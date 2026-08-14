@@ -1,0 +1,24 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cfdb
+      POSTGRES_PASSWORD: cfdb
+      POSTGRES_DB: cfdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Placeholder for Airflow, dbt runner, worker images. Uncomment/configure when ready.
+  # airflow:
+  #   image: apache/airflow:2.7.1
+  #   environment:
+  #     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+  #   depends_on:
+  #     - postgres
+
+volumes:
+  postgres_data:
