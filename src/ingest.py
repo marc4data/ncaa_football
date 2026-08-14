@@ -19,6 +19,10 @@ load_dotenv()
 CFBD_API_KEY = os.getenv("CFBD_API_KEY")
 BASE_URL = "https://api.collegefootballdata.com"
 
+from .raw_manifest import RawManifest
+
+manifest = RawManifest()
+
 
 def ensure_dir(path: Path):
     path.mkdir(parents=True, exist_ok=True)
@@ -33,6 +37,7 @@ def write_raw(endpoint: str, content: dict):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(content, f, indent=2, ensure_ascii=False)
     print(f"Wrote raw file: {file_path}")
+    return filename
 
 
 def fetch(endpoint: str, params: dict | None = None):
@@ -46,7 +51,13 @@ def fetch(endpoint: str, params: dict | None = None):
         data = resp.json()
     except Exception:
         data = {"status_code": resp.status_code, "text": resp.text}
-    write_raw(endpoint.replace('/', '_'), {"status_code": resp.status_code, "params": params, "data": data})
+    endpoint_key = endpoint.replace('/', '_')
+    filename = write_raw(endpoint_key, {"status_code": resp.status_code, "params": params, "data": data})
+    try:
+        manifest.add_entry(endpoint_key, filename, params, resp.status_code)
+    except Exception:
+        # manifest failures should not stop the fetch
+        print("Warning: failed to update raw manifest")
     return resp
 
 
