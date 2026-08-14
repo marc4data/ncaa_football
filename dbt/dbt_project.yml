@@ -5,6 +5,7 @@ config-version: 2
 profile: cfdb_profile
 
 model-paths: ["models"]
+test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target"]
 
