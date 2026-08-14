@@ -1,0 +1,13 @@
+name: cfdb_dbt
+version: '0.1'
+config-version: 2
+
+profile: cfdb_profile
+
+model-paths: ["models"]
+target-path: "target"
+clean-targets: ["target"]
+
+models:
+  cfdb_dbt:
+    +materialized: view

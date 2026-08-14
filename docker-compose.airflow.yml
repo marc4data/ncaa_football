@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  airflow-webserver:
+    image: apache/airflow:2.7.1
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://cfdb:cfdb@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'change-me'
+    volumes:
+      - ./dags:/opt/airflow/dags
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+  airflow-scheduler:
+    image: apache/airflow:2.7.1
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://cfdb:cfdb@postgres:5432/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+    depends_on:
+      - postgres
+
+# Note: This is a template. You must initialize the Airflow DB and create the
+# `airflow` database in the Postgres service before running the containers.

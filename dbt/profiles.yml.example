@@ -1,0 +1,11 @@
+cfdb_profile:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      user: cfdb
+      password: cfdb
+      port: 5432
+      dbname: cfdb
+      schema: public
