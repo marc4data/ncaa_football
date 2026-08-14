@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: mart_team_season_record
+    description: >
+      One row per team per season: record, scoring, and point differential from
+      completed games. Feeds team pages on the site.
+    columns:
+      - name: team_season_key
+        description: season + team_id; the grain of this mart, stated explicitly.
+        data_tests:
+          - unique
+          - not_null
+      - name: team_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('stg_teams')
+              field: team_id
+      - name: season
+        data_tests:
+          - not_null
+      - name: games_played
+        data_tests:
+          - not_null
+      - name: wins
+        data_tests:
+          - not_null

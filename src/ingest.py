@@ -29,7 +29,9 @@ def ensure_dir(path: Path):
 
 
 def write_raw(endpoint: str, content: dict):
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(":", "-")
+    # Explicit format, not isoformat(): the UTC offset would introduce a "+00:00"
+    # that the colon-stripping mangles into "+00-00". Filenames are manifest keys.
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     dir_path = Path("data") / "raw" / endpoint
     ensure_dir(dir_path)
     filename = f"{ts}.json"

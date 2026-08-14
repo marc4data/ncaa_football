@@ -1,0 +1,66 @@
+{{ config(materialized='table') }}
+
+-- One row per team per season: win/loss record and scoring, from completed games only.
+--
+-- Games are stored one row per matchup; a team-level record needs each game counted
+-- once from each side, so unpivot home/away into one row per team-game first.
+
+with team_games as (
+
+    select
+        season,
+        home_team_id as team_id,
+        home_points  as points_for,
+        away_points  as points_against
+    from {{ ref('stg_games') }}
+    where is_completed
+      and home_points is not null
+      and away_points is not null
+
+    union all
+
+    select
+        season,
+        away_team_id as team_id,
+        away_points  as points_for,
+        home_points  as points_against
+    from {{ ref('stg_games') }}
+    where is_completed
+      and home_points is not null
+      and away_points is not null
+
+),
+
+aggregated as (
+
+    select
+        season,
+        team_id,
+        count(*)                                              as games_played,
+        count(*) filter (where points_for > points_against)   as wins,
+        count(*) filter (where points_for < points_against)   as losses,
+        count(*) filter (where points_for = points_against)   as ties,
+        sum(points_for)                                       as points_for,
+        sum(points_against)                                   as points_against
+    from team_games
+    group by season, team_id
+
+)
+
+select
+    a.season::text || '-' || a.team_id::text as team_season_key,
+    a.season,
+    a.team_id,
+    t.school,
+    t.conference,
+    t.classification,
+    a.games_played,
+    a.wins,
+    a.losses,
+    a.ties,
+    a.points_for,
+    a.points_against,
+    a.points_for - a.points_against as point_differential,
+    round(a.wins::numeric / nullif(a.games_played, 0), 3) as win_pct
+from aggregated a
+left join {{ ref('stg_teams') }} t on t.team_id = a.team_id
