@@ -1,6 +1,6 @@
 from pathlib import Path
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 
@@ -46,7 +46,7 @@ class RawManifest:
             "filename": filename,
             "params": params or {},
             "status_code": status_code,
-            "added_at": datetime.utcnow().isoformat()
+            "added_at": datetime.now(timezone.utc).isoformat()
         }
         entries.append(entry)
         self._save(endpoint, entries)

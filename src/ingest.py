@@ -9,17 +9,17 @@ Files are written under `data/raw/<endpoint>/` with an ISO timestamp filename.
 import os
 import sys
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import requests
 from dotenv import load_dotenv
+
+from .raw_manifest import RawManifest
 
 load_dotenv()
 
 CFBD_API_KEY = os.getenv("CFBD_API_KEY")
 BASE_URL = "https://api.collegefootballdata.com"
-
-from .raw_manifest import RawManifest
 
 manifest = RawManifest()
 
@@ -29,7 +29,7 @@ def ensure_dir(path: Path):
 
 
 def write_raw(endpoint: str, content: dict):
-    ts = datetime.utcnow().isoformat(timespec="seconds").replace(":", "-")
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(":", "-")
     dir_path = Path("data") / "raw" / endpoint
     ensure_dir(dir_path)
     filename = f"{ts}.json"
