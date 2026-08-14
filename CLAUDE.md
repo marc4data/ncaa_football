@@ -13,7 +13,11 @@ Conventions
 
 Key commands
 - Local Docker Compose (development): `docker compose up --build`
-- Run ingestion script (example): `python -m src.ingest_stub`
+- Run ingestion (example): `python -m src.ingest fetch teams`
+- Install dev tooling: `pip install -r requirements-dev.txt`
+- Lint: `flake8 src dags tests` · Tests: `pytest -q`
+- CI runs both on every PR to `main` (`.github/workflows/ci.yml`). The live CFBD
+  smoke test is a manual `workflow_dispatch` job — unit tests never hit the API.
 
 Secrets
 - CFBD API key and other secrets must be stored in CI/GitHub Secrets or a local `.env` that is NOT committed.

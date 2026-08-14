@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:  # lets the CFBD live smoke test below be run on demand
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: flake8 + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (flake8)
+        run: flake8 src dags tests
+
+      - name: Test (pytest)
+        run: pytest -q
+
+      - name: Assert no secrets are tracked in git
+        run: |
+          if git ls-files | grep -iE '(^|/)\.env$|secret|token'; then
+            echo "::error::Tracked file looks like a secret — see the CFBD terms constraint in CLAUDE.md"
+            exit 1
+          fi
+          echo "No tracked secrets."
+
+      - name: Assert no raw data is tracked in git
+        run: |
+          if git ls-files | grep -E '^data/'; then
+            echo "::error::Raw CFBD responses must never be committed (redistribution risk)"
+            exit 1
+          fi
+          echo "No tracked raw data."
+
+  cfbd-smoke:
+    name: CFBD live smoke test
+    # Manual only: hitting the real API on every PR burns rate limit for no signal.
+    # This is the acceptance test for the CFBD_API_KEY repo secret.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch teams from CFBD
+        env:
+          CFBD_API_KEY: ${{ secrets.CFBD_API_KEY }}
+        run: python -m src.ingest fetch teams
+
+      - name: Assert the response was a 200
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          manifest = pathlib.Path("data/raw/teams/manifest.json")
+          if not manifest.exists():
+              sys.exit("No manifest written — the fetch did not run.")
+          latest = json.loads(manifest.read_text())[-1]
+          print("Latest manifest entry:", latest)
+          if latest["status_code"] != 200:
+              sys.exit(f"CFBD returned {latest['status_code']} — check the CFBD_API_KEY secret.")
+          print("CFBD key is valid.")
+          PY
+      # Raw data is deliberately not uploaded as an artifact — CFBD terms prohibit
+      # redistribution, and the workspace is discarded when the job ends.
