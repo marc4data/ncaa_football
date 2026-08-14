@@ -4,6 +4,7 @@ No test here touches the network — `requests.get` is always stubbed. CI must n
 spend the CFBD rate limit, and the API key never needs to exist for unit tests.
 """
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,16 @@ def test_fetch_writes_raw_file_and_manifest_entry(in_tmp_repo, monkeypatch):
 
     entries = json.loads((in_tmp_repo / "data" / "raw" / "teams" / "manifest.json").read_text())
     assert entries[0]["status_code"] == 200
+
+
+def test_raw_filename_is_clean_utc_timestamp(in_tmp_repo, monkeypatch):
+    """Filenames are manifest keys — no UTC offset, no stray '+', sortable."""
+    stub_get(monkeypatch, FakeResponse(200, []))
+
+    ingest.fetch("teams", {})
+
+    raw_files = [p for p in (in_tmp_repo / "data" / "raw" / "teams").iterdir() if p.name != "manifest.json"]
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json", raw_files[0].name)
 
 
 def test_fetch_sends_bearer_auth_header(in_tmp_repo, monkeypatch):
