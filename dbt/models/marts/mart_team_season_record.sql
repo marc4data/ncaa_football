@@ -4,6 +4,14 @@
 --
 -- Games are stored one row per matchup; a team-level record needs each game counted
 -- once from each side, so unpivot home/away into one row per team-game first.
+--
+-- Team attributes join on **(season, team_id)**, not team_id alone — see stg_teams for
+-- why. That join is deliberately a LEFT join: CFBD's season team list covers FBS and FCS,
+-- but schedules include lower-division opponents, so some team-seasons have no listed
+-- attributes. Dropping those rows would break the league-wide invariant that every game
+-- produces one win and one loss (the reconciliation test below depends on it), so they
+-- are kept and flagged with `is_listed_team` instead. Consumers filter; the mart doesn't
+-- silently discard.
 
 with team_games as (
 
@@ -51,6 +59,7 @@ select
     a.season::text || '-' || a.team_id::text as team_season_key,
     a.season,
     a.team_id,
+    t.team_id is not null as is_listed_team,
     t.school,
     t.conference,
     t.classification,
@@ -63,4 +72,6 @@ select
     a.points_for - a.points_against as point_differential,
     round(a.wins::numeric / nullif(a.games_played, 0), 3) as win_pct
 from aggregated a
-left join {{ ref('stg_teams') }} t on t.team_id = a.team_id
+left join {{ ref('stg_teams') }} t
+    on t.team_id = a.team_id
+   and t.season = a.season

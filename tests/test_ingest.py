@@ -5,6 +5,7 @@ spend the CFBD rate limit, and the API key never needs to exist for unit tests.
 """
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -62,13 +63,50 @@ def test_fetch_writes_raw_file_and_manifest_entry(in_tmp_repo, monkeypatch):
 
 
 def test_raw_filename_is_clean_utc_timestamp(in_tmp_repo, monkeypatch):
-    """Filenames are manifest keys — no UTC offset, no stray '+', sortable."""
+    """Filenames are manifest keys — no UTC offset, no stray '+', sortable, ms precision."""
     stub_get(monkeypatch, FakeResponse(200, []))
 
     ingest.fetch("teams", {})
 
     raw_files = [p for p in (in_tmp_repo / "data" / "raw" / "teams").iterdir() if p.name != "manifest.json"]
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json", raw_files[0].name)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json", raw_files[0].name)
+
+
+def test_same_millisecond_writes_do_not_overwrite(in_tmp_repo, monkeypatch):
+    """Two responses landing on the same timestamp must produce two distinct files.
+
+    Regression: at second resolution this silently overwrote the earlier file and left it
+    labelled with the wrong request's params — 6 files were corrupted this way during the
+    first 2024-25 backfill.
+    """
+    frozen = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    class FrozenClock:
+        @staticmethod
+        def now(tz=None):
+            return frozen
+
+    monkeypatch.setattr(ingest, "datetime", FrozenClock)
+
+    first = ingest.write_raw("teams", {"status_code": 200, "params": {"week": "1"}, "data": []})
+    second = ingest.write_raw("teams", {"status_code": 200, "params": {"week": "2"}, "data": []})
+
+    assert first != second
+    raw_dir = in_tmp_repo / "data" / "raw" / "teams"
+    assert (raw_dir / first).exists()
+    assert (raw_dir / second).exists()
+    # And each file still holds its own request's params.
+    assert json.loads((raw_dir / first).read_text())["params"] == {"week": "1"}
+    assert json.loads((raw_dir / second).read_text())["params"] == {"week": "2"}
+
+
+def test_fetch_raises_when_manifest_refuses_the_entry(in_tmp_repo, monkeypatch):
+    """Unrecorded provenance is a hard failure, not a warning."""
+    stub_get(monkeypatch, FakeResponse(200, []))
+    monkeypatch.setattr(ingest.manifest, "add_entry", lambda *a, **k: False)
+
+    with pytest.raises(RuntimeError, match="provenance"):
+        ingest.fetch("teams", {})
 
 
 def test_fetch_sends_bearer_auth_header(in_tmp_repo, monkeypatch):

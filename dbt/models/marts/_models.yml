@@ -14,9 +14,17 @@ models:
       - name: team_id
         data_tests:
           - not_null
-          - relationships:
-              to: ref('stg_teams')
-              field: team_id
+      # No `relationships` test to stg_teams: schedules include lower-division opponents
+      # that CFBD's season team list doesn't cover, so referential integrity genuinely
+      # does not hold here. `is_listed_team` records the fact instead, and
+      # assert_listed_teams_have_attributes checks the join where it should hold.
+      - name: is_listed_team
+        description: >
+          True when this team-season matched CFBD's team list for that season. False for
+          lower-division opponents that appear on schedules but aren't listed — their rows
+          are kept so league-wide win/loss totals still reconcile.
+        data_tests:
+          - not_null
       - name: season
         data_tests:
           - not_null

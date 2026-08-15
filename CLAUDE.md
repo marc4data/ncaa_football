@@ -14,6 +14,8 @@ Conventions
 Key commands
 - Local Docker Compose (development): `docker compose up --build`
 - Run ingestion (example): `python -m src.ingest fetch teams`
+- Historical backfill (idempotent, resumable): `python -m src.backfill --seasons 2024 2025`
+- Audit the raw layer after any backfill: `python -m src.validate_raw`
 - Install dev tooling: `pip install -r requirements-dev.txt`
 - Lint: `flake8 src dags tests` · Tests: `pytest -q`
 - CI runs both on every PR to `main` (`.github/workflows/ci.yml`). The live CFBD

@@ -2,12 +2,21 @@ version: 2
 
 models:
   - name: stg_teams
-    description: One row per team from the latest successful /teams fetch.
+    description: >
+      One row per team per season, from the latest successful year-parameterized /teams
+      fetch for that season. Conference and classification are as of that season, not today.
     columns:
-      - name: team_id
-        description: CFBD's own team id — the join key everywhere downstream.
+      - name: team_season_key
+        description: season + team_id — the grain, stated explicitly.
         data_tests:
           - unique
+          - not_null
+      - name: team_id
+        description: CFBD's own team id. Not unique on its own — a team appears once per season.
+        data_tests:
+          - not_null
+      - name: season
+        data_tests:
           - not_null
       - name: school
         data_tests:

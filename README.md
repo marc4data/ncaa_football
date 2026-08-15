@@ -1,44 +1,126 @@
-# Claude Code — cfdb (scaffold)
+# cfdb — college football data platform
 
-This repository contains the implementation code for the cfdb project: ingestion scripts, Airflow DAGs, dbt transforms, ML scripts, and the Streamlit app.
+Implementation code for the cfdb project: ingestion, Airflow DAGs, dbt transforms, ML
+scripts, and the Streamlit app. Architecture and decisions live in the Cowork folder's
+`CLAUDE.md`; this repo covers *how*.
 
-Quickstart (local)
+Pipeline: **CFBD API → immutable raw JSON → Postgres → dbt (staging → marts)**.
 
-1. Copy secrets into a local `.env` (DO NOT COMMIT):
+## Setup
 
 ```bash
-# .env (example)
-CFBD_API_KEY=your_api_key_here
+docker compose up -d postgres                    # local warehouse/serving Postgres
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt              # includes runtime deps + pytest/flake8
 ```
 
-2. Start local Postgres for development:
+Create `.env` (never committed):
+
+```
+CFBD_API_KEY=<your key>
+DATABRICKS_HOST=<workspace URL>
+DATABRICKS_TOKEN=<token>
+```
+
+## Ingestion
+
+Single endpoint:
 
 ```bash
-cd claude_code
+python -m src.ingest fetch teams
+python -m src.ingest fetch games --year 2024 --seasonType regular
+python -m src.ingest fetch plays --year 2024 --week 1 --seasonType regular
+```
+
+Every response lands immutably under `data/raw/<endpoint>/<utc-timestamp>.json` alongside
+a `manifest.json` recording filename, params, status code, and fetch time. Failed fetches
+are landed too — the raw layer records what happened, and staging filters to `status_code = 200`.
+
+### Historical backfill
+
+```bash
+python -m src.backfill --dry-run                 # show the plan, fetch nothing
+python -m src.backfill --seasons 2024 2025       # ~2 min, ~575 MB raw
+python -m src.backfill --only plays drives       # restrict to some endpoints
+python -m src.backfill --force                   # re-fetch even if already present
+```
+
+**The backfill is idempotent and resumable.** A request is identified by (endpoint, params);
+if the manifest already has a successful entry for that pair, the call is skipped. Re-running
+after a partial run fills only the gaps, and re-running a complete backfill fetches nothing.
+Week numbers come from CFBD's `/calendar`, not a hardcoded count — season length varies.
+
+Failed fetches are *not* treated as done, so a gap is always refilled on the next run. A run
+with any failure exits non-zero.
+
+### Auditing the raw layer
+
+```bash
+python -m src.validate_raw                       # audit; non-zero exit if anything is wrong
+python -m src.validate_raw --repair              # delete mismatched files + manifest entries
+```
+
+Raw files are self-describing — each stores the params of the request that produced it — so
+the manifest is checked against the data rather than trusted. Detects three problems:
+mismatched params (a file overwritten by a different request), missing files, and orphans.
+
+**Run this after any backfill.** It exists because second-resolution filenames once collided
+during a fast run, silently overwriting 6 files and leaving them labelled with the wrong
+request's params. Filenames now carry milliseconds and never overwrite, and this audit is
+the standing check.
+
+Repair deliberately doesn't re-fetch: it removes the bad entries, and the next
+`python -m src.backfill` refills the gaps through its normal skip-if-present logic.
+
+## Loading to Postgres
+
+```bash
+python -m src.load_raw_to_postgres teams
+python -m src.load_raw_to_postgres plays
+```
+
+One row per raw file in `raw_<endpoint>`, with the response as `jsonb`. Loads are upserts
+keyed on filename, so re-running never duplicates.
+
+## Transforms
+
+See [dbt/README.md](dbt/README.md). Short version:
+
+```bash
+cp dbt/profiles.yml.example dbt/profiles.yml     # gitignored
+cd dbt
+DBT_PROFILES_DIR=. dbt run
+DBT_PROFILES_DIR=. dbt test
+```
+
+## Full rebuild from scratch
+
+```bash
 docker compose up -d postgres
+python -m src.backfill --seasons 2024 2025
+python -m src.validate_raw
+for ep in teams conferences venues games drives plays games_teams; do
+  python -m src.load_raw_to_postgres $ep
+done
+cd dbt && DBT_PROFILES_DIR=. dbt run && DBT_PROFILES_DIR=. dbt test
 ```
 
-3. Run the ingestion stub:
+Raw is never mutated, so this rebuilds every downstream table from data already on disk —
+no re-fetching unless the raw layer has gaps.
+
+## Tests and CI
 
 ```bash
-CFBD_API_KEY=your_api_key python -m src.ingest fetch teams
+flake8 src dags tests
+pytest -q
 ```
 
-DBT
+CI runs both on every PR to `main`, plus guards asserting no secrets and no `data/` files
+are ever tracked. The live CFBD smoke test is a manual `workflow_dispatch` job — unit tests
+stub the network and never hit the API.
 
-- Copy `dbt/profiles.yml.example` to your `~/.dbt/profiles.yml` or set the `DBT_PROFILES_DIR` env var. Then run:
+## Airflow
 
-```bash
-cd claude_code/dbt
-dbt deps
-dbt run
-```
-
-Airflow (local template)
-
-- See `docker-compose.airflow.yml` for a template to run a local Airflow webserver + scheduler. You'll need to create an `airflow` database in Postgres and initialize the Airflow DB before starting the containers.
-
-
-Next steps
-- Add `dbt/` project and seed models.
-- Add `dags/` with Airflow DAG definitions and a `docker-compose.yml` extension for Airflow when ready.
+`docker-compose.airflow.yml` is a template for a local webserver + scheduler. Generate a
+real `AIRFLOW__CORE__FERNET_KEY` into `.env` before running it — the committed value is a
+placeholder.
