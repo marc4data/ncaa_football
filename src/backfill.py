@@ -1,11 +1,17 @@
 """Historical backfill: land whole seasons of CFBD data into the raw layer.
 
 Usage:
+  python -m src.backfill --list                    # show the endpoint registry
   python -m src.backfill --dry-run                 # show the plan, fetch nothing
-  python -m src.backfill                           # backfill the default seasons
+  python -m src.backfill                           # sweep every registry endpoint
   python -m src.backfill --seasons 2024 2025 2026
   python -m src.backfill --only plays drives       # restrict to some endpoints
+  python -m src.backfill --bucket C1               # restrict to a cadence bucket
+  python -m src.backfill --per-game --seasons 2024 # add the per-game fan-out (expensive)
   python -m src.backfill --force                   # re-fetch even if already present
+
+What gets fetched is decided by `src/endpoints.py`, not by this module — see that file for
+the registry and the meaning of each strategy.
 
 Idempotency (M1 open question #4, decided here): **the raw manifest owns "have I already
 fetched this?"** A request is identified by (endpoint, params); if the manifest has an
@@ -24,25 +30,23 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from . import ingest
+from .endpoints import (
+    LIVE, MANUAL, PER_GAME, REGISTRY, SEASON, SEASON_TYPE, SEASON_WEEK, STATIC,
+    PER_GAME_COST_NOTE, Endpoint, resolve,
+)
 from .raw_manifest import RawManifest
 
-# Play-by-play and drives are scoped to these seasons only, per CLAUDE.md's data scope.
+# Play-by-play and drive detail are scoped to these seasons only, per CLAUDE.md's data scope.
 PBP_SEASONS = {"2024", "2025", "2026"}
+PBP_ENDPOINTS = {"plays", "plays/stats", "drives"}
+
 DEFAULT_SEASONS = ["2024", "2025"]
-
-# Endpoints with no season dimension at all — fetched once.
-STATIC_ENDPOINTS = ["conferences", "venues"]
-
-# One call per (season). CFBD serves a whole season in a single response.
-SEASON_ENDPOINTS = ["teams", "games", "drives"]
-
-# One call per (season, week, seasonType). These are the volume drivers.
-WEEKLY_ENDPOINTS = ["plays", "games/teams"]
-
 SEASON_TYPES = ["regular", "postseason"]
 
 # Be polite to the API between calls; the backfill is not in a hurry.
 SLEEP_SECONDS = 0.3
+
+Request = Tuple[str, Dict[str, str]]
 
 manifest = RawManifest()
 
@@ -102,48 +106,78 @@ def season_weeks(season: str) -> Dict[str, List[str]]:
     return weeks
 
 
-def build_plan(seasons: List[str], only: List[str] | None) -> List[Tuple[str, Dict[str, str]]]:
-    """The full list of (endpoint, params) the backfill intends to fetch."""
-    plan: List[Tuple[str, Dict[str, str]]] = []
+def completed_game_ids(season: str) -> List[str]:
+    """Game ids for a season, read from already-landed /games responses.
 
-    def wanted(ep: str) -> bool:
-        return not only or ep in only
+    Per-game fan-out depends on the bulk sweep having run first; that ordering is
+    deliberate, so the expensive step can never run against a guess.
+    """
+    ids: List[str] = []
+    for season_type in SEASON_TYPES:
+        payload = load_latest_raw("games", {"year": season, "seasonType": season_type})
+        if not payload:
+            continue
+        for game in payload:
+            if game.get("completed"):
+                ids.append(str(game["id"]))
+    return ids
 
-    for ep in STATIC_ENDPOINTS:
-        if wanted(ep):
-            plan.append((ep, {}))
 
+def requests_for(endpoint: Endpoint, seasons: List[str], per_game: bool) -> List[Request]:
+    """Expand one registry entry into concrete (endpoint, params) requests."""
+    if endpoint.strategy in (MANUAL, LIVE):
+        return []
+
+    if endpoint.strategy == STATIC:
+        return [(endpoint.path, {})]
+
+    out: List[Request] = []
     for season in seasons:
-        for ep in SEASON_ENDPOINTS:
-            if not wanted(ep):
-                continue
-            if ep == "drives" and season not in PBP_SEASONS:
-                continue
-            if ep == "teams":
-                # No seasonType dimension; the roster of teams is a season fact.
-                plan.append((ep, {"year": season}))
-            else:
-                for st in SEASON_TYPES:
-                    plan.append((ep, {"year": season, "seasonType": st}))
-
-        if not any(wanted(ep) for ep in WEEKLY_ENDPOINTS):
+        if endpoint.path in PBP_ENDPOINTS and season not in PBP_SEASONS:
             continue
 
-        weeks = season_weeks(season)
-        for ep in WEEKLY_ENDPOINTS:
-            if not wanted(ep):
-                continue
-            if ep == "plays" and season not in PBP_SEASONS:
-                continue
-            for st in SEASON_TYPES:
-                for week in weeks[st]:
-                    plan.append((ep, {"year": season, "week": week, "seasonType": st}))
+        if endpoint.strategy == SEASON:
+            out.append((endpoint.path, {"year": season}))
 
+        elif endpoint.strategy == SEASON_TYPE:
+            for season_type in SEASON_TYPES:
+                out.append((endpoint.path, {"year": season, "seasonType": season_type}))
+
+        elif endpoint.strategy == SEASON_WEEK:
+            weeks = season_weeks(season)
+            for season_type in SEASON_TYPES:
+                for week in weeks[season_type]:
+                    out.append((endpoint.path,
+                                {"year": season, "week": week, "seasonType": season_type}))
+
+        elif endpoint.strategy == PER_GAME:
+            if not per_game:
+                continue
+            id_param = endpoint.extra.get("id_param", "id")
+            for game_id in completed_game_ids(season):
+                out.append((endpoint.path, {id_param: game_id}))
+
+    return out
+
+
+def build_plan(seasons: List[str], only: List[str] | None, bucket: str | None,
+               per_game: bool) -> List[Request]:
+    """The full list of (endpoint, params) the backfill intends to fetch."""
+    selected = resolve(only) if only else [e for e in REGISTRY if e.include]
+    if bucket:
+        selected = [e for e in selected if e.bucket == bucket]
+    if per_game and not only:
+        selected = selected + [e for e in REGISTRY if e.strategy == PER_GAME and not e.include]
+
+    plan: List[Request] = []
+    for endpoint in selected:
+        plan.extend(requests_for(endpoint, seasons, per_game))
     return plan
 
 
-def run(seasons: List[str], only: List[str] | None, force: bool, dry_run: bool) -> int:
-    plan = build_plan(seasons, only)
+def run(seasons: List[str], only: List[str] | None, bucket: str | None, per_game: bool,
+        force: bool, dry_run: bool) -> int:
+    plan = build_plan(seasons, only, bucket, per_game)
     print(f"Backfill plan: {len(plan)} requests across seasons {', '.join(seasons)}")
 
     fetched = skipped = failed = 0
@@ -181,14 +215,30 @@ def run(seasons: List[str], only: List[str] | None, force: bool, dry_run: bool) 
     return 1 if failed else 0
 
 
+def list_registry() -> int:
+    print(f"{'endpoint':30} {'strategy':13} {'bucket':7} {'swept':6} note")
+    for e in REGISTRY:
+        print(f"{e.path:30} {e.strategy:13} {e.bucket:7} {str(e.include):6} {e.note}")
+    print(f"\n{len(REGISTRY)} endpoints, {len([e for e in REGISTRY if e.include])} in the default sweep.")
+    print(f"\n{PER_GAME_COST_NOTE}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backfill historical CFBD seasons into the raw layer.")
     parser.add_argument("--seasons", nargs="+", default=DEFAULT_SEASONS)
     parser.add_argument("--only", nargs="+", help="restrict to these endpoints")
+    parser.add_argument("--bucket", help="restrict to a cadence bucket (A, B, C1, C2, D, REF)")
+    parser.add_argument("--per-game", action="store_true",
+                        help="include per-game fan-out endpoints (expensive)")
     parser.add_argument("--force", action="store_true", help="re-fetch even if already present")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without fetching")
+    parser.add_argument("--list", action="store_true", help="print the endpoint registry and exit")
     args = parser.parse_args()
-    return run(args.seasons, args.only, args.force, args.dry_run)
+
+    if args.list:
+        return list_registry()
+    return run(args.seasons, args.only, args.bucket, args.per_game, args.force, args.dry_run)
 
 
 if __name__ == "__main__":

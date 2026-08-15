@@ -66,9 +66,28 @@ def load_endpoint(endpoint: str):
     print(f"Loaded {len(files)} files into {table}")
 
 
+def load_all():
+    """Load every endpoint directory present under data/raw.
+
+    With 63 endpoints in the sweep, naming each one is no longer practical. Directories
+    are discovered from disk rather than the registry so that anything landed by hand
+    (a one-off `src.ingest` call) is loaded too.
+    """
+    base = Path("data") / "raw"
+    if not base.exists():
+        print("No raw data to load.")
+        return
+    endpoints = sorted(p.name for p in base.iterdir() if p.is_dir())
+    for endpoint in endpoints:
+        load_endpoint(endpoint)
+    print(f"\nLoaded {len(endpoints)} endpoint(s).")
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python -m src.load_raw_to_postgres <endpoint>")
+        print("Usage: python -m src.load_raw_to_postgres <endpoint>|--all")
+    elif sys.argv[1] == "--all":
+        load_all()
     else:
         load_endpoint(sys.argv[1])

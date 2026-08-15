@@ -39,11 +39,37 @@ are landed too — the raw layer records what happened, and staging filters to `
 ### Historical backfill
 
 ```bash
+python -m src.backfill --list                    # the endpoint registry
 python -m src.backfill --dry-run                 # show the plan, fetch nothing
-python -m src.backfill --seasons 2024 2025       # ~2 min, ~575 MB raw
+python -m src.backfill --seasons 2024 2025       # full-breadth sweep
 python -m src.backfill --only plays drives       # restrict to some endpoints
+python -m src.backfill --bucket C1               # restrict to a cadence bucket
+python -m src.backfill --per-game --seasons 2024 # add per-game fan-out (expensive)
 python -m src.backfill --force                   # re-fetch even if already present
 ```
+
+**What gets fetched lives in [`src/endpoints.py`](src/endpoints.py), not in the backfill.**
+That registry covers all 74 endpoints in the CFBD OpenAPI spec (v5.24.0), each tagged with
+a fetch strategy and a cadence bucket:
+
+| Strategy | Meaning | Cost |
+|---|---|---|
+| `static` | no parameters — one call, ever | 1 |
+| `season` | one call per season | 1/season |
+| `season_type` | per (season, seasonType) — regular and postseason | 2/season |
+| `season_week` | per (season, seasonType, week) — the volume drivers | ~17/season |
+| `per_game` | one call per game id — **opt-in**, ~3,800/season | large |
+| `manual` | needs an argument a sweep can't invent (playerId, searchTerm) | n/a |
+| `live` | only meaningful mid-game, or API metadata | n/a |
+
+63 of the 74 are in the default sweep. The rest are excluded because they can't be swept
+(`manual`, `live`) or because their cost is a different order of magnitude (`per_game`).
+
+Per-game fan-out reads game ids from **already-landed** `/games` responses, so the
+expensive step can never run against a guess — run the bulk sweep first.
+
+Check quota before a large run: `curl -H "Authorization: Bearer $CFBD_API_KEY" \
+https://api.collegefootballdata.com/info` reports tier, monthly limit, and calls remaining.
 
 **The backfill is idempotent and resumable.** A request is identified by (endpoint, params);
 if the manifest already has a successful entry for that pair, the call is skipped. Re-running
@@ -75,8 +101,8 @@ Repair deliberately doesn't re-fetch: it removes the bad entries, and the next
 ## Loading to Postgres
 
 ```bash
-python -m src.load_raw_to_postgres teams
-python -m src.load_raw_to_postgres plays
+python -m src.load_raw_to_postgres teams      # one endpoint
+python -m src.load_raw_to_postgres --all      # every endpoint landed under data/raw
 ```
 
 One row per raw file in `raw_<endpoint>`, with the response as `jsonb`. Loads are upserts
@@ -99,9 +125,7 @@ DBT_PROFILES_DIR=. dbt test
 docker compose up -d postgres
 python -m src.backfill --seasons 2024 2025
 python -m src.validate_raw
-for ep in teams conferences venues games drives plays games_teams; do
-  python -m src.load_raw_to_postgres $ep
-done
+python -m src.load_raw_to_postgres --all
 cd dbt && DBT_PROFILES_DIR=. dbt run && DBT_PROFILES_DIR=. dbt test
 ```
 
