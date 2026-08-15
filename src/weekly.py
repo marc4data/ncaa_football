@@ -62,7 +62,12 @@ def _requests_for_bucket(bucket: str, season: str,
             for week in weeks:
                 out.append((endpoint.path, dict(week)))
         elif endpoint.strategy == SEASON_TYPE:
-            out.append((endpoint.path, {"year": season, "seasonType": "regular"}))
+            # Both season types, not just `regular`. The weeks in play carry their own
+            # seasonType, but these endpoints are season-scoped and so must be asked for
+            # each — otherwise every bowl and playoff game would be invisible to the
+            # weekly refresh from December onward, while the DAG still reported success.
+            for season_type in {w["seasonType"] for w in weeks} | {"regular"}:
+                out.append((endpoint.path, {"year": season, "seasonType": season_type}))
         elif endpoint.strategy == SEASON:
             out.append((endpoint.path, {"year": season}))
         elif endpoint.strategy == SEASON_WEEK:
