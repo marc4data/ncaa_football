@@ -74,5 +74,6 @@ def test_the_ratified_full_history_set_is_exactly_what_was_decided():
         "games", "records", "rankings", "teams", "coaches", "stats/season",
         "stats/season/advanced", "stats/player/season", "wepa/team/season",
         "ppa/players/season", "draft/picks",
+        "calendar",  # added at Marc's direction 2026-08-15
     }
     assert {e.path for e in ep.REGISTRY if e.history == ep.HISTORY_FULL} == ratified

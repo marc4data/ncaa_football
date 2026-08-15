@@ -83,7 +83,8 @@ REGISTRY: List[Endpoint] = [
     Endpoint("metrics/fg/ep", STATIC, BUCKET_REFERENCE, note="field goal expected points model"),
 
     # ---- Structural, season-scoped (bucket A) -------------------------------------
-    Endpoint("calendar", SEASON, BUCKET_STRUCTURAL, note="drives week enumeration"),
+    Endpoint("calendar", SEASON, BUCKET_STRUCTURAL, history=HISTORY_FULL, min_season=2002,
+             note="drives week enumeration; CFBD serves no calendar before 2002"),
     Endpoint("teams", SEASON, BUCKET_STRUCTURAL, history=HISTORY_FULL, min_season=1869,
              note="season-correct affiliations"),
     Endpoint("teams/fbs", SEASON, BUCKET_STRUCTURAL),
