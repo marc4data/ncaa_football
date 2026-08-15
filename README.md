@@ -156,6 +156,40 @@ stub the network and never hit the API.
 
 ## Airflow
 
-`docker-compose.airflow.yml` is a template for a local webserver + scheduler. Generate a
-real `AIRFLOW__CORE__FERNET_KEY` into `.env` before running it — the committed value is a
-placeholder.
+Local Airflow 3.3.1 (api-server + scheduler + dag-processor, LocalExecutor), reusing the
+project Postgres for its own metadata in a separate `airflow` database.
+
+```bash
+# one-time: create the metadata database and generate secrets into .env
+docker compose exec postgres psql -U cfdb -d cfdb -c "CREATE DATABASE airflow OWNER cfdb;"
+python -c "from cryptography.fernet import Fernet; print('AIRFLOW_FERNET_KEY='+Fernet.generate_key().decode())" >> .env
+python -c "import secrets; print('AIRFLOW_JWT_SECRET='+secrets.token_hex(32))" >> .env
+
+docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d airflow-init
+docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d
+open http://localhost:8080
+```
+
+Two settings that are easy to get wrong and fail confusingly:
+
+- **`AIRFLOW__CORE__EXECUTION_API_SERVER_URL`** must point at `airflow-apiserver:8080`.
+  Workers call back to the API server, and the default is `localhost:8080` — which inside
+  a scheduler container is nothing at all. Symptom: tasks queue, then fail with
+  `httpx.ConnectError: Connection refused` and no task log.
+- **`AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS`**. Airflow 3 defaults to
+  SimpleAuthManager, so `airflow users create` no longer works (it needs the FAB auth
+  manager). This local stack treats every visitor as admin.
+
+### DAGs
+
+| DAG | Schedule | What |
+|---|---|---|
+| `cfbd_lines_snapshot` | `@daily` | One `/lines` snapshot of the week currently in play |
+
+Raise the lines cadence to hourly by changing `SCHEDULE` in
+[dags/lines_snapshot_dag.py](dags/lines_snapshot_dag.py). The snapshot targets one week
+(~0.11 MB), so hourly costs ~2.6 MB and 24 calls a day — about 320 MB across a season.
+A season-scoped snapshot would be 15x that.
+
+DAGs schedule and retry only. They perform no transforms and compute no metrics: tasks
+call functions in `src/`, which land raw responses. Meaning is dbt's job.
