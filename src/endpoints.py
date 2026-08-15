@@ -20,7 +20,7 @@ excluded by default and opted into explicitly, because their cost is a different
 magnitude (see PER_GAME_COST_NOTE).
 """
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 STATIC = "static"
 SEASON = "season"
@@ -29,6 +29,13 @@ SEASON_WEEK = "season_week"
 PER_GAME = "per_game"
 MANUAL = "manual"
 LIVE = "live"
+
+# How deep to go. `recent` is the project's default scope (2024+, per CLAUDE.md's data
+# scope); `full` means every season the endpoint actually serves, bounded by its own
+# availability. Membership of the `full` set is ratified in the decision log — amending it
+# is one line here plus one line there.
+HISTORY_RECENT = "recent"
+HISTORY_FULL = "full"
 
 # Cadence buckets from the roadmap's M1 classification.
 BUCKET_STRUCTURAL = "A"      # season-scoped structural facts
@@ -46,6 +53,11 @@ class Endpoint:
     bucket: str
     include: bool = True
     note: str = ""
+    history: str = HISTORY_RECENT
+    # Earliest season the endpoint serves anything for. Probed against the live API on
+    # 2026-08-15 rather than assumed; the values line up with the sport's own history
+    # (1869 first game, 1936 first AP poll, 1967 common draft).
+    min_season: Optional[int] = None
     # Snapshot endpoints answer differently to the *same* request over time — betting
     # lines move, pre-game win probability shifts. For these, repeat fetches with
     # identical params are the point, so `--snapshot` bypasses skip-if-present. Without
@@ -72,13 +84,14 @@ REGISTRY: List[Endpoint] = [
 
     # ---- Structural, season-scoped (bucket A) -------------------------------------
     Endpoint("calendar", SEASON, BUCKET_STRUCTURAL, note="drives week enumeration"),
-    Endpoint("teams", SEASON, BUCKET_STRUCTURAL, note="season-correct affiliations"),
+    Endpoint("teams", SEASON, BUCKET_STRUCTURAL, history=HISTORY_FULL, min_season=1869,
+             note="season-correct affiliations"),
     Endpoint("teams/fbs", SEASON, BUCKET_STRUCTURAL),
     Endpoint("conferences", SEASON, BUCKET_STRUCTURAL),
     Endpoint("conferences/affiliations", SEASON, BUCKET_STRUCTURAL),
     Endpoint("conferences/changes", SEASON, BUCKET_STRUCTURAL),
     Endpoint("roster", SEASON, BUCKET_STRUCTURAL),
-    Endpoint("coaches", SEASON, BUCKET_STRUCTURAL),
+    Endpoint("coaches", SEASON, BUCKET_STRUCTURAL, history=HISTORY_FULL, min_season=1886),
     Endpoint("coaches/seasons", SEASON, BUCKET_STRUCTURAL),
     # API rejects a year-only call: "coachId or team is required". A per-team fan-out
     # would work (~679 calls/season) but nothing needs it yet — reachable via src.ingest.
@@ -86,7 +99,7 @@ REGISTRY: List[Endpoint] = [
              note="requires coachId or team"),
 
     # ---- Game results and detail (bucket B / C2) ----------------------------------
-    Endpoint("games", SEASON_TYPE, BUCKET_HISTORICAL),
+    Endpoint("games", SEASON_TYPE, BUCKET_HISTORICAL, history=HISTORY_FULL, min_season=1869),
     Endpoint("games/media", SEASON_TYPE, BUCKET_HISTORICAL),
     Endpoint("games/weather", SEASON_TYPE, BUCKET_HISTORICAL, note="Tier 3 feature"),
     Endpoint("games/teams", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="team box scores"),
@@ -101,7 +114,7 @@ REGISTRY: List[Endpoint] = [
     Endpoint("playoffs/cfp/participants", SEASON, BUCKET_HISTORICAL),
 
     # ---- Ratings and rankings: revise retroactively (bucket C1) --------------------
-    Endpoint("rankings", SEASON_TYPE, BUCKET_REVISIONIST),
+    Endpoint("rankings", SEASON_TYPE, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=1936),
     Endpoint("ratings/sp", SEASON, BUCKET_REVISIONIST),
     Endpoint("ratings/sp/conferences", SEASON, BUCKET_REVISIONIST),
     Endpoint("ratings/srs", SEASON, BUCKET_REVISIONIST),
@@ -111,12 +124,12 @@ REGISTRY: List[Endpoint] = [
     Endpoint("ratings/core", SEASON, BUCKET_REVISIONIST),
 
     # ---- Team and player statistics (bucket C1) -----------------------------------
-    Endpoint("records", SEASON, BUCKET_REVISIONIST),
-    Endpoint("stats/season", SEASON, BUCKET_REVISIONIST),
-    Endpoint("stats/season/advanced", SEASON, BUCKET_REVISIONIST),
+    Endpoint("records", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=1869),
+    Endpoint("stats/season", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=1869),
+    Endpoint("stats/season/advanced", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=2001),
     Endpoint("stats/game/advanced", SEASON_TYPE, BUCKET_IMMUTABLE_WK),
     Endpoint("stats/game/havoc", SEASON_TYPE, BUCKET_IMMUTABLE_WK),
-    Endpoint("stats/player/season", SEASON_TYPE, BUCKET_REVISIONIST),
+    Endpoint("stats/player/season", SEASON_TYPE, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=2004),
     Endpoint("stats/player/success", SEASON_TYPE, BUCKET_REVISIONIST),
     # Year alone is rejected: "week required when team and playerId not specified".
     Endpoint("stats/player/success/game", SEASON_WEEK, BUCKET_IMMUTABLE_WK),
@@ -124,12 +137,12 @@ REGISTRY: List[Endpoint] = [
     # ---- Predicted points added ----------------------------------------------------
     Endpoint("ppa/teams", SEASON, BUCKET_REVISIONIST),
     Endpoint("ppa/games", SEASON_TYPE, BUCKET_IMMUTABLE_WK),
-    Endpoint("ppa/players/season", SEASON, BUCKET_REVISIONIST),
+    Endpoint("ppa/players/season", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=2013),
     # Year alone is rejected: "week required when team not specified".
     Endpoint("ppa/players/games", SEASON_WEEK, BUCKET_IMMUTABLE_WK),
 
     # ---- Adjusted (wEPA) metrics — Tier 3 feature ---------------------------------
-    Endpoint("wepa/team/season", SEASON, BUCKET_REVISIONIST),
+    Endpoint("wepa/team/season", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=2008),
     Endpoint("wepa/players/passing", SEASON, BUCKET_REVISIONIST),
     Endpoint("wepa/players/rushing", SEASON, BUCKET_REVISIONIST),
     Endpoint("wepa/players/kicking", SEASON, BUCKET_REVISIONIST),
@@ -147,7 +160,7 @@ REGISTRY: List[Endpoint] = [
     Endpoint("recruiting/players", SEASON, BUCKET_STRUCTURAL),
     Endpoint("recruiting/teams", SEASON, BUCKET_STRUCTURAL),
     Endpoint("recruiting/groups", STATIC, BUCKET_STRUCTURAL, note="all-time aggregate"),
-    Endpoint("draft/picks", SEASON, BUCKET_STRUCTURAL),
+    Endpoint("draft/picks", SEASON, BUCKET_STRUCTURAL, history=HISTORY_FULL, min_season=1967),
     Endpoint("talent", SEASON, BUCKET_STRUCTURAL),
 
     # ---- Per-game fan-out: opt-in only ---------------------------------------------

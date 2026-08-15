@@ -53,3 +53,35 @@ models:
           returned none — the silent failure that reports green.
         data_tests:
           - not_null
+
+  - name: mart_team_schedule
+    description: >
+      One row per team per game — the schedule from a single team's point of view, for every
+      season landed including seasons not yet played. A 2026 row has a kickoff and an
+      opponent but no result, which is what a schedule is before it starts.
+    columns:
+      - name: team_game_key
+        description: season + game + team; the grain, stated explicitly.
+        data_tests:
+          - unique
+          - not_null
+      - name: season
+        data_tests:
+          - not_null
+      - name: team_id
+        data_tests:
+          - not_null
+      - name: opponent_id
+        data_tests:
+          - not_null
+      - name: venue_role
+        data_tests:
+          - accepted_values:
+              values: ['home', 'away', 'neutral']
+      - name: result
+        description: W/L/T, null until the game is played.
+        data_tests:
+          - accepted_values:
+              values: ['W', 'L', 'T']
+              config:
+                where: "result is not null"

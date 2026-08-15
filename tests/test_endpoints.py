@@ -51,3 +51,28 @@ def test_resolve_rejects_unknown_endpoints():
 def test_sweepable_is_a_meaningful_subset():
     assert 0 < len(ep.SWEEPABLE) < len(ep.REGISTRY)
     assert all(e.include for e in ep.SWEEPABLE)
+
+
+def test_full_history_endpoints_declare_a_min_season():
+    """`full` without a bound would be unrunnable — the expansion needs a floor."""
+    for e in ep.REGISTRY:
+        if e.history == ep.HISTORY_FULL:
+            assert e.min_season, f"{e.path} is full-history but has no min_season"
+            assert 1869 <= e.min_season <= 2026, f"{e.path} min_season {e.min_season} implausible"
+
+
+def test_history_defaults_to_recent():
+    """Depth is opt-in: an endpoint added without thought stays at the project's default."""
+    assert ep.BY_PATH["plays"].history == ep.HISTORY_RECENT
+    assert ep.BY_PATH["lines"].history == ep.HISTORY_RECENT
+    assert ep.BY_PATH["games"].history == ep.HISTORY_FULL
+
+
+def test_the_ratified_full_history_set_is_exactly_what_was_decided():
+    """Guards the decision log: membership changes should be deliberate, not incidental."""
+    ratified = {
+        "games", "records", "rankings", "teams", "coaches", "stats/season",
+        "stats/season/advanced", "stats/player/season", "wepa/team/season",
+        "ppa/players/season", "draft/picks",
+    }
+    assert {e.path for e in ep.REGISTRY if e.history == ep.HISTORY_FULL} == ratified

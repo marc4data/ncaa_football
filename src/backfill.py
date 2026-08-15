@@ -26,13 +26,14 @@ import argparse
 import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import ingest
 from .endpoints import (
-    BY_PATH, LIVE, MANUAL, PER_GAME, REGISTRY, SEASON, SEASON_TYPE, SEASON_WEEK, STATIC,
-    PER_GAME_COST_NOTE, Endpoint, resolve,
+    BY_PATH, HISTORY_FULL, LIVE, MANUAL, PER_GAME, REGISTRY, SEASON, SEASON_TYPE,
+    SEASON_WEEK, STATIC, PER_GAME_COST_NOTE, Endpoint, resolve,
 )
 from .raw_manifest import RawManifest
 
@@ -123,7 +124,23 @@ def completed_game_ids(season: str) -> List[str]:
     return ids
 
 
-def requests_for(endpoint: Endpoint, seasons: List[str], per_game: bool) -> List[Request]:
+def seasons_for(endpoint: Endpoint, seasons: List[str], full_history: bool,
+                current_season: int) -> List[str]:
+    """Which seasons to pull for one endpoint.
+
+    Under --full-history, endpoints marked HISTORY_FULL ignore the requested season list
+    and expand across everything they actually serve, bounded by the min_season probed
+    from the live API. Every other endpoint keeps the project's default 2024+ scope, which
+    is the point of the attribute: depth is declared per endpoint, not per invocation.
+    """
+    if full_history and endpoint.history == HISTORY_FULL and endpoint.min_season:
+        return [str(y) for y in range(endpoint.min_season, current_season + 1)]
+    return seasons
+
+
+def requests_for(endpoint: Endpoint, seasons: List[str], per_game: bool,
+                 full_history: bool = False,
+                 current_season: Optional[int] = None) -> List[Request]:
     """Expand one registry entry into concrete (endpoint, params) requests."""
     if endpoint.strategy in (MANUAL, LIVE):
         return []
@@ -131,8 +148,9 @@ def requests_for(endpoint: Endpoint, seasons: List[str], per_game: bool) -> List
     if endpoint.strategy == STATIC:
         return [(endpoint.path, {})]
 
+    current_season = current_season or datetime.now(timezone.utc).year
     out: List[Request] = []
-    for season in seasons:
+    for season in seasons_for(endpoint, seasons, full_history, current_season):
         if endpoint.path in PBP_ENDPOINTS and season not in PBP_SEASONS:
             continue
 
@@ -161,7 +179,8 @@ def requests_for(endpoint: Endpoint, seasons: List[str], per_game: bool) -> List
 
 
 def build_plan(seasons: List[str], only: List[str] | None, bucket: str | None,
-               per_game: bool) -> List[Request]:
+               per_game: bool, full_history: bool = False,
+               current_season: Optional[int] = None) -> List[Request]:
     """The full list of (endpoint, params) the backfill intends to fetch."""
     selected = resolve(only) if only else [e for e in REGISTRY if e.include]
     if bucket:
@@ -169,15 +188,21 @@ def build_plan(seasons: List[str], only: List[str] | None, bucket: str | None,
     if per_game and not only:
         selected = selected + [e for e in REGISTRY if e.strategy == PER_GAME and not e.include]
 
+    if full_history:
+        # --full-history is about depth, not breadth: restrict to the ratified set so a
+        # stray flag can't sweep 150 seasons of every endpoint.
+        selected = [e for e in selected if e.history == HISTORY_FULL]
+
     plan: List[Request] = []
     for endpoint in selected:
-        plan.extend(requests_for(endpoint, seasons, per_game))
+        plan.extend(requests_for(endpoint, seasons, per_game, full_history, current_season))
     return plan
 
 
 def run(seasons: List[str], only: List[str] | None, bucket: str | None, per_game: bool,
-        force: bool, dry_run: bool, snapshot: bool = False) -> int:
-    plan = build_plan(seasons, only, bucket, per_game)
+        force: bool, dry_run: bool, snapshot: bool = False,
+        full_history: bool = False) -> int:
+    plan = build_plan(seasons, only, bucket, per_game, full_history)
     print(f"Backfill plan: {len(plan)} requests across seasons {', '.join(seasons)}")
 
     fetched = skipped = failed = 0
@@ -237,6 +262,9 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="re-fetch even if already present")
     parser.add_argument("--snapshot", action="store_true",
                         help="re-fetch snapshot endpoints (lines, pregame wp) even if present")
+    parser.add_argument("--full-history", action="store_true",
+                        help="for the ratified full-history endpoints, pull every season "
+                             "they serve rather than the --seasons list")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without fetching")
     parser.add_argument("--list", action="store_true", help="print the endpoint registry and exit")
     args = parser.parse_args()
@@ -244,7 +272,7 @@ def main() -> int:
     if args.list:
         return list_registry()
     return run(args.seasons, args.only, args.bucket, args.per_game, args.force, args.dry_run,
-               args.snapshot)
+               args.snapshot, args.full_history)
 
 
 if __name__ == "__main__":

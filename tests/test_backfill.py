@@ -164,3 +164,31 @@ def test_load_latest_raw_returns_newest_matching_payload(planner, tmp_path):
 
     assert planner.load_latest_raw("calendar", {"year": "2024"}) == ["new"]
     assert planner.load_latest_raw("calendar", {"year": "1999"}) is None
+
+
+def test_full_history_expands_an_endpoint_across_its_own_availability(planner):
+    """Depth comes from the registry's min_season, not from --seasons."""
+    plan = planner.build_plan(["2024"], only=["draft/picks"], bucket=None, per_game=False,
+                              full_history=True, current_season=2026)
+    years = [p["year"] for _, p in plan]
+
+    assert years[0] == "1967", "draft picks start at the common-draft era"
+    assert years[-1] == "2026"
+    assert len(years) == 2026 - 1967 + 1
+
+
+def test_full_history_leaves_recent_scoped_endpoints_alone(planner):
+    """PBP stays at 2024+ however the flag is passed — depth is per endpoint."""
+    plan = planner.build_plan(["2024"], only=["plays"], bucket=None, per_game=False,
+                              full_history=True, current_season=2026)
+    assert plan == [], "plays is `recent`, so --full-history selects nothing for it"
+
+
+def test_full_history_restricts_the_sweep_to_the_ratified_set(planner):
+    """A stray flag must not pull 150 seasons of every endpoint."""
+    plan = planner.build_plan(["2024"], only=None, bucket=None, per_game=False,
+                              full_history=True, current_season=2026)
+    swept = {e for e, _ in plan}
+
+    assert swept == {e.path for e in ep.REGISTRY if e.history == ep.HISTORY_FULL}
+    assert "plays" not in swept and "lines" not in swept
