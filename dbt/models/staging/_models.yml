@@ -43,3 +43,18 @@ models:
         data_tests:
           - accepted_values:
               values: ['regular', 'postseason']
+
+  - name: stg_raw_manifest
+    description: >
+      Every landed API response, with observation time and row count. Deliberately not
+      deduplicated — each fetch is a fact about the pipeline.
+    columns:
+      - name: endpoint
+        data_tests:
+          - not_null
+      - name: is_success
+        data_tests:
+          - not_null
+      - name: is_empty
+        data_tests:
+          - not_null

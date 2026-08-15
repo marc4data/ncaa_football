@@ -119,6 +119,27 @@ Two timestamps, deliberately distinct: **`fetched_at`** is when the response was
 (from the manifest) and **`added_at`** is when it was loaded. Snapshot analysis needs the
 former — line movement is only interpretable against observation time.
 
+The loader also maintains **`raw_manifest`**, one row per landed response across every
+endpoint, carrying `fetched_at` and a `row_count` computed at load. That single table is
+what makes two otherwise-impossible questions answerable:
+
+| Question | Answered by |
+|---|---|
+| How old is this data? | `mart_data_freshness.last_success_at` — the "data as of X" stamp every page shows |
+| Did the pull return anything? | `row_count`, and the `lost_its_data` flag |
+
+**Empty responses are the failure mode this pipeline is most exposed to**: CFBD answers 200
+with an empty array, the DAG goes green, and nobody notices until a page is blank. Rather
+than guess a per-endpoint row threshold — which needs a season to calibrate and is wrong all
+preseason — detection compares each request against *itself*: for an identical
+(endpoint, params), did an earlier fetch return rows where the latest returned none?
+Legitimately-empty endpoints never trip it, because they never had rows to lose.
+
+That distinction is load-bearing. `records` returned 668 rows for 2024 and 2025 and 0 for
+2026, which is a season that hasn't happened, not a regression. Comparing an endpoint's
+newest response against its best across *all* params flags every endpoint the moment a new
+season opens — the first version of the mart did exactly that and produced 8 false positives.
+
 ## Transforms
 
 See [dbt/README.md](dbt/README.md). Short version:

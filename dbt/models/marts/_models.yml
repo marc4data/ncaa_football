@@ -34,3 +34,22 @@ models:
       - name: wins
         data_tests:
           - not_null
+
+  - name: mart_data_freshness
+    description: >
+      One row per endpoint: how old its newest successful response is, and whether that
+      response carried any rows. Source for the "data as of X" stamp every page shows.
+    columns:
+      - name: endpoint
+        data_tests:
+          - unique
+          - not_null
+      - name: total_responses
+        data_tests:
+          - not_null
+      - name: lost_its_data
+        description: >
+          True when this endpoint used to return rows and its latest successful response
+          returned none — the silent failure that reports green.
+        data_tests:
+          - not_null

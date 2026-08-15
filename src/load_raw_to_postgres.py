@@ -18,6 +18,44 @@ def get_conn():
     return psycopg2.connect(host=PG_HOST, port=PG_PORT, user=PG_USER, password=PG_PASSWORD, dbname=PG_DB)
 
 
+def payload_row_count(payload) -> int:
+    """How many records a landed response actually carried.
+
+    Captured at load time so "CFBD returned 200 with nothing in it" is a fact in the
+    warehouse rather than something a person has to notice. A 200 with an empty array is
+    the failure mode that reports green.
+    """
+    if not isinstance(payload, dict):
+        return 0
+    data = payload.get("data")
+    if isinstance(data, list):
+        return len(data)
+    if isinstance(data, dict):
+        return 1 if data else 0
+    return 0
+
+
+MANIFEST_TABLE = "raw_manifest"
+
+
+def _ensure_manifest_table(cur):
+    """One row per landed response across every endpoint — the spine for freshness."""
+    cur.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {MANIFEST_TABLE} (
+            endpoint text NOT NULL,
+            filename text NOT NULL,
+            params jsonb,
+            status_code int,
+            row_count int,
+            fetched_at timestamptz,
+            loaded_at timestamptz,
+            PRIMARY KEY (endpoint, filename)
+        );
+        """
+    )
+
+
 def load_endpoint(endpoint: str):
     base = Path("data") / "raw" / endpoint
     if not base.exists():
@@ -58,6 +96,7 @@ def load_endpoint(endpoint: str):
             )
             # Tables created before fetched_at existed.
             cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS fetched_at timestamptz;")
+            _ensure_manifest_table(cur)
             for p in files:
                 try:
                     payload = json.loads(p.read_text(encoding="utf-8"))
@@ -65,6 +104,7 @@ def load_endpoint(endpoint: str):
                     payload = {"_raw_text": p.read_text()}
                 status_code = payload.get("status_code") if isinstance(payload, dict) else None
                 params = payload.get("params") if isinstance(payload, dict) else None
+                params_json = json.dumps(params) if params is not None else None
                 cur.execute(
                     f"""
                     INSERT INTO {table}
@@ -77,9 +117,24 @@ def load_endpoint(endpoint: str):
                         fetched_at = EXCLUDED.fetched_at,
                         added_at = EXCLUDED.added_at;
                     """,
-                    (p.name, json.dumps(payload), status_code,
-                     json.dumps(params) if params is not None else None,
+                    (p.name, json.dumps(payload), status_code, params_json,
                      fetched_at.get(p.name)),
+                )
+                cur.execute(
+                    f"""
+                    INSERT INTO {MANIFEST_TABLE}
+                        (endpoint, filename, params, status_code, row_count,
+                         fetched_at, loaded_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (endpoint, filename) DO UPDATE SET
+                        params = EXCLUDED.params,
+                        status_code = EXCLUDED.status_code,
+                        row_count = EXCLUDED.row_count,
+                        fetched_at = EXCLUDED.fetched_at,
+                        loaded_at = EXCLUDED.loaded_at;
+                    """,
+                    (endpoint, p.name, params_json, status_code,
+                     payload_row_count(payload), fetched_at.get(p.name)),
                 )
     conn.close()
     print(f"Loaded {len(files)} files into {table}")
