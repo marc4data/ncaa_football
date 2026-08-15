@@ -109,3 +109,27 @@ def test_refresh_outside_the_season_is_a_clean_skip(monkeypatch):
 
     assert summary["status"] == "skipped"
     assert summary["requests"] == 0
+
+
+def test_season_scoped_endpoints_cover_the_season_type_in_play():
+    """December regression: hardcoding `regular` made every bowl game invisible.
+
+    The weekly refresh runs during the postseason too, and the season-scoped endpoints are
+    asked per seasonType — so a postseason week must produce postseason requests.
+    """
+    postseason_week = [{"year": "2026", "week": "1", "seasonType": "postseason"}]
+    requests = weekly._requests_for_bucket(BUCKET_REVISIONIST, "2026", postseason_week)
+    season_types = {p.get("seasonType") for _, p in requests if "seasonType" in p}
+
+    assert "postseason" in season_types, "bowl-season data would be silently missed"
+    # `regular` stays in the set: cumulative season stats still revise during the postseason.
+    assert "regular" in season_types
+
+
+def test_regular_season_weeks_do_not_request_postseason():
+    """No wasted calls during the regular season — the week in play decides."""
+    regular_week = [{"year": "2026", "week": "5", "seasonType": "regular"}]
+    requests = weekly._requests_for_bucket(BUCKET_REVISIONIST, "2026", regular_week)
+    season_types = {p.get("seasonType") for _, p in requests if "seasonType" in p}
+
+    assert season_types == {"regular"}

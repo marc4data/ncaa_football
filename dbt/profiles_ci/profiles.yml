@@ -1,0 +1,14 @@
+# dbt profile for CI. Points at the workflow's Postgres service container, which is
+# seeded from ci/fixtures.sql — never at anyone's real warehouse.
+cfdb_profile:
+  target: ci
+  outputs:
+    ci:
+      type: postgres
+      host: "{{ env_var('PG_HOST', 'localhost') }}"
+      port: "{{ env_var('PG_PORT', '5432') | int }}"
+      user: "{{ env_var('PG_USER', 'cfdb') }}"
+      password: "{{ env_var('PG_PASSWORD', 'cfdb') }}"
+      dbname: "{{ env_var('PG_DB', 'cfdb') }}"
+      schema: public
+      threads: 4

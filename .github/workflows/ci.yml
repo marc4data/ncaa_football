@@ -102,3 +102,66 @@ jobs:
           PY
       # Raw data is deliberately not uploaded as an artifact — CFBD terms prohibit
       # redistribution, and the workspace is discarded when the job ends.
+
+  dbt:
+    name: dbt build (models + tests)
+    runs-on: ubuntu-latest
+    # Transform correctness gets the same gate as Python. Without this, a model change
+    # that breaks a reconciliation test is only caught by the weekly DAG — in production,
+    # after merge.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: cfdb
+          POSTGRES_PASSWORD: cfdb
+          POSTGRES_DB: cfdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PG_HOST: localhost
+      PG_PORT: "5432"
+      PG_USER: cfdb
+      PG_PASSWORD: cfdb
+      PG_DB: cfdb
+      DBT_PROFILES_DIR: dbt/profiles_ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dbt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Load the raw-layer fixture
+        env:
+          PGPASSWORD: cfdb
+        run: psql -h localhost -U cfdb -d cfdb -v ON_ERROR_STOP=1 -f ci/fixtures.sql
+
+      - name: dbt build
+        run: dbt build --project-dir dbt
+
+      - name: Assert the fixture exercised both date eras
+        env:
+          PGPASSWORD: cfdb
+        # A fixture that only covered the modern era would let the date-only regression
+        # test pass without testing anything.
+        run: |
+          eras=$(psql -h localhost -U cfdb -d cfdb -tAc \
+            "select count(distinct kickoff_time_known) from mart_team_schedule;")
+          if [ "$eras" -ne 2 ]; then
+            echo "::error::fixture covers $eras date era(s); it must cover both"
+            exit 1
+          fi
+          echo "Fixture covers both date eras."
