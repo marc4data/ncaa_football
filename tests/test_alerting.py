@@ -5,6 +5,8 @@ would mask the failure it exists to report.
 """
 import json
 
+import pytest
+
 from src import alerting
 
 
@@ -112,3 +114,34 @@ def test_failure_callback_reports_both_channels(tmp_path, monkeypatch):
 
     assert result == {"logged": True, "emailed": False}
     assert "boom" in (tmp_path / "failures.jsonl").read_text()
+
+
+def test_diagnose_maps_auth_failure_to_the_app_password_hint():
+    """The most likely misconfiguration deserves the most specific advice."""
+    exc = alerting.smtplib.SMTPAuthenticationError(535, b"Username and Password not accepted")
+    assert "App Password" in alerting.diagnose(exc)
+
+
+def test_diagnose_covers_the_other_common_smtp_failures():
+    import socket
+
+    assert "smtp.gmail.com" in alerting.diagnose(socket.gaierror("name resolution"))
+    assert "587" in alerting.diagnose(ConnectionRefusedError())
+    assert "465" in alerting.diagnose(alerting.smtplib.SMTPNotSupportedError())
+    assert "Unexpected" in alerting.diagnose(ValueError("something else"))
+
+
+def test_send_can_raise_for_the_cli_test(monkeypatch):
+    """A silent False is useless to someone running a test on purpose."""
+    def explode(*a, **k):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(alerting.smtplib, "SMTP", explode)
+    for key, value in ((alerting.SMTP_HOST, "smtp.example.com"),
+                       (alerting.SMTP_FROM, "a@example.com"),
+                       (alerting.SMTP_TO, "b@example.com")):
+        monkeypatch.setenv(key, value)
+
+    assert alerting.send_failure_email({"dag_id": "d", "task_id": "t"}) is False
+    with pytest.raises(OSError):
+        alerting.send_failure_email({"dag_id": "d", "task_id": "t"}, raise_on_error=True)

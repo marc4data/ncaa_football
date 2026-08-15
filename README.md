@@ -209,7 +209,7 @@ Two channels, wired as `on_failure_callback` on every DAG:
 ALERT_SMTP_HOST=smtp.gmail.com
 ALERT_SMTP_PORT=587
 ALERT_SMTP_USER=you@gmail.com
-ALERT_SMTP_PASSWORD=<app password, not your account password>
+ALERT_SMTP_PASSWORD=<App Password>
 ALERT_EMAIL_FROM=you@gmail.com
 ALERT_EMAIL_TO=you@gmail.com
 ```

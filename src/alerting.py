@@ -11,14 +11,19 @@ chosen because neither needs new infrastructure:
 Nothing in here may raise. An exception in a failure handler would mask the failure it
 exists to report, so every path is wrapped and degrades to a printed warning.
 """
+import argparse
 import json
 import os
 import smtplib
+import socket
+import sys
 import traceback
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from dotenv import load_dotenv
 
 ALERT_LOG = Path("data") / "alerts" / "failures.jsonl"
 
@@ -52,8 +57,31 @@ def record_failure(event: Dict[str, Any], path: Optional[Path] = None) -> bool:
         return False
 
 
-def send_failure_email(event: Dict[str, Any]) -> bool:
-    """Send the failure by SMTP if configured. Returns whether it was sent."""
+def diagnose(exc: BaseException) -> str:
+    """Turn an SMTP exception into the thing to actually go and fix."""
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return ("Credentials rejected. Gmail requires an App Password (16 characters, "
+                "2-Step Verification enabled) — an account password will always fail here.")
+    if isinstance(exc, smtplib.SMTPSenderRefused):
+        return f"Sender refused. {SMTP_FROM} usually has to match {SMTP_USER}."
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return f"Recipient refused. Check {SMTP_TO}."
+    if isinstance(exc, smtplib.SMTPNotSupportedError):
+        return ("Server rejected STARTTLS. Port 465 expects TLS from the first byte; "
+                "this client upgrades an open connection, so use 587.")
+    if isinstance(exc, (socket.gaierror, socket.herror)):
+        return f"Host did not resolve. Check {SMTP_HOST} (Gmail is smtp.gmail.com)."
+    if isinstance(exc, (ConnectionRefusedError, socket.timeout, TimeoutError)):
+        return f"Nothing answered. Check {SMTP_PORT} (587 for STARTTLS) and any firewall."
+    return "Unexpected SMTP error — see the exception above."
+
+
+def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False) -> bool:
+    """Send the failure by SMTP if configured. Returns whether it was sent.
+
+    `raise_on_error` is for the CLI test, where a silent False is useless — a person
+    running a test wants the actual reason.
+    """
     if not smtp_configured():
         return False
     try:
@@ -77,6 +105,8 @@ def send_failure_email(event: Dict[str, Any]) -> bool:
         return True
     except Exception as exc:  # never raise from an alert path
         print(f"ALERT: could not send failure email: {exc}")
+        if raise_on_error:
+            raise
         return False
 
 
@@ -107,3 +137,64 @@ def failure_callback(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     print(f"ALERT: {event.get('dag_id')}.{event.get('task_id')} failed "
           f"(logged={logged}, emailed={emailed}): {event.get('error')}")
     return {"logged": logged, "emailed": emailed}
+
+
+def _describe_config() -> None:
+    """Print which channels are live, without ever printing a secret."""
+    print(f"local log:  {ALERT_LOG}  (always on)")
+    print("smtp:")
+    for key in (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_FROM, SMTP_TO):
+        value = os.getenv(key)
+        print(f"  {key:22} {value or '(unset)'}")
+    password = os.getenv(SMTP_PASSWORD)
+    print(f"  {SMTP_PASSWORD:22} {'set, ' + str(len(password)) + ' chars' if password else '(unset)'}")
+    if password and len(password.replace(' ', '')) != 16:
+        print("    note: Gmail App Passwords are 16 characters — this may be an account password.")
+    print(f"\nsmtp configured: {smtp_configured()}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Inspect and test failure alerting without running any pipeline.")
+    parser.add_argument("--check", action="store_true",
+                        help="report configuration; send nothing")
+    parser.add_argument("--test", action="store_true",
+                        help="send a synthetic failure through both channels")
+    args = parser.parse_args()
+
+    load_dotenv()
+
+    if not args.check and not args.test:
+        parser.print_help()
+        return 0
+
+    _describe_config()
+    if args.check:
+        return 0
+
+    event = build_event({
+        "task_instance": None,
+        "exception": RuntimeError("synthetic alert from `python -m src.alerting --test`"),
+    })
+    event.update({"dag_id": "cfdb_alerting", "task_id": "self_test"})
+
+    print("\n--- sending ---")
+    logged = record_failure(event)
+    print(f"local log: {'written' if logged else 'FAILED'} -> {ALERT_LOG}")
+
+    if not smtp_configured():
+        print("smtp:      skipped (not configured)")
+        return 0 if logged else 1
+
+    try:
+        send_failure_email(event, raise_on_error=True)
+    except Exception as exc:
+        print(f"smtp:      FAILED — {type(exc).__name__}")
+        print(f"           {diagnose(exc)}")
+        return 1
+    print(f"smtp:      sent to {os.getenv(SMTP_TO)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
