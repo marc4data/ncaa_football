@@ -40,6 +40,7 @@ are landed too — the raw layer records what happened, and staging filters to `
 
 ```bash
 python -m src.backfill --list                    # the endpoint registry
+python -m src.backfill --list-history            # just the full-history set and its depths
 python -m src.backfill --dry-run                 # show the plan, fetch nothing
 python -m src.backfill --seasons 2024 2025       # full-breadth sweep
 python -m src.backfill --only plays drives       # restrict to some endpoints
@@ -69,8 +70,23 @@ a fetch strategy and a cadence bucket:
 | `manual` | needs an argument a sweep can't invent (playerId, searchTerm) | n/a |
 | `live` | only meaningful mid-game, or API metadata | n/a |
 
-63 of the 74 are in the default sweep. The rest are excluded because they can't be swept
+62 of the 74 are in the default sweep. The rest are excluded because they can't be swept
 (`manual`, `live`) or because their cost is a different order of magnitude (`per_game`).
+
+**Depth is declared per endpoint too**, via `history` and `min_season`:
+
+| `history` | Depth | Applies to |
+|---|---|---|
+| `recent` (default) | 2024+ | Everything not listed below — PBP, drives, lines, box scores, per-game fan-outs |
+| `full` | Every season the endpoint serves, floored by `min_season` | The 11 ratified season-level endpoints |
+
+`min_season` was probed against the live API on 2026-08-15 rather than assumed, and the
+values match the sport's history: 1869 for games/records/teams (the first game ever played),
+1936 for rankings (first AP poll), 1967 for draft picks (common draft era).
+
+`--full-history` expands only the ratified set, so a stray flag can't sweep 150 seasons of
+every endpoint. Changing that set is one registry line plus one decision-log line — see
+`python -m src.backfill --list-history` for the current membership.
 
 Per-game fan-out reads game ids from **already-landed** `/games` responses, so the
 expensive step can never run against a guess — run the bulk sweep first.

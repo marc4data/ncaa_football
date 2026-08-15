@@ -243,12 +243,28 @@ def run(seasons: List[str], only: List[str] | None, bucket: str | None, per_game
     return 1 if failed else 0
 
 
-def list_registry() -> int:
-    print(f"{'endpoint':30} {'strategy':13} {'bucket':7} {'swept':6} note")
-    for e in REGISTRY:
-        print(f"{e.path:30} {e.strategy:13} {e.bucket:7} {str(e.include):6} {e.note}")
-    print(f"\n{len(REGISTRY)} endpoints, {len([e for e in REGISTRY if e.include])} in the default sweep.")
-    print(f"\n{PER_GAME_COST_NOTE}")
+def list_registry(history_only: bool = False) -> int:
+    """Print the registry as a table — the readable view of what the code declares."""
+    rows = [e for e in REGISTRY if not history_only or e.history == HISTORY_FULL]
+
+    print(f"{'endpoint':28} {'strategy':12} {'bucket':7} {'history':8} {'depth':11} {'swept':6} note")
+    print("-" * 110)
+    for e in rows:
+        depth = f"{e.min_season}+" if e.min_season else ("2024+" if e.include else "-")
+        print(f"{e.path:28} {e.strategy:12} {e.bucket:7} {e.history:8} {depth:11} "
+              f"{str(e.include):6} {e.note}")
+
+    full = [e for e in REGISTRY if e.history == HISTORY_FULL]
+    print(f"\n{len(rows)} shown. Registry: {len(REGISTRY)} endpoints, "
+          f"{len([e for e in REGISTRY if e.include])} in the default sweep, "
+          f"{len(full)} ratified for full history.")
+    print("\nDepth is declared per endpoint, not per invocation:")
+    print("  recent  the project default, 2024+ (CLAUDE.md data scope)")
+    print("  full    every season the endpoint serves, floored by min_season — probed")
+    print("          against the live API 2026-08-15, not assumed. Run with --full-history.")
+    print("\nChanging the full-history set is one registry line plus one decision-log line.")
+    if not history_only:
+        print(f"\n{PER_GAME_COST_NOTE}")
     return 0
 
 
@@ -267,10 +283,12 @@ def main() -> int:
                              "they serve rather than the --seasons list")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without fetching")
     parser.add_argument("--list", action="store_true", help="print the endpoint registry and exit")
+    parser.add_argument("--list-history", action="store_true",
+                        help="print only the endpoints ratified for full history")
     args = parser.parse_args()
 
-    if args.list:
-        return list_registry()
+    if args.list or args.list_history:
+        return list_registry(history_only=args.list_history)
     return run(args.seasons, args.only, args.bucket, args.per_game, args.force, args.dry_run,
                args.snapshot, args.full_history)
 
