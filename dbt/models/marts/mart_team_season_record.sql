@@ -44,10 +44,10 @@ aggregated as (
     select
         season,
         team_id,
-        count(*)                                              as games_played,
-        count(*) filter (where points_for > points_against)   as wins,
-        count(*) filter (where points_for < points_against)   as losses,
-        count(*) filter (where points_for = points_against)   as ties,
+        count(*)                                                          as games_played,
+        count(case when points_for > points_against then 1 end)           as wins,
+        count(case when points_for < points_against then 1 end)           as losses,
+        count(case when points_for = points_against then 1 end)           as ties,
         sum(points_for)                                       as points_for,
         sum(points_against)                                   as points_against
     from team_games
@@ -56,7 +56,7 @@ aggregated as (
 )
 
 select
-    a.season::text || '-' || a.team_id::text as team_season_key,
+    cast(a.season as {{ dbt.type_string() }}) || '-' || cast(a.team_id as {{ dbt.type_string() }}) as team_season_key,
     a.season,
     a.team_id,
     t.team_id is not null as is_listed_team,
@@ -70,7 +70,7 @@ select
     a.points_for,
     a.points_against,
     a.points_for - a.points_against as point_differential,
-    round(a.wins::numeric / nullif(a.games_played, 0), 3) as win_pct
+    round(cast(a.wins as numeric) / nullif(a.games_played, 0), 3) as win_pct
 from aggregated a
 left join {{ ref('stg_teams') }} t
     on t.team_id = a.team_id

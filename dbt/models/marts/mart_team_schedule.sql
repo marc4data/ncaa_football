@@ -20,7 +20,7 @@
 -- every season that has any times at all.
 with season_has_times as (
 
-    select season, bool_or(start_date::time <> '00:00:00') as times_known
+    select season, bool_or({{ utc_time_of_day('start_date') }} <> '00:00:00') as times_known
     from {{ ref('stg_games') }}
     group by season
 
@@ -61,7 +61,8 @@ team_games as (
 )
 
 select
-    g.season::text || '-' || g.game_id::text || '-' || g.team_id::text as team_game_key,
+    cast(g.season as {{ dbt.type_string() }}) || '-' || cast(g.game_id as {{ dbt.type_string() }})
+        || '-' || cast(g.team_id as {{ dbt.type_string() }}) as team_game_key,
     g.season,
     g.week,
     g.season_type,
@@ -77,8 +78,8 @@ select
     g.start_date,
     -- The site and any analysis both want local calendar day, not a UTC timestamp.
     case
-        when h.times_known then (g.start_date at time zone 'America/New_York')::date
-        else (g.start_date at time zone 'UTC')::date
+        when h.times_known then {{ to_local_date('g.start_date') }}
+        else {{ to_utc_date('g.start_date') }}
     end as game_date,
     h.times_known as kickoff_time_known,
     case when g.is_neutral_site then 'neutral' when g.is_away then 'away' else 'home' end as venue_role,

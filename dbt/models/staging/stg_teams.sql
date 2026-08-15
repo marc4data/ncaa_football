@@ -7,26 +7,23 @@
 --
 -- So: only year-parameterized fetches feed this model. The early unparameterized pulls
 -- are deliberately excluded — they describe today, not any particular season.
+--
+-- JSON access goes through the dispatched macros (see macros/json.sql), so this model is
+-- dialect-neutral ahead of the Databricks migration.
 
 with season_fetches as (
 
     select
         filename,
-        (params ->> 'year')::int as season,
-        content -> 'data'        as payload
+        cast({{ json_get_string('params', 'year') }} as int) as season,
+        {{ json_get_object('content', 'data') }}             as payload,
+        row_number() over (
+            partition by {{ json_get_string('params', 'year') }}
+            order by filename desc
+        ) as recency
     from {{ source('raw', 'raw_teams') }}
     where status_code = 200
-      and params ? 'year'
-
-),
-
-latest_per_season as (
-
-    select distinct on (season)
-        season,
-        payload
-    from season_fetches
-    order by season, filename desc
+      and {{ json_get_string('params', 'year') }} is not null
 
 ),
 
@@ -34,21 +31,22 @@ teams as (
 
     select
         season,
-        jsonb_array_elements(payload) as team
-    from latest_per_season
+        {{ json_array_elements('payload') }} as team
+    from season_fetches
+    where recency = 1
 
 )
 
 select
     season,
-    (team ->> 'id')::int             as team_id,
-    season::text || '-' || (team ->> 'id') as team_season_key,
-    team ->> 'school'                as school,
-    team ->> 'mascot'                as mascot,
-    team ->> 'abbreviation'          as abbreviation,
-    team ->> 'conference'            as conference,
-    team ->> 'division'              as division,
-    team ->> 'classification'        as classification,
-    team -> 'location' ->> 'city'    as city,
-    team -> 'location' ->> 'state'   as state
+    cast({{ json_get_string('team', 'id') }} as int)   as team_id,
+    cast(season as {{ dbt.type_string() }}) || '-' || {{ json_get_string('team', 'id') }} as team_season_key,
+    {{ json_get_string('team', 'school') }}            as school,
+    {{ json_get_string('team', 'mascot') }}            as mascot,
+    {{ json_get_string('team', 'abbreviation') }}      as abbreviation,
+    {{ json_get_string('team', 'conference') }}        as conference,
+    {{ json_get_string('team', 'division') }}          as division,
+    {{ json_get_string('team', 'classification') }}    as classification,
+    {{ json_get_nested_string('team', ['location', 'city']) }}  as city,
+    {{ json_get_nested_string('team', ['location', 'state']) }} as state
 from teams

@@ -19,5 +19,5 @@ select
     loaded_at,
     -- Staleness is measured against observation, not load: reloading old files must not
     -- make stale data look fresh.
-    extract(epoch from (now() - fetched_at)) / 3600.0 as hours_since_fetch
+    {{ hours_between('now()', 'fetched_at') }} as hours_since_fetch
 from {{ source('raw', 'raw_manifest') }}

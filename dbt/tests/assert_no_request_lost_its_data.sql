@@ -17,13 +17,17 @@ with successful as (
 
 latest_per_request as (
 
-    select distinct on (endpoint, params)
-        endpoint,
-        params,
-        row_count as latest_row_count,
-        fetched_at as latest_fetched_at
-    from successful
-    order by endpoint, params, fetched_at desc
+    select endpoint, params, latest_row_count, latest_fetched_at
+    from (
+        select
+            endpoint,
+            params,
+            row_count  as latest_row_count,
+            fetched_at as latest_fetched_at,
+            row_number() over (partition by endpoint, params order by fetched_at desc) as recency
+        from successful
+    ) ranked
+    where recency = 1
 
 ),
 
@@ -44,6 +48,6 @@ select
 from latest_per_request l
 join best_per_request b
     on b.endpoint = l.endpoint
-   and b.params is not distinct from l.params
+   and (b.params = l.params or (b.params is null and l.params is null))
 where l.latest_row_count = 0
   and b.best_row_count > 0
