@@ -187,6 +187,7 @@ Two settings that are easy to get wrong and fail confusingly:
 | `cfbd_lines_snapshot` | `@daily` | One `/lines` snapshot of the week currently in play |
 | `cfbd_results_refresh` | Sun 12:00 UTC | The week just played + the prior one (late stat corrections), plus ratings and cumulative stats that revise because of it |
 | `cfbd_pregame_refresh` | Tue 12:00 UTC | Lines and pre-game win probability for the upcoming week, plus ratings after polls publish |
+| `cfbd_alerting_selftest` | manual | Fails on purpose to verify alerting reaches you |
 
 Schedules are **calendar days, not CFBD week boundaries** — CFBD's week 1 spans twelve days
 and two Saturdays, so a per-week trigger would sit idle through the opening slate.
