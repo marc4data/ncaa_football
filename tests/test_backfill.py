@@ -100,6 +100,48 @@ def test_default_sweep_covers_the_whole_registry(planner):
     assert swept == {e.path for e in ep.SWEEPABLE}
 
 
+def test_snapshot_endpoints_refetch_only_under_snapshot_flag(planner, monkeypatch):
+    """Betting lines move: re-fetching identical params is the point, not a duplicate.
+
+    Without this, the daily lines pull would be skipped from its second run onward and the
+    movement series would never accumulate.
+    """
+    calls = []
+
+    class Resp:
+        status_code = 200
+
+    monkeypatch.setattr(planner.ingest, "fetch",
+                        lambda ep, params: calls.append((ep, params)) or Resp())
+    monkeypatch.setattr(planner.time, "sleep", lambda s: None)
+    planner.manifest.add_entry("lines", "a.json", {"year": "2025", "seasonType": "regular"}, 200)
+
+    planner.run(["2025"], ["lines"], None, False, force=False, dry_run=False, snapshot=False)
+    assert calls == [("lines", {"year": "2025", "seasonType": "postseason"})], \
+        "the already-fetched regular-season snapshot should be skipped"
+
+    calls.clear()
+    planner.run(["2025"], ["lines"], None, False, force=False, dry_run=False, snapshot=True)
+    assert ("lines", {"year": "2025", "seasonType": "regular"}) in calls, \
+        "--snapshot must re-fetch even though the params are already present"
+
+
+def test_non_snapshot_endpoints_ignore_the_snapshot_flag(planner, monkeypatch):
+    """--snapshot must not turn the whole sweep into a re-fetch."""
+    calls = []
+
+    class Resp:
+        status_code = 200
+
+    monkeypatch.setattr(planner.ingest, "fetch",
+                        lambda ep, params: calls.append((ep, params)) or Resp())
+    monkeypatch.setattr(planner.time, "sleep", lambda s: None)
+    planner.manifest.add_entry("teams", "a.json", {"year": "2025"}, 200)
+
+    planner.run(["2025"], ["teams"], None, False, force=False, dry_run=False, snapshot=True)
+    assert calls == []
+
+
 def test_already_fetched_skips_only_successful_matching_params(planner):
     planner.manifest.add_entry("plays", "a.json", {"year": "2024", "week": "1"}, 200)
     planner.manifest.add_entry("plays", "b.json", {"year": "2024", "week": "2"}, 401)

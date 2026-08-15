@@ -46,6 +46,12 @@ class Endpoint:
     bucket: str
     include: bool = True
     note: str = ""
+    # Snapshot endpoints answer differently to the *same* request over time — betting
+    # lines move, pre-game win probability shifts. For these, repeat fetches with
+    # identical params are the point, so `--snapshot` bypasses skip-if-present. Without
+    # this the daily lines pull would be skipped from its second run onward and the
+    # movement series would never accumulate.
+    snapshot: bool = False
     extra: Dict[str, str] = field(default_factory=dict)
 
     @property
@@ -129,9 +135,10 @@ REGISTRY: List[Endpoint] = [
     Endpoint("wepa/players/kicking", SEASON, BUCKET_REVISIONIST),
 
     # ---- Betting (bucket D) --------------------------------------------------------
-    Endpoint("lines", SEASON_TYPE, BUCKET_PREGAME, note="daily during game week; keep every snapshot"),
+    Endpoint("lines", SEASON_TYPE, BUCKET_PREGAME, snapshot=True,
+             note="daily during game week; every snapshot is kept, never deduped"),
     Endpoint("teams/ats", SEASON, BUCKET_REVISIONIST, note="against the spread"),
-    Endpoint("metrics/wp/pregame", SEASON_TYPE, BUCKET_PREGAME),
+    Endpoint("metrics/wp/pregame", SEASON_TYPE, BUCKET_PREGAME, snapshot=True),
 
     # ---- Player movement and recruiting -------------------------------------------
     Endpoint("player/portal", SEASON, BUCKET_STRUCTURAL, note="transfer portal"),

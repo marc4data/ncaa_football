@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Tuple
 
 from . import ingest
 from .endpoints import (
-    LIVE, MANUAL, PER_GAME, REGISTRY, SEASON, SEASON_TYPE, SEASON_WEEK, STATIC,
+    BY_PATH, LIVE, MANUAL, PER_GAME, REGISTRY, SEASON, SEASON_TYPE, SEASON_WEEK, STATIC,
     PER_GAME_COST_NOTE, Endpoint, resolve,
 )
 from .raw_manifest import RawManifest
@@ -176,7 +176,7 @@ def build_plan(seasons: List[str], only: List[str] | None, bucket: str | None,
 
 
 def run(seasons: List[str], only: List[str] | None, bucket: str | None, per_game: bool,
-        force: bool, dry_run: bool) -> int:
+        force: bool, dry_run: bool, snapshot: bool = False) -> int:
     plan = build_plan(seasons, only, bucket, per_game)
     print(f"Backfill plan: {len(plan)} requests across seasons {', '.join(seasons)}")
 
@@ -185,7 +185,10 @@ def run(seasons: List[str], only: List[str] | None, bucket: str | None, per_game
 
     for endpoint, params in plan:
         label = f"{endpoint} {params}"
-        if not force and already_fetched(endpoint, params):
+        # Snapshot endpoints are re-fetched on purpose under --snapshot: the same request
+        # answers differently over time, and that difference is the data.
+        resnapshot = snapshot and BY_PATH[endpoint].snapshot
+        if not force and not resnapshot and already_fetched(endpoint, params):
             skipped += 1
             if dry_run:
                 print(f"  SKIP (present)  {label}")
@@ -232,13 +235,16 @@ def main() -> int:
     parser.add_argument("--per-game", action="store_true",
                         help="include per-game fan-out endpoints (expensive)")
     parser.add_argument("--force", action="store_true", help="re-fetch even if already present")
+    parser.add_argument("--snapshot", action="store_true",
+                        help="re-fetch snapshot endpoints (lines, pregame wp) even if present")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without fetching")
     parser.add_argument("--list", action="store_true", help="print the endpoint registry and exit")
     args = parser.parse_args()
 
     if args.list:
         return list_registry()
-    return run(args.seasons, args.only, args.bucket, args.per_game, args.force, args.dry_run)
+    return run(args.seasons, args.only, args.bucket, args.per_game, args.force, args.dry_run,
+               args.snapshot)
 
 
 if __name__ == "__main__":

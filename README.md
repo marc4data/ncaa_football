@@ -46,7 +46,14 @@ python -m src.backfill --only plays drives       # restrict to some endpoints
 python -m src.backfill --bucket C1               # restrict to a cadence bucket
 python -m src.backfill --per-game --seasons 2024 # add per-game fan-out (expensive)
 python -m src.backfill --force                   # re-fetch even if already present
+python -m src.backfill --snapshot --only lines --seasons 2026   # daily lines snapshot
 ```
+
+**Snapshot endpoints.** `/lines` and `/metrics/wp/pregame` answer differently to the *same*
+request over time — that difference is the data. They're marked `snapshot=True` in the
+registry, and `--snapshot` bypasses skip-if-present for them only. Without it the daily
+lines pull would be skipped from its second run onward and no movement series would
+accumulate. A plain backfill rerun stays a no-op.
 
 **What gets fetched lives in [`src/endpoints.py`](src/endpoints.py), not in the backfill.**
 That registry covers all 74 endpoints in the CFBD OpenAPI spec (v5.24.0), each tagged with
@@ -107,6 +114,10 @@ python -m src.load_raw_to_postgres --all      # every endpoint landed under data
 
 One row per raw file in `raw_<endpoint>`, with the response as `jsonb`. Loads are upserts
 keyed on filename, so re-running never duplicates.
+
+Two timestamps, deliberately distinct: **`fetched_at`** is when the response was observed
+(from the manifest) and **`added_at`** is when it was loaded. Snapshot analysis needs the
+former — line movement is only interpretable against observation time.
 
 ## Transforms
 
