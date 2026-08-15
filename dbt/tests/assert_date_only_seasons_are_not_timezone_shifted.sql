@@ -10,4 +10,4 @@ select
 from {{ ref('mart_team_schedule') }} s
 join {{ ref('stg_games') }} g on g.game_id = s.game_id
 where not s.kickoff_time_known
-  and s.game_date <> (g.start_date at time zone 'UTC')::date
+  and s.game_date <> {{ to_utc_date('g.start_date') }}

@@ -16,13 +16,17 @@ with successful as (
 
 latest as (
 
-    select distinct on (endpoint)
-        endpoint,
-        fetched_at    as last_success_at,
-        row_count     as last_row_count,
-        hours_since_fetch
-    from successful
-    order by endpoint, fetched_at desc
+    select endpoint, last_success_at, last_row_count, hours_since_fetch
+    from (
+        select
+            endpoint,
+            fetched_at as last_success_at,
+            row_count  as last_row_count,
+            hours_since_fetch,
+            row_number() over (partition by endpoint order by fetched_at desc) as recency
+        from successful
+    ) ranked
+    where recency = 1
 
 ),
 
@@ -30,10 +34,10 @@ totals as (
 
     select
         endpoint,
-        count(*)                                   as total_responses,
-        count(*) filter (where is_success)         as successful_responses,
-        count(*) filter (where not is_success)     as failed_responses,
-        count(*) filter (where is_success and is_empty) as empty_responses,
+        count(*)                                                  as total_responses,
+        count(case when is_success then 1 end)                    as successful_responses,
+        count(case when not is_success then 1 end)                as failed_responses,
+        count(case when is_success and is_empty then 1 end)       as empty_responses,
         max(row_count)                             as max_row_count
     from {{ ref('stg_raw_manifest') }}
     group by endpoint
@@ -46,12 +50,16 @@ totals as (
 -- all params flags every endpoint the moment a new season opens.
 latest_per_request as (
 
-    select distinct on (endpoint, params)
-        endpoint,
-        params,
-        row_count as latest_row_count
-    from successful
-    order by endpoint, params, fetched_at desc
+    select endpoint, params, latest_row_count
+    from (
+        select
+            endpoint,
+            params,
+            row_count as latest_row_count,
+            row_number() over (partition by endpoint, params order by fetched_at desc) as recency
+        from successful
+    ) ranked
+    where recency = 1
 
 ),
 
@@ -67,13 +75,14 @@ losses as (
 
     select
         l.endpoint,
-        count(*) filter (
-            where l.latest_row_count = 0 and b.best_row_count > 0
-        ) as requests_that_lost_data
+        count(case
+            when l.latest_row_count = 0 and b.best_row_count > 0 then 1
+        end) as requests_that_lost_data
     from latest_per_request l
     join best_per_request b
         on b.endpoint = l.endpoint
-       and b.params is not distinct from l.params
+       -- Null-safe equality without `is not distinct from`, which Spark spells `<=>`.
+       and (b.params = l.params or (b.params is null and l.params is null))
     group by l.endpoint
 
 )
@@ -81,7 +90,7 @@ losses as (
 select
     t.endpoint,
     l.last_success_at,
-    round(l.hours_since_fetch::numeric, 1) as hours_since_last_success,
+    round(cast(l.hours_since_fetch as numeric), 1) as hours_since_last_success,
     l.last_row_count,
     t.total_responses,
     t.successful_responses,
