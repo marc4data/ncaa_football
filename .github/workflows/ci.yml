@@ -53,6 +53,15 @@ jobs:
           fi
           echo "No tracked raw data."
 
+      - name: Assert no office documents are tracked in git
+        run: |
+          # .gitignore stops accidents; `git add -f` bypasses it. This does not.
+          if git ls-files | grep -iE '\.(docx?|xlsx?|pptx)$|^~\$|/~\$'; then
+            echo "::error::Project writing lives in the Cowork folder outside this repo — a document here is a stray copy"
+            exit 1
+          fi
+          echo "No tracked office documents."
+
   cfbd-smoke:
     name: CFBD live smoke test
     # Manual only: hitting the real API on every PR burns rate limit for no signal.

@@ -23,3 +23,15 @@ sources:
             data_tests:
               - unique
               - not_null
+      - name: raw_manifest
+        description: >
+          One row per landed response across every endpoint, written by
+          src/load_raw_to_postgres.py. Carries fetched_at (observation time) and row_count,
+          which is what makes freshness and empty-response detection possible at all.
+        columns:
+          - name: endpoint
+            data_tests:
+              - not_null
+          - name: filename
+            data_tests:
+              - not_null

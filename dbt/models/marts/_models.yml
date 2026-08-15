@@ -14,9 +14,17 @@ models:
       - name: team_id
         data_tests:
           - not_null
-          - relationships:
-              to: ref('stg_teams')
-              field: team_id
+      # No `relationships` test to stg_teams: schedules include lower-division opponents
+      # that CFBD's season team list doesn't cover, so referential integrity genuinely
+      # does not hold here. `is_listed_team` records the fact instead, and
+      # assert_listed_teams_have_attributes checks the join where it should hold.
+      - name: is_listed_team
+        description: >
+          True when this team-season matched CFBD's team list for that season. False for
+          lower-division opponents that appear on schedules but aren't listed — their rows
+          are kept so league-wide win/loss totals still reconcile.
+        data_tests:
+          - not_null
       - name: season
         data_tests:
           - not_null
@@ -26,3 +34,54 @@ models:
       - name: wins
         data_tests:
           - not_null
+
+  - name: mart_data_freshness
+    description: >
+      One row per endpoint: how old its newest successful response is, and whether that
+      response carried any rows. Source for the "data as of X" stamp every page shows.
+    columns:
+      - name: endpoint
+        data_tests:
+          - unique
+          - not_null
+      - name: total_responses
+        data_tests:
+          - not_null
+      - name: lost_its_data
+        description: >
+          True when this endpoint used to return rows and its latest successful response
+          returned none — the silent failure that reports green.
+        data_tests:
+          - not_null
+
+  - name: mart_team_schedule
+    description: >
+      One row per team per game — the schedule from a single team's point of view, for every
+      season landed including seasons not yet played. A 2026 row has a kickoff and an
+      opponent but no result, which is what a schedule is before it starts.
+    columns:
+      - name: team_game_key
+        description: season + game + team; the grain, stated explicitly.
+        data_tests:
+          - unique
+          - not_null
+      - name: season
+        data_tests:
+          - not_null
+      - name: team_id
+        data_tests:
+          - not_null
+      - name: opponent_id
+        data_tests:
+          - not_null
+      - name: venue_role
+        data_tests:
+          - accepted_values:
+              values: ['home', 'away', 'neutral']
+      - name: result
+        description: W/L/T, null until the game is played.
+        data_tests:
+          - accepted_values:
+              values: ['W', 'L', 'T']
+              config:
+                where: "result is not null"

@@ -31,11 +31,25 @@ def ensure_dir(path: Path):
 def write_raw(endpoint: str, content: dict):
     # Explicit format, not isoformat(): the UTC offset would introduce a "+00:00"
     # that the colon-stripping mangles into "+00-00". Filenames are manifest keys.
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    #
+    # Millisecond precision is load-bearing, not decoration. At second resolution two
+    # fast responses (small endpoints answer in well under a second) produce the same
+    # filename: the second write silently overwrites the first, and the manifest refuses
+    # the duplicate filename — leaving a file labelled with the wrong request's params.
+    # That happened to 6 files during the first 2024-25 backfill.
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S-%f")[:-3]
     dir_path = Path("data") / "raw" / endpoint
     ensure_dir(dir_path)
-    filename = f"{ts}.json"
+
+    # Belt and braces: never overwrite an existing raw file, whatever the clock says.
+    filename = f"{ts}Z.json"
     file_path = dir_path / filename
+    collision = 0
+    while file_path.exists():
+        collision += 1
+        filename = f"{ts}Z-{collision}.json"
+        file_path = dir_path / filename
+
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(content, f, indent=2, ensure_ascii=False)
     print(f"Wrote raw file: {file_path}")
@@ -56,10 +70,20 @@ def fetch(endpoint: str, params: dict | None = None):
     endpoint_key = endpoint.replace('/', '_')
     filename = write_raw(endpoint_key, {"status_code": resp.status_code, "params": params, "data": data})
     try:
-        manifest.add_entry(endpoint_key, filename, params, resp.status_code)
+        recorded = manifest.add_entry(endpoint_key, filename, params, resp.status_code)
     except Exception:
-        # manifest failures should not stop the fetch
+        # I/O trouble writing the manifest shouldn't discard a response we already hold.
         print("Warning: failed to update raw manifest")
+        return resp
+
+    if not recorded:
+        # The manifest refused the filename as a duplicate. The raw file is on disk but
+        # its provenance is not recorded — exactly the unlabelled-data case the raw layer
+        # exists to prevent, so fail loudly rather than continue.
+        raise RuntimeError(
+            f"Manifest refused duplicate filename {endpoint_key}/{filename}. "
+            "The raw file's provenance is unrecorded; do not trust this fetch."
+        )
     return resp
 
 

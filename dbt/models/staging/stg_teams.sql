@@ -1,38 +1,48 @@
--- One row per team, taken from the most recent *successful* /teams response.
+-- One row per team **per season**.
 --
--- Two things the raw layer forces us to handle here, not downstream:
---   1. Failed fetches are landed too (a 401 is in the table right now) — filter them
---      out rather than letting nulls leak into the marts.
---   2. Every fetch lands a new file, so the same team appears once per fetch.
---      Take the latest file only; filenames are UTC timestamps, so max() works.
+-- Season scoping is the point. CFBD's /teams accepts a `year`, and the answer differs:
+-- for 2024 it reports Boise State in the Mountain West and North Dakota State as FCS,
+-- while an unparameterized call reports their *current* affiliations. Joining a
+-- season-scoped fact to a current-state dimension produced 2024 rows labelled "Pac-12".
+--
+-- So: only year-parameterized fetches feed this model. The early unparameterized pulls
+-- are deliberately excluded — they describe today, not any particular season.
 
-with successful_fetches as (
+with season_fetches as (
 
     select
         filename,
-        content -> 'data' as payload
+        (params ->> 'year')::int as season,
+        content -> 'data'        as payload
     from {{ source('raw', 'raw_teams') }}
     where status_code = 200
+      and params ? 'year'
 
 ),
 
-latest_fetch as (
+latest_per_season as (
 
-    select payload
-    from successful_fetches
-    where filename = (select max(filename) from successful_fetches)
+    select distinct on (season)
+        season,
+        payload
+    from season_fetches
+    order by season, filename desc
 
 ),
 
 teams as (
 
-    select jsonb_array_elements(payload) as team
-    from latest_fetch
+    select
+        season,
+        jsonb_array_elements(payload) as team
+    from latest_per_season
 
 )
 
 select
+    season,
     (team ->> 'id')::int             as team_id,
+    season::text || '-' || (team ->> 'id') as team_season_key,
     team ->> 'school'                as school,
     team ->> 'mascot'                as mascot,
     team ->> 'abbreviation'          as abbreviation,

@@ -1,6 +1,7 @@
 __pycache__/
 .venv/
 .env
+.env.*
 venv/
 .DS_Store
 .vscode/
@@ -11,3 +12,13 @@ dbt/target/
 dbt/logs/
 dbt/dbt_packages/
 dbt/.user.yml
+logs/
+
+# Office documents — this project's writing lives in the Cowork folder, outside this repo.
+# Anything of this shape appearing here is a stray copy, not a deliverable.
+*.docx
+*.doc
+*.xlsx
+*.xls
+*.pptx
+~$*
