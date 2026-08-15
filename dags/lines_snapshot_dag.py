@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+from src.alerting import failure_callback
 from src.snapshot import snapshot_lines
 
 # Change to "@hourly" if line movement proves interesting enough to sample more finely.
@@ -33,6 +34,8 @@ default_args = {
     # Lines move continuously, so a failed run is worth retrying quickly — but there is no
     # point retrying for hours, since the next scheduled run supersedes it.
     "retry_delay": timedelta(minutes=5),
+    # Data quality rule #5: failures are visible, never swallowed.
+    "on_failure_callback": failure_callback,
 }
 
 

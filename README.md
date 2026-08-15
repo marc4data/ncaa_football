@@ -185,6 +185,38 @@ Two settings that are easy to get wrong and fail confusingly:
 | DAG | Schedule | What |
 |---|---|---|
 | `cfbd_lines_snapshot` | `@daily` | One `/lines` snapshot of the week currently in play |
+| `cfbd_results_refresh` | Sun 12:00 UTC | The week just played + the prior one (late stat corrections), plus ratings and cumulative stats that revise because of it |
+| `cfbd_pregame_refresh` | Tue 12:00 UTC | Lines and pre-game win probability for the upcoming week, plus ratings after polls publish |
+
+Schedules are **calendar days, not CFBD week boundaries** — CFBD's week 1 spans twelve days
+and two Saturdays, so a per-week trigger would sit idle through the opening slate.
+
+Both weekly DAGs drive off the cadence buckets in `src/endpoints.py`, so adding an endpoint
+to a bucket puts it in the right refresh automatically. They deliberately force a re-fetch:
+the params match earlier requests by design, and staging's latest-file-per-params rule
+collapses the overlap.
+
+### Failure alerting
+
+Two channels, wired as `on_failure_callback` on every DAG:
+
+| Channel | Configured via | Behaviour |
+|---|---|---|
+| Local JSONL | none — always on | Appends to `data/alerts/failures.jsonl` |
+| SMTP email | `ALERT_*` in `.env` | Sent only when host/from/to are all set |
+
+```
+ALERT_SMTP_HOST=smtp.gmail.com
+ALERT_SMTP_PORT=587
+ALERT_SMTP_USER=you@gmail.com
+ALERT_SMTP_PASSWORD=<app password, not your account password>
+ALERT_EMAIL_FROM=you@gmail.com
+ALERT_EMAIL_TO=you@gmail.com
+```
+
+The local file is always written because an alerting channel that needs configuration is
+one that's off on the day it's needed. Neither path can raise: an exception in a failure
+handler would mask the failure it exists to report.
 
 Raise the lines cadence to hourly by changing `SCHEDULE` in
 [dags/lines_snapshot_dag.py](dags/lines_snapshot_dag.py). The snapshot targets one week
