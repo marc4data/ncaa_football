@@ -163,9 +163,31 @@ See [dbt/README.md](dbt/README.md). Short version:
 ```bash
 cp dbt/profiles.yml.example dbt/profiles.yml     # gitignored
 cd dbt
-DBT_PROFILES_DIR=. dbt run
-DBT_PROFILES_DIR=. dbt test
+DBT_PROFILES_DIR=. dbt build                     # Postgres (default target)
+DBT_PROFILES_DIR=. dbt build --target databricks # Databricks
 ```
+
+### Databricks (M4)
+
+The same models run on both engines; the dialect difference lives entirely in
+`dbt/macros/`. Connection settings come from `.env`:
+
+```
+DATABRICKS_SERVER_HOSTNAME=<workspace host, no https://>
+DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/<id>
+DATABRICKS_TOKEN=<personal access token>
+```
+
+Land raw responses there with the Databricks loader — JSON is stored as `STRING`, since
+Delta has no `jsonb`, which is exactly why the macros dispatch:
+
+```bash
+python -m src.load_raw_to_databricks teams games --seasons 2024 2025 2026
+python -m src.load_raw_to_databricks --all
+```
+
+The serverless warehouse auto-starts on first query, so an initial `dbt debug` can take
+~30 seconds.
 
 ## Full rebuild from scratch
 
