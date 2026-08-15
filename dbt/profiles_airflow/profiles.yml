@@ -1,0 +1,18 @@
+# dbt profile used *inside* the Airflow containers.
+#
+# Identical to profiles.yml.example except for the host: on the compose network Postgres
+# answers to `postgres`, not `localhost`. Committed deliberately — it carries no secret,
+# because every value falls back to the local Compose defaults and can be overridden by
+# environment variables.
+cfdb_profile:
+  target: airflow
+  outputs:
+    airflow:
+      type: postgres
+      host: "{{ env_var('PG_HOST', 'postgres') }}"
+      port: "{{ env_var('PG_PORT', '5432') | int }}"
+      user: "{{ env_var('PG_USER', 'cfdb') }}"
+      password: "{{ env_var('PG_PASSWORD', 'cfdb') }}"
+      dbname: "{{ env_var('PG_DB', 'cfdb') }}"
+      schema: public
+      threads: 4

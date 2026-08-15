@@ -11,7 +11,10 @@
 #   python -c "import secrets; print(secrets.token_hex(32))"
 
 x-airflow-common: &airflow-common
-  image: apache/airflow:3.3.1
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: cfdb/airflow:3.3.1
   environment: &airflow-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
@@ -31,11 +34,26 @@ x-airflow-common: &airflow-common
     # because every service runs with the project as its working directory.
     PYTHONPATH: /opt/airflow/project
     CFBD_API_KEY: ${CFBD_API_KEY}
-    _PIP_ADDITIONAL_REQUIREMENTS: python-dotenv requests
+    # dbt reads its profile from the repo, pointed at the compose network's Postgres.
+    DBT_PROFILES_DIR: /opt/airflow/project/dbt/profiles_airflow
+    # On the compose network Postgres answers to `postgres`. src/load_raw_to_postgres.py
+    # defaults to localhost, which inside a container is nothing.
+    PG_HOST: postgres
+    PG_PORT: "5432"
+    PG_USER: cfdb
+    PG_PASSWORD: cfdb
+    PG_DB: cfdb
+    ALERT_SMTP_HOST: ${ALERT_SMTP_HOST:-}
+    ALERT_SMTP_PORT: ${ALERT_SMTP_PORT:-587}
+    ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
+    ALERT_SMTP_PASSWORD: ${ALERT_SMTP_PASSWORD:-}
+    ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
+    ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./src:/opt/airflow/project/src
     - ./data:/opt/airflow/project/data
+    - ./dbt:/opt/airflow/project/dbt
     - ./logs:/opt/airflow/logs
   working_dir: /opt/airflow/project
   depends_on:

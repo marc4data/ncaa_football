@@ -1,0 +1,11 @@
+# Airflow image carrying the project's own dependencies, including dbt.
+#
+# Replaces _PIP_ADDITIONAL_REQUIREMENTS, which reinstalled packages on every container
+# start: slow, and a network failure at boot became a broken scheduler. Baking them in
+# also means the image is a reproducible artifact rather than whatever pip resolved today.
+FROM apache/airflow:3.3.1
+
+# Pinned alongside the project's own requirements so the DAGs and a local shell resolve
+# the same versions.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt

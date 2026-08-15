@@ -9,17 +9,21 @@ trigger would sit idle through the opening slate.
   Tuesday — pre-game refresh: lines and pre-game win probability for the upcoming week,
             plus ratings again, since polls publish early in the week.
 
-Each DAG fetches, then loads to Postgres. Transforms are not here: dbt runs separately
-until the Airflow image carries it (see README).
+Each DAG runs fetch -> load -> dbt run -> dbt test. Airflow schedules the transform; it
+does not perform it. A failing dbt test fails the run, which is the intended split: data
+correctness is dbt's, process reliability is Airflow's.
 """
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.standard.operators.python import PythonOperator
 
 from src.alerting import failure_callback
 from src.load_raw_to_postgres import load_endpoint
 from src.weekly import pregame_refresh, results_refresh
+
+DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
 
 default_args = {
     "owner": "cfdb",
@@ -66,7 +70,20 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
             op_kwargs={"refresh_callable": refresh_callable},
         )
         load = PythonOperator(task_id="load_to_postgres", python_callable=_load)
-        fetch >> load
+
+        # Airflow schedules dbt; it does not do the transforming. The models and their
+        # tests are dbt's, and a failing test fails the run — data correctness belongs to
+        # dbt, process reliability to Airflow.
+        dbt_run = BashOperator(
+            task_id="dbt_run",
+            bash_command=f"dbt run --project-dir {DBT_PROJECT_DIR}",
+        )
+        dbt_test = BashOperator(
+            task_id="dbt_test",
+            bash_command=f"dbt test --project-dir {DBT_PROJECT_DIR}",
+        )
+
+        fetch >> load >> dbt_run >> dbt_test
     return dag
 
 
