@@ -33,8 +33,13 @@ load_dotenv()
 CATALOG = os.getenv("DATABRICKS_CATALOG", "workspace")
 SCHEMA = os.getenv("DATABRICKS_SCHEMA", "cfdb")
 
-# A SQL warehouse round trip dominates; batching is what makes this finish.
+# A SQL warehouse round trip dominates; batching is what makes this finish. The batch is
+# bounded by *bytes*, not row count: 25 files of 5 MB each is 125 MB of query text, which
+# blows the same limit the chunking exists to respect. Row-count batching worked fine until
+# it met an endpoint whose files were individually small enough to skip chunking and
+# collectively far too big to send.
 BATCH_ROWS = 25
+BATCH_BYTES = 6_000_000
 
 # Databricks rejects query text over a limit measured empirically at 16 MB OK / 32 MB
 # failing ("Query text size exceeds limit"). JSON escaping inflates content on the way
@@ -98,6 +103,21 @@ def fetched_at_index(endpoint: str) -> Dict[str, str]:
         return {}
 
 
+def _size_bounded_batches(paths: List[Path]) -> List[List[Path]]:
+    """Group files so no single statement approaches the query-text limit."""
+    batches, current, current_bytes = [], [], 0
+    for path in paths:
+        size = path.stat().st_size
+        if current and (current_bytes + size > BATCH_BYTES or len(current) >= BATCH_ROWS):
+            batches.append(current)
+            current, current_bytes = [], 0
+        current.append(path)
+        current_bytes += size
+    if current:
+        batches.append(current)
+    return batches
+
+
 def _load_large_file(cursor, table: str, endpoint: str, path: Path, payload: dict,
                      fetched_at_value: Optional[str]) -> None:
     """Land one file too big for a single statement, via chunk staging + SQL concat."""
@@ -154,11 +174,39 @@ def _load_large_file(cursor, table: str, endpoint: str, path: Path, payload: dic
     """)
 
 
-def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None) -> int:
+def already_loaded(cursor, endpoint: str) -> set:
+    """Filenames already landed for this endpoint.
+
+    Makes the load *resumable*, not merely idempotent. MERGE meant a rerun produced the
+    right answer, but redid every megabyte to get there — so a failure four hours in cost
+    four hours to retry. A 1.7 GB load over a serverless warehouse will be interrupted;
+    the question is only whether that is expensive.
+    """
+    try:
+        cursor.execute(f"""
+            SELECT filename FROM {CATALOG}.{SCHEMA}.raw_manifest
+            WHERE endpoint = {_sql_string(endpoint)}
+        """)
+        return {row.filename for row in cursor.fetchall()}
+    except Exception:
+        return set()
+
+
+def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None,
+                  resume: bool = True) -> int:
     files = raw_files(endpoint, seasons)
     if not files:
         print(f"No files to load for {endpoint}")
         return 0
+
+    if resume:
+        done = already_loaded(cursor, endpoint)
+        skipped = [f for f in files if f.name in done]
+        files = [f for f in files if f.name not in done]
+        if skipped:
+            print(f"  {endpoint}: skipping {len(skipped)} already loaded")
+        if not files:
+            return 0
 
     table = f"{CATALOG}.{SCHEMA}.raw_{endpoint.replace('/', '_')}"
     cursor.execute(f"""
@@ -189,8 +237,7 @@ def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None) ->
         loaded += 1
         print(f"  {endpoint}: {loaded}/{len(files)} (chunked {path.stat().st_size/1e6:.0f} MB)")
 
-    for start in range(0, len(normal), BATCH_ROWS):
-        batch = normal[start:start + BATCH_ROWS]
+    for batch in _size_bounded_batches(normal):
         values = []
         for path in batch:
             try:
@@ -264,24 +311,46 @@ def main() -> int:
         parser.print_help()
         return 1
 
-    with connect() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
-            cursor.execute(f"""
-                CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}.raw_manifest (
-                    endpoint STRING NOT NULL,
-                    filename STRING NOT NULL,
-                    params STRING,
-                    status_code INT,
-                    row_count INT,
-                    fetched_at TIMESTAMP,
-                    loaded_at TIMESTAMP
-                ) USING DELTA
-            """)
-            total = sum(load_endpoint(cursor, e, args.seasons) for e in endpoints)
+    # One connection per endpoint rather than one for the whole run: a single session held
+    # open for hours against a serverless warehouse is what died last time, mid-file.
+    failed = []
+    total = 0
+    for endpoint in endpoints:
+        for attempt in (1, 2, 3):
+            try:
+                with connect() as connection:
+                    with connection.cursor() as cursor:
+                        _ensure_schema(cursor)
+                        total += load_endpoint(cursor, endpoint, args.seasons)
+                break
+            except Exception as exc:
+                print(f"  {endpoint}: attempt {attempt} failed — {type(exc).__name__}: "
+                      f"{str(exc)[:120]}")
+                if attempt == 3:
+                    failed.append(endpoint)
 
     print(f"\nLoaded {total} file(s) into {CATALOG}.{SCHEMA}")
+    if failed:
+        # Loud and non-zero: a partial load must not read as a success.
+        print(f"FAILED endpoints ({len(failed)}): {', '.join(failed)}")
+        return 1
     return 0
+
+
+def _ensure_schema(cursor) -> None:
+    """Schema and the manifest spine, created before any endpoint is loaded."""
+    cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}.raw_manifest (
+            endpoint STRING NOT NULL,
+            filename STRING NOT NULL,
+            params STRING,
+            status_code INT,
+            row_count INT,
+            fetched_at TIMESTAMP,
+            loaded_at TIMESTAMP
+        ) USING DELTA
+    """)
 
 
 if __name__ == "__main__":
