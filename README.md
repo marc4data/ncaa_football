@@ -189,6 +189,24 @@ python -m src.load_raw_to_databricks --all
 The serverless warehouse auto-starts on first query, so an initial `dbt debug` can take
 ~30 seconds.
 
+**Known limitation — the token needs the `files` scope.** The intended bulk path is a Unity
+Catalog volume upload followed by `COPY INTO`. The Files API currently refuses it:
+
+```
+403 {"error_code":403,"message":"Provided access token does not have required scopes: files"}
+```
+
+SQL access to the volume works (`LIST` succeeds); only the REST Files API is refused, so
+this is a token-scope issue rather than a permissions or networking one. Regenerating the
+PAT with the `files` scope would enable the faster path.
+
+Until then the loader goes through SQL, which has a hard ceiling: query text over roughly
+16 MB is accepted and 32 MB is rejected outright ("Query text size exceeds limit"). Files
+above ~6 MB are therefore split into 4 MB chunks, staged, and reassembled server-side with
+`array_sort` over `(seq, chunk)` structs — ordering `collect_list` alone would not
+guarantee. Verified byte-identical by md5 on the largest file in the corpus (34 MB,
+132,277 records).
+
 ## Full rebuild from scratch
 
 ```bash

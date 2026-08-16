@@ -36,6 +36,16 @@ SCHEMA = os.getenv("DATABRICKS_SCHEMA", "cfdb")
 # A SQL warehouse round trip dominates; batching is what makes this finish.
 BATCH_ROWS = 25
 
+# Databricks rejects query text over a limit measured empirically at 16 MB OK / 32 MB
+# failing ("Query text size exceeds limit"). JSON escaping inflates content on the way
+# into a literal, so oversized files are split well under that and reassembled in SQL.
+#
+# Chunking exists because the Files API — the clean path, volume upload + COPY INTO — is
+# refused by the current token: "does not have required scopes: files". A token with the
+# files scope would make this unnecessary; see README.
+MAX_LITERAL_BYTES = 6_000_000
+CHUNK_BYTES = 4_000_000
+
 
 def connect():
     missing = [k for k in ("DATABRICKS_SERVER_HOSTNAME", "DATABRICKS_HTTP_PATH",
@@ -88,6 +98,62 @@ def fetched_at_index(endpoint: str) -> Dict[str, str]:
         return {}
 
 
+def _load_large_file(cursor, table: str, endpoint: str, path: Path, payload: dict,
+                     fetched_at_value: Optional[str]) -> None:
+    """Land one file too big for a single statement, via chunk staging + SQL concat."""
+    content = json.dumps(payload)
+    params = payload.get("params") if isinstance(payload, dict) else None
+    chunks = [content[i:i + CHUNK_BYTES] for i in range(0, len(content), CHUNK_BYTES)]
+
+    staging = f"{CATALOG}.{SCHEMA}._chunk_staging"
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {staging}
+        (filename STRING, seq INT, chunk STRING) USING DELTA
+    """)
+    cursor.execute(f"DELETE FROM {staging} WHERE filename = {_sql_string(path.name)}")
+    for seq, chunk in enumerate(chunks):
+        cursor.execute(
+            f"INSERT INTO {staging} VALUES ({_sql_string(path.name)}, {seq}, "
+            f"{_sql_string(chunk)})")
+
+    # array_sort orders the structs by their first field, so the pieces reassemble in the
+    # order they were split — concat_ws over collect_list alone would not guarantee that.
+    cursor.execute(f"""
+        MERGE INTO {table} AS t
+        USING (
+            SELECT
+                filename,
+                array_join(transform(array_sort(collect_list(struct(seq, chunk))),
+                                     s -> s.chunk), '') AS content,
+                {payload.get('status_code') if isinstance(payload, dict) else 'NULL'} AS status_code,
+                {_sql_string(json.dumps(params) if params is not None else None)} AS params,
+                {payload_row_count(payload)} AS row_count,
+                {_sql_string(fetched_at_value)} AS fetched_at,
+                current_timestamp() AS loaded_at
+            FROM {staging}
+            WHERE filename = {_sql_string(path.name)}
+            GROUP BY filename
+        ) AS s
+        ON t.filename = s.filename
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+    cursor.execute(f"DELETE FROM {staging} WHERE filename = {_sql_string(path.name)}")
+
+    cursor.execute(f"""
+        MERGE INTO {CATALOG}.{SCHEMA}.raw_manifest AS t
+        USING (SELECT {_sql_string(endpoint)} AS endpoint, {_sql_string(path.name)} AS filename,
+                      {_sql_string(json.dumps(params) if params is not None else None)} AS params,
+                      {payload.get('status_code') if isinstance(payload, dict) else 'NULL'} AS status_code,
+                      {payload_row_count(payload)} AS row_count,
+                      {_sql_string(fetched_at_value)} AS fetched_at,
+                      current_timestamp() AS loaded_at) AS s
+        ON t.endpoint = s.endpoint AND t.filename = s.filename
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+
+
 def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None) -> int:
     files = raw_files(endpoint, seasons)
     if not files:
@@ -110,8 +176,21 @@ def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None) ->
     fetched_at = fetched_at_index(endpoint)
     loaded = 0
 
-    for start in range(0, len(files), BATCH_ROWS):
-        batch = files[start:start + BATCH_ROWS]
+    # Oversized files take the chunked path; the rest batch normally.
+    large = [p for p in files if p.stat().st_size > MAX_LITERAL_BYTES]
+    normal = [p for p in files if p.stat().st_size <= MAX_LITERAL_BYTES]
+
+    for path in large:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        _load_large_file(cursor, table, endpoint, path, payload, fetched_at.get(path.name))
+        loaded += 1
+        print(f"  {endpoint}: {loaded}/{len(files)} (chunked {path.stat().st_size/1e6:.0f} MB)")
+
+    for start in range(0, len(normal), BATCH_ROWS):
+        batch = normal[start:start + BATCH_ROWS]
         values = []
         for path in batch:
             try:
