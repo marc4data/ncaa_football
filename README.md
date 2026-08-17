@@ -156,6 +156,36 @@ That distinction is load-bearing. `records` returned 668 rows for 2024 and 2025 
 newest response against its best across *all* params flags every endpoint the moment a new
 season opens — the first version of the mart did exactly that and produced 8 false positives.
 
+## Layers
+
+Schema per layer in both engines (decision log 2026-08-17), rather than a naming convention
+in one namespace:
+
+| Layer | Postgres | Databricks | Written by |
+|---|---|---|---|
+| raw | `raw.*` | `workspace.raw.*` | the loaders |
+| staging | `staging.*` | `workspace.staging.*` | dbt |
+| marts | `marts.*` | `workspace.marts.*` | dbt |
+
+`dbt/macros/generate_schema_name.sql` returns the configured schema verbatim; dbt's default
+would have produced `public_marts` and kept the layers entangled in the name.
+
+**The serving database is the enforced tier.** It holds published marts only — raw and
+staging never ship to the droplet — and `cfdb_read` has USAGE on `marts` and nothing else,
+with `search_path = marts` so the site's SQL needs no prefixes. Verified by attempting the
+denials rather than assuming them:
+
+```
+create table public.x(i int)   -> ERROR: permission denied for schema public
+create schema raw              -> ERROR: permission denied for database cfdb
+insert into marts.mart_...     -> ERROR: permission denied for table
+drop table marts.mart_...      -> ERROR: must be owner of table
+```
+
+`ci/check_layering.py` closes the remaining gap: schemas separate each layer's *output*,
+but nothing stops a mart selecting straight from raw. That reads dbt's compiled dependency
+graph and fails the build if any non-staging model references a source.
+
 ## Transforms
 
 See [dbt/README.md](dbt/README.md). Short version:

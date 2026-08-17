@@ -35,11 +35,13 @@ def payload_row_count(payload) -> int:
     return 0
 
 
-MANIFEST_TABLE = "raw_manifest"
+RAW_SCHEMA = os.getenv("PG_RAW_SCHEMA", "raw")
+MANIFEST_TABLE = f"{RAW_SCHEMA}.raw_manifest"
 
 
 def _ensure_manifest_table(cur):
     """One row per landed response across every endpoint — the spine for freshness."""
+    cur.execute(f"CREATE SCHEMA IF NOT EXISTS {RAW_SCHEMA}")
     cur.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {MANIFEST_TABLE} (
@@ -78,7 +80,7 @@ def load_endpoint(endpoint: str):
         except json.JSONDecodeError:
             print(f"Warning: unreadable manifest for {endpoint}; fetched_at will be null")
 
-    table = f"raw_{endpoint}"
+    table = f"{RAW_SCHEMA}.raw_{endpoint}"
     conn = get_conn()
     with conn:
         with conn.cursor() as cur:

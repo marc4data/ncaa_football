@@ -6,7 +6,7 @@ sources:
       Immutable landing tables written by `src/load_raw_to_postgres.py`. One row per
       raw API response file. Never modified by dbt — everything downstream rebuilds
       from here (data quality rule #1).
-    schema: "{{ target.schema }}"
+    schema: "{{ var('raw_schema', 'raw') }}"
     tables:
       - name: raw_teams
         description: CFBD /teams responses.

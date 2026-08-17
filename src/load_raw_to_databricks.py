@@ -31,7 +31,8 @@ from .load_raw_to_postgres import payload_row_count
 load_dotenv()
 
 CATALOG = os.getenv("DATABRICKS_CATALOG", "workspace")
-SCHEMA = os.getenv("DATABRICKS_SCHEMA", "cfdb")
+# The loader owns the raw layer only; dbt writes staging and marts.
+SCHEMA = os.getenv("DATABRICKS_RAW_SCHEMA", "raw")
 
 # A SQL warehouse round trip dominates; batching is what makes this finish. The batch is
 # bounded by *bytes*, not row count: 25 files of 5 MB each is 125 MB of query text, which

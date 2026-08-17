@@ -36,6 +36,8 @@ STACK_DIR = "/opt/cfdb"
 
 # The site's contract. Staging views and raw tables deliberately do not travel: serving
 # holds what the site reads, so a page cannot accidentally query a 1.7 GB raw table.
+MARTS_SCHEMA = "marts"
+
 DEFAULT_MARTS = [
     "mart_team_schedule",
     "mart_team_season_record",
@@ -53,7 +55,7 @@ def dump_marts(marts: List[str]) -> bytes:
     """pg_dump the named marts from the transform warehouse."""
     table_args = []
     for mart in marts:
-        table_args += ["-t", f"public.{mart}"]
+        table_args += ["-t", f"{MARTS_SCHEMA}.{mart}"]
 
     command = [
         "docker", "compose", "exec", "-T", "postgres",
@@ -67,8 +69,30 @@ def dump_marts(marts: List[str]) -> bytes:
     return result.stdout
 
 
+def remote_sql(statement: str) -> None:
+    r"""Run one SQL statement on the serving database over SSH.
+
+    Kept separate from the streaming restore on purpose: `docker compose exec -T` consumes
+    stdin, so chaining a `-c` call ahead of the dump on the same SSH channel makes the
+    first command eat the dump — which surfaces as `invalid command \N`, a COPY-data
+    error that says nothing about the actual cause.
+    """
+    remote = (
+        f"cd {STACK_DIR} && set -a && . ./.env && set +a && "
+        f'docker compose exec -T postgres psql -v ON_ERROR_STOP=1 '
+        f'-U "$SERVING_PG_USER" -d "$SERVING_PG_DB" -c "{statement}"'
+    )
+    result = subprocess.run(["ssh", "-o", "BatchMode=yes", DROPLET, remote],
+                            capture_output=True, input=b"")
+    if result.returncode != 0:
+        raise RuntimeError(f"remote sql failed: {result.stderr.decode()[:400]}")
+
+
 def restore_to_serving(dump: bytes) -> None:
     """Stream the dump into the serving container over SSH."""
+    # pg_dump -t emits no CREATE SCHEMA, so the target schema has to exist first.
+    remote_sql(f"CREATE SCHEMA IF NOT EXISTS {MARTS_SCHEMA}")
+
     remote = (
         f"cd {STACK_DIR} && set -a && . ./.env && set +a && "
         'docker compose exec -T postgres psql -v ON_ERROR_STOP=1 '
@@ -90,18 +114,16 @@ def grant_read_access(marts: List[str]) -> None:
     permission error — the kind of failure that looks like a database problem and is
     actually a publish-job problem.
     """
-    grants = " ".join(
-        f'GRANT SELECT ON public.{m} TO \\"$CFDB_READ_USER\\";' for m in marts
+    # Schema-level, per the layering decision: the serving database contains only marts,
+    # so the boundary that matters is "this role cannot see upstream layers" — and a new
+    # mart becomes readable on publish rather than needing a grant nobody remembers.
+    grants = (
+        f'GRANT USAGE ON SCHEMA {MARTS_SCHEMA} TO \\"$CFDB_READ_USER\\"; '
+        f'GRANT SELECT ON ALL TABLES IN SCHEMA {MARTS_SCHEMA} TO \\"$CFDB_READ_USER\\"; '
+        f'ALTER DEFAULT PRIVILEGES IN SCHEMA {MARTS_SCHEMA} '
+        f'GRANT SELECT ON TABLES TO \\"$CFDB_READ_USER\\";'
     )
-    remote = (
-        f"cd {STACK_DIR} && set -a && . ./.env && set +a && "
-        f'docker compose exec -T postgres psql -v ON_ERROR_STOP=1 '
-        f'-U "$SERVING_PG_USER" -d "$SERVING_PG_DB" -c "{grants}"'
-    )
-    result = subprocess.run(["ssh", "-o", "BatchMode=yes", DROPLET, remote],
-                            capture_output=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"grant failed: {result.stderr.decode()[:400]}")
+    remote_sql(grants)
 
 
 def verify(marts: List[str]) -> None:
@@ -110,12 +132,12 @@ def verify(marts: List[str]) -> None:
         local = subprocess.run(
             ["docker", "compose", "exec", "-T", "postgres", "psql", "-U",
              os.getenv("PG_USER", "cfdb"), "-d", os.getenv("PG_DB", "cfdb"),
-             "-tAc", f"select count(*) from {mart}"],
+             "-tAc", f"select count(*) from {MARTS_SCHEMA}.{mart}"],
             capture_output=True, env=local_pg_env())
         remote = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", DROPLET,
              f"cd {STACK_DIR} && set -a && . ./.env && set +a && "
-             f'docker compose exec -T postgres psql -tAc "select count(*) from {mart}" '
+             f'docker compose exec -T postgres psql -tAc "select count(*) from {MARTS_SCHEMA}.{mart}" '
              f'-U "$SERVING_PG_USER" -d "$SERVING_PG_DB"'],
             capture_output=True)
         left = local.stdout.decode().strip()
