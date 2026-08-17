@@ -1,31 +1,51 @@
 """Airflow DAG: periodic betting-line snapshots.
 
 CFBD serves the *current* line plus an opening value. The path between them exists only if
-we sample it, and once a game kicks off that path can never be recovered — this is the one
-part of the pipeline where a missed run is permanently lost data, not a delayed backfill.
+we sample it, and once a game kicks off it can never be recovered — this is the one part of
+the pipeline where a missed run is permanently lost data, not a delayed backfill. Closing
+Line Value is built entirely from that history.
 
 Cadence
 -------
-Daily to start. Raising it to hourly is a one-line change to SCHEDULE below: the snapshot
-targets the week currently in play (~0.11 MB per call), so hourly costs ~2.6 MB and 24 API
-calls a day — about 320 MB across a season against a 75,000-call monthly quota.
+The schedule is permanently the finest cadence — `0 */4 * * *` UTC — and each run is gated
+by `src.lines_cadence.should_snapshot`:
+
+    inside the season window   -> every run proceeds       (4-hourly)
+    outside it                 -> only the 00:00 UTC run   (daily)
+
+Deliberately *not* implemented by changing the schedule seasonally. A seasonal schedule edit
+is a runtime-path change twice a year, and one August it will be forgotten. Between seasons
+the only maintenance is three dates in `config/lines_cadence.json`; this file never changes.
+
+Tasks
+-----
+    cadence_gate -> snapshot_lines -> load_to_postgres
+
+The snapshot and the load are separate on purpose. The fetch is the irreversible part: if
+the load fails, history has still been captured to disk and the next run is unaffected — the
+load simply catches up. Coupling them would let a database problem cost us line movement.
 
 Boundaries
 ----------
-This DAG schedules and retries. It performs no transforms and computes no metrics: the
-task calls `src.snapshot.snapshot_lines`, which lands a raw response and nothing more.
-Meaning is dbt's job downstream.
+This DAG schedules, gates and retries. It performs no transforms and computes no metrics:
+tasks call `src.*` functions that land a raw response and load it verbatim. Meaning is
+dbt's job downstream.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from airflow import DAG
-from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import (
+    PythonOperator,
+    ShortCircuitOperator,
+)
 
 from src.alerting import failure_callback
+from src.lines_cadence import load_config, should_snapshot
+from src.load_raw_to_postgres import load_endpoint
 from src.snapshot import snapshot_lines
 
-# Change to "@hourly" if line movement proves interesting enough to sample more finely.
-SCHEDULE = "@daily"
+# Finest cadence, always. The gate below decides which runs actually do work.
+SCHEDULE = "0 */4 * * *"
 
 default_args = {
     "owner": "cfdb",
@@ -39,20 +59,44 @@ default_args = {
 }
 
 
-def take_snapshot(**context):
-    """Land one snapshot of the week currently in play.
+def cadence_gate(**context) -> bool:
+    """Decide whether this run should capture a snapshot.
 
-    Returns the summary so it lands in XCom and the task log — enough to see whether a run
-    captured anything without opening the raw files.
+    Logs the branch and the reason on *every* run, including skips. A short-circuit that
+    skips silently is indistinguishable from a broken DAG when you look at it in March.
     """
+    now = context.get("logical_date") or datetime.now(timezone.utc)
+    config = load_config()
+    decision = should_snapshot(now, config)
+
+    print(
+        f"cadence gate: {decision.branch.upper()} — proceed={decision.proceed} | "
+        f"now={now.isoformat()} | {decision.reason}"
+    )
+    return decision.proceed
+
+
+def take_snapshot(**context):
+    """Land one snapshot of the week currently in play."""
     summary = snapshot_lines()
     print(f"lines snapshot: {summary}")
     return summary
 
 
+def load_snapshots(**context):
+    """Load every landed lines file into the warehouse.
+
+    Loads the whole endpoint rather than only this run's file: the loader upserts on
+    filename, so re-loading costs nothing, and any earlier snapshot that never reached the
+    warehouse is swept up here instead of waiting for the weekly DAG.
+    """
+    load_endpoint("lines")
+    return {"loaded": "lines"}
+
+
 with DAG(
     dag_id="cfbd_lines_snapshot",
-    description="Periodic betting-line snapshots for the week in play",
+    description="Betting-line snapshots: 4-hourly in season, daily outside it",
     default_args=default_args,
     start_date=datetime(2026, 8, 15),
     schedule=SCHEDULE,
@@ -62,7 +106,22 @@ with DAG(
     max_active_runs=1,
     tags=["cfdb", "lines", "snapshot"],
 ) as dag:
-    PythonOperator(
+    gate = ShortCircuitOperator(
+        task_id="cadence_gate",
+        python_callable=cadence_gate,
+        # A skipped gate is a normal outcome, not a failure; downstream is simply skipped.
+        ignore_downstream_trigger_rules=True,
+    )
+    snapshot = PythonOperator(
         task_id="snapshot_lines",
         python_callable=take_snapshot,
     )
+    load = PythonOperator(
+        task_id="load_to_postgres",
+        python_callable=load_snapshots,
+        # One retry only: the next scheduled run loads this file anyway, so a stuck load
+        # must not hold the slot against the next fetch.
+        retries=1,
+    )
+
+    gate >> snapshot >> load

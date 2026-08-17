@@ -54,6 +54,8 @@ x-airflow-common: &airflow-common
     - ./src:/opt/airflow/project/src
     - ./data:/opt/airflow/project/data
     - ./dbt:/opt/airflow/project/dbt
+    # Cadence window for the lines DAG; read at task runtime, not at parse time.
+    - ./config:/opt/airflow/project/config
     - ./logs:/opt/airflow/logs
   working_dir: /opt/airflow/project
   depends_on:
