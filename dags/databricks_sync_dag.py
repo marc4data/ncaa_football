@@ -25,6 +25,7 @@ This DAG schedules and reports. The loading, the batching, the retry-per-endpoin
 decision about what is outstanding all live in `src/load_raw_to_databricks.py`, where they
 are testable without an Airflow instance.
 """
+import subprocess
 from datetime import datetime, timedelta
 
 from airflow import DAG
@@ -32,6 +33,9 @@ from airflow.providers.standard.operators.python import PythonOperator
 
 from src.alerting import failure_callback
 from src.load_raw_to_databricks import all_endpoints, sync
+from src.warehouse_usage import measured
+
+DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
 
 # 14:00 UTC: two hours after the Sunday results refresh and the Tuesday pre-game refresh,
 # so the day's new files are already on disk when this runs rather than being picked up a
@@ -52,7 +56,8 @@ default_args = {
 
 def sync_to_databricks(**context):
     """Load whatever Databricks is missing, and refuse to call a partial load a success."""
-    summary = sync(all_endpoints())
+    with measured("raw_sync"):
+        summary = sync(all_endpoints())
     print(f"databricks sync: {summary}")
 
     if summary["failed"]:
@@ -64,6 +69,35 @@ def sync_to_databricks(**context):
             f"{', '.join(summary['failed'])}"
         )
     return summary
+
+
+def run_dbt(command: str, **context):
+    """Run one dbt command against the analytics warehouse, metering the time it costs.
+
+    `--target databricks` is explicit because the profile's default target is Postgres.
+    That default is the safety property: this DAG is the only place in the stack that can
+    spend warehouse time, and it has to ask for it by name.
+
+    `measured` wraps the whole invocation rather than each model — the quota is consumed by
+    warehouse *uptime*, and on a 160-node build the cold start dominates.
+    """
+    result = subprocess.run(
+        ["dbt", command, "--project-dir", DBT_PROJECT_DIR, "--target", "databricks"],
+        cwd="/opt/airflow/project", capture_output=True, text=True,
+    )
+    # dbt's own output is the diagnosis when this fails; printing it puts the failing model
+    # in the task log instead of only a return code.
+    print(result.stdout[-4000:])
+    if result.returncode != 0:
+        print(result.stderr[-2000:])
+        raise RuntimeError(f"dbt {command} against Databricks failed "
+                           f"(exit {result.returncode})")
+    return {"command": command}
+
+
+def metered_dbt(command: str, **context):
+    with measured(f"dbt_{command}"):
+        return run_dbt(command, **context)
 
 
 with DAG(
@@ -78,7 +112,26 @@ with DAG(
     max_active_runs=1,
     tags=["cfdb", "databricks", "raw"],
 ) as dag:
-    PythonOperator(
+    sync_raw = PythonOperator(
         task_id="sync_raw_to_databricks",
         python_callable=sync_to_databricks,
     )
+
+    # dbt against the analytics warehouse, once the raw layer underneath it is level.
+    # `--target databricks` is explicit: the profile's default target is Postgres, so this
+    # is the only place in the stack that can spend warehouse time by accident.
+    #
+    # `measured` wraps the *whole* dbt invocation rather than each model, because the
+    # quota is consumed by warehouse uptime and the cold start dominates a 160-node build.
+    dbt_run = PythonOperator(
+        task_id="dbt_run_databricks",
+        python_callable=metered_dbt,
+        op_kwargs={"command": "run"},
+    )
+    dbt_test = PythonOperator(
+        task_id="dbt_test_databricks",
+        python_callable=metered_dbt,
+        op_kwargs={"command": "test"},
+    )
+
+    sync_raw >> dbt_run >> dbt_test
