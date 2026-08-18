@@ -14,7 +14,7 @@ CONFIG = CadenceConfig(
     season=2026,
     first_game_date=date(2026, 8, 27),
     lead_days=7,
-    season_end_date=date(2027, 1, 31),
+    season_end_date=date(2027, 1, 27),
 )
 
 
@@ -24,7 +24,7 @@ def at(y, m, d, hour=0) -> datetime:
 
 def test_window_start_is_lead_days_before_the_first_game():
     assert CONFIG.window_start == date(2026, 8, 20)
-    assert CONFIG.window_end == date(2027, 1, 31)
+    assert CONFIG.window_end == date(2027, 1, 27)
 
 
 # --- inside the window: every run proceeds ------------------------------------------
@@ -78,20 +78,21 @@ def test_day_before_the_window_is_still_daily():
 
 
 def test_last_day_of_the_window_is_inside():
-    assert should_snapshot(at(2027, 1, 31, 20), CONFIG).branch == "in_season"
+    """2027-01-27: championship (Mon 2027-01-25) plus two days for the UTC rollover."""
+    assert should_snapshot(at(2027, 1, 27, 20), CONFIG).branch == "in_season"
 
 
 def test_day_after_the_window_reverts_to_daily():
-    assert should_snapshot(at(2027, 2, 1, 20), CONFIG).branch == "off_season_skip"
-    assert should_snapshot(at(2027, 2, 1, 0), CONFIG).branch == "off_season_daily"
+    assert should_snapshot(at(2027, 1, 28, 20), CONFIG).branch == "off_season_skip"
+    assert should_snapshot(at(2027, 1, 28, 0), CONFIG).branch == "off_season_daily"
 
 
 # --- the dates this decision was actually made for ----------------------------------
 
-def test_today_2026_08_17_is_pre_switch():
-    """Today is three days before the switch: daily cadence still applies."""
-    assert should_snapshot(at(2026, 8, 17, 4), CONFIG).branch == "off_season_skip"
-    assert should_snapshot(at(2026, 8, 17, 0), CONFIG).branch == "off_season_daily"
+def test_2026_08_19_the_day_before_the_switch():
+    """The last day of daily cadence before the window opens."""
+    assert should_snapshot(at(2026, 8, 19, 4), CONFIG).branch == "off_season_skip"
+    assert should_snapshot(at(2026, 8, 19, 0), CONFIG).branch == "off_season_daily"
 
 
 # --- shape and robustness ------------------------------------------------------------
@@ -124,7 +125,7 @@ def test_config_loads_from_the_repo_file():
     assert config.first_game_date == date(2026, 8, 27)
     assert config.lead_days == 7
     assert config.window_start == date(2026, 8, 20), "switch date must be 2026-08-20"
-    assert config.season_end_date > config.first_game_date
+    assert config.season_end_date == date(2027, 1, 27), 'per decision log 2026-08-18'
 
 
 def test_missing_config_raises_rather_than_defaulting():
