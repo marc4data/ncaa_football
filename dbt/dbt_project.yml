@@ -17,3 +17,9 @@ models:
       +schema: staging
     marts:
       +schema: marts
+    # Serving layer: denormalized, pre-joined, what the site reads. Tables rather than
+    # views because the publish job ships rows via pg_dump — a view would ship its
+    # definition and reference marts tables that do not exist on the droplet.
+    serving:
+      +schema: serving
+      +materialized: table

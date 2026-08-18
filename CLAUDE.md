@@ -41,3 +41,38 @@ Secrets
 
 Decision log
 - Source of truth for architecture/decisions is the Cowork folder's `CLAUDE.md` (outside this repo). Record implementation deviations here.
+
+## cfdb — standing context
+
+Division of labour ("church vs state"):
+- Strategy, decisions and design docs live in ../claude_work. That folder is the source of
+  truth for WHAT to build and WHY. Do not put production code there.
+- All code lives in this repo. You implement within decisions already made; you do not
+  re-litigate them. If a decision looks wrong, SAY SO and stop — do not quietly do something
+  else.
+
+Authoritative documents (read before acting, in ../claude_work):
+- CLAUDE.md ................................ project rules
+- decision_log.md .......................... settled decisions, newest last
+- roadmap.md ............................... phasing
+- cfdb_page_to_mart_matrix.xlsx ............ the dimensional model (7 sheets)
+- cfdb_wireframe_v02.html .................. the 17 site screens this model serves
+- cfdb_site_ia_and_layouts.md .............. IA rationale + CFBD endpoint coverage
+
+Settled decisions you must work within:
+- Naming: fct_* / dim_* in the warehouse. Serving layer is pre-joined wide srv_* tables.
+- Streamlit is display-only: single-table SELECT + WHERE. No joins, no metric math in the app.
+- dbt owns all transforms, metric definitions and tests. Airflow owns reliability only —
+  no business logic in DAGs.
+- Scope: FBS spine. Non-FBS teams that play an FBS opponent exist as dim_team stubs
+  (name, conference, logo, is_fbs = false) with no deep stats.
+- Play-by-play scope: 2024, 2025, 2026 only.
+- CFBD API keys are server-side only, never client-side, never committed.
+
+IMPORTANT — how much to trust the matrix:
+cfdb_page_to_mart_matrix.xlsx is a PROPOSAL. It was written from three object names
+(mart_data_freshness, mart_team_schedule, mart_team_season_record) with no schema inspected,
+and from CFBD's public docs with no live API calls. Rows marked ASSUMED or PARTIAL are
+inferences. Verify before you build on them, and report anything that contradicts the doc
+rather than silently conforming to it.
+```

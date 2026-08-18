@@ -42,7 +42,12 @@ PBP_SEASONS = {"2024", "2025", "2026"}
 PBP_ENDPOINTS = {"plays", "plays/stats", "drives"}
 
 DEFAULT_SEASONS = ["2024", "2025"]
-SEASON_TYPES = ["regular", "postseason"]
+# The 2020 FCS season was played in SPRING 2021 and CFBD labels it with its own season
+# types. Requesting only regular/postseason silently omitted 532 real games — found by the
+# /records reconciliation test, which showed 21 FCS team-seasons short, including Sam
+# Houston's 10-0 title run. Spring types exist only for 2020, so for every other season
+# these two requests return empty and cost one call each.
+SEASON_TYPES = ["regular", "postseason", "spring_regular", "spring_postseason"]
 
 # Be polite to the API between calls; the backfill is not in a hurry.
 SLEEP_SECONDS = 0.3

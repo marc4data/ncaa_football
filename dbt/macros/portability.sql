@@ -85,3 +85,31 @@
 {% macro databricks__type_timestamp_tz() -%}
     timestamp
 {%- endmacro %}
+
+
+{# --- nth part of a delimited string (1-indexed) --------------------------------------
+  Needed because /games/teams ships compound stats as strings: thirdDownEff "4-9",
+  totalPenaltiesYards "6-45", possessionTime "31:24".
+#}
+{% macro split_at(col, delim, index) -%}
+    {{ return(adapter.dispatch('split_at', 'cfdb_dbt')(col, delim, index)) }}
+{%- endmacro %}
+
+{% macro default__split_at(col, delim, index) -%}
+    split_part({{ col }}, '{{ delim }}', {{ index }})
+{%- endmacro %}
+
+{% macro databricks__split_at(col, delim, index) -%}
+    element_at(split({{ col }}, '\\{{ delim }}'), {{ index }})
+{%- endmacro %}
+
+
+{# --- integer cast that tolerates the box score's untidiness ---------------------------
+  /games/teams ships stats as free text: possessionTime arrives as " 00:00 " with padding,
+  and a split can yield an empty part. Trim-and-nullif turns those into NULL instead of a
+  failed cast. A genuinely non-numeric value still errors, which is correct — silent
+  coercion of an unexpected format is how a stat column fills with zeros nobody questions.
+#}
+{% macro safe_int(expr) -%}
+    cast(nullif(trim(cast({{ expr }} as {{ dbt.type_string() }})), '') as int)
+{%- endmacro %}

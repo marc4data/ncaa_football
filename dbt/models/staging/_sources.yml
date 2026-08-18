@@ -23,6 +23,44 @@ sources:
             data_tests:
               - unique
               - not_null
+      - name: raw_venues
+        description: CFBD /venues responses. Not season-scoped — one call returns every venue.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_conferences
+        description: CFBD /conferences responses, one per season.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_calendar
+        description: >
+          CFBD /calendar responses, one per season. Serves nothing before 2002, which bounds
+          every week-grain join — asserted in dim_week.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_lines
+        description: >
+          CFBD /lines snapshots. One row per fetch, not per game: the same request is
+          re-issued every 4 hours in season and each response is a point in time. This is the
+          only endpoint whose history cannot be backfilled.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_games_teams
+        description: CFBD /games/teams team box scores. Stats arrive EAV-shaped as strings.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_records
+        description: >
+          CFBD /records. Landed but deliberately NOT a source for fct_team_record — records
+          are derived from the game spine, and this endpoint is used only to reconcile
+          against that derivation.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_manifest
         description: >
           One row per landed response across every endpoint, written by

@@ -1,0 +1,463 @@
+version: 2
+
+models:
+  - name: dim_season
+    description: One row per season. Thin by design — it exists so season is a joinable key with attributes rather than a bare integer.
+    columns:
+      - name: season
+        description: Season year, the natural key.
+        data_tests: [unique, not_null]
+      - name: season_label
+        description: Season as text, for display.
+      - name: first_game_date
+        description: Date of the earliest game, era-aware.
+      - name: last_game_date
+        description: Date of the latest game.
+      - name: game_count
+        description: Games recorded in the season.
+        data_tests: [not_null]
+      - name: has_postseason
+        description: Whether any postseason game exists for the season.
+      - name: is_current_season
+        description: True for the newest season present.
+
+  - name: dim_week
+    description: >
+      One row per (season, season_type, week). KNOWN CONSTRAINT: CFBD serves no /calendar
+      before 2002, so this covers 25 of the 157 seasons in fct_game — any week-grain join
+      loses everything earlier.
+    columns:
+      - name: week_sk
+        description: Surrogate key over (season, season_type, week).
+        data_tests: [unique, not_null]
+      - name: season
+        description: Season.
+        data_tests: [not_null]
+      - name: season_type
+        description: regular, postseason, or the 2020-only spring variants.
+        data_tests: [not_null]
+      - name: week
+        description: Week number within the season type.
+        data_tests: [not_null]
+      - name: start_at
+        description: Week window start, UTC.
+      - name: end_at
+        description: Week window end, UTC.
+      - name: first_game_at
+        description: First kickoff in the week.
+      - name: last_game_at
+        description: Last kickoff in the week.
+      - name: start_date
+        description: Week start as a UTC date.
+      - name: end_date
+        description: Week end as a UTC date.
+
+  - name: dim_conference
+    description: One row per (season, conference). Season-scoped because membership and existence change year to year.
+    columns:
+      - name: conference_sk
+        description: Surrogate key over (season, conference_id).
+        data_tests: [unique, not_null]
+      - name: season
+        description: Season.
+        data_tests: [not_null]
+      - name: conference_id
+        description: CFBD conference id.
+        data_tests: [not_null]
+      - name: conference_name
+        description: Short form ("ACC") — the value stg_teams.conference joins on.
+        data_tests: [not_null]
+      - name: conference_long_name
+        description: Full title.
+      - name: conference_abbreviation
+        description: CFBD abbreviation.
+      - name: classification
+        description: fbs / fcs / ii / iii.
+      - name: member_count_reported
+        description: Membership as CFBD reports it.
+      - name: member_team_count
+        description: Membership counted from dim_team. A divergence from the reported count is a realignment one source has and the other has not.
+
+  - name: dim_venue
+    description: >
+      One row per venue, not season-scoped. NOTE: /games carries the venue NAME and no venue
+      id, so this cannot be joined to fct_game reliably; fct_game keeps the venue name
+      denormalized instead.
+    columns:
+      - name: venue_sk
+        description: Surrogate key over venue_id.
+        data_tests: [unique, not_null]
+      - name: venue_id
+        description: CFBD venue id.
+        data_tests: [not_null]
+      - name: venue_name
+        description: Stadium name.
+      - name: city
+        description: City.
+      - name: state
+        description: State or province.
+      - name: zip
+        description: Postal code.
+      - name: country_code
+        description: ISO country code.
+      - name: timezone
+        description: IANA timezone; frequently null.
+      - name: latitude
+        description: Decimal degrees.
+      - name: longitude
+        description: Decimal degrees.
+      - name: elevation_m
+        description: Elevation in metres.
+      - name: capacity
+        description: Seating capacity.
+      - name: construction_year
+        description: Year built.
+      - name: is_grass
+        description: Natural grass surface.
+      - name: is_dome
+        description: Enclosed venue.
+
+  - name: dim_provider
+    description: One row per sportsbook. Exists so that two spellings of the same book cannot become two dimension members.
+    columns:
+      - name: provider_sk
+        description: Surrogate key over provider_key.
+        data_tests: [unique, not_null]
+      - name: provider_key
+        description: Canonical key — draftkings, espn_bet, bovada.
+        data_tests: [unique, not_null]
+      - name: provider_name
+        description: Display name. DraftKings is canonical; "Draft Kings" maps to it.
+        data_tests: [not_null]
+      - name: first_seen_at
+        description: Earliest snapshot carrying this provider.
+      - name: last_seen_at
+        description: Latest snapshot carrying this provider.
+      - name: line_rows
+        description: Line rows observed across all snapshots.
+
+  - name: dim_team
+    description: >
+      One row per (season, team). SEASON-SCOPED, NOT SCD2 — per-season scoping answers "what
+      was true in season X", which is what every page asks, and realignment happens between
+      seasons. Carries contrast-safe colour variants computed in dbt, never in the app.
+    columns:
+      - name: team_sk
+        description: Surrogate key over (season, team_id).
+        data_tests: [unique, not_null]
+      - name: season
+        description: Season the attributes apply to.
+        data_tests: [not_null]
+      - name: team_id
+        description: CFBD team id. Not unique alone — a team appears once per season.
+        data_tests: [not_null]
+      - name: school
+        description: School name.
+        data_tests: [not_null]
+      - name: mascot
+        description: Mascot.
+      - name: abbreviation
+        description: Short display code.
+      - name: conference
+        description: Conference short name for this season.
+      - name: conference_sk
+        description: FK to dim_conference; null for teams with no conference that season.
+      - name: division
+        description: Division within the conference, where one exists.
+      - name: classification
+        description: fbs / fcs / ii / iii.
+      - name: is_fbs
+        description: Convenience flag for the FBS spine.
+      - name: city
+        description: Team city.
+      - name: state
+        description: Team state.
+      - name: color_raw
+        description: Primary colour exactly as landed. CFBD returns the literal string '#null' when absent; that is normalised to NULL in staging.
+      - name: alt_color_raw
+        description: Alternate colour exactly as landed.
+      - name: color_on_light
+        description: Hex guaranteed to clear 3:1 against the light surface (#fcfcfb).
+      - name: color_on_dark
+        description: Hex guaranteed to clear 3:1 against the dark surface (#1a1a19).
+      - name: color_source_light
+        description: Which rung produced color_on_light — primary, alternate, adjusted or fallback.
+        data_tests:
+          - accepted_values: {values: ['primary', 'alternate', 'adjusted', 'fallback']}
+      - name: color_source_dark
+        description: Which rung produced color_on_dark.
+        data_tests:
+          - accepted_values: {values: ['primary', 'alternate', 'adjusted', 'fallback']}
+      - name: color_source
+        description: The worse of the two rungs — how far from brand this team renders at its worst. Belongs in the data-quality view.
+      - name: logos
+        description: Full landed logo array (16 URLs — light and dark at 8 sizes).
+      - name: logo_source_url
+        description: First logo URL, for provenance. Third-party CDN — never hotlinked by the site.
+      - name: logo_path
+        description: Path to our own cached copy. Null until the fetch-and-cache task exists; the column is here so the app never changes shape later.
+
+  - name: fct_game
+    description: >
+      One row per game. Owns the date-era logic: CFBD records kickoff times only from 2001,
+      and converting the earlier midnight-UTC date-only values to a local zone shifts 66,496
+      games back a day. Everything downstream reads game_date from here.
+    columns:
+      - name: game_sk
+        description: Surrogate key over game_id.
+        data_tests: [unique, not_null]
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [unique, not_null]
+      - name: season
+        description: Season.
+        data_tests: [not_null]
+      - name: week
+        description: Week number.
+      - name: season_type
+        description: regular or postseason.
+      - name: week_sk
+        description: FK to dim_week. Null before 2002, where CFBD publishes no calendar.
+      - name: home_team_sk
+        description: FK to dim_team for the home side.
+      - name: away_team_sk
+        description: FK to dim_team for the away side.
+      - name: home_team_id
+        description: CFBD id, home side.
+        data_tests: [not_null]
+      - name: away_team_id
+        description: CFBD id, away side.
+        data_tests: [not_null]
+      - name: home_team
+        description: Home school name as carried on the game.
+      - name: away_team
+        description: Away school name as carried on the game.
+      - name: home_classification
+        description: Home side classification at game time.
+      - name: away_classification
+        description: Away side classification at game time.
+      - name: start_date
+        description: Kickoff timestamp, UTC.
+      - name: game_date
+        description: Local calendar date, era-aware — UTC date for date-only seasons, Eastern for timed ones.
+      - name: kickoff_time_known
+        description: False for seasons where CFBD records no kickoff time (pre-2001).
+      - name: is_completed
+        description: Whether the game has been played.
+      - name: is_conference_game
+        description: Conference matchup.
+      - name: is_neutral_site
+        description: Neutral-site game.
+      - name: home_points
+        description: Home score; null until played.
+      - name: away_points
+        description: Away score; null until played.
+      - name: venue
+        description: Venue name as carried on the game. Not a key — /games has no venue id.
+      - name: attendance
+        description: Reported attendance.
+
+  - name: fct_game_team
+    description: >
+      One row per (game, team) — exactly two per game. Box-score columns come from
+      /games/teams and are null where no box score exists; the game spine is left-joined so a
+      game without one still produces its two rows rather than disappearing.
+    columns:
+      - name: game_team_sk
+        description: Surrogate key over (game_id, team_id).
+        data_tests: [unique, not_null]
+      - name: game_sk
+        description: FK to fct_game.
+        data_tests: [not_null]
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null]
+      - name: team_sk
+        description: FK to dim_team.
+      - name: team_id
+        description: CFBD team id for this side.
+        data_tests: [not_null]
+      - name: team
+        description: School name for this side.
+      - name: classification
+        description: Classification at game time.
+      - name: opponent_team_sk
+        description: FK to dim_team for the opponent.
+      - name: opponent_team_id
+        description: Opponent CFBD id.
+        data_tests: [not_null]
+      - name: opponent
+        description: Opponent school name.
+      - name: opponent_classification
+        description: Opponent classification at game time.
+      - name: season
+        description: Season.
+        data_tests: [not_null]
+      - name: week
+        description: Week number.
+      - name: season_type
+        description: regular or postseason.
+      - name: week_sk
+        description: FK to dim_week; null before 2002.
+      - name: game_date
+        description: Era-aware local date, inherited from fct_game.
+      - name: kickoff_time_known
+        description: Inherited from fct_game.
+      - name: is_home
+        description: Whether this side was the home team.
+      - name: is_neutral_site
+        description: Neutral-site game.
+      - name: is_conference_game
+        description: Conference matchup.
+      - name: is_completed
+        description: Whether the game has been played.
+      - name: venue
+        description: Venue name.
+      - name: attendance
+        description: Reported attendance.
+      - name: points_for
+        description: Points scored by this side.
+      - name: points_against
+        description: Points conceded by this side.
+      - name: margin
+        description: points_for minus points_against; null until played.
+      - name: result
+        description: W, L or T; null until played.
+        data_tests:
+          - accepted_values:
+              values: ['W', 'L', 'T']
+              config: {where: "result is not null"}
+      - name: first_downs
+        description: Box score — first downs.
+      - name: total_yards
+        description: Box score — total yards. Can be negative in extreme games.
+      - name: rushing_yards
+        description: Box score — rushing yards.
+      - name: passing_yards
+        description: Box score — net passing yards.
+      - name: rushing_attempts
+        description: Box score — rushing attempts.
+      - name: turnovers
+        description: Box score — turnovers.
+      - name: interceptions
+        description: Box score — interceptions thrown.
+      - name: fumbles_lost
+        description: Box score — fumbles lost.
+      - name: third_down_conversions
+        description: Third downs converted, split from the compound "N-M" value.
+      - name: third_down_attempts
+        description: Third downs attempted, split from the compound value.
+      - name: fourth_down_conversions
+        description: Fourth downs converted.
+      - name: fourth_down_attempts
+        description: Fourth downs attempted.
+      - name: penalties
+        description: Penalty count, split from the compound "N-M" value.
+      - name: penalty_yards
+        description: Penalty yards.
+      - name: possession_seconds
+        description: Time of possession in seconds, parsed from "MM:SS".
+      - name: has_box_score
+        description: Whether a /games/teams record existed for this team-game.
+
+  - name: fct_team_record
+    description: >
+      One row per (season, team), derived from the game spine rather than /records. /records
+      is used as a reconciliation test instead — two independent derivations that must agree
+      is a stronger artifact than trusting one.
+    columns:
+      - name: team_season_sk
+        description: Surrogate key over (season, team_id).
+        data_tests: [unique, not_null]
+      - name: season
+        description: Season.
+        data_tests: [not_null]
+      - name: team_sk
+        description: FK to dim_team.
+      - name: team_id
+        description: CFBD team id.
+        data_tests: [not_null]
+      - name: school
+        description: School name from dim_team; null for teams absent from the season's team list.
+      - name: conference
+        description: Conference for the season.
+      - name: conference_sk
+        description: FK to dim_conference.
+      - name: classification
+        description: Classification for the season.
+      - name: is_listed_team
+        description: Whether this team appears in CFBD's team list for the season. False for lower-division opponents that appear only on schedules.
+        data_tests: [not_null]
+      - name: games_played
+        description: Completed games with scores.
+        data_tests: [not_null]
+      - name: wins
+        description: Wins.
+        data_tests: [not_null]
+      - name: losses
+        description: Losses.
+      - name: ties
+        description: Ties.
+      - name: conference_wins
+        description: Wins in conference games.
+      - name: conference_losses
+        description: Losses in conference games.
+      - name: points_for
+        description: Points scored across completed games.
+      - name: points_against
+        description: Points conceded across completed games.
+      - name: point_differential
+        description: points_for minus points_against.
+      - name: win_pct
+        description: Wins divided by games played, 3dp.
+      - name: tiebreak_rank
+        description: >
+          cfdb's own ordering within (season, conference). CFBD has no standings endpoint, so
+          this is our logic and the page must label it as such.
+      - name: tiebreak_basis
+        description: Names the rule applied, so the UI can attribute the ordering rather than implying an official standing.
+
+  - name: fct_betting_line
+    description: >
+      One row per (game, provider, snapshot). APPEND-ONLY — a full refresh would recompute
+      from today's /lines and collapse every historical snapshot to the current value,
+      destroying the only dataset in the project that cannot be rebuilt.
+    columns:
+      - name: betting_line_sk
+        description: Surrogate key over (game_id, provider_key, snapshot_ts).
+        data_tests: [unique, not_null]
+      - name: game_sk
+        description: FK to fct_game.
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null]
+      - name: provider_sk
+        description: FK to dim_provider.
+      - name: provider_key
+        description: Canonical sportsbook key.
+        data_tests: [not_null]
+      - name: provider_raw
+        description: Sportsbook name exactly as landed, preserved so the original spelling is never lost.
+      - name: snapshot_ts
+        description: When the line was observed. The axis the whole table exists for.
+        data_tests: [not_null]
+      - name: season
+        description: Season.
+      - name: week
+        description: Week.
+      - name: season_type
+        description: regular or postseason.
+      - name: spread
+        description: Numeric spread. Disagrees with formatted_spread historically; deliberately not reconciled.
+      - name: formatted_spread
+        description: Display spread as CFBD formats it. Kept alongside spread; the consumer chooses.
+      - name: spread_open
+        description: Opening spread.
+      - name: over_under
+        description: Current total.
+      - name: over_under_open
+        description: Opening total.
+      - name: home_moneyline
+        description: Home moneyline.
+      - name: away_moneyline
+        description: Away moneyline.

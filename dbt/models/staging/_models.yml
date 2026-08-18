@@ -40,9 +40,14 @@ models:
         data_tests:
           - not_null
       - name: season_type
+        description: >
+          regular, postseason, or the 2020-only spring_regular / spring_postseason — the FCS
+          season moved to spring 2021. The spring values entered this model on 2026-08-18
+          when the ingestion gap was closed; accepting them is correct, filtering them would
+          re-create the 532-game hole the /records reconciliation test found.
         data_tests:
           - accepted_values:
-              values: ['regular', 'postseason']
+              values: ['regular', 'postseason', 'spring_regular', 'spring_postseason']
 
   - name: stg_raw_manifest
     description: >

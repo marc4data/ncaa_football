@@ -48,5 +48,10 @@ select
     {{ json_get_string('team', 'division') }}          as division,
     {{ json_get_string('team', 'classification') }}    as classification,
     {{ json_get_nested_string('team', ['location', 'city']) }}  as city,
-    {{ json_get_nested_string('team', ['location', 'state']) }} as state
+    {{ json_get_nested_string('team', ['location', 'state']) }} as state,
+    -- Identity chrome. CFBD returns the literal string '#null' for a missing colour, so
+    -- these are normalised here and never parsed raw downstream.
+    {{ clean_hex(json_get_string('team', 'color')) }}          as color_raw,
+    {{ clean_hex(json_get_string('team', 'alternateColor')) }} as alt_color_raw,
+    {{ json_get_object('team', 'logos') }}                     as logos
 from teams

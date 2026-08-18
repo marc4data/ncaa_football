@@ -22,7 +22,8 @@ def planner(tmp_path, monkeypatch):
     monkeypatch.setattr(backfill, "manifest",
                         backfill.RawManifest(base_dir=backfill.Path("data") / "raw"))
     monkeypatch.setattr(backfill, "season_weeks",
-                        lambda season: {"regular": ["1", "2"], "postseason": ["1"]})
+                        lambda season: {"regular": ["1", "2"], "postseason": ["1"],
+                                        "spring_regular": [], "spring_postseason": []})
     return backfill
 
 
@@ -37,16 +38,22 @@ def test_season_strategy_expands_per_season(planner):
     assert plan == [("teams", {"year": "2024"}), ("teams", {"year": "2025"})]
 
 
-def test_season_type_strategy_covers_regular_and_postseason(planner):
-    """Deduping or fetching only `regular` silently drops the bowl games."""
+def test_season_type_strategy_covers_every_season_type(planner):
+    """Fetching only `regular` drops the bowl games; omitting the spring types dropped the
+    entire 2020 FCS season, which was played in spring 2021 — 532 games found missing by the
+    /records reconciliation test on 2026-08-18."""
     plan = planner.build_plan(["2024"], only=["games"], bucket=None, per_game=False)
     assert [p for _, p in plan] == [
         {"year": "2024", "seasonType": "regular"},
         {"year": "2024", "seasonType": "postseason"},
+        {"year": "2024", "seasonType": "spring_regular"},
+        {"year": "2024", "seasonType": "spring_postseason"},
     ]
 
 
 def test_season_week_strategy_expands_over_weeks_and_season_types(planner):
+    """Season types with no weeks contribute nothing — a season with no spring schedule
+    costs no requests."""
     plan = planner.build_plan(["2024"], only=["plays"], bucket=None, per_game=False)
     assert [p for _, p in plan] == [
         {"year": "2024", "week": "1", "seasonType": "regular"},
@@ -117,8 +124,9 @@ def test_snapshot_endpoints_refetch_only_under_snapshot_flag(planner, monkeypatc
     planner.manifest.add_entry("lines", "a.json", {"year": "2025", "seasonType": "regular"}, 200)
 
     planner.run(["2025"], ["lines"], None, False, force=False, dry_run=False, snapshot=False)
-    assert calls == [("lines", {"year": "2025", "seasonType": "postseason"})], \
+    assert ("lines", {"year": "2025", "seasonType": "regular"}) not in calls, \
         "the already-fetched regular-season snapshot should be skipped"
+    assert ("lines", {"year": "2025", "seasonType": "postseason"}) in calls
 
     calls.clear()
     planner.run(["2025"], ["lines"], None, False, force=False, dry_run=False, snapshot=True)
