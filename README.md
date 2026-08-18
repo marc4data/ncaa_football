@@ -156,6 +156,36 @@ That distinction is load-bearing. `records` returned 668 rows for 2024 and 2025 
 newest response against its best across *all* params flags every endpoint the moment a new
 season opens — the first version of the mart did exactly that and produced 8 false positives.
 
+## Layers
+
+Schema per layer in both engines (decision log 2026-08-17), rather than a naming convention
+in one namespace:
+
+| Layer | Postgres | Databricks | Written by |
+|---|---|---|---|
+| raw | `raw.*` | `workspace.raw.*` | the loaders |
+| staging | `staging.*` | `workspace.staging.*` | dbt |
+| marts | `marts.*` | `workspace.marts.*` | dbt |
+
+`dbt/macros/generate_schema_name.sql` returns the configured schema verbatim; dbt's default
+would have produced `public_marts` and kept the layers entangled in the name.
+
+**The serving database is the enforced tier.** It holds published marts only — raw and
+staging never ship to the droplet — and `cfdb_read` has USAGE on `marts` and nothing else,
+with `search_path = marts` so the site's SQL needs no prefixes. Verified by attempting the
+denials rather than assuming them:
+
+```
+create table public.x(i int)   -> ERROR: permission denied for schema public
+create schema raw              -> ERROR: permission denied for database cfdb
+insert into marts.mart_...     -> ERROR: permission denied for table
+drop table marts.mart_...      -> ERROR: must be owner of table
+```
+
+`ci/check_layering.py` closes the remaining gap: schemas separate each layer's *output*,
+but nothing stops a mart selecting straight from raw. That reads dbt's compiled dependency
+graph and fails the build if any non-staging model references a source.
+
 ## Transforms
 
 See [dbt/README.md](dbt/README.md). Short version:
@@ -188,6 +218,24 @@ python -m src.load_raw_to_databricks --all
 
 The serverless warehouse auto-starts on first query, so an initial `dbt debug` can take
 ~30 seconds.
+
+**Known limitation — the token needs the `files` scope.** The intended bulk path is a Unity
+Catalog volume upload followed by `COPY INTO`. The Files API currently refuses it:
+
+```
+403 {"error_code":403,"message":"Provided access token does not have required scopes: files"}
+```
+
+SQL access to the volume works (`LIST` succeeds); only the REST Files API is refused, so
+this is a token-scope issue rather than a permissions or networking one. Regenerating the
+PAT with the `files` scope would enable the faster path.
+
+Until then the loader goes through SQL, which has a hard ceiling: query text over roughly
+16 MB is accepted and 32 MB is rejected outright ("Query text size exceeds limit"). Files
+above ~6 MB are therefore split into 4 MB chunks, staged, and reassembled server-side with
+`array_sort` over `(seq, chunk)` structs — ordering `collect_list` alone would not
+guarantee. Verified byte-identical by md5 on the largest file in the corpus (34 MB,
+132,277 records).
 
 ## Full rebuild from scratch
 

@@ -1,0 +1,90 @@
+# Serving stack for cfdb.marc4data.com — DigitalOcean droplet, 1 GiB / 1 vCPU.
+#
+# Three services, mirroring the local stack: serving Postgres, the Streamlit site, and a
+# Cloudflare Tunnel connector. Cloudflare Access sits in front, per the settled
+# access-control architecture.
+#
+# **No inbound ports are published.** The tunnel dials *out* to Cloudflare, so the droplet
+# needs no open ports for the site to work — the firewall keeps only SSH. Postgres is
+# reachable only on the internal Docker network; it is never exposed to the host, let
+# alone the internet.
+#
+# Memory is the binding constraint on a 1 GiB box, so every service carries a limit. The
+# numbers are deliberate: Postgres is tuned small (see command flags), Streamlit gets the
+# largest share because it holds query results, and cloudflared is tiny.
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SERVING_PG_USER:-cfdb}
+      POSTGRES_PASSWORD: ${SERVING_PG_PASSWORD:?serving Postgres password is required}
+      POSTGRES_DB: ${SERVING_PG_DB:-cfdb}
+    # Tuned for 1 GiB total, shared with two other services. Defaults assume a machine
+    # several times this size and would push the box into swap under a single big query.
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=384MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c max_connections=20
+      -c random_page_cost=1.1
+    volumes:
+      - serving_pg:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SERVING_PG_USER:-cfdb}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  site:
+    build:
+      context: ./site
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # The site connects as the read-only role, exactly as it does locally: serving is
+      # read-only by architecture, not by convention.
+      CFDB_READ_USER: ${CFDB_READ_USER:-cfdb_read}
+      CFDB_READ_PASSWORD: ${CFDB_READ_PASSWORD:?read-only password is required}
+      SERVING_PG_HOST: postgres
+      SERVING_PG_PORT: "5432"
+      SERVING_PG_DB: ${SERVING_PG_DB:-cfdb}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # No ports: the tunnel reaches this over the Docker network by service name.
+    expose:
+      - "8501"
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # Behind a profile so the rest of the stack runs before a tunnel exists: Compose
+    # interpolates the whole file, so a required-variable guard here would block building
+    # Postgres and the site too. Start it with:
+    #   docker compose --profile tunnel up -d
+    profiles: ["tunnel"]
+    # Token-based tunnel: routing and Access policy live in the Cloudflare dashboard, so
+    # nothing about the hostname is baked into this box.
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - site
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  serving_pg:

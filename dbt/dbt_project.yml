@@ -12,3 +12,8 @@ clean-targets: ["target"]
 models:
   cfdb_dbt:
     +materialized: view
+    # Schema per layer (decision log 2026-08-17). Raw is written by the loaders, not dbt.
+    staging:
+      +schema: staging
+    marts:
+      +schema: marts

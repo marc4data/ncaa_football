@@ -31,10 +31,26 @@ from .load_raw_to_postgres import payload_row_count
 load_dotenv()
 
 CATALOG = os.getenv("DATABRICKS_CATALOG", "workspace")
-SCHEMA = os.getenv("DATABRICKS_SCHEMA", "cfdb")
+# The loader owns the raw layer only; dbt writes staging and marts.
+SCHEMA = os.getenv("DATABRICKS_RAW_SCHEMA", "raw")
 
-# A SQL warehouse round trip dominates; batching is what makes this finish.
+# A SQL warehouse round trip dominates; batching is what makes this finish. The batch is
+# bounded by *bytes*, not row count: 25 files of 5 MB each is 125 MB of query text, which
+# blows the same limit the chunking exists to respect. Row-count batching worked fine until
+# it met an endpoint whose files were individually small enough to skip chunking and
+# collectively far too big to send.
 BATCH_ROWS = 25
+BATCH_BYTES = 6_000_000
+
+# Databricks rejects query text over a limit measured empirically at 16 MB OK / 32 MB
+# failing ("Query text size exceeds limit"). JSON escaping inflates content on the way
+# into a literal, so oversized files are split well under that and reassembled in SQL.
+#
+# Chunking exists because the Files API — the clean path, volume upload + COPY INTO — is
+# refused by the current token: "does not have required scopes: files". A token with the
+# files scope would make this unnecessary; see README.
+MAX_LITERAL_BYTES = 6_000_000
+CHUNK_BYTES = 4_000_000
 
 
 def connect():
@@ -88,11 +104,110 @@ def fetched_at_index(endpoint: str) -> Dict[str, str]:
         return {}
 
 
-def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None) -> int:
+def _size_bounded_batches(paths: List[Path]) -> List[List[Path]]:
+    """Group files so no single statement approaches the query-text limit."""
+    batches, current, current_bytes = [], [], 0
+    for path in paths:
+        size = path.stat().st_size
+        if current and (current_bytes + size > BATCH_BYTES or len(current) >= BATCH_ROWS):
+            batches.append(current)
+            current, current_bytes = [], 0
+        current.append(path)
+        current_bytes += size
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _load_large_file(cursor, table: str, endpoint: str, path: Path, payload: dict,
+                     fetched_at_value: Optional[str]) -> None:
+    """Land one file too big for a single statement, via chunk staging + SQL concat."""
+    content = json.dumps(payload)
+    params = payload.get("params") if isinstance(payload, dict) else None
+    chunks = [content[i:i + CHUNK_BYTES] for i in range(0, len(content), CHUNK_BYTES)]
+
+    staging = f"{CATALOG}.{SCHEMA}._chunk_staging"
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {staging}
+        (filename STRING, seq INT, chunk STRING) USING DELTA
+    """)
+    cursor.execute(f"DELETE FROM {staging} WHERE filename = {_sql_string(path.name)}")
+    for seq, chunk in enumerate(chunks):
+        cursor.execute(
+            f"INSERT INTO {staging} VALUES ({_sql_string(path.name)}, {seq}, "
+            f"{_sql_string(chunk)})")
+
+    # array_sort orders the structs by their first field, so the pieces reassemble in the
+    # order they were split — concat_ws over collect_list alone would not guarantee that.
+    cursor.execute(f"""
+        MERGE INTO {table} AS t
+        USING (
+            SELECT
+                filename,
+                array_join(transform(array_sort(collect_list(struct(seq, chunk))),
+                                     s -> s.chunk), '') AS content,
+                {payload.get('status_code') if isinstance(payload, dict) else 'NULL'} AS status_code,
+                {_sql_string(json.dumps(params) if params is not None else None)} AS params,
+                {payload_row_count(payload)} AS row_count,
+                {_sql_string(fetched_at_value)} AS fetched_at,
+                current_timestamp() AS loaded_at
+            FROM {staging}
+            WHERE filename = {_sql_string(path.name)}
+            GROUP BY filename
+        ) AS s
+        ON t.filename = s.filename
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+    cursor.execute(f"DELETE FROM {staging} WHERE filename = {_sql_string(path.name)}")
+
+    cursor.execute(f"""
+        MERGE INTO {CATALOG}.{SCHEMA}.raw_manifest AS t
+        USING (SELECT {_sql_string(endpoint)} AS endpoint, {_sql_string(path.name)} AS filename,
+                      {_sql_string(json.dumps(params) if params is not None else None)} AS params,
+                      {payload.get('status_code') if isinstance(payload, dict) else 'NULL'} AS status_code,
+                      {payload_row_count(payload)} AS row_count,
+                      {_sql_string(fetched_at_value)} AS fetched_at,
+                      current_timestamp() AS loaded_at) AS s
+        ON t.endpoint = s.endpoint AND t.filename = s.filename
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+
+
+def already_loaded(cursor, endpoint: str) -> set:
+    """Filenames already landed for this endpoint.
+
+    Makes the load *resumable*, not merely idempotent. MERGE meant a rerun produced the
+    right answer, but redid every megabyte to get there — so a failure four hours in cost
+    four hours to retry. A 1.7 GB load over a serverless warehouse will be interrupted;
+    the question is only whether that is expensive.
+    """
+    try:
+        cursor.execute(f"""
+            SELECT filename FROM {CATALOG}.{SCHEMA}.raw_manifest
+            WHERE endpoint = {_sql_string(endpoint)}
+        """)
+        return {row.filename for row in cursor.fetchall()}
+    except Exception:
+        return set()
+
+
+def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None,
+                  resume: bool = True) -> int:
     files = raw_files(endpoint, seasons)
     if not files:
         print(f"No files to load for {endpoint}")
         return 0
+
+    if resume:
+        done = already_loaded(cursor, endpoint)
+        skipped = [f for f in files if f.name in done]
+        files = [f for f in files if f.name not in done]
+        if skipped:
+            print(f"  {endpoint}: skipping {len(skipped)} already loaded")
+        if not files:
+            return 0
 
     table = f"{CATALOG}.{SCHEMA}.raw_{endpoint.replace('/', '_')}"
     cursor.execute(f"""
@@ -110,8 +225,20 @@ def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None) ->
     fetched_at = fetched_at_index(endpoint)
     loaded = 0
 
-    for start in range(0, len(files), BATCH_ROWS):
-        batch = files[start:start + BATCH_ROWS]
+    # Oversized files take the chunked path; the rest batch normally.
+    large = [p for p in files if p.stat().st_size > MAX_LITERAL_BYTES]
+    normal = [p for p in files if p.stat().st_size <= MAX_LITERAL_BYTES]
+
+    for path in large:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        _load_large_file(cursor, table, endpoint, path, payload, fetched_at.get(path.name))
+        loaded += 1
+        print(f"  {endpoint}: {loaded}/{len(files)} (chunked {path.stat().st_size/1e6:.0f} MB)")
+
+    for batch in _size_bounded_batches(normal):
         values = []
         for path in batch:
             try:
@@ -185,24 +312,46 @@ def main() -> int:
         parser.print_help()
         return 1
 
-    with connect() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
-            cursor.execute(f"""
-                CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}.raw_manifest (
-                    endpoint STRING NOT NULL,
-                    filename STRING NOT NULL,
-                    params STRING,
-                    status_code INT,
-                    row_count INT,
-                    fetched_at TIMESTAMP,
-                    loaded_at TIMESTAMP
-                ) USING DELTA
-            """)
-            total = sum(load_endpoint(cursor, e, args.seasons) for e in endpoints)
+    # One connection per endpoint rather than one for the whole run: a single session held
+    # open for hours against a serverless warehouse is what died last time, mid-file.
+    failed = []
+    total = 0
+    for endpoint in endpoints:
+        for attempt in (1, 2, 3):
+            try:
+                with connect() as connection:
+                    with connection.cursor() as cursor:
+                        _ensure_schema(cursor)
+                        total += load_endpoint(cursor, endpoint, args.seasons)
+                break
+            except Exception as exc:
+                print(f"  {endpoint}: attempt {attempt} failed — {type(exc).__name__}: "
+                      f"{str(exc)[:120]}")
+                if attempt == 3:
+                    failed.append(endpoint)
 
     print(f"\nLoaded {total} file(s) into {CATALOG}.{SCHEMA}")
+    if failed:
+        # Loud and non-zero: a partial load must not read as a success.
+        print(f"FAILED endpoints ({len(failed)}): {', '.join(failed)}")
+        return 1
     return 0
+
+
+def _ensure_schema(cursor) -> None:
+    """Schema and the manifest spine, created before any endpoint is loaded."""
+    cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}.raw_manifest (
+            endpoint STRING NOT NULL,
+            filename STRING NOT NULL,
+            params STRING,
+            status_code INT,
+            row_count INT,
+            fetched_at TIMESTAMP,
+            loaded_at TIMESTAMP
+        ) USING DELTA
+    """)
 
 
 if __name__ == "__main__":

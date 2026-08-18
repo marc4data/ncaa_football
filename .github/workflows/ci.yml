@@ -152,6 +152,11 @@ jobs:
       - name: dbt build
         run: dbt build --project-dir dbt
 
+      - name: Assert layer boundaries
+        # Schema-per-layer separates outputs; it cannot stop a mart selecting straight
+        # from raw. This reads the compiled dependency graph, where that would show up.
+        run: python ci/check_layering.py
+
       - name: Assert the fixture exercised both date eras
         env:
           PGPASSWORD: cfdb
@@ -159,7 +164,7 @@ jobs:
         # test pass without testing anything.
         run: |
           eras=$(psql -h localhost -U cfdb -d cfdb -tAc \
-            "select count(distinct kickoff_time_known) from mart_team_schedule;")
+            "select count(distinct kickoff_time_known) from marts.mart_team_schedule;")
           if [ "$eras" -ne 2 ]; then
             echo "::error::fixture covers $eras date era(s); it must cover both"
             exit 1
