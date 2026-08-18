@@ -43,6 +43,13 @@ x-airflow-common: &airflow-common
     PG_USER: cfdb
     PG_PASSWORD: cfdb
     PG_DB: cfdb
+    # Databricks, for the daily raw sync. Left empty rather than defaulted so a machine
+    # without credentials fails loudly in the task instead of syncing nothing quietly.
+    DATABRICKS_SERVER_HOSTNAME: ${DATABRICKS_SERVER_HOSTNAME:-}
+    DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
+    DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+    DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-workspace}
+    DATABRICKS_RAW_SCHEMA: ${DATABRICKS_RAW_SCHEMA:-raw}
     ALERT_SMTP_HOST: ${ALERT_SMTP_HOST:-}
     ALERT_SMTP_PORT: ${ALERT_SMTP_PORT:-587}
     ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}

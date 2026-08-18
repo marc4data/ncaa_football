@@ -21,7 +21,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from databricks import sql
 from dotenv import load_dotenv
@@ -296,6 +296,87 @@ def load_endpoint(cursor, endpoint: str, seasons: Optional[List[str]] = None,
     return loaded
 
 
+def all_endpoints() -> List[str]:
+    """Every endpoint directory present under data/raw."""
+    base = Path("data") / "raw"
+    if not base.exists():
+        return []
+    return sorted(p.name for p in base.iterdir() if p.is_dir())
+
+
+def pending_by_endpoint(cursor, endpoints: List[str]) -> Dict[str, int]:
+    """How many local raw files each endpoint still owes Databricks.
+
+    One query across the whole manifest, not one per endpoint. `load_endpoints` below opens
+    a fresh connection per endpoint on purpose — a session held open across a long load is
+    what died mid-file once — but paying that cost only to discover an endpoint has nothing
+    to do is pure waste, and on a serverless warehouse that startup dominates the cost of a
+    daily sync where most endpoints are idle.
+    """
+    loaded: Dict[str, set] = {}
+    try:
+        cursor.execute(f"SELECT endpoint, filename FROM {CATALOG}.{SCHEMA}.raw_manifest")
+        for row in cursor.fetchall():
+            loaded.setdefault(row.endpoint, set()).add(row.filename)
+    except Exception:
+        # No manifest yet means nothing has ever loaded, so everything is pending. Guessing
+        # the opposite would silently skip the very first sync.
+        loaded = {}
+
+    pending = {}
+    for endpoint in endpoints:
+        missing = {p.name for p in raw_files(endpoint)} - loaded.get(endpoint, set())
+        if missing:
+            pending[endpoint] = len(missing)
+    return pending
+
+
+def load_endpoints(endpoints: List[str],
+                   seasons: Optional[List[str]] = None) -> Tuple[int, List[str]]:
+    """Load each endpoint, one short-lived connection at a time, three attempts each.
+
+    One connection per endpoint rather than one for the whole run: a single session held
+    open for hours against a serverless warehouse is what died last time, mid-file.
+    """
+    failed: List[str] = []
+    total = 0
+    for endpoint in endpoints:
+        for attempt in (1, 2, 3):
+            try:
+                with connect() as connection:
+                    with connection.cursor() as cursor:
+                        _ensure_schema(cursor)
+                        total += load_endpoint(cursor, endpoint, seasons)
+                break
+            except Exception as exc:
+                print(f"  {endpoint}: attempt {attempt} failed — {type(exc).__name__}: "
+                      f"{str(exc)[:120]}")
+                if attempt == 3:
+                    failed.append(endpoint)
+    return total, failed
+
+
+def sync(endpoints: List[str], seasons: Optional[List[str]] = None) -> dict:
+    """Bring Databricks level with the local raw layer for these endpoints.
+
+    Deliberately additive and idempotent: it loads the files Databricks lacks and touches
+    nothing else, so running it twice — or running it after a manual load — costs one query
+    and changes nothing. That is what lets it sit on a schedule without supervision.
+    """
+    with connect() as connection:
+        with connection.cursor() as cursor:
+            _ensure_schema(cursor)
+            pending = pending_by_endpoint(cursor, endpoints)
+
+    if not pending:
+        return {"checked": len(endpoints), "pending_endpoints": 0, "loaded": 0, "failed": []}
+
+    print(f"Pending: {', '.join(f'{e}={n}' for e, n in sorted(pending.items()))}")
+    total, failed = load_endpoints(sorted(pending), seasons)
+    return {"checked": len(endpoints), "pending_endpoints": len(pending),
+            "loaded": total, "failed": failed}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Load raw CFBD responses into Databricks.")
     parser.add_argument("endpoints", nargs="*", help="endpoint directory names")
@@ -304,31 +385,14 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.all:
-        base = Path("data") / "raw"
-        endpoints = sorted(p.name for p in base.iterdir() if p.is_dir())
+        endpoints = all_endpoints()
     elif args.endpoints:
         endpoints = args.endpoints
     else:
         parser.print_help()
         return 1
 
-    # One connection per endpoint rather than one for the whole run: a single session held
-    # open for hours against a serverless warehouse is what died last time, mid-file.
-    failed = []
-    total = 0
-    for endpoint in endpoints:
-        for attempt in (1, 2, 3):
-            try:
-                with connect() as connection:
-                    with connection.cursor() as cursor:
-                        _ensure_schema(cursor)
-                        total += load_endpoint(cursor, endpoint, args.seasons)
-                break
-            except Exception as exc:
-                print(f"  {endpoint}: attempt {attempt} failed — {type(exc).__name__}: "
-                      f"{str(exc)[:120]}")
-                if attempt == 3:
-                    failed.append(endpoint)
+    total, failed = load_endpoints(endpoints, args.seasons)
 
     print(f"\nLoaded {total} file(s) into {CATALOG}.{SCHEMA}")
     if failed:
