@@ -50,6 +50,10 @@ x-airflow-common: &airflow-common
     DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
     DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-workspace}
     DATABRICKS_RAW_SCHEMA: ${DATABRICKS_RAW_SCHEMA:-raw}
+    # Failure triage. Without this the alert email still sends, in its plain form —
+    # the summary is an enhancement to the alert, never a precondition for it.
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ALERT_TRIAGE_MODEL: ${ALERT_TRIAGE_MODEL:-claude-sonnet-5}
     ALERT_SMTP_HOST: ${ALERT_SMTP_HOST:-}
     ALERT_SMTP_PORT: ${ALERT_SMTP_PORT:-587}
     ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}

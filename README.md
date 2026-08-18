@@ -326,6 +326,52 @@ The local file is always written because an alerting channel that needs configur
 one that's off on the day it's needed. Neither path can raise: an exception in a failure
 handler would mask the failure it exists to report.
 
+#### Triage: making the alert readable
+
+A traceback answers "what threw". It does not answer what broke, whether it matters, or
+what to do. When `ANTHROPIC_API_KEY` is set, [src/alert_triage.py](src/alert_triage.py)
+asks Claude those three questions and leads the email with the answers:
+
+```
+Subject: [cfdb] FAILURE - Cadence config missing from the Airflow bind mount
+
+WHAT HAPPENED / IMPACT / LIKELY FIX
+...
+========================================================================
+TECHNICAL DETAIL
+<every field, then the full traceback>
+```
+
+The subject is always `[cfdb] FAILURE - ` so the whole set filters and sorts together.
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+ALERT_TRIAGE_MODEL=claude-sonnet-5   # optional
+ALERT_TRIAGE_TIMEOUT=25              # optional, seconds
+```
+
+Preview it against a real recorded failure without waiting for the next one:
+
+```bash
+python -m src.alert_triage --latest     # triage the most recent failure and print the email
+python -m src.alert_triage --dry-run    # show the prompt, call nothing
+python -m src.alert_triage --index 3    # any earlier failure
+```
+
+Three properties this had to have, all of them consequences of running inside the failure
+path:
+
+- **It cannot suppress an alert.** Every path returns `None` instead of raising, the caller
+  wraps the call anyway, and the plain email goes out unchanged. A summariser that costs us
+  an alert is worse than no summariser.
+- **It adds no dependency.** The call is `urllib` from the standard library, not the SDK: a
+  broken or conflicting install here would take out alerting itself.
+- **Secrets never leave the machine.** Known secret *values* — not just variable names — are
+  stripped from the error and traceback first, along with URL credentials and bearer tokens,
+  because this is the one place the pipeline sends error text to a third party.
+
+Cost is negligible: one short call per failed task, and only on failure.
+
 Raise the lines cadence to hourly by changing `SCHEDULE` in
 [dags/lines_snapshot_dag.py](dags/lines_snapshot_dag.py). The snapshot targets one week
 (~0.11 MB), so hourly costs ~2.6 MB and 24 calls a day — about 320 MB across a season.

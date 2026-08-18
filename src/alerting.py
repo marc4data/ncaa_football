@@ -21,9 +21,11 @@ import traceback
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
+
+from .alert_triage import triage
 
 ALERT_LOG = Path("data") / "alerts" / "failures.jsonl"
 
@@ -76,7 +78,61 @@ def diagnose(exc: BaseException) -> str:
     return "Unexpected SMTP error — see the exception above."
 
 
-def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False) -> bool:
+def format_email(event: Dict[str, Any],
+                 summary: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
+    """Build the subject and body. Pure, so the exact email can be tested and previewed.
+
+    Subject is `[cfdb] FAILURE - <headline>`: a constant prefix so a filter or a sort can
+    find every one of them, followed by what actually broke, so the subject alone is often
+    enough. Without triage the headline degrades to `dag.task` — less useful, still
+    correctly shaped.
+
+    The body puts the readable explanation first and the technical detail underneath. Both
+    are always present: the summary is what makes the alert actionable at a glance, and the
+    traceback is what makes it debuggable when the summary is wrong.
+    """
+    identity = f"{event.get('dag_id')}.{event.get('task_id')}"
+
+    if summary:
+        subject = f"[cfdb] FAILURE - {summary.get('headline')}"
+        sections = [
+            f"{identity}  |  attempt {event.get('try_number')}  |  {event.get('at')}",
+            "",
+            "WHAT HAPPENED",
+            summary.get("what_happened", "(not provided)"),
+            "",
+            "IMPACT",
+            summary.get("impact", "(not provided)"),
+            "",
+            "LIKELY FIX",
+            summary.get("likely_fix", "(not provided)"),
+            "",
+            f"-- written by {summary.get('model', 'Claude')}; the detail below is the source"
+            " of truth --",
+        ]
+    else:
+        subject = f"[cfdb] FAILURE - {identity} failed"
+        sections = [
+            f"{identity}  |  attempt {event.get('try_number')}  |  {event.get('at')}",
+            "",
+            str(event.get("error") or "(no error message recorded)"),
+        ]
+
+    sections += [
+        "",
+        "=" * 72,
+        "TECHNICAL DETAIL",
+        "=" * 72,
+        "",
+        "\n".join(f"{k}: {v}" for k, v in event.items() if k != "traceback"),
+        "",
+        str(event.get("traceback") or "(no traceback captured)"),
+    ]
+    return subject, "\n".join(sections)
+
+
+def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False,
+                       summary: Optional[Dict[str, str]] = None) -> bool:
     """Send the failure by SMTP if configured. Returns whether it was sent.
 
     `raise_on_error` is for the CLI test, where a silent False is useless — a person
@@ -85,15 +141,12 @@ def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False) -> b
     if not smtp_configured():
         return False
     try:
+        subject, body = format_email(event, summary)
         message = EmailMessage()
-        message["Subject"] = f"[cfdb] {event.get('dag_id')}.{event.get('task_id')} failed"
+        message["Subject"] = subject
         message["From"] = os.environ[SMTP_FROM]
         message["To"] = os.environ[SMTP_TO]
-        message.set_content(
-            "\n".join(f"{k}: {v}" for k, v in event.items() if k != "traceback")
-            + "\n\n"
-            + str(event.get("traceback") or "")
-        )
+        message.set_content(body)
 
         port = int(os.getenv(SMTP_PORT, "587"))
         with smtplib.SMTP(os.environ[SMTP_HOST], port, timeout=30) as server:
@@ -130,13 +183,37 @@ def build_event(context: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def failure_callback(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Airflow `on_failure_callback`: log locally, and email when configured."""
+    """Airflow `on_failure_callback`: log locally, and email when configured.
+
+    Order matters. The local record is written *first* and without the summary, so the
+    durable evidence of the failure exists before anything slow or networked is attempted.
+    Triage then runs, and its result is appended as its own line rather than rewritten into
+    the first — an append-only log stays append-only, and a summary that never arrived
+    leaves the original record untouched rather than half-written.
+    """
     event = build_event(context or {})
     logged = record_failure(event)
-    emailed = send_failure_email(event)
+
+    # Defence in depth. `triage` already promises never to raise, but that promise lives in
+    # another module and one careless edit there would silently cost us the email — the
+    # exact failure this module exists to prevent. The guarantee is cheap to enforce here
+    # too, so it is enforced here too.
+    try:
+        summary = triage(event)
+    except Exception as exc:  # never raise from an alert path
+        print(f"ALERT: triage raised, sending the plain email ({type(exc).__name__}: {exc})")
+        summary = None
+
+    if summary:
+        record_failure({"at": event.get("at"), "dag_id": event.get("dag_id"),
+                        "task_id": event.get("task_id"), "run_id": event.get("run_id"),
+                        "kind": "triage", **summary})
+
+    emailed = send_failure_email(event, summary=summary)
     print(f"ALERT: {event.get('dag_id')}.{event.get('task_id')} failed "
-          f"(logged={logged}, emailed={emailed}): {event.get('error')}")
-    return {"logged": logged, "emailed": emailed}
+          f"(logged={logged}, triaged={bool(summary)}, emailed={emailed}): "
+          f"{event.get('error')}")
+    return {"logged": logged, "triaged": bool(summary), "emailed": emailed}
 
 
 def _describe_config() -> None:
