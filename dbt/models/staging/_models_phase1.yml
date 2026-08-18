@@ -1,0 +1,148 @@
+version: 2
+
+models:
+  - name: stg_conferences
+    description: One row per conference per season. Note the payload's naming inversion — CFBD's `name` is the short form ("ACC") and `shortName` is the full title.
+    columns:
+      - name: season
+        description: Season the conference roster applies to.
+        data_tests: [not_null]
+      - name: conference_id
+        description: CFBD conference id.
+        data_tests: [not_null]
+      - name: conference_name
+        description: Short form ("ACC"). This is what stg_teams.conference carries and what joins.
+        data_tests: [not_null]
+      - name: conference_long_name
+        description: Full title ("Atlantic Coast Conference").
+      - name: conference_abbreviation
+        description: CFBD's abbreviation, often equal to conference_name.
+      - name: classification
+        description: fbs / fcs / ii / iii.
+      - name: member_count_reported
+        description: Member count as CFBD reports it; compared against the counted membership in dim_conference.
+
+  - name: stg_venues
+    description: One row per venue. Not season-scoped — /venues takes no year.
+    columns:
+      - name: venue_id
+        description: CFBD venue id.
+        data_tests: [unique, not_null]
+      - name: venue_name
+        description: Stadium name as CFBD spells it.
+      - name: city
+        description: Venue city.
+      - name: state
+        description: Venue state or province.
+      - name: zip
+        description: Postal code.
+      - name: country_code
+        description: ISO country code.
+      - name: timezone
+        description: IANA timezone; null for many venues.
+      - name: latitude
+        description: Decimal degrees.
+      - name: longitude
+        description: Decimal degrees.
+      - name: elevation_m
+        description: Elevation in metres.
+      - name: capacity
+        description: Seating capacity.
+      - name: construction_year
+        description: Year built.
+      - name: is_grass
+        description: Natural grass surface; null where unknown.
+      - name: is_dome
+        description: Enclosed venue.
+
+  - name: stg_calendar
+    description: One row per (season, season_type, week). CFBD serves nothing before 2002, which bounds every week-grain join.
+    columns:
+      - name: season
+        description: Season.
+        data_tests: [not_null]
+      - name: season_type
+        description: >
+          regular, postseason, or the 2020-only spring_regular / spring_postseason — the
+          COVID season, when FCS moved its 2020 schedule to spring 2021. Part of the key:
+          Postseason Week 1 is not Regular Season Week 1, and neither is Spring Week 1.
+          The spring values are accepted rather than filtered, because filtering would
+          silently drop real games from a real season.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['regular', 'postseason', 'spring_regular', 'spring_postseason']
+      - name: week
+        description: Week number within the season type.
+        data_tests: [not_null]
+      - name: start_at
+        description: Week window start, UTC.
+      - name: end_at
+        description: Week window end, UTC.
+      - name: first_game_at
+        description: Kickoff of the first game in the week.
+      - name: last_game_at
+        description: Kickoff of the last game in the week.
+
+  - name: stg_game_team_stat
+    description: >
+      Box score, long: one row per (game, team, stat category). /games/teams ships ~35
+      category/stat pairs per team with values as strings, including compound values like
+      thirdDownEff "4-9" and possessionTime "31:24". Landed verbatim; fct_game_team pivots a
+      curated subset.
+    columns:
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null]
+      - name: team_id
+        description: CFBD team id.
+        data_tests: [not_null]
+      - name: home_away
+        description: Which side of the game this team was.
+      - name: points
+        description: Points scored, as reported on the box score.
+      - name: stat_category
+        description: CFBD's category name, e.g. totalYards, thirdDownEff.
+        data_tests: [not_null]
+      - name: stat_raw
+        description: Value exactly as landed, string. Never parsed here.
+
+  - name: stg_lines
+    description: >
+      One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated
+      fetches of the same request are the point, because /lines returns only opening and
+      current with nothing between, and that movement cannot be backfilled.
+    columns:
+      - name: filename
+        description: Raw file the snapshot came from; provenance back to the landed response.
+      - name: snapshot_ts
+        description: When the line was OBSERVED (raw_manifest.fetched_at), not when it was loaded.
+        data_tests: [not_null]
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null]
+      - name: season
+        description: Season.
+      - name: week
+        description: Week.
+      - name: season_type
+        description: regular or postseason.
+      - name: provider_raw
+        description: Sportsbook name exactly as landed, including the "Draft Kings" spelling.
+        data_tests: [not_null]
+      - name: provider_key
+        description: Canonical key. Null means an unmapped sportsbook, which fails assert_no_unmapped_provider.
+      - name: spread
+        description: Numeric spread. Disagrees with formatted_spread historically; neither is authoritative.
+      - name: formatted_spread
+        description: Spread as CFBD formats it for display. Kept separate and never reconciled against spread.
+      - name: spread_open
+        description: Opening spread.
+      - name: over_under
+        description: Current total.
+      - name: over_under_open
+        description: Opening total.
+      - name: home_moneyline
+        description: Home moneyline.
+      - name: away_moneyline
+        description: Away moneyline.

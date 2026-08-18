@@ -10,6 +10,9 @@ enforces two rules from the layering decision (2026-08-17):
   1. Only staging models may reference sources. A mart reading raw JSON directly means the
      cleaning, the status_code filter, and the dedup have all been bypassed.
   2. Marts may only depend on staging or other marts.
+  3. Serving models may only depend on marts or other serving models. A srv_ view reaching
+     past the dimensional layer into staging is the same defect one level down: it means the
+     conformed keys and the tested grain were bypassed to get a column quickly.
 
 Run after any dbt compile/build:
     python ci/check_layering.py
@@ -28,6 +31,8 @@ def layer_of(node: dict) -> str:
         return "staging"
     if "marts" in parts:
         return "marts"
+    if "serving" in parts:
+        return "serving"
     return "other"
 
 
@@ -57,23 +62,33 @@ def main() -> int:
         if layer == "marts":
             for dep in models:
                 dep_node = nodes.get(dep)
-                if dep_node and layer_of(dep_node) == "other":
+                if dep_node and layer_of(dep_node) not in ("staging", "marts"):
                     violations.append(
-                        f"{node['name']} (marts) depends on {dep_node['name']}, "
-                        f"which is in neither staging nor marts"
+                        f"{node['name']} (marts) depends on {dep_node['name']} "
+                        f"({layer_of(dep_node)}), which is neither staging nor marts"
                     )
 
-    staging = [n for n in nodes.values()
-               if n.get("resource_type") == "model" and layer_of(n) == "staging"]
-    marts = [n for n in nodes.values()
-             if n.get("resource_type") == "model" and layer_of(n) == "marts"]
-    print(f"Checked {len(staging)} staging and {len(marts)} mart model(s).")
+        if layer == "serving":
+            for dep in models:
+                dep_node = nodes.get(dep)
+                if dep_node and layer_of(dep_node) not in ("marts", "serving"):
+                    violations.append(
+                        f"{node['name']} (serving) depends on {dep_node['name']} "
+                        f"({layer_of(dep_node)}) — serving reads marts, not staging or raw"
+                    )
+
+    counts = {}
+    for layer in ("staging", "marts", "serving"):
+        counts[layer] = len([n for n in nodes.values()
+                             if n.get("resource_type") == "model" and layer_of(n) == layer])
+    print(f"Checked {counts['staging']} staging, {counts['marts']} mart, "
+          f"{counts['serving']} serving model(s).")
 
     if violations:
         print(f"\nLAYER VIOLATIONS ({len(violations)}):")
         for v in violations:
             print(f"  - {v}")
-        print("\nOnly staging may read sources; marts build on staging.")
+        print("\nOnly staging reads sources; marts build on staging; serving builds on marts.")
         return 1
 
     print("Layer boundaries hold: sources are read only by staging.")

@@ -1,0 +1,37 @@
+-- Standings: one row per (season, team). Replaces mart_team_season_record.
+--
+-- Denormalized on purpose — the site reads exactly one of these per view, with a WHERE
+-- clause and no joins. Column names and semantics deliberately mirror the mart it replaces
+-- so the parity test can compare them directly; new columns (tiebreak_rank, colours) are
+-- additive and excluded from parity.
+
+select
+    r.team_season_sk,
+    -- Retained under the mart's original name so the parity test compares like with like.
+    cast(r.season as {{ dbt.type_string() }}) || '-' || cast(r.team_id as {{ dbt.type_string() }}) as team_season_key,
+    r.season,
+    r.team_id,
+    r.is_listed_team,
+    r.school,
+    r.conference,
+    r.classification,
+    r.games_played,
+    r.wins,
+    r.losses,
+    r.ties,
+    r.points_for,
+    r.points_against,
+    r.point_differential,
+    r.win_pct,
+    -- Additive beyond the mart.
+    r.conference_wins,
+    r.conference_losses,
+    r.tiebreak_rank,
+    r.tiebreak_basis,
+    t.color_on_light,
+    t.color_on_dark,
+    t.logo_source_url,
+    t.abbreviation
+from {{ ref('fct_team_record') }} r
+left join {{ ref('dim_team') }} t
+    on t.season = r.season and t.team_id = r.team_id
