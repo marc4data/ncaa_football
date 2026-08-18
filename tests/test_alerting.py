@@ -112,7 +112,9 @@ def test_failure_callback_reports_both_channels(tmp_path, monkeypatch):
     result = alerting.failure_callback({"task_instance": FakeTaskInstance(),
                                         "exception": RuntimeError("boom")})
 
-    assert result == {"logged": True, "emailed": False}
+    # `triaged` is False with no ANTHROPIC_API_KEY set, which is also the assertion that
+    # the test suite never reaches the network.
+    assert result == {"logged": True, "triaged": False, "emailed": False}
     assert "boom" in (tmp_path / "failures.jsonl").read_text()
 
 
