@@ -6,15 +6,11 @@
 -- Scoped to seasons where /records was actually pulled, so the test does not fail merely
 -- because an endpoint has less history than the game spine.
 --
--- 2020 IS EXCLUDED, and the reason is a real ingestion gap this test found: the 2020 FCS
--- season was played in SPRING 2021, which CFBD labels with the season types spring_regular
--- and spring_postseason. src/backfill.py only ever requests 'regular' and 'postseason', so
--- those games were never fetched — Sam Houston's 10-0 FCS title run is absent from our game
--- spine while /records counts it. 21 team-seasons diverge for exactly this reason.
---
--- The fix belongs in ingestion (add the spring season types to SEASON_TYPES and backfill
--- 2020), not here. Registered as a follow-up; until then this exclusion is the honest scope
--- rather than a silenced failure.
+-- 2020 was excluded here for a while: the FCS season was played in SPRING 2021 under the
+-- season types spring_regular / spring_postseason, which src/backfill.py never requested, so
+-- 532 games were missing and 21 FCS team-seasons diverged. THIS TEST FOUND THAT. The gap was
+-- closed in ingestion (2026-08-18) rather than papered over here, and the exclusion is now
+-- removed — 2020 is back in scope and passing.
 
 with cfbd as (
     select
@@ -43,7 +39,6 @@ ours as (
     select r.season, r.team_id, r.wins, r.losses
     from {{ ref('fct_team_record') }} r
     where r.season in (select distinct season from cfbd_flat)
-      and r.season <> 2020
       and r.classification in ('fbs', 'fcs')
 )
 
