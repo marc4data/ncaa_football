@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS raw.raw_records (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_info (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_info_usage (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_warehouse_usage (
+    observed_at timestamptz NOT NULL, operation text NOT NULL, outcome text,
+    elapsed_seconds numeric, catalog text,
+    PRIMARY KEY (observed_at, operation)
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -53,6 +66,7 @@ CREATE TABLE IF NOT EXISTS raw.raw_manifest (
 
 TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_calendar, raw.raw_lines, raw.raw_games_teams, raw.raw_records,
+         raw.raw_info, raw.raw_info_usage, raw.raw_warehouse_usage,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -283,3 +297,51 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 ('records',     '2026-01-01T00-00-07-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:09Z', now()),
 ('lines',       '2026-01-01T00-00-08-001Z.json', '{"year": "2024", "week": "1", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:10Z', now()),
 ('lines',       '2026-01-01T00-00-09-001Z.json', '{"year": "2024", "week": "1", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:14Z', now());
+
+-- Quota telemetry. Two snapshots so the series has a delta rather than a single point —
+-- one row answers "where are we", only a series answers "where are we heading".
+INSERT INTO raw.raw_info (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-10-001Z.json', '{
+  "status_code": 200, "params": {},
+  "data": {"patronLevel": 3, "tierName": "Tier 3", "monthlyLimit": 75000,
+           "remainingCalls": 73053, "usedCalls": 1947,
+           "resetAt": "2026-09-01T00:00:00.000Z", "sharedPool": true,
+           "products": ["cfb", "cbb"]}
+  }', 200, '{}', '2026-01-01T00:00:20Z', now()),
+('2026-01-01T00-00-10-002Z.json', '{
+  "status_code": 200, "params": {},
+  "data": {"patronLevel": 3, "tierName": "Tier 3", "monthlyLimit": 75000,
+           "remainingCalls": 72900, "usedCalls": 2100,
+           "resetAt": "2026-09-01T00:00:00.000Z", "sharedPool": true,
+           "products": ["cfb", "cbb"]}
+  }', 200, '{}', '2026-01-01T00:00:21Z', now());
+
+-- The manifest labels this endpoint `info_usage`, not `info/usage`: src/ingest.fetch
+-- flattens the slash so the endpoint can be a directory name. Joining on the API path
+-- returns zero rows with no error, which is exactly how this model shipped broken once.
+INSERT INTO raw.raw_info_usage (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-11-001Z.json', '{
+  "status_code": 200, "params": {"days": "31", "limit": "50"},
+  "data": {"window": {"start": "2026-07-18T00:00:00.000Z", "end": "2026-08-18T00:00:00.000Z"},
+           "api": "cfb",
+           "totals": {"requests": 1967, "cfbRequests": 1967, "cbbRequests": 0,
+                      "uniqueEndpoints": 65},
+           "topEndpoints": [
+             {"api": "cfb", "endpoint": "/games", "requests": 324,
+              "lastUsedAt": "2026-08-18T00:00:00.000Z"},
+             {"api": "cfb", "endpoint": "/rankings", "requests": 203,
+              "lastUsedAt": "2026-08-17T00:00:00.000Z"}],
+           "recentRequests": []}
+  }', 200, '{"days": "31", "limit": "50"}', '2026-01-01T00:00:22Z', now());
+
+-- Warehouse telemetry, including a failed run: a failure burned warehouse time too,
+-- usually more, having paid the cold start before dying.
+INSERT INTO raw.raw_warehouse_usage (observed_at, operation, outcome, elapsed_seconds, catalog) VALUES
+('2026-01-01T00:00:30Z', 'raw_sync', 'success', 5.9,  'workspace'),
+('2026-01-01T00:01:00Z', 'dbt_run',  'success', 78.0, 'workspace'),
+('2026-01-01T00:02:30Z', 'dbt_test', 'failed',  12.4, 'workspace');
+
+INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
+('info',       '2026-01-01T00-00-10-001Z.json', '{}', 200, 1, '2026-01-01T00:00:20Z', now()),
+('info',       '2026-01-01T00-00-10-002Z.json', '{}', 200, 1, '2026-01-01T00:00:21Z', now()),
+('info_usage', '2026-01-01T00-00-11-001Z.json', '{"days": "31", "limit": "50"}', 200, 1, '2026-01-01T00:00:22Z', now());

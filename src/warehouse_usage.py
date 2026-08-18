@@ -100,5 +100,61 @@ def summary(path: Optional[Path] = None) -> Dict[str, Any]:
     }
 
 
+def load_to_postgres(path: Optional[Path] = None) -> int:
+    """Land the measurement log into `raw.raw_warehouse_usage` so dbt can read it.
+
+    Idempotent on (at, operation): the log is append-only and this is re-run daily over the
+    whole file, so re-loading must cost nothing rather than duplicating history. The pair
+    is a safe key because a single operation cannot start twice at the same instant.
+
+    Deliberately not a CFBD endpoint, but it lands in `raw` for the same reason those do:
+    it is unmodelled source data, and dbt owns everything downstream of it.
+    """
+    from .load_raw_to_postgres import get_conn
+
+    path = path or USAGE_LOG
+    if not path.exists():
+        return 0
+
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rows.append((entry.get("at"), entry.get("operation"), entry.get("outcome"),
+                     entry.get("elapsed_seconds"), entry.get("catalog")))
+    if not rows:
+        return 0
+
+    connection = get_conn()
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA IF NOT EXISTS raw")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS raw.raw_warehouse_usage (
+                    observed_at timestamptz NOT NULL,
+                    operation text NOT NULL,
+                    outcome text,
+                    elapsed_seconds numeric,
+                    catalog text,
+                    PRIMARY KEY (observed_at, operation)
+                )
+            """)
+            cursor.executemany("""
+                INSERT INTO raw.raw_warehouse_usage
+                    (observed_at, operation, outcome, elapsed_seconds, catalog)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (observed_at, operation) DO UPDATE
+                    SET outcome = EXCLUDED.outcome,
+                        elapsed_seconds = EXCLUDED.elapsed_seconds
+            """, rows)
+        return len(rows)
+    finally:
+        connection.close()
+
+
 if __name__ == "__main__":
     print(json.dumps(summary(), indent=2))

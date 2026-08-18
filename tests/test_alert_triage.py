@@ -223,3 +223,20 @@ def test_email_is_still_sent_when_triage_explodes(monkeypatch, tmp_path):
 
     assert result["emailed"] is True
     assert sent["subject"].startswith("[cfdb] FAILURE - ")
+
+
+def test_the_suite_cannot_reach_the_network_by_accident(assert_no_network, tmp_path):
+    """Regression guard for a defect this suite actually had.
+
+    When ANTHROPIC_API_KEY landed in .env, `failure_callback` began making a real, billable
+    call on every test run — and still passed, so nothing surfaced it but an 11.5-second
+    test that used to take milliseconds. The autouse fixture in conftest strips ambient
+    credentials; this proves the result, not the mechanism.
+    """
+    from src import alerting
+
+    alerting.ALERT_LOG = tmp_path / "failures.jsonl"
+    result = alerting.failure_callback({"dag_id": "d", "task_id": "t"})
+
+    assert result["triaged"] is False
+    assert result["emailed"] is False

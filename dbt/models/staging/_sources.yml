@@ -61,6 +61,32 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_info
+        description: >
+          Point-in-time snapshots of CFBD call quota from /info. Every snapshot is kept
+          rather than the latest, because the endpoint reports a running monthly total:
+          one row says where we stand, only a series says where we are heading.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_info_usage
+        description: >
+          Snapshots of /info/usage — per-endpoint request counts over a trailing window.
+          Truncated to the API's `limit` parameter, so these are the top endpoints per
+          snapshot and not the complete set.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_warehouse_usage
+        description: >
+          cfdb's own telemetry, not a CFBD endpoint. Databricks Free Edition documents no
+          account-level API, so warehouse consumption cannot be read back and is measured
+          client-side by src/warehouse_usage.py instead.
+        columns:
+          - name: observed_at
+            data_tests: [not_null]
+          - name: operation
+            data_tests: [not_null]
       - name: raw_manifest
         description: >
           One row per landed response across every endpoint, written by

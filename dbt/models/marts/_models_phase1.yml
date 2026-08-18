@@ -461,3 +461,52 @@ models:
         description: Home moneyline.
       - name: away_moneyline
         description: Away moneyline.
+
+  - name: fct_api_usage
+    description: >
+      Consumption against every metered external resource cfdb depends on, at one row per
+      (resource, observed_at). Two resources in one fact because the question asked of them
+      is identical and asked at the same moment: are we about to lose a dependency? The
+      failure modes are not symmetrical — CFBD publishes a limit and reports position
+      exactly; Databricks Free Edition publishes neither and answers an overrun by shutting
+      compute down for the day, or the month. Neither is user-visible: the site reads
+      serving Postgres, so exhausting either costs freshness, never availability.
+    columns:
+      - name: api_usage_sk
+        description: Surrogate key over (resource, observed_at).
+        data_tests: [unique, not_null]
+      - name: resource
+        description: Which metered dependency this row measures.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['cfbd_api', 'databricks_warehouse']
+      - name: observed_at
+        description: When the measurement was taken.
+        data_tests: [not_null]
+      - name: unit
+        description: >
+          `calls` for CFBD, `seconds` for Databricks. The two are not comparable and the
+          column exists so nothing tries.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['calls', 'seconds']
+      - name: used_value
+        description: >
+          Consumed to date within the current quota window. For Databricks this is a
+          running total of measured elapsed seconds, since nothing reports it for us.
+        data_tests: [not_null]
+      - name: limit_value
+        description: >
+          The published ceiling, or NULL where none is published. The null is meaningful:
+          it means unknowable, not unlimited and not zero.
+      - name: pct_used
+        description: >
+          Percentage of the limit consumed, NULL when the limit is unknown. A percentage of
+          an unpublished threshold would be an invented number, and avoiding invented
+          numbers about quota is the reason this table exists.
+      - name: resets_at
+        description: When the quota window rolls over. NULL for Databricks.
