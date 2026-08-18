@@ -9,3 +9,14 @@ cfdb_profile:
       port: 5432
       dbname: cfdb
       schema: public
+
+    # M4 target. Serverless SQL warehouse on Databricks Free Edition; the warehouse
+    # auto-starts on first query, so an initial `dbt debug` can take ~30s.
+    databricks:
+      type: databricks
+      host: "{{ env_var('DATABRICKS_SERVER_HOSTNAME') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      catalog: "{{ env_var('DATABRICKS_CATALOG', 'workspace') }}"
+      schema: "{{ env_var('DATABRICKS_SCHEMA', 'cfdb') }}"
+      threads: 4
