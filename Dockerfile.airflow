@@ -7,5 +7,9 @@ FROM apache/airflow:3.3.1
 
 # Pinned alongside the project's own requirements so the DAGs and a local shell resolve
 # the same versions.
-COPY requirements.txt /tmp/requirements.txt
+# --chown because COPY preserves the *host's* permissions. This file is 0600 on disk, so
+# without it the `airflow` user cannot read what it was just given, and the build dies with
+# "Could not open requirements file: Permission denied" — which reads like a pip or network
+# problem and is neither. The flag makes the image independent of local file modes.
+COPY --chown=airflow:root requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
