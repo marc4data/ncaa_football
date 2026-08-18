@@ -285,3 +285,26 @@ A season-scoped snapshot would be 15x that.
 
 DAGs schedule and retry only. They perform no transforms and compute no metrics: tasks
 call functions in `src/`, which land raw responses. Meaning is dbt's job.
+
+## Site (M6, in development)
+
+Streamlit reading marts from serving Postgres. Runs locally against the current marts
+while hosting comes online.
+
+```bash
+streamlit run site/app.py     # http://localhost:8501
+```
+
+Two boundaries the code enforces rather than documents:
+
+- **Read-only by role.** The site connects as `cfdb_read`, which has SELECT and nothing
+  else — verified against INSERT/DELETE/CREATE/DROP at creation. A bug in a page cannot
+  write to the warehouse.
+- **Marts only, no computation.** Every query selects from a `mart_*` table. Sorting,
+  filtering and formatting are presentation; a new *number* is a new dbt model, requested
+  through the demand-driven process. `site/db.py` is the single place queries live, so this
+  is reviewable in one file.
+
+Every page carries a "data as of" stamp (rule #5) sourced from `mart_data_freshness`,
+scoped to the endpoints the page actually reads — an hourly lines snapshot must not make a
+schedule page look fresher than it is.
