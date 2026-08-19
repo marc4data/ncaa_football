@@ -1,4 +1,4 @@
-{{ config(materialized='table') }}
+{{ config(materialized='table', tags=['production']) }}
 
 -- One row per endpoint: how fresh its data is, and whether the last pull returned anything.
 --

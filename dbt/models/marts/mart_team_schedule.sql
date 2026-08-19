@@ -1,4 +1,4 @@
-{{ config(materialized='table') }}
+{{ config(materialized='table', tags=['production']) }}
 
 -- One row per team per game: the schedule from a single team's point of view.
 --

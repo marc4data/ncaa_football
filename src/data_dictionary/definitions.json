@@ -1,0 +1,1410 @@
+{
+  "_comment": [
+    "The cfdb field definition map. Data, not code — edit this file directly.",
+    "glossary        : CFBD's published metric definitions, verbatim. Do not reword.",
+    "glossary_fields : leaf field name (lowercased) -> glossary term. Only map a field here",
+    "                  when its UNIT matches the term. Counts vs rates belong in `canon`.",
+    "canon           : leaf field name (lowercased) -> [definition, confidence].",
+    "patterns        : ordered fallbacks matched on prefix/suffix -> [definition, confidence].",
+    "confidence      : high | medium | low. Applies to inferred definitions only."
+  ],
+  "glossary": {
+    "DB Havoc": "Percentage of plays where the defense either defended or intercepted a pass.",
+    "Excitement Index": "Measures the game's entertainment value by tracking swings in win probability. Larger swings result in a higher score.",
+    "Expected Points (EP)": "Assigns point values to field positions based on down, distance, and yard line. A negative value means the opponent is expected to score next.",
+    "Expected Points Added (EPA)": "Uses EP to measure play impact by calculating the change in EP from the start to end of a play.",
+    "Explosiveness": "Average EPA on successful plays. Uses the site's custom PPA model.",
+    "Front Seven Havoc": "Percentage of plays where the front seven forced a fumble or recorded a tackle for loss (TFL).",
+    "Garbage Time": "When one of the following is true: lead > 38 points in 2nd quarter; lead > 28 points in 3rd quarter; lead > 22 points in 4th quarter. Games can occasionally exit garbage time if extreme comebacks occur.",
+    "Havoc": "Percentage of plays where the defense recorded a TFL, forced a fumble, intercepted, or broke up a pass.",
+    "Line Yards": "Estimates rushing yards attributable to the offensive line using weighted yardage: losses 120%; 0-4 yards 100%; 5-10 yards 50%; 11+ yards 0%.",
+    "Open Field Yards": "Average yards per carry gained more than 10 yards beyond the line of scrimmage.",
+    "Passing Downs": "Defined as 2nd down with 7+ yards to go or 3rd/4th down with 5+ yards to go.",
+    "Postgame Win Probability": "Estimates how often each team would win if the game were replayed using the same stats, shuffled in a different order.",
+    "Power Success": "Percentage of short-yardage runs (<=2 yards on 3rd/4th down or inside the 2-yard line on 1st/2nd) converted to a 1st down or touchdown.",
+    "Predicted Points (PP)": "Equivalent to EP, calculated using CFBD's custom model.",
+    "Predicted Points Added (PPA)": "Equivalent to EPA, calculated using CFBD's custom model.",
+    "Scoring Opportunities": "All offensive drives that cross the opponent's 40-yard line.",
+    "Second Level Yards": "Average yards per carry gained between 5 and 10 yards beyond the line of scrimmage.",
+    "Simple Rating System (SRS)": "Combines scoring margin and strength of schedule to rate teams. The rating indicates expected margin vs. an average team, adjusting for home field advantage.",
+    "Standard Downs": "All downs that are not Passing Downs.",
+    "Success Rate": "Measures play efficiency. A play is considered successful if it: results in a touchdown; gains >=50% of yards needed on 1st down; gains >=70% of yards needed on 2nd down; gains 100% of yards needed on 3rd/4th down.",
+    "Stuff Rate": "Percentage of rushing plays stopped at or behind the line of scrimmage.",
+    "Usage": "Percentage of plays in which a player was directly involved. Includes passes, rushes, receptions, incompletions, and targets."
+  },
+  "glossary_fields": {
+    "excitementindex": "Excitement Index",
+    "explosiveness": "Explosiveness",
+    "successrate": "Success Rate",
+    "stuffrate": "Stuff Rate",
+    "powersuccess": "Power Success",
+    "lineyards": "Line Yards",
+    "lineyardstotal": "Line Yards",
+    "openfieldyards": "Open Field Yards",
+    "openfieldyardstotal": "Open Field Yards",
+    "secondlevelyards": "Second Level Yards",
+    "secondlevelyardstotal": "Second Level Yards",
+    "passingdowns": "Passing Downs",
+    "standarddowns": "Standard Downs",
+    "havocrate": "Havoc",
+    "dbhavocrate": "DB Havoc",
+    "frontsevenhavocrate": "Front Seven Havoc",
+    "ppa": "Predicted Points Added (PPA)",
+    "totalppa": "Predicted Points Added (PPA)",
+    "totalpassingppa": "Predicted Points Added (PPA)",
+    "totalrushingppa": "Predicted Points Added (PPA)",
+    "totalreceivingppa": "Predicted Points Added (PPA)",
+    "expectedpoints": "Expected Points (EP)",
+    "srs": "Simple Rating System (SRS)",
+    "usage": "Usage",
+    "passingusage": "Usage",
+    "rushingusage": "Usage",
+    "receivingusage": "Usage",
+    "homepostgamewinprobability": "Postgame Win Probability",
+    "awaypostgamewinprobability": "Postgame Win Probability"
+  },
+  "canon": {
+    "id": [
+      "Primary identifier assigned by CFBD for the entity this endpoint returns. Stable across calls; the natural join key.",
+      "high"
+    ],
+    "gameid": [
+      "CFBD game identifier. Joins to /games.id.",
+      "high"
+    ],
+    "teamid": [
+      "CFBD team identifier. Joins to /teams.id.",
+      "high"
+    ],
+    "hometeamid": [
+      "CFBD team id of the home team.",
+      "high"
+    ],
+    "awayteamid": [
+      "CFBD team id of the away team.",
+      "high"
+    ],
+    "athleteid": [
+      "CFBD athlete (player) identifier.",
+      "high"
+    ],
+    "playerid": [
+      "CFBD player identifier.",
+      "high"
+    ],
+    "driveid": [
+      "CFBD drive identifier. Joins to /drives.id.",
+      "high"
+    ],
+    "playid": [
+      "CFBD play identifier. Joins to /plays.id.",
+      "high"
+    ],
+    "venueid": [
+      "CFBD venue identifier. Joins to /venues.id.",
+      "high"
+    ],
+    "conferenceid": [
+      "CFBD conference identifier.",
+      "high"
+    ],
+    "matchupid": [
+      "Identifier for a playoff matchup slot.",
+      "medium"
+    ],
+    "collegeathleteid": [
+      "CFBD athlete id for the player's college career.",
+      "high"
+    ],
+    "nflathleteid": [
+      "NFL-side athlete id for the drafted player.",
+      "high"
+    ],
+    "collegeid": [
+      "CFBD team id of the player's college.",
+      "high"
+    ],
+    "nflteamid": [
+      "Identifier of the NFL team that made the pick.",
+      "high"
+    ],
+    "recruitids": [
+      "List of recruit identifiers making up this group.",
+      "medium"
+    ],
+    "filename": [
+      "Raw response file this record was loaded from. Added by the cfdb loader, not by CFBD.",
+      "high"
+    ],
+    "name": [
+      "Display name of the entity this endpoint returns.",
+      "high"
+    ],
+    "shortname": [
+      "Abbreviated display name.",
+      "high"
+    ],
+    "displayname": [
+      "Full display name intended for presentation.",
+      "high"
+    ],
+    "nickname": [
+      "Informal or secondary name.",
+      "medium"
+    ],
+    "school": [
+      "Institution name (e.g. 'Alabama'). CFBD's canonical team label in most endpoints.",
+      "high"
+    ],
+    "mascot": [
+      "Team mascot name (e.g. 'Crimson Tide').",
+      "high"
+    ],
+    "abbreviation": [
+      "Short code for the entity.",
+      "high"
+    ],
+    "alternatenames": [
+      "Other names CFBD recognises for this team; useful for matching external sources.",
+      "high"
+    ],
+    "firstname": [
+      "Player's given name.",
+      "high"
+    ],
+    "lastname": [
+      "Player's family name.",
+      "high"
+    ],
+    "athletename": [
+      "Player's full name as CFBD records it.",
+      "high"
+    ],
+    "player": [
+      "Player's name.",
+      "high"
+    ],
+    "team": [
+      "Team name. In most CFBD endpoints this is the school name string, NOT the numeric id.",
+      "high"
+    ],
+    "opponent": [
+      "Opposing team name.",
+      "high"
+    ],
+    "hometeam": [
+      "Name of the home team.",
+      "high"
+    ],
+    "awayteam": [
+      "Name of the away team.",
+      "high"
+    ],
+    "collegeteam": [
+      "Name of the player's college team.",
+      "high"
+    ],
+    "nflteam": [
+      "Name of the NFL team that made the pick.",
+      "high"
+    ],
+    "outlet": [
+      "Broadcaster or media outlet carrying the game.",
+      "high"
+    ],
+    "text": [
+      "Free-text description.",
+      "medium"
+    ],
+    "playtext": [
+      "Narrative description of the play as CFBD records it.",
+      "high"
+    ],
+    "notes": [
+      "Free-text notes CFBD attaches to the game (e.g. bowl or event name).",
+      "medium"
+    ],
+    "highlights": [
+      "URL or reference to game highlights.",
+      "medium"
+    ],
+    "twitter": [
+      "Team's Twitter/X handle.",
+      "high"
+    ],
+    "logo": [
+      "URL of a team logo image.",
+      "high"
+    ],
+    "logos": [
+      "List of team logo image URLs. Typically a light and a dark variant.",
+      "high"
+    ],
+    "color": [
+      "Team primary colour as a hex string.",
+      "high"
+    ],
+    "alternatecolor": [
+      "Team secondary colour as a hex string.",
+      "high"
+    ],
+    "season": [
+      "Season year. CFBD labels a season by the calendar year it starts in.",
+      "high"
+    ],
+    "year": [
+      "Season year. Same convention as `season`.",
+      "high"
+    ],
+    "week": [
+      "Week number within the season.",
+      "high"
+    ],
+    "seasontype": [
+      "Segment of the season (regular, postseason, etc.). See the Vocabularies sheet.",
+      "high"
+    ],
+    "startdate": [
+      "Scheduled start, ISO 8601. Verify timezone handling before deriving a local calendar date.",
+      "medium"
+    ],
+    "enddate": [
+      "End timestamp, ISO 8601.",
+      "medium"
+    ],
+    "starttime": [
+      "Scheduled start time.",
+      "medium"
+    ],
+    "starttimetbd": [
+      "True when the kickoff time has not been announced; the date portion of startDate is then a placeholder.",
+      "high"
+    ],
+    "isstarttimetbd": [
+      "True when the kickoff time has not been announced.",
+      "high"
+    ],
+    "wallclock": [
+      "Real-world timestamp at which the play occurred.",
+      "high"
+    ],
+    "firstgamestart": [
+      "Start time of the first game in this week.",
+      "high"
+    ],
+    "lastgamestart": [
+      "Start time of the last game in this week.",
+      "high"
+    ],
+    "effectiveyear": [
+      "Season in which the change takes effect.",
+      "high"
+    ],
+    "effectivestart": [
+      "Date/season from which this record applies.",
+      "high"
+    ],
+    "effectiveend": [
+      "Date/season after which this record no longer applies.",
+      "high"
+    ],
+    "startyear": [
+      "First season of the tenure or span.",
+      "high"
+    ],
+    "endyear": [
+      "Last season of the tenure or span. Null usually means ongoing — confirm against the data.",
+      "medium"
+    ],
+    "hiredate": [
+      "Date the coach was hired.",
+      "high"
+    ],
+    "transferdate": [
+      "Date the player entered the transfer portal.",
+      "high"
+    ],
+    "throughweek": [
+      "Data in this record reflects results through this week.",
+      "high"
+    ],
+    "throughseasontype": [
+      "Data in this record reflects results through this season segment.",
+      "high"
+    ],
+    "seasons": [
+      "Per-season detail nested under this record.",
+      "high"
+    ],
+    "conference": [
+      "Conference name. A text label, not a foreign key — CFBD has no conference id on most endpoints.",
+      "high"
+    ],
+    "conferenceabbreviation": [
+      "Short code for the conference.",
+      "high"
+    ],
+    "conferencedivision": [
+      "Division within the conference, where one exists.",
+      "high"
+    ],
+    "homeconference": [
+      "Conference of the home team.",
+      "high"
+    ],
+    "awayconference": [
+      "Conference of the away team.",
+      "high"
+    ],
+    "offenseconference": [
+      "Conference of the team on offense.",
+      "high"
+    ],
+    "defenseconference": [
+      "Conference of the team on defense.",
+      "high"
+    ],
+    "opponentconference": [
+      "Conference of the opposing team.",
+      "high"
+    ],
+    "collegeconference": [
+      "Conference of the player's college team.",
+      "high"
+    ],
+    "classification": [
+      "Division level (fbs, fcs, ii, iii). NOTE: the conference-level vocabulary adds 'ii/iii'; see Vocabularies.",
+      "high"
+    ],
+    "homeclassification": [
+      "Division level of the home team.",
+      "high"
+    ],
+    "awayclassification": [
+      "Division level of the away team.",
+      "high"
+    ],
+    "fromclassification": [
+      "Division level before the change.",
+      "high"
+    ],
+    "toclassification": [
+      "Division level after the change.",
+      "high"
+    ],
+    "division": [
+      "Division grouping.",
+      "medium"
+    ],
+    "category": [
+      "Statistic category grouping.",
+      "medium"
+    ],
+    "stattype": [
+      "Statistic type within a category.",
+      "medium"
+    ],
+    "statname": [
+      "Name of the statistic in this row. These endpoints are EAV-shaped: one row per statistic, not one column per statistic.",
+      "high"
+    ],
+    "statvalue": [
+      "Value of the statistic named in statName. Often delivered as a string even when numeric.",
+      "high"
+    ],
+    "stat": [
+      "Statistic value.",
+      "medium"
+    ],
+    "positiongroup": [
+      "Grouping of positions (e.g. offensive line).",
+      "high"
+    ],
+    "position": [
+      "Player position abbreviation.",
+      "high"
+    ],
+    "recruittype": [
+      "Recruit's origin classification (HighSchool, JUCO, PrepSchool).",
+      "high"
+    ],
+    "mediatype": [
+      "Broadcast medium (tv, radio, web, ppv, mobile).",
+      "high"
+    ],
+    "playtype": [
+      "Category of play (rush, pass, punt, etc.).",
+      "high"
+    ],
+    "poll": [
+      "Name of the ranking poll.",
+      "high"
+    ],
+    "provider": [
+      "Sportsbook that supplied the line. Values are not normalised by CFBD - cfdb has seen both 'DraftKings' and 'Draft Kings'.",
+      "high"
+    ],
+    "status": [
+      "Current state of the entity.",
+      "medium"
+    ],
+    "code": [
+      "Coded value; see the paired label field.",
+      "medium"
+    ],
+    "origin": [
+      "Team the player transferred from.",
+      "high"
+    ],
+    "destination": [
+      "Team the player transferred to.",
+      "high"
+    ],
+    "committedto": [
+      "Team the recruit committed to.",
+      "high"
+    ],
+    "eligibility": [
+      "Transfer eligibility status.",
+      "high"
+    ],
+    "competition": [
+      "Playoff competition this record belongs to.",
+      "high"
+    ],
+    "format": [
+      "Playoff format descriptor.",
+      "medium"
+    ],
+    "round": [
+      "Playoff round.",
+      "high"
+    ],
+    "roundname": [
+      "Display name of the playoff round.",
+      "high"
+    ],
+    "roundorder": [
+      "Sort order of the round within the bracket.",
+      "high"
+    ],
+    "bowlname": [
+      "Name of the bowl hosting this game.",
+      "high"
+    ],
+    "bracketslot": [
+      "Position in the playoff bracket.",
+      "high"
+    ],
+    "matchuporder": [
+      "Sort order of the matchup within its round.",
+      "high"
+    ],
+    "bidtype": [
+      "How the team earned its playoff bid (automatic or at_large).",
+      "high"
+    ],
+    "qualificationreason": [
+      "Explanation of how the team qualified.",
+      "high"
+    ],
+    "qualifyingconference": [
+      "Conference through which the team qualified.",
+      "high"
+    ],
+    "outcome": [
+      "Result state (active, eliminated, champion).",
+      "high"
+    ],
+    "eliminatedround": [
+      "Round in which the team was eliminated.",
+      "high"
+    ],
+    "modelversion": [
+      "Version of the CFBD model that produced these values. Changes here can shift figures without any underlying data change.",
+      "high"
+    ],
+    "venue": [
+      "Venue name.",
+      "high"
+    ],
+    "city": [
+      "City.",
+      "high"
+    ],
+    "state": [
+      "State or province.",
+      "high"
+    ],
+    "stateprovince": [
+      "State or province.",
+      "high"
+    ],
+    "country": [
+      "Country.",
+      "high"
+    ],
+    "countrycode": [
+      "ISO country code.",
+      "high"
+    ],
+    "zip": [
+      "Postal code.",
+      "high"
+    ],
+    "timezone": [
+      "IANA timezone of the venue. Needed to convert startDate to a correct local date.",
+      "high"
+    ],
+    "elevation": [
+      "Venue elevation. Units not stated in the spec — verify before use.",
+      "medium"
+    ],
+    "latitude": [
+      "Latitude in decimal degrees.",
+      "high"
+    ],
+    "longitude": [
+      "Longitude in decimal degrees.",
+      "high"
+    ],
+    "capacity": [
+      "Seating capacity.",
+      "high"
+    ],
+    "constructionyear": [
+      "Year the venue was built.",
+      "high"
+    ],
+    "grass": [
+      "True when the playing surface is natural grass.",
+      "high"
+    ],
+    "dome": [
+      "True when the venue is a dome.",
+      "high"
+    ],
+    "gameindoors": [
+      "True when the game was played indoors.",
+      "high"
+    ],
+    "location": [
+      "Location descriptor.",
+      "medium"
+    ],
+    "homecity": [
+      "City of the player's home town.",
+      "high"
+    ],
+    "homestate": [
+      "State of the player's home town.",
+      "high"
+    ],
+    "homecountry": [
+      "Country of the player's home town.",
+      "high"
+    ],
+    "homelatitude": [
+      "Latitude of the player's home town.",
+      "high"
+    ],
+    "homelongitude": [
+      "Longitude of the player's home town.",
+      "high"
+    ],
+    "homecountyfips": [
+      "US FIPS code of the player's home county.",
+      "high"
+    ],
+    "countyfips": [
+      "US FIPS county code.",
+      "high"
+    ],
+    "fipscode": [
+      "US FIPS code.",
+      "high"
+    ],
+    "neutralsite": [
+      "True when the game was played at neither team's home venue.",
+      "high"
+    ],
+    "homeaway": [
+      "Whether this row's team was home or away.",
+      "high"
+    ],
+    "ishomeoffense": [
+      "True when the home team had possession on this drive.",
+      "high"
+    ],
+    "points": [
+      "Points scored.",
+      "high"
+    ],
+    "homepoints": [
+      "Final points scored by the home team. Null while the game is unplayed.",
+      "high"
+    ],
+    "awaypoints": [
+      "Final points scored by the away team. Null while the game is unplayed.",
+      "high"
+    ],
+    "homescore": [
+      "Home team score.",
+      "high"
+    ],
+    "awayscore": [
+      "Away team score.",
+      "high"
+    ],
+    "teamscore": [
+      "Score of this row's team.",
+      "high"
+    ],
+    "opponentscore": [
+      "Score of the opposing team.",
+      "high"
+    ],
+    "offensescore": [
+      "Score of the team on offense.",
+      "high"
+    ],
+    "defensescore": [
+      "Score of the team on defense.",
+      "high"
+    ],
+    "startoffensescore": [
+      "Offence's score at the start of the drive.",
+      "high"
+    ],
+    "startdefensescore": [
+      "Defence's score at the start of the drive.",
+      "high"
+    ],
+    "endoffensescore": [
+      "Offence's score at the end of the drive.",
+      "high"
+    ],
+    "enddefensescore": [
+      "Defence's score at the end of the drive.",
+      "high"
+    ],
+    "homelinescores": [
+      "Home team points by period, in order.",
+      "high"
+    ],
+    "awaylinescores": [
+      "Away team points by period, in order.",
+      "high"
+    ],
+    "pointsfor": [
+      "Points scored by the team across the span.",
+      "high"
+    ],
+    "pointsagainst": [
+      "Points conceded by the team across the span.",
+      "high"
+    ],
+    "averagepointdifferential": [
+      "Mean points scored minus points conceded per game.",
+      "high"
+    ],
+    "completed": [
+      "True when the game has finished.",
+      "high"
+    ],
+    "conferencegame": [
+      "True when both teams are in the same conference.",
+      "high"
+    ],
+    "attendance": [
+      "Reported attendance. Frequently null.",
+      "high"
+    ],
+    "wins": [
+      "Number of wins.",
+      "high"
+    ],
+    "losses": [
+      "Number of losses.",
+      "high"
+    ],
+    "ties": [
+      "Number of ties.",
+      "high"
+    ],
+    "games": [
+      "Number of games.",
+      "high"
+    ],
+    "winpercentage": [
+      "Wins divided by games. Confirm whether ties are counted as half a win.",
+      "medium"
+    ],
+    "expectedwins": [
+      "Wins the team would be expected to have, given its underlying performance.",
+      "medium"
+    ],
+    "secondorderwins": [
+      "Wins implied by scoring opportunities rather than actual results.",
+      "medium"
+    ],
+    "conferencechampion": [
+      "True when the team won its conference.",
+      "high"
+    ],
+    "firstroundbye": [
+      "True when the team received a first-round bye.",
+      "high"
+    ],
+    "appeared": [
+      "True when the entity appeared in this context.",
+      "medium"
+    ],
+    "active": [
+      "True when the record is currently in force.",
+      "high"
+    ],
+    "isinterim": [
+      "True when the coach held the role on an interim basis.",
+      "high"
+    ],
+    "isfinal": [
+      "True when this is the final poll of the season.",
+      "high"
+    ],
+    "period": [
+      "Quarter (or overtime period) number.",
+      "high"
+    ],
+    "startperiod": [
+      "Quarter in which the drive began.",
+      "high"
+    ],
+    "endperiod": [
+      "Quarter in which the drive ended.",
+      "high"
+    ],
+    "down": [
+      "Down number (1-4).",
+      "high"
+    ],
+    "distance": [
+      "Yards needed for a first down.",
+      "high"
+    ],
+    "yardstogoal": [
+      "Yards from the opponent's goal line.",
+      "high"
+    ],
+    "startyardstogoal": [
+      "Yards from the opponent's goal line at the start of the drive.",
+      "high"
+    ],
+    "endyardstogoal": [
+      "Yards from the opponent's goal line at the end of the drive.",
+      "high"
+    ],
+    "yardline": [
+      "Yard line marker for the play.",
+      "high"
+    ],
+    "startyardline": [
+      "Yard line where the drive began.",
+      "high"
+    ],
+    "endyardline": [
+      "Yard line where the drive ended.",
+      "high"
+    ],
+    "yardsgained": [
+      "Yards gained on the play. Negative for a loss.",
+      "high"
+    ],
+    "yards": [
+      "Yards.",
+      "medium"
+    ],
+    "highlightyards": [
+      "Yards gained beyond what the offensive line is credited with; the ball-carrier's contribution.",
+      "medium"
+    ],
+    "driveresult": [
+      "How the drive ended (punt, touchdown, turnover, etc.).",
+      "high"
+    ],
+    "drivenumber": [
+      "Sequence number of the drive within the game.",
+      "high"
+    ],
+    "playnumber": [
+      "Sequence number of the play within the game or drive.",
+      "high"
+    ],
+    "scoring": [
+      "True when the play resulted in points.",
+      "high"
+    ],
+    "offensetimeouts": [
+      "Timeouts remaining for the team on offence.",
+      "high"
+    ],
+    "defensetimeouts": [
+      "Timeouts remaining for the team on defence.",
+      "high"
+    ],
+    "minutes": [
+      "Minutes component of a clock or duration.",
+      "high"
+    ],
+    "seconds": [
+      "Seconds component of a clock or duration.",
+      "high"
+    ],
+    "plays": [
+      "Number of plays.",
+      "high"
+    ],
+    "totalplays": [
+      "Total plays in the denominator of the rate fields alongside it.",
+      "high"
+    ],
+    "offenseplays": [
+      "Number of offensive plays.",
+      "high"
+    ],
+    "defenseplays": [
+      "Number of defensive plays.",
+      "high"
+    ],
+    "drives": [
+      "Number of drives.",
+      "high"
+    ],
+    "attempts": [
+      "Number of attempts.",
+      "medium"
+    ],
+    "successes": [
+      "Count of successful plays, per the Success Rate definition.",
+      "high"
+    ],
+    "success": [
+      "Whether the play met the Success Rate criteria.",
+      "high"
+    ],
+    "averagestart": [
+      "Average starting field position.",
+      "medium"
+    ],
+    "rating": [
+      "Rating value produced by the model named by this endpoint. Scale differs per model — do not compare across endpoints.",
+      "medium"
+    ],
+    "overall": [
+      "Composite of the offensive and defensive components in this rating.",
+      "medium"
+    ],
+    "offense": [
+      "Offensive component of this rating or metric.",
+      "medium"
+    ],
+    "defense": [
+      "Defensive component of this rating or metric.",
+      "medium"
+    ],
+    "specialteams": [
+      "Special-teams component of this rating.",
+      "medium"
+    ],
+    "elo": [
+      "Elo rating. A relative strength score updated after each game.",
+      "medium"
+    ],
+    "homepregameelo": [
+      "Home team's Elo rating before the game.",
+      "high"
+    ],
+    "homepostgameelo": [
+      "Home team's Elo rating after the game.",
+      "high"
+    ],
+    "awaypregameelo": [
+      "Away team's Elo rating before the game.",
+      "high"
+    ],
+    "awaypostgameelo": [
+      "Away team's Elo rating after the game.",
+      "high"
+    ],
+    "fpi": [
+      "Football Power Index rating.",
+      "medium"
+    ],
+    "spoverall": [
+      "SP+ overall rating.",
+      "medium"
+    ],
+    "spoffense": [
+      "SP+ offensive rating.",
+      "medium"
+    ],
+    "spdefense": [
+      "SP+ defensive rating.",
+      "medium"
+    ],
+    "spspecialteams": [
+      "SP+ special-teams rating.",
+      "medium"
+    ],
+    "gamecontrol": [
+      "Measure of how much of the game the team spent in control.",
+      "low"
+    ],
+    "strengthofrecord": [
+      "Difficulty of achieving this team's record.",
+      "medium"
+    ],
+    "strengthofschedule": [
+      "Difficulty of the schedule played.",
+      "medium"
+    ],
+    "sos": [
+      "Strength of schedule.",
+      "medium"
+    ],
+    "remainingstrengthofschedule": [
+      "Difficulty of the schedule still to be played.",
+      "medium"
+    ],
+    "averagewinprobability": [
+      "Mean win probability across the span.",
+      "medium"
+    ],
+    "homewinprobability": [
+      "Probability the home team wins, at this point in the game.",
+      "high"
+    ],
+    "wepa": [
+      "Opponent-adjusted EPA (weighted EPA). CFBD's adjusted-metrics family.",
+      "medium"
+    ],
+    "paar": [
+      "Points above average replacement.",
+      "low"
+    ],
+    "pace": [
+      "Tempo measure — plays or drives per unit of game time.",
+      "medium"
+    ],
+    "runrate": [
+      "Share of plays that were runs.",
+      "medium"
+    ],
+    "percentppa": [
+      "This player's share of the team's total PPA.",
+      "high"
+    ],
+    "percentpassingppa": [
+      "This player's share of the team's passing PPA.",
+      "high"
+    ],
+    "percentrushingppa": [
+      "This player's share of the team's rushing PPA.",
+      "high"
+    ],
+    "percentreceivingppa": [
+      "This player's share of the team's receiving PPA.",
+      "high"
+    ],
+    "talent": [
+      "Composite recruiting talent score for the roster.",
+      "medium"
+    ],
+    "stars": [
+      "Recruiting star rating.",
+      "high"
+    ],
+    "averagerating": [
+      "Mean recruit rating across the group.",
+      "high"
+    ],
+    "totalrating": [
+      "Summed recruit rating across the group.",
+      "high"
+    ],
+    "averagestars": [
+      "Mean star rating across the group.",
+      "high"
+    ],
+    "commits": [
+      "Number of commitments.",
+      "high"
+    ],
+    "rank": [
+      "Rank position. Lower is better.",
+      "high"
+    ],
+    "ranking": [
+      "Rank position.",
+      "high"
+    ],
+    "bestrank": [
+      "Best (lowest) rank achieved across the span.",
+      "high"
+    ],
+    "committeerank": [
+      "Rank assigned by the selection committee.",
+      "high"
+    ],
+    "preseasonrank": [
+      "Rank in the preseason poll.",
+      "high"
+    ],
+    "postseasonrank": [
+      "Rank in the final poll.",
+      "high"
+    ],
+    "weeksranked": [
+      "Number of weeks the team appeared in the poll.",
+      "high"
+    ],
+    "weekstopten": [
+      "Number of weeks the team was ranked in the top ten.",
+      "high"
+    ],
+    "firstplacevotes": [
+      "Number of first-place votes received.",
+      "high"
+    ],
+    "predraftranking": [
+      "Overall pre-draft ranking.",
+      "high"
+    ],
+    "predraftpositionranking": [
+      "Pre-draft ranking within the player's position.",
+      "high"
+    ],
+    "predraftgrade": [
+      "Pre-draft grade assigned to the player.",
+      "medium"
+    ],
+    "pick": [
+      "Overall selection number in the draft.",
+      "high"
+    ],
+    "totalpicks": [
+      "Total draft picks.",
+      "high"
+    ],
+    "firstroundpicks": [
+      "Number of first-round picks.",
+      "high"
+    ],
+    "membercount": [
+      "Number of member teams.",
+      "high"
+    ],
+    "teamcount": [
+      "Number of teams.",
+      "high"
+    ],
+    "order": [
+      "Sort order.",
+      "medium"
+    ],
+    "seed": [
+      "Seeding position.",
+      "high"
+    ],
+    "homeseed": [
+      "Home team's playoff seed.",
+      "high"
+    ],
+    "awayseed": [
+      "Away team's playoff seed.",
+      "high"
+    ],
+    "attributioncomplete": [
+      "True when every play in the span could be attributed to a player.",
+      "medium"
+    ],
+    "spread": [
+      "Point spread. Sign convention is provider-specific — verify which team a negative favours.",
+      "medium"
+    ],
+    "spreadopen": [
+      "Opening point spread.",
+      "high"
+    ],
+    "formattedspread": [
+      "Human-readable spread string, e.g. 'Alabama -7.5'.",
+      "high"
+    ],
+    "overunder": [
+      "Total points line.",
+      "high"
+    ],
+    "overunderopen": [
+      "Opening total points line.",
+      "high"
+    ],
+    "homemoneyline": [
+      "American-odds moneyline for the home team.",
+      "high"
+    ],
+    "awaymoneyline": [
+      "American-odds moneyline for the away team.",
+      "high"
+    ],
+    "atswins": [
+      "Wins against the spread.",
+      "high"
+    ],
+    "atslosses": [
+      "Losses against the spread.",
+      "high"
+    ],
+    "atspushes": [
+      "Pushes against the spread.",
+      "high"
+    ],
+    "avgcovermargin": [
+      "Average margin by which the team beat or missed the spread.",
+      "high"
+    ],
+    "temperature": [
+      "Air temperature. Units not stated in the spec — verify against the data.",
+      "medium"
+    ],
+    "dewpoint": [
+      "Dew point. Units not stated in the spec.",
+      "medium"
+    ],
+    "humidity": [
+      "Relative humidity.",
+      "high"
+    ],
+    "precipitation": [
+      "Precipitation amount.",
+      "medium"
+    ],
+    "snowfall": [
+      "Snowfall amount.",
+      "medium"
+    ],
+    "winddirection": [
+      "Wind direction in degrees.",
+      "high"
+    ],
+    "windspeed": [
+      "Wind speed. Units not stated in the spec.",
+      "medium"
+    ],
+    "pressure": [
+      "Barometric pressure.",
+      "medium"
+    ],
+    "weatherconditioncode": [
+      "Coded weather condition.",
+      "high"
+    ],
+    "weathercondition": [
+      "Text description of the weather condition.",
+      "high"
+    ],
+    "height": [
+      "Player height. Units not stated in the spec — commonly inches.",
+      "medium"
+    ],
+    "weight": [
+      "Player weight. Units not stated in the spec — commonly pounds.",
+      "medium"
+    ],
+    "jersey": [
+      "Jersey number.",
+      "high"
+    ],
+    "fromconferenceid": [
+      "Conference id before the change.",
+      "high"
+    ],
+    "fromconference": [
+      "Conference name before the change.",
+      "high"
+    ],
+    "fromconferenceabbreviation": [
+      "Conference abbreviation before the change.",
+      "high"
+    ],
+    "toconferenceid": [
+      "Conference id after the change.",
+      "high"
+    ],
+    "toconference": [
+      "Conference name after the change.",
+      "high"
+    ],
+    "toconferenceabbreviation": [
+      "Conference abbreviation after the change.",
+      "high"
+    ],
+    "firstdown": [
+      "Value restricted to first-down plays.",
+      "high"
+    ],
+    "seconddown": [
+      "Value restricted to second-down plays.",
+      "high"
+    ],
+    "thirddown": [
+      "Value restricted to third-down plays.",
+      "high"
+    ],
+    "rushing": [
+      "Value restricted to rushing plays.",
+      "high"
+    ],
+    "passing": [
+      "Value restricted to passing plays.",
+      "high"
+    ],
+    "rush": [
+      "Value restricted to rushing plays.",
+      "high"
+    ],
+    "pass": [
+      "Value restricted to passing plays.",
+      "high"
+    ],
+    "db": [
+      "Defensive-back component.",
+      "high"
+    ],
+    "frontseven": [
+      "Front-seven (defensive line and linebackers) component.",
+      "high"
+    ],
+    "total": [
+      "Total across the components alongside it.",
+      "high"
+    ],
+    "all": [
+      "Value across all plays, unsplit.",
+      "high"
+    ],
+    "rate": [
+      "Rate, expressed as a proportion of the relevant denominator.",
+      "medium"
+    ],
+    "home": [
+      "Value for the home team.",
+      "high"
+    ],
+    "away": [
+      "Value for the away team.",
+      "high"
+    ],
+    "totalhavocevents": [
+      "Count of havoc events, not the rate. Havoc itself is a percentage - see the Glossary sheet. Divide by totalPlays to reproduce havocRate.",
+      "high"
+    ],
+    "dbhavocevents": [
+      "Count of defensive-back havoc events, not the rate. See DB Havoc on the Glossary sheet.",
+      "high"
+    ],
+    "frontsevenhavocevents": [
+      "Count of front-seven havoc events, not the rate. See Front Seven Havoc on the Glossary sheet.",
+      "high"
+    ],
+    "explosivenessallowed": [
+      "Explosiveness conceded to opponents - the defensive side of the metric. The Glossary defines Explosiveness from the offence's perspective.",
+      "high"
+    ],
+    "totalopportunies": [
+      "Count of scoring opportunities (drives crossing the opponent's 40). CFBD's field name is misspelled in the API - 'Opportunies'. Preserve the typo when reading; rename downstream.",
+      "high"
+    ],
+    "pointsperopportunity": [
+      "Points scored per scoring opportunity. See Scoring Opportunities on the Glossary sheet.",
+      "high"
+    ],
+    "averagepredictedpoints": [
+      "Mean Predicted Points across the plays in scope. See Predicted Points (PP) on the Glossary sheet.",
+      "medium"
+    ],
+    "homeid": [
+      "CFBD team id of the home team. The same value as homeTeamId on endpoints that use that spelling.",
+      "high"
+    ],
+    "awayid": [
+      "CFBD team id of the away team. The same value as awayTeamId on endpoints that use that spelling.",
+      "high"
+    ],
+    "(scalar)": [
+      "This endpoint returns a bare array of strings rather than objects — there are no named fields.",
+      "high"
+    ]
+  },
+  "patterns": [
+    [
+      "rate",
+      "Rate — a proportion of the relevant denominator. Confirm the denominator against the endpoint's other fields.",
+      "medium"
+    ],
+    [
+      "pct",
+      "Percentage value.",
+      "medium"
+    ],
+    [
+      "total",
+      "Sum across the components alongside it.",
+      "medium"
+    ],
+    [
+      "average",
+      "Mean value across the span this record covers.",
+      "medium"
+    ],
+    [
+      "avg",
+      "Mean value across the span this record covers.",
+      "medium"
+    ],
+    [
+      "id",
+      "Identifier.",
+      "medium"
+    ],
+    [
+      "name",
+      "Name or label.",
+      "medium"
+    ],
+    [
+      "yards",
+      "Yardage figure.",
+      "medium"
+    ],
+    [
+      "ppa",
+      "Predicted Points Added, CFBD's model. See the Glossary sheet.",
+      "medium"
+    ],
+    [
+      "epa",
+      "Expected Points Added. See the Glossary sheet.",
+      "medium"
+    ],
+    [
+      "elo",
+      "Elo rating component.",
+      "medium"
+    ],
+    [
+      "eff",
+      "Efficiency measure.",
+      "low"
+    ]
+  ]
+}

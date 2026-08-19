@@ -45,6 +45,24 @@ CREATE TABLE IF NOT EXISTS raw.raw_records (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_rankings (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_stats_season (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_stats_season_advanced (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_dbt_test_result (
+    invocation_id text NOT NULL, unique_id text NOT NULL, generated_at timestamptz,
+    dbt_version text, status text, failures bigint, execution_time numeric,
+    message text, relation_name text,
+    PRIMARY KEY (invocation_id, unique_id)
+);
 CREATE TABLE IF NOT EXISTS raw.raw_info (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
@@ -67,6 +85,8 @@ CREATE TABLE IF NOT EXISTS raw.raw_manifest (
 TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_calendar, raw.raw_lines, raw.raw_games_teams, raw.raw_records,
          raw.raw_info, raw.raw_info_usage, raw.raw_warehouse_usage,
+         raw.raw_rankings, raw.raw_stats_season, raw.raw_stats_season_advanced,
+         raw.raw_dbt_test_result,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -345,3 +365,50 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 ('info',       '2026-01-01T00-00-10-001Z.json', '{}', 200, 1, '2026-01-01T00:00:20Z', now()),
 ('info',       '2026-01-01T00-00-10-002Z.json', '{}', 200, 1, '2026-01-01T00:00:21Z', now()),
 ('info_usage', '2026-01-01T00-00-11-001Z.json', '{"days": "31", "limit": "50"}', 200, 1, '2026-01-01T00:00:22Z', now());
+
+-- Rankings. Three levels of nesting collapse in stg_rankings, so the fixture carries all
+-- three: a week, holding two polls, each holding ranks. Two polls on purpose — the compare
+-- view's disagreement spread is zero with one, and a zero can hide an arithmetic error.
+INSERT INTO raw.raw_rankings (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-12-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"season": 2024, "week": 1, "seasonType": "regular", "polls": [
+      {"poll": "AP Top 25", "isFinal": false, "ranks": [
+        {"rank": 1, "teamId": 1, "school": "Alpha State", "conference": "Test Conference",
+         "firstPlaceVotes": 40, "points": 1500},
+        {"rank": 2, "teamId": 2, "school": "Beta Tech", "conference": "Test Conference",
+         "firstPlaceVotes": 2, "points": 1400}]},
+      {"poll": "Coaches Poll", "isFinal": false, "ranks": [
+        {"rank": 3, "teamId": 1, "school": "Alpha State", "conference": "Test Conference",
+         "firstPlaceVotes": 5, "points": 1300}]}
+    ]}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:23Z', now());
+
+-- Season stats. `statValue` is anyOf[string, number] in the OpenAPI spec, so the fixture
+-- carries one of each: the numeric cast must survive a string without failing the build.
+INSERT INTO raw.raw_stats_season (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-13-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "statName": "firstDowns", "statValue": 215},
+    {"season": 2024, "team": "Beta Tech", "conference": "Test Conference",
+     "statName": "firstDowns", "statValue": 180},
+    {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "statName": "possessionTime", "statValue": "31:12"}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:24Z', now());
+
+-- dbt's own test outcomes, including a failure: the System Overview page exists to surface
+-- failures, so a fixture of nothing but passes would exercise the wrong branch.
+INSERT INTO raw.raw_dbt_test_result
+  (invocation_id, unique_id, generated_at, dbt_version, status, failures, execution_time, message, relation_name) VALUES
+('fixture-invocation-0001', 'test.cfdb_dbt.unique_fct_game_game_sk.abc123',
+ '2026-01-01T00:00:25Z', '1.12.0', 'pass', 0, 0.05, NULL, '"cfdb"."marts"."fct_game"'),
+('fixture-invocation-0001', 'test.cfdb_dbt.not_null_fct_game_season.def456',
+ '2026-01-01T00:00:25Z', '1.12.0', 'fail', 3, 0.07, 'Got 3 results, configured to fail if != 0',
+ '"cfdb"."marts"."fct_game"');
+
+INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
+('rankings',     '2026-01-01T00-00-12-001Z.json', '{"year": "2024"}', 200, 1, '2026-01-01T00:00:23Z', now()),
+('stats/season', '2026-01-01T00-00-13-001Z.json', '{"year": "2024"}', 200, 3, '2026-01-01T00:00:24Z', now());
