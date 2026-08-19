@@ -20,7 +20,7 @@
 --
 -- Only the site's dependencies could be user-visible, and neither of these is: the site
 -- reads serving Postgres, so exhausting either costs freshness, never availability.
-{{ config(materialized='table') }}
+{{ config(materialized='table', tags=['postgres_only']) }}
 
 with cfbd as (
     select

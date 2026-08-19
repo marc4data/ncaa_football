@@ -36,10 +36,23 @@ from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator
 
 from src.alerting import failure_callback
+from src.dbt_artifacts import load_run_results
 from src.load_raw_to_postgres import load_endpoint
 from src.weekly import pregame_refresh, results_refresh
 
 DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
+
+# The production refresh builds an EXPLICIT selection, never the whole project.
+#
+# This is a structural guarantee, not a convention. `+tag:production` resolves to the three
+# marts the publish job ships plus their ancestors — six models — so a new model is excluded
+# by construction rather than by anyone remembering to exclude it. Half-finished work in the
+# tree cannot fail the run that keeps the live site fresh, which means new models can be
+# built at any time instead of being scheduled around the season.
+#
+# Tag the mart, not the staging models: `+` pulls ancestors in automatically, so the
+# selection stays correct when a mart gains an upstream dependency.
+PRODUCTION_SELECTOR = "--select +tag:production"
 
 default_args = {
     "owner": "cfdb",
@@ -92,14 +105,23 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
         # dbt, process reliability to Airflow.
         dbt_run = BashOperator(
             task_id="dbt_run",
-            bash_command=f"dbt run --project-dir {DBT_PROJECT_DIR}",
+            bash_command=f"dbt run --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
         )
         dbt_test = BashOperator(
             task_id="dbt_test",
-            bash_command=f"dbt test --project-dir {DBT_PROJECT_DIR}",
+            bash_command=f"dbt test --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
         )
 
-        fetch >> load >> dbt_run >> dbt_test
+        capture_dq = PythonOperator(
+            task_id="capture_test_results",
+            python_callable=lambda **_: load_run_results(),
+            # all_done, not all_success. A failing dbt test is exactly when this history is
+            # worth having, and the default rule would skip the capture in precisely that
+            # case — recording only the runs where nothing went wrong.
+            trigger_rule="all_done",
+        )
+
+        fetch >> load >> dbt_run >> dbt_test >> capture_dq
     return dag
 
 

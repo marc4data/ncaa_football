@@ -1,4 +1,4 @@
-{{ config(materialized='table') }}
+{{ config(materialized='table', tags=['production']) }}
 
 -- One row per team per season: win/loss record and scoring, from completed games only.
 --

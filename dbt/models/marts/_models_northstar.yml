@@ -1,0 +1,137 @@
+version: 2
+
+models:
+  - name: dim_poll
+    description: >
+      One row per poll CFBD publishes, derived from the data rather than hardcoded — the
+      poll list is not stable across eras, and a fixed list would silently drop a poll the
+      API added. `division` and `is_committee` are cfdb's classification, not CFBD's: the
+      API returns only a display name.
+    columns:
+      - name: poll_sk
+        description: Surrogate key over the poll name.
+        data_tests: [unique, not_null]
+      - name: poll_name
+        description: CFBD's display name for the poll, used as the natural key.
+        data_tests: [unique, not_null]
+      - name: division
+        description: >
+          fbs, fcs, ii or iii, inferred from the poll name. `iii` is matched before `ii`
+          because the latter is a substring of the former.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['fbs', 'fcs', 'ii', 'iii']
+      - name: is_committee
+        description: >
+          True for the CFP committee ranking, which is a selection decision rather than a
+          vote and is presented differently.
+      - name: display_order
+        description: Sort order for the page's poll tabs. Committee first, then AP, then coaches.
+
+  - name: fct_poll_rank
+    description: >
+      One row per poll x season x week x ranked team. Periodic snapshot — each week's poll
+      is a fresh observation and earlier weeks are never revised. Teams receiving votes
+      are kept with a null rank, because dropping them would make the points totals
+      disagree with the published poll.
+    columns:
+      - name: poll_rank_sk
+        description: Surrogate key over poll, season, season type, week and team.
+        data_tests: [unique, not_null]
+      - name: season
+        description: Season the poll belongs to.
+        data_tests: [not_null]
+      - name: week
+        description: Week within the season the poll was published for.
+      - name: rank
+        description: Position in the poll. Null when the team is only receiving votes.
+      - name: team_id
+        description: CFBD team id.
+        data_tests: [not_null]
+      - name: points
+        description: Total voting points awarded to the team.
+      - name: first_place_votes
+        description: Number of first-place votes received.
+      - name: is_receiving_votes
+        description: True when the team has points but no rank.
+
+  - name: fct_team_season_stat
+    description: >
+      One row per team x season x stat name, kept long rather than pivoted. CFBD serves 63
+      distinct stat names and adds to that list; a wide table would need a code change for
+      each new one and would silently omit anything unrecognised. The matrix's
+      `through_week` grain is deliberately absent — /stats/season is called without week
+      parameters, so every row is the full season to date and a constant would imply a
+      slice never requested.
+    columns:
+      - name: team_season_stat_sk
+        description: Surrogate key over season, school and stat name.
+        data_tests: [unique, not_null]
+      - name: season
+        description: Season the statistic covers.
+        data_tests: [not_null]
+      - name: team_id
+        description: >
+          CFBD team id, recovered from dim_team on (season, school) because /stats/season
+          carries a team name and no id.
+      - name: stat_name
+        description: CFBD's name for the statistic.
+        data_tests: [not_null]
+      - name: stat_value
+        description: >
+          Numeric value where the source permits it, null where it does not. `statValue` is
+          declared anyOf[string, number] in the OpenAPI spec.
+      - name: stat_value_raw
+        description: The value exactly as CFBD sent it, kept so a page can show source text.
+      - name: is_unresolved_team
+        description: >
+          True when the team name did not match dim_team. Kept rather than dropped: an
+          unresolvable name is a data-quality signal, not a row to discard.
+
+  - name: dim_field_metadata
+    description: >
+      One row per modelled column — the data dictionary, generated from the warehouse's own
+      catalogue rather than maintained by hand. Descriptions are authored once in
+      schema.yml and pushed into the database by persist_docs, so the dictionary cannot
+      drift from the models. Materialized as a view because it reads the catalogue and
+      declares no refs: as a table dbt builds it first and it captures the previous run's
+      comments.
+    columns:
+      - name: field_sk
+        description: Surrogate key over schema, table and column.
+        data_tests: [unique, not_null]
+      - name: layer
+        description: staging, dimensional or serving — the model layer the column belongs to.
+      - name: column_description
+        description: >
+          The description written in schema.yml. Null where the column is undocumented,
+          which is what is_documented reports.
+      - name: is_documented
+        description: True when the column carries a description.
+
+  - name: fct_dq_test_result
+    description: >
+      One row per dbt test per invocation. dbt overwrites run_results.json every run, so
+      the current state is visible and the trend is not — this table is the trend. A test
+      that fails once is a blip; a test that has failed for six runs is a broken pipeline
+      nobody has looked at, and the two must be distinguishable.
+    columns:
+      - name: dq_test_result_sk
+        description: Surrogate key over invocation and test.
+        data_tests: [unique, not_null]
+      - name: invocation_id
+        description: dbt's own id for the run, fresh per invocation.
+        data_tests: [not_null]
+      - name: test_name
+        description: Test name with dbt's hash suffix stripped, so identity survives config changes.
+      - name: status
+        description: dbt's outcome for the test — pass, fail, error or skipped.
+      - name: is_passing
+        description: True for pass or success, so the page does not have to know dbt's vocabulary.
+      - name: failures
+        description: Number of failing rows the test returned.
+      - name: recency_rank
+        description: >
+          1 for the most recent run of this test. The status board filters on it; the
+          history is what the rest of the table is for.

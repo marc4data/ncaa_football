@@ -113,3 +113,22 @@
 {% macro safe_int(expr) -%}
     cast(nullif(trim(cast({{ expr }} as {{ dbt.type_string() }})), '') as int)
 {%- endmacro %}
+
+
+{# --- numeric value from free text, or NULL ---------------------------------------------
+  CFBD's /stats/season declares `statValue` as anyOf[string, number], so a value that looks
+  numeric usually is and occasionally is not. Postgres tests with its `~` regex operator,
+  which Spark does not have at all; Spark's `try_cast` expresses the same intent natively
+  and more cheaply. Same question, no shared syntax — the case dispatch exists for.
+#}
+{% macro safe_numeric(col) -%}
+    {{ return(adapter.dispatch('safe_numeric', 'cfdb_dbt')(col)) }}
+{%- endmacro %}
+
+{% macro default__safe_numeric(col) -%}
+    case when {{ col }} ~ '^-?[0-9]+(\.[0-9]+)?$' then cast({{ col }} as numeric) end
+{%- endmacro %}
+
+{% macro databricks__safe_numeric(col) -%}
+    try_cast({{ col }} as decimal(38,10))
+{%- endmacro %}

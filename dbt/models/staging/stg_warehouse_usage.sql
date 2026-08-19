@@ -1,3 +1,8 @@
+{{ config(tags=['postgres_only']) }}
+-- Postgres-only. This model's source is cfdb's own telemetry, written directly to Postgres
+-- by src/*.py rather than landed as a CFBD response, so it has no Databricks equivalent and
+-- the analytics build excludes it by tag. Operational history belongs where the operations
+-- are; the analytics warehouse has no use for dbt test outcomes.
 -- One row per measured Databricks operation.
 --
 -- Not a CFBD endpoint: this is cfdb's own telemetry, landed by `src/warehouse_usage.py`

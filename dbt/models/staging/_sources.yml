@@ -61,6 +61,27 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_rankings
+        description: >
+          CFBD /rankings. Three levels of nesting — week, then poll, then rank — so one file
+          can hold several hundred rows and a team appears once per poll it is ranked in.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_stats_season
+        description: >
+          CFBD /stats/season. EAV by nature: one row per team per stat name, with the value
+          arriving as either a string or a number.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_stats_season_advanced
+        description: >
+          CFBD /stats/season/advanced. Deeply nested offense/defense splits rather than EAV,
+          so it is flattened by explicit path rather than pivoted.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_info
         description: >
           Point-in-time snapshots of CFBD call quota from /info. Every snapshot is kept
@@ -77,7 +98,23 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_dbt_test_result
+        # Written straight to Postgres by src/*.py, never landed as a CFBD response, so
+        # it has no Databricks equivalent and the analytics build excludes it by tag.
+        tags: ['postgres_only']
+        description: >
+          dbt's own test outcomes, one row per test per invocation, landed by
+          src/dbt_artifacts.py. dbt overwrites run_results.json every run, so the current
+          state is visible and the trend is not — this table is the trend.
+        columns:
+          - name: invocation_id
+            data_tests: [not_null]
+          - name: unique_id
+            data_tests: [not_null]
       - name: raw_warehouse_usage
+        # Written straight to Postgres by src/*.py, never landed as a CFBD response, so
+        # it has no Databricks equivalent and the analytics build excludes it by tag.
+        tags: ['postgres_only']
         description: >
           cfdb's own telemetry, not a CFBD endpoint. Databricks Free Edition documents no
           account-level API, so warehouse consumption cannot be read back and is measured

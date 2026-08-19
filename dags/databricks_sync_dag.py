@@ -80,9 +80,14 @@ def run_dbt(command: str, **context):
 
     `measured` wraps the whole invocation rather than each model — the quota is consumed by
     warehouse *uptime*, and on a 160-node build the cold start dominates.
+
+    `tag:postgres_only` is excluded because cfdb's own telemetry — dbt test outcomes and
+    warehouse timings — is written straight to Postgres and has no Databricks source table.
+    Operational history belongs where the operations are.
     """
     result = subprocess.run(
-        ["dbt", command, "--project-dir", DBT_PROJECT_DIR, "--target", "databricks"],
+        ["dbt", command, "--project-dir", DBT_PROJECT_DIR, "--target", "databricks",
+         "--exclude", "tag:postgres_only"],
         cwd="/opt/airflow/project", capture_output=True, text=True,
     )
     # dbt's own output is the diagnosis when this fails; printing it puts the failing model

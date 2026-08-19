@@ -12,6 +12,12 @@ clean-targets: ["target"]
 models:
   cfdb_dbt:
     +materialized: view
+    # Push schema.yml descriptions into the database as native comments. This is what makes
+    # dim_field_metadata possible without a second document: descriptions are authored once
+    # here, and the data dictionary is read back out of the warehouse's own catalogue.
+    +persist_docs:
+      relation: true
+      columns: true
     # Schema per layer (decision log 2026-08-17). Raw is written by the loaders, not dbt.
     staging:
       +schema: staging
