@@ -165,3 +165,48 @@
         else (-1.0 * {{ col }}) / ((-1.0 * {{ col }}) + 100.0)
     end
 {%- endmacro %}
+
+
+{# --- URL slug from a display name -------------------------------------------------------
+  AC-G.14: slugs are a dbt decision, never string manipulation in the app, because the app
+  must not own an identifier the database uses. `Texas A&M` -> `texas-am`.
+
+  Order matters. Ampersands and periods are removed rather than replaced with a separator,
+  so `Texas A&M` gives `texas-am` and not `texas-a-m`; everything else non-alphanumeric
+  becomes a hyphen, runs collapse, and leading/trailing hyphens are trimmed. Written the
+  same way in both dialects because the regex flavours agree on these classes.
+#}
+{% macro to_slug(col) -%}
+    {{ return(adapter.dispatch('to_slug', 'cfdb_dbt')(col)) }}
+{%- endmacro %}
+
+{% macro default__to_slug(col) -%}
+    trim(both '-' from
+      regexp_replace(
+        regexp_replace(lower(trim({{ col }})), '[&.'']', '', 'g'),
+        '[^a-z0-9]+', '-', 'g'))
+{%- endmacro %}
+
+{% macro databricks__to_slug(col) -%}
+    trim('-',
+      regexp_replace(
+        regexp_replace(lower(trim({{ col }})), '[&.\']', ''),
+        '[^a-z0-9]+', '-'))
+{%- endmacro %}
+
+
+{# --- UTC timestamp rendered in a display zone, keeping it a timestamp -------------------
+  AC-G.34: kickoff times are published Eastern, so the display zone is applied in dbt and
+  the app never converts. Distinct from to_local_date, which drops the time.
+#}
+{% macro to_local_timestamp(ts, tz='America/New_York') -%}
+    {{ return(adapter.dispatch('to_local_timestamp', 'cfdb_dbt')(ts, tz)) }}
+{%- endmacro %}
+
+{% macro default__to_local_timestamp(ts, tz) -%}
+    ({{ ts }} at time zone '{{ tz }}')
+{%- endmacro %}
+
+{% macro databricks__to_local_timestamp(ts, tz) -%}
+    from_utc_timestamp({{ ts }}, '{{ tz }}')
+{%- endmacro %}

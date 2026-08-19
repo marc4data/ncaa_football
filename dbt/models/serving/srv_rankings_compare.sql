@@ -35,5 +35,10 @@ select
              coalesce(committee_rank, ap_rank, coaches_rank))
       - least(coalesce(ap_rank, coaches_rank, committee_rank),
               coalesce(coaches_rank, ap_rank, committee_rank),
-              coalesce(committee_rank, ap_rank, coaches_rank)) as disagreement_spread
+              coalesce(committee_rank, ap_rank, coaches_rank)) as disagreement_spread,
+    ao_src.as_of_ts
 from ranked
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'rankings') ao_src

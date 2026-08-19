@@ -36,45 +36,45 @@ markets as (
     where p.home_cover_edge is not null
 )
 select
-    {{ surrogate_key(['game_id', 'model_name', 'model_version', 'split', 'market']) }}
+    {{ surrogate_key(['markets.game_id', 'markets.model_name', 'markets.model_version', 'markets.split', 'markets.market']) }}
         as edge_finder_sk,
-    game_id,
-    season,
-    season_type,
-    week,
-    model_name,
-    model_version,
-    model_family,
-    split,
-    prediction_ts,
-    home_team,
-    away_team,
-    home_conference,
-    away_conference,
-    market,
-    edge_unit,
-    edge_value,
-    abs(edge_value) as edge_magnitude,
-    is_cover_edge_from_export,
-    is_wp_edge_from_export,
-    devig_method,
-    confidence_bucket,
-    spread,
-    predicted_margin,
+    markets.game_id,
+    markets.season,
+    markets.season_type,
+    markets.week,
+    markets.model_name,
+    markets.model_version,
+    markets.model_family,
+    markets.split,
+    markets.prediction_ts,
+    markets.home_team,
+    markets.away_team,
+    markets.home_conference,
+    markets.away_conference,
+    markets.market,
+    markets.edge_unit,
+    markets.edge_value,
+    abs(markets.edge_value) as edge_magnitude,
+    markets.is_cover_edge_from_export,
+    markets.is_wp_edge_from_export,
+    markets.devig_method,
+    markets.confidence_bucket,
+    markets.spread,
+    markets.predicted_margin,
     -- Derived, explicitly named, and the only place a home-perspective sign exists.
-    -1 * predicted_margin as predicted_margin_home_perspective,
-    -1 * spread           as spread_home_perspective,
-    predicted_home_win_probability,
-    market_implied_home_win_probability,
-    predicted_home_points,
-    predicted_away_points,
-    predicted_total_points,
-    actual_margin,
-    actual_home_cover,
-    home_win_correct,
-    cover_correct,
-    is_out_of_sample_week,
-    training_week_floor,
+    -1 * markets.predicted_margin as predicted_margin_home_perspective,
+    -1 * markets.spread           as spread_home_perspective,
+    markets.predicted_home_win_probability,
+    markets.market_implied_home_win_probability,
+    markets.predicted_home_points,
+    markets.predicted_away_points,
+    markets.predicted_total_points,
+    markets.actual_margin,
+    markets.actual_home_cover,
+    markets.home_win_correct,
+    markets.cover_correct,
+    markets.is_out_of_sample_week,
+    markets.training_week_floor,
     -- The page must not present an extrapolated early-season edge as an actionable one.
     -- Precomputed rather than left to the app, so every consumer applies the same rule.
     case when is_out_of_sample_week then false else true end as is_default_actionable,
@@ -82,5 +82,18 @@ select
          then 'Before week ' || cast(training_week_floor as {{ dbt.type_string() }})
               || ' the model is extrapolating: the training set contains no regular-season '
               || 'game this early, because opponent-adjusted inputs need game history.'
-    end as out_of_sample_note
+    end as out_of_sample_note,
+    ao_src.as_of_ts,
+    mv_src.model_version as model_version_key,
+    mv_src.attribution,
+    markets.home_win_probability_edge
 from markets
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'prediction') ao_src
+-- AC-G.41: the licence-required attribution travels as DATA, so a page physically
+-- cannot draw the model's numbers without it.
+left join {{ ref('dim_model_version') }} mv_src
+    on mv_src.model_name = markets.model_name
+   and mv_src.model_version = markets.model_version

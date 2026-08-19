@@ -54,5 +54,17 @@ select
         when 'marts'   then 'dimensional'
         when 'serving' then 'serving'
     end as layer,
-    column_description is not null as is_documented
+    column_description is not null as is_documented,
+    -- AC-16.2: UNDOCUMENTED is a first-class rendered value, not an absence.
+    --
+    -- `is_documented` was a boolean and could not distinguish "we wrote this" from "CFBD
+    -- wrote this" from "nobody has". Only two of the four values are derivable today —
+    -- the catalogue records whether a description exists, not who authored it — so
+    -- `from_openapi` and `inferred` are reserved rather than guessed at. Inventing
+    -- provenance for a description would be exactly the dishonesty this page exists to
+    -- prevent.
+    case
+        when column_description is null then 'UNDOCUMENTED'
+        else 'authored'
+    end as description_status
 from catalog

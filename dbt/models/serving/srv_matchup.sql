@@ -31,37 +31,69 @@ latest_market as (
     ) r where recency = 1
 ),
 latest_prediction as (
-    select game_id, model_name, model_family, predicted_margin, predicted_total_points,
+    select game_id, model_name, model_version, model_family, predicted_margin, predicted_total_points,
            predicted_home_points, predicted_away_points, predicted_home_win_probability,
            home_cover_edge, home_win_probability_edge, confidence_bucket,
            is_out_of_sample_week
     from (
         select *, row_number() over (partition by game_id
-                                     order by prediction_ts desc, model_version desc) as recency
+                                     order by case when predicted_margin is not null then 0 else 1 end,
+                                                prediction_ts desc, model_version desc) as recency
         from {{ ref('fct_prediction') }}
     ) r where recency = 1
 ),
 -- Head-to-head, computed from the game spine rather than a separate endpoint. Counted from
 -- the HOME team's perspective in the current game, which is the perspective the page shows.
 series as (
+    -- Head-to-head, from the game spine.
+    --
+    -- Written as a UNION of two equality joins rather than one join with an OR across both
+    -- team-pair orderings. The OR form is the obvious way to express it and is a trap:
+    -- Postgres cannot hash-join a disjunction, so it degrades to a nested loop over 110,634
+    -- games against itself. That built acceptably until fct_game gained four columns, then
+    -- ran past 11 minutes without finishing. Same result, and it hash-joins.
     select
-        cur.game_id,
-        count(*)                                                          as series_games,
-        sum(case when prior.home_team_id = cur.home_team_id
+        game_id,
+        count(*)                                as series_games,
+        sum(home_team_won)                      as series_home_team_wins,
+        min(prior_season)                       as series_first_season,
+        max(prior_season)                       as series_last_season
+    from (
+        select
+            cur.game_id,
+            prior.season as prior_season,
+            case when prior.home_team_id = cur.home_team_id
                       and prior.home_points > prior.away_points then 1
                  when prior.away_team_id = cur.home_team_id
                       and prior.away_points > prior.home_points then 1
-                 else 0 end)                                              as series_home_team_wins,
-        min(prior.season)                                                 as series_first_season,
-        max(prior.season)                                                 as series_last_season
-    from {{ ref('fct_game') }} cur
-    join {{ ref('fct_game') }} prior
-      on prior.is_completed
-     and prior.game_id <> cur.game_id
-     and ((prior.home_team_id = cur.home_team_id and prior.away_team_id = cur.away_team_id)
-       or (prior.home_team_id = cur.away_team_id and prior.away_team_id = cur.home_team_id))
-    group by cur.game_id
+                 else 0 end as home_team_won
+        from {{ ref('fct_game') }} cur
+        join {{ ref('fct_game') }} prior
+          on prior.home_team_id = cur.home_team_id
+         and prior.away_team_id = cur.away_team_id
+         and prior.game_id <> cur.game_id
+        where prior.is_completed
+
+        union all
+
+        select
+            cur.game_id,
+            prior.season,
+            case when prior.home_team_id = cur.home_team_id
+                      and prior.home_points > prior.away_points then 1
+                 when prior.away_team_id = cur.home_team_id
+                      and prior.away_points > prior.home_points then 1
+                 else 0 end
+        from {{ ref('fct_game') }} cur
+        join {{ ref('fct_game') }} prior
+          on prior.home_team_id = cur.away_team_id
+         and prior.away_team_id = cur.home_team_id
+         and prior.game_id <> cur.game_id
+        where prior.is_completed
+    ) meetings
+    group by game_id
 )
+
 select
     g.game_sk, g.game_id,
     g.season, g.season_type, g.week, g.week_sk,
@@ -95,7 +127,16 @@ select
 
     s.series_games, s.series_home_team_wins,
     s.series_games - s.series_home_team_wins as series_away_team_wins,
-    s.series_first_season, s.series_last_season
+    s.series_first_season, s.series_last_season,
+    ao_src.as_of_ts,
+    mv_src.model_version as model_version_key,
+    mv_src.attribution,
+    {{ to_local_timestamp('g.start_date') }} as start_date_et,
+    g.venue as venue_display,
+    l.spread as spread_current,
+    l.snapshot_ts,
+    p.predicted_home_win_probability as home_win_probability,
+    g.away_points - g.home_points as actual_margin
 from {{ ref('fct_game') }} g
 left join {{ ref('dim_team') }} h on h.season = g.season and h.team_id = g.home_team_id
 left join {{ ref('dim_team') }} a on a.season = g.season and a.team_id = g.away_team_id
@@ -105,3 +146,12 @@ left join latest_line l on l.game_id = g.game_id
 left join latest_market m on m.game_id = g.game_id
 left join latest_prediction p on p.game_id = g.game_id
 left join series s on s.game_id = g.game_id
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao_src
+-- AC-G.41: the licence-required attribution travels as DATA, so a page physically
+-- cannot draw the model's numbers without it.
+left join {{ ref('dim_model_version') }} mv_src
+    on mv_src.model_name = p.model_name
+   and mv_src.model_version = p.model_version

@@ -36,8 +36,13 @@ select
     g.first_downs, g.total_yards, g.rushing_yards, g.passing_yards,
     g.turnovers, g.third_down_conversions, g.third_down_attempts, g.possession_seconds,
     g.has_box_score,
-    t.color_on_light, t.color_on_dark, t.logo_source_url
+    t.color_on_light, t.color_on_dark, t.logo_source_url,
+    ao_src.as_of_ts
 from {{ ref('fct_game_team') }} g
 join {{ ref('fct_game') }} f on f.game_id = g.game_id
 left join {{ ref('dim_team') }} t on t.season = g.season and t.team_id = g.team_id
 left join {{ ref('dim_team') }} o on o.season = g.season and o.team_id = g.opponent_team_id
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao_src
