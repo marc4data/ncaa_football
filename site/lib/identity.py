@@ -1,0 +1,56 @@
+"""Team identity: chrome, never encoding (§0.6, AC-G.24 to AC-G.29).
+
+Two hard rules, both easy to break under deadline pressure and both the difference between
+a data site and a misleading one:
+
+  1. Colour identifies a team; it never carries a value. A bar whose fill is a team colour
+     invites the reader to compare colours, which mean nothing.
+  2. Contrast is computed in dbt, never here. dim_team ships color_on_light and
+     color_on_dark already solved for WCAG; the app reads them.
+"""
+from typing import Optional
+
+
+FALLBACK = "#6b7280"
+
+
+def text_on(row, dark_theme: bool = False) -> str:
+    """The contrast-safe text colour for this team's own colour.
+
+    AC-G.26. There is deliberately no contrast maths in this module — if a colour is
+    missing, the neutral fallback is used rather than something computed here.
+    """
+    if row is None:
+        return FALLBACK
+    key = "color_on_dark" if dark_theme else "color_on_light"
+    value = row.get(key) if hasattr(row, "get") else None
+    return value or FALLBACK
+
+
+def accent_style(row, dark_theme: bool = False) -> str:
+    """A left accent rule — the only place a team colour is allowed to appear (AC-G.25)."""
+    return f"border-left:4px solid {text_on(row, dark_theme)};padding-left:.6rem"
+
+
+def logo_or_monogram(logo_url: Optional[str], display_name: str,
+                     size_px: int = 28, color: str = FALLBACK) -> str:
+    """A logo, or a monogram at the IDENTICAL footprint (AC-G.28).
+
+    Same box either way, so a missing logo does not shift the layout, and no broken-image
+    glyph is ever rendered. Logos come from our own cache; nothing is hotlinked (AC-G.27).
+    """
+    initials = "".join(part[0] for part in str(display_name).split()[:2]).upper() or "?"
+    if logo_url:
+        return (f"<img class='cfdb-logo' src='{logo_url}' alt='{display_name}' "
+                f"style='width:{size_px}px;height:{size_px}px'>")
+    return (f"<span class='cfdb-monogram' aria-label='{display_name}' "
+            f"style='width:{size_px}px;height:{size_px}px;line-height:{size_px}px;"
+            f"background:{color}'>{initials}</span>")
+
+
+def color_source_hint(row) -> str:
+    """AC-7.2: a defaulted colour must be identifiable, or it becomes invisible debt."""
+    source = row.get("color_source") if hasattr(row, "get") else None
+    if not source or source == "brand":
+        return ""
+    return f"<span class='cfdb-hint' title='colour {source} rather than sourced'>◦</span>"
