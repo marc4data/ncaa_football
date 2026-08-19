@@ -61,12 +61,28 @@ x-airflow-common: &airflow-common
     ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
     ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
   volumes:
-    - ./dags:/opt/airflow/dags
-    - ./src:/opt/airflow/project/src
-    - ./data:/opt/airflow/project/data
-    - ./dbt:/opt/airflow/project/dbt
+    # CODE comes from ../cfdb_deploy, a git worktree PINNED TO MAIN — never the working tree.
+    #
+    # Airflow reads these paths live, so while they pointed at the development tree a
+    # `git checkout` WAS a production deployment. That caused two incidents: the live lines
+    # schedule silently reverting to @daily, and a branch predating the cadence-gate PR
+    # removing config/lines_cadence.json out from under a running DAG. "Merge quickly" is a
+    # habit, not a mitigation. This is the mitigation.
+    #
+    # It also closes the gap dbt selectors cannot: `--select +tag:production` protects the
+    # refresh from a model that FAILS, but dbt parses the whole project before selection
+    # applies, so a half-written model that does not COMPILE still breaks every invocation.
+    # A pinned tree means unfinished work is not visible to Airflow at all.
+    #
+    # Refresh after merging with:  scripts/deploy_main.sh
+    - ../cfdb_deploy/dags:/opt/airflow/dags
+    - ../cfdb_deploy/src:/opt/airflow/project/src
+    - ../cfdb_deploy/dbt:/opt/airflow/project/dbt
     # Cadence window for the lines DAG; read at task runtime, not at parse time.
-    - ./config:/opt/airflow/project/config
+    - ../cfdb_deploy/config:/opt/airflow/project/config
+    # STATE stays on the primary tree: data/ and logs/ are gitignored, so they do not exist
+    # in a worktree at all, and the 1.6 GB raw layer must not be duplicated.
+    - ./data:/opt/airflow/project/data
     - ./logs:/opt/airflow/logs
   working_dir: /opt/airflow/project
   depends_on:
