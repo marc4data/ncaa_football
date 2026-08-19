@@ -19,16 +19,31 @@ markets as (
         p.home_win_probability_edge as edge_value,
         'probability' as edge_unit
     from predictions p
+    -- NOT derived. home_win_probability_edge needs market_implied_home_win_probability,
+    -- which the notebooks also leave blank (0 of 3,402). It could be recovered from the
+    -- moneylines in fct_betting_line, but only by choosing a de-vig method — and that is a
+    -- modelling decision, not a load-time one. Raised in DECISIONS NEEDED rather than
+    -- guessed at, so this market stays empty until it is settled.
     where p.home_win_probability_edge is not null
 
     union all
 
+    -- The pack's notebooks leave home_cover_edge BLANK — the export contract permits
+    -- "leave unsupported fields blank", and none of the seven notebooks fills it. Measured
+    -- on the first real load: 0 of 3,402 rows populated, while spread (3,402) and
+    -- predicted_margin (1,134) both are.
+    --
+    -- So it is computed here from the contract's OWN definition, verbatim:
+    --     home_cover_edge = spread - predicted_margin
+    -- That is applying a documented formula to columns we have, not inventing a metric.
+    -- `is_edge_derived` records which rows came from the export and which from this
+    -- calculation, so the distinction is never invisible.
     select
         p.*, 'spread' as market,
-        p.home_cover_edge as edge_value,
+        coalesce(p.home_cover_edge, p.spread - p.predicted_margin) as edge_value,
         'points' as edge_unit
     from predictions p
-    where p.home_cover_edge is not null
+    where coalesce(p.home_cover_edge, p.spread - p.predicted_margin) is not null
 )
 select
     {{ surrogate_key(['game_id', 'model_name', 'model_version', 'split', 'market']) }}
@@ -50,6 +65,7 @@ select
     edge_unit,
     edge_value,
     abs(edge_value) as edge_magnitude,
+    home_cover_edge is not null as is_edge_from_export,
     confidence_bucket,
     spread,
     predicted_margin,

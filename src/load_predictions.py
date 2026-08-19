@@ -197,7 +197,10 @@ def load_directory(directory: Optional[Path] = None) -> Dict[str, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Load model prediction exports.")
-    parser.add_argument("--dir", type=Path, default=OUTPUT_DIR)
+    # Default None, not OUTPUT_DIR: a default here would look like an explicitly requested
+    # path and skip the candidate search entirely — which is exactly the bug that made this
+    # report "0 files" while six exports sat in cfdb_model_pack/model_outputs.
+    parser.add_argument("--dir", type=Path, default=None)
     args = parser.parse_args()
     summary = load_directory(args.dir)
     print(f"Loaded {summary['rows']} row(s) from {summary['files']} file(s)")
