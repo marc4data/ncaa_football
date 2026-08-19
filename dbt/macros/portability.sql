@@ -132,3 +132,18 @@
 {% macro databricks__safe_numeric(col) -%}
     try_cast({{ col }} as decimal(38,10))
 {%- endmacro %}
+
+
+{# --- Python-style boolean text to a real boolean ----------------------------------------
+  The pack's CSV exports are written by pandas, so booleans arrive as "True"/"False" and an
+  EMPTY string means not-applicable — a push on the spread, or a field the model does not
+  populate. Coercing blank to false would turn "no cover result" into "did not cover", which
+  is a wrong answer rather than a missing one, so blanks stay NULL.
+#}
+{% macro text_to_boolean(col) -%}
+    case
+        when {{ col }} is null or trim({{ col }}) = '' then null
+        when lower(trim({{ col }})) in ('true', 't', '1')  then true
+        when lower(trim({{ col }})) in ('false', 'f', '0') then false
+    end
+{%- endmacro %}

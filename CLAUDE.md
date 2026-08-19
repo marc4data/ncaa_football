@@ -36,6 +36,22 @@ Key commands
 - CI runs both on every PR to `main` (`.github/workflows/ci.yml`). The live CFBD
   smoke test is a manual `workflow_dispatch` job — unit tests never hit the API.
 
+Licensed material — NEVER COMMIT
+- `cfdb_model_pack/` is the CFB Model Training Pack (2026 Edition, Rad Sports Analytics).
+  Its LICENSE is **personal, non-commercial, original-purchaser-only** and explicitly
+  prohibits uploading the pack to a repository or sharing it with non-purchasers. The
+  notebooks, `training_data.csv` and guides ARE the licensed material; the `.zip` is only
+  the wrapper, so ignoring `*.zip` alone is not sufficient.
+- `cfdb_model_pack/`, `model_outputs/` and `*.zip` are gitignored. Verified clean: no pack
+  file has ever been tracked, committed on any branch, or left in the object store.
+- This repo is private today and going public has been discussed. **A later .gitignore does
+  not remove anything from git history** — if a pack file is ever committed, stop and raise
+  it rather than fixing it in passing.
+- Predictions derived from the pack must be attributed as cfdb's own, built on a licensed
+  training pack, and never presented as official CollegeFootballData.com predictions. The
+  wording lives in `dim_model_version.attribution` and `srv_model_performance.attribution`
+  so a page cannot render the numbers without it.
+
 Secrets
 - CFBD API key and other secrets must be stored in CI/GitHub Secrets or a local `.env` that is NOT committed.
 

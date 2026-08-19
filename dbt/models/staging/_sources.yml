@@ -98,6 +98,18 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_model_prediction
+        # Landed from model_outputs/*.csv, which is LICENSED-DERIVED and gitignored. The
+        # pack itself is personal, non-commercial and original-purchaser-only.
+        tags: ['postgres_only']
+        description: >
+          Model prediction exports, one row per CSV row, stored whole. Follows the pack's
+          42-column contract; the away-minus-home sign convention is preserved verbatim.
+        columns:
+          - name: source_file
+            data_tests: [not_null]
+          - name: model_version
+            data_tests: [not_null]
       - name: raw_dbt_test_result
         # Written straight to Postgres by src/*.py, never landed as a CFBD response, so
         # it has no Databricks equivalent and the analytics build excludes it by tag.
