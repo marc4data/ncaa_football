@@ -38,7 +38,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-OUTPUT_DIR = Path("model_outputs")
+# The notebooks use a RELATIVE output path — Path("model_outputs") — and a notebook runs
+# from its own directory, so exports land under cfdb_model_pack/ rather than the repo root.
+# Both are searched, in order, because getting this wrong looks exactly like "the notebooks
+# have not been run yet": a clean exit reporting zero files.
+CANDIDATE_DIRS = (
+    Path("model_outputs"),
+    Path("cfdb_model_pack") / "model_outputs",
+)
+OUTPUT_DIR = CANDIDATE_DIRS[0]
+
 
 # Named in the pack's schema doc under "Expected Local Files". Listed explicitly rather than
 # globbed so a stray CSV in the directory is not silently ingested as predictions.
@@ -68,6 +77,21 @@ CONTRACT_COLUMNS = (
     "home_cover_edge", "confidence_bucket", "margin_error", "absolute_margin_error",
     "home_win_correct", "cover_correct", "brier_score_component", "log_loss_component",
 )
+
+
+def resolve_directory(explicit: Optional[Path] = None) -> Optional[Path]:
+    """First candidate directory that actually holds an expected export."""
+    if explicit is not None:
+        return explicit if explicit.exists() else None
+    for candidate in CANDIDATE_DIRS:
+        if candidate.exists() and any((candidate / n).exists() for n in EXPECTED_FILES):
+            return candidate
+    # Nothing populated: report against the first that exists, so the message names a real path.
+    for candidate in CANDIDATE_DIRS:
+        if candidate.exists():
+            return candidate
+    return None
+
 
 DDL = """
 CREATE TABLE IF NOT EXISTS raw.raw_model_prediction (
@@ -145,10 +169,12 @@ def load_file(cursor, path: Path) -> int:
 def load_directory(directory: Optional[Path] = None) -> Dict[str, int]:
     from .load_raw_to_postgres import get_conn
 
-    directory = directory or OUTPUT_DIR
-    if not directory.exists():
-        print(f"No prediction directory at {directory} — run the pack's notebooks first.")
+    directory = resolve_directory(directory)
+    if directory is None:
+        searched = " or ".join(str(c) for c in CANDIDATE_DIRS)
+        print(f"No prediction directory found ({searched}) — run the pack's notebooks first.")
         return {"files": 0, "rows": 0}
+    print(f"Reading from {directory}")
 
     present = [directory / name for name in EXPECTED_FILES if (directory / name).exists()]
     if not present:

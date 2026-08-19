@@ -1,5 +1,9 @@
 __pycache__/
 .venv/
+# Separate environment for the Model Pack notebooks. Kept apart from .venv because the pack
+# pins pandas<3 while the pipeline runs pandas 3.x, and because torch/fastai have no business
+# in the environment that runs dbt and the DAGs.
+.venv-modelpack/
 .env
 .env.*
 venv/
