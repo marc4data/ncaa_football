@@ -136,7 +136,14 @@ select
     l.spread as spread_current,
     l.snapshot_ts,
     p.predicted_home_win_probability as home_win_probability,
-    g.away_points - g.home_points as actual_margin
+    g.away_points - g.home_points as actual_margin,
+    -- The model's own coverage floor, carried as DATA so the Empty state is not a
+    -- hardcoded "Week 5" string. CFBD does not ship current-season feature files until
+    -- week 5, because the models need several weeks of this year's results before they can
+    -- forecast this year's teams. Weeks 1-4 having no predictions is BY DESIGN and recurs
+    -- every season — which makes it EMPTY (the data does not exist yet, and here is why),
+    -- never Degraded (we have not built it).
+    {{ var('prediction_training_week_floor', 5) }} as training_week_floor
 from {{ ref('fct_game') }} g
 left join {{ ref('dim_team') }} h on h.season = g.season and h.team_id = g.home_team_id
 left join {{ ref('dim_team') }} a on a.season = g.season and a.team_id = g.away_team_id

@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS raw.raw_model_prediction (
     row_number int NOT NULL, payload jsonb NOT NULL, loaded_at timestamptz DEFAULT now(),
     PRIMARY KEY (source_file, model_version, row_number)
 );
+CREATE TABLE IF NOT EXISTS raw.raw_deploy_status (
+    observed_at timestamptz NOT NULL, deploy_sha text, main_sha text,
+    commits_behind int, severity text, detail text,
+    PRIMARY KEY (observed_at)
+);
 CREATE TABLE IF NOT EXISTS raw.raw_games_media (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
@@ -96,6 +101,7 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_info, raw.raw_info_usage, raw.raw_warehouse_usage,
          raw.raw_rankings, raw.raw_stats_season, raw.raw_stats_season_advanced,
          raw.raw_dbt_test_result, raw.raw_model_prediction, raw.raw_games_media,
+         raw.raw_deploy_status,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -485,3 +491,11 @@ INSERT INTO raw.raw_games_media (filename, content, status_code, params, fetched
 
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('games_media', '2026-01-01T00-00-14-001Z.json', '{"year": "2024"}', 200, 3, '2026-01-01T00:00:26Z', now());
+
+-- Deploy drift. A STALE row on purpose: the alarm exists because production silently ran
+-- old code for a day, so the fixture exercises the escalating branch rather than the
+-- reassuring one.
+INSERT INTO raw.raw_deploy_status
+  (observed_at, deploy_sha, main_sha, commits_behind, severity, detail) VALUES
+('2026-01-01T00:00:50Z', 'aaaa111', 'bbbb222', 7, 'error',
+ 'Deploy tree is 7 commits behind main (aaaa111 vs bbbb222). Airflow is running old code');

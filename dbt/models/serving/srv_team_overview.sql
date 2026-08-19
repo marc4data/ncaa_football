@@ -90,16 +90,25 @@ select
     cast(s.conference_wins as {{ dbt.type_string() }}) || '-'
         || cast(s.conference_losses as {{ dbt.type_string() }}) as conference_record_display,
 
-    coalesce(a.ats_wins, 0) as ats_wins,
-    coalesce(a.ats_losses, 0) as ats_losses,
-    coalesce(a.ats_pushes, 0) as ats_pushes,
-    cast(coalesce(a.ats_wins,0) as {{ dbt.type_string() }}) || '-'
-        || cast(coalesce(a.ats_losses,0) as {{ dbt.type_string() }}) || '-'
-        || cast(coalesce(a.ats_pushes,0) as {{ dbt.type_string() }}) as ats_record_display,
-    cast(coalesce(a.ats_fav_wins,0) as {{ dbt.type_string() }}) || '-'
-        || cast(coalesce(a.ats_fav_losses,0) as {{ dbt.type_string() }}) as ats_as_favorite_display,
-    cast(coalesce(a.ats_dog_wins,0) as {{ dbt.type_string() }}) || '-'
-        || cast(coalesce(a.ats_dog_losses,0) as {{ dbt.type_string() }}) as ats_as_underdog_display,
+    -- NOT coalesced to zero. A team with no graded games has no ATS record, and `0-0-0`
+    -- claims it went 0-0-0 — which is a measurement, not an absence.
+    --
+    -- The coalesce made every 2026 team read 0-0-0 while wins, losses and record_display in
+    -- the SAME ROW were correctly null: one table, two treatments of "hasn't happened yet".
+    -- Null lets the page render an em dash per AC-G.32, which is the honest rendering.
+    a.ats_wins,
+    a.ats_losses,
+    a.ats_pushes,
+    case when a.ats_wins is not null then
+        cast(a.ats_wins as {{ dbt.type_string() }}) || '-'
+            || cast(a.ats_losses as {{ dbt.type_string() }}) || '-'
+            || cast(a.ats_pushes as {{ dbt.type_string() }}) end as ats_record_display,
+    case when a.ats_fav_wins is not null then
+        cast(a.ats_fav_wins as {{ dbt.type_string() }}) || '-'
+            || cast(a.ats_fav_losses as {{ dbt.type_string() }}) end as ats_as_favorite_display,
+    case when a.ats_dog_wins is not null then
+        cast(a.ats_dog_wins as {{ dbt.type_string() }}) || '-'
+            || cast(a.ats_dog_losses as {{ dbt.type_string() }}) end as ats_as_underdog_display,
 
     ao.as_of_ts
 from {{ ref('dim_team') }} d
