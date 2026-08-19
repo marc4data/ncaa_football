@@ -210,3 +210,32 @@ models:
           Licence-required wording. The pack prohibits presenting derived output as official
           CollegeFootballData.com predictions.
         data_tests: [not_null]
+
+  - name: fct_market_probability
+    description: >
+      The market's own win probability with the vig removed, one row per game x provider x
+      snapshot. Derived and ADDITIVE — the raw moneylines in fct_betting_line are never
+      modified, so a second de-vig method can be computed later and compared without
+      rewriting history. Method is multiplicative normalisation, chosen for explainability:
+      its assumption (vig proportional to implied probability) states in one line on the
+      Methodology page, where Shin's and the power methods do not, and the accuracy gain on
+      a two-way market is small.
+    columns:
+      - name: betting_line_sk
+        description: Key of the betting-line row this was derived from.
+        data_tests: [unique, not_null]
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null]
+      - name: overround
+        description: >
+          Raw implied probabilities summed. Above 1.0 by the book's margin — measured ~1.052
+          across 5,398 rows, a 5.2% vig. Exposed because a market with an odd overround is a
+          market not to trust.
+      - name: market_implied_home_win_probability
+        description: De-vigged home win probability. Sums to 1 with the away side by construction.
+      - name: devig_method
+        description: >
+          The method used, stored beside the probability so the choice is auditable in the
+          data rather than only in a comment.
+        data_tests: [not_null]

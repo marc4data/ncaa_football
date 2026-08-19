@@ -16,7 +16,7 @@
 -- Booleans arrive as Python's "True"/"False" text and blanks mean "not applicable" — a
 -- push, or a field the model does not populate — so they are read as text and normalised
 -- to a real boolean with nulls preserved rather than coerced to false.
-{{ config(tags=['predictions', 'postgres_only']) }}
+{{ config(tags=['predictions']) }}
 
 with source as (
     select

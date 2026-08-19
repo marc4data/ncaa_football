@@ -99,9 +99,10 @@ sources:
           - name: filename
             data_tests: [unique, not_null]
       - name: raw_model_prediction
-        # Landed from model_outputs/*.csv, which is LICENSED-DERIVED and gitignored. The
-        # pack itself is personal, non-commercial and original-purchaser-only.
-        tags: ['postgres_only']
+        # Landed from model_outputs/*.csv. The PACK is licensed and never loaded anywhere;
+        # this is DERIVED OUTPUT, which the licence explicitly permits for private projects,
+        # and it carries none of the pack's 86 training features. Builds on both engines
+        # (decision log 2026-08-19).
         description: >
           Model prediction exports, one row per CSV row, stored whole. Follows the pack's
           42-column contract; the away-minus-home sign convention is preserved verbatim.

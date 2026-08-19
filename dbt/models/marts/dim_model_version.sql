@@ -1,4 +1,4 @@
-{{ config(materialized='table', tags=['predictions', 'postgres_only']) }}
+{{ config(materialized='table', tags=['predictions']) }}
 -- One row per model version actually loaded: what produced a prediction, and when.
 --
 -- Derived from the exports rather than declared, because a declared list drifts the moment

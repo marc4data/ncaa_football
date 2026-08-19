@@ -1,4 +1,4 @@
-{{ config(tags=['predictions', 'postgres_only']) }}
+{{ config(tags=['predictions']) }}
 -- Edge Finder: one row per game x model x market, with the edge already computed.
 --
 -- The page's sliders are WHERE clauses over this table. No math in the app — which is why
@@ -19,31 +19,21 @@ markets as (
         p.home_win_probability_edge as edge_value,
         'probability' as edge_unit
     from predictions p
-    -- NOT derived. home_win_probability_edge needs market_implied_home_win_probability,
-    -- which the notebooks also leave blank (0 of 3,402). It could be recovered from the
-    -- moneylines in fct_betting_line, but only by choosing a de-vig method — and that is a
-    -- modelling decision, not a load-time one. Raised in DECISIONS NEEDED rather than
-    -- guessed at, so this market stays empty until it is settled.
+    -- Now populated: the de-vig in fct_market_probability supplies
+    -- market_implied_home_win_probability, which the pack's exports leave blank.
     where p.home_win_probability_edge is not null
 
     union all
 
-    -- The pack's notebooks leave home_cover_edge BLANK — the export contract permits
-    -- "leave unsupported fields blank", and none of the seven notebooks fills it. Measured
-    -- on the first real load: 0 of 3,402 rows populated, while spread (3,402) and
-    -- predicted_margin (1,134) both are.
-    --
-    -- So it is computed here from the contract's OWN definition, verbatim:
-    --     home_cover_edge = spread - predicted_margin
-    -- That is applying a documented formula to columns we have, not inventing a metric.
-    -- `is_edge_derived` records which rows came from the export and which from this
-    -- calculation, so the distinction is never invisible.
+    -- Both edges are derived ONCE in fct_prediction and merely consumed here. Deriving in
+    -- this view would force srv_model_performance and the Excel export to repeat the same
+    -- formula independently, which is how definitions drift.
     select
         p.*, 'spread' as market,
-        coalesce(p.home_cover_edge, p.spread - p.predicted_margin) as edge_value,
+        p.home_cover_edge as edge_value,
         'points' as edge_unit
     from predictions p
-    where coalesce(p.home_cover_edge, p.spread - p.predicted_margin) is not null
+    where p.home_cover_edge is not null
 )
 select
     {{ surrogate_key(['game_id', 'model_name', 'model_version', 'split', 'market']) }}
@@ -65,7 +55,9 @@ select
     edge_unit,
     edge_value,
     abs(edge_value) as edge_magnitude,
-    home_cover_edge is not null as is_edge_from_export,
+    is_cover_edge_from_export,
+    is_wp_edge_from_export,
+    devig_method,
     confidence_bucket,
     spread,
     predicted_margin,
