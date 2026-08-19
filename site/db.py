@@ -5,9 +5,17 @@ Two rules this module exists to enforce:
 1. **Read-only.** The site connects as `cfdb_read`, a role with SELECT and nothing else —
    verified at creation against INSERT/DELETE/CREATE/DROP. Serving is read-only by
    architecture, not by convention, so a bug in a page cannot write to the warehouse.
-2. **Marts only.** Every query here selects from a `mart_*` table. If a page needs a number
-   that isn't in a mart, the answer is a new dbt model, not a calculation here — the
-   standing boundary, which matters most under schedule pressure.
+2. **Serving only.** Every query selects from exactly one `srv_*` table (G-1, AC-G.3). If a
+   page needs a number that is not in a serving view, the answer is a new dbt model, not a
+   calculation here — the standing boundary, which matters most under schedule pressure.
+
+   Repointed off `mart_*` on 2026-08-20 once the parity gate was met: srv_standings against
+   mart_team_season_record and srv_team_game_log against mart_team_schedule both pass, and
+   the columns this module reads exist under the same names in both. That is what made the
+   cutover a rename rather than a rewrite.
+
+3. **Every list query carries an explicit LIMIT** (AC-G.39). srv_team_game_log is 221,268
+   rows; an unbounded select is a defect even when the filter makes it small today.
 """
 import os
 from typing import Optional
@@ -40,7 +48,7 @@ def query(sql: str, params: Optional[dict] = None) -> pd.DataFrame:
 
 @st.cache_data(ttl=600)
 def seasons() -> list:
-    df = query("select distinct season from mart_team_schedule order by season desc")
+    df = query("select distinct season from srv_team_game_log order by season desc limit 200")
     return df["season"].tolist()
 
 
@@ -48,9 +56,10 @@ def seasons() -> list:
 def teams_for_season(season: int) -> list:
     df = query("""
         select distinct team
-        from mart_team_schedule
+        from srv_team_game_log
         where season = :season
         order by team
+        limit 1000
     """, {"season": season})
     return df["team"].tolist()
 
@@ -61,9 +70,10 @@ def schedule(season: int, team: str) -> pd.DataFrame:
         select week, game_date, venue_role, opponent, opponent_conference,
                is_conference_game, result, points_for, points_against, margin,
                venue, attendance, season_type, kickoff_time_known
-        from mart_team_schedule
+        from srv_team_game_log
         where season = :season and team = :team
         order by game_date, week
+        limit 500
     """, {"season": season, "team": team})
 
 
@@ -73,7 +83,7 @@ def season_record(season: int, team: str) -> pd.DataFrame:
         select season, school, conference, classification, games_played, wins, losses,
                ties, points_for, points_against, point_differential, win_pct,
                is_listed_team
-        from mart_team_season_record
+        from srv_standings
         where season = :season and school = :team
     """, {"season": season, "team": team})
 
@@ -83,33 +93,44 @@ def team_history(team: str) -> pd.DataFrame:
     return query("""
         select season, conference, games_played, wins, losses, ties,
                points_for, points_against, point_differential, win_pct
-        from mart_team_season_record
+        from srv_standings
         where school = :team
         order by season desc
+        limit 200
     """, {"team": team})
 
 
 @st.cache_data(ttl=300)
 def freshness() -> pd.DataFrame:
-    return query("""
-        select endpoint, last_success_at, hours_since_last_success, last_row_count,
-               lost_its_data, never_succeeded
-        from mart_data_freshness
-        order by hours_since_last_success
-    """)
+    """RETIRED. Endpoint-level freshness is back-of-house content.
+
+    The standalone banner read `mart_data_freshness`, the last `mart_*` dependency in the
+    app. It is not replaced by a serving equivalent: AC-G.35 requires each page to carry an
+    `as_of_ts` from its OWN view, which is both more accurate and per-domain, and AC-1.7
+    says endpoint detail belongs on System Overview rather than front of house.
+
+    Retiring an element is not a cutover, so no parity proof is owed for it.
+    """
+    raise NotImplementedError(
+        "Freshness banner retired; use as_of_ts from the page's own serving view.")
 
 
 @st.cache_data(ttl=300)
 def data_as_of() -> Optional[pd.Timestamp]:
-    """The freshest successful pull across the endpoints the site actually reads.
+    """When the data behind THIS page was last loaded.
 
-    Deliberately not `max()` over every endpoint: an hourly lines snapshot would make the
-    stamp look fresher than the data on the page.
+    Deliberately per-view rather than global: a 4-hourly lines snapshot would otherwise make
+    every page look fresher than its own data. mart_as_of computes freshness per domain in
+    dbt and each serving view carries its own.
     """
+    # AC-G.35: the stamp comes from a COLUMN on the page's own serving view, never from
+    # now() and no longer from an endpoint-level freshness mart. srv_team_game_log is what
+    # this page reads, so its as_of_ts is the honest answer for this page — a different page
+    # reading a different view will legitimately show a different one.
     df = query("""
-        select max(last_success_at) as as_of
-        from mart_data_freshness
-        where endpoint in ('games', 'teams', 'calendar')
+        select max(as_of_ts) as as_of
+        from srv_team_game_log
+        limit 1
     """)
     value = df["as_of"].iloc[0] if not df.empty else None
     return value if pd.notna(value) else None
