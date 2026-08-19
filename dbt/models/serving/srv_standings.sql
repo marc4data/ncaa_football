@@ -31,7 +31,12 @@ select
     t.color_on_light,
     t.color_on_dark,
     t.logo_source_url,
-    t.abbreviation
+    t.abbreviation,
+    ao_src.as_of_ts
 from {{ ref('fct_team_record') }} r
 left join {{ ref('dim_team') }} t
     on t.season = r.season and t.team_id = r.team_id
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao_src

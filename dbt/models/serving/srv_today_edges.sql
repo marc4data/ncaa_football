@@ -38,12 +38,13 @@ latest_market as (
     ) r where recency = 1
 ),
 latest_prediction as (
-    select game_id, model_name, predicted_margin, predicted_home_win_probability,
+    select game_id, model_name, model_version, predicted_margin, predicted_home_win_probability,
            predicted_home_points, predicted_away_points, home_cover_edge,
            home_win_probability_edge, confidence_bucket, is_out_of_sample_week
     from (
         select *, row_number() over (partition by game_id
-                                     order by prediction_ts desc, model_version desc) as recency
+                                     order by case when predicted_margin is not null then 0 else 1 end,
+                                                prediction_ts desc, model_version desc) as recency
         from {{ ref('fct_prediction') }}
     ) r where recency = 1
 )
@@ -68,7 +69,22 @@ select
     -- Edge, derived once in fct_prediction and only consumed here.
     p.home_cover_edge, p.home_win_probability_edge,
     p.is_out_of_sample_week,
-    case when p.is_out_of_sample_week then false else true end as is_default_actionable
+    case when p.is_out_of_sample_week then false else true end as is_default_actionable,
+    ao_src.as_of_ts,
+    mv_src.model_version as model_version_key,
+    mv_src.attribution,
+    {{ to_local_timestamp('g.start_date') }} as start_date_et,
+    h.team_slug as home_team_slug,
+    a.team_slug as away_team_slug,
+    g.home_team as home_team_display,
+    g.away_team as away_team_display,
+    h.color_on_dark as home_color_on_dark,
+    g.venue as venue_display,
+    g.network,
+    l.spread as spread_current,
+    l.over_under as total_current,
+    p.predicted_home_win_probability as home_win_probability,
+    g.excitement_index
 from {{ ref('fct_game') }} g
 join current_week w
   on w.season = g.season and w.season_type = g.season_type and w.week = g.week
@@ -77,3 +93,12 @@ left join {{ ref('dim_team') }} a on a.season = g.season and a.team_id = g.away_
 left join latest_line l on l.game_id = g.game_id
 left join latest_market m on m.game_id = g.game_id
 left join latest_prediction p on p.game_id = g.game_id
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao_src
+-- AC-G.41: the licence-required attribution travels as DATA, so a page physically
+-- cannot draw the model's numbers without it.
+left join {{ ref('dim_model_version') }} mv_src
+    on mv_src.model_name = p.model_name
+   and mv_src.model_version = p.model_version

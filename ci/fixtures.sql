@@ -50,6 +50,10 @@ CREATE TABLE IF NOT EXISTS raw.raw_model_prediction (
     row_number int NOT NULL, payload jsonb NOT NULL, loaded_at timestamptz DEFAULT now(),
     PRIMARY KEY (source_file, model_version, row_number)
 );
+CREATE TABLE IF NOT EXISTS raw.raw_games_media (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_rankings (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
@@ -91,7 +95,7 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_calendar, raw.raw_lines, raw.raw_games_teams, raw.raw_records,
          raw.raw_info, raw.raw_info_usage, raw.raw_warehouse_usage,
          raw.raw_rankings, raw.raw_stats_season, raw.raw_stats_season_advanced,
-         raw.raw_dbt_test_result, raw.raw_model_prediction,
+         raw.raw_dbt_test_result, raw.raw_model_prediction, raw.raw_games_media,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -462,3 +466,22 @@ INSERT INTO raw.raw_model_prediction (source_file, model_version, prediction_ts,
   "confidence_bucket": "low", "margin_error": "", "absolute_margin_error": "",
   "home_win_correct": "", "cover_correct": "",
   "brier_score_component": "", "log_loss_component": ""}'::jsonb);
+
+-- Broadcast media. TWO TV rows for one game on purpose: simulcasts are real (ABC and SEC
+-- Network carry the same game), and joining them without deduplication multiplied 18 games
+-- into two rows each in fct_game — a silent grain break that still built green. The fixture
+-- carries the collision so the dedup is exercised rather than assumed.
+INSERT INTO raw.raw_games_media (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-14-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
+     "mediaType": "tv", "outlet": "ABC"},
+    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
+     "mediaType": "tv", "outlet": "SEC Network"},
+    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
+     "mediaType": "web", "outlet": "ESPN+"}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:26Z', now());
+
+INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
+('games_media', '2026-01-01T00-00-14-001Z.json', '{"year": "2024"}', 200, 3, '2026-01-01T00:00:26Z', now());

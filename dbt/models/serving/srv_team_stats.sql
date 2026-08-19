@@ -26,7 +26,16 @@ select
         as rank_asc,
     round(cast(percent_rank() over (
         partition by s.season, s.stat_name order by s.stat_value asc nulls last
-    ) as numeric), 4) as percentile
+    ) as numeric), 4) as percentile,
+    ao_src.as_of_ts,
+    t.team_slug,
+    t.team_display,
+    t.logo_source_url as logo_url,
+    t.conference
 from {{ ref('fct_team_season_stat') }} s
 left join {{ ref('dim_team') }} t on t.season = s.season and t.team_id = s.team_id
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'stats') ao_src
 where s.stat_value is not null
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.

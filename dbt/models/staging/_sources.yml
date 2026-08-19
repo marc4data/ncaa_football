@@ -61,6 +61,14 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_games_media
+        description: >
+          CFBD /games/media — broadcast outlet per game per media type. Landed since the
+          full-breadth backfill and unmodelled until now; `network` on Schedule and Today
+          reads from here.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_rankings
         description: >
           CFBD /rankings. Three levels of nesting — week, then poll, then rank — so one file

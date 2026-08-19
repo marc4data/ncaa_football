@@ -18,9 +18,18 @@ select
     end as winner,
     abs(coalesce(g.home_points, 0) - coalesce(g.away_points, 0)) as final_margin,
     hr.wins as home_wins, hr.losses as home_losses,
-    ar.wins as away_wins, ar.losses as away_losses
+    ar.wins as away_wins, ar.losses as away_losses,
+    ao_src.as_of_ts,
+    g.away_points - g.home_points as actual_margin,   -- away minus home, per the convention
+    g.excitement_index,
+    g.is_upset,
+    g.attendance
 from {{ ref('fct_game') }} g
 left join {{ ref('dim_team') }} h on h.season = g.season and h.team_id = g.home_team_id
 left join {{ ref('dim_team') }} a on a.season = g.season and a.team_id = g.away_team_id
 left join {{ ref('fct_team_record') }} hr on hr.season = g.season and hr.team_id = g.home_team_id
 left join {{ ref('fct_team_record') }} ar on ar.season = g.season and ar.team_id = g.away_team_id
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao_src

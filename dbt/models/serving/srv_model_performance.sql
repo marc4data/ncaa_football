@@ -57,5 +57,10 @@ select
          then round(100.0 * cover_correct_count / cover_scored, 1) end as ats_accuracy_pct,
     -- Licence requirement, carried as data so a page cannot render the numbers without it.
     'cfdb model, built on a licensed CFB Model Training Pack (2026 Edition). '
-        || 'Not an official CollegeFootballData.com prediction.' as attribution
+        || 'Not an official CollegeFootballData.com prediction.' as attribution,
+    ao_src.as_of_ts
 from aggregated
+-- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
+-- underlying data was last loaded, never from now() in the app. Per-domain rather than
+-- global: a betting line and a 1936 poll have very different notions of fresh.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'prediction') ao_src

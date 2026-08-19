@@ -103,6 +103,11 @@ select
     r.season,
     r.team_id,
     r.school,
+    -- AC-G.14 / AC-G.55. The app must never derive this: it is an identifier the database
+    -- owns, and `Texas A&M` -> `texas-am` is a decision, not a string operation. Every deep
+    -- link on the site resolves through it.
+    {{ to_slug('r.school') }} as team_slug,
+    r.school as team_display,
     r.mascot,
     r.abbreviation,
     r.conference,

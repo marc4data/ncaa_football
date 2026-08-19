@@ -48,5 +48,6 @@ select
     cast({{ json_get_string('game', 'awayPoints') }} as int)      as away_points,
     {{ json_get_string('game', 'awayClassification') }}           as away_classification,
     {{ json_get_string('game', 'venue') }}                        as venue,
-    cast({{ json_get_string('game', 'attendance') }} as int)      as attendance
+    cast({{ json_get_string('game', 'attendance') }} as int)      as attendance,
+    {{ safe_numeric(json_get_string('game', 'excitementIndex')) }} as excitement_index
 from games

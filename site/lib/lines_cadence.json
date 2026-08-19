@@ -1,0 +1,10 @@
+{
+  "_comment": "Cadence window for cfbd_lines_snapshot. The DAG is scheduled permanently at the finest cadence (0 */4 * * * UTC) and gated at runtime, so this file is the only thing that changes between seasons — never the schedule.",
+  "season": 2026,
+  "first_game_date": "2026-08-27",
+  "lead_days": 7,
+  "season_end_date": "2027-01-27",
+  "_first_game_note": "2026-08-27 is the first game of any classification (FCS/D-II), verified against /games. CFBD's /calendar reports firstGameStart 2026-08-29, which is FBS-only and would start the window two days late.",
+  "_season_end_note": "Set by decision log 2026-08-18. CFP National Championship is Monday 2027-01-25 at Allegiant Stadium; +2 days because a 7:30pm ET kickoff runs past midnight UTC and everything schedules in UTC. Supersedes an earlier 2027-01-31 proposal derived from CFBD /calendar (postseason ends 2027-01-28), which was a buffer rather than an anchored date.",
+  "_maintenance": "One file to update each August: season, first_game_date, season_end_date."
+}
