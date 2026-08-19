@@ -134,3 +134,48 @@ def test_a_blocked_page_names_a_specific_object():
     page = BY_KEY["players"]
     assert page.blocker and page.blocker.startswith("srv_")
     assert "dim_athlete" in page.blocker_note
+
+
+# --- page-level criteria that are checkable without a browser ---------------------------
+
+def test_every_page_module_exists_and_exposes_render():
+    """AC-G.49: nav builds from the registry, so a missing module breaks the whole site."""
+    import importlib
+    for page in PAGES:
+        module = importlib.import_module(f"pages.{page.key}")
+        assert callable(getattr(module, "render", None)), page.key
+
+
+def test_built_pages_pass_the_query_contract():
+    """Every SQL string in a built page must satisfy G-1/G-2/AC-G.39.
+
+    Checked by extracting the literals rather than by reading them, because the contract is
+    the kind of thing that is true when written and false three edits later.
+    """
+    import re
+    from pathlib import Path
+    site = Path(__file__).resolve().parents[1] / "site"
+    checked = 0
+    for path in (site / "pages").glob("*.py"):
+        source = path.read_text()
+        for sql in re.findall(r'"""\s*(select\b.*?)"""', source, re.DOTALL | re.IGNORECASE):
+            check_contract(" ".join(sql.split()))
+            checked += 1
+    for path in [site / "lib" / "filters.py"]:
+        for sql in re.findall(r'"""\s*(select\b.*?)"""', path.read_text(),
+                              re.DOTALL | re.IGNORECASE):
+            check_contract(" ".join(sql.split()))
+            checked += 1
+    assert checked >= 5, f"expected several page queries, found {checked}"
+
+
+def test_model_performance_lists_the_model_that_was_never_written():
+    """AC-13.4: a missing model is a visible row, not a shorter table."""
+    from pages import performance
+    assert "fastai_home_win" in performance.EXPECTED_MODELS
+
+
+def test_ats_breakeven_is_the_real_number():
+    """AC-13.3: 52.4% is breakeven at −110; a softer threshold would flatter the model."""
+    from pages import performance
+    assert performance.BREAKEVEN == 52.4

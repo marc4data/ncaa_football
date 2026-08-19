@@ -63,3 +63,30 @@ CSS = """
 
 def inject() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(TABLE_CSS, unsafe_allow_html=True)
+
+
+TABLE_CSS = """
+<style>
+.cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem; }
+.cfdb-table caption { caption-side:top; text-align:left; font-size:.8rem; opacity:.6;
+  padding-bottom:.4rem; }
+.cfdb-table th { text-align:left; font-weight:600; font-size:.78rem; letter-spacing:.02em;
+  text-transform:uppercase; opacity:.65; border-bottom:1px solid #d7dae0;
+  padding:.45rem .55rem; }
+.cfdb-table td { padding:.42rem .55rem; border-bottom:1px solid #eef0f3; }
+.cfdb-table tbody tr:hover { background:rgba(31,111,235,.05); }
+.cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right; }
+.cfdb-team { margin-left:.4rem; }
+.cfdb-rank { font-size:.72rem; font-weight:700; opacity:.7; margin-left:.3rem; }
+.cfdb-daygroup { font-weight:600; margin:1.1rem 0 .3rem; font-size:.95rem; }
+@media (prefers-color-scheme: dark) {
+  .cfdb-table th { border-bottom-color:#333a45; }
+  .cfdb-table td { border-bottom-color:#242933; }
+}
+</style>
+"""
+
+
+def inject_tables() -> None:
+    st.markdown(TABLE_CSS, unsafe_allow_html=True)

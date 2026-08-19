@@ -8,7 +8,13 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY app.py db.py /app/
+# The whole app: nav entrypoint, the shared Part 0 components, and the page modules.
+# Copying only app.py silently produced `ModuleNotFoundError: No module named 'lib'` at
+# runtime — the image built fine and the container started, so nothing surfaced it until a
+# page was actually requested.
+COPY app.py /app/
+COPY lib/ /app/lib/
+COPY pages/ /app/pages/
 
 EXPOSE 8501
 
