@@ -147,3 +147,21 @@
         when lower(trim({{ col }})) in ('false', 'f', '0') then false
     end
 {%- endmacro %}
+
+
+{# --- American moneyline to raw implied probability --------------------------------------
+  Includes the vig: the two sides of a real market sum to more than 1, and that overround is
+  the book's margin. Removing it is a separate, named step — see fct_market_probability.
+
+      +150  ->  decimal 2.50  ->  0.400
+      -200  ->  decimal 1.50  ->  0.667
+
+  Zero is not a valid moneyline and would divide by zero, so it is treated as absent.
+#}
+{% macro moneyline_to_implied(col) -%}
+    case
+        when {{ col }} is null or {{ col }} = 0 then null
+        when {{ col }} > 0 then 100.0 / ({{ col }} + 100.0)
+        else (-1.0 * {{ col }}) / ((-1.0 * {{ col }}) + 100.0)
+    end
+{%- endmacro %}

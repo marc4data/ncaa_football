@@ -1,4 +1,4 @@
-{{ config(tags=['predictions', 'postgres_only']) }}
+{{ config(tags=['predictions']) }}
 -- Edge Finder: one row per game x model x market, with the edge already computed.
 --
 -- The page's sliders are WHERE clauses over this table. No math in the app — which is why
@@ -19,10 +19,15 @@ markets as (
         p.home_win_probability_edge as edge_value,
         'probability' as edge_unit
     from predictions p
+    -- Now populated: the de-vig in fct_market_probability supplies
+    -- market_implied_home_win_probability, which the pack's exports leave blank.
     where p.home_win_probability_edge is not null
 
     union all
 
+    -- Both edges are derived ONCE in fct_prediction and merely consumed here. Deriving in
+    -- this view would force srv_model_performance and the Excel export to repeat the same
+    -- formula independently, which is how definitions drift.
     select
         p.*, 'spread' as market,
         p.home_cover_edge as edge_value,
@@ -50,6 +55,9 @@ select
     edge_unit,
     edge_value,
     abs(edge_value) as edge_magnitude,
+    is_cover_edge_from_export,
+    is_wp_edge_from_export,
+    devig_method,
     confidence_bucket,
     spread,
     predicted_margin,

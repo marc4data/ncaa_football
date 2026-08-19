@@ -1,4 +1,4 @@
-{{ config(tags=['predictions', 'postgres_only']) }}
+{{ config(tags=['predictions']) }}
 -- Model Performance: accuracy and calibration, pre-aggregated by segment.
 --
 -- Honest by construction, which is the point of shipping it early. The measured baseline is

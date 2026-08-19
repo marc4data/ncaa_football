@@ -195,12 +195,76 @@ def load_directory(directory: Optional[Path] = None) -> Dict[str, int]:
     return {"files": len(present), "rows": total}
 
 
+def load_directory_to_databricks(directory: Optional[Path] = None) -> Dict[str, int]:
+    """Mirror the prediction exports into Databricks.
+
+    Predictions build on BOTH engines (decision log 2026-08-19): the licensed dataset is
+    never uploaded anywhere — only derived output, which the licence explicitly permits for
+    private projects, and which carries none of the pack's 86 training features.
+
+    Same content-addressed idempotency as the Postgres path: MERGE on
+    (source_file, model_version, row_number), so re-running costs a query and changes
+    nothing, and a re-scored export lands alongside its predecessor.
+    """
+    import json
+    from .load_raw_to_databricks import connect, CATALOG, SCHEMA, _sql_string
+
+    directory = resolve_directory(directory)
+    if directory is None:
+        return {"files": 0, "rows": 0}
+    present = [directory / name for name in EXPECTED_FILES if (directory / name).exists()]
+    if not present:
+        return {"files": 0, "rows": 0}
+
+    total = 0
+    with connect() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMA}")
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {CATALOG}.{SCHEMA}.raw_model_prediction (
+                    source_file STRING, model_version STRING, prediction_ts TIMESTAMP,
+                    row_number INT, payload STRING, loaded_at TIMESTAMP
+                ) USING DELTA
+            """)
+            for path in present:
+                rows = read_rows(path)
+                if not rows:
+                    continue
+                version = file_version(path)
+                ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+                # Delete-then-insert for this (file, version): simpler than a row-wise MERGE
+                # and identical in effect, because the pair is content-addressed — the same
+                # version always carries the same rows.
+                cursor.execute(
+                    f"DELETE FROM {CATALOG}.{SCHEMA}.raw_model_prediction "
+                    f"WHERE source_file = {_sql_string(path.name)} "
+                    f"AND model_version = {_sql_string(version)}")
+                values = ", ".join(
+                    f"({_sql_string(path.name)}, {_sql_string(version)}, "
+                    f"cast({_sql_string(ts)} as timestamp), {i}, "
+                    f"{_sql_string(json.dumps(row))}, current_timestamp())"
+                    for i, row in enumerate(rows))
+                cursor.execute(
+                    f"INSERT INTO {CATALOG}.{SCHEMA}.raw_model_prediction VALUES {values}")
+                print(f"  {path.name}: {len(rows)} row(s) -> Databricks")
+                total += len(rows)
+    return {"files": len(present), "rows": total}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Load model prediction exports.")
-    parser.add_argument("--dir", type=Path, default=OUTPUT_DIR)
+    # Default None, not OUTPUT_DIR: a default here would look like an explicitly requested
+    # path and skip the candidate search entirely — which is exactly the bug that made this
+    # report "0 files" while six exports sat in cfdb_model_pack/model_outputs.
+    parser.add_argument("--dir", type=Path, default=None)
+    parser.add_argument("--databricks", action="store_true",
+                        help="also mirror into Databricks")
     args = parser.parse_args()
     summary = load_directory(args.dir)
-    print(f"Loaded {summary['rows']} row(s) from {summary['files']} file(s)")
+    print(f"Loaded {summary['rows']} row(s) from {summary['files']} file(s) into Postgres")
+    if args.databricks:
+        db = load_directory_to_databricks(args.dir)
+        print(f"Loaded {db['rows']} row(s) from {db['files']} file(s) into Databricks")
     return 0
 
 
