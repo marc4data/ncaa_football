@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS raw.raw_records (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_model_prediction (
+    source_file text NOT NULL, model_version text NOT NULL, prediction_ts timestamptz NOT NULL,
+    row_number int NOT NULL, payload jsonb NOT NULL, loaded_at timestamptz DEFAULT now(),
+    PRIMARY KEY (source_file, model_version, row_number)
+);
 CREATE TABLE IF NOT EXISTS raw.raw_rankings (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
@@ -86,7 +91,7 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_calendar, raw.raw_lines, raw.raw_games_teams, raw.raw_records,
          raw.raw_info, raw.raw_info_usage, raw.raw_warehouse_usage,
          raw.raw_rankings, raw.raw_stats_season, raw.raw_stats_season_advanced,
-         raw.raw_dbt_test_result,
+         raw.raw_dbt_test_result, raw.raw_model_prediction,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -412,3 +417,48 @@ INSERT INTO raw.raw_dbt_test_result
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('rankings',     '2026-01-01T00-00-12-001Z.json', '{"year": "2024"}', 200, 1, '2026-01-01T00:00:23Z', now()),
 ('stats/season', '2026-01-01T00-00-13-001Z.json', '{"year": "2024"}', 200, 3, '2026-01-01T00:00:24Z', now());
+
+-- Model predictions, in the pack's 42-column contract shape.
+--
+-- The sign convention is the reason these values look backwards and they are correct:
+-- margin = away - home, so game 9001 (Alpha 28, Beta 21) has actual_margin = -7 and the
+-- HOME team won. A fixture written the intuitive way would make the convention tests pass
+-- against wrong data, which is worse than having no fixture at all.
+--
+-- Row 2 is a week-1 game: the pack trains on regular-season week 5 onward, so this is the
+-- out-of-sample case that srv_edge_finder must label rather than render as actionable.
+INSERT INTO raw.raw_model_prediction (source_file, model_version, prediction_ts, row_number, payload) VALUES
+('linear_margin_predictions.csv', 'fixture00001', '2026-01-01T00:00:40Z', 0, '{
+  "game_id": "9001", "season": "2024", "season_type": "regular", "week": "8",
+  "home_team": "Alpha State", "away_team": "Beta Tech", "split": "test",
+  "model_name": "linear_margin", "model_family": "linear_regression", "target": "margin",
+  "home_points": "28", "away_points": "21", "actual_margin": "-7",
+  "actual_total_points": "49", "actual_home_win": "True", "actual_winner": "Alpha State",
+  "spread": "-4.5", "actual_home_cover": "True",
+  "predicted_home_points": "26.5", "predicted_away_points": "22.1",
+  "predicted_margin": "-4.4", "predicted_total_points": "48.6",
+  "predicted_home_win_probability": "0.64", "raw_home_win_probability": "0.61",
+  "calibrated_home_win_probability": "0.64", "predicted_home_win": "True",
+  "predicted_winner": "Alpha State", "predicted_home_cover": "False",
+  "market_implied_home_win_probability": "0.60",
+  "home_win_probability_edge": "0.04", "home_cover_edge": "-0.1",
+  "confidence_bucket": "medium", "margin_error": "2.6", "absolute_margin_error": "2.6",
+  "home_win_correct": "True", "cover_correct": "False",
+  "brier_score_component": "0.1296", "log_loss_component": "0.4463"}'::jsonb),
+('linear_margin_predictions.csv', 'fixture00001', '2026-01-01T00:00:40Z', 1, '{
+  "game_id": "9003", "season": "2024", "season_type": "regular", "week": "1",
+  "home_team": "Beta Tech", "away_team": "Alpha State", "split": "test",
+  "model_name": "linear_margin", "model_family": "linear_regression", "target": "margin",
+  "home_points": "", "away_points": "", "actual_margin": "",
+  "actual_total_points": "", "actual_home_win": "", "actual_winner": "",
+  "spread": "3.0", "actual_home_cover": "",
+  "predicted_home_points": "20.0", "predicted_away_points": "24.0",
+  "predicted_margin": "4.0", "predicted_total_points": "44.0",
+  "predicted_home_win_probability": "0.43", "raw_home_win_probability": "0.43",
+  "calibrated_home_win_probability": "0.43", "predicted_home_win": "False",
+  "predicted_winner": "Alpha State", "predicted_home_cover": "False",
+  "market_implied_home_win_probability": "0.46",
+  "home_win_probability_edge": "-0.03", "home_cover_edge": "-1.0",
+  "confidence_bucket": "low", "margin_error": "", "absolute_margin_error": "",
+  "home_win_correct": "", "cover_correct": "",
+  "brier_score_component": "", "log_loss_component": ""}'::jsonb);

@@ -448,7 +448,14 @@ models:
       - name: season_type
         description: regular or postseason.
       - name: spread
-        description: Numeric spread. Disagrees with formatted_spread historically; deliberately not reconciled.
+        description: >
+          Closing point spread. NEGATIVE MEANS THE HOME TEAM WAS FAVOURED — documented by
+          the CFB Model Training Pack's Data Info Sheet and verified against its 5,133
+          training rows, where home teams win 74.4% of spread<0 games against 31.4% of
+          spread>0 games. This resolves a question open since 2026-08-17. The word
+          "closing" applies to completed games in the pack's training data; CFBD's weekly
+          drops are forward-looking, so the sign convention carries but "closing" does not.
+          Still disagrees with formatted_spread historically; deliberately not reconciled.
       - name: formatted_spread
         description: Display spread as CFBD formats it. Kept alongside spread; the consumer chooses.
       - name: spread_open

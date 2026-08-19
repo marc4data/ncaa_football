@@ -135,3 +135,78 @@ models:
         description: >
           1 for the most recent run of this test. The status board filters on it; the
           history is what the rest of the table is for.
+
+  - name: fct_prediction
+    description: >
+      One row per game x model_name x model_version x split. Append-only. Adopts the CFB
+      Model Training Pack's 42-column export contract essentially verbatim — column names
+      are NOT changed to house style, so that when a number here disagrees with the pack's
+      own leaderboard the first question ("are these the same quantity?") is answerable.
+      model_version and prediction_ts are cfdb's addition to the pack's grain, and they are
+      what make in-season re-scoring append rather than overwrite.
+      SIGN CONVENTION: margin = away_points - home_points, so a NEGATIVE margin means the
+      HOME team won, and spread < 0 means the home team was favoured. Preserved verbatim
+      from raw through staging; home-perspective values exist only in serving, as
+      explicitly named derived columns.
+    columns:
+      - name: prediction_sk
+        description: Surrogate key over game, model name, model version and split.
+        data_tests: [unique, not_null]
+      - name: game_id
+        description: CFBD game id the prediction is for.
+        data_tests: [not_null]
+      - name: model_name
+        description: The pack's name for the model that produced this row.
+        data_tests: [not_null]
+      - name: model_version
+        description: >
+          First 12 hex characters of the export file's SHA-256. Content-addressed, so
+          reloading the same export is idempotent and a re-scored export appends.
+        data_tests: [not_null]
+      - name: split
+        description: train, validate or test, as assigned by the pack's notebooks.
+        data_tests: [not_null]
+      - name: actual_margin
+        description: >
+          away_points - home_points. NEGATIVE MEANS THE HOME TEAM WON. Pinned by
+          assert_prediction_sign_convention and assert_prediction_margin_is_away_minus_home.
+      - name: spread
+        description: Point spread. Negative means the home team was favoured.
+      - name: home_cover_edge
+        description: >
+          spread - predicted_margin. Positive means the model prefers the home side against
+          the spread.
+      - name: is_out_of_sample_week
+        description: >
+          True for regular-season weeks below the pack's training floor of week 5. The pack
+          contains no regular-season training row earlier than week 5, because its
+          opponent-adjusted inputs need game history — so a Week 1 prediction is
+          extrapolation, not inference, and must not render like a Week 8 one.
+      - name: training_week_floor
+        description: The week from which the pack's training data begins. Carried so a page can cite it.
+
+  - name: dim_model_version
+    description: >
+      One row per model version actually loaded, derived from the exports rather than
+      declared — a declared list drifts the moment a notebook is re-run. Carries the
+      attribution string the licence requires, as data, so a page cannot render predictions
+      without it.
+    columns:
+      - name: model_version_sk
+        description: Surrogate key over model name and version.
+        data_tests: [unique, not_null]
+      - name: model_name
+        description: The pack's name for the model.
+        data_tests: [not_null]
+      - name: trained_at
+        description: >
+          The export file's modification time. A PROXY: the pack's contract carries no
+          training timestamp, so this is when predictions were written, not necessarily
+          when the model was fitted.
+      - name: split_definition
+        description: The pack's default split, recorded so a page states it rather than assumes it.
+      - name: attribution
+        description: >
+          Licence-required wording. The pack prohibits presenting derived output as official
+          CollegeFootballData.com predictions.
+        data_tests: [not_null]

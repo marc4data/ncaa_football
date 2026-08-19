@@ -1,5 +1,9 @@
 __pycache__/
 .venv/
+# Separate environment for the Model Pack notebooks. Kept apart from .venv because the pack
+# pins pandas<3 while the pipeline runs pandas 3.x, and because torch/fastai have no business
+# in the environment that runs dbt and the DAGs.
+.venv-modelpack/
 .env
 .env.*
 venv/
@@ -22,3 +26,21 @@ logs/
 *.xls
 *.pptx
 ~$*
+
+# ---------------------------------------------------------------------------------------
+# CFB Model Training Pack — LICENSED MATERIAL, NEVER COMMIT
+#
+# cfdb_model_pack/LICENSE is personal, non-commercial and original-purchaser-only, and
+# explicitly prohibits uploading the pack to a repository or sharing it with non-purchasers.
+# The extracted notebooks, training_data.csv and guides ARE the licensed material; the zip is
+# only the wrapper, so ignoring *.zip alone is not enough.
+#
+# This repo is private today and going public has been discussed. A private repo carrying
+# licensed data in its history is a landmine that a later .gitignore does not defuse — git
+# history is not retroactively cleaned by ignoring a path.
+#
+# Model OUTPUTS are our own work, but they are derived from the licensed training data and
+# are large and regenerable, so they stay local too and are ingested from disk.
+cfdb_model_pack/
+model_outputs/
+*.zip
