@@ -2,23 +2,15 @@
 import pandas as pd
 import streamlit as st
 
-from lib import fmt, params, shell, states, table
+from lib import filters, fmt, shell, states, table
 from lib.query import query
 from lib.table import Col
 
 
 def body(page) -> None:
-    seasons = query("select distinct season from srv_standings order by season desc limit 200")
-    if seasons.empty:
-        states.empty("Conference standings would appear here.",
-                     "No completed games have been recorded in any season.")
-        return
-    options = seasons["season"].tolist()
-    default = params.get("season") or int(options[0])
-    with st.sidebar:
-        season = st.selectbox("Season", options,
-                              index=options.index(default) if default in options else 0)
-    params.set_params(season=season)
+    scope = filters.game_scope(show_week=False)
+    season = scope.season
+    table.dataset_caption("Standings", "srv_standings")
 
     with states.section("srv_standings"):
         df = query("""
@@ -32,10 +24,13 @@ def body(page) -> None:
                    ats_record_display, ats_as_favorite_display, ats_as_underdog_display,
                    color_on_light, as_of_ts
             from srv_standings
-            where season = :season and classification in ('fbs','fcs')
+            where season = :season
+              and classification = any(:classifications)
+              and (:conference is null or conference = :conference)
             order by conference, tiebreak_rank
             limit 1000
-        """, {"season": season})
+        """, {"season": season, "classifications": scope.classifications,
+              "conference": scope.conference})
         table.as_of_caption(df)
 
         states.render_or_state(
@@ -43,7 +38,7 @@ def body(page) -> None:
             "Conference standings would appear here.",
             f"No completed games have been recorded for {season} yet. Standings fill in "
             f"from the first Saturday.",
-            renderer=_by_conference)
+            renderer=lambda d: _by_conference(d, scope))
 
         # AC-5.6: the rating columns are ABSENT rather than blank, and the page says which
         # object they wait on rather than showing an empty column that reads as no data.
@@ -109,7 +104,7 @@ def _streak(row) -> str:
     return f"{arrow} {value}"
 
 
-def _by_conference(df: pd.DataFrame) -> None:
+def _by_conference(df: pd.DataFrame, scope) -> None:
     """AC-5.2: grouped by conference, and by division WHERE A CONFERENCE HAS THEM.
 
     Only 14 of 136 FBS teams had a division in 2025 — the SEC and Big Ten dropped theirs in
@@ -124,15 +119,15 @@ def _by_conference(df: pd.DataFrame) -> None:
             for division in sorted(divisions):
                 block = rows[rows["division"] == division]
                 st.caption(division)
-                _render(block, conference)
+                _render(block, scope)
             # A conference can have divisions and still have teams outside them, which is
             # what a mid-season realignment looks like in the data.
             rest = rows[rows["division"].isna()]
             if not rest.empty:
                 st.caption("No division recorded")
-                _render(rest, conference)
+                _render(rest, scope)
         else:
-            _render(rows, conference)
+            _render(rows, scope)
 
         basis = rows["tiebreak_basis"].dropna().unique()
         if len(basis):
@@ -140,10 +135,10 @@ def _by_conference(df: pd.DataFrame) -> None:
                        f"standing — real conference tiebreakers involve head-to-head.")
 
 
-def _render(rows: pd.DataFrame, conference: str) -> None:
-    table.render(rows, COLUMNS, caption="srv_standings",
-                 link_builder=lambda r: params.link("team", team=r["team_slug"],
-                                                    season=r["season"]))
+def _render(rows: pd.DataFrame, scope) -> None:
+    # AC-5.4: team click -> Team page, carrying the scope forward.
+    table.render(rows, COLUMNS, caption="",
+                 link_builder=lambda r: scope.link("team", team=r["team_slug"]))
 
 
 def render() -> None:

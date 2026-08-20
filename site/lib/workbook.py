@@ -248,6 +248,12 @@ EXPORT_ONLY_LABELS = {
     "away_points": "the site's header is blank, because the score renders beside the team "
                    "name; a spreadsheet column cannot have a blank header",
     "home_points": "as away_points",
+    "actual_margin": "the page can say 'Margin' because the column sits between the two "
+                     "teams' scores and the direction is obvious in context; a workbook "
+                     "travels without that context, so the header states away-minus-home",
+    "is_upset": "the page uses '!' by degree to save horizontal space on a wide table. A "
+                "spreadsheet header of '!' is unreadable in a filter dropdown, and the "
+                "cell carries a boolean rather than the glyph",
     "segment_value": "the page labels this per tab — Week, Conference, Confidence, "
                      "Predicted band — because each tab shows one segment type. The sheet "
                      "stacks all five, so its header has to name the column rather than "
@@ -418,10 +424,37 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         # AC-15.12: native Excel affordances, so the file is workable rather than readable.
         tab.freeze_panes = f"A{ROW_FIRST_DATA}"
         tab.auto_filter.ref = f"A{ROW_HEADER}:{last_column}{last_row}"
+        # WIDTHS FROM THE DATA, not from the header.
+        #
+        # The previous version sized every column from its LABEL, so a "Spread" column got
+        # 11 characters regardless of what was in it and numeric cells rendered as #######,
+        # while a description column got the same treatment and ran off the screen.
+        #
+        # Measured over the actual values, then clamped. The clamp matters in both
+        # directions: a floor so a two-character header is still readable, and a ceiling so
+        # one 400-character description does not set the width for the sheet. The header
+        # rows are written ABOVE the table and are not measured — the credit line in A1 is
+        # 120 characters and would otherwise decide column A on its own, which is exactly
+        # how a header blows out the first column.
         for index, (field, label) in enumerate(sheet.columns, start=1):
             letter = get_column_letter(index)
-            tab.column_dimensions[letter].width = min(
-                max(len(label) + 4, 11), 42 if field.endswith("description") else 24)
+            longest = len(str(label))
+            for offset in range(len(df)):
+                value = tab.cell(ROW_FIRST_DATA + offset, index).value
+                if value is None:
+                    continue
+                if isinstance(value, datetime):
+                    rendered = 17
+                elif isinstance(value, float):
+                    # A float renders at its FORMAT width, not its repr: 0.07894736842105
+                    # occupies four characters once the number format is applied.
+                    rendered = len(number_format(field).replace("#,##", "").replace(";", ""))
+                    rendered = max(rendered, 8)
+                else:
+                    rendered = len(str(value))
+                longest = max(longest, rendered)
+            ceiling = 60 if field.endswith("description") or field == "attribution" else 28
+            tab.column_dimensions[letter].width = min(max(longest + 3, 9), ceiling)
             span = f"{letter}{ROW_FIRST_DATA}:{letter}{last_row}"
             if field in COLOUR_SCALE_FIELDS:
                 tab.conditional_formatting.add(span, ColorScaleRule(

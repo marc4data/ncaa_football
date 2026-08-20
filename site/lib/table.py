@@ -17,9 +17,14 @@ class Col:
 
     def __init__(self, field: str, label: str, kind: str = "text",
                  dp: Optional[int] = None, width: Optional[str] = None,
-                 render: Optional[Callable] = None):
+                 render: Optional[Callable] = None,
+                 link: Optional[Callable] = None):
         self.field, self.label, self.kind = field, label, kind
         self.dp, self.width, self.render = dp, width, render
+        # A column-specific destination, which WINS over the row link for that cell.
+        # AC-2.5 wants both on one row: the row goes to the game, the team name goes to the
+        # team. Nested anchors are invalid HTML, so it has to be one or the other per cell.
+        self.link = link
 
     def format(self, row) -> str:
         if self.render is not None:
@@ -31,6 +36,10 @@ class Col:
             return fmt.signed(value, self.field, self.dp)
         if self.kind == "datetime":
             return fmt.eastern(value)
+        if self.kind == "time":
+            return fmt.clock(value)
+        if self.kind == "date":
+            return fmt.day(value)
         if self.kind == "cover":
             return chips.cover_chip_html(value)
         if self.kind == "bool":
@@ -49,14 +58,36 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     """An HTML table, because Streamlit's dataframe cannot hold a chip or a link.
 
     AC-G.47: the table carries header semantics and a caption naming its source view.
+
+    ROWS ARE LINKED WITH REAL ANCHORS, and that is a fix rather than a style choice. This
+    used to put `onclick="window.location=..."` on the <tr>. Streamlit's markdown sanitiser
+    strips event handlers, so every row rendered with a pointer cursor and did nothing —
+    the whole site was a set of termini, which is exactly what Marc reported.
+
+    An onclick would have failed AC-G.13 even if it had survived: the criterion is that
+    middle-click or copy-link on any row yields a working URL, and a JavaScript handler
+    gives neither. An <a href> gives both for free, and navigates by writing query params
+    because that is what the href contains.
+
+    Every CELL carries the anchor rather than the row, because <a> cannot wrap <tr>. The
+    anchor is display:block so the whole cell is the target, which makes the row clickable
+    in effect while staying valid HTML that a browser can middle-click.
     """
     head = "".join(f"<th class='{c.css}'>{c.label}</th>" for c in columns)
     body = []
     for _, row in df.head(max_rows).iterrows():
-        cells = "".join(f"<td class='{c.css}'>{c.format(row)}</td>" for c in columns)
-        href = link_builder(row) if link_builder else None
-        attrs = f" onclick=\"window.location='{href}'\" style='cursor:pointer'" if href else ""
-        body.append(f"<tr{attrs}>{cells}</tr>")
+        row_href = link_builder(row) if link_builder else None
+        cells = []
+        for column in columns:
+            content = column.format(row)
+            href = column.link(row) if column.link else row_href
+            css = "cfdb-cell-link" + (" cfdb-cell-link-alt" if column.link else "")
+            if href:
+                content = f"<a class='{css}' href='{href}' target='_self'>{content}</a>"
+            cells.append(f"<td class='{column.css}'>{content}</td>")
+        joined = "".join(cells)
+        body.append(f"<tr class='cfdb-linked'>{joined}</tr>" if row_href
+                    else f"<tr>{joined}</tr>")
     st.markdown(
         "<table class='cfdb-table'>"
         + (f"<caption>{caption}</caption>" if caption else "")
@@ -71,12 +102,50 @@ def team_cell(row, slug_field: str, display_field: str, logo_field: str,
     """Logo-or-monogram plus name, with a rank badge only when the team is ranked.
 
     AC-1.5: an unranked team shows NO badge, not an em dash inside one.
+
+    The slug_field argument was accepted and ignored for weeks, which is why every team
+    name on the site was inert text. It is now what the anchor is built from — see
+    `team_link` for the href, which is passed as the column's own `link` so the team name
+    goes to the team and the rest of the row goes to the game.
     """
     logo = identity.logo_or_monogram(row.get(logo_field), row.get(display_field) or "?")
     rank = row.get(rank_field) if rank_field else None
     badge = (f"<span class='cfdb-rank'>#{int(rank)}</span>"
              if rank is not None and not pd.isna(rank) else "")
     return f"{logo}{badge}<span class='cfdb-team'>{row.get(display_field) or '—'}</span>"
+
+
+def team_link(slug_field: str, season_field: str = "season") -> Callable:
+    """An href to a team page, for use as a Col's `link`.
+
+    Returns None where the slug is missing rather than building `/team?team=None` — a link
+    to nowhere is worse than a cell that was never clickable, which is the same reasoning
+    that put a slug fallback on every serving view.
+    """
+    def href(row):
+        slug = row.get(slug_field)
+        if slug is None or (isinstance(slug, float) and pd.isna(slug)):
+            return None
+        season = row.get(season_field)
+        query = f"team={slug}"
+        if season is not None and not pd.isna(season):
+            query += f"&season={int(season)}"
+        return f"/team?{query}"
+    return href
+
+
+def dataset_caption(label: str, table_name: str) -> None:
+    """AC-G.7, amended: front of house says "Dataset: Schedule", not `srv_schedule`.
+
+    The literal object name is right for a BUILDER — System Overview and Degraded states
+    keep it, because there the exact identifier is the point. On a page whose reader wants
+    to know what they are looking at, a table name is jargon, and the useful move is a link
+    to what that dataset actually contains.
+    """
+    st.markdown(
+        f"<div class='cfdb-dataset'>Dataset: "
+        f"<a href='/dictionary?tab=serving&stat={table_name}' target='_self'>{label}</a>"
+        f"</div>", unsafe_allow_html=True)
 
 
 def as_of_caption(df: pd.DataFrame) -> None:

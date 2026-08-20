@@ -1,16 +1,44 @@
-"""One filter contract, applied identically everywhere (§0.4).
+"""One filter contract, applied identically everywhere (§0.4, amended).
 
-Defaults read flag columns rather than literals (AC-G.15), option lists come from the
-page's own serving view so an option that would return zero rows is never offered
-(AC-G.16), and every choice round-trips through the URL (AC-G.18).
+TWO CHANGES FROM THE ORIGINAL, both from walking the site rather than reading it.
+
+FILTERS ARE AT THE TOP, NOT IN THE SIDEBAR. The requirement said sidebar; every sports site
+puts season and week controls above the content because that is where the eye lands, and
+the sidebar is navigation. A control the reader has to go looking for is a control they
+assume is not there.
+
+FILTERS SURVIVE NAVIGATION. This is the one that made the site feel broken: choosing season
+2025 to see results, moving to another page, and being silently returned to 2026. The cause
+was that each page read `params.get("season")` and fell back to its own default whenever the
+URL happened not to carry one — so the filter round-tripped within a page and evaporated
+between them.
+
+The fix is that the scope is written to the URL on every render and read back on the next,
+and every internal link carries it forward. AC-G.18 asked for round-tripping; what was
+missing is that a link is part of the trip.
+
+Option lists still come from the page's own serving view, so an option that would return
+zero rows is never offered (AC-G.16).
 """
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 import streamlit as st
 
 from lib import params
 from lib.query import query
+
+# FBS spine (Marc, 2026-08-20). The site is about FBS; non-FBS teams exist as opponents with
+# names, colours and slugs, and do not get index rows, standings rows or team pages.
+#
+# A DEFAULT, not a hardcoded WHERE. The whole point of a division filter is that someone can
+# widen it, and a rule baked into every query is a rule nobody can see or change.
+DIVISIONS = {
+    "FBS": "fbs",
+    "FBS + FCS": "fcs",
+    "All divisions": "all",
+}
+DEFAULT_DIVISION = "fbs"
 
 
 @dataclass
@@ -19,6 +47,7 @@ class GameScope:
     week: Optional[int]
     season_type: str
     conference: Optional[str]
+    division: str = DEFAULT_DIVISION
 
     def describe(self) -> str:
         bits = [f"season {self.season}", self.season_type]
@@ -26,7 +55,36 @@ class GameScope:
             bits.append(f"week {self.week}")
         if self.conference:
             bits.append(self.conference)
+        if self.division != "all":
+            bits.append(self.division.upper())
         return ", ".join(bits)
+
+    @property
+    def classifications(self) -> List[str]:
+        """Which classifications a query should accept.
+
+        The inclusion rule for GAMES is EITHER team FBS, not both — a Division II visitor's
+        trip to an FBS stadium is an FBS game. That is enforced in the serving views, which
+        is where a rule that spans two columns belongs; this list is for team-grain pages.
+        """
+        if self.division == "all":
+            return ["fbs", "fcs", "ii", "iii", "ii/iii"]
+        if self.division == "fcs":
+            return ["fbs", "fcs"]
+        return ["fbs"]
+
+    def link(self, page: str, **extra) -> str:
+        """An internal link that CARRIES THE SCOPE FORWARD.
+
+        This is what makes filters persist. A link that drops the season is why choosing
+        2025 and clicking a team returned a 2026 page.
+        """
+        carried = {"season": self.season, "week": self.week,
+                   "season_type": None if self.season_type == "regular" else self.season_type,
+                   "conference": self.conference,
+                   "division": None if self.division == DEFAULT_DIVISION else self.division}
+        carried.update(extra)
+        return params.link(page, **carried)
 
 
 @st.cache_data(ttl=3600)
@@ -52,29 +110,79 @@ def _conferences(season: int) -> list:
     return df["conference"].tolist()
 
 
-def game_scope() -> GameScope:
-    """Sidebar filters for any week-scoped page. State lives in the URL."""
+def game_scope(show_week: bool = True, show_conference: bool = True) -> GameScope:
+    """The global filter bar, rendered at the top of the page.
+
+    Every value is read from the URL first and written back after, so the scope survives a
+    page change. Nothing here mutates session state — AC-G.13 requires navigation by query
+    params, and a filter held only in session is a filter that cannot be linked to.
+    """
     seasons = _seasons()
-    default_season = params.get("season") or (seasons[0] if seasons else None)
-    with st.sidebar:
-        season = st.selectbox("Season", seasons,
-                              index=seasons.index(default_season) if default_season in seasons else 0)
-        season_type = st.selectbox("Season type", ["regular", "postseason"],
-                                   index=0 if (params.get("season_type") or "regular") == "regular" else 1)
-        weeks = _weeks(season, season_type)
-        week_options = ["All"] + [str(w) for w in weeks]
-        current_week = params.get("week")
-        week_index = week_options.index(str(current_week)) if str(current_week) in week_options else 0
-        week_choice = st.selectbox("Week", week_options, index=week_index)
-        conferences = ["All"] + _conferences(season)
-        conf_current = params.get("conference")
-        conf_index = conferences.index(conf_current) if conf_current in conferences else 0
-        conference = st.selectbox("Conference", conferences, index=conf_index)
+    if not seasons:
+        return GameScope(0, None, "regular", None)
+
+    requested = params.get("season")
+    season = requested if requested in seasons else seasons[0]
+    season_type = params.get("season_type") or "regular"
+
+    weeks = _weeks(season, season_type)
+    week_options = ["All"] + [str(w) for w in weeks]
+    current_week = str(params.get("week"))
+    conferences = ["All"] + _conferences(season)
+    current_conf = params.get("conference")
+    division_labels = list(DIVISIONS)
+    current_division = params.get("division") or DEFAULT_DIVISION
+    division_label = next((k for k, v in DIVISIONS.items() if v == current_division),
+                          division_labels[0])
+
+    # A horizontal row under the title. Columns rather than the sidebar, per the amendment.
+    widths = [1.1, 1.0, 1.2, 1.5, 0.9]
+    slots = st.columns(widths if show_conference else widths[:3] + widths[4:])
+    index = 0
+
+    with slots[index]:
+        season = st.selectbox("Season", seasons, index=seasons.index(season),
+                              key="flt_season")
+    index += 1
+    with slots[index]:
+        season_type = st.selectbox(
+            "Type", ["regular", "postseason"],
+            index=0 if season_type == "regular" else 1, key="flt_type")
+    index += 1
+    with slots[index]:
+        if show_week:
+            week_choice = st.selectbox(
+                "Week", week_options,
+                index=week_options.index(current_week) if current_week in week_options else 0,
+                key="flt_week")
+        else:
+            week_choice = "All"
+    index += 1
+    if show_conference:
+        with slots[index]:
+            conference = st.selectbox(
+                "Conference", conferences,
+                index=conferences.index(current_conf) if current_conf in conferences else 0,
+                key="flt_conf")
+        index += 1
+    else:
+        conference = "All"
+    with slots[index]:
+        division_label = st.selectbox(
+            "Division", division_labels, index=division_labels.index(division_label),
+            key="flt_div",
+            help="FBS by default. A game counts as FBS if EITHER team is FBS, so a "
+                 "non-FBS visitor's trip to an FBS stadium is included.")
 
     week = None if week_choice == "All" else int(week_choice)
     conf = None if conference == "All" else conference
-    params.set_params(season=season, week=week, season_type=season_type, conference=conf)
-    return GameScope(season, week, season_type, conf)
+    division = DIVISIONS[division_label]
+
+    # Written back on every render, which is what makes the scope survive a page change.
+    params.set_params(
+        season=season, week=week, conference=conf, division=division,
+        season_type=None if season_type == "regular" else season_type)
+    return GameScope(season, week, season_type, conf, division)
 
 
 def clear() -> None:

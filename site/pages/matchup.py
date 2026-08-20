@@ -13,7 +13,8 @@ the copy cannot drift from what the model actually did.
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, chips, fmt, identity, params, shell, states, table
+from lib import (attribution, chips, filters, fmt, identity, params, shell,
+                 states, table)
 from lib.query import query
 from lib.table import Col
 
@@ -71,34 +72,66 @@ def body(page) -> None:
 
 
 def _picker() -> None:
-    """No game chosen. Offer the current week rather than an empty page."""
-    seasons = query("select distinct season from srv_matchup order by season desc limit 200")
-    if seasons.empty:
-        states.empty("A game would be here.", "No games have been built yet.")
-        return
-    season = params.get("season") or int(seasons["season"].iloc[0])
-    with st.sidebar:
-        options = seasons["season"].tolist()
-        season = st.selectbox("Season", options,
-                              index=options.index(season) if season in options else 0)
+    """No game_id. A REAL PICKER, not an arbitrary list.
+
+    Arriving here cold used to show the most recent 300 games sorted by date with no way to
+    narrow them — an unfiltered list, which is not a decision surface but a broken index.
+    That only became visible because nothing on the site linked to this page, so the nav
+    entry was the sole route in; with the deep links working it is the exception rather
+    than the way in.
+
+    Keeping the nav slot and giving it a job: the same filter bar every other page uses,
+    grouped by day, searchable by team. AC-10.1 as amended.
+    """
+    scope = filters.game_scope()
+    table.dataset_caption("Matchup", "srv_matchup")
+    st.markdown("Pick a game to see the full matchup — market, model, and the series "
+                "history. Every game row elsewhere on the site links straight here.")
+    search = st.text_input("Find a team", placeholder="Type a team name…")
+
     games = query("""
-        select game_id, week, start_date_et, home_team, away_team, is_completed
+        select game_id, season, week, start_date_et, game_date,
+               home_team, away_team, home_conference, away_conference,
+               home_points, away_points, is_completed, venue_display
         from srv_matchup
-        where season = :season
-        order by start_date_et desc, game_id
-        limit 300
-    """, {"season": season})
+        where season = :season and season_type = :season_type
+          and (:week is null or week = :week)
+          and (:conference is null or home_conference = :conference
+               or away_conference = :conference)
+        order by start_date_et, game_id
+        limit 400
+    """, {"season": scope.season, "season_type": scope.season_type,
+          "week": scope.week, "conference": scope.conference})
+
+    if search and not games.empty:
+        mask = (games["home_team"].str.contains(search, case=False, na=False)
+                | games["away_team"].str.contains(search, case=False, na=False))
+        games = games[mask]
+
     states.render_or_state(
         games, "srv_matchup",
-        "Pick a game to see the matchup.",
-        f"No games recorded for {season}.",
-        renderer=lambda d: table.render(d, [
-            Col("start_date_et", "Kickoff", "datetime"),
-            Col("week", "Wk", "num", dp=0),
+        "Games would be listed here.",
+        f"No game matches “{search}”." if search else
+        f"No games recorded for {scope.describe()}.",
+        renderer=lambda d: _picker_table(d, scope),
+        fix_label="Clear filters" if (scope.week or scope.conference) else None,
+        fix=filters.clear)
+
+
+def _picker_table(df, scope) -> None:
+    """Grouped by day, like every other game list on the site."""
+    for day, rows in df.groupby(df["game_date"], sort=True):
+        st.markdown(f"<div class='cfdb-daygroup'>{fmt.day(pd.Timestamp(day))}</div>",
+                    unsafe_allow_html=True)
+        table.render(rows, [
+            Col("start_date_et", "Kickoff", "time"),
             Col("away_team", "Away"),
+            Col("away_points", "", "num", dp=0),
             Col("home_team", "Home"),
-        ], caption="srv_matchup",
-            link_builder=lambda r: params.link("matchup", game_id=r["game_id"])))
+            Col("home_points", "", "num", dp=0),
+            Col("venue_display", "Venue"),
+        ], caption="",
+            link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]))
 
 
 def _scoreline(row) -> None:

@@ -83,7 +83,25 @@ def eastern(ts) -> str:
     if ts is None or pd.isna(ts):
         return EM_DASH
     stamp = pd.Timestamp(ts)
-    return stamp.strftime("%a %d %b %Y, %-I:%M %p ET")
+    return stamp.strftime("%b %-d, %Y, %-I:%M %p ET")
+
+
+def clock(ts) -> str:
+    """Time only, with the zone. For a table already grouped by day.
+
+    The long form wrapped onto two lines in a narrow kickoff column and repeated a date the
+    day header had already given. "7:30 PM ET" is the whole of what that cell adds.
+    """
+    if ts is None or pd.isna(ts):
+        return EM_DASH
+    return pd.Timestamp(ts).strftime("%-I:%M %p ET")
+
+
+def day(ts) -> str:
+    """A date as "Aug 20, 2026"."""
+    if ts is None or pd.isna(ts):
+        return EM_DASH
+    return pd.Timestamp(ts).strftime("%b %-d, %Y")
 
 
 def as_of(ts) -> str:

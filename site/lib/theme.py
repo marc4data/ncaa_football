@@ -76,6 +76,21 @@ TABLE_CSS = """
   padding:.45rem .55rem; }
 .cfdb-table td { padding:.42rem .55rem; border-bottom:1px solid #eef0f3; }
 .cfdb-table tbody tr:hover { background:rgba(31,111,235,.05); }
+/* Linked rows. The anchor fills the cell so the whole row is a target, while staying a
+   real <a href> — which is what makes middle-click and copy-link work (AC-G.13). The row
+   link inherits colour so a table does not turn into a wall of blue; the column-specific
+   link (a team name) is visually distinct, per AC-2.5. */
+.cfdb-table td a.cfdb-cell-link { display:block; color:inherit; text-decoration:none;
+    margin:-.42rem -.55rem; padding:.42rem .55rem; }
+.cfdb-table td a.cfdb-cell-link-alt { color:#1f6feb; font-weight:600; }
+.cfdb-table td a.cfdb-cell-link-alt:hover { text-decoration:underline; }
+.cfdb-table tr.cfdb-linked { cursor:pointer; }
+.cfdb-dataset { font-size:.78rem; opacity:.72; margin:-.25rem 0 .6rem; }
+.cfdb-dataset a { color:#1f6feb; text-decoration:none; }
+.cfdb-dataset a:hover { text-decoration:underline; }
+.cfdb-footer a { color:#1f6feb; text-decoration:none; }
+.cfdb-footer a:hover { text-decoration:underline; }
+.cfdb-footer-links { opacity:.85; }
 .cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right; }
 .cfdb-team { margin-left:.4rem; }
 .cfdb-rank { font-size:.72rem; font-weight:700; opacity:.7; margin-left:.3rem; }

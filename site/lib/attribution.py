@@ -9,8 +9,22 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
-CFBD_CREDIT = ("Data from [CollegeFootballData.com](https://collegefootballdata.com). "
-               "Optional under their terms; we do it anyway.")
+# Rendered as HTML, not markdown. The footer goes through st.markdown with
+# unsafe_allow_html, which does NOT also parse markdown link syntax — so the previous
+# `[text](url)` rendered as literal brackets and the attribution was not a link at all.
+CFBD_CREDIT = (
+    'Data sourced from the '
+    '<a href="https://collegefootballdata.com" target="_blank" rel="noopener">'
+    'CollegeFootballData API</a>. Attribution is optional under their terms; '
+    'cfdb provides it anyway.')
+
+# This site is a portfolio piece, so the links are part of the point rather than an
+# afterthought bolted to the bottom.
+AUTHOR_LINKS = (
+    '<a href="https://www.linkedin.com/in/marc4data/" target="_blank" rel="noopener">'
+    'LinkedIn</a> · '
+    '<a href="https://marc4data.netlify.app/" target="_blank" rel="noopener">'
+    'marc4data.netlify.app</a>')
 
 
 def model_attribution(df: Optional[pd.DataFrame]) -> None:
@@ -32,5 +46,8 @@ def model_attribution(df: Optional[pd.DataFrame]) -> None:
 
 
 def footer() -> None:
-    """CFBD credit, on every page (AC-G.43)."""
-    st.markdown(f"<div class='cfdb-footer'>{CFBD_CREDIT}</div>", unsafe_allow_html=True)
+    """CFBD credit, on every page (AC-G.43), plus the author links."""
+    st.markdown(
+        f"<div class='cfdb-footer'>{CFBD_CREDIT}<br>"
+        f"<span class='cfdb-footer-links'>Built by Marc Alexander · {AUTHOR_LINKS}</span>"
+        f"</div>", unsafe_allow_html=True)

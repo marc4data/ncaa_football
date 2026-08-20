@@ -167,6 +167,18 @@ def _ratings(season, team_display) -> None:
             st.caption(str(note))
 
 
+def _opponent(row) -> str:
+    """AC-8.3 in one cell: "@ Ohio State" away, "Ohio State" home, "vs Ohio State" neutral.
+
+    A neutral site is neither, and marking it "vs" rather than leaving it bare is the
+    difference between a bowl game and a home game on a schedule read at a glance.
+    """
+    name = row.get("opponent") or fmt.EM_DASH
+    if row.get("is_neutral_site"):
+        return f"vs {name}"
+    return f"@ {name}" if str(row.get("venue_role") or "").lower() == "away" else name
+
+
 def _rating_rank(row) -> str:
     """CFBD's own rank where it publishes one, ours otherwise, and the difference is said
     rather than hidden — Elo and PPA publish no ranking, so those are cfdb's ordering."""
@@ -212,16 +224,19 @@ def _game_log(season, team_display) -> None:
             "No games recorded for this team-season.",
             renderer=lambda d: table.render(d, [
                 Col("week", "Wk", "num", dp=0),
-                Col("game_date", "Date", "datetime"),
-                Col("venue_role", "H/A"),
-                Col("opponent", "Opponent"),
+                Col("game_date", "Date", "date"),
+                # "@ Opponent" rather than an H/A column. The universal convention in every
+                # printed schedule, and it saves a column on a table that needed the width.
+                Col("opponent", "Opponent", render=_opponent),
                 Col("result", "Result"),
                 Col("points_for", "PF", "num", dp=0),
                 Col("points_against", "PA", "num", dp=0),
                 # AC-8.3: oriented to the SUBJECT team, not to home.
-                Col("margin", "Margin (team)", "signed", dp=0),
-            ], caption="srv_team_game_log",
-                link_builder=lambda r: params.link("matchup", game_id=r["game_id"])))
+                Col("margin", "Margin", "signed", dp=0),
+            ], caption="",
+                # AC-8.7: game log rows click through to the Matchup.
+                link_builder=lambda r: params.link("matchup", game_id=r["game_id"],
+                                                   season=season)))
 
 
 def render() -> None:

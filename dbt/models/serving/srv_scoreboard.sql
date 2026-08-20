@@ -37,6 +37,14 @@ select
     -- The slug falls back to a slug OF that name rather than to NULL. A null slug is a link
     -- to nowhere; a derived slug is a link to a team page that will honestly render Empty,
     -- because a team with no dim_team row genuinely has no season record to show.
+    -- FBS SPINE (Marc, 2026-08-20). EITHER team, not both: a Division II visitor's trip
+    -- to an FBS stadium is an FBS game, and excluding it would drop 20 of the 25 games on
+    -- the opening Thursday. 934 of 3,831 games in 2025 qualify, so this is the difference
+    -- between a schedule about college football and a schedule about all of college
+    -- football. Carried as a COLUMN so the site filters on it with a default rather than a
+    -- hardcoded WHERE nobody can widen.
+    (g.home_classification = 'fbs' or g.away_classification = 'fbs') as is_fbs_game,
+
     g.home_team_id, g.home_team, h.abbreviation as home_abbreviation,
     {{ team_identity('h', 'g.home_team', 'home_') }},
     h.color_on_light as home_color_on_light, h.logo_source_url as home_logo_url,
