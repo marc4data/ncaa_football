@@ -64,7 +64,11 @@ def _slate(df: pd.DataFrame) -> None:
                 r, "away_team_slug", "away_team_display", "away_logo_url")),
             Col("home", "Home", render=lambda r: table.team_cell(
                 r, "home_team_slug", "home_team_display", "home_logo_url")),
-            Col("market", "Spread · model", render=_spread_and_model),
+            # Named for what it renders, not for a real column. A synthetic Col whose name
+            # collides with an actual field of the same view makes every field-keyed check
+            # over these definitions ambiguous — the export's label comparison hit exactly
+            # that against srv_edge_finder.market.
+            Col("spread_and_model", "Spread · model", render=_spread_and_model),
             Col("total_current", "Total", "num"),
             Col("home_cover_edge", "Cover edge", "signed"),
             Col("flag", "", render=lambda r: chips.out_of_sample_chip_html(

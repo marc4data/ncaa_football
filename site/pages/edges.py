@@ -167,12 +167,18 @@ def _edges(df: pd.DataFrame, market: str) -> None:
         Col("flag", "", render=lambda r: chips.out_of_sample_chip_html(
             bool(r.get("is_out_of_sample_week")))),
     ]
+    # Labelled by what they ARE, not by whose they are. "Market" and "Model" alone
+    # collided with the model-name column two places to the right, so the table carried two
+    # columns headed Model and two headed Market — which the Excel export surfaced, because
+    # a spreadsheet with duplicate headers is unusable in a way a web table merely looks
+    # cluttered.
     if market == "spread":
-        columns.insert(3, Col("spread_home_perspective", "Market", "signed"))
-        columns.insert(4, Col("predicted_margin_home_perspective", "Model", "signed"))
+        columns.insert(3, Col("spread_home_perspective", "Market spread", "signed"))
+        columns.insert(4, Col("predicted_margin_home_perspective", "Model margin", "signed"))
     else:
-        columns.insert(3, Col("market_implied_home_win_probability", "Market", "num"))
-        columns.insert(4, Col("predicted_home_win_probability", "Model", "num"))
+        columns.insert(3, Col("market_implied_home_win_probability",
+                              "Market win prob", "num"))
+        columns.insert(4, Col("predicted_home_win_probability", "Model win prob", "num"))
     table.render(df, columns, caption="srv_edge_finder",
                  link_builder=lambda r: params.link("matchup", game_id=r["game_id"]))
 
