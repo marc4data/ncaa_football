@@ -14,8 +14,13 @@ ENUM_PARAMS = {
     "market": {"spread", "total", "moneyline"},
     "stat_scope": {"team", "opponent"},
     "stat_basis": {"raw", "adjusted"},
+    # Which end of the leaderboard leads. cfdb does not model whether a statistic is
+    # better high or better low, so Stats asks rather than guesses, and the answer is part
+    # of the URL like every other choice (AC-G.18) — a link to a leaderboard that arrives
+    # sorted the other way is a link to a different claim.
+    "order": {"desc", "asc"},
 }
-SLUG_PARAMS = {"team", "opponent", "conference", "poll", "provider", "model", "tab"}
+SLUG_PARAMS = {"team", "opponent", "conference", "poll", "provider", "model", "tab", "stat"}
 KNOWN = INT_PARAMS | set(ENUM_PARAMS) | SLUG_PARAMS
 
 

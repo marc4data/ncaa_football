@@ -52,10 +52,20 @@ series as (
     -- Postgres cannot hash-join a disjunction, so it degrades to a nested loop over 110,634
     -- games against itself. That built acceptably until fct_game gained four columns, then
     -- ran past 11 minutes without finishing. Same result, and it hash-joins.
+    --
+    -- A TIE IS ITS OWN OUTCOME and is counted as one. The first version derived the away
+    -- record as `series_games - series_home_team_wins`, which is only correct in a sport
+    -- without draws: every tie was silently credited to the away team. College football
+    -- had no overtime before 1996 and there are 2,600 tied games on record, which
+    -- overstated the away side in 40,045 of 102,985 matchup rows — a plausible-looking
+    -- number, wrong, and impossible to spot on screen because a head-to-head record is
+    -- exactly the figure nobody arrives already knowing.
     select
         game_id,
         count(*)                                as series_games,
         sum(home_team_won)                      as series_home_team_wins,
+        sum(away_team_won)                      as series_away_team_wins,
+        sum(was_tied)                           as series_ties,
         min(prior_season)                       as series_first_season,
         max(prior_season)                       as series_last_season
     from (
@@ -66,13 +76,25 @@ series as (
                       and prior.home_points > prior.away_points then 1
                  when prior.away_team_id = cur.home_team_id
                       and prior.away_points > prior.home_points then 1
-                 else 0 end as home_team_won
+                 else 0 end as home_team_won,
+            case when prior.home_team_id = cur.away_team_id
+                      and prior.home_points > prior.away_points then 1
+                 when prior.away_team_id = cur.away_team_id
+                      and prior.away_points > prior.home_points then 1
+                 else 0 end as away_team_won,
+            case when prior.home_points = prior.away_points then 1 else 0 end as was_tied
         from {{ ref('fct_game') }} cur
         join {{ ref('fct_game') }} prior
           on prior.home_team_id = cur.home_team_id
          and prior.away_team_id = cur.away_team_id
          and prior.game_id <> cur.game_id
+        -- A RESULT, not merely a completed flag. Two games are marked completed with
+        -- no score recorded, and counting them as meetings gave a head-to-head record
+        -- of 0-0-0 over one meeting — a row that reconciles to nothing and reads as a
+        -- rendering fault. A meeting with no result contributes no result.
         where prior.is_completed
+          and prior.home_points is not null
+          and prior.away_points is not null
 
         union all
 
@@ -83,13 +105,25 @@ series as (
                       and prior.home_points > prior.away_points then 1
                  when prior.away_team_id = cur.home_team_id
                       and prior.away_points > prior.home_points then 1
-                 else 0 end
+                 else 0 end,
+            case when prior.home_team_id = cur.away_team_id
+                      and prior.home_points > prior.away_points then 1
+                 when prior.away_team_id = cur.away_team_id
+                      and prior.away_points > prior.home_points then 1
+                 else 0 end,
+            case when prior.home_points = prior.away_points then 1 else 0 end
         from {{ ref('fct_game') }} cur
         join {{ ref('fct_game') }} prior
           on prior.home_team_id = cur.away_team_id
          and prior.away_team_id = cur.home_team_id
          and prior.game_id <> cur.game_id
+        -- A RESULT, not merely a completed flag. Two games are marked completed with
+        -- no score recorded, and counting them as meetings gave a head-to-head record
+        -- of 0-0-0 over one meeting — a row that reconciles to nothing and reads as a
+        -- rendering fault. A meeting with no result contributes no result.
         where prior.is_completed
+          and prior.home_points is not null
+          and prior.away_points is not null
     ) meetings
     group by game_id
 )
@@ -125,8 +159,7 @@ select
     p.home_cover_edge, p.home_win_probability_edge,
     p.is_out_of_sample_week,
 
-    s.series_games, s.series_home_team_wins,
-    s.series_games - s.series_home_team_wins as series_away_team_wins,
+    s.series_games, s.series_home_team_wins, s.series_away_team_wins, s.series_ties,
     s.series_first_season, s.series_last_season,
     ao_src.as_of_ts,
     mv_src.model_version as model_version_key,
@@ -137,6 +170,12 @@ select
     l.snapshot_ts,
     p.predicted_home_win_probability as home_win_probability,
     g.away_points - g.home_points as actual_margin,
+    -- The same result read the other way round, so the page can put the actual margin
+    -- beside predicted_margin_home_perspective without flipping a sign in the app. The
+    -- storage convention stays away-minus-home everywhere; this is the display reading,
+    -- and it is computed here because the app computing it would be the app owning a
+    -- convention (G-3).
+    g.home_points - g.away_points as actual_margin_home_perspective,
     -- The model's own coverage floor, carried as DATA so the Empty state is not a
     -- hardcoded "Week 5" string. CFBD does not ship current-season feature files until
     -- week 5, because the models need several weeks of this year's results before they can

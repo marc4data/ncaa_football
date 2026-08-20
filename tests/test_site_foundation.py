@@ -179,3 +179,122 @@ def test_ats_breakeven_is_the_real_number():
     """AC-13.3: 52.4% is breakeven at −110; a softer threshold would flatter the model."""
     from pages import performance
     assert performance.BREAKEVEN == 52.4
+
+
+# --- A4 page bodies ----------------------------------------------------------------------
+
+def test_every_page_now_has_a_body_except_the_blocked_one():
+    """A4's completion criterion, checked rather than claimed.
+
+    `shell.render_page(key)` with no body renders the "not built yet" placeholder. Counting
+    which modules still call it that way is the only honest measure of how much of A4 is
+    done — a progress note in a document is a claim, and this is the same claim executable.
+    """
+    import re
+    from pathlib import Path
+    from lib.registry import BY_KEY
+    pages = Path(__file__).resolve().parents[1] / "site" / "pages"
+    placeholders = set()
+    for path in pages.glob("*.py"):
+        if path.stem == "__init__":
+            continue
+        source = path.read_text()
+        # A body-less page is exactly `shell.render_page("key")` with no second argument.
+        if re.search(r'render_page\(\s*"[^"]+"\s*\)', source):
+            placeholders.add(path.stem)
+    # Players stays a placeholder: its primary view does not exist, so the shell renders
+    # the blocked state and a body would have nothing to read.
+    assert placeholders <= {"players", "export"}, f"still placeholders: {sorted(placeholders)}"
+    assert not BY_KEY["players"].buildable
+
+
+def test_edge_finder_reads_its_week_floor_from_data_not_from_a_constant():
+    """The week-5 rule is the model's property and must travel with the model.
+
+    A hardcoded 5 in the page would go stale the first time the model is retrained on a
+    different cut, and the page would keep confidently stating the old number.
+    """
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "edges.py").read_text()
+    assert "training_week_floor" in source
+    # The user-facing sentence interpolates the floor rather than naming a week. Asserting
+    # that "Week 5" appears nowhere in the file was the first version of this test and it
+    # failed on the docstring explaining why not to hardcode it — a test that cannot tell
+    # prose from copy is a test that gets loosened rather than fixed.
+    assert "Week {floor}" in source
+
+
+def test_edge_finder_empty_copy_is_empty_not_degraded():
+    """AC-G.51. Nothing is broken in weeks 1-4 and nothing is missing that should exist,
+    so Degraded would be a false statement about whose fault it is."""
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "edges.py").read_text()
+    assert "states.empty(" in source
+    assert "states.degraded(" not in source
+
+
+def test_matchup_does_not_flip_the_sign_convention_itself():
+    """G-3: a sign convention is a definition, and definitions live in dbt.
+
+    The page reads actual_margin_home_perspective rather than negating actual_margin, so
+    there is exactly one place the convention is expressed.
+    """
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "matchup.py").read_text()
+    assert "actual_margin_home_perspective" in source
+    assert "-float(" not in source and "-1 *" not in source
+
+
+def test_matchup_reads_series_ties_rather_than_deriving_them():
+    """A tie is its own outcome. Subtracting to find the away record credited every draw
+    to the away team in 40,045 rows."""
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "matchup.py").read_text()
+    assert "series_ties" in source
+
+
+def test_blank_confidence_bucket_renders_as_absent():
+    """The pack writes an empty string where it has no bucket, and an empty cell reads as
+    a value. Same defect class as the ats 0-0-0 that manufactured a record."""
+    from pages import edges
+    from lib import fmt
+    assert edges._bucket({"confidence_bucket": ""}) == fmt.EM_DASH
+    assert edges._bucket({"confidence_bucket": None}) == fmt.EM_DASH
+    assert edges._bucket({"confidence_bucket": "high"}) == "high"
+
+
+def test_moneylines_never_render_with_a_decimal_point():
+    """A price with a decimal point reads like a spread, and those are different
+    quantities. -270.0 is not a moneyline anyone has seen."""
+    from pages import odds
+    render = odds._moneyline("home_moneyline")
+    assert render({"home_moneyline": -270}) == "-270"
+    assert render({"home_moneyline": 145}) == "+145"
+
+
+def test_odds_best_price_can_be_both_sides():
+    """One book holding the best number on each side is a real market state, not a bug."""
+    from pages import odds
+    assert odds._best({"is_best_home_spread": True, "is_best_away_spread": True}) == "both"
+    assert odds._best({"is_best_home_spread": False, "is_best_away_spread": False}) != "both"
+
+
+def test_dictionary_renders_undocumented_as_a_value():
+    """AC-16.2: a blank description cell reads as a rendering fault; a state reads as debt."""
+    from pages import dictionary
+    html = dictionary._status({"description_status": "UNDOCUMENTED"})
+    assert "Undocumented" in html
+    assert "cfdb-chip" in html
+
+
+def test_methodology_states_the_counterintuitive_sign_convention():
+    """The one fact a reader is most likely to get backwards has to be on the page that
+    exists to explain the numbers."""
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "pages"
+              / "methodology.py").read_text()
+    assert "away points minus home points" in source
+    assert "betting advice" in source.lower()
+    assert "Week 5" in source
+    # The licence obligation, stated on the page and not only in a column.
+    assert "not CollegeFootballData.com predictions" in source
