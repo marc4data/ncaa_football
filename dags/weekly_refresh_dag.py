@@ -38,6 +38,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from src.alerting import failure_callback
 from src.dbt_artifacts import load_run_results
 from src.load_raw_to_postgres import load_endpoint
+from src.publish_marts import publish_all
 from src.weekly import pregame_refresh, results_refresh
 
 DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
@@ -121,6 +122,26 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
             bash_command=f"dbt test --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
         )
 
+        # PUBLISH IS A DOWNSTREAM TASK, NOT A SCHEDULE.
+        #
+        # This is the last hop before a user sees anything, and until now it had no
+        # scheduled trigger at all: the serving database changed only when someone ran
+        # publish_marts by hand. Every model could be current and the site still weeks old.
+        #
+        # It runs after dbt_test rather than on its own clock, and the difference is not
+        # cosmetic. A clock-triggered publish can fire mid-build and ship a half-rebuilt
+        # serving layer — succeeding while doing it, which is the same green-and-wrong
+        # signature as the three defects found this week. Being downstream makes
+        # "the build finished" a precondition rather than a hope.
+        #
+        # all_success is the right trigger here, unlike capture_test_results below: a
+        # failing dbt test means the serving layer is not fit to publish, and shipping it
+        # anyway would put data on the site that dbt has just said is wrong.
+        publish = PythonOperator(
+            task_id="publish_to_serving",
+            python_callable=lambda **_: publish_all(),
+        )
+
         capture_dq = PythonOperator(
             task_id="capture_test_results",
             python_callable=lambda **_: load_run_results(),
@@ -130,7 +151,7 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
             trigger_rule="all_done",
         )
 
-        fetch >> load >> dbt_run >> dbt_test >> capture_dq
+        fetch >> load >> dbt_run >> dbt_test >> publish >> capture_dq
     return dag
 
 

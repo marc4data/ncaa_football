@@ -21,6 +21,20 @@ services:
       POSTGRES_USER: ${SERVING_PG_USER:-cfdb}
       POSTGRES_PASSWORD: ${SERVING_PG_PASSWORD:?serving Postgres password is required}
       POSTGRES_DB: ${SERVING_PG_DB:-cfdb}
+    # LOOPBACK ONLY, and the address is the whole point.
+    #
+    # Publishing used to run `docker compose exec postgres psql` over SSH, which means the
+    # publishing identity needs the Docker socket — and Docker socket access is root:
+    # `docker run -v /:/host` and you are root on the host. A "restricted" publish user in
+    # the docker group would have been cosmetically better than root and materially
+    # identical.
+    #
+    # Binding to 127.0.0.1 lets the publish user reach Postgres with psql and no Docker at
+    # all, so its blast radius is what it can do to the serving database — which is exactly
+    # what publishing is. Nothing is exposed externally: 127.0.0.1 is not routable, and UFW
+    # still allows only 22/tcp.
+    ports:
+      - "127.0.0.1:5433:5432"
     # Tuned for 1 GiB total, shared with two other services. Defaults assume a machine
     # several times this size and would push the box into swap under a single big query.
     command: >

@@ -44,3 +44,10 @@ logs/
 cfdb_model_pack/
 model_outputs/
 *.zip
+
+# SSH keys, including the Airflow publish key. It lives in ~/.ssh and is mounted by path,
+# never copied into the tree — but a pattern costs nothing and a committed key cannot be
+# uncommitted.
+*.pem
+id_ed25519*
+cfdb_publish_ed25519*
