@@ -5,7 +5,9 @@ select
     t.color_on_light, t.color_on_dark, t.color_source_light, t.color_source_dark,
     t.logo_source_url,
     r.games_played, r.wins, r.losses, r.ties, r.win_pct, r.tiebreak_rank,
-    ao_src.as_of_ts
+    ao_src.as_of_ts,
+    t.team_slug,
+    t.team_display
 from {{ ref('dim_team') }} t
 left join {{ ref('fct_team_record') }} r on r.season = t.season and r.team_id = t.team_id
 -- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's

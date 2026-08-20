@@ -86,3 +86,26 @@
 {% macro databricks__json_array_elements(column) -%}
     explode(from_json({{ column }}, 'array<string>'))
 {%- endmacro %}
+
+
+{# --- Nth element of a JSON ARRAY, as text ------------------------------------------------
+  Distinct from json_get_string, which addresses an OBJECT KEY. On an array, Postgres's
+  `->> '0'` looks for a key named "0", finds none, and returns NULL — silently, because a
+  missing key and a null value are the same answer.
+
+  That is exactly how every logo on the site went missing: dim_team.logos held a populated
+  array of CDN URLs on all 34,061 rows, logo_source_url extracted element 0 with the key
+  accessor, and the monogram fallback fired 100% of the time. The fallback was working, so
+  nothing looked broken — the site simply had no logos.
+#}
+{% macro json_array_element_string(column, index) -%}
+    {{ return(adapter.dispatch('json_array_element_string', 'cfdb_dbt')(column, index)) }}
+{%- endmacro %}
+
+{% macro default__json_array_element_string(column, index) -%}
+    ({{ column }} ->> {{ index }})
+{%- endmacro %}
+
+{% macro databricks__json_array_element_string(column, index) -%}
+    get_json_object({{ column }}, '$[{{ index }}]')
+{%- endmacro %}

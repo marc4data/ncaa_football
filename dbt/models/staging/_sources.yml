@@ -119,6 +119,15 @@ sources:
             data_tests: [not_null]
           - name: model_version
             data_tests: [not_null]
+      - name: raw_deploy_status
+        tags: ['postgres_only']
+        description: >
+          How far Airflow's pinned deploy worktree is behind main. The pin stops a dev
+          checkout changing production; this measures its mirror image, production silently
+          running old code. Written by src/deploy_status.py.
+        columns:
+          - name: observed_at
+            data_tests: [not_null]
       - name: raw_dbt_test_result
         # Written straight to Postgres by src/*.py, never landed as a CFBD response, so
         # it has no Databricks equivalent and the analytics build excludes it by tag.

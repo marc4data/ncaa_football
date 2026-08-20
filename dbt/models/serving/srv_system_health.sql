@@ -69,7 +69,23 @@ documentation as (
         cast(null as {{ type_timestamp_tz() }})            as observed_at
     from {{ ref('dim_field_metadata') }}
     group by layer
+),
+
+-- Deploy drift. Added after production spent a day building a dbt project with 39 models
+-- while development had 56 — no error and no alert, because a pinned tree that requires a
+-- person to advance it is a tree that will be stale again. Latest observation only; the
+-- history is in the staging model.
+deployment as (
+    select
+        'deployment'                                       as signal_type,
+        'airflow deploy tree'                              as subject,
+        severity,
+        detail,
+        observed_at
+    from {{ ref('fct_deploy_status') }}
+    where recency_rank = 1
 )
+
 select
     {{ surrogate_key(['signal_type', 'subject']) }} as system_health_sk,
     signal_type, subject, severity, detail, observed_at,
@@ -79,6 +95,7 @@ from (
     union all select * from tests
     union all select * from quota
     union all select * from documentation
+    union all select * from deployment
 ) combined
 -- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
 -- underlying data was last loaded, never from now() in the app. Per-domain rather than

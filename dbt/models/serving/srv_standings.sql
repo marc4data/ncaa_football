@@ -32,7 +32,9 @@ select
     t.color_on_dark,
     t.logo_source_url,
     t.abbreviation,
-    ao_src.as_of_ts
+    ao_src.as_of_ts,
+    t.team_slug,
+    t.team_display
 from {{ ref('fct_team_record') }} r
 left join {{ ref('dim_team') }} t
     on t.season = r.season and t.team_id = r.team_id

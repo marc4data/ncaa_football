@@ -42,9 +42,38 @@ Redeploy after changing site code or the stack:
 ```bash
 # from the repo root
 rsync -az deploy/docker-compose.yml deploy/backup.sh root@143.110.225.139:/opt/cfdb/
-rsync -az deploy/site/ site/app.py site/db.py root@143.110.225.139:/opt/cfdb/site/
-ssh root@143.110.225.139 'cd /opt/cfdb && docker compose build site && docker compose up -d'
+rsync -az --delete --exclude '__pycache__' \
+  deploy/site/Dockerfile deploy/site/requirements.txt \
+  site/app.py site/lib site/pages \
+  root@143.110.225.139:/opt/cfdb/site/
+ssh root@143.110.225.139 'cd /opt/cfdb && docker compose build site && docker compose up -d site'
 ```
+
+**One rsync, and the source directories have no trailing slash.** Both details are load
+bearing, and both were got wrong on a real deploy:
+
+- `site/lib/` with a trailing slash copies the directory's *contents* into the destination
+  root, so every module lands beside `app.py` and the `lib` package does not exist. Without
+  the slash the directory itself is copied, which is what the Dockerfile's `COPY lib/` needs.
+- Two `--delete` invocations against the same destination fight each other. The second one
+  deleted the `Dockerfile` the first had just placed, and the build then failed with
+  `failed to read dockerfile`. `--delete` is still right — a page module removed from the
+  repo but left on the box keeps being served — it just has to be one command that knows
+  about everything.
+
+The list also has to include `lib/` and `pages/` at all: it once read `app.py` and `db.py`
+alone, which produces a container that builds cleanly, starts cleanly, and raises
+`ModuleNotFoundError: No module named 'lib'` the moment anyone loads a page.
+
+Verify after deploying, because "the container is up" is not "the site works":
+
+```bash
+ssh root@143.110.225.139 'cd /opt/cfdb && docker compose logs --tail=30 site'
+curl -sS -o /dev/null -w '%{http_code}\n' https://cfdb.marc4data.com   # 302 -> Access
+```
+
+A 302 is the expected answer: Cloudflare Access is redirecting to its login. A 200 from an
+unauthenticated request would mean the Access policy is missing.
 
 ## Publishing marts
 

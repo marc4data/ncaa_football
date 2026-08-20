@@ -152,6 +152,22 @@ jobs:
       - name: dbt build
         run: dbt build --project-dir dbt
 
+      - name: Assert every page query resolves
+        env:
+          PGPASSWORD: cfdb
+        # The contract test proves each query is legally shaped; it cannot prove the
+        # columns exist. Scores asked for eight columns srv_scoreboard did not have and
+        # rendered the Error state on every load, which looks like a handled failure.
+        run: python ci/check_page_queries.py
+
+      - name: Assert every health signal fires
+        env:
+          PGPASSWORD: cfdb
+        # The System Overview page has five severity ladders and only one of them had ever
+        # been observed climbing. A branch that never evaluates true looks exactly like a
+        # healthy system until the day it matters.
+        run: python ci/check_health_signals.py
+
       - name: Assert layer boundaries
         # Schema-per-layer separates outputs; it cannot stop a mart selecting straight
         # from raw. This reads the compiled dependency graph, where that would show up.

@@ -39,8 +39,17 @@ def engine():
     host = os.getenv("SERVING_PG_HOST", os.getenv("PG_HOST", "localhost"))
     port = os.getenv("SERVING_PG_PORT", os.getenv("PG_PORT", "5432"))
     database = os.getenv("SERVING_PG_DB", os.getenv("PG_DB", "cfdb"))
+    schema = os.getenv("SERVING_SCHEMA", "serving")
     return create_engine(
         f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+        # The app states the schema it reads rather than inheriting it. On the droplet the
+        # read role carries `search_path=serving` as a role attribute, set out of band and
+        # recorded nowhere in this repo — so a recreated role produces "relation does not
+        # exist" on every view, which `states.section` reports as Degraded: "this has not
+        # been built yet". That is a confident, wrong diagnosis of a connection problem.
+        # Declaring it here makes the same value explicit and makes the app runnable
+        # against any database that has the views.
+        connect_args={"options": f"-csearch_path={schema}"},
         pool_pre_ping=True)
 
 

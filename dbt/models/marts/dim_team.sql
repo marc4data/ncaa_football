@@ -135,7 +135,7 @@ select
     -- The 500px light variant is the one the site renders. logo_path stays null until the
     -- fetch-and-cache task exists (identity spec D3) — the column is here so the app never
     -- changes shape when caching lands.
-    {{ json_get_string('r.logos', '0') }} as logo_source_url,
+    {{ json_array_element_string('r.logos', 0) }} as logo_source_url,
     cast(null as {{ dbt.type_string() }}) as logo_path
 from resolved r
 left join {{ ref('dim_conference') }} c
