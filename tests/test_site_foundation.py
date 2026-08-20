@@ -202,9 +202,11 @@ def test_every_page_now_has_a_body_except_the_blocked_one():
         # A body-less page is exactly `shell.render_page("key")` with no second argument.
         if re.search(r'render_page\(\s*"[^"]+"\s*\)', source):
             placeholders.add(path.stem)
-    # Players stays a placeholder: its primary view does not exist, so the shell renders
-    # the blocked state and a body would have nothing to read.
-    assert placeholders <= {"players", "export"}, f"still placeholders: {sorted(placeholders)}"
+    # Players is the only one left, and it stays: its primary view does not exist, so the
+    # shell renders the blocked state and a body would have nothing to read. Asserting
+    # equality rather than a subset — a loose bound stops measuring anything once the work
+    # is done, which is precisely when it should start guarding against regression.
+    assert placeholders == {"players"}, f"still placeholders: {sorted(placeholders)}"
     assert not BY_KEY["players"].buildable
 
 
@@ -298,3 +300,49 @@ def test_methodology_states_the_counterintuitive_sign_convention():
     assert "Week 5" in source
     # The licence obligation, stated on the page and not only in a column.
     assert "not CollegeFootballData.com predictions" in source
+
+
+def test_every_site_dependency_is_in_the_site_image_requirements():
+    """The site image has its own requirements list, and forgetting it is silent.
+
+    Two lists exist for a good reason — the repo root carries dbt, the Databricks driver
+    and the ingestion stack, none of which belong on a 1 GiB droplet whose only job is
+    rendering. The cost is that a new site dependency has to be added to both, and missing
+    the second one fails in the worst possible way: the tests pass, CI passes, the image
+    builds, the container starts, and the one page that needs it raises on import when
+    somebody opens it.
+
+    That is exactly what happened with openpyxl for the Excel export, so the coupling is
+    now checked rather than remembered.
+    """
+    import ast
+    import sys as _sys
+    from pathlib import Path
+
+    site = Path(__file__).resolve().parents[1] / "site"
+    requirements = (Path(__file__).resolve().parents[1]
+                    / "deploy" / "site" / "requirements.txt").read_text().lower()
+
+    # Import name -> distribution name, where they differ.
+    DISTRIBUTION = {"dotenv": "python-dotenv", "psycopg2": "psycopg2-binary",
+                    "yaml": "pyyaml"}
+    LOCAL = {"lib", "pages", "app"}
+
+    imported = set()
+    for path in site.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                imported.add(node.module.split(".")[0])
+
+    third_party = {
+        name for name in imported
+        if name not in LOCAL and name not in _sys.stdlib_module_names
+    }
+    missing = sorted(
+        name for name in third_party
+        if DISTRIBUTION.get(name, name) not in requirements)
+    assert not missing, (
+        f"imported by site/ but absent from deploy/site/requirements.txt: {missing}")
