@@ -620,8 +620,15 @@ INSERT INTO raw.raw_ratings_srs (filename, content, status_code, params, fetched
     {"year": 2024, "team": "Alpha State", "conference": "Test Conference",
      "division": null, "rating": 11.1, "ranking": 1},
     {"year": 2024, "team": "Beta Tech", "conference": "Test Conference",
+     "division": null, "rating": -2.4, "ranking": 2},
+    {"year": 2024, "team": "Beta Tech", "conference": null,
      "division": null, "rating": -2.4, "ranking": 2}
   ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:32Z', now());
+-- The second Beta Tech row is NOT a typo. CFBD's /ratings/srs returns some schools twice —
+-- once with a conference and once with `conference: null`, carrying an IDENTICAL rating.
+-- Charlotte in 2024 and 2025, Troy in 2024. The rating is the same on both copies, so no
+-- average moves and no value looks wrong; what moves is every count and every percentile
+-- denominator. The fixture keeps the duplicate alive so the dedup runs on every build.
 
 INSERT INTO raw.raw_ratings_elo (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-22-001Z.json', '{

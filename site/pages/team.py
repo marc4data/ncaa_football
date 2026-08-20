@@ -126,6 +126,7 @@ def _ratings(season, team_display) -> None:
         df = query("""
             select rating_system, rating_system_display, display_order,
                    rating, rating_rank, rating_rank_computed, rating_percentile,
+                   rating_population,
                    offense_rating, defense_rating, special_teams_rating,
                    strength_of_schedule, second_order_wins,
                    rating_scope, is_projection, completed_games_at_rating,
@@ -179,10 +180,19 @@ def _rating_rank(row) -> str:
 
 
 def _percentile(row) -> str:
+    """AC-G.33: the percentile carries the population it was computed against.
+
+    That population MOVES. SP+ covers 139 teams today and Elo covers none; when Elo appears
+    mid-season it may cover a different set again. "82nd percentile" means something
+    different over 139 teams than over 265, and only the n makes that legible.
+    """
     value = row.get("rating_percentile")
     if value is None or pd.isna(value):
         return fmt.EM_DASH
-    return f"{float(value) * 100:.0f}%"
+    population = row.get("rating_population")
+    suffix = (f" of {int(population)}"
+              if population is not None and not pd.isna(population) else "")
+    return f"{float(value) * 100:.0f}%{suffix}"
 
 
 def _game_log(season, team_display) -> None:

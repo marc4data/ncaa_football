@@ -107,7 +107,15 @@ select
     round(cast(percent_rank() over (
         partition by r.season, r.rating_system, t.classification
         order by r.rating asc nulls first
-    ) as numeric), 4) as rating_percentile
+    ) as numeric), 4) as rating_percentile,
+    -- THE n THE PERCENTILE WAS COMPUTED AGAINST, per system. AC-G.33 again: a rate without
+    -- its denominator is a defect, and here the denominator MOVES. SP+ covers 139 teams
+    -- today while Elo covers none; when Elo appears mid-season it may cover a different set
+    -- again. A percentile over a shifting population with no n attached is a number that
+    -- silently changes meaning between August and October.
+    count(*) over (
+        partition by r.season, r.rating_system, t.classification
+    ) as rating_population
 from rated r
 left join {{ ref('dim_team') }} t
     on t.season = r.season and t.school = r.team

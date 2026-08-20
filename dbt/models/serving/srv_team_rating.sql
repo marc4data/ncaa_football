@@ -42,6 +42,7 @@ select
     r.rating_rank,
     r.rating_rank_computed,
     r.rating_percentile,
+    r.rating_population,
     r.offense_rating,
     r.defense_rating,
     r.special_teams_rating,

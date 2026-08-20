@@ -181,6 +181,30 @@ unioned as (
            null, null, null
     from ppa
 
+),
+
+-- ONE ROW PER (season, system, team), because CFBD does not guarantee it.
+--
+-- /ratings/srs returns some schools TWICE — once with their conference and once with
+-- `conference: null`, carrying an identical rating. Charlotte in 2024 and 2025, Troy in
+-- 2024. Three rows across two seasons, which is exactly the size of defect that survives
+-- review: the rating is the same on both copies, so no average moves and no value looks
+-- wrong. What moves is every COUNT and every PERCENTILE DENOMINATOR — SRS percentiles were
+-- being computed over 266 rows for 265 teams.
+--
+-- The conference-bearing row wins, because it is the more informative of two rows that
+-- agree on the number.
+deduplicated as (
+
+    select
+        u.*,
+        row_number() over (
+            partition by u.season, u.rating_system, u.team
+            order by case when u.conference is null then 1 else 0 end, u.rating desc
+        ) as team_recency
+    from unioned u
+    where u.team is not null
+
 )
 
 select
@@ -195,5 +219,5 @@ select
     special_teams_rating,
     strength_of_schedule,
     second_order_wins
-from unioned
-where team is not null
+from deduplicated
+where team_recency = 1
