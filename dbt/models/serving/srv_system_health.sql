@@ -82,11 +82,8 @@ deployment as (
         severity,
         detail,
         observed_at
-    from (
-        select *, row_number() over (order by observed_at desc) as recency
-        from {{ ref('stg_deploy_status') }}
-    ) ranked
-    where recency = 1
+    from {{ ref('fct_deploy_status') }}
+    where recency_rank = 1
 )
 
 select
