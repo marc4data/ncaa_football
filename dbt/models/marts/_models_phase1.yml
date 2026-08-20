@@ -104,6 +104,12 @@ models:
         description: IANA timezone; frequently null.
       - name: latitude
         description: Decimal degrees.
+        # A second source table, so a payload-shape change at CFBD's end shows up here even
+        # if dim_team is untouched. Also the only numeric column under this test — the cast
+        # to text is what makes one test work across types. Measured 95.5%.
+        data_tests:
+          - populated_rate:
+              arguments: {min_rate: 0.85}
       - name: longitude
         description: Decimal degrees.
       - name: elevation_m
@@ -170,10 +176,22 @@ models:
         description: Convenience flag for the FBS spine.
       - name: city
         description: Team city.
+        # Canary for json_get_nested_string, the two-hop accessor. It reads `location.city`,
+        # and if the parent hop ever stopped resolving this would go to 0% in silence
+        # exactly as the logos did. Measured 97.3%.
+        data_tests:
+          - populated_rate:
+              arguments: {min_rate: 0.90}
       - name: state
         description: Team state.
       - name: color_raw
         description: Primary colour exactly as landed. CFBD returns the literal string '#null' when absent; that is normalised to NULL in staging.
+        # Canary for json_get_string, the plain key accessor, on the column the entire
+        # contrast ladder is computed from. At 0% every team would fall to the fallback
+        # rung and still render — the same invisible failure. Measured 97.0%.
+        data_tests:
+          - populated_rate:
+              arguments: {min_rate: 0.90}
       - name: alt_color_raw
         description: Alternate colour exactly as landed.
       - name: color_on_light
@@ -194,6 +212,30 @@ models:
         description: Full landed logo array (16 URLs — light and dark at 8 sizes).
       - name: logo_source_url
         description: First logo URL, for provenance. Third-party CDN — never hotlinked by the site.
+        data_tests:
+          # Two thresholds because there are two honest floors, and only the pair of them
+          # distinguishes the failure modes worth telling apart.
+          #
+          # The FBS-modern test is the acceptance criterion: every team the site can render
+          # has an asset. Measured 3,143 of 3,143 — the FBS gaps are all defunct programs
+          # (Denver, Carlisle, Wichita State), none later than 1995, and the site floor is
+          # 2002. 0.99 rather than 1.0 leaves room for CFBD retiring one asset without
+          # turning a build red over a single missing PNG.
+          - populated_rate:
+              arguments:
+                min_rate: 0.99
+                row_filter: "is_fbs and season >= 2002"
+              config:
+                severity: error
+          # The all-rows test is the accessor canary. It exists to catch the exact defect
+          # that got here — a wrong accessor returning NULL for every row — which reads as
+          # 0% and trips this long before anyone notices the fallback is doing all the work.
+          # Measured 96.4%; 0.90 sits well below the honest floor and far above broken.
+          - populated_rate:
+              arguments:
+                min_rate: 0.90
+              config:
+                severity: error
       - name: logo_path
         description: Path to our own cached copy. Null until the fetch-and-cache task exists; the column is here so the app never changes shape later.
 

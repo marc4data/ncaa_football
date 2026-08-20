@@ -105,15 +105,28 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
+--
+-- `logos` is a JSON ARRAY, and that is load-bearing rather than incidental. Every logo on
+-- the site was null because `logo_source_url` reached into this array with `->> '0'` — the
+-- object-KEY accessor, which finds no key named "0" and returns NULL without complaint. The
+-- fixture must carry the array shape, because against an object the wrong accessor would
+-- have worked and CI would have gone green on a broken build.
+--
+-- `color` likewise: it is read with the plain key accessor, and the contrast ladder falls
+-- back silently when it is null, so a regression there is invisible in exactly the same way.
 INSERT INTO raw.raw_teams (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-00-001Z.json', '{
   "status_code": 200, "params": {"year": "2024"},
   "data": [
     {"id": 1, "school": "Alpha State", "mascot": "Ones", "abbreviation": "ALP",
      "conference": "Test Conference", "division": null, "classification": "fbs",
+     "color": "#123456", "alternateColor": "#abcdef",
+     "logos": ["http://example.invalid/alpha.png", "http://example.invalid/alpha-dark.png"],
      "location": {"city": "Alphaville", "state": "AA"}},
     {"id": 2, "school": "Beta Tech", "mascot": "Twos", "abbreviation": "BET",
      "conference": "Test Conference", "division": null, "classification": "fbs",
+     "color": "#654321", "alternateColor": "#fedcba",
+     "logos": ["http://example.invalid/beta.png", "http://example.invalid/beta-dark.png"],
      "location": {"city": "Betaburg", "state": "BB"}}
   ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:00Z', now()),
 ('2026-01-01T00-00-00-002Z.json', '{
@@ -121,9 +134,13 @@ INSERT INTO raw.raw_teams (filename, content, status_code, params, fetched_at, a
   "data": [
     {"id": 1, "school": "Alpha State", "mascot": "Ones", "abbreviation": "ALP",
      "conference": "Old Conference", "division": null, "classification": "fbs",
+     "color": "#123456", "alternateColor": "#abcdef",
+     "logos": ["http://example.invalid/alpha.png"],
      "location": {"city": "Alphaville", "state": "AA"}},
     {"id": 2, "school": "Beta Tech", "mascot": "Twos", "abbreviation": "BET",
      "conference": "Old Conference", "division": null, "classification": "fbs",
+     "color": "#654321", "alternateColor": "#fedcba",
+     "logos": ["http://example.invalid/beta.png"],
      "location": {"city": "Betaburg", "state": "BB"}}
   ]}', 200, '{"year": "1900"}', '2026-01-01T00:00:00Z', now()),
 -- A failed fetch, landed as the raw layer always does. Staging must filter it out.
@@ -335,6 +352,16 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 
 -- Quota telemetry. Two snapshots so the series has a delta rather than a single point —
 -- one row answers "where are we", only a series answers "where are we heading".
+--
+-- The LATEST snapshot deliberately sits above the 90% error threshold, so the escalating
+-- branch of the quota signal runs on every CI build. The earlier one is comfortably below
+-- it, which keeps the series honest: a quota that was fine and is now not is the shape the
+-- alarm exists to catch, and it also proves fct_api_usage takes the latest observation per
+-- resource rather than the first or an average.
+--
+-- Only one severity per resource is observable at a time — the signal reports current state
+-- — so the choice is which branch CI exercises, and an unexercised alarm is worth less than
+-- an unexercised all-clear. ci/check_health_signals.py asserts this stays true.
 INSERT INTO raw.raw_info (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-10-001Z.json', '{
   "status_code": 200, "params": {},
@@ -346,7 +373,7 @@ INSERT INTO raw.raw_info (filename, content, status_code, params, fetched_at, ad
 ('2026-01-01T00-00-10-002Z.json', '{
   "status_code": 200, "params": {},
   "data": {"patronLevel": 3, "tierName": "Tier 3", "monthlyLimit": 75000,
-           "remainingCalls": 72900, "usedCalls": 2100,
+           "remainingCalls": 3750, "usedCalls": 71250,
            "resetAt": "2026-09-01T00:00:00.000Z", "sharedPool": true,
            "products": ["cfb", "cbb"]}
   }', 200, '{}', '2026-01-01T00:00:21Z', now());
