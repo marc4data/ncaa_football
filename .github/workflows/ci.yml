@@ -152,6 +152,12 @@ jobs:
       - name: dbt build
         run: dbt build --project-dir dbt
 
+      - name: Assert the production selector covers the serving layer
+        # `+tag:production` once resolved to six models, none of them a serving view, and
+        # every scheduled refresh was green while rebuilding nothing anyone reads. This
+        # asserts what the selector RESOLVES TO, not that it ran.
+        run: python ci/check_production_selector.py
+
       - name: Assert every page query resolves
         env:
           PGPASSWORD: cfdb

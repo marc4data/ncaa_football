@@ -38,13 +38,11 @@ select
     -- to nowhere; a derived slug is a link to a team page that will honestly render Empty,
     -- because a team with no dim_team row genuinely has no season record to show.
     g.home_team_id, g.home_team, h.abbreviation as home_abbreviation,
-    coalesce(h.team_slug, {{ to_slug('g.home_team') }}) as home_team_slug,
-    coalesce(h.team_display, g.home_team)               as home_team_display,
+    {{ team_identity('h', 'g.home_team', 'home_') }},
     h.color_on_light as home_color_on_light, h.logo_source_url as home_logo_url,
     g.home_points,
     g.away_team_id, g.away_team, a.abbreviation as away_abbreviation,
-    coalesce(a.team_slug, {{ to_slug('g.away_team') }}) as away_team_slug,
-    coalesce(a.team_display, g.away_team)               as away_team_display,
+    {{ team_identity('a', 'g.away_team', 'away_') }},
     a.color_on_light as away_color_on_light, a.logo_source_url as away_logo_url,
     g.away_points,
     -- AC-1.5: the rank the team held going into this game, so an unranked team can show

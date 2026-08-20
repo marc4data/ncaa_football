@@ -33,7 +33,13 @@ aggregated as (
         count(case when is_conference_game and points_for > points_against then 1 end) as conference_wins,
         count(case when is_conference_game and points_for < points_against then 1 end) as conference_losses,
         sum(points_for)                                            as points_for,
-        sum(points_against)                                        as points_against
+        sum(points_against)                                        as points_against,
+        -- The name comes from the GAME SPINE, which is complete, not from the dimension,
+        -- which is not. dim_team is built from CFBD's /teams response and has no row for a
+        -- Division II side that merely appeared on someone's schedule, so `school` was NULL
+        -- on 7,482 of 30,475 team-seasons — and every view reading it inherited that.
+        -- max() rather than min() is arbitrary; fct_game_team carries one name per team_id.
+        max(team)                                                  as team_name
     from team_games
     group by season, team_sk, team_id
 
@@ -43,7 +49,7 @@ with_team as (
 
     select
         a.*,
-        t.school,
+        coalesce(t.school, a.team_name) as school,
         t.conference,
         t.conference_sk,
         t.classification,

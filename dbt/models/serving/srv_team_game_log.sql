@@ -38,8 +38,7 @@ select
     g.has_box_score,
     t.color_on_light, t.color_on_dark, t.logo_source_url,
     ao_src.as_of_ts,
-    t.team_slug,
-    t.team_display
+    {{ team_identity('t', 'g.team') }}
 from {{ ref('fct_game_team') }} g
 join {{ ref('fct_game') }} f on f.game_id = g.game_id
 left join {{ ref('dim_team') }} t on t.season = g.season and t.team_id = g.team_id
