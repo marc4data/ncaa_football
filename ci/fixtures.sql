@@ -147,8 +147,24 @@ INSERT INTO raw.raw_teams (filename, content, status_code, params, fetched_at, a
 ('2026-01-01T00-00-00-003Z.json', '{"status_code": 401, "params": {"year": "2024"}, "data": null}',
  401, '{"year": "2024"}', '2026-01-01T00:00:01Z', now());
 
--- Games. One completed matchup per season, so every reconciliation test has something to
--- reconcile: each game contributes exactly one win and one loss.
+-- Games. Completed matchups, so every reconciliation test has something to reconcile.
+--
+-- THE POST-GAME PATH IS THE HALF THAT MATTERS ON A SATURDAY, and it was the half never
+-- exercised: every page was verified against 2026 rows, and every 2026 row has
+-- is_completed = false, so no scored formatter on the site had ever run against a real
+-- value. Rehearsing against a completed 2025 week found two defects in an afternoon. These
+-- three games keep that path exercised on every build instead of four times a season.
+--
+-- Game 9004 is against GAMMA COLLEGE, which is deliberately ABSENT FROM raw_teams. That is
+-- not an oversight — it is the shape of 11% of the real scoreboard. dim_team is built from
+-- CFBD's /teams response, which does not list every opponent an FBS side schedules, so a
+-- Division II visitor exists in /games and not in /teams. Reading the display name off the
+-- dimension left it NULL on 12,168 of 110,634 rows and the Scores page rendered the winner
+-- as `None`. A fixture where every team is in both places cannot catch that.
+--
+-- Game 9005 is a TIE. A tie is a settled result and must never render as Pending, and it is
+-- the branch where `winner is null` means something completely different from "not played
+-- yet". College football had no overtime before 1996 and there are 2,600 of them on record.
 INSERT INTO raw.raw_games (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-01-001Z.json', '{
   "status_code": 200, "params": {"year": "2024", "seasonType": "regular"},
@@ -157,7 +173,18 @@ INSERT INTO raw.raw_games (filename, content, status_code, params, fetched_at, a
      "startDate": "2024-09-07T23:30:00.000Z", "completed": true, "conferenceGame": true,
      "neutralSite": false, "homeId": 1, "homeTeam": "Alpha State", "homePoints": 28,
      "homeClassification": "fbs", "awayId": 2, "awayTeam": "Beta Tech", "awayPoints": 21,
-     "awayClassification": "fbs", "venue": "Alpha Field", "attendance": 50000}
+     "awayClassification": "fbs", "venue": "Alpha Field", "attendance": 50000},
+    {"id": 9004, "season": 2024, "week": 2, "seasonType": "regular",
+     "startDate": "2024-09-14T23:30:00.000Z", "completed": true, "conferenceGame": false,
+     "neutralSite": false, "homeId": 1, "homeTeam": "Alpha State", "homePoints": 41,
+     "homeClassification": "fbs", "awayId": 77, "awayTeam": "Gamma College",
+     "awayPoints": 3, "awayClassification": "ii", "venue": "Alpha Field",
+     "attendance": 41000},
+    {"id": 9005, "season": 2024, "week": 3, "seasonType": "regular",
+     "startDate": "2024-09-21T23:30:00.000Z", "completed": true, "conferenceGame": true,
+     "neutralSite": false, "homeId": 2, "homeTeam": "Beta Tech", "homePoints": 17,
+     "homeClassification": "fbs", "awayId": 1, "awayTeam": "Alpha State", "awayPoints": 17,
+     "awayClassification": "fbs", "venue": "Beta Grounds", "attendance": 33000}
   ]}', 200, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:02Z', now()),
 -- Date-only era: midnight UTC, no kickoff time recorded.
 ('2026-01-01T00-00-01-002Z.json', '{
@@ -175,7 +202,7 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 ('teams', '2026-01-01T00-00-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:00Z', now()),
 ('teams', '2026-01-01T00-00-00-002Z.json', '{"year": "1900"}', 200, 2, '2026-01-01T00:00:00Z', now()),
 ('teams', '2026-01-01T00-00-00-003Z.json', '{"year": "2024"}', 401, 0, '2026-01-01T00:00:01Z', now()),
-('games', '2026-01-01T00-00-01-001Z.json', '{"year": "2024", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:02Z', now()),
+('games', '2026-01-01T00-00-01-001Z.json', '{"year": "2024", "seasonType": "regular"}', 200, 3, '2026-01-01T00:00:02Z', now()),
 ('games', '2026-01-01T00-00-01-002Z.json', '{"year": "1900", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:03Z', now()),
 -- An endpoint that has never returned rows: legitimately empty, must not read as a loss.
 ('records', '2026-01-01T00-00-02-001Z.json', '{"year": "2026"}', 200, 0, '2026-01-01T00:00:04Z', now());
@@ -287,8 +314,10 @@ INSERT INTO raw.raw_records (filename, content, status_code, params, fetched_at,
   "status_code": 200, "params": {"year": "2024"},
   "data": [
     {"year": 2024, "teamId": 1, "team": "Alpha State", "classification": "fbs",
-     "total": {"games": 1, "wins": 1, "losses": 0, "ties": 0}},
+     "total": {"games": 3, "wins": 2, "losses": 0, "ties": 1}},
     {"year": 2024, "teamId": 2, "team": "Beta Tech", "classification": "fbs",
+     "total": {"games": 2, "wins": 0, "losses": 1, "ties": 1}},
+    {"year": 2024, "teamId": 77, "team": "Gamma College", "classification": "ii",
      "total": {"games": 1, "wins": 0, "losses": 1, "ties": 0}}
   ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:09Z', now()),
 -- The legitimately-empty response already in the manifest. An endpoint that returns no rows

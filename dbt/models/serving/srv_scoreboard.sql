@@ -23,12 +23,28 @@ select
     g.is_completed, g.is_neutral_site, g.venue,
     g.venue as venue_display,
     {{ to_local_timestamp('g.start_date') }} as start_date_et,
+    -- THE NAME COMES FROM THE GAME, not from the dimension.
+    --
+    -- dim_team is season-scoped and built from CFBD's /teams response, which does not list
+    -- every opponent an FBS or FCS side happens to schedule: a Division II visitor exists in
+    -- /games and not in /teams. Taking the display name off the dimension left it NULL on
+    -- 12,168 of 110,634 rows — 11% of the scoreboard — and the page rendered an em dash for
+    -- the team and, worse, `None` for the winner.
+    --
+    -- fct_game carries the name for both sides on every row, always. srv_schedule already
+    -- did it this way and has zero nulls; this view was the one that disagreed.
+    --
+    -- The slug falls back to a slug OF that name rather than to NULL. A null slug is a link
+    -- to nowhere; a derived slug is a link to a team page that will honestly render Empty,
+    -- because a team with no dim_team row genuinely has no season record to show.
     g.home_team_id, g.home_team, h.abbreviation as home_abbreviation,
-    h.team_slug as home_team_slug, h.team_display as home_team_display,
+    coalesce(h.team_slug, {{ to_slug('g.home_team') }}) as home_team_slug,
+    coalesce(h.team_display, g.home_team)               as home_team_display,
     h.color_on_light as home_color_on_light, h.logo_source_url as home_logo_url,
     g.home_points,
     g.away_team_id, g.away_team, a.abbreviation as away_abbreviation,
-    a.team_slug as away_team_slug, a.team_display as away_team_display,
+    coalesce(a.team_slug, {{ to_slug('g.away_team') }}) as away_team_slug,
+    coalesce(a.team_display, g.away_team)               as away_team_display,
     a.color_on_light as away_color_on_light, a.logo_source_url as away_logo_url,
     g.away_points,
     -- AC-1.5: the rank the team held going into this game, so an unranked team can show

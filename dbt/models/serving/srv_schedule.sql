@@ -41,7 +41,9 @@ select
     g.excitement_index,
 
     g.home_team_id,
-    h.team_slug                   as home_team_slug,
+    -- Same fallback as srv_scoreboard: a null slug is a link to nowhere, and
+    -- dim_team has no row for a Division II visitor that /games knows about.
+    coalesce(h.team_slug, {{ to_slug('g.home_team') }}) as home_team_slug,
     g.home_team                   as home_team_display,
     h.abbreviation                as home_abbreviation,
     h.conference                  as home_conference,
@@ -52,7 +54,7 @@ select
     g.home_rank,
 
     g.away_team_id,
-    a.team_slug                   as away_team_slug,
+    coalesce(a.team_slug, {{ to_slug('g.away_team') }}) as away_team_slug,
     g.away_team                   as away_team_display,
     a.abbreviation                as away_abbreviation,
     a.conference                  as away_conference,

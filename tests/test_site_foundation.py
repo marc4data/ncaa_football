@@ -346,3 +346,36 @@ def test_every_site_dependency_is_in_the_site_image_requirements():
         if DISTRIBUTION.get(name, name) not in requirements)
     assert not missing, (
         f"imported by site/ but absent from deploy/site/requirements.txt: {missing}")
+
+
+# --- the post-game render path -----------------------------------------------------------
+
+def test_the_winner_is_read_from_the_view_not_derived_from_a_sign():
+    """The page used to pick the winner by the sign of actual_margin and index into a
+    display column. Two derivations of one definition disagree eventually, and this pair
+    disagreed on 1 game in 295 the first time it was run against real completed games."""
+    from pages import scores
+    row = {"is_completed": True, "winner": "Alpha State", "actual_margin": -7,
+           "home_team_display": "Alpha State", "away_team_display": "Beta Tech"}
+    assert "Alpha State" in scores._winner(row)
+
+
+def test_a_tie_is_a_settled_result_not_a_pending_one():
+    """srv_scoreboard returns NULL for `winner` on a completed game with equal scores.
+    Rendering that as Pending would claim the game has not been played."""
+    from pages import scores
+    tie = scores._winner({"is_completed": True, "winner": None, "actual_margin": 0})
+    pending = scores._winner({"is_completed": False, "winner": None})
+    assert "Tie" in tie
+    assert "Pending" in pending
+    assert tie != pending
+
+
+def test_the_winner_never_renders_the_string_none():
+    """A formatter that indexes into a nullable column and interpolates the result puts
+    `None` on the page. 11% of srv_scoreboard is a game against a team with no dim_team
+    row, so the nullable case is the common case, not an edge."""
+    from pages import scores
+    for row in ({"is_completed": True, "winner": None, "actual_margin": 0},
+                {"is_completed": False, "winner": None, "actual_margin": None}):
+        assert "None" not in scores._winner(row)

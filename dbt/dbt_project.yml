@@ -29,3 +29,25 @@ models:
     serving:
       +schema: serving
       +materialized: table
+      # THE SERVING LAYER IS THE PRODUCTION SURFACE, so it carries the production tag by
+      # construction rather than one model at a time.
+      #
+      # Airflow's refresh runs `dbt build --select +tag:production`. Until now that tag was
+      # on three legacy marts and nothing else, so the selector resolved to SIX models —
+      # mart_data_freshness, mart_team_schedule, mart_team_season_record and three staging
+      # ancestors. Not one srv_ view. Not fct_game. The scheduled refresh fetched results
+      # every Sunday, landed them in raw, rebuilt three marts nothing on the site reads, and
+      # stopped. Every view the site actually serves was rebuilt only when somebody ran dbt
+      # by hand.
+      #
+      # The tag was narrow to keep half-finished work out of the runtime path, and that is a
+      # real concern with two better answers already in place: Airflow reads a worktree
+      # PINNED TO MAIN, and CI builds the entire project on every pull request. Unfinished
+      # work cannot reach the tree Airflow runs. The narrow selector was guarding a door
+      # that is bolted from two other sides, while leaving the site's data stale by
+      # construction.
+      #
+      # `+` pulls ancestors, so tagging serving pulls the marts and staging models it needs
+      # and nothing else. A new mart that no serving view reads stays out of the runtime
+      # path exactly as before.
+      +tags: ['production']

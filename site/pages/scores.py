@@ -12,7 +12,7 @@ def _rows(season, week, season_type, conference) -> pd.DataFrame:
         select game_id, season, week, game_date, start_date_et,
                home_team_slug, home_team_display, home_logo_url, home_points, home_rank,
                away_team_slug, away_team_display, away_logo_url, away_points, away_rank,
-               actual_margin, excitement_index, is_upset, attendance, venue_display,
+               winner, actual_margin, excitement_index, is_upset, attendance, venue_display,
                is_completed, as_of_ts
         from srv_scoreboard
         where season = :season and season_type = :season_type and is_completed
@@ -23,14 +23,29 @@ def _rows(season, week, season_type, conference) -> pd.DataFrame:
 
 
 def _winner(row) -> str:
-    """AC-3.1: where actual_margin < 0 the HOME team won. The page must not undo the
-    convention in display code — it held 3,402/3,402 in the data."""
-    margin = row.get("actual_margin")
-    if margin is None or pd.isna(margin):
-        return chips.chip_html("w", "Pending")
-    if margin == 0:
-        return chips.chip_html("w", "Tie")
-    winner = row["home_team_display"] if margin < 0 else row["away_team_display"]
+    """AC-3.1. The winner is READ, not derived.
+
+    This used to pick the winner by the sign of actual_margin and index into the display
+    columns. Two problems, both found by rehearsing the post-game path against real 2025
+    games rather than 2026 fixtures where every score is null:
+
+      1. It is the app owning a definition dbt already owns. srv_scoreboard computes
+         `winner` from the points, and a second derivation is a second answer waiting to
+         disagree — which it did, on one game in 295.
+      2. It indexed into a column that can be NULL and rendered `<strong>None</strong>`.
+         The display name is fixed at the view now, but a formatter that assumes a value is
+         present is the thing that broke, and reading the view's own answer removes the
+         assumption rather than guarding it.
+
+    The sign convention is still asserted — in dbt, against the data, where it belongs.
+    """
+    if not row.get("is_completed"):
+        return chips.chip_html("w", "Pending", "this game has not been played")
+    winner = row.get("winner")
+    if winner is None or (isinstance(winner, float) and pd.isna(winner)):
+        # The view returns NULL for a completed game with equal scores. A tie is a settled
+        # result and must not render as Pending.
+        return chips.chip_html("w", "Tie", "a settled result, not an unplayed game")
     return f"<strong>{winner}</strong>"
 
 

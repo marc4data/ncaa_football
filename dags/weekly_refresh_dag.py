@@ -44,14 +44,23 @@ DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
 
 # The production refresh builds an EXPLICIT selection, never the whole project.
 #
-# This is a structural guarantee, not a convention. `+tag:production` resolves to the three
-# marts the publish job ships plus their ancestors — six models — so a new model is excluded
-# by construction rather than by anyone remembering to exclude it. Half-finished work in the
-# tree cannot fail the run that keeps the live site fresh, which means new models can be
-# built at any time instead of being scheduled around the season.
+# `+tag:production` now resolves to 53 of the project's 58 models: every serving view, plus
+# every mart and staging model that feeds one. The serving layer carries the tag from
+# dbt_project.yml, so it applies by construction rather than one model at a time, and `+`
+# pulls the ancestors.
 #
-# Tag the mart, not the staging models: `+` pulls ancestors in automatically, so the
-# selection stays correct when a mart gains an upstream dependency.
+# It used to resolve to SIX — three legacy marts and three staging models, not one srv_
+# view. The refresh fetched results every Sunday, landed them in raw, rebuilt three marts
+# that nothing on the site reads, and stopped. Every view the site actually serves was
+# rebuilt only when somebody ran dbt by hand, which meant the pipeline was scheduled up to
+# the point where it stopped mattering.
+#
+# The narrow selector existed to keep half-finished work out of the runtime path. That
+# concern is real and is already answered twice over: Airflow reads a worktree PINNED TO
+# MAIN, and CI builds the entire project on every pull request, so unfinished work cannot
+# reach the tree this runs against. Five models remain excluded — dim_season, dim_venue,
+# dim_week, stg_calendar, stg_venues — because no serving view reads them, which is exactly
+# the property the selector is supposed to have.
 PRODUCTION_SELECTOR = "--select +tag:production"
 
 default_args = {
