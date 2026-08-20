@@ -64,8 +64,7 @@ PAGES = [
     Page("edges", "Edge Finder", BETTING, "srv_edge_finder", True, True, True,
          partial_sections=["Hit-rate slider, bucket n and calibration "
                            "(fct_edge_bucket_performance)"]),
-    Page("performance", "Model Performance", BETTING, "srv_model_performance", True, True, True,
-         partial_sections=["Segment breakdowns (segment_type / segment_value)"]),
+    Page("performance", "Model Performance", BETTING, "srv_model_performance", True, True, True),
     Page("movement", "Line Movement", BETTING, "srv_line_movement", True, True, True),
     Page("export", "Excel Export", DELIVERABLE, None, True, True, True),
     Page("dictionary", "Data Dictionary", REFERENCE, "srv_data_dictionary", True, True, True),

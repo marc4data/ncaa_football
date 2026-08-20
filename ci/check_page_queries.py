@@ -35,9 +35,13 @@ SQL = re.compile(r'"""\s*(select\b.*?)"""', re.DOTALL | re.IGNORECASE)
 # f-string holes that appear inside query literals, and what to put there so the SQL parses.
 # Kept short on purpose: a query needing more interpolation than this is a query that should
 # not be interpolated.
+#
+# These are the holes whose value is a bare identifier chosen at runtime — a sort direction,
+# say. Holes filled from a module-level constant are resolved from the module itself, below,
+# because substituting a placeholder for a COLUMN LIST would validate nothing: the check
+# exists to prove the columns are real, and `select *` proves only that the table is.
 SUBSTITUTIONS = {
     "{rank_field}": "rank_desc",
-    "{COLUMNS}": "*",
 }
 
 # A value per bind parameter, so the query executes. These are not assertions about the
@@ -53,17 +57,45 @@ BINDINGS = {
 DEFAULT_BINDING = None
 
 
+def module_constants(source: str) -> dict:
+    """Module-level `NAME = "..."` string constants, for resolving f-string holes.
+
+    A page that shares one column list between two queries writes it as a constant and
+    interpolates it, which is correct — the alternative is two copies that drift. Reading
+    the constant back means the check still sees the real column names rather than a
+    wildcard, which is the entire point of running these against a database.
+
+    Parsed rather than imported: importing a page module pulls in streamlit and opens a
+    database connection at import time, and this runs before either is wanted.
+    """
+    import ast
+    constants = {}
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id.isupper():
+                constants[target.id] = node.value.value
+    return constants
+
+
 def statements():
     files = sorted(SITE.joinpath("pages").glob("*.py")) + \
         sorted(SITE.joinpath("lib").glob("*.py"))
     for path in files:
-        for raw in SQL.findall(path.read_text(encoding="utf-8")):
+        source = path.read_text(encoding="utf-8")
+        constants = module_constants(source)
+        for raw in SQL.findall(source):
             sql = " ".join(raw.split())
+            for name, value in constants.items():
+                sql = sql.replace("{" + name + "}", " ".join(value.split()))
             for hole, value in SUBSTITUTIONS.items():
                 sql = sql.replace(hole, value)
             if "{" in sql:
-                # An uncovered interpolation would silently become a syntax error and read
-                # as a broken query rather than an unsupported one. Say which it is.
+                # An uncovered interpolation would become a syntax error and read as a
+                # broken query rather than an unsupported one. Say which it is.
                 yield path, sql, f"uninterpolated placeholder in {path.name}"
                 continue
             yield path, sql, None
