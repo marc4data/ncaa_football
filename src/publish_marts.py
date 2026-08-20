@@ -103,6 +103,7 @@ DEFAULT_SERVING = [
     "srv_model_performance",
     "srv_line_movement",
     "srv_system_health",
+    "srv_team_rating",
     "srv_data_dictionary",
 ]
 

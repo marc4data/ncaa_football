@@ -25,8 +25,24 @@ Two assertions, and the second is the one that matters:
                                             is rebuilt from a stale input, which is worse
                                             than not rebuilding it at all: it looks fresh.
 
-Runs against dbt's manifest, so it reads the compiled graph rather than re-implementing
-selector semantics.
+WHY THIS IS NOT A DBT TEST, which is the first thing anyone will try to turn it into.
+
+A dbt test runs only for SELECTED models. So a dbt test guarding the selector would be
+scoped by the very thing it checks — narrow the selector and the guard narrows with it, in
+the same motion, silently.
+
+That is not hypothetical. The parity gate between srv_standings and mart_team_season_record
+IS a dbt test, and when the selector covered six models it did not fail: IT WAS NEVER ASKED.
+A scheduled run then rebuilt the mart from a defective definition and reported success,
+because nothing in a green run summary distinguishes "passed" from "not selected".
+
+THE RULE: a guard must not be scoped by the mechanism it checks. A freshness check that
+only runs when the pipeline runs cannot detect a pipeline that stopped. A test living inside
+the thing it tests inherits that thing's failure modes, including "did not happen".
+
+This runs in CI, against the manifest, outside dbt's selection entirely — which is what
+makes it a guard rather than a participant. Reading the compiled graph also means it does
+not re-implement selector semantics.
 """
 import json
 import sys

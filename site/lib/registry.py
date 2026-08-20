@@ -49,7 +49,7 @@ PAGES = [
          partial_sections=["Opponent scope and adjusted basis (stat_scope / stat_basis)"]),
     Page("teams", "Teams", GAMES, "srv_teams_index", True, True, True),
     Page("team", "Team page", GAMES, "srv_team_overview", True, True, True,
-         partial_sections=["Ratings and profile percentiles (fct_team_week_rating)",
+         partial_sections=["Week-over-week trends (weekly rating history)",
                            "Roster (dim_athlete)"]),
     Page("players", "Players", GAMES, "srv_player_stats", False, False, False,
          blocker="srv_player_stats",
@@ -58,8 +58,7 @@ PAGES = [
                       "blocked page whose raw data is not already on disk."),
     Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True,
          partial_sections=["Weather (fct_game_weather)",
-                           "Travel, rest and elevation (venue join key)",
-                           "Ratings (fct_team_week_rating)"]),
+                           "Travel, rest and elevation (venue join key)"]),
     Page("odds", "Odds Board", BETTING, "srv_odds_board", True, True, True),
     Page("edges", "Edge Finder", BETTING, "srv_edge_finder", True, True, True,
          partial_sections=["Hit-rate slider, bucket n and calibration "

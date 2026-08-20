@@ -6,7 +6,9 @@ was written for Roster and now earns its keep three times.
 """
 import streamlit as st
 
-from lib import identity, params, shell, states, table
+import pandas as pd
+
+from lib import fmt, identity, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -62,18 +64,24 @@ def body(page) -> None:
     with tabs[1]:
         _game_log(season, row.get('team_display'))
     with tabs[2]:
-        # AC-8.2: this tab is Degraded while the page around it works.
-        states.degraded("fct_team_week_rating",
-                        "SP+, Elo, SRS and the profile percentiles are not built yet.",
-                        scheduled="Track B1 — the largest enrichment in the backlog")
+        _ratings(season, row.get("team_display"))
     with tabs[3]:
         states.degraded("dim_athlete",
                         "Rosters need the athlete dimension and the player facts.",
                         scheduled="Track B8 — after the other blocked pages")
     with tabs[4]:
-        states.degraded("fct_team_week_rating",
-                        "Week-over-week trends need a rating per team per week.",
-                        scheduled="Track B1")
+        # Still Degraded, and the reason is sharper than it was. B1 shipped, but every
+        # rating CFBD publishes for a team is SEASON-scoped: /ratings/elo is the only one
+        # whose API even accepts a week, and it has only ever been fetched with a year.
+        # A trend line drawn from a season value repeated across fourteen weeks would be a
+        # fabricated time series that looked entirely convincing.
+        states.degraded(
+            "weekly rating history",
+            "Trends needs a rating per team per WEEK. Four of the five systems CFBD "
+            "publishes are season-scoped by design, and Elo — the one that is not — has "
+            "only been fetched by season. A chart drawn from a season figure repeated "
+            "across every week would be a line that never happened.",
+            scheduled="a weekly Elo backfill, which is a fetch change rather than a model")
 
 
 def _identity_header(row) -> None:
@@ -102,6 +110,79 @@ def _overview(row) -> None:
     cols[3].metric("ATS", row.get("ats_record_display") or "—")
     st.caption(f"ATS as favourite {row.get('ats_as_favorite_display') or '—'} · "
                f"as underdog {row.get('ats_as_underdog_display') or '—'}")
+
+
+def _ratings(season, team_display) -> None:
+    """B1. Five rating systems, with projections marked as projections.
+
+    The distinction is the whole reason this tab is not just five numbers: in weeks 1 to 4
+    the only ratings that exist are SP+ and FPI, and both are FORECASTS. Elo, SRS and PPA
+    are computed from results and have nothing to compute from. Rendering all five in the
+    same styling would imply a preseason projection and a measured rating are the same kind
+    of claim, which is the defect the backtest warning on Model Performance exists to
+    prevent, one page over.
+    """
+    with states.section("srv_team_rating"):
+        df = query("""
+            select rating_system, rating_system_display, display_order,
+                   rating, rating_rank, rating_rank_computed, rating_percentile,
+                   offense_rating, defense_rating, special_teams_rating,
+                   strength_of_schedule, second_order_wins,
+                   rating_scope, is_projection, completed_games_at_rating,
+                   rating_basis_note, as_of_ts
+            from srv_team_rating
+            where season = :season and school = :team_display
+            order by display_order
+            limit 20
+        """, {"season": season, "team_display": team_display})
+
+        if df.empty:
+            states.empty(
+                "Team ratings would be here.",
+                f"No rating system has published a figure for this team in {season}.")
+            return
+
+        if df["is_projection"].any():
+            st.info(
+                "**These are preseason projections, not measurements.** No game has been "
+                "played yet, so SP+ and FPI are forecasting the season rather than "
+                "describing it. Elo, SRS and PPA are computed from results and appear once "
+                "games are played.")
+
+        table.render(df, [
+            Col("rating_system_display", "System"),
+            Col("rating", "Rating", "num"),
+            Col("rank", "Rank", render=_rating_rank),
+            Col("rating_percentile", "Percentile", render=_percentile),
+            Col("offense_rating", "Offence", "num"),
+            Col("defense_rating", "Defence", "num"),
+            Col("basis", "Basis", render=lambda r: "Projection" if r.get("is_projection")
+                else f"{int(r.get('completed_games_at_rating') or 0)} games"),
+        ], caption="srv_team_rating")
+        table.as_of_caption(df)
+
+        notes = df["rating_basis_note"].dropna().unique()
+        for note in notes:
+            st.caption(str(note))
+
+
+def _rating_rank(row) -> str:
+    """CFBD's own rank where it publishes one, ours otherwise, and the difference is said
+    rather than hidden — Elo and PPA publish no ranking, so those are cfdb's ordering."""
+    published = row.get("rating_rank")
+    if published is not None and not pd.isna(published):
+        return f"{int(published)}"
+    computed = row.get("rating_rank_computed")
+    if computed is None or pd.isna(computed):
+        return fmt.EM_DASH
+    return f"{int(computed)}*"
+
+
+def _percentile(row) -> str:
+    value = row.get("rating_percentile")
+    if value is None or pd.isna(value):
+        return fmt.EM_DASH
+    return f"{float(value) * 100:.0f}%"
 
 
 def _game_log(season, team_display) -> None:

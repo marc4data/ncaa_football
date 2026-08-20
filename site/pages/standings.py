@@ -50,10 +50,11 @@ def body(page) -> None:
         if not df.empty:
             st.divider()
             states.degraded(
-                "fct_team_week_rating",
-                "SP+ and Elo columns are not built yet, so this table ranks on results "
+                "sp_plus_rating / elo_rating on srv_standings",
+                "The ratings themselves are built — see any team's Ratings tab — but they "
+                "are not yet carried as columns here, so this table ranks on results "
                 "alone.",
-                scheduled="Track B1")
+                scheduled="carrying fct_team_rating across to Standings")
 
 
 COLUMNS = [

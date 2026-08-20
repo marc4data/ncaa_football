@@ -90,6 +90,26 @@ CREATE TABLE IF NOT EXISTS raw.raw_warehouse_usage (
     elapsed_seconds numeric, catalog text,
     PRIMARY KEY (observed_at, operation)
 );
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_sp (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_srs (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_elo (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_fpi (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ppa_teams (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -102,6 +122,8 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_rankings, raw.raw_stats_season, raw.raw_stats_season_advanced,
          raw.raw_dbt_test_result, raw.raw_model_prediction, raw.raw_games_media,
          raw.raw_deploy_status,
+         raw.raw_ratings_sp, raw.raw_ratings_srs, raw.raw_ratings_elo,
+         raw.raw_ratings_fpi, raw.raw_ppa_teams,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -557,3 +579,74 @@ INSERT INTO raw.raw_deploy_status
   (observed_at, deploy_sha, main_sha, commits_behind, severity, detail) VALUES
 ('2026-01-01T00:00:50Z', 'aaaa111', 'bbbb222', 7, 'error',
  'Deploy tree is 7 commits behind main (aaaa111 vs bbbb222). Airflow is running old code');
+
+-- The five rating systems (B1).
+--
+-- SP+ carries a `nationalAverages` row, which is what CFBD actually returns and is NOT a
+-- team. Left in, it would appear on the Teams index, get a team page, and sit in the
+-- percentile denominator shifting every team's standing by an amount nobody would trace.
+-- The fixture carries it so the exclusion is exercised rather than assumed.
+--
+-- 2024 ratings are MEASURED (the fixture's 2024 games are completed); the 2026 SP+ row is a
+-- PROJECTION, because no 2026 game exists. Both branches of is_projection therefore run on
+-- every build — which matters because in weeks 1 to 4 the projection branch is the only one
+-- with any rows at all.
+INSERT INTO raw.raw_ratings_sp (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-20-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "rating": 18.4,
+     "ranking": 1, "offense": {"rating": 34.1}, "defense": {"rating": 15.7},
+     "specialTeams": {"rating": 0.4}, "sos": 0.61, "secondOrderWins": 9.2},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "rating": 3.2,
+     "ranking": 2, "offense": {"rating": 27.0}, "defense": {"rating": 23.8},
+     "specialTeams": {"rating": -0.2}, "sos": 0.55, "secondOrderWins": 6.1},
+    {"year": 2024, "team": "nationalAverages", "conference": null, "rating": 10.8,
+     "ranking": null, "offense": {"rating": 30.5}, "defense": {"rating": 19.7},
+     "specialTeams": {"rating": 0.0}, "sos": null, "secondOrderWins": null}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:30Z', now()),
+('2026-01-01T00-00-20-002Z.json', '{
+  "status_code": 200, "params": {"year": "2026"},
+  "data": [
+    {"year": 2026, "team": "Alpha State", "conference": "Test Conference", "rating": 12.0,
+     "ranking": 1, "offense": {"rating": 31.0}, "defense": {"rating": 19.0},
+     "specialTeams": {"rating": 0.1}, "sos": 0.50, "secondOrderWins": 8.0}
+  ]}', 200, '{"year": "2026"}', '2026-01-01T00:00:31Z', now());
+
+INSERT INTO raw.raw_ratings_srs (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-21-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "division": null, "rating": 11.1, "ranking": 1},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference",
+     "division": null, "rating": -2.4, "ranking": 2}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:32Z', now());
+
+INSERT INTO raw.raw_ratings_elo (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-22-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "elo": 1712},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "elo": 1489}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:33Z', now());
+
+INSERT INTO raw.raw_ratings_fpi (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-23-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "fpi": 14.2,
+     "efficiencies": {"offense": 62.1, "defense": 71.3, "specialTeams": 50.2}},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "fpi": 1.9,
+     "efficiencies": {"offense": 48.0, "defense": 52.5, "specialTeams": 49.1}}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:34Z', now());
+
+INSERT INTO raw.raw_ppa_teams (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-24-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "offense": {"overall": 0.31}, "defense": {"overall": 0.05}},
+    {"season": 2024, "team": "Beta Tech", "conference": "Test Conference",
+     "offense": {"overall": 0.12}, "defense": {"overall": 0.22}}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:35Z', now());
