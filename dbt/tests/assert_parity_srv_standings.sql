@@ -15,6 +15,22 @@
 -- A changed value produces TWO rows with the same key (one from each side), which is the
 -- signature of a modified row rather than an added or dropped one.
 --
+--
+-- WHEN PARITY FAILS, THE QUESTION IS WHICH SIDE IS RIGHT — never how to make them match.
+--
+--   New side wrong   fix the new side. The gate is doing its original job.
+--   Old side wrong   fix the old side, or retire it. Record the divergence with its row
+--                    count and reason as an EXPECTED DIVERGENCE. Never weaken the new side.
+--   Both wrong       fix both, and the gate was never the point.
+--
+-- This is not hypothetical. srv_standings was fixed so that a team absent from dim_team
+-- still carries a name, and this gate went red on 14,964 rows BECAUSE the serving view had
+-- become more correct than the mart. Under a naive reading of "must be row-for-row
+-- identical", the cheapest way to make that green is to re-introduce the bug on the new
+-- side — which is a real temptation in a deadline week and would spend the credibility of
+-- every other gate in the project.
+--
+-- A gate that can be silenced by making the new thing worse is worse than no gate.
 -- This test is scaffolding: when mart_team_season_record is dropped it must be deleted in
 -- the same commit. A parity test against a dropped model is a broken build; one kept
 -- against a frozen copy asserts agreement with something no longer maintained.

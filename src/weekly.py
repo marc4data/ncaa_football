@@ -110,6 +110,38 @@ def results_refresh(season: Optional[str] = None,
     return {"status": "ok", "weeks": weeks, **_run(requests)}
 
 
+def scores_refresh(season: Optional[str] = None,
+                   now: Optional[datetime] = None) -> Dict[str, Any]:
+    """The game spine only: who played, what the score was, is it final.
+
+    THIS IS THE CHEAP ONE, and being cheap is what makes it frequent. A full
+    results_refresh is 31 requests — plays, drives, box scores, PPA, ratings — and running
+    that every few hours through a season would cost roughly half the monthly quota to
+    re-fetch data that does not change between Saturday night and Sunday morning.
+
+    The Scores page needs one thing to stop lying: /games. That is TWO requests for the
+    weeks in play, so this can run on a fine cadence and the heavy refresh can stay weekly.
+
+    Why it matters for the opening weekend specifically: cfbd_midweek_results fires at 12:00
+    UTC on Thursday, ten hours BEFORE Thursday's 22:00 kickoffs, and the next results run is
+    Sunday. Without this, the twenty games of 27 August sit on the site marked "scheduled"
+    until Sunday the 30th — and Scores is the most-visited surface on any sports site during
+    a game week.
+
+    Safe to run mid-slate, which is the property that lets it be frequent. CFBD reports
+    `completed: false` for a game in progress, so a live game stays out of the completed set
+    rather than being recorded as final at whatever the score was when we asked.
+    """
+    now = now or datetime.now(timezone.utc)
+    season = season or str(now.year)
+    weeks = week_window(season, now, include_prior=True)
+    if not weeks:
+        return {"status": "skipped", "reason": f"no active week in {season}", "requests": 0}
+
+    requests = [("games", dict(week)) for week in weeks]
+    return {"status": "ok", "weeks": weeks, **_run(requests)}
+
+
 def pregame_refresh(season: Optional[str] = None,
                     now: Optional[datetime] = None) -> Dict[str, Any]:
     """Tuesday: what's expected to happen next, and the ratings that inform it."""

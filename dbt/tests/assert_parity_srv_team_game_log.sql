@@ -1,6 +1,10 @@
 -- PARITY GATE: srv_team_game_log vs mart_team_schedule. See
--- assert_parity_srv_standings.sql for why EXCEPT rather than a join, and for the scaffolding
--- note — this test is deleted when the mart it protects is dropped.
+-- assert_parity_srv_standings.sql for why EXCEPT rather than a join, for the scaffolding
+-- note — this test is deleted when the mart it protects is dropped — and for the rule that
+-- applies when it goes red:
+--
+--   WHEN PARITY FAILS, THE QUESTION IS WHICH SIDE IS RIGHT, never how to make them match.
+--   Fixing the new side to agree with a defective old side turns a control into a liability.
 
 with mart as (
     select
