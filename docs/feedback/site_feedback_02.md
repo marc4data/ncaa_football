@@ -266,7 +266,7 @@ Does the **page** scroll sideways (bad), or does the **table** scroll inside its
 Ohio Dominican, Northwestern (IA) don't have a icon and are repeating the team. name twice.
 If there are multiple tables on the same page and they have the same field layout, keep the column widths consistent for all the tables (Schedule, Scores, Standings, Teams, Team Page, matchup)
 A Links to the Data Dictionary aren't taking directly to the table referenced (Teams)
-C! Footer, Change the Built by Marc Alexander, [Website]<link>, [Email icon]<marc4data@gmail.com>, [LinkedIn Icon]<link to Marc's linkedin page>
+C! Footer, Change the Built by Marc Alexander, [Website]<link>, [Email icon]<email address>, [LinkedIn Icon]<link to Marc's linkedin page>
 C! Footer, Replace this section of the footer "Attribution is optional under their terms; cfdb provides it anyway." with "Really cool site, check it out!"
 B I chose 2025 and Week 12 on Scores and then navigate to Rankings and it resets to current week (2026 W1).  
 It's night and the sight reverts back to System/Dark even though I explicitly chose Light Theme.  ONce I choose it, it should stick...not randomly default back to a different setting.  

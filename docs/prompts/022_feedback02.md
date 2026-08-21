@@ -90,7 +90,7 @@ F2-07  DUPLICATE TEAM NAME WHERE THERE IS NO LOGO. Ohio Dominican and Northweste
        fallback appears to emit text alongside the name. MAKE THE TEAM NAME THE LINK, DROP THE
        CIRCLE, one affordance sitewide.
 
-F2-08  FOOTER, part 1. "Built by Marc Alexander" + website link + email icon (marc4data@gmail.com) +
+F2-08  FOOTER, part 1. "Built by Marc Alexander" + website link + email icon (email address) +
        LinkedIn icon.
 
 F2-09  FOOTER, part 2. Replace "Attribution is optional under their terms; cfdb provides it anyway."
