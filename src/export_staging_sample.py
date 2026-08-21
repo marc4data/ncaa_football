@@ -32,6 +32,7 @@ import sys
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Optional
 
 ROW_CAP = 10_000
 SCHEMA = "staging"
@@ -39,6 +40,17 @@ SCHEMA = "staging"
 # Candidate columns, in preference order, for expressing the narrowing. Checked against
 # information_schema per table rather than assumed — the shape of a staging model follows
 # its endpoint, not a convention.
+#
+# ID BEFORE NAME, ALWAYS. The team_id comes from dim_team, the conformed dimension, and it
+# is a better key than the school name for a reason that is visible in the data rather than
+# theoretical: dim_team also holds `Southeastern Oklahoma State` (199) and `Southwestern
+# Oklahoma State` (2927). An exact name match happens to avoid them; any looser match would
+# not, and an id cannot hit them at all.
+#
+# It is also stable where the name's context is not — Oklahoma State is one team_id across
+# 1901-2026 while its conference row changes five times through realignment.
+ID_COLUMNS = ("team_id",)
+ID_PAIR_COLUMNS = ("home_team_id", "away_team_id")
 TEAM_COLUMNS = ("school", "team", "team_name")
 PAIR_COLUMNS = ("home_team", "away_team")
 ORDER_COLUMNS = ("season", "year", "week")
@@ -77,7 +89,29 @@ def columns_of(cursor, table: str) -> list:
     return [row[0] for row in cursor.fetchall()]
 
 
-def build_query(cursor, table: str, row_count: int, team: str, season: int) -> tuple:
+def resolve_team_id(cursor, team: str) -> Optional[int]:
+    """Oklahoma State's team_id, from dim_team.
+
+    From the DIMENSION rather than from staging: dim_team is the conformed source of team
+    identity, and reading the key from the layer that owns it is the difference between a
+    join key and a lucky match. It returns one id for a team across every season it played,
+    which is what makes it usable as a filter on tables that carry no season at all.
+    """
+    cursor.execute("""
+        select distinct team_id from marts.dim_team where school = %(team)s
+    """, {"team": team})
+    ids = [row[0] for row in cursor.fetchall()]
+    if len(ids) == 1:
+        return ids[0]
+    # More than one id for one name is a real possibility across a 157-season history, and
+    # silently picking the first would be a guess presented as a fact.
+    print(f"  ! {team} resolves to {len(ids)} team_id(s) in dim_team: {ids} — "
+          f"falling back to matching on the name")
+    return None
+
+
+def build_query(cursor, table: str, row_count: int, team: str, season: int,
+                team_id: Optional[int] = None) -> tuple:
     """Return (sql, params, note) for one table.
 
     The note is what the Index sheet reports. Every sheet gets one, because "10,000 rows of
@@ -100,25 +134,33 @@ def build_query(cursor, table: str, row_count: int, team: str, season: int) -> t
         params["season"] = season
         applied.append(f"season {season}")
 
+    id_col = next((c for c in ID_COLUMNS if c in cols), None)
     team_col = next((c for c in TEAM_COLUMNS if c in cols), None)
-    if team_col:
+
+    if team_id is not None and id_col:
+        where.append(f"{id_col} = %(team_id)s")
+        params["team_id"] = team_id
+        applied.append(f"{id_col} = {team_id} ({team})")
+        if "season" not in cols and "game_id" in cols:
+            # No season column of its own: scope it through the games that do have one.
+            where.append(f"""game_id in (
+                select game_id from {SCHEMA}.stg_games where season = %(season)s)""")
+            params["season"] = season
+            applied.append(f"game_id scoped to {season} via stg_games "
+                           f"(this table carries no season)")
+    elif team_id is not None and all(c in cols for c in ID_PAIR_COLUMNS):
+        where.append("%(team_id)s in (home_team_id, away_team_id)")
+        params["team_id"] = team_id
+        applied.append(f"team_id {team_id} ({team}) as home or away")
+    elif team_col:
+        # No id column at all — the name is the only key this table has.
         where.append(f"{team_col} = %(team)s")
         params["team"] = team
-        applied.append(f"{team_col} = {team!r}")
+        applied.append(f"{team_col} = {team!r} — NO id column on this table, matched by name")
     elif all(c in cols for c in PAIR_COLUMNS):
         where.append("(%(team)s in (home_team, away_team))")
         params["team"] = team
-        applied.append(f"{team!r} as home or away")
-    elif "team_id" in cols and "game_id" in cols:
-        # No name, no season. Resolve both through the tables that do carry them — the same
-        # request expressed as a join rather than a literal.
-        where.append(f"""team_id in (
-            select distinct team_id from {SCHEMA}.stg_teams where school = %(team)s)""")
-        where.append(f"""game_id in (
-            select game_id from {SCHEMA}.stg_games where season = %(season)s)""")
-        params.update({"team": team, "season": season})
-        applied.append(f"team_id and game_id resolved for {team!r} in {season} "
-                       f"(this table carries neither a name nor a season)")
+        applied.append(f"{team!r} as home or away, matched by name")
 
     if not where:
         return (f"select * from {SCHEMA}.{table}{order_sql} limit {ROW_CAP}", {},
@@ -145,6 +187,10 @@ def export(out_path: Path, team: str, season: int) -> dict:
     """, (SCHEMA,))
     tables = [row[0] for row in cursor.fetchall()]
 
+    team_id = resolve_team_id(cursor, team)
+    print(f"  {team} -> team_id {team_id} (from marts.dim_team)\n"
+          if team_id is not None else "")
+
     book = Workbook()
     book.remove(book.active)
     header_font = Font(bold=True, color="FFFFFF")
@@ -154,7 +200,7 @@ def export(out_path: Path, team: str, season: int) -> dict:
     for table in tables:
         cursor.execute(f"select count(*) from {SCHEMA}.{table}")
         total = cursor.fetchone()[0]
-        sql, params, note = build_query(cursor, table, total, team, season)
+        sql, params, note = build_query(cursor, table, total, team, season, team_id)
         cursor.execute(sql, params)
         headers = [d[0] for d in cursor.description]
         rows = cursor.fetchall()
@@ -191,7 +237,7 @@ def export(out_path: Path, team: str, season: int) -> dict:
         index_rows.append((table, total, len(rows), note))
         print(f"  {table:26s} {len(rows):>7,} of {total:>9,}  {note[:60]}")
 
-    _write_index(book, index_rows, team, season, header_font, header_fill)
+    _write_index(book, index_rows, team, season, team_id, header_font, header_fill)
     connection.close()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     book.save(out_path)
@@ -200,7 +246,8 @@ def export(out_path: Path, team: str, season: int) -> dict:
             "path": str(out_path)}
 
 
-def _write_index(book, index_rows, team, season, header_font, header_fill) -> None:
+def _write_index(book, index_rows, team, season, team_id, header_font,
+                 header_fill) -> None:
     """What each tab is, and why it holds what it holds.
 
     Without this the workbook cannot answer its own most obvious question: is this tab the
@@ -213,7 +260,8 @@ def _write_index(book, index_rows, team, season, header_font, header_fill) -> No
     tab.cell(1, 1).fill = header_fill
     tab.cell(2, 1, f"Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
     tab.cell(3, 1, f"Rule: up to {ROW_CAP:,} rows per table. Anything larger is narrowed to "
-                   f"{team}, {season}, ordered by season and week ascending.")
+                   f"{team} (team_id {team_id}, from marts.dim_team), {season}, ordered by "
+                   f"season and week ascending.")
     tab.cell(4, 1, "Staging is the layer BELOW the site's serving views: one model per CFBD "
                    "endpoint, JSON unpacked and failed responses filtered out. Shapes follow "
                    "the endpoint, which is why not every table can express the same filter.")
