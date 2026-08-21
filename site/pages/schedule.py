@@ -7,7 +7,7 @@ because the view reads fct_game rather than fct_game_team.
 import pandas as pd
 import streamlit as st
 
-from lib import filters, shell, states, table
+from lib import chips, filters, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -72,6 +72,7 @@ def _columns(scope) -> list:
 def body(page) -> None:
     scope = filters.game_scope()
     table.dataset_caption("Schedule", "srv_schedule")
+    chips.spread_sign_note()
     with states.section("srv_schedule"):
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)

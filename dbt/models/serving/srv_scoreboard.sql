@@ -12,7 +12,56 @@
 -- AP only, and only one poll, because the badge shows ONE number. Verified unique on
 -- (season, season_type, week, team_id) across all 27,371 rows — a second poll here would
 -- fan the scoreboard out silently, which is how fct_game gained 18 phantom rows once.
-with ap_rank as (
+-- Game-grain totals from the team-grain box score. R-006.
+--
+-- NOT BLOCKED, which is worth saying because it was expected to be: srv_scoreboard carries
+-- no yardage, but fct_game_team does, at game x team grain — so "total yards, both teams"
+-- is a sum of the two rows for a game rather than a column that has to be invented.
+--
+-- Box scores are `recent` scope: 3,360 of 7,662 completed 2025 team-rows carry total_yards
+-- and NOTHING before 2024 does. So this is null for most of history, which is the honest
+-- state and renders as an em dash rather than a zero.
+with game_box as (
+    select
+        game_id,
+        sum(total_yards)    as total_yards_both_teams,
+        sum(rushing_yards)  as rushing_yards_both_teams,
+        sum(passing_yards)  as passing_yards_both_teams,
+        sum(turnovers)      as turnovers_both_teams,
+        count(*) filter (where total_yards is not null) as teams_with_box_score
+    from {{ ref('fct_game_team') }}
+    group by game_id
+),
+
+-- The last line recorded BEFORE kickoff, and its provenance. R-007.
+--
+-- srv_scoreboard was contracted to carry `spread_at_close` and does not. Building it
+-- surfaced why the name matters: our snapshot history begins 2026-08-15, when the lines DAG
+-- started sampling. For a 2024 game, the only line we hold is whatever CFBD returned when
+-- we fetched it in August 2026 — a real market number, but its snapshot_ts is our FETCH
+-- time, not a pre-kickoff observation.
+--
+-- Calling both "close" would conflate a line we watched with a line we were told about, so
+-- the two are distinguished by `spread_at_close_basis` and the page says which it is. An
+-- unattributed line is a number with no provenance and this project does not ship those.
+pre_kick as (
+    select game_id, spread, provider_key, snapshot_ts, basis from (
+        select
+            b.game_id, b.spread, b.provider_key, b.snapshot_ts,
+            case when b.snapshot_ts <= g.start_date then 'observed_before_kickoff'
+                 else 'as_recorded_by_cfbd' end as basis,
+            row_number() over (
+                partition by b.game_id
+                -- Prefer a genuine pre-kickoff observation; among those, the latest.
+                order by case when b.snapshot_ts <= g.start_date then 0 else 1 end,
+                         b.snapshot_ts desc, b.provider_key
+            ) as recency
+        from {{ ref('fct_betting_line') }} b
+        join {{ ref('fct_game') }} g on g.game_id = b.game_id
+    ) ranked where recency = 1
+),
+
+ap_rank as (
     select season, season_type, week, team_id, rank
     from {{ ref('fct_poll_rank') }}
     where poll_name = 'AP Top 25'
@@ -71,8 +120,53 @@ select
     g.away_points - g.home_points as actual_margin,   -- away minus home, per the convention
     g.excitement_index,
     g.is_upset,
-    g.attendance
+    g.attendance,
+
+    -- R-005. Computed in dbt, not summed in the app: the single-table-SELECT rule means no
+    -- metric maths in Streamlit, and a sum in a page is exactly that.
+    --
+    -- NULL, not zero, for a game that has not been played. We have shipped the opposite
+    -- once — ats_record_display reading 0-0-0 for seasons nobody had played, in the same
+    -- row where wins and losses were correctly null. One table, two treatments of "hasn't
+    -- happened yet" is the bug; a third instance is not going in.
+    case when g.is_completed and g.home_points is not null and g.away_points is not null
+         then g.home_points + g.away_points end            as total_points,
+
+    -- R-006.
+    bx.total_yards_both_teams,
+    bx.rushing_yards_both_teams,
+    bx.passing_yards_both_teams,
+    bx.turnovers_both_teams,
+    -- 2 when both box scores landed, 1 when only one did, 0 when neither. A total built
+    -- from one team is not a game total, and this is what lets the page say so.
+    bx.teams_with_box_score,
+
+    -- R-007.
+    pk.spread as spread_at_close,
+    pk.provider_key as spread_at_close_provider,
+    pk.basis as spread_at_close_basis,
+
+    -- R-008. WHETHER THE FAVOURITE COVERED — distinct from which side covered.
+    --
+    -- Four states, and pending is not push. A pick'em (spread exactly 0) has no favourite
+    -- at all, which is the not-applicable third state of AC-G.32 and a real case in the
+    -- data rather than a hypothetical.
+    --
+    -- Convention, as everywhere: margin is away minus home, so a NEGATIVE spread means the
+    -- home team is favoured. The favourite covers when the actual margin beats the number
+    -- in the favourite's direction.
+    case
+        when not g.is_completed or g.home_points is null then 'pending'
+        when pk.spread is null then null
+        when pk.spread = 0 then 'no_favorite'
+        when (g.away_points - g.home_points) = pk.spread then 'push'
+        when pk.spread < 0 and (g.away_points - g.home_points) < pk.spread then 'yes'
+        when pk.spread > 0 and (g.away_points - g.home_points) > pk.spread then 'yes'
+        else 'no'
+    end                                                    as favorite_covered
 from {{ ref('fct_game') }} g
+left join game_box bx on bx.game_id = g.game_id
+left join pre_kick pk on pk.game_id = g.game_id
 left join ap_rank hp
     on hp.season = g.season and hp.season_type = g.season_type
    and hp.week = g.week and hp.team_id = g.home_team_id

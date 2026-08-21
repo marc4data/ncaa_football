@@ -186,6 +186,7 @@ def _market(row) -> None:
     # is the number a reader is most likely to invert.
     cols[0].metric("Spread (home)", fmt.signed(row.get("spread"), "spread"),
                    help="Negative means the home team is favoured.")
+    # R-009, third placement. Same sentence, one source.
     cols[1].metric("Total", fmt.number(row.get("over_under"), "over_under"))
     cols[2].metric("Home moneyline", fmt.signed(row.get("home_moneyline"), "", dp=0))
     cols[3].metric("Away moneyline", fmt.signed(row.get("away_moneyline"), "", dp=0))
@@ -197,6 +198,7 @@ def _market(row) -> None:
             f"(away {float(row.get('market_implied_away_win_probability')) * 100:.1f}%), "
             f"de-vigged by {row.get('devig_method')}; the book's overround was "
             f"{fmt.number(row.get('overround'), '', 4)}. Raw prices above are untouched.")
+    chips.spread_sign_note()
     st.caption(f"Line from {row.get('provider_key') or 'an unnamed book'}, "
                f"snapshot {fmt.local_time(row.get('line_snapshot_ts'))}. "
                f"Opening spread {fmt.signed(row.get('spread_open'), 'spread')}, "

@@ -52,6 +52,24 @@ select
     -- The coalesce made every 2026 team read 0-0-0 while wins, losses and record_display in
     -- the SAME ROW were correctly null: one table, two treatments of "hasn't happened yet".
     -- Null lets the page render an em dash per AC-G.32, which is the honest rendering.
+    r.games_played,
+    r.points_for,
+    r.points_against,
+    r.point_differential,
+    r.yards_for,
+    r.rushing_yards_for,
+    r.passing_yards_for,
+    r.yards_allowed,
+    r.rushing_yards_allowed,
+    r.passing_yards_allowed,
+    r.penalty_yards,
+    r.takeaways,
+    r.giveaways,
+    r.turnover_margin,
+    -- AC-G.33: the n every total above was computed over, so a page cannot render a
+    -- per-game figure against the wrong denominator.
+    r.games_with_box_score,
+    r.games_with_opponent_box_score,
     r.ats_wins,
     r.ats_losses,
     r.ats_pushes,

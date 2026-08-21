@@ -43,7 +43,9 @@ def body(page) -> None:
         select season, team_slug, team_display, mascot, conference, division,
                classification, logo_url, color_on_light, color_on_dark, color_source,
                wins, losses, record_display, conference_record_display, conference_standing,
-               ats_record_display, ats_as_favorite_display, ats_as_underdog_display, as_of_ts
+               ats_record_display, ats_as_favorite_display, ats_as_underdog_display,
+               games_played, points_for, points_against, yards_for, yards_allowed,
+               turnover_margin, games_with_box_score, as_of_ts
         from srv_team_overview
         where season = :season and team_slug = :team
         limit 1
@@ -99,7 +101,48 @@ def _identity_header(row) -> None:
         unsafe_allow_html=True)
 
 
+def _kpi_banner(row) -> None:
+    """R-002. Season totals across the top of Overview.
+
+    Marc marked this M! in the first feedback pass and it went three rounds without being
+    scheduled — the most overdue item in the register.
+
+    AC-G.33 governs every figure here, and this is the highest-visibility surface on the
+    site so it is the worst place to get composition wrong. We have shipped that defect
+    once: an ATS percentage rendered beside n=567 when it was computed over 553. Every
+    component correct, the assembly lying. So each yardage figure carries the number of
+    games its box scores actually came from, which is NOT games_played — box scores are
+    `recent` scope and a 2025 team has them for about half its season.
+
+    A team-season with nothing played renders em dashes, not zeros. Same rule as R-005.
+    """
+    box = row.get("games_with_box_score")
+    box_n = int(box) if box is not None and not pd.isna(box) else 0
+
+    cells = st.columns(5)
+    cells[0].metric("Points for", fmt.number(row.get("points_for"), "", 0))
+    cells[1].metric("Points against", fmt.number(row.get("points_against"), "", 0))
+    cells[2].metric("Total yards", fmt.number(row.get("yards_for"), "", 0))
+    cells[3].metric("Yards allowed", fmt.number(row.get("yards_allowed"), "", 0))
+    cells[4].metric("Turnover margin", fmt.signed(row.get("turnover_margin"), "", 0))
+
+    if box_n == 0:
+        st.caption(
+            "Points are complete for every game. **Yardage and turnovers are not shown: no "
+            "box score has been recorded for this team-season.** CFBD publishes game "
+            "statistics from 2024 onward.")
+    elif box_n < int(row.get("games_played") or 0):
+        st.caption(
+            f"Points cover all {int(row.get('games_played') or 0)} games. **Yardage and "
+            f"turnovers cover {box_n} of them** — box scores are only published for some "
+            f"games, so these totals are not a full season.")
+    else:
+        st.caption(f"All figures over {box_n} games.")
+
+
 def _overview(row) -> None:
+    _kpi_banner(row)
+    st.divider()
     cols = st.columns(4)
     # AC-5.3 / AC-G.2: records are pre-formatted strings from the view, never assembled here.
     cols[0].metric("Record", row.get("record_display") or "—")

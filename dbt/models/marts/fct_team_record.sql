@@ -39,7 +39,15 @@ aggregated as (
         -- Division II side that merely appeared on someone's schedule, so `school` was NULL
         -- on 7,482 of 30,475 team-seasons — and every view reading it inherited that.
         -- max() rather than min() is arbitrary; fct_game_team carries one name per team_id.
-        max(team)                                                  as team_name
+        max(team)                                                  as team_name,
+
+        -- SEASON TOTALS, offensive side. R-002 / R-003 / R-032.
+        sum(total_yards)                                           as yards_for,
+        sum(rushing_yards)                                         as rushing_yards_for,
+        sum(passing_yards)                                         as passing_yards_for,
+        sum(turnovers)                                             as giveaways,
+        sum(penalty_yards)                                         as penalty_yards,
+        count(*) filter (where total_yards is not null)            as games_with_box_score
     from team_games
     group by season, team_sk, team_id
 
@@ -115,6 +123,29 @@ ats as (
 -- All of these are DISPLAY STRINGS by the time they leave here, because AC-5.3 forbids the
 -- app assembling "5-7" from two columns. A record is one fact with a conventional
 -- rendering, not two numbers and a hyphen decided in Python.
+-- What the opponent did, in the same games. The defensive half of R-002.
+--
+-- A separate aggregate rather than subtraction from a game total: fct_game_team already has
+-- one row per team per game, so the opponent's yardage is that opponent's own row, keyed by
+-- (game_id, opponent_team_id). Subtracting from a game total would need the game total to
+-- exist, which it does not when only one box score landed.
+allowed as (
+
+    select
+        g.season,
+        g.team_id,
+        sum(o.total_yards)                                as yards_allowed,
+        sum(o.rushing_yards)                              as rushing_yards_allowed,
+        sum(o.passing_yards)                              as passing_yards_allowed,
+        sum(o.turnovers)                                  as takeaways,
+        count(*) filter (where o.total_yards is not null) as games_with_opponent_box_score
+    from team_games g
+    join {{ ref('fct_game_team') }} o
+      on o.game_id = g.game_id and o.team_id = g.opponent_team_id
+    group by g.season, g.team_id
+
+),
+
 splits as (
 
     select
@@ -304,8 +335,30 @@ select
             || cast(a.ats_fav_losses as {{ dbt.type_string() }}) end as ats_as_favorite_display,
     case when a.ats_dog_wins is not null and a.ats_dog_wins + a.ats_dog_losses > 0 then
         cast(a.ats_dog_wins as {{ dbt.type_string() }}) || '-'
-            || cast(a.ats_dog_losses as {{ dbt.type_string() }}) end as ats_as_underdog_display
+            || cast(a.ats_dog_losses as {{ dbt.type_string() }}) end as ats_as_underdog_display,
+
+    -- Season totals. R-002 / R-003 / R-032, one dbt change for three requests.
+    w.yards_for,
+    w.rushing_yards_for,
+    w.passing_yards_for,
+    w.penalty_yards,
+    w.giveaways,
+    -- AC-G.33: the n each total was computed over, carried beside it. Box scores are
+    -- `recent` scope, so a 2025 team has yardage from about half its games and a 2019 team
+    -- has none. Yards-per-game over `games_played` would be the composition defect we
+    -- already shipped once.
+    w.games_with_box_score,
+    al.yards_allowed,
+    al.rushing_yards_allowed,
+    al.passing_yards_allowed,
+    al.takeaways,
+    al.games_with_opponent_box_score,
+    -- Takeaways minus giveaways, team perspective, positive is good. Null unless BOTH sides
+    -- were recorded — a margin from one half is not a margin.
+    case when al.takeaways is not null and w.giveaways is not null
+         then al.takeaways - w.giveaways end                        as turnover_margin
 from with_team w
+left join allowed al    on al.season = w.season and al.team_id = w.team_id
 left join ats a         on a.season = w.season and a.team_id = w.team_id
 left join splits s      on s.season = w.season and s.team_id = w.team_id
 left join streak st     on st.season = w.season and st.team_id = w.team_id

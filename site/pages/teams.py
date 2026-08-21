@@ -18,7 +18,10 @@ def body(page) -> None:
         df = query("""
             select season, team_id, school, team_slug, team_display, abbreviation,
                    conference, classification, logo_source_url, color_on_light,
-                   color_on_dark, color_source_light, wins, losses, win_pct, as_of_ts
+                   color_on_dark, color_source_light, wins, losses, win_pct,
+                   yards_for, rushing_yards_for, passing_yards_for,
+                   yards_allowed, rushing_yards_allowed, passing_yards_allowed,
+                   games_with_box_score, as_of_ts
             from srv_teams_index
             where season = :season
               and classification = any(:classifications)
@@ -40,6 +43,15 @@ def body(page) -> None:
             f"No teams match “{search}”." if search else
             f"No teams for {scope.describe()}.",
             renderer=lambda d: _by_conference(d, scope))
+
+        # AC-G.33: the yardage columns are not season-complete, and the page says so once
+        # rather than repeating a caveat per row.
+        if not df.empty:
+            covered = int(df["games_with_box_score"].fillna(0).gt(0).sum())
+            st.caption(
+                f"Yardage is from box scores, which CFBD publishes from 2024 onward — "
+                f"{covered:,} of {len(df):,} teams shown have any. Blank means no box "
+                f"score, not zero yards.")
 
 
 def _team(row) -> str:
@@ -74,6 +86,16 @@ def _by_conference(df, scope) -> None:
         Col("abbreviation", "Abbr"),
         Col("record", "Record", render=_record),
         Col("win_pct", "Win %", "num"),
+        # R-003. Six numeric columns on ~136 FBS rows. AC-G.40's budget is stated WITH its
+        # filter rather than as a bare number: this is fine at the FBS default and is the
+        # reason the division filter defaults where it does — an all-divisions render is
+        # 681 rows, and six more columns there is a different question.
+        Col("yards_for", "Yds", "num", dp=0),
+        Col("rushing_yards_for", "Rush", "num", dp=0),
+        Col("passing_yards_for", "Pass", "num", dp=0),
+        Col("yards_allowed", "Yds all", "num", dp=0),
+        Col("rushing_yards_allowed", "Rush all", "num", dp=0),
+        Col("passing_yards_allowed", "Pass all", "num", dp=0),
     ]
     # F2-06/F2-27: computed over every conference at once, so the grid does not reflow
     # per group.

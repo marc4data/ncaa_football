@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from lib import chips, filters, shell, states, table
+from lib import chips, filters, fmt, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -13,7 +13,9 @@ def _rows(season, week, season_type, conference, division='fbs') -> pd.DataFrame
                home_team_slug, home_team_display, home_logo_url, home_points, home_rank,
                away_team_slug, away_team_display, away_logo_url, away_points, away_rank,
                winner, actual_margin, excitement_index, is_upset, attendance, venue_display,
-               is_completed, as_of_ts
+               total_points, total_yards_both_teams, teams_with_box_score,
+               spread_at_close, spread_at_close_provider, spread_at_close_basis,
+               favorite_covered, is_completed, as_of_ts
         from srv_scoreboard
         where season = :season and season_type = :season_type and is_completed
           and (:week is null or week = :week)
@@ -58,6 +60,27 @@ UPSET_LEGEND = ("Upset scale — **!** under 10 points · **!!** 10 to 20 · **!
                 "for how surprising a result was.")
 
 
+def _favorite_covered(row) -> str:
+    """R-008. Four states, and none of them is another one.
+
+    `pending` is not `push` — AC-G.20 — and a pick'em has no favourite at all, which is the
+    not-applicable third state of AC-G.32 rather than a missing value. All four come from
+    the view; nothing here decides which side was favoured.
+    """
+    value = row.get("favorite_covered")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return fmt.EM_DASH
+    return {
+        "yes":         chips.chip_html("y", "Covered", "the market favourite covered"),
+        "no":          chips.chip_html("n", "No", "the favourite did not cover"),
+        "push":        chips.chip_html("w", "Push",
+                                       "landed exactly on the number, a settled result"),
+        "pending":     chips.chip_html("w", "Pending", "not played yet"),
+        "no_favorite": chips.chip_html("w", "Pick-em",
+                                       "the spread was zero, so there was no favourite"),
+    }.get(str(value), fmt.EM_DASH)
+
+
 def _side(row, side: str) -> str:
     """A team cell, with a caret if this side won.
 
@@ -92,6 +115,7 @@ def _upset(row) -> str:
 def body(page) -> None:
     scope = filters.game_scope()
     table.dataset_caption("Scores", "srv_scoreboard")
+    chips.spread_sign_note()
     with states.section("srv_scoreboard"):
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)
@@ -117,6 +141,11 @@ def body(page) -> None:
             # The GLYPHS are !/!!/!!!; the HEADER is a word. A column headed with a
             # punctuation mark is a puzzle rather than a label.
             Col("is_upset", "Upset", render=_upset),
+            # R-005 / R-006 / R-007 / R-008.
+            Col("total_points", "Pts", "num", dp=0),
+            Col("total_yards_both_teams", "Yards", "num", dp=0),
+            Col("spread_at_close", "Close", "signed"),
+            Col("favorite_covered", "Fav cover", render=_favorite_covered),
             Col("excitement_index", "Excitement", "num", dp=1),
             Col("attendance", "Attendance", "num", dp=0),
             table.details_col(lambda r: scope.link("matchup",
@@ -135,6 +164,35 @@ def body(page) -> None:
         # page, not left to a tooltip that a touch device never shows.
         if not df.empty:
             st.caption(UPSET_LEGEND)
+            _provenance(df)
+
+
+def _provenance(df) -> None:
+    """Where the closing line came from, and how complete the yardage is.
+
+    An unattributed line is a number with no provenance. And the two bases are genuinely
+    different claims: a snapshot cfdb took before kickoff is an observation, while CFBD's
+    recorded spread is a number we were told about afterwards. Our snapshot history starts
+    2026-08-15, so almost every historical game carries the second kind.
+    """
+    bases = set(df["spread_at_close_basis"].dropna().unique())
+    books = sorted(set(df["spread_at_close_provider"].dropna().unique()))
+    if bases:
+        parts = []
+        if "observed_before_kickoff" in bases:
+            parts.append("a snapshot cfdb took before kickoff")
+        if "as_recorded_by_cfbd" in bases:
+            parts.append("the line CFBD recorded for the game")
+        st.caption(
+            f"**Close** is {' or '.join(parts)}"
+            + (f", from {', '.join(books)}. " if books else ". ")
+            + "cfdb began sampling lines on 15 August 2026, so earlier games carry CFBD's "
+              "recorded number rather than an observation.")
+    missing = df[df["teams_with_box_score"].fillna(0) == 0]
+    if not missing.empty:
+        st.caption(
+            f"**Yards** is blank for {len(missing):,} of {len(df):,} games shown — CFBD "
+            f"publishes box scores from 2024 onward, and not for every game.")
 
 
 def _grouped(df, columns, scope) -> None:
