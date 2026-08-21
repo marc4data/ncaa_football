@@ -35,7 +35,7 @@ class Col:
         if self.kind == "signed":
             return fmt.signed(value, self.field, self.dp)
         if self.kind == "datetime":
-            return fmt.eastern(value)
+            return fmt.local_time(value)
         if self.kind == "time":
             return fmt.clock(value)
         if self.kind == "date":
@@ -132,6 +132,27 @@ def team_link(slug_field: str, season_field: str = "season") -> Callable:
             query += f"&season={int(season)}"
         return f"/team?{query}"
     return href
+
+
+DETAILS_GLYPH = "▤"
+
+
+def details_col(link_builder, label: str = "") -> "Col":
+    """An explicit "open the detail page" cell.
+
+    Both destinations already existed on a Schedule row — the row went to the game, the team
+    name went to the team — and a reader could not tell them apart, which is why Marc
+    proposed collapsing them into one. Collapsing would have made the Team page unreachable
+    from the two most-visited pages on the site.
+
+    An explicit affordance fixes discoverability instead. AC-2.5 requires the two to be
+    "visually distinct"; a glyph in its own column is what makes that true rather than
+    asserted.
+    """
+    return Col("details", label,
+               render=lambda r: f"<span class='cfdb-details' title='Open the matchup'>"
+                                f"{DETAILS_GLYPH}</span>",
+               link=link_builder)
 
 
 def dataset_caption(label: str, table_name: str) -> None:

@@ -3,11 +3,51 @@
 AC-G.30 to AC-G.35. Precision is fixed PER COLUMN, not per value, so a column of figures
 compares vertically: `7` renders `7.0` where its column is 1 dp.
 """
+import json
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
 EM_DASH = "—"
+
+# The display timezone is CONFIGURED, not constant. Every time on the site — kickoffs, line
+# snapshots, and the as-of stamp — is rendered in it, and the zone abbreviation always
+# travels with the number.
+#
+# That last part is load-bearing rather than decorative. The site publishes Pacific while
+# ESPN and CBS publish Eastern, so a reader comparing tabs WILL see different numbers for
+# the same kickoff. "7:30 PM PDT" is unambiguous; "7:30 PM" is a trap.
+#
+# One resolution point, so viewer-local after Week 0 changes how this value is obtained
+# rather than every call site that formats a time.
+DEFAULT_TIMEZONE = "America/Los_Angeles"
+
+
+@lru_cache(maxsize=1)
+def display_timezone() -> str:
+    try:
+        config = json.loads(
+            (Path(__file__).resolve().parent / "site_config.json").read_text())
+        return config.get("display_timezone") or DEFAULT_TIMEZONE
+    except Exception:                                              # noqa: BLE001
+        # A missing config must not make every timestamp on the site unreadable.
+        return DEFAULT_TIMEZONE
+
+
+def _local(ts):
+    """A timestamp in the display zone, tolerant of naive input.
+
+    Values arrive tz-aware from Postgres; a naive one is treated as UTC rather than
+    rejected, because a naive datetime is what a hand-built test frame produces and
+    crashing the page over it would be the wrong trade.
+    """
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is None:
+        stamp = stamp.tz_localize("UTC")
+    return stamp.tz_convert(display_timezone())
+
 
 # Fixed precision by column meaning, per AC-G.31.
 #
@@ -74,37 +114,56 @@ def with_n(value, n, column: str = "") -> str:
         else number(value, column)
 
 
-def eastern(ts) -> str:
-    """AC-G.34: display Eastern with the zone shown. Storage stays UTC.
+def local_time(ts) -> str:
+    """AC-G.34: display in the configured zone, with the abbreviation shown.
 
-    The conversion itself is done in dbt (`start_date_et`); this only formats what arrives,
-    so the app never owns a timezone rule.
+    Renamed from `eastern`, which stopped being true the moment the site moved to Pacific.
+    A function whose name asserts something false is the class this project keeps finding —
+    fct_team_week_rating asserted a grain no source had, and this asserted a zone.
+
+    The column it reads is still `start_date_et`, a dbt conversion, so the app owns no
+    timezone RULE — only which zone it renders in, which is config.
     """
     if ts is None or pd.isna(ts):
         return EM_DASH
-    stamp = pd.Timestamp(ts)
-    return stamp.strftime("%b %-d, %Y, %-I:%M %p ET")
+    return _local(ts).strftime("%b %-d, %Y, %-I:%M %p %Z")
 
 
 def clock(ts) -> str:
     """Time only, with the zone. For a table already grouped by day.
 
     The long form wrapped onto two lines in a narrow kickoff column and repeated a date the
-    day header had already given. "7:30 PM ET" is the whole of what that cell adds.
+    day header had already given. "7:30 PM PDT" is the whole of what that cell adds.
     """
     if ts is None or pd.isna(ts):
         return EM_DASH
-    return pd.Timestamp(ts).strftime("%-I:%M %p ET")
+    return _local(ts).strftime("%-I:%M %p %Z")
 
 
 def day(ts) -> str:
-    """A date as "Aug 20, 2026"."""
+    """A date as "Aug 20, 2026".
+
+    A DATE IS NOT CONVERTED. `game_date` is a date column, not an instant, and running it
+    through a timezone conversion turns midnight UTC into 5pm the previous day — shifting
+    every game back by one. This project has already lost 66,496 games to exactly that,
+    which is why the era logic in mart_team_schedule exists.
+
+    A value carrying a real time of day is converted; a bare date is rendered as it is.
+    """
     if ts is None or pd.isna(ts):
         return EM_DASH
-    return pd.Timestamp(ts).strftime("%b %-d, %Y")
+    stamp = pd.Timestamp(ts)
+    if stamp.tzinfo is None and stamp.normalize() == stamp:
+        return stamp.strftime("%b %-d, %Y")
+    return _local(stamp).strftime("%b %-d, %Y")
 
 
 def as_of(ts) -> str:
+    """AC-G.35, in the display zone rather than UTC.
+
+    The as-of stamp answers "how current is this", and a reader who has to convert from UTC
+    to answer it will not bother. Storage stays UTC; only the rendering moves.
+    """
     if ts is None or pd.isna(ts):
         return "as of — (freshness unavailable)"
-    return f"as of {pd.Timestamp(ts).strftime('%d %b %Y %H:%M')} UTC"
+    return f"as of {_local(ts).strftime('%b %-d, %Y, %-I:%M %p %Z')}"

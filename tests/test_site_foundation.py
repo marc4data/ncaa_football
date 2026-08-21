@@ -379,3 +379,81 @@ def test_the_winner_never_renders_the_string_none():
     for row in ({"is_completed": True, "winner": None, "actual_margin": 0},
                 {"is_completed": False, "winner": None, "actual_margin": None}):
         assert "None" not in scores._winner(row)
+
+
+# --- indicators that fire on everything indicate nothing ---------------------------------
+
+def test_the_colour_source_hint_does_not_fire_on_a_teams_own_colour():
+    """Its guard skipped `"brand"`, a rung dim_team has never emitted.
+
+    So it rendered on all 34,061 rows, including the 29,903 using the team's own primary
+    colour. Third instance of the same shape: the monogram fallback firing 100% of the
+    time, `->> '0'` returning null on every row, and this. Something that never
+    discriminates looks like it is working precisely because it always does something.
+    """
+    from lib import identity
+    for sourced in identity.SOURCED_RUNGS:
+        assert identity.color_source_hint({"color_source": sourced}) == "", sourced
+    for defaulted in ("adjusted", "fallback"):
+        assert identity.color_source_hint({"color_source": defaulted}) != "", defaulted
+
+
+def test_rows_are_linked_with_real_anchors_not_event_handlers():
+    """AC-G.13 specifies an OBSERVABLE — middle-click yields a working URL — not a
+    mechanism. An onclick satisfies neither, and Streamlit's sanitiser strips it anyway,
+    so the site rendered pointer cursors attached to nothing."""
+    import pandas as pd
+    from lib import table as table_lib
+    from lib.table import Col
+    import streamlit as st
+    captured = []
+    st.markdown = lambda body, **kw: captured.append(body)          # type: ignore
+    st.caption = lambda *a, **kw: None                              # type: ignore
+    frame = pd.DataFrame([{"game_id": 42, "team_slug": "alpha-state"}])
+    table_lib.render(frame, [Col("game_id", "Game", "num", dp=0)],
+                     link_builder=lambda r: f"/matchup?game_id={r['game_id']}")
+    html = captured[0]
+    assert 'href="/matchup?game_id=42"' in html or "href='/matchup?game_id=42'" in html
+    assert "onclick" not in html
+
+
+def test_a_date_is_not_shifted_by_the_display_timezone():
+    """game_date is a DATE, not an instant. Running it through a zone conversion turns
+    midnight UTC into 5pm the previous day — this project has already lost 66,496 games to
+    exactly that."""
+    import datetime
+    from lib import fmt as fmt_lib
+    assert fmt_lib.day(datetime.date(2026, 8, 27)) == "Aug 27, 2026"
+
+
+def test_every_rendered_time_carries_its_zone():
+    """AC-G.34. The site publishes Pacific while ESPN publishes Eastern, so a reader
+    comparing tabs sees different numbers for one kickoff. The abbreviation is what makes
+    that unambiguous rather than wrong."""
+    import pandas as pd
+    from lib import fmt as fmt_lib
+    stamp = pd.Timestamp("2026-08-28 02:30", tz="UTC")
+    for rendered in (fmt_lib.clock(stamp), fmt_lib.local_time(stamp),
+                     fmt_lib.as_of(stamp)):
+        assert any(zone in rendered for zone in ("PDT", "PST")), rendered
+
+
+def test_the_display_timezone_is_configured_not_hardcoded():
+    """One resolution point, so viewer-local after Week 0 changes how the value is
+    obtained rather than every call site that formats a time."""
+    from pathlib import Path
+    import json
+    from lib import fmt as fmt_lib
+    config = json.loads(
+        (Path(__file__).resolve().parents[1] / "site" / "lib" / "site_config.json")
+        .read_text())
+    assert fmt_lib.display_timezone() == config["display_timezone"]
+
+
+def test_the_team_page_is_routable_even_though_it_is_not_in_nav():
+    """st.navigation does ROUTING as well as the sidebar, so a page dropped from the dict
+    to hide it becomes a dead link from five other pages."""
+    from lib.registry import BY_KEY
+    page = BY_KEY["team"]
+    assert page.in_nav is False
+    assert page.buildable, "a hidden page must still be built and routable"

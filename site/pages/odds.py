@@ -137,7 +137,7 @@ def _board(df: pd.DataFrame) -> None:
         head = rows.iloc[0]
         st.markdown(
             f"<div class='cfdb-daygroup'>{head['away_team_display']} at "
-            f"{head['home_team_display']} · {fmt.eastern(head['start_date_et'])}</div>",
+            f"{head['home_team_display']} · {fmt.local_time(head['start_date_et'])}</div>",
             unsafe_allow_html=True)
         table.render(rows, columns, caption="srv_odds_board")
         if pd.notna(head.get("predicted_margin")):

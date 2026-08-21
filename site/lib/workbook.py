@@ -251,9 +251,6 @@ EXPORT_ONLY_LABELS = {
     "actual_margin": "the page can say 'Margin' because the column sits between the two "
                      "teams' scores and the direction is obvious in context; a workbook "
                      "travels without that context, so the header states away-minus-home",
-    "is_upset": "the page uses '!' by degree to save horizontal space on a wide table. A "
-                "spreadsheet header of '!' is unreadable in a filter dropdown, and the "
-                "cell carries a boolean rather than the glyph",
     "segment_value": "the page labels this per tab — Week, Conference, Confidence, "
                      "Predicted band — because each tab shows one segment type. The sheet "
                      "stacks all five, so its header has to name the column rather than "

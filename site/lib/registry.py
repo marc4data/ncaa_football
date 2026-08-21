@@ -24,10 +24,19 @@ class Page:
     blocker: Optional[str] = None
     blocker_note: str = ""
     partial_sections: List[str] = field(default_factory=list)
+    # Whether the page gets a nav slot. A page with its own index does not need one — see
+    # `team`. Distinct from `buildable`: a page can be built, reachable and deliberately
+    # absent from the sidebar.
+    in_nav: bool = True
 
     @property
     def buildable(self) -> bool:
         return self.exists and self.complete and self.published
+
+    @property
+    def url_path_for_nav(self) -> str:
+        """The href Streamlit renders for this page's sidebar link."""
+        return self.key
 
     @property
     def readiness(self) -> str:
@@ -48,7 +57,17 @@ PAGES = [
     Page("stats", "Stats", GAMES, "srv_team_stats", True, True, True,
          partial_sections=["Opponent scope and adjusted basis (stat_scope / stat_basis)"]),
     Page("teams", "Teams", GAMES, "srv_teams_index", True, True, True),
+    # NOT IN NAV. Teams IS the index for this page — searchable, conference-filtered, 681
+    # cards — so a nav entry that lands on an arbitrary team is strictly worse than the
+    # picker that already exists. The distinction from Matchup, which we just went the other
+    # way on: Matchup had NO index, so removing it from nav would have left it reachable
+    # only by luck. This one is reachable from Teams, Standings, Schedule, Scores and every
+    # team name on the site.
+    #
+    # AC-G.51 does not apply: that is about BLOCKED pages staying visible, and this page is
+    # built. The page count stays 18; this is a nav decision, not a scope one.
     Page("team", "Team page", GAMES, "srv_team_overview", True, True, True,
+         in_nav=False,
          partial_sections=["Week-over-week trends (weekly rating history)",
                            "Roster (dim_athlete)"]),
     Page("players", "Players", GAMES, "srv_player_stats", False, False, False,

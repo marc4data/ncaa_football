@@ -91,6 +91,16 @@ TABLE_CSS = """
 .cfdb-footer a { color:#1f6feb; text-decoration:none; }
 .cfdb-footer a:hover { text-decoration:underline; }
 .cfdb-footer-links { opacity:.85; }
+/* AC-G.18b. The neutral form states the scope; the active form marks it, because a
+   filter inherited from another page has to be legible on arrival rather than inferable
+   from the URL. */
+.cfdb-scope { font-size:.82rem; opacity:.8; margin:.1rem 0 .7rem; }
+.cfdb-scope-active { opacity:1; }
+.cfdb-details { opacity:.55; font-size:1rem; }
+.cfdb-table td a:hover .cfdb-details { opacity:1; }
+.cfdb-scope-chip { display:inline-block; background:rgba(31,111,235,.12);
+    border:1px solid rgba(31,111,235,.35); border-radius:999px; padding:.06rem .5rem;
+    margin-right:.3rem; font-weight:600; font-size:.78rem; }
 .cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right; }
 .cfdb-team { margin-left:.4rem; }
 .cfdb-rank { font-size:.72rem; font-weight:700; opacity:.7; margin-left:.3rem; }
@@ -105,3 +115,21 @@ TABLE_CSS = """
 
 def inject_tables() -> None:
     st.markdown(TABLE_CSS, unsafe_allow_html=True)
+
+
+def hide_nav_entries(keys) -> None:
+    """Hide specific sidebar links while leaving their routes intact.
+
+    The Team page has its own index — Teams is searchable, conference-filtered and already
+    the way people reach it — so a nav slot landing on an arbitrary team is worse than no
+    slot. But st.navigation does routing as well as the sidebar, so the page has to stay
+    registered or every team link on the site becomes a dead one.
+
+    Scoped to the sidebar nav so it cannot hit an in-page link to the same destination.
+    """
+    if not keys:
+        return
+    selectors = ", ".join(
+        f'[data-testid="stSidebarNav"] a[href$="/{key}"]' for key in keys)
+    st.markdown(f"<style>{selectors} {{ display:none !important; }}</style>",
+                unsafe_allow_html=True)

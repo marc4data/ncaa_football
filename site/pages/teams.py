@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 
-from lib import filters, fmt, identity, shell, states, table
+from lib import filters, fmt, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -41,10 +41,19 @@ def body(page) -> None:
 
 
 def _team(row) -> str:
-    """AC-7.2: a defaulted colour is identifiable, or it becomes invisible data debt."""
-    cell = table.team_cell(row, "team_slug", "team_display", "logo_source_url")
-    return cell + identity.color_source_hint(
-        {"color_source": row.get("color_source_light")})
+    """The team, with ONE affordance: the name is the link.
+
+    The colour-source hint used to render a small circle here whose tooltip explained
+    itself only on hover. Two problems, and the first one made the second worse: its guard
+    checked for a rung value dim_team never emits, so it fired on every one of 34,061 rows
+    including the 29,903 that use the team's own primary colour. A marker on everything
+    marks nothing, and an unexplained glyph next to a team name reads as a control.
+
+    Colour-source debt is a BUILDER's concern and stays on the data-quality surfaces, the
+    same split that put friendly dataset names on front-of-house pages and left the literal
+    object name on System Overview.
+    """
+    return table.team_cell(row, "team_slug", "team_display", "logo_source_url")
 
 
 def _record(row) -> str:

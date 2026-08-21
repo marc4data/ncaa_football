@@ -161,7 +161,7 @@ def _scoreline(row) -> None:
     with middle:
         st.markdown(
             f"<div style='text-align:center;opacity:.75;font-size:.85rem'>"
-            f"{'Final' if played else 'Scheduled'}<br>{fmt.eastern(row.get('start_date_et'))}"
+            f"{'Final' if played else 'Scheduled'}<br>{fmt.local_time(row.get('start_date_et'))}"
             f"<br>{row.get('venue_display') or ''}"
             f"{'<br>neutral site' if row.get('is_neutral_site') else ''}</div>",
             unsafe_allow_html=True)
@@ -193,7 +193,7 @@ def _market(row) -> None:
             f"de-vigged by {row.get('devig_method')}; the book's overround was "
             f"{fmt.number(row.get('overround'), '', 4)}. Raw prices above are untouched.")
     st.caption(f"Line from {row.get('provider_key') or 'an unnamed book'}, "
-               f"snapshot {fmt.eastern(row.get('line_snapshot_ts'))}. "
+               f"snapshot {fmt.local_time(row.get('line_snapshot_ts'))}. "
                f"Opening spread {fmt.signed(row.get('spread_open'), 'spread')}, "
                f"opening total {fmt.number(row.get('over_under_open'), 'over_under')}.")
 

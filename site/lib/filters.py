@@ -182,7 +182,51 @@ def game_scope(show_week: bool = True, show_conference: bool = True) -> GameScop
     params.set_params(
         season=season, week=week, conference=conf, division=division,
         season_type=None if season_type == "regular" else season_type)
-    return GameScope(season, week, season_type, conf, division)
+
+    scope = GameScope(season, week, season_type, conf, division)
+    _summary(scope, seasons[0] if seasons else season)
+    return scope
+
+
+def _summary(scope: GameScope, newest_season: int) -> None:
+    """AC-G.18b: the filter is VISIBLE STATE, and anything off-default is marked.
+
+    Persisting silently is worse than not persisting at all. Not persisting was a bug you
+    noticed immediately — choose 2025, navigate, get 2026 back. Persisting invisibly is a
+    way to be confidently wrong: land on Stats, read 2025 numbers, and take them as
+    current. A filter carried between pages has to announce itself on arrival.
+
+    Off-default is marked rather than merely present, because "season 2025" reads as
+    information and a highlighted "season 2025 · not current" reads as a state you are in.
+    """
+    off_default = []
+    if scope.season != newest_season:
+        off_default.append(f"Season {scope.season}")
+    if scope.week is not None:
+        off_default.append(f"Week {scope.week}")
+    if scope.season_type != "regular":
+        off_default.append(scope.season_type.title())
+    if scope.conference:
+        off_default.append(scope.conference)
+    if scope.division != DEFAULT_DIVISION:
+        off_default.append(next(k for k, v in DIVISIONS.items() if v == scope.division))
+
+    if not off_default:
+        st.markdown(
+            f"<div class='cfdb-scope'>Showing <strong>Season {scope.season}</strong>, "
+            f"all weeks, FBS.</div>", unsafe_allow_html=True)
+        return
+
+    chips = "".join(f"<span class='cfdb-scope-chip'>{value}</span>" for value in off_default)
+    st.markdown(
+        f"<div class='cfdb-scope cfdb-scope-active'>Filtered: {chips}</div>",
+        unsafe_allow_html=True)
+    # One click back to the default state, present only when there is something to reset —
+    # a permanently visible reset button is noise on the page it is least needed.
+    if st.button(f"Reset to Season {newest_season}", key="flt_reset"):
+        params.set_params(season=None, week=None, conference=None, division=None,
+                          season_type=None)
+        st.rerun()
 
 
 def clear() -> None:

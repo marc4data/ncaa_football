@@ -58,6 +58,8 @@ def _columns(scope) -> list:
         Col("predicted_margin", "Pred margin", "signed"),
         Col("network", "TV"),
         Col("venue_display", "Venue"),
+        table.details_col(lambda r: scope.link("matchup",
+                                               game_id=r["game_id"])),
     ]
 
 

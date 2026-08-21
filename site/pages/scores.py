@@ -93,9 +93,13 @@ def body(page) -> None:
             # AC-3.6: a column, never an app-side rank comparison.
             # "!" by degree rather than a fixed-width chip. The chip was costing more
             # horizontal space than the information justified on a table this wide.
-            Col("is_upset", "!", render=_upset),
+            # The GLYPHS are !/!!/!!!; the HEADER is a word. A column headed with a
+            # punctuation mark is a puzzle rather than a label.
+            Col("is_upset", "Upset", render=_upset),
             Col("excitement_index", "Excitement", "num", dp=1),
             Col("attendance", "Attendance", "num", dp=0),
+            table.details_col(lambda r: scope.link("matchup",
+                                                   game_id=r["game_id"])),
         ]
         states.render_or_state(
             df, "srv_scoreboard",

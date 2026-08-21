@@ -24,6 +24,15 @@ def _page_module(key: str):
     return render
 
 
+# EVERY page is registered, including the ones with no nav slot.
+#
+# st.navigation does the ROUTING as well as the sidebar, so a page left out of this dict is
+# not merely hidden — it is unreachable by URL, which would break every team link on the
+# site. So the Team page is registered here and its sidebar entry is hidden in CSS.
+#
+# The failure direction is deliberate: if the selector ever misses, the nav entry reappears.
+# That is a cosmetic regression. Dropping the page from the dict to hide it would produce a
+# dead link from five other pages, which is not.
 nav = {}
 for group in GROUPS:
     nav[group] = [
@@ -32,4 +41,5 @@ for group in GROUPS:
         for p in PAGES if p.group == group
     ]
 
+theme.hide_nav_entries([p.url_path_for_nav for p in PAGES if not p.in_nav])
 st.navigation(nav).run()
