@@ -40,6 +40,7 @@ def body(page) -> None:
 
         # AC-1.1: an out-of-window query legitimately returns zero rows and must render
         # EMPTY, not Degraded — the view exists, there is simply no slate today.
+        shown = table.apply_sort(shown, _columns(scope))
         states.render_or_state(
             shown, "srv_today_edges",
             "Today's slate would be here.",

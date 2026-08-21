@@ -58,6 +58,21 @@ UPSET_LEGEND = ("Upset scale — **!** under 10 points · **!!** 10 to 20 · **!
                 "for how surprising a result was.")
 
 
+def _side(row, side: str) -> str:
+    """A team cell, with a caret if this side won.
+
+    The caret is a GLYPH, not a colour, so the result survives greyscale and a colour-blind
+    reader (AC-G.22). It is absent rather than dimmed on the losing side: two markers where
+    one is meaningful is the monogram problem again.
+    """
+    cell = table.team_cell(row, f"{side}_team_slug", f"{side}_team_display",
+                           f"{side}_logo_url", f"{side}_rank")
+    winner = row.get("winner")
+    if winner and winner == row.get(f"{side}_team_display"):
+        return f"<span class='cfdb-winner' title='won'>▸</span>{cell}"
+    return f"<span class='cfdb-winner-spacer'></span>{cell}"
+
+
 def _upset(row) -> str:
     """Upset by DEGREE, in the width of one character.
 
@@ -82,12 +97,13 @@ def body(page) -> None:
                    scope.division)
         table.as_of_caption(df)
         columns = [
-            Col("away", "Away", render=lambda r: table.team_cell(
-                r, "away_team_slug", "away_team_display", "away_logo_url", "away_rank"),
+            # F2-23: a caret beside the team that won, so the result is readable without
+            # comparing two numbers. The winner comes from the view, not from a comparison
+            # here — the page re-deriving it is what disagreed on 1 game in 295.
+            Col("away", "Away", render=lambda r: _side(r, "away"),
                 link=lambda r: scope.link("team", team=r.get("away_team_slug"))),
             Col("away_points", "", "num", dp=0),
-            Col("home", "Home", render=lambda r: table.team_cell(
-                r, "home_team_slug", "home_team_display", "home_logo_url", "home_rank"),
+            Col("home", "Home", render=lambda r: _side(r, "home"),
                 link=lambda r: scope.link("team", team=r.get("home_team_slug"))),
             Col("home_points", "", "num", dp=0),
             Col("winner", "Winner", render=_winner),
@@ -106,6 +122,9 @@ def body(page) -> None:
             table.details_col(lambda r: scope.link("matchup",
                                                    game_id=r["game_id"])),
         ]
+        # AC-2.8: sorted before grouping, so each day sorts within itself and the days
+        # keep their own order.
+        df = table.apply_sort(df, columns)
         states.render_or_state(
             df, "srv_scoreboard",
             "Completed results would be listed here.",

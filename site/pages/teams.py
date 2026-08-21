@@ -32,6 +32,8 @@ def body(page) -> None:
         if search:
             df = df[df["school"].str.contains(search, case=False, na=False)]
 
+        df = table.apply_sort(df, [Col("abbreviation", "Abbr"),
+                                   Col("win_pct", "Win %", "num")])
         states.render_or_state(
             df, "srv_teams_index",
             "Teams would be listed here.",

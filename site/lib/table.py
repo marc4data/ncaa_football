@@ -10,7 +10,7 @@ from typing import Callable, List, Optional
 import pandas as pd
 import streamlit as st
 
-from lib import chips, fmt, identity
+from lib import chips, fmt, identity, params
 
 
 class Col:
@@ -54,6 +54,65 @@ class Col:
         return "cfdb-num" if self.kind in ("num", "signed") else ""
 
 
+def apply_sort(df: pd.DataFrame, columns: List[Col],
+               default: Optional[str] = None) -> pd.DataFrame:
+    """Sort the frame by whichever column the URL asks for. AC-2.8.
+
+    SORTING IS DISPLAY, and doing it here is not the thing AC-5.1 forbids. That rule is
+    about business logic — a conference tiebreaker implemented in Python is a defect because
+    the ordering is a DEFINITION that belongs in dbt. "Show me this table by attendance
+    descending" is a reader rearranging what they were already given.
+
+    Server-side rather than JavaScript, and that is the second time this pattern has paid:
+    Streamlit strips event handlers, so a client-side sorter would render an arrow attached
+    to nothing exactly as the row links did. A header that is an <a href> toggling a query
+    param sorts, survives a reload, and can be sent to somebody.
+
+    Applied BEFORE grouping so a grouped table sorts within each group and the groups
+    themselves keep their own order — a day is still a day.
+    """
+    field = params.get("sort") or default
+    if not field:
+        return df
+    if field not in df.columns:
+        # A stale or hand-edited ?sort= names a column this table does not have. Ignore it
+        # rather than raising: an unknown sort is noise, not a request (AC-G.11).
+        return df
+    ascending = (params.get("order") or "asc") == "asc"
+    # na_position last in both directions: a null is not the smallest value, it is the
+    # absence of one, and burying them keeps the top of the table meaningful either way.
+    return df.sort_values(field, ascending=ascending, na_position="last",
+                          kind="mergesort")
+
+
+def _header_cell(column: Col, sortable: bool) -> str:
+    """A header, and a sort toggle where the column has something to sort by."""
+    # A synthetic column has no field to sort by — "Spread · model" is two numbers in one
+    # cell, and the details glyph is not data. Those render as plain headers rather than
+    # as links that would do nothing.
+    if not sortable or not column.field or column.field in ("details", "flag", "rank",
+                                                            "team", "away", "home",
+                                                            "record", "overall",
+                                                            "conf_record", "winner",
+                                                            "ats", "basis", "status",
+                                                            "description", "market",
+                                                            "result", "bucket",
+                                                            "spread_and_model"):
+        return f"<th class='{column.css}'>{column.label}</th>"
+
+    current = params.get("sort")
+    order = params.get("order") or "asc"
+    is_active = current == column.field
+    # Clicking the active column flips it; clicking a new one starts ascending.
+    next_order = "desc" if (is_active and order == "asc") else "asc"
+    arrow = ("▲" if order == "asc" else "▼") if is_active else "⇅"
+    href = params.link_here(sort=column.field, order=next_order)
+    active = " cfdb-sorted" if is_active else ""
+    return (f"<th class='{column.css}{active}'>"
+            f"<a class='cfdb-sort' href='{href}' target='_self'>{column.label}"
+            f"<span class='cfdb-sort-arrow'>{arrow}</span></a></th>")
+
+
 def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
     """Column widths computed ONCE over the whole dataset, for reuse across every group.
 
@@ -87,7 +146,7 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
 
 def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
            link_builder: Optional[Callable] = None, max_rows: int = 300,
-           layout: Optional[List[str]] = None) -> None:
+           layout: Optional[List[str]] = None, sortable: bool = True) -> None:
     """An HTML table, because Streamlit's dataframe cannot hold a chip or a link.
 
     AC-G.47: the table carries header semantics and a caption naming its source view.
@@ -111,7 +170,7 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     colgroup = ("<colgroup>"
                 + "".join(f"<col style='width:{width}'>" for width in layout)
                 + "</colgroup>") if layout else ""
-    head = "".join(f"<th class='{c.css}'>{c.label}</th>" for c in columns)
+    head = "".join(_header_cell(c, sortable) for c in columns)
     body = []
     for _, row in df.head(max_rows).iterrows():
         row_href = link_builder(row) if link_builder else None

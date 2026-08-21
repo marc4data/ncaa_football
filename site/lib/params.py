@@ -4,6 +4,7 @@ One canonical name per concept, used everywhere. Per-page synonyms are how a boo
 working, so the table below is the only place a parameter name is spelled.
 """
 from typing import Any
+from urllib.parse import quote
 
 import streamlit as st
 
@@ -21,7 +22,11 @@ ENUM_PARAMS = {
     "order": {"desc", "asc"},
 }
 SLUG_PARAMS = {"team", "opponent", "conference", "poll", "provider", "model",
-               "tab", "stat", "table"}
+               "tab", "stat", "table",
+               # Which column a table is sorted by. In the URL like every other choice, so
+               # a sorted table can be linked to — AC-2.8 asks for sortable headers and
+               # AC-G.18 decides where that state lives.
+               "sort"}
 KNOWN = INT_PARAMS | set(ENUM_PARAMS) | SLUG_PARAMS
 
 
@@ -72,6 +77,26 @@ def link(page: str, **kwargs) -> str:
     """A URL for a page with parameters, for use in a clickable row."""
     query = "&".join(f"{k}={v}" for k, v in kwargs.items() if v is not None)
     return f"/{page}?{query}" if query else f"/{page}"
+
+
+def link_here(**overrides) -> str:
+    """The CURRENT url with some parameters changed. For a sort toggle.
+
+    Sorting must not throw away the scope. A header link that rebuilt the URL from scratch
+    would drop the season and week the reader chose — which is exactly the bug that made
+    filters feel broken, arriving by a different route.
+
+    The page path comes from Streamlit rather than being passed in, so a header does not
+    have to know which page it is on.
+    """
+    query = {k: v for k, v in st.query_params.items() if k in KNOWN}
+    for key, value in overrides.items():
+        if value is None:
+            query.pop(key, None)
+        else:
+            query[key] = str(value)
+    encoded = "&".join(f"{k}={quote(str(v))}" for k, v in query.items())
+    return f"?{encoded}" if encoded else "?"
 
 
 def current() -> dict:

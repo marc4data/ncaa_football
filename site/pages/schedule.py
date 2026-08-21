@@ -76,6 +76,7 @@ def body(page) -> None:
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)
         table.as_of_caption(df)
+        df = table.apply_sort(df, _columns(scope))
         states.render_or_state(
             df, "srv_schedule",
             "The week's games would be listed here.",

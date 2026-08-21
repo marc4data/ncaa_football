@@ -84,11 +84,10 @@ def _compare(season, week) -> None:
             limit 200
         """, {"season": season, "week": week})
         table.as_of_caption(df)
-        states.render_or_state(
-            df, "srv_rankings_compare",
-            "Poll disagreement would be here.",
-            f"No comparable polls for week {week}.",
-            renderer=lambda d: table.render(d, [
+        # AC-4.5 said this was "sortable here" and it was not — the headers were static
+        # text. F2-22. Sorting now happens through the URL like every other choice, so a
+        # reader can send somebody "the week the polls disagreed most about Texas".
+        compare_columns = [
                 Col("school", "Team"),
                 Col("conference_name", "Conf"),
                 Col("ap_rank", "AP", "num", dp=0),
@@ -97,7 +96,13 @@ def _compare(season, week) -> None:
                 # AC-4.5: computed in dbt, sortable here, so "where do the polls disagree
                 # most" is one click rather than an app-side calculation.
                 Col("disagreement_spread", "Spread", "num", dp=0),
-            ], caption="srv_rankings_compare"))
+        ]
+        df = table.apply_sort(df, compare_columns)
+        states.render_or_state(
+            df, "srv_rankings_compare",
+            "Poll disagreement would be here.",
+            f"No comparable polls for week {week}.",
+            renderer=lambda d: table.render(d, compare_columns, caption=""))
 
 
 def render() -> None:

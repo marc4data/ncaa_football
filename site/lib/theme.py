@@ -102,6 +102,12 @@ TABLE_CSS = """
 .cfdb-scope-active { opacity:1; }
 .cfdb-monogram-empty { display:inline-block; vertical-align:middle; border-radius:50%;
     background:rgba(127,127,127,.14); margin-right:.4rem; }
+.cfdb-table th a.cfdb-sort { color:inherit; text-decoration:none; display:block; }
+.cfdb-table th a.cfdb-sort:hover { text-decoration:underline; }
+.cfdb-sort-arrow { opacity:.35; margin-left:.25rem; font-size:.7rem; }
+.cfdb-table th.cfdb-sorted .cfdb-sort-arrow { opacity:1; }
+.cfdb-winner { color:#1f6feb; font-weight:700; margin-right:.15rem; }
+.cfdb-winner-spacer { display:inline-block; width:.75em; }
 .cfdb-details { opacity:.55; font-size:1rem; }
 .cfdb-table td a:hover .cfdb-details { opacity:1; }
 .cfdb-scope-chip { display:inline-block; background:rgba(31,111,235,.12);

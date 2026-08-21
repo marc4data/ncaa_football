@@ -101,7 +101,14 @@ REGISTRY: List[Endpoint] = [
 
     # ---- Game results and detail (bucket B / C2) ----------------------------------
     Endpoint("games", SEASON_TYPE, BUCKET_HISTORICAL, history=HISTORY_FULL, min_season=1869),
-    Endpoint("games/media", SEASON_TYPE, BUCKET_HISTORICAL),
+    # PREGAME, not HISTORICAL. Broadcast assignments are announced roughly twelve days
+    # ahead and change up to game week — they are the definition of time-sensitive
+    # pre-game data. Sitting in BUCKET_HISTORICAL meant no weekly refresh fetched it, so
+    # the TV column on Today and Schedule was empty for 2026 and would have STAYED empty
+    # all season while every DAG reported success. A backfill had populated 2024 and 2025,
+    # which is why it looked like a working column with a gap rather than a column with no
+    # source of new rows.
+    Endpoint("games/media", SEASON_TYPE, BUCKET_PREGAME),
     Endpoint("games/weather", SEASON_TYPE, BUCKET_HISTORICAL, note="Tier 3 feature"),
     Endpoint("games/teams", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="team box scores"),
     Endpoint("games/players", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="player box scores"),
