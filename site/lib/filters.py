@@ -110,12 +110,24 @@ def _conferences(season: int) -> list:
     return df["conference"].tolist()
 
 
-def game_scope(show_week: bool = True, show_conference: bool = True) -> GameScope:
-    """The global filter bar, rendered at the top of the page.
+def game_scope(show_week: bool = True, show_conference: bool = True,
+               show_season: bool = True, week_note: str = "",
+               conference_note: str = "", season_note: str = "") -> GameScope:
+    """The global filter bar, rendered at the top of EVERY data page.
 
     Every value is read from the URL first and written back after, so the scope survives a
     page change. Nothing here mutates session state — AC-G.13 requires navigation by query
     params, and a filter held only in session is a filter that cannot be linked to.
+
+    F2-01 was still broken after the last pass because only SIX of eighteen pages called
+    this at all. Rankings, Stats, Today, Odds, Line Movement, Edge Finder, Model Performance
+    and the Team page each rolled their own selectors, so they neither read the incoming
+    scope nor wrote it back — the scope did not "drop on some routes", it was never on them.
+
+    F2-03: an inapplicable filter is DISABLED WITH A REASON, never absent. Teams is
+    team-by-season grain so a week means nothing there, but its absence is what made the
+    page feel broken. Consistency of chrome beats per-page optimisation, and a disabled
+    control with a tooltip answers the question the missing one raised.
     """
     seasons = _seasons()
     if not seasons:
@@ -136,13 +148,17 @@ def game_scope(show_week: bool = True, show_conference: bool = True) -> GameScop
                           division_labels[0])
 
     # A horizontal row under the title. Columns rather than the sidebar, per the amendment.
-    widths = [1.1, 1.0, 1.2, 1.5, 0.9]
-    slots = st.columns(widths if show_conference else widths[:3] + widths[4:])
+    # Always five slots. A bar that changes shape per page is a bar the reader has to
+    # re-learn, and a missing control reads as a missing feature.
+    slots = st.columns([1.1, 1.0, 1.2, 1.5, 1.1])
     index = 0
 
     with slots[index]:
+        # A disabled season still SHOWS the inherited value, so a page that cannot scope by
+        # season says so rather than looking like it forgot.
         season = st.selectbox("Season", seasons, index=seasons.index(season),
-                              key="flt_season")
+                              key="flt_season", disabled=not show_season,
+                              help=season_note or None)
     index += 1
     with slots[index]:
         season_type = st.selectbox(
@@ -150,23 +166,25 @@ def game_scope(show_week: bool = True, show_conference: bool = True) -> GameScop
             index=0 if season_type == "regular" else 1, key="flt_type")
     index += 1
     with slots[index]:
-        if show_week:
-            week_choice = st.selectbox(
-                "Week", week_options,
-                index=week_options.index(current_week) if current_week in week_options else 0,
-                key="flt_week")
-        else:
+        week_choice = st.selectbox(
+            "Week", week_options if show_week else ["All"],
+            index=week_options.index(current_week)
+            if show_week and current_week in week_options else 0,
+            key="flt_week", disabled=not show_week,
+            help=week_note or None)
+        if not show_week:
             week_choice = "All"
     index += 1
-    if show_conference:
-        with slots[index]:
-            conference = st.selectbox(
-                "Conference", conferences,
-                index=conferences.index(current_conf) if current_conf in conferences else 0,
-                key="flt_conf")
-        index += 1
-    else:
-        conference = "All"
+    with slots[index]:
+        conference = st.selectbox(
+            "Conference", conferences if show_conference else ["All"],
+            index=conferences.index(current_conf)
+            if show_conference and current_conf in conferences else 0,
+            key="flt_conf", disabled=not show_conference,
+            help=conference_note or None)
+        if not show_conference:
+            conference = "All"
+    index += 1
     with slots[index]:
         division_label = st.selectbox(
             "Division", division_labels, index=division_labels.index(division_label),

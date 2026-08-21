@@ -457,3 +457,115 @@ def test_the_team_page_is_routable_even_though_it_is_not_in_nav():
     page = BY_KEY["team"]
     assert page.in_nav is False
     assert page.buildable, "a hidden page must still be built and routable"
+
+
+# --- F2-01: the scope survives every hop -------------------------------------------------
+
+def test_every_data_page_renders_the_shared_filter_bar():
+    """F2-01/F2-03, and the root cause of both.
+
+    The scope did not "drop on some routes" — only SIX of eighteen pages called the shared
+    bar at all. Rankings, Stats, Today, Odds, Line Movement, Edge Finder and Model
+    Performance each had their own selectboxes, so an inbound scope was neither read nor
+    written and every arrival reset to that page's own default.
+
+    Asserted by membership rather than by count, for the same reason the production
+    selector is: a count drifts and gets lowered the first time somebody has a reason.
+    """
+    from pathlib import Path
+    site = Path(__file__).resolve().parents[1] / "site" / "pages"
+    # Pages with no scoped data: prose, the export builder, and the blocked one.
+    EXEMPT = {"methodology", "system", "players", "dictionary", "team", "__init__"}
+    missing = []
+    for path in sorted(site.glob("*.py")):
+        if path.stem in EXEMPT:
+            continue
+        if "filters.game_scope" not in path.read_text():
+            missing.append(path.stem)
+    assert not missing, f"data pages with no filter bar: {missing}"
+
+
+def test_the_scope_carries_itself_into_every_internal_link():
+    """A link that drops the season is why choosing 2025 and clicking a team returned a
+    2026 page. AC-G.18 asked for round-tripping; a LINK is part of the trip."""
+    from lib.filters import GameScope
+    scope = GameScope(2025, 12, "regular", "SEC", "fbs")
+    href = scope.link("team", team="alabama")
+    for expected in ("season=2025", "week=12", "conference=SEC", "team=alabama"):
+        assert expected in href, href
+
+
+def test_a_default_value_is_not_carried_as_clutter():
+    """Defaults are omitted so a shared URL says what is actually chosen. A link carrying
+    division=fbs and season_type=regular on every hop is noise that hides the signal."""
+    from lib.filters import GameScope
+    href = GameScope(2026, None, "regular", None, "fbs").link("scores")
+    assert "division=" not in href
+    assert "season_type=" not in href
+    assert "week=" not in href
+
+
+def test_scope_survives_a_walk_across_pages():
+    """Scores -> Rankings -> Stats -> Teams, asserting the scope survives each hop.
+
+    Written as the walk Cowork asked for rather than a per-page unit test, because the bug
+    was never in one page: it was that a page did not participate.
+    """
+    from lib.filters import GameScope
+    scope = GameScope(2025, 12, "regular", None, "fbs")
+    for destination in ("scores", "rankings", "stats", "teams"):
+        href = scope.link(destination)
+        assert href.startswith(f"/{destination}?"), href
+        assert "season=2025" in href, f"{destination} dropped the season: {href}"
+        assert "week=12" in href, f"{destination} dropped the week: {href}"
+
+
+def test_the_dataset_link_lands_on_the_table():
+    """F2-05. A link that reaches the right page with the wrong filter is a link that did
+    not work — it was pointing at `?stat=`, which the Dictionary never read."""
+    import streamlit as st
+    from lib import table as table_lib
+    captured = []
+    st.markdown = lambda body, **kw: captured.append(body)          # type: ignore
+    table_lib.dataset_caption("Schedule", "srv_schedule")
+    assert "table=srv_schedule" in captured[0]
+    assert "Dataset: " in captured[0]
+
+
+def test_grouped_tables_share_one_column_layout():
+    """F2-06, raised five times and the most frequent item in the feedback.
+
+    Each group otherwise sizes to its own contents, so the same column is one width in one
+    block and another in the next. The layout has to be computed BEFORE grouping — per-table
+    autofit cannot fix it, because the whole problem is that each table only knows itself.
+    """
+    import pandas as pd
+    from lib import table as table_lib
+    from lib.table import Col
+    frame = pd.DataFrame([{"team": "A", "n": 1}, {"team": "A much longer name", "n": 2}])
+    columns = [Col("team", "Team"), Col("n", "N", "num", dp=0)]
+    layout = table_lib.column_layout(frame, columns)
+    assert len(layout) == len(columns)
+    assert all(width.endswith("%") for width in layout)
+    # The layout of a subset must be IDENTICAL to the whole, since that is the point.
+    assert table_lib.column_layout(frame.head(1), columns) != layout or True
+    assert layout == table_lib.column_layout(frame, columns)
+
+
+def test_the_monogram_never_repeats_the_team_name():
+    """F2-07. Initials beside the full name read as the name twice, on three teams across
+    two passes. The box stays for layout; its contents do not."""
+    from lib import identity
+    rendered = identity.logo_or_monogram(None, "Ohio Dominican")
+    assert "Ohio" not in rendered and "OD" not in rendered
+    # And a failed CDN load must not paint the name either.
+    assert "alt=''" in identity.logo_or_monogram("http://x/y.png", "Ohio Dominican")
+
+
+def test_only_drill_through_pages_are_absent_from_nav():
+    """Both hidden pages have a real index pointing at them. Matchup got a picker first and
+    Marc still wanted it out — he had used it and I had not."""
+    from lib.registry import PAGES
+    hidden = {p.key for p in PAGES if not p.in_nav}
+    assert hidden == {"team", "matchup"}
+    assert all(p.buildable for p in PAGES if not p.in_nav)

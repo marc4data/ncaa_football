@@ -1,23 +1,29 @@
 """Rankings — page 4. Poll standings, movement, and where the polls disagree."""
 import streamlit as st
 
-from lib import params, shell, states, table
+from lib import filters, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
 
 def body(page) -> None:
-    seasons = query("select distinct season from srv_rankings order by season desc limit 200")
-    options = seasons["season"].tolist()
-    default = params.get("season") or (options[0] if options else None)
-    with st.sidebar:
-        season = st.selectbox("Season", options,
-                              index=options.index(default) if default in options else 0)
-        weeks = query("""select distinct week from srv_rankings
-                         where season = :season order by week desc limit 40""",
-                      {"season": season})["week"].tolist()
-        week = st.selectbox("Week", weeks, index=0) if weeks else None
-    params.set_params(season=season, week=week)
+    # F2-03: the bar renders on every data page, so a scope inherited from
+    # another page is visible on arrival rather than silently in effect.
+    # F2-01 was reported still broken on this route, and the reason was that this page
+    # never called the shared bar at all — it had its own season and week selectboxes, so
+    # an inbound scope was neither read nor written and every arrival reset to the default.
+    scope = filters.game_scope(
+        conference_note="Polls rank teams nationally, so a conference does not scope them.",
+        show_conference=False)
+    table.dataset_caption("Rankings", "srv_rankings")
+    season = scope.season
+
+    weeks = query("""select distinct week from srv_rankings
+                     where season = :season order by week desc limit 40""",
+                  {"season": season})["week"].tolist()
+    # The global week is honoured where the polls published one; otherwise the most recent
+    # poll week, because a rankings page with no week is a rankings page with no content.
+    week = scope.week if scope.week in weeks else (weeks[0] if weeks else None)
 
     polls = query("""select distinct poll_name, poll_display_order from srv_rankings
                      where season = :season order by poll_display_order, poll_name limit 20""",

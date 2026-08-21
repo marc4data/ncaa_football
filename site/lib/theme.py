@@ -68,7 +68,9 @@ def inject() -> None:
 
 TABLE_CSS = """
 <style>
-.cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem; }
+.cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
+    table-layout:fixed; }
+.cfdb-table td, .cfdb-table th { overflow:hidden; text-overflow:ellipsis; }
 .cfdb-table caption { caption-side:top; text-align:left; font-size:.8rem; opacity:.6;
   padding-bottom:.4rem; }
 .cfdb-table th { text-align:left; font-weight:600; font-size:.78rem; letter-spacing:.02em;
@@ -91,11 +93,15 @@ TABLE_CSS = """
 .cfdb-footer a { color:#1f6feb; text-decoration:none; }
 .cfdb-footer a:hover { text-decoration:underline; }
 .cfdb-footer-links { opacity:.85; }
+.cfdb-footer-links a[aria-label] { display:inline-block; min-width:1.4em;
+    text-align:center; font-weight:700; }
 /* AC-G.18b. The neutral form states the scope; the active form marks it, because a
    filter inherited from another page has to be legible on arrival rather than inferable
    from the URL. */
 .cfdb-scope { font-size:.82rem; opacity:.8; margin:.1rem 0 .7rem; }
 .cfdb-scope-active { opacity:1; }
+.cfdb-monogram-empty { display:inline-block; vertical-align:middle; border-radius:50%;
+    background:rgba(127,127,127,.14); margin-right:.4rem; }
 .cfdb-details { opacity:.55; font-size:1rem; }
 .cfdb-table td a:hover .cfdb-details { opacity:1; }
 .cfdb-scope-chip { display:inline-block; background:rgba(31,111,235,.12);

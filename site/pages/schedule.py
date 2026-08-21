@@ -57,7 +57,13 @@ def _columns(scope) -> list:
         # predicted_margin keeps the pack's away-minus-home sign (AC-1.4, AC-10.5).
         Col("predicted_margin", "Pred margin", "signed"),
         Col("network", "TV"),
-        Col("venue_display", "Venue"),
+        # F2-19: neutral site is a property a reader scans for; venue is detail and moved
+        # to Matchup (F2-18), where there is room to name it properly.
+        # The HEADER is a word and the CELL is a mark — the same rule the Upset column
+        # needed. A column headed with a single character is a puzzle, which is exactly the
+        # complaint that made "!" become "Upset" one page over.
+        Col("is_neutral_site", "Neutral",
+            render=lambda r: "◇" if r.get("is_neutral_site") else ""),
         table.details_col(lambda r: scope.link("matchup",
                                                game_id=r["game_id"])),
     ]
@@ -80,10 +86,12 @@ def body(page) -> None:
 
 def _grouped(df: pd.DataFrame, scope) -> None:
     """AC-2.2: grouped by day, kickoff order within a day, with day headers."""
+    # F2-06: one layout over the whole frame, reused by every group.
+    layout = table.column_layout(df, _columns(scope))
     for day, rows in df.groupby(df["game_date"], sort=True):
         st.markdown(f"<div class='cfdb-daygroup'>{pd.Timestamp(day):%A %d %B %Y}</div>",
                     unsafe_allow_html=True)
-        table.render(rows, _columns(scope), caption="",
+        table.render(rows, _columns(scope), caption="", layout=layout,
                      link_builder=lambda r: scope.link("matchup",
                                                        game_id=r["game_id"]))
 

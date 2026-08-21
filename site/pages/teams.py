@@ -66,19 +66,23 @@ def _record(row) -> str:
 
 def _by_conference(df, scope) -> None:
     """AC-7.1: grouped by conference, alphabetical within."""
+    columns = [
+        Col("team", "Team", render=_team,
+            link=lambda r: scope.link("team", team=r["team_slug"])),
+        Col("abbreviation", "Abbr"),
+        Col("record", "Record", render=_record),
+        Col("win_pct", "Win %", "num"),
+    ]
+    # F2-06/F2-27: computed over every conference at once, so the grid does not reflow
+    # per group.
+    layout = table.column_layout(df, columns)
     for conference, rows in df.groupby("conference", sort=True, dropna=False):
         st.markdown(f"<div class='cfdb-daygroup'>{conference or 'Independent'}</div>",
                     unsafe_allow_html=True)
-        table.render(rows, [
-            # Mascot removed: it never distinguished two teams or answered a question.
-            Col("team", "Team", render=_team),
-            Col("abbreviation", "Abbr"),
-            Col("record", "Record", render=_record),
-            Col("win_pct", "Win %", "num"),
-        ], caption="",
-            # AC-7.5: the row goes to the team page, carrying the scope so a season chosen
-            # here is still chosen there.
-            link_builder=lambda r: scope.link("team", team=r["team_slug"]))
+        # Mascot removed: it never distinguished two teams or answered a question.
+        # AC-7.5: the row goes to the team page, carrying the scope forward.
+        table.render(rows, columns, caption="", layout=layout,
+                     link_builder=lambda r: scope.link("team", team=r["team_slug"]))
 
 
 def render() -> None:

@@ -4,6 +4,7 @@ Formatting only. Every value arrives already computed — this decides how it lo
 what it is (G-3). A column spec is declarative so a page says what a column MEANS and the
 renderer decides precision, alignment and chip treatment from that.
 """
+import re
 from typing import Callable, List, Optional
 
 import pandas as pd
@@ -53,8 +54,40 @@ class Col:
         return "cfdb-num" if self.kind in ("num", "signed") else ""
 
 
+def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
+    """Column widths computed ONCE over the whole dataset, for reuse across every group.
+
+    F2-06, raised five times across two passes and by frequency the number one item in the
+    feedback. When a page renders several tables of the same shape — Today and Schedule
+    grouped by day, Teams grouped by conference — each group otherwise sizes itself to its
+    own contents, so the same column is 90px in one block and 140px in the next and the page
+    reads as ragged.
+
+    Per-table autofit cannot fix that, because the whole problem is that each table only
+    knows about itself. The layout has to be computed BEFORE grouping and handed to every
+    group, which is why this returns a list of widths rather than styling anything.
+
+    Widths are proportional rather than absolute: a percentage keeps the table responsive on
+    a laptop, which is where Marc reads it, while still being identical across groups.
+    """
+    weights = []
+    for column in columns:
+        longest = len(str(column.label))
+        for _, row in df.iterrows():
+            rendered = column.format(row)
+            # Strip tags before measuring — a logo or a chip is markup, not width.
+            text = re.sub(r"<[^>]+>", "", str(rendered))
+            longest = max(longest, len(text))
+        # Clamped in both directions: a floor so a two-character header stays readable, a
+        # ceiling so one long venue name does not take half the table.
+        weights.append(min(max(longest, 4), 34))
+    total = sum(weights) or 1
+    return [f"{100 * weight / total:.2f}%" for weight in weights]
+
+
 def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
-           link_builder: Optional[Callable] = None, max_rows: int = 300) -> None:
+           link_builder: Optional[Callable] = None, max_rows: int = 300,
+           layout: Optional[List[str]] = None) -> None:
     """An HTML table, because Streamlit's dataframe cannot hold a chip or a link.
 
     AC-G.47: the table carries header semantics and a caption naming its source view.
@@ -73,6 +106,11 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     anchor is display:block so the whole cell is the target, which makes the row clickable
     in effect while staying valid HTML that a browser can middle-click.
     """
+    # A colgroup rather than per-cell widths: one declaration the browser applies to the
+    # whole table, and identical markup in every group when `layout` is shared.
+    colgroup = ("<colgroup>"
+                + "".join(f"<col style='width:{width}'>" for width in layout)
+                + "</colgroup>") if layout else ""
     head = "".join(f"<th class='{c.css}'>{c.label}</th>" for c in columns)
     body = []
     for _, row in df.head(max_rows).iterrows():
@@ -91,6 +129,7 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     st.markdown(
         "<table class='cfdb-table'>"
         + (f"<caption>{caption}</caption>" if caption else "")
+        + colgroup
         + f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>",
         unsafe_allow_html=True)
     if len(df) > max_rows:
@@ -163,9 +202,12 @@ def dataset_caption(label: str, table_name: str) -> None:
     to know what they are looking at, a table name is jargon, and the useful move is a link
     to what that dataset actually contains.
     """
+    # The link carries the TABLE, and the Data Dictionary reads it as a filter so the
+    # reader lands on that table rather than the top of a 1,200-row page. `table` is the
+    # canonical parameter name; `stat` was the wrong one and is why these did not resolve.
     st.markdown(
         f"<div class='cfdb-dataset'>Dataset: "
-        f"<a href='/dictionary?tab=serving&stat={table_name}' target='_self'>{label}</a>"
+        f"<a href='/dictionary?table={table_name}' target='_self'>{label}</a>"
         f"</div>", unsafe_allow_html=True)
 
 

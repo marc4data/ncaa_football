@@ -13,7 +13,7 @@ time the model is retrained on a different cut.
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, chips, fmt, params, shell, states, table
+from lib import attribution, chips, filters, fmt, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -42,6 +42,10 @@ def _seasons() -> list:
 
 
 def body(page) -> None:
+    # F2-03: the bar renders on every data page, so a scope inherited from
+    # another page is visible on arrival rather than silently in effect.
+    scope = filters.game_scope()
+    table.dataset_caption("Edge finder", "srv_edge_finder")
     with states.section("srv_edge_finder"):
         floor = _floor()
         seasons = _seasons()
@@ -52,24 +56,25 @@ def body(page) -> None:
                 "the book.")
             return
 
-        requested = params.get("season")
-        season = requested if requested in seasons else seasons[0]
+        season = scope.season
         chosen_market = params.get("market")
         market_label = BY_CODE.get(chosen_market, list(MARKETS)[0])
 
-        with st.sidebar:
-            season = st.selectbox("Season", seasons, index=seasons.index(season))
+        controls = st.columns([1.2, 1.6, 1.2])
+        with controls[0]:
             market_label = st.selectbox("Market", list(MARKETS),
                                         index=list(MARKETS).index(market_label))
-            models = query("""select distinct model_name from srv_edge_finder
-                              where season = :season order by model_name limit 40""",
-                           {"season": season})["model_name"].tolist()
-            model_options = ["All models"] + models
-            chosen_model = params.get("model")
+        models = query("""select distinct model_name from srv_edge_finder
+                          where season = :season order by model_name limit 40""",
+                       {"season": season})["model_name"].tolist()
+        model_options = ["All models"] + models
+        chosen_model = params.get("model")
+        with controls[1]:
             model = st.selectbox(
                 "Model", model_options,
                 index=model_options.index(chosen_model)
                 if chosen_model in model_options else 0)
+        with controls[2]:
             # The threshold is a filter on a value the view already computed, never a
             # recomputation of it. Its default is 0 so the page opens showing everything
             # rather than a pre-filtered subset a reader has to discover.
@@ -78,7 +83,7 @@ def body(page) -> None:
 
         market = MARKETS[market_label]
         model = None if model == "All models" else model
-        params.set_params(season=season, market=market, model=model)
+        params.set_params(market=market, model=model)
 
         df = query("""
             select game_id, season, season_type, week, model_name, model_family, split,
@@ -92,12 +97,14 @@ def body(page) -> None:
                    out_of_sample_note, model_version_key, attribution, as_of_ts
             from srv_edge_finder
             where season = :season
+              and (:week is null or week = :week)
               and market = :market
               and (:model is null or model_name = :model)
               and edge_magnitude >= :minimum
             order by edge_magnitude desc
             limit 400
-        """, {"season": season, "market": market, "model": model, "minimum": minimum})
+        """, {"season": season, "week": scope.week, "market": market,
+              "model": model, "minimum": minimum})
         table.as_of_caption(df)
 
         if df.empty:

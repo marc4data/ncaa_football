@@ -39,13 +39,18 @@ def logo_or_monogram(logo_url: Optional[str], display_name: str,
     Same box either way, so a missing logo does not shift the layout, and no broken-image
     glyph is ever rendered. Logos come from our own cache; nothing is hotlinked (AC-G.27).
     """
-    initials = "".join(part[0] for part in str(display_name).split()[:2]).upper() or "?"
     if logo_url:
-        return (f"<img class='cfdb-logo' src='{logo_url}' alt='{display_name}' "
+        # alt is EMPTY on purpose. The team name is rendered immediately beside this, so
+        # the image is decorative — and a non-empty alt means a CDN failure paints the name
+        # a second time next to a broken-image glyph.
+        return (f"<img class='cfdb-logo' src='{logo_url}' alt='' "
                 f"style='width:{size_px}px;height:{size_px}px'>")
-    return (f"<span class='cfdb-monogram' aria-label='{display_name}' "
-            f"style='width:{size_px}px;height:{size_px}px;line-height:{size_px}px;"
-            f"background:{color}'>{initials}</span>")
+    # NO INITIALS. The monogram used to render "OD" beside "Ohio Dominican", which reads as
+    # the name twice — Marc flagged it on three teams across two passes. The box stays so a
+    # missing logo does not shift the row (AC-G.28 is about FOOTPRINT), but it is empty:
+    # the name is right there, and one affordance means one thing.
+    return (f"<span class='cfdb-monogram-empty' aria-hidden='true' "
+            f"style='width:{size_px}px;height:{size_px}px'></span>")
 
 
 # The colour ladder's rungs, as dim_team actually emits them. `primary` and `alternate` are

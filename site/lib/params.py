@@ -20,7 +20,8 @@ ENUM_PARAMS = {
     # sorted the other way is a link to a different claim.
     "order": {"desc", "asc"},
 }
-SLUG_PARAMS = {"team", "opponent", "conference", "poll", "provider", "model", "tab", "stat"}
+SLUG_PARAMS = {"team", "opponent", "conference", "poll", "provider", "model",
+               "tab", "stat", "table"}
 KNOWN = INT_PARAMS | set(ENUM_PARAMS) | SLUG_PARAMS
 
 

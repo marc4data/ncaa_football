@@ -141,6 +141,9 @@ def _scoreline(row) -> None:
     scoreless tie — and rendering an unplayed game the same way asserts something false.
     """
     played = bool(row.get("is_completed"))
+    # AWAY on the LEFT, HOME on the right — the universal convention, and the reason the
+    # previous layout read as unnatural. "Team, venue, team" is not a matchup; "away @ home"
+    # is how every scoreboard in the sport is written.
     left, middle, right = st.columns([5, 2, 5])
     for column, side in ((left, "away"), (right, "home")):
         with column:
@@ -161,7 +164,9 @@ def _scoreline(row) -> None:
     with middle:
         st.markdown(
             f"<div style='text-align:center;opacity:.75;font-size:.85rem'>"
-            f"{'Final' if played else 'Scheduled'}<br>{fmt.local_time(row.get('start_date_et'))}"
+            f"<strong>@</strong><br>"
+            f"{'Final' if played else 'Scheduled'}<br>"
+            f"{fmt.local_time(row.get('start_date_et'))}"
             f"<br>{row.get('venue_display') or ''}"
             f"{'<br>neutral site' if row.get('is_neutral_site') else ''}</div>",
             unsafe_allow_html=True)

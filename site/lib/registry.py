@@ -75,7 +75,12 @@ PAGES = [
          blocker_note="Blocked on dim_athlete, fct_player_season_stat, "
                       "fct_player_game_stat and fct_play. Scheduled last: it is the only "
                       "blocked page whose raw data is not already on disk."),
-    Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True,
+    # NOT IN NAV. Marc asked in wireframe v0.2, again in feedback 01, and again after
+    # using the picker that was built in response: "it's a click-through asset". Schedule,
+    # Scores and Today are its index, and now that rows actually link, they are how it is
+    # reached. The picker stays for /matchup with no game_id — arriving cold should still
+    # work — but a nav slot for a drill-through is a slot that lands nobody usefully.
+    Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True, in_nav=False,
          partial_sections=["Weather (fct_game_weather)",
                            "Travel, rest and elevation (venue join key)"]),
     Page("odds", "Odds Board", BETTING, "srv_odds_board", True, True, True),

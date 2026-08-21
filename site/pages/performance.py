@@ -12,7 +12,7 @@ commentary smoothing the gap.
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, chips, fmt, shell, states, table
+from lib import attribution, chips, filters, fmt, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -72,6 +72,19 @@ def _winner(row) -> str:
 
 
 def body(page) -> None:
+    # F2-03: the bar renders on every data page, so a scope inherited from
+    # another page is visible on arrival rather than silently in effect.
+    # Every filter is inapplicable here and all three say why. Backtest accuracy is a
+    # property of a MODEL VERSION, not of a season the reader picked: the 2025 held-out
+    # figures do not change when the site's season filter moves to 2026, and silently
+    # emptying this page to honour a global scope would be worse than disabling the control.
+    filters.game_scope(
+        show_season=False, show_week=False, show_conference=False,
+        season_note="Backtest accuracy belongs to a model version, not a season — the "
+                    "2025 held-out figures are the whole record.",
+        week_note="Use the by-week breakdown below.",
+        conference_note="Use the by-conference breakdown below.")
+    table.dataset_caption("Model performance", "srv_model_performance")
     with states.section("srv_model_performance"):
         # Filtered to 'overall'. The view now stacks five cuts, and an unfiltered read
         # would put week rows and conference rows in the headline table at incompatible

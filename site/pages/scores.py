@@ -53,6 +53,11 @@ def _winner(row) -> str:
     return f"<strong>{winner}</strong>"
 
 
+UPSET_LEGEND = ("Upset scale — **!** under 10 points · **!!** 10 to 20 · **!!!** 21 or "
+                "more. Degree is the winning margin, which is the cheapest honest proxy "
+                "for how surprising a result was.")
+
+
 def _upset(row) -> str:
     """Upset by DEGREE, in the width of one character.
 
@@ -107,14 +112,20 @@ def body(page) -> None:
             f"No completed games for {scope.describe()} yet.",
             renderer=lambda d: _grouped(d, columns, scope),
             fix_label="Clear filters", fix=filters.clear)
+        # F2-24: a glyph nobody can decode is decoration. The thresholds are stated on the
+        # page, not left to a tooltip that a touch device never shows.
+        if not df.empty:
+            st.caption(UPSET_LEGEND)
 
 
 def _grouped(df, columns, scope) -> None:
     """AC-3.5: grouped by day, most recent first."""
+    # F2-06: one layout over the whole frame, reused by every group.
+    layout = table.column_layout(df, columns)
     for day, rows in df.groupby(df["game_date"], sort=False):
         st.markdown(f"<div class='cfdb-daygroup'>{pd.Timestamp(day):%A %d %B %Y}</div>",
                     unsafe_allow_html=True)
-        table.render(rows, columns, caption="",
+        table.render(rows, columns, caption="", layout=layout,
                      link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]))
 
 

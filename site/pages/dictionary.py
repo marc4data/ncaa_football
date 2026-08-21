@@ -17,7 +17,12 @@ from lib import chips, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
-LAYERS = ["All layers", "staging", "dimensional", "serving"]
+# SERVING FIRST AND BY DEFAULT (F2-32). The site's promise is that it serves curated data;
+# a dictionary opening on raw and staging invites "so where is that?" — a question the
+# publication boundary answers with "nowhere". The other layers stay available behind an
+# explicit choice, because describing them is permitted and the architecture is worth
+# showing; they are simply not what this page opens on.
+LAYERS = ["serving", "dimensional", "staging", "All layers"]
 
 
 @st.cache_data(ttl=3600)
@@ -31,21 +36,35 @@ def _tables(layer) -> list:
 def body(page) -> None:
     with states.section("srv_data_dictionary"):
         chosen_layer = params.get("tab")
-        with st.sidebar:
-            layer_label = st.selectbox(
-                "Layer", LAYERS,
-                index=LAYERS.index(chosen_layer) if chosen_layer in LAYERS else 0)
-            layer = None if layer_label == "All layers" else layer_label
-            tables = ["All tables"] + _tables(layer)
-            table_choice = st.selectbox("Table", tables)
+        # F2-05: a dataset link from another page arrives as ?table=srv_schedule and must
+        # land ON that table. The layer is inferred from it rather than asked for, because
+        # a link that lands you on the right page with the wrong filter is still a link
+        # that did not work.
+        requested_table = params.get("table")
+        layer_label = chosen_layer if chosen_layer in LAYERS else LAYERS[0]
+        if requested_table:
+            layer_label = ("serving" if requested_table.startswith("srv_")
+                           else "staging" if requested_table.startswith("stg_")
+                           else "dimensional")
+
+        controls = st.columns([1.2, 2.0, 1.2])
+        with controls[0]:
+            layer_label = st.selectbox("Layer", LAYERS, index=LAYERS.index(layer_label))
+        layer = None if layer_label == "All layers" else layer_label
+        tables = ["All tables"] + _tables(layer)
+        with controls[1]:
+            table_choice = st.selectbox(
+                "Table", tables,
+                index=tables.index(requested_table) if requested_table in tables else 0)
+        with controls[2]:
             undocumented_only = st.toggle(
                 "Undocumented only", value=False,
                 help="The columns still waiting for a description.")
         search = st.text_input("Search columns and descriptions", "",
                                placeholder="e.g. spread, margin, devig")
 
-        params.set_params(tab=layer_label if layer else None)
         table_name = None if table_choice == "All tables" else table_choice
+        params.set_params(tab=layer_label, table=table_name)
 
         df = query("""
             select layer, table_schema, table_name, column_name, ordinal_position,

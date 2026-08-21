@@ -112,6 +112,8 @@ def _by_conference(df: pd.DataFrame, scope) -> None:
     as normal rather than as missing data: a Degraded state for the other 90% would be
     reporting a defect that does not exist.
     """
+    # F2-06: one layout across every conference so the grid does not reflow per group.
+    layout = table.column_layout(df, COLUMNS)
     for conference, rows in df.groupby("conference", sort=True):
         st.markdown(f"<div class='cfdb-daygroup'>{conference}</div>", unsafe_allow_html=True)
         divisions = [d for d in rows["division"].dropna().unique()]
@@ -119,15 +121,15 @@ def _by_conference(df: pd.DataFrame, scope) -> None:
             for division in sorted(divisions):
                 block = rows[rows["division"] == division]
                 st.caption(division)
-                _render(block, scope)
+                _render(block, scope, layout)
             # A conference can have divisions and still have teams outside them, which is
             # what a mid-season realignment looks like in the data.
             rest = rows[rows["division"].isna()]
             if not rest.empty:
                 st.caption("No division recorded")
-                _render(rest, scope)
+                _render(rest, scope, layout)
         else:
-            _render(rows, scope)
+            _render(rows, scope, layout)
 
         basis = rows["tiebreak_basis"].dropna().unique()
         if len(basis):
@@ -135,9 +137,9 @@ def _by_conference(df: pd.DataFrame, scope) -> None:
                        f"standing — real conference tiebreakers involve head-to-head.")
 
 
-def _render(rows: pd.DataFrame, scope) -> None:
+def _render(rows: pd.DataFrame, scope, layout=None) -> None:
     # AC-5.4: team click -> Team page, carrying the scope forward.
-    table.render(rows, COLUMNS, caption="",
+    table.render(rows, COLUMNS, caption="", layout=layout,
                  link_builder=lambda r: scope.link("team", team=r["team_slug"]))
 
 
