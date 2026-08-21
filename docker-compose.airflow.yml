@@ -33,7 +33,9 @@ x-airflow-common: &airflow-common
     # Publishing to the droplet. The KEY PATH travels, never the key material — nothing
     # here is secret, and nothing here reaches a task log.
     SERVING_PUBLISH_KEY: /opt/airflow/.ssh/cfdb_publish
-    SERVING_PUBLISH_HOST: ${SERVING_PUBLISH_HOST:-cfdb_publish@143.110.225.139}
+    # No default: an unset value fails the publish loudly rather than dialling
+    # a host nobody configured.
+    SERVING_PUBLISH_HOST: ${SERVING_PUBLISH_HOST:?set SERVING_PUBLISH_HOST}
     # The project is importable as `src.*`, and relative paths like data/raw resolve
     # because every service runs with the project as its working directory.
     PYTHONPATH: /opt/airflow/project

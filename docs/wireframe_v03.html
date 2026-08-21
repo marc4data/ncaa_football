@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cfdb — Site Wireframe v0.3</title>
+<style>
+:root{
+  --surface-0:#f4f3f1; --surface-1:#fcfcfb; --surface-2:#eceae6;
+  --line:#d6d3cd; --line-strong:#b3afa7;
+  --ink:#0b0b0b; --ink-2:#52514e; --ink-3:#86837c;
+  --accent:#2a78d6; --accent-soft:#e8f0fc;
+  --pos:#2a78d6; --neg:#e34948; --mid:#f0efec;
+  --good:#008300; --warn:#eda100;
+  --wire:#e4e2de; --r:6px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+:root[data-theme="dark"]{
+  --surface-0:#141413; --surface-1:#1a1a19; --surface-2:#242422;
+  --line:#3a3a37; --line-strong:#55554f;
+  --ink:#fff; --ink-2:#c3c2b7; --ink-3:#8d8b82;
+  --accent:#3987e5; --accent-soft:#17253a;
+  --pos:#3987e5; --neg:#e66767; --mid:#383835; --wire:#26261f;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--sans);background:var(--surface-0);color:var(--ink);font-size:14px;line-height:1.5}
+.app{display:grid;grid-template-columns:238px 1fr;min-height:100vh}
+
+.side{background:var(--surface-1);border-right:1px solid var(--line);padding:16px 0;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{padding:0 16px 14px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.brand h1{margin:0;font-size:17px;letter-spacing:-.02em}
+.brand .sub{color:var(--ink-3);font-size:11px;margin-top:2px}
+.navgrp{padding:12px 16px 4px;font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.navitem{display:flex;align-items:center;gap:7px;padding:6px 16px;cursor:pointer;color:var(--ink-2);border-left:2px solid transparent;font-size:13px}
+.navitem:hover{background:var(--surface-2);color:var(--ink)}
+.navitem.on{background:var(--accent-soft);border-left-color:var(--accent);color:var(--ink);font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:var(--line-strong)}
+.dot.live{background:var(--good)}
+.dot.part{background:var(--warn)}
+.ph{margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--ink-3)}
+.navitem.newp{position:relative}
+.navitem.newp::after{content:"NEW";font-size:8px;font-family:var(--mono);color:#fff;background:var(--accent);border-radius:3px;padding:1px 4px;margin-left:4px}
+
+.main{padding:20px 26px 80px;max-width:1260px}
+.topbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:6px}
+.topbar h2{margin:0;font-size:21px;letter-spacing:-.02em}
+.tag{font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:99px;border:1px solid var(--line-strong);color:var(--ink-2)}
+.tag.live{background:#e6f2e6;border-color:#9cc79c;color:#155415}
+.tag.part{background:#fdf3dd;border-color:#e2c477;color:#6b5008}
+.tag.build{background:var(--surface-2)}
+.tag.new{background:var(--accent-soft);border-color:#9dc0ee;color:#12406f}
+.tag.chg{background:#fce8ec;border-color:#e8a3b0;color:#7d1f31}
+.tag.boh{background:#efe9f7;border-color:#bfa8dd;color:#402a63}
+:root[data-theme="dark"] .tag.live{background:#14301a;border-color:#2f6b39;color:#a8dfae}
+:root[data-theme="dark"] .tag.part{background:#332a10;border-color:#7a6222;color:#ecd08a}
+:root[data-theme="dark"] .tag.new{background:#12283f;border-color:#2d5b8f;color:#a9cdf5}
+:root[data-theme="dark"] .tag.chg{background:#3a1620;border-color:#8a3a4c;color:#f0adb9}
+:root[data-theme="dark"] .tag.boh{background:#241a33;border-color:#584080;color:#cdb6ea}
+.lede{color:var(--ink-2);margin:0 0 15px;max-width:80ch}
+.theme{margin-left:auto;font-size:11px;padding:4px 10px;border-radius:var(--r);border:1px solid var(--line-strong);background:var(--surface-1);color:var(--ink-2);cursor:pointer}
+
+.screen{display:none}.screen.on{display:block}
+.frame{background:var(--surface-1);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:13px}
+.frame>.ftitle{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);font-weight:600;margin-bottom:9px;display:flex;align-items:center;gap:7px}
+.filters{display:flex;gap:7px;flex-wrap:wrap;align-items:center;padding:9px 11px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r);margin-bottom:12px}
+.ctl{background:var(--surface-1);border:1px solid var(--line-strong);border-radius:4px;padding:4px 9px;font-size:12px;color:var(--ink-2);white-space:nowrap}
+.ctl::after{content:" ▾";color:var(--ink-3)}
+.ctl.nb::after{content:""}
+.ctl.seg{padding:0;display:inline-flex;overflow:hidden}
+.ctl.seg span{padding:4px 9px;border-right:1px solid var(--line)}
+.ctl.seg span:last-child{border-right:0}
+.ctl.seg span.on{background:var(--accent);color:#fff;font-weight:600}
+.slider{display:inline-flex;align-items:center;gap:6px;background:var(--surface-1);border:1px solid var(--line-strong);border-radius:4px;padding:3px 9px;font-size:12px;color:var(--ink-2)}
+.track{width:96px;height:3px;background:var(--line-strong);border-radius:2px;position:relative}
+.track i{position:absolute;top:-4px;width:11px;height:11px;border-radius:50%;background:var(--accent);left:44%}
+.track u{position:absolute;top:-2px;width:1px;height:7px;background:var(--line-strong);text-decoration:none}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px;flex-wrap:wrap}
+.tabs div{padding:6px 13px;font-size:12.5px;color:var(--ink-3);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs div.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+
+table.w{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+table.w th{text-align:left;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);font-weight:600;padding:6px 7px;border-bottom:1px solid var(--line-strong);white-space:nowrap}
+table.w th.s::after{content:" ⇅";color:var(--line-strong)}
+table.w td{padding:5px 7px;border-bottom:1px solid var(--line);color:var(--ink-2);white-space:nowrap}
+table.w td.n,table.w th.n{text-align:right}
+table.w td.n{font-family:var(--mono);font-size:11.5px}
+table.w tr:hover td{background:var(--surface-2)}
+table.w tr.clk:hover td{background:var(--accent-soft);cursor:pointer}
+.team{font-weight:600;color:var(--ink)}
+.mascot{display:inline-block;width:17px;height:17px;border-radius:50%;background:var(--wire);border:1px solid var(--line);vertical-align:-4px;margin-right:5px;position:relative;overflow:hidden}
+.mascot::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--line-strong);opacity:.5}
+.win{font-weight:700;color:var(--ink)}
+.wmark{color:var(--good);font-weight:700}
+.lose{opacity:.55}
+
+/* fixed-shape status chips: glyph + colour, never colour alone */
+.st{display:inline-flex;align-items:center;justify-content:center;gap:3px;width:56px;font-family:var(--mono);font-size:10.5px;padding:1px 0;border-radius:4px;border:1px solid transparent}
+.st.y{background:rgba(0,131,0,.12);color:var(--good);border-color:rgba(0,131,0,.32)}
+.st.n{background:var(--mid);color:var(--ink-3);border-color:var(--line)}
+.st.p{background:rgba(42,120,214,.13);color:var(--pos);border-color:rgba(42,120,214,.3)}
+.st.r{background:rgba(227,73,72,.13);color:var(--neg);border-color:rgba(227,73,72,.3)}
+.st.w{background:var(--mid);color:var(--ink-3);border-color:var(--line)}
+.pill{font-family:var(--mono);font-size:10.5px;padding:1px 6px;border-radius:99px;border:1px solid transparent}
+.pos{background:rgba(42,120,214,.13);color:var(--pos);border-color:rgba(42,120,214,.3)}
+.neg{background:rgba(227,73,72,.13);color:var(--neg);border-color:rgba(227,73,72,.3)}
+.neu{background:var(--mid);color:var(--ink-3);border-color:var(--line)}
+
+.bar{display:inline-block;height:9px;border-radius:2px;vertical-align:middle}
+.bar.p{background:var(--pos)}.bar.n{background:var(--neg)}
+.dbar{display:inline-flex;align-items:center;width:92px}
+.dbar .l{flex:1;display:flex;justify-content:flex-end}.dbar .r{flex:1}
+.dbar .ax{width:1px;height:13px;background:var(--line-strong)}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(282px,1fr));gap:10px}
+.gcard{border:1px solid var(--line);border-radius:var(--r);padding:10px;background:var(--surface-1);cursor:pointer}
+.gcard:hover{border-color:var(--accent)}
+.gcard .row{display:flex;justify-content:space-between;align-items:center;padding:2px 0}
+.gcard .row.w{background:linear-gradient(90deg,rgba(0,131,0,.07),transparent);margin:0 -5px;padding:2px 5px;border-radius:3px}
+.gcard .sc{font-family:var(--mono);font-weight:700;font-size:15px}
+.gcard .meta{display:flex;gap:6px;margin-top:7px;padding-top:7px;border-top:1px solid var(--line);font-size:10.5px;color:var(--ink-3);flex-wrap:wrap;align-items:center}
+.net{font-family:var(--mono);font-size:9.5px;border:1px solid var(--line-strong);border-radius:3px;padding:0 4px;color:var(--ink-2)}
+.exc{font-family:var(--mono);font-size:9.5px;background:rgba(237,161,0,.16);border:1px solid rgba(237,161,0,.4);color:#8a5f00;border-radius:3px;padding:0 4px}
+:root[data-theme="dark"] .exc{color:#e8bd63}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(142px,1fr));gap:9px;margin-bottom:12px}
+.kpi{border:1px solid var(--line);border-radius:var(--r);padding:9px 11px;background:var(--surface-1)}
+.kpi .k{font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.kpi .v{font-size:21px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:1px}
+.kpi .d{font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+
+.plot{border:1px dashed var(--line-strong);border-radius:var(--r);background:repeating-linear-gradient(135deg,transparent,transparent 7px,var(--surface-2) 7px,var(--surface-2) 8px);display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:11.5px;text-align:center;padding:10px}
+.h110{height:110px}.h150{height:150px}.h190{height:190px}.h230{height:230px}
+.cols{display:grid;gap:12px}
+.c2{grid-template-columns:1fr 1fr}.c3{grid-template-columns:1fr 1fr 1fr}
+.c21{grid-template-columns:2fr 1fr}.c12{grid-template-columns:1fr 2fr}
+@media(max-width:1020px){.cols{grid-template-columns:1fr!important}}
+
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:9px 12px;border-radius:0 var(--r) var(--r) 0;font-size:12.5px;color:var(--ink-2);margin:12px 0}
+.note b{color:var(--ink)}
+.note.warn{border-left-color:var(--warn);background:#fdf6e4}
+.note.stop{border-left-color:var(--neg);background:#fceceb}
+.note.ok{border-left-color:var(--good);background:#e9f4e9}
+:root[data-theme="dark"] .note.warn{background:#2e2711}
+:root[data-theme="dark"] .note.stop{background:#301716}
+:root[data-theme="dark"] .note.ok{background:#152614}
+.note code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);padding:1px 4px;border-radius:3px}
+ul.tight{margin:6px 0;padding-left:19px}
+ul.tight li{margin:3px 0;color:var(--ink-2);font-size:12.5px}
+h4.sec{font-size:13px;margin:16px 0 7px;letter-spacing:-.01em}
+.small{font-size:11px;color:var(--ink-3)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--ink-3);margin-bottom:13px;padding:9px 12px;background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r);align-items:center}
+.legend b{color:var(--ink-2)}
+.xl{border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.xltabs{display:flex;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:11px;overflow-x:auto}
+.xltabs span{padding:6px 12px;border-right:1px solid var(--line);color:var(--ink-3);white-space:nowrap}
+.xltabs span.on{background:var(--surface-1);color:var(--ink);font-weight:700;border-bottom:2px solid var(--good);margin-bottom:-1px}
+.xlbody{padding:11px}
+.boh{border:1px solid #bfa8dd;border-radius:var(--r);background:#faf7fe;padding:3px 9px;font-size:11px;color:#402a63;display:inline-block;margin-bottom:10px}
+:root[data-theme="dark"] .boh{background:#1e1730;border-color:#584080;color:#cdb6ea}
+</style>
+</head>
+<body>
+<div class="app">
+
+<nav class="side">
+  <div class="brand"><h1>cfdb</h1><div class="sub">Wireframe v0.3 · 20 Aug 2026</div></div>
+  <div class="navgrp">Overview</div>
+  <div class="navitem on" data-s="s0"><span class="dot"></span>Change log</div>
+  <div class="navitem" data-s="s1"><span class="dot part"></span>Today <span class="ph">P1</span></div>
+  <div class="navgrp">Games &amp; teams</div>
+  <div class="navitem" data-s="s2"><span class="dot live"></span>Schedule <span class="ph">P1</span></div>
+  <div class="navitem" data-s="s3"><span class="dot live"></span>Scores <span class="ph">P1</span></div>
+  <div class="navitem" data-s="s4"><span class="dot"></span>Rankings <span class="ph">P2</span></div>
+  <div class="navitem" data-s="s5"><span class="dot live"></span>Standings <span class="ph">P1</span></div>
+  <div class="navitem" data-s="s6"><span class="dot"></span>Stats <span class="ph">P2</span></div>
+  <div class="navitem" data-s="s7"><span class="dot live"></span>Teams <span class="ph">P1</span></div>
+  <div class="navitem" data-s="s8"><span class="dot live"></span>Team page <span class="ph">P2</span></div>
+  <div class="navitem newp" data-s="s18"><span class="dot"></span>Players <span class="ph">P3</span></div>
+  <div class="navitem" data-s="s9"><span class="dot part"></span>Matchup <span class="ph">P3</span></div>
+  <div class="navgrp">Betting</div>
+  <div class="navitem" data-s="s10"><span class="dot live"></span>Odds Board <span class="ph">P5</span></div>
+  <div class="navitem" data-s="s11"><span class="dot live"></span>Edge Finder <span class="ph">P5</span></div>
+  <div class="navitem" data-s="s12"><span class="dot live"></span>Model Performance <span class="ph">P5</span></div>
+  <div class="navitem" data-s="s13"><span class="dot part"></span>Line Movement <span class="ph">P4</span></div>
+  <div class="navgrp">Deliverable</div>
+  <div class="navitem" data-s="s14"><span class="dot part"></span>Excel Export <span class="ph">P5</span></div>
+  <div class="navgrp">Reference</div>
+  <div class="navitem" data-s="s15"><span class="dot"></span>Data Dictionary</div>
+  <div class="navitem" data-s="s16"><span class="dot live"></span>Methodology <span class="ph">P6</span></div>
+  <div class="navgrp">Back of house</div>
+  <div class="navitem" data-s="s17"><span class="dot"></span>System Overview</div>
+</nav>
+
+<main class="main">
+
+<!-- ============ S0 CHANGE LOG ============ -->
+<section class="screen on" id="s0">
+  <div class="topbar"><h2>v0.3 change log</h2><button class="theme" id="t0">Toggle dark</button></div>
+  <p class="lede">v0.3 is the build target. The Player page is back — that makes <b>18 pages</b> — and every dot now reflects what the database can actually serve as of 20 Aug 2026, not what was planned. This wireframe plus <code>cfdb_site_requirements.md</code> is what Claude Code builds against.</p>
+
+  <div class="legend">
+    <span><span class="dot live" style="display:inline-block"></span> <b>Renders</b> — a <code>srv_</code> view backs every element</span>
+    <span><span class="dot part" style="display:inline-block"></span> <b>Degraded</b> — renders, one section empty</span>
+    <span><span class="dot" style="display:inline-block"></span> <b>Blocked</b> — primary table missing</span>
+    <span><b>13 of 18 render · 4 degraded within that · 5 blocked</b></span>
+  </div>
+
+  <h4 class="sec">What changed since v0.2</h4>
+  <table class="w">
+    <tr><th>#</th><th>Change</th><th>Where</th></tr>
+    <tr><td class="n">1</td><td><b>Player page added back</b> — building the page-to-mart matrix surfaced that <code>fct_play</code> and <code>fct_player_game_stat</code> had <b>zero</b> pages referencing them. Either the tables were unjustified or a page was missing. It was the page.</td><td>S18, nav</td></tr>
+    <tr><td class="n">2</td><td>Every nav dot re-derived from the actual model state. Dots are now evidence, not intent.</td><td>nav</td></tr>
+    <tr><td class="n">3</td><td>Model Performance carries the <b>real</b> Model Pack numbers — 6 of 7 models, 3,402 predictions, 2025 held-out split. The old figures were Marc's prior spreadsheet model.</td><td>S12</td></tr>
+    <tr><td class="n">4</td><td>Edge Finder gains a <b>de-vig disclosure</b> and an <b>out-of-sample flag</b>. A held-out-split hit rate is not a live hit rate and the page must not let them read the same.</td><td>S11</td></tr>
+    <tr><td class="n">5</td><td>Attribution shown as a rendered element, not a footer note — it is carried in <code>dim_model_version</code> so a page cannot show the numbers without it.</td><td>S11, S12, S18</td></tr>
+    <tr><td class="n">6</td><td>Blocked pages now name the <b>single table</b> that unblocks them, on the page itself.</td><td>S4, S6, S15, S17, S18</td></tr>
+  </table>
+
+  <h4 class="sec">The five blocked pages, and the one table each needs</h4>
+  <table class="w">
+    <tr><th>Page</th><th>Missing primary</th><th>Raw data already landed?</th><th>New API call?</th></tr>
+    <tr><td>Rankings</td><td><code>fct_poll_rank</code> + <code>dim_poll</code></td><td><code>raw.raw_rankings</code>, 1936+</td><td><span class="st n">✗ no</span></td></tr>
+    <tr><td>Stats</td><td><code>fct_team_season_stat</code></td><td><code>raw.raw_stats_season</code>, 1869+</td><td><span class="st n">✗ no</span></td></tr>
+    <tr><td>Data Dictionary</td><td><code>dim_field_metadata</code></td><td>dbt <code>schema.yml</code> + <code>persist_docs</code></td><td><span class="st n">✗ no</span></td></tr>
+    <tr><td>System Overview</td><td><code>fct_dq_test_result</code></td><td>dbt <code>run_results.json</code>, written every run</td><td><span class="st n">✗ no</span></td></tr>
+    <tr><td><b>Players</b></td><td><code>dim_athlete</code>, <code>fct_player_season_stat</code>, <code>fct_player_game_stat</code>, <code>fct_play</code></td><td>partially — roster and PPA endpoints not all landed</td><td><span class="st r">✓ yes</span></td></tr>
+  </table>
+  <div class="note"><b>Players is deliberately last.</b> It is the only blocked page that needs four tables and new ingestion rather than one table off data already on disk. The other four are the north star — they take the site to 17 of 17 with no API call. Players makes 18.</div>
+
+  <h4 class="sec">Degraded, not blocked — these render today with one hole</h4>
+  <ul class="tight">
+    <li><b>Today</b> and <b>Matchup</b> — <code>srv_today_edges</code> and <code>srv_matchup</code> do not exist yet, so both pages render their schedule content and show an empty state where predictions go. Enrichment, not a blocker.</li>
+    <li><b>Line Movement</b> — the snapshot table exists and the DAG runs, but there is not yet enough history to draw a line. It fills itself in.</li>
+    <li><b>Excel Export</b> — the workbook builds, but sheets sourced from blocked tables are omitted rather than shipped empty.</li>
+  </ul>
+
+  <h4 class="sec">Standing constraints this wireframe assumes</h4>
+  <ul class="tight">
+    <li><b>The site reads <code>serving</code> and nothing else.</b> No page touches <code>raw</code>, <code>staging</code> or <code>marts</code> — enforced by <code>search_path</code>, the <code>cfdb_read</code> role and the CI layering guard.</li>
+    <li><b>No joins and no metric maths in Streamlit.</b> Every page is a single-table <code>SELECT … WHERE</code>. If a page needs two things joined, that is a serving-view change, not app code.</li>
+    <li><b>Team colour is identity chrome, never a data encoding.</b> Value is encoded by position, length or a sequential ramp — never by team colour.</li>
+    <li><b>Predictions carry attribution as data.</b> cfdb's own predictions, built on a licensed training pack — never presented as official CollegeFootballData.com predictions.</li>
+  </ul>
+</section>
+
+<!-- ============ S1 TODAY ============ -->
+<section class="screen" id="s1">
+  <div class="topbar"><h2>Today</h2><span class="tag part">degraded — no <code>srv_today_edges</code></span><button class="theme" id="t1">Toggle dark</button></div>
+  <p class="lede">Front of house only now. Nothing about pipeline internals, dbt tests or reconciliation — that all moved to System Overview. What's left is what a member of your group would actually want on a Thursday.</p>
+  <div class="kpis">
+    <div class="kpi"><div class="k">Week</div><div class="v">8</div><div class="d">2025 regular</div></div>
+    <div class="kpi"><div class="k">Games</div><div class="v">59</div><div class="d">FBS slate</div></div>
+    <div class="kpi"><div class="k">Edges ≥ 3</div><div class="v">14</div><div class="d">vs market</div></div>
+    <div class="kpi"><div class="k">Last week</div><div class="v">7-9</div><div class="d">ATS</div></div>
+    <div class="kpi"><div class="k">Updated</div><div class="v">2h</div><div class="d">ago</div></div>
+  </div>
+  <div class="cols c21">
+    <div class="frame">
+      <div class="ftitle">Biggest model-vs-market disagreements</div>
+      <table class="w">
+        <tr><th class="s">Matchup</th><th class="n s">Proj</th><th class="n s">Pred</th><th class="n">PTL</th><th>Lean</th></tr>
+        <tr class="clk"><td><span class="mascot"></span>S. Florida @ <span class="mascot"></span><span class="team">North Texas</span></td><td class="n">35.0–33.5</td><td class="n">27.4–32.0</td><td class="n"><span class="dbar"><span class="l"><span class="bar n" style="width:32px"></span></span><span class="ax"></span><span class="r"></span></span></td><td><span class="st r">▼ 9.1</span></td></tr>
+        <tr class="clk"><td><span class="mascot"></span>UAB @ <span class="mascot"></span><span class="team">Florida Atlantic</span></td><td class="n">32.0–37.5</td><td class="n">22.8–28.8</td><td class="n"><span class="dbar"><span class="l"><span class="bar n" style="width:48px"></span></span><span class="ax"></span><span class="r"></span></span></td><td><span class="st r">▼ 17.9</span></td></tr>
+        <tr class="clk"><td><span class="mascot"></span>Army @ <span class="mascot"></span><span class="team">East Carolina</span></td><td class="n">24.5–28.0</td><td class="n">23.9–24.4</td><td class="n"><span class="dbar"><span class="l"><span class="bar n" style="width:24px"></span></span><span class="ax"></span><span class="r"></span></span></td><td><span class="st r">▼ 4.3</span></td></tr>
+        <tr class="clk"><td><span class="mascot"></span>Team D @ <span class="mascot"></span><span class="team">Team H</span></td><td class="n">21.0–27.5</td><td class="n">25.5–26.0</td><td class="n"><span class="dbar"><span class="l"></span><span class="ax"></span><span class="r"><span class="bar p" style="width:20px"></span></span></span></td><td><span class="st p">▲ 3.0</span></td></tr>
+      </table>
+      <div class="small" style="margin-top:8px">Rows click through to Matchup. Red = model below the line, blue = above — your convention, now with a direction glyph so it survives greyscale.</div>
+    </div>
+    <div>
+      <div class="frame"><div class="ftitle">Best games to watch <span class="small">— last week</span></div>
+        <table class="w">
+          <tr><td><span class="mascot"></span>Vanderbilt @ Alabama</td><td class="n"><span class="exc">8.9</span></td></tr>
+          <tr><td><span class="mascot"></span>Illinois @ Ohio State</td><td class="n"><span class="exc">8.1</span></td></tr>
+          <tr><td><span class="mascot"></span>Texas @ Oklahoma</td><td class="n"><span class="exc">7.6</span></td></tr>
+        </table>
+        <div class="small" style="margin-top:7px">Excitement index only exists <b>after</b> a game, as you noted — so it's a look-back module, never a preview.</div>
+      </div>
+      <div class="frame"><div class="ftitle">Rankings movers</div><div class="plot h110">Bump chart, top 10</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ S2 SCHEDULE ============ -->
+<section class="screen" id="s2">
+  <div class="topbar"><h2>Schedule</h2><span class="tag live">renders</span><button class="theme" id="t2">Toggle dark</button></div>
+  <p class="lede">The one page with a real mart behind it today. Venue is reduced to a neutral-site flag; full venue detail moved to Matchup. Every row clicks through.</p>
+  <div class="filters">
+    <span class="ctl">Season 2025</span><span class="ctl">Week 8</span><span class="ctl">All conferences</span>
+    <span class="ctl seg nb"><span class="on">Flat</span><span>By day</span></span>
+    <span class="ctl nb">☐ Edges only</span><span class="ctl nb">☐ Ranked only</span>
+    <span class="ctl nb" style="margin-left:auto">⬇ Excel</span>
+  </div>
+  <div class="frame">
+    <table class="w">
+      <tr><th class="s">Kick</th><th class="s">Away</th><th class="s">Home</th><th>TV</th><th class="n s">Spread</th><th class="n s">O/U</th><th class="n s">Pred Spr</th><th class="n s">Edge</th><th></th></tr>
+      <tr class="clk"><td>Sat 12:00</td><td><span class="mascot"></span>UAB</td><td><span class="mascot"></span>Florida Atlantic</td><td><span class="net">ESPN+</span></td><td class="n">−5.5</td><td class="n">69.5</td><td class="n">−5.9</td><td class="n"><span class="st n">– 0.4</span></td><td class="small">›</td></tr>
+      <tr class="clk"><td>Sat 15:30</td><td><span class="mascot"></span>South Florida</td><td><span class="mascot"></span>North Texas</td><td><span class="net">ESPN2</span></td><td class="n">+1.5</td><td class="n">68.5</td><td class="n">−4.7</td><td class="n"><span class="st p">▲ 6.2</span></td><td class="small">›</td></tr>
+      <tr class="clk"><td>Sat 19:00</td><td><span class="mascot"></span>Army</td><td><span class="mascot"></span>East Carolina</td><td><span class="net">CBSSN</span></td><td class="n">−3.5</td><td class="n">52.5</td><td class="n">−0.5</td><td class="n"><span class="st p">▲ 3.0</span></td><td class="small">›</td></tr>
+      <tr class="clk"><td>Sat 19:30</td><td><span class="mascot"></span>Oregon</td><td><span class="mascot"></span>Penn State</td><td><span class="net">FOX</span></td><td class="n">−3.5</td><td class="n">53.5</td><td class="n">−4.7</td><td class="n"><span class="st n">– 1.2</span></td><td class="small">›</td></tr>
+      <tr class="clk"><td>Sat 20:00</td><td><span class="mascot"></span>Notre Dame</td><td><span class="mascot"></span>Navy <span class="small">◇ neutral</span></td><td><span class="net">NBC</span></td><td class="n">−25.0</td><td class="n">47.5</td><td class="n">−22.1</td><td class="n"><span class="st n">– 2.9</span></td><td class="small">›</td></tr>
+    </table>
+  </div>
+  <div class="note ok"><b>Mascot logos confirmed available.</b> CFBD's Team model carries <code>logos</code> (list of URLs), plus <code>color</code> and <code>alternate_color</code>. So team marks and team-coloured accents cost you one join, not an asset pipeline. The logo URLs point at a third-party CDN — cache them yourself rather than hotlinking in production.</div>
+  <div class="note"><b>Division scope, as decided.</b> FBS is the spine; any non-FBS team appearing as an FBS opponent exists as a dimension row with name, conference and logo but no deep stats. Records and schedules reconcile, volume barely moves, and no page shows an empty advanced-metrics table for a DIII program.</div>
+</section>
+
+<!-- ============ S3 SCORES ============ -->
+<section class="screen" id="s3">
+  <div class="topbar"><h2>Scores</h2><span class="tag live">renders</span><button class="theme" id="t3">Toggle dark</button></div>
+  <p class="lede">Two card states, as you asked: <b>pre-game</b> shows what we know going in, <b>post-game</b> shows what happened. Winner shaded, network badged, excitement scored after the fact, whole card clickable.</p>
+  <div class="filters">
+    <span class="ctl">Season 2025</span><span class="ctl">Week 8</span><span class="ctl">All conferences</span>
+    <span class="ctl seg nb"><span class="on">Cards</span><span>Compact</span></span>
+    <span class="ctl seg nb"><span class="on">All</span><span>Final</span><span>Upcoming</span></span>
+  </div>
+  <h4 class="sec">Post-game card</h4>
+  <div class="cards">
+    <div class="gcard">
+      <div class="row"><span class="lose"><span class="mascot"></span>Army <span class="small">(1-3)</span></span><span class="sc lose">6</span></div>
+      <div class="row w"><span><span class="wmark">◀</span> <span class="mascot"></span><span class="team">East Carolina</span> <span class="small">(3-2)</span></span><span class="sc win">28</span></div>
+      <div class="meta"><span>Final</span><span class="net">CBSSN</span><span>ECU −3.5</span><span>O/U 52.5</span><span class="exc">4.2</span><span class="st n">✗ DNC</span></div>
+    </div>
+    <div class="gcard">
+      <div class="row w"><span><span class="wmark">◀</span> <span class="mascot"></span><span class="team">#1 Ohio State</span></span><span class="sc win">31</span></div>
+      <div class="row"><span class="lose"><span class="mascot"></span>Washington</span><span class="sc lose">17</span></div>
+      <div class="meta"><span>Final</span><span class="net">FOX</span><span>OSU −8.5</span><span>O/U 52.5</span><span class="exc">5.8</span><span class="st y">✓ Cover</span></div>
+    </div>
+  </div>
+  <h4 class="sec">Pre-game card — what we know going in</h4>
+  <div class="cards">
+    <div class="gcard">
+      <div class="row"><span><span class="mascot"></span><span class="team">#6 Oregon</span> <span class="small">6-1 · SP+ 9</span></span><span class="small">Elo 1846</span></div>
+      <div class="row"><span><span class="mascot"></span><span class="team">#3 Penn State</span> <span class="small">7-0 · SP+ 4</span></span><span class="small">Elo 1922</span></div>
+      <div class="meta"><span>Sat 7:30p</span><span class="net">FOX</span><span>PSU −3.5</span><span>O/U 53.5</span><span class="st n">– 1.2</span></div>
+    </div>
+    <div class="gcard">
+      <div class="row"><span><span class="mascot"></span><span class="team">South Florida</span> <span class="small">5-2 · SP+ 58</span></span><span class="small">Elo 1521</span></div>
+      <div class="row"><span><span class="mascot"></span><span class="team">North Texas</span> <span class="small">5-1 · SP+ 44</span></span><span class="small">Elo 1616</span></div>
+      <div class="meta"><span>Sat 3:30p</span><span class="net">ESPN2</span><span>USF +1.5</span><span>O/U 68.5</span><span class="st p">▲ 6.2</span></div>
+    </div>
+  </div>
+  <div class="note"><b>Why two card designs rather than one that adapts.</b> A pre-game card's job is "should I care about this game" — form, ratings, the line, our disagreement. A post-game card's job is "what happened" — score, winner, whether it covered, whether it was worth watching. Different jobs, so different marks. One card that greys out half its fields does neither well.</div>
+</section>
+
+<!-- ============ S4 RANKINGS ============ -->
+<section class="screen" id="s4">
+  <div class="topbar"><h2>Rankings</h2><span class="tag build">BLOCKED — <code>fct_poll_rank</code> + <code>dim_poll</code></span><button class="theme" id="t4">Toggle dark</button></div>
+  <p class="lede">Comparison table now sortable on every column header. Movement tab is a bump chart.</p>
+  <div class="tabs"><div>AP</div><div>Coaches</div><div>CFP</div><div>SP+</div><div>Elo</div><div class="on">Compare polls</div><div>Movement</div></div>
+  <div class="filters"><span class="ctl">Season 2025</span><span class="ctl">Week 8</span><span class="ctl">Sort: disagreement ▾</span><span class="ctl nb" style="margin-left:auto;color:var(--ink-3)">Through games OCT. 18, 2025</span></div>
+  <div class="frame">
+    <table class="w">
+      <tr><th class="s">Team</th><th class="n s">AP</th><th class="n s">Coaches</th><th class="n s">CFP</th><th class="n s">SP+</th><th class="n s">Elo</th><th class="n s">Spread</th><th class="s">Next</th></tr>
+      <tr class="clk"><td><span class="mascot"></span><span class="team">Indiana</span></td><td class="n">11</td><td class="n">9</td><td class="n">13</td><td class="n">24</td><td class="n">18</td><td class="n"><span class="st r">▲ 15</span></td><td class="small">vs Iowa</td></tr>
+      <tr class="clk"><td><span class="mascot"></span><span class="team">Vanderbilt</span></td><td class="n">18</td><td class="n">20</td><td class="n">17</td><td class="n">31</td><td class="n">27</td><td class="n"><span class="st r">▲ 14</span></td><td class="small">@ Missouri</td></tr>
+      <tr class="clk"><td><span class="mascot"></span><span class="team">Alabama</span></td><td class="n">17</td><td class="n">16</td><td class="n">15</td><td class="n">8</td><td class="n">10</td><td class="n"><span class="st n">– 9</span></td><td class="small">vs Tennessee</td></tr>
+      <tr class="clk"><td><span class="mascot"></span><span class="team">Ohio State</span></td><td class="n">1</td><td class="n">1</td><td class="n">1</td><td class="n">2</td><td class="n">1</td><td class="n"><span class="st n">– 1</span></td><td class="small">@ Penn State</td></tr>
+    </table>
+  </div>
+  <div class="frame">
+    <div class="ftitle">Movement — bump chart</div>
+    <div class="filters" style="margin-bottom:9px"><span class="ctl">Poll: AP</span><span class="ctl">Teams: top 10</span><span class="ctl">Weeks 1–8</span></div>
+    <div class="plot h190">Bump chart — rank by week, one line per team, direct-labelled at both ends</div>
+    <div class="small" style="margin-top:8px"><b>One constraint worth knowing now:</b> bump charts stop being readable past roughly 10–12 lines. So this needs a team cap or a multiselect, not "all 25" — otherwise it's spaghetti. Default to top 10 with the option to pick specific teams.</div>
+  </div>
+</section>
+
+<!-- ============ S5 STANDINGS ============ -->
+<section class="screen" id="s5">
+  <div class="topbar"><h2>Standings</h2><span class="tag live">renders</span><button class="theme" id="t5">Toggle dark</button></div>
+  <p class="lede">Backed by a real mart. Unchanged from v0.1 — you had no feedback, so I left it.</p>
+  <div class="tabs"><div class="on">SEC</div><div>Big Ten</div><div>Big 12</div><div>ACC</div><div>American</div><div>MW</div><div>Sun Belt</div><div>MAC</div><div>CUSA</div><div>Ind.</div></div>
+  <div class="frame">
+    <table class="w">
+      <tr><th class="s">Team</th><th class="n s">Cf W</th><th class="n s">Cf L</th><th class="n s">Ov W</th><th class="n s">Ov L</th><th class="n s">PF</th><th class="n s">PA</th><th>Home</th><th>Away</th><th class="n">Strk</th><th class="n s">AP</th><th class="n s">SP+</th><th class="n s">xW</th><th class="n s">Luck</th><th class="n s">ATS</th></tr>
+      <tr class="clk"><td><span class="mascot"></span><span class="team">Ole Miss</span></td><td class="n">4</td><td class="n">0</td><td class="n">7</td><td class="n">0</td><td class="n">248</td><td class="n">142</td><td>4-0</td><td>3-0</td><td class="n">W7</td><td class="n">4</td><td class="n">6</td><td class="n">5.8</td><td class="n"><span class="st p">▲ 1.2</span></td><td class="n">5-2</td></tr>
+      <tr class="clk"><td><span class="mascot"></span><span class="team">Alabama</span></td><td class="n">3</td><td class="n">1</td><td class="n">5</td><td class="n">2</td><td class="n">221</td><td class="n">168</td><td>3-1</td><td>2-1</td><td class="n">W2</td><td class="n">17</td><td class="n">8</td><td class="n">5.6</td><td class="n"><span class="st n">– 0.6</span></td><td class="n">3-4</td></tr>
+      <tr class="clk"><td><span class="mascot"></span><span class="team">Vanderbilt</span></td><td class="n">3</td><td class="n">1</td><td class="n">6</td><td class="n">1</td><td class="n">239</td><td class="n">151</td><td>4-0</td><td>2-1</td><td class="n">W3</td><td class="n">18</td><td class="n">31</td><td class="n">4.3</td><td class="n"><span class="st p">▲ 1.7</span></td><td class="n">6-1</td></tr>
+    </table>
+  </div>
+  <div class="note warn"><b>Unchanged caveat.</b> CFBD has no standings endpoint. Row order, tiebreakers and any clinch logic are cfdb's own — the footer should say so.</div>
+</section>
+
+<!-- ============ S6 STATS ============ -->
+<section class="screen" id="s6">
+  <div class="topbar"><h2>Stats</h2><span class="tag build">BLOCKED — <code>fct_team_season_stat</code></span><button class="theme" id="t6">Toggle dark</button></div>
+  <p class="lede">Unchanged from v0.1 — no feedback given. Team ⇄ Opponent and Raw ⇄ Adjusted toggles retained.</p>
+  <div class="tabs"><div class="on">Team</div><div>Player</div><div>Advanced</div><div>Drives</div></div>
+  <div class="filters">
+    <span class="ctl">Season 2025</span><span class="ctl">Through wk 8</span><span class="ctl">All conferences</span>
+    <span class="ctl seg nb"><span class="on">Team</span><span>Opponent</span></span>
+    <span class="ctl seg nb"><span>Raw</span><span class="on">Adjusted</span></span>
+    <span class="ctl seg nb"><span class="on">Overall</span><span>Rush</span><span>Pass</span></span>
+    <span class="ctl nb">☐ Exclude garbage time</span>
+  </div>
+  <div class="frame">
+    <table class="w">
+      <tr><th class="n">#</th><th class="s">Team</th><th class="n s">adj EPA</th><th class="n s">Success</th><th class="n s">Explosive</th><th class="n s">Line Yds</th><th class="n s">2nd Lvl</th><th class="n s">Open Fld</th><th class="n s">Pts/Opp</th><th class="n s">Pts/Drive</th></tr>
+      <tr class="clk"><td class="n">1</td><td><span class="mascot"></span><span class="team">Ohio State</span></td><td class="n">0.312 <span class="bar p" style="width:42px"></span></td><td class="n">.512</td><td class="n">1.28</td><td class="n">3.11</td><td class="n">1.42</td><td class="n">0.88</td><td class="n">4.91</td><td class="n">3.42</td></tr>
+      <tr class="clk"><td class="n">2</td><td><span class="mascot"></span><span class="team">Alabama</span></td><td class="n">0.275 <span class="bar p" style="width:37px"></span></td><td class="n">.498</td><td class="n">1.24</td><td class="n">3.02</td><td class="n">1.38</td><td class="n">0.79</td><td class="n">4.72</td><td class="n">3.18</td></tr>
+      <tr class="clk"><td class="n">3</td><td><span class="mascot"></span><span class="team">Indiana</span></td><td class="n">0.268 <span class="bar p" style="width:36px"></span></td><td class="n">.503</td><td class="n">1.19</td><td class="n">2.94</td><td class="n">1.31</td><td class="n">0.74</td><td class="n">4.55</td><td class="n">3.09</td></tr>
+    </table>
+  </div>
+  <div class="note"><b>Added:</b> a Drives tab and a Pts/Drive column — that's backlog item B2, which you marked V1 and which fits here rather than as its own page.</div>
+</section>
+
+<!-- ============ S7 TEAMS ============ -->
+<section class="screen" id="s7">
+  <div class="topbar"><h2>Teams</h2><span class="tag live">renders</span><button class="theme" id="t7">Toggle dark</button></div>
+  <p class="lede">Conference-grouped index with four destinations per row. Logos now real.</p>
+  <div class="filters"><span class="ctl">Season 2025</span><span class="ctl">FBS</span><span class="ctl nb">🔍 Filter teams</span></div>
+  <div class="frame">
+    <div class="ftitle">SEC — 16 teams</div>
+    <table class="w">
+      <tr><th class="s">Team</th><th class="n s">Rec</th><th class="n s">Conf</th><th class="n s">SP+</th><th class="n s">Elo</th><th class="n s">Talent</th><th class="n s">ATS</th><th>Go to</th></tr>
+      <tr><td><span class="mascot"></span><span class="team">Alabama</span></td><td class="n">5-2</td><td class="n">3-1</td><td class="n">8</td><td class="n">1978</td><td class="n">993.6</td><td class="n">3-4</td><td class="small" style="color:var(--accent)">Overview · Schedule · Stats · Roster</td></tr>
+      <tr><td><span class="mascot"></span><span class="team">Ole Miss</span></td><td class="n">7-0</td><td class="n">4-0</td><td class="n">6</td><td class="n">1904</td><td class="n">812.4</td><td class="n">5-2</td><td class="small" style="color:var(--accent)">Overview · Schedule · Stats · Roster</td></tr>
+      <tr><td><span class="mascot"></span><span class="team">Vanderbilt</span></td><td class="n">6-1</td><td class="n">3-1</td><td class="n">31</td><td class="n">1702</td><td class="n">548.1</td><td class="n">6-1</td><td class="small" style="color:var(--accent)">Overview · Schedule · Stats · Roster</td></tr>
+    </table>
+  </div>
+  <div class="note"><b>Nav pattern confirmed, per your D4 question.</b> Sidebar for pages + context-specific tabs within a page is exactly how Streamlit works: <code>st.navigation</code>/<code>st.Page</code> drives the sidebar, <code>st.tabs</code> gives you the horizontal row inside whichever page you're on. No workaround needed, no version risk — that combination has been stable for a while.</div>
+</section>
+
+<!-- ============ S8 TEAM PAGE ============ -->
+<section class="screen" id="s8">
+  <div class="topbar"><h2>Team page — Alabama</h2><span class="tag live">renders</span><button class="theme" id="t8">Toggle dark</button></div>
+  <p class="lede">Five tabs. Schedule and record are live; stats, trends and roster are not.</p>
+  <div class="tabs"><div class="on">Overview</div><div>Schedule</div><div>Stats</div><div>Roster</div><div>Trends</div></div>
+  <div class="kpis">
+    <div class="kpi"><div class="k">Record</div><div class="v">5-2</div><div class="d">3-1 SEC · 3rd</div></div>
+    <div class="kpi"><div class="k">SP+</div><div class="v">8</div><div class="d">▲ 3 vs wk 7</div></div>
+    <div class="kpi"><div class="k">Elo</div><div class="v">1978</div><div class="d">▲ 30 since wk 5</div></div>
+    <div class="kpi"><div class="k">Returning prod</div><div class="v">61%</div><div class="d">42nd</div></div>
+    <div class="kpi"><div class="k">ATS</div><div class="v">3-4</div><div class="d">1-3 as favourite</div></div>
+  </div>
+  <div class="cols c21">
+    <div class="frame">
+      <div class="ftitle">Game log — prediction vs result</div>
+      <table class="w">
+        <tr><th class="n">Wk</th><th class="s">Opponent</th><th class="n s">Line</th><th class="n s">Pred</th><th class="n">Result</th><th class="n s">ATL</th><th>ATS</th></tr>
+        <tr class="clk"><td class="n">5</td><td><span class="mascot"></span>vs Georgia</td><td class="n">+2.5</td><td class="n">+1.1</td><td class="n lose">L 24-27</td><td class="n">−0.5</td><td><span class="st n">✗ DNC</span></td></tr>
+        <tr class="clk"><td class="n">6</td><td><span class="mascot"></span>@ Missouri</td><td class="n">−3.0</td><td class="n">−5.8</td><td class="n win">W 31-17</td><td class="n">+11.0</td><td><span class="st y">✓ Cover</span></td></tr>
+        <tr class="clk"><td class="n">7</td><td><span class="mascot"></span>vs Tennessee</td><td class="n">−7.5</td><td class="n">−9.2</td><td class="n win">W 34-20</td><td class="n">+6.5</td><td><span class="st y">✓ Cover</span></td></tr>
+        <tr class="clk"><td class="n">8</td><td><span class="mascot"></span>@ South Carolina</td><td class="n">−5.5</td><td class="n">−2.1 <span class="small">±9.4</span></td><td class="n">—</td><td class="n">—</td><td><span class="st w">– pend</span></td></tr>
+      </table>
+      <div class="small" style="margin-top:8px">Week 8 shows a <b>±9.4 confidence band</b> — backlog A6, which you marked V1. At 14.1 points of margin MAE, a bare point estimate overstates what the model knows.</div>
+    </div>
+    <div>
+      <div class="frame"><div class="ftitle">Profile vs FBS</div>
+        <table class="w">
+          <tr><td>adj EPA</td><td class="n">.275</td><td class="n"><span class="bar p" style="width:48px"></span> <span class="small">94th</span></td></tr>
+          <tr><td>adj EPA allowed</td><td class="n">.088</td><td class="n"><span class="bar p" style="width:38px"></span> <span class="small">78th</span></td></tr>
+          <tr><td>Success rate</td><td class="n">.498</td><td class="n"><span class="bar p" style="width:44px"></span> <span class="small">88th</span></td></tr>
+          <tr><td>Pts/drive</td><td class="n">3.18</td><td class="n"><span class="bar p" style="width:40px"></span> <span class="small">81st</span></td></tr>
+          <tr><td>Havoc allowed</td><td class="n">.161</td><td class="n"><span class="bar n" style="width:20px"></span> <span class="small">34th</span></td></tr>
+        </table>
+      </div>
+      <div class="frame"><div class="ftitle">Head-to-head history</div><div class="plot h110">Series record vs selected opponent — backlog B6, V1</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ S9 MATCHUP ============ -->
+<section class="screen" id="s9">
+  <div class="topbar"><h2>Matchup</h2><span class="tag part">degraded — no <code>srv_matchup</code></span><button class="theme" id="t9">Toggle dark</button></div>
+  <p class="lede">You called this the page where users decide whether and what to bet. That makes it the most important screen on the site, so it gets the most surface — reachable from nav <i>and</i> from every game row.</p>
+  <div class="filters"><span class="ctl">Oregon</span><span class="ctl nb">@</span><span class="ctl">Penn State</span><span class="ctl">Week 8, 2025</span><span class="ctl nb">↗ ESPN gamecast</span><span class="ctl nb" style="margin-left:auto">⬇ Excel</span></div>
+  <div class="cols c21">
+    <div class="frame">
+      <div class="ftitle">Model vs market</div>
+      <table class="w">
+        <tr><th></th><th class="n">Oregon</th><th class="n">Penn State</th><th class="n">Total</th></tr>
+        <tr><td><b>Proj</b> <span class="small">Vegas implied</span></td><td class="n">25.0</td><td class="n">28.5</td><td class="n">53.5</td></tr>
+        <tr><td><b>Pred</b> <span class="small">cfdb model</span></td><td class="n">27.4 <span class="small">±6.8</span></td><td class="n">32.0 <span class="small">±7.1</span></td><td class="n">59.4 <span class="small">±12.2</span></td></tr>
+        <tr><td><b>PTL</b></td><td class="n"><span class="st p">▲ 2.4</span></td><td class="n"><span class="st p">▲ 3.5</span></td><td class="n"><span class="st p">▲ 5.9</span></td></tr>
+        <tr><td>Spread</td><td class="n" colspan="2">market <b>PSU −3.5</b> · model <b>PSU −4.7</b></td><td class="n"><span class="st n">– 1.2</span></td></tr>
+        <tr><td>Win probability</td><td class="n">29.5%</td><td class="n">70.5%</td><td class="n"><span class="small">model</span></td></tr>
+      </table>
+      <div class="small" style="margin-top:8px">The ±band is doing real work here: a 5.9-point total edge against a ±12.2 band is not the same claim as 5.9 against ±3.</div>
+    </div>
+    <div class="frame">
+      <div class="ftitle">Call</div>
+      <div style="text-align:center;padding:12px 0">
+        <div class="small">strongest edge</div>
+        <div style="font-size:24px;font-weight:700;letter-spacing:-.02em;margin:3px 0">OVER 53.5</div>
+        <div><span class="st p" style="width:auto;padding:2px 10px">▲ 5.9 pts</span></div>
+        <div class="small" style="margin-top:9px">bucket hit rate<br><b>51.2%</b> · n=41 · breakeven 52.4%</div>
+        <div style="margin-top:8px"><span class="st n" style="width:auto;padding:2px 10px">✗ below threshold</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="cols c3">
+    <div class="frame"><div class="ftitle">Efficiency comparison</div><div class="plot h190">Diverging bars centred on FBS mean</div></div>
+    <div class="frame"><div class="ftitle">Drivers</div>
+      <table class="w">
+        <tr><td>PSU adj passing EPA</td><td class="n"><span class="bar p" style="width:42px"></span> +2.1</td></tr>
+        <tr><td>ORE adj EPA allowed</td><td class="n"><span class="bar p" style="width:28px"></span> +1.4</td></tr>
+        <tr><td>Elo differential</td><td class="n"><span class="bar n" style="width:17px"></span> −0.8</td></tr>
+        <tr><td>Home field</td><td class="n"><span class="bar p" style="width:14px"></span> +0.7</td></tr>
+        <tr><td>Rest advantage</td><td class="n"><span class="bar p" style="width:9px"></span> +0.3</td></tr>
+      </table>
+    </div>
+    <div class="frame"><div class="ftitle">Situation &amp; context</div>
+      <table class="w">
+        <tr><td>Rest days</td><td class="n">7 / 13</td></tr>
+        <tr><td>Travel</td><td class="n">2,410 mi</td></tr>
+        <tr><td>Elevation Δ</td><td class="n">−820 ft</td></tr>
+        <tr><td>Venue</td><td class="n">Beaver Stadium</td></tr>
+        <tr><td>Surface</td><td class="n">grass, open</td></tr>
+        <tr><td>Weather</td><td class="n">54°F, 11mph</td></tr>
+        <tr><td>Series</td><td class="n">ORE 2-1</td></tr>
+      </table>
+      <div class="small" style="margin-top:7px">Rest/travel/elevation = A1, weather = A2, series = B6.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ S10 ODDS ============ -->
+<section class="screen" id="s10">
+  <div class="topbar"><h2>Odds Board</h2><span class="tag live">renders</span><button class="theme" id="t10">Toggle dark</button></div>
+  <p class="lede">Unchanged from v0.1 — no feedback given.</p>
+  <div class="filters"><span class="ctl">Week 8</span><span class="ctl">All conferences</span><span class="ctl seg nb"><span class="on">Spread</span><span>Total</span><span>Moneyline</span></span><span class="ctl">Sort: edge ▾</span><span class="ctl nb">⬇ Excel</span></div>
+  <div class="frame">
+    <table class="w">
+      <tr><th class="s">Kick</th><th class="s">Matchup</th><th class="n s">Mkt spr</th><th class="n s">Mkt O/U</th><th class="n s">Mkt ML</th><th class="n s">Pred spr</th><th class="n s">Pred tot</th><th class="n s">Win%</th><th class="n s">No-vig%</th><th class="n s">Edge</th></tr>
+      <tr class="clk"><td>Sat 15:30</td><td><span class="mascot"></span>USF @ <span class="mascot"></span>North Texas</td><td class="n">+1.5</td><td class="n">68.5</td><td class="n">+105</td><td class="n">−4.7</td><td class="n">59.4</td><td class="n">70.5</td><td class="n">48.8</td><td class="n"><span class="st p">▲ 6.2</span></td></tr>
+      <tr class="clk"><td>Sat 19:00</td><td><span class="mascot"></span>Army @ <span class="mascot"></span>East Carolina</td><td class="n">−3.5</td><td class="n">52.5</td><td class="n">−165</td><td class="n">−0.5</td><td class="n">48.2</td><td class="n">57.1</td><td class="n">61.2</td><td class="n"><span class="st p">▲ 3.0</span></td></tr>
+      <tr class="clk"><td>Sat 12:00</td><td><span class="mascot"></span>UAB @ <span class="mascot"></span>Florida Atlantic</td><td class="n">−5.5</td><td class="n">69.5</td><td class="n">−210</td><td class="n">−5.9</td><td class="n">51.6</td><td class="n">59.8</td><td class="n">66.4</td><td class="n"><span class="st n">– 0.4</span></td></tr>
+    </table>
+  </div>
+  <div class="note warn"><b>Constraints, restated.</b> CFBD <code>/lines</code>: one provider, open + current only, no juice on spread or total. No-vig is computable from the two-way moneyline only. No props, no alternate lines.</div>
+</section>
+
+<!-- ============ S11 EDGE FINDER ============ -->
+<section class="screen" id="s11">
+  <div class="topbar"><h2>Edge Finder</h2><span class="tag live">renders — real predictions</span><button class="theme" id="t11">Toggle dark</button></div>
+  <p class="lede">Instead of a fixed "no bet" rule, a stepped slider between defensible boundaries. You move it, the table re-filters and the count updates.</p>
+  <div class="filters">
+    <span class="ctl">Week 8</span><span class="ctl">All markets</span><span class="ctl">All conferences</span>
+    <span class="slider">Min edge <span class="track"><u style="left:0"></u><u style="left:22%"></u><u style="left:44%"></u><u style="left:66%"></u><u style="left:88%"></u><i></i></span> <b>3.0</b></span>
+    <span class="slider">Min bucket hit% <span class="track"><u style="left:0"></u><u style="left:33%"></u><u style="left:66%"></u><i style="left:60%"></i></span> <b>52.4</b></span>
+    <span class="ctl nb">☐ Require n ≥ 30</span>
+  </div>
+  <div class="frame">
+    <div class="ftitle">3 of 59 games clear the current thresholds</div>
+    <table class="w">
+      <tr><th class="s">Matchup</th><th class="s">Market</th><th class="n s">Line</th><th class="n s">Model</th><th class="n s">Edge</th><th class="n s">Hist hit</th><th class="n">n</th><th class="n s">Kelly</th><th>Call</th></tr>
+      <tr class="clk"><td><span class="mascot"></span>USF @ <span class="mascot"></span>North Texas</td><td>Spread</td><td class="n">+1.5</td><td class="n">−4.7</td><td class="n"><span class="st p">▲ 6.2</span></td><td class="n">53.1%</td><td class="n">64</td><td class="n">0.9u</td><td><span class="st y">✓ Bet</span></td></tr>
+      <tr class="clk"><td><span class="mascot"></span>UAB @ <span class="mascot"></span>Florida Atlantic</td><td>Total</td><td class="n">69.5</td><td class="n">51.6</td><td class="n"><span class="st p">▲ 17.9</span></td><td class="n">48.2%</td><td class="n">11</td><td class="n">0.0u</td><td><span class="st n">✗ Pass</span></td></tr>
+      <tr class="clk"><td><span class="mascot"></span>Army @ <span class="mascot"></span>East Carolina</td><td>Total</td><td class="n">52.5</td><td class="n">48.2</td><td class="n"><span class="st p">▲ 4.3</span></td><td class="n">51.9%</td><td class="n">88</td><td class="n">0.0u</td><td><span class="st n">✗ Pass</span></td></tr>
+    </table>
+  </div>
+  <div class="frame">
+    <div class="ftitle">Expanded — USF @ North Texas</div>
+    <div class="cols c3">
+      <div><div class="small" style="font-weight:600;color:var(--ink)">Drivers</div><div class="plot h110">SHAP bars</div></div>
+      <div><div class="small" style="font-weight:600;color:var(--ink)">Edge-bucket calibration</div><div class="plot h110">Hit rate by decile, breakeven reference line</div></div>
+      <div><div class="small" style="font-weight:600;color:var(--ink)">Context</div><table class="w"><tr><td>Rest</td><td class="n">6 / 7</td></tr><tr><td>Travel</td><td class="n">1,050 mi</td></tr><tr><td>Elev Δ</td><td class="n">+560 ft</td></tr><tr><td>Weather</td><td class="n">72°F, 8mph</td></tr></table></div>
+    </div>
+  </div>
+  <div class="note stop"><b>What the slider doesn't change.</b> Moving the threshold down surfaces more rows; it doesn't make them profitable. The second slider — minimum bucket hit rate, defaulted to the 52.4% breakeven — is the one that actually protects you, and the <code>n</code> column is why: a 17.9-point edge on n=11 is noise wearing a big number. Keep both sliders, and keep <code>n</code> visible next to every hit rate.</div>
+  <div class="note warn"><b>Out-of-sample flag — new in v0.3, and mandatory.</b> Every hit rate on this page comes from the <b>2025 held-out test split</b>, not from live betting. A backtest hit rate and a realised hit rate must never render in identical styling. Each row carries <code>is_out_of_sample</code> from <code>fct_prediction</code>, and backtest-only rows are chipped <span class="st w">– b/test</span>. Once the season starts, live rows appear alongside and the chip is what separates them.</div>
+  <div class="note"><b>De-vig disclosure.</b> <code>market_implied_home_win_probability</code> is blank in every model export, so it is derived by <b>multiplicative normalisation</b> — <code>implied_home = (1/home_dec) / ((1/home_dec) + (1/away_dec))</code>. The method is stored per row in <code>devig_method</code>, so the choice is auditable and a second method can be computed later without rewriting history. Raw moneylines in <code>fct_betting_line</code> are never overwritten. The assumption — vig proportional to implied probability — is stated on Methodology.</div>
+  <div class="note"><b>Attribution renders, it is not a footer.</b> <span class="st p">cfdb model</span> These are cfdb's own predictions, built on a licensed CFB Model Training Pack. <b>Not official CollegeFootballData.com predictions.</b> The string comes from <code>dim_model_version</code> and flows through the serving view, so the page cannot draw the numbers without it.</div>
+</section>
+
+<!-- ============ S12 PERFORMANCE ============ -->
+<section class="screen" id="s12">
+  <div class="topbar"><h2>Model Performance</h2><span class="tag live">renders — real predictions</span><button class="theme" id="t12">Toggle dark</button></div>
+  <p class="lede"><b>Real numbers, from real model output.</b> 3,402 predictions across 6 of 7 models, loaded from the 2026 Model Pack, measured on the 2025 held-out test split. This page exists to measure, not to flatter — and the headline is that the best model does not beat the market.</p>
+
+  <div class="kpis">
+    <div class="kpi"><div class="k">Margin MAE</div><div class="v">11.75</div><div class="d">market 11.24</div></div>
+    <div class="kpi"><div class="k">SU accuracy</div><div class="v">73.5%</div><div class="d">market 76.3%</div></div>
+    <div class="kpi"><div class="k">ATS</div><div class="v" style="color:var(--neg)">51.4%</div><div class="d">breakeven 52.4</div></div>
+    <div class="kpi"><div class="k">Predictions</div><div class="v">3,402</div><div class="d">6 of 7 models</div></div>
+    <div class="kpi"><div class="k">Sample</div><div class="v">2025</div><div class="d">held-out test split</div></div>
+  </div>
+
+  <div class="cols c2">
+    <div class="frame">
+      <div class="ftitle">By model — 2025 held-out test split</div>
+      <table class="w">
+        <tr><th class="s">Model</th><th class="n s">Margin MAE</th><th class="n s">Winner</th><th class="n s">ATS</th><th>Active</th></tr>
+        <tr><td><code>ridge_margin_expanded</code></td><td class="n">11.75</td><td class="n">73.5%</td><td class="n">51.4%</td><td><span class="st y">✓ yes</span></td></tr>
+        <tr><td><code>xgboost_home_win_calibrated</code></td><td class="n">—</td><td class="n">73.2%</td><td class="n">—</td><td><span class="st n">✗ no</span></td></tr>
+        <tr><td><code>random_forest_score</code></td><td class="n">12.77</td><td class="n">68.8%</td><td class="n">48.6%</td><td><span class="st n">✗ no</span></td></tr>
+        <tr><td><code>fastai_wp</code></td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td><span class="st r">✗ not loaded</span></td></tr>
+      </table>
+      <div class="small" style="margin-top:8px">The 7th model is honestly absent rather than quietly omitted — notebook 04's export cell produced no file. A missing model is a visible row, not a shorter table.</div>
+    </div>
+    <div class="frame">
+      <div class="ftitle">Against the prior model — direction, not like-for-like</div>
+      <table class="w">
+        <tr><th class="s">Metric</th><th class="n s">Prior model</th><th class="n s">Pack best</th><th class="n s">Market</th></tr>
+        <tr><td>Margin MAE</td><td class="n">14.13</td><td class="n">11.75</td><td class="n">11.24</td></tr>
+        <tr><td>SU accuracy</td><td class="n">70.0%</td><td class="n">73.5%</td><td class="n">76.3%</td></tr>
+        <tr><td>ATS</td><td class="n">49.4%</td><td class="n">51.4%</td><td class="n">—</td></tr>
+      </table>
+      <div class="small" style="margin-top:8px"><b>Material improvement, still short of the market.</b> MAE now within about half a point of the market's; ATS about a point under the 52.4% breakeven rather than three. The comparison is <b>directional</b> — different model, different sample window — and the page says so where it renders.</div>
+    </div>
+  </div>
+
+  <div class="cols c2">
+    <div class="frame"><div class="ftitle">Calibration</div><div class="plot h190">Decile-binned predicted vs realised, 45° reference. Reads from <code>srv_model_performance</code>.</div></div>
+    <div class="frame">
+      <div class="ftitle">Accuracy by week — empty until the season runs</div>
+      <div class="plot h190">Empty state, not zeroes. Week-by-week needs live 2026 results; the held-out split has no week axis a user would recognise.</div>
+    </div>
+  </div>
+
+  <div class="cols c2">
+    <div class="frame"><div class="ftitle">Closing Line Value <span class="tag build">V1.5</span></div><div class="plot h150">Empty until the 4-hourly snapshot DAG has accumulated history</div></div>
+    <div class="frame"><div class="ftitle">Model registry</div>
+      <table class="w"><tr><th>Version</th><th class="n">Preds</th><th>Trained</th><th>Active</th></tr>
+      <tr><td><code>ridge_margin_expanded</code></td><td class="n">567</td><td>Pack 2026</td><td><span class="st y">✓ yes</span></td></tr>
+      <tr><td><code>random_forest_score</code></td><td class="n">567</td><td>Pack 2026</td><td><span class="st n">✗ no</span></td></tr></table>
+      <div class="small" style="margin-top:7px">From <code>dim_model_version</code> — which version made which prediction, and the attribution string every prediction page must carry.</div>
+    </div>
+  </div>
+
+  <div class="note"><b>Attribution renders, it is not a footer.</b> <span class="st p">cfdb model</span> These are cfdb's own predictions, built on a licensed CFB Model Training Pack. <b>Not official CollegeFootballData.com predictions.</b> Carried in <code>dim_model_version</code> and surfaced by <code>srv_model_performance</code>, so the page cannot draw the numbers without it.</div>
+</section>
+
+<!-- ============ S13 LINE MOVEMENT ============ -->
+<section class="screen" id="s13">
+  <div class="topbar"><h2>Line Movement</h2><span class="tag part">degraded — history accumulating</span><button class="theme" id="t13">Toggle dark</button></div>
+  <p class="lede">Every 4 hours, as chosen. That's ~6 calls a day, ~180 a month — negligible against your tier, and it captures overnight and morning moves that hourly would only refine.</p>
+  <div class="note stop"><b>Unchanged and still the most time-sensitive item in the whole build.</b> <code>/lines</code> returns open and current only. Line history cannot be backfilled. Every day the DAG isn't running is history you can never recover — and CLV, which is the fastest honest read on whether the model has an edge, depends entirely on it.</div>
+  <div class="filters"><span class="ctl">Week 8</span><span class="ctl">Oregon @ Penn State</span><span class="ctl seg nb"><span class="on">Spread</span><span>Total</span><span>ML</span></span></div>
+  <div class="frame"><div class="ftitle">Spread over time</div><div class="plot h230">Step line · market spread · model line as flat reference · crosshair + tooltip</div></div>
+  <div class="cols c2">
+    <div class="frame"><div class="ftitle">Steam moves</div><div class="plot h110">&gt;1.5 pt moves inside 6h</div></div>
+    <div class="frame"><div class="ftitle">Model vs close</div><div class="plot h110">Did the market move toward us — precursor to CLV</div></div>
+  </div>
+</section>
+
+<!-- ============ S14 EXCEL ============ -->
+<section class="screen" id="s14">
+  <div class="topbar"><h2>Excel Export</h2><span class="tag part">degraded — blocked sheets omitted</span><button class="theme" id="t14">Toggle dark</button></div>
+  <p class="lede">Unchanged from v0.1 except that Field Definitions is promoted to a full <b>Data Dictionary</b> sheet, generated from the same dbt metadata that drives the website page. One source, two surfaces.</p>
+  <div class="xl">
+    <div class="xltabs"><span class="on">Weekly Slate</span><span>Ballot</span><span>Model Edges</span><span>Team Profiles</span><span>Results</span><span>Performance</span><span>Line History</span><span>Data Dictionary</span><span>Assumptions</span></div>
+    <div class="xlbody">
+      <table class="w">
+        <tr><th class="n"></th><th>A</th><th>B</th><th>C</th><th class="n">K</th><th class="n">L</th><th class="n">M</th><th class="n">N</th><th class="n">O</th><th class="n">P</th><th class="n">Q</th></tr>
+        <tr><td class="n small">1</td><td class="team">id</td><td class="team">awayTeam</td><td class="team">homeTeam</td><td class="n team">Proj Away</td><td class="n team">Pred Away</td><td class="n team">Proj Home</td><td class="n team">Pred Home</td><td class="n team">PTL Tot</td><td class="n team">Edge</td><td class="n team">Kelly</td></tr>
+        <tr><td class="n small">2</td><td>401762471</td><td>Army</td><td>East Carolina</td><td class="n">24.5</td><td class="n">23.86</td><td class="n">28.0</td><td class="n">24.37</td><td class="n"><span class="dbar"><span class="l"><span class="bar n" style="width:28px"></span></span><span class="ax"></span><span class="r"></span></span></td><td class="n">3.0</td><td class="n">0.0</td></tr>
+        <tr><td class="n small">3</td><td>401762481</td><td>South Florida</td><td>North Texas</td><td class="n">35.0</td><td class="n">27.37</td><td class="n">33.5</td><td class="n">32.03</td><td class="n"><span class="dbar"><span class="l"><span class="bar n" style="width:24px"></span></span><span class="ax"></span><span class="r"></span></span></td><td class="n">6.2</td><td class="n">0.9</td></tr>
+      </table>
+      <div class="small" style="margin-top:9px;font-family:var(--mono)">O2 = <b>=(L2+N2)-(K2+M2)</b> · P2 = <b>=ABS(PredSpread-MktSpread)</b> · Q2 = <b>=MAX(0,(WinProb*(Odds+1)-1)/Odds)*Assumptions!$B$4</b></div>
+    </div>
+  </div>
+  <div class="note"><b>Still the biggest single upgrade:</b> both your workbooks are values-only. Live formulas plus an Assumptions sheet (juice, Kelly fraction, min edge, bankroll) turns a static report into something the recipient can interrogate.</div>
+  <div class="note warn"><b>Two questions from v0.1 are still unanswered</b> — does the Ballot sheet need to stay byte-identical to what your group uses today, and is this one workbook or several context-specific downloads? Both change the build.</div>
+</section>
+
+<!-- ============ S15 DATA DICTIONARY ============ -->
+<section class="screen" id="s15">
+  <div class="topbar"><h2>Data Dictionary</h2><span class="tag build">BLOCKED — <code>dim_field_metadata</code></span><button class="theme" id="t15">Toggle dark</button></div>
+  <p class="lede">Your D2 answer turned into a page. The chain you described: <b>CFBD's own dictionary → maintained in dbt → published to the website and the Excel download.</b> Descriptions live in <code>schema.yml</code> with <code>persist_docs</code>, so warehouse comments, the site page and the workbook sheet are the same artifact and cannot drift.</p>
+  <div class="filters"><span class="ctl">Layer: marts</span><span class="ctl">Table: all</span><span class="ctl nb">🔍 Search fields</span><span class="ctl seg nb"><span class="on">All</span><span>Confirmed</span><span>Unknown</span></span><span class="ctl nb" style="margin-left:auto">⬇ Excel</span></div>
+  <div class="frame">
+    <div class="ftitle">mart_game_predictions</div>
+    <table class="w">
+      <tr><th class="s">Field</th><th class="s">Type</th><th>Description</th><th class="s">Source</th><th>Status</th><th>Sample</th></tr>
+      <tr><td class="team">game_id</td><td>bigint</td><td>Unique game identifier; matches ESPN gameId so it deep-links</td><td class="small">/games.id</td><td><span class="st y">✓ conf</span></td><td class="n">401762471</td></tr>
+      <tr><td class="team">market_spread</td><td>numeric</td><td>Spread from home perspective; positive when home is underdog</td><td class="small">/lines.spread</td><td><span class="st y">✓ conf</span></td><td class="n">−3.5</td></tr>
+      <tr><td class="team">pred_home_points</td><td>numeric</td><td>Model-predicted home score</td><td class="small">cfdb model v0.3</td><td><span class="st y">✓ conf</span></td><td class="n">24.37</td></tr>
+      <tr><td class="team">ptl_total</td><td>numeric</td><td>Predicted-to-line total delta: (pred total) − (market total)</td><td class="small">derived</td><td><span class="st y">✓ conf</span></td><td class="n">−4.27</td></tr>
+      <tr><td class="team">spread <span class="small">(training CSV)</span></td><td>numeric</td><td><i>Meaning not yet confirmed — market line at an unknown capture time, or the training label. Vendor-supplied.</i></td><td class="small">CFBD weekly CSV</td><td><span class="st r">? unk</span></td><td class="n">6.0</td></tr>
+      <tr><td class="team">talent</td><td>numeric</td><td>247 composite team talent. <i>Zero for some teams — missing, not a true zero.</i></td><td class="small">/talent</td><td><span class="st n">△ caveat</span></td><td class="n">993.55</td></tr>
+    </table>
+  </div>
+  <div class="note ok"><b>Why this is worth more than it looks.</b> You framed it as fixing your own confusion about <code>spread</code>, and it does. But a generated, versioned data dictionary that reaches both the app and the export is also one of the most senior things in the whole build — it's the difference between "I moved data" and "I ran a data product." Very few portfolio projects have one.</div>
+  <div class="note warn"><b>The known-unknowns register is the part not to skip.</b> A field marked <span class="st r">? unk</span> with an honest "meaning not confirmed, vendor-supplied" is far stronger than a plausible-sounding guess. It turns the <code>spread</code> ambiguity from a silent gap into a tracked item — and when you re-subscribe for 2026 and get CFBD's dictionary, closing those rows is a visible piece of work.</div>
+</section>
+
+<!-- ============ S16 METHODOLOGY ============ -->
+<section class="screen" id="s16">
+  <div class="topbar"><h2>Methodology</h2><span class="tag live">renders — static</span><button class="theme" id="t16">Toggle dark</button></div>
+  <p class="lede">Front of house. Explains what the site is and what it can't do. The operational detail moved to System Overview.</p>
+  <div class="cols c2">
+    <div class="frame"><div class="ftitle">Architecture</div><div class="plot h190">CFBD → Airflow → Databricks → dbt → Postgres → Streamlit<br>+ 4-hourly line snapshot DAG</div></div>
+    <div class="frame"><div class="ftitle">Sections</div>
+      <ul class="tight">
+        <li><b>What the model predicts</b> — team scores → margin → spread and total, with confidence bands</li>
+        <li><b>Features</b> — 83 opponent-adjusted metrics, as-of-week, no leakage; walk-forward validation</li>
+        <li><b>Current performance</b> — links to Model Performance, drawdowns included</li>
+        <li><b>Known limitations</b> — single-provider lines, no juice on spread/total, no props, line history starts <span class="small">[DAG date]</span>, standings tiebreakers are ours, no QBR</li>
+        <li><b>Scope</b> — FBS plus non-FBS opponents as stubs; 2024–2026 play-by-play</li>
+        <li><b>Attribution</b> — CollegeFootballData.com; keys server-side; no raw-data redistribution</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note"><b>The honest framing.</b> While the model trails the market, the claim to make here isn't "I built a winning model" — it's "I built the instrumentation that proves whether a model wins." That's a more senior claim and a much harder one to poke holes in.</div>
+</section>
+
+<!-- ============ S17 SYSTEM OVERVIEW ============ -->
+<section class="screen" id="s17">
+  <div class="topbar"><h2>System Overview</h2><span class="tag build">BLOCKED — <code>fct_dq_test_result</code></span><span class="tag boh">back of house</span><button class="theme" id="t17">Toggle dark</button></div>
+  <div class="boh">Back of house — your kitchen, not the dining room. Reachable but never linked from Today.</div>
+  <p class="lede">Everything that was cluttering the home page. Pipeline health, dbt tests, reconciliation, quota, lineage. Front of house gets finished dishes; this is where you find out the walk-in is running warm.</p>
+  <div class="kpis">
+    <div class="kpi"><div class="k">dbt tests</div><div class="v">142</div><div class="d">0 failing</div></div>
+    <div class="kpi"><div class="k">Freshness</div><div class="v">2h</div><div class="d">mart_data_freshness</div></div>
+    <div class="kpi"><div class="k">API calls</div><div class="v">18.4k</div><div class="d">of 75k this month</div></div>
+    <div class="kpi"><div class="k">Snapshots</div><div class="v">6/6</div><div class="d">last 24h</div></div>
+    <div class="kpi"><div class="k">DQ issues</div><div class="v" style="color:var(--neg)">3</div><div class="d">open</div></div>
+  </div>
+  <div class="frame">
+    <div class="ftitle">Open data-quality issues</div>
+    <table class="w">
+      <tr><th class="s">Issue</th><th class="s">Scope</th><th class="s">Detected</th><th>Status</th></tr>
+      <tr><td>Spread source disagreement</td><td class="n">170 / 216 rows</td><td>wk 5–8 workbook</td><td><span class="st r">✗ open</span></td></tr>
+      <tr><td>Null talent values</td><td class="n">9 teams</td><td>training CSVs</td><td><span class="st r">✗ open</span></td></tr>
+      <tr><td>Garbled team name encoding</td><td class="n">1 row</td><td>wk 8, home team = <code>¬</code></td><td><span class="st r">✗ open</span></td></tr>
+    </table>
+  </div>
+  <div class="note warn">
+    <b>D3 — new evidence, and it changes my answer.</b> You asked which file I meant: it's your own <code>CFDB_Performance_Monitor 20251018 2300.xlsx</code>, columns <b>S</b> (<code>Formatted Spread</code>) and <b>T</b> (<code>Spread</code>). I re-analysed it, and this is <b>not</b> a definition error:
+    <ul class="tight">
+      <li>The difference is <b>symmetric noise, not a systematic offset</b> — median 0.0, mean −0.08, std 1.57, with 75 positive and 95 negative disagreements.</li>
+      <li><b>Both predict the actual result equally well</b> — MAE vs actual margin 11.241 using <code>Spread</code>, 11.219 using <code>Formatted Spread</code>. Neither is garbage; both are plausible market lines.</li>
+      <li><code>Formatted Spread</code> is a half-point in <b>216 of 216</b> rows; <code>Spread</code> in only <b>120 of 216</b>.</li>
+    </ul>
+    That pattern says <b>two captures of the same market at different times, or two providers</b> — most likely one column pulled when the prediction was made and the other refreshed at extract time. Worth noting CFBD's <code>GameLine</code> carries <i>both</i> <code>spread</code> and <code>formattedSpread</code>, and from a single response those two agree — so the divergence points at the workbook assembling from two pulls rather than at CFBD.
+    <br><br><b>What to do:</b> don't pick a winner yet. Once the snapshot DAG runs you'll have real timestamps, and the right fix is to store line-with-timestamp and let the site choose (line at prediction time for edge, closing line for CLV). Meanwhile: worst offenders were UTSA @ North Texas (8.5 pts), Oklahoma State @ Arizona (5.0), South Alabama @ Troy (5.0).
+  </div>
+  <div class="cols c2">
+    <div class="frame"><div class="ftitle">Lineage</div><div class="plot h150">Embedded dbt DAG — backlog C5</div></div>
+    <div class="frame"><div class="ftitle">API quota</div><div class="plot h150">Calls by endpoint vs monthly tier limit — backlog C4</div></div>
+  </div>
+</section>
+
+<!-- ============ S18 PLAYERS ============ -->
+<section class="screen" id="s18">
+  <div class="topbar"><h2>Players</h2><span class="tag new">new in v0.3</span><span class="tag build">BLOCKED — 4 tables</span><button class="theme" id="t18">Toggle dark</button></div>
+  <p class="lede">Restored because the page-to-mart matrix showed <code>fct_play</code> and <code>fct_player_game_stat</code> with <b>zero</b> pages referencing them. A fact table nothing reads is either unjustified or evidence of a missing page. Here it was the page.</p>
+
+  <div class="note stop"><b>This page is blocked and is deliberately last in the build order.</b> It needs <code>dim_athlete</code>, <code>fct_player_season_stat</code>, <code>fct_player_game_stat</code> and <code>fct_play</code> — four tables, and unlike the other blocked pages not all of its raw data is landed. Rankings, Stats, Data Dictionary and System Overview each need <b>one</b> table off data already on disk; those take the site to 17 of 17 with no API call. Players makes 18, afterwards.</div>
+
+  <div class="filters">
+    <span class="ctl">Search player</span><span class="ctl">Team: Alabama</span><span class="ctl">Season 2025</span><span class="ctl">Position: QB</span>
+  </div>
+
+  <div class="tabs"><div class="on">Overview</div><div>Game log</div><div>Splits</div><div>Plays</div></div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="k">Cmp/Att</div><div class="v">148/221</div><div class="d">67.0%</div></div>
+    <div class="kpi"><div class="k">Yards</div><div class="v">1,942</div><div class="d">8.8 Y/A</div></div>
+    <div class="kpi"><div class="k">TD / INT</div><div class="v">16 / 4</div><div class="d">4.0 ratio</div></div>
+    <div class="kpi"><div class="k">EPA/play</div><div class="v">.241</div><div class="d">12th, QBs n≥150</div></div>
+    <div class="kpi"><div class="k">Usage</div><div class="v">31.4%</div><div class="d">share of team plays</div></div>
+  </div>
+
+  <div class="cols c21">
+    <div class="frame">
+      <div class="ftitle">Game log <span class="small">— <code>fct_player_game_stat</code></span></div>
+      <table class="w">
+        <tr><th class="n">Wk</th><th class="s">Opponent</th><th class="n s">Cmp/Att</th><th class="n s">Yds</th><th class="n s">TD</th><th class="n s">INT</th><th class="n s">EPA</th><th>Result</th></tr>
+        <tr class="clk"><td class="n">5</td><td><span class="mascot"></span>vs Georgia</td><td class="n">21/34</td><td class="n">248</td><td class="n">1</td><td class="n">2</td><td class="n">−0.04</td><td class="n lose">L 24-27</td></tr>
+        <tr class="clk"><td class="n">6</td><td><span class="mascot"></span>@ Missouri</td><td class="n">19/26</td><td class="n">301</td><td class="n">3</td><td class="n">0</td><td class="n">.412</td><td class="n win">W 31-17</td></tr>
+        <tr class="clk"><td class="n">7</td><td><span class="mascot"></span>vs Tennessee</td><td class="n">24/33</td><td class="n">288</td><td class="n">2</td><td class="n">1</td><td class="n">.198</td><td class="n win">W 34-20</td></tr>
+      </table>
+      <div class="small" style="margin-top:8px">Every row clicks through to the Matchup page for that game — the same deep-link contract every other table uses.</div>
+    </div>
+    <div>
+      <div class="frame"><div class="ftitle">Percentile vs position <span class="small">— <code>fct_player_season_stat</code></span></div>
+        <table class="w">
+          <tr><td>EPA/play</td><td class="n">.241</td><td class="n"><span class="bar p" style="width:46px"></span> <span class="small">88th</span></td></tr>
+          <tr><td>Success rate</td><td class="n">.512</td><td class="n"><span class="bar p" style="width:41px"></span> <span class="small">79th</span></td></tr>
+          <tr><td>Sack rate</td><td class="n">.058</td><td class="n"><span class="bar p" style="width:36px"></span> <span class="small">71st</span></td></tr>
+          <tr><td>Explosive rate</td><td class="n">.141</td><td class="n"><span class="bar n" style="width:19px"></span> <span class="small">38th</span></td></tr>
+        </table>
+        <div class="small" style="margin-top:7px">Percentiles are computed in the serving view, never in Streamlit. Rank text always carries its <code>n</code> and its qualifying threshold.</div>
+      </div>
+      <div class="frame"><div class="ftitle">Play-level drill-down <span class="tag build">V1.5</span></div><div class="plot h110">Filterable play list from <code>fct_play</code> — the largest table in the model, so this tab is lazy-loaded and always filtered to one player-game.</div></div>
+    </div>
+  </div>
+
+  <div class="note warn"><b>Scope discipline.</b> Players is a <b>drill-down</b>, not a league-wide leaderboard. It always opens filtered to one player. A "top 50 passers" view is a different page against a different view and is not in v0.3 — without that discipline the page becomes an unbounded scan of the largest fact tables in the model.</div>
+</section>
+
+</main>
+</div>
+<script>
+document.querySelectorAll('.navitem').forEach(function(n){
+  n.addEventListener('click',function(){
+    document.querySelectorAll('.navitem').forEach(function(x){x.classList.remove('on')});
+    document.querySelectorAll('.screen').forEach(function(x){x.classList.remove('on')});
+    n.classList.add('on');
+    var t=document.getElementById(n.dataset.s); if(t)t.classList.add('on');
+    window.scrollTo(0,0);
+  });
+});
+document.querySelectorAll('.theme').forEach(function(b){
+  b.addEventListener('click',function(){
+    var r=document.documentElement;
+    r.dataset.theme = r.dataset.theme==='dark'?'light':'dark';
+  });
+});
+</script>
+</body>
+</html>

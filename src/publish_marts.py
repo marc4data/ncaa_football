@@ -31,7 +31,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DROPLET = os.getenv("SERVING_SSH_HOST", "root@143.110.225.139")
+# See deploy/README.md. No literal host in a tracked file.
+DROPLET = os.getenv("SERVING_SSH_HOST", "")
 STACK_DIR = "/opt/cfdb"
 
 # The restricted publish identity. A dedicated Unix user with a forced command, no shell,
@@ -44,7 +45,7 @@ STACK_DIR = "/opt/cfdb"
 #
 # The key is passed by path and never read into this process. Airflow mounts it read-only;
 # it is not in the repository and does not appear in a task log.
-PUBLISH_HOST = os.getenv("SERVING_PUBLISH_HOST", "cfdb_publish@143.110.225.139")
+PUBLISH_HOST = os.getenv("SERVING_PUBLISH_HOST", "")
 PUBLISH_KEY = os.getenv("SERVING_PUBLISH_KEY", "")
 READ_ROLE = os.getenv("CFDB_READ_USER", "cfdb_read")
 

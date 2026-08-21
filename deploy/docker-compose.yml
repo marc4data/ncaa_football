@@ -1,4 +1,4 @@
-# Serving stack for cfdb.marc4data.com — DigitalOcean droplet, 1 GiB / 1 vCPU.
+# Serving stack — DigitalOcean droplet, 1 GiB / 1 vCPU.
 #
 # Three services, mirroring the local stack: serving Postgres, the Streamlit site, and a
 # Cloudflare Tunnel connector. Cloudflare Access sits in front, per the settled
