@@ -40,9 +40,16 @@ select
     g.attendance,
     g.excitement_index,
 
+    -- FBS SPINE (Marc, 2026-08-20). EITHER team, not both: a Division II visitor's trip
+    -- to an FBS stadium is an FBS game, and excluding it would drop 20 of the 25 games on
+    -- the opening Thursday. 934 of 3,831 games in 2025 qualify, so this is the difference
+    -- between a schedule about college football and a schedule about all of college
+    -- football. Carried as a COLUMN so the site filters on it with a default rather than a
+    -- hardcoded WHERE nobody can widen.
+    (g.home_classification = 'fbs' or g.away_classification = 'fbs') as is_fbs_game,
+
     g.home_team_id,
-    h.team_slug                   as home_team_slug,
-    g.home_team                   as home_team_display,
+    {{ team_identity('h', 'g.home_team', 'home_') }},
     h.abbreviation                as home_abbreviation,
     h.conference                  as home_conference,
     h.color_on_light              as home_color_on_light,
@@ -52,8 +59,7 @@ select
     g.home_rank,
 
     g.away_team_id,
-    a.team_slug                   as away_team_slug,
-    g.away_team                   as away_team_display,
+    {{ team_identity('a', 'g.away_team', 'away_') }},
     a.abbreviation                as away_abbreviation,
     a.conference                  as away_conference,
     a.color_on_light              as away_color_on_light,

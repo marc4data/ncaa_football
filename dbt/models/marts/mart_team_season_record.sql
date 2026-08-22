@@ -18,6 +18,7 @@ with team_games as (
     select
         season,
         home_team_id as team_id,
+        home_team    as team_name,
         home_points  as points_for,
         away_points  as points_against
     from {{ ref('stg_games') }}
@@ -30,6 +31,7 @@ with team_games as (
     select
         season,
         away_team_id as team_id,
+        away_team    as team_name,
         away_points  as points_for,
         home_points  as points_against
     from {{ ref('stg_games') }}
@@ -49,7 +51,12 @@ aggregated as (
         count(case when points_for < points_against then 1 end)           as losses,
         count(case when points_for = points_against then 1 end)           as ties,
         sum(points_for)                                       as points_for,
-        sum(points_against)                                   as points_against
+        sum(points_against)                                   as points_against,
+        -- The name from the GAME SPINE. stg_teams is CFBD's /teams response and has no row
+        -- for a Division II side that merely appeared on someone's schedule, so `school`
+        -- was null on 7,482 of 30,475 team-seasons here too. Kept in step with
+        -- fct_team_record so the parity gate keeps asserting something.
+        max(team_name)                                        as team_name
     from team_games
     group by season, team_id
 
@@ -60,7 +67,7 @@ select
     a.season,
     a.team_id,
     t.team_id is not null as is_listed_team,
-    t.school,
+    coalesce(t.school, a.team_name) as school,
     t.conference,
     t.classification,
     a.games_played,

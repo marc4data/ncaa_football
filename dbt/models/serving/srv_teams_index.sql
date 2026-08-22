@@ -5,6 +5,20 @@ select
     t.color_on_light, t.color_on_dark, t.color_source_light, t.color_source_dark,
     t.logo_source_url,
     r.games_played, r.wins, r.losses, r.ties, r.win_pct, r.tiebreak_rank,
+    r.yards_for,
+    r.rushing_yards_for,
+    r.passing_yards_for,
+    r.yards_allowed,
+    r.rushing_yards_allowed,
+    r.passing_yards_allowed,
+    r.penalty_yards,
+    r.takeaways,
+    r.giveaways,
+    r.turnover_margin,
+    -- AC-G.33: the n every total above was computed over, so a page cannot render a
+    -- per-game figure against the wrong denominator.
+    r.games_with_box_score,
+    r.games_with_opponent_box_score,
     ao_src.as_of_ts,
     t.team_slug,
     t.team_display

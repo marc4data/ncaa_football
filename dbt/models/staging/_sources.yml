@@ -166,3 +166,18 @@ sources:
           - name: filename
             data_tests:
               - not_null
+      # The five rating systems. All landed SEASON-scoped: CFBD's spec allows a `week`
+      # parameter on /ratings/elo alone, and even that has only ever been fetched with a
+      # year. Verified against config/api-docs.json before stg_team_rating was built,
+      # because the model was going to be called fct_team_week_rating.
+      - name: raw_ratings_sp
+        description: SP+ ratings. The only system publishing a PRESEASON PROJECTION.
+      - name: raw_ratings_srs
+        description: Simple Rating System. Results-derived, so empty until games are played.
+      - name: raw_ratings_elo
+        description: Elo. Results-derived. Weekly-capable at the API, landed season-only.
+      - name: raw_ratings_fpi
+        description: ESPN FPI. Also a preseason projection.
+      - name: raw_ppa_teams
+        description: Predicted points added per play, offence and defence. Results-derived.
+

@@ -8,61 +8,17 @@
 -- The columns are deliberately ABSENT rather than present-and-null. A null column reads as
 -- "no data for this team"; an absent column lets the page render its Degraded state and
 -- name `fct_team_week_rating`, which is the honest signal and what AC-8.2 asks for.
-with ats as (
-    -- Against-the-spread record, from the game spine and the closing line. Computed here
-    -- because AC-5.3/AC-G.2 forbid the app assembling records from components.
-    --
-    -- Sign convention, stated because it governs the whole calculation: margin is
-    -- away - home, and the home side covers when margin < spread.
-    select
-        t.season,
-        t.team_id,
-        sum(case when t.covered then 1 else 0 end)                      as ats_wins,
-        sum(case when t.covered is false then 1 else 0 end)             as ats_losses,
-        sum(case when t.covered is null and t.spread is not null then 1 else 0 end) as ats_pushes,
-        sum(case when t.is_favorite and t.covered then 1 else 0 end)    as ats_fav_wins,
-        sum(case when t.is_favorite and t.covered is false then 1 else 0 end) as ats_fav_losses,
-        sum(case when not t.is_favorite and t.covered then 1 else 0 end) as ats_dog_wins,
-        sum(case when not t.is_favorite and t.covered is false then 1 else 0 end) as ats_dog_losses
-    from (
-        select
-            g.season,
-            g.home_team_id as team_id,
-            l.spread,
-            l.spread < 0   as is_favorite,
-            case when g.away_points - g.home_points < l.spread then true
-                 when g.away_points - g.home_points > l.spread then false end as covered
-        from {{ ref('fct_game') }} g
-        join (
-            select game_id, spread from (
-                select b.*, row_number() over (partition by b.game_id
-                                               order by b.snapshot_ts desc, b.provider_key) as r
-                from {{ ref('fct_betting_line') }} b
-            ) x where r = 1
-        ) l on l.game_id = g.game_id
-        where g.is_completed and l.spread is not null
-
-        union all
-
-        select
-            g.season,
-            g.away_team_id as team_id,
-            -1 * l.spread,
-            l.spread > 0,
-            case when g.away_points - g.home_points > l.spread then true
-                 when g.away_points - g.home_points < l.spread then false end
-        from {{ ref('fct_game') }} g
-        join (
-            select game_id, spread from (
-                select b.*, row_number() over (partition by b.game_id
-                                               order by b.snapshot_ts desc, b.provider_key) as r
-                from {{ ref('fct_betting_line') }} b
-            ) x where r = 1
-        ) l on l.game_id = g.game_id
-        where g.is_completed and l.spread is not null
-    ) t
-    group by t.season, t.team_id
-)
+--
+-- ATS COMES FROM fct_team_record, not from a CTE here.
+--
+-- It used to be computed in this file, which meant Standings would have needed the same
+-- calculation a second time — and two derivations of one definition is the defect this
+-- project keeps finding. The record is a business definition and lives in the fact; every
+-- view that shows it reads the same columns.
+--
+-- Moving it also carried the null-not-zero fix: a team that was never a favourite now has
+-- NULL as its favourite record rather than "0-0", which claimed a record it never had.
+-- 34 team-seasons changed, all of them 0-0 becoming absent.
 select
     {{ surrogate_key(['d.season', 'd.team_id']) }} as team_overview_sk,
     d.season,
@@ -96,23 +52,33 @@ select
     -- The coalesce made every 2026 team read 0-0-0 while wins, losses and record_display in
     -- the SAME ROW were correctly null: one table, two treatments of "hasn't happened yet".
     -- Null lets the page render an em dash per AC-G.32, which is the honest rendering.
-    a.ats_wins,
-    a.ats_losses,
-    a.ats_pushes,
-    case when a.ats_wins is not null then
-        cast(a.ats_wins as {{ dbt.type_string() }}) || '-'
-            || cast(a.ats_losses as {{ dbt.type_string() }}) || '-'
-            || cast(a.ats_pushes as {{ dbt.type_string() }}) end as ats_record_display,
-    case when a.ats_fav_wins is not null then
-        cast(a.ats_fav_wins as {{ dbt.type_string() }}) || '-'
-            || cast(a.ats_fav_losses as {{ dbt.type_string() }}) end as ats_as_favorite_display,
-    case when a.ats_dog_wins is not null then
-        cast(a.ats_dog_wins as {{ dbt.type_string() }}) || '-'
-            || cast(a.ats_dog_losses as {{ dbt.type_string() }}) end as ats_as_underdog_display,
+    r.games_played,
+    r.points_for,
+    r.points_against,
+    r.point_differential,
+    r.yards_for,
+    r.rushing_yards_for,
+    r.passing_yards_for,
+    r.yards_allowed,
+    r.rushing_yards_allowed,
+    r.passing_yards_allowed,
+    r.penalty_yards,
+    r.takeaways,
+    r.giveaways,
+    r.turnover_margin,
+    -- AC-G.33: the n every total above was computed over, so a page cannot render a
+    -- per-game figure against the wrong denominator.
+    r.games_with_box_score,
+    r.games_with_opponent_box_score,
+    r.ats_wins,
+    r.ats_losses,
+    r.ats_pushes,
+    r.ats_record_display,
+    r.ats_as_favorite_display,
+    r.ats_as_underdog_display,
 
     ao.as_of_ts
 from {{ ref('dim_team') }} d
 left join {{ ref('fct_team_record') }} r on r.season = d.season and r.team_id = d.team_id
 left join {{ ref('srv_standings') }} s on s.season = d.season and s.team_id = d.team_id
-left join ats a on a.season = d.season and a.team_id = d.team_id
 cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao

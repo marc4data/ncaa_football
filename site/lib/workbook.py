@@ -186,23 +186,41 @@ SHEETS = [
     # to it: which models produced the predicted columns, and what every field means. Both
     # are small, and shipping predictions without either would be shipping numbers with no
     # way to check what they are.
+    # Every cut, not just the headline. The view stacks overall / week / conference /
+    # confidence / probability-decile rows, and segment_type is carried so a filter in the
+    # workbook separates them — which is the one thing a spreadsheet is genuinely better at
+    # than a page. The headline table on the site reads `segment_type = 'overall'`; here
+    # the reader gets the same data plus the breakdowns and does the filtering themselves.
+    #
+    # cover_scored travels beside ats_accuracy_pct on purpose. A rate without its
+    # denominator is the defect AC-G.33 exists to prevent, and it is worse in a workbook,
+    # where the column gets averaged.
     Sheet("Model performance", "srv_model_performance", """
-        select model_name, model_version, model_family, split, season,
-               is_out_of_sample_week, games, mean_absolute_margin_error,
-               winner_accuracy_pct, ats_accuracy_pct, brier_score, log_loss, attribution
+        select segment_type, segment_value, model_name, model_version, model_family,
+               split, season, is_out_of_sample_week, games,
+               mean_absolute_margin_error, winner_accuracy_pct, winner_scored,
+               ats_accuracy_pct, cover_scored,
+               mean_predicted_home_win_probability, actual_home_win_rate,
+               brier_score, log_loss, attribution
         from srv_model_performance
-        order by winner_accuracy_pct desc nulls last
-        limit 200
+        order by model_name, segment_type, segment_order, segment_value
+        limit 2000
     """, [
+        ("segment_type", "Segment"), ("segment_value", "Segment value"),
         ("model_name", "Model"), ("model_version", "Version"),
         ("model_family", "Family"), ("split", "Split"), ("season", "Season"),
         ("is_out_of_sample_week", "Out-of-sample week"), ("games", "n"),
         ("mean_absolute_margin_error", "Margin MAE"),
-        ("winner_accuracy_pct", "SU %"), ("ats_accuracy_pct", "ATS %"),
+        ("winner_accuracy_pct", "SU %"), ("winner_scored", "SU graded"),
+        ("ats_accuracy_pct", "ATS %"), ("cover_scored", "ATS graded"),
+        ("mean_predicted_home_win_probability", "Model says"),
+        ("actual_home_win_rate", "Actually happened"),
         ("brier_score", "Brier"), ("log_loss", "Log loss"),
         ("attribution", "Attribution"),
     ], has_predictions=True, scoped=False,
-        note="Model-level provenance for the predicted columns, not week-scoped."),
+        note="Every segment: overall, by week, by conference, by confidence, and by "
+             "predicted-probability decile. Filter on Segment. Conference rows count a "
+             "game under both teams' conferences, so they exceed the overall row."),
 
     Sheet("Data dictionary", "srv_data_dictionary", """
         select layer, table_name, column_name, data_type, is_nullable,
@@ -230,6 +248,13 @@ EXPORT_ONLY_LABELS = {
     "away_points": "the site's header is blank, because the score renders beside the team "
                    "name; a spreadsheet column cannot have a blank header",
     "home_points": "as away_points",
+    "actual_margin": "the page can say 'Margin' because the column sits between the two "
+                     "teams' scores and the direction is obvious in context; a workbook "
+                     "travels without that context, so the header states away-minus-home",
+    "segment_value": "the page labels this per tab — Week, Conference, Confidence, "
+                     "Predicted band — because each tab shows one segment type. The sheet "
+                     "stacks all five, so its header has to name the column rather than "
+                     "the cut, and Segment sits beside it saying which cut each row is",
 }
 
 COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential",
@@ -396,10 +421,37 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         # AC-15.12: native Excel affordances, so the file is workable rather than readable.
         tab.freeze_panes = f"A{ROW_FIRST_DATA}"
         tab.auto_filter.ref = f"A{ROW_HEADER}:{last_column}{last_row}"
+        # WIDTHS FROM THE DATA, not from the header.
+        #
+        # The previous version sized every column from its LABEL, so a "Spread" column got
+        # 11 characters regardless of what was in it and numeric cells rendered as #######,
+        # while a description column got the same treatment and ran off the screen.
+        #
+        # Measured over the actual values, then clamped. The clamp matters in both
+        # directions: a floor so a two-character header is still readable, and a ceiling so
+        # one 400-character description does not set the width for the sheet. The header
+        # rows are written ABOVE the table and are not measured — the credit line in A1 is
+        # 120 characters and would otherwise decide column A on its own, which is exactly
+        # how a header blows out the first column.
         for index, (field, label) in enumerate(sheet.columns, start=1):
             letter = get_column_letter(index)
-            tab.column_dimensions[letter].width = min(
-                max(len(label) + 4, 11), 42 if field.endswith("description") else 24)
+            longest = len(str(label))
+            for offset in range(len(df)):
+                value = tab.cell(ROW_FIRST_DATA + offset, index).value
+                if value is None:
+                    continue
+                if isinstance(value, datetime):
+                    rendered = 17
+                elif isinstance(value, float):
+                    # A float renders at its FORMAT width, not its repr: 0.07894736842105
+                    # occupies four characters once the number format is applied.
+                    rendered = len(number_format(field).replace("#,##", "").replace(";", ""))
+                    rendered = max(rendered, 8)
+                else:
+                    rendered = len(str(value))
+                longest = max(longest, rendered)
+            ceiling = 60 if field.endswith("description") or field == "attribution" else 28
+            tab.column_dimensions[letter].width = min(max(longest + 3, 9), ceiling)
             span = f"{letter}{ROW_FIRST_DATA}:{letter}{last_row}"
             if field in COLOUR_SCALE_FIELDS:
                 tab.conditional_formatting.add(span, ColorScaleRule(
@@ -444,7 +496,8 @@ def _write_index(book, season, week, season_type, conference, generated,
     # different run than the one in the file.
     try:
         versions = query("""select distinct model_version, model_name
-                            from srv_model_performance limit 20""")
+                            from srv_model_performance
+                            where segment_type = 'overall' limit 20""")
         model_version = ", ".join(
             f"{r.model_name} {r.model_version}" for r in versions.itertuples()) or "none"
     except Exception:                                              # noqa: BLE001

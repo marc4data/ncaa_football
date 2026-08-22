@@ -24,10 +24,19 @@ class Page:
     blocker: Optional[str] = None
     blocker_note: str = ""
     partial_sections: List[str] = field(default_factory=list)
+    # Whether the page gets a nav slot. A page with its own index does not need one — see
+    # `team`. Distinct from `buildable`: a page can be built, reachable and deliberately
+    # absent from the sidebar.
+    in_nav: bool = True
 
     @property
     def buildable(self) -> bool:
         return self.exists and self.complete and self.published
+
+    @property
+    def url_path_for_nav(self) -> str:
+        """The href Streamlit renders for this page's sidebar link."""
+        return self.key
 
     @property
     def readiness(self) -> str:
@@ -48,24 +57,37 @@ PAGES = [
     Page("stats", "Stats", GAMES, "srv_team_stats", True, True, True,
          partial_sections=["Opponent scope and adjusted basis (stat_scope / stat_basis)"]),
     Page("teams", "Teams", GAMES, "srv_teams_index", True, True, True),
+    # NOT IN NAV. Teams IS the index for this page — searchable, conference-filtered, 681
+    # cards — so a nav entry that lands on an arbitrary team is strictly worse than the
+    # picker that already exists. The distinction from Matchup, which we just went the other
+    # way on: Matchup had NO index, so removing it from nav would have left it reachable
+    # only by luck. This one is reachable from Teams, Standings, Schedule, Scores and every
+    # team name on the site.
+    #
+    # AC-G.51 does not apply: that is about BLOCKED pages staying visible, and this page is
+    # built. The page count stays 18; this is a nav decision, not a scope one.
     Page("team", "Team page", GAMES, "srv_team_overview", True, True, True,
-         partial_sections=["Ratings and profile percentiles (fct_team_week_rating)",
+         in_nav=False,
+         partial_sections=["Week-over-week trends (weekly rating history)",
                            "Roster (dim_athlete)"]),
     Page("players", "Players", GAMES, "srv_player_stats", False, False, False,
          blocker="srv_player_stats",
          blocker_note="Blocked on dim_athlete, fct_player_season_stat, "
                       "fct_player_game_stat and fct_play. Scheduled last: it is the only "
                       "blocked page whose raw data is not already on disk."),
-    Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True,
+    # NOT IN NAV. Marc asked in wireframe v0.2, again in feedback 01, and again after
+    # using the picker that was built in response: "it's a click-through asset". Schedule,
+    # Scores and Today are its index, and now that rows actually link, they are how it is
+    # reached. The picker stays for /matchup with no game_id — arriving cold should still
+    # work — but a nav slot for a drill-through is a slot that lands nobody usefully.
+    Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True, in_nav=False,
          partial_sections=["Weather (fct_game_weather)",
-                           "Travel, rest and elevation (venue join key)",
-                           "Ratings (fct_team_week_rating)"]),
+                           "Travel, rest and elevation (venue join key)"]),
     Page("odds", "Odds Board", BETTING, "srv_odds_board", True, True, True),
     Page("edges", "Edge Finder", BETTING, "srv_edge_finder", True, True, True,
          partial_sections=["Hit-rate slider, bucket n and calibration "
                            "(fct_edge_bucket_performance)"]),
-    Page("performance", "Model Performance", BETTING, "srv_model_performance", True, True, True,
-         partial_sections=["Segment breakdowns (segment_type / segment_value)"]),
+    Page("performance", "Model Performance", BETTING, "srv_model_performance", True, True, True),
     Page("movement", "Line Movement", BETTING, "srv_line_movement", True, True, True),
     Page("export", "Excel Export", DELIVERABLE, None, True, True, True),
     Page("dictionary", "Data Dictionary", REFERENCE, "srv_data_dictionary", True, True, True),

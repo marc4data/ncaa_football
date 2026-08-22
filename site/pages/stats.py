@@ -16,7 +16,7 @@ differently — so the picker stays literal and the gap is declared in the regis
 import pandas as pd
 import streamlit as st
 
-from lib import params, shell, states, table
+from lib import filters, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -49,6 +49,12 @@ def _conferences(season: int) -> list:
 
 
 def body(page) -> None:
+    # F2-03: the bar renders on every data page, so a scope inherited from
+    # another page is visible on arrival rather than silently in effect.
+    scope = filters.game_scope(
+        show_week=False,
+        week_note="Season statistics are cumulative, so a week does not scope them.")
+    table.dataset_caption("Team stats", "srv_team_stats")
     with states.section("srv_team_stats"):
         seasons = _seasons()
         if not seasons:
@@ -56,35 +62,28 @@ def body(page) -> None:
                          "No season statistics have been built yet.")
             return
 
-        requested = params.get("season")
-        season = requested if requested in seasons else seasons[0]
-
+        # Season and conference come from the GLOBAL bar. Only the two controls specific
+        # to this page stay local — a page-level control that duplicates a global one is
+        # how the two end up disagreeing.
+        season, conference = scope.season, scope.conference
         stats = _stat_names(season)
-        conferences = ["All"] + _conferences(season)
-        with st.sidebar:
-            season = st.selectbox("Season", seasons, index=seasons.index(season))
-            # Re-read after the season changes: offering a stat that does not exist in the
-            # chosen season would produce an Empty state the reader caused by using our own
-            # control, which AC-G.16 exists to prevent.
-            stats = _stat_names(season)
+        if not stats:
+            states.empty("A statistical leaderboard would be here.",
+                         f"No season statistics recorded for {season}.")
+            return
+        picker, order_slot = st.columns([2, 1])
+        with picker:
             current_stat = params.get("stat")
             stat_name = st.selectbox(
                 "Statistic", stats,
                 index=stats.index(current_stat) if current_stat in stats else 0)
+        with order_slot:
             labels = list(DIRECTIONS)
             current_order = BY_PARAM.get(params.get("order"), labels[0])
             direction = st.radio("Order", labels, horizontal=True,
                                  index=labels.index(current_order))
-            conferences = ["All"] + _conferences(season)
-            chosen_conf = params.get("conference")
-            conference = st.selectbox(
-                "Conference", conferences,
-                index=conferences.index(chosen_conf) if chosen_conf in conferences else 0)
-
-        conference = None if conference == "All" else conference
         rank_field, order_code = DIRECTIONS[direction]
-        params.set_params(season=season, stat=stat_name, conference=conference,
-                          order=order_code)
+        params.set_params(stat=stat_name, order=order_code)
         df = query(f"""
             select season, team_slug, team_display, conference, classification, logo_url,
                    stat_name, stat_value, stat_value_raw, rank_desc, rank_asc, percentile,

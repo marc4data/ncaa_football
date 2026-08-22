@@ -39,18 +39,39 @@ def logo_or_monogram(logo_url: Optional[str], display_name: str,
     Same box either way, so a missing logo does not shift the layout, and no broken-image
     glyph is ever rendered. Logos come from our own cache; nothing is hotlinked (AC-G.27).
     """
-    initials = "".join(part[0] for part in str(display_name).split()[:2]).upper() or "?"
     if logo_url:
-        return (f"<img class='cfdb-logo' src='{logo_url}' alt='{display_name}' "
+        # alt is EMPTY on purpose. The team name is rendered immediately beside this, so
+        # the image is decorative — and a non-empty alt means a CDN failure paints the name
+        # a second time next to a broken-image glyph.
+        return (f"<img class='cfdb-logo' src='{logo_url}' alt='' "
                 f"style='width:{size_px}px;height:{size_px}px'>")
-    return (f"<span class='cfdb-monogram' aria-label='{display_name}' "
-            f"style='width:{size_px}px;height:{size_px}px;line-height:{size_px}px;"
-            f"background:{color}'>{initials}</span>")
+    # NO INITIALS. The monogram used to render "OD" beside "Ohio Dominican", which reads as
+    # the name twice — Marc flagged it on three teams across two passes. The box stays so a
+    # missing logo does not shift the row (AC-G.28 is about FOOTPRINT), but it is empty:
+    # the name is right there, and one affordance means one thing.
+    return (f"<span class='cfdb-monogram-empty' aria-hidden='true' "
+            f"style='width:{size_px}px;height:{size_px}px'></span>")
+
+
+# The colour ladder's rungs, as dim_team actually emits them. `primary` and `alternate` are
+# the team's own brand colours; `adjusted` and `fallback` are cfdb's, and only those two are
+# debt worth flagging.
+SOURCED_RUNGS = ("primary", "alternate")
 
 
 def color_source_hint(row) -> str:
-    """AC-7.2: a defaulted colour must be identifiable, or it becomes invisible debt."""
+    """AC-7.2: a defaulted colour must be identifiable, or it becomes invisible debt.
+
+    THE GUARD WAS AGAINST A VALUE THAT NEVER OCCURS. It skipped `"brand"`, and dim_team
+    emits primary / alternate / adjusted / fallback — so the hint rendered on all 34,061
+    rows, including the 29,903 using the team's own primary colour. An indicator that fires
+    on everything indicates nothing, which is the monogram fallback again: something that
+    appears to be working precisely because it never discriminates.
+
+    Not rendered on the Teams index any more regardless — see the note there. This stays
+    correct for the data-quality surfaces, where a builder is the reader.
+    """
     source = row.get("color_source") if hasattr(row, "get") else None
-    if not source or source == "brand":
+    if not source or source in SOURCED_RUNGS:
         return ""
     return f"<span class='cfdb-hint' title='colour {source} rather than sourced'>◦</span>"

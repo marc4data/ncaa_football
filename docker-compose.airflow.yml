@@ -30,6 +30,12 @@ x-airflow-common: &airflow-common
     # Workers call back to the API server here. Without this they fall back to
     # localhost:8080, which inside a scheduler container is nothing at all.
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    # Publishing to the droplet. The KEY PATH travels, never the key material — nothing
+    # here is secret, and nothing here reaches a task log.
+    SERVING_PUBLISH_KEY: /opt/airflow/.ssh/cfdb_publish
+    # No default: an unset value fails the publish loudly rather than dialling
+    # a host nobody configured.
+    SERVING_PUBLISH_HOST: ${SERVING_PUBLISH_HOST:?set SERVING_PUBLISH_HOST}
     # The project is importable as `src.*`, and relative paths like data/raw resolve
     # because every service runs with the project as its working directory.
     PYTHONPATH: /opt/airflow/project
@@ -84,6 +90,16 @@ x-airflow-common: &airflow-common
     # in a worktree at all, and the 1.6 GB raw layer must not be duplicated.
     - ./data:/opt/airflow/project/data
     - ./logs:/opt/airflow/logs
+    # The publish key, READ-ONLY and from OUTSIDE the repository.
+    #
+    # It is a dedicated ed25519 keypair whose public half is pinned in the droplet's
+    # authorized_keys behind a forced command, so holding it permits exactly the publish
+    # verbs and nothing else — no shell, no file read, no port forward, no Docker.
+    #
+    # Deliberately not the root key that publishes from a laptop: a key that can open a
+    # root shell does not belong in a scheduler that runs code from a repository. And
+    # deliberately not inside the repo — a key in the tree is a key that gets committed.
+    - ${CFDB_PUBLISH_KEY:-~/.ssh/cfdb_publish_ed25519}:/opt/airflow/.ssh/cfdb_publish:ro
   working_dir: /opt/airflow/project
   depends_on:
     - postgres

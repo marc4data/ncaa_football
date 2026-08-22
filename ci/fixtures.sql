@@ -90,6 +90,26 @@ CREATE TABLE IF NOT EXISTS raw.raw_warehouse_usage (
     elapsed_seconds numeric, catalog text,
     PRIMARY KEY (observed_at, operation)
 );
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_sp (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_srs (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_elo (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_fpi (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ppa_teams (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -102,6 +122,8 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_rankings, raw.raw_stats_season, raw.raw_stats_season_advanced,
          raw.raw_dbt_test_result, raw.raw_model_prediction, raw.raw_games_media,
          raw.raw_deploy_status,
+         raw.raw_ratings_sp, raw.raw_ratings_srs, raw.raw_ratings_elo,
+         raw.raw_ratings_fpi, raw.raw_ppa_teams,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -147,8 +169,24 @@ INSERT INTO raw.raw_teams (filename, content, status_code, params, fetched_at, a
 ('2026-01-01T00-00-00-003Z.json', '{"status_code": 401, "params": {"year": "2024"}, "data": null}',
  401, '{"year": "2024"}', '2026-01-01T00:00:01Z', now());
 
--- Games. One completed matchup per season, so every reconciliation test has something to
--- reconcile: each game contributes exactly one win and one loss.
+-- Games. Completed matchups, so every reconciliation test has something to reconcile.
+--
+-- THE POST-GAME PATH IS THE HALF THAT MATTERS ON A SATURDAY, and it was the half never
+-- exercised: every page was verified against 2026 rows, and every 2026 row has
+-- is_completed = false, so no scored formatter on the site had ever run against a real
+-- value. Rehearsing against a completed 2025 week found two defects in an afternoon. These
+-- three games keep that path exercised on every build instead of four times a season.
+--
+-- Game 9004 is against GAMMA COLLEGE, which is deliberately ABSENT FROM raw_teams. That is
+-- not an oversight — it is the shape of 11% of the real scoreboard. dim_team is built from
+-- CFBD's /teams response, which does not list every opponent an FBS side schedules, so a
+-- Division II visitor exists in /games and not in /teams. Reading the display name off the
+-- dimension left it NULL on 12,168 of 110,634 rows and the Scores page rendered the winner
+-- as `None`. A fixture where every team is in both places cannot catch that.
+--
+-- Game 9005 is a TIE. A tie is a settled result and must never render as Pending, and it is
+-- the branch where `winner is null` means something completely different from "not played
+-- yet". College football had no overtime before 1996 and there are 2,600 of them on record.
 INSERT INTO raw.raw_games (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-01-001Z.json', '{
   "status_code": 200, "params": {"year": "2024", "seasonType": "regular"},
@@ -157,7 +195,18 @@ INSERT INTO raw.raw_games (filename, content, status_code, params, fetched_at, a
      "startDate": "2024-09-07T23:30:00.000Z", "completed": true, "conferenceGame": true,
      "neutralSite": false, "homeId": 1, "homeTeam": "Alpha State", "homePoints": 28,
      "homeClassification": "fbs", "awayId": 2, "awayTeam": "Beta Tech", "awayPoints": 21,
-     "awayClassification": "fbs", "venue": "Alpha Field", "attendance": 50000}
+     "awayClassification": "fbs", "venue": "Alpha Field", "attendance": 50000},
+    {"id": 9004, "season": 2024, "week": 2, "seasonType": "regular",
+     "startDate": "2024-09-14T23:30:00.000Z", "completed": true, "conferenceGame": false,
+     "neutralSite": false, "homeId": 1, "homeTeam": "Alpha State", "homePoints": 41,
+     "homeClassification": "fbs", "awayId": 77, "awayTeam": "Gamma College",
+     "awayPoints": 3, "awayClassification": "ii", "venue": "Alpha Field",
+     "attendance": 41000},
+    {"id": 9005, "season": 2024, "week": 3, "seasonType": "regular",
+     "startDate": "2024-09-21T23:30:00.000Z", "completed": true, "conferenceGame": true,
+     "neutralSite": false, "homeId": 2, "homeTeam": "Beta Tech", "homePoints": 17,
+     "homeClassification": "fbs", "awayId": 1, "awayTeam": "Alpha State", "awayPoints": 17,
+     "awayClassification": "fbs", "venue": "Beta Grounds", "attendance": 33000}
   ]}', 200, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:02Z', now()),
 -- Date-only era: midnight UTC, no kickoff time recorded.
 ('2026-01-01T00-00-01-002Z.json', '{
@@ -175,7 +224,7 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 ('teams', '2026-01-01T00-00-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:00Z', now()),
 ('teams', '2026-01-01T00-00-00-002Z.json', '{"year": "1900"}', 200, 2, '2026-01-01T00:00:00Z', now()),
 ('teams', '2026-01-01T00-00-00-003Z.json', '{"year": "2024"}', 401, 0, '2026-01-01T00:00:01Z', now()),
-('games', '2026-01-01T00-00-01-001Z.json', '{"year": "2024", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:02Z', now()),
+('games', '2026-01-01T00-00-01-001Z.json', '{"year": "2024", "seasonType": "regular"}', 200, 3, '2026-01-01T00:00:02Z', now()),
 ('games', '2026-01-01T00-00-01-002Z.json', '{"year": "1900", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:03Z', now()),
 -- An endpoint that has never returned rows: legitimately empty, must not read as a loss.
 ('records', '2026-01-01T00-00-02-001Z.json', '{"year": "2026"}', 200, 0, '2026-01-01T00:00:04Z', now());
@@ -287,8 +336,10 @@ INSERT INTO raw.raw_records (filename, content, status_code, params, fetched_at,
   "status_code": 200, "params": {"year": "2024"},
   "data": [
     {"year": 2024, "teamId": 1, "team": "Alpha State", "classification": "fbs",
-     "total": {"games": 1, "wins": 1, "losses": 0, "ties": 0}},
+     "total": {"games": 3, "wins": 2, "losses": 0, "ties": 1}},
     {"year": 2024, "teamId": 2, "team": "Beta Tech", "classification": "fbs",
+     "total": {"games": 2, "wins": 0, "losses": 1, "ties": 1}},
+    {"year": 2024, "teamId": 77, "team": "Gamma College", "classification": "ii",
      "total": {"games": 1, "wins": 0, "losses": 1, "ties": 0}}
   ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:09Z', now()),
 -- The legitimately-empty response already in the manifest. An endpoint that returns no rows
@@ -468,6 +519,7 @@ INSERT INTO raw.raw_model_prediction (source_file, model_version, prediction_ts,
 ('linear_margin_predictions.csv', 'fixture00001', '2026-01-01T00:00:40Z', 0, '{
   "game_id": "9001", "season": "2024", "season_type": "regular", "week": "8",
   "home_team": "Alpha State", "away_team": "Beta Tech", "split": "test",
+  "home_conference": "Test Conference", "away_conference": "Other Conference",
   "model_name": "linear_margin", "model_family": "linear_regression", "target": "margin",
   "home_points": "28", "away_points": "21", "actual_margin": "-7",
   "actual_total_points": "49", "actual_home_win": "True", "actual_winner": "Alpha State",
@@ -485,6 +537,7 @@ INSERT INTO raw.raw_model_prediction (source_file, model_version, prediction_ts,
 ('linear_margin_predictions.csv', 'fixture00001', '2026-01-01T00:00:40Z', 1, '{
   "game_id": "9003", "season": "2024", "season_type": "regular", "week": "1",
   "home_team": "Beta Tech", "away_team": "Alpha State", "split": "test",
+  "home_conference": "Test Conference", "away_conference": "Test Conference",
   "model_name": "linear_margin", "model_family": "linear_regression", "target": "margin",
   "home_points": "", "away_points": "", "actual_margin": "",
   "actual_total_points": "", "actual_home_win": "", "actual_winner": "",
@@ -526,3 +579,81 @@ INSERT INTO raw.raw_deploy_status
   (observed_at, deploy_sha, main_sha, commits_behind, severity, detail) VALUES
 ('2026-01-01T00:00:50Z', 'aaaa111', 'bbbb222', 7, 'error',
  'Deploy tree is 7 commits behind main (aaaa111 vs bbbb222). Airflow is running old code');
+
+-- The five rating systems (B1).
+--
+-- SP+ carries a `nationalAverages` row, which is what CFBD actually returns and is NOT a
+-- team. Left in, it would appear on the Teams index, get a team page, and sit in the
+-- percentile denominator shifting every team's standing by an amount nobody would trace.
+-- The fixture carries it so the exclusion is exercised rather than assumed.
+--
+-- 2024 ratings are MEASURED (the fixture's 2024 games are completed); the 2026 SP+ row is a
+-- PROJECTION, because no 2026 game exists. Both branches of is_projection therefore run on
+-- every build — which matters because in weeks 1 to 4 the projection branch is the only one
+-- with any rows at all.
+INSERT INTO raw.raw_ratings_sp (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-20-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "rating": 18.4,
+     "ranking": 1, "offense": {"rating": 34.1}, "defense": {"rating": 15.7},
+     "specialTeams": {"rating": 0.4}, "sos": 0.61, "secondOrderWins": 9.2},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "rating": 3.2,
+     "ranking": 2, "offense": {"rating": 27.0}, "defense": {"rating": 23.8},
+     "specialTeams": {"rating": -0.2}, "sos": 0.55, "secondOrderWins": 6.1},
+    {"year": 2024, "team": "nationalAverages", "conference": null, "rating": 10.8,
+     "ranking": null, "offense": {"rating": 30.5}, "defense": {"rating": 19.7},
+     "specialTeams": {"rating": 0.0}, "sos": null, "secondOrderWins": null}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:30Z', now()),
+('2026-01-01T00-00-20-002Z.json', '{
+  "status_code": 200, "params": {"year": "2026"},
+  "data": [
+    {"year": 2026, "team": "Alpha State", "conference": "Test Conference", "rating": 12.0,
+     "ranking": 1, "offense": {"rating": 31.0}, "defense": {"rating": 19.0},
+     "specialTeams": {"rating": 0.1}, "sos": 0.50, "secondOrderWins": 8.0}
+  ]}', 200, '{"year": "2026"}', '2026-01-01T00:00:31Z', now());
+
+INSERT INTO raw.raw_ratings_srs (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-21-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "division": null, "rating": 11.1, "ranking": 1},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference",
+     "division": null, "rating": -2.4, "ranking": 2},
+    {"year": 2024, "team": "Beta Tech", "conference": null,
+     "division": null, "rating": -2.4, "ranking": 2}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:32Z', now());
+-- The second Beta Tech row is NOT a typo. CFBD's /ratings/srs returns some schools twice —
+-- once with a conference and once with `conference: null`, carrying an IDENTICAL rating.
+-- Charlotte in 2024 and 2025, Troy in 2024. The rating is the same on both copies, so no
+-- average moves and no value looks wrong; what moves is every count and every percentile
+-- denominator. The fixture keeps the duplicate alive so the dedup runs on every build.
+
+INSERT INTO raw.raw_ratings_elo (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-22-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "elo": 1712},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "elo": 1489}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:33Z', now());
+
+INSERT INTO raw.raw_ratings_fpi (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-23-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "fpi": 14.2,
+     "efficiencies": {"offense": 62.1, "defense": 71.3, "specialTeams": 50.2}},
+    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "fpi": 1.9,
+     "efficiencies": {"offense": 48.0, "defense": 52.5, "specialTeams": 49.1}}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:34Z', now());
+
+INSERT INTO raw.raw_ppa_teams (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-24-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024"},
+  "data": [
+    {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "offense": {"overall": 0.31}, "defense": {"overall": 0.05}},
+    {"season": 2024, "team": "Beta Tech", "conference": "Test Conference",
+     "offense": {"overall": 0.12}, "defense": {"overall": 0.22}}
+  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:35Z', now());

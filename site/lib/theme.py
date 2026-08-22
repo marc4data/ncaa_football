@@ -68,7 +68,9 @@ def inject() -> None:
 
 TABLE_CSS = """
 <style>
-.cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem; }
+.cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
+    table-layout:fixed; }
+.cfdb-table td, .cfdb-table th { overflow:hidden; text-overflow:ellipsis; }
 .cfdb-table caption { caption-side:top; text-align:left; font-size:.8rem; opacity:.6;
   padding-bottom:.4rem; }
 .cfdb-table th { text-align:left; font-weight:600; font-size:.78rem; letter-spacing:.02em;
@@ -76,6 +78,41 @@ TABLE_CSS = """
   padding:.45rem .55rem; }
 .cfdb-table td { padding:.42rem .55rem; border-bottom:1px solid #eef0f3; }
 .cfdb-table tbody tr:hover { background:rgba(31,111,235,.05); }
+/* Linked rows. The anchor fills the cell so the whole row is a target, while staying a
+   real <a href> — which is what makes middle-click and copy-link work (AC-G.13). The row
+   link inherits colour so a table does not turn into a wall of blue; the column-specific
+   link (a team name) is visually distinct, per AC-2.5. */
+.cfdb-table td a.cfdb-cell-link { display:block; color:inherit; text-decoration:none;
+    margin:-.42rem -.55rem; padding:.42rem .55rem; }
+.cfdb-table td a.cfdb-cell-link-alt { color:#1f6feb; font-weight:600; }
+.cfdb-table td a.cfdb-cell-link-alt:hover { text-decoration:underline; }
+.cfdb-table tr.cfdb-linked { cursor:pointer; }
+.cfdb-dataset { font-size:.78rem; opacity:.72; margin:-.25rem 0 .6rem; }
+.cfdb-dataset a { color:#1f6feb; text-decoration:none; }
+.cfdb-dataset a:hover { text-decoration:underline; }
+.cfdb-footer a { color:#1f6feb; text-decoration:none; }
+.cfdb-footer a:hover { text-decoration:underline; }
+.cfdb-footer-links { opacity:.85; }
+.cfdb-footer-links a[aria-label] { display:inline-block; min-width:1.4em;
+    text-align:center; font-weight:700; }
+/* AC-G.18b. The neutral form states the scope; the active form marks it, because a
+   filter inherited from another page has to be legible on arrival rather than inferable
+   from the URL. */
+.cfdb-scope { font-size:.82rem; opacity:.8; margin:.1rem 0 .7rem; }
+.cfdb-scope-active { opacity:1; }
+.cfdb-monogram-empty { display:inline-block; vertical-align:middle; border-radius:50%;
+    background:rgba(127,127,127,.14); margin-right:.4rem; }
+.cfdb-table th a.cfdb-sort { color:inherit; text-decoration:none; display:block; }
+.cfdb-table th a.cfdb-sort:hover { text-decoration:underline; }
+.cfdb-sort-arrow { opacity:.35; margin-left:.25rem; font-size:.7rem; }
+.cfdb-table th.cfdb-sorted .cfdb-sort-arrow { opacity:1; }
+.cfdb-winner { color:#1f6feb; font-weight:700; margin-right:.15rem; }
+.cfdb-winner-spacer { display:inline-block; width:.75em; }
+.cfdb-details { opacity:.55; font-size:1rem; }
+.cfdb-table td a:hover .cfdb-details { opacity:1; }
+.cfdb-scope-chip { display:inline-block; background:rgba(31,111,235,.12);
+    border:1px solid rgba(31,111,235,.35); border-radius:999px; padding:.06rem .5rem;
+    margin-right:.3rem; font-weight:600; font-size:.78rem; }
 .cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right; }
 .cfdb-team { margin-left:.4rem; }
 .cfdb-rank { font-size:.72rem; font-weight:700; opacity:.7; margin-left:.3rem; }
@@ -90,3 +127,21 @@ TABLE_CSS = """
 
 def inject_tables() -> None:
     st.markdown(TABLE_CSS, unsafe_allow_html=True)
+
+
+def hide_nav_entries(keys) -> None:
+    """Hide specific sidebar links while leaving their routes intact.
+
+    The Team page has its own index — Teams is searchable, conference-filtered and already
+    the way people reach it — so a nav slot landing on an arbitrary team is worse than no
+    slot. But st.navigation does routing as well as the sidebar, so the page has to stay
+    registered or every team link on the site becomes a dead one.
+
+    Scoped to the sidebar nav so it cannot hit an in-page link to the same destination.
+    """
+    if not keys:
+        return
+    selectors = ", ".join(
+        f'[data-testid="stSidebarNav"] a[href$="/{key}"]' for key in keys)
+    st.markdown(f"<style>{selectors} {{ display:none !important; }}</style>",
+                unsafe_allow_html=True)

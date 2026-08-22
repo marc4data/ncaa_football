@@ -11,7 +11,7 @@ is precisely why it does not — a movement figure is a definition (which snapsh
 import pandas as pd
 import streamlit as st
 
-from lib import fmt, params, shell, states, table
+from lib import filters, fmt, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -41,6 +41,10 @@ def _games(season: int, week) -> pd.DataFrame:
 
 
 def body(page) -> None:
+    # F2-03: the bar renders on every data page, so a scope inherited from
+    # another page is visible on arrival rather than silently in effect.
+    scope = filters.game_scope()
+    table.dataset_caption("Line movement", "srv_line_movement")
     with states.section("srv_line_movement"):
         seasons = _seasons()
         if not seasons:
@@ -48,19 +52,7 @@ def body(page) -> None:
                          "No betting-line snapshots have been recorded yet.")
             return
 
-        requested = params.get("season")
-        season = requested if requested in seasons else seasons[0]
-        with st.sidebar:
-            season = st.selectbox("Season", seasons, index=seasons.index(season))
-            weeks = query("""select distinct week from srv_line_movement
-                             where season = :season order by week limit 40""",
-                          {"season": season})["week"].tolist()
-            options = ["All"] + [str(w) for w in weeks]
-            current = str(params.get("week"))
-            week_choice = st.selectbox(
-                "Week", options, index=options.index(current) if current in options else 0)
-
-        week = None if week_choice == "All" else int(week_choice)
+        season, week = scope.season, scope.week
         games = _games(season, week)
         if games.empty:
             states.empty(
@@ -75,11 +67,10 @@ def body(page) -> None:
                   for r in games.itertuples()]
         ids = games["game_id"].tolist()
         chosen = params.get("game_id")
-        with st.sidebar:
-            label = st.selectbox("Game", labels,
-                                 index=ids.index(chosen) if chosen in ids else 0)
+        label = st.selectbox("Game", labels,
+                             index=ids.index(chosen) if chosen in ids else 0)
         game_id = int(ids[labels.index(label)])
-        params.set_params(season=season, week=week, game_id=game_id)
+        params.set_params(game_id=game_id)
 
         df = query("""
             select game_id, snapshot_ts, provider_key, provider_name, season, week,

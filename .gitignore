@@ -26,6 +26,18 @@ logs/
 *.xls
 *.pptx
 ~$*
+# ...except two, which ARE deliverables. Narrow by design: the rule above keeps doing its
+# job everywhere else, and a blanket removal would let the next stray copy through.
+!docs/*.xlsx
+
+# CFBD's OpenAPI spec, 170 KB of someone else's document.
+#
+# Ignored as a DECISION rather than left untracked and hoping. Untracked is not protected —
+# one `git add -A` commits it — and the same reasoning that pinned the deploy tree applies:
+# a control that depends on nobody making a mistake is not a control. The spec is public and
+# stable; reference it at https://api.collegefootballdata.com/api-docs.json instead of
+# vendoring a copy that goes stale and redistributes their work.
+config/api-docs.json
 
 # ---------------------------------------------------------------------------------------
 # CFB Model Training Pack — LICENSED MATERIAL, NEVER COMMIT
@@ -44,3 +56,10 @@ logs/
 cfdb_model_pack/
 model_outputs/
 *.zip
+
+# SSH keys, including the Airflow publish key. It lives in ~/.ssh and is mounted by path,
+# never copied into the tree — but a pattern costs nothing and a committed key cannot be
+# uncommitted.
+*.pem
+id_ed25519*
+cfdb_publish_ed25519*

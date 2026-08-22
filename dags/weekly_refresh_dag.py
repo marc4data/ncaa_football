@@ -38,20 +38,30 @@ from airflow.providers.standard.operators.python import PythonOperator
 from src.alerting import failure_callback
 from src.dbt_artifacts import load_run_results
 from src.load_raw_to_postgres import load_endpoint
+from src.publish_marts import publish_all
 from src.weekly import pregame_refresh, results_refresh
 
 DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
 
 # The production refresh builds an EXPLICIT selection, never the whole project.
 #
-# This is a structural guarantee, not a convention. `+tag:production` resolves to the three
-# marts the publish job ships plus their ancestors — six models — so a new model is excluded
-# by construction rather than by anyone remembering to exclude it. Half-finished work in the
-# tree cannot fail the run that keeps the live site fresh, which means new models can be
-# built at any time instead of being scheduled around the season.
+# `+tag:production` now resolves to 53 of the project's 58 models: every serving view, plus
+# every mart and staging model that feeds one. The serving layer carries the tag from
+# dbt_project.yml, so it applies by construction rather than one model at a time, and `+`
+# pulls the ancestors.
 #
-# Tag the mart, not the staging models: `+` pulls ancestors in automatically, so the
-# selection stays correct when a mart gains an upstream dependency.
+# It used to resolve to SIX — three legacy marts and three staging models, not one srv_
+# view. The refresh fetched results every Sunday, landed them in raw, rebuilt three marts
+# that nothing on the site reads, and stopped. Every view the site actually serves was
+# rebuilt only when somebody ran dbt by hand, which meant the pipeline was scheduled up to
+# the point where it stopped mattering.
+#
+# The narrow selector existed to keep half-finished work out of the runtime path. That
+# concern is real and is already answered twice over: Airflow reads a worktree PINNED TO
+# MAIN, and CI builds the entire project on every pull request, so unfinished work cannot
+# reach the tree this runs against. Five models remain excluded — dim_season, dim_venue,
+# dim_week, stg_calendar, stg_venues — because no serving view reads them, which is exactly
+# the property the selector is supposed to have.
 PRODUCTION_SELECTOR = "--select +tag:production"
 
 default_args = {
@@ -112,6 +122,26 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
             bash_command=f"dbt test --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
         )
 
+        # PUBLISH IS A DOWNSTREAM TASK, NOT A SCHEDULE.
+        #
+        # This is the last hop before a user sees anything, and until now it had no
+        # scheduled trigger at all: the serving database changed only when someone ran
+        # publish_marts by hand. Every model could be current and the site still weeks old.
+        #
+        # It runs after dbt_test rather than on its own clock, and the difference is not
+        # cosmetic. A clock-triggered publish can fire mid-build and ship a half-rebuilt
+        # serving layer — succeeding while doing it, which is the same green-and-wrong
+        # signature as the three defects found this week. Being downstream makes
+        # "the build finished" a precondition rather than a hope.
+        #
+        # all_success is the right trigger here, unlike capture_test_results below: a
+        # failing dbt test means the serving layer is not fit to publish, and shipping it
+        # anyway would put data on the site that dbt has just said is wrong.
+        publish = PythonOperator(
+            task_id="publish_to_serving",
+            python_callable=lambda **_: publish_all(),
+        )
+
         capture_dq = PythonOperator(
             task_id="capture_test_results",
             python_callable=lambda **_: load_run_results(),
@@ -121,7 +151,7 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
             trigger_rule="all_done",
         )
 
-        fetch >> load >> dbt_run >> dbt_test >> capture_dq
+        fetch >> load >> dbt_run >> dbt_test >> publish >> capture_dq
     return dag
 
 

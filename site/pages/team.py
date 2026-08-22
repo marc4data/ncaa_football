@@ -6,7 +6,9 @@ was written for Roster and now earns its keep three times.
 """
 import streamlit as st
 
-from lib import identity, params, shell, states, table
+import pandas as pd
+
+from lib import fmt, identity, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -41,7 +43,9 @@ def body(page) -> None:
         select season, team_slug, team_display, mascot, conference, division,
                classification, logo_url, color_on_light, color_on_dark, color_source,
                wins, losses, record_display, conference_record_display, conference_standing,
-               ats_record_display, ats_as_favorite_display, ats_as_underdog_display, as_of_ts
+               ats_record_display, ats_as_favorite_display, ats_as_underdog_display,
+               games_played, points_for, points_against, yards_for, yards_allowed,
+               turnover_margin, games_with_box_score, as_of_ts
         from srv_team_overview
         where season = :season and team_slug = :team
         limit 1
@@ -62,18 +66,24 @@ def body(page) -> None:
     with tabs[1]:
         _game_log(season, row.get('team_display'))
     with tabs[2]:
-        # AC-8.2: this tab is Degraded while the page around it works.
-        states.degraded("fct_team_week_rating",
-                        "SP+, Elo, SRS and the profile percentiles are not built yet.",
-                        scheduled="Track B1 — the largest enrichment in the backlog")
+        _ratings(season, row.get("team_display"))
     with tabs[3]:
         states.degraded("dim_athlete",
                         "Rosters need the athlete dimension and the player facts.",
                         scheduled="Track B8 — after the other blocked pages")
     with tabs[4]:
-        states.degraded("fct_team_week_rating",
-                        "Week-over-week trends need a rating per team per week.",
-                        scheduled="Track B1")
+        # Still Degraded, and the reason is sharper than it was. B1 shipped, but every
+        # rating CFBD publishes for a team is SEASON-scoped: /ratings/elo is the only one
+        # whose API even accepts a week, and it has only ever been fetched with a year.
+        # A trend line drawn from a season value repeated across fourteen weeks would be a
+        # fabricated time series that looked entirely convincing.
+        states.degraded(
+            "weekly rating history",
+            "Trends needs a rating per team per WEEK. Four of the five systems CFBD "
+            "publishes are season-scoped by design, and Elo — the one that is not — has "
+            "only been fetched by season. A chart drawn from a season figure repeated "
+            "across every week would be a line that never happened.",
+            scheduled="a weekly Elo backfill, which is a fetch change rather than a model")
 
 
 def _identity_header(row) -> None:
@@ -91,7 +101,48 @@ def _identity_header(row) -> None:
         unsafe_allow_html=True)
 
 
+def _kpi_banner(row) -> None:
+    """R-002. Season totals across the top of Overview.
+
+    Marc marked this M! in the first feedback pass and it went three rounds without being
+    scheduled — the most overdue item in the register.
+
+    AC-G.33 governs every figure here, and this is the highest-visibility surface on the
+    site so it is the worst place to get composition wrong. We have shipped that defect
+    once: an ATS percentage rendered beside n=567 when it was computed over 553. Every
+    component correct, the assembly lying. So each yardage figure carries the number of
+    games its box scores actually came from, which is NOT games_played — box scores are
+    `recent` scope and a 2025 team has them for about half its season.
+
+    A team-season with nothing played renders em dashes, not zeros. Same rule as R-005.
+    """
+    box = row.get("games_with_box_score")
+    box_n = int(box) if box is not None and not pd.isna(box) else 0
+
+    cells = st.columns(5)
+    cells[0].metric("Points for", fmt.number(row.get("points_for"), "", 0))
+    cells[1].metric("Points against", fmt.number(row.get("points_against"), "", 0))
+    cells[2].metric("Total yards", fmt.number(row.get("yards_for"), "", 0))
+    cells[3].metric("Yards allowed", fmt.number(row.get("yards_allowed"), "", 0))
+    cells[4].metric("Turnover margin", fmt.signed(row.get("turnover_margin"), "", 0))
+
+    if box_n == 0:
+        st.caption(
+            "Points are complete for every game. **Yardage and turnovers are not shown: no "
+            "box score has been recorded for this team-season.** CFBD publishes game "
+            "statistics from 2024 onward.")
+    elif box_n < int(row.get("games_played") or 0):
+        st.caption(
+            f"Points cover all {int(row.get('games_played') or 0)} games. **Yardage and "
+            f"turnovers cover {box_n} of them** — box scores are only published for some "
+            f"games, so these totals are not a full season.")
+    else:
+        st.caption(f"All figures over {box_n} games.")
+
+
 def _overview(row) -> None:
+    _kpi_banner(row)
+    st.divider()
     cols = st.columns(4)
     # AC-5.3 / AC-G.2: records are pre-formatted strings from the view, never assembled here.
     cols[0].metric("Record", row.get("record_display") or "—")
@@ -102,6 +153,101 @@ def _overview(row) -> None:
     cols[3].metric("ATS", row.get("ats_record_display") or "—")
     st.caption(f"ATS as favourite {row.get('ats_as_favorite_display') or '—'} · "
                f"as underdog {row.get('ats_as_underdog_display') or '—'}")
+
+
+def _ratings(season, team_display) -> None:
+    """B1. Five rating systems, with projections marked as projections.
+
+    The distinction is the whole reason this tab is not just five numbers: in weeks 1 to 4
+    the only ratings that exist are SP+ and FPI, and both are FORECASTS. Elo, SRS and PPA
+    are computed from results and have nothing to compute from. Rendering all five in the
+    same styling would imply a preseason projection and a measured rating are the same kind
+    of claim, which is the defect the backtest warning on Model Performance exists to
+    prevent, one page over.
+    """
+    with states.section("srv_team_rating"):
+        df = query("""
+            select rating_system, rating_system_display, display_order,
+                   rating, rating_rank, rating_rank_computed, rating_percentile,
+                   rating_population,
+                   offense_rating, defense_rating, special_teams_rating,
+                   strength_of_schedule, second_order_wins,
+                   rating_scope, is_projection, completed_games_at_rating,
+                   rating_basis_note, as_of_ts
+            from srv_team_rating
+            where season = :season and school = :team_display
+            order by display_order
+            limit 20
+        """, {"season": season, "team_display": team_display})
+
+        if df.empty:
+            states.empty(
+                "Team ratings would be here.",
+                f"No rating system has published a figure for this team in {season}.")
+            return
+
+        if df["is_projection"].any():
+            st.info(
+                "**These are preseason projections, not measurements.** No game has been "
+                "played yet, so SP+ and FPI are forecasting the season rather than "
+                "describing it. Elo, SRS and PPA are computed from results and appear once "
+                "games are played.")
+
+        table.render(df, [
+            Col("rating_system_display", "System"),
+            Col("rating", "Rating", "num"),
+            Col("rank", "Rank", render=_rating_rank),
+            Col("rating_percentile", "Percentile", render=_percentile),
+            Col("offense_rating", "Offence", "num"),
+            Col("defense_rating", "Defence", "num"),
+            Col("basis", "Basis", render=lambda r: "Projection" if r.get("is_projection")
+                else f"{int(r.get('completed_games_at_rating') or 0)} games"),
+        ], caption="srv_team_rating")
+        table.as_of_caption(df)
+
+        notes = df["rating_basis_note"].dropna().unique()
+        for note in notes:
+            st.caption(str(note))
+
+
+def _opponent(row) -> str:
+    """AC-8.3 in one cell: "@ Ohio State" away, "Ohio State" home, "vs Ohio State" neutral.
+
+    A neutral site is neither, and marking it "vs" rather than leaving it bare is the
+    difference between a bowl game and a home game on a schedule read at a glance.
+    """
+    name = row.get("opponent") or fmt.EM_DASH
+    if row.get("is_neutral_site"):
+        return f"vs {name}"
+    return f"@ {name}" if str(row.get("venue_role") or "").lower() == "away" else name
+
+
+def _rating_rank(row) -> str:
+    """CFBD's own rank where it publishes one, ours otherwise, and the difference is said
+    rather than hidden — Elo and PPA publish no ranking, so those are cfdb's ordering."""
+    published = row.get("rating_rank")
+    if published is not None and not pd.isna(published):
+        return f"{int(published)}"
+    computed = row.get("rating_rank_computed")
+    if computed is None or pd.isna(computed):
+        return fmt.EM_DASH
+    return f"{int(computed)}*"
+
+
+def _percentile(row) -> str:
+    """AC-G.33: the percentile carries the population it was computed against.
+
+    That population MOVES. SP+ covers 139 teams today and Elo covers none; when Elo appears
+    mid-season it may cover a different set again. "82nd percentile" means something
+    different over 139 teams than over 265, and only the n makes that legible.
+    """
+    value = row.get("rating_percentile")
+    if value is None or pd.isna(value):
+        return fmt.EM_DASH
+    population = row.get("rating_population")
+    suffix = (f" of {int(population)}"
+              if population is not None and not pd.isna(population) else "")
+    return f"{float(value) * 100:.0f}%{suffix}"
 
 
 def _game_log(season, team_display) -> None:
@@ -121,16 +267,19 @@ def _game_log(season, team_display) -> None:
             "No games recorded for this team-season.",
             renderer=lambda d: table.render(d, [
                 Col("week", "Wk", "num", dp=0),
-                Col("game_date", "Date", "datetime"),
-                Col("venue_role", "H/A"),
-                Col("opponent", "Opponent"),
+                Col("game_date", "Date", "date"),
+                # "@ Opponent" rather than an H/A column. The universal convention in every
+                # printed schedule, and it saves a column on a table that needed the width.
+                Col("opponent", "Opponent", render=_opponent),
                 Col("result", "Result"),
                 Col("points_for", "PF", "num", dp=0),
                 Col("points_against", "PA", "num", dp=0),
                 # AC-8.3: oriented to the SUBJECT team, not to home.
-                Col("margin", "Margin (team)", "signed", dp=0),
-            ], caption="srv_team_game_log",
-                link_builder=lambda r: params.link("matchup", game_id=r["game_id"])))
+                Col("margin", "Margin", "signed", dp=0),
+            ], caption="",
+                # AC-8.7: game log rows click through to the Matchup.
+                link_builder=lambda r: params.link("matchup", game_id=r["game_id"],
+                                                   season=season)))
 
 
 def render() -> None:

@@ -1,4 +1,19 @@
-# Serving deployment — cfdb.marc4data.com
+# Serving deployment
+
+> **The droplet is addressed by environment variable, never by a literal.**
+>
+> Not because an IP is a secret — it is not, and obscurity is not security. Because a
+> literal in a public repository is a *complete map with no upside*: a reader who wants to
+> understand the architecture is served just as well by a documented variable, and a reader
+> who wants to probe it is served considerably better by the real value.
+>
+> Set these before running anything here:
+>
+> ```bash
+> export CFDB_DROPLET_HOST=root@203.0.113.10          # example — your droplet
+> export CFDB_SITE_HOST=cfdb.example.com              # example — your hostname
+> export SERVING_PUBLISH_HOST=cfdb_publish@203.0.113.10
+> ```
 
 DigitalOcean droplet (SFO, 1 GiB / 1 vCPU, $6/mo) running three services under Compose:
 serving Postgres, the Streamlit site, and a Cloudflare Tunnel connector.
@@ -29,7 +44,7 @@ laptop or a git history.
 ## Operating it
 
 ```bash
-ssh root@143.110.225.139
+ssh $CFDB_DROPLET_HOST
 cd /opt/cfdb
 docker compose ps
 docker compose logs -f site
@@ -41,12 +56,12 @@ Redeploy after changing site code or the stack:
 
 ```bash
 # from the repo root
-rsync -az deploy/docker-compose.yml deploy/backup.sh root@143.110.225.139:/opt/cfdb/
+rsync -az deploy/docker-compose.yml deploy/backup.sh $CFDB_DROPLET_HOST:/opt/cfdb/
 rsync -az --delete --exclude '__pycache__' \
   deploy/site/Dockerfile deploy/site/requirements.txt \
   site/app.py site/lib site/pages \
-  root@143.110.225.139:/opt/cfdb/site/
-ssh root@143.110.225.139 'cd /opt/cfdb && docker compose build site && docker compose up -d site'
+  $CFDB_DROPLET_HOST:/opt/cfdb/site/
+ssh $CFDB_DROPLET_HOST 'cd /opt/cfdb && docker compose build site && docker compose up -d site'
 ```
 
 **One rsync, and the source directories have no trailing slash.** Both details are load
@@ -68,8 +83,8 @@ alone, which produces a container that builds cleanly, starts cleanly, and raise
 Verify after deploying, because "the container is up" is not "the site works":
 
 ```bash
-ssh root@143.110.225.139 'cd /opt/cfdb && docker compose logs --tail=30 site'
-curl -sS -o /dev/null -w '%{http_code}\n' https://cfdb.marc4data.com   # 302 -> Access
+ssh $CFDB_DROPLET_HOST 'cd /opt/cfdb && docker compose logs --tail=30 site'
+curl -sS -o /dev/null -w '%{http_code}\n' https://$CFDB_SITE_HOST   # 302 -> Access
 ```
 
 A 302 is the expected answer: Cloudflare Access is redirecting to its login. A 200 from an
@@ -105,10 +120,10 @@ in `/opt/cfdb/.env`:
 
 1. **Zero Trust → Networks → Tunnels → Create a tunnel** (Cloudflared), name it `cfdb`.
 2. Copy the token into `/opt/cfdb/.env` as `CLOUDFLARE_TUNNEL_TOKEN=...`
-3. Add a **public hostname**: `cfdb.marc4data.com` → `http://site:8501`
+3. Add a **public hostname**: `$CFDB_SITE_HOST` → `http://site:8501`
    (service name, not localhost — the connector shares the Docker network).
 4. **Zero Trust → Access → Applications → Add a self-hosted application** for
-   `cfdb.marc4data.com`, policy = allow the specific email addresses.
+   `$CFDB_SITE_HOST`, policy = allow the specific email addresses.
 5. On the droplet: `cd /opt/cfdb && docker compose --profile tunnel up -d`
 
 Step 4 is what keeps strangers out. Until it exists, the hostname from step 3 would be

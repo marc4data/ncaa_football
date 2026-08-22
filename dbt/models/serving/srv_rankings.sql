@@ -25,8 +25,7 @@ select
     t.color_on_dark,
     t.logo_path,
     ao_src.as_of_ts,
-    t.team_slug,
-    t.team_display,
+    {{ team_identity('t', 'r.school') }},
     t.logo_source_url as logo_url,
     t.conference
 from {{ ref('fct_poll_rank') }} r

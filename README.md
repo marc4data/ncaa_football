@@ -1,10 +1,27 @@
 # cfdb — college football data platform
 
-Implementation code for the cfdb project: ingestion, Airflow DAGs, dbt transforms, ML
-scripts, and the Streamlit app. Architecture and decisions live in the Cowork folder's
-`CLAUDE.md`; this repo covers *how*.
+A college football analytics platform: **CFBD API → immutable raw JSON → Postgres → dbt
+(staging → marts → serving) → a Streamlit site behind Cloudflare Access.** 110,634 games
+back to 1869, seventeen pre-joined serving views, and model predictions built on a licensed
+feature store.
 
-Pipeline: **CFBD API → immutable raw JSON → Postgres → dbt (staging → marts)**.
+> ### 📄 Start with [`docs/README.md`](docs/README.md)
+>
+> The code is the easy half. `docs/` holds the decision log, 215 numbered acceptance
+> criteria, the licence boundary reasoned in writing before anything was built, and
+> twenty-four rounds of the prompts that drove the work — including the decisions that were
+> wrong and what changed. That is the part worth reading first.
+
+## First: install the git hooks
+
+```bash
+bash scripts/install_hooks.sh
+```
+
+`.git/hooks` is not version controlled, so this is per-clone. The pre-commit hook refuses
+any staged path under `cfdb_model_pack/` — that directory holds commercially licensed
+material whose terms prohibit publishing it to a public repository, and this repository is
+public. See [`docs/publication_boundary.md`](docs/publication_boundary.md).
 
 ## Setup
 

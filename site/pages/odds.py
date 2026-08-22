@@ -12,7 +12,7 @@ and a definition belongs in the warehouse where it can be tested, not in a page.
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, fmt, params, shell, states, table
+from lib import attribution, filters, fmt, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -31,6 +31,10 @@ def _weeks(season: int) -> list:
 
 
 def body(page) -> None:
+    # F2-03: the bar renders on every data page, so a scope inherited from
+    # another page is visible on arrival rather than silently in effect.
+    scope = filters.game_scope()
+    table.dataset_caption("Odds board", "srv_odds_board")
     with states.section("srv_odds_board"):
         seasons = _seasons()
         if not seasons:
@@ -38,22 +42,11 @@ def body(page) -> None:
                          "No betting lines have been loaded yet.")
             return
 
-        requested = params.get("season")
-        season = requested if requested in seasons else seasons[0]
-        with st.sidebar:
-            season = st.selectbox("Season", seasons, index=seasons.index(season))
-            weeks = _weeks(season)
-            options = ["All"] + [str(w) for w in weeks]
-            current = str(params.get("week"))
-            week_choice = st.selectbox("Week", options,
-                                       index=options.index(current)
-                                       if current in options else 0)
-            best_only = st.toggle(
-                "Best price only", value=False,
-                help="Show only the book offering the most favourable number on each side.")
-
-        week = None if week_choice == "All" else int(week_choice)
-        params.set_params(season=season, week=week)
+        # Season and week come from the global bar; only the page-specific control stays.
+        season, week = scope.season, scope.week
+        best_only = st.toggle(
+            "Best price only", value=False,
+            help="Show only the book offering the most favourable number on each side.")
 
         df = query("""
             select game_id, season, week, season_type, start_date_et,
@@ -137,7 +130,7 @@ def _board(df: pd.DataFrame) -> None:
         head = rows.iloc[0]
         st.markdown(
             f"<div class='cfdb-daygroup'>{head['away_team_display']} at "
-            f"{head['home_team_display']} · {fmt.eastern(head['start_date_et'])}</div>",
+            f"{head['home_team_display']} · {fmt.local_time(head['start_date_et'])}</div>",
             unsafe_allow_html=True)
         table.render(rows, columns, caption="srv_odds_board")
         if pd.notna(head.get("predicted_margin")):

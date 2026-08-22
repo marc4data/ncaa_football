@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# Refuse to commit licensed material. Install with: bash scripts/install_hooks.sh
+#
+# WHY THIS EXISTS RATHER THAN MOVING THE PACK OUT OF THE TREE.
+#
+# The pack is 28 MB of contractually un-publishable files sitting inside the repository
+# directory. Moving it elsewhere would be the stronger control — a file that is not in the
+# directory cannot be committed by any accident — but the notebook paths and
+# src/load_predictions.py point at it, and it is in active use for model tuning. Breaking
+# live paths to prevent a risk that has not materialised in the entire history of the repo
+# is a bad trade.
+#
+# What DOES change is the cost of the mistake. While the repo is private, a stray
+# `git add -A` is an embarrassing commit you amend. Once it is public, it is a licence
+# breach you cannot take back: you can rotate a key, you cannot un-publish a licensed file.
+#
+# So the hook holds the line until the pack moves for real, after the model round. It is
+# better than the move in one respect — it stays correct even if someone later re-creates
+# the directory or points a path back at it — and it fails LOUDLY at the moment of the
+# mistake rather than silently afterwards.
+#
+# Matched BY NAME as well as by directory, so the rule survives a rename: it is the
+# training data and the model binaries that are licensed, not the folder they happen to
+# live in today.
+#
+# The pack LICENSE says, verbatim: "You may not: ... Upload the pack files to a PUBLIC
+# REPOSITORY, shared drive, data marketplace, or notebook platform."
+set -euo pipefail
+
+# Paths that must never be staged. Directory first, then the artefacts by name.
+FORBIDDEN_PATTERNS=(
+    '^cfdb_model_pack/'
+    '^model_outputs/'
+    'training_data\.csv$'
+    '\.joblib$'
+    '\.pkl$'
+    '\.pth$'
+    'Prediction_Export_Schema.*\.md$'
+)
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+offenders=""
+while IFS= read -r path; do
+    for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+        if printf '%s' "$path" | grep -qE "$pattern"; then
+            offenders="${offenders}  ${path}"$'\n'
+            break
+        fi
+    done
+done <<< "$staged"
+
+if [ -n "$offenders" ]; then
+    cat >&2 <<EOF
+
+COMMIT REFUSED — licensed material is staged.
+
+$offenders
+The CFB Model Training Pack licence prohibits uploading pack files to a public repository,
+in those words. This repository is public, so a commit containing them is a licence breach
+that cannot be undone — history is the whole repo, and a later .gitignore does not remove
+anything already committed.
+
+Unstage them:
+
+  git restore --staged <path>
+
+If you genuinely need to commit something under one of these paths, the answer is almost
+certainly that it belongs somewhere else. Override only if you are certain:
+
+  git commit --no-verify
+
+EOF
+    exit 1
+fi
+
+exit 0

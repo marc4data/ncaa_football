@@ -58,3 +58,22 @@ def out_of_sample_chip_html(is_out_of_sample: bool) -> str:
     return chip_html("w", "Out-of-sample week",
                      "the model's training set contains no regular-season game this early; "
                      "this is extrapolation, not inference")
+
+
+SPREAD_SIGN_NOTE = (
+    "**A negative spread means the home team is favoured** — and a negative predicted "
+    "margin means the model agrees. cfdb stores margin as away points minus home points, "
+    "so both numbers point the same way."
+)
+
+
+def spread_sign_note() -> None:
+    """R-009. One line of copy, in one place, used on every page that shows a spread.
+
+    Written as a shared component rather than three captions because the confusion is not
+    Schedule-specific: the same sign appears on Scores and Matchup, and three copies of one
+    sentence is three chances for them to drift. It is also the cheapest item in the
+    register and sat open for three rounds, which is its own argument for making it
+    impossible to forget.
+    """
+    st.caption(SPREAD_SIGN_NOTE)

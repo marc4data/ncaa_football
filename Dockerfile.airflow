@@ -13,3 +13,20 @@ FROM apache/airflow:3.3.1
 # problem and is neither. The flag makes the image independent of local file modes.
 COPY --chown=airflow:root requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# A pg_dump MATCHING THE SERVER, because publishing runs from here now.
+#
+# The base image ships client 18. Both warehouses are Postgres 15, and pg_dump 18 emits
+# `SET transaction_timeout = 0` — a parameter introduced in 17 — so the restore dies on the
+# server with `unrecognized configuration parameter`. A newer client dumping for an older
+# server is unsupported in that direction; the rule is that pg_dump may be newer than the
+# server it dumps FROM, never than the server it restores INTO.
+#
+# Installed alongside rather than replacing 18, so `psql` keeps working as before and only
+# the dump is version-pinned. src/publish_marts.py selects the binary by asking the server
+# its own version, so a future upgrade to 16 needs this line changed and nothing else.
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client-15 \
+ && rm -rf /var/lib/apt/lists/*
+USER airflow

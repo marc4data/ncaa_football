@@ -1,0 +1,6 @@
+{
+  "_comment": "Site-wide display settings. ONE configured default, read from here and applied everywhere — including the as-of stamp — so that moving to viewer-local time after Week 0 is a change to how this value is RESOLVED rather than a hunt through the codebase for hardcoded zones.",
+  "display_timezone": "America/Los_Angeles",
+  "_timezone_note": "Pacific, by Marc's decision 2026-08-21. This cuts against convention — ESPN and CBS publish kickoffs in Eastern — which is exactly why AC-G.34's requirement to always show the zone abbreviation is load-bearing. '7:30 PM PDT' is unambiguous; '7:30 PM' is not.",
+  "_future": "Viewer-local is the eventual answer and was deferred because a custom JS component is a new failure mode days before a season. When it lands, it replaces display_timezone resolution, not the call sites."
+}
