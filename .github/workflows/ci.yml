@@ -56,11 +56,24 @@ jobs:
       - name: Assert no office documents are tracked in git
         run: |
           # .gitignore stops accidents; `git add -f` bypasses it. This does not.
-          if git ls-files | grep -iE '\.(docx?|xlsx?|pptx)$|^~\$|/~\$'; then
+          #
+          # TWO DELIBERATE EXCEPTIONS, and they must match `!docs/*.xlsx` in .gitignore.
+          # One policy enforced in two places is two places to change when the policy
+          # changes — this guard failed the first build after docs/ landed precisely
+          # because the ignore rule was updated and this was not.
+          #
+          # Narrow on purpose: only .xlsx, only DIRECTLY under docs/, and the name may not
+          # begin with ~$. A stray document anywhere else is still refused, a .docx in docs/
+          # is still refused, and so is docs/~$whatever.xlsx — the lock file Excel writes
+          # while a workbook is open, which is one of the things this rule exists to catch.
+          # An exception that readmits the original target is not an exception, it is a hole.
+          ALLOWED='^docs/[^~/][^/]*\.xlsx$'
+          if git ls-files | grep -vE "$ALLOWED" | grep -iE '\.(docx?|xlsx?|pptx)$|^~\$|/~\$'; then
             echo "::error::Project writing lives in the Cowork folder outside this repo — a document here is a stray copy"
+            echo "::error::The only exception is docs/*.xlsx, which are published deliverables."
             exit 1
           fi
-          echo "No tracked office documents."
+          echo "No tracked office documents outside the docs/ exception."
 
   cfbd-smoke:
     name: CFBD live smoke test
