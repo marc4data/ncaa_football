@@ -163,23 +163,158 @@ def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False,
         return False
 
 
+# Lines the databricks driver, dbt and psycopg2 all emit on the way down. Ordered by how
+# specific they are, because the useful line is rarely the last one — a stack unwinds into
+# generic wrappers, and "Retry policy max retry duration" says more than "task failed".
+ERROR_MARKERS = (
+    "Retry request would exceed",
+    "Database Error",
+    "Compilation Error",
+    "OperationalError",
+    "Exception:",
+    "Traceback (most recent call last)",
+    "Error:",
+)
+LOG_ROOT = Path(os.getenv("AIRFLOW__LOGGING__BASE_LOG_FOLDER", "/opt/airflow/logs"))
+
+
+def error_from_log(dag_id: Optional[str], run_id: Optional[str], task_id: Optional[str],
+                   try_number: Optional[int]) -> Optional[str]:
+    """The most informative error line from the task's own log file.
+
+    THE LAST RESORT THAT SHOULD RARELY BE NEEDED AND WAS. Airflow 3 runs tasks under a
+    supervisor and the exception does not always survive that boundary, so
+    `context["exception"]` can be None for a task that raised with a perfectly good message.
+    A Databricks sync failed twice with "Retry request would exceed Retry policy max retry
+    duration of 900.0 seconds" sitting in its log, and the alert email said
+    "(no error message recorded)".
+
+    An alert that links to a log it cannot read has outsourced its only job. This reads it.
+
+    Never raises, never blocks: a missing log, a permission error or a half-written file all
+    return None, and the alert goes out with whatever else it has.
+    """
+    if not all((dag_id, run_id, task_id)):
+        return None
+    try:
+        folder = LOG_ROOT / f"dag_id={dag_id}" / f"run_id={run_id}" / f"task_id={task_id}"
+        if not folder.is_dir():
+            return None
+        # Prefer this attempt's log, then any attempt — a retry-exhausted task writes one
+        # file per try and the last is the one that gave up.
+        candidates = sorted(folder.glob("attempt=*.log"))
+        if try_number is not None:
+            exact = folder / f"attempt={try_number}.log"
+            if exact.exists():
+                candidates = [exact] + [c for c in candidates if c != exact]
+        for path in candidates:
+            text = path.read_text(errors="ignore")[-200_000:]
+            hits = []
+            for line in text.splitlines():
+                for rank, marker in enumerate(ERROR_MARKERS):
+                    if marker in line:
+                        # Structured logs wrap the message in JSON; pull the event out so
+                        # the email carries a sentence rather than a serialised record.
+                        message = line
+                        if '"event":"' in line:
+                            try:
+                                message = json.loads(line[line.index("{"):])["event"]
+                            except Exception:                      # noqa: BLE001
+                                pass
+                        hits.append((rank, message.strip()[:600]))
+                        break
+            if hits:
+                hits.sort(key=lambda pair: pair[0])
+                return hits[0][1]
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"could not read the task log for an error message: {exc}")
+    return None
+
+
 def build_event(context: Dict[str, Any]) -> Dict[str, Any]:
-    """Flatten an Airflow task context into a record worth reading later."""
+    """Flatten an Airflow task context into a record worth reading later.
+
+    THREE SOURCES FOR THE ERROR, in descending order of directness, because depending on
+    one of them is how an alert ends up saying nothing. `exception` is the best answer and
+    is absent under Airflow 3's supervisor more often than it should be; `reason` is what
+    Airflow itself says happened; the log is where the message provably was.
+
+    `error_source` travels with it so a reader knows which one answered — "from the task
+    log" and "from the raised exception" are different levels of confidence and the email
+    should not pretend otherwise.
+    """
     task_instance = context.get("task_instance")
     exception = context.get("exception")
+    dag_id = getattr(task_instance, "dag_id", None) or context.get("dag_id")
+    task_id = getattr(task_instance, "task_id", None) or context.get("task_id")
+    run_id = getattr(task_instance, "run_id", None)
+    try_number = getattr(task_instance, "try_number", None)
+
+    error = str(exception) if exception else None
+    source = "raised exception" if error else None
+    if not error:
+        reason = context.get("reason")
+        if reason:
+            error, source = str(reason), "Airflow reason"
+    if not error:
+        from_log = error_from_log(dag_id, run_id, task_id, try_number)
+        if from_log:
+            error, source = from_log, "task log"
+
     return {
         "at": datetime.now(timezone.utc).isoformat(),
-        "dag_id": getattr(task_instance, "dag_id", None) or context.get("dag_id"),
-        "task_id": getattr(task_instance, "task_id", None) or context.get("task_id"),
-        "run_id": getattr(task_instance, "run_id", None),
-        "try_number": getattr(task_instance, "try_number", None),
+        "dag_id": dag_id,
+        "task_id": task_id,
+        "run_id": run_id,
+        "try_number": try_number,
         "log_url": getattr(task_instance, "log_url", None),
-        "error": str(exception) if exception else None,
+        "error": error,
+        "error_source": source,
         "traceback": (
             "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
             if isinstance(exception, BaseException) else None
         ),
     }
+
+
+def already_alerted(event: Dict[str, Any], window_seconds: int = 600) -> bool:
+    """Whether this exact failure has already been emailed.
+
+    Identity is (dag_id, task_id, run_id, try_number) — the four things that make one
+    attempt distinct. A retry is a new try_number and alerts again, which is correct: the
+    second failure of the same task is news.
+
+    Read from the append-only record rather than from memory, because the callback may run
+    in a fresh process each time. A window bounds the scan so this stays cheap as the log
+    grows; anything older than ten minutes is a different incident by any useful definition.
+    """
+    keys = ("dag_id", "task_id", "run_id", "try_number")
+    identity = tuple(event.get(k) for k in keys)
+    if not any(identity):
+        return False
+    try:
+        if not ALERT_LOG.exists():
+            return False
+        cutoff = datetime.now(timezone.utc).timestamp() - window_seconds
+        for line in ALERT_LOG.read_text(errors="ignore").splitlines()[-400:]:
+            try:
+                past = json.loads(line)
+            except Exception:                                      # noqa: BLE001
+                continue
+            if past.get("at") == event.get("at"):
+                continue                                # the record we just wrote
+            if tuple(past.get(k) for k in keys) != identity:
+                continue
+            try:
+                when = datetime.fromisoformat(str(past.get("at"))).timestamp()
+            except Exception:                                      # noqa: BLE001
+                continue
+            if when >= cutoff:
+                return True
+    except Exception as exc:                                       # noqa: BLE001
+        # Never let dedup logic cost an alert. A failure to read the log means send it.
+        print(f"could not check for duplicate alerts ({exc}); sending anyway")
+    return False
 
 
 def failure_callback(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -193,6 +328,21 @@ def failure_callback(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     """
     event = build_event(context or {})
     logged = record_failure(event)
+
+    if already_alerted(event):
+        # ONE EMAIL PER FAILURE. Airflow 3 invoked this callback twice, two seconds apart,
+        # for the same (dag, task, run, attempt) — so a single Databricks failure sent two
+        # identical alerts. Duplicate alerts are worse than merely noisy: they train the
+        # reader to skim, and the one that matters arrives looking like the one that did
+        # not.
+        #
+        # Deduped on the failure's own identity rather than on time, so a genuine retry
+        # (a new attempt) still alerts. The local record above is written FIRST and
+        # unconditionally — the durable evidence keeps both, and only the email is
+        # suppressed.
+        print(f"suppressing a duplicate alert for {event.get('dag_id')}."
+              f"{event.get('task_id')} attempt {event.get('try_number')}")
+        return {"logged": logged, "emailed": False, "duplicate": True}
 
     # Defence in depth. `triage` already promises never to raise, but that promise lives in
     # another module and one careless edit there would silently cost us the email — the
