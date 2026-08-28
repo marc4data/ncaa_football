@@ -4,6 +4,13 @@ psycopg2-binary>=2.9
 dbt-core>=1.9
 dbt-postgres>=1.9
 dbt-databricks>=1.12
+# PINNED BECAUSE WE USE ITS PRIVATE API. src/load_raw_to_databricks.connect passes
+# _socket_timeout and _retry_stop_after_attempts_duration, underscore-prefixed knobs with no
+# stability guarantee. Until now this arrived transitively through dbt-databricks and was
+# free to move under us on any rebuild; a minor bump that renamed either kwarg would make
+# every sync fail at connect() with a TypeError. Declared and pinned so the upgrade is a
+# deliberate edit that can be tested.
+databricks-sql-connector==4.4.0
 streamlit>=1.40
 sqlalchemy>=2.0
 pandas>=2.0

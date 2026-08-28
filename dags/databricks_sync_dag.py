@@ -50,6 +50,13 @@ default_args = {
     # just be the same warehouse, still cold.
     "retries": 1,
     "retry_delay": timedelta(minutes=15),
+    # A STALLED TASK MUST NOT OUTLIVE ITS OWN SCHEDULE. This DAG is daily, and nothing here
+    # bounded a run: on 23 August one task blocked for over 17 minutes inside a single socket
+    # read and was killed by the scheduler's heartbeat timeout rather than by any limit of
+    # its own — which is a worse way to end, because it produces no summary and no traceback.
+    # The whole of 28 August's work took 20 minutes across all three tasks, so 45 is generous
+    # for the slowest of them while still guaranteeing the run cannot reach tomorrow's.
+    "execution_timeout": timedelta(minutes=45),
     "on_failure_callback": failure_callback,
 }
 
