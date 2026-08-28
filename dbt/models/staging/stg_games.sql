@@ -1,9 +1,29 @@
 -- One row per game, across every season landed in raw.
 --
--- Dedup is keyed on the **whole params object**, not on the season alone. The backfill
--- fetches each season twice — once for `seasonType=regular`, once for `postseason` — so
--- deduping per season would silently discard the bowl games. Keying on params generalises:
--- one surviving file per distinct request, whatever dimensions that request had.
+-- DEDUP HAPPENS TWICE, ON TWO DIFFERENT KEYS, BECAUSE THERE ARE TWO DIFFERENT DUPLICATES.
+--
+-- 1. Per params, keeping the newest FILE. The backfill fetches each season twice — once for
+--    `seasonType=regular`, once for `postseason` — so deduping per season would silently
+--    discard the bowl games. Keying on the whole params object generalises: one surviving
+--    file per distinct request, whatever dimensions that request had.
+--
+-- 2. Per game_id, keeping the row from the newest file. Step 1 is only sufficient while
+--    requests are DISJOINT, and it has no answer for OVERLAPPING ones. cfbd_scores_refresh
+--    fetches `{year, week, seasonType}`; the backfill holds `{year, seasonType}` for the
+--    whole season. Different params, so different partitions, so both files survive step 1
+--    — and every game the week-scoped file shares with the season-wide one is emitted
+--    twice. That is 211 duplicate game_ids on the first live run of the scores DAG, and
+--    nine failing tests: the unique tests on stg_games and fct_game, the schedule
+--    reconciliation assertions, and srv_team_game_log parity.
+--
+--    It had never fired because nothing in the project fetched a single week until the
+--    scores DAG did. Two latent faults that only meet on first use.
+--
+--    Newest file wins, matching step 1, so a refetch supersedes rather than races: the
+--    2-hourly scores fetch is by construction newer than the backfill it overlaps.
+--
+-- Verified as a strict no-op for history: across 157 seasons of raw, 1869 to 2025, this
+-- drops zero rows. Only 2026 changes, and only by the 211 it is here to remove.
 --
 -- JSON access goes through the dispatched macros (see macros/json.sql); the dedup uses a
 -- window function rather than Postgres' `distinct on`, which Spark has no equivalent for.
@@ -12,6 +32,7 @@ with successful_fetches as (
 
     select
         params,
+        filename,
         {{ json_get_object('content', 'data') }} as payload,
         row_number() over (
             partition by params
@@ -22,11 +43,29 @@ with successful_fetches as (
 
 ),
 
-games as (
+exploded as (
 
-    select {{ json_array_elements('payload') }} as game
+    select
+        filename,
+        {{ json_array_elements('payload') }} as game
     from successful_fetches
     where recency = 1
+
+),
+
+games as (
+
+    select game
+    from (
+        select
+            game,
+            row_number() over (
+                partition by cast({{ json_get_string('game', 'id') }} as int)
+                order by filename desc
+            ) as game_recency
+        from exploded
+    ) ranked
+    where game_recency = 1
 
 )
 
