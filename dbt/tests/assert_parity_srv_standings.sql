@@ -1,3 +1,4 @@
+{{ config(tags=['parity']) }}
 -- PARITY GATE: srv_standings must be row-for-row identical to mart_team_season_record
 -- before the site is repointed. This test is what converts the cutover from a calendar
 -- decision into a proof.

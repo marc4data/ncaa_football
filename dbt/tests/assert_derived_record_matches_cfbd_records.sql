@@ -29,6 +29,28 @@ cfbd_flat as (
     from cfbd
 ),
 
+-- A 0-0 CFBD record is NOT a claim that the team has played no games. It is the absence of
+-- a second opinion, and there is nothing to reconcile against an absence.
+--
+-- /records lags /games at the start of a season. On 28 August 2026, after the opening
+-- Thursday, CFBD reported 0-0 for every 2026 team while the game spine already carried 49
+-- completed games — so 33 FBS/FCS team-seasons diverged, ALL of them with us ahead and none
+-- behind. Delaware State had beaten Stony Brook 41-34 and /records still said 0-0. Our side
+-- was right; theirs had not been published yet.
+--
+-- This is the same scoping rule the test already applies one level up — "seasons where
+-- /records was actually pulled" — moved to team-season grain, where the lag actually lives.
+-- It is deliberately NOT a tolerance for being ahead: the moment CFBD publishes any record
+-- for a team, reconciliation is strict again in both directions.
+--
+-- The teeth this keeps are the ones that matter. The 2020 spring-season gap this test found
+-- was CFBD AHEAD of us — 21 FCS team-seasons where we were missing 532 games — and that
+-- still fails loudly, because those rows have a nonzero CFBD record.
+reconcilable as (
+    select * from cfbd_flat
+    where coalesce(cfbd_wins, 0) + coalesce(cfbd_losses, 0) > 0
+),
+
 -- Scoped to FBS and FCS. Six 2025 Division II/III teams diverge by exactly one game, in
 -- both directions (we count one more for Augsburg, one fewer for Angelo State). That is
 -- CFBD's own coverage disagreeing with itself at the lowest classifications — /records and
@@ -46,5 +68,5 @@ select
     o.season, o.team_id, o.wins as derived_wins, c.cfbd_wins,
     o.losses as derived_losses, c.cfbd_losses
 from ours o
-join cfbd_flat c on c.season = o.season and c.team_id = o.team_id
+join reconcilable c on c.season = o.season and c.team_id = o.team_id
 where o.wins <> c.cfbd_wins or o.losses <> c.cfbd_losses

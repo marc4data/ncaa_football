@@ -1,3 +1,4 @@
+{{ config(tags=['parity']) }}
 -- PARITY GATE: srv_team_game_log vs mart_team_schedule. See
 -- assert_parity_srv_standings.sql for why EXCEPT rather than a join, for the scaffolding
 -- note — this test is deleted when the mart it protects is dropped — and for the rule that
