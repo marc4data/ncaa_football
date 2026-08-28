@@ -1,4 +1,19 @@
+{{ config(materialized='table') }}
+
 -- One row per game, across every season landed in raw.
+--
+-- MATERIALIZED AS A TABLE, and alone among the staging models in that. Staging is views by
+-- convention because a view costs nothing to build and the work is trivial. This model
+-- stopped being trivial when the game_id dedup below was added: a window function is an
+-- optimization fence, and this view is referenced FOUR times — twice inside fct_game alone,
+-- once for a GROUP BY and once joined to four other relations. As a view each reference is
+-- re-inlined and re-sorted, and the planner, unable to push predicates through the fence,
+-- chose a plan for fct_game that had not finished after eight minutes against a build that
+-- previously took under thirty seconds for the whole 27-model selection.
+--
+-- Reading the view standalone is 216 ms. The cost was never the dedup; it was paying for it
+-- once per reference and denying the planner any statistics. As a table the dedup runs once
+-- per dbt run and every downstream model reads an analyzed relation.
 --
 -- DEDUP HAPPENS TWICE, ON TWO DIFFERENT KEYS, BECAUSE THERE ARE TWO DIFFERENT DUPLICATES.
 --
