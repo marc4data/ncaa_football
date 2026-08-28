@@ -53,6 +53,35 @@ MAX_LITERAL_BYTES = 6_000_000
 CHUNK_BYTES = 4_000_000
 
 
+# A single statement may block for this long before the client gives up on it.
+#
+# THE DEFAULT IS 900 SECONDS AND IT IS WORSE THAN IT SOUNDS. On 20, 21 and 23 August one
+# MERGE per run stopped responding — 915s, 929s, 955s, 988s, 1037s — and the error the
+# connector raised was "Retry request would exceed Retry policy max retry duration of 900.0
+# seconds". That reads as a retry storm. It is not: the same log line records
+# `"attempt": "1/30"`. Nothing was ever retried. One request hung, and when it finally came
+# back the connector compared elapsed time against a budget measured from the START of the
+# first attempt, found 928 > 900, and refused to continue. A 15-minute silent stall was
+# reported as a retry-policy violation.
+#
+# Two things follow, and the second is the reason this matters:
+#
+#   1. Raising the budget would not have helped. There was no retry to permit.
+#   2. Blocking for 900s exceeds Airflow's 300s task-heartbeat timeout, so the scheduler
+#      marked the task a zombie and killed it mid-run. `load_endpoints` retries each
+#      endpoint three times against exactly this kind of flakiness, and it never got to use
+#      attempts two and three — the worker was gone. The hang disabled the recovery built
+#      for it.
+#
+# 300s is generous against observed behaviour — the 28 August sync loaded 70 files across 35
+# endpoints in 339s total — and comfortably under the heartbeat, so a stall now surfaces as a
+# prompt error the per-endpoint retry can actually act on.
+#
+# The hang has not recurred since 23 August and its server-side cause was never proven from
+# the client log; this bounds the blast radius rather than claiming to have fixed it.
+STATEMENT_TIMEOUT_SECONDS = 300
+
+
 def connect():
     missing = [k for k in ("DATABRICKS_SERVER_HOSTNAME", "DATABRICKS_HTTP_PATH",
                            "DATABRICKS_TOKEN") if not os.getenv(k)]
@@ -62,6 +91,10 @@ def connect():
         server_hostname=os.environ["DATABRICKS_SERVER_HOSTNAME"],
         http_path=os.environ["DATABRICKS_HTTP_PATH"],
         access_token=os.environ["DATABRICKS_TOKEN"],
+        # Underscore-prefixed: these are the connector's private knobs, so the dependency is
+        # pinned in requirements.txt rather than floating in transitively via dbt-databricks.
+        _socket_timeout=STATEMENT_TIMEOUT_SECONDS,
+        _retry_stop_after_attempts_duration=STATEMENT_TIMEOUT_SECONDS,
     )
 
 

@@ -151,7 +151,24 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
             trigger_rule="all_done",
         )
 
-        fetch >> load >> dbt_run >> dbt_test >> publish >> capture_dq
+        # CAPTURE HANGS OFF dbt_test, NOT OFF publish, AND THAT IS WHAT MAKES THE RUN HONEST.
+        #
+        # A DagRun takes its state from its LEAF tasks. While this was a single chain ending
+        # `publish >> capture_dq`, capture_dq — correctly `all_done` — succeeded whether or
+        # not publish had run, and being the only leaf it reported the whole run as SUCCESS.
+        #
+        # That is exactly the green-and-wrong signature this project keeps finding. Between
+        # 23 and 28 August every weekly refresh reported success while publish was
+        # `upstream_failed` behind a red dbt test, and the site sat five days stale with
+        # nothing on the DAG list saying so. The publish is the point of the pipeline; a run
+        # that skips it has not succeeded, whatever the last task did.
+        #
+        # Fanning the two out makes publish a leaf in its own right, so its failure reaches
+        # the run state — while capture_dq still records test history on every outcome,
+        # which is the property its trigger rule exists to guarantee. capture_dq does not
+        # read anything publish writes, so the ordering was incidental to begin with.
+        dbt_test >> capture_dq
+        fetch >> load >> dbt_run >> dbt_test >> publish
     return dag
 
 
