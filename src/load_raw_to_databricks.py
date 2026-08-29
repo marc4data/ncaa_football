@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -364,28 +365,62 @@ def pending_by_endpoint(cursor, endpoints: List[str]) -> Dict[str, int]:
     return pending
 
 
+RETRY_ATTEMPTS = 3
+
+# Seconds between attempts. A serverless warehouse that refuses a session says "please try
+# again later", and the previous loop retried instantly — which asks the same question of the
+# same cold warehouse three times in a row and calls that resilience.
+RETRY_BACKOFF_SECONDS = 20
+
+
+def with_retry(operation, label: str, attempts: int = RETRY_ATTEMPTS,
+               backoff: int = RETRY_BACKOFF_SECONDS):
+    """Run `operation`, retrying a flaky warehouse. Raises the last error if all fail.
+
+    ONE RETRY POLICY, BOTH CONNECTIONS. This existed inline in `load_endpoints` and nowhere
+    else, so `sync` — which opens its own connection twenty lines above to work out what is
+    pending — had no protection at all. On 29 August that unprotected connect is exactly
+    where a warehouse refusal landed, and the whole task died in the pre-flight check without
+    the retry logic written for that failure ever running.
+
+    Extracted rather than copied, so a third call site cannot reintroduce the gap.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as exc:                                   # noqa: BLE001
+            print(f"  {label}: attempt {attempt}/{attempts} failed — "
+                  f"{type(exc).__name__}: {str(exc)[:120]}")
+            if attempt == attempts:
+                raise
+            time.sleep(backoff)
+
+
+def _load_one(endpoint: str, seasons: Optional[List[str]]) -> int:
+    """One endpoint, on its own short-lived connection."""
+    with connect() as connection:
+        with connection.cursor() as cursor:
+            _ensure_schema(cursor)
+            return load_endpoint(cursor, endpoint, seasons)
+
+
 def load_endpoints(endpoints: List[str],
                    seasons: Optional[List[str]] = None) -> Tuple[int, List[str]]:
     """Load each endpoint, one short-lived connection at a time, three attempts each.
 
     One connection per endpoint rather than one for the whole run: a single session held
     open for hours against a serverless warehouse is what died last time, mid-file.
+
+    A failing endpoint is recorded and the rest still run — one bad endpoint must not cost
+    the other thirty-four.
     """
     failed: List[str] = []
     total = 0
     for endpoint in endpoints:
-        for attempt in (1, 2, 3):
-            try:
-                with connect() as connection:
-                    with connection.cursor() as cursor:
-                        _ensure_schema(cursor)
-                        total += load_endpoint(cursor, endpoint, seasons)
-                break
-            except Exception as exc:
-                print(f"  {endpoint}: attempt {attempt} failed — {type(exc).__name__}: "
-                      f"{str(exc)[:120]}")
-                if attempt == 3:
-                    failed.append(endpoint)
+        try:
+            total += with_retry(lambda e=endpoint: _load_one(e, seasons), endpoint)
+        except Exception:                                          # noqa: BLE001
+            failed.append(endpoint)
     return total, failed
 
 
@@ -396,10 +431,14 @@ def sync(endpoints: List[str], seasons: Optional[List[str]] = None) -> dict:
     nothing else, so running it twice — or running it after a manual load — costs one query
     and changes nothing. That is what lets it sit on a schedule without supervision.
     """
-    with connect() as connection:
-        with connection.cursor() as cursor:
-            _ensure_schema(cursor)
-            pending = pending_by_endpoint(cursor, endpoints)
+    def _pending():
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                _ensure_schema(cursor)
+                return pending_by_endpoint(cursor, endpoints)
+
+    # Retried like everything else. This connect used to be the one bare call in the module.
+    pending = with_retry(_pending, "pending check")
 
     if not pending:
         return {"checked": len(endpoints), "pending_endpoints": 0, "loaded": 0, "failed": []}
