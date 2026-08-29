@@ -57,23 +57,37 @@ SCORES_SELECTOR = (
     "--select +srv_scoreboard +srv_schedule +srv_matchup +srv_team_game_log +srv_today_edges"
 )
 
-# THE PARITY GATES CANNOT BE SATISFIED BY THIS DAG, SO THIS DAG MUST NOT RUN THEM.
+# A TEST THIS DAG CANNOT SATISFY IS A TEST THIS DAG MUST NOT RUN.
 #
-# They compare a serving view against the LEGACY MART IT REPLACES — srv_team_game_log against
-# mart_team_schedule, srv_standings against mart_team_season_record. The legacy mart is not an
-# ancestor of the view that replaces it, so the selector above rebuilds one side and never the
-# other, and the two drift a little further with every run. On 28 August that drift reached
-# four team-rows and blocked the publish of an entire game day.
+# Five tests compare a LEGACY MART — mart_team_schedule, mart_team_season_record — against a
+# model the selector above rebuilds. Neither mart is an ancestor of any of the five views, so
+# this DAG refreshes one side of the comparison and never the other. They do not measure
+# correctness here; they measure how long it has been since the last full build.
 #
-# This is not a tolerance for parity failing. The gates keep their full authority on the
-# weekly refresh, which rebuilds +tag:production — both sides — and is the only place a parity
-# comparison is meaningful. Running them here measured nothing except how long it had been
-# since the last full build. Per the tests' own rule, the question when parity fails is which
-# side is right, and a comparison between a fresh side and a stale one cannot answer it.
+# This cost four separate outages in one week, each looking like a different bug:
 #
-# They are scaffolding: both files are deleted when the marts they protect are dropped, and
-# this exclusion goes with them.
-TEST_EXCLUDE = "--exclude tag:parity"
+#   assert_schedule_matches_games                 blocked the first run after the dedup fix
+#   assert_parity_srv_team_game_log               blocked a game day at four team-rows
+#   assert_games_played_reconciles_to_schedule    blocked the 02:00 run on 29 August
+#   assert_derived_record_matches_cfbd_records    (a different cause — CFBD lag, since scoped)
+#
+# The tag is `legacy_mart` and not `parity` because parity named only two of the five. The
+# property that matters is reading a legacy mart, not being a parity gate: the reconciliation
+# assertions have exactly the same defect and were tagged one at a time as each surfaced.
+#
+# NOT a tolerance for these failing. All five keep full authority on the weekly refresh, which
+# rebuilds +tag:production — both sides — and is the only place the comparison means anything.
+# Per the parity gates' own rule, "which side is right" cannot be answered by comparing a
+# fresh side to a stale one.
+#
+# Mart-only invariants are deliberately NOT tagged — assert_wins_equal_losses_per_season,
+# assert_record_totals_reconcile, assert_listed_teams_have_attributes read the mart and
+# nothing else, so a stale mart still satisfies them and they keep working here. The rule is
+# crossing the boundary, not touching a mart, and tests/test_dag_structure.py enforces it.
+#
+# Scaffolding: these files are deleted when the marts they protect are dropped, and this
+# exclusion goes with them.
+TEST_EXCLUDE = "--exclude tag:legacy_mart"
 
 default_args = {
     "owner": "cfdb",

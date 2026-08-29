@@ -1,3 +1,7 @@
+{{ config(tags=['legacy_mart']) }}
+-- TAGGED `legacy_mart`: excluded from cfbd_scores_refresh, which rebuilds one side of
+-- this comparison and not the other. Full authority on the weekly +tag:production
+-- build, which rebuilds both. See dags/scores_refresh_dag.py TEST_EXCLUDE.
 -- Reconciliation (data quality rule #4): the mart's team-game count must reconcile to the
 -- schedule it was built from, **per season**.
 --

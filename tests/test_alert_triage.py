@@ -210,8 +210,8 @@ def test_email_is_still_sent_when_triage_explodes(monkeypatch, tmp_path):
 
     sent = {}
 
-    def capture(event, raise_on_error=False, summary=None):
-        sent["subject"], sent["body"] = alerting.format_email(event, summary)
+    def capture(event, raise_on_error=False, summary=None, triage_note=None):
+        sent["subject"], sent["body"] = alerting.format_email(event, summary, triage_note)
         return True
 
     monkeypatch.setattr(alerting, "triage",
@@ -240,3 +240,52 @@ def test_the_suite_cannot_reach_the_network_by_accident(assert_no_network, tmp_p
 
     assert result["triaged"] is False
     assert result["emailed"] is False
+
+
+# --- a broken summariser must announce itself ---------------------------------------------
+
+def test_an_unavailable_summary_says_why_in_the_email(monkeypatch):
+    """A working fallback is the worst place for a degradation to hide.
+
+    The key in .env was rejected with "API key is invalid" on 21 consecutive alerts. Every
+    one still sent, the plain email is perfectly reasonable, and the only trace was a line
+    of stdout inside a failing task's log. Nothing in the email said a summary had been
+    attempted at all, so the feature looked switched off rather than broken.
+    """
+    from src import alerting
+    event = {"dag_id": "d", "task_id": "t", "error": "boom"}
+    _, body = alerting.format_email(
+        event, None, "HTTP 401 from the Anthropic API — API key is invalid.")
+    assert "No readable summary" in body
+    assert "API key is invalid" in body
+    # The alert itself must still be complete — the note explains an absence, never replaces
+    # content.
+    assert "TECHNICAL DETAIL" in body and "boom" in body
+
+
+def test_a_successful_summary_carries_no_apology(monkeypatch):
+    """The note appears only when there is something missing to explain."""
+    from src import alerting
+    summary = {"headline": "h", "what_happened": "w", "impact": "i", "likely_fix": "f"}
+    _, body = alerting.format_email({"dag_id": "d", "task_id": "t"}, summary, None)
+    assert "No readable summary" not in body
+
+
+def test_the_reason_is_recorded_for_every_way_triage_can_give_up(monkeypatch):
+    """`unavailable_reason` is what the email reads, so it must be set on every None path —
+    a reason of None would put the alert straight back to saying nothing."""
+    from src import alert_triage
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert alert_triage.triage(EVENT) is None
+    assert "ANTHROPIC_API_KEY" in (alert_triage.unavailable_reason() or "")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(alert_triage, "_post",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("network down")))
+    assert alert_triage.triage(EVENT) is None
+    assert "network down" in (alert_triage.unavailable_reason() or "")
+
+    monkeypatch.setattr(alert_triage, "_post",
+                        lambda *a, **k: {"content": [{"type": "text", "text": "not json"}]})
+    assert alert_triage.triage(EVENT) is None
+    assert "could not be parsed" in (alert_triage.unavailable_reason() or "")

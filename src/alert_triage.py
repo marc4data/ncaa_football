@@ -177,14 +177,46 @@ def _parse(text: str) -> Optional[Dict[str, str]]:
     return {k: str(v).strip() for k, v in parsed.items() if isinstance(v, (str, int, float))}
 
 
+# Why the most recent triage() gave up. Read by the alerting module so a broken summariser
+# is stated IN THE EMAIL rather than only in a task log nobody opens.
+#
+# THIS EXISTS BECAUSE THE SILENT VERSION COST US THREE WEEKS. The key in .env was rejected
+# with "API key is invalid" on 21 consecutive alerts. Every one of them still sent — the
+# fallback worked exactly as designed — so nothing looked broken, the plain email is a
+# perfectly reasonable email, and the only trace was one stdout line inside a failing task's
+# log. A degradation that hides inside a working fallback is the hardest kind to notice.
+#
+# Process-local module state is safe here: Airflow's LocalExecutor runs each task in its own
+# process, and the value is set and read within one callback.
+_unavailable_reason: Optional[str] = None
+
+
+def unavailable_reason() -> Optional[str]:
+    """Why the last triage() returned None, or None if it produced a summary."""
+    return _unavailable_reason
+
+
+def _api_error_message(body: str) -> str:
+    """The human sentence out of an API error body, falling back to the raw text."""
+    try:
+        return json.loads(body).get("error", {}).get("message", "") or body
+    except Exception:                                              # noqa: BLE001
+        return body
+
+
 def triage(event: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """Ask Claude to explain this failure. Returns None if it cannot, and never raises.
 
     None is a first-class outcome, not an error: no API key configured is the normal state
-    on a fresh machine, and the caller sends the plain email instead.
+    on a fresh machine, and the caller sends the plain email instead. What it must never be
+    is SILENT — see `unavailable_reason`.
     """
+    global _unavailable_reason
+    _unavailable_reason = None
+
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
+        _unavailable_reason = "ANTHROPIC_API_KEY is not set"
         return None
 
     try:
@@ -200,17 +232,24 @@ def triage(event: Dict[str, Any]) -> Optional[Dict[str, str]]:
         result = _parse(text)
         if result:
             result["model"] = response.get("model", MODEL)
-        return result
+            return result
+        _unavailable_reason = f"{MODEL} replied but the summary could not be parsed"
+        return None
     except urllib.error.HTTPError as exc:
         # The body carries the real reason (bad key, rate limit); the status alone does not.
         detail = ""
         try:
             detail = exc.read().decode("utf-8")[:200]
-        except Exception:
+        except Exception:                                          # noqa: BLE001
             pass
+        _unavailable_reason = f"HTTP {exc.code} from the Anthropic API"
+        message = _api_error_message(detail).strip()
+        if message:
+            _unavailable_reason += f" — {message}"
         print(f"ALERT: triage unavailable (HTTP {exc.code}) {detail}")
         return None
     except Exception as exc:  # never raise from an alert path
+        _unavailable_reason = f"{type(exc).__name__}: {exc}"
         print(f"ALERT: triage unavailable ({type(exc).__name__}: {exc})")
         return None
 

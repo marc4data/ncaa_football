@@ -83,3 +83,71 @@ def test_the_private_connector_api_we_depend_on_is_pinned():
     rebuild could rename either one and fail every sync at connect()."""
     reqs = (DAGS.parent / "requirements.txt").read_text()
     assert "databricks-sql-connector==" in reqs
+
+
+# --- the legacy-mart boundary ------------------------------------------------------------
+
+LEGACY_MARTS = ("mart_team_schedule", "mart_team_season_record")
+
+# What cfbd_scores_refresh rebuilds: the five serving views and their ancestors. stg_games is
+# the ancestor that actually moves — every completed game changes it — so it stands in for
+# the rebuilt side here.
+REBUILT = ("stg_games", "srv_scoreboard", "srv_schedule", "srv_matchup",
+           "srv_team_game_log", "srv_today_edges", "srv_standings")
+
+
+TAG_DIRECTIVE = re.compile(r"config\s*\(\s*tags\s*=\s*\[[^\]]*['\"]legacy_mart['\"]")
+
+
+def _dbt_tests():
+    for path in sorted((DAGS.parent / "dbt" / "tests").glob("*.sql")):
+        yield path, path.read_text()
+
+
+def _is_tagged(src: str) -> bool:
+    """Match the dbt config DIRECTIVE, not the word.
+
+    The first version tested `"legacy_mart" in src` and passed on a file whose config line
+    had been deleted, because the comment explaining the tag still mentions it by name. That
+    is the third time in this repo a source-reading test has matched its own prose — the
+    week-floor copy test and the publish-leaf test both did it first.
+    """
+    return bool(TAG_DIRECTIVE.search(src))
+
+
+def test_every_test_crossing_the_legacy_mart_boundary_is_tagged():
+    """The rule is CROSSING the boundary, not touching a mart.
+
+    A test comparing a legacy mart against a model cfbd_scores_refresh rebuilds is measuring
+    how long it has been since the last full build, because that DAG refreshes one side and
+    never the other. Four separate outages in the week of 24 August were this same defect
+    wearing a different test name each time, tagged one at a time as each surfaced. This
+    fails on the fifth rather than waiting for it to block another game day.
+    """
+    untagged = []
+    for path, src in _dbt_tests():
+        refs = re.findall(r"ref\('([a-z_0-9]+)'\)", src)
+        crosses = (any(r in LEGACY_MARTS for r in refs)
+                   and any(r in REBUILT for r in refs))
+        if crosses and not _is_tagged(src):
+            untagged.append(path.name)
+    assert not untagged, (
+        "these compare a legacy mart against a model cfbd_scores_refresh rebuilds and must "
+        f"carry {{{{ config(tags=['legacy_mart']) }}}}: {untagged}")
+
+
+def test_mart_only_invariants_keep_their_coverage_in_the_scores_dag():
+    """The exclusion must stay narrow. A test that reads ONLY a legacy mart still holds when
+    that mart is stale — it was internally consistent when built — so tagging it would drop
+    real coverage from the every-two-hours DAG to no purpose."""
+    over_tagged = []
+    for path, src in _dbt_tests():
+        refs = set(re.findall(r"ref\('([a-z_0-9]+)'\)", src))
+        if _is_tagged(src) and not (refs & set(REBUILT)):
+            over_tagged.append(path.name)
+    assert not over_tagged, (
+        f"these read no rebuilt model, so the tag costs coverage for nothing: {over_tagged}")
+
+
+def test_the_scores_dag_excludes_the_tag_it_relies_on():
+    assert "--exclude tag:legacy_mart" in _code("scores_refresh_dag.py")
