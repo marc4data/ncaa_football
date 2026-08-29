@@ -87,7 +87,28 @@ case "$VERB" in
         # The dump arrives on stdin and carries --clean --if-exists, so this replaces each
         # table rather than appending. Marts are derived data; a blunt replace is always
         # safe and is the reason no merge logic exists here.
-        "${PSQL[@]}"
+        #
+        # --single-transaction IS WHAT KEEPS THE SITE UP WHILE THIS RUNS.
+        #
+        # Without it psql autocommits statement by statement, so the DROP of each table
+        # lands immediately and the table stays gone until its COPY finishes. For a 333 MB
+        # dump that is minutes of a live site reading empty tables — and if the restore dies
+        # partway, the drops are already committed and the site stays empty until some later
+        # publish happens to succeed.
+        #
+        # That is not hypothetical. On 29 August the 20:00 restore was killed 34 minutes in;
+        # the site served nothing from 20:14 until 21:00, in the middle of a game day, and
+        # the only reason it recovered was the retry landing. ON_ERROR_STOP was already set
+        # and did not help: it stops on error, it does not undo what already committed.
+        #
+        # Inside one transaction, Postgres' transactional DDL means readers keep seeing the
+        # OLD tables until commit and the NEW ones after. A failure now rolls back to the
+        # previous good data instead of leaving a hole.
+        #
+        # The cost is honest and much smaller: DROP takes ACCESS EXCLUSIVE, so readers block
+        # for the length of the restore — seconds to a couple of minutes — rather than being
+        # served an empty page. A slow page beats a blank one, and a rollback beats both.
+        "${PSQL[@]}" --single-transaction
         ;;
 
     grant)

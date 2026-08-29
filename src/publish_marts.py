@@ -61,12 +61,38 @@ def _use_restricted() -> bool:
     return bool(PUBLISH_KEY)
 
 
+# How long one publish verb may run before we give up on it.
+#
+# A HANGING RESTORE IS THE WORST CASE, so it gets a bound. On 29 August the 20:00 restore ran
+# for 34 minutes before the worker was killed — long past Airflow's task-heartbeat timeout, so
+# it died without a traceback, and the retry did not start until the ten-minute retry delay
+# had also elapsed. A healthy restore of the same 333 MB dump takes two to ten minutes.
+#
+# Failing at twelve turns a 46-minute outage into a prompt, retryable error, and the retry is
+# where recovery actually comes from. Paired with --single-transaction on the remote, a
+# timeout now rolls back rather than leaving the site holding empty tables.
+PUBLISH_TIMEOUT_SECONDS = int(os.getenv("SERVING_PUBLISH_TIMEOUT", "720"))
+
+# The cheap verbs answer in seconds; only the restore streams a dump.
+QUICK_VERB_TIMEOUT_SECONDS = 120
+
+
 def _publish_ssh(verb: str, *, stdin: bytes = b"") -> subprocess.CompletedProcess:
     """Invoke one verb of the forced command. The remote side chooses nothing."""
-    return subprocess.run(
-        ["ssh", "-i", PUBLISH_KEY, "-o", "BatchMode=yes",
-         "-o", "StrictHostKeyChecking=accept-new", PUBLISH_HOST, verb],
-        input=stdin, capture_output=True)
+    timeout = PUBLISH_TIMEOUT_SECONDS if stdin else QUICK_VERB_TIMEOUT_SECONDS
+    try:
+        return subprocess.run(
+            ["ssh", "-i", PUBLISH_KEY, "-o", "BatchMode=yes",
+             "-o", "StrictHostKeyChecking=accept-new", PUBLISH_HOST, verb],
+            input=stdin, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Raised, not returned: a timed-out publish must fail the task so the retry runs.
+        # Returning a non-zero result would be indistinguishable from a remote refusal, and
+        # the distinction is what tells you whether to look at the droplet or the network.
+        raise RuntimeError(
+            f"publish verb '{verb.split()[0]}' timed out after {timeout}s. The remote "
+            f"restore runs in one transaction, so the serving database has rolled back to "
+            f"the previous good data rather than being left empty.")
 
 
 # The site's contract. Staging views and raw tables deliberately do not travel: serving
