@@ -1,3 +1,23 @@
+{{ config(tags=['full_refresh_only']) }}
+-- TAGGED `full_refresh_only`: excluded from cfbd_scores_refresh, which refreshes one side of
+-- this comparison and not the other. Full authority on the weekly +tag:production build,
+-- which refetches both. See dags/scores_refresh_dag.py TEST_EXCLUDE.
+--
+-- THE ASYMMETRY IS THE WHOLE PROBLEM, and it is structural rather than a timing accident.
+-- cfbd_scores_refresh fetches /games and nothing else, by design — that is what makes it
+-- cheap enough to run every two hours. So every time it runs, fct_team_record advances with
+-- the games that just finished while raw_records sits at whenever /records was last pulled.
+-- The test then reports a divergence that means only "these two endpoints were fetched at
+-- different times", which is true of every single run.
+--
+-- On 28 August this fired at 33 team-seasons and blocked a game day. Scoping out CFBD's
+-- unpublished 0-0 rows (below) fixed that morning and would NOT have survived Saturday: once
+-- CFBD publishes any 2026 record the rows come back into scope, and our side keeps moving
+-- every two hours all afternoon. Same failure, one day later.
+--
+-- The 0-0 scope stays because it is independently correct — an absent second opinion is not
+-- a disagreement — but the tag is what makes this safe during a live slate.
+--
 -- fct_team_record derives W-L from the game spine. /records is landed and deliberately NOT
 -- the source — it is the independent second opinion. Where both cover the same team-season,
 -- they must agree; divergence means one of the two derivations is wrong and we want to know

@@ -59,35 +59,42 @@ SCORES_SELECTOR = (
 
 # A TEST THIS DAG CANNOT SATISFY IS A TEST THIS DAG MUST NOT RUN.
 #
-# Five tests compare a LEGACY MART — mart_team_schedule, mart_team_season_record — against a
-# model the selector above rebuilds. Neither mart is an ancestor of any of the five views, so
-# this DAG refreshes one side of the comparison and never the other. They do not measure
-# correctness here; they measure how long it has been since the last full build.
+# THE RULE, stated once instead of discovered six times: this DAG fetches /games and rebuilds
+# the five views above plus their ancestors. Nothing else. So any test comparing something it
+# DOES refresh against something it does NOT is measuring the gap between two fetch times, not
+# correctness — and it reports that gap as a failure on essentially every run.
 #
-# This cost four separate outages in one week, each looking like a different bug:
+# Two shapes qualify, and both were found the hard way:
+#
+#   a legacy mart      mart_team_schedule, mart_team_season_record are not ancestors of any
+#                      of the five views, so this DAG refreshes one side of the comparison
+#   another endpoint   /records is never refetched here, while fct_team_record advances with
+#                      every game that finals — the asymmetry is permanent, not transient
+#
+# Six tests carry `full_refresh_only`. Five surfaced one at a time across the week of
+# 24 August, each looking like a separate bug and each patched separately:
 #
 #   assert_schedule_matches_games                 blocked the first run after the dedup fix
 #   assert_parity_srv_team_game_log               blocked a game day at four team-rows
 #   assert_games_played_reconciles_to_schedule    blocked the 02:00 run on 29 August
-#   assert_derived_record_matches_cfbd_records    (a different cause — CFBD lag, since scoped)
+#   assert_derived_record_matches_cfbd_records    blocked 28 August; would have blocked
+#                                                 Saturday's slate too, for a different reason
 #
-# The tag is `legacy_mart` and not `parity` because parity named only two of the five. The
-# property that matters is reading a legacy mart, not being a parity gate: the reconciliation
-# assertions have exactly the same defect and were tagged one at a time as each surfaced.
+# The sixth, assert_date_only_seasons_are_not_timezone_shifted, has never fired. It is tagged
+# because it has the same shape, which is the point of fixing a class rather than an instance.
 #
-# NOT a tolerance for these failing. All five keep full authority on the weekly refresh, which
-# rebuilds +tag:production — both sides — and is the only place the comparison means anything.
-# Per the parity gates' own rule, "which side is right" cannot be answered by comparing a
-# fresh side to a stale one.
+# NOT a tolerance for any of these failing. All six keep full authority on the weekly refresh,
+# which rebuilds +tag:production and refetches every endpoint — the only place these
+# comparisons mean anything. Per the parity gates' own rule, "which side is right" cannot be
+# answered by comparing a fresh side to a stale one.
 #
-# Mart-only invariants are deliberately NOT tagged — assert_wins_equal_losses_per_season,
-# assert_record_totals_reconcile, assert_listed_teams_have_attributes read the mart and
-# nothing else, so a stale mart still satisfies them and they keep working here. The rule is
-# crossing the boundary, not touching a mart, and tests/test_dag_structure.py enforces it.
-#
-# Scaffolding: these files are deleted when the marts they protect are dropped, and this
-# exclusion goes with them.
-TEST_EXCLUDE = "--exclude tag:legacy_mart"
+# Deliberately NOT tagged: tests that read only one side. Mart-only invariants
+# (assert_wins_equal_losses_per_season, assert_record_totals_reconcile,
+# assert_listed_teams_have_attributes) still hold against a stale mart, and the lines and
+# prediction assertions read a single unchanged source. Tagging those would drop real coverage
+# from the every-two-hours DAG for nothing. tests/test_dag_structure.py enforces both
+# directions, so the seventh instance fails in CI rather than at 02:00 on a game day.
+TEST_EXCLUDE = "--exclude tag:full_refresh_only"
 
 default_args = {
     "owner": "cfdb",

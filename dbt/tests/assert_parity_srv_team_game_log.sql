@@ -1,5 +1,5 @@
-{{ config(tags=['legacy_mart']) }}
--- TAGGED `legacy_mart`: excluded from cfbd_scores_refresh, which rebuilds one side of
+{{ config(tags=['full_refresh_only']) }}
+-- TAGGED `full_refresh_only`: excluded from cfbd_scores_refresh, which rebuilds one side of
 -- this comparison and not the other. Full authority on the weekly +tag:production
 -- build, which rebuilds both. See dags/scores_refresh_dag.py TEST_EXCLUDE.
 -- PARITY GATE: srv_team_game_log vs mart_team_schedule. See
