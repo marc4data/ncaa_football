@@ -106,7 +106,20 @@ def cache_ttl() -> int:
         return 300
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+# AC-G.37, WIRED UP. `cache_ttl()` above computed 300 s in season and 3600 s outside it, and
+# the decorator ignored it and hardcoded 3600 — so the rule existed, was documented, was
+# tested by eye and never once applied. The season window may as well not have been written.
+#
+# WHAT THAT COST. On 29 August the publish left the serving tables empty for 46 minutes
+# (fixed separately, in deploy/cfdb_publish.sh). Anyone loading the site in that window
+# cached an EMPTY dataframe — and then kept being served it for a full hour after the data
+# came back, because the TTL was the out-of-season one. A 46-minute data outage became a
+# longer site outage than the outage, on a game day, and the only cure was restarting the
+# container.
+#
+# `ttl` is evaluated once at import, which is the right grain here: the container is
+# recreated on deploy, and a season boundary is not a mid-process event.
+@st.cache_data(ttl=cache_ttl(), show_spinner=False)
 def _run(sql: str, params: dict) -> pd.DataFrame:
     with engine().connect() as connection:
         return pd.read_sql(text(sql), connection, params=params)

@@ -569,3 +569,30 @@ def test_only_drill_through_pages_are_absent_from_nav():
     hidden = {p.key for p in PAGES if not p.in_nav}
     assert hidden == {"team", "matchup"}
     assert all(p.buildable for p in PAGES if not p.in_nav)
+
+
+# --- the cache TTL that was written and never applied -------------------------------------
+
+def test_the_query_cache_uses_the_seasonal_ttl_it_computes():
+    """AC-G.37 existed as a function and the decorator ignored it.
+
+    `cache_ttl()` returns 300 s in season and 3600 s outside it. `_run` was decorated
+    `ttl=3600`, so the rule was documented, plausible and never once applied. On 29 August a
+    46-minute publish outage was cached as an EMPTY result and served for a full hour after
+    the data came back — a longer site outage than the data outage that caused it.
+    """
+    import inspect
+    from lib import query as query_module
+    source = inspect.getsource(query_module)
+    decorator = [ln for ln in source.splitlines()
+                 if ln.startswith("@st.cache_data") and "show_spinner" in ln]
+    assert decorator, "expected the cached _run decorator"
+    assert "ttl=cache_ttl()" in decorator[0], (
+        "the decorator must call cache_ttl(), not restate a literal that cannot follow the "
+        f"season: {decorator[0]}")
+
+
+def test_the_in_season_ttl_is_short_enough_to_recover_from_a_bad_read():
+    """The TTL is how long a transient wrong answer survives after the cause is fixed."""
+    from lib.query import cache_ttl
+    assert cache_ttl() <= 300
