@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from .alert_triage import triage
+from .alert_triage import triage, unavailable_reason
 
 ALERT_LOG = Path("data") / "alerts" / "failures.jsonl"
 
@@ -79,7 +79,8 @@ def diagnose(exc: BaseException) -> str:
 
 
 def format_email(event: Dict[str, Any],
-                 summary: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
+                 summary: Optional[Dict[str, str]] = None,
+                 triage_note: Optional[str] = None) -> Tuple[str, str]:
     """Build the subject and body. Pure, so the exact email can be tested and previewed.
 
     Subject is `[cfdb] FAILURE - <headline>`: a constant prefix so a filter or a sort can
@@ -117,6 +118,25 @@ def format_email(event: Dict[str, Any],
             "",
             str(event.get("error") or "(no error message recorded)"),
         ]
+        # SAY THAT THE SUMMARY IS MISSING, AND WHY.
+        #
+        # The plain email is a correct, working fallback, which is exactly what made this
+        # dangerous: an invalid API key produced 21 consecutive alerts with no summary and
+        # nothing anywhere in the email saying one had been attempted. The degradation hid
+        # inside a fallback that looked like a design choice, and was found only by asking
+        # why the readable section had stopped appearing.
+        #
+        # A missing capability that announces itself is a nuisance. One that does not is an
+        # assumption that quietly stops being true.
+        if triage_note:
+            # The API's own message usually ends in a full stop; ours adds one. Trimmed so
+            # the line does not read "API key is invalid.." to the person we are asking to
+            # go and fix the API key.
+            sections += [
+                "",
+                f"(No readable summary: {triage_note.rstrip('. ')}. This alert is "
+                "unaffected — the detail below is complete.)",
+            ]
 
     sections += [
         "",
@@ -132,7 +152,8 @@ def format_email(event: Dict[str, Any],
 
 
 def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False,
-                       summary: Optional[Dict[str, str]] = None) -> bool:
+                       summary: Optional[Dict[str, str]] = None,
+                       triage_note: Optional[str] = None) -> bool:
     """Send the failure by SMTP if configured. Returns whether it was sent.
 
     `raise_on_error` is for the CLI test, where a silent False is useless — a person
@@ -141,7 +162,7 @@ def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False,
     if not smtp_configured():
         return False
     try:
-        subject, body = format_email(event, summary)
+        subject, body = format_email(event, summary, triage_note)
         message = EmailMessage()
         message["Subject"] = subject
         message["From"] = os.environ[SMTP_FROM]
@@ -350,16 +371,18 @@ def failure_callback(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     # too, so it is enforced here too.
     try:
         summary = triage(event)
+        triage_note = None if summary else unavailable_reason()
     except Exception as exc:  # never raise from an alert path
         print(f"ALERT: triage raised, sending the plain email ({type(exc).__name__}: {exc})")
         summary = None
+        triage_note = f"{type(exc).__name__}: {exc}"
 
     if summary:
         record_failure({"at": event.get("at"), "dag_id": event.get("dag_id"),
                         "task_id": event.get("task_id"), "run_id": event.get("run_id"),
                         "kind": "triage", **summary})
 
-    emailed = send_failure_email(event, summary=summary)
+    emailed = send_failure_email(event, summary=summary, triage_note=triage_note)
     print(f"ALERT: {event.get('dag_id')}.{event.get('task_id')} failed "
           f"(logged={logged}, triaged={bool(summary)}, emailed={emailed}): "
           f"{event.get('error')}")

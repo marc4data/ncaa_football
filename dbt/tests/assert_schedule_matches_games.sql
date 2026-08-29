@@ -1,3 +1,7 @@
+{{ config(tags=['legacy_mart']) }}
+-- TAGGED `legacy_mart`: excluded from cfbd_scores_refresh, which rebuilds one side of
+-- this comparison and not the other. Full authority on the weekly +tag:production
+-- build, which rebuilds both. See dags/scores_refresh_dag.py TEST_EXCLUDE.
 -- Reconciliation (rule #4): the schedule mart must account for every game exactly twice —
 -- once from each side. Catches a dropped side of the union, a fan-out in the team join,
 -- and any season that silently failed to land.

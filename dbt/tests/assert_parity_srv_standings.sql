@@ -1,4 +1,7 @@
-{{ config(tags=['parity']) }}
+{{ config(tags=['legacy_mart']) }}
+-- TAGGED `legacy_mart`: excluded from cfbd_scores_refresh, which rebuilds one side of
+-- this comparison and not the other. Full authority on the weekly +tag:production
+-- build, which rebuilds both. See dags/scores_refresh_dag.py TEST_EXCLUDE.
 -- PARITY GATE: srv_standings must be row-for-row identical to mart_team_season_record
 -- before the site is repointed. This test is what converts the cutover from a calendar
 -- decision into a proof.
