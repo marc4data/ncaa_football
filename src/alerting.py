@@ -25,7 +25,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from .alert_triage import triage, unavailable_reason
+from .alert_triage import (check_credentials, triage, triage_model,
+                           unavailable_reason)
 
 ALERT_LOG = Path("data") / "alerts" / "failures.jsonl"
 
@@ -401,6 +402,26 @@ def _describe_config() -> None:
     if password and len(password.replace(' ', '')) != 16:
         print("    note: Gmail App Passwords are 16 characters — this may be an account password.")
     print(f"\nsmtp configured: {smtp_configured()}")
+
+    # TRIAGE IS HALF OF ALERTING AND `--check` USED TO IGNORE IT ENTIRELY.
+    #
+    # The API key in .env was rejected for the whole life of the feature. Every alert still
+    # sent, because the fallback works — so the only symptom was a readable summary that had
+    # never once appeared, and the only trace was a line of stdout inside a failing task's
+    # log. This command reported SMTP down to the character count of the password and said
+    # nothing at all about the half that was broken.
+    #
+    # A live probe, because "the variable is set" was never the question. GET /v1/models
+    # spends no tokens and tests exactly what failed: whether the credential is accepted.
+    print("\ntriage (readable summary at the top of each alert):")
+    key = os.getenv("ANTHROPIC_API_KEY")
+    print(f"  {'ANTHROPIC_API_KEY':22} {'set, ' + str(len(key)) + ' chars' if key else '(unset)'}")
+    print(f"  {'ALERT_TRIAGE_MODEL':22} {triage_model()}")
+    ok, detail = check_credentials()
+    print(f"\ntriage available: {ok} — {detail}")
+    if not ok:
+        print("  alerts will still send, and will say in the body that the summary is "
+              "missing and why.")
 
 
 def main() -> int:

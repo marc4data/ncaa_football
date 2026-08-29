@@ -34,7 +34,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -194,6 +194,60 @@ _unavailable_reason: Optional[str] = None
 def unavailable_reason() -> Optional[str]:
     """Why the last triage() returned None, or None if it produced a summary."""
     return _unavailable_reason
+
+
+def triage_model() -> str:
+    """The model triage will use. A function, not the constant, so `--check` reports what a
+    fresh process would actually pick up rather than what was read at import time."""
+    return os.getenv("ALERT_TRIAGE_MODEL", MODEL)
+
+
+def check_credentials() -> Tuple[bool, str]:
+    """Probe the API key without spending tokens. Returns (ok, human explanation).
+
+    WHY THIS IS ITS OWN CHECK. The key in .env was rejected for the entire life of this
+    feature and nobody knew, because every alert still sent. `--check` reported SMTP in
+    detail and never mentioned triage, so the one command whose job is "is alerting working"
+    could not see the half of it that was broken.
+
+    GET /v1/models is the cheapest authenticated call there is — no tokens, no model
+    invoked. It validates CREDENTIALS, which is the failure mode that actually happened; it
+    does not prove the account has quota, and it says so.
+
+    Distinguishing 401 from 403 matters and is the whole reason to probe this endpoint
+    rather than /v1/messages: /v1/models needs no workspace scoping, so `authentication_error`
+    here means the key is not recognised at all, while `permission_error` would mean a real
+    key pointed at the wrong workspace. Those need different fixes.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        return False, "ANTHROPIC_API_KEY is not set — alerts will send without a summary"
+
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/models",
+        headers={"x-api-key": api_key, "anthropic-version": API_VERSION},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT):
+            return True, "credentials accepted"
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:                                          # noqa: BLE001
+            pass
+        message = (_api_error_message(body).strip().rstrip(". ") or str(exc.reason))
+        if exc.code == 401:
+            return False, (f"HTTP 401 — {message}. The key is not recognised. A workspace "
+                           f"ID will not help: /v1/models needs no workspace scoping, so "
+                           f"this fails before any scope is checked. Mint a new key.")
+        if exc.code in (403, 404):
+            return False, (f"HTTP {exc.code} — {message}. The key authenticates but is not "
+                           f"permitted here; check the workspace it belongs to.")
+        return False, f"HTTP {exc.code} — {message}"
+    except Exception as exc:                                       # noqa: BLE001
+        return False, f"could not reach the API ({type(exc).__name__}: {exc})"
 
 
 def _api_error_message(body: str) -> str:

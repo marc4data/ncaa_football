@@ -4,6 +4,7 @@ The property that matters most is negative: this code runs *inside* the failure 
 no input, no outage and no malformed reply may stop the alert going out. Most of what
 follows is proving the fallbacks, not the happy path.
 """
+import io
 import json
 import urllib.error
 
@@ -289,3 +290,42 @@ def test_the_reason_is_recorded_for_every_way_triage_can_give_up(monkeypatch):
                         lambda *a, **k: {"content": [{"type": "text", "text": "not json"}]})
     assert alert_triage.triage(EVENT) is None
     assert "could not be parsed" in (alert_triage.unavailable_reason() or "")
+
+
+# --- preflight: the check that would have caught the dead key on day one ------------------
+
+def test_check_credentials_distinguishes_unrecognised_from_unscoped(monkeypatch):
+    """401 and 403 need different fixes, and the probe exists to tell them apart.
+
+    /v1/models requires no workspace scoping, so `authentication_error` there means the key
+    is not recognised at all — a workspace ID cannot help. A 403 would mean a real key
+    pointed somewhere it is not allowed, which IS a workspace question.
+    """
+    import urllib.error
+    from src import alert_triage as t
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    def raise_status(code, body):
+        def boom(*_a, **_k):
+            raise urllib.error.HTTPError("u", code, "reason", {}, io.BytesIO(body.encode()))
+        return boom
+
+    monkeypatch.setattr(t.urllib.request, "urlopen",
+                        raise_status(401, '{"error":{"message":"API key is invalid."}}'))
+    ok, detail = t.check_credentials()
+    assert not ok and "not recognised" in detail and "workspace ID will not help" in detail
+    assert "invalid.." not in detail          # the API's full stop plus ours
+
+    monkeypatch.setattr(t.urllib.request, "urlopen",
+                        raise_status(403, '{"error":{"message":"not permitted"}}'))
+    ok, detail = t.check_credentials()
+    assert not ok and "workspace" in detail and "not recognised" not in detail
+
+
+def test_check_credentials_reports_a_missing_key_without_a_network_call(monkeypatch):
+    from src import alert_triage as t
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(t.urllib.request, "urlopen",
+                        lambda *a, **k: pytest.fail("must not call the API with no key"))
+    ok, detail = t.check_credentials()
+    assert not ok and "ANTHROPIC_API_KEY is not set" in detail
