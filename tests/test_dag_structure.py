@@ -85,18 +85,16 @@ def test_the_private_connector_api_we_depend_on_is_pinned():
     assert "databricks-sql-connector==" in reqs
 
 
-# --- the legacy-mart boundary ------------------------------------------------------------
+# --- what cfbd_scores_refresh cannot satisfy ------------------------------------------------
 
+# cfbd_scores_refresh fetches /games and rebuilds the five serving views plus ancestors.
+# Anything else in the warehouse is whatever the last full refresh left behind.
+GAME_DERIVED = ("stg_games", "fct_game", "fct_game_team", "fct_team_record",
+                "srv_scoreboard", "srv_schedule", "srv_matchup", "srv_team_game_log",
+                "srv_today_edges", "srv_standings")
 LEGACY_MARTS = ("mart_team_schedule", "mart_team_season_record")
 
-# What cfbd_scores_refresh rebuilds: the five serving views and their ancestors. stg_games is
-# the ancestor that actually moves — every completed game changes it — so it stands in for
-# the rebuilt side here.
-REBUILT = ("stg_games", "srv_scoreboard", "srv_schedule", "srv_matchup",
-           "srv_team_game_log", "srv_today_edges", "srv_standings")
-
-
-TAG_DIRECTIVE = re.compile(r"config\s*\(\s*tags\s*=\s*\[[^\]]*['\"]legacy_mart['\"]")
+TAG_DIRECTIVE = re.compile(r"config\s*\(\s*tags\s*=\s*\[[^\]]*['\"]full_refresh_only['\"]")
 
 
 def _dbt_tests():
@@ -107,47 +105,54 @@ def _dbt_tests():
 def _is_tagged(src: str) -> bool:
     """Match the dbt config DIRECTIVE, not the word.
 
-    The first version tested `"legacy_mart" in src` and passed on a file whose config line
-    had been deleted, because the comment explaining the tag still mentions it by name. That
-    is the third time in this repo a source-reading test has matched its own prose — the
-    week-floor copy test and the publish-leaf test both did it first.
+    An earlier version tested `"full_refresh_only" in src` and passed on a file whose config
+    line had been deleted, because the comment explaining the tag still names it. That is the
+    third time a source-reading test here has matched its own prose — the week-floor copy test
+    and the publish-leaf test both did it first.
     """
     return bool(TAG_DIRECTIVE.search(src))
 
 
-def test_every_test_crossing_the_legacy_mart_boundary_is_tagged():
-    """The rule is CROSSING the boundary, not touching a mart.
+def _sides(src: str):
+    """(refreshed_by_scores, not_refreshed_by_scores) — what this test compares."""
+    refs = set(re.findall(r"ref\('([a-z_0-9]+)'\)", src))
+    sources = set(re.findall(r"source\(\s*'raw'\s*,\s*'([a-z_0-9]+)'\s*\)", src))
+    fresh = refs & set(GAME_DERIVED)
+    stale = (refs & set(LEGACY_MARTS)) | {s for s in sources if s != "games"}
+    return fresh, stale
 
-    A test comparing a legacy mart against a model cfbd_scores_refresh rebuilds is measuring
-    how long it has been since the last full build, because that DAG refreshes one side and
-    never the other. Four separate outages in the week of 24 August were this same defect
-    wearing a different test name each time, tagged one at a time as each surfaced. This
-    fails on the fifth rather than waiting for it to block another game day.
+
+def test_every_test_the_scores_dag_cannot_satisfy_is_tagged():
+    """The general rule, not the six instances.
+
+    A test comparing something cfbd_scores_refresh refreshes against something it does not is
+    measuring the gap between two fetch times. Two shapes qualify: a legacy mart that is not
+    an ancestor of the five views, and a raw endpoint other than /games that this DAG never
+    refetches. Six tests matched; five of them surfaced one at a time across a single week,
+    each looking like a separate bug. This fails on the seventh in CI instead.
     """
     untagged = []
     for path, src in _dbt_tests():
-        refs = re.findall(r"ref\('([a-z_0-9]+)'\)", src)
-        crosses = (any(r in LEGACY_MARTS for r in refs)
-                   and any(r in REBUILT for r in refs))
-        if crosses and not _is_tagged(src):
-            untagged.append(path.name)
+        fresh, stale = _sides(src)
+        if fresh and stale and not _is_tagged(src):
+            untagged.append((path.name, sorted(fresh), sorted(stale)))
     assert not untagged, (
-        "these compare a legacy mart against a model cfbd_scores_refresh rebuilds and must "
-        f"carry {{{{ config(tags=['legacy_mart']) }}}}: {untagged}")
+        "these compare refreshed against un-refreshed data and must carry "
+        f"{{{{ config(tags=['full_refresh_only']) }}}}: {untagged}")
 
 
-def test_mart_only_invariants_keep_their_coverage_in_the_scores_dag():
-    """The exclusion must stay narrow. A test that reads ONLY a legacy mart still holds when
-    that mart is stale — it was internally consistent when built — so tagging it would drop
-    real coverage from the every-two-hours DAG to no purpose."""
+def test_single_sided_tests_keep_their_coverage_in_the_scores_dag():
+    """The exclusion must stay narrow. A test reading only one side still holds when that side
+    is stale — it was internally consistent when built — so tagging it would drop real
+    coverage from the every-two-hours DAG to no purpose."""
     over_tagged = []
     for path, src in _dbt_tests():
-        refs = set(re.findall(r"ref\('([a-z_0-9]+)'\)", src))
-        if _is_tagged(src) and not (refs & set(REBUILT)):
+        fresh, stale = _sides(src)
+        if _is_tagged(src) and not (fresh and stale):
             over_tagged.append(path.name)
     assert not over_tagged, (
-        f"these read no rebuilt model, so the tag costs coverage for nothing: {over_tagged}")
+        f"these do not straddle the boundary, so the tag costs coverage for nothing: {over_tagged}")
 
 
 def test_the_scores_dag_excludes_the_tag_it_relies_on():
-    assert "--exclude tag:legacy_mart" in _code("scores_refresh_dag.py")
+    assert "--exclude tag:full_refresh_only" in _code("scores_refresh_dag.py")
