@@ -329,3 +329,46 @@ def test_check_credentials_reports_a_missing_key_without_a_network_call(monkeypa
                         lambda *a, **k: pytest.fail("must not call the API with no key"))
     ok, detail = t.check_credentials()
     assert not ok and "ANTHROPIC_API_KEY is not set" in detail
+
+
+# --- the token budget, which thinking now shares ------------------------------------------
+
+def test_truncation_names_the_token_limit_not_the_parser(monkeypatch):
+    """"could not be parsed" sent us to look at the parser when the answer was in `usage`.
+
+    Sonnet 5 runs adaptive thinking by default and thinking tokens come out of max_tokens.
+    Measured on a real alert: 828 output tokens of which 400 were thinking, leaving 72 spare
+    against the old 900 budget. On 29 August it did not fit, the JSON was cut off mid-object
+    and the email lost its summary. A reason that blames the wrong component is worse than a
+    vague one.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(alert_triage, "_post", lambda *a, **k: {
+        "stop_reason": "max_tokens",
+        "usage": {"output_tokens": 2000, "output_tokens_details": {"thinking_tokens": 1600}},
+        "content": [{"type": "text", "text": '{"headline":"truncated mid-obj'}]})
+    assert alert_triage.triage(EVENT) is None
+    reason = alert_triage.unavailable_reason() or ""
+    assert "cut off" in reason and "thinking" in reason and "MAX_TOKENS" in reason
+
+
+def test_the_budget_leaves_real_headroom_over_observed_use():
+    """Observed on a live alert: ~830 output tokens, ~400 of them thinking. A budget that
+    merely fits is a coin flip on every alert."""
+    assert alert_triage.MAX_TOKENS >= 1800
+
+
+def test_the_reply_shape_is_enforced_server_side(monkeypatch):
+    """output_config.format makes the schema the API's problem rather than the parser's.
+    `_parse` stays as the backstop for truncation, which structured output cannot prevent."""
+    sent = {}
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(alert_triage, "_post",
+                        lambda payload, key: sent.update(payload) or {
+                            "model": "m", "stop_reason": "end_turn",
+                            "content": [{"type": "text", "text": json.dumps(SUMMARY)}]})
+    assert alert_triage.triage(EVENT)["headline"] == SUMMARY["headline"]
+    fmt = sent["output_config"]["format"]
+    assert fmt["type"] == "json_schema"
+    assert set(fmt["schema"]["required"]) == {"headline", "what_happened", "impact",
+                                              "likely_fix"}

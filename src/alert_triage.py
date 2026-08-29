@@ -51,7 +51,37 @@ MODEL = os.getenv("ALERT_TRIAGE_MODEL", "claude-sonnet-5")
 # arrives late is worth less than the email it is delaying.
 TIMEOUT = int(os.getenv("ALERT_TRIAGE_TIMEOUT", "25"))
 
-MAX_TOKENS = 900
+# THINKING TOKENS COME OUT OF THIS BUDGET, AND THAT IS WHY 900 WAS NOT ENOUGH.
+#
+# Sonnet 5 runs adaptive thinking when `thinking` is omitted — it is not opt-in the way it
+# was on older models. Measured on a real alert: 828 output tokens, of which 400 were
+# thinking. The JSON had 428 tokens to fit in and 72 to spare. It fits most of the time,
+# which is the worst possible failure mode: on 29 August it did not, the reply was truncated
+# mid-object, `_parse` returned None and the email lost its summary.
+#
+# 2000 is roughly three times the observed need. The cost is a rounding error — a truncated
+# summary costs the whole point of the feature.
+MAX_TOKENS = 2000
+
+# The reply must conform to this or the API does not return it. `output_config.format`
+# replaces the older approach of asking for JSON in the prompt and hoping: the prompt still
+# describes what each field should contain, but the SHAPE is now enforced server-side rather
+# than validated after the fact by `_parse`.
+#
+# `_parse` stays. Structured output guarantees conformance only when generation COMPLETES —
+# a truncated response is still truncated — so the tolerant parser remains the backstop and
+# `stop_reason` is now reported when it is the cause.
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "headline": {"type": "string"},
+        "what_happened": {"type": "string"},
+        "impact": {"type": "string"},
+        "likely_fix": {"type": "string"},
+    },
+    "required": ["headline", "what_happened", "impact", "likely_fix"],
+    "additionalProperties": False,
+}
 
 # Tracebacks are long and the useful part is the end. Bounded so a runaway log cannot turn
 # one alert into a large request.
@@ -279,6 +309,8 @@ def triage(event: Dict[str, Any]) -> Optional[Dict[str, str]]:
             "max_tokens": MAX_TOKENS,
             "system": SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": build_prompt(event)}],
+            "output_config": {"format": {"type": "json_schema",
+                                         "schema": RESPONSE_SCHEMA}},
         }, api_key)
 
         blocks = response.get("content") or []
@@ -287,7 +319,24 @@ def triage(event: Dict[str, Any]) -> Optional[Dict[str, str]]:
         if result:
             result["model"] = response.get("model", MODEL)
             return result
-        _unavailable_reason = f"{MODEL} replied but the summary could not be parsed"
+
+        # NAME THE CAUSE, DO NOT JUST SAY "could not be parsed".
+        #
+        # That phrasing sent us looking at the parser when the real answer was in `usage`:
+        # thinking had eaten the token budget and the JSON was cut off mid-object. A reason
+        # that points at the wrong component is worse than a vague one.
+        stop = response.get("stop_reason")
+        usage = response.get("usage") or {}
+        if stop == "max_tokens":
+            thinking = (usage.get("output_tokens_details") or {}).get("thinking_tokens")
+            _unavailable_reason = (
+                f"{MODEL} hit the {MAX_TOKENS}-token limit and the reply was cut off"
+                + (f" ({thinking} of it thinking)" if thinking else "")
+                + " — raise MAX_TOKENS in src/alert_triage.py")
+        else:
+            _unavailable_reason = (
+                f"{MODEL} replied but the summary could not be parsed "
+                f"(stop_reason={stop}, {usage.get('output_tokens')} output tokens)")
         return None
     except urllib.error.HTTPError as exc:
         # The body carries the real reason (bad key, rate limit); the status alone does not.

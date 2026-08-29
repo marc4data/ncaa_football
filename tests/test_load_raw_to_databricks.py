@@ -75,3 +75,40 @@ def test_an_endpoint_with_no_directory_is_not_pending(raw_layer):
 def test_all_endpoints_lists_directories_only(raw_layer):
     (raw_layer / "data" / "raw" / "stray.json").write_text("{}", encoding="utf-8")
     assert loader.all_endpoints() == ["games", "lines"]
+
+
+# --- one retry policy, every connection -----------------------------------------------
+
+def test_the_pending_check_is_retried_like_everything_else(monkeypatch):
+    """`sync` opened a bare connection twenty lines above a three-attempt loop.
+
+    On 29 August a warehouse refusal landed on exactly that unprotected connect and killed
+    the whole task in its pre-flight check, without the retry logic written for that failure
+    ever running.
+    """
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("BAD_REQUEST: Cannot create the resource")
+        return "ok"
+
+    monkeypatch.setattr(loader.time, "sleep", lambda _s: None)
+    assert loader.with_retry(flaky, "pending check") == "ok"
+    assert len(calls) == 3
+
+
+def test_with_retry_reraises_once_the_attempts_are_spent(monkeypatch):
+    monkeypatch.setattr(loader.time, "sleep", lambda _s: None)
+    with pytest.raises(RuntimeError):
+        loader.with_retry(lambda: (_ for _ in ()).throw(RuntimeError("still down")), "x")
+
+
+def test_one_failing_endpoint_does_not_cost_the_others(monkeypatch):
+    """A bad endpoint is recorded; the rest still load."""
+    monkeypatch.setattr(loader.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(loader, "_load_one",
+                        lambda e, s: (_ for _ in ()).throw(RuntimeError("no")) if e == "bad" else 5)
+    total, failed = loader.load_endpoints(["good", "bad", "also_good"])
+    assert total == 10 and failed == ["bad"]
