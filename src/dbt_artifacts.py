@@ -19,11 +19,24 @@ Usage:
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
-DEFAULT_ARTIFACT = Path("dbt") / "target" / "run_results.json"
+# FOLLOWS dbt, RATHER THAN ASSUMING WHERE dbt WROTE.
+#
+# dbt puts run_results.json under the project's `target/` by default, which is inside the
+# code checkout. That is fine on a laptop and wrong on a server: the checkout is owned by
+# root and the container runs as uid 50000, so dbt cannot write there at all — it dies
+# during logging setup, before it can print why, and exits 2 with no output. That cost an
+# hour during the move to the droplet.
+#
+# target/ and logs/ are STATE, not code, and belong outside the checkout for the same reason
+# data/ and the Airflow logs already are. DBT_TARGET_PATH moves them; this reads the same
+# variable so the two cannot disagree about where the artifact landed.
+DEFAULT_TARGET_DIR = Path(os.getenv("DBT_TARGET_PATH") or Path("dbt") / "target")
+DEFAULT_ARTIFACT = DEFAULT_TARGET_DIR / "run_results.json"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS raw.raw_dbt_test_result (
