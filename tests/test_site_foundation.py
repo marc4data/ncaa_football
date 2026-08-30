@@ -142,7 +142,7 @@ def test_every_page_module_exists_and_exposes_render():
     """AC-G.49: nav builds from the registry, so a missing module breaks the whole site."""
     import importlib
     for page in PAGES:
-        module = importlib.import_module(f"pages.{page.key}")
+        module = importlib.import_module(f"views.{page.key}")
         assert callable(getattr(module, "render", None)), page.key
 
 
@@ -156,7 +156,7 @@ def test_built_pages_pass_the_query_contract():
     from pathlib import Path
     site = Path(__file__).resolve().parents[1] / "site"
     checked = 0
-    for path in (site / "pages").glob("*.py"):
+    for path in (site / "views").glob("*.py"):
         source = path.read_text()
         for sql in re.findall(r'"""\s*(select\b.*?)"""', source, re.DOTALL | re.IGNORECASE):
             check_contract(" ".join(sql.split()))
@@ -171,13 +171,13 @@ def test_built_pages_pass_the_query_contract():
 
 def test_model_performance_lists_the_model_that_was_never_written():
     """AC-13.4: a missing model is a visible row, not a shorter table."""
-    from pages import performance
+    from views import performance
     assert "fastai_home_win" in performance.EXPECTED_MODELS
 
 
 def test_ats_breakeven_is_the_real_number():
     """AC-13.3: 52.4% is breakeven at −110; a softer threshold would flatter the model."""
-    from pages import performance
+    from views import performance
     assert performance.BREAKEVEN == 52.4
 
 
@@ -193,9 +193,9 @@ def test_every_page_now_has_a_body_except_the_blocked_one():
     import re
     from pathlib import Path
     from lib.registry import BY_KEY
-    pages = Path(__file__).resolve().parents[1] / "site" / "pages"
+    views = Path(__file__).resolve().parents[1] / "site" / "views"
     placeholders = set()
-    for path in pages.glob("*.py"):
+    for path in views.glob("*.py"):
         if path.stem == "__init__":
             continue
         source = path.read_text()
@@ -217,7 +217,7 @@ def test_edge_finder_reads_its_week_floor_from_data_not_from_a_constant():
     different cut, and the page would keep confidently stating the old number.
     """
     from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "edges.py").read_text()
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "edges.py").read_text()
     assert "training_week_floor" in source
     # The user-facing sentence interpolates the floor rather than naming a week. Asserting
     # that "Week 5" appears nowhere in the file was the first version of this test and it
@@ -230,7 +230,7 @@ def test_edge_finder_empty_copy_is_empty_not_degraded():
     """AC-G.51. Nothing is broken in weeks 1-4 and nothing is missing that should exist,
     so Degraded would be a false statement about whose fault it is."""
     from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "edges.py").read_text()
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "edges.py").read_text()
     assert "states.empty(" in source
     assert "states.degraded(" not in source
 
@@ -242,7 +242,7 @@ def test_matchup_does_not_flip_the_sign_convention_itself():
     there is exactly one place the convention is expressed.
     """
     from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "matchup.py").read_text()
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
     assert "actual_margin_home_perspective" in source
     assert "-float(" not in source and "-1 *" not in source
 
@@ -251,14 +251,14 @@ def test_matchup_reads_series_ties_rather_than_deriving_them():
     """A tie is its own outcome. Subtracting to find the away record credited every draw
     to the away team in 40,045 rows."""
     from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "site" / "pages" / "matchup.py").read_text()
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
     assert "series_ties" in source
 
 
 def test_blank_confidence_bucket_renders_as_absent():
     """The pack writes an empty string where it has no bucket, and an empty cell reads as
     a value. Same defect class as the ats 0-0-0 that manufactured a record."""
-    from pages import edges
+    from views import edges
     from lib import fmt
     assert edges._bucket({"confidence_bucket": ""}) == fmt.EM_DASH
     assert edges._bucket({"confidence_bucket": None}) == fmt.EM_DASH
@@ -268,7 +268,7 @@ def test_blank_confidence_bucket_renders_as_absent():
 def test_moneylines_never_render_with_a_decimal_point():
     """A price with a decimal point reads like a spread, and those are different
     quantities. -270.0 is not a moneyline anyone has seen."""
-    from pages import odds
+    from views import odds
     render = odds._moneyline("home_moneyline")
     assert render({"home_moneyline": -270}) == "-270"
     assert render({"home_moneyline": 145}) == "+145"
@@ -276,14 +276,14 @@ def test_moneylines_never_render_with_a_decimal_point():
 
 def test_odds_best_price_can_be_both_sides():
     """One book holding the best number on each side is a real market state, not a bug."""
-    from pages import odds
+    from views import odds
     assert odds._best({"is_best_home_spread": True, "is_best_away_spread": True}) == "both"
     assert odds._best({"is_best_home_spread": False, "is_best_away_spread": False}) != "both"
 
 
 def test_dictionary_renders_undocumented_as_a_value():
     """AC-16.2: a blank description cell reads as a rendering fault; a state reads as debt."""
-    from pages import dictionary
+    from views import dictionary
     html = dictionary._status({"description_status": "UNDOCUMENTED"})
     assert "Undocumented" in html
     assert "cfdb-chip" in html
@@ -293,7 +293,7 @@ def test_methodology_states_the_counterintuitive_sign_convention():
     """The one fact a reader is most likely to get backwards has to be on the page that
     exists to explain the numbers."""
     from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "site" / "pages"
+    source = (Path(__file__).resolve().parents[1] / "site" / "views"
               / "methodology.py").read_text()
     assert "away points minus home points" in source
     assert "betting advice" in source.lower()
@@ -326,7 +326,7 @@ def test_every_site_dependency_is_in_the_site_image_requirements():
     # Import name -> distribution name, where they differ.
     DISTRIBUTION = {"dotenv": "python-dotenv", "psycopg2": "psycopg2-binary",
                     "yaml": "pyyaml"}
-    LOCAL = {"lib", "pages", "app"}
+    LOCAL = {"lib", "views", "app"}
 
     imported = set()
     for path in site.rglob("*.py"):
@@ -354,7 +354,7 @@ def test_the_winner_is_read_from_the_view_not_derived_from_a_sign():
     """The page used to pick the winner by the sign of actual_margin and index into a
     display column. Two derivations of one definition disagree eventually, and this pair
     disagreed on 1 game in 295 the first time it was run against real completed games."""
-    from pages import scores
+    from views import scores
     row = {"is_completed": True, "winner": "Alpha State", "actual_margin": -7,
            "home_team_display": "Alpha State", "away_team_display": "Beta Tech"}
     assert "Alpha State" in scores._winner(row)
@@ -363,7 +363,7 @@ def test_the_winner_is_read_from_the_view_not_derived_from_a_sign():
 def test_a_tie_is_a_settled_result_not_a_pending_one():
     """srv_scoreboard returns NULL for `winner` on a completed game with equal scores.
     Rendering that as Pending would claim the game has not been played."""
-    from pages import scores
+    from views import scores
     tie = scores._winner({"is_completed": True, "winner": None, "actual_margin": 0})
     pending = scores._winner({"is_completed": False, "winner": None})
     assert "Tie" in tie
@@ -375,7 +375,7 @@ def test_the_winner_never_renders_the_string_none():
     """A formatter that indexes into a nullable column and interpolates the result puts
     `None` on the page. 11% of srv_scoreboard is a game against a team with no dim_team
     row, so the nullable case is the common case, not an edge."""
-    from pages import scores
+    from views import scores
     for row in ({"is_completed": True, "winner": None, "actual_margin": 0},
                 {"is_completed": False, "winner": None, "actual_margin": None}):
         assert "None" not in scores._winner(row)
@@ -473,7 +473,7 @@ def test_every_data_page_renders_the_shared_filter_bar():
     selector is: a count drifts and gets lowered the first time somebody has a reason.
     """
     from pathlib import Path
-    site = Path(__file__).resolve().parents[1] / "site" / "pages"
+    site = Path(__file__).resolve().parents[1] / "site" / "views"
     # Pages with no scoped data: prose, the export builder, and the blocked one.
     EXEMPT = {"methodology", "system", "players", "dictionary", "team", "__init__"}
     missing = []
@@ -653,3 +653,40 @@ def test_every_site_import_is_declared_in_the_site_requirements():
                if m not in reqs and not (m == "psycopg2" and "psycopg2" in reqs)
                and not (m == "dotenv" and "python-dotenv" in reqs)]
     assert not missing, f"imported by the site but not in site/requirements.txt: {missing}"
+
+
+# --- the directory name Streamlit reserves ------------------------------------------------
+
+def test_there_is_no_pages_directory_beside_the_entrypoint():
+    """`pages/` is a reserved name and this app must never use it again.
+
+    Streamlit auto-discovers a directory called `pages/` next to the entrypoint script and
+    builds a multipage app from the filenames. That competes with st.navigation, which is how
+    this app builds its nav — and on 30 August a rebuild picked up Streamlit 1.62, where the
+    automatic one won. The sidebar showed raw filenames, including `app` (the entrypoint
+    itself, an entry only filename discovery ever produces), and every page rendered blank.
+
+    Nothing raised. No test failed. The database was healthy and the deployment was verified
+    by querying it. The site was unusable for a day and the end user found it.
+
+    Pinning Streamlit held it up; this is what makes the collision impossible at any version.
+    """
+    entrypoint = SITE_DIR / "app.py"
+    assert entrypoint.is_file(), "expected the Streamlit entrypoint at site/app.py"
+    reserved = SITE_DIR / "pages"
+    assert not reserved.exists(), (
+        "site/pages/ is auto-discovered by Streamlit and overrides st.navigation. "
+        "Page modules live in site/views/.")
+    assert (SITE_DIR / "views").is_dir()
+
+
+def test_the_image_copies_views_and_never_pages():
+    """The rename only helps if the image agrees. A Dockerfile still copying to /app/pages
+    would recreate the reserved directory inside the container, where nothing local can see
+    it — which is the same class of gap that let the build files live off-repo."""
+    dockerfile = (SITE_DIR / "Dockerfile").read_text()
+    code = "\n".join(ln for ln in dockerfile.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "/app/views/" in code
+    assert "/app/pages/" not in code, (
+        "copying to /app/pages/ recreates the directory Streamlit auto-discovers")

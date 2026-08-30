@@ -303,7 +303,7 @@ def test_export_labels_agree_with_the_site(built):
 
     view_labels = {}
     for page in PAGES:
-        path = site / "pages" / f"{page.key}.py"
+        path = site / "views" / f"{page.key}.py"
         if not page.view or not path.exists():
             continue
         for field, label in re.findall(r'Col\(\s*"(\w+)"\s*,\s*"([^"]*)"', path.read_text()):
@@ -331,7 +331,7 @@ def test_every_declared_label_divergence_is_still_real():
 
     view_labels = {}
     for page in PAGES:
-        path = site / "pages" / f"{page.key}.py"
+        path = site / "views" / f"{page.key}.py"
         if not page.view or not path.exists():
             continue
         for field, label in re.findall(r'Col\(\s*"(\w+)"\s*,\s*"([^"]*)"', path.read_text()):

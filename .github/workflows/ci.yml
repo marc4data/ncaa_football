@@ -205,3 +205,56 @@ jobs:
             exit 1
           fi
           echo "Fixture covers both date eras."
+
+  site-image:
+    name: site image builds and renders
+    runs-on: ubuntu-latest
+    # THE ONLY JOB THAT LOOKS AT WHAT USERS LOOK AT.
+    #
+    # Until 30 August nothing in CI touched the site image at all — its Dockerfile and
+    # requirements were not even in the repo. A rebuild silently upgraded Streamlit, the
+    # sidebar fell back to raw filenames, every page went blank, and the site stayed that way
+    # for a day. The pipeline had 261 passing tests throughout, the database was healthy, and
+    # the deployment was verified by querying it, which is not the same claim.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the site image
+        # Catches a broken Dockerfile and any dependency missing from the site's own
+        # requirements — a separate list from the repo root, which has already lost openpyxl
+        # once and fails only at runtime on the page that needs it.
+        run: docker build -t cfdb-site:ci site/
+
+      - name: Run the entrypoint and check the nav it builds
+        # Executes the real app.py inside the real image at the pinned Streamlit version,
+        # with st.navigation stubbed so no page needs a database. Asserts the app gets that
+        # far and registers 18 titled pages — the half that was silently wrong.
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/ci/site_smoke.py:/app/site_smoke.py:ro" \
+            cfdb-site:ci python /app/site_smoke.py
+
+      - name: Assert the image has no auto-discovered pages directory
+        # Streamlit builds a multipage app from any directory named `pages/` next to the
+        # entrypoint, overriding st.navigation. The repo forbids the name; this checks the
+        # image, where a stray COPY could recreate it somewhere no local test can see.
+        run: |
+          if docker run --rm cfdb-site:ci test -d /app/pages; then
+            echo "::error::/app/pages exists in the image — Streamlit will auto-discover it"
+            exit 1
+          fi
+          docker run --rm cfdb-site:ci test -d /app/views
+          echo "Image has /app/views and no /app/pages."
+
+      - name: Boot the container and check it serves
+        # Import-time failures do not show up until the server starts.
+        run: |
+          docker run -d --name cfdb-site-ci -p 8501:8501 cfdb-site:ci
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8501/_stcore/health || true)
+            [ "$code" = "200" ] && { echo "Site healthy after ~$((i*2))s"; exit 0; }
+            sleep 2
+          done
+          echo "::error::site did not become healthy"
+          docker logs cfdb-site-ci
+          exit 1
