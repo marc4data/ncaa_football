@@ -84,6 +84,15 @@ def load_endpoint(endpoint: str):
     conn = get_conn()
     with conn:
         with conn.cursor() as cur:
+            # SCHEMA FIRST. This used to run after the CREATE TABLE below, which works on
+            # every machine where the schema already exists and fails on every machine
+            # where it does not — so it worked for months and then failed on the first
+            # genuinely fresh warehouse, during the move to the droplet. All 66 endpoints
+            # errored with `schema "raw" does not exist`.
+            #
+            # It is the disaster-recovery path that was broken: rebuilding from raw files
+            # into a new database is the thing this loader exists to make possible.
+            _ensure_manifest_table(cur)
             cur.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {table} (
@@ -98,7 +107,6 @@ def load_endpoint(endpoint: str):
             )
             # Tables created before fetched_at existed.
             cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS fetched_at timestamptz;")
-            _ensure_manifest_table(cur)
             for p in files:
                 try:
                     payload = json.loads(p.read_text(encoding="utf-8"))
