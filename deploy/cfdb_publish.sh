@@ -30,6 +30,7 @@
 #
 #   ensure-schema <schema>          CREATE SCHEMA IF NOT EXISTS
 #   restore <schema>                stream a pg_dump on stdin into the database
+#   restore-gz <schema>             the same, gzipped on the wire (the default)
 #   grant <schema> <role>           re-grant SELECT to the read-only role
 #   count <schema> <table>          row count, for post-publish verification
 #   ping                            confirm the key and the database both work
@@ -109,6 +110,26 @@ case "$VERB" in
         # for the length of the restore — seconds to a couple of minutes — rather than being
         # served an empty page. A slow page beats a blank one, and a rollback beats both.
         "${PSQL[@]}" --single-transaction
+        ;;
+
+    restore-gz)
+        schema="${ARGS[1]:-}"; valid_ident "$schema"
+        # THE SAME RESTORE, GZIPPED ON THE WIRE, BECAUSE THE WIRE IS THE BOTTLENECK.
+        #
+        # The dump is 334 MB of SQL and the link from the Airflow host to this droplet runs
+        # at about 20 Mbit/s, so a publish spends ~135 seconds doing nothing but upload. When
+        # that link is busy it stretches: on 30 August three consecutive publishes took 13,
+        # 16 and 17 minutes, each long enough for Airflow to disown the task as a zombie and
+        # kill it mid-stream. Postgres then reported a truncated COPY at a different random
+        # line each time — the symptom, not the cause.
+        #
+        # gzip -6 takes it to 59 MB, 5.6x smaller, for about four seconds of CPU. Same bytes
+        # arrive, same transaction wraps them; there is just far less time spent in the part
+        # that was failing.
+        #
+        # A separate verb rather than sniffing the stream: this is a forced command, and
+        # "guess what the client sent" is not a property worth having here.
+        gunzip -c | "${PSQL[@]}" --single-transaction
         ;;
 
     grant)

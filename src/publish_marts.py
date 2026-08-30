@@ -22,6 +22,7 @@ Usage:
   python -m src.publish_marts --marts mart_team_schedule
 """
 import argparse
+import gzip
 import os
 import subprocess
 import sys
@@ -75,6 +76,10 @@ PUBLISH_TIMEOUT_SECONDS = int(os.getenv("SERVING_PUBLISH_TIMEOUT", "720"))
 
 # The cheap verbs answer in seconds; only the restore streams a dump.
 QUICK_VERB_TIMEOUT_SECONDS = 120
+
+# gzip level for the dump. 6 is the default and the right trade here: level 9 spends roughly
+# three times the CPU to save another few percent of a link that is already 5.6x quieter.
+COMPRESS_LEVEL = 6
 
 
 def _publish_ssh(verb: str, *, stdin: bytes = b"") -> subprocess.CompletedProcess:
@@ -232,7 +237,24 @@ def restore_to_serving(dump: bytes, schema: str = MARTS_SCHEMA) -> None:
             result = _publish_ssh(verb)
             if result.returncode != 0:
                 raise RuntimeError(f"{verb} failed: {result.stderr.decode()[:400]}")
-        result = _publish_ssh(f"restore {schema}", stdin=dump)
+        # COMPRESS, BECAUSE THE WIRE IS THE BOTTLENECK AND THE WIRE IS WHAT FAILS.
+        #
+        # Measured: the dump is 334 MB, the link to the droplet runs at about 20 Mbit/s, and
+        # a healthy publish takes 135 seconds — which is, to within a few seconds, exactly
+        # the time needed to upload 334 MB at that rate. The database work is not the cost;
+        # the upload is essentially all of it.
+        #
+        # That is why this job is fragile. When the link is busy the same publish takes 13 to
+        # 17 minutes, which is long enough for Airflow to disown the task as a zombie and
+        # kill it mid-stream. Postgres then logs a truncated COPY at a different random line
+        # every time, which reads like data corruption and is really just a severed pipe.
+        #
+        # gzip -6 costs about four seconds of CPU and takes 334 MB to 59 MB. Same bytes land,
+        # same single transaction wraps them; the window that was failing gets 5.6x smaller.
+        payload = gzip.compress(dump, COMPRESS_LEVEL)
+        print(f"  compressed to {len(payload) / 1e6:.1f} MB "
+              f"({len(dump) / max(len(payload), 1):.1f}x) for transfer")
+        result = _publish_ssh(f"restore-gz {schema}", stdin=payload)
         if result.returncode != 0:
             raise RuntimeError(f"restore failed: {result.stderr.decode()[:400]}")
         return
