@@ -16,10 +16,22 @@ theme.inject()
 
 
 def _page_module(key: str):
-    """Every page is a module in site/pages; the registry decides what it renders."""
+    """Every page is a module in site/views; the registry decides what it renders.
+
+    THE DIRECTORY IS NOT CALLED `pages/`, AND THAT IS LOAD-BEARING.
+
+    Streamlit auto-discovers a directory named `pages/` next to the entrypoint and builds a
+    multipage app from the filenames. That competes with st.navigation below, and on
+    30 August a rebuild picked up Streamlit 1.62 where the automatic one won: the sidebar
+    showed raw filenames — including `app`, the entrypoint itself — and every page rendered
+    blank, with no error raised anywhere.
+
+    Pinning Streamlit held the site up. Renaming the directory is what makes the collision
+    impossible at any version. tests/test_site_foundation.py fails if `site/pages/` returns.
+    """
     def render():
         import importlib
-        module = importlib.import_module(f"pages.{key}")
+        module = importlib.import_module(f"views.{key}")
         module.render()
     return render
 

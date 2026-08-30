@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # page was actually requested.
 COPY app.py /app/
 COPY lib/ /app/lib/
-COPY pages/ /app/pages/
+# NOT `pages/`: Streamlit auto-discovers that name and overrides st.navigation.
+COPY views/ /app/views/
 
 EXPOSE 8501
 
