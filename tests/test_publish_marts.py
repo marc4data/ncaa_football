@@ -46,10 +46,22 @@ def test_the_remote_restore_runs_in_one_transaction():
         "database holding dropped tables and the site serves nothing")
 
 
-def test_the_restore_is_the_only_verb_that_needs_the_transaction():
-    """A guard against pasting the flag somewhere it does nothing. `count` and `grant` are
-    single statements; wrapping them would only obscure what the flag is for."""
-    assert _code(REMOTE_SCRIPT.read_text()).count("--single-transaction") == 1
+def test_only_the_restore_verbs_wrap_themselves_in_a_transaction():
+    """A guard against pasting the flag somewhere it does nothing. `count`, `grant` and
+    `ensure-schema` are single statements; wrapping them would only obscure what the flag is
+    for. Both restore verbs need it — the compressed one is the same restore.
+
+    Asserted per verb rather than as a total count, which was the first version and broke
+    the moment a second legitimate restore verb appeared.
+    """
+    script = _code(REMOTE_SCRIPT.read_text())
+    wrapped, bare = [], []
+    for verb in ("ping", "ensure-schema", "restore", "restore-gz", "grant", "count"):
+        start = script.index(f"    {verb})")
+        block = script[start:script.index(";;", start)]
+        (wrapped if "--single-transaction" in block else bare).append(verb)
+    assert wrapped == ["restore", "restore-gz"], wrapped
+    assert set(bare) == {"ping", "ensure-schema", "grant", "count"}
 
 
 def test_a_hanging_publish_raises_instead_of_running_forever(monkeypatch):
@@ -93,3 +105,49 @@ def test_the_publish_timeout_stays_under_the_two_hour_cadence():
     let attempts overlap would queue publishes behind each other."""
     total = publish_marts.PUBLISH_TIMEOUT_SECONDS * 3
     assert total < 2 * 60 * 60
+
+
+# --- the wire is the bottleneck -----------------------------------------------------------
+
+def test_the_dump_is_compressed_before_it_crosses_the_wire(monkeypatch):
+    """Measured: a 334 MB dump over a ~20 Mbit/s link is 135 seconds, which is essentially
+    the whole publish. The database work is not the cost; the upload is.
+
+    That is why the job is fragile. When the link is busy the same publish takes 13 to 17
+    minutes — long enough for Airflow to disown the task as a zombie and kill it mid-stream,
+    which Postgres then reports as a truncated COPY at a random line.
+    """
+    import gzip
+    sent = {}
+    monkeypatch.setattr(publish_marts, "PUBLISH_KEY", "/tmp/key")
+    monkeypatch.setattr(publish_marts, "PUBLISH_HOST", "user@host")
+    monkeypatch.setattr(publish_marts, "_publish_ssh",
+                        lambda verb, stdin=b"": sent.update(verb=verb, stdin=stdin)
+                        or subprocess.CompletedProcess([], 0, b"", b""))
+
+    body = b"COPY serving.srv_scoreboard FROM stdin;\n" + b"row\tdata\n" * 5000
+    publish_marts.restore_to_serving(body, "serving")
+
+    assert sent["verb"] == "restore-gz serving", (
+        "the plain `restore` verb sends 334 MB uncompressed over the link that is already "
+        "the failure point")
+    assert gzip.decompress(sent["stdin"]) == body, "the remote must receive the same bytes"
+    assert len(sent["stdin"]) < len(body), "compression must actually shrink the payload"
+
+
+def test_the_remote_understands_the_compressed_verb():
+    """Client and forced command have to agree, and they are deployed separately — the
+    script goes to the droplet by scp, the Python by the Airflow worktree. A mismatch is a
+    refused verb at publish time."""
+    script = _code(REMOTE_SCRIPT.read_text())
+    assert "restore-gz)" in script
+    assert "gunzip" in script
+
+
+def test_the_compressed_restore_is_still_atomic():
+    """The new path must not quietly lose the property that keeps the site up. Both restore
+    verbs wrap their load in one transaction."""
+    script = _code(REMOTE_SCRIPT.read_text())
+    start = script.index("    restore-gz)")
+    block = script[start:script.index(";;", start)]
+    assert "--single-transaction" in block
