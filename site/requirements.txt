@@ -1,0 +1,35 @@
+# The site image's own dependencies. Deliberately separate from the repo-root
+# requirements.txt, which carries dbt, the Databricks driver and the ingestion stack — none
+# of which belong on a 1 GiB droplet whose only job is rendering.
+#
+# The cost of two lists is that a new site dependency has to be added to BOTH, and forgetting
+# is silent: the repo's tests pass, CI passes, the image builds, and the page that needs it
+# raises on import at runtime. openpyxl was added to the root list for the Excel export and
+# missed here, which is exactly that.
+# PINNED EXACTLY, UNLIKE THE REST. streamlit renders the app; the others only move data.
+#
+# This was `streamlit>=1.40` until 30 August, when rebuilding the image to ship an unrelated
+# one-line change pulled 1.62.0 (released 19 Aug) in place of whatever the previous image had
+# baked in. The app builds its nav with st.navigation, but the code also has a directory
+# literally named `pages/`, which Streamlit auto-discovers as a multipage app. Those two
+# compete, and in 1.62 the automatic one won: the sidebar showed raw filenames — including
+# `app`, the entrypoint itself, which only filename discovery ever produces — and every page
+# rendered blank.
+#
+# Nothing caught it. The repo has no test that renders the site, CI does not build this
+# image, and the deployment was verified by querying the database, which was entirely healthy
+# throughout. The site was unusable for a day and the end user found it.
+#
+# A range is fine for a library whose contract is a function signature. It is not fine for
+# the framework that decides what the page looks like, where a minor release can change
+# rendering with no error anywhere. Upgrading is now a deliberate edit that someone has to
+# look at the site after.
+#
+# The durable fix is renaming `pages/` so the collision cannot happen at any version. Until
+# that lands, this pin is what holds the site up.
+streamlit==1.61.1
+sqlalchemy>=2.0
+psycopg2-binary>=2.9
+pandas>=2.0
+python-dotenv>=1.0
+openpyxl>=3.1
