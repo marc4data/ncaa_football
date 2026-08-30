@@ -596,3 +596,60 @@ def test_the_in_season_ttl_is_short_enough_to_recover_from_a_bad_read():
     """The TTL is how long a transient wrong answer survives after the cause is fixed."""
     from lib.query import cache_ttl
     assert cache_ttl() <= 300
+
+
+# --- the site image, which nothing else in CI can see -------------------------------------
+
+SITE_DIR = Path(__file__).resolve().parents[1] / "site"
+
+
+def test_the_site_image_build_files_are_in_the_repo():
+    """They lived only on the droplet until 30 August.
+
+    `site/Dockerfile` and `site/requirements.txt` existed on the server and nowhere in git.
+    A diff of the site directory reported "only query.py differs", which was true of the
+    files present in both places and silently skipped the two that were not. Nothing in
+    review or CI could see the image definition at all.
+    """
+    assert (SITE_DIR / "Dockerfile").is_file()
+    assert (SITE_DIR / "requirements.txt").is_file()
+
+
+def test_streamlit_is_pinned_exactly():
+    """A range is fine for a library whose contract is a function signature. It is not fine
+    for the framework that decides what the page looks like.
+
+    `streamlit>=1.40` meant rebuilding the image to ship an unrelated one-line change pulled
+    1.62.0, whose handling of an auto-discovered `pages/` directory overrode st.navigation.
+    The sidebar showed raw filenames and every page rendered blank, with no error anywhere.
+    """
+    reqs = (SITE_DIR / "requirements.txt").read_text()
+    lines = [ln.strip() for ln in reqs.splitlines()
+             if ln.strip() and not ln.strip().startswith("#")]
+    streamlit = [ln for ln in lines if ln.lower().startswith("streamlit")]
+    assert streamlit, "streamlit must be listed in the site requirements"
+    assert streamlit[0].startswith("streamlit=="), (
+        f"streamlit must be pinned to an exact version, not a range: {streamlit[0]}")
+
+
+def test_every_site_import_is_declared_in_the_site_requirements():
+    """The site image installs its own list, deliberately separate from the repo root. The
+    cost is that a new dependency has to be added to both, and forgetting is silent — the
+    tests pass, CI passes, the image builds, and the page raises on import at runtime.
+    openpyxl was already missed here once.
+    """
+    import re
+    reqs = (SITE_DIR / "requirements.txt").read_text().lower()
+    third_party = {"streamlit", "sqlalchemy", "pandas", "psycopg2", "dotenv", "openpyxl"}
+    seen = set()
+    for path in list(SITE_DIR.rglob("*.py")):
+        if "__pycache__" in str(path):
+            continue
+        for mod in re.findall(r"^\s*(?:import|from)\s+([a-z0-9_]+)", path.read_text(),
+                              re.MULTILINE):
+            if mod in third_party:
+                seen.add(mod)
+    missing = [m for m in seen
+               if m not in reqs and not (m == "psycopg2" and "psycopg2" in reqs)
+               and not (m == "dotenv" and "python-dotenv" in reqs)]
+    assert not missing, f"imported by the site but not in site/requirements.txt: {missing}"
