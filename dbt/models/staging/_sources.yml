@@ -263,4 +263,28 @@ sources:
             data_tests: [unique, not_null]
       - name: raw_ppa_teams
         description: Predicted points added per play, offence and defence. Results-derived.
+      - name: raw_ppa_games
+        description: >
+          CFBD /ppa/games. Team PPA per game, offense and defense, six splits each. Two rows
+          per game — one per team — so a game and its opponent are both present.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_ppa_players_season
+        description: >
+          CFBD /ppa/players/season. Player PPA, average AND total, each carrying the same
+          eight keys. SPELLS CONFERENCES AS ABBREVIATIONS — `B1G`, `B12`, `AAC` — where every
+          other endpoint uses full names. A cross-model filter on `conference = 'Big 12'`
+          silently returns nothing from this one.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_ppa_players_games
+        description: >
+          CFBD /ppa/players/games. Player PPA per game — and NO gameId on the payload, so the
+          game is identified only by season, week, season type and opponent. Publishes only
+          averagePPA.all / .pass / .rush: no totals, no down splits, no conference.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
 
