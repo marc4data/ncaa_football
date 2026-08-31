@@ -158,12 +158,48 @@ def day(ts) -> str:
     return _local(stamp).strftime("%b %-d, %Y")
 
 
-def as_of(ts) -> str:
-    """AC-G.35, in the display zone rather than UTC.
+def relative_age(ts, now=None) -> str:
+    """How long ago, in the largest unit that does not round the answer away.
+
+    HOURS RUN TO 48, NOT TO 24, and that is the whole point of this function. A stamp
+    44 hours old rolling over to "2 days ago" rounds away the number the reader needs: on a
+    live Saturday the difference between 20 hours and 44 hours is the difference between
+    "yesterday's refresh" and "we missed one". Days only start once the hour count has
+    stopped being informative.
+
+    A future timestamp reads as "just now" rather than a negative age. Clock skew between
+    the warehouse and the web host is a real few-seconds effect, and "in -3 seconds" is a
+    worse answer than a harmless rounding to the present.
+    """
+    stamp = _local(ts)
+    now = _local(now) if now is not None else pd.Timestamp.now(tz=display_timezone())
+    seconds = (now - stamp).total_seconds()
+
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        minutes = int(seconds // 60)
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    if seconds < 48 * 3600:
+        hours = int(seconds // 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = int(seconds // 86400)
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def as_of(ts, now=None) -> str:
+    """AC-G.35, in the display zone rather than UTC, absolute AND relative.
 
     The as-of stamp answers "how current is this", and a reader who has to convert from UTC
     to answer it will not bother. Storage stays UTC; only the rendering moves.
+
+    BOTH FORMS, NEVER ONE. "as of Aug 27, 8:00 AM PDT" at 44 hours old is technically true
+    and reads as fine, which is the definition of the problem — an absolute time is only
+    stale relative to a clock the reader has to consult. "44 hours ago" is what they
+    actually read. The absolute time stays because it is what someone cross-checks against
+    a CFBD page or a broadcast, and a relative age alone cannot be checked against anything.
     """
     if ts is None or pd.isna(ts):
         return "as of — (freshness unavailable)"
-    return f"as of {_local(ts).strftime('%b %-d, %Y, %-I:%M %p %Z')}"
+    return (f"as of {_local(ts).strftime('%b %-d, %Y, %-I:%M %p %Z')}"
+            f" · {relative_age(ts, now)}")

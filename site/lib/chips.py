@@ -4,6 +4,7 @@ AC-G.20 to AC-G.23. The hard rule is that meaning survives greyscale — colour 
 signal, never the only one, so the glyph carries the meaning on its own and every chip
 carries a spelled-out accessible label.
 """
+import pandas as pd
 import streamlit as st
 
 # class -> (glyph, default label, aria description)
@@ -58,6 +59,36 @@ def out_of_sample_chip_html(is_out_of_sample: bool) -> str:
     return chip_html("w", "Out-of-sample week",
                      "the model's training set contains no regular-season game this early; "
                      "this is extrapolation, not inference")
+
+
+# The floor when a view has not told us one. A LAST RESORT, not a default: every caller
+# passes the `training_week_floor` COLUMN, and this exists so a null does not render the
+# word "None" into the middle of a sentence.
+WEEK_FLOOR_FALLBACK = 5
+
+
+def week_floor_note(floor=None, season=None, clause: str = "") -> str:
+    """R-004. The Week 1-4 explanation, in one place, for all three pages that carry it.
+
+    Today, Matchup and Edge Finder all have to explain the same absence, and until now two
+    of them built the sentence inline and the third did not have it at all. The two that did
+    had ALREADY drifted — Matchup hardcoded "The 2026 model" while Edge Finder interpolated
+    the season — which is the drift argument arriving before anyone made the argument.
+
+    `clause` is the page-specific tail, appended before the full stop, because the reason the
+    block is empty differs by page: Matchup is about one game, Edge Finder is about having
+    nothing to compare against the book. The SENTENCE is shared; only the tail is local.
+
+    The season is interpolated, never hardcoded. A hardcoded year is correct for one season
+    and quietly wrong every year after.
+    """
+    week = WEEK_FLOOR_FALLBACK
+    if floor is not None and not pd.isna(floor):
+        week = int(floor)
+    year = "current-season" if season is None or pd.isna(season) else str(int(season))
+    stem = (f"Model predictions begin in Week {week}. The {year} model needs several weeks "
+            f"of current-season results before it can forecast this year's teams")
+    return f"{stem}{clause}."
 
 
 SPREAD_SIGN_NOTE = (

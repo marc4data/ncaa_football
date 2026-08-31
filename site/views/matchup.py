@@ -217,9 +217,9 @@ def _model(row) -> None:
         if pd.notna(floor) and pd.notna(week) and int(week) < int(floor):
             states.empty(
                 "The model's forecast would be here.",
-                f"Model predictions begin in Week {int(floor)}. The 2026 model needs "
-                f"several weeks of current-season results before it can forecast this "
-                f"year's teams, and this game is in Week {int(week)}.")
+                chips.week_floor_note(
+                    floor, row.get("season"),
+                    clause=f", and this game is in Week {int(week)}"))
         else:
             states.empty(
                 "The model's forecast would be here.",

@@ -17,9 +17,21 @@ gap the third weekly DAG exists to close. The schedule already knows when games 
 it is cheaper and cannot go stale.
 
     a game kicked off within the settle window   -> proceed, results are landing
+    a game is STILL not final, kicked off <36h   -> proceed, it is delayed or suspended
     the daily safety-net hour                    -> proceed, catches late stat corrections
     otherwise, in season                         -> skip
     out of season                                -> the safety-net hour only
+
+WHY THE SECOND BRANCH EXISTS. The settle window assumes a game ends within a few hours of
+starting, and late-August football in the southeast does not always oblige: a lightning delay
+is routine, and a game SUSPENDED on Thursday and resumed on Friday afternoon keeps its
+Thursday kickoff timestamp. Eighteen hours later the settle window has long since shut, so
+the finished game would sit unpublished until Sunday — the exact failure this module exists
+to prevent, arriving through the one door the kickoff clock does not watch.
+
+So the second branch asks a different question. Not "did a game start recently" but "is a
+game we already know about still unfinished". It closes on its own the moment the game
+finals, so it cannot loop.
 
 Cost. One refresh is TWO requests — /games for the week in play and the one before it — so
 running it every two hours through a game weekend costs about seventy requests a week
@@ -36,7 +48,7 @@ without Airflow, a database or a clock — the same shape as `lines_cadence.shou
 and it reuses that module's config file because the season window is the same season.
 """
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.lines_cadence import CadenceConfig, Decision
@@ -52,6 +64,15 @@ SETTLE_HOURS = 8
 # its condition is wrong.
 SAFETY_NET_HOUR_UTC = 12
 
+# How long after kickoff an UNFINISHED game keeps the gate open. Covers a suspended game
+# resumed the following afternoon, which is the case SETTLE_HOURS cannot see.
+#
+# THIS BOUND IS THE CIRCUIT BREAKER, not a detail. A postponed game is `completed = false`
+# with a past kickoff forever, so without an upper bound one of them would hold the gate open
+# permanently. At 36 hours the worst a game that never finals can cost is 18 runs — 36
+# requests, once, and then it falls out of the window whether or not it was ever played.
+UNFINISHED_HOURS = 36
+
 
 @dataclass(frozen=True)
 class ScoresDecision(Decision):
@@ -61,13 +82,18 @@ class ScoresDecision(Decision):
 def should_refresh_scores(now_utc: datetime,
                           config: CadenceConfig,
                           hours_since_last_kickoff: Optional[float] = None,
+                          unfinished_recent: Optional[int] = None,
                           settle_hours: int = SETTLE_HOURS) -> Decision:
     """Decide whether this run should fetch the game spine.
 
-    `hours_since_last_kickoff` is passed in rather than queried so this stays pure. None
-    means the caller could not determine it — a database that will not answer must not
-    silently stop the pipeline, so that case falls through to the safety net rather than
-    skipping.
+    Both data inputs are passed in rather than queried so this stays pure. None means the
+    caller could not determine it — a database that will not answer must not silently stop
+    the pipeline, so that case falls through to the safety net rather than skipping.
+
+    `unfinished_recent` is a COUNT, not a boolean, so the logged reason can say how many
+    games are holding the gate open. "1 game unfinished" and "14 games unfinished" are a
+    lightning delay and a broken load respectively, and the log should be able to tell them
+    apart without a second query.
     """
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=timezone.utc)
@@ -85,6 +111,20 @@ def should_refresh_scores(now_utc: datetime,
             branch="settling",
             reason=(f"a game kicked off {hours_since_last_kickoff:.1f}h ago, inside the "
                     f"{settle_hours}h settle window — results are landing now"),
+        )
+
+    # A GAME WE ALREADY KNOW ABOUT IS STILL NOT FINAL. Distinct from the branch above, and
+    # deliberately so: that one asks whether a game started recently, this one asks whether
+    # one has finished. A Thursday game suspended for weather and resumed Friday afternoon
+    # is invisible to the kickoff clock and obvious to this.
+    if in_season and unfinished_recent:
+        return ScoresDecision(
+            proceed=True,
+            branch="unfinished",
+            reason=(f"{unfinished_recent} game(s) kicked off within the last "
+                    f"{UNFINISHED_HOURS}h and are still not final — delayed, suspended or "
+                    f"simply not yet published, and none of those resolve by waiting for "
+                    f"Sunday"),
         )
 
     # FAIL OPEN, IN SEASON. If the schedule could not be read we cannot tell whether games
@@ -124,39 +164,70 @@ def should_refresh_scores(now_utc: datetime,
     return ScoresDecision(
         proceed=False,
         branch="nothing_settling",
-        reason=(f"in season, but {since} — outside the {settle_hours}h settle window and "
+        reason=(f"in season, but {since} and no game unfinished inside "
+                f"{UNFINISHED_HOURS}h — outside the {settle_hours}h settle window and "
                 f"not the daily {SAFETY_NET_HOUR_UTC:02d}:00 run"),
     )
 
 
-def hours_since_last_kickoff(now_utc: Optional[datetime] = None) -> Optional[float]:
-    """Hours since the most recent kickoff that has already happened.
+@dataclass(frozen=True)
+class ScheduleState:
+    """What the schedule says right now: both gate inputs, from one read.
+
+    They are returned together rather than fetched separately because they share a failure
+    mode. `should_refresh_scores` treats a null `hours_since_last_kickoff` as "the database
+    would not answer" and fails open on it; that inference is only sound if the other input
+    could not have succeeded independently. One connection, one query, one answer about
+    whether we could see the schedule at all.
+    """
+
+    hours_since_last_kickoff: Optional[float] = None
+    unfinished_recent: Optional[int] = None
+
+
+def schedule_state(now_utc: Optional[datetime] = None,
+                   unfinished_hours: int = UNFINISHED_HOURS) -> ScheduleState:
+    """Read the schedule for both gate inputs.
 
     Reads the SCHEDULE, which is known weeks ahead and does not depend on the refresh this
     gate is deciding about — so a stale results table cannot make the gate stop collecting
     results, which would be a satisfying loop to debug at 2am in November.
 
-    Returns None on any failure. The caller treats that as "cannot tell", which falls
-    through to the safety net rather than skipping.
+    The unfinished count is the one place the gate does read `is_completed`, and it is safe
+    in the same way: a stale `false` opens the gate rather than closing it, so the failure
+    direction is a wasted request instead of a missing score.
+
+    Returns an empty state on any failure. The caller treats null as "cannot tell", which
+    falls through to fail-open in season rather than skipping.
     """
     now_utc = now_utc or datetime.now(timezone.utc)
+    window_start = now_utc - timedelta(hours=unfinished_hours)
     try:
         from src.load_raw_to_postgres import get_conn
         connection = get_conn()
         try:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "select max(start_date) from marts.fct_game where start_date <= %s",
-                    (now_utc,))
-                latest = cursor.fetchone()[0]
+                    """
+                    select
+                        max(start_date) filter (where start_date <= %s),
+                        count(*) filter (where not is_completed
+                                           and start_date <= %s
+                                           and start_date >= %s)
+                    from marts.fct_game
+                    """,
+                    (now_utc, now_utc, window_start))
+                latest, unfinished = cursor.fetchone()
         finally:
             connection.close()
     except Exception as exc:                                       # noqa: BLE001
         print(f"could not read the schedule ({exc}); falling through to the safety net")
-        return None
+        return ScheduleState()
 
-    if latest is None:
-        return None
-    if latest.tzinfo is None:
-        latest = latest.replace(tzinfo=timezone.utc)
-    return (now_utc - latest).total_seconds() / 3600.0
+    hours = None
+    if latest is not None:
+        if latest.tzinfo is None:
+            latest = latest.replace(tzinfo=timezone.utc)
+        hours = (now_utc - latest).total_seconds() / 3600.0
+    return ScheduleState(hours_since_last_kickoff=hours,
+                         unfinished_recent=int(unfinished or 0))

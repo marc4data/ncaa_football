@@ -5,6 +5,7 @@ test. These assert the properties the document actually specifies: that the stat
 distinguishable, that a violation of the query contract raises rather than returning a
 wrong answer, and that null and zero never look alike.
 """
+import inspect
 import sys
 from pathlib import Path
 
@@ -223,7 +224,14 @@ def test_edge_finder_reads_its_week_floor_from_data_not_from_a_constant():
     # that "Week 5" appears nowhere in the file was the first version of this test and it
     # failed on the docstring explaining why not to hardcode it — a test that cannot tell
     # prose from copy is a test that gets loosened rather than fixed.
-    assert "Week {floor}" in source
+    #
+    # The interpolation moved to chips.week_floor_note under 028, because Today needed the
+    # same sentence and two inline copies had already drifted. FOLLOW IT RATHER THAN DROP
+    # IT: the property under test is that no page names a week, and that the one place the
+    # sentence is now built reads the floor it was handed.
+    assert "Week 5" not in source.split('"""')[-1]
+    assert "week_floor_note(" in source
+    assert "Week {week}" in inspect.getsource(chips.week_floor_note)
 
 
 def test_edge_finder_empty_copy_is_empty_not_degraded():
@@ -690,3 +698,61 @@ def test_the_image_copies_views_and_never_pages():
     assert "/app/views/" in code
     assert "/app/pages/" not in code, (
         "copying to /app/pages/ recreates the directory Streamlit auto-discovers")
+
+# --- prompt 028: the as-of stamp, the shared week-floor sentence, the slate caption -------
+
+
+def test_as_of_carries_both_an_absolute_time_and_a_relative_age():
+    """028 gap 3, part one. "as of Aug 27, 8:00 AM" at 44 hours old is technically true and
+    reads as fine, which is the definition of the problem. Both forms, never one — the
+    absolute time is what gets cross-checked, the relative age is what gets read."""
+    import pandas as pd
+    stamp = pd.Timestamp("2026-08-27 15:00", tz="UTC")
+    rendered = fmt.as_of(stamp, now=stamp + pd.Timedelta(hours=44))
+    assert "Aug 27, 2026" in rendered          # the absolute half survives
+    assert "44 hours ago" in rendered          # and the relative half is present
+
+
+def test_forty_four_hours_does_not_round_away_to_two_days():
+    """The hour count runs to 48, not to 24. On a live Saturday the difference between
+    20 hours and 44 hours is the difference between "yesterday's refresh" and "we missed
+    one", and "2 days ago" throws exactly that away."""
+    import pandas as pd
+    base = pd.Timestamp("2026-08-27 15:00", tz="UTC")
+    assert fmt.relative_age(base, now=base + pd.Timedelta(hours=44)) == "44 hours ago"
+    assert fmt.relative_age(base, now=base + pd.Timedelta(hours=25)) == "25 hours ago"
+    assert fmt.relative_age(base, now=base + pd.Timedelta(hours=49)) == "2 days ago"
+    # Clock skew reads as the present, never as a negative age.
+    assert fmt.relative_age(base, now=base - pd.Timedelta(seconds=30)) == "just now"
+
+
+def test_one_week_floor_sentence_serves_all_three_pages():
+    """R-004. Today, Matchup and Edge Finder explain the same absence, and two of them had
+    already drifted — Matchup hardcoded "The 2026 model" while Edge Finder interpolated the
+    season. One string, one place, a page-specific tail."""
+    matchup = chips.week_floor_note(5, 2026, clause=", and this game is in Week 2")
+    edges = chips.week_floor_note(5, 2026,
+                                  clause=", so there is nothing yet to compare")
+    stem = "Model predictions begin in Week 5. The 2026 model needs several weeks"
+    assert matchup.startswith(stem) and edges.startswith(stem)
+    assert matchup.endswith("Week 2.") and edges.endswith("compare.")
+
+
+def test_the_week_floor_season_is_never_hardcoded():
+    """A hardcoded year is correct for one season and quietly wrong every year after."""
+    assert "2027 model" in chips.week_floor_note(5, 2027)
+    # A null floor must not render the word "None" into the middle of a sentence.
+    assert "Week 5" in chips.week_floor_note(None, 2026)
+    assert "None" not in chips.week_floor_note(None, None)
+
+
+def test_in_progress_is_bounded_so_a_postponed_game_is_never_called_live():
+    """028 gap 1. `is_completed = false` alone is true for a postponed game forever, and
+    across the whole night for a game suspended Thursday and resumed Friday. A caption that
+    claims those are in progress is worse than the current silence, so the claim is bounded
+    by the same settle window the refresh gate uses."""
+    from views import scores
+    from src.scores_cadence import SETTLE_HOURS as pipeline_settle
+    # The page and the pipeline must agree on what "still settling" means, or the site
+    # claims a game is live for longer than the DAG is collecting results for it.
+    assert scores.SETTLE_HOURS == pipeline_settle

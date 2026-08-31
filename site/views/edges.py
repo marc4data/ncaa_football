@@ -131,10 +131,10 @@ def _nothing_yet(season: int, floor: int, minimum: float, market_label: str) -> 
         return
     states.empty(
         "Model-versus-market edges would be here.",
-        f"Model predictions begin in Week {floor}. The {season} model needs several weeks "
-        f"of current-season results before it can forecast this year's teams, so there is "
-        f"nothing yet to compare against the book. This page will fill in as soon as the "
-        f"first predictions land.")
+        chips.week_floor_note(
+            floor, season,
+            clause=", so there is nothing yet to compare against the book")
+        + " This page will fill in as soon as the first predictions land.")
     st.caption(
         "An edge is the model's number minus the market's. Both have to exist before the "
         "subtraction means anything — showing a placeholder here would imply the model has "

@@ -8,8 +8,18 @@ Scores is the most-visited surface on any sports site during a game week, and a 
 showing yesterday's games as upcoming is worse than not having the page.
 
 The answer is not a fourth fixed day. This is scheduled every two hours and gated at
-runtime on whether a game has actually kicked off recently, so it collects continuously
-through a game weekend and stays quiet on a Tuesday in October.
+runtime on the schedule itself, so it collects continuously through a game weekend and
+stays quiet on a Tuesday in October. The gate asks two questions, not one:
+
+    did a game kick off recently          -> results are landing, collect
+    is a known game STILL not final       -> it is delayed or suspended, collect
+
+The second is not a refinement of the first. A Thursday game halted for lightning and
+resumed Friday afternoon keeps its Thursday kickoff timestamp, so the kickoff clock says
+eighteen hours and the settle window shut overnight — and the finished game would sit
+unpublished until Sunday, which is the failure this DAG exists to prevent arriving through
+the one door the kickoff clock does not watch. Bounded at 36 hours so a postponed game,
+which is `completed = false` with a past kickoff forever, cannot hold the gate open.
 
 WHAT IT DELIBERATELY DOES NOT DO. It fetches /games and nothing else — two requests, for the
 week in play and the one before it. A full results_refresh is 31 requests covering plays,
@@ -39,7 +49,7 @@ from src.alerting import failure_callback
 from src.lines_cadence import load_config
 from src.load_raw_to_postgres import load_endpoint
 from src.publish_marts import publish_all
-from src.scores_cadence import hours_since_last_kickoff, should_refresh_scores
+from src.scores_cadence import schedule_state, should_refresh_scores
 from src.weekly import scores_refresh
 
 DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
@@ -112,10 +122,12 @@ def cadence_gate(**context) -> bool:
     when you look at this in March.
     """
     now = datetime.now(tz=None).astimezone()
+    state = schedule_state(now)
     decision = should_refresh_scores(
         now_utc=now,
         config=load_config(),
-        hours_since_last_kickoff=hours_since_last_kickoff(),
+        hours_since_last_kickoff=state.hours_since_last_kickoff,
+        unfinished_recent=state.unfinished_recent,
     )
     print(f"scores cadence gate: {decision.branch.upper()} — "
           f"proceed={decision.proceed} | {decision.reason}")

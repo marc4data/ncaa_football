@@ -1,10 +1,31 @@
 """Scores — page 3. Completed results with the model's call alongside the outcome."""
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 import streamlit as st
 
 from lib import chips, filters, fmt, shell, states, table
 from lib.query import query
 from lib.table import Col
+
+# How long after kickoff a game that is not yet final still counts as IN PROGRESS.
+#
+# A DELIBERATE COPY of src.scores_cadence.SETTLE_HOURS, which is the source of truth. The
+# site image is built from ./site alone and cannot import src/, the same boundary that put a
+# copy of the lines cadence config in lib/. Keeping the two numbers equal is what makes the
+# page and the pipeline agree on what "still settling" means — the refresh gate collects
+# results for exactly as long as this page claims a game is being played.
+#
+# The upper bound is the honesty guard, not a detail. `is_completed = false` on its own is
+# true for a POSTPONED game forever, and for a game suspended on Thursday and resumed on
+# Friday it is true across the whole intervening night. Claiming those are in progress is
+# the false positive that is worse than the current silence, so a game that kicked off
+# longer ago than this drops out of the claim rather than being asserted about.
+SETTLE_HOURS = 8
+
+# How far ahead a kickoff still counts as "coming up" for the not-started caption. A day,
+# because the caption answers "is anything happening today", not "what is on this season".
+UPCOMING_HOURS = 24
 
 
 def _rows(season, week, season_type, conference, division='fbs') -> pd.DataFrame:
@@ -26,6 +47,73 @@ def _rows(season, week, season_type, conference, division='fbs') -> pd.DataFrame
         limit 400
     """, {"season": season, "week": week, "season_type": season_type,
           "division": division})
+
+
+def _unsettled(scope, now=None) -> pd.DataFrame:
+    """Games in scope that are not final, in the window either side of now.
+
+    Not a join and not arithmetic — one serving view, a WHERE, and a projected boolean that
+    says which side of now each kickoff falls on. The window bounds are computed here
+    because they are clock values, not metrics.
+    """
+    now = now or datetime.now(timezone.utc)
+    return query("""
+        select game_id, start_date, (start_date <= :now) as has_kicked
+        from srv_scoreboard
+        where season = :season and season_type = :season_type
+          and (:week is null or week = :week)
+          and (:division = 'all' or is_fbs_game)
+          and not is_completed
+          and start_date >= :window_start and start_date <= :window_end
+        order by start_date
+        limit 400
+    """, {"season": scope.season, "week": scope.week,
+          "season_type": scope.season_type, "division": scope.division,
+          "now": now,
+          "window_start": now - timedelta(hours=SETTLE_HOURS),
+          "window_end": now + timedelta(hours=UPCOMING_HOURS)})
+
+
+def _slate_caption(scope, now=None) -> None:
+    """AC-3.4's second branch: the page says so, rather than being silently short a game.
+
+    THREE SITUATIONS, NOT TWO. At 23:00 on the opening Thursday the table is empty because
+    nothing has finaled yet, while twenty thousand people are watching a game — and "No
+    completed games for 2026 Week 1 yet" is true, reads as broken, and is indistinguishable
+    from a quiet Tuesday. "Nothing has finished yet" and "nothing is happening" are opposite
+    claims and only one of them is reassuring.
+
+      in progress now   -> games are being played; results appear as each one finals
+      today, none yet   -> when the first kickoff is
+      neither           -> nothing said here; the existing Empty state is already correct
+
+    A game in progress cannot reach the table above it: `is_completed` comes straight from
+    CFBD's `completed` field and is never derived from points, so a live game is absent
+    rather than presented as final at whatever the score was when we asked. This caption is
+    what turns that absence from a gap into a statement.
+    """
+    try:
+        df = _unsettled(scope, now)
+    except Exception:                                              # noqa: BLE001
+        # A caption is not worth failing a page over. Silence is the current behaviour and
+        # it is honest; a wrong claim about a live game is not.
+        return
+    if df.empty:
+        return
+
+    kicked = df[df["has_kicked"].fillna(False).astype(bool)]
+    if not kicked.empty:
+        st.caption(
+            f"**{len(kicked)} game{'s' if len(kicked) != 1 else ''} in progress.** Results "
+            f"appear here as each one finals — cfdb records a score only once CFBD reports "
+            f"the game complete, so a game still being played is absent rather than shown "
+            f"with a partial score.")
+        return
+
+    st.caption(
+        f"**No games have kicked off yet.** First kickoff "
+        f"{fmt.local_time(df['start_date'].min())}. Results appear here as each game "
+        f"finals.")
 
 
 def _winner(row) -> str:
@@ -120,6 +208,9 @@ def body(page) -> None:
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)
         table.as_of_caption(df)
+        # Before the table, not after it: on the opening Thursday this caption is the only
+        # thing on the page, and it is the answer to why.
+        _slate_caption(scope)
         columns = [
             # F2-23: a caret beside the team that won, so the result is readable without
             # comparing two numbers. The winner comes from the view, not from a comparison
