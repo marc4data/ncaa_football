@@ -49,6 +49,30 @@ CREATE TABLE IF NOT EXISTS raw.raw_games_weather (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_stats_categories (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_stats_game_advanced (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_stats_game_havoc (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_stats_player_season (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_stats_player_success (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_stats_player_success_game (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_records (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
@@ -133,6 +157,9 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_ratings_sp, raw.raw_ratings_srs, raw.raw_ratings_elo,
          raw.raw_ratings_fpi, raw.raw_ppa_teams,
          raw.raw_games_players, raw.raw_games_weather,
+         raw.raw_stats_categories, raw.raw_stats_game_advanced,
+         raw.raw_stats_game_havoc, raw.raw_stats_player_season,
+         raw.raw_stats_player_success, raw.raw_stats_player_success_game,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -415,6 +442,305 @@ INSERT INTO raw.raw_games_weather (filename, content, status_code, params, fetch
      "weatherConditionCode": null, "weatherCondition": null}
   ]}', 200, '{"year": "2024", "seasonType": "regular"}',
   '2026-01-01T00:00:10Z', now());
+
+-- Advanced stats. Both sides are present with DIFFERENT values, which is the point: a model
+-- that read offense's keys for the defense columns would produce identical numbers and pass
+-- every null and range check. Only distinct values catch it.
+INSERT INTO raw.raw_stats_game_advanced (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-09-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "season": 2024,
+   "seasonType": "regular",
+   "week": 1,
+   "team": "Alpha State",
+   "opponent": "Beta Tech",
+   "offense": {
+    "plays": 65,
+    "drives": 12,
+    "ppa": 0.51,
+    "totalPPA": 33.2,
+    "successRate": 0.48,
+    "explosiveness": 1.71,
+    "powerSuccess": 0.62,
+    "stuffRate": 0.15,
+    "lineYards": 2.41,
+    "lineYardsTotal": 113,
+    "secondLevelYards": 1.23,
+    "secondLevelYardsTotal": 58,
+    "openFieldYards": 3.77,
+    "openFieldYardsTotal": 177,
+    "standardDowns": {
+     "ppa": 0.38,
+     "successRate": 0.46,
+     "explosiveness": 1.49
+    },
+    "passingDowns": {
+     "ppa": 1.62,
+     "successRate": 0.6,
+     "explosiveness": 2.82
+    },
+    "rushingPlays": {
+     "ppa": 0.44,
+     "totalPPA": 20.9,
+     "successRate": 0.42,
+     "explosiveness": 1.68
+    },
+    "passingPlays": {
+     "ppa": 1.26,
+     "totalPPA": 22.7,
+     "successRate": 0.66,
+     "explosiveness": 2.17
+    }
+   },
+   "defense": {
+    "plays": 68,
+    "drives": 15,
+    "ppa": 0.81,
+    "totalPPA": 36.2,
+    "successRate": 0.51,
+    "explosiveness": 2.01,
+    "powerSuccess": 0.65,
+    "stuffRate": 0.18,
+    "lineYards": 2.71,
+    "lineYardsTotal": 116,
+    "secondLevelYards": 1.53,
+    "secondLevelYardsTotal": 61,
+    "openFieldYards": 4.07,
+    "openFieldYardsTotal": 180,
+    "standardDowns": {
+     "ppa": 0.68,
+     "successRate": 0.49,
+     "explosiveness": 1.79
+    },
+    "passingDowns": {
+     "ppa": 1.92,
+     "successRate": 0.63,
+     "explosiveness": 3.12
+    },
+    "rushingPlays": {
+     "ppa": 0.74,
+     "totalPPA": 23.9,
+     "successRate": 0.45,
+     "explosiveness": 1.98
+    },
+    "passingPlays": {
+     "ppa": 1.56,
+     "totalPPA": 25.7,
+     "successRate": 0.69,
+     "explosiveness": 2.47
+    }
+   }
+  }
+ ]
+}', 200, '{"year": "2024", "seasonType": "regular"}',
+  '2026-01-01T00:00:11Z', now());
+
+-- Season advanced. Carries the extra season-only groups AND `totalOpportunies` spelled the
+-- way CFBD spells it — reading the correct spelling returns null on every row.
+INSERT INTO raw.raw_stats_season_advanced (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-10-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "offense": {
+    "plays": 65,
+    "drives": 12,
+    "ppa": 0.51,
+    "totalPPA": 33.2,
+    "successRate": 0.48,
+    "explosiveness": 1.71,
+    "powerSuccess": 0.62,
+    "stuffRate": 0.15,
+    "lineYards": 2.41,
+    "lineYardsTotal": 113,
+    "secondLevelYards": 1.23,
+    "secondLevelYardsTotal": 58,
+    "openFieldYards": 3.77,
+    "openFieldYardsTotal": 177,
+    "standardDowns": {
+     "ppa": 0.38,
+     "successRate": 0.46,
+     "explosiveness": 1.49,
+     "rate": 0.72
+    },
+    "passingDowns": {
+     "ppa": 1.62,
+     "successRate": 0.6,
+     "explosiveness": 2.82,
+     "rate": 0.72,
+     "totalPPA": 9.4
+    },
+    "rushingPlays": {
+     "ppa": 0.44,
+     "totalPPA": 20.9,
+     "successRate": 0.42,
+     "explosiveness": 1.68,
+     "rate": 0.72
+    },
+    "passingPlays": {
+     "ppa": 1.26,
+     "totalPPA": 22.7,
+     "successRate": 0.66,
+     "explosiveness": 2.17,
+     "rate": 0.72
+    },
+    "totalOpportunies": 52,
+    "pointsPerOpportunity": 4.02,
+    "fieldPosition": {
+     "averageStart": 71.4,
+     "averagePredictedPoints": 1.273
+    },
+    "havoc": {
+     "total": 0.121,
+     "frontSeven": 0.094,
+     "db": 0.027
+    }
+   },
+   "defense": {
+    "plays": 68,
+    "drives": 15,
+    "ppa": 0.81,
+    "totalPPA": 36.2,
+    "successRate": 0.51,
+    "explosiveness": 2.01,
+    "powerSuccess": 0.65,
+    "stuffRate": 0.18,
+    "lineYards": 2.71,
+    "lineYardsTotal": 116,
+    "secondLevelYards": 1.53,
+    "secondLevelYardsTotal": 61,
+    "openFieldYards": 4.07,
+    "openFieldYardsTotal": 180,
+    "standardDowns": {
+     "ppa": 0.68,
+     "successRate": 0.49,
+     "explosiveness": 1.79,
+     "rate": 0.75
+    },
+    "passingDowns": {
+     "ppa": 1.92,
+     "successRate": 0.63,
+     "explosiveness": 3.12,
+     "rate": 0.75,
+     "totalPPA": 12.4
+    },
+    "rushingPlays": {
+     "ppa": 0.74,
+     "totalPPA": 23.9,
+     "successRate": 0.45,
+     "explosiveness": 1.98,
+     "rate": 0.75
+    },
+    "passingPlays": {
+     "ppa": 1.56,
+     "totalPPA": 25.7,
+     "successRate": 0.69,
+     "explosiveness": 2.47,
+     "rate": 0.75
+    },
+    "totalOpportunies": 55,
+    "pointsPerOpportunity": 4.32,
+    "fieldPosition": {
+     "averageStart": 74.4,
+     "averagePredictedPoints": 1.573
+    },
+    "havoc": {
+     "total": 0.151,
+     "frontSeven": 0.124,
+     "db": 0.057
+    }
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:12Z', now());
+
+INSERT INTO raw.raw_stats_game_havoc (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-11-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024", "seasonType": "regular"},
+  "data": [
+    {"gameId": 9001, "season": 2024, "seasonType": "regular", "week": 1,
+     "team": "Alpha State", "conference": "Test Conference",
+     "opponent": "Beta Tech", "opponentConference": "Test Conference",
+     "offense": {"totalPlays": 67, "totalHavocEvents": 17, "frontSevenHavocEvents": 7,
+                 "dbHavocEvents": 10, "havocRate": 0.253, "frontSevenHavocRate": 0.104,
+                 "dbHavocRate": 0.149},
+     "defense": {"totalPlays": 65, "totalHavocEvents": 6, "frontSevenHavocEvents": 5,
+                 "dbHavocEvents": 1, "havocRate": 0.092, "frontSevenHavocRate": 0.077,
+                 "dbHavocRate": 0.015}}
+  ]}', 200, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:13Z', now());
+
+-- A BARE ARRAY OF STRINGS, no wrapping object. The only endpoint shaped this way, and the
+-- reason json_scalar_text exists: reading these with ::text keeps JSON's quotes.
+INSERT INTO raw.raw_stats_categories (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-12-001Z.json', '{
+  "status_code": 200, "params": {},
+  "data": ["totalYards", "netPassingYards", "rushingYards", "firstDowns", "turnovers",
+           "possessionTime", "thirdDownEff"]}', 200, '{}',
+  '2026-01-01T00:00:14Z', now());
+
+INSERT INTO raw.raw_stats_player_season (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-13-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024", "seasonType": "regular"},
+  "data": [
+    {"season": 2024, "playerId": "1001", "player": "A. Passer", "position": "QB",
+     "team": "Alpha State", "conference": "Test Conference",
+     "category": "passing", "statType": "YDS", "stat": "2944"},
+    {"season": 2024, "playerId": "1001", "player": "A. Passer", "position": "QB",
+     "team": "Alpha State", "conference": "Test Conference",
+     "category": "passing", "statType": "TD", "stat": "24"},
+    {"season": 2024, "playerId": "1002", "player": "B. Runner", "position": "RB",
+     "team": "Alpha State", "conference": "Test Conference",
+     "category": "rushing", "statType": "YDS", "stat": "1188"}
+  ]}', 200, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:15Z', now());
+
+-- successRate null when plays is zero is the NORMAL case, not an edge one — a receiver has
+-- no passing plays. Coercing it to 0 would make "0% on no attempts" and "0% on twenty
+-- attempts" the same number.
+INSERT INTO raw.raw_stats_player_success (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-14-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024", "seasonType": "regular"},
+  "data": [
+    {"season": 2024, "id": "1001", "name": "A. Passer", "position": "QB",
+     "team": "Alpha State", "conference": "Test Conference",
+     "passing": {"plays": 312, "successes": 151, "successRate": 0.484},
+     "rushing": {"plays": 44, "successes": 21, "successRate": 0.477}},
+    {"season": 2024, "id": "1004", "name": "E. Receiver", "position": "WR",
+     "team": "Alpha State", "conference": "Test Conference",
+     "passing": {"plays": 0, "successes": 0, "successRate": null},
+     "rushing": {"plays": 2, "successes": 1, "successRate": 0.5}}
+  ]}', 200, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:16Z', now());
+
+-- One 200 and one 400. The 400 is faithful: CFBD rejects a year-only call on this endpoint,
+-- and a model that read the payload before checking the status would explode on it.
+INSERT INTO raw.raw_stats_player_success_game (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-15-001Z.json', '{
+  "status_code": 400, "params": {"year": "2024", "seasonType": "regular"},
+  "data": {"error": "week required when team and playerId not specified"}}',
+  400, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:17Z', now()),
+('2026-01-01T00-00-15-002Z.json', '{
+  "status_code": 200, "params": {"year": "2024", "week": "1", "seasonType": "regular"},
+  "data": [
+    {"season": 2024, "seasonType": "regular", "week": 1, "gameId": 9001,
+     "id": "1001", "name": "A. Passer", "position": "QB",
+     "team": "Alpha State", "conference": "Test Conference", "opponent": "Beta Tech",
+     "passing": {"plays": 26, "successes": 14, "successRate": 0.538},
+     "rushing": {"plays": 3, "successes": 1, "successRate": 0.333}}
+  ]}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:00:18Z', now());
 
 INSERT INTO raw.raw_records (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-07-001Z.json', '{

@@ -63,6 +63,28 @@ FIELD_ACCESS = re.compile(
     r"\s*'([a-z_][a-z0-9_]*)'\s*,\s*(\[[^\]]*\]|'[^']*')")
 SOURCE_REF = re.compile(r"source\(\s*'raw'\s*,\s*'([a-z0-9_]+)'\s*\)")
 
+# Jinja `{% set %}` blocks, and the quoted tokens inside them.
+#
+# THE REGEX ABOVE READS STRING LITERALS PASSED TO THE JSON MACROS, AND THAT STOPPED BEING THE
+# WHOLE PICTURE. The advanced-stats models generate offense and defense from one list —
+# `json_get_nested_string('row_json', [side, metric])` — so the field names live in a `set`
+# block and never appear as a literal argument. The matrix read those models as 6 of 20 and 4
+# of 25 when they in fact expose every field.
+#
+# That is the failure direction this document must not have. Undercounting looks like a gap
+# that is not there and sends the next person to rewrite a model that is already complete;
+# it also makes the headline number wrong in a way that is invisible unless you happen to
+# check one model by hand. A token inside a `set` list in these models IS a field name by
+# construction, so reading them is not a heuristic stretched further — it is reading the same
+# information from where the model actually keeps it.
+JINJA_SET = re.compile(r"{%-?\s*set\s.*?%}", re.S)
+QUOTED = re.compile(r"'([A-Za-z_][A-Za-z0-9_]*)'")
+
+# An endpoint whose entire response is a bare array of scalars — /stats/categories. The spec
+# flattener has no key to name, so it emits this sentinel. There is no field to unnest: a
+# model that reads the endpoint at all has read all of it.
+SCALAR_SENTINEL = "(scalar)"
+
 
 @dataclass
 class Row:
@@ -112,6 +134,9 @@ def staging_models() -> Dict[str, Dict[str, Set[str]]]:
                     keys.add(parts[-1])
             else:
                 keys.add(argument.strip("'"))
+        # Field names the model builds by looping over a list rather than naming inline.
+        for block in JINJA_SET.findall(text):
+            keys |= set(QUOTED.findall(block))
         for table in SOURCE_REF.findall(text):
             by_table.setdefault(table, {})[sql_file.stem] = keys
     return by_table
@@ -173,6 +198,9 @@ def build_rows(spec: Spec, landed: Dict[str, int]) -> List[Row]:
         exposed: Set[str] = set()
         for keys in models.values():
             exposed |= keys
+        # A bare scalar array has no field to unnest; reading the endpoint reads all of it.
+        if leaves == {SCALAR_SENTINEL} and models:
+            exposed = exposed | leaves
         rows.append(Row(
             path=path,
             endpoint=BY_PATH.get(path),

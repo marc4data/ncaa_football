@@ -106,6 +106,48 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_stats_categories
+        description: >
+          CFBD /stats/categories. A BARE ARRAY OF STRINGS — the only endpoint shaped that
+          way, with no wrapping object. The controlled vocabulary behind
+          stg_game_team_stat.stat_category.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_stats_game_advanced
+        description: >
+          CFBD /stats/game/advanced. 62 field paths, the richest per-game payload CFBD
+          serves — PPA, success rate, explosiveness, line yards, split by down type and
+          play type, for offense and defense.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_stats_game_havoc
+        description: CFBD /stats/game/havoc. Havoc rates per game, offense and defense.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_stats_player_season
+        description: >
+          CFBD /stats/player/season. EAV-shaped and the highest-volume endpoint in the stats
+          family — 132,277 rows for a single 2024 fetch. Carries a real playerId.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_stats_player_success
+        description: CFBD /stats/player/success. Season success rate, passing and rushing.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_stats_player_success_game
+        description: >
+          CFBD /stats/player/success/game. Per-game success rate. A THIRD OF THE LANDED
+          RESPONSES ARE 400s and that is correct: CFBD rejects a year-only call here, so the
+          early season-scoped attempts were refused and the registry fetches it per week.
+          The refusals stay in raw because raw is immutable.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_info
         description: >
           Point-in-time snapshots of CFBD call quota from /info. Every snapshot is kept
