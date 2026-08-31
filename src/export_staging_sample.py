@@ -3,6 +3,18 @@
 Rule, as asked: up to 20,000 rows per table. Any table with more than that is narrowed to
 activity tied to games involving a Big 12 team, ordered by season and week ascending.
 
+ONE OR MORE SEASONS, AND MEMBERSHIP IS RESOLVED SEPARATELY FOR EACH. `--season 2025 2026`
+does not union the years and then ask who was in the Big 12; it asks per year and unions the
+answers. That distinction is the whole reason membership is season-scoped — a team that
+joined in 2026 should contribute its 2026 games and not its 2025 ones, and resolving against
+a merged season set would hand it both.
+
+OPPONENTS ARE INCLUDED. "Big 12 activity" means the games, and a game has two teams in it.
+Game-grain tables got this for free — filtering to the game set returns both sides — but
+team-grain tables were filtered to the member list, so a Big 12 team's opponent was missing
+from the very sheets that describe it. The team set used for those is now every team that
+appears in the game set, members and opponents alike, and the Index sheet says so.
+
 WHICH IS NOT UNIFORMLY POSSIBLE, and the interesting part of the job is what to do about
 it. Staging models are shaped like the endpoints they unpack, so the columns needed to
 express "a game involving a Big 12 team" are not in all of them:
@@ -31,6 +43,7 @@ empty tab with no explanation is indistinguishable from a broken export.
 Usage:
   python -m src.export_staging_sample
   python -m src.export_staging_sample --conference "SEC" --season 2024
+  python -m src.export_staging_sample --conference "Big 12" --season 2025 2026
   python -m src.export_staging_sample --out /tmp/sample.xlsx --conference "Big Ten"
 """
 import argparse
@@ -94,44 +107,90 @@ def columns_of(cursor, table: str) -> list:
     return [row[0] for row in cursor.fetchall()]
 
 
-def resolve_conference(cursor, conference: str, season: int) -> dict:
-    """The Big 12's team_ids, names and game_ids for one season, from the conformed layer.
+def resolve_conference(cursor, conference: str, seasons) -> dict:
+    """Who is in the conference, which games they played, and who they played.
 
     From dim_team rather than from staging: dim_team owns team identity, and reading the key
     from the layer that owns it is the difference between a join key and a lucky match.
 
-    SEASON-SCOPED BECAUSE CONFERENCES MOVE. The Big 12 had 14 members in 2023 and 16 from
-    2024. Resolving membership without a season would blend eras and quietly widen the
-    filter every year realignment happens.
+    MEMBERSHIP IS RESOLVED PER SEASON AND THEN UNIONED, never the other way round. The Big 12
+    had 14 members in 2023 and 16 from 2024, so asking "who was in the Big 12 across 2025 and
+    2026" as one question would hand a 2026 joiner its 2025 games too. Asking per year and
+    unioning the answers keeps each year's game set honest; the union only ever appears
+    afterwards, in the filters.
 
     EXACT MATCH, NEVER A PATTERN. dim_team also holds `Big Sky`, `Big Ten` and
     `OVC-Big South`; `conference ilike '%big%'` would collect all four.
-    """
-    cursor.execute("""
-        select distinct team_id, school
-        from marts.dim_team
-        where conference = %(conference)s and season = %(season)s
-          and team_id is not null
-        order by school
-    """, {"conference": conference, "season": season})
-    rows = cursor.fetchall()
-    team_ids = [r[0] for r in rows]
-    names = [r[1] for r in rows]
 
-    game_ids = []
-    if team_ids:
-        # The game set, resolved once and reused. Tables with a game_id and nothing else are
-        # filtered against this rather than re-deriving it per table, so every game-grain
-        # sheet is narrowed to exactly the same games.
+    THREE SETS COME BACK, AND THEY ARE NOT INTERCHANGEABLE:
+
+      member_ids       teams in the conference, across the seasons asked for
+      game_ids         games with a member on either side
+      participant_ids  every team appearing in those games — members AND their opponents
+
+    Team-grain tables use `participant_ids`, because a request for "Big 12 activity" that
+    drops the opponent's own rows describes half of each game. Game-grain tables never had
+    this problem: filtering to `game_ids` returns both sides already.
+    """
+    seasons = sorted({int(s) for s in seasons})
+
+    member_ids, names = [], []
+    game_ids, participant_ids = [], []
+    per_season = {}
+
+    for season in seasons:
+        cursor.execute("""
+            select distinct team_id, school
+            from marts.dim_team
+            where conference = %(conference)s and season = %(season)s
+              and team_id is not null
+            order by school
+        """, {"conference": conference, "season": season})
+        rows = cursor.fetchall()
+        season_ids = [r[0] for r in rows]
+        per_season[season] = len(season_ids)
+        member_ids.extend(season_ids)
+        names.extend(r[1] for r in rows)
+
+        if not season_ids:
+            continue
+
+        # The game set for THIS season, against THIS season's membership. Resolved once and
+        # reused, so every game-grain sheet is narrowed to exactly the same games.
         cursor.execute(f"""
-            select game_id from {SCHEMA}.stg_games
+            select game_id, home_team_id, away_team_id from {SCHEMA}.stg_games
             where season = %(season)s
               and (home_team_id = any(%(ids)s) or away_team_id = any(%(ids)s))
-        """, {"season": season, "ids": team_ids})
-        game_ids = [r[0] for r in cursor.fetchall()]
+        """, {"season": season, "ids": season_ids})
+        for game_id, home_id, away_id in cursor.fetchall():
+            game_ids.append(game_id)
+            # Both sides. This is where opponents enter the team set.
+            participant_ids.extend(i for i in (home_id, away_id) if i is not None)
 
-    return {"conference": conference, "season": season,
-            "team_ids": team_ids, "names": names, "game_ids": game_ids}
+    participant_ids = sorted(set(participant_ids) | set(member_ids))
+    member_ids = sorted(set(member_ids))
+    game_ids = sorted(set(game_ids))
+
+    participant_names = []
+    if participant_ids:
+        # Names for the team-grain tables that carry no id. Season-scoped for the same reason
+        # the membership is: a school's own name is stable, but restricting to the seasons
+        # asked for keeps this list from collecting every alias dim_team has ever held.
+        cursor.execute("""
+            select distinct school from marts.dim_team
+            where team_id = any(%(ids)s) and season = any(%(seasons)s)
+            order by school
+        """, {"ids": participant_ids, "seasons": seasons})
+        participant_names = [r[0] for r in cursor.fetchall()]
+
+    return {"conference": conference,
+            "seasons": seasons,
+            "per_season": per_season,
+            "member_ids": member_ids,
+            "member_names": sorted(set(names)),
+            "team_ids": participant_ids,
+            "names": participant_names or sorted(set(names)),
+            "game_ids": game_ids}
 
 
 def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
@@ -144,8 +203,13 @@ def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
     cols = set(columns_of(cursor, table))
     order = [c for c in ORDER_COLUMNS if c in cols]
     order_sql = f" order by {', '.join(order)} asc" if order else ""
-    season, conference = members["season"], members["conference"]
+    conference = members["conference"]
+    seasons = members["seasons"]
+    season_label = ", ".join(str(s) for s in seasons)
+    # `team_ids` / `names` are the PARTICIPANTS — members and the opponents they played.
+    # `member_ids` is the conference itself, used only where the distinction is reported.
     ids, names, game_ids = members["team_ids"], members["names"], members["game_ids"]
+    members_only = members["member_ids"]
 
     if row_count <= ROW_CAP:
         return (f"select * from {SCHEMA}.{table}{order_sql} limit {ROW_CAP}", {},
@@ -156,40 +220,48 @@ def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
     # Season first where the table carries one. It bounds the volume and it is what makes
     # the conference membership meaningful, since the roster changes with realignment.
     if "season" in cols:
-        where.append("season = %(season)s")
-        params["season"] = season
-        applied.append(f"season {season}")
+        where.append("season = any(%(seasons)s)")
+        params["seasons"] = seasons
+        applied.append(f"season {season_label}")
 
     # GAME GRAIN BEFORE TEAM GRAIN. The request is activity tied to games involving a Big 12
     # team, so where a table can express a game, that is the faithful reading.
     if all(c in cols for c in ID_PAIR_COLUMNS):
-        where.append("(home_team_id = any(%(ids)s) or away_team_id = any(%(ids)s))")
-        params["ids"] = ids
-        applied.append(f"either side a {conference} team ({len(ids)} teams)")
+        # Members on either side, not participants — a game qualifies because a CONFERENCE
+        # team is in it. Filtering on participants here would pull in games between two of
+        # the opponents, which is a different and much larger question.
+        where.append("(home_team_id = any(%(member_ids)s) or away_team_id = any(%(member_ids)s))")
+        params["member_ids"] = members_only
+        applied.append(f"either side a {conference} team ({len(members_only)} teams) — "
+                       f"both teams' rows are included")
     elif "game_id" in cols:
         # No team column at all: scope through the games resolved once in resolve_conference.
         # This is the same request answered through a join, and the note says so rather than
         # implying the table carried the filter itself.
         where.append("game_id = any(%(game_ids)s)")
         params["game_ids"] = game_ids
-        applied.append(f"game_id in the {len(game_ids):,} {season} {conference} games "
-                       f"(resolved via stg_games — this table carries no team)")
+        applied.append(f"game_id in the {len(game_ids):,} {season_label} {conference} games "
+                       f"(resolved via stg_games — this table carries no team); both "
+                       f"teams' rows are included")
     elif any(c in cols for c in ID_COLUMNS):
         id_col = next(c for c in ID_COLUMNS if c in cols)
         where.append(f"{id_col} = any(%(ids)s)")
         params["ids"] = ids
-        applied.append(f"{id_col} in the {len(ids)} {conference} teams — TEAM grain, "
-                       f"not game grain: this table has no games to be tied to")
+        applied.append(f"{id_col} in the {len(ids)} teams that played in those games "
+                       f"({len(members_only)} {conference} members plus their opponents) — "
+                       f"TEAM grain, not game grain: this table has no games to be tied to")
     elif any(c in cols for c in TEAM_COLUMNS):
         team_col = next(c for c in TEAM_COLUMNS if c in cols)
         where.append(f"{team_col} = any(%(names)s)")
         params["names"] = names
-        applied.append(f"{team_col} in the {len(names)} {conference} teams — matched by "
-                       f"NAME, no id column on this table; TEAM grain, not game grain")
+        applied.append(f"{team_col} in the {len(names)} teams that played in those games "
+                       f"({len(members_only)} {conference} members plus their opponents) — "
+                       f"matched by NAME, no id column; TEAM grain, not game grain")
     elif all(c in cols for c in PAIR_COLUMNS):
-        where.append("(home_team = any(%(names)s) or away_team = any(%(names)s))")
-        params["names"] = names
-        applied.append(f"either side a {conference} team, matched by name")
+        where.append("(home_team = any(%(member_names)s) or away_team = any(%(member_names)s))")
+        params["member_names"] = members["member_names"]
+        applied.append(f"either side a {conference} team, matched by name — both teams' "
+                       f"rows are included")
 
     if not where:
         return (f"select * from {SCHEMA}.{table}{order_sql} limit {ROW_CAP}", {},
@@ -201,7 +273,7 @@ def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
                          + (f"; ordered by {', '.join(order)}" if order else ""))
 
 
-def export(out_path: Path, conference: str, season: int) -> dict:
+def export(out_path: Path, conference: str, seasons) -> dict:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -216,14 +288,20 @@ def export(out_path: Path, conference: str, season: int) -> dict:
     """, (SCHEMA,))
     tables = [row[0] for row in cursor.fetchall()]
 
-    members = resolve_conference(cursor, conference, season)
-    if not members["team_ids"]:
-        print(f"  ! no teams found for conference {conference!r} in {season} — "
+    members = resolve_conference(cursor, conference, seasons)
+    season_label = ", ".join(str(s) for s in members["seasons"])
+    if not members["member_ids"]:
+        print(f"  ! no teams found for conference {conference!r} in {season_label} — "
               f"oversized tables cannot be narrowed and will show the first "
               f"{ROW_CAP:,} rows")
     else:
-        print(f"  {conference} {season} -> {len(members['team_ids'])} teams, "
-              f"{len(members['game_ids']):,} games (from marts.dim_team)\n")
+        # Per season as well as the total, because a year with zero members is a typo in
+        # the conference name or a season with no data, and a combined count hides it.
+        breakdown = ", ".join(f"{s}: {n}" for s, n in sorted(members["per_season"].items()))
+        opponents = len(members["team_ids"]) - len(members["member_ids"])
+        print(f"  {conference} {season_label} -> {len(members['member_ids'])} members "
+              f"({breakdown}), {len(members['game_ids']):,} games, "
+              f"{opponents} opponents (from marts.dim_team)\n")
 
     book = Workbook()
     book.remove(book.active)
@@ -292,16 +370,22 @@ def _write_index(book, index_rows, members, header_font, header_fill) -> None:
     tab.cell(1, 1, "cfdb — staging layer sample").font = header_font
     tab.cell(1, 1).fill = header_fill
     tab.cell(2, 1, f"Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
+    season_label = ", ".join(str(s) for s in members["seasons"])
+    opponents = len(members["team_ids"]) - len(members["member_ids"])
     tab.cell(3, 1, f"Rule: up to {ROW_CAP:,} rows per table. Anything larger is narrowed to "
                    f"activity tied to games involving a {members['conference']} team in "
-                   f"{members['season']} — {len(members['team_ids'])} teams, "
-                   f"{len(members['game_ids']):,} games, resolved from marts.dim_team — "
-                   f"ordered by season and week ascending.")
-    tab.cell(5, 1, "Two shapes. A game-grain table is filtered to that game set. A "
-                   "team-grain table has no games to be tied to, so it is filtered to the "
-                   "member teams themselves; the Note column says which was applied. "
-                   "Membership is season-scoped because realignment moves teams — the "
-                   "Big 12 had 14 members in 2023 and 16 from 2024.")
+                   f"{season_label} — {len(members['member_ids'])} members, "
+                   f"{len(members['game_ids']):,} games, {opponents} opponents also "
+                   f"included, resolved from marts.dim_team — ordered by season and week "
+                   f"ascending.")
+    tab.cell(5, 1, "Two shapes. A game-grain table is filtered to that game set, so BOTH "
+                   "teams' rows are present. A team-grain table has no games to be tied "
+                   "to, so it is filtered to every team that played in those games — "
+                   "members and opponents alike; the Note column says which was applied. "
+                   "Membership is resolved SEPARATELY PER SEASON and then unioned, because "
+                   "realignment moves teams: the Big 12 had 14 members in 2023 and 16 from "
+                   "2024, so a team that joined later must not contribute its earlier "
+                   "games.")
     tab.cell(4, 1, "Staging is the layer BELOW the site's serving views: one model per CFBD "
                    "endpoint, JSON unpacked and failed responses filtered out. Shapes follow "
                    "the endpoint, which is why not every table can express the same filter.")
@@ -325,11 +409,16 @@ def main() -> int:
                         default=Path("data/exports/staging_sample.xlsx"))
     parser.add_argument("--conference", default="Big 12",
                         help="exact dim_team.conference value, e.g. 'Big 12', 'SEC'")
-    parser.add_argument("--season", type=int, default=2025)
+    parser.add_argument("--season", type=int, nargs="+", default=[2025],
+                        metavar="YEAR",
+                        help="one or more seasons, e.g. --season 2025 2026. Membership is "
+                             "resolved per season and unioned, never merged first.")
     args = parser.parse_args()
 
+    season_label = ", ".join(str(s) for s in sorted(set(args.season)))
     print(f"Sampling {SCHEMA}: <= {ROW_CAP:,} rows per table, larger tables narrowed to "
-          f"games involving a {args.conference} team in {args.season}\n")
+          f"games involving a {args.conference} team in {season_label}, "
+          f"opponents included\n")
     summary = export(args.out, args.conference, args.season)
     print(f"\n{summary['tables']} sheet(s), {summary['rows']:,} rows -> {summary['path']}")
     return 0
