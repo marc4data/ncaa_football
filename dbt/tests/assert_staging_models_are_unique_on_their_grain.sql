@@ -57,6 +57,10 @@
     ('stg_rating_srs_expanded', ['season', 'team']),
     ('stg_rating_elo',          ['season', 'team']),
     ('stg_rating_core',         ['season', 'team', 'through_season_type', 'through_week']),
+    ('stg_team_season_ppa',     ['season', 'team']),
+    ('stg_game_team_ppa',       ['game_id', 'team']),
+    ('stg_player_season_ppa',   ['season', 'player_id']),
+    ('stg_player_game_ppa',     ['season', 'season_type', 'week', 'player_id']),
 ] %}
 
 {% for model, grain in staging_grains %}

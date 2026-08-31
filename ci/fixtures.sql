@@ -154,6 +154,18 @@ CREATE TABLE IF NOT EXISTS raw.raw_ppa_teams (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_ppa_games (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ppa_players_season (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ppa_players_games (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -170,6 +182,8 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_ratings_fpi, raw.raw_ppa_teams,
          raw.raw_ratings_sp_conferences, raw.raw_ratings_srs_expanded,
          raw.raw_ratings_core,
+         raw.raw_ppa_games, raw.raw_ppa_players_season,
+         raw.raw_ppa_players_games,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -270,6 +284,178 @@ INSERT INTO raw.raw_games (filename, content, status_code, params, fetched_at, a
   ]}', 200, '{"year": "1900", "seasonType": "regular"}', '2026-01-01T00:00:03Z', now());
 
 -- The manifest spine: one row per landed response, including the failure.
+INSERT INTO raw.raw_ppa_games (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-28-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "opponent": "Beta Tech",
+   "offense": {
+    "overall": 0.13,
+    "passing": 0.08,
+    "rushing": 0.15,
+    "firstDown": -0.06,
+    "secondDown": 0.02,
+    "thirdDown": 0.43
+   },
+   "defense": {
+    "overall": 0.43,
+    "passing": 0.38,
+    "rushing": 0.45,
+    "firstDown": 0.24,
+    "secondDown": 0.32,
+    "thirdDown": 0.73
+   }
+  },
+  {
+   "gameId": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "opponent": "Alpha State",
+   "offense": {
+    "overall": 0.43,
+    "passing": 0.38,
+    "rushing": 0.45,
+    "firstDown": 0.24,
+    "secondDown": 0.32,
+    "thirdDown": 0.73
+   },
+   "defense": {
+    "overall": 0.13,
+    "passing": 0.08,
+    "rushing": 0.15,
+    "firstDown": -0.06,
+    "secondDown": 0.02,
+    "thirdDown": 0.43
+   }
+  }
+ ]
+}', 200, '{"year": "2024", "seasonType": "regular"}',
+  '2026-01-01T00:00:39Z', now());
+
+INSERT INTO raw.raw_ppa_players_season (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-29-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "id": "1001",
+   "name": "A. Passer",
+   "position": "QB",
+   "team": "Alpha State",
+   "conference": "B12",
+   "averagePPA": {
+    "all": 0.352,
+    "pass": 0.362,
+    "rush": 0.372,
+    "firstDown": 0.382,
+    "secondDown": 0.392,
+    "thirdDown": 0.402,
+    "standardDowns": 0.412,
+    "passingDowns": 0.422
+   },
+   "totalPPA": {
+    "all": 114.748,
+    "pass": 115.748,
+    "rush": 116.748,
+    "firstDown": 117.748,
+    "secondDown": 118.748,
+    "thirdDown": 119.748,
+    "standardDowns": 120.748,
+    "passingDowns": 121.748
+   }
+  },
+  {
+   "season": 2024,
+   "id": "1002",
+   "name": "B. Runner",
+   "position": "RB",
+   "team": "Beta Tech",
+   "conference": "B12",
+   "averagePPA": {
+    "all": 0.552,
+    "pass": 0.562,
+    "rush": 0.572,
+    "firstDown": 0.582,
+    "secondDown": 0.592,
+    "thirdDown": 0.602,
+    "standardDowns": 0.612,
+    "passingDowns": 0.622
+   },
+   "totalPPA": {
+    "all": 58.2,
+    "pass": 59.2,
+    "rush": 60.2,
+    "firstDown": 61.2,
+    "secondDown": 62.2,
+    "thirdDown": 63.2,
+    "standardDowns": 64.2,
+    "passingDowns": 65.2
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:40Z', now());
+
+INSERT INTO raw.raw_ppa_players_games (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-30-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "id": "1001",
+   "name": "A. Passer",
+   "position": "QB",
+   "team": "Alpha State",
+   "opponent": "Beta Tech",
+   "averagePPA": {
+    "all": 0.412,
+    "pass": 0.455,
+    "rush": -0.12
+   }
+  },
+  {
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "id": "1002",
+   "name": "B. Runner",
+   "position": "RB",
+   "team": "Beta Tech",
+   "opponent": "Alpha State",
+   "averagePPA": {
+    "all": 0.201,
+    "pass": null,
+    "rush": 0.201
+   }
+  }
+ ]
+}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:00:41Z', now());
+
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('teams', '2026-01-01T00-00-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:00Z', now()),
 ('teams', '2026-01-01T00-00-00-002Z.json', '{"year": "1900"}', 200, 2, '2026-01-01T00:00:00Z', now()),
@@ -1390,11 +1576,74 @@ INSERT INTO raw.raw_ratings_core (filename, content, status_code, params, fetche
   '2026-01-01T00:00:37Z', now());
 
 INSERT INTO raw.raw_ppa_teams (filename, content, status_code, params, fetched_at, added_at) VALUES
-('2026-01-01T00-00-24-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024"},
-  "data": [
-    {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
-     "offense": {"overall": 0.31}, "defense": {"overall": 0.05}},
-    {"season": 2024, "team": "Beta Tech", "conference": "Test Conference",
-     "offense": {"overall": 0.12}, "defense": {"overall": 0.22}}
-  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:35Z', now());
+('2026-01-01T00-00-27-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "conference": "Test Conference",
+   "team": "Alpha State",
+   "offense": {
+    "overall": 0.13,
+    "passing": 0.08,
+    "rushing": 0.15,
+    "firstDown": -0.06,
+    "secondDown": 0.02,
+    "thirdDown": 0.43,
+    "cumulative": {
+     "total": 104.5,
+     "passing": 12.36,
+     "rushing": 95.5
+    }
+   },
+   "defense": {
+    "overall": 0.43,
+    "passing": 0.38,
+    "rushing": 0.45,
+    "firstDown": 0.24,
+    "secondDown": 0.32,
+    "thirdDown": 0.73,
+    "cumulative": {
+     "total": 107.5,
+     "passing": 15.36,
+     "rushing": 98.5
+    }
+   }
+  },
+  {
+   "season": 2024,
+   "conference": "Test Conference",
+   "team": "Beta Tech",
+   "offense": {
+    "overall": 0.23,
+    "passing": 0.18,
+    "rushing": 0.25,
+    "firstDown": 0.04,
+    "secondDown": 0.12,
+    "thirdDown": 0.53,
+    "cumulative": {
+     "total": 105.5,
+     "passing": 13.36,
+     "rushing": 96.5
+    }
+   },
+   "defense": {
+    "overall": 0.53,
+    "passing": 0.48,
+    "rushing": 0.55,
+    "firstDown": 0.34,
+    "secondDown": 0.42,
+    "thirdDown": 0.83,
+    "cumulative": {
+     "total": 108.5,
+     "passing": 16.36,
+     "rushing": 99.5
+    }
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:38Z', now());

@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 22 | every field the spec publishes is exposed as a column |
-| partial | 7 | a staging model exists but drops fields |
-| raw only | 36 | responses have landed; nothing reads them |
+| complete | 26 | every field the spec publishes is exposed as a column |
+| partial | 6 | a staging model exists but drops fields |
+| raw only | 33 | responses have landed; nothing reads them |
 | no raw data | 9 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 312 of 1191 (26.2%).** That percentage is the product gap in one number.
+**Fields exposed: 357 of 1191 (30.0%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -71,11 +71,11 @@ sweep can invent.
 | `plays/stats` | swept | 44 | — | 0/20 | raw only |
 | `plays/stats/types` | swept | 2 | — | 0/2 | raw only |
 | `plays/types` | swept | 2 | — | 0/3 | raw only |
-| `ppa/games` | swept | 14 | — | 0/13 | raw only |
-| `ppa/players/games` | swept | 48 | — | 0/11 | raw only |
-| `ppa/players/season` | swept | 26 | — | 0/14 | raw only |
+| `ppa/games` | swept | 14 | `stg_game_team_ppa` | 13/13 | complete |
+| `ppa/players/games` | swept | 48 | `stg_player_game_ppa` | 11/11 | complete |
+| `ppa/players/season` | swept | 26 | `stg_player_season_ppa` | 14/14 | complete |
 | `ppa/predicted` | CLI | — | — | 0/2 | no raw data |
-| `ppa/teams` | swept | 15 | `stg_team_rating` | 3/10 | partial |
+| `ppa/teams` | swept | 15 | `stg_team_rating`, `stg_team_season_ppa` | 10/10 | complete |
 | `rankings` | swept | 195 | `stg_rankings` | 11/11 | complete |
 | `ratings/core` | swept | 15 | `stg_rating_core` | 11/11 | complete |
 | `ratings/elo` | swept | 15 | `stg_rating_elo`, `stg_team_rating` | 4/4 | complete |
@@ -120,7 +120,6 @@ carried through.
 | `games` | stg_games | 22 | `awayConference`, `awayLineScores`, `awayPostgameElo`, `awayPostgameWinProbability`, `awayPregameElo`, `awaySeed`, `bowlName`, `bracketSlot`, `competition`, `format`, `highlights`, `homeConference`, … (+10) |
 | `teams` | stg_teams | 13 | `alternateNames`, `capacity`, `constructionYear`, `countryCode`, `dome`, `elevation`, `grass`, `latitude`, `longitude`, `name`, `timezone`, `twitter`, … (+1) |
 | `lines` | stg_lines | 11 | `awayClassification`, `awayConference`, `awayScore`, `awayTeam`, `awayTeamId`, `homeClassification`, `homeConference`, `homeScore`, `homeTeam`, `homeTeamId`, `startDate` |
-| `ppa/teams` | stg_team_rating | 7 | `firstDown`, `passing`, `rushing`, `season`, `secondDown`, `thirdDown`, `total` |
 | `games/media` | stg_game_media | 6 | `awayConference`, `awayTeam`, `homeConference`, `homeTeam`, `isStartTimeTBD`, `startTime` |
 | `info` | stg_api_quota | 6 | `adjustedMetrics`, `graphQl`, `livePlayByPlay`, `products`, `scoreboard`, `weather` |
 | `info/usage` | stg_api_usage_endpoint | 4 | `cbbRequests`, `cfbRequests`, `requestedAt`, `uniqueEndpoints` |

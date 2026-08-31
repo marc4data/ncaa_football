@@ -462,6 +462,80 @@ models:
           Carried because a rating is not comparable across model versions — a chart that
           spliced core-v1 and core-v2 would show a step change that is an artifact.
 
+  - name: stg_team_season_ppa
+    description: >
+      Team PPA for a season, one row per (season, team), offense and defense side by side.
+      Alongside stg_team_rating, which takes `offense.overall` and nothing else — three of
+      ten fields survived conforming. TWO SCALES: the flat metrics are per-play averages,
+      `*_cumulative_*` are season totals. Defensive PPA is NOT sign-flipped: lower is better
+      on the defensive columns, as CFBD publishes it.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: offense_overall
+        description: PPA per play, this team's offense. Higher is better.
+      - name: defense_overall
+        description: PPA per play allowed. LOWER is better — the sign is not inverted here.
+      - name: offense_cumulative_total
+        description: Season total PPA, not a per-play average. Different scale to the above.
+
+  - name: stg_game_team_ppa
+    description: >
+      Team PPA for a single game, one row per (game, team). Same six offensive and six
+      defensive splits as the season model, no cumulative block — one game has no season
+      total. Carries `opponent`, which the season model cannot.
+    columns:
+      - name: game_id
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: opponent
+        description: Opponent by name; both teams' rows exist and join on game_id.
+
+  - name: stg_player_season_ppa
+    description: >
+      Player PPA for a season, one row per (season, player). `averagePPA` and `totalPPA`
+      carry the IDENTICAL eight keys, so the `average_ppa_` / `total_ppa_` prefixes are the
+      only thing separating 0.352 from 114.748 for the same player and statistic.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: player_id
+        description: CFBD player id, string.
+        data_tests: [not_null]
+      - name: conference_abbreviation
+        description: >
+          NAMED FOR WHAT IT HOLDS, BECAUSE THIS ENDPOINT IS THE ODD ONE OUT. It reports
+          `B1G`, `B12`, `AAC` where /ppa/teams, /ppa/games and every ratings endpoint report
+          `Big Ten`, `Big 12`, `American Athletic`. Calling it `conference` would invite a
+          join that returns nothing and raises no error. Carried verbatim; mapping it is a
+          mart's job.
+      - name: average_ppa_all
+        description: PPA per play across all plays.
+      - name: total_ppa_all
+        description: PPA accumulated across the season. Same statistic, different scale.
+
+  - name: stg_player_game_ppa
+    description: >
+      Player PPA for a single game. THE GRAIN IS (season, season_type, week, player) because
+      the payload carries NO gameId — the game is identified by week and opponent only, so a
+      join to stg_games needs the (season, week, season_type, team) tuple. Thinner than the
+      season model by the endpoint's own content, not by omission: averagePPA only, and only
+      all / pass / rush. No conference column, because there is none on the payload.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: week
+        data_tests: [not_null]
+      - name: player_id
+        data_tests: [not_null]
+      - name: opponent
+        description: The only identifier of who the game was against.
+      - name: average_ppa_all
+        description: PPA per play in this game.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated
