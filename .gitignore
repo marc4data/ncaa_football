@@ -30,14 +30,20 @@ logs/
 # job everywhere else, and a blanket removal would let the next stray copy through.
 !docs/*.xlsx
 
-# CFBD's OpenAPI spec, 170 KB of someone else's document.
+# CFBD's OpenAPI spec is now VENDORED at config/api-docs.json, reversing the 24 Aug decision
+# to ignore it. That decision said "reference it by URL instead of vendoring a copy that goes
+# stale", and the staleness worry was right — the URL served 5.24.0 then and serves 5.25.0
+# now. What it got wrong is which side of the trade staleness lands on.
 #
-# Ignored as a DECISION rather than left untracked and hoping. Untracked is not protected —
-# one `git add -A` commits it — and the same reasoning that pinned the deploy tree applies:
-# a control that depends on nobody making a mistake is not a control. The spec is public and
-# stable; reference it at https://api.collegefootballdata.com/api-docs.json instead of
-# vendoring a copy that goes stale and redistributes their work.
-config/api-docs.json
+# A URL cannot anchor anything. docs/cfbd_coverage.md is a committed statement about which
+# endpoints we have and which fields we unnest, and its denominator is the spec. Anchored to
+# a URL, the matrix silently means something different next week and no diff ever shows it.
+# Anchored to a committed file, upstream drift is a visible change to a tracked artifact —
+# which is exactly how the five `passing/*` paths surfaced.
+#
+# Staleness is therefore not avoided, it is made loud: scripts/refresh_cfbd_spec.py --check
+# runs in CI and fails when the vendored copy no longer matches upstream. Redistribution is
+# not a concern either; the spec is served unauthenticated and describes a public API.
 
 # ---------------------------------------------------------------------------------------
 # CFB Model Training Pack — LICENSED MATERIAL, NEVER COMMIT

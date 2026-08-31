@@ -2,6 +2,45 @@
 
 Decisions made in Cowork (strategy/governance surface). Claude Code implements within these. Newest first.
 
+## 2026-08-31 — The CFBD spec is vendored after all, reversing 24 Aug
+
+**Prompt 024 decided NOT to vendor `config/api-docs.json`** — "reference CFBD's spec by URL
+rather than vendoring 170 KB of someone else's document" — and put it in `.gitignore`
+explicitly so it could not be committed by accident. **Prompt 029 asks for it vendored.**
+029 is newer and Marc's, so it wins; recording the reversal rather than deleting an ignore
+line and moving on.
+
+**The staleness argument was right about the fact and wrong about the direction.** The URL
+served v5.24.0 on 24 August and serves v5.25.0 today, so the vendored copy would indeed have
+gone stale. But a URL cannot anchor anything. `docs/cfbd_coverage.md` (prompt 029 Priority 2b)
+is a committed claim about which endpoints exist, which are registered, which have landed
+raw, and which fields are unnested — and its denominator is the spec. Anchored to a URL that
+claim quietly means something different every release and no diff ever shows it.
+
+**What the reversal bought immediately: five endpoints nobody knew about.** v5.25.0 added
+`passing/players/games`, `passing/players/season`, `passing/plays`, `passing/teams/games` and
+`passing/teams/season`. The registry was written by hand from 5.24.0's 74 paths; the spec now
+serves 79. Nothing in the repo could have said so, because the reference was a URL. These are
+prompt 029 Priority 6 — register with `include=False`, `min_season=2025`, CLI backfill.
+
+**Staleness is now loud rather than avoided.** `scripts/refresh_cfbd_spec.py --check` fetches
+upstream and fails if the vendored copy differs, naming the paths that appeared or vanished.
+It runs weekly on a schedule, not on pull requests: failing someone's PR because CFBD shipped
+a release, or because their API was briefly down, is noise, and the offline tests in
+`tests/test_cfbd_spec.py` already hold the registry and the vendored spec together on every
+PR. The same weekly run is a free canary for dependency drift — the class of failure that
+resolved `streamlit>=1.40` to 1.62.0 on a rebuild and broke the site nav for a day.
+
+**A new upstream endpoint now fails a test until someone decides about it.** Registering an
+endpoint is a judgement about cost and scope; *not noticing* one is not a judgement.
+`UNREGISTERED_ON_PURPOSE` lists the five `passing/*` paths with a reason each, so a sixth
+still fails.
+
+**The file is normalized, not copied byte for byte** — sorted keys, two-space indent — so a
+real change to one endpoint is a few lines rather than a reshuffle of five thousand.
+Redistribution is not a concern: the spec is served unauthenticated and describes a public
+API. The pack's licence constraints are unrelated and unchanged.
+
 ## 2026-08-23 (later) — The uniqueness sweep found a defect in a model one hour old
 
 268/268 dbt · 233/233 production · 42/42 page queries · 211 pytest. Published, deployed, CI green.
