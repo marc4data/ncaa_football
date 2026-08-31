@@ -6,6 +6,17 @@ on:
   push:
     branches: [main]
   workflow_dispatch:  # lets the CFBD live smoke test below be run on demand
+  schedule:
+    # Monday 06:00 UTC. Two things need a clock rather than a commit:
+    #
+    #   1. Upstream drift. CFBD ships endpoints between releases and the repo cannot notice
+    #      on its own — v5.25.0 added five `passing/*` paths and nothing here said so until
+    #      the spec was vendored. See the spec-drift job.
+    #   2. Dependency drift. A weekly build with no source change is a free canary for the
+    #      class of failure that broke the site nav: `streamlit>=1.40` resolved to 1.62.0 on
+    #      a rebuild, auto-discovery of `pages/` overrode st.navigation, and the first
+    #      report was Marc looking at the live site. A red Monday is a much cheaper signal.
+    - cron: '0 6 * * 1'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -74,6 +85,28 @@ jobs:
             exit 1
           fi
           echo "No tracked office documents outside the docs/ exception."
+
+  spec-drift:
+    name: CFBD spec is current
+    # Not on pull requests. The offline tests in tests/test_cfbd_spec.py already hold the
+    # registry and the VENDORED spec together on every PR; this job answers the different
+    # question of whether the vendored copy still matches upstream, which needs the network
+    # and has nothing to do with the change under review. Failing someone's PR because CFBD
+    # shipped a release, or because their API was briefly down, is noise.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Compare the vendored spec against upstream
+        # No API key: the spec is served unauthenticated because it describes a public API.
+        # A failure here is a task, not a fault — run scripts/refresh_cfbd_spec.py, then
+        # decide what to do about whatever moved.
+        run: python scripts/refresh_cfbd_spec.py --check
 
   cfbd-smoke:
     name: CFBD live smoke test
