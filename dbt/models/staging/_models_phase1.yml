@@ -341,6 +341,127 @@ models:
       - name: opponent
         description: Opponent by name.
 
+  - name: stg_rating_sp
+    description: >
+      SP+ team ratings, one row per (season, team), with offense / defense / special teams
+      components. Exists ALONGSIDE stg_team_rating, which unions five ratings endpoints into
+      a conformed long shape and necessarily drops what they do not share — six of eighteen
+      SP+ fields survived that. Conforming is a mart's job; representing the endpoint is
+      staging's, and nothing was doing it.
+    columns:
+      - name: season
+        description: From the wire key `year`; renamed so it joins like every other model.
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: rating
+        description: Overall SP+ rating, points per game above average.
+      - name: ranking
+        description: SP+ rank, 1 is best.
+      - name: offense_success
+        description: >
+          Component metric. NULL for recent seasons — CFBD publishes SP+ components for
+          older seasons and has not backfilled them. Carried anyway: a column that is null
+          today and populated by a 2015 backfill tomorrow is worth having.
+      - name: defense_havoc_total
+        description: Havoc rate, nested one level deeper than the other defensive metrics.
+      - name: special_teams_rating
+        description: SP+ special teams rating.
+
+  - name: stg_rating_sp_conference
+    description: >
+      SP+ at conference grain, one row per (season, conference). Same metrics as
+      stg_rating_sp with the team dimension collapsed and no ranking on any axis. Its own
+      model rather than a union with the team-grain one: different key, different columns.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: conference
+        data_tests: [not_null]
+      - name: rating
+        description: Conference SP+ rating.
+
+  - name: stg_rating_fpi
+    description: >
+      ESPN's FPI, one row per (season, team), with resume ranks and efficiency components.
+      TWO KINDS OF NUMBER: `resume_rank_*` are RANKS where 1 is best; `efficiency_*` and
+      `fpi` are RATINGS where higher is better. `fpi` appears in both groups under the same
+      name upstream, so the prefixes are load-bearing.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: fpi
+        description: The FPI rating itself. Not the same number as resume_rank_fpi.
+      - name: resume_rank_fpi
+        description: The team's RANK by FPI, 1 is best. Not the same number as fpi.
+      - name: efficiency_overall
+        description: Overall efficiency rating, higher is better.
+
+  - name: stg_rating_srs
+    description: >
+      Simple Rating System, one row per (season, team). Covers far more teams than the other
+      ratings — 265 rows for 2024 against 134 for Elo and FPI, because it rates FCS teams
+      too, so a side-by-side join finds SRS populated where the others are null.
+      /ratings/srs returns some schools TWICE, once with a conference and once with
+      `conference: null` carrying an identical rating; the dedup prefers the row that names
+      a conference.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: rating
+        description: SRS rating, points above average adjusted for schedule.
+      - name: ranking
+        description: SRS rank, 1 is best.
+
+  - name: stg_rating_srs_expanded
+    description: >
+      SRS plus `classification` — the field that makes the wider coverage usable. Its own
+      model rather than folded into stg_rating_srs: separate endpoints, separate raw tables,
+      and merging them would make the coverage matrix lie about both.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: classification
+        description: fbs / fcs / ii / iii.
+
+  - name: stg_rating_elo
+    description: >
+      Elo ratings, one row per (season, team) — the smallest ratings payload. A running
+      rating rather than a season summary; the value is the rating at the end of the season
+      fetched. NO ranking column: ordering by elo within a season produces one, and doing
+      that in a mart is honest where inventing the column here would not be.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: elo
+        description: Elo rating at the end of the fetched season.
+
+  - name: stg_rating_core
+    description: >
+      CFBD's core rating. THE GRAIN IS (season, team, through_season_type, through_week) —
+      the rating AS OF a point in the season, so a full backfill accumulates a time series.
+      The landed data holds one as-of point per season today, which is exactly the condition
+      under which a (season, team) assumption looks correct and silently drops rows later.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: through_week
+        description: The rating is as of the end of this week.
+      - name: team
+        data_tests: [not_null]
+      - name: model_version
+        description: >
+          Carried because a rating is not comparable across model versions — a chart that
+          spliced core-v1 and core-v2 would show a step change that is an artifact.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated

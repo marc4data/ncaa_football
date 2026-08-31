@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 15 | every field the spec publishes is exposed as a column |
-| partial | 11 | a staging model exists but drops fields |
-| raw only | 39 | responses have landed; nothing reads them |
+| complete | 22 | every field the spec publishes is exposed as a column |
+| partial | 7 | a staging model exists but drops fields |
+| raw only | 36 | responses have landed; nothing reads them |
 | no raw data | 9 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 257 of 1191 (21.6%).** That percentage is the product gap in one number.
+**Fields exposed: 312 of 1191 (26.2%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -77,13 +77,13 @@ sweep can invent.
 | `ppa/predicted` | CLI | — | — | 0/2 | no raw data |
 | `ppa/teams` | swept | 15 | `stg_team_rating` | 3/10 | partial |
 | `rankings` | swept | 195 | `stg_rankings` | 11/11 | complete |
-| `ratings/core` | swept | 15 | — | 0/11 | raw only |
-| `ratings/elo` | swept | 15 | `stg_team_rating` | 3/4 | partial |
-| `ratings/fpi` | swept | 15 | `stg_team_rating` | 7/13 | partial |
-| `ratings/sp` | swept | 16 | `stg_team_rating` | 6/18 | partial |
-| `ratings/sp/conferences` | swept | 15 | — | 0/16 | raw only |
-| `ratings/srs` | swept | 15 | `stg_team_rating` | 4/6 | partial |
-| `ratings/srs/expanded` | swept | 15 | — | 0/7 | raw only |
+| `ratings/core` | swept | 15 | `stg_rating_core` | 11/11 | complete |
+| `ratings/elo` | swept | 15 | `stg_rating_elo`, `stg_team_rating` | 4/4 | complete |
+| `ratings/fpi` | swept | 15 | `stg_rating_fpi`, `stg_team_rating` | 13/13 | complete |
+| `ratings/sp` | swept | 16 | `stg_rating_sp`, `stg_team_rating` | 18/18 | complete |
+| `ratings/sp/conferences` | swept | 15 | `stg_rating_sp_conference` | 16/16 | complete |
+| `ratings/srs` | swept | 15 | `stg_rating_srs`, `stg_team_rating` | 6/6 | complete |
+| `ratings/srs/expanded` | swept | 15 | `stg_rating_srs_expanded` | 7/7 | complete |
 | `records` | swept | 170 | — | 0/11 | raw only |
 | `recruiting/groups` | swept | 2 | — | 0/7 | raw only |
 | `recruiting/players` | swept | 4 | — | 0/19 | raw only |
@@ -119,15 +119,11 @@ carried through.
 |---|---|---:|---|
 | `games` | stg_games | 22 | `awayConference`, `awayLineScores`, `awayPostgameElo`, `awayPostgameWinProbability`, `awayPregameElo`, `awaySeed`, `bowlName`, `bracketSlot`, `competition`, `format`, `highlights`, `homeConference`, … (+10) |
 | `teams` | stg_teams | 13 | `alternateNames`, `capacity`, `constructionYear`, `countryCode`, `dome`, `elevation`, `grass`, `latitude`, `longitude`, `name`, `timezone`, `twitter`, … (+1) |
-| `ratings/sp` | stg_team_rating | 12 | `db`, `explosiveness`, `frontSeven`, `pace`, `passing`, `passingDowns`, `runRate`, `rushing`, `standardDowns`, `success`, `total`, `year` |
 | `lines` | stg_lines | 11 | `awayClassification`, `awayConference`, `awayScore`, `awayTeam`, `awayTeamId`, `homeClassification`, `homeConference`, `homeScore`, `homeTeam`, `homeTeamId`, `startDate` |
 | `ppa/teams` | stg_team_rating | 7 | `firstDown`, `passing`, `rushing`, `season`, `secondDown`, `thirdDown`, `total` |
 | `games/media` | stg_game_media | 6 | `awayConference`, `awayTeam`, `homeConference`, `homeTeam`, `isStartTimeTBD`, `startTime` |
 | `info` | stg_api_quota | 6 | `adjustedMetrics`, `graphQl`, `livePlayByPlay`, `products`, `scoreboard`, `weather` |
-| `ratings/fpi` | stg_team_rating | 6 | `averageWinProbability`, `gameControl`, `remainingStrengthOfSchedule`, `strengthOfRecord`, `strengthOfSchedule`, `year` |
 | `info/usage` | stg_api_usage_endpoint | 4 | `cbbRequests`, `cfbRequests`, `requestedAt`, `uniqueEndpoints` |
-| `ratings/srs` | stg_team_rating | 2 | `division`, `year` |
-| `ratings/elo` | stg_team_rating | 1 | `year` |
 
 ## How the columns are decided
 

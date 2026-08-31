@@ -138,6 +138,18 @@ CREATE TABLE IF NOT EXISTS raw.raw_ratings_fpi (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_sp_conferences (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_srs_expanded (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_ratings_core (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_ppa_teams (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
@@ -156,6 +168,8 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_deploy_status,
          raw.raw_ratings_sp, raw.raw_ratings_srs, raw.raw_ratings_elo,
          raw.raw_ratings_fpi, raw.raw_ppa_teams,
+         raw.raw_ratings_sp_conferences, raw.raw_ratings_srs_expanded,
+         raw.raw_ratings_core,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -1004,25 +1018,131 @@ INSERT INTO raw.raw_deploy_status
 -- with any rows at all.
 INSERT INTO raw.raw_ratings_sp (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-20-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024"},
-  "data": [
-    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "rating": 18.4,
-     "ranking": 1, "offense": {"rating": 34.1}, "defense": {"rating": 15.7},
-     "specialTeams": {"rating": 0.4}, "sos": 0.61, "secondOrderWins": 9.2},
-    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "rating": 3.2,
-     "ranking": 2, "offense": {"rating": 27.0}, "defense": {"rating": 23.8},
-     "specialTeams": {"rating": -0.2}, "sos": 0.55, "secondOrderWins": 6.1},
-    {"year": 2024, "team": "nationalAverages", "conference": null, "rating": 10.8,
-     "ranking": null, "offense": {"rating": 30.5}, "defense": {"rating": 19.7},
-     "specialTeams": {"rating": 0.0}, "sos": null, "secondOrderWins": null}
-  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:30Z', now()),
-('2026-01-01T00-00-20-002Z.json', '{
-  "status_code": 200, "params": {"year": "2026"},
-  "data": [
-    {"year": 2026, "team": "Alpha State", "conference": "Test Conference", "rating": 12.0,
-     "ranking": 1, "offense": {"rating": 31.0}, "defense": {"rating": 19.0},
-     "specialTeams": {"rating": 0.1}, "sos": 0.50, "secondOrderWins": 8.0}
-  ]}', 200, '{"year": "2026"}', '2026-01-01T00:00:31Z', now());
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "rating": 18.4,
+   "ranking": 1,
+   "secondOrderWins": 9.2,
+   "sos": 0.61,
+   "offense": {
+    "ranking": 1,
+    "rating": 34.1,
+    "success": 0.44,
+    "explosiveness": 1.21,
+    "rushing": 3.1,
+    "passing": 4.2,
+    "standardDowns": 0.51,
+    "passingDowns": 0.33,
+    "runRate": 0.58,
+    "pace": 27.4
+   },
+   "defense": {
+    "ranking": 6,
+    "rating": 39.1,
+    "success": 0.49,
+    "explosiveness": 1.71,
+    "rushing": 3.6,
+    "passing": 4.7,
+    "standardDowns": 0.56,
+    "passingDowns": 0.38,
+    "havoc": {
+     "total": 0.23,
+     "frontSeven": 0.16,
+     "db": 0.12
+    }
+   },
+   "specialTeams": {
+    "rating": 0.4
+   }
+  },
+  {
+   "year": 2024,
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "rating": 20.4,
+   "ranking": 3,
+   "secondOrderWins": 11.2,
+   "sos": 0.63,
+   "offense": {
+    "ranking": 3,
+    "rating": 36.1,
+    "success": 0.46,
+    "explosiveness": 1.41,
+    "rushing": 3.3,
+    "passing": 4.4,
+    "standardDowns": 0.53,
+    "passingDowns": 0.35,
+    "runRate": 0.6,
+    "pace": 29.4
+   },
+   "defense": {
+    "ranking": 8,
+    "rating": 41.1,
+    "success": 0.51,
+    "explosiveness": 1.91,
+    "rushing": 3.8,
+    "passing": 4.9,
+    "standardDowns": 0.58,
+    "passingDowns": 0.4,
+    "havoc": {
+     "total": 0.25,
+     "frontSeven": 0.18,
+     "db": 0.14
+    }
+   },
+   "specialTeams": {
+    "rating": 0.6
+   }
+  },
+  {
+   "year": 2024,
+   "team": "nationalAverages",
+   "conference": null,
+   "rating": 10.8,
+   "ranking": null,
+   "secondOrderWins": null,
+   "sos": null,
+   "offense": {
+    "ranking": 2,
+    "rating": 35.1,
+    "success": 0.45,
+    "explosiveness": 1.31,
+    "rushing": 3.2,
+    "passing": 4.3,
+    "standardDowns": 0.52,
+    "passingDowns": 0.34,
+    "runRate": 0.59,
+    "pace": 28.4
+   },
+   "defense": {
+    "ranking": 7,
+    "rating": 40.1,
+    "success": 0.5,
+    "explosiveness": 1.81,
+    "rushing": 3.7,
+    "passing": 4.8,
+    "standardDowns": 0.57,
+    "passingDowns": 0.39,
+    "havoc": {
+     "total": 0.24,
+     "frontSeven": 0.17,
+     "db": 0.13
+    }
+   },
+   "specialTeams": {
+    "rating": 0.0
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:31Z', now());
 
 INSERT INTO raw.raw_ratings_srs (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-21-001Z.json', '{
@@ -1051,13 +1171,223 @@ INSERT INTO raw.raw_ratings_elo (filename, content, status_code, params, fetched
 
 INSERT INTO raw.raw_ratings_fpi (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-23-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024"},
-  "data": [
-    {"year": 2024, "team": "Alpha State", "conference": "Test Conference", "fpi": 14.2,
-     "efficiencies": {"offense": 62.1, "defense": 71.3, "specialTeams": 50.2}},
-    {"year": 2024, "team": "Beta Tech", "conference": "Test Conference", "fpi": 1.9,
-     "efficiencies": {"offense": 48.0, "defense": 52.5, "specialTeams": 49.1}}
-  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:34Z', now());
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "fpi": 14.2,
+   "resumeRanks": {
+    "strengthOfRecord": 3,
+    "fpi": 2,
+    "averageWinProbability": 5,
+    "strengthOfSchedule": 41,
+    "remainingStrengthOfSchedule": null,
+    "gameControl": 4
+   },
+   "efficiencies": {
+    "overall": 58.9,
+    "offense": 62.1,
+    "defense": 71.3,
+    "specialTeams": 50.2
+   }
+  },
+  {
+   "year": 2024,
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "fpi": 1.9,
+   "resumeRanks": {
+    "strengthOfRecord": 44,
+    "fpi": 51,
+    "averageWinProbability": 47,
+    "strengthOfSchedule": 60,
+    "remainingStrengthOfSchedule": null,
+    "gameControl": 49
+   },
+   "efficiencies": {
+    "overall": 49.6,
+    "offense": 48.0,
+    "defense": 52.5,
+    "specialTeams": 49.1
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:34Z', now());
+
+INSERT INTO raw.raw_ratings_sp_conferences (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-24-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "conference": "Test Conference",
+   "rating": 5.04,
+   "secondOrderWins": null,
+   "sos": null,
+   "offense": {
+    "rating": 34.1,
+    "success": 0.44,
+    "explosiveness": 1.21,
+    "rushing": 3.1,
+    "passing": 4.2,
+    "standardDowns": 0.51,
+    "passingDowns": 0.33,
+    "runRate": 0.58,
+    "pace": 27.4
+   },
+   "defense": {
+    "rating": 39.1,
+    "success": 0.49,
+    "explosiveness": 1.71,
+    "rushing": 3.6,
+    "passing": 4.7,
+    "standardDowns": 0.56,
+    "passingDowns": 0.38,
+    "havoc": {
+     "total": 0.23,
+     "frontSeven": 0.16,
+     "db": 0.12
+    }
+   },
+   "specialTeams": {
+    "rating": 0.15
+   }
+  },
+  {
+   "year": 2024,
+   "conference": "Other Conference",
+   "rating": 8.04,
+   "secondOrderWins": null,
+   "sos": null,
+   "offense": {
+    "rating": 37.1,
+    "success": 0.47,
+    "explosiveness": 1.51,
+    "rushing": 3.4,
+    "passing": 4.5,
+    "standardDowns": 0.54,
+    "passingDowns": 0.36,
+    "runRate": 0.61,
+    "pace": 30.4
+   },
+   "defense": {
+    "rating": 42.1,
+    "success": 0.52,
+    "explosiveness": 2.01,
+    "rushing": 3.9,
+    "passing": 5.0,
+    "standardDowns": 0.59,
+    "passingDowns": 0.41,
+    "havoc": {
+     "total": 0.26,
+     "frontSeven": 0.19,
+     "db": 0.15
+    }
+   },
+   "specialTeams": {
+    "rating": 0.45
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:35Z', now());
+
+INSERT INTO raw.raw_ratings_srs_expanded (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-25-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "team": "Alpha State",
+   "classification": "fbs",
+   "conference": "Test Conference",
+   "division": null,
+   "ranking": 1,
+   "rating": 11.1
+  },
+  {
+   "year": 2024,
+   "team": "Beta Tech",
+   "classification": "fbs",
+   "conference": "Test Conference",
+   "division": null,
+   "ranking": 2,
+   "rating": -2.4
+  },
+  {
+   "year": 2024,
+   "team": "Gamma College",
+   "classification": "fcs",
+   "conference": null,
+   "division": null,
+   "ranking": 88,
+   "rating": -14.7
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:36Z', now());
+
+INSERT INTO raw.raw_ratings_core (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-26-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "throughSeasonType": "regular",
+   "throughWeek": 12,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "overall": 30.1,
+   "offense": 18.0,
+   "defense": -12.1,
+   "offensePlays": 790,
+   "defensePlays": 770,
+   "modelVersion": "core-v1"
+  },
+  {
+   "year": 2024,
+   "throughSeasonType": "postseason",
+   "throughWeek": 1,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "overall": 37.25,
+   "offense": 22.01,
+   "defense": -15.24,
+   "offensePlays": 836,
+   "defensePlays": 813,
+   "modelVersion": "core-v1"
+  },
+  {
+   "year": 2024,
+   "throughSeasonType": "postseason",
+   "throughWeek": 1,
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "overall": 8.4,
+   "offense": 4.1,
+   "defense": -4.3,
+   "offensePlays": 801,
+   "defensePlays": 812,
+   "modelVersion": "core-v1"
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:37Z', now());
 
 INSERT INTO raw.raw_ppa_teams (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-24-001Z.json', '{
