@@ -733,6 +733,154 @@ models:
       - name: expected_points
         description: Expected points of attempting the field goal from there.
 
+  - name: stg_coach_season
+    description: >
+      Coaching record, one row per (coach, season, team), unnested from /coaches. TEAM IS
+      PART OF THE GRAIN: a coach can appear twice in one season when an interim takes over
+      mid-year, so (coach, season) is not unique. `hired_at` belongs to the coach, not the
+      season, so it repeats across their rows and is the most recent hire rather than the one
+      that started this season.
+    columns:
+      - name: coach_id
+        data_tests: [not_null]
+      - name: season
+        data_tests: [not_null]
+      - name: team_id
+        data_tests: [not_null]
+      - name: hired_at
+        description: Coach-level, not season-level. Repeats across that coach's rows.
+
+  - name: stg_coach_season_detail
+    description: >
+      The rich coaching season from /coaches/seasons — same grain as stg_coach_season, 36
+      fields against 19. Both are kept: separate endpoints, separate raw tables, and they do
+      not cover the same seasons (/coaches is fetched back to 1886, /coaches/seasons for
+      three). The five record splits are generated from one list so a `home_wins` reading
+      `away.wins` is unrepresentable.
+    columns:
+      - name: coach_id
+        data_tests: [not_null]
+      - name: season
+        data_tests: [not_null]
+      - name: team_id
+        data_tests: [not_null]
+      - name: attribution_complete
+        description: >
+          Whether CFBD attributes the whole season to this coach. False means the record is
+          shared with an interim and must not be read as one person's season.
+      - name: neutral_win_percentage
+        description: >
+          NULL where the split has no games, which is most neutral-site and postseason rows.
+          Kept null rather than coerced to 0 — no games played and every game lost are not
+          the same season.
+      - name: year_over_year_wins
+        description: A DELTA against the previous season, not an absolute.
+      - name: draft_year
+        description: The draft FOLLOWING this season, so season + 1.
+
+  - name: stg_recruit
+    description: >
+      Individual recruits, one row per recruit record. TWO IDS AND THEY ARE NOT THE SAME:
+      `recruit_id` is the recruiting record, `athlete_id` is the college athlete and is null
+      until they enrol or get linked. Joining player stats on recruit_id returns nothing;
+      joining on athlete_id silently drops every unlinked recruit.
+    columns:
+      - name: recruit_id
+        data_tests: [not_null]
+      - name: athlete_id
+        description: Null until the recruit exists as a college athlete.
+      - name: committed_to
+        description: Null for uncommitted recruits — data, not a gap.
+      - name: height_inches
+        description: Inches. No unit on the wire.
+      - name: hometown_fips_code
+        description: County FIPS. Called `fipsCode` here, `countyFips` on /draft/picks.
+
+  - name: stg_team_recruiting_rank
+    description: >
+      Team recruiting class ranking, one row per (class year, team). `national_rank` and
+      `points` disagree on ties — several teams can share a points total and get distinct
+      ranks — so leaderboards built on each are not interchangeable.
+    columns:
+      - name: recruiting_class
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+
+  - name: stg_team_recruiting_position_group
+    description: >
+      Recruiting strength by position group. HAS NO UNIQUE KEY, and the endpoint is why:
+      every specific group is one row per team, but `All Positions` appears EIGHT times for
+      241 of 264 teams with different ratings and nothing in the payload to tell them apart.
+      /recruiting/groups aggregates over a year window and recruit type it does not echo
+      back, and the registry calls it with no parameters. Deliberately exempt from the grain
+      sweep; fetching per explicit window is a registry change recorded in the decision log.
+      No season column either, so it cannot be joined to stg_team_recruiting_rank on a class.
+      `commits` and `average_stars` arrive as STRINGS beside numeric siblings.
+    columns:
+      - name: team
+        data_tests: [not_null]
+      - name: position_group
+        data_tests: [not_null]
+
+  - name: stg_team_talent
+    description: >
+      Team talent composite, one row per (season, team) — the accumulated recruiting rating
+      of the roster, as distinct from one class's rank in stg_team_recruiting_rank.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+
+  - name: stg_draft_pick
+    description: >
+      One row per NFL draft pick. Carries ids for BOTH worlds — college_athlete_id /
+      college_team_id inward, nfl_athlete_id / nfl_team_id outward. THREE PICK NUMBERS:
+      `overall_pick` across the draft, `round`, and `pick_in_round` within it; using
+      pick_in_round where overall was meant produces thirty-two number-one picks per draft.
+    columns:
+      - name: draft_year
+        data_tests: [not_null]
+      - name: overall_pick
+        description: Pick number across the whole draft. Not pick_in_round.
+        data_tests: [not_null]
+      - name: hometown_latitude
+        description: >
+          A STRING on this endpoint where /recruiting/players sends a number. Parsed with
+          safe_numeric so the two align.
+
+  - name: stg_draft_position
+    description: >
+      The NFL draft position vocabulary. Small and load-bearing: /draft/picks spells
+      positions out ("Quarterback") where the rest of the API abbreviates ("QB"), and this is
+      the mapping between them.
+    columns:
+      - name: position_name
+        data_tests: [not_null, unique]
+      - name: position_abbreviation
+        description: The form the rest of the API uses.
+
+  - name: stg_nfl_team
+    description: >
+      NFL franchises. NO ID ON THE PAYLOAD, though /draft/picks carries nflTeamId — and the
+      only shared value, `location`, is AMBIGUOUS rather than merely fragile: two franchises
+      share "New York" and two share "Los Angeles", and /draft/picks stores exactly those
+      bare locations. A pick assigned to New York cannot be resolved to a franchise through
+      this table, and a location join would silently double every such pick. The key is
+      `display_name`. Recorded rather than worked around; inventing an id would be inventing
+      data.
+    columns:
+      - name: location
+        description: >
+          "Chicago". Matches /draft/picks.nfl_team but NOT uniquely — two franchises share
+          "New York" and two share "Los Angeles", verified against the real data. Explicitly
+          not the key.
+        data_tests: [not_null]
+      - name: display_name
+        description: '"Chicago Bears". The actual unique key on this table.'
+        data_tests: [not_null, unique]
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated

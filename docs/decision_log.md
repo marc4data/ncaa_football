@@ -2,6 +2,34 @@
 
 Decisions made in Cowork (strategy/governance surface). Claude Code implements within these. Newest first.
 
+## 2026-08-31 (late) — /recruiting/groups is fetched without the parameters that key it
+
+**The endpoint returns rows that cannot be told apart.** Every specific position group is one
+row per team, but `All Positions` appears **eight times for 241 of 264 teams**, with different
+ratings and commit counts and nothing in the payload to distinguish them: same team, same
+conference, same `positionGroup` string. Alabama's eight carry 79, 95, 58, 79, 28, 83, 45 and
+39 commits.
+
+**The cause is on our side of the wire.** `/recruiting/groups` accepts `startYear`, `endYear`,
+`recruitType`, `team` and `conference`, defaulting to 2000–present and `HighSchool`. The
+registry calls it with **no parameters at all** (`Endpoint("recruiting/groups", STATIC, …,
+note="all-time aggregate")`), so the window is implicit and is not echoed back. The rows are
+slices of something real; the discriminator is discarded before it reaches us.
+
+**DECIDED for now: `stg_team_recruiting_position_group` has no unique key and is exempt from
+the grain sweep.** Declaring `(team, position_group)` would fail every build. Adding a row
+number to make it pass would manufacture a key out of file ordering, which is worse than
+having none — it would look unique and mean nothing.
+
+**Not decided: how to fetch it properly.** The fix is a registry change — call it per explicit
+`startYear`/`endYear` (and possibly per `recruitType`), which puts the discriminator in
+`params` where the model can read it and makes the grain real. That is a fetch-cost decision
+and a backfill, so it is recorded here rather than done in a staging PR. The endpoint's `note`
+in `src/endpoints.py` also says "all-time aggregate", which this shows is not accurate.
+
+**How it was found:** the grain sweep, on its first run against real data for this family. The
+fixture had one row per group and could never have surfaced it.
+
 ## 2026-08-31 (later) — Staging is refreshed whether or not a page reads it
 
 **The rule until now: `+tag:production` on the serving layer, and `+` pulls ancestors.** A

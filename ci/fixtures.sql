@@ -210,6 +210,42 @@ CREATE TABLE IF NOT EXISTS raw.raw_metrics_wp_pregame (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_coaches (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_coaches_seasons (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_recruiting_players (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_recruiting_teams (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_recruiting_groups (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_talent (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_draft_picks (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_draft_positions (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_draft_teams (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -233,6 +269,10 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_teams_fbs, raw.raw_teams_ats, raw.raw_player_portal,
          raw.raw_player_returning, raw.raw_player_usage,
          raw.raw_metrics_fg_ep, raw.raw_metrics_wp_pregame,
+         raw.raw_coaches, raw.raw_coaches_seasons,
+         raw.raw_recruiting_players, raw.raw_recruiting_teams,
+         raw.raw_recruiting_groups, raw.raw_talent,
+         raw.raw_draft_picks, raw.raw_draft_positions, raw.raw_draft_teams,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -961,6 +1001,461 @@ INSERT INTO raw.raw_metrics_wp_pregame (filename, content, status_code, params, 
 -- status_code and row_count are NOT optional here: stg_raw_manifest derives is_success and
 -- is_empty from them and both carry not_null tests. Omitting them failed two tests in a way
 -- that pointed at the manifest model rather than at this fixture.
+INSERT INTO raw.raw_coaches (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-42-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "id": 501,
+   "firstName": "Head",
+   "lastName": "Coach",
+   "hireDate": "2021-12-01T00:00:00.000Z",
+   "seasons": [
+    {
+     "teamId": 1,
+     "school": "Alpha State",
+     "conference": "Test Conference",
+     "year": 2024,
+     "games": 12,
+     "wins": 9,
+     "losses": 3,
+     "ties": 0,
+     "winPercentage": 0.75,
+     "preseasonRank": 12,
+     "postseasonRank": 8,
+     "srs": 11.1,
+     "spOverall": 18.4,
+     "spOffense": 34.1,
+     "spDefense": 15.7
+    },
+    {
+     "teamId": 1,
+     "school": "Alpha State",
+     "conference": "Test Conference",
+     "year": 2023,
+     "games": 12,
+     "wins": 7,
+     "losses": 5,
+     "ties": 0,
+     "winPercentage": 0.583,
+     "preseasonRank": null,
+     "postseasonRank": null,
+     "srs": 4.2,
+     "spOverall": 8.1,
+     "spOffense": 29.0,
+     "spDefense": 20.9
+    }
+   ]
+  },
+  {
+   "id": 502,
+   "firstName": "Interim",
+   "lastName": "Fill",
+   "hireDate": "2024-10-27T00:00:00.000Z",
+   "seasons": [
+    {
+     "teamId": 2,
+     "school": "Beta Tech",
+     "conference": "Test Conference",
+     "year": 2024,
+     "games": 4,
+     "wins": 2,
+     "losses": 2,
+     "ties": 0,
+     "winPercentage": 0.5,
+     "preseasonRank": null,
+     "postseasonRank": null,
+     "srs": -8.6,
+     "spOverall": -11.4,
+     "spOffense": 20.5,
+     "spDefense": 30.4
+    },
+    {
+     "teamId": 3,
+     "school": "Gamma College",
+     "conference": null,
+     "year": 2024,
+     "games": 3,
+     "wins": 1,
+     "losses": 2,
+     "ties": 0,
+     "winPercentage": 0.333,
+     "preseasonRank": null,
+     "postseasonRank": null,
+     "srs": -12.0,
+     "spOverall": -14.2,
+     "spOffense": 18.1,
+     "spDefense": 32.3
+    }
+   ]
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:54Z', now());
+
+INSERT INTO raw.raw_coaches_seasons (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-43-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "coach": {
+    "id": 501,
+    "firstName": "Head",
+    "lastName": "Coach"
+   },
+   "team": {
+    "id": 1,
+    "school": "Alpha State",
+    "conference": "Test Conference"
+   },
+   "year": 2024,
+   "games": 12,
+   "wins": 9,
+   "losses": 3,
+   "ties": 0,
+   "winPercentage": 0.75,
+   "preseasonRank": 12,
+   "postseasonRank": 8,
+   "srs": 11.1,
+   "spOverall": 18.4,
+   "spOffense": 34.1,
+   "spDefense": 15.7,
+   "teamMetrics": {
+    "spSpecialTeams": -0.6,
+    "strengthOfSchedule": 3.1,
+    "secondOrderWins": 8.4,
+    "fpi": 9.659,
+    "yearOverYear": {
+     "wins": 2,
+     "srs": 6.9,
+     "spOverall": 10.3
+    }
+   },
+   "recruiting": {
+    "rank": 10,
+    "points": 275.39,
+    "talent": 833.61
+   },
+   "pollResume": {
+    "preseasonRank": 12,
+    "postseasonRank": 8,
+    "bestRank": 6,
+    "weeksRanked": 14,
+    "weeksTopTen": 5
+   },
+   "attributionComplete": true,
+   "recordSplits": {
+    "conference": {
+     "games": 8,
+     "wins": 6,
+     "losses": 2,
+     "ties": 0,
+     "winPercentage": 0.75
+    },
+    "postseason": {
+     "games": 1,
+     "wins": 1,
+     "losses": 0,
+     "ties": 0,
+     "winPercentage": 1.0
+    },
+    "home": {
+     "games": 7,
+     "wins": 6,
+     "losses": 1,
+     "ties": 0,
+     "winPercentage": 0.857
+    },
+    "away": {
+     "games": 4,
+     "wins": 2,
+     "losses": 2,
+     "ties": 0,
+     "winPercentage": 0.5
+    },
+    "neutral": {
+     "games": 0,
+     "wins": 0,
+     "losses": 0,
+     "ties": 0,
+     "winPercentage": null
+    }
+   },
+   "scoring": {
+    "pointsFor": 411,
+    "pointsAgainst": 233,
+    "averagePointDifferential": 14.833
+   },
+   "cfp": {
+    "appeared": true,
+    "seed": 8,
+    "outcome": "Quarterfinal"
+   },
+   "draftFollowingSeason": {
+    "year": 2025,
+    "totalPicks": 3,
+    "firstRoundPicks": 1
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:55Z', now());
+
+INSERT INTO raw.raw_recruiting_players (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-44-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "id": "108699",
+   "athleteId": "5079720",
+   "recruitType": "HighSchool",
+   "year": 2024,
+   "ranking": 1,
+   "name": "Top Recruit",
+   "school": "Test High",
+   "committedTo": "Alpha State",
+   "position": "WR",
+   "height": 75,
+   "weight": 214,
+   "stars": 5,
+   "rating": 0.9997,
+   "city": "Testville",
+   "stateProvince": "TX",
+   "country": "USA",
+   "hometownInfo": {
+    "latitude": 25.8967,
+    "longitude": -80.2594,
+    "fipsCode": "12086"
+   }
+  },
+  {
+   "id": "108700",
+   "athleteId": null,
+   "recruitType": "HighSchool",
+   "year": 2024,
+   "ranking": 812,
+   "name": "Unsigned Recruit",
+   "school": "Other High",
+   "committedTo": null,
+   "position": "OL",
+   "height": 78,
+   "weight": 300,
+   "stars": 3,
+   "rating": 0.8412,
+   "city": "Elsewhere",
+   "stateProvince": "OK",
+   "country": "USA",
+   "hometownInfo": {
+    "latitude": 35.4,
+    "longitude": -97.5,
+    "fipsCode": "40109"
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:56Z', now());
+
+INSERT INTO raw.raw_recruiting_teams (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-45-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "team": "Alpha State",
+   "rank": 1,
+   "points": 317.05
+  },
+  {
+   "year": 2024,
+   "team": "Beta Tech",
+   "rank": 2,
+   "points": 288.41
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:57Z', now());
+
+INSERT INTO raw.raw_recruiting_groups (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-46-001Z.json', '{
+ "status_code": 200,
+ "params": {},
+ "data": [
+  {
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "positionGroup": "Defensive Back",
+   "averageRating": 0.8082,
+   "totalRating": 3.2329,
+   "commits": "4",
+   "averageStars": "2.5000000000000000"
+  },
+  {
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "positionGroup": "Quarterback",
+   "averageRating": 0.9101,
+   "totalRating": 1.8202,
+   "commits": "2",
+   "averageStars": "4.0000000000000000"
+  }
+ ]
+}', 200, '{}',
+  '2026-01-01T00:00:58Z', now());
+
+INSERT INTO raw.raw_talent (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-47-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "team": "Alpha State",
+   "talent": 1018.28
+  },
+  {
+   "year": 2024,
+   "team": "Beta Tech",
+   "talent": 702.11
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:59Z', now());
+
+INSERT INTO raw.raw_draft_picks (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-48-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "collegeAthleteId": 4431611,
+   "nflAthleteId": 108247,
+   "collegeId": 1,
+   "collegeTeam": "Alpha State",
+   "collegeConference": "Test Conference",
+   "nflTeamId": 3,
+   "nflTeam": "Chicago",
+   "year": 2024,
+   "overall": 1,
+   "round": 1,
+   "pick": 1,
+   "name": "First Pick",
+   "position": "Quarterback",
+   "height": 73,
+   "weight": 214,
+   "preDraftRanking": 1,
+   "preDraftPositionRanking": 1,
+   "preDraftGrade": 97,
+   "hometownInfo": {
+    "city": "Washington",
+    "state": "DC",
+    "country": "USA",
+    "latitude": "38.8949855",
+    "longitude": "-77.0365708",
+    "countyFips": "11001"
+   }
+  },
+  {
+   "collegeAthleteId": 4431612,
+   "nflAthleteId": 108248,
+   "collegeId": 2,
+   "collegeTeam": "Beta Tech",
+   "collegeConference": "Test Conference",
+   "nflTeamId": 4,
+   "nflTeam": "Cincinnati",
+   "year": 2024,
+   "overall": 33,
+   "round": 2,
+   "pick": 1,
+   "name": "Round Two Pick",
+   "position": "Wide Receiver",
+   "height": 72,
+   "weight": 198,
+   "preDraftRanking": 30,
+   "preDraftPositionRanking": 4,
+   "preDraftGrade": 88,
+   "hometownInfo": {
+    "city": "Testville",
+    "state": "TX",
+    "country": "USA",
+    "latitude": "32.47",
+    "longitude": "-99.71",
+    "countyFips": "48441"
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:01:00Z', now());
+
+INSERT INTO raw.raw_draft_positions (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-49-001Z.json', '{
+ "status_code": 200,
+ "params": {},
+ "data": [
+  {
+   "name": "Quarterback",
+   "abbreviation": "QB"
+  },
+  {
+   "name": "Wide Receiver",
+   "abbreviation": "WR"
+  },
+  {
+   "name": "Center",
+   "abbreviation": "C"
+  }
+ ]
+}', 200, '{}',
+  '2026-01-01T00:01:01Z', now());
+
+INSERT INTO raw.raw_draft_teams (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-50-001Z.json', '{
+ "status_code": 200,
+ "params": {},
+ "data": [
+  {
+   "location": "Chicago",
+   "nickname": "Bears",
+   "displayName": "Chicago Bears",
+   "logo": "https://example/chi.png"
+  },
+  {
+   "location": "Cincinnati",
+   "nickname": "Bengals",
+   "displayName": "Cincinnati Bengals",
+   "logo": "https://example/cin.png"
+  },
+  {
+   "location": "New York",
+   "nickname": "Jets",
+   "displayName": "New York Jets",
+   "logo": "https://example/nyj.png"
+  },
+  {
+   "location": "New York",
+   "nickname": "Giants",
+   "displayName": "New York Giants",
+   "logo": "https://example/nyg.png"
+  }
+ ]
+}', 200, '{}',
+  '2026-01-01T00:01:02Z', now());
+
 INSERT INTO raw.raw_manifest
   (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
   ('metrics_wp_pregame', '2026-01-01T00-00-41-001Z.json',

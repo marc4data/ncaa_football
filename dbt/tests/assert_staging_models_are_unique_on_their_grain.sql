@@ -71,6 +71,14 @@
     ('stg_team_returning_production', ['season', 'team']),
     ('stg_player_season_usage', ['season', 'player_id']),
     ('stg_field_goal_ep',       ['yards_to_goal']),
+    ('stg_coach_season',        ['coach_id', 'season', 'team_id']),
+    ('stg_coach_season_detail', ['coach_id', 'season', 'team_id']),
+    ('stg_recruit',             ['recruit_id']),
+    ('stg_team_recruiting_rank', ['recruiting_class', 'team']),
+    ('stg_team_talent',         ['season', 'team']),
+    ('stg_draft_pick',          ['draft_year', 'overall_pick']),
+    ('stg_draft_position',      ['position_name']),
+    ('stg_nfl_team',            ['display_name']),
 ] %}
 
 {% for model, grain in staging_grains %}
