@@ -53,6 +53,22 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_games_players
+        description: >
+          CFBD /games/players player box scores — the deepest payload the API serves:
+          game -> teams[] -> categories[] -> types[] -> athletes[]. Identifies teams by NAME
+          only; unlike /games/teams it ships no teamId.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_games_weather
+        description: >
+          CFBD /games/weather. One row per game, flat, twenty-two fields. Landed since
+          August and read by nothing until stg_game_weather — the endpoint was in the sweep,
+          so every DAG was green while the data sat unused.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_records
         description: >
           CFBD /records. Landed but deliberately NOT a source for fct_team_record — records

@@ -101,11 +101,117 @@ models:
         description: Which side of the game this team was.
       - name: points
         description: Points scored, as reported on the box score.
+      - name: team
+        description: >
+          School name as the box score reported it. Distinct from stg_teams.school, which is
+          the season-correct affiliation — this is what CFBD printed on this game.
+        data_tests: [not_null]
+      - name: conference
+        description: Conference as the box score reported it, same caveat as `team`.
       - name: stat_category
         description: CFBD's category name, e.g. totalYards, thirdDownEff.
         data_tests: [not_null]
       - name: stat_raw
         description: Value exactly as landed, string. Never parsed here.
+
+  - name: stg_game_player_stat
+    description: >
+      Player box score, long: one row per (game, team, stat category, stat type, athlete).
+      /games/players nests four arrays deep — game -> teams[] -> categories[] -> types[] ->
+      athletes[] — and this flattens all of it. Values stay strings because the type names are
+      open-ended and category-specific (C/ATT, YDS, QBR, LONG), so any parsing rule would be a
+      decision to drop whatever CFBD adds next.
+    columns:
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null]
+      - name: team
+        description: >
+          School name. THIS PAYLOAD SHIPS NO TEAM ID — unlike /games/teams. Joining it to a
+          team dimension is a join on a string, and school names are not stable across
+          seasons; resolution needs a season-scoped map and belongs in a mart.
+        data_tests: [not_null]
+      - name: conference
+        description: Conference as the box score reported it.
+      - name: home_away
+        description: Which side of the game this team was.
+      - name: points
+        description: Team points, repeated on every athlete row of that team.
+      - name: stat_category
+        description: passing, rushing, receiving, kicking, punting, returns, interceptions.
+        data_tests: [not_null]
+      - name: stat_type
+        description: The measure within the category — C/ATT, YDS, TD, INT, QBR, LONG, CAR.
+        data_tests: [not_null]
+      - name: athlete_id
+        description: >
+          CFBD athlete id, STRING. It looks numeric and is left as text: the spec types it as
+          a string, and casting would be a lossy guess about an identifier CFBD never promised
+          is one.
+        data_tests: [not_null]
+      - name: athlete_name
+        description: Athlete name as reported on this box score.
+      - name: stat_raw
+        description: Value exactly as landed, string. "12/31" for C/ATT, "58" for YDS.
+
+  - name: stg_game_weather
+    description: >
+      One row per game: conditions at kickoff plus the venue and matchup context CFBD ships
+      with them. All twenty-two published fields are carried through. The endpoint had been
+      landing since August and nothing read it — no page needed weather, so every DAG stayed
+      green while the data sat unused.
+    columns:
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null, unique]
+      - name: season
+        description: Season, read from the row rather than parsed out of the request params.
+        data_tests: [not_null]
+      - name: week
+        description: Week number within the season type.
+      - name: season_type
+        description: regular / postseason.
+      - name: start_at
+        description: Kickoff, timestamptz.
+      - name: home_team
+        description: >
+          Home school by NAME. /games/weather ships no team ids at all, so this is a
+          string-keyed join for anything downstream — same hazard as /teams/matchup.
+      - name: home_conference
+        description: Home conference as reported.
+      - name: away_team
+        description: Away school by name; same caveat as home_team.
+      - name: away_conference
+        description: Away conference as reported.
+      - name: venue_id
+        description: CFBD venue id — the one id this payload does carry, joinable to stg_venues.
+      - name: venue
+        description: Venue name as reported.
+      - name: is_indoors
+        description: >
+          Whether the game was played indoors. Indoor games STILL report temperature and
+          humidity — the stadium's, not the sky's — so any weather-effect analysis has to
+          filter on this or it averages a dome into the rain.
+      - name: temperature_f
+        description: Temperature, Fahrenheit.
+      - name: dew_point_f
+        description: Dew point, Fahrenheit.
+      - name: humidity_pct
+        description: Relative humidity, percent.
+      - name: precipitation_in
+        description: Precipitation, inches.
+      - name: snowfall_in
+        description: Snowfall, inches.
+      - name: wind_direction_deg
+        description: Wind direction, degrees clockwise from north.
+      - name: wind_speed_mph
+        description: Wind speed, miles per hour.
+      - name: pressure_mb
+        description: Barometric pressure, millibars.
+      - name: weather_condition_code
+        description: CFBD's numeric condition code.
+      - name: weather_condition
+        description: Human-readable condition, e.g. "Fair".
 
   - name: stg_lines
     description: >

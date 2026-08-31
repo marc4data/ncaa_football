@@ -39,6 +39,14 @@ stat_rows as (
     select
         game_id,
         cast({{ json_get_string('team', 'teamId') }} as int) as team_id,
+        -- School name and conference AS THE BOX SCORE REPORTED THEM. Both were landing and
+        -- neither was read: the model took teamId and dropped the two fields next to it, so
+        -- anything wanting a team name on a box score had to join out to stg_teams. That join
+        -- also answers a subtly different question — stg_teams gives the season-correct
+        -- affiliation, while this is what CFBD printed on this particular game. They agree
+        -- almost always, and where they do not, the disagreement is the interesting part.
+        {{ json_get_string('team', 'team') }}                as team,
+        {{ json_get_string('team', 'conference') }}          as conference,
         {{ json_get_string('team', 'homeAway') }}            as home_away,
         cast({{ json_get_string('team', 'points') }} as int) as points,
         {{ json_array_elements(json_get_object('team', 'stats')) }} as stat
@@ -49,6 +57,8 @@ stat_rows as (
 select
     game_id,
     team_id,
+    team,
+    conference,
     home_away,
     points,
     {{ json_get_string('stat', 'category') }} as stat_category,
