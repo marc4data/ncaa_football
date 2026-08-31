@@ -50,17 +50,34 @@
 {%- endmacro %}
 
 
-{# --- Extract a scalar from a nested object ------------------------------------------ #}
+{# --- Extract a scalar from a nested object ------------------------------------------
+
+  ARBITRARY DEPTH, because two was not enough and the old version failed silently.
+
+  This read `path[0]` and `path[1]` and ignored everything after. A three-element path
+  therefore returned a two-level lookup — an OBJECT rendered as text, not the scalar asked
+  for — with no error anywhere. Nothing needed three levels until the advanced stats models,
+  where `offense.standardDowns.ppa` is the normal shape and there are sixty of them.
+
+  Empty paths raise rather than compiling to something that reads the whole column.
+#}
 {% macro json_get_nested_string(column, path) -%}
     {{ return(adapter.dispatch('json_get_nested_string', 'cfdb_dbt')(column, path)) }}
 {%- endmacro %}
 
 {% macro default__json_get_nested_string(column, path) -%}
-    ({{ column }} -> '{{ path[0] }}' ->> '{{ path[1] }}')
+    {%- if path | length == 0 -%}
+        {{ exceptions.raise_compiler_error("json_get_nested_string needs at least one key") }}
+    {%- endif -%}
+    ({{ column }}
+    {%- for key in path[:-1] %} -> '{{ key }}'{% endfor %} ->> '{{ path[-1] }}')
 {%- endmacro %}
 
 {% macro databricks__json_get_nested_string(column, path) -%}
-    (get_json_object({{ column }}, '$.{{ path[0] }}.{{ path[1] }}'))
+    {%- if path | length == 0 -%}
+        {{ exceptions.raise_compiler_error("json_get_nested_string needs at least one key") }}
+    {%- endif -%}
+    (get_json_object({{ column }}, '$.{{ path | join('.') }}'))
 {%- endmacro %}
 
 
@@ -108,4 +125,28 @@
 
 {% macro databricks__json_array_element_string(column, index) -%}
     get_json_object({{ column }}, '$[{{ index }}]')
+{%- endmacro %}
+
+
+{# --- An exploded array ELEMENT that is itself a scalar, as text --------------------------
+
+  For endpoints returning a bare array of strings — /stats/categories is the whole payload,
+  no wrapping object. After json_array_elements, Postgres hands back a `jsonb` scalar and
+  Spark hands back the string, so reading it needs the dialect split even though nothing is
+  being addressed by key.
+
+  `#>> '{}'` is the empty path: "extract this whole value as text". Casting with ::text
+  instead would keep JSON's quotes, giving `"passing"` rather than passing — which does not
+  fail, it just silently poisons every join and filter downstream.
+#}
+{% macro json_scalar_text(column) -%}
+    {{ return(adapter.dispatch('json_scalar_text', 'cfdb_dbt')(column)) }}
+{%- endmacro %}
+
+{% macro default__json_scalar_text(column) -%}
+    ({{ column }} #>> '{}')
+{%- endmacro %}
+
+{% macro databricks__json_scalar_text(column) -%}
+    ({{ column }})
 {%- endmacro %}

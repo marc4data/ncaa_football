@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 8 | every field the spec publishes is exposed as a column |
+| complete | 15 | every field the spec publishes is exposed as a column |
 | partial | 11 | a staging model exists but drops fields |
-| raw only | 46 | responses have landed; nothing reads them |
+| raw only | 39 | responses have landed; nothing reads them |
 | no raw data | 9 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 165 of 1191 (13.9%).** That percentage is the product gap in one number.
+**Fields exposed: 257 of 1191 (21.6%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -90,14 +90,14 @@ sweep can invent.
 | `recruiting/teams` | swept | 4 | — | 0/4 | raw only |
 | `roster` | swept | 4 | — | 0/16 | raw only |
 | `scoreboard` | CLI | — | — | 0/28 | no raw data |
-| `stats/categories` | swept | 2 | — | 0/1 | raw only |
-| `stats/game/advanced` | swept | 14 | — | 0/20 | raw only |
-| `stats/game/havoc` | swept | 14 | — | 0/15 | raw only |
-| `stats/player/season` | swept | 58 | — | 0/9 | raw only |
-| `stats/player/success` | swept | 17 | — | 0/9 | raw only |
-| `stats/player/success/game` | swept | 48 | — | 0/13 | raw only |
+| `stats/categories` | swept | 2 | `stg_stat_category` | 1/1 | complete |
+| `stats/game/advanced` | swept | 14 | `stg_game_team_advanced` | 20/20 | complete |
+| `stats/game/havoc` | swept | 14 | `stg_game_team_havoc` | 15/15 | complete |
+| `stats/player/season` | swept | 58 | `stg_player_season_stat` | 9/9 | complete |
+| `stats/player/success` | swept | 17 | `stg_player_season_success` | 9/9 | complete |
+| `stats/player/success/game` | swept | 48 | `stg_player_game_success` | 13/13 | complete |
 | `stats/season` | swept | 170 | `stg_team_season_stat` | 5/5 | complete |
-| `stats/season/advanced` | swept | 38 | — | 0/25 | raw only |
+| `stats/season/advanced` | swept | 38 | `stg_team_season_advanced` | 25/25 | complete |
 | `talent` | swept | 4 | — | 0/3 | raw only |
 | `teams` | swept | 162 | `stg_teams` | 12/25 | partial |
 | `teams/ats` | swept | 15 | — | 0/9 | raw only |

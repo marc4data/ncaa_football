@@ -33,6 +33,13 @@
     ('stg_game_media',         ['game_id', 'media_type', 'outlet']),
     ('stg_rankings',           ['season', 'season_type', 'week', 'poll_name', 'team_id']),
     ('stg_team_season_stat',   ['season', 'school', 'stat_name']),
+    ('stg_game_team_advanced',  ['game_id', 'team']),
+    ('stg_team_season_advanced', ['season', 'team']),
+    ('stg_game_team_havoc',     ['game_id', 'team']),
+    ('stg_stat_category',       ['stat_category']),
+    ('stg_player_season_stat',  ['season', 'player_id', 'stat_category', 'stat_type']),
+    ('stg_player_season_success', ['season', 'player_id']),
+    ('stg_player_game_success', ['game_id', 'player_id']),
 ] %}
 
 {% for model, grain in staging_grains %}

@@ -213,6 +213,134 @@ models:
       - name: weather_condition
         description: Human-readable condition, e.g. "Fair".
 
+  - name: stg_game_team_advanced
+    description: >
+      Advanced box score, wide: one row per (game, team) with offense and defense side by
+      side. /stats/game/advanced publishes 62 field paths — PPA, success rate, explosiveness,
+      line yards, stuff rate, and the same set again split by standard/passing downs and
+      rushing/passing plays — and nothing read any of them until now. Wide rather than long
+      because the schema is FIXED and typed, unlike the box-score endpoints whose category
+      names CFBD can extend. Both sides are generated from one Jinja list so a
+      `defense_x reads offense.x` mix-up is unrepresentable.
+    columns:
+      - name: game_id
+        description: CFBD game id.
+        data_tests: [not_null]
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        description: >
+          Team by NAME; this endpoint ships no ids. Resolution needs a season-scoped team
+          map and belongs in a mart.
+        data_tests: [not_null]
+      - name: opponent
+        description: Opponent by name, same caveat.
+      - name: offense_ppa
+        description: Predicted points added per play, this team's offense.
+      - name: defense_ppa
+        description: PPA per play allowed by this team's defense.
+
+  - name: stg_team_season_advanced
+    description: >
+      Advanced season profile, wide: one row per (season, team). The widest payload CFBD
+      serves at 82 field paths — the season companion to stg_game_team_advanced, plus a
+      `rate` on each split, field position, havoc and scoring opportunities.
+      `totalOpportunies` is CFBD's own typo and is the actual wire key; the lookup preserves
+      it and the column is named correctly.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        description: Team by name; no ids in this payload.
+        data_tests: [not_null]
+      - name: conference
+        description: Conference as reported for that season.
+      - name: offense_total_opportunities
+        description: >
+          Scoring opportunities — drives reaching the opponent's 40. Read from the wire key
+          `totalOpportunies`, which is misspelled upstream; reading the correct spelling
+          returns null for every row, silently.
+
+  - name: stg_game_team_havoc
+    description: >
+      Havoc rates per (game, team). `offense` is havoc INFLICTED ON this team's offense,
+      `defense` is havoc its defense created — both kept, neither renamed, because
+      "allowed"/"created" would be an interpretation and staging represents the endpoint.
+    columns:
+      - name: game_id
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: conference
+        description: This team's conference — stg_game_team_advanced does not carry it.
+      - name: opponent_conference
+        description: Opponent's conference.
+
+  - name: stg_stat_category
+    description: >
+      The controlled vocabulary of box-score stat categories, one row per name. The
+      authoritative list behind stg_game_team_stat.stat_category — without it, validating
+      those categories means hardcoding a list that goes stale when CFBD adds one.
+    columns:
+      - name: stat_category
+        description: Category name as CFBD publishes it, e.g. totalYards, thirdDownEff.
+        data_tests: [not_null, unique]
+
+  - name: stg_player_season_stat
+    description: >
+      Player season totals, long: one row per (season, player, category, stat type). Flat and
+      EAV-shaped, and the highest-volume endpoint in the stats family. Values stay strings
+      because statType is open-ended and each type carries its own units.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: player_id
+        description: >
+          CFBD player id, STRING — a real id, unlike the game box scores which carry only a
+          name. Left as text because the spec types it as a string.
+        data_tests: [not_null]
+      - name: player_name
+        description: Player name as reported.
+      - name: position
+        description: Listed position.
+      - name: stat_category
+        description: e.g. passing, rushing, defensive.
+        data_tests: [not_null]
+      - name: stat_type
+        description: The measure within the category, e.g. YDS, TD, PD.
+        data_tests: [not_null]
+      - name: stat_raw
+        description: Value exactly as landed, string. Never parsed here.
+
+  - name: stg_player_season_success
+    description: >
+      Player success rate for a season: one row per (season, player), passing and rushing
+      generated from one list. successRate is NULL when plays is zero, which is most rows;
+      kept null rather than coerced to 0, because 0% on no attempts and 0% on twenty
+      attempts are different facts.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: player_id
+        data_tests: [not_null]
+      - name: passing_success_rate
+        description: Share of passing plays that stayed on schedule. Null when plays is 0.
+      - name: rushing_success_rate
+        description: Share of rushing plays that stayed on schedule. Null when plays is 0.
+
+  - name: stg_player_game_success
+    description: >
+      Player success rate for a single game: one row per (game, player). A third of the
+      landed responses for this endpoint are 400s — CFBD rejects a year-only call — and
+      `status_code = 200` is what excludes them.
+    columns:
+      - name: game_id
+        data_tests: [not_null]
+      - name: player_id
+        data_tests: [not_null]
+      - name: opponent
+        description: Opponent by name.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated
