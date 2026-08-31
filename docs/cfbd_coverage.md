@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 5 | every field the spec publishes is exposed as a column |
-| partial | 12 | a staging model exists but drops fields |
-| raw only | 48 | responses have landed; nothing reads them |
+| complete | 8 | every field the spec publishes is exposed as a column |
+| partial | 11 | a staging model exists but drops fields |
+| raw only | 46 | responses have landed; nothing reads them |
 | no raw data | 9 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 134 of 1191 (11.3%).** That percentage is the product gap in one number.
+**Fields exposed: 165 of 1191 (13.9%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -44,9 +44,9 @@ sweep can invent.
 | `game/box/advanced` | CLI | — | — | 0/34 | no raw data |
 | `games` | swept | 343 | `stg_games` | 19/41 | partial |
 | `games/media` | swept | 9 | `stg_game_media` | 6/12 | partial |
-| `games/players` | swept | 45 | — | 0/7 | raw only |
-| `games/teams` | swept | 45 | `stg_game_team_stat` | 6/8 | partial |
-| `games/weather` | swept | 5 | — | 0/22 | raw only |
+| `games/players` | swept | 45 | `stg_game_player_stat` | 7/7 | complete |
+| `games/teams` | swept | 45 | `stg_game_team_stat` | 8/8 | complete |
+| `games/weather` | swept | 5 | `stg_game_weather` | 22/22 | complete |
 | `info` | CLI | 14 | `stg_api_quota` | 7/13 | partial |
 | `info/usage` | CLI | 14 | `stg_api_usage_endpoint` | 6/10 | partial |
 | `lines` | swept | 63 | `stg_lines` | 12/23 | partial |
@@ -126,7 +126,6 @@ carried through.
 | `info` | stg_api_quota | 6 | `adjustedMetrics`, `graphQl`, `livePlayByPlay`, `products`, `scoreboard`, `weather` |
 | `ratings/fpi` | stg_team_rating | 6 | `averageWinProbability`, `gameControl`, `remainingStrengthOfSchedule`, `strengthOfRecord`, `strengthOfSchedule`, `year` |
 | `info/usage` | stg_api_usage_endpoint | 4 | `cbbRequests`, `cfbRequests`, `requestedAt`, `uniqueEndpoints` |
-| `games/teams` | stg_game_team_stat | 2 | `conference`, `team` |
 | `ratings/srs` | stg_team_rating | 2 | `division`, `year` |
 | `ratings/elo` | stg_team_rating | 1 | `year` |
 

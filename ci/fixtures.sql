@@ -41,6 +41,14 @@ CREATE TABLE IF NOT EXISTS raw.raw_games_teams (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_games_players (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_games_weather (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_records (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
@@ -124,6 +132,7 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_deploy_status,
          raw.raw_ratings_sp, raw.raw_ratings_srs, raw.raw_ratings_elo,
          raw.raw_ratings_fpi, raw.raw_ppa_teams,
+         raw.raw_games_players, raw.raw_games_weather,
          raw.raw_manifest;
 
 -- Teams, season-scoped. Only year-parameterized fetches feed stg_teams.
@@ -331,6 +340,82 @@ INSERT INTO raw.raw_games_teams (filename, content, status_code, params, fetched
 -- CFBD's own records, for the reconciliation test. Alpha won 9001, Beta lost it, so these
 -- agree with what fct_team_record derives from the game spine. A fixture that disagreed
 -- would make the test red for a reason that has nothing to do with the code under test.
+-- Player box scores. Four levels of array: game -> teams[] -> categories[] -> types[] ->
+-- athletes[]. The fixture keeps all four so a flattening bug cannot pass by collapsing one.
+--
+-- NOTE THERE IS NO teamId HERE, and that is faithful rather than lazy — /games/players
+-- identifies teams by name only. A fixture that invented one would let a model be written
+-- against an id that does not exist in production.
+INSERT INTO raw.raw_games_players (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-07-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024", "week": "1", "seasonType": "regular"},
+  "data": [
+    {"id": 9001, "teams": [
+      {"team": "Alpha State", "conference": "Test Conference", "homeAway": "home", "points": 28,
+       "categories": [
+         {"name": "passing", "types": [
+           {"name": "C/ATT", "athletes": [{"id": "1001", "name": "A. Passer", "stat": "18/26"}]},
+           {"name": "YDS",   "athletes": [{"id": "1001", "name": "A. Passer", "stat": "244"}]},
+           {"name": "TD",    "athletes": [{"id": "1001", "name": "A. Passer", "stat": "3"}]}
+         ]},
+         {"name": "rushing", "types": [
+           {"name": "CAR", "athletes": [
+             {"id": "1002", "name": "B. Runner", "stat": "21"},
+             {"id": "1003", "name": "C. Back",   "stat": "7"}]},
+           {"name": "YDS", "athletes": [
+             {"id": "1002", "name": "B. Runner", "stat": "131"},
+             {"id": "1003", "name": "C. Back",   "stat": "37"}]}
+         ]}
+       ]},
+      {"team": "Beta Tech", "conference": "Test Conference", "homeAway": "away", "points": 21,
+       "categories": [
+         {"name": "passing", "types": [
+           {"name": "C/ATT", "athletes": [{"id": "2001", "name": "D. Arm", "stat": "24/39"}]},
+           {"name": "YDS",   "athletes": [{"id": "2001", "name": "D. Arm", "stat": "301"}]}
+         ]}
+       ]}
+    ]}
+  ]}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:00:09Z', now());
+
+-- Weather. Flat, and every one of the twenty-two published fields is present so a model that
+-- silently stopped reading one would not pass by finding null everywhere.
+--
+-- Game 9002 is INDOORS and still reports a temperature — that is what CFBD does, and it is
+-- the trap the is_indoors column exists to let callers avoid. Game 9003 carries nulls across
+-- every measurement, which is what an unplayed or old game looks like; a hard cast instead of
+-- safe_numeric fails the model on exactly this row.
+INSERT INTO raw.raw_games_weather (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-08-001Z.json', '{
+  "status_code": 200, "params": {"year": "2024", "seasonType": "regular"},
+  "data": [
+    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
+     "startTime": "2024-08-31T23:00:00.000Z", "gameIndoors": false,
+     "homeTeam": "Alpha State", "homeConference": "Test Conference",
+     "awayTeam": "Beta Tech", "awayConference": "Test Conference",
+     "venueId": 501, "venue": "Alpha Field",
+     "temperature": 71.4, "dewPoint": 55.2, "humidity": 56, "precipitation": 0,
+     "snowfall": 0, "windDirection": 210, "windSpeed": 8.1, "pressure": 1014.6,
+     "weatherConditionCode": 2, "weatherCondition": "Fair"},
+    {"id": 9002, "season": 2024, "week": 2, "seasonType": "regular",
+     "startTime": "2024-09-07T19:30:00.000Z", "gameIndoors": true,
+     "homeTeam": "Beta Tech", "homeConference": "Test Conference",
+     "awayTeam": "Alpha State", "awayConference": "Test Conference",
+     "venueId": 502, "venue": "Beta Dome",
+     "temperature": 72.0, "dewPoint": 50.0, "humidity": 45, "precipitation": 0,
+     "snowfall": 0, "windDirection": 0, "windSpeed": 0, "pressure": 1016.0,
+     "weatherConditionCode": 1, "weatherCondition": "Clear"},
+    {"id": 9003, "season": 2024, "week": 3, "seasonType": "regular",
+     "startTime": "2024-09-14T16:00:00.000Z", "gameIndoors": false,
+     "homeTeam": "Alpha State", "homeConference": "Test Conference",
+     "awayTeam": "Gamma College", "awayConference": null,
+     "venueId": 501, "venue": "Alpha Field",
+     "temperature": null, "dewPoint": null, "humidity": null, "precipitation": null,
+     "snowfall": null, "windDirection": null, "windSpeed": null, "pressure": null,
+     "weatherConditionCode": null, "weatherCondition": null}
+  ]}', 200, '{"year": "2024", "seasonType": "regular"}',
+  '2026-01-01T00:00:10Z', now());
+
 INSERT INTO raw.raw_records (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-07-001Z.json', '{
   "status_code": 200, "params": {"year": "2024"},
