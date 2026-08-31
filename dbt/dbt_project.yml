@@ -21,6 +21,26 @@ models:
     # Schema per layer (decision log 2026-08-17). Raw is written by the loaders, not dbt.
     staging:
       +schema: staging
+      # STAGING IS KEPT FRESH WHETHER OR NOT A PAGE READS IT.
+      #
+      # The serving layer carries `production`, and `+tag:production` pulls its ancestors —
+      # so a staging model reached the scheduled refresh only by being upstream of something
+      # the site renders. That was the right rule when the site WAS the product. It is the
+      # wrong rule now: prompt 029 makes the warehouse itself the deliverable, and the whole
+      # of Priority 3 is staging models for endpoints no page consumes.
+      #
+      # Without this tag those models exist in git and never materialise. stg_game_weather
+      # and stg_game_player_stat shipped in the games family and neither was in the
+      # selection — 58 of 66 models, the two new ones outside it. That is the same "green
+      # and useless" shape ci/check_production_selector.py was written for: every run
+      # succeeds, and the thing you added is simply never built.
+      #
+      # A SEPARATE TAG RATHER THAN `production`, because the two words mean different
+      # things. `production` is "the site is stale without this", and the scores DAG rebuilds
+      # it every two hours. `warehouse` is "the warehouse should hold this", which the weekly
+      # DAG is the right cadence for — box scores and weather are immutable once the week
+      # completes, and rebuilding 1.27M player-stat rows two-hourly would buy nothing.
+      +tags: ['warehouse']
     marts:
       +schema: marts
     # Serving layer: denormalized, pre-joined, what the site reads. Tables rather than
