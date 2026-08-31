@@ -313,4 +313,56 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_teams_fbs
+        description: >
+          CFBD /teams/fbs. The FBS list for a season, same payload shape as /teams. `location`
+          is a FULL VENUE OBJECT — fourteen fields including capacity, surface, dome and
+          coordinates — not a city and state.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_teams_ats
+        description: >
+          CFBD /teams/ats. Against-the-spread record per season. Ships a real teamId. `games`
+          is NOT atsWins + atsLosses + atsPushes: unlined games count toward games only.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_player_portal
+        description: >
+          CFBD /player/portal. Transfer portal entries. NO PLAYER ID — first and last name
+          only, in the one dataset where a player's team is changing. A null `destination`
+          means entered but not yet committed, which is data rather than a gap.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_player_returning
+        description: >
+          CFBD /player/returning. TEAM GRAIN despite the namespace — the share of last
+          season's production coming back, aggregated per team, with no per-player rows.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_player_usage
+        description: >
+          CFBD /player/usage. Share of a team's plays per player, split by down and play
+          type. Reports conferences as ABBREVIATIONS (B1G, B12) like /ppa/players/season.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_metrics_wp_pregame
+        description: >
+          CFBD /metrics/wp/pregame. A SNAPSHOT endpoint — registered snapshot=True, because
+          the number moves with the market through the week. Never deduplicated; every fetch
+          is kept, like /lines.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_metrics_fg_ep
+        description: >
+          CFBD /metrics/fg/ep. A static 100-row reference curve — expected points of a field
+          goal attempt by yard line. Takes no parameters.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
 

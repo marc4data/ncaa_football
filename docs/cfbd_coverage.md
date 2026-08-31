@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 30 | every field the spec publishes is exposed as a column |
-| partial | 6 | a staging model exists but drops fields |
-| raw only | 29 | responses have landed; nothing reads them |
+| complete | 38 | every field the spec publishes is exposed as a column |
+| partial | 5 | a staging model exists but drops fields |
+| raw only | 22 | responses have landed; nothing reads them |
 | no raw data | 9 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 395 of 1191 (33.2%).** That percentage is the product gap in one number.
+**Fields exposed: 492 of 1191 (41.3%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -51,19 +51,19 @@ sweep can invent.
 | `info/usage` | CLI | 14 | `stg_api_usage_endpoint` | 6/10 | partial |
 | `lines` | swept | 63 | `stg_lines` | 12/23 | partial |
 | `live/plays` | CLI | — | — | 0/63 | no raw data |
-| `metrics/fg/ep` | swept | 2 | — | 0/3 | raw only |
+| `metrics/fg/ep` | swept | 2 | `stg_field_goal_ep` | 3/3 | complete |
 | `metrics/wp` | CLI | — | — | 0/16 | no raw data |
-| `metrics/wp/pregame` | swept | 9 | — | 0/8 | raw only |
+| `metrics/wp/pregame` | swept | 9 | `stg_game_pregame_wp` | 8/8 | complete |
 | `passing/players/games` | — | — | — | 0/22 | unregistered |
 | `passing/players/season` | — | — | — | 0/18 | unregistered |
 | `passing/plays` | — | — | — | 0/36 | unregistered |
 | `passing/teams/games` | — | — | — | 0/20 | unregistered |
 | `passing/teams/season` | — | — | — | 0/16 | unregistered |
-| `player/portal` | swept | 4 | — | 0/10 | raw only |
-| `player/returning` | swept | 4 | — | 0/15 | raw only |
+| `player/portal` | swept | 4 | `stg_player_portal` | 10/10 | complete |
+| `player/returning` | swept | 4 | `stg_team_returning_production` | 15/15 | complete |
 | `player/search` | CLI | — | — | 0/16 | no raw data |
 | `player/season/overview` | CLI | — | — | 0/17 | no raw data |
-| `player/usage` | swept | 15 | — | 0/14 | raw only |
+| `player/usage` | swept | 15 | `stg_player_season_usage` | 14/14 | complete |
 | `playoffs/cfp` | swept | 3 | — | 0/34 | raw only |
 | `playoffs/cfp/games` | swept | 3 | — | 0/19 | raw only |
 | `playoffs/cfp/participants` | swept | 3 | — | 0/12 | raw only |
@@ -99,9 +99,9 @@ sweep can invent.
 | `stats/season` | swept | 170 | `stg_team_season_stat` | 5/5 | complete |
 | `stats/season/advanced` | swept | 38 | `stg_team_season_advanced` | 25/25 | complete |
 | `talent` | swept | 4 | — | 0/3 | raw only |
-| `teams` | swept | 162 | `stg_teams` | 12/25 | partial |
-| `teams/ats` | swept | 15 | — | 0/9 | raw only |
-| `teams/fbs` | swept | 4 | — | 0/25 | raw only |
+| `teams` | swept | 162 | `stg_teams` | 25/25 | complete |
+| `teams/ats` | swept | 15 | `stg_team_season_ats` | 9/9 | complete |
+| `teams/fbs` | swept | 4 | `stg_team_fbs` | 25/25 | complete |
 | `teams/matchup` | CLI | — | — | 0/18 | no raw data |
 | `venues` | swept | 2 | `stg_venues` | 14/14 | complete |
 | `wepa/players/kicking` | swept | 15 | `stg_player_season_wepa_kicking` | 7/7 | complete |
@@ -118,7 +118,6 @@ carried through.
 | Endpoint | Model | Dropped | Fields not exposed |
 |---|---|---:|---|
 | `games` | stg_games | 22 | `awayConference`, `awayLineScores`, `awayPostgameElo`, `awayPostgameWinProbability`, `awayPregameElo`, `awaySeed`, `bowlName`, `bracketSlot`, `competition`, `format`, `highlights`, `homeConference`, … (+10) |
-| `teams` | stg_teams | 13 | `alternateNames`, `capacity`, `constructionYear`, `countryCode`, `dome`, `elevation`, `grass`, `latitude`, `longitude`, `name`, `timezone`, `twitter`, … (+1) |
 | `lines` | stg_lines | 11 | `awayClassification`, `awayConference`, `awayScore`, `awayTeam`, `awayTeamId`, `homeClassification`, `homeConference`, `homeScore`, `homeTeam`, `homeTeamId`, `startDate` |
 | `games/media` | stg_game_media | 6 | `awayConference`, `awayTeam`, `homeConference`, `homeTeam`, `isStartTimeTBD`, `startTime` |
 | `info` | stg_api_quota | 6 | `adjustedMetrics`, `graphQl`, `livePlayByPlay`, `products`, `scoreboard`, `weather` |
