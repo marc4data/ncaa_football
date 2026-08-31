@@ -236,6 +236,31 @@ sources:
         description: Elo. Results-derived. Weekly-capable at the API, landed season-only.
       - name: raw_ratings_fpi
         description: ESPN FPI. Also a preseason projection.
+      - name: raw_ratings_sp_conferences
+        description: >
+          CFBD /ratings/sp/conferences. SP+ at conference grain — the same metric set as
+          /ratings/sp with the team dimension collapsed and NO ranking anywhere, because
+          CFBD does not rank conferences here.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_ratings_srs_expanded
+        description: >
+          CFBD /ratings/srs/expanded. SRS plus `classification` (fbs/fcs/ii/iii), which is
+          what makes SRS's wider team coverage usable — 265 rows for 2024 against 134 for
+          Elo, because it rates FCS teams too.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_ratings_core
+        description: >
+          CFBD /ratings/core. CFBD's own rating, published AS OF a point in the season —
+          the grain is (season, team, throughSeasonType, throughWeek), not (season, team).
+          The landed data holds one as-of point per season today, which is precisely the
+          condition under which a (season, team) assumption looks correct.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_ppa_teams
         description: Predicted points added per play, offence and defence. Results-derived.
 

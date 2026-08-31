@@ -21,6 +21,16 @@
 -- Enumerating the class rather than testing one model at a time is deliberate. Six separate
 -- outages in four days came from patching one instance of a defect class at a time; the
 -- lesson recorded then was to enumerate the class before the third patch.
+--
+-- stg_rating_core DECLARES FOUR KEYS, NOT TWO. /ratings/core publishes the rating AS OF a
+-- point in the season, so its grain is (season, team, through_season_type, through_week).
+-- The landed data holds exactly one as-of point per season today, which is precisely the
+-- condition under which a (season, team) declaration passes every build and starts silently
+-- dropping rows the moment CFBD serves a second one.
+--
+-- Note for anyone editing the list below: it is a single Jinja expression, so NO comment
+-- syntax works inside it — neither `--` nor `{# #}`. Both are compilation errors. Comments
+-- about individual entries belong up here.
 {% set staging_grains = [
     ('stg_games',              ['game_id']),
     ('stg_teams',              ['season', 'team_id']),
@@ -40,6 +50,13 @@
     ('stg_player_season_stat',  ['season', 'player_id', 'stat_category', 'stat_type']),
     ('stg_player_season_success', ['season', 'player_id']),
     ('stg_player_game_success', ['game_id', 'player_id']),
+    ('stg_rating_sp',           ['season', 'team']),
+    ('stg_rating_sp_conference', ['season', 'conference']),
+    ('stg_rating_fpi',          ['season', 'team']),
+    ('stg_rating_srs',          ['season', 'team']),
+    ('stg_rating_srs_expanded', ['season', 'team']),
+    ('stg_rating_elo',          ['season', 'team']),
+    ('stg_rating_core',         ['season', 'team', 'through_season_type', 'through_week']),
 ] %}
 
 {% for model, grain in staging_grains %}
