@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 26 | every field the spec publishes is exposed as a column |
+| complete | 30 | every field the spec publishes is exposed as a column |
 | partial | 6 | a staging model exists but drops fields |
-| raw only | 33 | responses have landed; nothing reads them |
+| raw only | 29 | responses have landed; nothing reads them |
 | no raw data | 9 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 357 of 1191 (30.0%).** That percentage is the product gap in one number.
+**Fields exposed: 395 of 1191 (33.2%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -104,10 +104,10 @@ sweep can invent.
 | `teams/fbs` | swept | 4 | — | 0/25 | raw only |
 | `teams/matchup` | CLI | — | — | 0/18 | no raw data |
 | `venues` | swept | 2 | `stg_venues` | 14/14 | complete |
-| `wepa/players/kicking` | swept | 15 | — | 0/7 | raw only |
-| `wepa/players/passing` | swept | 15 | — | 0/8 | raw only |
-| `wepa/players/rushing` | swept | 15 | — | 0/8 | raw only |
-| `wepa/team/season` | swept | 31 | — | 0/15 | raw only |
+| `wepa/players/kicking` | swept | 15 | `stg_player_season_wepa_kicking` | 7/7 | complete |
+| `wepa/players/passing` | swept | 15 | `stg_player_season_wepa_passing` | 8/8 | complete |
+| `wepa/players/rushing` | swept | 15 | `stg_player_season_wepa_rushing` | 8/8 | complete |
+| `wepa/team/season` | swept | 31 | `stg_team_season_wepa` | 15/15 | complete |
 
 ## What each gap costs
 
