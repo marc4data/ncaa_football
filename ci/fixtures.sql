@@ -166,6 +166,22 @@ CREATE TABLE IF NOT EXISTS raw.raw_ppa_players_games (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_wepa_team_season (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_wepa_players_passing (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_wepa_players_rushing (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_wepa_players_kicking (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -184,6 +200,8 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_ratings_core,
          raw.raw_ppa_games, raw.raw_ppa_players_season,
          raw.raw_ppa_players_games,
+         raw.raw_wepa_team_season, raw.raw_wepa_players_passing,
+         raw.raw_wepa_players_rushing, raw.raw_wepa_players_kicking,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -455,6 +473,169 @@ INSERT INTO raw.raw_ppa_players_games (filename, content, status_code, params, f
  ]
 }', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
   '2026-01-01T00:00:41Z', now());
+
+INSERT INTO raw.raw_wepa_team_season (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-31-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "teamId": 1,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "epa": {
+    "total": 0.09,
+    "passing": 0.1,
+    "rushing": 0.11
+   },
+   "epaAllowed": {
+    "total": 0.15,
+    "passing": 0.16,
+    "rushing": 0.17
+   },
+   "successRate": {
+    "total": 0.375,
+    "standardDowns": 0.385,
+    "passingDowns": 0.395
+   },
+   "successRateAllowed": {
+    "total": 0.446,
+    "standardDowns": 0.456,
+    "passingDowns": 0.466
+   },
+   "rushing": {
+    "lineYards": 3.07,
+    "secondLevelYards": 3.08,
+    "openFieldYards": 3.09,
+    "highlightYards": 3.1
+   },
+   "rushingAllowed": {
+    "lineYards": 3.35,
+    "secondLevelYards": 3.36,
+    "openFieldYards": 3.37,
+    "highlightYards": 3.38
+   },
+   "explosiveness": 0.939,
+   "explosivenessAllowed": 0.91
+  },
+  {
+   "year": 2024,
+   "teamId": 2,
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "epa": {
+    "total": 0.19,
+    "passing": 0.2,
+    "rushing": 0.21
+   },
+   "epaAllowed": {
+    "total": 0.25,
+    "passing": 0.26,
+    "rushing": 0.27
+   },
+   "successRate": {
+    "total": 0.475,
+    "standardDowns": 0.485,
+    "passingDowns": 0.495
+   },
+   "successRateAllowed": {
+    "total": 0.546,
+    "standardDowns": 0.556,
+    "passingDowns": 0.566
+   },
+   "rushing": {
+    "lineYards": 4.07,
+    "secondLevelYards": 4.08,
+    "openFieldYards": 4.09,
+    "highlightYards": 4.1
+   },
+   "rushingAllowed": {
+    "lineYards": 4.35,
+    "secondLevelYards": 4.36,
+    "openFieldYards": 4.37,
+    "highlightYards": 4.38
+   },
+   "explosiveness": 1.039,
+   "explosivenessAllowed": 1.01
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:42Z', now());
+
+INSERT INTO raw.raw_wepa_players_passing (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-32-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "athleteId": "1001",
+   "athleteName": "A. Passer",
+   "position": "QB",
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "wepa": 0.48,
+   "plays": 304
+  },
+  {
+   "year": 2024,
+   "athleteId": "1005",
+   "athleteName": "F. Backup",
+   "position": "QB",
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "wepa": 0.48,
+   "plays": 12
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:43Z', now());
+
+INSERT INTO raw.raw_wepa_players_rushing (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-33-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "athleteId": "1002",
+   "athleteName": "B. Runner",
+   "position": "RB",
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "wepa": 0.22,
+   "plays": 152
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:44Z', now());
+
+INSERT INTO raw.raw_wepa_players_kicking (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-34-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "athleteId": "1006",
+   "athleteName": "G. Kicker",
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "paar": 16.71,
+   "attempts": 31
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:45Z', now());
 
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('teams', '2026-01-01T00-00-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:00Z', now()),

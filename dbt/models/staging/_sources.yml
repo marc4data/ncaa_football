@@ -287,4 +287,30 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_wepa_team_season
+        description: >
+          CFBD /wepa/team/season. Opponent-adjusted team metrics, each block published twice —
+          once for what the team did and once suffixed `Allowed` for what it conceded. THE ONE
+          METRICS ENDPOINT THAT SHIPS A teamId, so it joins to dim_team without a name match.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_wepa_players_passing
+        description: CFBD /wepa/players/passing. wEPA and the play count it was earned over.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_wepa_players_rushing
+        description: CFBD /wepa/players/rushing. Same shape as the passing endpoint.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_wepa_players_kicking
+        description: >
+          CFBD /wepa/players/kicking. THE ODD ONE: the metric is `paar` (Points Above Average
+          Replacement), not wEPA, on a different scale; the denominator is `attempts`, not
+          `plays`; and there is no `position` because every row is a kicker.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
 

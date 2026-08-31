@@ -61,6 +61,10 @@
     ('stg_game_team_ppa',       ['game_id', 'team']),
     ('stg_player_season_ppa',   ['season', 'player_id']),
     ('stg_player_game_ppa',     ['season', 'season_type', 'week', 'player_id']),
+    ('stg_team_season_wepa',    ['season', 'team_id']),
+    ('stg_player_season_wepa_passing', ['season', 'athlete_id']),
+    ('stg_player_season_wepa_rushing', ['season', 'athlete_id']),
+    ('stg_player_season_wepa_kicking', ['season', 'athlete_id']),
 ] %}
 
 {% for model, grain in staging_grains %}

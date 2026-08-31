@@ -536,6 +536,76 @@ models:
       - name: average_ppa_all
         description: PPA per play in this game.
 
+  - name: stg_team_season_wepa
+    description: >
+      Opponent-adjusted team profile, one row per (season, team). Every block is published
+      twice — once for what the team did, once suffixed `Allowed` for what it conceded — so
+      this model loops over ['', 'Allowed'] where the ppa models loop over offense/defense.
+      THE ONE METRICS ENDPOINT THAT SHIPS A teamId: /ratings/*, /ppa/* and
+      /stats/season/advanced all identify a team by name only, so this is the single place in
+      the adjusted-metrics family where a name-keyed join is not forced on the caller.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team_id
+        description: CFBD team id — joins straight to dim_team, unlike its siblings.
+        data_tests: [not_null]
+      - name: epa_total
+        description: Opponent-adjusted EPA per play generated.
+      - name: epa_allowed_total
+        description: >
+          EPA per play conceded. NOT inverted — a high value here is a bad defence, matching
+          how CFBD publishes it.
+      - name: explosiveness_allowed
+        description: Explosiveness conceded.
+
+  - name: stg_player_season_wepa_passing
+    description: >
+      Opponent-adjusted passing value per player, one row per (season, athlete). `plays` is
+      load-bearing: wEPA is a per-play average, so 0.48 over 304 plays and 0.48 over 12 are
+      different claims and any leaderboard needs a minimum-plays filter.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: athlete_id
+        description: CFBD athlete id, string.
+        data_tests: [not_null]
+      - name: wepa
+        description: Opponent-adjusted EPA per play.
+      - name: plays
+        description: Plays the average was earned over.
+
+  - name: stg_player_season_wepa_rushing
+    description: >
+      Opponent-adjusted rushing value per player, one row per (season, athlete). Same shape
+      as the passing model; a separate endpoint and raw table, so a separate model.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: athlete_id
+        data_tests: [not_null]
+      - name: wepa
+        description: Opponent-adjusted EPA per play.
+      - name: plays
+        description: Plays the average was earned over.
+
+  - name: stg_player_season_wepa_kicking
+    description: >
+      Opponent-adjusted kicking value per player. THE ODD ONE OF THE THREE AND DELIBERATELY
+      NOT NORMALISED: the metric is `paar` (Points Above Average Replacement) on a different
+      scale from wEPA, the denominator is `attempts` not `plays`, and there is no `position`
+      because every row is a kicker. Renaming paar to wepa for symmetry would make three
+      models look unionable when their measures are not comparable.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: athlete_id
+        data_tests: [not_null]
+      - name: paar
+        description: Points Above Average Replacement. NOT wEPA, and not comparable to it.
+      - name: attempts
+        description: Kick attempts. The denominator here, where the others use plays.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated
