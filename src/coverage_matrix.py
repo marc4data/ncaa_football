@@ -166,19 +166,57 @@ def landed_from_database() -> Dict[str, int]:
                            "where table_schema = 'raw'")
             tables = [name for (name,) in cursor.fetchall()]
             for table in tables:
-                cursor.execute(f'select count(*) from raw."{table}"')
-                counts[table] = cursor.fetchone()[0]
+                # Successful responses only, matching landed_from_directory. A table holding
+                # nothing but 400s is not an endpoint whose data nobody reads.
+                cursor.execute(
+                    "select count(*) from information_schema.columns where "
+                    "table_schema = 'raw' and table_name = %s and column_name = 'status_code'",
+                    (table,))
+                has_status = cursor.fetchone()[0] > 0
+                if has_status:
+                    cursor.execute(f'select count(*) from raw."{table}" '
+                                   f'where status_code = 200')
+                else:
+                    cursor.execute(f'select count(*) from raw."{table}"')
+                found = cursor.fetchone()[0]
+                if found:
+                    counts[table] = found
     finally:
         connection.close()
     return counts
 
 
 def landed_from_directory() -> Dict[str, int]:
-    """Raw key -> number of response files on disk, as the offline fallback."""
+    """Raw key -> number of SUCCESSFUL response files on disk, as the offline fallback.
+
+    SUCCESSFUL, NOT MERELY PRESENT. Counting files made an endpoint that has only ever
+    returned errors look like one whose data nobody reads. /coaches/tenures is exactly that:
+    both landed files are 400s — "coachId or team is required" — and the matrix reported it
+    as `raw only`, which sends the reader off to write a staging model over an empty table.
+
+    The distinction matters for the status column: "landed, nothing reads it" is a modelling
+    task, while "registered, never fetched" is a backfill task, and they were being conflated
+    in the one direction that wastes the most time.
+    """
     if not RAW_DIR.exists():
         return {}
-    return {f"raw_{directory.name}": len(list(directory.glob("*.json")))
-            for directory in sorted(RAW_DIR.iterdir()) if directory.is_dir()}
+    counts: Dict[str, int] = {}
+    for directory in sorted(RAW_DIR.iterdir()):
+        if not directory.is_dir():
+            continue
+        successes = 0
+        for path in directory.glob("*.json"):
+            if path.name == "manifest.json":
+                continue
+            try:
+                payload = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            if isinstance(payload, dict) and payload.get("status_code") == 200:
+                successes += 1
+        if successes:
+            counts[f"raw_{directory.name}"] = successes
+    return counts
 
 
 def build_rows(spec: Spec, landed: Dict[str, int]) -> List[Row]:

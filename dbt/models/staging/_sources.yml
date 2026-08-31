@@ -365,4 +365,65 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_coaches
+        description: >
+          CFBD /coaches. COACH grain with a nested seasons[] array, so the useful grain is
+          (coach, season, team) — a coach can appear twice in one season when an interim
+          takes over mid-year.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_coaches_seasons
+        description: >
+          CFBD /coaches/seasons. The rich version: record plus team metrics, recruiting, poll
+          resume, five record splits, scoring, CFP outcome and the following draft. Deepest
+          nesting outside the box scores.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_recruiting_players
+        description: >
+          CFBD /recruiting/players. Individual recruits. TWO IDS: `id` is the recruit record,
+          `athleteId` the college athlete, null until linked.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_recruiting_teams
+        description: CFBD /recruiting/teams. Team class rank and composite points per year.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_recruiting_groups
+        description: >
+          CFBD /recruiting/groups. AN ALL-TIME AGGREGATE per (team, position group) — takes
+          no year. `commits` and `averageStars` arrive as STRINGS beside numeric siblings.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_talent
+        description: CFBD /talent. Team talent composite per season, three fields.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_draft_picks
+        description: >
+          CFBD /draft/picks. The one place the college and NFL worlds meet; carries ids for
+          both. THREE pick numbers — overall, round, and pick-within-round.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_draft_positions
+        description: >
+          CFBD /draft/positions. The position vocabulary. Matters because /draft/picks spells
+          positions out ("Quarterback") where the rest of the API abbreviates ("QB").
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_draft_teams
+        description: >
+          CFBD /draft/teams. NFL franchises — and NO ID, though /draft/picks carries
+          nflTeamId. The only join key is the location string.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
 

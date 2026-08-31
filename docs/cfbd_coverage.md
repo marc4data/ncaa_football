@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 38 | every field the spec publishes is exposed as a column |
+| complete | 47 | every field the spec publishes is exposed as a column |
 | partial | 5 | a staging model exists but drops fields |
-| raw only | 22 | responses have landed; nothing reads them |
-| no raw data | 9 | registered, never fetched |
+| raw only | 12 | responses have landed; nothing reads them |
+| no raw data | 10 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 492 of 1191 (41.3%).** That percentage is the product gap in one number.
+**Fields exposed: 610 of 1191 (51.2%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -29,85 +29,85 @@ sweep can invent.
 
 | Endpoint | Registered | Raw | Staging model | Fields | Status |
 |---|---|---:|---|---:|---|
-| `calendar` | swept | 27 | `stg_calendar` | 7/7 | complete |
-| `coaches` | swept | 142 | — | 0/19 | raw only |
+| `calendar` | swept | 26 | `stg_calendar` | 7/7 | complete |
+| `coaches` | swept | 141 | `stg_coach_season` | 19/19 | complete |
 | `coaches/profile` | CLI | — | — | 0/19 | no raw data |
-| `coaches/seasons` | swept | 4 | — | 0/36 | raw only |
-| `coaches/tenures` | CLI | 3 | — | 0/18 | raw only |
-| `conferences` | swept | 5 | `stg_conferences` | 6/6 | complete |
-| `conferences/affiliations` | swept | 4 | — | 0/9 | raw only |
-| `conferences/changes` | swept | 4 | — | 0/11 | raw only |
-| `draft/picks` | swept | 61 | — | 0/24 | raw only |
-| `draft/positions` | swept | 2 | — | 0/2 | raw only |
-| `draft/teams` | swept | 2 | — | 0/4 | raw only |
-| `drives` | swept | 15 | — | 0/24 | raw only |
+| `coaches/seasons` | swept | 3 | `stg_coach_season_detail` | 36/36 | complete |
+| `coaches/tenures` | CLI | — | — | 0/18 | no raw data |
+| `conferences` | swept | 4 | `stg_conferences` | 6/6 | complete |
+| `conferences/affiliations` | swept | 3 | — | 0/9 | raw only |
+| `conferences/changes` | swept | 3 | — | 0/11 | raw only |
+| `draft/picks` | swept | 60 | `stg_draft_pick` | 24/24 | complete |
+| `draft/positions` | swept | 1 | `stg_draft_position` | 2/2 | complete |
+| `draft/teams` | swept | 1 | `stg_nfl_team` | 4/4 | complete |
+| `drives` | swept | 14 | — | 0/24 | raw only |
 | `game/box/advanced` | CLI | — | — | 0/34 | no raw data |
-| `games` | swept | 343 | `stg_games` | 19/41 | partial |
-| `games/media` | swept | 9 | `stg_game_media` | 6/12 | partial |
-| `games/players` | swept | 45 | `stg_game_player_stat` | 7/7 | complete |
-| `games/teams` | swept | 45 | `stg_game_team_stat` | 8/8 | complete |
-| `games/weather` | swept | 5 | `stg_game_weather` | 22/22 | complete |
-| `info` | CLI | 14 | `stg_api_quota` | 7/13 | partial |
-| `info/usage` | CLI | 14 | `stg_api_usage_endpoint` | 6/10 | partial |
-| `lines` | swept | 63 | `stg_lines` | 12/23 | partial |
+| `games` | swept | 342 | `stg_games` | 19/41 | partial |
+| `games/media` | swept | 8 | `stg_game_media` | 6/12 | partial |
+| `games/players` | swept | 44 | `stg_game_player_stat` | 7/7 | complete |
+| `games/teams` | swept | 44 | `stg_game_team_stat` | 8/8 | complete |
+| `games/weather` | swept | 4 | `stg_game_weather` | 22/22 | complete |
+| `info` | CLI | 13 | `stg_api_quota` | 7/13 | partial |
+| `info/usage` | CLI | 13 | `stg_api_usage_endpoint` | 6/10 | partial |
+| `lines` | swept | 62 | `stg_lines` | 12/23 | partial |
 | `live/plays` | CLI | — | — | 0/63 | no raw data |
-| `metrics/fg/ep` | swept | 2 | `stg_field_goal_ep` | 3/3 | complete |
+| `metrics/fg/ep` | swept | 1 | `stg_field_goal_ep` | 3/3 | complete |
 | `metrics/wp` | CLI | — | — | 0/16 | no raw data |
-| `metrics/wp/pregame` | swept | 9 | `stg_game_pregame_wp` | 8/8 | complete |
+| `metrics/wp/pregame` | swept | 8 | `stg_game_pregame_wp` | 8/8 | complete |
 | `passing/players/games` | — | — | — | 0/22 | unregistered |
 | `passing/players/season` | — | — | — | 0/18 | unregistered |
 | `passing/plays` | — | — | — | 0/36 | unregistered |
 | `passing/teams/games` | — | — | — | 0/20 | unregistered |
 | `passing/teams/season` | — | — | — | 0/16 | unregistered |
-| `player/portal` | swept | 4 | `stg_player_portal` | 10/10 | complete |
-| `player/returning` | swept | 4 | `stg_team_returning_production` | 15/15 | complete |
+| `player/portal` | swept | 3 | `stg_player_portal` | 10/10 | complete |
+| `player/returning` | swept | 3 | `stg_team_returning_production` | 15/15 | complete |
 | `player/search` | CLI | — | — | 0/16 | no raw data |
 | `player/season/overview` | CLI | — | — | 0/17 | no raw data |
-| `player/usage` | swept | 15 | `stg_player_season_usage` | 14/14 | complete |
-| `playoffs/cfp` | swept | 3 | — | 0/34 | raw only |
-| `playoffs/cfp/games` | swept | 3 | — | 0/19 | raw only |
-| `playoffs/cfp/participants` | swept | 3 | — | 0/12 | raw only |
-| `plays` | swept | 44 | — | 0/28 | raw only |
-| `plays/stats` | swept | 44 | — | 0/20 | raw only |
-| `plays/stats/types` | swept | 2 | — | 0/2 | raw only |
-| `plays/types` | swept | 2 | — | 0/3 | raw only |
-| `ppa/games` | swept | 14 | `stg_game_team_ppa` | 13/13 | complete |
-| `ppa/players/games` | swept | 48 | `stg_player_game_ppa` | 11/11 | complete |
-| `ppa/players/season` | swept | 26 | `stg_player_season_ppa` | 14/14 | complete |
+| `player/usage` | swept | 14 | `stg_player_season_usage` | 14/14 | complete |
+| `playoffs/cfp` | swept | 2 | — | 0/34 | raw only |
+| `playoffs/cfp/games` | swept | 2 | — | 0/19 | raw only |
+| `playoffs/cfp/participants` | swept | 2 | — | 0/12 | raw only |
+| `plays` | swept | 43 | — | 0/28 | raw only |
+| `plays/stats` | swept | 43 | — | 0/20 | raw only |
+| `plays/stats/types` | swept | 1 | — | 0/2 | raw only |
+| `plays/types` | swept | 1 | — | 0/3 | raw only |
+| `ppa/games` | swept | 13 | `stg_game_team_ppa` | 13/13 | complete |
+| `ppa/players/games` | swept | 43 | `stg_player_game_ppa` | 11/11 | complete |
+| `ppa/players/season` | swept | 25 | `stg_player_season_ppa` | 14/14 | complete |
 | `ppa/predicted` | CLI | — | — | 0/2 | no raw data |
-| `ppa/teams` | swept | 15 | `stg_team_rating`, `stg_team_season_ppa` | 10/10 | complete |
-| `rankings` | swept | 195 | `stg_rankings` | 11/11 | complete |
-| `ratings/core` | swept | 15 | `stg_rating_core` | 11/11 | complete |
-| `ratings/elo` | swept | 15 | `stg_rating_elo`, `stg_team_rating` | 4/4 | complete |
-| `ratings/fpi` | swept | 15 | `stg_rating_fpi`, `stg_team_rating` | 13/13 | complete |
-| `ratings/sp` | swept | 16 | `stg_rating_sp`, `stg_team_rating` | 18/18 | complete |
-| `ratings/sp/conferences` | swept | 15 | `stg_rating_sp_conference` | 16/16 | complete |
-| `ratings/srs` | swept | 15 | `stg_rating_srs`, `stg_team_rating` | 6/6 | complete |
-| `ratings/srs/expanded` | swept | 15 | `stg_rating_srs_expanded` | 7/7 | complete |
-| `records` | swept | 170 | — | 0/11 | raw only |
-| `recruiting/groups` | swept | 2 | — | 0/7 | raw only |
-| `recruiting/players` | swept | 4 | — | 0/19 | raw only |
-| `recruiting/teams` | swept | 4 | — | 0/4 | raw only |
-| `roster` | swept | 4 | — | 0/16 | raw only |
+| `ppa/teams` | swept | 14 | `stg_team_rating`, `stg_team_season_ppa` | 10/10 | complete |
+| `rankings` | swept | 194 | `stg_rankings` | 11/11 | complete |
+| `ratings/core` | swept | 14 | `stg_rating_core` | 11/11 | complete |
+| `ratings/elo` | swept | 14 | `stg_rating_elo`, `stg_team_rating` | 4/4 | complete |
+| `ratings/fpi` | swept | 14 | `stg_rating_fpi`, `stg_team_rating` | 13/13 | complete |
+| `ratings/sp` | swept | 15 | `stg_rating_sp`, `stg_team_rating` | 18/18 | complete |
+| `ratings/sp/conferences` | swept | 14 | `stg_rating_sp_conference` | 16/16 | complete |
+| `ratings/srs` | swept | 14 | `stg_rating_srs`, `stg_team_rating` | 6/6 | complete |
+| `ratings/srs/expanded` | swept | 14 | `stg_rating_srs_expanded` | 7/7 | complete |
+| `records` | swept | 169 | — | 0/11 | raw only |
+| `recruiting/groups` | swept | 1 | `stg_team_recruiting_position_group` | 7/7 | complete |
+| `recruiting/players` | swept | 3 | `stg_recruit` | 19/19 | complete |
+| `recruiting/teams` | swept | 3 | `stg_team_recruiting_rank` | 4/4 | complete |
+| `roster` | swept | 3 | — | 0/16 | raw only |
 | `scoreboard` | CLI | — | — | 0/28 | no raw data |
-| `stats/categories` | swept | 2 | `stg_stat_category` | 1/1 | complete |
-| `stats/game/advanced` | swept | 14 | `stg_game_team_advanced` | 20/20 | complete |
-| `stats/game/havoc` | swept | 14 | `stg_game_team_havoc` | 15/15 | complete |
-| `stats/player/season` | swept | 58 | `stg_player_season_stat` | 9/9 | complete |
-| `stats/player/success` | swept | 17 | `stg_player_season_success` | 9/9 | complete |
-| `stats/player/success/game` | swept | 48 | `stg_player_game_success` | 13/13 | complete |
-| `stats/season` | swept | 170 | `stg_team_season_stat` | 5/5 | complete |
-| `stats/season/advanced` | swept | 38 | `stg_team_season_advanced` | 25/25 | complete |
-| `talent` | swept | 4 | — | 0/3 | raw only |
-| `teams` | swept | 162 | `stg_teams` | 25/25 | complete |
-| `teams/ats` | swept | 15 | `stg_team_season_ats` | 9/9 | complete |
-| `teams/fbs` | swept | 4 | `stg_team_fbs` | 25/25 | complete |
+| `stats/categories` | swept | 1 | `stg_stat_category` | 1/1 | complete |
+| `stats/game/advanced` | swept | 13 | `stg_game_team_advanced` | 20/20 | complete |
+| `stats/game/havoc` | swept | 13 | `stg_game_team_havoc` | 15/15 | complete |
+| `stats/player/season` | swept | 57 | `stg_player_season_stat` | 9/9 | complete |
+| `stats/player/success` | swept | 16 | `stg_player_season_success` | 9/9 | complete |
+| `stats/player/success/game` | swept | 43 | `stg_player_game_success` | 13/13 | complete |
+| `stats/season` | swept | 169 | `stg_team_season_stat` | 5/5 | complete |
+| `stats/season/advanced` | swept | 37 | `stg_team_season_advanced` | 25/25 | complete |
+| `talent` | swept | 3 | `stg_team_talent` | 3/3 | complete |
+| `teams` | swept | 160 | `stg_teams` | 25/25 | complete |
+| `teams/ats` | swept | 14 | `stg_team_season_ats` | 9/9 | complete |
+| `teams/fbs` | swept | 3 | `stg_team_fbs` | 25/25 | complete |
 | `teams/matchup` | CLI | — | — | 0/18 | no raw data |
-| `venues` | swept | 2 | `stg_venues` | 14/14 | complete |
-| `wepa/players/kicking` | swept | 15 | `stg_player_season_wepa_kicking` | 7/7 | complete |
-| `wepa/players/passing` | swept | 15 | `stg_player_season_wepa_passing` | 8/8 | complete |
-| `wepa/players/rushing` | swept | 15 | `stg_player_season_wepa_rushing` | 8/8 | complete |
-| `wepa/team/season` | swept | 31 | `stg_team_season_wepa` | 15/15 | complete |
+| `venues` | swept | 1 | `stg_venues` | 14/14 | complete |
+| `wepa/players/kicking` | swept | 14 | `stg_player_season_wepa_kicking` | 7/7 | complete |
+| `wepa/players/passing` | swept | 14 | `stg_player_season_wepa_passing` | 8/8 | complete |
+| `wepa/players/rushing` | swept | 14 | `stg_player_season_wepa_rushing` | 8/8 | complete |
+| `wepa/team/season` | swept | 30 | `stg_team_season_wepa` | 15/15 | complete |
 
 ## What each gap costs
 
