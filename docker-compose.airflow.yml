@@ -18,6 +18,18 @@ x-airflow-common: &airflow-common
   environment: &airflow-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # A NEW DAG ARRIVES RUNNING, NOT PAUSED.
+    #
+    # Airflow's default is the opposite, and it cost the opening weekend. cfbd_scores_refresh
+    # was written for Thursday 27 August, named that date in its own docstring, parsed
+    # cleanly every 30 seconds for four days — and never ran once, because nobody unpaused
+    # it. A DAG that is deployed, healthy and silent looks exactly like a DAG that is
+    # working, which is the failure this project keeps finding in new costumes.
+    #
+    # The safety argument for pausing-at-creation is backfill: an unpaused DAG with catchup
+    # can stampede on first parse. Every DAG here sets catchup=False, so that risk does not
+    # apply and the default is pure downside.
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://cfdb:cfdb@postgres:5432/airflow

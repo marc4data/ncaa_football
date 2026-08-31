@@ -25,6 +25,7 @@ def body(page) -> None:
                    predicted_margin_home_perspective, home_win_probability,
                    market_implied_home_win_probability, devig_method, home_cover_edge,
                    confidence_bucket, is_out_of_sample_week, is_default_actionable,
+                   training_week_floor,
                    model_version_key, attribution, excitement_index, as_of_ts
             from srv_today_edges
             where (:season is null or season = :season)
@@ -33,6 +34,7 @@ def body(page) -> None:
             limit 300
         """, {"season": scope.season, "week": scope.week})
         table.as_of_caption(df)
+        _week_floor_note(df)
 
         only_predictions = st.toggle("Predictions only", value=False,
                                      help="Hide games with no model row")
@@ -50,6 +52,36 @@ def body(page) -> None:
 
         if not shown.empty:
             attribution.model_attribution(shown)
+
+
+def _week_floor_note(df: pd.DataFrame) -> None:
+    """Say why the model column is empty, on the page most likely to be seen first.
+
+    Today is a visitor's first stop and was the one page of the three that rendered the
+    out-of-sample CHIP without ever explaining it. A chip on a blank cell is a label for an
+    absence; the sentence is the reason for it.
+
+    Rendered as a callout rather than a caption because this is prominent copy, not a
+    footnote — it is a stated boundary of the model, and the strongest thing the project
+    says about itself. A blank prediction block with no explanation is a broken site; the
+    same block with this sentence is a working site with a boundary.
+
+    The condition is the SLATE's, not today's date: a scope showing Week 2 explains itself
+    whenever it is looked at, including in December when the model has long since started.
+    """
+    if df.empty or "training_week_floor" not in df.columns:
+        return
+    floors = df["training_week_floor"].dropna()
+    if floors.empty:
+        return
+    floor = int(floors.min())
+    below = df[df["week"].fillna(floor) < floor]
+    if below.empty:
+        return
+    seasons = df["season"].dropna()
+    st.info(chips.week_floor_note(
+        floor, seasons.min() if not seasons.empty else None,
+        clause=", so the model column is empty for these games"))
 
 
 def _spread_and_model(row) -> str:

@@ -24,6 +24,45 @@ def at(y, m, d, h):
     return datetime(y, m, d, h, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("label,now,since,unfinished,proceed,branch", [
+    # THE SUSPENDED GAME, which is the whole reason the second branch exists. A Thursday
+    # 22:00 kickoff halted for lightning and resumed Friday afternoon keeps its Thursday
+    # timestamp, so the kickoff clock says 18 hours and the settle window shut long ago.
+    ("thursday game still unfinished on friday afternoon",
+     at(2026, 8, 28, 16), 18.0, 1, True, "unfinished"),
+    # And it closes on its own the moment the game finals — same clock, nothing unfinished.
+    ("same hour once the game has finaled",
+     at(2026, 8, 28, 16), 18.0, 0, False, "nothing_settling"),
+    # The bound is the circuit breaker: past 36h a game that never finals stops counting.
+    # The caller is what applies the window, so from the gate's side this is simply zero.
+    ("a postponed game older than the window no longer counts",
+     at(2026, 8, 30, 16), 60.0, 0, False, "nothing_settling"),
+    # Out of season an unfinished game is not a reason to spend a request.
+    ("unfinished game out of season", at(2026, 6, 4, 6), 18.0, 1, False,
+     "off_season_skip"),
+])
+def test_the_unfinished_branch(label, now, since, unfinished, proceed, branch):
+    decision = should_refresh_scores(now, CONFIG, since, unfinished_recent=unfinished)
+    assert decision.proceed is proceed, f"{label}: {decision.reason}"
+    assert decision.branch == branch, f"{label}: {decision.reason}"
+
+
+def test_settling_wins_over_unfinished_so_the_reason_is_the_more_specific_one():
+    """Both can be true at once during a live slate. The log should say "results are
+    landing", not "something is unfinished" — the first is the normal case and the second
+    is the exception, and a gate that reports the exception every Saturday trains the
+    reader to ignore it."""
+    decision = should_refresh_scores(at(2026, 8, 28, 2), CONFIG, 3.0, unfinished_recent=5)
+    assert decision.branch == "settling"
+
+
+def test_an_unreadable_database_still_fails_open_rather_than_reading_zero():
+    """A null count is "cannot tell", not "nothing unfinished". Both inputs come from one
+    read in schedule_state precisely so this inference is sound."""
+    decision = should_refresh_scores(at(2026, 10, 6, 6), CONFIG, None, unfinished_recent=None)
+    assert decision.proceed and decision.branch == "unknown_fail_open"
+
+
 @pytest.mark.parametrize("label,now,since,proceed,branch", [
     # The opening weekend, which is the whole reason this DAG exists. Thursday's games kick
     # at 22:00 UTC, ten hours AFTER cfbd_midweek_results has already run.
