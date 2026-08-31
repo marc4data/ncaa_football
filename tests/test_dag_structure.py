@@ -156,3 +156,54 @@ def test_single_sided_tests_keep_their_coverage_in_the_scores_dag():
 
 def test_the_scores_dag_excludes_the_tag_it_relies_on():
     assert "--exclude tag:full_refresh_only" in _code("scores_refresh_dag.py")
+
+
+# --- one deploy path, one meaning ---------------------------------------------------------
+
+DEPLOY_SCRIPT = DAGS.parent / "scripts" / "deploy_main.sh"
+
+
+def test_the_deploy_script_targets_the_droplet_not_the_laptop():
+    """"Deployed" used to mean three things and merging to main updated one of them.
+
+    The DAGs came from a git worktree on the laptop, the droplet's site was a file copy with
+    no git, and the forced command was an scp. On 30 August the cache-TTL fix was on main and
+    not on the droplet, and a diff comparing only the files present in both places reported
+    no difference while two existed on one side alone. The site was down for a day.
+
+    Since the migration, production is the droplet. Refreshing the laptop worktree here would
+    quietly recreate the two-productions problem — it is the M3 rollback, paused, and
+    decommissioned when M3 closes.
+    """
+    code = "\n".join(ln for ln in DEPLOY_SCRIPT.read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "/opt/cfdb-pipeline/repo" in code or "PIPELINE_DIR" in code
+    assert "cfdb_deploy" not in code, (
+        "the laptop worktree is the paused rollback, not a deploy target")
+
+
+def test_the_deploy_script_deploys_the_site_too():
+    """The site is a separate image with separate failure modes. A deploy that moves the
+    pipeline and leaves the site behind is the gap that caused the outage."""
+    code = "\n".join(ln for ln in DEPLOY_SCRIPT.read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "/opt/cfdb/site" in code or "SITE_DIR" in code
+    assert "docker compose build site" in code
+
+
+def test_the_deploy_script_verifies_the_site_renders():
+    """CLAUDE.md, 2026-08-31: the site's definition of done is that the site works. A deploy
+    that ends at 'files copied' is the claim that was wrong three times."""
+    code = "\n".join(ln for ln in DEPLOY_SCRIPT.read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "site_smoke.py" in code
+    assert "_stcore/health" in code
+    assert "fail " in code, "a failed verification must stop the deploy, not just print"
+
+
+def test_the_deploy_script_disables_applefile_companions_when_syncing():
+    """macOS tar emits `._*` files that match the raw loader's *.json glob. 1,772 of them
+    came across during the migration and had to be deleted before anything would parse."""
+    code = "\n".join(ln for ln in DEPLOY_SCRIPT.read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "COPYFILE_DISABLE=1" in code
