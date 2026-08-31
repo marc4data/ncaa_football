@@ -182,6 +182,34 @@ CREATE TABLE IF NOT EXISTS raw.raw_wepa_players_kicking (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_teams_fbs (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_teams_ats (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_player_portal (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_player_returning (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_player_usage (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_metrics_fg_ep (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_metrics_wp_pregame (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -202,6 +230,9 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_ppa_players_games,
          raw.raw_wepa_team_season, raw.raw_wepa_players_passing,
          raw.raw_wepa_players_rushing, raw.raw_wepa_players_kicking,
+         raw.raw_teams_fbs, raw.raw_teams_ats, raw.raw_player_portal,
+         raw.raw_player_returning, raw.raw_player_usage,
+         raw.raw_metrics_fg_ep, raw.raw_metrics_wp_pregame,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -636,6 +667,309 @@ INSERT INTO raw.raw_wepa_players_kicking (filename, content, status_code, params
  ]
 }', 200, '{"year": "2024"}',
   '2026-01-01T00:00:45Z', now());
+
+INSERT INTO raw.raw_teams_fbs (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-35-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "id": 1,
+   "school": "Alpha State",
+   "mascot": "Alpha State Mascot",
+   "abbreviation": "ALP",
+   "alternateNames": [
+    "ALP",
+    "Alpha State"
+   ],
+   "conference": "Test Conference",
+   "division": null,
+   "classification": "fbs",
+   "color": "#003594",
+   "alternateColor": "#ffffff",
+   "logos": [
+    "https://cdn.example/logos/1.png"
+   ],
+   "twitter": "@AlphaState",
+   "location": {
+    "id": 501,
+    "name": "Alpha State Field",
+    "city": "Testville",
+    "state": "TX",
+    "zip": "79601",
+    "countryCode": "US",
+    "timezone": "America/Chicago",
+    "latitude": 32.472275,
+    "longitude": -99.710464,
+    "elevation": "520.9",
+    "capacity": 12000,
+    "constructionYear": 2017,
+    "grass": false,
+    "dome": false
+   }
+  },
+  {
+   "id": 2,
+   "school": "Beta Tech",
+   "mascot": "Beta Tech Mascot",
+   "abbreviation": "BET",
+   "alternateNames": [
+    "BET",
+    "Beta Tech"
+   ],
+   "conference": "Test Conference",
+   "division": null,
+   "classification": "fbs",
+   "color": "#003594",
+   "alternateColor": "#ffffff",
+   "logos": [
+    "https://cdn.example/logos/2.png"
+   ],
+   "twitter": "@BetaTech",
+   "location": {
+    "id": 502,
+    "name": "Beta Tech Field",
+    "city": "Testville",
+    "state": "TX",
+    "zip": "79601",
+    "countryCode": "US",
+    "timezone": "America/Chicago",
+    "latitude": 32.472275,
+    "longitude": -99.710464,
+    "elevation": "520.9",
+    "capacity": 12000,
+    "constructionYear": 2017,
+    "grass": false,
+    "dome": true
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:46Z', now());
+
+INSERT INTO raw.raw_teams_ats (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-36-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "teamId": 1,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "games": 11,
+   "atsWins": 6,
+   "atsLosses": 4,
+   "atsPushes": 0,
+   "avgCoverMargin": 3.32
+  },
+  {
+   "year": 2024,
+   "teamId": 2,
+   "team": "Beta Tech",
+   "conference": "Test Conference",
+   "games": 12,
+   "atsWins": 5,
+   "atsLosses": 6,
+   "atsPushes": 1,
+   "avgCoverMargin": -1.14
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:47Z', now());
+
+INSERT INTO raw.raw_player_portal (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-37-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "firstName": "Casey",
+   "lastName": "Mover",
+   "position": "CB",
+   "origin": "Alpha State",
+   "destination": "Beta Tech",
+   "transferDate": "2024-01-03T00:27:00.000Z",
+   "rating": 0.912,
+   "stars": 4,
+   "eligibility": "Immediate"
+  },
+  {
+   "season": 2024,
+   "firstName": "Jordan",
+   "lastName": "Waiting",
+   "position": "WR",
+   "origin": "Beta Tech",
+   "destination": null,
+   "transferDate": "2024-01-09T12:00:00.000Z",
+   "rating": null,
+   "stars": 3,
+   "eligibility": "Immediate"
+  },
+  {
+   "season": 2024,
+   "firstName": "Casey",
+   "lastName": "Mover",
+   "position": "OL",
+   "origin": "Gamma College",
+   "destination": "Alpha State",
+   "transferDate": "2024-02-01T09:00:00.000Z",
+   "rating": null,
+   "stars": 2,
+   "eligibility": "Immediate"
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:48Z', now());
+
+INSERT INTO raw.raw_player_returning (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-38-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "totalPPA": 100.6,
+   "totalPassingPPA": 5.3,
+   "totalReceivingPPA": 55.4,
+   "totalRushingPPA": 39.9,
+   "percentPPA": 0.338,
+   "percentPassingPPA": 0.106,
+   "percentReceivingPPA": 0.683,
+   "percentRushingPPA": 0.238,
+   "usage": 0.217,
+   "passingUsage": 0.206,
+   "receivingUsage": 0.515,
+   "rushingUsage": 0.187
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:49Z', now());
+
+INSERT INTO raw.raw_player_usage (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-39-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "id": "1001",
+   "name": "A. Passer",
+   "position": "QB",
+   "team": "Alpha State",
+   "conference": "B12",
+   "usage": {
+    "overall": 0.464,
+    "pass": 0.823,
+    "rush": 0.046,
+    "firstDown": 0.411,
+    "secondDown": 0.471,
+    "thirdDown": 0.6,
+    "standardDowns": 0.404,
+    "passingDowns": 0.634
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:50Z', now());
+
+INSERT INTO raw.raw_metrics_fg_ep (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-40-001Z.json', '{
+ "status_code": 200,
+ "params": {},
+ "data": [
+  {
+   "yardsToGoal": 0,
+   "distance": 17,
+   "expectedPoints": 2.85
+  },
+  {
+   "yardsToGoal": 20,
+   "distance": 37,
+   "expectedPoints": 2.41
+  },
+  {
+   "yardsToGoal": 40,
+   "distance": 57,
+   "expectedPoints": 1.08
+  }
+ ]
+}', 200, '{}',
+  '2026-01-01T00:00:51Z', now());
+
+INSERT INTO raw.raw_metrics_wp_pregame (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-41-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "gameId": 9001,
+   "homeTeam": "Alpha State",
+   "awayTeam": "Beta Tech",
+   "spread": -7.0,
+   "homeWinProbability": 0.71
+  }
+ ]
+}', 200, '{"year": "2024", "seasonType": "regular"}',
+  '2026-01-01T00:00:52Z', now());
+
+INSERT INTO raw.raw_metrics_wp_pregame (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-41-002Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "gameId": 9001,
+   "homeTeam": "Alpha State",
+   "awayTeam": "Beta Tech",
+   "spread": -9.5,
+   "homeWinProbability": 0.78
+  }
+ ]
+}', 200, '{"year": "2024", "seasonType": "regular"}',
+  '2026-01-01T00:00:53Z', now());
+
+-- stg_game_pregame_wp joins raw_manifest on endpoint + filename for the OBSERVED time, so
+-- both snapshots need a manifest row or the model comes back empty and the no-dedup property
+-- is asserted but never exercised.
+--
+-- status_code and row_count are NOT optional here: stg_raw_manifest derives is_success and
+-- is_empty from them and both carry not_null tests. Omitting them failed two tests in a way
+-- that pointed at the manifest model rather than at this fixture.
+INSERT INTO raw.raw_manifest
+  (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
+  ('metrics_wp_pregame', '2026-01-01T00-00-41-001Z.json',
+   '{"year": "2024", "seasonType": "regular"}', 200, 1,
+   '2026-01-01T00:00:52Z', '2026-01-01T00:00:52Z'),
+  ('metrics_wp_pregame', '2026-01-01T00-00-41-002Z.json',
+   '{"year": "2024", "seasonType": "regular"}', 200, 1,
+   '2026-01-01T00:00:53Z', '2026-01-01T00:00:53Z')
+ON CONFLICT DO NOTHING;
 
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('teams', '2026-01-01T00-00-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:00Z', now()),

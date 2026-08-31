@@ -65,6 +65,12 @@
     ('stg_player_season_wepa_passing', ['season', 'athlete_id']),
     ('stg_player_season_wepa_rushing', ['season', 'athlete_id']),
     ('stg_player_season_wepa_kicking', ['season', 'athlete_id']),
+    ('stg_team_fbs',            ['season', 'team_id']),
+    ('stg_team_season_ats',     ['season', 'team_id']),
+    ('stg_player_portal',       ['season', 'first_name', 'last_name', 'origin_team']),
+    ('stg_team_returning_production', ['season', 'team']),
+    ('stg_player_season_usage', ['season', 'player_id']),
+    ('stg_field_goal_ep',       ['yards_to_goal']),
 ] %}
 
 {% for model, grain in staging_grains %}

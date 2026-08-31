@@ -23,6 +23,10 @@ GRAIN_EXEMPT = {
     "stg_lines": "one row per (game, provider, SNAPSHOT) — repeated fetches are the point, "
                  "because /lines returns only opening and current and movement between them "
                  "cannot be backfilled",
+    "stg_game_pregame_wp": "the other snapshot model. /metrics/wp/pregame is registered "
+                           "snapshot=True because the number moves with the market through "
+                           "the week; deduplicating would keep one value per game and throw "
+                           "away the only thing repeated fetching buys",
 }
 
 

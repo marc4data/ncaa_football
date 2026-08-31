@@ -606,6 +606,133 @@ models:
       - name: attempts
         description: Kick attempts. The denominator here, where the others use plays.
 
+  - name: stg_team_fbs
+    description: >
+      The FBS team list for a season, one row per (season, team), with its venue fully
+      unnested. Its own model rather than a filter on stg_teams: a different endpoint and
+      raw table, and the two do not always agree — /teams is the full universe including FCS
+      opponents and stubs, /teams/fbs is CFBD's own answer to who is FBS. Where they differ,
+      the difference is the interesting part and a filter would hide it.
+    columns:
+      - name: season
+        description: From the request params; the payload carries no year.
+        data_tests: [not_null]
+      - name: team_id
+        data_tests: [not_null]
+      - name: venue_capacity
+        description: From the embedded location object, not from /venues.
+      - name: venue_elevation
+        description: >
+          Arrives as a STRING on the wire, unlike the other numerics in the block. Parsed
+          with safe_numeric so an empty string does not fail the model.
+      - name: alternate_names
+        description: JSON array, carried as JSON.
+
+  - name: stg_team_season_ats
+    description: >
+      Against-the-spread record, one row per (season, team). Ships a real teamId. `games` is
+      NOT ats_wins + ats_losses + ats_pushes — an unlined game counts toward games and toward
+      none of the outcomes, so the difference is the number of unlined games, which is worth
+      knowing and would be destroyed by deriving the total.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team_id
+        data_tests: [not_null]
+      - name: games
+        description: Games played. Not the sum of the three outcome columns; see above.
+      - name: avg_cover_margin
+        description: Signed — positive means the team beat the spread on average.
+
+  - name: stg_player_portal
+    description: >
+      Transfer portal entries. NO PLAYER ID: first and last name only, in the one dataset
+      where a player's team is changing, so the grain includes `origin_team` — the same name
+      entering from two schools is two entries and collapsing on name would merge two people.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: first_name
+        data_tests: [not_null]
+      - name: destination_team
+        description: >
+          NULL MEANS "entered the portal, not yet committed" — data, not a gap. Counting
+          transfers INTO a school must exclude nulls; counting entries must not.
+      - name: stars
+        description: Recruiting-service star rating. Present far more often than `rating`.
+      - name: rating
+        description: Null for most rows. A null rating with 4 stars is a real combination.
+
+  - name: stg_team_returning_production
+    description: >
+      Returning production, one row per (season, team). TEAM GRAIN DESPITE THE ENDPOINT NAME
+      — /player/returning publishes nothing per player, only the share of last season's
+      production coming back per team. THREE SCALES IN ONE ROW: total_*_ppa are absolute PPA
+      totals, percent_*_ppa are shares of the prior season (0-1), and *_usage are shares of
+      snaps (0-1). Plotting a total against a percent compares 100.6 with 0.338.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: total_ppa
+        description: Absolute returning PPA.
+      - name: percent_ppa
+        description: Share of last season's PPA returning, 0 to 1. Different scale.
+
+  - name: stg_player_season_usage
+    description: >
+      Player usage share for a season, one row per (season, player). Pairs with
+      stg_player_season_ppa on the same key — usage is how often, PPA is how well.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: player_id
+        data_tests: [not_null]
+      - name: conference_abbreviation
+        description: >
+          Named for what it holds. This endpoint reports B1G / B12 / AAC like
+          /ppa/players/season, where most others report full names; calling it `conference`
+          would invite a join that returns nothing and raises no error.
+      - name: usage_overall
+        description: Share of the team's plays this player was involved in.
+
+  - name: stg_game_pregame_wp
+    description: >
+      Pre-game win probability, one row per (game, SNAPSHOT). NOT DEDUPLICATED, like
+      stg_lines — the endpoint is registered snapshot=True because the number moves with the
+      market through the week, and collapsing to the latest fetch would keep one value per
+      game and discard the movement that repeated fetching exists to capture.
+    columns:
+      - name: snapshot_ts
+        description: >
+          When the probability was OBSERVED (raw_manifest.fetched_at), not when the file was
+          loaded. Load time would make a catch-up load look simultaneous.
+        data_tests: [not_null]
+      - name: game_id
+        data_tests: [not_null]
+      - name: home_win_probability
+        description: >
+          Home team's probability. The away side is 1 - this and is NOT stored: deriving it
+          is exact, whereas storing both invites them to disagree.
+      - name: spread
+        description: Point spread at the time of the snapshot.
+
+  - name: stg_field_goal_ep
+    description: >
+      The field-goal expected-points curve, one row per yard line. Static — the endpoint
+      takes no parameters and returns the same 100 rows every call. `yards_to_goal` and
+      `kick_distance` differ by the snap, hold and end-zone depth, which is why a
+      0-yards-to-goal row still has a 17-yard kick; both are kept.
+    columns:
+      - name: yards_to_goal
+        description: Field position.
+        data_tests: [not_null, unique]
+      - name: kick_distance
+        description: What the kicker actually faces, in yards.
+      - name: expected_points
+        description: Expected points of attempting the field goal from there.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated
