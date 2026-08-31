@@ -207,3 +207,32 @@ def test_the_deploy_script_disables_applefile_companions_when_syncing():
     code = "\n".join(ln for ln in DEPLOY_SCRIPT.read_text().splitlines()
                      if not ln.lstrip().startswith("#"))
     assert "COPYFILE_DISABLE=1" in code
+
+
+# --- the warehouse is the product, so the warehouse gets refreshed ------------------------
+
+def test_the_weekly_refresh_builds_staging_even_with_no_serving_consumer():
+    """`+tag:production` pulls the serving layer and its ancestors, so a staging model
+    reached the scheduled refresh only by being upstream of something the site renders.
+
+    That was right when the site was the product. Prompt 029 makes the warehouse itself the
+    deliverable, and the whole of Priority 3 is staging models for endpoints no page reads —
+    under the old rule every one of them would exist in git, pass CI, and never materialise.
+    stg_game_weather and stg_game_player_stat shipped and neither was selected.
+    """
+    source = (DAGS / "weekly_refresh_dag.py").read_text()
+    code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#"))
+    assert "tag:warehouse" in code, (
+        "the weekly refresh must select tag:warehouse, or staging models with no serving "
+        "consumer are never built")
+    assert "+tag:production" in code, "the site's surface still has to be refreshed"
+
+
+def test_the_scores_refresh_stays_narrow():
+    """The two-hourly DAG rebuilds what the live site needs and nothing else. Widening it to
+    the warehouse tag would rebuild 1.27M player-stat rows every two hours to no purpose —
+    box scores are immutable once the week completes."""
+    source = (DAGS / "scores_refresh_dag.py").read_text()
+    code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#"))
+    assert "tag:warehouse" not in code
+    assert "srv_scoreboard" in code

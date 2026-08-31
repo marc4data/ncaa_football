@@ -62,7 +62,11 @@ DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
 # reach the tree this runs against. Five models remain excluded — dim_season, dim_venue,
 # dim_week, stg_calendar, stg_venues — because no serving view reads them, which is exactly
 # the property the selector is supposed to have.
-PRODUCTION_SELECTOR = "--select +tag:production"
+# Two tags, two meanings. `+tag:production` is the site's surface and everything it
+# depends on. `tag:warehouse` is every staging model, whether or not a page reads it —
+# without it, a staging model for an endpoint no page consumes is never built, which is
+# most of prompt 029's Priority 3. Space-separated selectors union in dbt.
+PRODUCTION_SELECTOR = "--select +tag:production tag:warehouse"
 
 default_args = {
     "owner": "cfdb",

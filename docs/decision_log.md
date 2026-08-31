@@ -2,6 +2,46 @@
 
 Decisions made in Cowork (strategy/governance surface). Claude Code implements within these. Newest first.
 
+## 2026-08-31 (later) — Staging is refreshed whether or not a page reads it
+
+**The rule until now: `+tag:production` on the serving layer, and `+` pulls ancestors.** A
+staging model reached Airflow's scheduled refresh only by being upstream of something the site
+renders. That was deliberate and it is written down in `dbt_project.yml`: "a new mart that no
+serving view reads stays out of the runtime path exactly as before."
+
+**That rule was right when the site was the product.** Prompt 029 changes the premise — the
+warehouse itself is the deliverable — and the whole of Priority 3 is staging models for
+endpoints no page consumes. Under the old rule every one of them would exist in git, pass CI,
+and never materialise.
+
+**Not hypothetical.** `stg_game_weather` and `stg_game_player_stat` shipped in the games family
+and neither was in the selection: 58 of 66 models, the two new ones outside it. There is no
+symptom for this. The DAG is green, the models are in the repo, and the dbt tests that would
+catch it are themselves unselected — a dbt test only runs for selected models.
+
+**DECIDED: staging carries a `warehouse` tag; the weekly DAG selects
+`+tag:production tag:warehouse`.**
+
+A separate tag rather than adding `production`, because the two words mean different things:
+
+| Tag | Means | Cadence |
+|---|---|---|
+| `production` | the site is stale without this | scores DAG, two-hourly |
+| `warehouse` | the warehouse should hold this | weekly DAG |
+
+Box scores and weather are immutable once the week completes, so rebuilding 1.27M player-stat
+rows two-hourly would buy nothing. The scores DAG keeps its explicit narrow serving selector
+and is deliberately untouched.
+
+**The mart rule is unchanged.** Only staging was widened, so a mart nothing reads still stays
+out of the runtime path — `dim_season`, `dim_venue` and `dim_week` remain excluded, as before.
+
+**Guarded, and the guard is negative-tested.** `ci/check_production_selector.py` now also
+fails when any staging model falls outside the refresh, verified by stripping the tag from a
+manifest and confirming exit 1 with a message naming the model. That check runs in CI, outside
+dbt's selection, because a guard scoped by the mechanism it checks inherits that mechanism's
+failure modes — including "did not run".
+
 ## 2026-08-31 — The CFBD spec is vendored after all, reversing 24 Aug
 
 **Prompt 024 decided NOT to vendor `config/api-docs.json`** — "reference CFBD's spec by URL

@@ -50,6 +50,9 @@ from pathlib import Path
 
 MANIFEST = Path("dbt/target/manifest.json")
 TAG = "production"
+# Every staging model carries this, so the weekly refresh builds it whether or not a
+# serving view reads it. See dbt_project.yml for why it is not `production`.
+WAREHOUSE_TAG = "warehouse"
 
 
 def main() -> int:
@@ -84,7 +87,31 @@ def main() -> int:
         return "other"
 
     serving = {k for k in nodes if layer(k) == "serving"}
+    staging = {k for k in nodes if layer(k) == "staging"}
     failures = []
+
+    # The weekly refresh runs `+tag:production tag:warehouse`, a union. Selection here is the
+    # union too, or this guard would check a selector Airflow does not run.
+    warehouse = {k for k, v in nodes.items() if WAREHOUSE_TAG in (v.get("tags") or [])}
+    selected |= warehouse
+
+    # A STAGING MODEL OUTSIDE THE REFRESH IS THE PRIORITY 3 FAILURE MODE.
+    #
+    # Before the warehouse tag, staging reached the refresh only by being upstream of a
+    # serving view. Prompt 029's whole point is staging models for endpoints no page reads —
+    # so under the old rule every one of them would exist in git, pass CI, and never
+    # materialise. That is not a hypothetical: stg_game_weather and stg_game_player_stat
+    # shipped and neither was selected, 58 of 66 models.
+    #
+    # There is no symptom. The DAG is green, the models are in the repo, the tests that would
+    # catch it are themselves unselected — a dbt test only runs for selected models.
+    unrefreshed = sorted(nodes[k]["name"] for k in staging - selected)
+    if unrefreshed:
+        failures.append(
+            "staging model(s) OUTSIDE the weekly refresh — they exist in the repo and are "
+            f"never built: {', '.join(unrefreshed)}. Staging carries the "
+            f"`{WAREHOUSE_TAG}` tag in dbt_project.yml; a model here means that config "
+            "stopped applying to it.")
 
     missing_serving = sorted(nodes[k]["name"] for k in serving - selected)
     if missing_serving:
@@ -107,7 +134,7 @@ def main() -> int:
     counts = {}
     for node in selected:
         counts[layer(node)] = counts.get(layer(node), 0) + 1
-    print(f"`+tag:{TAG}` selects {len(selected)} of {len(nodes)} model(s): "
+    print(f"`+tag:{TAG} tag:{WAREHOUSE_TAG}` selects {len(selected)} of {len(nodes)} model(s): "
           + ", ".join(f"{n} {name}" for name, n in sorted(counts.items())))
     excluded = sorted(nodes[k]["name"] for k in set(nodes) - selected)
     print(f"Excluded ({len(excluded)}): {', '.join(excluded) if excluded else 'none'}")
@@ -118,7 +145,8 @@ def main() -> int:
             print(f"::error::{failure}")
         return 1
 
-    print("Every serving model and every ancestor is in the refresh Airflow runs.")
+    print("Every serving model, every ancestor, and every staging model is in the "
+          "refresh Airflow runs.")
     return 0
 
 
