@@ -298,6 +298,26 @@ CREATE TABLE IF NOT EXISTS raw.raw_metrics_wp (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_passing_players_season (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_passing_players_games (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_passing_teams_season (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_passing_teams_games (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_passing_plays (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -331,6 +351,9 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_plays, raw.raw_drives, raw.raw_plays_stats,
          raw.raw_plays_types, raw.raw_plays_stats_types,
          raw.raw_game_box_advanced, raw.raw_metrics_wp,
+         raw.raw_passing_players_season, raw.raw_passing_players_games,
+         raw.raw_passing_teams_season, raw.raw_passing_teams_games,
+         raw.raw_passing_plays,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -2529,6 +2552,285 @@ INSERT INTO raw.raw_metrics_wp (filename, content, status_code, params, fetched_
  ]
 }', 200, '{"gameId": "9001"}',
   '2026-01-01T00:01:16Z', now());
+
+INSERT INTO raw.raw_passing_players_season (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-05-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2025"
+ },
+ "data": [
+  {
+   "season": 2025,
+   "playerId": "1001",
+   "player": "A. Passer",
+   "team": "Alpha State",
+   "conference": "TC",
+   "attempts": 312,
+   "completions": 187,
+   "incompletions": 125,
+   "interceptions": 1,
+   "completionRate": 0.6,
+   "airYardsAttemptsAvailable": 140,
+   "totalAirYards": 609,
+   "averageDepthOfTarget": 11.5,
+   "totalYardsAttemptsAvailable": 312,
+   "totalYards": 1695,
+   "yardsAfterCatchAttemptsAvailable": 62,
+   "totalYardsAfterCatch": 149,
+   "averageYardsAfterCatch": 4.6
+  },
+  {
+   "season": 2025,
+   "playerId": "2001",
+   "player": "D. Arm",
+   "team": "Beta Tech",
+   "conference": "TC",
+   "attempts": 164,
+   "completions": 98,
+   "incompletions": 66,
+   "interceptions": 1,
+   "completionRate": 0.63,
+   "airYardsAttemptsAvailable": 73,
+   "totalAirYards": 612,
+   "averageDepthOfTarget": 14.5,
+   "totalYardsAttemptsAvailable": 164,
+   "totalYards": 1698,
+   "yardsAfterCatchAttemptsAvailable": 32,
+   "totalYardsAfterCatch": 152,
+   "averageYardsAfterCatch": 4.9
+  }
+ ]
+}', 200, '{"year": "2025"}',
+  '2026-01-01T00:01:17Z', now());
+
+INSERT INTO raw.raw_passing_players_games (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-06-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2025",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "season": 2025,
+   "week": 1,
+   "seasonType": "regular",
+   "playerId": "1001",
+   "player": "A. Passer",
+   "team": "Alpha State",
+   "conference": "TC",
+   "opponent": "Beta Tech",
+   "attempts": 43,
+   "completions": 25,
+   "incompletions": 18,
+   "interceptions": 1,
+   "completionRate": 0.6,
+   "airYardsAttemptsAvailable": 19,
+   "totalAirYards": 609,
+   "averageDepthOfTarget": 11.5,
+   "totalYardsAttemptsAvailable": 43,
+   "totalYards": 1695,
+   "yardsAfterCatchAttemptsAvailable": 8,
+   "totalYardsAfterCatch": 149,
+   "averageYardsAfterCatch": 4.6
+  }
+ ]
+}', 200, '{"year": "2025", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:01:18Z', now());
+
+INSERT INTO raw.raw_passing_teams_season (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-07-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2025"
+ },
+ "data": [
+  {
+   "season": 2025,
+   "team": "Alpha State",
+   "conference": "TC",
+   "offense": {
+    "attempts": 312,
+    "completions": 187,
+    "incompletions": 125,
+    "interceptions": 1,
+    "completionRate": 0.6,
+    "airYardsAttemptsAvailable": 140,
+    "totalAirYards": 609,
+    "averageDepthOfTarget": 11.5,
+    "totalYardsAttemptsAvailable": 312,
+    "totalYards": 1695,
+    "yardsAfterCatchAttemptsAvailable": 62,
+    "totalYardsAfterCatch": 149,
+    "averageYardsAfterCatch": 4.6
+   },
+   "defense": {
+    "attempts": 288,
+    "completions": 172,
+    "incompletions": 116,
+    "interceptions": 1,
+    "completionRate": 0.65,
+    "airYardsAttemptsAvailable": 129,
+    "totalAirYards": 614,
+    "averageDepthOfTarget": 16.5,
+    "totalYardsAttemptsAvailable": 288,
+    "totalYards": 1700,
+    "yardsAfterCatchAttemptsAvailable": 57,
+    "totalYardsAfterCatch": 154,
+    "averageYardsAfterCatch": 5.1
+   }
+  }
+ ]
+}', 200, '{"year": "2025"}',
+  '2026-01-01T00:01:19Z', now());
+
+INSERT INTO raw.raw_passing_teams_games (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-08-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2025",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "season": 2025,
+   "week": 1,
+   "seasonType": "regular",
+   "team": "Alpha State",
+   "conference": "TC",
+   "opponent": "Beta Tech",
+   "offense": {
+    "attempts": 43,
+    "completions": 25,
+    "incompletions": 18,
+    "interceptions": 1,
+    "completionRate": 0.6,
+    "airYardsAttemptsAvailable": 19,
+    "totalAirYards": 609,
+    "averageDepthOfTarget": 11.5,
+    "totalYardsAttemptsAvailable": 43,
+    "totalYards": 1695,
+    "yardsAfterCatchAttemptsAvailable": 8,
+    "totalYardsAfterCatch": 149,
+    "averageYardsAfterCatch": 4.6
+   },
+   "defense": {
+    "attempts": 39,
+    "completions": 23,
+    "incompletions": 16,
+    "interceptions": 1,
+    "completionRate": 0.65,
+    "airYardsAttemptsAvailable": 17,
+    "totalAirYards": 614,
+    "averageDepthOfTarget": 16.5,
+    "totalYardsAttemptsAvailable": 39,
+    "totalYards": 1700,
+    "yardsAfterCatchAttemptsAvailable": 7,
+    "totalYardsAfterCatch": 154,
+    "averageYardsAfterCatch": 5.1
+   }
+  }
+ ]
+}', 200, '{"year": "2025", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:01:20Z', now());
+
+INSERT INTO raw.raw_passing_plays (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-09-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2025",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "playId": "9001101849908",
+   "driveId": "90011",
+   "season": 2025,
+   "week": 1,
+   "seasonType": "regular",
+   "offenseId": 1,
+   "offense": "Alpha State",
+   "offenseConference": "TC",
+   "defenseId": 2,
+   "defense": "Beta Tech",
+   "defenseConference": "TC",
+   "period": 1,
+   "clock": {
+    "minutes": 15,
+    "seconds": 0
+   },
+   "down": 1,
+   "distance": 10,
+   "playText": "A. Passer pass complete for 14 yds",
+   "passerId": "1001",
+   "passer": "A. Passer",
+   "targetId": "1004",
+   "target": "E. Receiver",
+   "outcome": "Completion",
+   "airYards": 9,
+   "passDepth": "short",
+   "passDirection": "right",
+   "passLocation": "outside",
+   "totalYards": 14,
+   "yardsAfterCatch": 5,
+   "startYardline": 25,
+   "startYardsToGoal": 75,
+   "targetYardsToGoal": 66,
+   "isSpike": false,
+   "isThrowaway": false,
+   "isIntentionalGrounding": false,
+   "parseStatus": "complete"
+  },
+  {
+   "gameId": 9001,
+   "playId": "9001101849910",
+   "driveId": "90011",
+   "season": 2025,
+   "week": 1,
+   "seasonType": "regular",
+   "offenseId": 1,
+   "offense": "Alpha State",
+   "offenseConference": "TC",
+   "defenseId": 2,
+   "defense": "Beta Tech",
+   "defenseConference": "TC",
+   "period": 2,
+   "clock": {
+    "minutes": 3,
+    "seconds": 12
+   },
+   "down": 3,
+   "distance": 8,
+   "playText": "A. Passer pass incomplete",
+   "passerId": "1001",
+   "passer": "A. Passer",
+   "targetId": null,
+   "target": null,
+   "outcome": "Incompletion",
+   "airYards": null,
+   "passDepth": null,
+   "passDirection": null,
+   "passLocation": null,
+   "totalYards": 0,
+   "yardsAfterCatch": null,
+   "startYardline": 40,
+   "startYardsToGoal": 60,
+   "targetYardsToGoal": null,
+   "isSpike": false,
+   "isThrowaway": true,
+   "isIntentionalGrounding": false,
+   "parseStatus": "partial"
+  }
+ ]
+}', 200, '{"year": "2025", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:01:21Z', now());
 
 INSERT INTO raw.raw_manifest
   (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES

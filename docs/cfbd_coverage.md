@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 60 | every field the spec publishes is exposed as a column |
+| complete | 65 | every field the spec publishes is exposed as a column |
 | partial | 6 | a staging model exists but drops fields |
-| raw only | 5 | responses have landed; nothing reads them |
+| raw only | 0 | responses have landed; nothing reads them |
 | no raw data | 8 | registered, never fetched |
 | unregistered | 0 | the API serves it; we have not decided about it |
 
-**Fields exposed: 823 of 1191 (69.1%).** That percentage is the product gap in one number.
+**Fields exposed: 935 of 1191 (78.5%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -54,11 +54,11 @@ sweep can invent.
 | `metrics/fg/ep` | swept | 1 | `stg_field_goal_ep` | 3/3 | complete |
 | `metrics/wp` | CLI | 1,853 | `stg_game_win_probability` | 16/16 | complete |
 | `metrics/wp/pregame` | swept | 8 | `stg_game_pregame_wp` | 8/8 | complete |
-| `passing/players/games` | CLI | 33 | — | 0/22 | raw only |
-| `passing/players/season` | CLI | 2 | — | 0/18 | raw only |
-| `passing/plays` | CLI | 33 | — | 0/36 | raw only |
-| `passing/teams/games` | CLI | 33 | — | 0/20 | raw only |
-| `passing/teams/season` | CLI | 2 | — | 0/16 | raw only |
+| `passing/players/games` | CLI | 33 | `stg_passing_player_game` | 22/22 | complete |
+| `passing/players/season` | CLI | 2 | `stg_passing_player_season` | 18/18 | complete |
+| `passing/plays` | CLI | 33 | `stg_passing_play` | 36/36 | complete |
+| `passing/teams/games` | CLI | 33 | `stg_passing_team_game` | 20/20 | complete |
+| `passing/teams/season` | CLI | 2 | `stg_passing_team_season` | 16/16 | complete |
 | `player/portal` | swept | 3 | `stg_player_portal` | 10/10 | complete |
 | `player/returning` | swept | 3 | `stg_team_returning_production` | 15/15 | complete |
 | `player/search` | CLI | — | — | 0/16 | no raw data |

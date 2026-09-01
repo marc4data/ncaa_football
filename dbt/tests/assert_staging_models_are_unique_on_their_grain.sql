@@ -95,6 +95,11 @@
     ('stg_game_box_team',       ['game_id', 'team']),
     ('stg_game_box_player',     ['game_id', 'team', 'player_name']),
     ('stg_game_win_probability', ['play_id']),
+    ('stg_passing_player_season', ['season', 'player_id']),
+    ('stg_passing_player_game',  ['game_id', 'player_id']),
+    ('stg_passing_team_season',  ['season', 'team']),
+    ('stg_passing_team_game',    ['game_id', 'team']),
+    ('stg_passing_play',         ['play_id']),
 ] %}
 
 {% for model, grain in staging_grains %}

@@ -1198,6 +1198,88 @@ models:
       - name: home_win_probability
         description: Home team's probability at this play.
 
+  - name: stg_passing_player_season
+    description: >
+      Passer production for a season, one row per (season, player). RICHER THAN THE BOX
+      SCORE, not a duplicate: stg_game_player_stat has completions and yards, this has air
+      yards, depth of target and yards after catch — the throw rather than its result.
+      New in spec v5.25.0 and 2025 onward; 2022-2024 answer 200 with an empty array.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: player_id
+        data_tests: [not_null]
+      - name: average_depth_of_target
+        description: >
+          COMPUTED OVER air_yards_attempts_available, NOT over attempts. Air yards are
+          charted for 44.9% of attempts in the landed data, so reading this as a season-wide
+          figure overstates its basis by more than double.
+      - name: air_yards_attempts_available
+        description: The denominator for average_depth_of_target. Carried for that reason.
+
+  - name: stg_passing_player_game
+    description: >
+      Passer production for a single game, one row per (game, player). Carries a real gameId,
+      so it joins to stg_games without a name match — unlike /ppa/players/games, which
+      identifies its game by week and opponent alone.
+    columns:
+      - name: game_id
+        data_tests: [not_null]
+      - name: player_id
+        data_tests: [not_null]
+
+  - name: stg_passing_team_season
+    description: >
+      Team passing for a season, one row per (season, team). Both sides generated from one
+      list. DEFENSE IS PASSING ALLOWED — `defense_completion_rate` is what opposing passers
+      achieved, so lower is better on every defensive column. Not inverted, matching CFBD and
+      the ppa/wepa models.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: defense_completion_rate
+        description: Completion rate ALLOWED. Lower is better.
+
+  - name: stg_passing_team_game
+    description: >
+      Team passing for a single game, one row per (game, team). Two rows per game, so a game
+      and its opponent are both present and joinable on game_id.
+    columns:
+      - name: game_id
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+
+  - name: stg_passing_play
+    description: >
+      Enriched pass attempts, one row per pass — the most detailed play data here. Where
+      stg_play describes every play with a text string, this describes every PASS with
+      structured geometry: where it was thrown, how far in the air, at whom, and what
+      happened. 7,396 rows for a single week, which is why the endpoint is week-scoped and
+      opt-in. Three ids join out — playId to stg_play, driveId to stg_drive, gameId to
+      stg_games — and passerId/targetId are athlete ids /games/players does not carry.
+    columns:
+      - name: play_id
+        description: Joins to stg_play.play_id.
+        data_tests: [not_null, unique]
+      - name: parse_status
+        description: >
+          A QUALITY FLAG THAT MUST NOT BE IGNORED, AND NOT A RARE CASE: 29,750 rows are
+          `partial` against 24,322 `complete` on the landed data — the MAJORITY of pass plays
+          are only partially parsed. A row whose air yards are null because the parse failed
+          looks identical to a throw that genuinely had none, and only this column separates
+          them. Any analysis ignoring it silently mixes "unknown" with "zero" on most rows.
+          Nothing here filters on it — that is a mart's decision.
+      - name: is_spike
+        description: >
+          Spikes, throwaways and intentional grounding were never meant to be caught. A
+          completion rate computed off this table without excluding them measures something
+          other than passing accuracy.
+      - name: target_id
+        description: Null on an incompletion with no identifiable target, and on a throwaway.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated
