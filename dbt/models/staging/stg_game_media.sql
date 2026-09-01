@@ -70,5 +70,21 @@ select
     cast({{ json_get_string('row_json', 'week') }} as int)    as week,
     {{ json_get_string('row_json', 'seasonType') }}           as season_type,
     {{ json_get_string('row_json', 'mediaType') }}            as media_type,
-    {{ json_get_string('row_json', 'outlet') }}               as outlet
+    {{ json_get_string('row_json', 'outlet') }}               as outlet,
+
+    -- THE MATCHUP AND THE KICKOFF, which this model dropped. A broadcast listing without the
+    -- teams is only usable through a join to stg_games, and `startTime` here is the reason
+    -- the endpoint is classified PREGAME rather than historical: it moves as networks fix
+    -- their windows.
+    {{ json_get_string('row_json', 'homeTeam') }}             as home_team,
+    {{ json_get_string('row_json', 'homeConference') }}       as home_conference,
+    {{ json_get_string('row_json', 'awayTeam') }}             as away_team,
+    {{ json_get_string('row_json', 'awayConference') }}       as away_conference,
+    cast({{ json_get_string('row_json', 'startTime') }} as {{ type_timestamp_tz() }})
+                                                              as start_at,
+    -- TRUE MEANS THE TIME IS A PLACEHOLDER, not that it is missing. A game listed at noon
+    -- with this set is not scheduled for noon; it is unscheduled, and a schedule page that
+    -- ignores the flag will state a kickoff that nobody announced.
+    cast({{ json_get_string('row_json', 'isStartTimeTBD') }} as boolean)
+                                                              as is_start_time_tbd
 from deduped

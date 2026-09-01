@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 65 | every field the spec publishes is exposed as a column |
-| partial | 6 | a staging model exists but drops fields |
+| complete | 70 | every field the spec publishes is exposed as a column |
+| partial | 1 | a staging model exists but drops fields |
 | raw only | 0 | responses have landed; nothing reads them |
 | no raw data | 8 | registered, never fetched |
 | unregistered | 0 | the API serves it; we have not decided about it |
 
-**Fields exposed: 935 of 1191 (78.5%).** That percentage is the product gap in one number.
+**Fields exposed: 984 of 1191 (82.6%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -42,14 +42,14 @@ sweep can invent.
 | `draft/teams` | swept | 1 | `stg_nfl_team` | 4/4 | complete |
 | `drives` | swept | 16 | `stg_drive` | 24/24 | complete |
 | `game/box/advanced` | CLI | 1,849 | `stg_game_box_info`, `stg_game_box_player`, `stg_game_box_team` | 34/34 | complete |
-| `games` | swept | 348 | `stg_games` | 19/41 | partial |
-| `games/media` | swept | 8 | `stg_game_media` | 6/12 | partial |
+| `games` | swept | 348 | `stg_games` | 41/41 | complete |
+| `games/media` | swept | 8 | `stg_game_media` | 12/12 | complete |
 | `games/players` | swept | 46 | `stg_game_player_stat` | 7/7 | complete |
 | `games/teams` | swept | 46 | `stg_game_team_stat` | 8/8 | complete |
 | `games/weather` | swept | 4 | `stg_game_weather` | 22/22 | complete |
-| `info` | CLI | 14 | `stg_api_quota` | 7/13 | partial |
-| `info/usage` | CLI | 14 | `stg_api_usage_endpoint` | 6/10 | partial |
-| `lines` | swept | 71 | `stg_lines` | 12/23 | partial |
+| `info` | CLI | 14 | `stg_api_quota` | 13/13 | complete |
+| `info/usage` | CLI | 14 | `stg_api_recent_request`, `stg_api_usage_endpoint` | 10/10 | complete |
+| `lines` | swept | 71 | `stg_lines` | 23/23 | complete |
 | `live/plays` | CLI | — | — | 0/63 | no raw data |
 | `metrics/fg/ep` | swept | 1 | `stg_field_goal_ep` | 3/3 | complete |
 | `metrics/wp` | CLI | 1,853 | `stg_game_win_probability` | 16/16 | complete |
@@ -117,11 +117,7 @@ carried through.
 
 | Endpoint | Model | Dropped | Fields not exposed |
 |---|---|---:|---|
-| `games` | stg_games | 22 | `awayConference`, `awayLineScores`, `awayPostgameElo`, `awayPostgameWinProbability`, `awayPregameElo`, `awaySeed`, `bowlName`, `bracketSlot`, `competition`, `format`, `highlights`, `homeConference`, … (+10) |
-| `lines` | stg_lines | 11 | `awayClassification`, `awayConference`, `awayScore`, `awayTeam`, `awayTeamId`, `homeClassification`, `homeConference`, `homeScore`, `homeTeam`, `homeTeamId`, `startDate` |
-| `games/media` | stg_game_media | 6 | `awayConference`, `awayTeam`, `homeConference`, `homeTeam`, `isStartTimeTBD`, `startTime` |
-| `info` | stg_api_quota | 6 | `adjustedMetrics`, `graphQl`, `livePlayByPlay`, `products`, `scoreboard`, `weather` |
-| `info/usage` | stg_api_usage_endpoint | 4 | `cbbRequests`, `cfbRequests`, `requestedAt`, `uniqueEndpoints` |
+| — | — | 0 | Nothing left in this category. |
 
 ## Partial on purpose
 

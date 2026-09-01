@@ -37,6 +37,27 @@ lines_long as (
         cast({{ json_get_string('game', 'season') }} as int) as season,
         cast({{ json_get_string('game', 'week') }} as int)   as week,
         {{ json_get_string('game', 'seasonType') }}          as season_type,
+        cast({{ json_get_string('game', 'startDate') }} as {{ type_timestamp_tz() }})
+                                                             as start_date,
+
+        -- THE MATCHUP, WHICH THIS MODEL DID NOT CARRY. /lines names both teams, their ids,
+        -- conferences, classifications and the score, and the model kept only the game id —
+        -- so reading a line meant joining out to stg_games for the two things a line is
+        -- about. The ids make that join unnecessary and the classifications make an
+        -- FBS-only filter possible without one.
+        cast({{ json_get_string('game', 'homeTeamId') }} as int) as home_team_id,
+        {{ json_get_string('game', 'homeTeam') }}                as home_team,
+        {{ json_get_string('game', 'homeConference') }}          as home_conference,
+        {{ json_get_string('game', 'homeClassification') }}      as home_classification,
+        -- NULL UNTIL THE GAME IS PLAYED. A snapshot taken before kickoff has no score, which
+        -- is most rows in a movement series and is the point of them.
+        cast({{ json_get_string('game', 'homeScore') }} as int)  as home_score,
+        cast({{ json_get_string('game', 'awayTeamId') }} as int) as away_team_id,
+        {{ json_get_string('game', 'awayTeam') }}                as away_team,
+        {{ json_get_string('game', 'awayConference') }}          as away_conference,
+        {{ json_get_string('game', 'awayClassification') }}      as away_classification,
+        cast({{ json_get_string('game', 'awayScore') }} as int)  as away_score,
+
         {{ json_array_elements(json_get_object('game', 'lines')) }} as line
     from games
 
@@ -69,6 +90,17 @@ select
         when 'bovada'      then 'bovada'
         else null
     end as provider_key,
+    start_date,
+    home_team_id,
+    home_team,
+    home_conference,
+    home_classification,
+    home_score,
+    away_team_id,
+    away_team,
+    away_conference,
+    away_classification,
+    away_score,
     cast({{ json_get_string('line', 'spread') }} as numeric)         as spread,
     {{ json_get_string('line', 'formattedSpread') }}                 as formatted_spread,
     cast({{ json_get_string('line', 'spreadOpen') }} as numeric)     as spread_open,

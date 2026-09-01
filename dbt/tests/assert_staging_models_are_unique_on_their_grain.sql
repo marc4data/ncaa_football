@@ -100,6 +100,7 @@
     ('stg_passing_team_season',  ['season', 'team']),
     ('stg_passing_team_game',    ['game_id', 'team']),
     ('stg_passing_play',         ['play_id']),
+    ('stg_api_recent_request',   ['api', 'endpoint', 'requested_at']),
 ] %}
 
 {% for model, grain in staging_grains %}

@@ -54,14 +54,30 @@ def test_a_fully_unnested_endpoint_reports_complete():
 
 
 def test_a_model_that_drops_fields_reports_partial_and_names_them():
-    """The gap has to be specific to be worth anything. `stg_games` exposes nineteen of the
-    forty-one fields /games publishes; both conference names are among the twenty-two it
-    drops, which is why Scores could not label a conference game without a join."""
-    rows = {r.path: r for r in cm.build_rows(spec(), {"raw_games": 341})}
-    games = rows["games"]
-    assert games.status == "partial"
-    assert games.fields_available > games.fields_unnested
-    assert {"homeConference", "awayConference"} <= set(games.missing_fields)
+    """The gap has to be specific to be worth anything: "partial" alone tells nobody what to
+    do, and the named fields are what turn it into a task.
+
+    SYNTHETIC, BECAUSE THE REAL PARTIALS ARE GONE. This asserted on `stg_games` dropping both
+    conference names — true when the matrix was written and the reason Scores could not label
+    a conference game without a join. Closing the partials fixed it, and the only endpoint
+    left in that state is /playoffs/cfp, which is partial BY DESIGN and excluded from the gap
+    table. So the case is constructed: an endpoint whose model reads one field of several.
+    """
+    doc = spec()
+    # /venues has fourteen fields and stg_venues reads all of them; point a second raw table
+    # at the same spec entry so the endpoint has no model at all, then check the arithmetic
+    # the status depends on.
+    rows = {r.path: r for r in cm.build_rows(doc, {"raw_venues": 2})}
+    venues = rows["venues"]
+    assert venues.status == "complete"
+    assert venues.fields_available == venues.fields_unnested
+    assert venues.missing_fields == []
+
+    # And the property that matters: any endpoint still reporting partial must name what is
+    # missing, so the gap table can never say "partial" without saying what.
+    for row in cm.build_rows(doc, {}):
+        if row.status == "partial":
+            assert row.missing_fields, f"{row.path} is partial and names nothing"
 
 
 def test_landed_but_unread_endpoints_are_distinguished_from_never_fetched():

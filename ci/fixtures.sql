@@ -423,35 +423,222 @@ INSERT INTO raw.raw_teams (filename, content, status_code, params, fetched_at, a
 -- yet". College football had no overtime before 1996 and there are 2,600 of them on record.
 INSERT INTO raw.raw_games (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-01-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024", "seasonType": "regular"},
-  "data": [
-    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
-     "startDate": "2024-09-07T23:30:00.000Z", "completed": true, "conferenceGame": true,
-     "neutralSite": false, "homeId": 1, "homeTeam": "Alpha State", "homePoints": 28,
-     "homeClassification": "fbs", "awayId": 2, "awayTeam": "Beta Tech", "awayPoints": 21,
-     "awayClassification": "fbs", "venue": "Alpha Field", "attendance": 50000},
-    {"id": 9004, "season": 2024, "week": 2, "seasonType": "regular",
-     "startDate": "2024-09-14T23:30:00.000Z", "completed": true, "conferenceGame": false,
-     "neutralSite": false, "homeId": 1, "homeTeam": "Alpha State", "homePoints": 41,
-     "homeClassification": "fbs", "awayId": 77, "awayTeam": "Gamma College",
-     "awayPoints": 3, "awayClassification": "ii", "venue": "Alpha Field",
-     "attendance": 41000},
-    {"id": 9005, "season": 2024, "week": 3, "seasonType": "regular",
-     "startDate": "2024-09-21T23:30:00.000Z", "completed": true, "conferenceGame": true,
-     "neutralSite": false, "homeId": 2, "homeTeam": "Beta Tech", "homePoints": 17,
-     "homeClassification": "fbs", "awayId": 1, "awayTeam": "Alpha State", "awayPoints": 17,
-     "awayClassification": "fbs", "venue": "Beta Grounds", "attendance": 33000}
-  ]}', 200, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:02Z', now()),
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "id": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "startDate": "2024-09-07T23:30:00.000Z",
+   "completed": true,
+   "conferenceGame": true,
+   "neutralSite": false,
+   "homeId": 1,
+   "homeTeam": "Alpha State",
+   "homePoints": 28,
+   "homeClassification": "fbs",
+   "awayId": 2,
+   "awayTeam": "Beta Tech",
+   "awayPoints": 21,
+   "awayClassification": "fbs",
+   "venue": "Alpha Field",
+   "attendance": 50000,
+   "venueId": 500,
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "homeLineScores": [
+    7,
+    7,
+    0,
+    14
+   ],
+   "awayLineScores": [
+    0,
+    7,
+    7,
+    0
+   ],
+   "homePregameElo": 1550,
+   "homePostgameElo": 1570,
+   "homePostgameWinProbability": 0.62,
+   "awayPregameElo": 1480,
+   "awayPostgameElo": 1460,
+   "awayPostgameWinProbability": 0.38,
+   "startTimeTBD": false,
+   "notes": null,
+   "highlights": null,
+   "playoff": {
+    "competition": "cfp",
+    "format": "twelve_team_2024",
+    "round": "quarterfinal",
+    "roundName": "Quarterfinal",
+    "bracketSlot": "QF2",
+    "bowlName": "Test Bowl",
+    "homeSeed": 2,
+    "awaySeed": 7
+   }
+  },
+  {
+   "id": 9004,
+   "season": 2024,
+   "week": 2,
+   "seasonType": "regular",
+   "startDate": "2024-09-14T23:30:00.000Z",
+   "completed": true,
+   "conferenceGame": false,
+   "neutralSite": false,
+   "homeId": 1,
+   "homeTeam": "Alpha State",
+   "homePoints": 41,
+   "homeClassification": "fbs",
+   "awayId": 77,
+   "awayTeam": "Gamma College",
+   "awayPoints": 3,
+   "awayClassification": "ii",
+   "venue": "Alpha Field",
+   "attendance": 41000,
+   "venueId": 501,
+   "homeConference": "Test Conference",
+   "awayConference": "Other Conference",
+   "homeLineScores": [
+    7,
+    7,
+    0,
+    14
+   ],
+   "awayLineScores": [
+    0,
+    7,
+    7,
+    0
+   ],
+   "homePregameElo": 1551,
+   "homePostgameElo": 1571,
+   "homePostgameWinProbability": 0.63,
+   "awayPregameElo": 1481,
+   "awayPostgameElo": 1461,
+   "awayPostgameWinProbability": 0.37,
+   "startTimeTBD": false,
+   "notes": null,
+   "highlights": null,
+   "playoff": null
+  },
+  {
+   "id": 9005,
+   "season": 2024,
+   "week": 3,
+   "seasonType": "regular",
+   "startDate": "2024-09-21T23:30:00.000Z",
+   "completed": true,
+   "conferenceGame": true,
+   "neutralSite": false,
+   "homeId": 2,
+   "homeTeam": "Beta Tech",
+   "homePoints": 17,
+   "homeClassification": "fbs",
+   "awayId": 1,
+   "awayTeam": "Alpha State",
+   "awayPoints": 17,
+   "awayClassification": "fbs",
+   "venue": "Beta Grounds",
+   "attendance": 33000,
+   "venueId": 502,
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "homeLineScores": [
+    7,
+    7,
+    0,
+    14
+   ],
+   "awayLineScores": [
+    0,
+    7,
+    7,
+    0
+   ],
+   "homePregameElo": 1552,
+   "homePostgameElo": 1572,
+   "homePostgameWinProbability": 0.64,
+   "awayPregameElo": 1482,
+   "awayPostgameElo": 1462,
+   "awayPostgameWinProbability": 0.36,
+   "startTimeTBD": false,
+   "notes": null,
+   "highlights": null,
+   "playoff": null
+  }
+ ]
+}', 200, '{"year": "2024", "seasonType": "regular"}', '2026-01-01T00:00:02Z', now()),
 -- Date-only era: midnight UTC, no kickoff time recorded.
 ('2026-01-01T00-00-01-002Z.json', '{
-  "status_code": 200, "params": {"year": "1900", "seasonType": "regular"},
-  "data": [
-    {"id": 9002, "season": 1900, "week": 1, "seasonType": "regular",
-     "startDate": "1900-11-10T00:00:00.000Z", "completed": true, "conferenceGame": false,
-     "neutralSite": false, "homeId": 2, "homeTeam": "Beta Tech", "homePoints": 6,
-     "homeClassification": "fbs", "awayId": 1, "awayTeam": "Alpha State", "awayPoints": 5,
-     "awayClassification": "fbs", "venue": "Beta Grounds", "attendance": null}
-  ]}', 200, '{"year": "1900", "seasonType": "regular"}', '2026-01-01T00:00:03Z', now());
+ "status_code": 200,
+ "params": {
+  "year": "1900",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "id": 9002,
+   "season": 1900,
+   "week": 1,
+   "seasonType": "regular",
+   "startDate": "1900-11-10T00:00:00.000Z",
+   "completed": true,
+   "conferenceGame": false,
+   "neutralSite": false,
+   "homeId": 2,
+   "homeTeam": "Beta Tech",
+   "homePoints": 6,
+   "homeClassification": "fbs",
+   "awayId": 1,
+   "awayTeam": "Alpha State",
+   "awayPoints": 5,
+   "awayClassification": "fbs",
+   "venue": "Beta Grounds",
+   "attendance": null,
+   "venueId": 500,
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "homeLineScores": [
+    7,
+    7,
+    0,
+    14
+   ],
+   "awayLineScores": [
+    0,
+    7,
+    7,
+    0
+   ],
+   "homePregameElo": 1550,
+   "homePostgameElo": 1570,
+   "homePostgameWinProbability": 0.62,
+   "awayPregameElo": 1480,
+   "awayPostgameElo": 1460,
+   "awayPostgameWinProbability": 0.38,
+   "startTimeTBD": false,
+   "notes": null,
+   "highlights": null,
+   "playoff": {
+    "competition": "cfp",
+    "format": "twelve_team_2024",
+    "round": "quarterfinal",
+    "roundName": "Quarterfinal",
+    "bracketSlot": "QF2",
+    "bowlName": "Test Bowl",
+    "homeSeed": 2,
+    "awaySeed": 7
+   }
+  }
+ ]
+}', 200, '{"year": "1900", "seasonType": "regular"}', '2026-01-01T00:00:03Z', now());
 
 -- The manifest spine: one row per landed response, including the failure.
 INSERT INTO raw.raw_ppa_games (filename, content, status_code, params, fetched_at, added_at) VALUES
@@ -3509,32 +3696,104 @@ INSERT INTO raw.raw_records (filename, content, status_code, params, fetched_at,
 -- which is the minimum needed for the incremental anti-join to mean anything.
 INSERT INTO raw.raw_lines (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-08-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024", "week": "1", "seasonType": "regular"},
-  "data": [
-    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
-     "homeTeam": "Alpha State", "awayTeam": "Beta Tech", "lines": [
-      {"provider": "DraftKings", "spread": -7.5, "formattedSpread": "Alpha State -7.5",
-       "spreadOpen": -7.0, "overUnder": 55.5, "overUnderOpen": 54.5,
-       "homeMoneyline": -300, "awayMoneyline": 240},
-      {"provider": "Draft Kings", "spread": -7.5, "formattedSpread": "Alpha State -7.5",
-       "spreadOpen": -7.0, "overUnder": 55.5, "overUnderOpen": 54.5,
-       "homeMoneyline": null, "awayMoneyline": null},
-      {"provider": "Bovada", "spread": -7.0, "formattedSpread": "Alpha State -7",
-       "spreadOpen": -7.0, "overUnder": 56.0, "overUnderOpen": 55.0,
-       "homeMoneyline": -280, "awayMoneyline": 230}
-    ]}
-  ]}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "id": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "homeTeam": "Alpha State",
+   "awayTeam": "Beta Tech",
+   "lines": [
+    {
+     "provider": "DraftKings",
+     "spread": -7.5,
+     "formattedSpread": "Alpha State -7.5",
+     "spreadOpen": -7.0,
+     "overUnder": 55.5,
+     "overUnderOpen": 54.5,
+     "homeMoneyline": -300,
+     "awayMoneyline": 240
+    },
+    {
+     "provider": "Draft Kings",
+     "spread": -7.5,
+     "formattedSpread": "Alpha State -7.5",
+     "spreadOpen": -7.0,
+     "overUnder": 55.5,
+     "overUnderOpen": 54.5,
+     "homeMoneyline": null,
+     "awayMoneyline": null
+    },
+    {
+     "provider": "Bovada",
+     "spread": -7.0,
+     "formattedSpread": "Alpha State -7",
+     "spreadOpen": -7.0,
+     "overUnder": 56.0,
+     "overUnderOpen": 55.0,
+     "homeMoneyline": -280,
+     "awayMoneyline": 230
+    }
+   ],
+   "homeTeamId": 1,
+   "awayTeamId": 2,
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "homeClassification": "fbs",
+   "awayClassification": "fbs",
+   "homeScore": null,
+   "awayScore": null,
+   "startDate": "2024-08-31T23:00:00.000Z"
+  }
+ ]
+}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
   '2026-01-01T00:00:10Z', now()),
 ('2026-01-01T00-00-09-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024", "week": "1", "seasonType": "regular"},
-  "data": [
-    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
-     "homeTeam": "Alpha State", "awayTeam": "Beta Tech", "lines": [
-      {"provider": "DraftKings", "spread": -8.0, "formattedSpread": "Alpha State -8",
-       "spreadOpen": -7.0, "overUnder": 56.5, "overUnderOpen": 54.5,
-       "homeMoneyline": -320, "awayMoneyline": 255}
-    ]}
-  ]}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "id": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "homeTeam": "Alpha State",
+   "awayTeam": "Beta Tech",
+   "lines": [
+    {
+     "provider": "DraftKings",
+     "spread": -8.0,
+     "formattedSpread": "Alpha State -8",
+     "spreadOpen": -7.0,
+     "overUnder": 56.5,
+     "overUnderOpen": 54.5,
+     "homeMoneyline": -320,
+     "awayMoneyline": 255
+    }
+   ],
+   "homeTeamId": 1,
+   "awayTeamId": 2,
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "homeClassification": "fbs",
+   "awayClassification": "fbs",
+   "homeScore": null,
+   "awayScore": null,
+   "startDate": "2024-08-31T23:00:00.000Z"
+  }
+ ]
+}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
   '2026-01-01T00:00:14Z', now());
 
 -- Manifest rows for the new endpoints. `stg_lines` takes its snapshot timestamp from
@@ -3564,37 +3823,93 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 -- an unexercised all-clear. ci/check_health_signals.py asserts this stays true.
 INSERT INTO raw.raw_info (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-10-001Z.json', '{
-  "status_code": 200, "params": {},
-  "data": {"patronLevel": 3, "tierName": "Tier 3", "monthlyLimit": 75000,
-           "remainingCalls": 73053, "usedCalls": 1947,
-           "resetAt": "2026-09-01T00:00:00.000Z", "sharedPool": true,
-           "products": ["cfb", "cbb"]}
-  }', 200, '{}', '2026-01-01T00:00:20Z', now()),
+ "status_code": 200,
+ "params": {},
+ "data": {
+  "patronLevel": 3,
+  "tierName": "Tier 3",
+  "monthlyLimit": 75000,
+  "remainingCalls": 73053,
+  "usedCalls": 1947,
+  "resetAt": "2026-09-01T00:00:00.000Z",
+  "sharedPool": true,
+  "products": [
+   "cfb",
+   "cbb"
+  ],
+  "features": {
+   "adjustedMetrics": true,
+   "weather": true,
+   "scoreboard": true,
+   "livePlayByPlay": true,
+   "graphQl": false
+  }
+ }
+}', 200, '{}', '2026-01-01T00:00:20Z', now()),
 ('2026-01-01T00-00-10-002Z.json', '{
-  "status_code": 200, "params": {},
-  "data": {"patronLevel": 3, "tierName": "Tier 3", "monthlyLimit": 75000,
-           "remainingCalls": 3750, "usedCalls": 71250,
-           "resetAt": "2026-09-01T00:00:00.000Z", "sharedPool": true,
-           "products": ["cfb", "cbb"]}
-  }', 200, '{}', '2026-01-01T00:00:21Z', now());
+ "status_code": 200,
+ "params": {},
+ "data": {
+  "patronLevel": 3,
+  "tierName": "Tier 3",
+  "monthlyLimit": 75000,
+  "remainingCalls": 3750,
+  "usedCalls": 71250,
+  "resetAt": "2026-09-01T00:00:00.000Z",
+  "sharedPool": true,
+  "products": [
+   "cfb",
+   "cbb"
+  ],
+  "features": {
+   "adjustedMetrics": true,
+   "weather": true,
+   "scoreboard": true,
+   "livePlayByPlay": true,
+   "graphQl": false
+  }
+ }
+}', 200, '{}', '2026-01-01T00:00:21Z', now());
 
 -- The manifest labels this endpoint `info_usage`, not `info/usage`: src/ingest.fetch
 -- flattens the slash so the endpoint can be a directory name. Joining on the API path
 -- returns zero rows with no error, which is exactly how this model shipped broken once.
 INSERT INTO raw.raw_info_usage (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-11-001Z.json', '{
-  "status_code": 200, "params": {"days": "31", "limit": "50"},
-  "data": {"window": {"start": "2026-07-18T00:00:00.000Z", "end": "2026-08-18T00:00:00.000Z"},
-           "api": "cfb",
-           "totals": {"requests": 1967, "cfbRequests": 1967, "cbbRequests": 0,
-                      "uniqueEndpoints": 65},
-           "topEndpoints": [
-             {"api": "cfb", "endpoint": "/games", "requests": 324,
-              "lastUsedAt": "2026-08-18T00:00:00.000Z"},
-             {"api": "cfb", "endpoint": "/rankings", "requests": 203,
-              "lastUsedAt": "2026-08-17T00:00:00.000Z"}],
-           "recentRequests": []}
-  }', 200, '{"days": "31", "limit": "50"}', '2026-01-01T00:00:22Z', now());
+ "status_code": 200,
+ "params": {
+  "days": "31",
+  "limit": "50"
+ },
+ "data": {
+  "window": {
+   "start": "2026-07-18T00:00:00.000Z",
+   "end": "2026-08-18T00:00:00.000Z"
+  },
+  "api": "cfb",
+  "totals": {
+   "requests": 1967,
+   "cfbRequests": 1967,
+   "cbbRequests": 0,
+   "uniqueEndpoints": 65
+  },
+  "topEndpoints": [
+   {
+    "api": "cfb",
+    "endpoint": "/games",
+    "requests": 324,
+    "lastUsedAt": "2026-08-18T00:00:00.000Z"
+   },
+   {
+    "api": "cfb",
+    "endpoint": "/rankings",
+    "requests": 203,
+    "lastUsedAt": "2026-08-17T00:00:00.000Z"
+   }
+  ],
+  "recentRequests": []
+ }
+}', 200, '{"days": "31", "limit": "50"}', '2026-01-01T00:00:22Z', now());
 
 -- Warehouse telemetry, including a failed run: a failure burned warehouse time too,
 -- usually more, having paid the cold start before dying.
@@ -3708,15 +4023,55 @@ INSERT INTO raw.raw_model_prediction (source_file, model_version, prediction_ts,
 -- carries the collision so the dedup is exercised rather than assumed.
 INSERT INTO raw.raw_games_media (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-14-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024"},
-  "data": [
-    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
-     "mediaType": "tv", "outlet": "ABC"},
-    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
-     "mediaType": "tv", "outlet": "SEC Network"},
-    {"id": 9001, "season": 2024, "week": 1, "seasonType": "regular",
-     "mediaType": "web", "outlet": "ESPN+"}
-  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:26Z', now());
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "id": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "mediaType": "tv",
+   "outlet": "ABC",
+   "homeTeam": "Alpha State",
+   "awayTeam": "Beta Tech",
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "startTime": "2024-08-31T23:00:00.000Z",
+   "isStartTimeTBD": false
+  },
+  {
+   "id": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "mediaType": "tv",
+   "outlet": "SEC Network",
+   "homeTeam": "Alpha State",
+   "awayTeam": "Beta Tech",
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "startTime": "2024-08-31T23:00:00.000Z",
+   "isStartTimeTBD": false
+  },
+  {
+   "id": 9001,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "mediaType": "web",
+   "outlet": "ESPN+",
+   "homeTeam": "Alpha State",
+   "awayTeam": "Beta Tech",
+   "homeConference": "Test Conference",
+   "awayConference": "Test Conference",
+   "startTime": "2024-08-31T23:00:00.000Z",
+   "isStartTimeTBD": false
+  }
+ ]
+}', 200, '{"year": "2024"}', '2026-01-01T00:00:26Z', now());
 
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('games_media', '2026-01-01T00-00-14-001Z.json', '{"year": "2024"}', 200, 3, '2026-01-01T00:00:26Z', now());
