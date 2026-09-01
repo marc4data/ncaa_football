@@ -3953,7 +3953,13 @@ INSERT INTO raw.raw_stats_season (filename, content, status_code, params, fetche
     {"season": 2024, "team": "Beta Tech", "conference": "Test Conference",
      "statName": "firstDowns", "statValue": 180},
     {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
-     "statName": "possessionTime", "statValue": "31:12"}
+     "statName": "possessionTime", "statValue": "31:12"},
+    {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "statName": "firstDownsOpponent", "statValue": 190},
+    {"season": 2024, "team": "Beta Tech", "conference": "Test Conference",
+     "statName": "firstDownsOpponent", "statValue": 205},
+    {"season": 2024, "team": "Alpha State", "conference": "Test Conference",
+     "statName": "possessionTimeOpponent", "statValue": "28:48"}
   ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:24Z', now());
 
 -- dbt's own test outcomes, including a failure: the System Overview page exists to surface
@@ -3968,7 +3974,7 @@ INSERT INTO raw.raw_dbt_test_result
 
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('rankings',     '2026-01-01T00-00-12-001Z.json', '{"year": "2024"}', 200, 1, '2026-01-01T00:00:23Z', now()),
-('stats/season', '2026-01-01T00-00-13-001Z.json', '{"year": "2024"}', 200, 3, '2026-01-01T00:00:24Z', now());
+('stats/season', '2026-01-01T00-00-13-001Z.json', '{"year": "2024"}', 200, 6, '2026-01-01T00:00:24Z', now());
 
 -- Model predictions, in the pack's 42-column contract shape.
 --
