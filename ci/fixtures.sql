@@ -2187,6 +2187,31 @@ INSERT INTO raw.raw_game_box_advanced (filename, content, status_code, params, f
       "quarter3": null,
       "quarter4": 0
      }
+    },
+    {
+     "team": "Beta Tech",
+     "plays": 48,
+     "overall": {
+      "total": -0.223,
+      "quarter1": -0.112,
+      "quarter2": -0.335,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "passing": {
+      "total": 0.977,
+      "quarter1": 0.488,
+      "quarter2": 1.466,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "rushing": {
+      "total": -0.723,
+      "quarter1": -0.361,
+      "quarter2": -1.085,
+      "quarter3": null,
+      "quarter4": 0
+     }
     }
    ],
    "cumulativePpa": [

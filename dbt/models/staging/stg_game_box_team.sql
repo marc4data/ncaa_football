@@ -12,7 +12,15 @@
 -- for the blocks that happen to line up.
 --
 -- So each block is unnested independently and joined on (game_id, team). The join is by name
--- because the name is the only thing the API guarantees.
+-- because the name is the only thing the API guarantees.--
+-- CFBD SOMETIMES EMITS THE SAME TEAM TWICE INSIDE A BLOCK. Four games of 1,849 have a
+-- three-element `ppa` array for a two-team game — Eastern Michigan once and Saint Francis
+-- twice. The copies are byte-identical, so which survives does not matter, but joining eight
+-- blocks that each contain a duplicate multiplies: 2^7 = 128 rows for one (game, team).
+-- That is exactly what happened, and the grain sweep caught it on the first full build.
+--
+-- So each block is deduped to one row per (game, team) BEFORE the joins. Deduping after
+-- would be too late — the explosion happens in the join.
 --
 -- QUARTER SPLITS EVERYWHERE. ppa, cumulativePpa, successRates and explosiveness each carry
 -- total plus quarter1-4, so the metric names alone would collide four ways; the quarter is
@@ -51,33 +59,28 @@ latest as (
     from responses where recency = 1
 ),
 
-{#- One CTE per block. Verbose, and the alternative is a positional read that is wrong on the
-    games where CFBD orders a block differently — a failure that would affect two teams at a
-    time and look like a data quality problem in the source. #}
-ppa as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'ppa')) }} as b from latest
+{#- ONE CTE PER BLOCK, GENERATED AND DEDUPED.
+    Generated because eight near-identical CTEs invite a copy-paste error, and deduped
+    because CFBD sometimes emits the SAME TEAM TWICE inside a block. See the header. #}
+{% set blocks = ['ppa', 'cumulativePpa', 'successRates', 'explosiveness',
+                 'rushing', 'havoc', 'scoringOpportunities', 'fieldPosition'] %}
+
+{%- for block in blocks %}
+{{ snake_case(block) }} as (
+    select game_id, b
+    from (
+        select
+            game_id,
+            b,
+            row_number() over (partition by game_id, {{ json_get_string('b', 'team') }}) as copy
+        from (
+            select game_id, {{ json_array_elements(json_get_object('teams', block)) }} as b
+            from latest
+        ) exploded
+    ) ranked
+    where copy = 1
 ),
-cumulative_ppa as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'cumulativePpa')) }} as b from latest
-),
-success_rates as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'successRates')) }} as b from latest
-),
-explosiveness as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'explosiveness')) }} as b from latest
-),
-rushing as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'rushing')) }} as b from latest
-),
-havoc as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'havoc')) }} as b from latest
-),
-scoring_opportunities as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'scoringOpportunities')) }} as b from latest
-),
-field_position as (
-    select game_id, {{ json_array_elements(json_get_object('teams', 'fieldPosition')) }} as b from latest
-),
+{% endfor %}
 
 -- The spine: every (game, team) that appears in ANY block. A block missing for one team must
 -- not drop that team's row, so this is a union rather than a base table plus joins.
