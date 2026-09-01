@@ -139,6 +139,36 @@ DEFAULT_SERVING = [
     "srv_data_dictionary",
 ]
 
+# THE PLAYER TABLES PUBLISH ON A SLOWER CADENCE, AND THE REASON IS THE WIRE.
+#
+# These three are 608 MB of the serving schema's 932 MB. Including them takes a publish from
+# 59 MB to 182 MB gzipped — and the scores DAG publishes the whole serving schema EVERY TWO
+# HOURS over a link that is already this pipeline's failure point. 59 MB has taken 13 to 17
+# minutes when that link is busy, long enough for Airflow to disown the task as a zombie and
+# kill it mid-stream; on 29 August that left the site serving nothing for 46 minutes on a
+# game day. Tripling the payload would make that routine rather than occasional.
+#
+# Splitting is honest rather than merely cheap: player season totals, box scores and play
+# attributions change when games are played, not every two hours. The scores DAG exists to
+# move scores and lines quickly, and none of these three are that.
+#
+# Selective publishing needs no change to the fragile part. publish_schema already takes an
+# explicit table list, and the dump carries --clean --if-exists, which drops only the tables
+# IN the dump — so a hot publish leaves these three untouched rather than deleting them.
+HEAVY_SERVING = [
+    "srv_player_stats",
+    "srv_player_game_log",
+    "srv_player_play",
+]
+
+# What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,
+# which is exactly what it was before the player tables existed.
+HOT_SERVING = [t for t in DEFAULT_SERVING if t not in HEAVY_SERVING]
+
+# What a full publish ships. DEFAULT_SERVING stays the complete list so nothing that asks
+# for "everything" silently gets a subset.
+DEFAULT_SERVING = DEFAULT_SERVING + HEAVY_SERVING
+
 
 def local_pg_env() -> dict:
     env = os.environ.copy()
@@ -340,18 +370,27 @@ def publish_schema(tables: List[str], schema: str) -> None:
     verify(tables, schema)
 
 
-def publish_all(schemas: Optional[List[str]] = None) -> dict:
+def publish_all(schemas: Optional[List[str]] = None, hot: bool = False) -> dict:
     """Publish every contracted schema. The entry point Airflow calls.
 
     Returns a summary rather than printing only, so a task log carries the row counts that
     were verified. `verify` raises on any mismatch, so a green task means every table was
     counted on both sides and agreed — this is the last hop before a user sees data and,
     until it was scheduled, the only hop with no check on it at all.
+
+    `hot=True` publishes only the fast-moving serving views, which is what the two-hourly
+    scores refresh wants: the three player tables are 608 MB of the schema and change when
+    games are played, not every two hours. See HEAVY_SERVING.
     """
     schemas = schemas or ["marts", "serving"]
     published = {}
     for schema in schemas:
-        tables = DEFAULT_SERVING if schema == SERVING_SCHEMA else DEFAULT_MARTS
+        if schema == SERVING_SCHEMA:
+            # `hot` ships only the fast-moving views; see HEAVY_SERVING for why. The default
+            # stays the full list, so a caller that says nothing still gets everything.
+            tables = HOT_SERVING if hot else DEFAULT_SERVING
+        else:
+            tables = DEFAULT_MARTS
         publish_schema(tables, schema)
         published[schema] = len(tables)
     transport = "restricted publish key" if _use_restricted() else "root ssh"

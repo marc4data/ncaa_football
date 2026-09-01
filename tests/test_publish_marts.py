@@ -151,3 +151,42 @@ def test_the_compressed_restore_is_still_atomic():
     start = script.index("    restore-gz)")
     block = script[start:script.index(";;", start)]
     assert "--single-transaction" in block
+
+
+# --- the two-hourly publish must stay small ------------------------------------------------
+
+def test_the_heavy_player_tables_are_excluded_from_the_hot_publish():
+    """The scores DAG publishes serving every two hours, and the upload is the fragile step.
+
+    srv_player_stats, srv_player_game_log and srv_player_play are 608 MB of the serving
+    schema's 932 MB — measured, not estimated — and including them takes the payload from
+    59 MB to 182 MB gzipped. On a link where 59 MB has already taken 13 to 17 minutes, that
+    is the difference between an occasional zombie kill and a routine one.
+    """
+    from src import publish_marts
+    assert set(publish_marts.HOT_SERVING).isdisjoint(publish_marts.HEAVY_SERVING)
+    for table in ("srv_player_stats", "srv_player_game_log", "srv_player_play"):
+        assert table in publish_marts.HEAVY_SERVING
+        assert table not in publish_marts.HOT_SERVING
+
+
+def test_the_full_publish_still_ships_everything():
+    """Splitting must not quietly turn "publish everything" into a subset. A table that is in
+    neither list would never reach the site, and the failure would look like a stale page
+    rather than a missing publish."""
+    from src import publish_marts
+    assert (set(publish_marts.DEFAULT_SERVING)
+            == set(publish_marts.HOT_SERVING) | set(publish_marts.HEAVY_SERVING))
+
+
+def test_the_scores_dag_asks_for_the_hot_publish_and_the_weekly_one_does_not():
+    """The cadence split only works if the callers agree with it. Asserted on source because
+    both are lambdas inside a DAG definition."""
+    scores = Path(__file__).resolve().parents[1] / "dags" / "scores_refresh_dag.py"
+    weekly = Path(__file__).resolve().parents[1] / "dags" / "weekly_refresh_dag.py"
+    scores_src = _code(scores.read_text())
+    assert "hot=True" in scores_src, (
+        "the two-hourly publish must ship only the hot tables")
+    assert "hot=True" not in _code(weekly.read_text()), (
+        "the weekly publish is where the heavy player tables reach the site; if it also "
+        "asked for the hot set they would never be published at all")
