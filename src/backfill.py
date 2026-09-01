@@ -162,6 +162,20 @@ def seasons_for(endpoint: Endpoint, seasons: List[str], full_history: bool,
     """
     if full_history and endpoint.history == HISTORY_FULL and endpoint.min_season:
         return [str(y) for y in range(endpoint.min_season, current_season + 1)]
+
+    # MIN_SEASON IS A FLOOR IN EVERY PATH, NOT JUST UNDER --full-history.
+    #
+    # It used to apply only to the full-history expansion, so `--seasons 2024` would happily
+    # request a season an endpoint does not serve. For most of the registry that is harmless
+    # — their floors are all below 2024 — but the passing/* endpoints begin in 2025 and
+    # CFBD answers an out-of-range year with 200 AND AN EMPTY ARRAY, not a 404.
+    #
+    # A fetch like that succeeds, writes a file, records a 200 in the manifest, and produces
+    # an endpoint that looks landed and holds nothing. That is the exact shape the coverage
+    # matrix was taught to distinguish, arriving one layer earlier — and unlike a 400 it
+    # leaves no trace that anything was wrong.
+    if endpoint.min_season:
+        return [s for s in seasons if int(s) >= endpoint.min_season]
     return seasons
 
 

@@ -84,10 +84,24 @@ def test_landed_but_unread_endpoints_are_distinguished_from_never_fetched():
 
 def test_unregistered_endpoints_are_reported_as_such():
     """Ranked worst-first, an endpoint we have not decided about should not be able to hide
-    behind an endpoint we have."""
-    rows = {r.path: r for r in cm.build_rows(spec(), {})}
-    assert rows["passing/plays"].status == "unregistered"
-    assert rows["passing/plays"].endpoint is None
+    behind an endpoint we have.
+
+    SYNTHETIC, BECAUSE THERE ARE NO UNREGISTERED ENDPOINTS LEFT. This asserted on
+    `passing/plays`, which was genuinely unregistered until Priority 6 registered all five
+    passing paths — every path the spec serves is now in src/endpoints.py. The status still
+    has to work the day CFBD ships a sixth, so the case is constructed rather than borrowed
+    from a real gap that no longer exists.
+    """
+    invented = "totally/new/endpoint"
+    doc = spec()
+    doc.doc["paths"]["/" + invented] = doc.doc["paths"]["/venues"]
+    rows = {r.path: r for r in cm.build_rows(doc, {})}
+    assert rows[invented].status == "unregistered"
+    assert rows[invented].endpoint is None
+
+    # And nothing real is unregistered any more, which is the state worth pinning.
+    real = {r.path for r in cm.build_rows(spec(), {}) if r.status == "unregistered"}
+    assert not real, f"the spec serves endpoints nobody has decided about: {sorted(real)}"
 
 
 def test_every_spec_endpoint_gets_a_row():
