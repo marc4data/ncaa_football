@@ -2221,3 +2221,78 @@ models:
           than becoming false. "0.00 in" reads as a measurement; this reads as an answer.
       - name: as_of_ts
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_team_roster
+    description: >
+      Team page, Roster section. One row per player on a team's roster in a season — 68,357
+      rows across 2024-2026, which is every season cfdb holds a roster feed for. A 2019 team
+      page has no roster and says so, because /roster is `recent` scope and that is not a
+      defect.
+      Straight off dim_athlete with no aggregation: the dimension's grain is already
+      (season, player, team), which is exactly a roster. It is its own view rather than
+      columns on srv_team_overview because that is one row per team-season and this is many —
+      a different grain is a different relation.
+    columns:
+      - name: athlete_sk
+        description: Surrogate key from dim_athlete over (season, player, team) — the grain.
+      - name: season
+        description: Season the roster row belongs to. 2024 onward.
+      - name: player_id
+        description: CFBD athlete id, shared with every player fact.
+      - name: player_slug
+        description: >
+          URL-safe identifier carrying name AND player id, so a roster row links to the right
+          one of nine Jayden Williamses.
+      - name: full_name
+        description: First and last name joined, trimmed.
+      - name: first_name
+        description: Given name as the roster feed publishes it.
+      - name: last_name
+        description: Family name as the roster feed publishes it.
+      - name: team
+        description: Team name as the roster feed gave it.
+      - name: team_id
+        description: >
+          CFBD team id; null for the 321 NAIA and Division II programmes absent from /teams.
+      - name: team_slug
+        description: >
+          URL-safe team identifier, and what the Team page filters on. Falls back to a slug
+          of the roster's own team name where dim_team has no row.
+      - name: team_display
+        description: Team display name.
+      - name: conference
+        description: Conference affiliation for that season; null for unlisted teams.
+      - name: classification
+        description: Division for that season; null for unlisted teams.
+      - name: is_listed_team
+        description: >
+          Whether dim_team had a row. FALSE marks a non-FBS programme rather than a broken
+          join.
+      - name: position
+        description: Listed position; null on 2,450 rows where the feed omits it.
+      - name: jersey
+        description: Jersey number; null on 3,177 rows where the feed omits it.
+      - name: class_year
+        description: >
+          Academic class as 1-4, or null. CFBD sometimes sends the season in this field
+          instead — see dim_athlete.class_year_raw — and anything outside 1-4 is treated as
+          unknown rather than mapped.
+      - name: class_year_display
+        description: 'FR, SO, JR or SR; null wherever the class is unknown.'
+      - name: height_inches
+        description: Listed height in inches; null on 2,808 rows.
+      - name: height_display
+        description: Height as feet-inches, e.g. "6-2", assembled upstream.
+      - name: weight_pounds
+        description: Listed weight in pounds; null on 3,013 rows.
+      - name: home_city
+        description: Home town city.
+      - name: home_state
+        description: Home town state or province.
+      - name: hometown_display
+        description: >
+          "City, State" where both exist, otherwise whichever does, otherwise null — never a
+          lone comma, so the page renders an em dash rather than stray punctuation.
+      - name: as_of_ts
+        description: AC-G.35. Last load of the `team` domain, rendered instead of now().

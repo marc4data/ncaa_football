@@ -65,6 +65,7 @@ def body(page) -> None:
         _overview(row)
     with tabs[1]:
         _game_log(season, row.get('team_display'))
+        _roster(season, row.get("team_slug"))
     with tabs[2]:
         _ratings(season, row.get("team_display"))
     with tabs[3]:
@@ -280,6 +281,41 @@ def _game_log(season, team_display) -> None:
                 # AC-8.7: game log rows click through to the Matchup.
                 link_builder=lambda r: params.link("matchup", game_id=r["game_id"],
                                                    season=season)))
+
+
+def _roster(season, team_slug) -> None:
+    """The roster, from srv_team_roster.
+
+    Rosters are `recent` scope — 2024 onward — so a 2019 team page has none. The Empty state
+    says which, because "no roster recorded" and "we do not collect rosters for that season"
+    are different statements and only one of them is true here.
+    """
+    st.subheader("Roster")
+    with states.section("srv_team_roster"):
+        df = query("""
+            select player_slug, full_name, position, jersey, class_year_display,
+                   height_display, weight_pounds, hometown_display, as_of_ts
+            from srv_team_roster
+            where season = :season and team_slug = :team_slug
+            order by position, jersey
+            limit 250
+        """, {"season": season, "team_slug": team_slug})
+        states.render_or_state(
+            df, "srv_team_roster",
+            "This team's roster would be here.",
+            f"Rosters are collected from 2024 onward, so there is none for {season}."
+            if season < 2024 else "No roster recorded for this team-season.",
+            renderer=lambda d: table.render(d, [
+                Col("jersey", "#", "num", dp=0),
+                Col("full_name", "Player"),
+                Col("position", "Pos"),
+                Col("class_year_display", "Class"),
+                Col("height_display", "Ht"),
+                Col("weight_pounds", "Wt", "num", dp=0),
+                Col("hometown_display", "Hometown"),
+            ], caption="srv_team_roster",
+                link_builder=lambda r: params.link("players", q=r["full_name"],
+                                                   player=r["player_slug"], season=season)))
 
 
 def render() -> None:
