@@ -38,6 +38,9 @@ from .endpoints import (
 from .raw_manifest import RawManifest
 
 # Play-by-play and drive detail are scoped to these seasons only, per CLAUDE.md's data scope.
+# The classification value CFBD uses for the top division, on both sides of a game.
+FBS = "fbs"
+
 PBP_SEASONS = {"2024", "2025", "2026"}
 PBP_ENDPOINTS = {"plays", "plays/stats", "drives"}
 
@@ -113,10 +116,26 @@ def season_weeks(season: str) -> Dict[str, List[str]]:
 
 
 def completed_game_ids(season: str) -> List[str]:
-    """Game ids for a season, read from already-landed /games responses.
+    """FBS game ids for a season, read from already-landed /games responses.
 
     Per-game fan-out depends on the bulk sweep having run first; that ordering is
     deliberate, so the expensive step can never run against a guess.
+
+    FBS ONLY, AND THAT IS THE DIFFERENCE BETWEEN 1,853 CALLS AND 7,630.
+
+    CFBD's /games covers every division: 3,799 completed games in 2024, of which 919 involve
+    an FBS team. Fanning out over all of them would spend four times the quota on divisions
+    this project does not model — CLAUDE.md's scope is the FBS spine, with non-FBS opponents
+    existing as dim_team stubs and no deep stats.
+
+    "INVOLVES AN FBS TEAM", NOT "BOTH TEAMS FBS". An FBS team's September game against an FCS
+    opponent is one of its games and belongs in its record, its box score and its advanced
+    stats. Requiring both sides would drop 247 such games across 2024-2025 and leave holes in
+    the schedule of every team that played one — a gap that reads as missing data rather than
+    as a scope decision. The looser rule costs 247 extra calls and keeps the spine complete.
+
+    A game with NEITHER side FBS is skipped outright: two Division III teams playing each
+    other is not part of this warehouse at any grain.
     """
     ids: List[str] = []
     for season_type in SEASON_TYPES:
@@ -124,8 +143,11 @@ def completed_game_ids(season: str) -> List[str]:
         if not payload:
             continue
         for game in payload:
-            if game.get("completed"):
-                ids.append(str(game["id"]))
+            if not game.get("completed"):
+                continue
+            if FBS not in (game.get("homeClassification"), game.get("awayClassification")):
+                continue
+            ids.append(str(game["id"]))
     return ids
 
 
