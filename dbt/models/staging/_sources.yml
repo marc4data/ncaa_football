@@ -123,6 +123,42 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_plays
+        description: >
+          CFBD /plays. 619,113 plays across 2024-2026 — the highest-volume table in the
+          project by an order of magnitude, and 127 MB. `clock` is an OBJECT of minutes and
+          seconds; ids are eighteen-digit STRINGS.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_plays_stats
+        description: >
+          CFBD /plays/stats. The bridge from a play to the athletes in it. Several rows per
+          play is normal — a completed pass produces a passer, a receiver and a reception.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_drives
+        description: >
+          CFBD /drives. The layer between a game and its plays. Start and end blocks are
+          symmetric; `isHomeOffense` is the only link to home/away on the payload.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_plays_types
+        description: >
+          CFBD /plays/types. 49 play types. The controlled list behind stg_play.play_type,
+          which stores the `text` form.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_plays_stats_types
+        description: >
+          CFBD /plays/stats/types. 26 stat types. Keyed `name` where the play types use
+          `text` — two vocabularies from one API, spelled two ways.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_games_media
         description: >
           CFBD /games/media — broadcast outlet per game per media type. Landed since the

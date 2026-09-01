@@ -270,6 +270,26 @@ CREATE TABLE IF NOT EXISTS raw.raw_playoffs_cfp_participants (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_plays (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_drives (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_plays_stats (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_plays_types (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_plays_stats_types (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -300,6 +320,8 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_roster, raw.raw_conferences_affiliations,
          raw.raw_conferences_changes, raw.raw_playoffs_cfp,
          raw.raw_playoffs_cfp_games, raw.raw_playoffs_cfp_participants,
+         raw.raw_plays, raw.raw_drives, raw.raw_plays_stats,
+         raw.raw_plays_types, raw.raw_plays_stats_types,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -1828,6 +1850,265 @@ INSERT INTO raw.raw_playoffs_cfp_participants (filename, content, status_code, p
  ]
 }', 200, '{"year": "2024"}',
   '2026-01-01T00:01:09Z', now());
+
+INSERT INTO raw.raw_plays (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-58-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "driveId": "90011",
+   "id": "9001101849908",
+   "driveNumber": 1,
+   "playNumber": 2,
+   "offense": "Alpha State",
+   "offenseConference": "Test Conference",
+   "offenseScore": 0,
+   "defense": "Beta Tech",
+   "defenseConference": "Test Conference",
+   "defenseScore": 0,
+   "home": "Alpha State",
+   "away": "Beta Tech",
+   "period": 1,
+   "clock": {
+    "minutes": 15,
+    "seconds": 0
+   },
+   "offenseTimeouts": 3,
+   "defenseTimeouts": 3,
+   "yardline": 25,
+   "yardsToGoal": 75,
+   "down": 1,
+   "distance": 10,
+   "yardsGained": 14,
+   "scoring": false,
+   "playType": "Pass Reception",
+   "playText": "A. Passer pass complete to E. Receiver for 14 yds",
+   "ppa": 1.2227,
+   "wallclock": "2024-08-31T20:04:24.000Z"
+  },
+  {
+   "gameId": 9001,
+   "driveId": "90011",
+   "id": "9001101849909",
+   "driveNumber": 1,
+   "playNumber": 3,
+   "offense": "Alpha State",
+   "offenseConference": "Test Conference",
+   "offenseScore": 0,
+   "defense": "Beta Tech",
+   "defenseConference": "Test Conference",
+   "defenseScore": 0,
+   "home": "Alpha State",
+   "away": "Beta Tech",
+   "period": 1,
+   "clock": {
+    "minutes": 9,
+    "seconds": 0
+   },
+   "offenseTimeouts": 3,
+   "defenseTimeouts": 3,
+   "yardline": 39,
+   "yardsToGoal": 61,
+   "down": 1,
+   "distance": 10,
+   "yardsGained": 61,
+   "scoring": true,
+   "playType": "Passing Touchdown",
+   "playText": "A. Passer pass complete to E. Receiver for 61 yds for a TD",
+   "ppa": 5.8,
+   "wallclock": "2024-08-31T20:14:02.000Z"
+  }
+ ]
+}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:01:10Z', now());
+
+INSERT INTO raw.raw_drives (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-59-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "id": "90011",
+   "gameId": 9001,
+   "offense": "Alpha State",
+   "offenseConference": "Test Conference",
+   "defense": "Beta Tech",
+   "defenseConference": "Test Conference",
+   "driveNumber": 1,
+   "scoring": true,
+   "startPeriod": 1,
+   "startYardline": 25,
+   "startYardsToGoal": 75,
+   "startTime": {
+    "minutes": 15,
+    "seconds": 0
+   },
+   "endPeriod": 1,
+   "endYardline": 100,
+   "endYardsToGoal": 0,
+   "endTime": {
+    "minutes": 9,
+    "seconds": 0
+   },
+   "elapsed": {
+    "minutes": 6,
+    "seconds": 0
+   },
+   "plays": 3,
+   "yards": 75,
+   "driveResult": "TD",
+   "isHomeOffense": true,
+   "startOffenseScore": 0,
+   "startDefenseScore": 0,
+   "endOffenseScore": 7,
+   "endDefenseScore": 0
+  }
+ ]
+}', 200, '{"year": "2024", "seasonType": "regular"}',
+  '2026-01-01T00:01:11Z', now());
+
+INSERT INTO raw.raw_plays_stats (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-00-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "season": 2024,
+   "week": 1,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "opponent": "Beta Tech",
+   "teamScore": 0,
+   "opponentScore": 0,
+   "driveId": "90011",
+   "playId": "9001101849908",
+   "period": 1,
+   "clock": {
+    "minutes": 15,
+    "seconds": 0
+   },
+   "yardsToGoal": 75,
+   "down": 1,
+   "distance": 10,
+   "athleteId": "1001",
+   "athleteName": "A. Passer",
+   "statType": "Completion",
+   "stat": 1
+  },
+  {
+   "gameId": 9001,
+   "season": 2024,
+   "week": 1,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "opponent": "Beta Tech",
+   "teamScore": 0,
+   "opponentScore": 0,
+   "driveId": "90011",
+   "playId": "9001101849908",
+   "period": 1,
+   "clock": {
+    "minutes": 15,
+    "seconds": 0
+   },
+   "yardsToGoal": 75,
+   "down": 1,
+   "distance": 10,
+   "athleteId": "1004",
+   "athleteName": "E. Receiver",
+   "statType": "Reception",
+   "stat": 1
+  },
+  {
+   "gameId": 9001,
+   "season": 2024,
+   "week": 1,
+   "team": "Alpha State",
+   "conference": "Test Conference",
+   "opponent": "Beta Tech",
+   "teamScore": 0,
+   "opponentScore": 0,
+   "driveId": "90011",
+   "playId": "9001101849908",
+   "period": 1,
+   "clock": {
+    "minutes": 15,
+    "seconds": 0
+   },
+   "yardsToGoal": 75,
+   "down": 1,
+   "distance": 10,
+   "athleteId": "1004",
+   "athleteName": "E. Receiver",
+   "statType": "Yards",
+   "stat": 14
+  }
+ ]
+}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:01:12Z', now());
+
+INSERT INTO raw.raw_plays_types (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-01-001Z.json', '{
+ "status_code": 200,
+ "params": {},
+ "data": [
+  {
+   "id": 5,
+   "text": "Rush",
+   "abbreviation": "RUSH"
+  },
+  {
+   "id": 24,
+   "text": "Pass Reception",
+   "abbreviation": "REC"
+  },
+  {
+   "id": 67,
+   "text": "Passing Touchdown",
+   "abbreviation": "PTD"
+  }
+ ]
+}', 200, '{}',
+  '2026-01-01T00:01:13Z', now());
+
+INSERT INTO raw.raw_plays_stats_types (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-02-001Z.json', '{
+ "status_code": 200,
+ "params": {},
+ "data": [
+  {
+   "id": 1,
+   "name": "Incompletion"
+  },
+  {
+   "id": 4,
+   "name": "Completion"
+  },
+  {
+   "id": 5,
+   "name": "Reception"
+  },
+  {
+   "id": 8,
+   "name": "Yards"
+  }
+ ]
+}', 200, '{}',
+  '2026-01-01T00:01:14Z', now());
 
 INSERT INTO raw.raw_manifest
   (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES

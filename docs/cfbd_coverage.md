@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 53 | every field the spec publishes is exposed as a column |
+| complete | 58 | every field the spec publishes is exposed as a column |
 | partial | 6 | a staging model exists but drops fields |
-| raw only | 5 | responses have landed; nothing reads them |
+| raw only | 0 | responses have landed; nothing reads them |
 | no raw data | 10 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 696 of 1191 (58.4%).** That percentage is the product gap in one number.
+**Fields exposed: 773 of 1191 (64.9%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -40,7 +40,7 @@ sweep can invent.
 | `draft/picks` | swept | 60 | `stg_draft_pick` | 24/24 | complete |
 | `draft/positions` | swept | 1 | `stg_draft_position` | 2/2 | complete |
 | `draft/teams` | swept | 1 | `stg_nfl_team` | 4/4 | complete |
-| `drives` | swept | 14 | — | 0/24 | raw only |
+| `drives` | swept | 14 | `stg_drive` | 24/24 | complete |
 | `game/box/advanced` | CLI | — | — | 0/34 | no raw data |
 | `games` | swept | 342 | `stg_games` | 19/41 | partial |
 | `games/media` | swept | 8 | `stg_game_media` | 6/12 | partial |
@@ -67,10 +67,10 @@ sweep can invent.
 | `playoffs/cfp` | swept | 2 | `stg_cfp_bracket` | 8/34 | partial |
 | `playoffs/cfp/games` | swept | 2 | `stg_cfp_matchup` | 19/19 | complete |
 | `playoffs/cfp/participants` | swept | 2 | `stg_cfp_participant` | 12/12 | complete |
-| `plays` | swept | 43 | — | 0/28 | raw only |
-| `plays/stats` | swept | 43 | — | 0/20 | raw only |
-| `plays/stats/types` | swept | 1 | — | 0/2 | raw only |
-| `plays/types` | swept | 1 | — | 0/3 | raw only |
+| `plays` | swept | 43 | `stg_play` | 28/28 | complete |
+| `plays/stats` | swept | 43 | `stg_play_stat` | 20/20 | complete |
+| `plays/stats/types` | swept | 1 | `stg_play_stat_type` | 2/2 | complete |
+| `plays/types` | swept | 1 | `stg_play_type` | 3/3 | complete |
 | `ppa/games` | swept | 13 | `stg_game_team_ppa` | 13/13 | complete |
 | `ppa/players/games` | swept | 43 | `stg_player_game_ppa` | 11/11 | complete |
 | `ppa/players/season` | swept | 25 | `stg_player_season_ppa` | 14/14 | complete |

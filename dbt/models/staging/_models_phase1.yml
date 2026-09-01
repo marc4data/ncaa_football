@@ -1017,6 +1017,102 @@ models:
           The bracket EDGE — which matchup the winner feeds. Without it this is a list of
           games rather than a tree.
 
+  - name: stg_play
+    description: >
+      Play-by-play, one row per play. 619,113 plays across 2024-2026 — the highest-volume
+      model in the project by an order of magnitude.
+      A VIEW DELIBERATELY: a full unnest with field extraction measures 2.4s on the droplet,
+      cheap while nothing consumes it. THE FIRST MART THAT READS THIS TWICE SHOULD MATERIALIZE
+      IT AS A TABLE — re-inlining a 619k-row unnest per reference is what made fct_game fail
+      to finish in 22 minutes when stg_games was still a view.
+      Scope is 2024-2026 by the DATA, not a filter: CLAUDE.md limits play-by-play to those
+      seasons and the backfill honoured it, so a predicate here would encode the rule twice.
+    columns:
+      - name: play_id
+        description: >
+          Eighteen digits, kept as TEXT. CFBD never promised it is numeric, and it is past
+          comfortable range for anything narrower than a bigint.
+        data_tests: [not_null]
+      - name: game_id
+        description: Typed as bigint — this is the join to stg_games.
+        data_tests: [not_null]
+      - name: drive_id
+        description: String, joins to stg_drive.drive_id.
+      - name: clock_seconds
+        description: >
+          Derived from the minutes/seconds object so plays order within a period. Text
+          ordering puts 9:00 after 12:50.
+      - name: is_scoring_play
+        description: Marks the play that SCORED, not whether the game had scoring.
+      - name: ppa
+        description: Predicted points added for this play.
+
+  - name: stg_drive
+    description: >
+      Drives, one row per drive — the layer between a game and its plays. Start and end
+      blocks are symmetric and generated from one list, so `end_yardline` reading
+      `start.yardline` is unrepresentable.
+    columns:
+      - name: drive_id
+        description: String, joins to stg_play.drive_id.
+        data_tests: [not_null]
+      - name: game_id
+        data_tests: [not_null]
+      - name: start_yardline
+        description: >
+          Field position from one end; `start_yards_to_goal` measures the same spot from the
+          other. Both kept — which is "the" position depends on whose drive it is.
+      - name: is_home_offense
+        description: >
+          THE ONLY LINK TO HOME AND AWAY on this payload. The drive names its offense and
+          defense by school, never as home or away.
+      - name: elapsed_seconds
+        description: >
+          Total drive length in seconds, derived from the mm:ss object for the same reason
+          stg_play carries clock_seconds. The raw components are elapsed_minutes and
+          elapsed_seconds_part.
+
+  - name: stg_play_stat
+    description: >
+      Play-level stat lines, one row per (play, athlete, stat type) — the structured version
+      of stg_play.play_text. SEVERAL ROWS PER PLAY IS NORMAL: a completed pass produces a
+      passer, a receiver and a reception. Between this, stg_play and stg_drive a play can be
+      traced from its drive to the people in it with no name comparison, which is rare here.
+    columns:
+      - name: play_id
+        description: Joins to stg_play.play_id; both strings.
+        data_tests: [not_null]
+      - name: athlete_id
+        data_tests: [not_null]
+      - name: stat_type
+        description: Joins to stg_play_stat_type.stat_type.
+        data_tests: [not_null]
+      - name: stat
+        description: >
+          A NUMBER here, unlike the box-score models where every value is a string — this
+          endpoint reports one measure per row rather than a compound like "4-9".
+
+  - name: stg_play_type
+    description: >
+      The play type vocabulary, 49 rows. The controlled list behind stg_play.play_type, which
+      stores the `text` form. Also the only source of a play type's id and abbreviation,
+      neither of which stg_play carries.
+    columns:
+      - name: play_type_id
+        data_tests: [not_null, unique]
+      - name: play_type
+        description: The `text` form, which is what stg_play.play_type stores.
+
+  - name: stg_play_stat_type
+    description: >
+      The play-stat type vocabulary, 26 rows. Keyed `name` on the wire where the play types
+      use `text`, and with no abbreviation — two vocabularies from one API, spelled two ways.
+    columns:
+      - name: stat_type_id
+        data_tests: [not_null, unique]
+      - name: stat_type
+        description: Joins to stg_play_stat.stat_type.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated
