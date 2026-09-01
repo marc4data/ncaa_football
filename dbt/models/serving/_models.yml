@@ -2376,3 +2376,78 @@ models:
           the boundaries are named here so no page picks different ones.
       - name: as_of_ts
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_edge_bucket_performance
+    description: >
+      Edge Finder, track record. One row per model x version x split x market x edge bucket:
+      how often the model's pick was right, grouped by how big the edge it claimed was.
+      THE QUESTION THE SLIDER RAISES AND CANNOT ANSWER. The page lets a reader filter to
+      edges above some size; without this, that filter implies bigger is better. The measured
+      answer is that it is not — spread hit rates run 41.6% to 52.1% with no relationship to
+      edge size, against a 52.38% break-even.
+      FILTER ON market. A spread edge is in points and a moneyline edge is a probability;
+      they are stacked long because bucketing them on one scale would produce a table that
+      sorts but does not mean anything.
+    columns:
+      - name: edge_bucket_sk
+        description: >
+          Surrogate key over (model_name, model_version, split, market, edge_bucket) — the grain.
+      - name: model_name
+        description: Name of the model whose picks are being scored.
+      - name: model_version
+        description: Version of that model. Part of the grain — versions are never merged.
+      - name: model_family
+        description: Broader family the model belongs to.
+      - name: split
+        description: Data split — a train-split hit rate is not a claim about the future.
+      - name: market
+        description: '`spread` or `moneyline`. The column every consumer must filter on.'
+      - name: edge_unit
+        description: >
+          `points` for spread rows, `probability` for moneyline. Carried because the two are
+          not comparable and must never be ranked against each other.
+      - name: edge_bucket
+        description: >
+          The edge-size band, in the market's own unit — "3-5 pts" or "5-10 pp". Boundaries
+          are conventional round numbers rather than quantiles of this dataset: quantile
+          buckets would move on every re-score, so a bucket's meaning would change under a
+          reader who had learned it.
+      - name: bucket_order
+        description: Display order for the bands, so a page sorts them without parsing labels.
+      - name: bucket_games
+        description: >
+          Graded games in the band. NO RATE HERE IS READABLE WITHOUT IT — the whole fact is
+          1,106 graded cover predictions across six models, so individual cells hold tens of
+          games rather than thousands.
+      - name: bucket_hits
+        description: >
+          Games where the MODEL'S OWN PICK was right, not where the home team won. That is
+          what makes a hit rate below 50% meaningful rather than a home-field artefact.
+      - name: hit_rate_pct
+        description: '`bucket_hits` over `bucket_games` as a percentage, to 1 decimal place.'
+      - name: edge_over_break_even_pct
+        description: >
+          Hit rate minus 52.38%, the break-even against a standard -110 spread price.
+          NULL FOR MONEYLINE ON PURPOSE: those bets are priced per game, so a 77% hit rate on
+          heavy favourites can lose money and subtracting a fixed threshold from it would be
+          a confident, meaningless number.
+      - name: mean_edge_magnitude
+        description: Average absolute edge within the band, in the market's own unit.
+      - name: is_thin_sample
+        description: >
+          Whether the band holds fewer than 30 graded games. Thirty is a CONVENTION, not a
+          statistical claim, and it is named in one place so no page can quietly pick a
+          friendlier threshold. Thin cells are marked rather than dropped — a 50% rate over
+          18 games is not evidence, and hiding it would be a different dishonesty from
+          overstating it.
+      - name: out_of_sample_games
+        description: >
+          How many of the band's games fell outside the model's training weeks. A band made
+          largely of extrapolated predictions is weaker evidence than its n suggests.
+      - name: attribution
+        description: >
+          Licence-required attribution from dim_model_version, carried as data so a page
+          cannot render these rates without it.
+      - name: as_of_ts
+        description: AC-G.35. Last load of the `prediction` domain, rendered instead of now().
