@@ -171,6 +171,34 @@ REGISTRY: List[Endpoint] = [
     Endpoint("draft/picks", SEASON, BUCKET_STRUCTURAL, history=HISTORY_FULL, min_season=1967),
     Endpoint("talent", SEASON, BUCKET_STRUCTURAL),
 
+    # ---- Passing detail: new in spec v5.25.0, 2025 onward --------------------------
+    #
+    # Five endpoints CFBD added after this registry was first written by hand from v5.24.0.
+    # They surfaced the day the spec was vendored and a test started failing on paths that
+    # were served and unregistered — which is the whole reason the spec is committed.
+    #
+    # `include=False`: CLI backfill only. Not because they are expensive — the season-grain
+    # pair is two calls — but because passing/plays returns 7,396 rows and 5.9 MB for a
+    # SINGLE WEEK, and putting that in the default sweep would change what the weekly refresh
+    # costs without anybody deciding to.
+    #
+    # min_season=2025 IS PROBED, NOT ASSUMED. 2022, 2023 and 2024 all answer 200 with an
+    # EMPTY ARRAY rather than 404, so a backfill of those years would write files, record
+    # successes, and produce endpoints that look landed and hold nothing. seasons_for now
+    # floors on min_season in every path for exactly this.
+    Endpoint("passing/players/season", SEASON, BUCKET_REVISIONIST, include=False,
+             min_season=2025, note="passer production by season; 820 rows for 2025"),
+    Endpoint("passing/teams/season", SEASON, BUCKET_REVISIONIST, include=False,
+             min_season=2025, note="team passing production by season"),
+    Endpoint("passing/players/games", SEASON_WEEK, BUCKET_IMMUTABLE_WK, include=False,
+             min_season=2025, note="passer production by game"),
+    Endpoint("passing/teams/games", SEASON_WEEK, BUCKET_IMMUTABLE_WK, include=False,
+             min_season=2025, note="team passing production by game"),
+    # WEEK-SCOPED BECAUSE OF ITS SIZE, matching plays and plays/stats. A season-scoped fetch
+    # would be roughly 118,000 rows and 94 MB in one response.
+    Endpoint("passing/plays", SEASON_WEEK, BUCKET_IMMUTABLE_WK, include=False,
+             min_season=2025, note="enriched pass attempts; 7,396 rows/week"),
+
     # ---- Per-game fan-out: opt-in only ---------------------------------------------
     Endpoint("game/box/advanced", PER_GAME, BUCKET_IMMUTABLE_WK, include=False,
              extra={"id_param": "id"}, note="one call per game"),

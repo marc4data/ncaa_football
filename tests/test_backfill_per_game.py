@@ -70,3 +70,49 @@ def test_without_the_flag_nothing_fans_out(monkeypatch):
     monkeypatch.setattr(backfill, "load_latest_raw", lambda *_a, **_k: _games(
         (8, True, "fbs", "fbs")))
     assert backfill.requests_for(BY_PATH["metrics/wp"], ["2024"], per_game=False) == []
+
+
+# --- min_season is a floor in every path ---------------------------------------------------
+
+def test_min_season_floors_a_normal_backfill():
+    """AN OUT-OF-RANGE YEAR IS A 200 WITH AN EMPTY ARRAY, NOT A 404.
+
+    The passing/* endpoints begin in 2025 — probed, not assumed: 2022, 2023 and 2024 all
+    answer 200 with zero rows. Without a floor, `--seasons 2024` would write a file, record a
+    success in the manifest, and leave an endpoint that looks landed and holds nothing. That
+    is the exact confusion the coverage matrix's "raw only" vs "no raw data" split exists to
+    prevent, arriving one layer earlier — and unlike a 400 it leaves no trace.
+
+    min_season used to apply only under --full-history, which is why this could happen.
+    """
+    passing = BY_PATH["passing/plays"]
+    assert passing.min_season == 2025
+    assert backfill.seasons_for(passing, ["2024", "2025", "2026"],
+                                full_history=False, current_season=2026) == ["2025", "2026"]
+    assert backfill.seasons_for(passing, ["2024"],
+                                full_history=False, current_season=2026) == []
+
+
+def test_the_floor_does_not_disturb_endpoints_that_predate_it():
+    """Every other floor in the registry sits below the project's 2024 default, so this
+    change must be a no-op for them — the guard is against a silent narrowing."""
+    games = BY_PATH["games"]
+    assert games.min_season == 1869
+    assert backfill.seasons_for(games, ["2024", "2025"],
+                                full_history=False, current_season=2026) == ["2024", "2025"]
+
+
+def test_an_endpoint_with_no_floor_takes_the_seasons_as_given():
+    lines = BY_PATH["lines"]
+    assert lines.min_season is None
+    assert backfill.seasons_for(lines, ["2024", "2025"],
+                                full_history=False, current_season=2026) == ["2024", "2025"]
+
+
+def test_the_passing_endpoints_stay_out_of_the_default_sweep():
+    """passing/plays is 7,396 rows and 5.9 MB for one week. In the sweep it would change what
+    the weekly refresh costs without anybody deciding to."""
+    for path in ("passing/players/season", "passing/teams/season", "passing/players/games",
+                 "passing/teams/games", "passing/plays"):
+        assert BY_PATH[path].include is False, path
+        assert BY_PATH[path].min_season == 2025, path

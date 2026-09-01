@@ -22,13 +22,15 @@ SPEC_PATH = ROOT / "config" / "api-docs.json"
 # The five `passing/*` endpoints arrived in v5.25.0 and are Priority 6 of prompt 029: they get
 # registered with `include=False` and a 2025 floor, backfilled from the CLI rather than swept.
 # They are listed here so that a SIXTH new endpoint still fails this test.
-UNREGISTERED_ON_PURPOSE = {
-    "passing/players/games": "new in 5.25.0 — prompt 029 Priority 6, CLI backfill 2025+2026",
-    "passing/players/season": "new in 5.25.0 — prompt 029 Priority 6, CLI backfill 2025+2026",
-    "passing/plays": "new in 5.25.0 — prompt 029 Priority 6, CLI backfill 2025+2026",
-    "passing/teams/games": "new in 5.25.0 — prompt 029 Priority 6, CLI backfill 2025+2026",
-    "passing/teams/season": "new in 5.25.0 — prompt 029 Priority 6, CLI backfill 2025+2026",
-}
+# EMPTY, AND THAT IS THE GOAL STATE. Every path the spec serves is registered.
+#
+# The five passing/* endpoints lived here from the day the spec was vendored — that is what
+# surfaced them — until Priority 6 registered them, at which point the "registered AND
+# skipped" check below failed and sent me here. Both halves of the guard did their job.
+#
+# An entry belongs here only when the endpoint is served, known about, and deliberately not
+# registered, with the reason written down. It is not a place to park work.
+UNREGISTERED_ON_PURPOSE: dict = {}
 
 
 def spec() -> dict:
