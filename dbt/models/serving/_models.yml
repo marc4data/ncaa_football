@@ -1898,3 +1898,236 @@ models:
         description: AC-G.41. Licence-required attribution travelling as data.
       - name: as_of_ts
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_player_stats
+    description: >
+      Players page, season stats. One row per player x season x category x stat type, long
+      for the reason srv_team_stats is long — CFBD's stat types are open-ended and a wide
+      table would silently omit whatever it adds next.
+      Runs back to 2004, twenty seasons deeper than the game log and the drill-down, because
+      /stats/player/season is `full` scope while box scores and plays are `recent`.
+      PUBLISHED ON THE WEEKLY CADENCE, not the two-hourly one — this table and its two
+      siblings are 608 MB of the serving schema and would triple the payload on the link that
+      is the pipeline's failure point. See HEAVY_SERVING in src/publish_marts.py.
+    columns:
+      - name: player_season_stat_sk
+        description: Surrogate key over (season, player, category, stat type) — the grain.
+      - name: season
+        description: Season the totals cover. 2004 onward.
+      - name: player_id
+        description: CFBD athlete id, shared with the game log and the drill-down.
+      - name: player_slug
+        description: >
+          URL-safe identifier, name AND player id. The id is load-bearing: 1,343 name-and-
+          season combinations map to more than one athlete, including nine Jayden Williamses.
+      - name: player_name
+        description: Player name as the stats feed publishes it.
+      - name: position
+        description: Listed position for that season.
+      - name: team
+        description: Team name as the stats feed gave it.
+      - name: team_id
+        description: >
+          CFBD team id where dim_athlete reaches; null for seasons before 2024, which have no
+          roster feed. Not a join failure.
+      - name: conference
+        description: Conference affiliation recorded for that season.
+      - name: stat_category
+        description: >
+          CFBD's grouping — defensive, receiving, rushing, passing, kickReturns, fumbles,
+          interceptions, puntReturns, kicking, punting.
+      - name: stat_type
+        description: >
+          The statistic within the category. The page's stat picker is a WHERE on this
+          column, so the selectable set is data rather than code.
+      - name: stat_value
+        description: >
+          The value. Units differ per stat_type and are not normalised, so figures are only
+          comparable within one (stat_category, stat_type).
+          Zero is a real measurement here and is kept: "0 interceptions" is a fact about a
+          season, and its absence is not the same statement.
+      - name: rank_desc
+        description: >
+          Rank within (season, stat_category, stat_type), highest value first — correct for
+          stats where more is better. Ties share a rank and the next is skipped.
+      - name: rank_asc
+        description: >
+          The same ranking lowest-first, for stats where less is better. Both directions are
+          precomputed because the warehouse does not know which way a given stat reads and
+          the page must not decide with arithmetic.
+      - name: percentile
+        description: >
+          percent_rank within (season, stat_category, stat_type), ascending, to 4 decimal
+          places. 0 is the lowest value in the group and 1 the highest, so it reads with
+          rank_asc.
+      - name: rank_population
+        description: >
+          How many rows the rank was computed over. Without it a rank of 40th is unreadable —
+          40 of 2,000 and 40 of 45 are different statements.
+      - name: class_year_display
+        description: 'FR, SO, JR or SR; null where dim_athlete does not reach, i.e. before 2024.'
+      - name: height_display
+        description: Height as feet-inches, e.g. "6-2"; null outside 2024-2026.
+      - name: weight_pounds
+        description: Listed weight; null outside 2024-2026.
+      - name: jersey
+        description: Jersey number; null outside 2024-2026.
+      - name: as_of_ts
+        description: AC-G.35. Last load of the `stats` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_player_game_log
+    description: >
+      Players page, game log. One row per player x game x category x stat type.
+      2024 ONWARD ONLY, because box scores are `recent` scope. A player with a 2015 season on
+      the season tab and nothing here is the honest state rather than a defect —
+      srv_player_stats runs back to 2004 and this cannot.
+      Published on the weekly cadence; see srv_player_stats.
+    columns:
+      - name: player_game_stat_sk
+        description: >
+          Surrogate key over (game, team, category, stat type, athlete) — the grain.
+      - name: game_id
+        description: CFBD game id.
+      - name: season
+        description: Season, resolved from the game spine — the box-score feed carries none.
+      - name: week
+        description: Week, resolved from the game spine.
+      - name: season_type
+        description: '`regular` or `postseason`.'
+      - name: game_date
+        description: Calendar date of the game.
+      - name: start_date
+        description: Scheduled kickoff, timezone-aware.
+      - name: player_id
+        description: CFBD athlete id, shared with the season stats and the drill-down.
+      - name: player_slug
+        description: URL-safe identifier, name and player id.
+      - name: player_name
+        description: Athlete name as the box score publishes it.
+      - name: team
+        description: Team the athlete played for in this game.
+      - name: team_id
+        description: >
+          Resolved from dim_team within season; null for non-FBS programmes absent from
+          /teams.
+      - name: conference
+        description: Conference of that team.
+      - name: home_away
+        description: Whether the team was home or away, carried on the box-score row itself.
+      - name: opponent
+        description: >
+          The other side, derived from home_away against the game spine rather than by
+          matching names, so an upstream rename cannot break it.
+      - name: opponent_team_id
+        description: CFBD team id of the opponent.
+      - name: team_points
+        description: Points this team scored in the game, repeated on each of its stat rows.
+      - name: stat_category
+        description: CFBD's grouping for the statistic, e.g. passing, rushing, kicking.
+      - name: stat_type
+        description: >
+          The statistic within the category — C/ATT, YDS, TD, INT, QBR, LONG, CAR, AVG and
+          more, open-ended and category-specific.
+      - name: stat_raw
+        description: >
+          The value exactly as CFBD sent it, and the only column populated on every row.
+          Three shapes exist; see the three columns below.
+      - name: stat_value
+        description: >
+          The plain-number shape. NULL for a made/attempted pair, which has no single value,
+          and null for the literal "--" that CFBD sends for an uncomputed QBR.
+      - name: stat_made
+        description: >
+          First half of a made/attempted pair, across exactly three types: passing C/ATT,
+          kicking FG and kicking XP. "Made" is correct for each, since a completion is a pass
+          made. Splitting the pair is what lets a page show completion percentage rather than
+          only printing "12/31".
+      - name: stat_attempted
+        description: Second half of a made/attempted pair; null on every row that is not one.
+      - name: as_of_ts
+        description: AC-G.35. Last load of the `game` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_player_play
+    description: >
+      Players page, the play-level drill-down — one row per play a player is credited on, and
+      the section the site IA singles out as what nobody in the comp set offers publicly.
+      EVERY FILTER THE PAGE OFFERS IS A COLUMN HERE, because the site reads one relation per
+      query with a WHERE and no joins (G-2) and does no arithmetic (G-3).
+      COVERAGE IS INCOMPLETE AND MUST BE READ THAT WAY. /plays/stats caps at 2,000 records per
+      request, so the original week-scoped fetch returned an arbitrary 11% of games. The
+      source is fixed — the endpoint now fans out per game — but this view is only as complete
+      as what has landed. Absence means "no stat line landed for that play", never "the player
+      did nothing".
+      Published on the weekly cadence; see srv_player_stats.
+    columns:
+      - name: play_stat_sk
+        description: Surrogate key over (play, athlete, stat type) — the grain.
+      - name: play_id
+        description: CFBD play id, joining to the play spine.
+      - name: game_id
+        description: CFBD game id.
+      - name: season
+        description: Season the play belongs to.
+      - name: week
+        description: Week the play belongs to.
+      - name: season_type
+        description: '`regular` or `postseason`.'
+      - name: game_date
+        description: Calendar date of the game.
+      - name: player_id
+        description: CFBD athlete id.
+      - name: player_slug
+        description: URL-safe identifier, name and player id.
+      - name: player_name
+        description: Athlete name as this endpoint publishes it.
+      - name: team
+        description: Team the athlete was playing for.
+      - name: team_id
+        description: Resolved from dim_team within season.
+      - name: conference
+        description: Conference of that team.
+      - name: opponent
+        description: The other team in the game.
+      - name: stat_type
+        description: >
+          What the athlete recorded on the play — Reception, Completion, Sack and so on. One
+          measure per row, which is why the value needs no parsing.
+      - name: stat
+        description: The value, already numeric on this endpoint unlike the box score.
+      - name: period
+        description: Quarter, or the overtime period.
+      - name: down
+        description: >
+          Down, 1-4. Null or 0 on kickoffs and some special-teams plays, where there is no
+          down to report.
+      - name: distance
+        description: Yards needed for a first down.
+      - name: yards_to_goal
+        description: Distance to the opponent's goal line — the unambiguous field position.
+      - name: down_distance_display
+        description: >
+          "3rd and 7", or "1st and Goal" where the distance reaches the end zone. Assembled
+          upstream because a down and distance is one fact with a conventional rendering.
+      - name: distance_bucket
+        description: >
+          `short` (<=3), `medium` (4-7), `long` (8+) or `goal to go`. What the filter actually
+          needs: "3rd and long" is the question a reader asks and "3rd and 7" is not.
+      - name: field_zone
+        description: '`red zone` (<=20 to goal), `opponent territory` (<=50), or `own territory`.'
+      - name: play_type
+        description: CFBD's classification of the play.
+      - name: play_text
+        description: >
+          The narrative description of the play. This view is the structured counterpart —
+          which athlete recorded which stat — sitting beside the prose.
+      - name: yards_gained
+        description: Yards gained on the play; negative on a loss.
+      - name: is_scoring_play
+        description: Whether the play resulted in points.
+      - name: ppa
+        description: Predicted points added for the play, where CFBD computes it.
+      - name: as_of_ts
+        description: AC-G.35. Last load of the `game` domain, rendered instead of now().

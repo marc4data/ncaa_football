@@ -192,9 +192,20 @@ with DAG(
     )
     # Serving only. The legacy marts are on the weekly cadence and this DAG does not touch
     # what they are built from.
+    #
+    # HOT ONLY, AND THAT IS ABOUT THE WIRE RATHER THAN THE DATA. srv_player_stats,
+    # srv_player_game_log and srv_player_play are 608 MB of the serving schema's 932 MB, and
+    # including them takes a publish from 59 MB to 182 MB gzipped. This DAG runs EVERY TWO
+    # HOURS over the link that is already the pipeline's failure point — 59 MB has taken 13
+    # to 17 minutes when it is busy, long enough for Airflow to kill the task as a zombie
+    # mid-stream, which on 29 August left the site blank for 46 minutes on a game day.
+    #
+    # The split is honest as well as cheap: this DAG exists to move scores and lines quickly,
+    # and player season totals, box scores and play attributions are none of those. They
+    # publish on the weekly DAG, which is also when they change.
     publish = PythonOperator(
         task_id="publish_to_serving",
-        python_callable=lambda **_: publish_all(schemas=["serving"]),
+        python_callable=lambda **_: publish_all(schemas=["serving"], hot=True),
     )
 
     # The dead-man's switch. Downstream of publish and left at the default all_success
