@@ -1113,6 +1113,91 @@ models:
       - name: stat_type
         description: Joins to stg_play_stat.stat_type.
 
+  - name: stg_game_box_info
+    description: >
+      Advanced box score header, one row per game. THE GAME ID IS NOT IN THE PAYLOAD —
+      /game/box/advanced is fetched one game at a time and the response never names which
+      game it is, so the id is read from `params`. One raw object holds three grains
+      (gameInfo, teams, players) and therefore feeds three models.
+    columns:
+      - name: game_id
+        description: From the request params; the payload has no id.
+        data_tests: [not_null, unique]
+      - name: home_win_prob
+        description: >
+          THE POSTGAME figure — 0.9989 for a 63-0 win — not a forecast. stg_game_pregame_wp
+          holds the pre-kickoff series and stg_game_win_probability the live one.
+      - name: excitement_index
+        description: CFBD's excitement rating for the game.
+
+  - name: stg_game_box_team
+    description: >
+      Advanced box score at team grain, one row per (game, team) — the widest model here.
+      EIGHT BLOCKS EACH KEYED BY TEAM NAME with no positional guarantee, so each is unnested
+      independently and joined on (game_id, team); a positional read would work on almost
+      every game and silently swap two teams' numbers on the one where CFBD ordered a block
+      differently. The spine is a UNION across blocks so a team missing from one block does
+      not lose its row.
+    columns:
+      - name: game_id
+        data_tests: [not_null]
+      - name: team
+        data_tests: [not_null]
+      - name: ppa_overall_total
+        description: PPA PER PLAY. Not the same scale as cumulative_ppa_overall_total.
+      - name: cumulative_ppa_overall_total
+        description: PPA accumulated over the game. Same statistic, different scale.
+      - name: ppa_overall_quarter3
+        description: >
+          NULL where the quarter had no charted plays — a quarter with no plays is not a
+          quarter with zero PPA, so the null is kept.
+      - name: havoc_total
+        description: >
+          The `havoc` block is ordered OPPOSITE to `ppa` in 104 of 104 landed games, which is
+          why the blocks are joined by name rather than position. Whether the number is havoc
+          this team's defence caused or havoc its offence suffered is not stated by the API
+          and is not asserted here — it needs a reconciliation against stg_game_team_havoc
+          before anything downstream relies on the direction.
+
+  - name: stg_game_box_player
+    description: >
+      Advanced box score at player grain, one row per (game, team, player). Usage and PPA are
+      separate arrays joined on the player name. NO ATHLETE ID ON THIS PAYLOAD — the key is a
+      name within a game, so two same-named players in one game would collide and nothing in
+      the response could separate them. /games/players and /stats/player/season carry real
+      ids and are the better join for anything player-level; this model is for the advanced
+      metrics they lack.
+    columns:
+      - name: game_id
+        data_tests: [not_null]
+      - name: player_name
+        data_tests: [not_null]
+      - name: usage_total
+        description: Share of the team's plays, 0-1. A SHARE, not a rate.
+      - name: ppa_average_total
+        description: Points per play. A RATE, not a share.
+
+  - name: stg_game_win_probability
+    description: >
+      In-game win probability, one row per (game, play) — the live series. THE THIRD AND LAST
+      win probability in the project: stg_game_pregame_wp is the pre-kickoff forecast,
+      stg_game_box_info the single postgame figure, and this the play-by-play series. None is
+      named `win_probability` alone, because reading one as another is invisible.
+      Carries a real playId joining to stg_play, so a probability swing traces to the play
+      that caused it.
+    columns:
+      - name: play_id
+        description: Joins to stg_play.play_id.
+        data_tests: [not_null, unique]
+      - name: game_id
+        data_tests: [not_null]
+      - name: home_has_ball
+        description: >
+          POSSESSION, not favouritism. homeBall false with home_win_probability 0.9 is a
+          losing team with the ball.
+      - name: home_win_probability
+        description: Home team's probability at this play.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated

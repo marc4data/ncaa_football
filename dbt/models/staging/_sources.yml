@@ -159,6 +159,22 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_game_box_advanced
+        description: >
+          CFBD /game/box/advanced, fanned out one call per FBS game. A SINGLE OBJECT with
+          three grains inside — gameInfo, teams and players — and THE GAME ID IS NOT IN THE
+          PAYLOAD: it exists only in the request params. Eight team blocks, each a
+          two-element array keyed by team NAME with no positional guarantee.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_metrics_wp
+        description: >
+          CFBD /metrics/wp, fanned out one call per FBS game. The in-game win probability
+          series, one row per play, carrying a real playId that joins to /plays.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_games_media
         description: >
           CFBD /games/media — broadcast outlet per game per media type. Landed since the

@@ -290,6 +290,14 @@ CREATE TABLE IF NOT EXISTS raw.raw_plays_stats_types (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_game_box_advanced (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_metrics_wp (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -322,6 +330,7 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_playoffs_cfp_games, raw.raw_playoffs_cfp_participants,
          raw.raw_plays, raw.raw_drives, raw.raw_plays_stats,
          raw.raw_plays_types, raw.raw_plays_stats_types,
+         raw.raw_game_box_advanced, raw.raw_metrics_wp,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -2109,6 +2118,392 @@ INSERT INTO raw.raw_plays_stats_types (filename, content, status_code, params, f
  ]
 }', 200, '{}',
   '2026-01-01T00:01:14Z', now());
+
+INSERT INTO raw.raw_game_box_advanced (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-03-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "id": "9001"
+ },
+ "data": {
+  "gameInfo": {
+   "homeTeam": "Alpha State",
+   "homePoints": 63,
+   "homeWinProb": 0.9989,
+   "awayTeam": "Beta Tech",
+   "awayPoints": 0,
+   "awayWinProb": 0.0011,
+   "homeWinner": true,
+   "excitement": 2.8747
+  },
+  "teams": {
+   "ppa": [
+    {
+     "team": "Alpha State",
+     "plays": 21,
+     "overall": {
+      "total": 1.343,
+      "quarter1": 0.671,
+      "quarter2": 2.014,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "passing": {
+      "total": 2.543,
+      "quarter1": 1.272,
+      "quarter2": 3.815,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "rushing": {
+      "total": 0.843,
+      "quarter1": 0.421,
+      "quarter2": 1.264,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    },
+    {
+     "team": "Beta Tech",
+     "plays": 48,
+     "overall": {
+      "total": -0.223,
+      "quarter1": -0.112,
+      "quarter2": -0.335,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "passing": {
+      "total": 0.977,
+      "quarter1": 0.488,
+      "quarter2": 1.466,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "rushing": {
+      "total": -0.723,
+      "quarter1": -0.361,
+      "quarter2": -1.085,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    }
+   ],
+   "cumulativePpa": [
+    {
+     "team": "Alpha State",
+     "plays": 21,
+     "overall": {
+      "total": 28.2,
+      "quarter1": 14.1,
+      "quarter2": 42.3,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "passing": {
+      "total": 15.5,
+      "quarter1": 7.75,
+      "quarter2": 23.25,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "rushing": {
+      "total": 12.7,
+      "quarter1": 6.35,
+      "quarter2": 19.05,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    },
+    {
+     "team": "Beta Tech",
+     "plays": 48,
+     "overall": {
+      "total": -10.7,
+      "quarter1": -5.35,
+      "quarter2": -16.05,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "passing": {
+      "total": -6.1,
+      "quarter1": -3.05,
+      "quarter2": -9.15,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "rushing": {
+      "total": -4.6,
+      "quarter1": -2.3,
+      "quarter2": -6.9,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    }
+   ],
+   "successRates": [
+    {
+     "team": "Alpha State",
+     "overall": {
+      "total": 0.476,
+      "quarter1": 0.238,
+      "quarter2": 0.714,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "standardDowns": {
+      "total": 0.426,
+      "quarter1": 0.213,
+      "quarter2": 0.639,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "passingDowns": {
+      "total": 0.576,
+      "quarter1": 0.288,
+      "quarter2": 0.864,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    },
+    {
+     "team": "Beta Tech",
+     "overall": {
+      "total": 0.271,
+      "quarter1": 0.136,
+      "quarter2": 0.407,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "standardDowns": {
+      "total": 0.221,
+      "quarter1": 0.111,
+      "quarter2": 0.332,
+      "quarter3": null,
+      "quarter4": 0
+     },
+     "passingDowns": {
+      "total": 0.371,
+      "quarter1": 0.185,
+      "quarter2": 0.556,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    }
+   ],
+   "explosiveness": [
+    {
+     "team": "Alpha State",
+     "overall": {
+      "total": 3.39,
+      "quarter1": 1.695,
+      "quarter2": 5.085,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    },
+    {
+     "team": "Beta Tech",
+     "overall": {
+      "total": 1.11,
+      "quarter1": 0.555,
+      "quarter2": 1.665,
+      "quarter3": null,
+      "quarter4": 0
+     }
+    }
+   ],
+   "rushing": [
+    {
+     "team": "Alpha State",
+     "powerSuccess": 0.8,
+     "stuffRate": 0.2,
+     "lineYards": 19,
+     "lineYardsAverage": 1.2,
+     "secondLevelYards": 27,
+     "secondLevelYardsAverage": 1.8,
+     "openFieldYards": 147,
+     "openFieldYardsAverage": 9.8
+    },
+    {
+     "team": "Beta Tech",
+     "powerSuccess": 0.1,
+     "stuffRate": 0.5,
+     "lineYards": 4,
+     "lineYardsAverage": 0.3,
+     "secondLevelYards": 2,
+     "secondLevelYardsAverage": 0.1,
+     "openFieldYards": 0,
+     "openFieldYardsAverage": 0
+    }
+   ],
+   "havoc": [
+    {
+     "team": "Beta Tech",
+     "total": 0.286,
+     "frontSeven": 0.238,
+     "db": 0.048
+    },
+    {
+     "team": "Alpha State",
+     "total": 0.354,
+     "frontSeven": 0.301,
+     "db": 0.053
+    }
+   ],
+   "scoringOpportunities": [
+    {
+     "team": "Alpha State",
+     "opportunities": 7,
+     "points": 42,
+     "pointsPerOpportunity": 6
+    },
+    {
+     "team": "Beta Tech",
+     "opportunities": 3,
+     "points": 0,
+     "pointsPerOpportunity": 0
+    }
+   ],
+   "fieldPosition": [
+    {
+     "team": "Alpha State",
+     "averageStart": 64.6,
+     "averageStartingPredictedPoints": 1.74
+    },
+    {
+     "team": "Beta Tech",
+     "averageStart": 72.0,
+     "averageStartingPredictedPoints": 0.41
+    }
+   ]
+  },
+  "players": {
+   "usage": [
+    {
+     "player": "A. Passer",
+     "team": "Alpha State",
+     "position": "QB",
+     "total": 0.42,
+     "quarter1": 0.45,
+     "quarter2": 0.38,
+     "quarter3": 0,
+     "quarter4": 0,
+     "rushing": 0.05,
+     "passing": 0.63
+    },
+    {
+     "player": "F. Defender",
+     "team": "Beta Tech",
+     "position": "LB",
+     "total": 0.042,
+     "quarter1": 0.045,
+     "quarter2": 0.038,
+     "quarter3": 0,
+     "quarter4": 0,
+     "rushing": 0,
+     "passing": 0.063
+    }
+   ],
+   "ppa": [
+    {
+     "player": "F. Defender",
+     "team": "Beta Tech",
+     "position": "LB",
+     "average": {
+      "total": -0.578,
+      "quarter1": -0.703,
+      "quarter2": -0.453,
+      "quarter3": null,
+      "quarter4": null,
+      "rushing": 0,
+      "passing": -0.578
+     },
+     "cumulative": {
+      "total": -1.2,
+      "quarter1": -0.7,
+      "quarter2": -0.5,
+      "quarter3": null,
+      "quarter4": null,
+      "rushing": 0,
+      "passing": -1.2
+     }
+    },
+    {
+     "player": "A. Passer",
+     "team": "Alpha State",
+     "position": "QB",
+     "average": {
+      "total": 1.41,
+      "quarter1": 0.9,
+      "quarter2": 2.1,
+      "quarter3": null,
+      "quarter4": null,
+      "rushing": 0.2,
+      "passing": 1.8
+     },
+     "cumulative": {
+      "total": 28.2,
+      "quarter1": 9.8,
+      "quarter2": 18.4,
+      "quarter3": null,
+      "quarter4": null,
+      "rushing": 1.1,
+      "passing": 27.1
+     }
+    }
+   ]
+  }
+ }
+}', 200, '{"id": "9001"}',
+  '2026-01-01T00:01:15Z', now());
+
+INSERT INTO raw.raw_metrics_wp (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-01-04-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "gameId": "9001"
+ },
+ "data": [
+  {
+   "gameId": 9001,
+   "homeId": 1,
+   "home": "Alpha State",
+   "awayId": 2,
+   "away": "Beta Tech",
+   "playId": "9001101849903",
+   "playText": "A. Passer pass complete for 2 yds",
+   "homeScore": 0,
+   "awayScore": 0,
+   "down": 1,
+   "distance": 10,
+   "homeWinProbability": 0.4477,
+   "spread": 0,
+   "yardLine": 75,
+   "homeBall": false,
+   "playNumber": 0
+  },
+  {
+   "gameId": 9001,
+   "homeId": 1,
+   "home": "Alpha State",
+   "awayId": 2,
+   "away": "Beta Tech",
+   "playId": "9001101849908",
+   "playText": "A. Passer pass complete for 61 yds for a TD",
+   "homeScore": 7,
+   "awayScore": 0,
+   "down": 1,
+   "distance": 10,
+   "homeWinProbability": 0.7712,
+   "spread": -7,
+   "yardLine": 39,
+   "homeBall": true,
+   "playNumber": 1
+  }
+ ]
+}', 200, '{"gameId": "9001"}',
+  '2026-01-01T00:01:16Z', now());
 
 INSERT INTO raw.raw_manifest
   (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES

@@ -91,6 +91,10 @@
     ('stg_play_stat',           ['play_id', 'athlete_id', 'stat_type']),
     ('stg_play_type',           ['play_type_id']),
     ('stg_play_stat_type',      ['stat_type_id']),
+    ('stg_game_box_info',       ['game_id']),
+    ('stg_game_box_team',       ['game_id', 'team']),
+    ('stg_game_box_player',     ['game_id', 'team', 'player_name']),
+    ('stg_game_win_probability', ['play_id']),
 ] %}
 
 {% for model, grain in staging_grains %}
