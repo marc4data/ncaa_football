@@ -79,6 +79,13 @@
     ('stg_draft_pick',          ['draft_year', 'overall_pick']),
     ('stg_draft_position',      ['position_name']),
     ('stg_nfl_team',            ['display_name']),
+    ('stg_team_record',         ['season', 'team_id']),
+    ('stg_roster',              ['season', 'player_id', 'team']),
+    ('stg_conference_affiliation', ['team_id', 'conference_id', 'start_year']),
+    ('stg_conference_change',   ['team_id', 'effective_year']),
+    ('stg_cfp_bracket',         ['season', 'competition']),
+    ('stg_cfp_matchup',         ['season', 'matchup_id']),
+    ('stg_cfp_participant',     ['season', 'team_id']),
 ] %}
 
 {% for model, grain in staging_grains %}

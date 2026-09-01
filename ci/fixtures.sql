@@ -246,6 +246,30 @@ CREATE TABLE IF NOT EXISTS raw.raw_draft_teams (
     filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
     fetched_at timestamptz, added_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS raw.raw_roster (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_conferences_affiliations (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_conferences_changes (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_playoffs_cfp (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_playoffs_cfp_games (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
+CREATE TABLE IF NOT EXISTS raw.raw_playoffs_cfp_participants (
+    filename text PRIMARY KEY, content jsonb, status_code int, params jsonb,
+    fetched_at timestamptz, added_at timestamptz
+);
 CREATE TABLE IF NOT EXISTS raw.raw_manifest (
     endpoint text NOT NULL, filename text NOT NULL, params jsonb, status_code int,
     row_count int, fetched_at timestamptz, loaded_at timestamptz,
@@ -273,6 +297,9 @@ TRUNCATE raw.raw_teams, raw.raw_games, raw.raw_venues, raw.raw_conferences,
          raw.raw_recruiting_players, raw.raw_recruiting_teams,
          raw.raw_recruiting_groups, raw.raw_talent,
          raw.raw_draft_picks, raw.raw_draft_positions, raw.raw_draft_teams,
+         raw.raw_roster, raw.raw_conferences_affiliations,
+         raw.raw_conferences_changes, raw.raw_playoffs_cfp,
+         raw.raw_playoffs_cfp_games, raw.raw_playoffs_cfp_participants,
          raw.raw_games_players, raw.raw_games_weather,
          raw.raw_stats_categories, raw.raw_stats_game_advanced,
          raw.raw_stats_game_havoc, raw.raw_stats_player_season,
@@ -1456,6 +1483,352 @@ INSERT INTO raw.raw_draft_teams (filename, content, status_code, params, fetched
 }', 200, '{}',
   '2026-01-01T00:01:02Z', now());
 
+INSERT INTO raw.raw_roster (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-52-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "id": "1001",
+   "firstName": "A",
+   "lastName": "Passer",
+   "team": "Alpha State",
+   "weight": 216,
+   "height": 74,
+   "jersey": 7,
+   "year": 4,
+   "position": "QB",
+   "homeCity": "Brandon",
+   "homeState": "MS",
+   "homeCountry": "USA",
+   "homeLatitude": 32.2731,
+   "homeLongitude": -89.9868,
+   "homeCountyFIPS": "28121",
+   "recruitIds": [
+    "108699"
+   ]
+  },
+  {
+   "id": "1002",
+   "firstName": "B",
+   "lastName": "Runner",
+   "team": "Alpha State",
+   "weight": 205,
+   "height": 70,
+   "jersey": 22,
+   "year": 2,
+   "position": "RB",
+   "homeCity": "Testville",
+   "homeState": "TX",
+   "homeCountry": "USA",
+   "homeLatitude": 32.47,
+   "homeLongitude": -99.71,
+   "homeCountyFIPS": "48441",
+   "recruitIds": []
+  },
+  {
+   "id": "1002",
+   "firstName": "B",
+   "lastName": "Runner",
+   "team": "Beta Tech",
+   "weight": 205,
+   "height": 70,
+   "jersey": 24,
+   "year": 2,
+   "position": "RB",
+   "homeCity": "Testville",
+   "homeState": "TX",
+   "homeCountry": "USA",
+   "homeLatitude": 32.47,
+   "homeLongitude": -99.71,
+   "homeCountyFIPS": "48441",
+   "recruitIds": []
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:01:04Z', now());
+
+INSERT INTO raw.raw_conferences_affiliations (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-53-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "teamId": 1,
+   "team": "Alpha State",
+   "conferenceId": 4,
+   "conference": "Test Conference",
+   "conferenceAbbreviation": "TC",
+   "classification": "fbs",
+   "conferenceDivision": null,
+   "startYear": 2024,
+   "endYear": null
+  },
+  {
+   "teamId": 1,
+   "team": "Alpha State",
+   "conferenceId": 9,
+   "conference": "Old Conference",
+   "conferenceAbbreviation": "OC",
+   "classification": "fbs",
+   "conferenceDivision": null,
+   "startYear": 2013,
+   "endYear": 2023
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:01:05Z', now());
+
+INSERT INTO raw.raw_conferences_changes (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-54-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "teamId": 1,
+   "team": "Alpha State",
+   "fromConferenceId": 9,
+   "fromConference": "Old Conference",
+   "fromConferenceAbbreviation": "OC",
+   "fromClassification": "fbs",
+   "toConferenceId": 4,
+   "toConference": "Test Conference",
+   "toConferenceAbbreviation": "TC",
+   "toClassification": "fbs",
+   "effectiveYear": 2024
+  },
+  {
+   "teamId": 3,
+   "team": "Gamma College",
+   "fromConferenceId": 20,
+   "fromConference": "Small Conference",
+   "fromConferenceAbbreviation": "SC",
+   "fromClassification": "fcs",
+   "toConferenceId": 4,
+   "toConference": "Test Conference",
+   "toConferenceAbbreviation": "TC",
+   "toClassification": "fbs",
+   "effectiveYear": 2024
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:01:06Z', now());
+
+INSERT INTO raw.raw_playoffs_cfp (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-55-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": {
+  "season": 2024,
+  "competition": "cfp",
+  "format": "twelve_team_2024",
+  "teamCount": 12,
+  "status": "completed",
+  "participants": [
+   {
+    "team": {
+     "id": 1,
+     "school": "Alpha State",
+     "conference": "Test Conference"
+    },
+    "committeeRank": 1,
+    "seed": 1,
+    "bidType": "automatic",
+    "qualificationReason": "Conference champion automatic qualifier",
+    "conferenceChampion": true,
+    "qualifyingConference": "Test Conference",
+    "firstRoundBye": true,
+    "outcome": "champion",
+    "eliminatedRound": null
+   },
+   {
+    "team": {
+     "id": 2,
+     "school": "Beta Tech",
+     "conference": "Test Conference"
+    },
+    "committeeRank": 2,
+    "seed": 2,
+    "bidType": "at_large",
+    "qualificationReason": "At-large selection",
+    "conferenceChampion": false,
+    "qualifyingConference": null,
+    "firstRoundBye": false,
+    "outcome": "eliminated",
+    "eliminatedRound": "quarterfinal"
+   }
+  ],
+  "rounds": [
+   {
+    "code": "first_round",
+    "name": "First Round",
+    "order": 1,
+    "matchups": []
+   }
+  ],
+  "champion": {
+   "id": 1,
+   "school": "Alpha State",
+   "conference": "Test Conference"
+  }
+ }
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:01:07Z', now());
+
+INSERT INTO raw.raw_playoffs_cfp_games (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-56-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "id": 31,
+   "bracketSlot": "FR1",
+   "round": "first_round",
+   "roundName": "First Round",
+   "roundOrder": 1,
+   "matchupOrder": 1,
+   "startDate": "2024-12-21T21:00:00.000Z",
+   "bowlName": "Test First Round",
+   "slots": [
+    {
+     "position": 1,
+     "seed": 5,
+     "participant": {
+      "id": 1,
+      "school": "Alpha State",
+      "conference": "Test Conference"
+     },
+     "source": null
+    },
+    {
+     "position": 2,
+     "seed": 12,
+     "participant": {
+      "id": 2,
+      "school": "Beta Tech",
+      "conference": "Test Conference"
+     },
+     "source": null
+    }
+   ],
+   "game": {
+    "id": 401677176,
+    "startDate": "2024-12-21T21:00:00.000Z",
+    "completed": true,
+    "homeTeam": {
+     "id": 1,
+     "school": "Alpha State",
+     "conference": "Test Conference"
+    },
+    "homePoints": 38,
+    "awayTeam": {
+     "id": 2,
+     "school": "Beta Tech",
+     "conference": "Test Conference"
+    },
+    "awayPoints": 24,
+    "venueId": 501,
+    "venue": "Alpha Field"
+   },
+   "advancesTo": {
+    "matchupId": 36,
+    "bracketSlot": "QF2",
+    "position": 2
+   }
+  },
+  {
+   "id": 36,
+   "bracketSlot": "QF2",
+   "round": "quarterfinal",
+   "roundName": "Quarterfinal",
+   "roundOrder": 2,
+   "matchupOrder": 2,
+   "startDate": "2025-01-01T22:00:00.000Z",
+   "bowlName": "Test Quarterfinal",
+   "slots": [
+    {
+     "position": 1,
+     "seed": 4,
+     "participant": {
+      "id": null,
+      "school": null,
+      "conference": "Test Conference"
+     },
+     "source": null
+    },
+    {
+     "position": 2,
+     "seed": null,
+     "participant": null,
+     "source": {
+      "matchupId": 31
+     }
+    }
+   ],
+   "game": null,
+   "advancesTo": {
+    "matchupId": 40,
+    "bracketSlot": "SF1",
+    "position": 1
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:01:08Z', now());
+
+INSERT INTO raw.raw_playoffs_cfp_participants (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-57-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "team": {
+    "id": 1,
+    "school": "Alpha State",
+    "conference": "Test Conference"
+   },
+   "committeeRank": 1,
+   "seed": 1,
+   "bidType": "automatic",
+   "qualificationReason": "Conference champion automatic qualifier",
+   "conferenceChampion": true,
+   "qualifyingConference": "Test Conference",
+   "firstRoundBye": true,
+   "outcome": "champion",
+   "eliminatedRound": null
+  },
+  {
+   "team": {
+    "id": 2,
+    "school": "Beta Tech",
+    "conference": "Test Conference"
+   },
+   "committeeRank": 2,
+   "seed": 2,
+   "bidType": "at_large",
+   "qualificationReason": "At-large selection",
+   "conferenceChampion": false,
+   "qualifyingConference": null,
+   "firstRoundBye": false,
+   "outcome": "eliminated",
+   "eliminatedRound": "quarterfinal"
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:01:09Z', now());
+
 INSERT INTO raw.raw_manifest
   (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
   ('metrics_wp_pregame', '2026-01-01T00-00-41-001Z.json',
@@ -1954,17 +2327,169 @@ INSERT INTO raw.raw_stats_player_success_game (filename, content, status_code, p
 
 INSERT INTO raw.raw_records (filename, content, status_code, params, fetched_at, added_at) VALUES
 ('2026-01-01T00-00-07-001Z.json', '{
-  "status_code": 200, "params": {"year": "2024"},
-  "data": [
-    {"year": 2024, "teamId": 1, "team": "Alpha State", "classification": "fbs",
-     "total": {"games": 3, "wins": 2, "losses": 0, "ties": 1}},
-    {"year": 2024, "teamId": 2, "team": "Beta Tech", "classification": "fbs",
-     "total": {"games": 2, "wins": 0, "losses": 1, "ties": 1}},
-    {"year": 2024, "teamId": 77, "team": "Gamma College", "classification": "ii",
-     "total": {"games": 1, "wins": 0, "losses": 1, "ties": 0}}
-  ]}', 200, '{"year": "2024"}', '2026-01-01T00:00:09Z', now()),
--- The legitimately-empty response already in the manifest. An endpoint that returns no rows
--- is not a failure, and nothing downstream may treat it as one.
+ "status_code": 200,
+ "params": {
+  "year": "2024"
+ },
+ "data": [
+  {
+   "year": 2024,
+   "teamId": 1,
+   "team": "Alpha State",
+   "classification": "fbs",
+   "conference": "Test Conference",
+   "division": "",
+   "expectedWins": 2.1,
+   "total": {
+    "games": 3,
+    "wins": 2,
+    "losses": 0,
+    "ties": 1
+   },
+   "conferenceGames": {
+    "games": 2,
+    "wins": 1,
+    "losses": 0,
+    "ties": 1
+   },
+   "homeGames": {
+    "games": 2,
+    "wins": 2,
+    "losses": 0,
+    "ties": 0
+   },
+   "awayGames": {
+    "games": 1,
+    "wins": 0,
+    "losses": 0,
+    "ties": 1
+   },
+   "neutralSiteGames": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   },
+   "regularSeason": {
+    "games": 3,
+    "wins": 2,
+    "losses": 0,
+    "ties": 1
+   },
+   "postseason": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   }
+  },
+  {
+   "year": 2024,
+   "teamId": 2,
+   "team": "Beta Tech",
+   "classification": "fbs",
+   "conference": "Test Conference",
+   "division": "",
+   "expectedWins": 0.8,
+   "total": {
+    "games": 2,
+    "wins": 0,
+    "losses": 1,
+    "ties": 1
+   },
+   "conferenceGames": {
+    "games": 2,
+    "wins": 0,
+    "losses": 1,
+    "ties": 1
+   },
+   "homeGames": {
+    "games": 1,
+    "wins": 0,
+    "losses": 0,
+    "ties": 1
+   },
+   "awayGames": {
+    "games": 1,
+    "wins": 0,
+    "losses": 1,
+    "ties": 0
+   },
+   "neutralSiteGames": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   },
+   "regularSeason": {
+    "games": 2,
+    "wins": 0,
+    "losses": 1,
+    "ties": 1
+   },
+   "postseason": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   }
+  },
+  {
+   "year": 2024,
+   "teamId": 77,
+   "team": "Gamma College",
+   "classification": "ii",
+   "conference": null,
+   "division": "",
+   "expectedWins": null,
+   "total": {
+    "games": 1,
+    "wins": 0,
+    "losses": 1,
+    "ties": 0
+   },
+   "conferenceGames": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   },
+   "homeGames": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   },
+   "awayGames": {
+    "games": 1,
+    "wins": 0,
+    "losses": 1,
+    "ties": 0
+   },
+   "neutralSiteGames": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   },
+   "regularSeason": {
+    "games": 1,
+    "wins": 0,
+    "losses": 1,
+    "ties": 0
+   },
+   "postseason": {
+    "games": 0,
+    "wins": 0,
+    "losses": 0,
+    "ties": 0
+   }
+  }
+ ]
+}', 200, '{"year": "2024"}',
+  '2026-01-01T00:00:09Z', now()),
+-- The legitimately-empty response already in the manifest. An endpoint that returns
+-- no rows is not a failure, and nothing downstream may treat it as one.
 ('2026-01-01T00-00-02-001Z.json', '{
   "status_code": 200, "params": {"year": "2026"}, "data": []
   }', 200, '{"year": "2026"}', '2026-01-01T00:00:04Z', now());

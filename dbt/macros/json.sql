@@ -150,3 +150,30 @@
 {% macro databricks__json_scalar_text(column) -%}
     ({{ column }})
 {%- endmacro %}
+
+
+{# --- Nth element of a JSON array, as an OBJECT you can keep reading ------------------------
+
+  json_array_element_string returns the element as TEXT, which ends the chain: you cannot ask
+  it for a key afterwards. This returns the element still typed as JSON, so it composes —
+  json_get_string(json_array_element_object(col, 0), 'seed').
+
+  Needed for fixed-width arrays, where the position IS the meaning and exploding to rows would
+  be wrong. A CFP matchup has exactly two slots and they are ordered; flattening them to
+  slot_1 / slot_2 answers "who played whom" directly, where long form makes every caller
+  self-join to ask it.
+
+  Use it only where the array's length is part of the schema. For an open-ended array —
+  stat categories, athletes, logos — json_array_elements is the right tool and this is not.
+#}
+{% macro json_array_element_object(column, index) -%}
+    {{ return(adapter.dispatch('json_array_element_object', 'cfdb_dbt')(column, index)) }}
+{%- endmacro %}
+
+{% macro default__json_array_element_object(column, index) -%}
+    ({{ column }} -> {{ index }})
+{%- endmacro %}
+
+{% macro databricks__json_array_element_object(column, index) -%}
+    (get_json_object({{ column }}, '$[{{ index }}]'))
+{%- endmacro %}

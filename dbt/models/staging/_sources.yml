@@ -77,6 +77,52 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_roster
+        description: >
+          CFBD /roster. 22,843 players for 2024. THE `year` FIELD IS THE CLASS YEAR (1-4),
+          NOT THE SEASON — the season is only in params. `recruitIds` is an array bridging a
+          rostered player back to /recruiting/players.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_conferences_affiliations
+        description: >
+          CFBD /conferences/affiliations. The only endpoint that DATES an affiliation —
+          startYear and an endYear that is null for a current one. Carries a conferenceId,
+          which most conference-bearing endpoints do not.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_conferences_changes
+        description: >
+          CFBD /conferences/changes. Realignment as EVENTS rather than intervals, with
+          classification on both sides so a division move is one fact.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_playoffs_cfp
+        description: >
+          CFBD /playoffs/cfp. A SINGLE OBJECT, not an array — the only endpoint shaped that
+          way. COMPOSITE: its participants[] and rounds[].matchups[] duplicate
+          /playoffs/cfp/participants and /playoffs/cfp/games exactly.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_playoffs_cfp_games
+        description: >
+          CFBD /playoffs/cfp/games. Bracket matchups with fixed two-slot pairings and an
+          advancesTo edge. TWO IDENTITIES: `id` is the matchup within the bracket, `game.id`
+          is the CFBD game id.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_playoffs_cfp_participants
+        description: >
+          CFBD /playoffs/cfp/participants. The playoff field. Rows carry no year — the season
+          is only in params.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_games_media
         description: >
           CFBD /games/media — broadcast outlet per game per media type. Landed since the
