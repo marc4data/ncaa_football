@@ -37,15 +37,34 @@ latest as (
     from responses where recency = 1
 ),
 
-usage as (
-    select game_id, {{ json_array_elements(json_get_object('players', 'usage')) }} as b
-    from latest
-),
+{#- DEDUPED BEFORE THE JOIN, for the same reason as stg_game_box_team.
+    CFBD emits the same TEAM twice inside a block in four games, which multiplied that model
+    to 128 rows for one key. The exposure here is identical in shape — two blocks keyed by
+    player name, joined — so a repeated player would double every row for that player.
+    Cheaper to prevent than to detect: the grain sweep would catch it, but only after a
+    build. #}
+{% set player_blocks = ['usage', 'ppa'] %}
 
-ppa as (
-    select game_id, {{ json_array_elements(json_get_object('players', 'ppa')) }} as b
-    from latest
+{%- for block in player_blocks %}
+{{ block }} as (
+    select game_id, b
+    from (
+        select
+            game_id,
+            b,
+            row_number() over (
+                partition by game_id,
+                             {{ json_get_string('b', 'player') }},
+                             {{ json_get_string('b', 'team') }}
+            ) as copy
+        from (
+            select game_id, {{ json_array_elements(json_get_object('players', block)) }} as b
+            from latest
+        ) exploded
+    ) ranked
+    where copy = 1
 ),
+{% endfor %}
 
 spine as (
     select game_id,

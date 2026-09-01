@@ -15,9 +15,9 @@ never unnested, and never missed. Every DAG stayed green throughout.
 |---|---:|---|
 | complete | 60 | every field the spec publishes is exposed as a column |
 | partial | 6 | a staging model exists but drops fields |
-| raw only | 0 | responses have landed; nothing reads them |
+| raw only | 5 | responses have landed; nothing reads them |
 | no raw data | 8 | registered, never fetched |
-| unregistered | 5 | the API serves it; we have not decided about it |
+| unregistered | 0 | the API serves it; we have not decided about it |
 
 **Fields exposed: 823 of 1191 (69.1%).** That percentage is the product gap in one number.
 
@@ -41,7 +41,7 @@ sweep can invent.
 | `draft/positions` | swept | 1 | `stg_draft_position` | 2/2 | complete |
 | `draft/teams` | swept | 1 | `stg_nfl_team` | 4/4 | complete |
 | `drives` | swept | 16 | `stg_drive` | 24/24 | complete |
-| `game/box/advanced` | CLI | 104 | `stg_game_box_info`, `stg_game_box_player`, `stg_game_box_team` | 34/34 | complete |
+| `game/box/advanced` | CLI | 1,849 | `stg_game_box_info`, `stg_game_box_player`, `stg_game_box_team` | 34/34 | complete |
 | `games` | swept | 348 | `stg_games` | 19/41 | partial |
 | `games/media` | swept | 8 | `stg_game_media` | 6/12 | partial |
 | `games/players` | swept | 46 | `stg_game_player_stat` | 7/7 | complete |
@@ -52,13 +52,13 @@ sweep can invent.
 | `lines` | swept | 71 | `stg_lines` | 12/23 | partial |
 | `live/plays` | CLI | — | — | 0/63 | no raw data |
 | `metrics/fg/ep` | swept | 1 | `stg_field_goal_ep` | 3/3 | complete |
-| `metrics/wp` | CLI | 1 | `stg_game_win_probability` | 16/16 | complete |
+| `metrics/wp` | CLI | 1,853 | `stg_game_win_probability` | 16/16 | complete |
 | `metrics/wp/pregame` | swept | 8 | `stg_game_pregame_wp` | 8/8 | complete |
-| `passing/players/games` | — | — | — | 0/22 | unregistered |
-| `passing/players/season` | — | — | — | 0/18 | unregistered |
-| `passing/plays` | — | — | — | 0/36 | unregistered |
-| `passing/teams/games` | — | — | — | 0/20 | unregistered |
-| `passing/teams/season` | — | — | — | 0/16 | unregistered |
+| `passing/players/games` | CLI | 33 | — | 0/22 | raw only |
+| `passing/players/season` | CLI | 2 | — | 0/18 | raw only |
+| `passing/plays` | CLI | 33 | — | 0/36 | raw only |
+| `passing/teams/games` | CLI | 33 | — | 0/20 | raw only |
+| `passing/teams/season` | CLI | 2 | — | 0/16 | raw only |
 | `player/portal` | swept | 3 | `stg_player_portal` | 10/10 | complete |
 | `player/returning` | swept | 3 | `stg_team_returning_production` | 15/15 | complete |
 | `player/search` | CLI | — | — | 0/16 | no raw data |
