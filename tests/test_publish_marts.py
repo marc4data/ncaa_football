@@ -190,3 +190,27 @@ def test_the_scores_dag_asks_for_the_hot_publish_and_the_weekly_one_does_not():
     assert "hot=True" not in _code(weekly.read_text()), (
         "the weekly publish is where the heavy player tables reach the site; if it also "
         "asked for the hot set they would never be published at all")
+
+
+def test_every_serving_model_in_the_project_is_published():
+    """A serving model that is in neither publish list never reaches the site.
+
+    The failure mode is quiet and slow: dbt builds the table happily, the warehouse has it,
+    the documentation test counts its columns, and the page reading it renders Degraded
+    forever with nothing in any log to explain why. srv_game_weather was one edit away from
+    exactly that.
+
+    Checked against the model files rather than the database, so it fails in CI on the pull
+    request that adds a model rather than after a deploy.
+    """
+    from pathlib import Path
+    from src import publish_marts
+    models = Path(__file__).resolve().parents[1] / "dbt" / "models" / "serving"
+    on_disk = {p.stem for p in models.glob("srv_*.sql")}
+    published = set(publish_marts.DEFAULT_SERVING)
+    missing = on_disk - published
+    assert not missing, (
+        f"serving models that would never be published: {sorted(missing)}")
+    stale = published - on_disk
+    assert not stale, (
+        f"published tables with no model: {sorted(stale)}")

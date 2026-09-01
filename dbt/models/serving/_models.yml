@@ -2131,3 +2131,93 @@ models:
         description: Predicted points added for the play, where CFBD computes it.
       - name: as_of_ts
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_game_weather
+    description: >
+      Matchup page, Weather section. One row per game with conditions at kickoff and the
+      venue's geography. 6,847 games, 2024 onward — weather is not collected for earlier
+      seasons, so a 2019 matchup legitimately has no row.
+      A SEPARATE VIEW RATHER THAN COLUMNS ON srv_matchup: that table is already the widest
+      object in the model at 77 columns and 110,879 rows, and widening it would add twenty-odd
+      columns null on 94% of them. The site reads one relation per query, not one per page.
+      WEATHER DESCRIBES THE VENUE'S LOCATION, NOT THE PLAYING ENVIRONMENT. Domed games carry
+      ordinary outdoor readings — including five with measurable precipitation — so
+      `is_indoors` is the column that says whether any of it reached the field.
+    columns:
+      - name: game_weather_sk
+        description: Surrogate key over game_id — the grain, one row per game.
+      - name: game_id
+        description: CFBD game id, joining to srv_matchup and the rest of the game spine.
+      - name: season
+        description: Season the game belongs to. 2024 onward only.
+      - name: week
+        description: Week within the season and season_type.
+      - name: season_type
+        description: '`regular` or `postseason`.'
+      - name: start_at
+        description: Kickoff timestamp as the weather feed reports it.
+      - name: home_team
+        description: Home team name, as echoed by the weather endpoint.
+      - name: away_team
+        description: Away team name, as echoed by the weather endpoint.
+      - name: venue
+        description: Venue name from the weather payload.
+      - name: city
+        description: Venue city, from dim_venue.
+      - name: state
+        description: Venue state, from dim_venue.
+      - name: timezone
+        description: Venue timezone, from dim_venue.
+      - name: latitude
+        description: >
+          Venue latitude. Populated on all but one row — O'Hara Field is in dim_venue with no
+          coordinates published, which is an upstream gap rather than a failed join.
+      - name: longitude
+        description: Venue longitude, with the same single exception as latitude.
+      - name: elevation_m
+        description: >
+          Venue elevation in metres. Populated on 3,847 of 6,847 rows — /venues does not
+          publish it for every venue, so an elevation feature would be partial and should say
+          so rather than treating absence as sea level.
+      - name: capacity
+        description: Venue capacity, from dim_venue.
+      - name: is_grass
+        description: Whether the playing surface is grass, from dim_venue.
+      - name: is_indoors
+        description: >
+          THE COLUMN THAT QUALIFIES EVERY OTHER ONE. Whether the venue is enclosed. Agrees
+          with dim_venue.is_dome on all 6,847 rows — two independent sources, zero
+          disagreements. Indoor games still carry outdoor readings, so this is what says
+          whether they affected play.
+      - name: temperature_f
+        description: Temperature in Fahrenheit at kickoff. Observed range 6.1 to 107.2.
+      - name: dew_point_f
+        description: Dew point in Fahrenheit.
+      - name: humidity_pct
+        description: Relative humidity as a percentage.
+      - name: precipitation_in
+        description: Precipitation in inches. Non-zero on 444 games.
+      - name: snowfall_in
+        description: Snowfall in inches.
+      - name: pressure_mb
+        description: Barometric pressure in millibars.
+      - name: wind_speed_mph
+        description: Wind speed in miles per hour. Observed range 0 to 32.7.
+      - name: wind_direction_deg
+        description: Wind bearing in degrees, 0-360, as reported.
+      - name: wind_direction_compass
+        description: >
+          The bearing as one of eight compass points. A reader does not parse 247°, and eight
+          points is coarse enough to stay honest about a single instantaneous reading.
+      - name: weather_condition
+        description: >
+          CFBD's text label — Cloudy, Clear, Fair, Light Rain and so on. NULL on 548 rows
+          where the feed sends a blank, only 6 of which are indoors; normalised from empty
+          string so a page renders an em dash rather than a cell that looks broken.
+      - name: is_precipitating
+        description: >
+          Whether any precipitation was recorded. Null-safe — unknown stays unknown rather
+          than becoming false. "0.00 in" reads as a measurement; this reads as an answer.
+      - name: as_of_ts
+        description: AC-G.35. Last load of the `game` domain, rendered instead of now().
