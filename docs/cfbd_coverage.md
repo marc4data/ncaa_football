@@ -85,7 +85,7 @@ sweep can invent.
 | `ratings/srs` | swept | 16 | `stg_rating_srs`, `stg_team_rating` | 6/6 | complete |
 | `ratings/srs/expanded` | swept | 16 | `stg_rating_srs_expanded` | 7/7 | complete |
 | `records` | swept | 171 | `stg_team_record` | 11/11 | complete |
-| `recruiting/groups` | swept | 1 | `stg_team_recruiting_position_group` | 7/7 | complete |
+| `recruiting/groups` | swept | 2 | `stg_team_recruiting_position_group` | 7/7 | complete |
 | `recruiting/players` | swept | 3 | `stg_recruit` | 19/19 | complete |
 | `recruiting/teams` | swept | 3 | `stg_team_recruiting_rank` | 4/4 | complete |
 | `roster` | swept | 3 | `stg_roster` | 16/16 | complete |

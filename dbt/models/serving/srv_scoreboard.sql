@@ -113,7 +113,13 @@ select
         when g.away_points > g.home_points then g.away_team
         else null
     end as winner,
-    abs(coalesce(g.home_points, 0) - coalesce(g.away_points, 0)) as final_margin,
+    -- NULL, not zero, for a game with no result — the same rule `total_points` below
+    -- applies, and this column was the one place that broke it. `coalesce(points, 0)` gave
+    -- all 1,769 unplayed games a final margin of 0, which is indistinguishable from a tie
+    -- and from the three completed-but-unscored games. Zero here now means exactly one
+    -- thing: the two teams finished level.
+    case when g.is_completed and g.home_points is not null and g.away_points is not null
+         then abs(g.home_points - g.away_points) end       as final_margin,
     hr.wins as home_wins, hr.losses as home_losses,
     ar.wins as away_wins, ar.losses as away_losses,
     ao_src.as_of_ts,

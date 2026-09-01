@@ -5,11 +5,16 @@
 -- by construction — it tested nothing. The criterion worth having is the one that is
 -- currently false.
 --
--- Severity is warn, deliberately. This fails ~665 times today at 30.5% coverage, and a test
--- that fails hundreds of times on day one gets muted rather than paid down. Warn makes the
--- documentation debt countable and visible on every run; raise it to error once coverage
--- clears a threshold worth defending.
-{{ config(severity='warn') }}
+-- RAISED TO ERROR. It was warn while the debt stood at 634 undocumented serving columns —
+-- a test that fails hundreds of times on day one gets muted rather than paid down, so warn
+-- kept the number countable and visible on every run instead. That threshold has now been
+-- cleared: dbt/models/serving/_models.yml documents all 634, and the honest way to keep it
+-- there is to make the next undocumented column fail the build rather than add one more
+-- line to a warning nobody reads.
+--
+-- This checks the SERVING layer only. Staging and dimensional coverage are still partial
+-- and are not in scope here; widening it is a separate decision with a separate backlog.
+{{ config(severity='error') }}
 
 select table_schema, table_name, column_name
 from {{ ref('dim_field_metadata') }}
