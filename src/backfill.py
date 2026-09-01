@@ -189,7 +189,7 @@ def requests_for(endpoint: Endpoint, seasons: List[str], per_game: bool,
         return []
 
     if endpoint.strategy == STATIC:
-        return [(endpoint.path, {})]
+        return [(endpoint.path, dict(endpoint.fixed_params))]
 
     current_season = current_season or datetime.now(timezone.utc).year
     out: List[Request] = []
@@ -217,6 +217,11 @@ def requests_for(endpoint: Endpoint, seasons: List[str], per_game: bool,
             id_param = endpoint.extra.get("id_param", "id")
             for game_id in completed_game_ids(season):
                 out.append((endpoint.path, {id_param: game_id}))
+
+    if endpoint.fixed_params:
+        # Merged UNDER the strategy's own params: a strategy that legitimately sets `year`
+        # must win over a fixed default, or the two would fight silently.
+        out = [(path, {**endpoint.fixed_params, **params}) for path, params in out]
 
     return out
 

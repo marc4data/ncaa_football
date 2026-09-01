@@ -64,6 +64,11 @@ class Endpoint:
     # this the daily lines pull would be skipped from its second run onward and the
     # movement series would never accumulate.
     snapshot: bool = False
+    # Query parameters sent on EVERY request for this endpoint, merged under whatever the
+    # strategy generates. For endpoints whose default window is wrong for this project:
+    # /recruiting/groups aggregates over startYear..endYear and defaults to 2000-present,
+    # so without a floor it answers a question nobody asked.
+    fixed_params: Dict[str, str] = field(default_factory=dict)
     extra: Dict[str, str] = field(default_factory=dict)
 
     @property
@@ -167,7 +172,17 @@ REGISTRY: List[Endpoint] = [
     Endpoint("player/usage", SEASON, BUCKET_REVISIONIST),
     Endpoint("recruiting/players", SEASON, BUCKET_STRUCTURAL),
     Endpoint("recruiting/teams", SEASON, BUCKET_STRUCTURAL),
-    Endpoint("recruiting/groups", STATIC, BUCKET_STRUCTURAL, note="all-time aggregate"),
+    # NOT AN ALL-TIME AGGREGATE, WHICH THE OLD NOTE CLAIMED. /recruiting/groups aggregates
+    # over a startYear..endYear window and defaults to 2000-present, so calling it with no
+    # parameters answered a 26-season question while every other recruiting asset here is
+    # scoped to the project's seasons.
+    #
+    # startYear only, deliberately: endYear defaults to the current year, so this stays
+    # correct in 2027 without an edit. A hardcoded endYear is a staleness trap that looks
+    # like precision.
+    Endpoint("recruiting/groups", STATIC, BUCKET_STRUCTURAL,
+             fixed_params={"startYear": "2024"},
+             note="aggregated over startYear..present, not all-time"),
     Endpoint("draft/picks", SEASON, BUCKET_STRUCTURAL, history=HISTORY_FULL, min_season=1967),
     Endpoint("talent", SEASON, BUCKET_STRUCTURAL),
 

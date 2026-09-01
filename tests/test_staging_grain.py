@@ -23,12 +23,6 @@ GRAIN_EXEMPT = {
     "stg_lines": "one row per (game, provider, SNAPSHOT) — repeated fetches are the point, "
                  "because /lines returns only opening and current and movement between them "
                  "cannot be backfilled",
-    "stg_team_recruiting_position_group":
-        "HAS NO UNIQUE KEY, and the endpoint is why. `All Positions` appears eight times per "
-        "team for 241 of 264 teams, with different ratings and nothing in the payload to "
-        "distinguish the rows — /recruiting/groups aggregates over a year window and a "
-        "recruit type that it does not echo back. Fetching it with explicit startYear/"
-        "endYear would put the discriminator in params; that is a registry change",
     "stg_game_pregame_wp": "the other snapshot model. /metrics/wp/pregame is registered "
                            "snapshot=True because the number moves with the market through "
                            "the week; deduplicating would keep one value per game and throw "

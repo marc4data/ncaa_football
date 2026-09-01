@@ -1,43 +1,46 @@
 -- Recruiting strength by position group: one row per (team, position group).
 --
--- THIS MODEL HAS NO UNIQUE KEY, AND THAT IS THE ENDPOINT'S DOING RATHER THAN THE MODEL'S.
+-- "ALL POSITIONS" IS NOT AN AGGREGATE. IT IS EVERY OTHER ROW, MISLABELLED.
 --
--- Every specific position group — Defensive Back, Quarterback, Special Teams and the rest —
--- is exactly one row per team. But `All Positions` appears EIGHT TIMES for 241 of the 264
--- teams, with DIFFERENT ratings and commit counts on each row and NOTHING in the payload to
--- tell them apart: same team, same conference, same positionGroup string.
+-- This model had no unique key because `All Positions` appeared eight times per team for
+-- 241 of 264 teams, with different values and nothing to tell the rows apart. The cause is
+-- now established rather than guessed at.
 --
--- Alabama's eight carry 79, 95, 58, 79, 28, 83, 45 and 39 commits. They are clearly slices of
--- something — recruit type, or a year window — but the response returns neither, so the
--- distinction exists upstream and is discarded before it reaches us.
+-- Alabama's eight `All Positions` rows carry commit counts 95, 83, 79, 79, 58, 45, 39, 28 —
+-- which is EXACTLY the multiset of its eight real position groups: Defensive Line 95,
+-- Receiver 83, Defensive Back 79, Offensive Line 79, Linebacker 58, Running Back 45,
+-- Special Teams 39, Quarterback 28. CFBD emits every row twice: once labelled with its
+-- position group, once with the label overwritten as `All Positions`. There is no
+-- aggregate anywhere in the payload.
 --
--- WHY THE FETCH IS PART OF THE PROBLEM. /recruiting/groups accepts startYear, endYear,
--- recruitType, team and conference, and defaults to 2000-present with recruitType
--- HighSchool. The registry calls it with NO parameters, so the window is implicit and is not
--- echoed back. Fetching explicitly per window would put the discriminator in `params` where
--- the model could read it — that is a registry change, recorded in the decision log rather
--- than done here.
+-- That also explains the distribution — a team with five position groups gets five
+-- `All Positions` rows, not eight — which no year- or recruit-type-based theory fit.
 --
--- Until then this model is deliberately EXEMPT from the grain sweep and carries no unique
--- test. Declaring (team, position_group) unique would fail on every build; inventing a row
--- number to make it pass would manufacture a key out of file ordering, which is worse than
--- having none.
+-- SO THEY ARE FILTERED OUT, and nothing is lost: every value in them is present, correctly
+-- labelled, in the row it was copied from. With them gone, (team, position_group) is a real
+-- grain and the model rejoins the uniqueness sweep.
 --
--- NOT A SEASON, EITHER. There is no year column, so this cannot be joined to
--- stg_team_recruiting_rank on a class.
+-- assert_recruiting_groups_all_positions_is_still_a_duplicate fails the day CFBD fixes this
+-- and starts sending a genuine total, because then the filter WOULD be dropping data.
 --
--- `commits` AND `averageStars` ARRIVE AS STRINGS — "4" and "2.5000000000000000" — where
--- `averageRating` and `totalRating` arrive as numbers, in the same object. safe_numeric
--- absorbs both; a hard cast on the two string columns works today and breaks on the first
--- empty string.
+-- SCOPED TO 2024 ONWARD, NOT ALL-TIME. The endpoint aggregates over startYear..endYear and
+-- defaults to 2000-present; the registry now sends startYear=2024 and lets endYear default
+-- to the current year, so this covers the project's seasons and stays correct next year
+-- without an edit. The window is in `params`, which is where a reader can see it.
 
 with successful_fetches as (
 
     select
         filename,
+        -- CARRIED THROUGH BECAUSE THE FINAL SELECT NEEDS IT. `params` is a column of the
+        -- raw table, not of the CTE, and referencing it downstream is a compile error —
+        -- the same slip made in stg_api_usage_endpoint an hour earlier. Twice is a pattern:
+        -- anything the last select reads has to be listed here.
+        cast({{ json_get_string('params', 'startYear') }} as int) as from_season,
         {{ json_get_object('content', 'data') }} as payload,
-        -- The endpoint takes no parameters, so there is nothing to partition on: the newest
-        -- fetch of the one all-time answer wins outright.
+        -- One window, one answer: the newest fetch wins outright. Partitioning on
+        -- startYear would be right the day a second window is ever requested, and wrong
+        -- today in a way nobody would notice — there is only one.
         row_number() over (order by filename desc) as recency
     from {{ source('raw', 'raw_recruiting_groups') }}
     where status_code = 200
@@ -46,13 +49,16 @@ with successful_fetches as (
 
 exploded as (
 
-    select {{ json_array_elements('payload') }} as row_json
+    select from_season, {{ json_array_elements('payload') }} as row_json
     from successful_fetches
     where recency = 1
 
 )
 
 select
+    -- The requested window, carried so a reader can see what the aggregate covers rather
+    -- than having to know the registry.
+    from_season,
     {{ json_get_string('row_json', 'team') }}          as team,
     {{ json_get_string('row_json', 'conference') }}    as conference,
     {{ json_get_string('row_json', 'positionGroup') }} as position_group,
@@ -62,3 +68,6 @@ select
     {{ safe_numeric(json_get_string('row_json', 'commits')) }}       as commits,
     {{ safe_numeric(json_get_string('row_json', 'averageStars')) }}  as average_stars
 from exploded
+-- The mislabelled duplicates. See the header: every value here exists correctly labelled
+-- in the row it was copied from.
+where {{ json_get_string('row_json', 'positionGroup') }} <> 'All Positions'
