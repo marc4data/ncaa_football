@@ -229,3 +229,83 @@ def test_a_season_with_no_members_is_reported_rather_than_hidden():
     members = {2025: [(197, "Oklahoma State")], 2026: []}
     scope = ex.resolve_conference(SeasonAwareCursor(members, {}), "Big 12", [2025, 2026])
     assert scope["per_season"] == {2025: 1, 2026: 0}
+
+
+# --- the field inventory ---------------------------------------------------------------
+
+class ProfileCursor:
+    """Answers the two questions profile_fields asks, and records the SQL it was asked."""
+
+    def __init__(self, columns_by_table, aggregates_by_table):
+        self._columns = columns_by_table
+        self._aggregates = aggregates_by_table
+        self._rows = []
+        self._row = None
+        self.statements = []
+
+    def execute(self, sql, params=None):
+        self.statements.append(sql)
+        if "information_schema" in sql:
+            self._rows = list(self._columns[params[1]])
+        else:
+            table = next(t for t in self._aggregates if f'"{t}"' in sql)
+            self._row = self._aggregates[table]
+
+    def fetchall(self):
+        return self._rows
+
+    def fetchone(self):
+        return self._row
+
+
+def test_the_profile_reports_null_share_and_cardinality_per_field():
+    """Null % is a share of the whole table; cardinality is distinct non-null values."""
+    cursor = ProfileCursor(
+        {"stg_x": [("team_id", "integer"), ("note", "text")]},
+        # count(*), then count / count(distinct) per column, in ordinal order.
+        {"stg_x": (200, 200, 40, 150, 7)})
+    profile = ex.profile_fields(cursor, ["stg_x"])
+    assert profile == [
+        ("stg_x", "team_id", "integer", 0.0, 40),
+        # 50 of 200 null -> 25.0%, and 7 distinct among the 150 that are populated.
+        ("stg_x", "note", "text", 25.0, 7),
+    ]
+
+
+def test_one_query_per_table_not_one_per_column():
+    """1,447 columns asked individually is 2,894 round trips against views that re-parse JSON
+    on every scan. Folded into one statement per table it is one."""
+    cursor = ProfileCursor(
+        {"stg_x": [("a", "text"), ("b", "text"), ("c", "text")]},
+        {"stg_x": (10, 10, 3, 10, 4, 10, 5)})
+    ex.profile_fields(cursor, ["stg_x"])
+    aggregate_statements = [s for s in cursor.statements if "information_schema" not in s]
+    assert len(aggregate_statements) == 1
+
+
+def test_identifiers_are_quoted():
+    """They come from information_schema so they are trustworthy, but a quoted identifier is
+    correct for any name and a bare one only for the names we happen to have today."""
+    cursor = ProfileCursor(
+        {"stg_x": [("select", "text")]},
+        {"stg_x": (5, 5, 2)})
+    ex.profile_fields(cursor, ["stg_x"])
+    aggregate = next(s for s in cursor.statements if "information_schema" not in s)
+    assert 'count("select")' in aggregate
+    assert 'count(distinct "select")' in aggregate
+
+
+def test_an_empty_table_has_no_null_share_rather_than_zero_percent():
+    """Zero would claim the column is fully populated, which is the opposite of what an empty
+    table means. The sheet leaves the cell blank."""
+    cursor = ProfileCursor(
+        {"stg_empty": [("a", "text")]},
+        {"stg_empty": (0, 0, 0)})
+    profile = ex.profile_fields(cursor, ["stg_empty"])
+    assert profile == [("stg_empty", "a", "text", None, 0)]
+
+
+def test_a_table_with_no_columns_is_skipped_rather_than_queried():
+    cursor = ProfileCursor({"stg_none": []}, {})
+    assert ex.profile_fields(cursor, ["stg_none"]) == []
+    assert all("information_schema" in s for s in cursor.statements)

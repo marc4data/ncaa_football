@@ -193,6 +193,56 @@ def resolve_conference(cursor, conference: str, seasons) -> dict:
             "game_ids": game_ids}
 
 
+def profile_fields(cursor, tables) -> list:
+    """One row per (table, column): type, null share and cardinality.
+
+    PROFILED OVER THE WHOLE TABLE, NOT OVER THE EXPORTED SAMPLE. The data tabs are narrowed
+    to one conference; a field inventory narrowed the same way would describe this workbook
+    rather than the warehouse, and "how often is this column null" is a question about the
+    data, not about the filter someone happened to apply.
+
+    ONE QUERY PER TABLE, not one per column. 1,447 columns across 80 tables is 2,894 separate
+    aggregates if asked individually; folded into one statement per table it is 80 scans.
+    Staging models are VIEWS over raw JSON, so each scan re-parses the payload — that is why
+    this is the expensive part of the export and why it reports progress as it goes.
+
+    Identifiers are quoted rather than interpolated bare. They come from information_schema
+    so they are already trustworthy, but a quoted identifier is correct for any name and a
+    bare one is correct only for the names we happen to have today.
+    """
+    profile = []
+    for position, table in enumerate(tables, start=1):
+        cursor.execute("""
+            select column_name, data_type from information_schema.columns
+            where table_schema = %s and table_name = %s order by ordinal_position
+        """, (SCHEMA, table))
+        columns = cursor.fetchall()
+        if not columns:
+            continue
+
+        parts = ["count(*)"]
+        for name, _ in columns:
+            parts.append(f'count("{name}")')
+            # jsonb supports equality so distinct works on it directly. Plain `json` would
+            # not, and there is none in this schema — if one ever appears this is where it
+            # will fail, loudly, rather than silently reporting nothing.
+            parts.append(f'count(distinct "{name}")')
+        cursor.execute(f'select {", ".join(parts)} from {SCHEMA}."{table}"')
+        row = cursor.fetchone()
+        total = row[0]
+
+        for index, (name, data_type) in enumerate(columns):
+            non_null = row[1 + index * 2]
+            distinct = row[2 + index * 2]
+            # Null share is undefined on an empty table, not zero. Zero would claim the
+            # column is fully populated, which is the opposite of what an empty table means.
+            null_pct = None if not total else round(100.0 * (total - non_null) / total, 1)
+            profile.append((table, name, data_type, null_pct, distinct))
+        print(f"  [{position:>2}/{len(tables)}] profiled {table:26s} "
+              f"{len(columns):>3} field(s), {total:>9,} rows")
+    return profile
+
+
 def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
     """Return (sql, params, note) for one table.
 
@@ -349,6 +399,11 @@ def export(out_path: Path, conference: str, seasons) -> dict:
         index_rows.append((table, total, len(rows), note))
         print(f"  {table:26s} {len(rows):>7,} of {total:>9,}  {note[:60]}")
 
+    # Sheet ORDER is set by inserting both at position 0, last one first: Fields goes in,
+    # then Index pushes it to second. Requested position, and it reads correctly — what the
+    # workbook is, then what is in it, then the data.
+    print("\nProfiling fields (whole tables, not the exported sample)...")
+    _write_fields(book, profile_fields(cursor, tables), header_font, header_fill)
     _write_index(book, index_rows, members, header_font, header_fill)
     connection.close()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -356,6 +411,52 @@ def export(out_path: Path, conference: str, seasons) -> dict:
     return {"tables": len(index_rows),
             "rows": sum(r[2] for r in index_rows),
             "path": str(out_path)}
+
+
+def _write_fields(book, profile, header_font, header_fill) -> None:
+    """Every field in every staging table, with how empty and how varied it is.
+
+    The workbook's own data dictionary. A tab per table answers "what does this hold"; this
+    answers "what is in the layer, and which columns are actually populated" without opening
+    eighty sheets.
+
+    Null % and cardinality describe the FULL table. Cardinality is a count of distinct values
+    including null-free counts only — count(distinct) ignores nulls — so a column that is 90%
+    null can still show high cardinality across the rows it does have. Read the two together;
+    row counts per table are on the Index sheet.
+    """
+    from openpyxl.utils import get_column_letter
+
+    tab = book.create_sheet("Fields", 0)
+    tab.cell(1, 1, "cfdb — staging field inventory").font = header_font
+    tab.cell(1, 1).fill = header_fill
+    tab.cell(2, 1, f"{len(profile):,} fields across "
+                   f"{len({row[0] for row in profile})} tables. Null % and cardinality are "
+                   f"measured over the WHOLE table, not over the filtered sample on the data "
+                   f"tabs — this describes the warehouse, not this workbook.")
+    tab.cell(3, 1, "Cardinality counts distinct non-null values, so a mostly-null column can "
+                   "still show a high count. Read it against Null %, and against the row "
+                   "counts on the Index sheet.")
+
+    headers = ("Table", "Field", "Data type", "Null %", "Cardinality")
+    for index, label in enumerate(headers, start=1):
+        cell = tab.cell(5, index, label)
+        cell.font, cell.fill = header_font, header_fill
+
+    for r, (table, field, data_type, null_pct, cardinality) in enumerate(profile, start=6):
+        tab.cell(r, 1, table)
+        tab.cell(r, 2, field)
+        tab.cell(r, 3, data_type)
+        # Blank, not zero, where the table is empty and the share is undefined.
+        if null_pct is not None:
+            tab.cell(r, 4, null_pct).number_format = "0.0"
+        tab.cell(r, 5, cardinality).number_format = "#,##0"
+
+    tab.freeze_panes = "A6"
+    if profile:
+        tab.auto_filter.ref = f"A5:{get_column_letter(len(headers))}{len(profile) + 5}"
+    for index, width in enumerate((30, 34, 26, 10, 14), start=1):
+        tab.column_dimensions[get_column_letter(index)].width = width
 
 
 def _write_index(book, index_rows, members, header_font, header_fill) -> None:
