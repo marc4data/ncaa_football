@@ -167,3 +167,36 @@ def test_the_request_timeout_separates_connect_from_read():
     connect, read = ingest.REQUEST_TIMEOUT
     assert connect <= 15
     assert read >= 120
+
+
+# --- fixed_params: an endpoint whose default window is wrong for this project --------------
+
+def test_recruiting_groups_is_fetched_from_2024_with_no_end_year():
+    """/recruiting/groups aggregates over startYear..endYear and DEFAULTS TO 2000-PRESENT, so
+    calling it bare answered a 26-season question while every other recruiting asset here is
+    scoped to the project's seasons.
+
+    startYear only, deliberately: endYear defaults to the current year, so this stays correct
+    in 2027 without an edit. A hardcoded endYear is a staleness trap that looks like
+    precision.
+    """
+    endpoint = BY_PATH["recruiting/groups"]
+    assert endpoint.fixed_params == {"startYear": "2024"}
+    assert "endYear" not in endpoint.fixed_params
+    plan = backfill.requests_for(endpoint, ["2026"], per_game=False)
+    assert plan == [("recruiting/groups", {"startYear": "2024"})]
+
+
+def test_a_strategys_own_params_win_over_a_fixed_default(monkeypatch):
+    """Merged UNDER, not over. A season-scoped endpoint that legitimately sets `year` must
+    beat a fixed default, or the two would fight silently and the loser would be invisible."""
+    from dataclasses import replace
+    seasonal = replace(BY_PATH["talent"], fixed_params={"year": "1999", "extra": "kept"})
+    plan = backfill.requests_for(seasonal, ["2025"], per_game=False)
+    assert plan == [("talent", {"year": "2025", "extra": "kept"})]
+
+
+def test_endpoints_without_fixed_params_are_unaffected():
+    """The mechanism must be a no-op everywhere it is not used."""
+    plan = backfill.requests_for(BY_PATH["talent"], ["2025"], per_game=False)
+    assert plan == [("talent", {"year": "2025"})]

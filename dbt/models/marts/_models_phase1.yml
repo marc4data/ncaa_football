@@ -299,6 +299,49 @@ models:
       - name: attendance
         description: Reported attendance.
 
+  - name: fct_team_series
+    description: >
+      All-time head-to-head record between two teams, one row per UNORDERED pair. Built from
+      the game spine rather than fetched: /teams/matchup returns exactly this and pulling it
+      would have cost 1,463 calls for data the warehouse already held. Verified before the
+      decision — the derivation reproduces the endpoint exactly for Alabama-Auburn (84 games,
+      51-32-1, 1902-2025).
+      Complements srv_matchup, which carries the series PER GAME as it stood before each
+      meeting — the right shape for a matchup page, the wrong one for asking about a rivalry.
+      19,291 pairs, 109,107 games.
+    columns:
+      - name: team_series_sk
+        description: Surrogate over the ordered pair.
+        data_tests: [not_null, unique]
+      - name: team_a_id
+        description: >
+          The LOWER team id of the pair. Arbitrary but stable, which is what collapses the
+          two orientations of one rivalry into a single row and what a join needs.
+        data_tests: [not_null]
+      - name: team_b_id
+        data_tests: [not_null]
+      - name: team_a
+        description: >
+          School name from the team's MOST RECENT season. dim_team is season-scoped, so a
+          plain join would multiply the series by every season each team existed.
+      - name: games
+        description: >
+          Meetings WITH A KNOWN RESULT. wins + wins + ties equals this, asserted rather than
+          trusted — srv_matchup's first version derived one side as games - home_wins, which
+          is only correct in a sport without draws and overstated one side in 40,045 rows.
+        data_tests: [not_null]
+      - name: ties
+        description: A tie is its own outcome, not the absence of a win.
+      - name: unscored_games
+        description: >
+          Completed meetings with NO RECORDED SCORE — three exist across the whole spine
+          (Sul Ross State v Angelo State 2025 among them: completed, away 62, home null).
+          Upstream data. They cannot be credited to either side without inventing a result,
+          so they are excluded from the win tally and counted here rather than dropped:
+          games + unscored_games is meetings, `games` is meetings that resolved.
+      - name: first_season
+        description: Earliest meeting with a known result.
+
   - name: fct_game_team
     description: >
       One row per (game, team) — exactly two per game. Box-score columns come from

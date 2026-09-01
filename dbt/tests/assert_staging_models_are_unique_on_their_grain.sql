@@ -75,6 +75,7 @@
     ('stg_coach_season_detail', ['coach_id', 'season', 'team_id']),
     ('stg_recruit',             ['recruit_id']),
     ('stg_team_recruiting_rank', ['recruiting_class', 'team']),
+    ('stg_team_recruiting_position_group', ['team', 'position_group']),
     ('stg_team_talent',         ['season', 'team']),
     ('stg_draft_pick',          ['draft_year', 'overall_pick']),
     ('stg_draft_position',      ['position_name']),
