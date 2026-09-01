@@ -714,3 +714,176 @@ models:
           JSON array bridging a rostered player back to stg_recruit. The link that endpoint's
           own `athleteId` provides in the other direction, and which is null there for
           anyone unlinked — neither alone is enough.
+
+  - name: fct_player_season_stat
+    description: >
+      One row per season x player x category x stat type — player season totals, long.
+      1,453,075 rows over 23 seasons (2004-2026), 65,181 players, 30 stat types across 10
+      categories. The deepest player history in the warehouse and the primary fact behind
+      the Players page.
+      Long rather than wide for the reason srv_team_stats is long: CFBD's stat types are
+      open-ended, and a wide table needs a code change to show a new stat while silently
+      omitting it until someone notices.
+      IDENTITY IS CARRIED HERE, NOT BORROWED. dim_athlete covers 2024-2026 only, because it
+      is built from /roster; this fact runs back to 2004. The dimension is joined to enrich
+      and never to filter — an inner join would delete two decades of player history to
+      satisfy a foreign key.
+      Ranks are deliberately absent; they belong in srv_player_stats, computed over whatever
+      population the page is showing.
+    columns:
+      - name: player_season_stat_sk
+        description: Surrogate key over (season, player_id, stat_category, stat_type) — the grain.
+        tests: [unique, not_null]
+      - name: season
+        description: Season the totals cover. 2004-2026.
+        tests: [not_null]
+      - name: player_id
+        description: >
+          CFBD athlete id, kept as a string because CFBD never promised it is a number.
+          Shared with fct_player_game_stat and dim_athlete — verified, 93.7% of game-level
+          athletes resolve to a roster row.
+        tests: [not_null]
+      - name: player_name
+        description: Player name as the stats feed publishes it.
+      - name: player_slug
+        description: >
+          URL-safe identifier, name AND player id. Derived here rather than read off
+          dim_athlete so a 2007 season page links exactly as well as a 2025 one; matches
+          dim_athlete.athlete_slug by construction wherever both exist.
+      - name: position
+        description: Listed position for that season, from the stats feed.
+      - name: team
+        description: Team name as the stats feed gave it.
+      - name: team_id
+        description: >
+          CFBD team id from dim_athlete where the dimension has the athlete; null for every
+          season before 2024. Not a join failure — see the model header.
+      - name: conference
+        description: Conference affiliation as the stats feed recorded it that season.
+      - name: stat_category
+        description: >
+          CFBD's grouping — defensive, receiving, rushing, passing, kickReturns, fumbles,
+          interceptions, puntReturns, kicking, punting.
+      - name: stat_type
+        description: >
+          The statistic within the category. 30 distinct types, category-specific and
+          open-ended; the page's stat picker is a WHERE on this column, so the selectable
+          set is data rather than code.
+      - name: stat_value
+        description: >
+          Numeric value. All 1,453,075 values parse as numbers — measured, not assumed.
+          Units differ per stat_type and are not normalised.
+      - name: stat_raw
+        description: >
+          The value exactly as CFBD sent it. Kept even though everything currently parses,
+          so a type that starts arriving in another shape stays visible rather than becoming
+          a silent null.
+      - name: athlete_sk
+        description: >
+          Link to dim_athlete, joined on (season, player_id, team) — three columns, because
+          the dimension's grain includes team and two would fan out the ten dual-roster
+          players. Null wherever the roster feed does not reach.
+      - name: has_athlete_dimension
+        description: >
+          Whether dim_athlete had a row. FALSE for every season before 2024 and most of 2026 —
+          an absent roster feed, not a broken join.
+      - name: class_year_display
+        description: 'FR, SO, JR or SR from dim_athlete; null where the dimension does not reach.'
+      - name: height_display
+        description: Height as feet-inches from dim_athlete; null outside 2024-2026.
+      - name: weight_pounds
+        description: Listed weight from dim_athlete; null outside 2024-2026.
+      - name: jersey
+        description: Jersey number from dim_athlete; null outside 2024-2026.
+
+  - name: fct_player_game_stat
+    description: >
+      One row per game x team x category x stat type x athlete — the player box score, long.
+      1,266,259 rows over 3,410 games and 24,600 athletes. Box scores are `recent` scope, so
+      this starts at 2024 and is twenty seasons shallower than fct_player_season_stat. That
+      is the honest shape of the Players page: deep season history, recent game detail.
+      THIS MART RESOLVES WHAT THE SOURCE OMITS. /games/players ships a game id and a team
+      NAME and nothing else — no season, no team id. Season, week, dates and the opponent
+      come from fct_game (100.00% matched) and team_id from dim_team (99.74%).
+    columns:
+      - name: player_game_stat_sk
+        description: >
+          Surrogate key over (game_id, team, stat_category, stat_type, athlete_id) — the grain.
+        tests: [unique, not_null]
+      - name: game_id
+        description: CFBD game id.
+        tests: [not_null]
+      - name: season
+        description: Season, resolved from fct_game — the source carries none.
+      - name: week
+        description: Week, resolved from fct_game.
+      - name: season_type
+        description: '`regular` or `postseason`, resolved from fct_game.'
+      - name: game_date
+        description: Calendar date of the game.
+      - name: start_date
+        description: Scheduled kickoff, timezone-aware.
+      - name: is_completed
+        description: Whether the game has finished.
+      - name: is_neutral_site
+        description: Whether the game was at a neutral venue.
+      - name: player_id
+        description: CFBD athlete id, shared with fct_player_season_stat and dim_athlete.
+        tests: [not_null]
+      - name: player_name
+        description: Athlete name as the box score publishes it.
+      - name: player_slug
+        description: >
+          URL-safe identifier, name AND player id — the same construction as
+          dim_athlete.athlete_slug and fct_player_season_stat.player_slug, so all three
+          agree without any of them reading the others.
+      - name: athlete_sk
+        description: >
+          Link to dim_athlete on (season, player_id, team). Three columns, because two would
+          fan out the dual-roster players.
+      - name: has_athlete_dimension
+        description: Whether dim_athlete had a row for this athlete, season and team.
+      - name: team
+        description: Team name as the box score gave it — the only team identifier the
+          source provides.
+      - name: team_id
+        description: >
+          Resolved from dim_team on (season, school). Null on 3,318 rows, all non-FBS
+          programmes absent from /teams.
+      - name: conference
+        description: Conference as the box score recorded it.
+      - name: home_away
+        description: >
+          Whether this team was home or away. Carried on the box-score row itself, which is
+          why the opponent is derived without comparing team names.
+      - name: team_points
+        description: Points this team scored in the game, repeated on every stat row for it.
+      - name: opponent
+        description: >
+          The other side, derived from `home_away` against fct_game rather than by matching
+          names — so an upstream rename cannot break it.
+      - name: opponent_team_id
+        description: CFBD team id of the opponent, from the game spine.
+      - name: stat_category
+        description: CFBD's grouping for the statistic, e.g. passing, rushing, kicking.
+      - name: stat_type
+        description: >
+          The statistic within the category — C/ATT, YDS, TD, INT, QBR, LONG, CAR, AVG and
+          more. Open-ended and category-specific.
+      - name: stat_raw
+        description: >
+          The value exactly as CFBD sent it, and the only column populated on every row.
+          Three shapes exist; see stat_value, stat_made and stat_attempted.
+      - name: stat_value
+        description: >
+          The plain-number shape — 1,240,096 of 1,266,259 rows. NULL for a made/attempted
+          pair, which has no single value, and null for the literal "--".
+      - name: stat_made
+        description: >
+          First half of a made/attempted pair — 25,519 rows across exactly three types:
+          passing C/ATT, kicking FG and kicking XP. "Made" covers all three correctly, since
+          a completion is a pass made. Splitting the pair rather than leaving it a string is
+          the difference between a page that can show completion percentage and one that can
+          only print "12/31".
+      - name: stat_attempted
+        description: Second half of a made/attempted pair; null on every row that is not one.
