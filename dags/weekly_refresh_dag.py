@@ -94,6 +94,35 @@ def _load(**context):
     return {"loaded": endpoints}
 
 
+def _heartbeat(name):
+    """A final task that beats ONLY when everything upstream succeeded.
+
+    `trigger_rule` is left at its default `all_success` on purpose, and that default is the
+    entire safety property: a heartbeat from a failed run is a lie, and the one existing
+    task in this project that uses `all_done` — capture_dq — is the counter-example that
+    made the distinction concrete. If this task ever needs to run on failure, the heartbeat
+    is the wrong thing to attach to it.
+    """
+    def _beat(**context):
+        from src import heartbeat
+        run = context.get("dag_run")
+        heartbeat.beat(name,
+                       dag_id=getattr(run, "dag_id", "") or "",
+                       run_id=getattr(run, "run_id", "") or "")
+
+    return PythonOperator(task_id="heartbeat", python_callable=_beat)
+
+
+# One cadence name per DAG. These are the strings the external monitor knows: each maps to a
+# CFDB_HEARTBEAT_URL_<NAME> env var, so silencing one for the required absence test is a
+# config change rather than a code change.
+HEARTBEAT_NAME = {
+    "cfbd_results_refresh": "weekly_results",
+    "cfbd_pregame_refresh": "weekly_pregame",
+    "cfbd_midweek_results": "weekly_midweek",
+}
+
+
 def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) -> DAG:
     with DAG(
         dag_id=dag_id,
@@ -171,8 +200,19 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
         # the run state — while capture_dq still records test history on every outcome,
         # which is the property its trigger rule exists to guarantee. capture_dq does not
         # read anything publish writes, so the ordering was incidental to begin with.
+        # THE DEAD-MAN'S SWITCH, ON THE SUCCESS PATH ONLY.
+        #
+        # Downstream of publish, so it beats only when the whole chain worked — fetch, load,
+        # transform, test AND the hop that puts data in front of a reader. A heartbeat any
+        # earlier would report health for a run that never reached the site.
+        #
+        # Deliberately NOT downstream of capture_dq, which is `all_done` and therefore
+        # succeeds after a failure. Attaching the beat there would make it say "alive" on
+        # exactly the runs it exists to catch.
+        beat = _heartbeat(HEARTBEAT_NAME[dag_id])
+
         dbt_test >> capture_dq
-        fetch >> load >> dbt_run >> dbt_test >> publish
+        fetch >> load >> dbt_run >> dbt_test >> publish >> beat
     return dag
 
 

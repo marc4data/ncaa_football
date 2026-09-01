@@ -42,9 +42,26 @@ def test_publish_is_a_leaf_so_a_skipped_publish_fails_the_run():
         "capture_test_results must not be downstream of publish: as an all_done leaf it "
         "would mask a skipped publish and report the run as successful")
     assert "dbt_test >> capture_dq" in code
-    assert code.rstrip().rstrip(")").rstrip().endswith(">> publish") or \
-        re.search(r">> publish\s*$", code, re.MULTILINE), \
-        "publish must terminate its chain, so that it is a leaf"
+
+    # THE PROPERTY IS "A FAILED PUBLISH FAILS THE RUN", NOT "PUBLISH IS LITERALLY THE LEAF".
+    #
+    # The dead-man's switch put a heartbeat downstream of publish, so publish stopped being
+    # the terminal task and this assertion — written as "the chain ends at publish" — failed.
+    # It was right to fail: the mechanism changed. But the guarantee survives, and by the
+    # same route it always relied on. `beat` uses the DEFAULT all_success rule here, so a
+    # failed or upstream-failed publish leaves the heartbeat upstream_failed, and an
+    # upstream_failed leaf fails the DagRun exactly as a failed publish leaf did.
+    #
+    # What must never happen again is the chain ending in a task that succeeds regardless —
+    # which is what capture_dq's all_done did. So the test now checks the terminal task is
+    # the heartbeat and that the weekly heartbeat carries no permissive trigger rule,
+    # rather than checking a task position that legitimately moved.
+    assert re.search(r">> publish >> beat\s*$", code, re.MULTILINE), (
+        "publish must be followed only by the heartbeat, which terminates the chain")
+    assert "TriggerRule" not in code, (
+        "the weekly heartbeat must keep the strict all_success default: a permissive rule "
+        "would let the terminal task succeed behind a failed publish, which is the exact "
+        "masking capture_dq used to do")
 
 
 def test_capture_still_runs_when_tests_fail():

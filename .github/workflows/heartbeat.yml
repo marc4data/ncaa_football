@@ -1,0 +1,65 @@
+name: Dead-man's switch
+
+# THE MONITOR MUST NOT SHARE FATE WITH THE THING IT MONITORS.
+#
+# The laptop stack was down from 24 to 28 August and nothing noticed, because every check
+# that could have noticed ran on the machine that was off. This workflow runs on GitHub's
+# infrastructure, reads the pipeline's heartbeats over a restricted SSH forced command, and
+# fails when one stops arriving. A failed run emails the repository owner — that email IS
+# the alert.
+#
+# GitHub Actions over a hosted check service (healthchecks.io, Cronitor, Dead Man's Snitch):
+# free at all of them, but this needs no new account and no new credential to rotate, and
+# its notifications land where CI failures already do. The trade is that a GitHub outage
+# silences the monitor — acceptable for a check that exists to catch multi-day silence, and
+# visible rather than silent, because the run itself would be missing from the history.
+
+on:
+  schedule:
+    # Every two hours. The tightest budget is five hours (the two-hourly scores cadence plus
+    # room for one missed run), so checking on this interval detects a stop inside seven —
+    # against the four DAYS it took last time.
+    - cron: '15 */2 * * *'
+  workflow_dispatch:
+
+# Never more than one in flight: a slow SSH must not stack up runs, and a queued monitor is
+# a late monitor.
+concurrency:
+  group: heartbeat
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    name: Pipeline is still beating
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install the monitoring key
+        env:
+          MONITOR_SSH_KEY: ${{ secrets.CFDB_MONITOR_SSH_KEY }}
+          MONITOR_HOST: ${{ secrets.CFDB_MONITOR_HOST }}
+        run: |
+          if [ -z "$MONITOR_SSH_KEY" ] || [ -z "$MONITOR_HOST" ]; then
+            echo "::error::CFDB_MONITOR_SSH_KEY or CFDB_MONITOR_HOST is not set. The switch " \
+                 "is not armed; see docs/dead_mans_switch.md."
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$MONITOR_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # accept-new rather than a pinned known_hosts: the droplet's key is stable, and a
+          # rebuild that changed it would otherwise fail this check for the wrong reason —
+          # a false alarm here is how a switch gets muted.
+          ssh-keyscan -H "${MONITOR_HOST#*@}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Check every cadence is still beating
+        env:
+          MONITOR_HOST: ${{ secrets.CFDB_MONITOR_HOST }}
+        # The key is a forced command that can only print heartbeat ages — it cannot open a
+        # shell, run anything else, or reach Docker. See deploy/cfdb_heartbeat.sh.
+        run: python ci/check_heartbeats.py "$MONITOR_HOST"
