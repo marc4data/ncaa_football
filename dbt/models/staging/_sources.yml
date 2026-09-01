@@ -175,6 +175,40 @@ sources:
         columns:
           - name: filename
             data_tests: [unique, not_null]
+      - name: raw_passing_players_season
+        description: >
+          CFBD /passing/players/season. Passer production with air yards, depth of target and
+          yards after catch. THE `*AttemptsAvailable` COUNTS ARE DENOMINATORS: air yards were
+          charted for 53 of 164 attempts in the sample, so the averages are over the smaller
+          number.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_passing_players_games
+        description: CFBD /passing/players/games. The per-game companion; carries a real gameId.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_passing_teams_season
+        description: >
+          CFBD /passing/teams/season. Same thirteen measures nested under `offense` and
+          `defense`, where defense is passing ALLOWED.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_passing_teams_games
+        description: CFBD /passing/teams/games. Two rows per game, one per team.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
+      - name: raw_passing_plays
+        description: >
+          CFBD /passing/plays. Enriched pass attempts — 7,396 rows and 5.9 MB PER WEEK, the
+          reason this family is week-scoped and opt-in. `parseStatus` is a quality flag: the
+          geometry is derived by parsing play text and the parse does not always succeed.
+        columns:
+          - name: filename
+            data_tests: [unique, not_null]
       - name: raw_games_media
         description: >
           CFBD /games/media — broadcast outlet per game per media type. Landed since the

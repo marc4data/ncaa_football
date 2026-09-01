@@ -94,6 +94,19 @@ SOURCE_REF = re.compile(r"source\(\s*'raw'\s*,\s*'([a-z0-9_]+)'\s*\)")
 JINJA_SET = re.compile(r"{%-?\s*set\s.*?%}", re.S)
 QUOTED = re.compile(r"'([A-Za-z_][A-Za-z0-9_]*)'")
 
+# Field names can also live in a MACRO the model calls. The five passing models share
+# thirteen measures via `passing_metrics()` in dbt/macros/passing.sql, defined once so they
+# cannot drift apart — which is the right thing to do and made the names invisible to a
+# reader that only opens model files.
+#
+# THIS IS THE FOURTH SHAPE THIS MATCHER HAS MISSED, and they share a root: it infers what a
+# model reads from the text of one file, so anything that moves a name out of that file —
+# into a loop variable, a qualified alias, or a macro — disappears. Each time the symptom was
+# the same, a completed model reported as a gap.
+MACRO_DIR = ROOT / "dbt" / "macros"
+MACRO_CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\(\s*\)")
+MACRO_DEF = re.compile(r"{%-?\s*macro\s+([a-z_][a-z0-9_]*)\s*\(.*?{%-?\s*endmacro", re.S)
+
 # An endpoint whose entire response is a bare array of scalars — /stats/categories. The spec
 # flattener has no key to name, so it emits this sentinel. There is no field to unnest: a
 # model that reads the endpoint at all has read all of it.
@@ -150,9 +163,25 @@ class Row:
         return "complete"
 
 
+def macro_tokens() -> Dict[str, Set[str]]:
+    """Macro name -> the quoted tokens in its body.
+
+    Only zero-argument macros matter here: those are the ones used to share a field list.
+    """
+    tokens: Dict[str, Set[str]] = {}
+    if not MACRO_DIR.exists():
+        return tokens
+    for path in sorted(MACRO_DIR.glob("*.sql")):
+        text = path.read_text()
+        for match in MACRO_DEF.finditer(text):
+            tokens[match.group(1)] = set(QUOTED.findall(match.group(0)))
+    return tokens
+
+
 def staging_models() -> Dict[str, Dict[str, Set[str]]]:
     """raw table name -> {model name -> the payload keys that model reads}."""
     by_table: Dict[str, Dict[str, Set[str]]] = {}
+    macros = macro_tokens()
     for sql_file in sorted(STAGING_DIR.glob("*.sql")):
         text = sql_file.read_text()
         keys: Set[str] = set()
@@ -168,6 +197,9 @@ def staging_models() -> Dict[str, Dict[str, Set[str]]]:
         # Field names the model builds by looping over a list rather than naming inline.
         for block in JINJA_SET.findall(text):
             keys |= set(QUOTED.findall(block))
+        # Field names the model gets from a shared macro rather than declaring itself.
+        for name in set(MACRO_CALL.findall(text)):
+            keys |= macros.get(name, set())
         for table in SOURCE_REF.findall(text):
             by_table.setdefault(table, {})[sql_file.stem] = keys
     return by_table
