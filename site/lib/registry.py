@@ -70,11 +70,16 @@ PAGES = [
          in_nav=False,
          partial_sections=["Week-over-week trends (weekly rating history)",
                            "Roster (dim_athlete)"]),
-    Page("players", "Players", GAMES, "srv_player_stats", False, False, False,
-         blocker="srv_player_stats",
-         blocker_note="Blocked on dim_athlete, fct_player_season_stat, "
-                      "fct_player_game_stat and fct_play. Scheduled last: it is the only "
-                      "blocked page whose raw data is not already on disk."),
+    # UNBLOCKED. The note this replaces said the page was "the only blocked page whose raw
+    # data is not already on disk" — which stopped being true when the staging breadth work
+    # landed stg_roster, stg_player_season_stat, stg_game_player_stat, stg_play and
+    # stg_play_stat. dim_athlete, fct_player_season_stat, fct_player_game_stat, fct_play and
+    # fct_play_stat are built on them, and three serving views sit on top.
+    #
+    # The page reads THREE views rather than one because it shows three grains — season
+    # totals, a game log and individual plays — and the site reads one relation per query.
+    # `view` names the primary, which is what the header and the dataset caption cite.
+    Page("players", "Players", GAMES, "srv_player_stats", True, True, True),
     # NOT IN NAV. Marc asked in wireframe v0.2, again in feedback 01, and again after
     # using the picker that was built in response: "it's a click-through asset". Schedule,
     # Scores and Today are its index, and now that rows actually link, they are how it is

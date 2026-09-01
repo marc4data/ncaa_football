@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 
 from lib import chips, fmt                       # noqa: E402
 from lib.query import QueryContractError, check_contract   # noqa: E402
-from lib.registry import BY_KEY, GROUPS, PAGES   # noqa: E402
+from lib.registry import GROUPS, PAGES   # noqa: E402
 
 
 # --- the query contract, enforced in code rather than in review -------------------------
@@ -119,11 +119,20 @@ def test_out_of_sample_copy_says_week_not_prediction():
 
 # --- the nav contract --------------------------------------------------------------------
 
-def test_all_eighteen_pages_appear_including_blocked_ones():
-    """AC-G.51: blocked pages are not hidden."""
+def test_all_eighteen_pages_appear_and_none_is_blocked():
+    """AC-G.51 said blocked pages must not be hidden. There are none left to hide.
+
+    Players was the last, blocked on dim_athlete, fct_player_season_stat,
+    fct_player_game_stat and fct_play — all four now built. This is the roadmap's north star
+    stated as an assertion: "real data serving EVERY page", measured in pages that render
+    rather than tables that exist.
+
+    Asserted as equality rather than a floor, because a bound that only says "at least most
+    of them" stops measuring anything at exactly the point it should start guarding against
+    regression.
+    """
     assert len(PAGES) == 18
-    assert not BY_KEY["players"].buildable
-    assert BY_KEY["players"] in PAGES
+    assert [p.key for p in PAGES if not p.buildable] == []
 
 
 def test_groups_match_the_wireframe():
@@ -131,10 +140,19 @@ def test_groups_match_the_wireframe():
                       "Reference", "Back of house"]
 
 
-def test_a_blocked_page_names_a_specific_object():
-    page = BY_KEY["players"]
-    assert page.blocker and page.blocker.startswith("srv_")
-    assert "dim_athlete" in page.blocker_note
+def test_any_blocked_page_names_the_object_it_is_waiting_on():
+    """AC-G.7: a Degraded page names the OBJECT, so a reader can see the blocker on screen.
+
+    Written conditionally on purpose. No page is blocked today, so a test naming `players`
+    would now be asserting a fact about history — but the RULE still has to hold the next
+    time a page is added ahead of its data, which is exactly when nobody will remember it.
+    A vacuous pass here is the correct result for a site with nothing blocked.
+    """
+    for page in PAGES:
+        if page.buildable:
+            continue
+        assert page.blocker and page.blocker.startswith("srv_"), page.key
+        assert page.blocker_note, page.key
 
 
 # --- page-level criteria that are checkable without a browser ---------------------------
@@ -193,7 +211,6 @@ def test_every_page_now_has_a_body_except_the_blocked_one():
     """
     import re
     from pathlib import Path
-    from lib.registry import BY_KEY
     views = Path(__file__).resolve().parents[1] / "site" / "views"
     placeholders = set()
     for path in views.glob("*.py"):
@@ -203,12 +220,12 @@ def test_every_page_now_has_a_body_except_the_blocked_one():
         # A body-less page is exactly `shell.render_page("key")` with no second argument.
         if re.search(r'render_page\(\s*"[^"]+"\s*\)', source):
             placeholders.add(path.stem)
-    # Players is the only one left, and it stays: its primary view does not exist, so the
-    # shell renders the blocked state and a body would have nothing to read. Asserting
-    # equality rather than a subset — a loose bound stops measuring anything once the work
-    # is done, which is precisely when it should start guarding against regression.
-    assert placeholders == {"players"}, f"still placeholders: {sorted(placeholders)}"
-    assert not BY_KEY["players"].buildable
+    # NONE LEFT. Players was the last placeholder and now has a body reading three serving
+    # views — season totals, game log and the play-level drill-down. Asserting equality
+    # rather than a subset: a loose bound stops measuring anything once the work is done,
+    # which is precisely when it should start guarding against regression.
+    assert placeholders == set(), f"still placeholders: {sorted(placeholders)}"
+    assert all(page.buildable for page in PAGES)
 
 
 def test_edge_finder_reads_its_week_floor_from_data_not_from_a_constant():
