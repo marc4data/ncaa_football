@@ -2297,3 +2297,82 @@ models:
           lone comma, so the page renders an em dash rather than stray punctuation.
       - name: as_of_ts
         description: AC-G.35. Last load of the `team` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_game_travel
+    description: >
+      Matchup page, Travel and rest. One row per game x team, so a matchup query returns two.
+      This section was listed as blocked on "the venue join key" for months. The key was on
+      /games/weather all along — venueId on every row, matching dim_venue 6,847 of 6,847.
+      TWO MEASURES WITH DIFFERENT COVERAGE, and a consumer must not average over the
+      difference: `rest_days` comes from the schedule and exists for every game that is not a
+      season opener; `travel_km` needs coordinates for both the game venue and the team's own
+      home venue, so it is 2024 onward and about 79% even there.
+      NULL means unknown. ZERO means they played at home. Those are different answers.
+    columns:
+      - name: game_travel_sk
+        description: Surrogate key over (game_id, team_id) — the grain.
+      - name: game_id
+        description: CFBD game id. Appears on exactly two rows, one per team.
+      - name: team_id
+        description: CFBD team id for the side this row describes.
+      - name: team
+        description: Name of the side this row describes.
+      - name: opponent_team_id
+        description: CFBD team id of the opponent.
+      - name: opponent
+        description: Opponent name.
+      - name: season
+        description: Season the game belongs to.
+      - name: week
+        description: Week within the season and season_type.
+      - name: season_type
+        description: '`regular` or `postseason`.'
+      - name: game_date
+        description: Calendar date of the game.
+      - name: is_home
+        description: Whether this team was the designated home side.
+      - name: is_neutral_site
+        description: >
+          Whether the game was at a neutral venue. Neutral sites count as travel for BOTH
+          teams — a bowl game is a trip for everyone, and the home/away label on one is a
+          scheduling artefact rather than a fact about geography.
+      - name: game_venue
+        description: Venue the game was played at, from the weather payload.
+      - name: travel_km
+        description: >
+          Great-circle distance from this team's own home venue to where the game was played,
+          in kilometres to one decimal place. Haversine on a spherical Earth, which is
+          accurate to a few tenths of a percent — far below anything a travel story turns on.
+          NULL where either venue is unknown, never 0. ZERO means they played at home.
+          The home venue is DERIVED, not declared: CFBD publishes no "this team's stadium"
+          field, so it is the venue the team played most of its non-neutral home games at
+          that season. For small programmes with only one or two weather-covered home games
+          that mode can land on the wrong venue — 19 rows of 221,758, all non-FBS, tracked by
+          assert_a_home_game_is_played_at_home.
+      - name: elevation_change_m
+        description: >
+          Altitude of the game venue relative to this team's home venue, in metres. SIGNED on
+          purpose: arriving 1,500 m higher and 1,500 m lower are different experiences, and a
+          magnitude would erase which one happened. Null where either elevation is unknown —
+          /venues does not publish it for every venue.
+      - name: game_elevation_m
+        description: Elevation of the game venue in metres, where published.
+      - name: home_elevation_m
+        description: Elevation of this team's derived home venue in metres, where published.
+      - name: previous_game_date
+        description: >
+          Date of this team's previous game IN THE SAME SEASON. Null on a season opener.
+      - name: rest_days
+        description: >
+          Whole calendar days since this team's previous game in the same season. Null on a
+          season opener, which is the absence of a previous game rather than a long rest.
+          Counted within a season deliberately: the gap between a bowl game and the following
+          September is not rest in any sense a reader means.
+      - name: rest_bucket
+        description: >
+          `season opener`, `short week` (<=5 days), `normal week` (6-8), `extra rest` (9-14)
+          or `long layoff` (15+). A short week is the thing readers actually ask about, and
+          the boundaries are named here so no page picks different ones.
+      - name: as_of_ts
+        description: AC-G.35. Last load of the `game` domain, rendered instead of now().
