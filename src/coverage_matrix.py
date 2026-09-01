@@ -58,9 +58,17 @@ OPS_TABLES = {"raw_manifest", "raw_dbt_test_result", "raw_deploy_status",
 # either as an unnested field would credit us for reading our own bookkeeping.
 ENVELOPE_ALIASES = {"params", "content"}
 
+# The first argument is normally a quoted column alias — json_get_string('team', 'school').
+# It can also be a bare Jinja VARIABLE holding a built expression, as in the CFP matchup
+# model's `json_get_string(slot, 'seed')` where `slot` is an array element resolved in a
+# {% set %}. Accepting both spellings matters: reading only the quoted form reported
+# /playoffs/cfp/games as 17 of 19 when `seed` was exposed as slot_1_seed and slot_2_seed.
+#
+# Same failure direction as the Jinja-loop gap fixed earlier — undercounting invents a hole
+# that is not there and sends the next person to rewrite a finished model.
 FIELD_ACCESS = re.compile(
     r"json_get_(?:string|nested_string|object|array_element_string)\("
-    r"\s*'([a-z_][a-z0-9_]*)'\s*,\s*(\[[^\]]*\]|'[^']*')")
+    r"\s*'?([a-z_][a-z0-9_]*)'?\s*,\s*(\[[^\]]*\]|'[^']*')")
 SOURCE_REF = re.compile(r"source\(\s*'raw'\s*,\s*'([a-z0-9_]+)'\s*\)")
 
 # Jinja `{% set %}` blocks, and the quoted tokens inside them.
@@ -84,6 +92,23 @@ QUOTED = re.compile(r"'([A-Za-z_][A-Za-z0-9_]*)'")
 # flattener has no key to name, so it emits this sentinel. There is no field to unnest: a
 # model that reads the endpoint at all has read all of it.
 SCALAR_SENTINEL = "(scalar)"
+
+# Endpoints that are partial ON PURPOSE, with the reason. Without this the gap table reads
+# "26 fields dropped" and sends the next person to unnest a composite whose parts are already
+# modelled somewhere better — which is the same wasted trip the status column exists to
+# prevent, one level down.
+#
+# The bar for an entry is high: the fields must be genuinely exposed elsewhere, from the
+# endpoint that owns them. This is not a place to retire awkward work.
+PARTIAL_BY_DESIGN = {
+    "playoffs/cfp":
+        "COMPOSITE. Its `participants[]` is what /playoffs/cfp/participants serves and its "
+        "`rounds[].matchups[]` is what /playoffs/cfp/games serves — both fully modelled from "
+        "the endpoints that own them. Unnesting them here as well would put the same rows in "
+        "two places from sources that can drift between fetches, with no way to say which is "
+        "right. stg_cfp_bracket holds what only this endpoint has: the format, field size, "
+        "status and champion.",
+}
 
 
 @dataclass
@@ -319,14 +344,30 @@ def render(rows: List[Row], spec: Spec, source: str, generated: str) -> str:
     w("")
     w("| Endpoint | Model | Dropped | Fields not exposed |")
     w("|---|---|---:|---|")
-    partials = [r for r in rows if r.status == "partial"]
+    partials = [r for r in rows if r.status == "partial"
+                and r.path not in PARTIAL_BY_DESIGN]
     for row in sorted(partials, key=lambda r: -(r.fields_available - r.fields_unnested)):
         dropped = row.fields_available - row.fields_unnested
         shown = ", ".join(f"`{f}`" for f in row.missing_fields[:12])
         if len(row.missing_fields) > 12:
             shown += f", … (+{len(row.missing_fields) - 12})"
         w(f"| `{row.path}` | {', '.join(row.models)} | {dropped} | {shown} |")
+    if not partials:
+        w("| — | — | 0 | Nothing left in this category. |")
     w("")
+
+    by_design = [r for r in rows if r.path in PARTIAL_BY_DESIGN]
+    if by_design:
+        w("## Partial on purpose")
+        w("")
+        w("These read as incomplete above and are not work to do. Each one's missing fields")
+        w("are exposed elsewhere, from the endpoint that owns them.")
+        w("")
+        for row in sorted(by_design, key=lambda r: r.path):
+            dropped = row.fields_available - row.fields_unnested
+            w(f"**`{row.path}`** — {dropped} fields not exposed here. "
+              f"{PARTIAL_BY_DESIGN[row.path]}")
+            w("")
     w("## How the columns are decided")
     w("")
     w("- **Registered** — presence in `src/endpoints.py`, and whether `include` puts it in")

@@ -881,6 +881,142 @@ models:
         description: '"Chicago Bears". The actual unique key on this table.'
         data_tests: [not_null, unique]
 
+  - name: stg_team_record
+    description: >
+      Season win-loss record, one row per (season, team), split seven ways. DELIBERATELY NOT
+      the source of truth — records are derived from the game spine in fct_team_record and
+      this endpoint exists to reconcile against that derivation. Covers every division: 668
+      rows for 2024 including Division III. `division` is an EMPTY STRING, not null, for teams
+      that have none.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team_id
+        data_tests: [not_null]
+      - name: classification
+        description: fbs / fcs / ii / iii — what makes the non-FBS rows filterable.
+      - name: division
+        description: Empty string rather than null where a team has none.
+      - name: total_wins
+        description: Wins across all games. Compare against fct_team_record, not replace it.
+
+  - name: stg_roster
+    description: >
+      Team rosters, one row per (season, player, TEAM) — team is in the grain because a
+      player can appear on two rosters in one season. Ten did in 2024, where a mid-season move
+      leaves them listed by both schools; keying on (season, player_id) would silently drop
+      one row per transfer. THE `year` FIELD ON THE WIRE IS THE CLASS YEAR, NOT THE SEASON — reading it as the season puts every senior in 4 AD. The season
+      comes from the request params, so unparameterized fetches are excluded.
+    columns:
+      - name: season
+        description: From the request params. The payload has no season.
+        data_tests: [not_null]
+      - name: player_id
+        data_tests: [not_null]
+      - name: class_year
+        description: 1-4, freshman to senior. Named to keep it distinct from `season`.
+      - name: recruit_ids
+        description: >
+          JSON array bridging back to stg_recruit. The reverse of that model's `athlete_id`,
+          which is null for anyone unlinked — between the two most players can be joined.
+      - name: home_fips_code
+        description: >
+          County FIPS. Spelled `homeCountyFIPS` here, `fipsCode` on /recruiting/players and
+          `countyFips` on /draft/picks; aligned so callers need not know.
+
+  - name: stg_conference_affiliation
+    description: >
+      Which conference a team belonged to and WHEN, one row per (team, conference, start
+      year). The only endpoint that dates an affiliation — dim_team needs a row per season to
+      say the same thing. Grain includes start_year because a team can rejoin a conference it
+      previously left.
+    columns:
+      - name: team_id
+        data_tests: [not_null]
+      - name: conference_id
+        description: Carried here; most conference-bearing endpoints give a name only.
+      - name: start_year
+        data_tests: [not_null]
+      - name: end_year
+        description: >
+          NULL MEANS CURRENT. The open interval is the useful part; coercing it to a
+          far-future date would break the `is null` test that identifies current membership.
+
+  - name: stg_conference_change
+    description: >
+      Realignment as EVENTS, one row per (team, effective year) — the complement to
+      stg_conference_affiliation's intervals. Carries classification on both sides, so a
+      division move is a single fact rather than two affiliation rows that happen to differ.
+      36 moves in 2024 alone, which is why membership is resolved per season everywhere else.
+    columns:
+      - name: team_id
+        data_tests: [not_null]
+      - name: effective_year
+        data_tests: [not_null]
+
+  - name: stg_cfp_bracket
+    description: >
+      The playoff bracket header, one row per (season, competition). THE PAYLOAD IS A SINGLE
+      OBJECT, not an array — the only endpoint shaped that way.
+      DELIBERATELY PARTIAL: /playoffs/cfp is a composite whose participants[] and
+      rounds[].matchups[] duplicate /playoffs/cfp/participants and /playoffs/cfp/games
+      exactly. Unnesting them here too would put the same rows in two places from sources
+      that can drift between fetches, with no way to say which was right. The fields are
+      exposed, from the endpoints that own them.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: format
+        description: >
+          e.g. twelve_team_2024. The format changed in 2024 and will change again; a bracket
+          read without it cannot be compared across eras.
+      - name: champion_team_id
+        description: Null until the tournament completes.
+
+  - name: stg_cfp_participant
+    description: >
+      The playoff field, one row per (season, team). Season comes from the request — the rows
+      carry no year. `bid_type` and `conference_champion` are different questions: a team can
+      be a champion without an automatic bid, since the twelve-team format grants automatic
+      bids to the five highest-ranked champions only.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: team_id
+        data_tests: [not_null]
+      - name: seed
+        description: Bracket seed, distinct from committee_rank.
+      - name: eliminated_round
+        description: >
+          NULL FOR THE CHAMPION — they were never eliminated. A count of eliminations that
+          ignores the null undercounts the field by one.
+
+  - name: stg_cfp_matchup
+    description: >
+      Playoff bracket matchups, one row per (season, matchup) — the bracket as a graph.
+      SLOTS ARE FLATTENED TO POSITION 1 AND 2, the opposite call from the box scores, because
+      the key set is CLOSED: a matchup has exactly two ordered slots and always will. Long
+      form would force every caller to self-join to ask who played whom.
+    columns:
+      - name: season
+        data_tests: [not_null]
+      - name: matchup_id
+        description: >
+          The matchup id WITHIN the bracket (31, 36). A DIFFERENT NUMBER from game_id;
+          confusing them joins nothing and raises nothing.
+        data_tests: [not_null]
+      - name: game_id
+        description: The CFBD game id (401677176). This is what joins to stg_games.
+      - name: slot_1_source
+        description: >
+          Populated only while the participant is unknown, naming the feeding matchup. A slot
+          has a participant or a source, never both; a bracket fetched mid-tournament is a
+          legitimate state.
+      - name: advances_to_matchup_id
+        description: >
+          The bracket EDGE — which matchup the winner feeds. Without it this is a list of
+          games rather than a tree.
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated

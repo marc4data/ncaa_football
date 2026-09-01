@@ -2,7 +2,7 @@
 
 **Generated — do not edit by hand.** `python -m src.coverage_matrix`
 
-Spec v5.25.0 · 79 endpoints · generated 2026-08-31 · raw counts from `data/raw/` (response files on disk)
+Spec v5.25.0 · 79 endpoints · generated 2026-09-01 · raw counts from `data/raw/` (response files on disk)
 
 What the API serves, what we fetch, what has landed, and what is actually exposed as
 columns. The last of those is the one that was never measured: the pipeline was
@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 47 | every field the spec publishes is exposed as a column |
-| partial | 5 | a staging model exists but drops fields |
-| raw only | 12 | responses have landed; nothing reads them |
+| complete | 53 | every field the spec publishes is exposed as a column |
+| partial | 6 | a staging model exists but drops fields |
+| raw only | 5 | responses have landed; nothing reads them |
 | no raw data | 10 | registered, never fetched |
 | unregistered | 5 | the API serves it; we have not decided about it |
 
-**Fields exposed: 610 of 1191 (51.2%).** That percentage is the product gap in one number.
+**Fields exposed: 696 of 1191 (58.4%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -35,8 +35,8 @@ sweep can invent.
 | `coaches/seasons` | swept | 3 | `stg_coach_season_detail` | 36/36 | complete |
 | `coaches/tenures` | CLI | — | — | 0/18 | no raw data |
 | `conferences` | swept | 4 | `stg_conferences` | 6/6 | complete |
-| `conferences/affiliations` | swept | 3 | — | 0/9 | raw only |
-| `conferences/changes` | swept | 3 | — | 0/11 | raw only |
+| `conferences/affiliations` | swept | 3 | `stg_conference_affiliation` | 9/9 | complete |
+| `conferences/changes` | swept | 3 | `stg_conference_change` | 11/11 | complete |
 | `draft/picks` | swept | 60 | `stg_draft_pick` | 24/24 | complete |
 | `draft/positions` | swept | 1 | `stg_draft_position` | 2/2 | complete |
 | `draft/teams` | swept | 1 | `stg_nfl_team` | 4/4 | complete |
@@ -64,9 +64,9 @@ sweep can invent.
 | `player/search` | CLI | — | — | 0/16 | no raw data |
 | `player/season/overview` | CLI | — | — | 0/17 | no raw data |
 | `player/usage` | swept | 14 | `stg_player_season_usage` | 14/14 | complete |
-| `playoffs/cfp` | swept | 2 | — | 0/34 | raw only |
-| `playoffs/cfp/games` | swept | 2 | — | 0/19 | raw only |
-| `playoffs/cfp/participants` | swept | 2 | — | 0/12 | raw only |
+| `playoffs/cfp` | swept | 2 | `stg_cfp_bracket` | 8/34 | partial |
+| `playoffs/cfp/games` | swept | 2 | `stg_cfp_matchup` | 19/19 | complete |
+| `playoffs/cfp/participants` | swept | 2 | `stg_cfp_participant` | 12/12 | complete |
 | `plays` | swept | 43 | — | 0/28 | raw only |
 | `plays/stats` | swept | 43 | — | 0/20 | raw only |
 | `plays/stats/types` | swept | 1 | — | 0/2 | raw only |
@@ -84,11 +84,11 @@ sweep can invent.
 | `ratings/sp/conferences` | swept | 14 | `stg_rating_sp_conference` | 16/16 | complete |
 | `ratings/srs` | swept | 14 | `stg_rating_srs`, `stg_team_rating` | 6/6 | complete |
 | `ratings/srs/expanded` | swept | 14 | `stg_rating_srs_expanded` | 7/7 | complete |
-| `records` | swept | 169 | — | 0/11 | raw only |
+| `records` | swept | 169 | `stg_team_record` | 11/11 | complete |
 | `recruiting/groups` | swept | 1 | `stg_team_recruiting_position_group` | 7/7 | complete |
 | `recruiting/players` | swept | 3 | `stg_recruit` | 19/19 | complete |
 | `recruiting/teams` | swept | 3 | `stg_team_recruiting_rank` | 4/4 | complete |
-| `roster` | swept | 3 | — | 0/16 | raw only |
+| `roster` | swept | 3 | `stg_roster` | 16/16 | complete |
 | `scoreboard` | CLI | — | — | 0/28 | no raw data |
 | `stats/categories` | swept | 1 | `stg_stat_category` | 1/1 | complete |
 | `stats/game/advanced` | swept | 13 | `stg_game_team_advanced` | 20/20 | complete |
@@ -122,6 +122,13 @@ carried through.
 | `games/media` | stg_game_media | 6 | `awayConference`, `awayTeam`, `homeConference`, `homeTeam`, `isStartTimeTBD`, `startTime` |
 | `info` | stg_api_quota | 6 | `adjustedMetrics`, `graphQl`, `livePlayByPlay`, `products`, `scoreboard`, `weather` |
 | `info/usage` | stg_api_usage_endpoint | 4 | `cbbRequests`, `cfbRequests`, `requestedAt`, `uniqueEndpoints` |
+
+## Partial on purpose
+
+These read as incomplete above and are not work to do. Each one's missing fields
+are exposed elsewhere, from the endpoint that owns them.
+
+**`playoffs/cfp`** — 26 fields not exposed here. COMPOSITE. Its `participants[]` is what /playoffs/cfp/participants serves and its `rounds[].matchups[]` is what /playoffs/cfp/games serves — both fully modelled from the endpoints that own them. Unnesting them here as well would put the same rows in two places from sources that can drift between fetches, with no way to say which is right. stg_cfp_bracket holds what only this endpoint has: the format, field size, status and champion.
 
 ## How the columns are decided
 
