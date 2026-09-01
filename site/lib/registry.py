@@ -68,8 +68,9 @@ PAGES = [
     # built. The page count stays 18; this is a nav decision, not a scope one.
     Page("team", "Team page", GAMES, "srv_team_overview", True, True, True,
          in_nav=False,
-         partial_sections=["Week-over-week trends (weekly rating history)",
-                           "Roster (dim_athlete)"]),
+         # Roster is BUILT — dim_athlete exists and srv_team_roster sits on it, so the
+         # section renders and links each player through to the Players page.
+         partial_sections=["Week-over-week trends (weekly rating history)"]),
     # UNBLOCKED. The note this replaces said the page was "the only blocked page whose raw
     # data is not already on disk" — which stopped being true when the staging breadth work
     # landed stg_roster, stg_player_season_stat, stg_game_player_stat, stg_play and

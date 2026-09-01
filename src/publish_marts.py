@@ -138,6 +138,7 @@ DEFAULT_SERVING = [
     "srv_team_rating",
     "srv_data_dictionary",
     "srv_game_weather",
+    "srv_team_roster",
 ]
 
 # THE PLAYER TABLES PUBLISH ON A SLOWER CADENCE, AND THE REASON IS THE WIRE.
