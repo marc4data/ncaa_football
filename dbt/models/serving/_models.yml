@@ -2056,11 +2056,12 @@ models:
       the section the site IA singles out as what nobody in the comp set offers publicly.
       EVERY FILTER THE PAGE OFFERS IS A COLUMN HERE, because the site reads one relation per
       query with a WHERE and no joins (G-2) and does no arithmetic (G-3).
-      COVERAGE IS INCOMPLETE AND MUST BE READ THAT WAY. /plays/stats caps at 2,000 records per
-      request, so the original week-scoped fetch returned an arbitrary 11% of games. The
-      source is fixed — the endpoint now fans out per game — but this view is only as complete
-      as what has landed. Absence means "no stat line landed for that play", never "the player
-      did nothing".
+      COVERAGE, AND HOW TO READ ABSENCE. /plays/stats caps at 2,000 records per request, so
+      the original week-scoped fetch returned an arbitrary 11% of games skewed to whichever
+      the API listed first. Fixed by fanning out per game: 375,925 rows over 1,884 games,
+      with 2024 conference coverage now even (Big Ten 151, ACC 149, SEC 144, Big 12 127).
+      The fan-out runs over completed FBS games, which is the project's scope, so absence
+      means "cfdb did not ask about that game", never "the player did nothing".
       Published on the weekly cadence; see srv_player_stats.
     columns:
       - name: play_stat_sk
