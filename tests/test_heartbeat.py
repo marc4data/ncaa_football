@@ -1,0 +1,169 @@
+"""The switch that catches a stopped pipeline, and the two ways it could lie.
+
+The laptop stack was down 24-28 August and nothing noticed: every alert was of the form
+"something ran and failed", and nothing ran. These pin the properties that make absence
+detectable, because a dead-man's switch is only as good as the day it is tripped — and by
+then nobody is watching the code.
+"""
+from pathlib import Path
+
+import pytest
+
+import ci.check_heartbeats as chk
+from src import heartbeat
+
+DAGS = Path(__file__).resolve().parents[1] / "dags"
+FORCED_COMMAND = Path(__file__).resolve().parents[1] / "deploy" / "cfdb_heartbeat.sh"
+
+
+def _code(path: Path) -> str:
+    """Source with comment lines stripped — this repo has matched its own prose before."""
+    return "\n".join(ln for ln in path.read_text().splitlines()
+                     if not ln.lstrip().startswith("#") and not ln.lstrip().startswith("--"))
+
+
+# --- a beat must never come from a failed run ---------------------------------------------
+
+def test_the_heartbeat_is_the_last_task_on_the_success_path():
+    """A heartbeat from a failed run is a lie: it says healthy at the moment the pipeline is
+    not. In the DAGs that publish, the beat sits downstream of publish so it reports only a
+    run that reached a reader."""
+    for name in ("weekly_refresh_dag.py", "scores_refresh_dag.py"):
+        code = _code(DAGS / name)
+        assert ">> beat" in code, f"{name}: nothing beats"
+        assert "publish >> beat" in code, f"{name}: the beat must follow publish"
+
+
+def test_the_beat_is_never_attached_to_the_all_done_task():
+    """capture_dq is `all_done` — it succeeds after a failure, on purpose, so a failed run
+    still records its test results. A beat attached there would report alive on exactly the
+    runs this exists to catch."""
+    code = _code(DAGS / "weekly_refresh_dag.py")
+    assert "capture_dq >> beat" not in code
+    assert "beat >> capture_dq" not in code
+
+
+# --- idle is not dead ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("dag_file", ["scores_refresh_dag.py", "lines_snapshot_dag.py"])
+def test_a_gated_dag_still_beats_when_it_correctly_does_nothing(dag_file):
+    """THE SUBTLE ONE. Both gated DAGs skip their work outside a game window, and that is a
+    successful run — the scheduler fired, the gate decided, nothing failed.
+
+    With the default all_success rule the beat would be skipped too, so the pipeline would go
+    silent for an entire off-season and the monitor could not tell that apart from a dead
+    box. none_failed beats on success or deliberate skip and stays silent on failure.
+
+    `ignore_downstream_trigger_rules` must be False or the gate skips everything downstream
+    regardless of its rule, defeating the above.
+    """
+    code = _code(DAGS / dag_file)
+    assert "TriggerRule.NONE_FAILED" in code, f"{dag_file}: gated beat needs none_failed"
+    assert "ignore_downstream_trigger_rules=False" in code, (
+        f"{dag_file}: True would skip the heartbeat behind a closed gate")
+
+
+def test_the_ungated_weekly_dags_keep_the_strict_rule():
+    """Nothing skips in the weekly chain, so the beat must stay on all_success — the
+    stricter rule, applied where it costs nothing."""
+    code = _code(DAGS / "weekly_refresh_dag.py")
+    assert "TriggerRule.NONE_FAILED" not in code
+
+
+# --- the beat itself -------------------------------------------------------------------
+
+def test_a_monitor_outage_never_fails_a_green_pipeline(monkeypatch, capsys):
+    """The reverse would make the safety net the most fragile component in the system."""
+    monkeypatch.setattr(heartbeat, "ping_url_for", lambda _n: "http://127.0.0.1:1/ping")
+    assert heartbeat.ping("scores_refresh") is False
+    assert "FAILED" in capsys.readouterr().out
+
+
+def test_an_unconfigured_monitor_says_so_rather_than_passing_quietly(monkeypatch, capsys):
+    """"No URL set" and "ping succeeded" must not look the same. An unarmed switch that
+    reported success is the worst outcome available."""
+    monkeypatch.setattr(heartbeat, "ping_url_for", lambda _n: None)
+    assert heartbeat.ping("scores_refresh") is False
+    assert "nothing is watching" in capsys.readouterr().out
+
+
+# --- the watcher ---------------------------------------------------------------------------
+
+def test_an_unreachable_host_is_the_alarm_not_an_error(monkeypatch, capsys):
+    """If the droplet is off, reading heartbeats fails — and that IS the loudest case, not a
+    condition to handle quietly."""
+    def unreachable(_host):
+        raise RuntimeError("connection refused")
+    monkeypatch.setattr(chk, "read_ages", unreachable)
+    assert chk.main(["cfdb_monitor@nowhere"]) == 1
+    assert "unreachable" in capsys.readouterr().out
+
+
+def test_a_stale_cadence_fails_and_names_itself(monkeypatch, capsys):
+    fresh = {name: 60 for name in chk.CADENCES}
+    fresh["scores_refresh"] = 7 * 3600            # budget is 5h
+    monkeypatch.setattr(chk, "read_ages", lambda _h: fresh)
+    assert chk.main(["host"]) == 1
+    out = capsys.readouterr().out
+    assert "STALE" in out and "scores_refresh" in out
+    assert "Silence is not success" in out
+
+
+def test_a_cadence_that_never_beat_is_not_silently_ok(monkeypatch, capsys):
+    """A missing key reads as "no news". It is the opposite."""
+    monkeypatch.setattr(chk, "read_ages",
+                        lambda _h: {n: 60 for n in chk.CADENCES if n != "weekly_results"})
+    assert chk.main(["host"]) == 1
+    assert "NEVER BEAT" in capsys.readouterr().out
+
+
+def test_all_fresh_passes(monkeypatch, capsys):
+    monkeypatch.setattr(chk, "read_ages", lambda _h: {n: 60 for n in chk.CADENCES})
+    assert chk.main(["host"]) == 0
+    assert "beating within budget" in capsys.readouterr().out
+
+
+def cadence_names_in_dags() -> set:
+    """Every heartbeat name the DAGs actually emit.
+
+    Two spellings, because the weekly file maps three DAGs through HEARTBEAT_NAME while the
+    gated files name theirs inline. Both are matched rather than one, so a name added in
+    either place is seen.
+    """
+    import re
+    found = set()
+    for path in sorted(DAGS.glob("*.py")):
+        code = _code(path)
+        # inline: beat("scores_refresh", ...)
+        found |= set(re.findall(r'\.beat\(\s*"([a-z_]+)"', code))
+        # mapped: "cfbd_results_refresh": "weekly_results",
+        found |= set(re.findall(r'"cfbd_\w+":\s*"([a-z_]+)"', code))
+    return found
+
+
+def test_the_dags_and_the_monitor_agree_on_the_cadence_names():
+    """A DAG that beats under a name the monitor does not know is monitored by NOBODY, and
+    the switch looks armed while covering one cadence fewer than it appears to. A budget for
+    a name nothing emits is the mirror image: it fails forever, gets muted, and takes the
+    real alerts with it."""
+    emitted = cadence_names_in_dags()
+    budgeted = set(chk.CADENCES)
+
+    # Guard against the whole check passing because the regexes matched nothing.
+    assert len(emitted) == 5, f"expected five cadences in the DAGs, found {sorted(emitted)}"
+
+    assert emitted == budgeted, (
+        f"DAGs emit {sorted(emitted)} but the monitor budgets {sorted(budgeted)}; "
+        f"unmonitored={sorted(emitted - budgeted)} phantom={sorted(budgeted - emitted)}")
+
+
+# --- the forced command --------------------------------------------------------------------
+
+def test_the_monitoring_key_can_only_read_heartbeats():
+    """Verified live: `ssh cfdb_monitor@host 'cat /etc/passwd'` returns the heartbeat
+    listing, because SSH_ORIGINAL_COMMAND is never consulted. There is no verb to abuse."""
+    code = _code(FORCED_COMMAND)
+    assert "SSH_ORIGINAL_COMMAND" not in code, (
+        "this key takes no client input at all; parsing any would create a surface")
+    assert "docker" not in code, "Docker socket access is root by another name"
+    assert "pipeline_heartbeat" in code

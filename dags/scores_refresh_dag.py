@@ -44,6 +44,7 @@ from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import (
     PythonOperator, ShortCircuitOperator,
 )
+from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
 from src.lines_cadence import load_config
@@ -164,8 +165,19 @@ with DAG(
     gate = ShortCircuitOperator(
         task_id="cadence_gate",
         python_callable=cadence_gate,
-        # A skipped gate is a normal outcome, not a failure.
-        ignore_downstream_trigger_rules=True,
+        # `ignore_downstream_trigger_rules=False` SO THE HEARTBEAT CAN TELL THE
+        # DIFFERENCE BETWEEN IDLE AND DEAD.
+        #
+        # With True, a closed gate skips every downstream task no matter what trigger rule
+        # it carries — including the heartbeat. The pipeline would then emit nothing all
+        # off-season, and a dead-man's switch cannot distinguish "correctly idle" from
+        # "the box is off". That is the exact confusion it exists to remove.
+        #
+        # With False, each downstream task applies its own rule. The work tasks default to
+        # all_success and still skip behind a closed gate, unchanged; the heartbeat uses
+        # none_failed and therefore beats on a deliberate skip and stays silent on a
+        # failure. A skipped gate is a normal outcome, not a failure.
+        ignore_downstream_trigger_rules=False,
     )
     fetch = PythonOperator(task_id="fetch_scores", python_callable=_fetch)
     load = PythonOperator(task_id="load_to_postgres", python_callable=_load)
@@ -185,4 +197,21 @@ with DAG(
         python_callable=lambda **_: publish_all(schemas=["serving"]),
     )
 
-    gate >> fetch >> load >> dbt_run >> dbt_test >> publish
+    # The dead-man's switch. Downstream of publish and left at the default all_success
+    # trigger rule, so it beats only when the whole chain reached the site.
+    beat = PythonOperator(
+        task_id="heartbeat",
+        # NONE_FAILED, NOT the default all_success. This DAG is gated, so a run that
+        # correctly decides to do nothing leaves every work task SKIPPED — and an
+        # all_success heartbeat would stay silent through an entire off-season, which a
+        # monitor cannot distinguish from a dead box. none_failed beats on success or
+        # deliberate skip and stays silent the moment anything actually fails.
+        trigger_rule=TriggerRule.NONE_FAILED,
+        python_callable=lambda **c: __import__(
+            "src.heartbeat", fromlist=["beat"]).beat(
+                "scores_refresh",
+                dag_id=getattr(c.get("dag_run"), "dag_id", "") or "",
+                run_id=getattr(c.get("dag_run"), "run_id", "") or ""),
+    )
+
+    gate >> fetch >> load >> dbt_run >> dbt_test >> publish >> beat
