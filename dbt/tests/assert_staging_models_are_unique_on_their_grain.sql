@@ -86,6 +86,11 @@
     ('stg_cfp_bracket',         ['season', 'competition']),
     ('stg_cfp_matchup',         ['season', 'matchup_id']),
     ('stg_cfp_participant',     ['season', 'team_id']),
+    ('stg_play',                ['play_id']),
+    ('stg_drive',               ['drive_id']),
+    ('stg_play_stat',           ['play_id', 'athlete_id', 'stat_type']),
+    ('stg_play_type',           ['play_type_id']),
+    ('stg_play_stat_type',      ['stat_type_id']),
 ] %}
 
 {% for model, grain in staging_grains %}

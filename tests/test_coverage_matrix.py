@@ -67,10 +67,19 @@ def test_a_model_that_drops_fields_reports_partial_and_names_them():
 def test_landed_but_unread_endpoints_are_distinguished_from_never_fetched():
     """"Raw only" and "no raw data" are different problems with different fixes — one needs a
     staging model, the other needs a backfill. Collapsing them into "missing" is what made the
-    gap look like one big undifferentiated task."""
-    rows = {r.path: r for r in cm.build_rows(spec(), {"raw_drives": 12})}
-    assert rows["drives"].status == "raw only"
-    assert rows["teams/matchup"].status == "no raw data"
+    gap look like one big undifferentiated task.
+
+    THE FIXTURE IS SYNTHETIC ON PURPOSE. This used to assert on /drives, which was genuinely
+    raw-only at the time; the play-by-play round modelled it and the test broke. There are now
+    ZERO raw-only endpoints, so no real one can stand in — but the distinction still has to
+    hold the day a new endpoint lands ahead of its model. Handing build_rows a landed count
+    for an endpoint that has no model exercises exactly that.
+    """
+    rows = {r.path: r for r in cm.build_rows(spec(), {"raw_coaches_tenures": 12})}
+    assert rows["coaches/tenures"].status == "raw only", (
+        "an endpoint with landed responses and no model is a MODELLING task")
+    assert rows["teams/matchup"].status == "no raw data", (
+        "an endpoint with no landed responses is a BACKFILL task")
 
 
 def test_unregistered_endpoints_are_reported_as_such():
