@@ -84,14 +84,23 @@ def test_per_game_requires_opt_in_and_landed_games(planner, tmp_path):
 
     d = tmp_path / "data" / "raw" / "games"
     d.mkdir(parents=True)
-    payload = [{"id": 401, "completed": True}, {"id": 402, "completed": False}]
+    # CLASSIFICATIONS ARE REQUIRED ON THE FIXTURE NOW. The fan-out is scoped to games
+    # involving an FBS team, so a fake game without them is correctly skipped — this test
+    # failed on that when the scope landed, which is the rule working rather than a
+    # regression. Game 403 is the non-FBS case and must not appear in the plan.
+    payload = [{"id": 401, "completed": True,
+                "homeClassification": "fbs", "awayClassification": "fcs"},
+               {"id": 402, "completed": False,
+                "homeClassification": "fbs", "awayClassification": "fbs"},
+               {"id": 403, "completed": True,
+                "homeClassification": "fcs", "awayClassification": "fcs"}]
     (d / "2026-01-01T00-00-00-000Z.json").write_text(json.dumps(
         {"status_code": 200, "params": {"year": "2024", "seasonType": "regular"}, "data": payload}))
     planner.manifest.add_entry("games", "2026-01-01T00-00-00-000Z.json",
                                {"year": "2024", "seasonType": "regular"}, 200)
 
     plan = planner.build_plan(["2024"], only=["metrics/wp"], bucket=None, per_game=True)
-    # Only the completed game, and using this endpoint's own id parameter name.
+    # Completed AND involving an FBS team, using this endpoint's own id parameter name.
     assert plan == [("metrics/wp", {"gameId": "401"})]
 
 
