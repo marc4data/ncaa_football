@@ -2,6 +2,61 @@
 
 Decisions made in Cowork (strategy/governance surface). Claude Code implements within these. Newest first.
 
+## 2026-09-01 — The dead-man's switch is armed, and was tripped on purpose
+
+**M3's precondition is met.** Prompt 029 Priority 1 required not just a switch but proof:
+"silence a heartbeat deliberately and show the alert arriving. Record the test in the decision
+log with timestamps." Here it is.
+
+**The choice: GitHub Actions, $0.** healthchecks.io, Cronitor and Dead Man's Snitch are all
+free at this size. Actions wins on needing no new account and no new credential to rotate,
+and on delivering to where CI failures already land. The trade — a GitHub outage silences the
+monitor — is acceptable for a check whose job is catching multi-day silence, and it is
+visible rather than silent, because the run would be missing from the history.
+
+**THE TEST, ALL TIMES UTC, 1 SEPTEMBER 2026.**
+
+| Time | Event | Result |
+|---|---|---|
+| 07:22:57 | Workflow run against the live droplet | **success** — 5 of 5 beating |
+| 07:23:36 | `scores_refresh` backdated 9 hours (budget 5) | silenced deliberately |
+| 07:23:37 | Workflow dispatched | |
+| 07:23:46 | Check reports `STALE scores_refresh … 9h 0m ago, budget 5h 0m` | |
+| 07:23:49 | Workflow run 33481913839 | **failure** — the alarm |
+| 07:24:26 | Heartbeat restored | |
+| 07:24:43 | Workflow run 33481981446 | **success** — recovered |
+
+Detection took **twelve seconds** from dispatch. On the schedule it runs two-hourly, so a
+real stop surfaces within about seven hours against the four DAYS it took in August.
+
+**What the switch is NOT.** It detects absence, not wrongness. A pipeline that runs on time
+and writes bad data beats normally, and should — that is what the dbt tests and the alerting
+are for. Confusing the two would make this look like more coverage than it is.
+
+**Two design points worth keeping.**
+
+*On success only.* A beat from a failed run is a lie. Every beat is the last task on the
+success path, downstream of publish, and deliberately not downstream of `capture_dq` — which
+is `all_done` and succeeds after a failure, so a beat there would report alive on exactly the
+runs this catches.
+
+*Idle is not dead.* The gated DAGs beat on a deliberate skip, via `NONE_FAILED` plus
+`ignore_downstream_trigger_rules=False`. Without that the pipeline would go silent every
+off-season and the monitor could not distinguish that from a dead box — which is the same
+ambiguity the switch exists to remove.
+
+**Blast radius of the new key.** A forced command that prints heartbeat ages and nothing
+else; `SSH_ORIGINAL_COMMAND` is never consulted, so there is no verb to abuse. Verified:
+`ssh cfdb_monitor@host 'cat /etc/passwd'` returns the heartbeat listing. It reaches the
+warehouse over the compose network and never touches Docker. Revoke by deleting
+`/home/cfdb_monitor/.ssh/authorized_keys`; rotate by regenerating and
+`gh secret set CFDB_MONITOR_SSH_KEY`.
+
+**Follow-up, not done:** the five current beats were seeded by hand to arm the monitor. The
+first genuine beats arrive with the next scheduled runs — the two-hourly scores gate today,
+and the Sunday/Tuesday/Thursday weeklies. Until each cadence has beaten from its own DAG,
+the switch is proven but not yet exercised by the pipeline itself.
+
 ## 2026-08-31 (late) — /recruiting/groups is fetched without the parameters that key it
 
 **The endpoint returns rows that cannot be told apart.** Every specific position group is one
