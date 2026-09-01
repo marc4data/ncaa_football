@@ -69,6 +69,10 @@ def body(page) -> None:
         _market(row)
         _model(row)
         _series(row)
+        # Its own view and its own section: weather exists for 2024 onward only, and a
+        # nested section means a weather failure degrades one block rather than blanking a
+        # page that is otherwise complete.
+        _weather(game_id)
 
 
 def _picker() -> None:
@@ -277,6 +281,62 @@ def _series(row) -> None:
     if pd.notna(ties) and int(ties):
         st.caption(f"{int(ties)} of those ended in a tie — college football had no "
                    f"overtime before 1996.")
+
+
+def _weather(game_id) -> None:
+    """Conditions at kickoff, from srv_game_weather.
+
+    THE INDOOR CAVEAT IS NOT DECORATION. CFBD reports the weather at the venue's LOCATION,
+    not inside it, so domed games carry ordinary outdoor readings — 10°F to 98°F, 9 mph
+    average wind, and five with measurable precipitation. Rendering "Rain, 41°F" for a game
+    played under a roof would be stating something false, so the roof is said first and the
+    readings are labelled as outside.
+    """
+    st.subheader("Weather")
+    with states.section("srv_game_weather"):
+        df = query("""
+            select game_id, season, venue, city, state, is_indoors, temperature_f,
+                   humidity_pct, precipitation_in, snowfall_in, wind_speed_mph,
+                   wind_direction_compass, weather_condition, is_precipitating,
+                   elevation_m, as_of_ts
+            from srv_game_weather
+            where game_id = :game_id
+            limit 1
+        """, {"game_id": game_id})
+        if df.empty:
+            states.empty(
+                "Conditions at kickoff would be here.",
+                "Weather is collected from 2024 onward, and not every game has a reading.")
+            return
+
+        row = df.iloc[0]
+        indoors = bool(row.get("is_indoors"))
+        if indoors:
+            st.caption(
+                f"{row.get('venue')} is indoors. The readings below are the outdoor "
+                "conditions at the venue's location and did not affect play.")
+
+        def show(value, suffix=""):
+            return "—" if value is None or pd.isna(value) else f"{value:g}{suffix}"
+
+        cols = st.columns(4)
+        cols[0].metric("Temperature", show(row.get("temperature_f"), "°F"))
+        cols[1].metric("Wind", show(row.get("wind_speed_mph"), " mph")
+                       + (f" {row.get('wind_direction_compass')}"
+                          if row.get("wind_direction_compass") else ""))
+        cols[2].metric("Humidity", show(row.get("humidity_pct"), "%"))
+        cols[3].metric("Conditions", row.get("weather_condition") or "—")
+
+        notes = []
+        if pd.notna(row.get("precipitation_in")) and row.get("precipitation_in"):
+            notes.append(f"{row['precipitation_in']:g} in precipitation")
+        if pd.notna(row.get("snowfall_in")) and row.get("snowfall_in"):
+            notes.append(f"{row['snowfall_in']:g} in snow")
+        if pd.notna(row.get("elevation_m")):
+            notes.append(f"venue elevation {row['elevation_m']:g} m")
+        if notes:
+            st.caption(" · ".join(notes))
+        table.as_of_caption(df)
 
 
 def render() -> None:

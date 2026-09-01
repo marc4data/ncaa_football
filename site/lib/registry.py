@@ -85,9 +85,13 @@ PAGES = [
     # Scores and Today are its index, and now that rows actually link, they are how it is
     # reached. The picker stays for /matchup with no game_id — arriving cold should still
     # work — but a nav slot for a drill-through is a slot that lands nobody usefully.
+    # Weather is BUILT. fct_game_weather and srv_game_weather now exist and the page renders
+    # conditions at kickoff. Travel and elevation remain listed, but the reason has changed
+    # and is worth recording: they were blocked on there being no join key from a game to a
+    # venue, and /games/weather turned out to carry venueId on every row — matching dim_venue
+    # 6,847 of 6,847. The key exists; the feature is now merely unbuilt.
     Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True, in_nav=False,
-         partial_sections=["Weather (fct_game_weather)",
-                           "Travel, rest and elevation (venue join key)"]),
+         partial_sections=["Travel and rest (distance and days between games)"]),
     Page("odds", "Odds Board", BETTING, "srv_odds_board", True, True, True),
     Page("edges", "Edge Finder", BETTING, "srv_edge_finder", True, True, True,
          partial_sections=["Hit-rate slider, bucket n and calibration "
