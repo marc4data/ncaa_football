@@ -602,3 +602,115 @@ models:
           numbers about quota is the reason this table exists.
       - name: resets_at
         description: When the quota window rolls over. NULL for Databricks.
+
+  - name: dim_athlete
+    description: >
+      One row per season x player x TEAM. Season-scoped like dim_team, because a player's
+      team, class, height and weight all move between seasons.
+      Team is in the grain because a player can appear on two rosters in one season — ten
+      cases across 2024-2025, each a real mid-season transfer listed by both schools.
+      Keying on (season, player_id) would look correct on any sample that missed them and
+      would silently drop one row per transfer.
+    columns:
+      - name: athlete_sk
+        description: Surrogate key over (season, player_id, team) — the grain.
+        tests: [unique, not_null]
+      - name: season
+        description: Season the roster row belongs to. From the request, never from the row.
+        tests: [not_null]
+      - name: player_id
+        description: >
+          CFBD athlete id, stable across seasons and teams. NOT unique in this table — see
+          the grain.
+        tests: [not_null]
+      - name: full_name
+        description: First and last name joined, trimmed so a missing half leaves no gap.
+      - name: first_name
+        description: Given name as the roster feed publishes it.
+      - name: last_name
+        description: Family name as the roster feed publishes it.
+      - name: athlete_slug
+        description: >
+          URL-safe identifier, name AND player id. The id is not decoration: 1,343
+          (season, first name, last name) combinations map to more than one athlete — there
+          are nine distinct Jayden Williamses — so a name-only slug would route all of them
+          to one page and no small-sample test would catch it.
+          NOT unique within a season by itself: the ten dual-roster players carry one slug
+          across two rows, which is the transfer, not a collision.
+      - name: team
+        description: Team name exactly as the roster feed gave it — the only team identifier
+          the source provides.
+      - name: team_id
+        description: >
+          CFBD team id, resolved from `team` against dim_team within season. NULLABLE, and
+          null is not a join failure: 321 rows are NAIA and Division II programmes that
+          appear on a roster feed and are legitimately absent from CFBD's /teams response.
+          Match rate 99.32% / 99.45% / 100.00% for 2024 / 2025 / 2026.
+      - name: is_listed_team
+        description: >
+          Whether dim_team had a row for this team and season. FALSE marks the 321 non-FBS
+          programmes above, so a consumer can distinguish them from a broken join.
+      - name: team_slug
+        description: URL-safe team identifier, falling back to a slug of the roster's own
+          team name where dim_team has no row.
+      - name: team_display
+        description: Team display name, falling back to the roster's own name.
+      - name: conference
+        description: Team's conference that season; null where the team is not in dim_team.
+      - name: classification
+        description: Team's division that season; null where the team is not in dim_team.
+      - name: logo_source_url
+        description: CFBD logo URL for the team; null for unlisted teams.
+      - name: color_on_light
+        description: Contrast-corrected team colour for a light background.
+      - name: color_on_dark
+        description: Contrast-corrected team colour for a dark background.
+      - name: position
+        description: Listed position; null on 2,450 rows where the feed omits it.
+      - name: jersey
+        description: Jersey number; null on 3,177 rows where the feed omits it.
+      - name: class_year
+        description: >
+          Academic class as 1-4, or NULL where unknown. Anything outside 1-4 is treated as
+          unknown rather than mapped — see `class_year_raw`.
+      - name: class_year_raw
+        description: >
+          The value exactly as it arrived, kept so the upstream anomaly stays countable.
+          CFBD sometimes sends the SEASON in this field instead of the class: 1,336 rows of
+          "2024" in 2024, 1,115 of "2025" in 2025, plus 46 zeros. 2026 is clean, so this is
+          an inconsistency rather than a rule, and laundering it into a plausible-looking
+          freshman would hide it.
+      - name: class_year_display
+        description: 'FR, SO, JR or SR. Null wherever `class_year` is unknown.'
+      - name: height_inches
+        description: Listed height in inches; null on 2,808 rows.
+      - name: height_display
+        description: >
+          Feet and inches, e.g. "6-2". Assembled here rather than in the app: a height is one
+          fact with a conventional rendering, the same argument as record_display.
+      - name: weight_pounds
+        description: Listed weight in pounds; null on 3,013 rows.
+      - name: home_city
+        description: Home town city.
+      - name: home_state
+        description: Home town state or province.
+      - name: home_country
+        description: Home country.
+      - name: hometown_display
+        description: >
+          "City, State" where both are present, otherwise whichever exists, otherwise null —
+          never a lone comma, so the page renders an em dash rather than stray punctuation.
+      - name: home_latitude
+        description: Home town latitude, where the feed supplies coordinates.
+      - name: home_longitude
+        description: Home town longitude, where the feed supplies coordinates.
+      - name: home_fips_code
+        description: >
+          County FIPS code for the home town. Spelled `homeCountyFIPS` on this endpoint
+          against `fipsCode` on /recruiting/players and `countyFips` on /draft/picks; the
+          column name is aligned so callers need not know that.
+      - name: recruit_ids
+        description: >
+          JSON array bridging a rostered player back to stg_recruit. The link that endpoint's
+          own `athleteId` provides in the other direction, and which is null there for
+          anyone unlinked — neither alone is enough.
