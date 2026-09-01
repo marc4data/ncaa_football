@@ -19,8 +19,8 @@ from typing import Any, Dict, List, Optional
 
 from . import ingest
 from .endpoints import (
-    BUCKET_IMMUTABLE_WK, BUCKET_PREGAME, BUCKET_REVISIONIST, REGISTRY, SEASON, SEASON_TYPE,
-    SEASON_WEEK,
+    BUCKET_IMMUTABLE_WK, BUCKET_PREGAME, BUCKET_REVISIONIST, PER_GAME, REGISTRY, SEASON,
+    SEASON_TYPE, SEASON_WEEK,
 )
 from .snapshot import _calendar, current_week
 
@@ -53,7 +53,34 @@ def _requests_for_bucket(bucket: str, season: str,
     """Expand a cadence bucket into concrete requests for this refresh."""
     out: List[tuple] = []
     for endpoint in REGISTRY:
-        if endpoint.bucket != bucket or not endpoint.include:
+        if endpoint.bucket != bucket:
+            continue
+
+        # PER-GAME FAN-OUT IN THE WEEKLY PATH, FOR CORRECTNESS RATHER THAN VOLUME.
+        #
+        # PER_GAME endpoints are opt-in and excluded from the sweep, so `include` is False
+        # and the check below would skip them. /plays/stats is the exception: it is per-game
+        # not because a season-scoped call would be large but because ANY call broader than
+        # one game is truncated at 2,000 records, so a week-scoped weekly refresh would keep
+        # landing an arbitrary 11% sample forever.
+        #
+        # The marker is opt-in per endpoint rather than blanket for PER_GAME, deliberately.
+        # game/box/advanced and metrics/wp fan out for volume reasons and stay backfill-only;
+        # quietly adding them here would triple the weekly call count as a side effect of
+        # fixing something else.
+        #
+        # Scoped to the weeks in play, so a Sunday refresh asks about ~60 games rather than
+        # re-fetching the whole season.
+        if endpoint.strategy == PER_GAME:
+            if not endpoint.extra.get("weekly_per_game"):
+                continue
+            from .backfill import completed_game_ids
+            id_param = endpoint.extra.get("id_param", "id")
+            for game_id in completed_game_ids(season, weeks=weeks):
+                out.append((endpoint.path, {id_param: game_id}))
+            continue
+
+        if not endpoint.include:
             continue
 
         if bucket in (BUCKET_IMMUTABLE_WK, BUCKET_PREGAME):

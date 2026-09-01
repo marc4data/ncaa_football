@@ -119,7 +119,22 @@ REGISTRY: List[Endpoint] = [
     Endpoint("games/players", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="player box scores"),
     Endpoint("drives", SEASON_TYPE, BUCKET_IMMUTABLE_WK),
     Endpoint("plays", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="highest volume: ~21k rows/week"),
-    Endpoint("plays/stats", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="play-level stat lines"),
+    # NOT WEEK-SCOPED, BECAUSE A WEEK IS ALWAYS TRUNCATED.
+    #
+    # CFBD's spec says it in one line: "Returns player and play-stat associations, limited
+    # to 2,000 records." A week has far more than that, so every week-scoped fetch returned
+    # exactly 2,000 rows and stopped — with a 200 status and no indication anything was
+    # dropped. Measured before the change: 375 of 3,410 games covered (11%), and 118 of the
+    # 177 covered 2024 games were SEC, which is the API's row ordering rather than a fact
+    # about football.
+    #
+    # A single game averages ~185 stat lines, nowhere near the cap, so per-game is the only
+    # scope that returns complete data. It is the one endpoint whose fan-out is not about
+    # volume but about correctness, which is why — unlike the other PER_GAME entries — it
+    # also runs in the weekly refresh, via the `weekly_per_game` marker below.
+    Endpoint("plays/stats", PER_GAME, BUCKET_IMMUTABLE_WK, include=False,
+             extra={"id_param": "gameId", "weekly_per_game": True},
+             note="play-level stat lines; per-game because /plays/stats caps at 2,000 rows"),
 
     # ---- Postseason structure ------------------------------------------------------
     Endpoint("playoffs/cfp", SEASON, BUCKET_HISTORICAL),

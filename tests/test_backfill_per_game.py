@@ -200,3 +200,56 @@ def test_endpoints_without_fixed_params_are_unaffected():
     """The mechanism must be a no-op everywhere it is not used."""
     plan = backfill.requests_for(BY_PATH["talent"], ["2025"], per_game=False)
     assert plan == [("talent", {"year": "2025"})]
+
+
+# --- /plays/stats is per-game for CORRECTNESS, not for volume ------------------------------
+
+def test_plays_stats_fans_out_per_game_because_a_week_is_always_truncated():
+    """CFBD caps /plays/stats at 2,000 records per request and cfdb fetched it per week, so
+    every week returned exactly 2,000 rows and stopped — 375 of 3,410 games covered, and 118
+    of the 177 covered 2024 games were SEC because that is the order the API returns them in.
+
+    A 200 response carrying 2,000 rows is indistinguishable from a complete one, which is why
+    this needs a test rather than a comment: nothing about the fetch looked wrong.
+    """
+    endpoint = BY_PATH["plays/stats"]
+    assert endpoint.strategy == backfill.PER_GAME, (
+        "any scope broader than one game is truncated at 2,000 records")
+    assert endpoint.extra.get("id_param") == "gameId"
+
+
+def test_only_plays_stats_joins_the_weekly_refresh():
+    """The weekly marker is opt-in per endpoint rather than blanket for PER_GAME.
+
+    game/box/advanced and metrics/wp fan out because a season-scoped call would be huge —
+    a volume decision, and they stay backfill-only. /plays/stats fans out because anything
+    wider is WRONG. Quietly enabling all three in the weekly path would triple the weekly
+    call count as a side effect of fixing something else.
+    """
+    weekly_per_game = {e.path for e in backfill.REGISTRY
+                       if e.strategy == backfill.PER_GAME
+                       and e.extra.get("weekly_per_game")}
+    assert weekly_per_game == {"plays/stats"}
+
+
+def test_completed_game_ids_can_narrow_to_the_weeks_in_play(monkeypatch):
+    """The weekly refresh must not re-fetch a whole season every Sunday.
+
+    Without the week filter, a per-game endpoint in the weekly path would fan out over every
+    completed game in the season — hundreds of games that finished months ago, every week,
+    growing all season.
+    """
+    payload = [
+        {"id": 1, "completed": True, "week": 3, "homeClassification": "fbs",
+         "awayClassification": "fbs"},
+        {"id": 2, "completed": True, "week": 4, "homeClassification": "fbs",
+         "awayClassification": "fbs"},
+    ]
+    monkeypatch.setattr(backfill, "load_latest_raw",
+                        lambda ep, params: payload if params.get("seasonType") == "regular"
+                        else None)
+    every = backfill.completed_game_ids("2026")
+    assert every == ["1", "2"], "no filter means the whole season"
+    narrowed = backfill.completed_game_ids(
+        "2026", weeks=[{"year": "2026", "week": "4", "seasonType": "regular"}])
+    assert narrowed == ["2"], "the week filter must actually narrow"
