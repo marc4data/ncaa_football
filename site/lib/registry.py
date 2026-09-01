@@ -54,8 +54,12 @@ PAGES = [
     Page("scores", "Scores", GAMES, "srv_scoreboard", True, True, True),
     Page("rankings", "Rankings", GAMES, "srv_rankings", True, True, True),
     Page("standings", "Standings", GAMES, "srv_standings", True, True, True),
-    Page("stats", "Stats", GAMES, "srv_team_stats", True, True, True,
-         partial_sections=["Opponent scope and adjusted basis (stat_scope / stat_basis)"]),
+    # Scope is BUILT. fct_team_season_stat derives stat_scope and stat_base_name from
+    # CFBD's `Opponent` suffix, with a test asserting every statistic keeps both halves, so
+    # the picker lists 32 statistics with scope as its own control rather than 63 entries a
+    # reader had to pair up by hand. stat_basis is `raw` on every row and says so — adjusted
+    # figures come from a different endpoint and are not modelled yet.
+    Page("stats", "Stats", GAMES, "srv_team_stats", True, True, True),
     Page("teams", "Teams", GAMES, "srv_teams_index", True, True, True),
     # NOT IN NAV. Teams IS the index for this page — searchable, conference-filtered, 681
     # cards — so a nav entry that lands on an arbitrary team is strictly worse than the

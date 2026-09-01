@@ -178,8 +178,28 @@ models:
           which is not this file's job to decide.
       - name: stat_name
         description: >
-          CFBD's name for the statistic. The page's stat picker is a WHERE on this column,
-          so the set of selectable stats is data rather than code.
+          CFBD's name for the statistic, including its `Opponent` suffix where it has one.
+          Kept as the source's own label; the page now filters on `stat_base_name` and
+          `stat_scope` instead, so a reader does not have to know the suffix convention.
+      - name: stat_scope
+        description: >
+          `team` or `opponent` — whether the figure is what this team recorded or what it
+          allowed. CFBD ships the opponent variant as a SEPARATE statistic with an `Opponent`
+          suffix, so without this the picker listed firstDowns and firstDownsOpponent as two
+          unrelated entries. Derived in fct_team_season_stat, with
+          assert_every_team_stat_has_its_opponent_counterpart failing the build the first
+          time CFBD names something differently.
+      - name: stat_base_name
+        description: >
+          The statistic with its scope stripped — `firstDowns` for both firstDowns and
+          firstDownsOpponent. What lets a page put what a team did beside what it allowed;
+          under the raw names the two never join. 32 base names against 63 raw ones.
+      - name: stat_basis
+        description: >
+          `raw` on every row today, and the column exists so that stays visible rather than
+          assumed. /stats/season returns unadjusted totals; opponent-adjusted figures come
+          from /stats/season/advanced and are not modelled here, so charting one against the
+          other would compare two different things.
       - name: stat_value
         description: >
           Numeric value of the statistic, and what the ranks and percentile are computed on.
