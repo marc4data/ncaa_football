@@ -17,7 +17,17 @@
 -- Built as a table like every serving model (pg_dump ships rows, not view definitions), and
 -- because it reads a catalogue view it must be built AFTER the models it documents. That is
 -- the one ordering constraint dim_field_metadata's view materialization pushed here rather
--- than removing; the production DAG builds serving last, so it holds.
+-- than removing.
+--
+-- THIS PREVIOUSLY CLAIMED "the production DAG builds serving last, so it holds". IT DOES
+-- NOT. This model IS a serving model, so building serving last still schedules it in the
+-- same pass as the siblings it catalogues. Confirmed on the build that documented the
+-- serving layer: srv_system_health, which has the identical dependency, read "93 of 634
+-- columns documented" immediately after a run that wrote all 634.
+--
+-- The actual remedy is a second pass — the `dbt_catalogue` task in weekly_refresh_dag.py
+-- rebuilds this model and srv_system_health once everything else has landed its comments,
+-- pinned by test_the_catalogue_models_get_a_pass_of_their_own_after_everything_else.
 select
     field_sk,
     layer,

@@ -150,6 +150,33 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
             task_id="dbt_run",
             bash_command=f"dbt run --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
         )
+        # THE CATALOGUE MODELS NEED A SECOND PASS, AND dbt CANNOT KNOW THAT.
+        #
+        # srv_data_dictionary and srv_system_health both read dim_field_metadata, which reads
+        # the live database catalogue — table and column COMMENTS, written by persist_docs at
+        # the moment each model is built. Neither declares a ref on the models it describes,
+        # because there is nothing to ref: the dependency is on other models' side effects,
+        # not on their rows.
+        #
+        # So dbt is free to build them at any point in the run, and does. Measured on the
+        # build that documented the serving layer: srv_system_health reported "93 of 634
+        # columns documented" immediately after a run in which all 634 had just been written,
+        # because it had been built while the other serving models were still going in.
+        #
+        # srv_data_dictionary's own header already warned about this and concluded "the
+        # production DAG builds serving last, so it holds". It does not hold — both
+        # catalogue models ARE serving models, so building serving last puts them in the same
+        # pass as the siblings they describe. The DAG comment was the fix that was assumed
+        # rather than the fix that was made.
+        #
+        # A second pass is the whole remedy: rebuild exactly these two once everything else
+        # has landed its comments. Cheap — two small tables — and it runs before dbt_test so
+        # the tests see the fresh catalogue rather than the stale one.
+        dbt_catalogue = BashOperator(
+            task_id="dbt_catalogue",
+            bash_command=(f"dbt run --project-dir {DBT_PROJECT_DIR} "
+                          f"--select srv_data_dictionary srv_system_health"),
+        )
         dbt_test = BashOperator(
             task_id="dbt_test",
             bash_command=f"dbt test --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
@@ -212,7 +239,7 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
         beat = _heartbeat(HEARTBEAT_NAME[dag_id])
 
         dbt_test >> capture_dq
-        fetch >> load >> dbt_run >> dbt_test >> publish >> beat
+        fetch >> load >> dbt_run >> dbt_catalogue >> dbt_test >> publish >> beat
     return dag
 
 

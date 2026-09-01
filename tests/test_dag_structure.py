@@ -253,3 +253,39 @@ def test_the_scores_refresh_stays_narrow():
     code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#"))
     assert "tag:warehouse" not in code
     assert "srv_scoreboard" in code
+
+
+def test_the_catalogue_models_get_a_pass_of_their_own_after_everything_else():
+    """srv_data_dictionary and srv_system_health describe the database rather than reading
+    it, and dbt cannot see that dependency.
+
+    Both read dim_field_metadata, which reads live table and column COMMENTS — written by
+    persist_docs at the moment each model is built. Neither declares a ref on the models it
+    catalogues, because the dependency is on other models' side effects, not on their rows.
+    So dbt schedules them anywhere in the run.
+
+    Measured, on the build that documented the serving layer: srv_system_health reported
+    "93 of 634 columns documented" straight after a run that had just written all 634. It
+    had been built while its siblings were still going in.
+
+    srv_data_dictionary's header had assumed the DAG solved this by building serving last.
+    It cannot: both catalogue models ARE serving models, so "serving last" still puts them
+    in the same pass as the models they describe. This pins the actual remedy.
+    """
+    src = _code("weekly_refresh_dag.py")
+    assert "dbt_catalogue" in src, (
+        "the catalogue models need a rebuild after the main run, or the dictionary and the "
+        "system health board are permanently one build stale")
+    # Ordering is the whole point: after the build that writes the comments, and before the
+    # tests that read them.
+    wiring = re.search(r"dbt_run\s*>>\s*(\w+)\s*>>\s*dbt_test", src)
+    assert wiring and wiring.group(1) == "dbt_catalogue", (
+        f"expected dbt_run >> dbt_catalogue >> dbt_test, found {wiring and wiring.group(0)!r}")
+    # It must stay narrow. Re-running the production selector here would double the build.
+    task = src[src.index("dbt_catalogue = BashOperator"):]
+    task = task[:task.index(")\n        dbt_test")]
+    assert "PRODUCTION_SELECTOR" not in task, (
+        "the second pass rebuilds two small tables; running the full selector again would "
+        "double the run time to refresh a catalogue")
+    for model in ("srv_data_dictionary", "srv_system_health"):
+        assert model in task, f"{model} must be in the second pass"
