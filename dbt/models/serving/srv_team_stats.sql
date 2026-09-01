@@ -14,6 +14,18 @@ select
     s.school,
     s.conference_name,
     s.stat_name,
+    -- `team` or `opponent`. CFBD ships the opponent variant of a statistic as a SEPARATE
+    -- stat with an `Opponent` suffix, so without this the picker lists firstDowns and
+    -- firstDownsOpponent as unrelated entries and a reader has to know the convention.
+    -- Derived in the fact, not here and not in the page — see fct_team_season_stat.
+    s.stat_scope,
+    -- The statistic with its scope stripped, so a page can put what a team did beside what
+    -- it allowed. Without it the two live under different names and nothing joins them.
+    s.stat_base_name,
+    -- `raw` on every row today. /stats/season is unadjusted; opponent-adjusted figures come
+    -- from a different endpoint and a different fact, and charting one against the other
+    -- would compare two different things.
+    s.stat_basis,
     s.stat_value,
     s.stat_value_raw,
     t.classification,

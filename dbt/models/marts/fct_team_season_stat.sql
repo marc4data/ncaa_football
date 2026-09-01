@@ -20,6 +20,33 @@ select
     s.school,
     s.conference_name,
     s.stat_name,
+    -- SCOPE IS IN THE NAME, AND CFBD IS CONSISTENT ABOUT IT.
+    --
+    -- The opponent variant of a statistic is a SEPARATE stat with an `Opponent` suffix:
+    -- firstDowns and firstDownsOpponent are two entries, not one stat with a flag. Measured
+    -- across all 63 stat names: 31 carry the suffix, 32 do not, and every one of those 32
+    -- has a matching Opponent counterpart except `games`, which is a count of fixtures and
+    -- correctly has none.
+    --
+    -- Deriving this in the APP would be the app inventing a dimension the warehouse does not
+    -- have, which is why the Stats page refused to. Deriving it HERE is different: it is a
+    -- documented transformation with a test behind it, and
+    -- assert_every_team_stat_has_its_opponent_counterpart fails loudly the first time CFBD
+    -- names something differently — which is exactly the failure the page was right to fear
+    -- and wrong to be unable to detect.
+    case when s.stat_name like '%Opponent' then 'opponent' else 'team' end as stat_scope,
+    -- The statistic itself, with scope stripped, so a page can put a team's figure beside
+    -- what it allowed. Without this the two live under different names and nothing joins them.
+    case when s.stat_name like '%Opponent'
+         then left(s.stat_name, length(s.stat_name) - length('Opponent'))
+         else s.stat_name end                                          as stat_base_name,
+    -- RAW ON EVERY ROW TODAY, and the column exists so that stays visible rather than
+    -- assumed. /stats/season returns unadjusted totals; opponent-adjusted figures come from
+    -- /stats/season/advanced and land in a different fact. A page charting an adjusted
+    -- number against a raw one would be comparing two different things, and a constant here
+    -- is what lets it check rather than guess. Same reasoning as rating_scope on
+    -- fct_team_rating, which is 'season' on every row for the same kind of reason.
+    'raw'                                                              as stat_basis,
     s.stat_value_raw,
     -- Numeric where the value permits it, null where it does not. Both are kept so a page
     -- can display the source text while a chart uses the number.

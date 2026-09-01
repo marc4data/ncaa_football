@@ -36,9 +36,17 @@ def _seasons() -> list:
 
 @st.cache_data(ttl=3600)
 def _stat_names(season: int) -> list:
-    return query("""select distinct stat_name from srv_team_stats
-                    where season = :season order by stat_name limit 500""",
-                 {"season": season})["stat_name"].tolist()
+    """Base names, not raw stat names.
+
+    CFBD ships the opponent variant of a statistic as a separate stat with an `Opponent`
+    suffix, so the picker used to list firstDowns and firstDownsOpponent as two unrelated
+    entries — 63 of them — and a reader had to know the convention to find the pair. The
+    warehouse now derives the scope, so the picker lists the 32 statistics and the scope is
+    its own control.
+    """
+    return query("""select distinct stat_base_name from srv_team_stats
+                    where season = :season order by stat_base_name limit 500""",
+                 {"season": season})["stat_base_name"].tolist()
 
 
 @st.cache_data(ttl=3600)
@@ -71,30 +79,43 @@ def body(page) -> None:
             states.empty("A statistical leaderboard would be here.",
                          f"No season statistics recorded for {season}.")
             return
-        picker, order_slot = st.columns([2, 1])
+        picker, scope_slot, order_slot = st.columns([2, 1, 1])
         with picker:
             current_stat = params.get("stat")
             stat_name = st.selectbox(
                 "Statistic", stats,
                 index=stats.index(current_stat) if current_stat in stats else 0)
+        with scope_slot:
+            # `games` is a count of fixtures and has no opponent variant, so offering the
+            # control for it would be offering a choice that resolves to nothing.
+            scope_options = ["team"] if stat_name == "games" else ["team", "opponent"]
+            current_scope = params.get("scope")
+            scope_choice = st.radio(
+                "Scope", scope_options, horizontal=True,
+                index=scope_options.index(current_scope)
+                if current_scope in scope_options else 0,
+                help="What this team recorded, or what it allowed its opponents.")
         with order_slot:
             labels = list(DIRECTIONS)
             current_order = BY_PARAM.get(params.get("order"), labels[0])
             direction = st.radio("Order", labels, horizontal=True,
                                  index=labels.index(current_order))
         rank_field, order_code = DIRECTIONS[direction]
-        params.set_params(stat=stat_name, order=order_code)
+        params.set_params(stat=stat_name, order=order_code, scope=scope_choice)
         df = query(f"""
             select season, team_slug, team_display, conference, classification, logo_url,
-                   stat_name, stat_value, stat_value_raw, rank_desc, rank_asc, percentile,
+                   stat_name, stat_base_name, stat_scope, stat_basis,
+                   stat_value, stat_value_raw, rank_desc, rank_asc, percentile,
                    as_of_ts
             from srv_team_stats
             where season = :season
-              and stat_name = :stat_name
+              and stat_base_name = :stat_name
+              and stat_scope = :scope
               and (:conference is null or conference = :conference)
             order by {rank_field}
             limit 300
-        """, {"season": season, "stat_name": stat_name, "conference": conference})
+        """, {"season": season, "stat_name": stat_name, "scope": scope_choice,
+              "conference": conference})
         table.as_of_caption(df)
 
         states.render_or_state(
