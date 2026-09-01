@@ -58,7 +58,21 @@ select
     {{ json_get_string('row_json', 'school') }}                 as high_school,
     {{ json_get_string('row_json', 'committedTo') }}            as committed_to,
     {{ json_get_string('row_json', 'position') }}               as position,
-    cast({{ json_get_string('row_json', 'height') }} as int)    as height_inches,
+    -- NUMERIC, NOT INT, BECAUSE THIS ENDPOINT REPORTS HALF-INCHES.
+    --
+    -- /recruiting/players lists heights like 74.5 — a recruit measured at 6 feet 2 and a
+    -- half. 1,021 rows carry one. `cast(... as int)` does not round them, it RAISES, so this
+    -- view could not be read at all: any query touching the column failed with "invalid
+    -- input syntax for type integer: 79.5".
+    --
+    -- It hid for months because Postgres prunes unreferenced columns out of a view's target
+    -- list. count(*), the uniqueness sweep and the not-silently-empty sweep never selected
+    -- this column, so they never evaluated the cast and all passed. The first thing to ask
+    -- for every column was the staging export, which is how it surfaced.
+    --
+    -- Note /roster reports WHOLE inches and stg_roster's int cast there is correct. Two
+    -- endpoints, two conventions, and assuming one from the other is what produced this.
+    {{ safe_numeric(json_get_string('row_json', 'height')) }}   as height_inches,
     cast({{ json_get_string('row_json', 'weight') }} as int)    as weight_pounds,
     cast({{ json_get_string('row_json', 'stars') }} as int)     as stars,
     {{ safe_numeric(json_get_string('row_json', 'rating')) }}   as rating,

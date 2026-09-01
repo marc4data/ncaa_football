@@ -84,3 +84,25 @@ def test_the_new_family_models_declare_their_grain():
     one from the enumeration fails here rather than going quiet."""
     enumerated = enumerated_in_grain_test()
     assert {"stg_game_weather", "stg_game_team_stat", "stg_game_player_stat"} <= enumerated
+
+
+def test_the_staging_readability_sweep_covers_every_model():
+    """The readability sweep lists its models explicitly, so the list can go stale.
+
+    It has to: ref() cannot live inside a conditional, and dbt's graph is empty at parse
+    time, so enumerating the models dynamically fails to compile. The list is therefore
+    hand-held — and a staging model added without being added to it would silently escape
+    the one test that can see an unreadable column.
+
+    That is the exact failure mode the sweep exists for, so it gets a guard of its own.
+    """
+    from pathlib import Path
+    import re
+    root = Path(__file__).resolve().parents[1]
+    on_disk = {p.stem for p in (root / "dbt" / "models" / "staging").glob("*.sql")}
+    sweep = (root / "dbt" / "tests"
+             / "assert_every_staging_column_can_actually_be_read.sql").read_text()
+    listed = set(re.findall(r"^\s*'(stg_[a-z0-9_]+)',", sweep, re.MULTILINE))
+    assert listed == on_disk, (
+        f"missing from the sweep: {sorted(on_disk - listed)}; "
+        f"listed but not on disk: {sorted(listed - on_disk)}")

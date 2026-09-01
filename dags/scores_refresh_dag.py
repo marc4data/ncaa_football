@@ -111,7 +111,19 @@ SCORES_SELECTOR = (
 # prediction assertions read a single unchanged source. Tagging those would drop real coverage
 # from the every-two-hours DAG for nothing. tests/test_dag_structure.py enforces both
 # directions, so the seventh instance fails in CI rather than at 02:00 on a game day.
-TEST_EXCLUDE = "--exclude tag:full_refresh_only"
+# TWO TAGS, TWO REASONS, AND THEY ARE NOT INTERCHANGEABLE.
+#
+#   full_refresh_only  this DAG CANNOT satisfy the test — it straddles the refresh boundary
+#                      and would report a gap between two fetch times as a failure.
+#   slow_sweep         this DAG CAN satisfy it, but the test costs minutes and re-checks a
+#                      property that only changes when a model changes. Excluded to keep the
+#                      two-hourly job cheap, which is the whole reason it can be two-hourly.
+#
+# Kept apart so the first tag's meaning stays enforceable:
+# test_single_sided_tests_keep_their_coverage_in_the_scores_dag asserts nothing wears it
+# without straddling the boundary, and that check is only worth having while the tag means
+# one thing.
+TEST_EXCLUDE = "--exclude tag:full_refresh_only tag:slow_sweep"
 
 default_args = {
     "owner": "cfdb",

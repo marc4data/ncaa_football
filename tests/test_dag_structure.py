@@ -326,3 +326,35 @@ def test_the_scores_dag_builds_the_weather_model_it_does_not_fetch():
     src = _code("scores_refresh_dag.py")
     assert "+srv_game_weather" in src, (
         "the DAG that runs dbt must rebuild the weather model, or the fetch is wasted")
+
+
+def test_a_slow_sweep_is_excluded_for_cost_and_says_so():
+    """`slow_sweep` exists so `full_refresh_only` keeps meaning one thing.
+
+    The two exclusions answer different questions. full_refresh_only is about CORRECTNESS —
+    a test the scores DAG cannot satisfy because it compares refreshed data against stale
+    data. slow_sweep is about COST — a test that would be perfectly valid every two hours and
+    simply is not worth minutes there.
+
+    Collapsing them would make test_single_sided_tests_keep_their_coverage_in_the_scores_dag
+    unenforceable, because a tag that means two things cannot be checked for either.
+    """
+    src = _code("scores_refresh_dag.py")
+    assert "tag:slow_sweep" in src, (
+        "the two-hourly DAG must exclude the slow sweeps, or it stops being cheap")
+    assert "tag:full_refresh_only" in src, (
+        "excluding one reason must not drop the other")
+
+    # And nothing may wear both: that would be a claim that it is simultaneously
+    # unsatisfiable here and merely expensive here.
+    #
+    # Read from the config DIRECTIVE, not from the file text. The first version of this
+    # assertion substring-matched the source and failed on the very sweep it was written for,
+    # whose comment explains at length why it is NOT full_refresh_only. That is the fourth
+    # time a source-reading test in this file has matched its own prose; _is_tagged carries
+    # the first three.
+    for path, test_src in _dbt_tests():
+        config = re.search(r"config\(\s*tags\s*=\s*\[([^\]]*)\]", test_src)
+        tags = set(re.findall(r"'([a-z_]+)'", config.group(1))) if config else set()
+        assert not {"slow_sweep", "full_refresh_only"} <= tags, (
+            f"{path.name} claims both exclusion reasons; they are different claims")
