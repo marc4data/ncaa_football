@@ -114,6 +114,8 @@ def body(page) -> None:
         _edges(df, market)
         attribution.model_attribution(df)
 
+    _track_record(market, market_label)
+
 
 def _nothing_yet(season: int, floor: int, minimum: float, market_label: str) -> None:
     """Empty, never Degraded — and the reason must distinguish the two causes.
@@ -192,6 +194,68 @@ def _edges(df: pd.DataFrame, market: str) -> None:
     notes = df["out_of_sample_note"].dropna().unique()
     for note in notes:
         st.caption(str(note))
+
+
+def _track_record(market: str, market_label: str) -> None:
+    """Hit rate by how big the edge was — the question the slider raises and cannot answer.
+
+    THIS SECTION IS ALLOWED TO BE UNFLATTERING. The measured answer is that a bigger edge has
+    not been a better bet: spread hit rates sit between 41.6% and 52.1% with no relationship
+    to edge size, against a 52.38% break-even. A page that offered the filter without showing
+    that would be implying something the data does not support.
+
+    Every rate is rendered WITH its n, and thin cells are marked rather than dropped. A
+    50% hit rate over 18 games is not evidence, and hiding it would be a different kind of
+    dishonesty from overstating it.
+    """
+    st.divider()
+    st.markdown("#### Has a bigger edge been a better bet?")
+    with states.section("srv_edge_bucket_performance"):
+        df = query("""
+            select edge_bucket, bucket_order, bucket_games, bucket_hits, hit_rate_pct,
+                   edge_over_break_even_pct, mean_edge_magnitude, is_thin_sample,
+                   market, edge_unit, as_of_ts
+            from srv_edge_bucket_performance
+            where market = :market
+            order by bucket_order
+            limit 20
+        """, {"market": market})
+        if df.empty:
+            states.empty(
+                f"The {market_label.lower()} track record by edge size would be here.",
+                "No graded predictions yet, so there is nothing to score.")
+            return
+
+        # Aggregated across models: the per-model cells are too thin to read individually,
+        # and a reader asking "does a bigger edge win more" is asking about the approach
+        # rather than about one version of it.
+        grouped = df.groupby(["edge_bucket", "bucket_order"], as_index=False).agg(
+            bucket_games=("bucket_games", "sum"),
+            bucket_hits=("bucket_hits", "sum")).sort_values("bucket_order")
+        grouped["hit_rate_pct"] = (
+            100.0 * grouped["bucket_hits"] / grouped["bucket_games"]).round(1)
+        grouped["is_thin_sample"] = grouped["bucket_games"] < 30
+
+        table.render(grouped, [
+            Col("edge_bucket", "Edge size"),
+            Col("bucket_games", "Games", "num", dp=0),
+            Col("bucket_hits", "Hits", "num", dp=0),
+            Col("hit_rate_pct", "Hit rate", render=lambda r: f"{r['hit_rate_pct']:.1f}%"),
+            Col("is_thin_sample", "Sample",
+                render=lambda r: "thin" if r["is_thin_sample"] else ""),
+        ], caption="srv_edge_bucket_performance")
+
+        if market == "spread":
+            st.caption(
+                "Break-even against a standard -110 price is 52.38%. A hit rate below that "
+                "loses money even though it is above half.")
+        else:
+            # Not a break-even line, because moneyline bets are priced per game.
+            st.caption(
+                "Moneyline bets are priced per game, so there is no single break-even rate "
+                "to compare these against — a high hit rate on short-priced favourites can "
+                "still lose money.")
+        table.as_of_caption(df)
 
 
 def render() -> None:

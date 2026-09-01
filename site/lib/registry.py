@@ -96,9 +96,10 @@ PAGES = [
     # section had been listed as blocked on for months.
     Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True, in_nav=False),
     Page("odds", "Odds Board", BETTING, "srv_odds_board", True, True, True),
-    Page("edges", "Edge Finder", BETTING, "srv_edge_finder", True, True, True,
-         partial_sections=["Hit-rate slider, bucket n and calibration "
-                           "(fct_edge_bucket_performance)"]),
+    # Track record BUILT. fct_edge_bucket_performance exists and the page now shows hit
+    # rate by edge size with the n beside every rate — including the finding that a bigger
+    # edge has not been a better bet.
+    Page("edges", "Edge Finder", BETTING, "srv_edge_finder", True, True, True),
     Page("performance", "Model Performance", BETTING, "srv_model_performance", True, True, True),
     Page("movement", "Line Movement", BETTING, "srv_line_movement", True, True, True),
     Page("export", "Excel Export", DELIVERABLE, None, True, True, True),
