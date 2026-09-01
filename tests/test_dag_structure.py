@@ -289,3 +289,40 @@ def test_the_catalogue_models_get_a_pass_of_their_own_after_everything_else():
         "double the run time to refresh a catalogue")
     for model in ("srv_data_dictionary", "srv_system_health"):
         assert model in task, f"{model} must be in the second pass"
+
+
+def test_weather_refreshes_on_the_lines_cadence_without_gating_its_heartbeat():
+    """Weather is a SIBLING of the lines chain, not a link in it.
+
+    Two separate reasons, and both matter. A weather failure must not stop a lines snapshot:
+    the market at 14:00 cannot be observed again at 18:00, so a missed one is gone for good.
+    And it must not silence the heartbeat, because that switch monitors the LINES cadence —
+    a stale-lines alarm raised by a broken weather endpoint sends someone looking in exactly
+    the wrong place.
+
+    The failure is still loud: `weather` is a leaf, so a failure fails the DAG run and fires
+    on_failure_callback. Visible, just not conflated.
+    """
+    src = _code("lines_snapshot_dag.py")
+    assert "refresh_weather" in src, "weather must ride the lines cadence"
+    # Downstream of the gate, so it is skipped out of season like everything else here.
+    assert re.search(r"gate\s*>>\s*weather", src), (
+        "weather must sit behind the cadence gate, or it would fetch all off-season")
+    # NOT in the chain that feeds the heartbeat.
+    assert not re.search(r"weather\s*>>\s*beat", src), (
+        "a weather failure must not silence the lines dead-man's switch")
+    assert re.search(r"gate\s*>>\s*snapshot\s*>>\s*load\s*>>\s*beat", src), (
+        "the lines chain itself must be unchanged")
+
+
+def test_the_scores_dag_builds_the_weather_model_it_does_not_fetch():
+    """Fetch and build live in different DAGs here, exactly as they do for lines: the lines
+    DAG lands raw four-hourly, and the scores DAG runs dbt and publishes two-hourly.
+
+    Refreshing raw weather every four hours while rebuilding the model weekly would leave the
+    page showing a forecast up to seven days stale on top of current data — which is worse
+    than not collecting it, because it looks fresh.
+    """
+    src = _code("scores_refresh_dag.py")
+    assert "+srv_game_weather" in src, (
+        "the DAG that runs dbt must rebuild the weather model, or the fetch is wasted")

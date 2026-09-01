@@ -43,7 +43,7 @@ from airflow.utils.trigger_rule import TriggerRule
 from src.alerting import failure_callback
 from src.lines_cadence import load_config, should_snapshot
 from src.load_raw_to_postgres import load_endpoint
-from src.snapshot import snapshot_lines
+from src.snapshot import snapshot_lines, snapshot_weather
 
 # Finest cadence, always. The gate below decides which runs actually do work.
 SCHEDULE = "0 */4 * * *"
@@ -81,6 +81,21 @@ def take_snapshot(**context):
     """Land one snapshot of the week currently in play."""
     summary = snapshot_lines()
     print(f"lines snapshot: {summary}")
+    return summary
+
+
+def refresh_weather(**context):
+    """Re-fetch and load weather for the season type in play.
+
+    Fetch and load in ONE task, unlike lines, and the difference is deliberate. A lines
+    snapshot is irreversible — the market at 14:00 cannot be re-observed at 18:00 — so its
+    fetch is isolated from anything that might fail after it. Weather is a full re-fetch of
+    the season every run, so a failed load costs nothing but the next run.
+    """
+    summary = snapshot_weather()
+    print(f"weather refresh: {summary}")
+    if summary.get("status") == "ok":
+        load_endpoint("games_weather")
     return summary
 
 
@@ -136,6 +151,27 @@ with DAG(
         retries=1,
     )
 
+    # WEATHER RIDES THIS CADENCE, IN PARALLEL RATHER THAN IN SERIES.
+    #
+    # Both are pre-game information that moves as kickoff approaches, both are cheap, and
+    # both are pointless out of season — so weather inherits the same gate rather than
+    # needing a season window of its own. One request per run.
+    #
+    # It is a SIBLING of the lines chain, not a link in it, for two reasons. A weather
+    # failure must not stop a lines snapshot, because the market at 14:00 cannot be observed
+    # again at 18:00 and a missed one is gone. And it must not silence the heartbeat: that
+    # switch monitors the LINES cadence specifically, and a stale-lines alarm raised by a
+    # broken weather endpoint would send someone looking in the wrong place.
+    #
+    # The failure is still loud. `weather` is a leaf, so a failure fails the DAG run and
+    # fires on_failure_callback — visible, just not conflated with the lines monitor.
+    weather = PythonOperator(
+        task_id="refresh_weather",
+        python_callable=refresh_weather,
+        # One retry: the next run re-fetches the whole season anyway.
+        retries=1,
+    )
+
     # The dead-man's switch. This DAG has no publish step — a lines snapshot is not
     # user-facing on its own — so `load` is the end of its success path.
     beat = PythonOperator(
@@ -154,3 +190,6 @@ with DAG(
     )
 
     gate >> snapshot >> load >> beat
+    # Parallel leaf. See the comment on `weather`: it fails the run without silencing the
+    # lines heartbeat.
+    gate >> weather

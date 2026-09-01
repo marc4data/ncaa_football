@@ -58,6 +58,53 @@ def current_week(season: str, now: Optional[datetime] = None) -> Optional[Dict[s
     }
 
 
+def snapshot_weather(season: Optional[str] = None,
+                     now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Re-fetch /games/weather for the season type currently in play.
+
+    WHY THIS RIDES THE LINES CADENCE. Weather sat in BUCKET_HISTORICAL, which no in-season
+    refresh touches, so it was only ever fetched by a backfill — 2026 had nothing at all
+    until one was run by hand. For a game already played that is fine; for the next game it
+    is the difference between a forecast and a record of one, and a forecast nobody refreshes
+    is not a forecast.
+
+    The lines cadence is the right home for it. Both are pre-game information that moves as
+    kickoff approaches, both are cheap, and both are pointless out of season — so weather
+    inherits the same short-circuit gate rather than needing a season window of its own.
+
+    ONE REQUEST PER RUN, not one per week: /games/weather is season-scoped and returns every
+    game in the season type, so a week filter would only make it more expensive by making it
+    more frequent. At a four-hourly cadence that is roughly 180 calls a month against a
+    75,000 quota currently sitting near 2,300.
+
+    Returns a summary rather than raising on an empty result: a season type with no weather
+    yet published is a normal early-season state, not a failure.
+    """
+    now = now or datetime.now(timezone.utc)
+    season = season or str(now.year)
+
+    target = current_week(season, now)
+    if target is None:
+        return {
+            "status": "skipped",
+            "reason": f"no active or upcoming week in {season}",
+            "games": 0,
+        }
+
+    params = {"year": season, "seasonType": target["seasonType"]}
+    resp = ingest.fetch("games/weather", params)
+    if resp.status_code != 200:
+        raise RuntimeError(f"games/weather for {params} returned {resp.status_code}")
+
+    games = resp.json()
+    return {
+        "status": "ok",
+        "params": params,
+        "games": len(games),
+        "with_temperature": sum(1 for g in games if g.get("temperature") is not None),
+    }
+
+
 def snapshot_lines(season: Optional[str] = None, now: Optional[datetime] = None) -> Dict[str, Any]:
     """Land one /lines snapshot for the week currently in play.
 
