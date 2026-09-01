@@ -7,10 +7,12 @@
 -- query with a WHERE and no joins (G-2) and does no arithmetic (G-3). down_distance_display,
 -- distance_bucket and field_zone are all precomputed in fct_play for exactly this.
 --
--- COVERAGE: /plays/stats caps at 2,000 records per request, so a week-scoped fetch returned
--- an arbitrary 11% of games. That is fixed at the source — the endpoint now fans out per
--- game — but this view is only as complete as what has landed. Absence here means "no stat
--- line landed for that play", never "the player did nothing".
+-- COVERAGE: /plays/stats caps at 2,000 records per request, so the original week-scoped
+-- fetch returned an arbitrary 11% of games, skewed to whichever the API listed first. Fixed
+-- at the source by fanning out per game: 375,925 rows over 1,884 games, with conference
+-- coverage now even. The fan-out runs over completed FBS games, which is the project's
+-- scope, so absence here means "cfdb did not ask about that game", never "the player did
+-- nothing".
 select
     p.play_stat_sk,
     p.play_id,

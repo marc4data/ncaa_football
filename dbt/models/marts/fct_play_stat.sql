@@ -10,25 +10,30 @@
 -- receiver and a reception, each its own row; one athlete can record two different stats on
 -- the same play, which is why the grain needs both the athlete and the stat type.
 --
--- THIS FACT IS TRUNCATED UPSTREAM, AND THAT IS THE MOST IMPORTANT THING ABOUT IT.
+-- THIS FACT WAS TRUNCATED UPSTREAM FOR MONTHS, AND THE FIX IS WORTH KNOWING ABOUT.
 --
--- CFBD's own spec says /plays/stats is "limited to 2,000 records" per request, and cfdb
--- fetches it per season-week — so every single week returns exactly 2,000 rows and stops.
--- Measured: 2024 weeks 2 through 8 each return exactly 2,000 rows covering 11 games, out of
--- roughly 60 games played. Across 2024-2026 this fact covers 375 games of the 3,410 that
--- have box scores — about 11% — and the survivors skew heavily to one conference (118 of
--- 177 covered 2024 games are SEC), which is an artefact of the API's ordering and not a fact
--- about football.
+-- CFBD's spec says /plays/stats is "limited to 2,000 records" per request. cfdb fetched it
+-- per season-week, and a week has far more than that, so every request returned exactly
+-- 2,000 rows and stopped — 200 status, no indication anything was dropped. Coverage was 375
+-- games of the 3,410 with box scores, about 11%, and the survivors were whatever the API
+-- returned first: 118 of the 177 covered 2024 games were SEC, which is row ordering rather
+-- than a fact about football.
 --
--- Nothing detected this for the same reason silent truncation is always missed: a 200
--- response carrying 2,000 rows looks exactly like a complete one.
--- assert_play_stats_are_not_truncated_at_the_api_cap now says so on every run.
+-- Nothing detected it for the reason silent truncation is always missed: a 200 response
+-- carrying 2,000 rows looks exactly like a complete one.
 --
--- The fix is a narrower fan-out — the endpoint accepts gameId, and a single game averages
--- ~185 stat lines, nowhere near the cap. Until that backfill runs, ANY AGGREGATE OVER THIS
--- FACT IS AN AGGREGATE OVER AN ARBITRARY 11% SAMPLE. `is_coverage_complete` on this row's
--- game does not exist and cannot be faked; consumers must treat absence as unknown rather
--- than as zero.
+-- FIXED by fanning the endpoint out per game, which is the only scope that fits under the
+-- cap. Measured after the backfill: 375,925 rows over 1,884 games — 5.4x the data — with
+-- 2024 conference coverage now Big Ten 151, ACC 149, SEC 144, Big 12 127, which is what an
+-- unbiased sample of a season looks like. Per game it averages 199.5 stat lines and peaks at
+-- 356, an order of magnitude below the ceiling.
+--
+-- assert_play_stats_are_not_truncated_at_the_api_cap guards it at ERROR severity, asserting
+-- per GAME rather than per week — the unit of truncation moved when the fetch did.
+--
+-- COVERAGE IS STILL NOT UNIVERSAL, and absence must be read as unknown rather than as zero.
+-- The fan-out runs over completed FBS games, which is the project's scope, so a game with no
+-- rows here is one cfdb did not ask about — not a game in which nobody did anything.
 
 with play_stats as (
 
