@@ -64,11 +64,17 @@ ENVELOPE_ALIASES = {"params", "content"}
 # {% set %}. Accepting both spellings matters: reading only the quoted form reported
 # /playoffs/cfp/games as 17 of 19 when `seed` was exposed as slot_1_seed and slot_2_seed.
 #
-# Same failure direction as the Jinja-loop gap fixed earlier — undercounting invents a hole
-# that is not there and sends the next person to rewrite a finished model.
+# The alias may also be QUALIFIED — `json_get_string('r.b', 'lineYards')` in the advanced
+# box score, where eight blocks are joined and each needs its table alias. That is why the
+# pattern allows a dot.
+#
+# Same failure direction each time, and this is the third instance: undercounting invents a
+# hole that is not there and sends the next person to rewrite a finished model. The pattern
+# to watch for is any new way of naming the first argument — a variable, a qualified column,
+# a macro result — each of which has cost a round of confusion before being allowed here.
 FIELD_ACCESS = re.compile(
     r"json_get_(?:string|nested_string|object|array_element_string)\("
-    r"\s*'?([a-z_][a-z0-9_]*)'?\s*,\s*(\[[^\]]*\]|'[^']*')")
+    r"\s*'?([a-z_][a-z0-9_.]*)'?\s*,\s*(\[[^\]]*\]|'[^']*')")
 SOURCE_REF = re.compile(r"source\(\s*'raw'\s*,\s*'([a-z0-9_]+)'\s*\)")
 
 # Jinja `{% set %}` blocks, and the quoted tokens inside them.
