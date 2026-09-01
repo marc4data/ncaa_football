@@ -117,8 +117,13 @@ def season_weeks(season: str) -> Dict[str, List[str]]:
     return weeks
 
 
-def completed_game_ids(season: str) -> List[str]:
+def completed_game_ids(season: str, weeks: Optional[List[Dict[str, str]]] = None
+                       ) -> List[str]:
     """FBS game ids for a season, read from already-landed /games responses.
+
+    `weeks` narrows the result to specific (week, seasonType) pairs, which is what the
+    weekly refresh needs: fanning out over a whole season every Sunday would re-fetch
+    hundreds of games that finished months ago. Omit it for a full-season backfill.
 
     Per-game fan-out depends on the bulk sweep having run first; that ordering is
     deliberate, so the expensive step can never run against a guess.
@@ -144,10 +149,15 @@ def completed_game_ids(season: str) -> List[str]:
         payload = load_latest_raw("games", {"year": season, "seasonType": season_type})
         if not payload:
             continue
+        wanted = None
+        if weeks is not None:
+            wanted = {(str(w["week"]), w.get("seasonType", "regular")) for w in weeks}
         for game in payload:
             if not game.get("completed"):
                 continue
             if FBS not in (game.get("homeClassification"), game.get("awayClassification")):
+                continue
+            if wanted is not None and (str(game.get("week")), season_type) not in wanted:
                 continue
             ids.append(str(game["id"]))
     return ids

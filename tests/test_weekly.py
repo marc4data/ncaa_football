@@ -133,3 +133,32 @@ def test_regular_season_weeks_do_not_request_postseason():
     season_types = {p.get("seasonType") for _, p in requests if "seasonType" in p}
 
     assert season_types == {"regular"}
+
+
+def test_the_weekly_refresh_fans_plays_stats_out_per_game(monkeypatch):
+    """/plays/stats is PER_GAME and therefore `include=False`, which the bucket loop skips.
+
+    Without an explicit branch it would silently vanish from the weekly refresh the moment
+    its strategy changed — trading a truncated feed for no feed at all, and the DAG would
+    still report success. This pins that the branch exists and is week-scoped.
+    """
+    monkeypatch.setattr("src.backfill.completed_game_ids",
+                        lambda season, weeks=None: ["111", "222"] if weeks else ["999"])
+    weeks = [{"year": "2026", "week": "2", "seasonType": "regular"}]
+    requests = weekly._requests_for_bucket(BUCKET_IMMUTABLE_WK, "2026", weeks)
+
+    plays_stats = [params for path, params in requests if path == "plays/stats"]
+    assert plays_stats == [{"gameId": "111"}, {"gameId": "222"}], (
+        "the weekly refresh must fan /plays/stats out per game, scoped to the weeks in play")
+
+
+def test_the_expensive_per_game_endpoints_stay_out_of_the_weekly_refresh(monkeypatch):
+    """game/box/advanced and metrics/wp fan out for volume, not correctness, and remain
+    backfill-only. Adding them here would triple the weekly call count as a side effect."""
+    monkeypatch.setattr("src.backfill.completed_game_ids",
+                        lambda season, weeks=None: ["111"])
+    weeks = [{"year": "2026", "week": "2", "seasonType": "regular"}]
+    paths = {path for path, _ in
+             weekly._requests_for_bucket(BUCKET_IMMUTABLE_WK, "2026", weeks)}
+    assert "game/box/advanced" not in paths
+    assert "metrics/wp" not in paths
