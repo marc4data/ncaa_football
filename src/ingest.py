@@ -56,13 +56,25 @@ def write_raw(endpoint: str, content: dict):
     return filename
 
 
+# (connect, read) rather than one number, and the read half is generous on purpose.
+#
+# A flat 30s killed the passing backfill on its FIRST request. Two things make 30s too tight
+# here: several endpoints are computed rather than looked up — /game/box/advanced measured
+# 1.4s, 4.2s and 20.2s across three consecutive calls — and /passing/plays returns 5.9 MB for
+# a single week, which is a slow read on a two-vCPU box already running another backfill.
+#
+# The connect half stays short because a connection that will not establish in ten seconds is
+# not going to; it is the body that legitimately takes minutes.
+REQUEST_TIMEOUT = (10, 180)
+
+
 def fetch(endpoint: str, params: dict | None = None):
     if not CFBD_API_KEY:
         print("CFBD_API_KEY not set. Export it or create a .env file.")
         sys.exit(1)
     url = f"{BASE_URL}/{endpoint}"
     headers = {"Authorization": f"Bearer {CFBD_API_KEY}"}
-    resp = requests.get(url, headers=headers, params=params, timeout=30)
+    resp = requests.get(url, headers=headers, params=params, timeout=REQUEST_TIMEOUT)
     try:
         data = resp.json()
     except Exception:
