@@ -70,6 +70,28 @@
 {%- endmacro %}
 
 
+{# --- Whole days between two DATES ------------------------------------------------------
+  Postgres subtracts dates directly and yields an integer; Spark has no `-` operator for
+  dates at all and needs datediff(). Same question, no shared syntax — which is what the
+  dispatch is for.
+
+  DATES, not timestamps. Rest between games is counted in calendar days, and doing it on
+  timestamps would make a Saturday night kickoff followed by a Saturday noon kickoff read as
+  six days instead of seven.
+#}
+{% macro days_between(later, earlier) -%}
+    {{ return(adapter.dispatch('days_between', 'cfdb_dbt')(later, earlier)) }}
+{%- endmacro %}
+
+{% macro default__days_between(later, earlier) -%}
+    ({{ later }} - {{ earlier }})
+{%- endmacro %}
+
+{% macro databricks__days_between(later, earlier) -%}
+    datediff({{ later }}, {{ earlier }})
+{%- endmacro %}
+
+
 {# --- Timestamp-with-zone type name --------------------------------------------------
   Not interchangeable by accident: Postgres `timestamp` is zone-*less*, so naming the type
   wrongly would silently change what every date conversion in the marts means.

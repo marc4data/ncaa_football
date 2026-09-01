@@ -73,6 +73,7 @@ def body(page) -> None:
         # nested section means a weather failure degrades one block rather than blanking a
         # page that is otherwise complete.
         _weather(game_id)
+        _travel(game_id)
 
 
 def _picker() -> None:
@@ -336,6 +337,55 @@ def _weather(game_id) -> None:
             notes.append(f"venue elevation {row['elevation_m']:g} m")
         if notes:
             st.caption(" · ".join(notes))
+        table.as_of_caption(df)
+
+
+def _travel(game_id) -> None:
+    """How far each side came and how long they had to rest.
+
+    TWO MEASURES WITH DIFFERENT COVERAGE, shown separately rather than blended. Rest comes
+    from the schedule and exists for every game that is not a season opener; travel needs
+    coordinates for both venues, so it is 2024 onward and about 79% even there. A null
+    distance renders as an em dash, never as zero — zero means they played at home.
+    """
+    st.subheader("Travel and rest")
+    with states.section("srv_game_travel"):
+        df = query("""
+            select team, opponent, is_home, is_neutral_site, game_venue, travel_km,
+                   elevation_change_m, rest_days, rest_bucket, previous_game_date, as_of_ts
+            from srv_game_travel
+            where game_id = :game_id
+            order by is_home desc
+            limit 2
+        """, {"game_id": game_id})
+        if df.empty:
+            states.empty("How far each side travelled would be here.",
+                         "No travel or rest figures for this game.")
+            return
+
+        for _, r in df.iterrows():
+            side = "Home" if r.get("is_home") else "Away"
+            if r.get("is_neutral_site"):
+                side = "Neutral site"
+            st.markdown(f"**{r.get('team')}** · {side}")
+            cols = st.columns(3)
+            km = r.get("travel_km")
+            cols[0].metric(
+                "Travel",
+                # Zero is a real answer here and reads as one; null is not.
+                "—" if km is None or pd.isna(km)
+                else ("Home venue" if float(km) < 1 else f"{float(km):,.0f} km"))
+            rest = r.get("rest_days")
+            cols[1].metric(
+                "Rest",
+                "—" if rest is None or pd.isna(rest) else f"{int(rest)} days",
+                help=str(r.get("rest_bucket") or ""))
+            change = r.get("elevation_change_m")
+            cols[2].metric(
+                "Elevation change",
+                # Signed on purpose: arriving 1,500 m higher and 1,500 m lower are
+                # different experiences and a magnitude would erase which happened.
+                "—" if change is None or pd.isna(change) else f"{float(change):+,.0f} m")
         table.as_of_caption(df)
 
 

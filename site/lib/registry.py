@@ -91,8 +91,10 @@ PAGES = [
     # and is worth recording: they were blocked on there being no join key from a game to a
     # venue, and /games/weather turned out to carry venueId on every row — matching dim_venue
     # 6,847 of 6,847. The key exists; the feature is now merely unbuilt.
-    Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True, in_nav=False,
-         partial_sections=["Travel and rest (distance and days between games)"]),
+    # NO PARTIAL SECTIONS LEFT. Weather and travel both shipped once /games/weather turned
+    # out to carry the venue id that dim_venue could be joined on — the key the travel
+    # section had been listed as blocked on for months.
+    Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True, in_nav=False),
     Page("odds", "Odds Board", BETTING, "srv_odds_board", True, True, True),
     Page("edges", "Edge Finder", BETTING, "srv_edge_finder", True, True, True,
          partial_sections=["Hit-rate slider, bucket n and calibration "
