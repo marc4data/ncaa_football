@@ -116,3 +116,54 @@ def test_the_passing_endpoints_stay_out_of_the_default_sweep():
                  "passing/teams/games", "passing/plays"):
         assert BY_PATH[path].include is False, path
         assert BY_PATH[path].min_season == 2025, path
+
+
+# --- a network error is one failed request, not a failed backfill --------------------------
+
+def test_a_timeout_is_recorded_and_the_plan_continues(monkeypatch, capsys):
+    """THE PASSING BACKFILL DIED ON ITS FIRST REQUEST BECAUSE THIS CALL WAS UNGUARDED.
+
+    A read timeout propagated out of run() and killed the whole plan with a traceback, so the
+    operator saw a stack trace instead of a summary saying what to re-run. On a long plan that
+    is the difference between losing one request and losing hours: the per-game fan-out is
+    3,706 requests, and a blip at request 3,000 would have ended it.
+    """
+    import requests
+
+    calls = []
+
+    class Response:
+        status_code = 200
+
+    def flaky(endpoint, params):
+        calls.append(params)
+        if len(calls) == 1:
+            raise requests.exceptions.ReadTimeout("read timed out")
+        return Response()
+
+    monkeypatch.setattr(backfill.ingest, "fetch", flaky)
+    monkeypatch.setattr(backfill, "already_fetched", lambda *_a: False)
+    monkeypatch.setattr(backfill, "SLEEP_SECONDS", 0)
+    monkeypatch.setattr(backfill, "build_plan",
+                        lambda *a, **k: [("teams", {"year": "2024"}),
+                                         ("teams", {"year": "2025"})])
+
+    exit_code = backfill.run(["2024", "2025"], only=None, bucket=None, per_game=False,
+                             force=False, dry_run=False)
+
+    assert len(calls) == 2, "the second request must still be attempted"
+    out = capsys.readouterr().out
+    assert "ReadTimeout" in out, "the failure must name what went wrong"
+    assert "fetched=1" in out and "failed=1" in out
+    # A partial backfill must not look like a success — the existing contract, kept.
+    assert exit_code == 1
+
+
+def test_the_request_timeout_separates_connect_from_read():
+    """A flat 30s was too tight: /game/box/advanced measured 20.2s on one call and
+    /passing/plays returns 5.9 MB for a week. The connect half stays short because a
+    connection that will not establish in ten seconds is not going to."""
+    from src import ingest
+    connect, read = ingest.REQUEST_TIMEOUT
+    assert connect <= 15
+    assert read >= 120

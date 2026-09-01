@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
+
 from . import ingest
 from .endpoints import (
     BY_PATH, HISTORY_FULL, LIVE, MANUAL, PER_GAME, REGISTRY, SEASON, SEASON_TYPE,
@@ -265,7 +267,28 @@ def run(seasons: List[str], only: List[str] | None, bucket: str | None, per_game
             fetched += 1
             continue
 
-        resp = ingest.fetch(endpoint, params)
+        # A NETWORK ERROR IS ONE FAILED REQUEST, NOT A FAILED BACKFILL.
+        #
+        # This call was unguarded, so any requests exception propagated out of run() and
+        # killed the whole plan with a traceback. The passing backfill died that way on its
+        # FIRST request — a read timeout while another backfill was saturating the box — and
+        # the operator saw a stack trace instead of "1 failed, 102 to go".
+        #
+        # That matters most on the long plans, which are exactly the ones most likely to meet
+        # a blip: the per-game fan-out is 3,706 requests over several hours, and losing it to
+        # one timeout at request 3,000 would be the worst possible moment. Skip-if-present
+        # already makes a re-run cheap; what was missing was surviving to the end so the
+        # summary tells you what to re-run.
+        try:
+            resp = ingest.fetch(endpoint, params)
+        except requests.RequestException as error:
+            failed += 1
+            reason = type(error).__name__
+            failures.append(f"{label} -> {reason}")
+            print(f"  FAILED {reason}  {label}")
+            time.sleep(SLEEP_SECONDS)
+            continue
+
         if resp.status_code == 200:
             fetched += 1
         else:
