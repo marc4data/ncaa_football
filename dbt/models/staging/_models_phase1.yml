@@ -1280,6 +1280,24 @@ models:
       - name: target_id
         description: Null on an incompletion with no identifiable target, and on a throwaway.
 
+  - name: stg_api_recent_request
+    description: >
+      The recent-request tail from /info/usage: one row per (api, endpoint, requested_at). A
+      SECOND ARRAY ON THE SAME PAYLOAD at a different grain from topEndpoints — that one is an
+      aggregate of how many calls each endpoint took, this is the individual calls with
+      timestamps. The aggregate says an endpoint was called 400 times; only this says WHEN,
+      which is the difference between "the sweep ran" and "something is calling /games every
+      ninety seconds". CFBD returns a tail rather than a full history, so this is a rolling
+      snapshot, not a log to accumulate.
+    columns:
+      - name: api
+        description: cfb or cbb — the shared pool, visible per request.
+        data_tests: [not_null]
+      - name: endpoint
+        data_tests: [not_null]
+      - name: requested_at
+        data_tests: [not_null]
+
   - name: stg_lines
     description: >
       One row per (game, provider, snapshot). Deliberately NOT deduplicated — repeated

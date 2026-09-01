@@ -29,6 +29,20 @@ flattened as (
             as total_requests,
         {{ json_get_nested_string('payload', ['window', 'start']) }} as window_start_raw,
         {{ json_get_nested_string('payload', ['window', 'end']) }}   as window_end_raw,
+        -- THE TOTALS BLOCK, EXTRACTED HERE BECAUSE `payload` IS ONLY IN SCOPE IN THIS CTE.
+        -- These are window-level figures on an endpoint-grain model, so they denormalise
+        -- across the rows — deliberately, because the alternative is a second model whose
+        -- only content is three numbers.
+        --
+        -- `cfbRequests` and `cbbRequests` are the split behind the shared pool that
+        -- stg_api_quota.is_shared_pool warns about: `total_requests` includes both, so a CFB
+        -- budget read from the total alone counts basketball calls as football ones.
+        cast({{ json_get_nested_string('payload', ['totals', 'cfbRequests']) }} as bigint)
+            as cfb_requests,
+        cast({{ json_get_nested_string('payload', ['totals', 'cbbRequests']) }} as bigint)
+            as cbb_requests,
+        cast({{ json_get_nested_string('payload', ['totals', 'uniqueEndpoints']) }} as int)
+            as unique_endpoints,
         {{ json_array_elements(json_get_object('payload', 'topEndpoints')) }} as endpoint_row
     from responses
 )
@@ -42,5 +56,8 @@ select
     {{ json_get_string('endpoint_row', 'api') }}        as api,
     cast({{ json_get_string('endpoint_row', 'requests') }} as bigint) as requests,
     cast({{ json_get_string('endpoint_row', 'lastUsedAt') }} as {{ type_timestamp_tz() }})
-        as last_used_at
+        as last_used_at,
+    cfb_requests,
+    cbb_requests,
+    unique_endpoints
 from flattened

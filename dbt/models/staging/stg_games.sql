@@ -101,7 +101,53 @@ select
     {{ json_get_string('game', 'awayTeam') }}                     as away_team,
     cast({{ json_get_string('game', 'awayPoints') }} as int)      as away_points,
     {{ json_get_string('game', 'awayClassification') }}           as away_classification,
+    cast({{ json_get_string('game', 'venueId') }} as int)         as venue_id,
     {{ json_get_string('game', 'venue') }}                        as venue,
     cast({{ json_get_string('game', 'attendance') }} as int)      as attendance,
-    {{ safe_numeric(json_get_string('game', 'excitementIndex')) }} as excitement_index
+    {{ safe_numeric(json_get_string('game', 'excitementIndex')) }} as excitement_index,
+
+    -- CONFERENCE, ON THE SPINE AT LAST. This model held classification but not conference,
+    -- so labelling a game as a conference matchup, or grouping the schedule by league, meant
+    -- joining out to stg_teams — a season-scoped join, for a fact the payload was carrying
+    -- all along. `is_conference_game` above says WHETHER; these say WHICH.
+    {{ json_get_string('game', 'homeConference') }}               as home_conference,
+    {{ json_get_string('game', 'awayConference') }}               as away_conference,
+
+    -- Quarter-by-quarter scores, as JSON arrays. Carried rather than exploded: a scoring
+    -- progression belongs at game grain here and a mart can unnest it to quarters where a
+    -- page needs that shape.
+    {{ json_get_object('game', 'homeLineScores') }}               as home_line_scores,
+    {{ json_get_object('game', 'awayLineScores') }}               as away_line_scores,
+
+    -- ELO BEFORE AND AFTER, plus the postgame win probability. These are the only
+    -- game-level model outputs on the spine, and the pregame/postgame pair is what makes an
+    -- upset measurable rather than anecdotal.
+    {{ safe_numeric(json_get_string('game', 'homePregameElo')) }}  as home_pregame_elo,
+    {{ safe_numeric(json_get_string('game', 'homePostgameElo')) }} as home_postgame_elo,
+    {{ safe_numeric(json_get_string('game', 'homePostgameWinProbability')) }}
+                                                                   as home_postgame_win_probability,
+    {{ safe_numeric(json_get_string('game', 'awayPregameElo')) }}  as away_pregame_elo,
+    {{ safe_numeric(json_get_string('game', 'awayPostgameElo')) }} as away_postgame_elo,
+    {{ safe_numeric(json_get_string('game', 'awayPostgameWinProbability')) }}
+                                                                   as away_postgame_win_probability,
+
+    cast({{ json_get_string('game', 'startTimeTBD') }} as boolean) as is_start_time_tbd,
+    {{ json_get_string('game', 'notes') }}                         as notes,
+    {{ json_get_string('game', 'highlights') }}                    as highlights,
+
+    -- THE PLAYOFF BLOCK IS NULL FOR ALMOST EVERY GAME, and that is the normal case rather
+    -- than missing data — only playoff games carry it. It duplicates what stg_cfp_matchup
+    -- holds from /playoffs/cfp/games, but reaches back further: /playoffs/cfp is fetched for
+    -- two seasons while the game spine runs to 1869, so a pre-2024 playoff game is described
+    -- here and nowhere else.
+    {{ json_get_nested_string('game', ['playoff', 'competition']) }} as playoff_competition,
+    {{ json_get_nested_string('game', ['playoff', 'format']) }}      as playoff_format,
+    {{ json_get_nested_string('game', ['playoff', 'round']) }}       as playoff_round,
+    {{ json_get_nested_string('game', ['playoff', 'roundName']) }}   as playoff_round_name,
+    {{ json_get_nested_string('game', ['playoff', 'bracketSlot']) }} as playoff_bracket_slot,
+    {{ json_get_nested_string('game', ['playoff', 'bowlName']) }}    as playoff_bowl_name,
+    cast({{ json_get_nested_string('game', ['playoff', 'homeSeed']) }} as int)
+                                                                     as playoff_home_seed,
+    cast({{ json_get_nested_string('game', ['playoff', 'awaySeed']) }} as int)
+                                                                     as playoff_away_seed
 from games
