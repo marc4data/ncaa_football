@@ -887,3 +887,217 @@ models:
           only print "12/31".
       - name: stat_attempted
         description: Second half of a made/attempted pair; null on every row that is not one.
+
+  - name: fct_play
+    description: >
+      One row per play — 583,641 plays across 2024-2026, the finest grain in the warehouse
+      and the spine the Players page's drill-down sits on. Play-by-play is `recent` scope by
+      decision.
+      THE SOURCE HAS NO SEASON AND NO WEEK: /plays is fetched per season and week but the
+      rows carry only a game id, so both are resolved here from fct_game — the same job
+      fct_player_game_stat does for the box score. Team ids are resolved from dim_team the
+      same way, so a play can be attributed without a name comparison.
+    columns:
+      - name: play_sk
+        description: Surrogate key over play_id — the grain, one row per play.
+        tests: [unique, not_null]
+      - name: play_id
+        description: CFBD play id, a string. Joins to fct_play_stat.
+        tests: [unique, not_null]
+      - name: game_id
+        description: CFBD game id the play belongs to.
+      - name: drive_id
+        description: CFBD drive id, joining to the drive model.
+      - name: drive_number
+        description: Which drive of the game this play belongs to.
+      - name: play_number
+        description: Position of the play within its drive.
+      - name: season
+        description: Resolved from fct_game — the source row carries none.
+      - name: week
+        description: Resolved from fct_game.
+      - name: season_type
+        description: '`regular` or `postseason`, from fct_game.'
+      - name: game_date
+        description: Calendar date of the game.
+      - name: start_date
+        description: Scheduled kickoff of the game, timezone-aware.
+      - name: is_neutral_site
+        description: Whether the game was at a neutral venue.
+      - name: venue
+        description: Venue name.
+      - name: offense
+        description: Team on offence for this play, by name.
+      - name: offense_team_id
+        description: Resolved from dim_team within season; null for non-FBS programmes.
+      - name: offense_conference
+        description: Conference of the team on offence.
+      - name: offense_score
+        description: Offence's score at the time of the play.
+      - name: defense
+        description: Team on defence for this play, by name.
+      - name: defense_team_id
+        description: Resolved from dim_team within season; null for non-FBS programmes.
+      - name: defense_conference
+        description: Conference of the team on defence.
+      - name: defense_score
+        description: Defence's score at the time of the play.
+      - name: home_team
+        description: Home team of the game, regardless of who has the ball.
+      - name: away_team
+        description: Away team of the game.
+      - name: period
+        description: Quarter, or the overtime period.
+      - name: clock_minutes
+        description: Minutes remaining on the game clock.
+      - name: clock_seconds_part
+        description: >
+          The seconds COMPONENT of the clock, not a total. Named `_part` so it cannot be
+          mistaken for elapsed or remaining seconds.
+      - name: clock_seconds
+        description: The clock expressed as total seconds, for arithmetic and sorting.
+      - name: offense_timeouts
+        description: Timeouts the offence had remaining.
+      - name: defense_timeouts
+        description: Timeouts the defence had remaining.
+      - name: yardline
+        description: Field position as CFBD reports it, on the 0-100 field.
+      - name: yards_to_goal
+        description: Distance to the opponent's goal line — the unambiguous field position.
+      - name: down
+        description: Down, 1-4. Null or 0 on kickoffs and some special-teams plays.
+      - name: distance
+        description: Yards needed for a first down.
+      - name: yards_gained
+        description: Yards gained on the play; negative on a loss.
+      - name: is_scoring_play
+        description: Whether the play resulted in points.
+      - name: play_type
+        description: CFBD's classification of the play.
+      - name: play_text
+        description: >
+          The narrative description. fct_play_stat is the structured version of the same
+          event — which athlete recorded which stat.
+      - name: ppa
+        description: Predicted points added for the play, where CFBD computes it.
+      - name: wallclock_at
+        description: Real-world timestamp of the play, where reported.
+      - name: down_distance_display
+        description: >
+          "3rd and 7", or "1st and Goal" where the distance reaches the end zone. Assembled
+          here rather than in the app — a down and distance is one fact with a conventional
+          rendering. Null where down is null or 0, because "0th and 10" is not a thing.
+      - name: distance_bucket
+        description: >
+          `short` (<=3), `medium` (4-7), `long` (8+) or `goal to go`. What a filter actually
+          needs: "3rd and long" is the question a reader asks and "3rd and 7" is not.
+          Boundaries are the conventional ones, named here so no page can pick different ones.
+      - name: field_zone
+        description: '`red zone` (<=20 to goal), `opponent territory` (<=50), or `own territory`.'
+
+  - name: fct_play_stat
+    description: >
+      One row per play x athlete x stat type — the bridge from a play to the players in it,
+      and what makes the Players page's play-level drill-down possible.
+      SEVERAL ROWS PER PLAY IS NORMAL: a completed pass produces a passer, a receiver and a
+      reception, each its own row, and one athlete can record two different stats on one play.
+      THIS FACT IS TRUNCATED UPSTREAM AND THAT IS THE MOST IMPORTANT THING ABOUT IT. CFBD's
+      spec states /plays/stats is "limited to 2,000 records" per request and cfdb fetches it
+      per season-week, so every week returns exactly 2,000 rows and stops. It covers 375 of
+      the 3,410 games that have box scores — about 11% — and the survivors skew heavily to
+      one conference (118 of 177 covered 2024 games are SEC), which is the API's ordering
+      showing through rather than a fact about football.
+      ANY AGGREGATE OVER THIS FACT IS AN AGGREGATE OVER AN ARBITRARY 11% SAMPLE until a
+      per-game backfill runs. Absence must be treated as unknown, never as zero.
+      Play context is carried on the row so the drill-down can filter without joining, since
+      the site reads one relation per query (G-2).
+    columns:
+      - name: play_stat_sk
+        description: Surrogate key over (play_id, athlete_id, stat_type) — the grain.
+        tests: [unique, not_null]
+      - name: play_id
+        description: CFBD play id, joining to fct_play.
+        tests: [not_null]
+      - name: drive_id
+        description: CFBD drive id.
+      - name: game_id
+        description: CFBD game id.
+      - name: season
+        description: Season, carried on the stat row by this endpoint.
+      - name: week
+        description: Week, carried on the stat row by this endpoint.
+      - name: season_type
+        description: '`regular` or `postseason`, from fct_play.'
+      - name: game_date
+        description: Calendar date of the game, from fct_play.
+      - name: player_id
+        description: CFBD athlete id, shared with the other player facts and dim_athlete.
+      - name: player_name
+        description: Athlete name as this endpoint publishes it.
+      - name: player_slug
+        description: >
+          URL-safe identifier, name AND player id — the same construction as everywhere else,
+          so the page can link without a lookup.
+      - name: athlete_sk
+        description: Link to dim_athlete on (season, player_id, team); three columns, because
+          the dimension's grain includes team.
+      - name: has_athlete_dimension
+        description: Whether dim_athlete had a row for this athlete, season and team.
+      - name: team
+        description: Team the athlete was playing for.
+      - name: team_id
+        description: Resolved from dim_team within season; null for non-FBS programmes.
+      - name: conference
+        description: Conference of that team.
+      - name: opponent
+        description: The other team in the game.
+      - name: team_score
+        description: This team's score at the time of the play.
+      - name: opponent_score
+        description: The opponent's score at the time of the play.
+      - name: stat_type
+        description: >
+          What the athlete recorded — Reception, Completion, Sack and so on. One measure per
+          row, which is why the value needs no parsing.
+      - name: stat
+        description: >
+          The value, already a number on this endpoint — unlike the box-score models, where
+          every value is a string with a compound shape to parse.
+      - name: period
+        description: Quarter, repeated on the stat line by this endpoint.
+      - name: clock_minutes
+        description: Minutes remaining on the game clock.
+      - name: clock_seconds_part
+        description: The seconds COMPONENT of the clock, not a total.
+      - name: down
+        description: >
+          Down, taken from the stat row — /plays/stats repeats the play's situation on every
+          line it emits. assert_play_stat_situation_agrees_with_the_play checks this against
+          fct_play's own copy.
+      - name: distance
+        description: Yards needed for a first down, from the stat row.
+      - name: yards_to_goal
+        description: Distance to the opponent's goal line, from the stat row.
+      - name: down_distance_display
+        description: >
+          "3rd and 7", computed in fct_play. Note the derived columns come from fct_play's
+          copy of the situation while `down` and `distance` above come from the stat row —
+          the agreement test exists because that is two sources for one fact.
+      - name: distance_bucket
+        description: '`short`, `medium`, `long` or `goal to go`, computed in fct_play.'
+      - name: field_zone
+        description: '`red zone`, `opponent territory` or `own territory`, computed in fct_play.'
+      - name: play_type
+        description: CFBD's classification of the play, from fct_play.
+      - name: play_text
+        description: The narrative description of the play, from fct_play.
+      - name: yards_gained
+        description: Yards gained on the play, from fct_play.
+      - name: is_scoring_play
+        description: Whether the play resulted in points, from fct_play.
+      - name: ppa
+        description: Predicted points added for the play, from fct_play.
+      - name: offense_team_id
+        description: Team on offence for the play, from fct_play.
+      - name: defense_team_id
+        description: Team on defence for the play, from fct_play.
