@@ -88,37 +88,14 @@ pre_kick as (
         join {{ ref('fct_game') }} g on g.game_id = b.game_id
     ) ranked where recency = 1
 
-),
-
-pregame_wp as (
-
-    -- R-079. The same shape as pre_kick, and for the same reason — but the numbers here are
-    -- far starker. Only 131 of 1,891 games have a snapshot at or before kickoff, and ALL of
-    -- them are 2026: our snapshotting began 2026-08-15, so every 2024 and 2025 row was
-    -- observed after the game finished. A strict "at or before kickoff" rule would return
-    -- nothing for 1,760 of 1,891 games.
-    --
-    -- So it prefers a genuine pre-kickoff observation and falls back to what exists, with
-    -- `basis` saying which — a figure whose provenance travels with it, rather than a null
-    -- column or a silent lie about when it was taken.
-    --
-    -- Nine distinct snapshot timestamps exist in total. This is a VALUE, not a movement
-    -- series, and nothing here should be built as though it were one.
-    select game_id, home_win_probability, snapshot_ts, basis from (
-        select
-            w.game_id, w.home_win_probability, w.snapshot_ts,
-            case when w.snapshot_ts <= g.start_date then 'observed_before_kickoff'
-                 else 'as_recorded_by_cfbd' end as basis,
-            row_number() over (
-                partition by w.game_id
-                order by case when w.snapshot_ts <= g.start_date then 0 else 1 end,
-                         w.snapshot_ts desc
-            ) as recency
-        from {{ ref('stg_game_pregame_wp') }} w
-        join {{ ref('fct_game') }} g on g.game_id = w.game_id
-    ) ranked where recency = 1
-
 )
+
+-- R-079 IS A MART, NOT A CTE HERE. The first version of this view held the "latest snapshot
+-- at or before kickoff" selection inline and read stg_game_pregame_wp directly.
+-- ci/check_layering.py failed the build for it and was right to: serving builds on marts.
+-- Choosing which snapshot represents a game is a business rule, and a business rule inside a
+-- view is one a second consumer has to re-derive — which is the defect this whole prompt is
+-- about. It lives in fct_game_pregame_wp and is joined below.
 
 select
     g.game_sk,
@@ -285,7 +262,7 @@ left join latest_line l on l.game_id = g.game_id
 left join latest_prediction p on p.game_id = g.game_id
 left join game_box bx on bx.game_id = g.game_id
 left join pre_kick pk on pk.game_id = g.game_id
-left join pregame_wp wp on wp.game_id = g.game_id
+left join {{ ref('fct_game_pregame_wp') }} wp on wp.game_id = g.game_id
 left join {{ ref('fct_game_weather') }} w on w.game_id = g.game_id
 -- Record LEADING INTO this game's week, per side. Joined on the full grain including
 -- season_type, because postseason week numbers restart at 1 and joining on week alone would
