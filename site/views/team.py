@@ -73,18 +73,27 @@ def body(page) -> None:
                         "Rosters need the athlete dimension and the player facts.",
                         scheduled="Track B8 — after the other blocked pages")
     with tabs[4]:
-        # Still Degraded, and the reason is sharper than it was. B1 shipped, but every
-        # rating CFBD publishes for a team is SEASON-scoped: /ratings/elo is the only one
-        # whose API even accepts a week, and it has only ever been fetched with a year.
-        # A trend line drawn from a season value repeated across fourteen weeks would be a
-        # fabricated time series that looked entirely convincing.
+        # THE DATA EXISTS NOW. This tab said, until 2026-09-02, that Elo "has only been
+        # fetched by season" and that a weekly series needed a backfill. Both statements
+        # were true when written and are false today, by our own work — and a site that
+        # explains why it cannot do something it CAN now do teaches the reader to stop
+        # looking, which is a worse failure than saying nothing.
+        #
+        # What changed: /games has carried home_pregame_elo, home_postgame_elo and their
+        # away counterparts all along. A rating per team per GAME is a rating per team per
+        # WEEK, so fct_team_rating_week needed no API call at all. Coverage, FBS-only:
+        # 100% for 2023-2025, 99.9% for 2022, 93-97% back to 2014.
+        #
+        # STILL DEGRADED, BUT FOR A DIFFERENT AND SMALLER REASON: the chart is not built.
+        # That is a page to design, not a blocker to clear, and designing it here would be
+        # designing a page nobody has reviewed.
         states.degraded(
             "weekly rating history",
-            "Trends needs a rating per team per WEEK. Four of the five systems CFBD "
-            "publishes are season-scoped by design, and Elo — the one that is not — has "
-            "only been fetched by season. A chart drawn from a season figure repeated "
-            "across every week would be a line that never happened.",
-            scheduled="a weekly Elo backfill, which is a fetch change rather than a model")
+            "The data for this is now in the warehouse: fct_team_rating_week carries a "
+            "pregame and postgame Elo per team per week, covering every FBS team from "
+            "2014 and essentially all of them from 2022. What is missing is the chart "
+            "itself, not the ratings behind it.",
+            scheduled="the Trends chart, once the Team page is reviewed")
 
 
 def _identity_header(row) -> None:
