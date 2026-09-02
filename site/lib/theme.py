@@ -138,6 +138,8 @@ TABLE_CSS = """
 .cfdb-linescore th { opacity:.6; font-weight:600; }
 .cfdb-ls-team { text-align:left; opacity:.75; padding-right:.5rem !important; }
 .cfdb-ls-ot { font-weight:700; }
+/* R-092: why the quarters are missing, not merely that they are. */
+.cfdb-ls-why { font-size:.72rem; opacity:.6; margin-top:.15rem; }
 @media (prefers-color-scheme: dark) {
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
