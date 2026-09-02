@@ -27,7 +27,8 @@ with latest_line as (
 
     -- Most recent line of all, for the "current" market number. Distinct from pre_kick below,
     -- which answers a different question and must not be conflated with it.
-    select game_id, spread, over_under
+    select game_id, spread, over_under, spread_open, over_under_open,
+           home_moneyline, away_moneyline, provider_key, snapshot_ts
     from (
         select b.*, row_number() over (partition by b.game_id
                                        order by b.snapshot_ts desc, b.provider_key) as recency
@@ -36,11 +37,27 @@ with latest_line as (
 
 ),
 
+latest_market as (
+
+    -- De-vigged market probabilities, from srv_matchup. R-094.
+    select game_id, market_implied_home_win_probability,
+           market_implied_away_win_probability, overround, devig_method
+    from (
+        select *, row_number() over (partition by game_id
+                                     order by snapshot_ts desc, provider_key) as recency
+        from {{ ref('fct_market_probability') }}
+    ) r where recency = 1
+
+),
+
 latest_prediction as (
 
     -- Prefer a model that populates predicted_margin: six of seven models are probability
     -- models, so ordering by recency alone loses the margin almost every time.
-    select game_id, predicted_margin, predicted_home_win_probability, model_name
+    select game_id, model_name, model_version, model_family, predicted_margin,
+           predicted_total_points, predicted_home_points, predicted_away_points,
+           predicted_home_win_probability, home_cover_edge, home_win_probability_edge,
+           confidence_bucket, is_out_of_sample_week
     from (
         select p.*, row_number() over (
                    partition by p.game_id
@@ -88,7 +105,7 @@ pre_kick as (
         join {{ ref('fct_game') }} g on g.game_id = b.game_id
     ) ranked where recency = 1
 
-)
+),
 
 -- R-079 IS A MART, NOT A CTE HERE. The first version of this view held the "latest snapshot
 -- at or before kickoff" selection inline and read stg_game_pregame_wp directly.
@@ -96,6 +113,115 @@ pre_kick as (
 -- Choosing which snapshot represents a game is a business rule, and a business rule inside a
 -- view is one a second consumer has to re-derive — which is the defect this whole prompt is
 -- about. It lives in fct_game_pregame_wp and is joined below.
+
+series as (
+    -- Head-to-head, from the game spine.
+    --
+    -- Written as a UNION of two equality joins rather than one join with an OR across both
+    -- team-pair orderings. The OR form is the obvious way to express it and is a trap:
+    -- Postgres cannot hash-join a disjunction, so it degrades to a nested loop over 110,634
+    -- games against itself. That built acceptably until fct_game gained four columns, then
+    -- ran past 11 minutes without finishing. Same result, and it hash-joins.
+    --
+    -- A TIE IS ITS OWN OUTCOME and is counted as one. The first version derived the away
+    -- record as `series_games - series_home_team_wins`, which is only correct in a sport
+    -- without draws: every tie was silently credited to the away team. College football
+    -- had no overtime before 1996 and there are 2,600 tied games on record, which
+    -- overstated the away side in 40,045 of 102,985 matchup rows — a plausible-looking
+    -- number, wrong, and impossible to spot on screen because a head-to-head record is
+    -- exactly the figure nobody arrives already knowing.
+    select
+        game_id,
+        count(*)                                as series_games,
+        sum(home_team_won)                      as series_home_team_wins,
+        sum(away_team_won)                      as series_away_team_wins,
+        sum(was_tied)                           as series_ties,
+        min(prior_season)                       as series_first_season,
+        max(prior_season)                       as series_last_season
+    from (
+        select
+            cur.game_id,
+            prior.season as prior_season,
+            case when prior.home_team_id = cur.home_team_id
+                      and prior.home_points > prior.away_points then 1
+                 when prior.away_team_id = cur.home_team_id
+                      and prior.away_points > prior.home_points then 1
+                 else 0 end as home_team_won,
+            case when prior.home_team_id = cur.away_team_id
+                      and prior.home_points > prior.away_points then 1
+                 when prior.away_team_id = cur.away_team_id
+                      and prior.away_points > prior.home_points then 1
+                 else 0 end as away_team_won,
+            case when prior.home_points = prior.away_points then 1 else 0 end as was_tied
+        from {{ ref('fct_game') }} cur
+        join {{ ref('fct_game') }} prior
+          on prior.home_team_id = cur.home_team_id
+         and prior.away_team_id = cur.away_team_id
+         and prior.game_id <> cur.game_id
+        -- A RESULT, not merely a completed flag. Two games are marked completed with
+        -- no score recorded, and counting them as meetings gave a head-to-head record
+        -- of 0-0-0 over one meeting — a row that reconciles to nothing and reads as a
+        -- rendering fault. A meeting with no result contributes no result.
+        where prior.is_completed
+          and prior.home_points is not null
+          and prior.away_points is not null
+
+        union all
+
+        select
+            cur.game_id,
+            prior.season,
+            case when prior.home_team_id = cur.home_team_id
+                      and prior.home_points > prior.away_points then 1
+                 when prior.away_team_id = cur.home_team_id
+                      and prior.away_points > prior.home_points then 1
+                 else 0 end,
+            case when prior.home_team_id = cur.away_team_id
+                      and prior.home_points > prior.away_points then 1
+                 when prior.away_team_id = cur.away_team_id
+                      and prior.away_points > prior.home_points then 1
+                 else 0 end,
+            case when prior.home_points = prior.away_points then 1 else 0 end
+        from {{ ref('fct_game') }} cur
+        join {{ ref('fct_game') }} prior
+          on prior.home_team_id = cur.away_team_id
+         and prior.away_team_id = cur.home_team_id
+         and prior.game_id <> cur.game_id
+        -- A RESULT, not merely a completed flag. Two games are marked completed with
+        -- no score recorded, and counting them as meetings gave a head-to-head record
+        -- of 0-0-0 over one meeting — a row that reconciles to nothing and reads as a
+        -- rendering fault. A meeting with no result contributes no result.
+        where prior.is_completed
+          and prior.home_points is not null
+          and prior.away_points is not null
+    ) meetings
+    group by game_id
+),
+
+current_week as (
+
+    -- C4. THE CURRENT-WEEK RULE IS BUSINESS LOGIC AND IT MOVES HERE, NOT INTO THE PAGE.
+    --
+    -- srv_today_edges filtered to it. A slate spans Thursday to Saturday, so a calendar-date
+    -- filter shows an empty page on Wednesday — which is why "today" is the current CFBD week
+    -- and not today's date.
+    --
+    -- `not is_completed` ALONE IS NOT SUFFICIENT and picking it selected 2023 week 6 on the
+    -- first build: twelve historical games are permanently flagged incomplete because they
+    -- were cancelled and CFBD never marks them otherwise, so the earliest incomplete game is
+    -- three seasons in the past. Anchoring on KICKOFF TIME makes those rows irrelevant
+    -- instead of authoritative.
+    --
+    -- As a column rather than a WHERE clause in Streamlit: a definition that lives in a page
+    -- is a definition the next page gets wrong, and this one has already been got wrong once.
+    select season, season_type, week
+    from {{ ref('fct_game') }}
+    where start_date >= {{ dbt.current_timestamp() }}
+    group by season, season_type, week
+    order by min(start_date)
+    limit 1
+
+)
 
 select
     g.game_sk,
@@ -200,7 +326,71 @@ select
     p.predicted_margin,
     -1 * p.predicted_margin       as predicted_margin_home_perspective,
     p.predicted_home_win_probability as home_win_probability,
-    p.model_name                  as model_version_key,
+    p.predicted_home_win_probability,
+    p.predicted_total_points,
+    p.predicted_home_points,
+    p.predicted_away_points,
+    p.confidence_bucket,
+    p.home_cover_edge,
+    p.home_win_probability_edge,
+    p.is_out_of_sample_week,
+    -- C4-adjacent: the same rule srv_edge_finder uses, so no page re-derives it.
+    case when p.is_out_of_sample_week then false else true end as is_default_actionable,
+    {{ var('prediction_training_week_floor', 5) }} as training_week_floor,
+    p.model_name,
+    p.model_family,
+    -- THE COLUMN NOW HOLDS WHAT ITS NAME SAYS. R-094, found by the C2 diff.
+    --
+    -- srv_game inherited `p.model_name as model_version_key` from srv_schedule; srv_matchup
+    -- carried `mv.model_version`. The column is called model_version_key, so srv_matchup was
+    -- right — and unlike home_rank in the 030 rename, these did not merely agree-and-risk-
+    -- drifting: they disagreed on ALL 567 populated rows, one returning `random_forest_score`
+    -- and the other `98d34949266b`.
+    --
+    -- Part 1 documented the quirk rather than renaming it, on the grounds that renaming a
+    -- serving column is a breaking change. Merging the views IS that change, so this is the
+    -- moment the objection stops applying. `model_name` is now its own column beside it.
+    mv.model_version              as model_version_key,
+    -- Licence requirement, carried as data so a page cannot render the model's numbers
+    -- without it.
+    mv.attribution,
+
+    -- Market detail, from srv_matchup. R-094.
+    l.spread,
+    l.spread_open,
+    l.over_under,
+    l.over_under_open,
+    l.home_moneyline,
+    l.away_moneyline,
+    l.provider_key,
+    l.snapshot_ts                 as line_snapshot_ts,
+    l.snapshot_ts,
+    mk.market_implied_home_win_probability,
+    mk.market_implied_away_win_probability,
+    mk.overround,
+    mk.devig_method,
+
+    -- Division of each side that season, from the game spine.
+    g.home_classification,
+    g.away_classification,
+
+    -- The same result read the other way round, so a page can put it beside
+    -- predicted_margin_home_perspective without flipping a sign itself.
+    g.home_points - g.away_points as actual_margin_home_perspective,
+
+    -- HEAD TO HEAD AS IT STOOD BEFORE THIS GAME, from srv_matchup. Distinct from
+    -- fct_team_series, which is the all-time record per unordered pair: this is per-game and
+    -- excludes the fixture on its own row.
+    ser.series_games,
+    ser.series_home_team_wins,
+    ser.series_away_team_wins,
+    ser.series_ties,
+    ser.series_first_season,
+    ser.series_last_season,
+
+    -- C4. Whether this game is in the week currently in play. A COLUMN, not a WHERE clause
+    -- in the app: the Today page filters on a fact rather than re-deriving the definition.
+    cw.season is not null          as is_current_week,
 
     -- R-079. Pregame win probability, with the provenance of WHEN it was taken. Read
     -- pregame_wp_basis before quoting it: `as_recorded_by_cfbd` means the figure is real but
@@ -262,6 +452,13 @@ left join latest_line l on l.game_id = g.game_id
 left join latest_prediction p on p.game_id = g.game_id
 left join game_box bx on bx.game_id = g.game_id
 left join pre_kick pk on pk.game_id = g.game_id
+left join latest_market mk on mk.game_id = g.game_id
+left join series ser on ser.game_id = g.game_id
+left join {{ ref('dim_model_version') }} mv
+    on mv.model_name = p.model_name and mv.model_version = p.model_version
+-- One row at most; a cross join would multiply every game by it when the week resolves.
+left join current_week cw
+    on  cw.season = g.season and cw.season_type = g.season_type and cw.week = g.week
 left join {{ ref('fct_game_pregame_wp') }} wp on wp.game_id = g.game_id
 left join {{ ref('fct_game_weather') }} w on w.game_id = g.game_id
 -- Record LEADING INTO this game's week, per side. Joined on the full grain including

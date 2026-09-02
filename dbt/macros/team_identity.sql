@@ -18,7 +18,7 @@
     srv_team_game_log   12,552 of 221,268     5.7%
     srv_standings        7,482 of  30,475    24.6%
     srv_rankings           662 of  49,798     1.3%
-    srv_today_edges            9 of     211     4.3%   <- the landing page
+    srv_game            9 of     211     4.3%   <- the landing page
 
   Five views, four of them found only because the first one was swept for rather than
   fixed. A null display name renders as an em dash where a team should be; a null slug is

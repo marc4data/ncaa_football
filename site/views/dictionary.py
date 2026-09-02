@@ -30,6 +30,12 @@ from lib.table import Col
 RETIRED_VIEWS = {
     "srv_schedule": "srv_game",
     "srv_scoreboard": "srv_game",
+    # R-094, the second rename. Extended rather than joined by a second mechanism — the
+    # blast radius here is wider than 030's: Today is the landing page and Matchup is the
+    # drill-through target from Schedule, Scores, Today, Standings and every team name on
+    # the site, so a dead link is not one page.
+    "srv_matchup": "srv_game",
+    "srv_today_edges": "srv_game",
 }
 
 # SERVING FIRST AND BY DEFAULT (F2-32). The site's promise is that it serves curated data;

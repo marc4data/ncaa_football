@@ -49,7 +49,7 @@ OVERVIEW, GAMES, BETTING, DELIVERABLE, REFERENCE, BACK = (
     "Overview", "Games & teams", "Betting", "Deliverable", "Reference", "Back of house")
 
 PAGES = [
-    Page("today", "Today", OVERVIEW, "srv_today_edges", True, True, True),
+    Page("today", "Today", OVERVIEW, "srv_game", True, True, True),
     Page("schedule", "Schedule", GAMES, "srv_game", True, True, True),
     Page("scores", "Scores", GAMES, "srv_game", True, True, True),
     Page("rankings", "Rankings", GAMES, "srv_rankings", True, True, True),
@@ -98,7 +98,7 @@ PAGES = [
     # NO PARTIAL SECTIONS LEFT. Weather and travel both shipped once /games/weather turned
     # out to carry the venue id that dim_venue could be joined on — the key the travel
     # section had been listed as blocked on for months.
-    Page("matchup", "Matchup", GAMES, "srv_matchup", True, True, True, in_nav=False),
+    Page("matchup", "Matchup", GAMES, "srv_game", True, True, True, in_nav=False),
     Page("odds", "Odds Board", BETTING, "srv_odds_board", True, True, True),
     # Track record BUILT. fct_edge_bucket_performance exists and the page now shows hit
     # rate by edge size with the n beside every rate — including the finding that a bigger

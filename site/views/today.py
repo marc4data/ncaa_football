@@ -15,8 +15,8 @@ def body(page) -> None:
     # F2-03: the bar renders on every data page, so a scope inherited from
     # another page is visible on arrival rather than silently in effect.
     scope = filters.game_scope()
-    table.dataset_caption("Today", "srv_today_edges")
-    with states.section("srv_today_edges"):
+    table.dataset_caption("Today", "srv_game")
+    with states.section("srv_game"):
         df = query("""
             select game_id, season, week, season_type, start_date_et, venue_display,
                    is_neutral_site, network, home_team_slug, home_team_display,
@@ -27,7 +27,7 @@ def body(page) -> None:
                    confidence_bucket, is_out_of_sample_week, is_default_actionable,
                    training_week_floor,
                    model_version_key, attribution, excitement_index, as_of_ts
-            from srv_today_edges
+            from srv_game
             where (:season is null or season = :season)
               and (:week is null or week = :week)
             order by start_date_et, game_id
@@ -44,7 +44,7 @@ def body(page) -> None:
         # EMPTY, not Degraded — the view exists, there is simply no slate today.
         shown = table.apply_sort(shown, _columns(scope))
         states.render_or_state(
-            shown, "srv_today_edges",
+            shown, "srv_game",
             "Today's slate would be here.",
             f"No games in the current window for {scope.describe()}."
             + (" Try turning off “Predictions only”." if only_predictions else ""),

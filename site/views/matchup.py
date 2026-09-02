@@ -40,7 +40,7 @@ COLUMNS = """
 
 
 def body(page) -> None:
-    with states.section("srv_matchup"):
+    with states.section("srv_game"):
         game_id = params.get("game_id")
         if game_id is None:
             _picker()
@@ -48,7 +48,7 @@ def body(page) -> None:
 
         df = query(f"""
             select {COLUMNS}
-            from srv_matchup
+            from srv_game
             where game_id = :game_id
             limit 1
         """, {"game_id": game_id})
@@ -89,7 +89,7 @@ def _picker() -> None:
     grouped by day, searchable by team. AC-10.1 as amended.
     """
     scope = filters.game_scope()
-    table.dataset_caption("Matchup", "srv_matchup")
+    table.dataset_caption("Matchup", "srv_game")
     st.markdown("Pick a game to see the full matchup — market, model, and the series "
                 "history. Every game row elsewhere on the site links straight here.")
     search = st.text_input("Find a team", placeholder="Type a team name…")
@@ -98,7 +98,7 @@ def _picker() -> None:
         select game_id, season, week, start_date_et, game_date,
                home_team, away_team, home_conference, away_conference,
                home_points, away_points, is_completed, venue_display
-        from srv_matchup
+        from srv_game
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
           and (:conference is null or home_conference = :conference
@@ -114,7 +114,7 @@ def _picker() -> None:
         games = games[mask]
 
     states.render_or_state(
-        games, "srv_matchup",
+        games, "srv_game",
         "Games would be listed here.",
         f"No game matches “{search}”." if search else
         f"No games recorded for {scope.describe()}.",

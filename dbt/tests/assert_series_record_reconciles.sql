@@ -1,6 +1,6 @@
 -- A head-to-head record must account for every meeting it counts.
 --
--- srv_matchup derived the away side of the series as `series_games - series_home_team_wins`,
+-- srv_game derived the away side of the series as `series_games - series_home_team_wins`,
 -- which is correct only in a sport without draws. College football has 2,600 tied games on
 -- record and had no overtime before 1996, so every one of those was silently credited to the
 -- away team — overstating it in 40,045 of 102,985 rows.
@@ -19,6 +19,6 @@ select
     series_home_team_wins,
     series_away_team_wins,
     series_ties
-from {{ ref('srv_matchup') }}
+from {{ ref('srv_game') }}
 where series_games is not null
   and series_home_team_wins + series_away_team_wins + series_ties <> series_games

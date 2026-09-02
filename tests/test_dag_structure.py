@@ -107,8 +107,8 @@ def test_the_private_connector_api_we_depend_on_is_pinned():
 # cfbd_scores_refresh fetches /games and rebuilds the five serving views plus ancestors.
 # Anything else in the warehouse is whatever the last full refresh left behind.
 GAME_DERIVED = ("stg_games", "fct_game", "fct_game_team", "fct_team_record",
-                "srv_game", "srv_game", "srv_matchup", "srv_team_game_log",
-                "srv_today_edges", "srv_standings")
+                "srv_game", "srv_game", "srv_game", "srv_team_game_log",
+                "srv_game", "srv_standings")
 LEGACY_MARTS = ("mart_team_schedule", "mart_team_season_record")
 
 TAG_DIRECTIVE = re.compile(r"config\s*\(\s*tags\s*=\s*\[[^\]]*['\"]full_refresh_only['\"]")

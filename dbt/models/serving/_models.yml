@@ -1305,339 +1305,6 @@ models:
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
 
   # ---------------------------------------------------------------------------------------
-  - name: srv_today_edges
-    description: >
-      Today page. One row per game in the week currently in play, with market and model side
-      by side. Deliberately narrower than the Edge Finder — this answers "what is on today
-      and where does the model disagree", not "let me filter every market by edge size".
-      "TODAY" IS THE CURRENT CFBD WEEK, not a calendar date, because a slate spans Thursday
-      to Saturday and a date filter would show an empty page on Wednesday. The week is
-      anchored on the earliest game that has not yet KICKED OFF rather than on
-      `not is_completed`: twelve historical games (10 in 2023, 2 in 2024) are permanently
-      flagged incomplete because they were cancelled and CFBD never marks them otherwise, so
-      completion-based anchoring selected 2023 week 6 on the first build.
-    columns:
-      - name: game_sk
-        description: Surrogate key from the game fact — the grain, one row per game.
-      - name: game_id
-        description: CFBD game id.
-      - name: season
-        description: Season of the current slate.
-      - name: season_type
-        description: '`regular` or `postseason`.'
-      - name: week
-        description: The week currently in play.
-      - name: start_date
-        description: Scheduled kickoff, timezone-aware.
-      - name: start_date_et
-        description: Kickoff in US Eastern, stored without a timezone. Do not read as UTC.
-      - name: kickoff_time_known
-        description: >
-          Whether a real kickoff time is known; false means `start_date` carries a placeholder.
-      - name: is_neutral_site
-        description: Whether the game is at a neutral venue.
-      - name: venue
-        description: Venue name.
-      - name: venue_display
-        description: Alias of `venue`, carried so pages written against either name work.
-      - name: network
-        description: Broadcast network; null where not yet published.
-      - name: excitement_index
-        description: CFBD's excitement index; null for a game not yet played.
-      - name: home_team_id
-        description: CFBD team id for the home side.
-      - name: home_team
-        description: Home team name from the game fact.
-      - name: home_abbreviation
-        description: Home team abbreviation.
-      - name: home_team_slug
-        description: URL-safe home team identifier.
-      - name: home_team_display
-        description: Home team display name, falling back to the game fact's name.
-      - name: home_color_on_light
-        description: Contrast-corrected home colour for a light background.
-      - name: home_color_on_dark
-        description: Contrast-corrected home colour for a dark background.
-      - name: home_logo_url
-        description: CFBD logo URL for the home team.
-      - name: away_team_id
-        description: CFBD team id for the away side.
-      - name: away_team
-        description: Away team name from the game fact.
-      - name: away_abbreviation
-        description: Away team abbreviation.
-      - name: away_team_slug
-        description: URL-safe away team identifier.
-      - name: away_team_display
-        description: Away team display name, falling back to the game fact's name.
-      - name: away_color_on_light
-        description: Contrast-corrected away colour for a light background.
-      - name: away_logo_url
-        description: CFBD logo URL for the away team.
-      - name: spread
-        description: >
-          Spread at the most recent snapshot, in the away-minus-home convention.
-      - name: spread_current
-        description: Alias of `spread`, carried so pages written against either name work.
-      - name: over_under
-        description: Over/under at the most recent snapshot.
-      - name: total_current
-        description: Alias of `over_under`, carried for the same reason as `spread_current`.
-      - name: home_moneyline
-        description: American-odds moneyline for the home team at the latest snapshot.
-      - name: away_moneyline
-        description: American-odds moneyline for the away team at the latest snapshot.
-      - name: provider_key
-        description: Which sportsbook the market columns came from.
-      - name: market_implied_home_win_probability
-        description: De-vigged market probability for the home team.
-      - name: devig_method
-        description: >
-          Method used to remove the vigorish. The choice moves the number, so the
-          probability is not reproducible without it.
-      - name: model_name
-        description: >
-          Name of the model behind the prediction columns. Selection prefers a model that
-          populates `predicted_margin` over the merely most recent.
-      - name: model_version_key
-        description: The model VERSION, from dim_model_version.
-      - name: predicted_margin
-        description: Model's predicted margin in the pack's away-minus-home convention.
-      - name: predicted_margin_home_perspective
-        description: >
-          `predicted_margin` negated, so a positive number reads as "home favoured by".
-          Explicitly named because the source sign is preserved on the column above.
-      - name: predicted_home_win_probability
-        description: Model's probability that the home team wins.
-      - name: home_win_probability
-        description: Alias of `predicted_home_win_probability`, carried for page compatibility.
-      - name: predicted_home_points
-        description: Model's predicted home score; null for probability-only models.
-      - name: predicted_away_points
-        description: Model's predicted away score; null for probability-only models.
-      - name: confidence_bucket
-        description: The model's own confidence label for this prediction.
-      - name: home_cover_edge
-        description: >
-          Model's edge on the home side against the spread, in points. Derived once in
-          fct_prediction and only consumed here.
-      - name: home_win_probability_edge
-        description: >
-          Model's edge on the home moneyline, as a probability. Not comparable with
-          `home_cover_edge`, which is in points.
-      - name: is_out_of_sample_week
-        description: >
-          Whether the model is extrapolating for this week — no training data exists this
-          early in a season.
-      - name: is_default_actionable
-        description: >
-          The inverse of `is_out_of_sample_week`, precomputed so no page presents an
-          extrapolated early-season edge as actionable.
-      - name: training_week_floor
-        description: >
-          The model's own coverage floor, carried as DATA so the Empty state is not a
-          hardcoded "Week 5" string. CFBD does not ship current-season feature files until
-          week 5, because the models need several weeks of this year's results before they
-          can forecast this year's teams. Weeks 1-4 having no predictions is BY DESIGN and
-          recurs every season — which makes it EMPTY (the data does not exist yet, and here
-          is why), never Degraded (we have not built it).
-      - name: attribution
-        description: >
-          AC-G.41. Licence-required attribution travelling as data, so a page cannot draw the
-          model's numbers without it.
-      - name: as_of_ts
-        description: AC-G.35. Last load of the `game` domain, rendered instead of now().
-
-  # ---------------------------------------------------------------------------------------
-  - name: srv_matchup
-    description: >
-      Matchup — the widest view in the model, one row per game. Wide ON PURPOSE: this is
-      where a user decides whether to bet, so everything informing that decision sits on one
-      row — both teams' identity and records, the market, the model, the venue, and the
-      head-to-head series. A page that had to join would be a page doing business logic in
-      Streamlit.
-      NOT YET PRESENT, and absent rather than faked — weather (fct_game_weather unbuilt),
-      travel (dim_venue has no join key to fct_game, which carries a venue NAME and no usable
-      venue id), and ratings (fct_team_week_rating, primary on zero pages, so it waits). Each
-      is a column this view will gain, not a number it invents in the meantime.
-      The series columns are computed from the game spine, counted from the perspective of
-      the HOME team in the CURRENT game. For the all-time series per unordered team pair
-      independent of any one game, use fct_team_series instead.
-    columns:
-      - name: game_sk
-        description: Surrogate key from the game fact — the grain, one row per game.
-      - name: game_id
-        description: CFBD game id.
-      - name: season
-        description: Season the game belongs to.
-      - name: season_type
-        description: '`regular` or `postseason`.'
-      - name: week
-        description: Week within the season and season_type.
-      - name: week_sk
-        description: Surrogate key of the week, for joining to the week dimension.
-      - name: start_date
-        description: Scheduled kickoff, timezone-aware.
-      - name: start_date_et
-        description: Kickoff in US Eastern, stored without a timezone. Do not read as UTC.
-      - name: game_date
-        description: Calendar date of the game.
-      - name: kickoff_time_known
-        description: Whether a real kickoff time is known, as opposed to a placeholder.
-      - name: is_completed
-        description: Whether the game has finished. A cancelled game reads 0-0 with this false.
-      - name: is_conference_game
-        description: Whether both teams were in the same conference that season.
-      - name: is_neutral_site
-        description: Whether the game was at a neutral venue.
-      - name: venue
-        description: Venue name. A NAME, not an id — which is why travel distance cannot yet
-          be computed; dim_venue has no join key to this.
-      - name: venue_display
-        description: Alias of `venue`, carried so pages written against either name work.
-      - name: attendance
-        description: Reported attendance; null where not published.
-      - name: home_team_id
-        description: CFBD team id for the home side.
-      - name: home_team
-        description: Home team name from the game fact.
-      - name: home_abbreviation
-        description: Home team abbreviation.
-      - name: home_conference
-        description: Home team's conference for that season.
-      - name: home_classification
-        description: Home team's division for that season.
-      - name: home_color_on_light
-        description: Contrast-corrected home colour for a light background.
-      - name: home_color_on_dark
-        description: Contrast-corrected home colour for a dark background.
-      - name: home_logo_url
-        description: CFBD logo URL for the home team.
-      - name: home_points
-        description: Home team's final score; null until scored.
-      - name: home_wins
-        description: Home team's season win total.
-      - name: home_losses
-        description: Home team's season loss total.
-      - name: away_team_id
-        description: CFBD team id for the away side.
-      - name: away_team
-        description: Away team name from the game fact.
-      - name: away_abbreviation
-        description: Away team abbreviation.
-      - name: away_conference
-        description: Away team's conference for that season.
-      - name: away_classification
-        description: Away team's division for that season.
-      - name: away_color_on_light
-        description: Contrast-corrected away colour for a light background.
-      - name: away_color_on_dark
-        description: Contrast-corrected away colour for a dark background.
-      - name: away_logo_url
-        description: CFBD logo URL for the away team.
-      - name: away_points
-        description: Away team's final score; null until scored.
-      - name: away_wins
-        description: Away team's season win total.
-      - name: away_losses
-        description: Away team's season loss total.
-      - name: spread
-        description: Spread at the most recent snapshot, away-minus-home convention.
-      - name: spread_current
-        description: Alias of `spread`, carried so pages written against either name work.
-      - name: spread_open
-        description: Opening spread for the game from that provider.
-      - name: over_under
-        description: Over/under at the most recent snapshot.
-      - name: over_under_open
-        description: Opening over/under for the game from that provider.
-      - name: home_moneyline
-        description: American-odds moneyline for the home team at the latest snapshot.
-      - name: away_moneyline
-        description: American-odds moneyline for the away team at the latest snapshot.
-      - name: provider_key
-        description: Which sportsbook the market columns came from.
-      - name: line_snapshot_ts
-        description: When the market columns were observed.
-      - name: snapshot_ts
-        description: Alias of `line_snapshot_ts`, carried so pages written against either name work.
-      - name: market_implied_home_win_probability
-        description: De-vigged market probability for the home team.
-      - name: market_implied_away_win_probability
-        description: De-vigged market probability for the away team.
-      - name: overround
-        description: >
-          The bookmaker's margin in the raw prices — how far the implied probabilities summed
-          above 100% before de-vigging. Carried so a reader can see how much was removed.
-      - name: devig_method
-        description: Method used to remove the vigorish.
-      - name: model_name
-        description: Name of the model behind the prediction columns.
-      - name: model_family
-        description: Broader family that model belongs to.
-      - name: model_version_key
-        description: The model VERSION, from dim_model_version.
-      - name: predicted_margin
-        description: Model's predicted margin in the away-minus-home convention.
-      - name: predicted_margin_home_perspective
-        description: '`predicted_margin` negated, so positive reads as "home favoured by".'
-      - name: predicted_total_points
-        description: Model's predicted combined score.
-      - name: predicted_home_points
-        description: Model's predicted home score.
-      - name: predicted_away_points
-        description: Model's predicted away score.
-      - name: predicted_home_win_probability
-        description: Model's probability that the home team wins.
-      - name: home_win_probability
-        description: Alias of `predicted_home_win_probability`, carried for page compatibility.
-      - name: confidence_bucket
-        description: The model's own confidence label for this prediction.
-      - name: home_cover_edge
-        description: Model's edge on the home side against the spread, in points.
-      - name: home_win_probability_edge
-        description: Model's edge on the home moneyline, as a probability.
-      - name: is_out_of_sample_week
-        description: Whether the model is extrapolating for this week.
-      - name: training_week_floor
-        description: >
-          The model's coverage floor, carried as data so the Empty state is not a hardcoded
-          "Week 5" string. Weeks 1-4 having no predictions is by design and recurs annually.
-      - name: actual_margin
-        description: Realised margin, away minus home, following the storage convention.
-      - name: actual_margin_home_perspective
-        description: >
-          The same result read the other way round, so a page can put it beside
-          `predicted_margin_home_perspective` without flipping a sign. Computed here because
-          the app computing it would be the app owning a convention (G-3).
-      - name: series_games
-        description: >
-          Prior meetings between these two teams WITH A RECORDED RESULT, excluding this game.
-          Two games are flagged completed with no score, and counting them gave a
-          head-to-head of 0-0-0 over one meeting — a row that reconciles to nothing.
-      - name: series_home_team_wins
-        description: >
-          Prior meetings won by THIS GAME'S home team, whichever venue they were played at.
-      - name: series_away_team_wins
-        description: >
-          Prior meetings won by this game's away team. Counted directly, NOT derived as
-          `series_games - series_home_team_wins` — that form is only correct in a sport
-          without draws, and silently credited all 2,600 tied games to the away side,
-          overstating it in 40,045 of 102,985 rows.
-      - name: series_ties
-        description: >
-          Prior meetings that ended level. Its own outcome, not a rounding error: college
-          football had no overtime before 1996.
-      - name: series_first_season
-        description: Season of the earliest prior meeting with a result.
-      - name: series_last_season
-        description: Season of the most recent prior meeting with a result.
-      - name: attribution
-        description: AC-G.41. Licence-required attribution travelling as data.
-      - name: as_of_ts
-        description: AC-G.35. Last load of the `game` domain, rendered instead of now().
-
-  # ---------------------------------------------------------------------------------------
   - name: srv_player_stats
     description: >
       Players page, season stats. One row per player x season x category x stat type, long
@@ -2189,380 +1856,6 @@ models:
           cannot render these rates without it.
       - name: as_of_ts
         description: AC-G.35. Last load of the `prediction` domain, rendered instead of now().
-
-  # ---------------------------------------------------------------------------------------
-  - name: srv_game
-    description: >
-      THE game-grain serving view: one row per game. R-076.
-      Named for its GRAIN, not for a page. This replaces srv_schedule and srv_scoreboard,
-      which were one row per game over fct_game apiece — the same grain over the same fact,
-      split by which page read them. Naming views after pages is what produced two
-      implementations of one column, and one of them shipped broken: srv_scoreboard took team
-      display names off dim_team and rendered an em dash on 12,168 of 110,634 rows.
-      Merging them found the same shape a second time. `home_rank` also had two
-      implementations — one reading fct_game, one rebuilding the AP join in its own CTE. They
-      agreed exactly, which is precisely the state the team name was in before it drifted.
-      THE GRAIN RULE (Marc, 2026-09-02): "Can't add game.team grain to a table that is at game
-      grain." Anything finer lives in srv_game_team, or arrives here as a DERIVED summary —
-      the both-teams box totals below are the second kind.
-    columns:
-      - name: game_sk
-        tests: [unique, not_null]
-        description: >
-          Surrogate key from the game fact — the grain.
-      - name: game_id
-        description: >
-          CFBD game id.
-      - name: season
-        description: >
-          Season the game belongs to.
-      - name: week
-        description: >
-          Week within the season and season_type.
-      - name: season_type
-        description: >
-          `regular` or `postseason`.
-      - name: week_sk
-        description: >
-          Surrogate key of the week, for joining to the week dimension.
-      - name: game_date
-        description: >
-          Calendar date of the game.
-      - name: start_date
-        description: >
-          Scheduled kickoff, timezone-aware, as stored.
-      - name: start_date_et
-        description: >
-          AC-G.34. Kickoff converted to US Eastern and stored WITHOUT a timezone, applied
-          here and never in the app. Do not read this as UTC.
-      - name: kickoff_time_known
-        description: >
-          Whether a real kickoff time is known. FALSE means `start_date` carries a
-          placeholder, typically an unscheduled future game, so a page must not render an
-          hour for it.
-      - name: is_completed
-        description: >
-          Whether the game has finished. A cancelled game reads 0-0 with this false, so
-          "points are not null" is not a substitute for it.
-      - name: is_conference_game
-        description: >
-          Whether both teams were in the same conference that season.
-      - name: is_neutral_site
-        description: >
-          Whether the game was played at a neutral venue.
-      - name: venue
-        description: >
-          Venue name.
-      - name: venue_display
-        description: >
-          Venue name as rendered.
-      - name: network
-        description: >
-          Broadcast network; null where not published.
-      - name: network_abbreviation
-        description: >
-          Short form of `network`, from dim_broadcast_outlet. A column rather than a trim in
-          a view, so the site and the Excel workbook cannot disagree about what a channel is
-          called. Falls back to the full name for an outlet not yet mapped, which renders
-          long and is a visible prompt to add it.
-      - name: attendance
-        description: >
-          Reported attendance; null where not published.
-      - name: excitement_index
-        description: >
-          CFBD's excitement index for the game; null until it has been computed.
-      - name: is_upset
-        description: >
-          Whether the result counted as an upset by the upstream definition.
-      - name: is_fbs_game
-        description: >
-          Whether EITHER team was FBS — not both. A Division II visitor's trip to an FBS
-          stadium is an FBS game, and requiring both would drop 20 of the 25 games on the
-          opening Thursday. 934 of 3,831 games in 2025 qualify. Carried as a column rather
-          than a hardcoded WHERE so the site filters on it with a default that can be
-          widened.
-      - name: home_team_id
-        description: >
-          CFBD team id for the home side.
-      - name: home_team
-        description: >
-          Home team name FROM THE GAME FACT, populated on every row.
-      - name: home_team_slug
-        description: >
-          URL-safe home team identifier.
-      - name: home_team_display
-        description: >
-          Home team display name, falling back to the game fact's name.
-      - name: home_abbreviation
-        description: >
-          Home team abbreviation.
-      - name: home_conference
-        description: >
-          Home team's conference for that season.
-      - name: home_color_on_light
-        description: >
-          Contrast-corrected home colour for a light background.
-      - name: home_color_on_dark
-        description: >
-          Contrast-corrected home colour for a dark background.
-      - name: home_logo_url
-        description: >
-          CFBD logo URL for the home team.
-      - name: home_points
-        description: >
-          Home team's final score; null until the game is scored.
-      - name: home_rank
-        description: >
-          Home team's poll rank at kickoff; null if unranked.
-      - name: away_team_id
-        description: >
-          CFBD team id for the away side.
-      - name: away_team
-        description: >
-          Away team name from the game fact, populated on every row.
-      - name: away_team_slug
-        description: >
-          URL-safe away team identifier.
-      - name: away_team_display
-        description: >
-          Away team display name, falling back to the game fact's name.
-      - name: away_abbreviation
-        description: >
-          Away team abbreviation.
-      - name: away_conference
-        description: >
-          Away team's conference for that season.
-      - name: away_color_on_light
-        description: >
-          Contrast-corrected away colour for a light background.
-      - name: away_color_on_dark
-        description: >
-          Contrast-corrected away colour for a dark background.
-      - name: away_logo_url
-        description: >
-          CFBD logo URL for the away team.
-      - name: away_points
-        description: >
-          Away team's final score; null until the game is scored.
-      - name: away_rank
-        description: >
-          Away team's poll rank at kickoff; null if unranked.
-      - name: winner
-        description: >
-          Name of the winning team. Null when the game is not completed AND null on a tie —
-          the two cases are distinguished by `is_completed`, not by this column.
-      - name: final_margin
-        description: >
-          Absolute points margin. NULL, not zero, for a game with no result — so zero here
-          means exactly one thing: the two teams finished level. Previously
-          `abs(coalesce(home, 0) - coalesce(away, 0))`, which gave all 1,769 unplayed games
-          a margin of 0, indistinguishable from a tie.
-      - name: actual_margin
-        description: >
-          Signed margin, away minus home, following the project convention. Distinct from
-          `final_margin`, which is unsigned.
-      - name: total_points
-        description: >
-          Combined score. Computed in dbt rather than summed in the app, and NULL for a game
-          that has not been played rather than zero.
-      - name: home_wins
-        description: >
-          Home team's season win total, for the record shown on the card.
-      - name: home_losses
-        description: >
-          Home team's season loss total.
-      - name: away_wins
-        description: >
-          Away team's season win total.
-      - name: away_losses
-        description: >
-          Away team's season loss total.
-      - name: total_yards_both_teams
-        description: >
-          R-006. Game-grain total from the two team-grain box-score rows. NULL for most of
-          history — box scores are `recent` scope, 3,360 of 7,662 completed 2025 team-rows
-          carry total_yards and nothing before 2024 does. That renders as an em dash, which
-          is the honest state.
-      - name: rushing_yards_both_teams
-        description: >
-          Combined rushing yards for the game, same scope caveat as above.
-      - name: passing_yards_both_teams
-        description: >
-          Combined passing yards for the game, same scope caveat as above.
-      - name: turnovers_both_teams
-        description: >
-          Combined turnovers for the game, same scope caveat as above.
-      - name: teams_with_box_score
-        description: >
-          2 when both box scores landed, 1 when only one did, 0 when neither. A total built
-          from one team is not a game total, and this is what lets the page say so.
-      - name: spread_current
-        description: >
-          Spread from the most recent snapshot across all providers, in the away-minus-home
-          convention. One value per game — see srv_odds_board for the per-provider
-          breakdown.
-      - name: total_current
-        description: >
-          Over/under from that same most recent snapshot.
-      - name: spread_at_close
-        description: >
-          R-007. The last line recorded before kickoff where one exists. Read WITH
-          `spread_at_close_basis` — for older games this may be a line CFBD reported to us
-          long afterwards rather than one observed pre-kickoff.
-      - name: spread_at_close_provider
-        description: >
-          Which sportsbook that line came from.
-      - name: spread_at_close_basis
-        description: >
-          PROVENANCE, and the reason this column exists. `observed_before_kickoff` means
-          cfdb sampled the line while the market was live. `as_recorded_by_cfbd` means our
-          snapshot history begins 2026-08-15, so for an older game the only line we hold is
-          whatever CFBD returned when we fetched it — a real market number whose timestamp
-          is our fetch time, not a pre-kickoff observation. Calling both "close" would
-          conflate a line we watched with a line we were told about.
-      - name: favorite_covered
-        description: >
-          R-008. Whether the FAVOURITE covered — distinct from which side covered. Four
-          states, and pending is not push: `pending` (no result yet), `push` (landed exactly
-          on the number), `no_favorite` (a pick'em, spread exactly 0 — the not-applicable
-          third state of AC-G.32 and a real case in the data), `yes` or `no`. Null when no
-          spread is held. Follows the away-minus-home convention, so a NEGATIVE spread means
-          the home team was favoured.
-      - name: predicted_margin
-        description: >
-          Model's predicted margin in the away-minus-home convention. Model selection
-          prefers one that actually populates this column, because six of seven models are
-          probability models and ordering by recency alone loses the margin almost every
-          time.
-      - name: predicted_margin_home_perspective
-        description: >
-          `predicted_margin` negated, so positive reads as "home favoured by". Explicitly
-          named because the pack's own sign is preserved on the column above.
-      - name: home_win_probability
-        description: >
-          Model's probability that the home team wins.
-      - name: model_version_key
-        description: >
-          NAME NOTWITHSTANDING, this holds the model NAME — the same quirk as on
-          srv_odds_board, and unlike srv_edge_finder where the identically named column
-          carries the version. Documented rather than renamed, since a serving rename breaks
-          anything querying the warehouse directly.
-      - name: pregame_home_win_probability
-        description: >
-          CFBD's pregame win probability for the home side. READ pregame_wp_basis BEFORE
-          QUOTING IT — for most games this figure was fetched after the game finished and is
-          not a forecast we observed.
-      - name: pregame_wp_basis
-        description: >
-          PROVENANCE, and the reason the column exists. `observed_before_kickoff` means cfdb
-          sampled it while the game was still ahead; `as_recorded_by_cfbd` means the value
-          is real but its timestamp is our fetch time. Measured: only 131 of 1,891 games
-          have a genuine pre-kickoff observation, and all 131 are 2026 — snapshotting began
-          2026-08-15, so every 2024 and 2025 row is the second kind.
-      - name: pregame_wp_snapshot_ts
-        description: >
-          When the pregame probability was observed. Nine distinct timestamps exist across
-          the whole table, which is why this is a VALUE and not a movement series.
-      - name: is_indoors
-        description: >
-          Whether the venue is enclosed, and THE COLUMN THAT QUALIFIES EVERY OTHER WEATHER
-          FIELD. CFBD reports conditions at the venue's LOCATION rather than inside it, so a
-          domed game carries ordinary outdoor readings; rendering them without this states
-          something false.
-      - name: temperature_f
-        description: >
-          Temperature in Fahrenheit at kickoff. Null before 2024 — weather is not collected
-          for earlier seasons, which renders as an em dash rather than a zero.
-      - name: wind_speed_mph
-        description: >
-          Wind speed in miles per hour at kickoff.
-      - name: precipitation_in
-        description: >
-          Precipitation in inches at kickoff.
-      - name: weather_condition_code
-        description: >
-          CFBD's numeric condition code. 18 distinct values; the site maps them to an icon
-          set rather than inventing conditions the data does not carry.
-      - name: weather_condition
-        description: >
-          CFBD's text label for the conditions — Cloudy, Clear, Fair, Light Rain. Null where
-          the feed sends a blank, so a page renders an em dash rather than an empty cell
-          that looks broken.
-      - name: home_pregame_elo
-        description: >
-          The home team's Elo rating going INTO this game. A rating per team per game is a
-          rating per team per week, which is what makes a weekly rating series possible
-          without a single new API call — the project had recorded that as needing
-          /ratings/elo re-fetched by week. Populated on 67,306 of 110,879 rows; null before
-          Elo existed.
-      - name: home_postgame_elo
-        description: >
-          The home team's Elo rating after the game. The difference from the pregame figure
-          is what the result was worth.
-      - name: away_pregame_elo
-        description: >
-          The away team's Elo rating going into this game.
-      - name: away_postgame_elo
-        description: >
-          The away team's Elo rating after the game.
-      - name: home_q1
-        description: >
-          Home points in the first quarter. Null where CFBD sends no line score — 60% of
-          rows, all historical; the earliest game with quarters is 2001.
-      - name: home_q2
-        description: >
-          Home points in the second quarter.
-      - name: home_q3
-        description: >
-          Home points in the third quarter.
-      - name: home_q4
-        description: >
-          Home points in the fourth quarter.
-      - name: home_overtime_points
-        description: >
-          Home points scored after regulation, SUMMED across however many overtimes there
-          were. A column per period would either invent nine of them or truncate a long game
-          — periods reach thirteen in this data. Zero means the game ended in regulation;
-          null means no quarters are held for it.
-      - name: home_periods
-        description: >
-          How many scoring periods were recorded, so a page can render "2OT" honestly rather
-          than inferring it. 4 for a regulation game, 13 at the extreme.
-      - name: away_q1
-        description: >
-          Away points in the first quarter.
-      - name: away_q2
-        description: >
-          Away points in the second quarter.
-      - name: away_q3
-        description: >
-          Away points in the third quarter.
-      - name: away_q4
-        description: >
-          Away points in the fourth quarter.
-      - name: away_overtime_points
-        description: >
-          Away points scored after regulation, summed across all overtimes.
-      - name: away_periods
-        description: >
-          How many scoring periods were recorded for the away side.
-      - name: home_team_record_display
-        description: >
-          The home team's record LEADING INTO this game's week, as a W-L string — extending
-          to W-L-T only where the running tie count is non-zero, since ties existed before
-          1996 and a two-part string misstates those seasons. NOT the same as
-          `home_wins`/`home_losses` above, which are SEASON-FINAL: showing those beside a
-          Week 3 game from a finished season is the composition failure this column exists
-          to prevent. Named `home_team_record_display` and not `home_record_display` because
-          srv_standings already uses that name for "record in home games". Null where the
-          warehouse holds no completed game for the team, since 0-0 there would be a lie.
-      - name: away_team_record_display
-        description: >
-          The away team's record leading into this game's week. See home_team_record_display
-          for the semantics and the deliberate naming.
-      - name: as_of_ts
-        description: >
-          AC-G.35. Last load of the `game` domain, rendered instead of now().
 
   # ---------------------------------------------------------------------------------------
   - name: srv_game_team
@@ -3323,3 +2616,511 @@ models:
       - name: defense_third_down
         description: >
           Defensive predicted points added allowed per third-down play. Lower is better.
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_game
+    description: >
+      THE game-grain serving view: one row per game, 130 columns. R-076 and R-094.
+      Named for its GRAIN, not for a page. Four views were one row per game over fct_game —
+      srv_schedule, srv_scoreboard, srv_matchup and srv_today_edges — split by which page read
+      them. All four are retired into this one; there is no alias and no view over it, because
+      a second name is how they drifted in the first place.
+      EACH RENAME FOUND A COLUMN WITH TWO IMPLEMENTATIONS, by comparing rather than reading.
+      The team display name had already drifted and shipped an em dash on 12,168 rows.
+      `home_rank` agreed on all 11,982 populated rows and was one edit from the same fate.
+      `model_version_key` was worse than either: it DISAGREED on all 567 populated rows, one
+      view holding the model name and the other the version, and is fixed here.
+      THE GRAIN RULE (Marc, 2026-09-02): "Can't add game.team grain to a table that is at game
+      grain." Anything finer lives in srv_game_team; the both-teams box totals and the
+      head-to-head series here are DERIVED summaries, which the rule permits.
+    columns:
+      - name: game_sk
+        tests: [unique, not_null]
+        description: >
+          Surrogate key from the game fact — the grain.
+      - name: game_id
+        description: >
+          CFBD game id.
+      - name: season
+        description: >
+          Season the game belongs to.
+      - name: week
+        description: >
+          Week within the season and season_type.
+      - name: season_type
+        description: >
+          `regular` or `postseason`.
+      - name: week_sk
+        description: >
+          Surrogate key of the week, for joining to the week dimension.
+      - name: game_date
+        description: >
+          Calendar date of the game.
+      - name: start_date
+        description: >
+          Scheduled kickoff, timezone-aware, as stored.
+      - name: start_date_et
+        description: >
+          AC-G.34. Kickoff converted to US Eastern and stored WITHOUT a timezone, applied
+          here and never in the app. Do not read this as UTC.
+      - name: kickoff_time_known
+        description: >
+          Whether a real kickoff time is known. FALSE means `start_date` carries a
+          placeholder, typically an unscheduled future game, so a page must not render an
+          hour for it.
+      - name: is_completed
+        description: >
+          Whether the game has finished. A cancelled game reads 0-0 with this false, so
+          "points are not null" is not a substitute for it.
+      - name: is_conference_game
+        description: >
+          Whether both teams were in the same conference that season.
+      - name: is_neutral_site
+        description: >
+          Whether the game was played at a neutral venue.
+      - name: venue
+        description: >
+          Venue name.
+      - name: venue_display
+        description: >
+          Venue name as rendered.
+      - name: network
+        description: >
+          Broadcast network; null where not published.
+      - name: network_abbreviation
+        description: >
+          Short form of `network`, from dim_broadcast_outlet. A column rather than a trim in
+          a view, so the site and the Excel workbook cannot disagree about what a channel is
+          called. Falls back to the full name for an outlet not yet mapped, which renders
+          long and is a visible prompt to add it.
+      - name: attendance
+        description: >
+          Reported attendance; null where not published.
+      - name: excitement_index
+        description: >
+          CFBD's excitement index for the game; null until it has been computed.
+      - name: is_upset
+        description: >
+          Whether the result counted as an upset by the upstream definition.
+      - name: is_fbs_game
+        description: >
+          Whether EITHER team was FBS — not both. A Division II visitor's trip to an FBS
+          stadium is an FBS game, and requiring both would drop 20 of the 25 games on the
+          opening Thursday. 934 of 3,831 games in 2025 qualify. Carried as a column rather
+          than a hardcoded WHERE so the site filters on it with a default that can be
+          widened.
+      - name: home_team_id
+        description: >
+          CFBD team id for the home side.
+      - name: home_team
+        description: >
+          Home team name FROM THE GAME FACT, populated on every row.
+      - name: home_team_slug
+        description: >
+          URL-safe home team identifier.
+      - name: home_team_display
+        description: >
+          Home team display name, falling back to the game fact's name.
+      - name: home_abbreviation
+        description: >
+          Home team abbreviation.
+      - name: home_conference
+        description: >
+          Home team's conference for that season.
+      - name: home_color_on_light
+        description: >
+          Contrast-corrected home colour for a light background.
+      - name: home_color_on_dark
+        description: >
+          Contrast-corrected home colour for a dark background.
+      - name: home_logo_url
+        description: >
+          CFBD logo URL for the home team.
+      - name: home_points
+        description: >
+          Home team's final score; null until the game is scored.
+      - name: home_rank
+        description: >
+          Home team's poll rank at kickoff; null if unranked.
+      - name: away_team_id
+        description: >
+          CFBD team id for the away side.
+      - name: away_team
+        description: >
+          Away team name from the game fact, populated on every row.
+      - name: away_team_slug
+        description: >
+          URL-safe away team identifier.
+      - name: away_team_display
+        description: >
+          Away team display name, falling back to the game fact's name.
+      - name: away_abbreviation
+        description: >
+          Away team abbreviation.
+      - name: away_conference
+        description: >
+          Away team's conference for that season.
+      - name: away_color_on_light
+        description: >
+          Contrast-corrected away colour for a light background.
+      - name: away_color_on_dark
+        description: >
+          Contrast-corrected away colour for a dark background.
+      - name: away_logo_url
+        description: >
+          CFBD logo URL for the away team.
+      - name: away_points
+        description: >
+          Away team's final score; null until the game is scored.
+      - name: away_rank
+        description: >
+          Away team's poll rank at kickoff; null if unranked.
+      - name: winner
+        description: >
+          Name of the winning team. Null when the game is not completed AND null on a tie —
+          the two cases are distinguished by `is_completed`, not by this column.
+      - name: final_margin
+        description: >
+          Absolute points margin. NULL, not zero, for a game with no result — so zero here
+          means exactly one thing: the two teams finished level. Previously
+          `abs(coalesce(home, 0) - coalesce(away, 0))`, which gave all 1,769 unplayed games
+          a margin of 0, indistinguishable from a tie.
+      - name: actual_margin
+        description: >
+          Signed margin, away minus home, following the project convention. Distinct from
+          `final_margin`, which is unsigned.
+      - name: total_points
+        description: >
+          Combined score. Computed in dbt rather than summed in the app, and NULL for a game
+          that has not been played rather than zero.
+      - name: home_wins
+        description: >
+          Home team's season win total, for the record shown on the card.
+      - name: home_losses
+        description: >
+          Home team's season loss total.
+      - name: away_wins
+        description: >
+          Away team's season win total.
+      - name: away_losses
+        description: >
+          Away team's season loss total.
+      - name: total_yards_both_teams
+        description: >
+          R-006. Game-grain total from the two team-grain box-score rows. NULL for most of
+          history — box scores are `recent` scope, 3,360 of 7,662 completed 2025 team-rows
+          carry total_yards and nothing before 2024 does. That renders as an em dash, which
+          is the honest state.
+      - name: rushing_yards_both_teams
+        description: >
+          Combined rushing yards for the game, same scope caveat as above.
+      - name: passing_yards_both_teams
+        description: >
+          Combined passing yards for the game, same scope caveat as above.
+      - name: turnovers_both_teams
+        description: >
+          Combined turnovers for the game, same scope caveat as above.
+      - name: teams_with_box_score
+        description: >
+          2 when both box scores landed, 1 when only one did, 0 when neither. A total built
+          from one team is not a game total, and this is what lets the page say so.
+      - name: spread_current
+        description: >
+          Spread from the most recent snapshot across all providers, in the away-minus-home
+          convention. One value per game — see srv_odds_board for the per-provider
+          breakdown.
+      - name: total_current
+        description: >
+          Over/under from that same most recent snapshot.
+      - name: spread_at_close
+        description: >
+          R-007. The last line recorded before kickoff where one exists. Read WITH
+          `spread_at_close_basis` — for older games this may be a line CFBD reported to us
+          long afterwards rather than one observed pre-kickoff.
+      - name: spread_at_close_provider
+        description: >
+          Which sportsbook that line came from.
+      - name: spread_at_close_basis
+        description: >
+          PROVENANCE, and the reason this column exists. `observed_before_kickoff` means
+          cfdb sampled the line while the market was live. `as_recorded_by_cfbd` means our
+          snapshot history begins 2026-08-15, so for an older game the only line we hold is
+          whatever CFBD returned when we fetched it — a real market number whose timestamp
+          is our fetch time, not a pre-kickoff observation. Calling both "close" would
+          conflate a line we watched with a line we were told about.
+      - name: favorite_covered
+        description: >
+          R-008. Whether the FAVOURITE covered — distinct from which side covered. Four
+          states, and pending is not push: `pending` (no result yet), `push` (landed exactly
+          on the number), `no_favorite` (a pick'em, spread exactly 0 — the not-applicable
+          third state of AC-G.32 and a real case in the data), `yes` or `no`. Null when no
+          spread is held. Follows the away-minus-home convention, so a NEGATIVE spread means
+          the home team was favoured.
+      - name: predicted_margin
+        description: >
+          Model's predicted margin in the away-minus-home convention. Model selection
+          prefers one that actually populates this column, because six of seven models are
+          probability models and ordering by recency alone loses the margin almost every
+          time.
+      - name: predicted_margin_home_perspective
+        description: >
+          `predicted_margin` negated, so positive reads as "home favoured by". Explicitly
+          named because the pack's own sign is preserved on the column above.
+      - name: home_win_probability
+        description: >
+          Model's probability that the home team wins.
+      - name: predicted_home_win_probability
+        description: >
+          Model's probability that the home team wins. Duplicated as home_win_probability,
+          which is the name srv_schedule used; both are kept so pages written against either
+          continue to work.
+      - name: predicted_total_points
+        description: >
+          Model's predicted combined score.
+      - name: predicted_home_points
+        description: >
+          Model's predicted home score.
+      - name: predicted_away_points
+        description: >
+          Model's predicted away score.
+      - name: confidence_bucket
+        description: >
+          The model's own confidence label for this prediction.
+      - name: home_cover_edge
+        description: >
+          Model's edge on the home side against the spread, in points.
+      - name: home_win_probability_edge
+        description: >
+          Model's edge on the home moneyline, as a probability.
+      - name: is_out_of_sample_week
+        description: >
+          Whether the model is extrapolating for this week.
+      - name: is_default_actionable
+        description: >
+          The inverse of is_out_of_sample_week, precomputed so every consumer applies the
+          same rule and no page presents an extrapolated early-season edge as actionable.
+      - name: training_week_floor
+        description: >
+          The model's own coverage floor, carried as data so an Empty state is not a
+          hardcoded "Week 5" string. CFBD ships no current-season feature files until week
+          5, so weeks 1-4 having no predictions is by design and recurs annually.
+      - name: model_name
+        description: >
+          Name of the model behind the prediction columns. Its own column now: it used to be
+          what `model_version_key` contained, which is what the C2 diff caught.
+      - name: model_family
+        description: >
+          Broader family that model belongs to.
+      - name: model_version_key
+        description: >
+          The model VERSION, from dim_model_version — which is what the column's name has
+          always claimed. srv_game inherited the model NAME here from srv_schedule while
+          srv_matchup carried the version, and they disagreed on all 567 populated rows
+          (`random_forest_score` against `98d34949266b`). Part 1 documented the quirk rather
+          than renaming it because a serving rename is a breaking change; merging the views
+          IS that change, so it was fixed here.
+      - name: attribution
+        description: >
+          AC-G.41. Licence-required attribution travelling as data.
+      - name: spread
+        description: >
+          Spread at the most recent snapshot, away-minus-home convention.
+      - name: spread_open
+        description: >
+          Opening spread for the game from that provider.
+      - name: over_under
+        description: >
+          Over/under at the most recent snapshot.
+      - name: over_under_open
+        description: >
+          Opening over/under for the game from that provider.
+      - name: home_moneyline
+        description: >
+          American-odds moneyline for the home team at the latest snapshot.
+      - name: away_moneyline
+        description: >
+          American-odds moneyline for the away team at the latest snapshot.
+      - name: provider_key
+        description: >
+          Which sportsbook the market columns came from.
+      - name: line_snapshot_ts
+        description: >
+          When the market columns were observed.
+      - name: snapshot_ts
+        description: >
+          Alias of line_snapshot_ts, carried because srv_matchup exposed both and the rename
+          drops nothing.
+      - name: market_implied_home_win_probability
+        description: >
+          De-vigged market probability for the home team.
+      - name: market_implied_away_win_probability
+        description: >
+          De-vigged market probability for the away team.
+      - name: overround
+        description: >
+          The bookmaker's margin in the raw prices — how far the implied probabilities
+          summed above 100% before de-vigging. Carried so a reader can see how much was
+          removed.
+      - name: devig_method
+        description: >
+          Method used to remove the vigorish.
+      - name: home_classification
+        description: >
+          Home team's division for that season.
+      - name: away_classification
+        description: >
+          Away team's division for that season.
+      - name: actual_margin_home_perspective
+        description: >
+          The same result read the other way round, so a page can put it beside
+          `predicted_margin_home_perspective` without flipping a sign. Computed here because
+          the app computing it would be the app owning a convention (G-3).
+      - name: series_games
+        description: >
+          Prior meetings between these two teams WITH A RECORDED RESULT, excluding this
+          game. Two games are flagged completed with no score, and counting them gave a
+          head-to-head of 0-0-0 over one meeting — a row that reconciles to nothing.
+      - name: series_home_team_wins
+        description: >
+          Prior meetings won by THIS GAME'S home team, whichever venue they were played at.
+      - name: series_away_team_wins
+        description: >
+          Prior meetings won by this game's away team. Counted directly, NOT derived as
+          `series_games - series_home_team_wins` — that form is only correct in a sport
+          without draws, and silently credited all 2,600 tied games to the away side,
+          overstating it in 40,045 of 102,985 rows.
+      - name: series_ties
+        description: >
+          Prior meetings that ended level. Its own outcome, not a rounding error: college
+          football had no overtime before 1996.
+      - name: series_first_season
+        description: >
+          Season of the earliest prior meeting with a result.
+      - name: series_last_season
+        description: >
+          Season of the most recent prior meeting with a result.
+      - name: is_current_week
+        description: >
+          Whether this game is in the week currently in play — the rule srv_today_edges
+          filtered on, carried as a COLUMN so the Today page filters on a fact rather than
+          re-deriving it. "Current" is the current CFBD WEEK, not today's date: a slate
+          spans Thursday to Saturday and a date filter shows an empty page on Wednesday.
+          Anchored on kickoff time rather than `not is_completed`, because twelve historical
+          games are permanently flagged incomplete and anchoring on completion selected 2023
+          week 6.
+      - name: pregame_home_win_probability
+        description: >
+          CFBD's pregame win probability for the home side. READ pregame_wp_basis BEFORE
+          QUOTING IT — for most games this figure was fetched after the game finished and is
+          not a forecast we observed.
+      - name: pregame_wp_basis
+        description: >
+          PROVENANCE, and the reason the column exists. `observed_before_kickoff` means cfdb
+          sampled it while the game was still ahead; `as_recorded_by_cfbd` means the value
+          is real but its timestamp is our fetch time. Measured: only 131 of 1,891 games
+          have a genuine pre-kickoff observation, and all 131 are 2026 — snapshotting began
+          2026-08-15, so every 2024 and 2025 row is the second kind.
+      - name: pregame_wp_snapshot_ts
+        description: >
+          When the pregame probability was observed. Nine distinct timestamps exist across
+          the whole table, which is why this is a VALUE and not a movement series.
+      - name: is_indoors
+        description: >
+          Whether the venue is enclosed, and THE COLUMN THAT QUALIFIES EVERY OTHER WEATHER
+          FIELD. CFBD reports conditions at the venue's LOCATION rather than inside it, so a
+          domed game carries ordinary outdoor readings; rendering them without this states
+          something false.
+      - name: temperature_f
+        description: >
+          Temperature in Fahrenheit at kickoff. Null before 2024 — weather is not collected
+          for earlier seasons, which renders as an em dash rather than a zero.
+      - name: wind_speed_mph
+        description: >
+          Wind speed in miles per hour at kickoff.
+      - name: precipitation_in
+        description: >
+          Precipitation in inches at kickoff.
+      - name: weather_condition_code
+        description: >
+          CFBD's numeric condition code. 18 distinct values; the site maps them to an icon
+          set rather than inventing conditions the data does not carry.
+      - name: weather_condition
+        description: >
+          CFBD's text label for the conditions — Cloudy, Clear, Fair, Light Rain. Null where
+          the feed sends a blank, so a page renders an em dash rather than an empty cell
+          that looks broken.
+      - name: home_pregame_elo
+        description: >
+          The home team's Elo rating going INTO this game. A rating per team per game is a
+          rating per team per week, which is what makes a weekly rating series possible
+          without a single new API call — the project had recorded that as needing
+          /ratings/elo re-fetched by week. Populated on 67,306 of 110,879 rows; null before
+          Elo existed.
+      - name: home_postgame_elo
+        description: >
+          The home team's Elo rating after the game. The difference from the pregame figure
+          is what the result was worth.
+      - name: away_pregame_elo
+        description: >
+          The away team's Elo rating going into this game.
+      - name: away_postgame_elo
+        description: >
+          The away team's Elo rating after the game.
+      - name: home_q1
+        description: >
+          Home points in the first quarter. Null where CFBD sends no line score — 60% of
+          rows, all historical; the earliest game with quarters is 2001.
+      - name: home_q2
+        description: >
+          Home points in the second quarter.
+      - name: home_q3
+        description: >
+          Home points in the third quarter.
+      - name: home_q4
+        description: >
+          Home points in the fourth quarter.
+      - name: home_overtime_points
+        description: >
+          Home points scored after regulation, SUMMED across however many overtimes there
+          were. A column per period would either invent nine of them or truncate a long game
+          — periods reach thirteen in this data. Zero means the game ended in regulation;
+          null means no quarters are held for it.
+      - name: home_periods
+        description: >
+          How many scoring periods were recorded, so a page can render "2OT" honestly rather
+          than inferring it. 4 for a regulation game, 13 at the extreme.
+      - name: away_q1
+        description: >
+          Away points in the first quarter.
+      - name: away_q2
+        description: >
+          Away points in the second quarter.
+      - name: away_q3
+        description: >
+          Away points in the third quarter.
+      - name: away_q4
+        description: >
+          Away points in the fourth quarter.
+      - name: away_overtime_points
+        description: >
+          Away points scored after regulation, summed across all overtimes.
+      - name: away_periods
+        description: >
+          How many scoring periods were recorded for the away side.
+      - name: home_team_record_display
+        description: >
+          The home team's record LEADING INTO this game's week, as a W-L string — extending
+          to W-L-T only where the running tie count is non-zero, since ties existed before
+          1996 and a two-part string misstates those seasons. NOT the same as
+          `home_wins`/`home_losses` above, which are SEASON-FINAL: showing those beside a
+          Week 3 game from a finished season is the composition failure this column exists
+          to prevent. Named `home_team_record_display` and not `home_record_display` because
+          srv_standings already uses that name for "record in home games". Null where the
+          warehouse holds no completed game for the team, since 0-0 there would be a lie.
+      - name: away_team_record_display
+        description: >
+          The away team's record leading into this game's week. See home_team_record_display
+          for the semantics and the deliberate naming.
+      - name: as_of_ts
+        description: >
+          AC-G.35. Last load of the `game` domain, rendered instead of now().
