@@ -9,7 +9,7 @@
 -- THIS MODEL IS ALSO THE GAME-TO-VENUE BRIDGE, AND THAT IS ARGUABLY WORTH MORE THAN THE
 -- WEATHER.
 --
--- srv_matchup lists travel, rest and elevation as absent because "dim_venue has no join key
+-- srv_game lists travel, rest and elevation as absent because "dim_venue has no join key
 -- to fct_game, which carries a venue NAME and no usable venue id". /games/weather carries
 -- `venueId` on every row, and it joins to dim_venue for 6,847 of 6,847 — a 100% match. So
 -- the missing key was landed all along on an endpoint nobody had read.

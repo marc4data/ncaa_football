@@ -1,6 +1,6 @@
 -- Matchup page, Weather section: one row per game with conditions and venue geography.
 --
--- A SEPARATE VIEW RATHER THAN COLUMNS ON srv_matchup, deliberately. srv_matchup is already
+-- A SEPARATE VIEW RATHER THAN COLUMNS ON srv_game, deliberately. srv_game is already
 -- the widest object in the model at 77 columns and 110,879 rows, and weather exists for
 -- 6,847 of those games — 2024 onward only. Widening it would add twenty-odd columns that are
 -- null on 94% of rows and grow the largest serving table to carry them.

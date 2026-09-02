@@ -128,8 +128,6 @@ DEFAULT_SERVING = [
     "srv_rankings",
     "srv_rankings_compare",
     "srv_team_stats",
-    "srv_matchup",
-    "srv_today_edges",
     "srv_odds_board",
     "srv_edge_finder",
     "srv_model_performance",

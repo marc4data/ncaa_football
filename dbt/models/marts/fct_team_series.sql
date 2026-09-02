@@ -12,7 +12,7 @@
 -- where /teams/matchup takes and returns names; and it covers every pair that has ever
 -- played, where the endpoint answers one pair per call.
 --
--- WHY IT EXISTS WHEN srv_matchup ALREADY COMPUTES A SERIES. That one is per GAME — the
+-- WHY IT EXISTS WHEN srv_game ALREADY COMPUTES A SERIES. That one is per GAME — the
 -- series as it stood before each meeting, which is what a matchup page wants. Asking "what
 -- is the all-time record between these two" of that view means knowing to pick their most
 -- recent game. This is the same fact at the grain a question about a rivalry actually has,
@@ -23,7 +23,7 @@
 -- makes `team_a` the lower id — arbitrary but stable, and stable is what a join needs.
 -- Wins are then counted for each side explicitly rather than one side being derived.
 --
--- A TIE IS ITS OWN OUTCOME. srv_matchup's first version derived the away record as
+-- A TIE IS ITS OWN OUTCOME. srv_game's first version derived the away record as
 -- games - home_wins, which is only correct in a sport without draws; college football had no
 -- overtime before 1996 and 2,600 tied games are on record, so that overstated one side in
 -- 40,045 of 102,985 rows. Both sides and the ties are counted here, and the three sum to
@@ -42,7 +42,7 @@
 --
 -- The consequence is deliberate: `games` is games with a known result, and
 -- games + unscored_games is meetings. The reconciliation test checks the second against
--- srv_matchup, which counts every completed game.
+-- srv_game, which counts every completed game.
 
 with played as (
 

@@ -65,7 +65,7 @@ SCHEDULE = "0 */2 * * *"
 # and the views built on it. Deliberately NOT +tag:production — that is 53 models, and a
 # two-request fetch has no business triggering a full transform every two hours.
 SCORES_SELECTOR = (
-    "--select +srv_game +srv_game +srv_matchup +srv_team_game_log +srv_today_edges"
+    "--select +srv_game +srv_game +srv_game +srv_team_game_log +srv_game"
     # WEATHER IS FETCHED BY THE LINES DAG AND BUILT HERE, exactly as lines themselves are:
     # that DAG lands raw and this one is where dbt runs and the site is published.
     # Refreshing the raw every four hours while rebuilding the model weekly would leave the

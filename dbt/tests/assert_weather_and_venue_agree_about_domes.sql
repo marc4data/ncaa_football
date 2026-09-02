@@ -5,7 +5,7 @@
 -- zero disagreements.
 --
 -- This is a join test wearing a data-quality hat. fct_game_weather joins weather to dim_venue
--- on venue_id, and that join is the bridge srv_matchup needs for travel and elevation. If it
+-- on venue_id, and that join is the bridge srv_game needs for travel and elevation. If it
 -- ever drifts — a reused venue id, a renumbering, a cast changing behaviour between engines —
 -- the first visible symptom is a domed stadium claiming to be open air, and every geography
 -- column on the row would be wrong in the same silent way.

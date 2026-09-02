@@ -12,7 +12,7 @@
 --   srv_team_game_log   12,552 of 221,268     5.7%
 --   srv_standings        7,482 of  30,475    24.6%
 --   srv_rankings           662 of  49,798     1.3%
---   srv_today_edges            9 of     211     4.3%   <- the landing page
+--   srv_game            9 of     211     4.3%   <- the landing page
 --
 -- Four of those five were invisible until the first was generalised. This test is the
 -- generalisation made permanent: it covers every view that carries an identity pair, so
@@ -28,7 +28,7 @@ with offenders as (
         ('srv_game', ['home', 'away']),
         ('srv_game',   ['home', 'away']),
         ('srv_odds_board', ['home', 'away']),
-        ('srv_today_edges', ['home', 'away']),
+        ('srv_game', ['home', 'away']),
     ] %}
     {% set single = [
         'srv_rankings', 'srv_standings', 'srv_team_game_log',
