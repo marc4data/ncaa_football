@@ -36,40 +36,13 @@
 -- because it appears on a schedule, with no result in the warehouse — gets NULL. Marc's rule:
 -- 0-0 there is a lie. `has_completed_games` says which case a null is.
 
-with season_type_ordinal as (
+-- THE SPINE IS SHARED, NOT REBUILT. It was inline here until fct_team_rating_week needed
+-- exactly the same thing; it now lives in dim_team_week and both models build on it. A second
+-- spine that drifts from the first is this project's signature defect, and prompt 030 spent
+-- itself removing two instances of it — adding a third would have been an odd way to finish.
+with spine as (
 
-    select * from (values
-        ('regular', 1), ('postseason', 2), ('spring_regular', 3), ('spring_postseason', 4)
-    ) as t(season_type, ordinal)
-
-),
-
-teams_in_season as (
-
-    -- EVERY team on the spine, not just FBS. A Division II visitor appears on the schedule
-    -- and its row needs a record, or the column renders inconsistently down the page.
-    select distinct season, home_team_id as team_id from {{ ref('fct_game') }}
-    where home_team_id is not null
-    union
-    select distinct season, away_team_id from {{ ref('fct_game') }}
-    where away_team_id is not null
-
-),
-
-week_slots as (
-
-    select distinct season, season_type, week from {{ ref('fct_game') }}
-
-),
-
-spine as (
-
-    select
-        t.season, w.season_type, w.week, t.team_id,
-        o.ordinal as season_type_ordinal
-    from teams_in_season t
-    join week_slots w on w.season = t.season
-    join season_type_ordinal o on o.season_type = w.season_type
+    select * from {{ ref('dim_team_week') }}
 
 ),
 
