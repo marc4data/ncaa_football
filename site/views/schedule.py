@@ -349,13 +349,48 @@ def _linescore_geometry(df: pd.DataFrame) -> dict:
     return {"ot": any_ot, "label_ch": min(label, 8)}
 
 
+def _ls_width(geo: dict) -> str:
+    """THE TABLE'S OWN WIDTH, WHICH `table-layout:fixed` ALONE DOES NOT GIVE YOU.
+
+    Measured, not assumed: with the colgroup in place and `table-layout:fixed` computed, every
+    numeric column came out identical across all sixty cards on a page and the LABEL column
+    came out anywhere from 31px to 46px. A fixed layout distributes a KNOWN table width by the
+    colgroup; with `width:auto` the browser still runs a content pass to decide what that
+    width is, and the only column whose content varies is the label.
+
+    Stating the sum removes the content pass. The terms are the colgroup's, in order.
+    """
+    numeric = 5 if geo["ot"] else 4                      # quarters, plus OT when the page has any
+    return (f"{_ls_label_em(geo) + numeric * 2.6 + 3 + 1.2:.2f}em")
+
+
+def _ls_label_em(geo: dict) -> float:
+    """The label column, in em — NOT in `ch`, WHICH IS THE WRONG UNIT FOR THIS TEXT.
+
+    `ch` is the advance width of "0". These labels are UPPERCASE text in a PROPORTIONAL face,
+    where a capital runs about 0.62em against roughly 0.5em for the digit, and the cell also
+    carries .35rem of padding on the left and .5rem on the right that the column width has to
+    cover because the cells are border-box.
+
+    Measured on the rendered page with the `ch` version: 30px of column against 45px of
+    content for "NMSU", so every abbreviation on every card was quietly ellipsis-clipped —
+    invisible in a screenshot, which is exactly why it was found by measuring instead.
+
+    0.65 rather than 0.62 leaves a character's worth of headroom for a wide capital.
+    """
+    return geo["label_ch"] * 0.65 + 1.15
+
+
 def _ls_colgroup(geo: dict) -> str:
     """The shared geometry as markup. `.cfdb-linescore` is `table-layout:fixed`, so these
-    widths are honoured rather than treated as hints."""
-    cols = [f"<col style='width:{geo['label_ch'] + 1}ch'>"]
+    widths are honoured rather than treated as hints — given `_ls_width` above."""
+    cols = [f"<col style='width:{_ls_label_em(geo):.2f}em'>"]
     cols += ["<col style='width:2.6em'>"] * (5 if geo["ot"] else 4)
-    cols.append("<col style='width:3em'>")      # the total, R-109
+    # THE MARKER PRECEDES THE TOTAL, as it precedes the score in the dense view. Trailing it
+    # put a right-pointing glyph on the far side of the number it describes, so the two views
+    # marked a winner in two directions on one page.
     cols.append("<col style='width:1.2em'>")    # the winner marker, R-113
+    cols.append("<col style='width:3em'>")      # the total, R-109
     return "<colgroup>" + "".join(cols) + "</colgroup>"
 
 
@@ -363,8 +398,8 @@ def _ls_header(geo: dict) -> str:
     quarters = "".join(f"<th>{q}</th>" for q in (1, 2, 3, 4))
     overtime = "<th>OT</th>" if geo["ot"] else ""
     return (f"<tr><th></th>{quarters}{overtime}"
-            f"<th title='Total'>{TOTAL_HEADER}</th>"
-            f"<th class='cfdb-ls-mark'></th></tr>")
+            f"<th class='cfdb-ls-mark'></th>"
+            f"<th title='Total'>{TOTAL_HEADER}</th></tr>")
 
 
 def _ls_row(row, side: str, geo: dict) -> str:
@@ -388,9 +423,9 @@ def _ls_row(row, side: str, geo: dict) -> str:
         else:
             cells.append("<td></td>")
     points = row.get(f"{side}_points")
+    cells.append(f"<td class='cfdb-ls-mark'>{_winner_marker(row, side)}</td>")
     cells.append(f"<td class='cfdb-ls-total'>"
                  f"{'' if _missing(points) else int(points)}</td>")
-    cells.append(f"<td class='cfdb-ls-mark'>{_winner_marker(row, side)}</td>")
     return (f"<tr><td class='cfdb-ls-team'>{_team_abbrev(row, side)}</td>"
             f"{''.join(cells)}</tr>")
 
@@ -415,7 +450,8 @@ def _score_block(row, geo: dict) -> str:
                 if not _missing(season) and int(season) < 2001
                 else "No quarter scores recorded for this game.")
         why = f"<div class='cfdb-ls-why'>{text}</div>"
-    return (f"<table class='cfdb-linescore'>{_ls_colgroup(geo)}{_ls_header(geo)}"
+    return (f"<table class='cfdb-linescore' style='width:{_ls_width(geo)}'>"
+            f"{_ls_colgroup(geo)}{_ls_header(geo)}"
             f"{_ls_row(row, 'away', geo)}{_ls_row(row, 'home', geo)}</table>{why}")
 
 
@@ -442,7 +478,15 @@ def _market_block(row) -> str:
                       f"{fmt.signed(move, 'move')}</td>")
         lines.append(f"<tr><td class='cfdb-market-label'>{label}</td><td>{shown}</td>"
                      f"{moved or '<td></td>'}</tr>")
-    return f"<table class='cfdb-market'>{''.join(lines)}</table>" if lines else ""
+    if not lines:
+        return ""
+    # Fixed columns, so a card whose line has not moved lines up with the one beside it.
+    # 4.6em is "Spread" at this font plus its cell padding — measured after 3.6em clipped it
+    # to "Sprea / d" the moment the table stopped sizing itself to its contents.
+    colgroup = ("<colgroup><col style='width:4.6em'><col style='width:3.4em'>"
+                "<col style='width:4em'></colgroup>")
+    return (f"<table class='cfdb-market' style='width:12em'>"
+            f"{colgroup}{''.join(lines)}</table>")
 
 
 def _team_row(row, side: str, scope) -> str:

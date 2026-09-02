@@ -188,14 +188,19 @@ TABLE_CSS = """
 /* R-109: the score is the last column of the box score, not a separate block. */
 .cfdb-ls-total { font-weight:700; }
 /* R-113: the marker's own column, so it is reserved on the losing row too. */
-.cfdb-ls-mark { width:1.2em; padding:0 !important; text-align:left !important; }
+.cfdb-ls-mark { width:1.2em; padding:0 !important; text-align:right !important; }
 /* R-092: why the quarters are missing, not merely that they are. */
 .cfdb-ls-why { font-size:.72rem; opacity:.6; margin-top:.15rem; text-align:right; }
 /* R-106: the pre-kick occupant of the same box. */
-.cfdb-market { border-collapse:collapse; font-size:.78rem; margin-left:auto; }
+/* R-015 APPLIES HERE TOO. Without a fixed layout the market block sizes itself to its own
+   contents, so a card whose line has not moved renders a narrower box than the one beside it
+   and the two O/U numbers sit at different x. Constant widths rather than a computed geometry
+   because, unlike the box score, nothing about this block varies with the page. */
+.cfdb-market { border-collapse:collapse; font-size:.78rem; margin-left:auto;
+               table-layout:fixed; }
 .cfdb-market td { padding:.05rem .35rem; text-align:right;
                   font-variant-numeric:tabular-nums; }
-.cfdb-market-label { text-align:left !important; opacity:.6; }
+.cfdb-market-label { text-align:left !important; opacity:.6; white-space:nowrap; }
 .cfdb-market-move { opacity:.6; font-size:.72rem; }
 /* R-102: the legend the R-026 icon-only exception leans on. */
 .cfdb-legend { font-size:.78rem; opacity:.65; margin:.2rem 0 .5rem; }

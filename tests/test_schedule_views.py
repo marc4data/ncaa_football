@@ -438,3 +438,69 @@ def test_a_regulation_game_leaves_its_overtime_cell_blank_rather_than_zero():
     regulation = schedule._card(df.iloc[1], _Scope(), geo)
     assert "cfdb-ls-ot" not in regulation
     assert "<td></td>" in regulation
+
+
+def test_the_winner_marker_precedes_the_total_in_both_views():
+    """One page must not mark a winner in two directions.
+
+    The marker is a RIGHT-pointing glyph, so it has to sit before the number it describes.
+    The first version of the box score put its column last, which pointed it away from the
+    total while the dense view pointed into the score — on the same page, in the same week.
+    """
+    card = _card()
+    linescore = card[card.index("<table class='cfdb-linescore'"):]
+    assert linescore.index("cfdb-ls-mark") < linescore.index("cfdb-ls-total")
+    dense = schedule._score_cell(_row(), "home")
+    assert dense.index(schedule.WINNER_GLYPH) < dense.index("31")
+
+
+def test_the_market_block_is_the_same_width_whether_or_not_the_line_moved():
+    """R-015's principle in the pre-kick state. Without a fixed layout the block sizes itself
+    to its contents, so a card with no move renders a narrower box than the one beside it and
+    the two O/U numbers sit at different x."""
+    nan = float("nan")
+    base = dict(is_completed=False, winner=None, home_points=nan, away_points=nan,
+                home_periods=nan, away_periods=nan)
+    moved = _card(**base, total_move_from_open=1.5, spread_move_from_open=-0.5)
+    still = _card(**base, total_move_from_open=nan, spread_move_from_open=nan)
+    for card in (moved, still):
+        assert card.count("<colgroup>") == 1
+        # "<col " with the space — "<colgroup>" itself matches a bare "<col".
+        assert card[card.index("<colgroup>"):card.index("</colgroup>")].count("<col ") == 3
+    # And the still card reserves the move cell rather than dropping the column.
+    assert still.count("<td>") >= 2
+
+
+def test_the_box_score_states_its_own_width_rather_than_letting_content_decide():
+    """`table-layout:fixed` distributes a KNOWN width by the colgroup; with `width:auto` the
+    browser still runs a content pass to decide what that width is.
+
+    Measured on the rendered page before this: every numeric column was identical across all
+    sixty cards and the label column ranged from 31px to 46px, because the label is the only
+    cell whose content varies. Asserting the colgroup alone passes against that.
+    """
+    geo_regulation = {"ot": False, "label_ch": 4}
+    geo_overtime = {"ot": True, "label_ch": 4}
+    label = schedule._ls_label_em(geo_regulation)
+    assert float(schedule._ls_width(geo_regulation).rstrip("em")) == \
+        pytest.approx(label + 4 * 2.6 + 3 + 1.2)
+    assert float(schedule._ls_width(geo_overtime).rstrip("em")) == \
+        pytest.approx(label + 5 * 2.6 + 3 + 1.2), "the OT column is in the sum"
+    card = _card()
+    table_tag = card[card.index("<table class='cfdb-linescore'"):]
+    assert "style='width:" in table_tag[:120]
+
+
+def test_the_box_score_label_is_sized_in_em_not_in_the_width_of_a_zero():
+    """`ch` is the advance width of "0"; these labels are UPPERCASE text in a PROPORTIONAL
+    face, and the cell also carries padding the column has to cover.
+
+    Measured with the `ch` version: 30px of column against 45px of content for "NMSU", so
+    every abbreviation on every card was ellipsis-clipped — invisible in a screenshot, which
+    is why it took a measurement to find. A four-character label needs more than four times
+    the width of a digit.
+    """
+    card = _card()
+    colgroup = card[card.index("<colgroup>"):card.index("</colgroup>")]
+    assert "ch" not in colgroup, "ch under-sizes uppercase proportional text"
+    assert schedule._ls_label_em({"ot": False, "label_ch": 4}) > 3.5

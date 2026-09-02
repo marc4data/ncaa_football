@@ -8,9 +8,22 @@
 # in the page-title colour would read as body text and look inert — the accent is the one that
 # says "this is a control", and it is already the colour of everything else clickable here.
 #
-# Deliberately ONLY primaryColor. Streamlit's background and text colours are left unset so
-# they continue to follow the viewer's light/dark preference, which is what theme.py's own
-# prefers-color-scheme blocks are written against. Pinning them here would override that and
-# break dark mode for everyone whose OS asks for it.
-[theme]
+# DECLARED PER MODE, AND THAT IS NOT COSMETIC.
+#
+# The first version of this file set a bare `[theme] primaryColor` and a comment claiming the
+# background and text colours were "left unset so they continue to follow the viewer's
+# light/dark preference". That is not what Streamlit does. Declaring ANY key under a bare
+# `[theme]` makes it resolve a concrete theme, and an unset `base` resolves to light — so the
+# app stopped following the OS preference entirely and served the light palette to everyone.
+#
+# Measured, not reasoned: with the bare `[theme]` version the page background under
+# `prefers-color-scheme: dark` was rgb(255,255,255); with this file it is rgb(14,17,23).
+#
+# `[theme.light]` and `[theme.dark]` override only within each mode and leave the choice of
+# mode to the viewer, which is what theme.py's own prefers-color-scheme blocks are written
+# against.
+[theme.light]
+primaryColor = "#1f6feb"
+
+[theme.dark]
 primaryColor = "#1f6feb"

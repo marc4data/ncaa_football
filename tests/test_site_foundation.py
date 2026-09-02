@@ -577,6 +577,29 @@ def test_grouped_tables_share_one_column_layout():
     assert layout == table_lib.column_layout(frame, columns)
 
 
+def test_a_narrow_column_is_allowed_the_padding_its_cells_will_carry():
+    """THE MEASURE WAS CHARACTERS ONLY, AND EVERY CELL ALSO CARRIES .5rem EACH SIDE.
+
+    That padding is CONSTANT per column while these weights are PROPORTIONAL, so on a wide
+    column it vanishes into the rounding and on a six-character one it is a fifth of the box.
+    Schedule showed both failure modes in one screenshot: the header "SPREAD" broke to
+    "SPREA / D", and the score column rendered 30 as "3 / 0" — with `table-layout:fixed`
+    there is no reflow to rescue it.
+
+    Derivation, so the number below is not a threshold picked to pass:
+      characters only   floor 5 against 30  ->  5 / 35  = 14.3%
+      with the allowance                          8 / 41  = 19.5%
+    Removing the allowance drops it back under 16 and fails this.
+    """
+    import pandas as pd
+    from lib import table as table_lib
+    from lib.table import Col
+    frame = pd.DataFrame([{"wide": "a" * 30, "narrow": "7"}])
+    layout = table_lib.column_layout(frame, [Col("wide", "Wide"), Col("narrow", "")])
+    assert float(layout[1].rstrip("%")) > 16.0
+    assert sum(float(w.rstrip("%")) for w in layout) == pytest.approx(100.0, abs=0.05)
+
+
 def test_the_monogram_never_repeats_the_team_name():
     """F2-07. Initials beside the full name read as the name twice, on three teams across
     two passes. The box stays for layout; its contents do not."""
@@ -803,3 +826,60 @@ def test_every_parameter_a_page_reads_is_a_known_parameter():
     assert not unregistered, (
         "these resolve to None silently and any feature built on them is inert: "
         f"{sorted(set(unregistered))}")
+
+
+def test_a_logo_is_measured_as_width_rather_than_stripped_to_nothing():
+    """Stripping tags is right for a chip, whose text IS its width, and wrong for an image,
+    whose text is nothing and whose box is 20px.
+
+    Schedule's Away column was short by exactly a logo, so "New Mexico State" pushed its
+    3-2 record onto a second line while the column beside it had room to spare.
+    """
+    import pandas as pd
+    from lib import table as table_lib
+    from lib.table import Col
+    frame = pd.DataFrame([{"a": "Team", "b": "Team"}])
+    plain = Col("a", "A")
+    logoed = Col("b", "B", render=lambda r: "<img src='x.png' alt=''>Team")
+    layout = table_lib.column_layout(frame, [plain, logoed])
+    assert float(layout[1].rstrip("%")) > float(layout[0].rstrip("%")), (
+        "identical text, but one cell also carries an image")
+
+
+def test_a_monospace_number_is_measured_wider_than_the_same_count_of_prose():
+    """`.cfdb-num` is ui-monospace; the header and the body text are not. Measuring "-10.2"
+    as five characters of prose is what broke PRED across two lines."""
+    import pandas as pd
+    from lib import table as table_lib
+    from lib.table import Col
+    frame = pd.DataFrame([{"a": "-10.2", "b": -10.2}])
+    layout = table_lib.column_layout(
+        frame, [Col("a", "A"), Col("b", "B", "signed", dp=1)])
+    assert float(layout[1].rstrip("%")) > float(layout[0].rstrip("%"))
+
+
+def test_the_header_is_measured_as_the_uppercase_letter_spaced_thing_it_renders_as():
+    """`.cfdb-table th` uppercases and adds .02em of letter-spacing, so a six-character label
+    is wider than six characters of body text. SPREAD broke to "SPREA / D"."""
+    import pandas as pd
+    from lib import table as table_lib
+    from lib.table import Col
+    frame = pd.DataFrame([{"a": "x", "b": "x"}])
+    layout = table_lib.column_layout(frame, [Col("a", "A"), Col("b", "Spread")])
+    assert float(layout[1].rstrip("%")) > float(layout[0].rstrip("%"))
+
+
+def test_the_streamlit_theme_does_not_pin_the_app_to_the_light_palette():
+    """R-099, CORRECTED AFTER LOOKING.
+
+    Declaring any key under a bare `[theme]` makes Streamlit resolve a concrete theme, and an
+    unset `base` resolves to LIGHT — so setting only primaryColor stopped the app following
+    the viewer's preference and served the light palette to everyone. Measured: the page
+    background under prefers-color-scheme:dark was rgb(255,255,255) with the bare section and
+    rgb(14,17,23) with the per-mode ones.
+    """
+    config = (Path(__file__).resolve().parents[1] / ".streamlit" / "config.toml").read_text()
+    body = "\n".join(ln for ln in config.splitlines() if not ln.lstrip().startswith("#"))
+    assert "[theme.light]" in body and "[theme.dark]" in body
+    assert "\n[theme]" not in "\n" + body, (
+        "a bare [theme] section resolves base=light and disables dark mode")
