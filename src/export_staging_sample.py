@@ -53,7 +53,25 @@ from decimal import Decimal
 from pathlib import Path
 
 ROW_CAP = 20_000
-SCHEMA = "staging"
+DEFAULT_SCHEMA = "staging"
+
+# WHICH SCHEMAS THIS WILL EXPORT, AND WHY IT IS A LIST RATHER THAN A FREE STRING.
+#
+# The schema name is interpolated into SQL — it cannot be a bound parameter, because a
+# parameter cannot be an identifier. An allowlist is the cheap correct answer: it is not
+# possible to reach `raw` (JSON payloads nobody wants in a workbook) or anything outside
+# these two by argument, and there is nothing to escape.
+EXPORTABLE_SCHEMAS = {
+    "staging": "one model per CFBD endpoint, JSON unpacked and failed responses filtered "
+               "out — the layer BELOW the site's serving views",
+    "serving": "what the site actually reads: pre-joined, one relation per page section, "
+               "with the display rules already applied",
+}
+
+# The game spine, ALWAYS read from staging regardless of what is being exported. Resolving
+# which games belong to a conference is a question about the schedule, not about the layer
+# somebody asked for — and `serving.stg_games` does not exist.
+SPINE_TABLE = "staging.stg_games"
 
 # Candidate columns, in preference order, for expressing the narrowing. Checked against
 # information_schema per table rather than assumed — the shape of a staging model follows
@@ -98,12 +116,12 @@ def _clean(value):
     return value
 
 
-def columns_of(cursor, table: str) -> list:
+def columns_of(cursor, table: str, schema: str) -> list:
     cursor.execute("""
         select column_name from information_schema.columns
         where table_schema = %s and table_name = %s
         order by ordinal_position
-    """, (SCHEMA, table))
+    """, (schema, table))
     return [row[0] for row in cursor.fetchall()]
 
 
@@ -158,7 +176,7 @@ def resolve_conference(cursor, conference: str, seasons) -> dict:
         # The game set for THIS season, against THIS season's membership. Resolved once and
         # reused, so every game-grain sheet is narrowed to exactly the same games.
         cursor.execute(f"""
-            select game_id, home_team_id, away_team_id from {SCHEMA}.stg_games
+            select game_id, home_team_id, away_team_id from {SPINE_TABLE}
             where season = %(season)s
               and (home_team_id = any(%(ids)s) or away_team_id = any(%(ids)s))
         """, {"season": season, "ids": season_ids})
@@ -193,7 +211,7 @@ def resolve_conference(cursor, conference: str, seasons) -> dict:
             "game_ids": game_ids}
 
 
-def profile_fields(cursor, tables) -> list:
+def profile_fields(cursor, tables, schema: str) -> list:
     """One row per (table, column): type, null share and cardinality.
 
     PROFILED OVER THE WHOLE TABLE, NOT OVER THE EXPORTED SAMPLE. The data tabs are narrowed
@@ -215,7 +233,7 @@ def profile_fields(cursor, tables) -> list:
         cursor.execute("""
             select column_name, data_type from information_schema.columns
             where table_schema = %s and table_name = %s order by ordinal_position
-        """, (SCHEMA, table))
+        """, (schema, table))
         columns = cursor.fetchall()
         if not columns:
             continue
@@ -227,7 +245,7 @@ def profile_fields(cursor, tables) -> list:
             # not, and there is none in this schema — if one ever appears this is where it
             # will fail, loudly, rather than silently reporting nothing.
             parts.append(f'count(distinct "{name}")')
-        cursor.execute(f'select {", ".join(parts)} from {SCHEMA}."{table}"')
+        cursor.execute(f'select {", ".join(parts)} from {schema}."{table}"')
         row = cursor.fetchone()
         total = row[0]
 
@@ -243,14 +261,15 @@ def profile_fields(cursor, tables) -> list:
     return profile
 
 
-def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
+def build_query(cursor, table: str, row_count: int, members: dict,
+                schema: str = DEFAULT_SCHEMA) -> tuple:
     """Return (sql, params, note) for one table.
 
     The note is what the Index sheet reports. Every sheet gets one, because "20,000 rows of
     199,083" and "every Big 12 game of 2025" are very different things to be looking at and
     the tab itself cannot tell you which it is.
     """
-    cols = set(columns_of(cursor, table))
+    cols = set(columns_of(cursor, table, schema))
     order = [c for c in ORDER_COLUMNS if c in cols]
     order_sql = f" order by {', '.join(order)} asc" if order else ""
     conference = members["conference"]
@@ -262,7 +281,7 @@ def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
     members_only = members["member_ids"]
 
     if row_count <= ROW_CAP:
-        return (f"select * from {SCHEMA}.{table}{order_sql} limit {ROW_CAP}", {},
+        return (f"select * from {schema}.{table}{order_sql} limit {ROW_CAP}", {},
                 f"Whole table ({row_count:,} rows), under the {ROW_CAP:,} cap.")
 
     where, params, applied = [], {}, []
@@ -314,16 +333,17 @@ def build_query(cursor, table: str, row_count: int, members: dict) -> tuple:
                        f"rows are included")
 
     if not where:
-        return (f"select * from {SCHEMA}.{table}{order_sql} limit {ROW_CAP}", {},
+        return (f"select * from {schema}.{table}{order_sql} limit {ROW_CAP}", {},
                 f"OVER CAP at {row_count:,} rows and NOT NARROWABLE — no season, team or "
                 f"game column to filter on. Showing the first {ROW_CAP:,} rows instead.")
 
-    sql = f"select * from {SCHEMA}.{table} where {' and '.join(where)}{order_sql} limit {ROW_CAP}"
+    sql = f"select * from {schema}.{table} where {' and '.join(where)}{order_sql} limit {ROW_CAP}"
     return sql, params, (f"{row_count:,} rows in full, narrowed to " + "; ".join(applied)
                          + (f"; ordered by {', '.join(order)}" if order else ""))
 
 
-def export(out_path: Path, conference: str, seasons) -> dict:
+def export(out_path: Path, conference: str, seasons,
+           schema: str = DEFAULT_SCHEMA) -> dict:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -335,7 +355,7 @@ def export(out_path: Path, conference: str, seasons) -> dict:
     cursor.execute("""
         select table_name from information_schema.tables
         where table_schema = %s order by table_name
-    """, (SCHEMA,))
+    """, (schema,))
     tables = [row[0] for row in cursor.fetchall()]
 
     members = resolve_conference(cursor, conference, seasons)
@@ -360,9 +380,9 @@ def export(out_path: Path, conference: str, seasons) -> dict:
     index_rows = []
 
     for table in tables:
-        cursor.execute(f"select count(*) from {SCHEMA}.{table}")
+        cursor.execute(f"select count(*) from {schema}.{table}")
         total = cursor.fetchone()[0]
-        sql, params, note = build_query(cursor, table, total, members)
+        sql, params, note = build_query(cursor, table, total, members, schema)
         cursor.execute(sql, params)
         headers = [d[0] for d in cursor.description]
         rows = cursor.fetchall()
@@ -403,8 +423,9 @@ def export(out_path: Path, conference: str, seasons) -> dict:
     # then Index pushes it to second. Requested position, and it reads correctly — what the
     # workbook is, then what is in it, then the data.
     print("\nProfiling fields (whole tables, not the exported sample)...")
-    _write_fields(book, profile_fields(cursor, tables), header_font, header_fill)
-    _write_index(book, index_rows, members, header_font, header_fill)
+    _write_fields(book, profile_fields(cursor, tables, schema), header_font,
+                  header_fill, schema)
+    _write_index(book, index_rows, members, header_font, header_fill, schema)
     connection.close()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     book.save(out_path)
@@ -413,7 +434,8 @@ def export(out_path: Path, conference: str, seasons) -> dict:
             "path": str(out_path)}
 
 
-def _write_fields(book, profile, header_font, header_fill) -> None:
+def _write_fields(book, profile, header_font, header_fill,
+                  schema: str = DEFAULT_SCHEMA) -> None:
     """Every field in every staging table, with how empty and how varied it is.
 
     The workbook's own data dictionary. A tab per table answers "what does this hold"; this
@@ -428,7 +450,7 @@ def _write_fields(book, profile, header_font, header_fill) -> None:
     from openpyxl.utils import get_column_letter
 
     tab = book.create_sheet("Fields", 0)
-    tab.cell(1, 1, "cfdb — staging field inventory").font = header_font
+    tab.cell(1, 1, f"cfdb — {schema} field inventory").font = header_font
     tab.cell(1, 1).fill = header_fill
     tab.cell(2, 1, f"{len(profile):,} fields across "
                    f"{len({row[0] for row in profile})} tables. Null % and cardinality are "
@@ -459,7 +481,7 @@ def _write_fields(book, profile, header_font, header_fill) -> None:
         tab.column_dimensions[get_column_letter(index)].width = width
 
 
-def _write_index(book, index_rows, members, header_font, header_fill) -> None:
+def _write_index(book, index_rows, members, header_font, header_fill, schema) -> None:
     """What each tab is, and why it holds what it holds.
 
     Without this the workbook cannot answer its own most obvious question: is this tab the
@@ -468,7 +490,7 @@ def _write_index(book, index_rows, members, header_font, header_fill) -> None:
     from openpyxl.utils import get_column_letter
 
     tab = book.create_sheet("Index", 0)
-    tab.cell(1, 1, "cfdb — staging layer sample").font = header_font
+    tab.cell(1, 1, f"cfdb — {schema} layer sample").font = header_font
     tab.cell(1, 1).fill = header_fill
     tab.cell(2, 1, f"Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
     season_label = ", ".join(str(s) for s in members["seasons"])
@@ -487,9 +509,10 @@ def _write_index(book, index_rows, members, header_font, header_fill) -> None:
                    "realignment moves teams: the Big 12 had 14 members in 2023 and 16 from "
                    "2024, so a team that joined later must not contribute its earlier "
                    "games.")
-    tab.cell(4, 1, "Staging is the layer BELOW the site's serving views: one model per CFBD "
-                   "endpoint, JSON unpacked and failed responses filtered out. Shapes follow "
-                   "the endpoint, which is why not every table can express the same filter.")
+    # The layer note comes from EXPORTABLE_SCHEMAS rather than being written twice, so a
+    # serving workbook cannot describe itself as staging.
+    tab.cell(4, 1, f"{schema.capitalize()}: {EXPORTABLE_SCHEMAS[schema]}. Shapes follow the "
+                   f"source, which is why not every table can express the same filter.")
 
     for index, label in enumerate(("Table", "Rows in full", "Rows exported", "Note"), start=1):
         cell = tab.cell(6, index, label)
@@ -506,8 +529,13 @@ def _write_index(book, index_rows, members, header_font, header_fill) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sample every staging table into one workbook.")
-    parser.add_argument("--out", type=Path,
-                        default=Path("data/exports/staging_sample.xlsx"))
+    parser.add_argument("--schema", default=DEFAULT_SCHEMA, choices=sorted(EXPORTABLE_SCHEMAS),
+                        help="which warehouse layer to export. `staging` is one model per "
+                             "endpoint; `serving` is what the site reads.")
+    # None so the default can follow --schema rather than being fixed to staging. A serving
+    # export landing in a file called staging_sample.xlsx is the kind of small wrongness
+    # nobody notices until they open the wrong workbook a week later.
+    parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--conference", default="Big 12",
                         help="exact dim_team.conference value, e.g. 'Big 12', 'SEC'")
     parser.add_argument("--season", type=int, nargs="+", default=[2025],
@@ -515,12 +543,13 @@ def main() -> int:
                         help="one or more seasons, e.g. --season 2025 2026. Membership is "
                              "resolved per season and unioned, never merged first.")
     args = parser.parse_args()
+    out_path = args.out or Path(f"data/exports/{args.schema}_sample.xlsx")
 
     season_label = ", ".join(str(s) for s in sorted(set(args.season)))
-    print(f"Sampling {SCHEMA}: <= {ROW_CAP:,} rows per table, larger tables narrowed to "
+    print(f"Sampling {args.schema}: <= {ROW_CAP:,} rows per table, larger tables narrowed to "
           f"games involving a {args.conference} team in {season_label}, "
           f"opponents included\n")
-    summary = export(args.out, args.conference, args.season)
+    summary = export(out_path, args.conference, args.season, args.schema)
     print(f"\n{summary['tables']} sheet(s), {summary['rows']:,} rows -> {summary['path']}")
     return 0
 

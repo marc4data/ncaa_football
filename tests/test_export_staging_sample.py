@@ -9,6 +9,8 @@ These exercise build_query against fake column sets rather than a database. The 
 staging model follows its endpoint, so the branch a table takes is decided entirely by which
 columns exist — which is exactly what can be tested without Postgres.
 """
+from pathlib import Path
+
 import pytest
 
 from src import export_staging_sample as ex
@@ -264,7 +266,7 @@ def test_the_profile_reports_null_share_and_cardinality_per_field():
         {"stg_x": [("team_id", "integer"), ("note", "text")]},
         # count(*), then count / count(distinct) per column, in ordinal order.
         {"stg_x": (200, 200, 40, 150, 7)})
-    profile = ex.profile_fields(cursor, ["stg_x"])
+    profile = ex.profile_fields(cursor, ["stg_x"], "staging")
     assert profile == [
         ("stg_x", "team_id", "integer", 0.0, 40),
         # 50 of 200 null -> 25.0%, and 7 distinct among the 150 that are populated.
@@ -278,7 +280,7 @@ def test_one_query_per_table_not_one_per_column():
     cursor = ProfileCursor(
         {"stg_x": [("a", "text"), ("b", "text"), ("c", "text")]},
         {"stg_x": (10, 10, 3, 10, 4, 10, 5)})
-    ex.profile_fields(cursor, ["stg_x"])
+    ex.profile_fields(cursor, ["stg_x"], "staging")
     aggregate_statements = [s for s in cursor.statements if "information_schema" not in s]
     assert len(aggregate_statements) == 1
 
@@ -289,7 +291,7 @@ def test_identifiers_are_quoted():
     cursor = ProfileCursor(
         {"stg_x": [("select", "text")]},
         {"stg_x": (5, 5, 2)})
-    ex.profile_fields(cursor, ["stg_x"])
+    ex.profile_fields(cursor, ["stg_x"], "staging")
     aggregate = next(s for s in cursor.statements if "information_schema" not in s)
     assert 'count("select")' in aggregate
     assert 'count(distinct "select")' in aggregate
@@ -301,11 +303,54 @@ def test_an_empty_table_has_no_null_share_rather_than_zero_percent():
     cursor = ProfileCursor(
         {"stg_empty": [("a", "text")]},
         {"stg_empty": (0, 0, 0)})
-    profile = ex.profile_fields(cursor, ["stg_empty"])
+    profile = ex.profile_fields(cursor, ["stg_empty"], "staging")
     assert profile == [("stg_empty", "a", "text", None, 0)]
 
 
 def test_a_table_with_no_columns_is_skipped_rather_than_queried():
     cursor = ProfileCursor({"stg_none": []}, {})
-    assert ex.profile_fields(cursor, ["stg_none"]) == []
+    assert ex.profile_fields(cursor, ["stg_none"], "staging") == []
     assert all("information_schema" in s for s in cursor.statements)
+
+
+# --- the schema parameter ---------------------------------------------------------------
+
+def test_the_query_targets_the_schema_it_was_asked_for():
+    """The narrowing logic is schema-agnostic — it reads columns, not table names — so the
+    same rules apply to serving. Only the qualified name changes."""
+    sql, _, _ = ex.build_query(FakeCursor(["game_id"]), "srv_game", 999_999, MEMBERS,
+                               schema="serving")
+    assert "from serving.srv_game" in sql
+    assert "staging." not in sql
+
+
+def test_the_schema_defaults_to_staging():
+    """The existing invocation must keep working unchanged."""
+    sql, _, _ = _query(["game_id"], 999_999)
+    assert "from staging.stg_x" in sql
+    assert ex.DEFAULT_SCHEMA == "staging"
+
+
+def test_the_game_spine_is_pinned_to_staging_whatever_is_being_exported():
+    """Resolving which games belong to a conference is a question about the SCHEDULE, not
+    about the layer somebody asked for — and `serving.stg_games` does not exist, so a naive
+    substitution would fail on the first serving export."""
+    assert ex.SPINE_TABLE == "staging.stg_games"
+    source = Path(ex.__file__).read_text()
+    assert "{SPINE_TABLE}" in source
+    assert "{schema}.stg_games" not in source
+
+
+def test_only_the_allowlisted_schemas_are_reachable():
+    """The schema name is interpolated into SQL because a bound parameter cannot be an
+    identifier. An allowlist is the correct cheap answer: `raw` holds JSON payloads nobody
+    wants in a workbook, and there is nothing to escape."""
+    assert set(ex.EXPORTABLE_SCHEMAS) == {"staging", "serving"}
+    assert "raw" not in ex.EXPORTABLE_SCHEMAS
+
+
+def test_every_exportable_schema_describes_itself():
+    """The Index sheet's layer note is read from this map rather than written twice, so a
+    serving workbook cannot describe itself as staging."""
+    for name, description in ex.EXPORTABLE_SCHEMAS.items():
+        assert description and len(description) > 30, name
