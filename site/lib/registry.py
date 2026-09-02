@@ -74,7 +74,11 @@ PAGES = [
          in_nav=False,
          # Roster is BUILT — dim_athlete exists and srv_team_roster sits on it, so the
          # section renders and links each player through to the Players page.
-         partial_sections=["Week-over-week trends (weekly rating history)"]),
+         # Trends: the DATA is built (fct_team_rating_week, R-083) and the CHART is not.
+         # The section stays listed, because listing it is how a reader learns the tab is
+         # not there — but the wording no longer claims the ratings are missing, which
+         # would now be false and would stop someone asking for the chart.
+         partial_sections=["Week-over-week trends (ratings built, chart not yet)"]),
     # UNBLOCKED. The note this replaces said the page was "the only blocked page whose raw
     # data is not already on disk" — which stopped being true when the staging breadth work
     # landed stg_roster, stg_player_season_stat, stg_game_player_stat, stg_play and
