@@ -20,9 +20,20 @@ ENUM_PARAMS = {
     # of the URL like every other choice (AC-G.18) — a link to a leaderboard that arrives
     # sorted the other way is a link to a different claim.
     "order": {"desc", "asc"},
+    # R-043. Which Schedule rendering is showing. THE REASON THE TAB IS A TAB: a tab is
+    # URL-addressable and a toggle is not, and that is only true if the parameter is known
+    # here. It was not, at first — unknown parameters are ignored silently (AC-G.11), so
+    # ?view=stacked resolved to None, the radio fell back to its first option, and both
+    # tabs rendered the dense table. The feature was inert and looked fine.
+    "view": {"dense", "stacked"},
 }
 SLUG_PARAMS = {"team", "opponent", "conference", "poll", "provider", "model",
                "tab", "stat", "table",
+               # The Players page: which athlete is selected, and the search term that found
+               # them. Both were read without being registered, which meant link_here()
+               # dropped them — so sorting or changing any filter on that page silently
+               # deselected the player you were looking at.
+               "player", "q",
                # Which column a table is sorted by. In the URL like every other choice, so
                # a sorted table can be linked to — AC-2.8 asks for sortable headers and
                # AC-G.18 decides where that state lives.
