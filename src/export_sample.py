@@ -1,6 +1,12 @@
-"""Export a sample of every staging table to one Excel workbook, a tab per table.
+"""Export a sample of every table in one warehouse layer to an Excel workbook, a tab per table.
 
-Rule, as asked: up to 20,000 rows per table. Any table with more than that is narrowed to
+NAMED FOR WHAT IT DOES, NOT FOR ONE OF ITS ARGUMENTS. This was export_staging_sample until
+--schema existed, at which point the name described one of two things it could do — the same
+"named after a use rather than its shape" mistake that had four game-grain serving views
+called srv_schedule, srv_scoreboard, srv_matchup and srv_today_edges. Renamed with no shim
+left behind, for the reason alias views are forbidden: a second name is how two things drift.
+
+Rule: up to 20,000 rows per table. Any table with more than that is narrowed to
 activity tied to games involving a Big 12 team, ordered by season and week ascending.
 
 ONE OR MORE SEASONS, AND MEMBERSHIP IS RESOLVED SEPARATELY FOR EACH. `--season 2025 2026`
@@ -41,10 +47,10 @@ A filtered sheet that comes back EMPTY is written anyway, with its headers and a
 empty tab with no explanation is indistinguishable from a broken export.
 
 Usage:
-  python -m src.export_staging_sample
-  python -m src.export_staging_sample --conference "SEC" --season 2024
-  python -m src.export_staging_sample --conference "Big 12" --season 2025 2026
-  python -m src.export_staging_sample --out /tmp/sample.xlsx --conference "Big Ten"
+  python -m src.export_sample
+  python -m src.export_sample --conference "SEC" --season 2024
+  python -m src.export_sample --conference "Big 12" --season 2025 2026
+  python -m src.export_sample --out /tmp/sample.xlsx --conference "Big Ten"
 """
 import argparse
 import sys
@@ -492,7 +498,11 @@ def _write_index(book, index_rows, members, header_font, header_fill, schema) ->
     tab = book.create_sheet("Index", 0)
     tab.cell(1, 1, f"cfdb — {schema} layer sample").font = header_font
     tab.cell(1, 1).fill = header_fill
-    tab.cell(2, 1, f"Generated {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC")
+    # BOTH ZONES, deliberately. The default filename is stamped in local time so a person can
+    # find the file they made this afternoon; this line is the provenance record and has
+    # always been UTC. Showing one without the other makes the pair look inconsistent.
+    tab.cell(2, 1, f"Generated {datetime.now():%Y-%m-%d %H:%M} local "
+                   f"({datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC)")
     season_label = ", ".join(str(s) for s in members["seasons"])
     opponents = len(members["team_ids"]) - len(members["member_ids"])
     tab.cell(3, 1, f"Rule: up to {ROW_CAP:,} rows per table. Anything larger is narrowed to "
@@ -532,10 +542,17 @@ def main() -> int:
     parser.add_argument("--schema", default=DEFAULT_SCHEMA, choices=sorted(EXPORTABLE_SCHEMAS),
                         help="which warehouse layer to export. `staging` is one model per "
                              "endpoint; `serving` is what the site reads.")
-    # None so the default can follow --schema rather than being fixed to staging. A serving
-    # export landing in a file called staging_sample.xlsx is the kind of small wrongness
-    # nobody notices until they open the wrong workbook a week later.
-    parser.add_argument("--out", type=Path, default=None)
+    # DEFAULT IS TIMESTAMPED, so two runs do not silently overwrite each other. The old
+    # default was a fixed staging_sample.xlsx: exporting twice left one file and no way to
+    # tell which run produced it. Pass --out to name it yourself.
+    #
+    # LOCAL TIME, not UTC, because the timestamp is there to help a person find the file they
+    # made this afternoon. The Index sheet stamps BOTH so the two always reconcile — a
+    # filename saying 1800 beside a workbook saying 1700 UTC is a puzzle nobody needs.
+    parser.add_argument("--out", type=Path, default=None,
+                        help="output path. Defaults to "
+                             "data/exports/<schema>_sample_<yyyymmdd>_<hhmm>.xlsx, "
+                             "timestamped in local time.")
     parser.add_argument("--conference", default="Big 12",
                         help="exact dim_team.conference value, e.g. 'Big 12', 'SEC'")
     parser.add_argument("--season", type=int, nargs="+", default=[2025],
@@ -543,7 +560,8 @@ def main() -> int:
                         help="one or more seasons, e.g. --season 2025 2026. Membership is "
                              "resolved per season and unioned, never merged first.")
     args = parser.parse_args()
-    out_path = args.out or Path(f"data/exports/{args.schema}_sample.xlsx")
+    out_path = args.out or Path(
+        f"data/exports/{args.schema}_sample_{datetime.now():%Y%m%d_%H%M}.xlsx")
 
     season_label = ", ".join(str(s) for s in sorted(set(args.season)))
     print(f"Sampling {args.schema}: <= {ROW_CAP:,} rows per table, larger tables narrowed to "
