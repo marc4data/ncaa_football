@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from src import export_staging_sample as ex
+from src import export_sample as ex
 
 
 class FakeCursor:
@@ -354,3 +354,48 @@ def test_every_exportable_schema_describes_itself():
     serving workbook cannot describe itself as staging."""
     for name, description in ex.EXPORTABLE_SCHEMAS.items():
         assert description and len(description) > 30, name
+
+
+# --- the default output path -------------------------------------------------------------
+
+def test_the_default_filename_carries_the_schema_and_a_timestamp():
+    """Two runs must not silently overwrite each other.
+
+    The old default was a fixed `staging_sample.xlsx`, so exporting twice left one file and
+    no way to tell which run made it. The name now carries both the layer and the minute.
+    """
+    import re
+    source = Path(ex.__file__).read_text()
+    match = re.search(r'f"data/exports/\{args\.schema\}_sample_\{([^}]+)\}\.xlsx"', source)
+    assert match, "the default output name must interpolate both the schema and a timestamp"
+    assert "%Y%m%d_%H%M" in match.group(1), "sortable to the minute, so files list in order"
+
+
+def test_the_default_is_local_time_and_the_workbook_reconciles_it():
+    """The filename stamp is for a person finding the file they made this afternoon, so it is
+    local. The Index line is provenance and has always been UTC. Showing one without the
+    other makes the pair look inconsistent, so the Index carries both."""
+    source = Path(ex.__file__).read_text()
+    assert 'datetime.now():%Y%m%d_%H%M' in source, "filename uses local time"
+    assert "local" in source and "UTC)" in source, "the Index shows both zones"
+
+
+def test_nothing_still_refers_to_the_old_module_name():
+    """Renamed with NO shim, for the reason alias views are forbidden in this project: a
+    second name is how two things drift. So there must be no second name."""
+    import re
+    root = Path(ex.__file__).resolve().parents[1]
+    # Match the IMPORT and INVOCATION forms, not the bare word. The module's own docstring
+    # explains what it was renamed from, and this file names it in a search string — the
+    # first version of this test flagged both. That is the fifth time a source-reading test
+    # in this project has matched its own prose; test_dag_structure._is_tagged carries the
+    # earlier ones, and the lesson keeps being the same: assert on the code, not the words.
+    usage = re.compile(r"(?:src\.|import\s+)export_staging_sample")
+    stale = []
+    for pattern in ("src/*.py", "tests/*.py", "site/**/*.py", "dags/*.py", "ci/*.py"):
+        for path in root.glob(pattern):
+            if path.name == Path(__file__).name:
+                continue
+            if usage.search(path.read_text()):
+                stale.append(str(path.relative_to(root)))
+    assert not stale, f"still importing or invoking the old module name: {stale}"
