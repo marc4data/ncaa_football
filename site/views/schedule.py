@@ -76,12 +76,30 @@ def _rows(season: int, week, season_type: str, conference,
 
 # --- shared cell renderers ------------------------------------------------------------
 
+def _text(value) -> str:
+    """A cell value as a string, or "".
+
+    `value or ""` IS NOT THIS, and the difference cost the stacked view fifteen rows. pandas
+    returns NaN for a null in an object column, NaN is TRUTHY, so `nan or ""` evaluates to
+    nan — which then fails a str.join with "expected str instance, float found". The view
+    rendered the first fifteen games and died on the sixteenth, where the network was null.
+
+    It failed inside states.section, which caught it and rendered an Error state, so there
+    was no exception to see and no test to fail. It was found by counting cards against rows.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value)
+
+
 def _team_name(row, side: str) -> str:
     """Display name, abbreviated past the threshold. R-085."""
-    name = row.get(f"{side}_team_display") or "—"
-    if len(str(name)) > TEAM_NAME_MAX:
-        return row.get(f"{side}_abbreviation") or str(name)[:TEAM_NAME_MAX]
-    return str(name)
+    name = _text(row.get(f"{side}_team_display")) or "—"
+    if len(name) > TEAM_NAME_MAX:
+        # An abbreviation can be null for a team absent from /teams, so fall back to a
+        # truncation rather than to NaN.
+        return _text(row.get(f"{side}_abbreviation")) or name[:TEAM_NAME_MAX]
+    return name
 
 
 def _team_with_record(row, side: str) -> str:
@@ -233,9 +251,9 @@ def _stacked(df: pd.DataFrame, scope) -> None:
                 f"</table>") if away_ls else ""
             detail = " · ".join(x for x in [
                 _weather_cell(r),
-                (r.get("network_abbreviation") or ""),
+                _text(r.get("network_abbreviation")),
                 ("◇ neutral site" if r.get("is_neutral_site") else ""),
-                (r.get("venue_display") or ""),
+                _text(r.get("venue_display")),
             ] if x)
             st.markdown(
                 f"<div class='cfdb-gamecard'>"
