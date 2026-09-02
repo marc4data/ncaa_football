@@ -117,6 +117,27 @@ TABLE_CSS = """
 .cfdb-team { margin-left:.4rem; }
 .cfdb-rank { font-size:.72rem; font-weight:700; opacity:.7; margin-left:.3rem; }
 .cfdb-daygroup { font-weight:600; margin:1.1rem 0 .3rem; font-size:.95rem; }
+/* R-088: the record sits beside the team name, smaller and regular weight — not its own
+   column, which would cost a column's width for two characters. */
+.cfdb-team-record { font-size:.75rem; font-weight:400; opacity:.65; margin-left:.4rem; }
+/* R-027: weather is a glyph plus a temperature, or a dome glyph alone. */
+.cfdb-wx { white-space:nowrap; font-size:.85rem; }
+/* R-043: the stacked view. Away over home on the left, detail to the right. */
+.cfdb-gamecard { display:flex; gap:1.2rem; align-items:flex-start;
+                 padding:.55rem .7rem; border:1px solid rgba(0,0,0,.10);
+                 border-radius:6px; margin:.35rem 0; }
+.cfdb-gamecard-teams { flex:1 1 auto; min-width:0; }
+.cfdb-gamecard-row { display:flex; justify-content:space-between; align-items:center;
+                     gap:.6rem; padding:.12rem 0; }
+.cfdb-gamecard-pts { font-variant-numeric:tabular-nums; font-weight:700; }
+.cfdb-gamecard-detail { flex:0 0 auto; text-align:right; }
+.cfdb-gamecard-meta { font-size:.78rem; opacity:.7; margin-top:.25rem; }
+.cfdb-linescore { border-collapse:collapse; font-size:.78rem; }
+.cfdb-linescore th, .cfdb-linescore td { padding:.05rem .35rem; text-align:right;
+                                         font-variant-numeric:tabular-nums; }
+.cfdb-linescore th { opacity:.6; font-weight:600; }
+.cfdb-ls-team { text-align:left; opacity:.75; padding-right:.5rem !important; }
+.cfdb-ls-ot { font-weight:700; }
 @media (prefers-color-scheme: dark) {
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
