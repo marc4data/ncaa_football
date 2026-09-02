@@ -50,8 +50,8 @@ OVERVIEW, GAMES, BETTING, DELIVERABLE, REFERENCE, BACK = (
 
 PAGES = [
     Page("today", "Today", OVERVIEW, "srv_today_edges", True, True, True),
-    Page("schedule", "Schedule", GAMES, "srv_schedule", True, True, True),
-    Page("scores", "Scores", GAMES, "srv_scoreboard", True, True, True),
+    Page("schedule", "Schedule", GAMES, "srv_game", True, True, True),
+    Page("scores", "Scores", GAMES, "srv_game", True, True, True),
     Page("rankings", "Rankings", GAMES, "srv_rankings", True, True, True),
     Page("standings", "Standings", GAMES, "srv_standings", True, True, True),
     # Scope is BUILT. fct_team_season_stat derives stat_scope and stat_base_name from

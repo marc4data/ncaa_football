@@ -30,7 +30,7 @@ def body(page) -> None:
         "raw-data download: CFBD's terms prohibit redistributing their data as data, and a "
         "workbook travels further than a page does.")
 
-    with states.section("srv_schedule"):
+    with states.section("srv_game"):
         planned, missing = _preview(scope)
 
     if not planned:

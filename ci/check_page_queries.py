@@ -2,7 +2,7 @@
 
 `test_built_pages_pass_the_query_contract` proves each query is legally SHAPED — one
 serving relation, no join, an explicit limit. It cannot prove the columns exist, and that
-gap shipped a broken page: Scores asked srv_scoreboard for eight columns it did not have
+gap shipped a broken page: Scores asked srv_game for eight columns it did not have
 (start_date_et, both team slugs, both display names, both poll ranks, venue_display) and
 had been raising on every single load since it was written.
 

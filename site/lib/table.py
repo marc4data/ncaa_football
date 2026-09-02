@@ -254,7 +254,7 @@ def details_col(link_builder, label: str = "") -> "Col":
 
 
 def dataset_caption(label: str, table_name: str) -> None:
-    """AC-G.7, amended: front of house says "Dataset: Schedule", not `srv_schedule`.
+    """AC-G.7, amended: front of house says "Dataset: Schedule", not `srv_game`.
 
     The literal object name is right for a BUILDER — System Overview and Degraded states
     keep it, because there the exact identifier is the point. On a page whose reader wants

@@ -1043,7 +1043,7 @@ models:
       - name: model_version_key
         description: >
           The model VERSION, from dim_model_version. Note this differs from the identically
-          named column on srv_odds_board and srv_schedule, which carry the model NAME.
+          named column on srv_odds_board and srv_game, which carry the model NAME.
       - name: attribution
         description: >
           AC-G.41. Licence-required attribution travelling as data, so a page physically
@@ -1175,127 +1175,6 @@ models:
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
 
   # ---------------------------------------------------------------------------------------
-  - name: srv_schedule
-    description: >
-      Schedule. ONE ROW PER GAME — not one per team. The grain inversion the spec once
-      carried backwards, so a count here equals the game count for the filtered scope and
-      never twice it. Contrast srv_team_game_log, which is deliberately one row per side.
-      The current line and the current prediction are collapsed to one row each before
-      joining, so a game with many snapshots and many scored models still yields one row.
-    columns:
-      - name: game_sk
-        description: Surrogate key from the game fact — the grain.
-      - name: game_id
-        description: CFBD game id.
-      - name: season
-        description: Season the game belongs to.
-      - name: week
-        description: Week within the season and season_type.
-      - name: season_type
-        description: '`regular` or `postseason`.'
-      - name: week_sk
-        description: Surrogate key of the week, for joining to the week dimension.
-      - name: game_date
-        description: Calendar date of the game.
-      - name: start_date
-        description: Scheduled kickoff, timezone-aware, as stored.
-      - name: start_date_et
-        description: >
-          AC-G.34. Kickoff converted to US Eastern and stored WITHOUT a timezone, applied
-          here and never in the app. Do not read this as UTC.
-      - name: kickoff_time_known
-        description: >
-          Whether a real kickoff time is known. FALSE means `start_date` carries a placeholder,
-          typically an unscheduled future game, so a page must not render an hour for it.
-      - name: is_completed
-        description: >
-          Whether the game has finished. A cancelled game reads 0-0 with this false, so
-          "points are not null" is not a substitute for it.
-      - name: is_conference_game
-        description: Whether both teams were in the same conference that season.
-      - name: is_neutral_site
-        description: Whether the game was played at a neutral venue.
-      - name: venue_display
-        description: Venue name as rendered.
-      - name: network
-        description: Broadcast network; null where not published.
-      - name: attendance
-        description: Reported attendance; null where not published.
-      - name: excitement_index
-        description: CFBD's excitement index for the game; null until it has been computed.
-      - name: is_fbs_game
-        description: >
-          Whether EITHER team was FBS — not both. A Division II visitor's trip to an FBS
-          stadium is an FBS game, and requiring both would drop 20 of the 25 games on the
-          opening Thursday. 934 of 3,831 games in 2025 qualify. Carried as a column rather
-          than a hardcoded WHERE so the site filters on it with a default that can be widened.
-      - name: home_team_id
-        description: CFBD team id for the home side.
-      - name: home_team_slug
-        description: URL-safe home team identifier.
-      - name: home_team_display
-        description: Home team display name, falling back to the game fact's name.
-      - name: home_abbreviation
-        description: Home team abbreviation.
-      - name: home_conference
-        description: Home team's conference for that season.
-      - name: home_color_on_light
-        description: Contrast-corrected home colour for a light background.
-      - name: home_color_on_dark
-        description: Contrast-corrected home colour for a dark background.
-      - name: home_logo_url
-        description: CFBD logo URL for the home team.
-      - name: home_points
-        description: Home team's final score; null until the game is scored.
-      - name: home_rank
-        description: Home team's poll rank at kickoff; null if unranked.
-      - name: away_team_id
-        description: CFBD team id for the away side.
-      - name: away_team_slug
-        description: URL-safe away team identifier.
-      - name: away_team_display
-        description: Away team display name, falling back to the game fact's name.
-      - name: away_abbreviation
-        description: Away team abbreviation.
-      - name: away_conference
-        description: Away team's conference for that season.
-      - name: away_color_on_light
-        description: Contrast-corrected away colour for a light background.
-      - name: away_color_on_dark
-        description: Contrast-corrected away colour for a dark background.
-      - name: away_logo_url
-        description: CFBD logo URL for the away team.
-      - name: away_points
-        description: Away team's final score; null until the game is scored.
-      - name: away_rank
-        description: Away team's poll rank at kickoff; null if unranked.
-      - name: spread_current
-        description: >
-          Spread from the most recent snapshot across all providers, in the away-minus-home
-          convention. One value per game — see srv_odds_board for the per-provider breakdown.
-      - name: total_current
-        description: Over/under from that same most recent snapshot.
-      - name: predicted_margin
-        description: >
-          Model's predicted margin in the away-minus-home convention. Model selection prefers
-          one that actually populates this column, because six of seven models are
-          probability models and ordering by recency alone loses the margin almost every time.
-      - name: predicted_margin_home_perspective
-        description: >
-          `predicted_margin` negated, so positive reads as "home favoured by". Explicitly
-          named because the pack's own sign is preserved on the column above.
-      - name: home_win_probability
-        description: Model's probability that the home team wins.
-      - name: model_version_key
-        description: >
-          NAME NOTWITHSTANDING, this holds the model NAME — the same quirk as on
-          srv_odds_board, and unlike srv_edge_finder where the identically named column
-          carries the version. Documented rather than renamed, since a serving rename breaks
-          anything querying the warehouse directly.
-      - name: as_of_ts
-        description: AC-G.35. Last load of the `game` domain, rendered instead of now().
-
-  # ---------------------------------------------------------------------------------------
   - name: srv_team_overview
     description: >
       Team page, Overview tab. One row per team per season.
@@ -1422,167 +1301,6 @@ models:
           corrected.
       - name: ats_as_underdog_display
         description: Pre-formatted ATS record in games where this team was the underdog.
-      - name: as_of_ts
-        description: AC-G.35. Last load of the `game` domain, rendered instead of now().
-
-  # ---------------------------------------------------------------------------------------
-  - name: srv_scoreboard
-    description: >
-      Scoreboard. One row per game, carrying BOTH card states — pre-game and post-game
-      fields live on the same row so the app switches on `is_completed` rather than querying
-      two objects. Additive.
-      Team names come from fct_game rather than dim_team: the dimension is built from CFBD's
-      /teams response, which does not list every opponent an FBS side schedules, and taking
-      names from it left 12,168 of 110,634 rows — 11% of the scoreboard — with a null team
-      and `None` for the winner. Slugs fall back to a slug OF the game's name, because a null
-      slug is a link to nowhere while a derived one reaches a page that honestly renders Empty.
-      Poll rank is AP only and one poll only, because the badge shows ONE number; a second
-      poll here would fan the scoreboard out silently.
-    columns:
-      - name: game_sk
-        description: Surrogate key from the game fact — the grain, one row per game.
-      - name: game_id
-        description: CFBD game id.
-      - name: season
-        description: Season the game belongs to.
-      - name: week
-        description: Week within the season and season_type.
-      - name: season_type
-        description: '`regular` or `postseason`.'
-      - name: game_date
-        description: Calendar date of the game.
-      - name: start_date
-        description: Scheduled kickoff, timezone-aware, as stored.
-      - name: start_date_et
-        description: >
-          Kickoff converted to US Eastern and stored WITHOUT a timezone. Do not read as UTC.
-      - name: is_completed
-        description: >
-          Whether the game has finished, and the column the card switches on. A cancelled
-          game reads 0-0 with this false.
-      - name: is_neutral_site
-        description: Whether the game was played at a neutral venue.
-      - name: venue
-        description: Venue name.
-      - name: venue_display
-        description: Alias of `venue`, carried so pages written against either name work.
-      - name: is_fbs_game
-        description: >
-          Whether EITHER team was FBS — not both. Requiring both would drop 20 of the 25
-          games on the opening Thursday; 934 of 3,831 games in 2025 qualify. A column rather
-          than a hardcoded WHERE so the default can be widened.
-      - name: home_team_id
-        description: CFBD team id for the home side.
-      - name: home_team
-        description: Home team name FROM THE GAME FACT, populated on every row.
-      - name: home_abbreviation
-        description: Home team abbreviation from dim_team; null for teams not in /teams.
-      - name: home_team_slug
-        description: >
-          URL-safe home team identifier, falling back to a slug of the game's own team name
-          where dim_team has no row.
-      - name: home_team_display
-        description: Home team display name, falling back to the game fact's name.
-      - name: home_color_on_light
-        description: Contrast-corrected home colour for a light background.
-      - name: home_logo_url
-        description: CFBD logo URL for the home team.
-      - name: home_points
-        description: Home team's final score; null until scored.
-      - name: away_team_id
-        description: CFBD team id for the away side.
-      - name: away_team
-        description: Away team name from the game fact, populated on every row.
-      - name: away_abbreviation
-        description: Away team abbreviation from dim_team; null for teams not in /teams.
-      - name: away_team_slug
-        description: URL-safe away team identifier, with the same slug fallback as the home side.
-      - name: away_team_display
-        description: Away team display name, falling back to the game fact's name.
-      - name: away_color_on_light
-        description: Contrast-corrected away colour for a light background.
-      - name: away_logo_url
-        description: CFBD logo URL for the away team.
-      - name: away_points
-        description: Away team's final score; null until scored.
-      - name: home_rank
-        description: >
-          AC-1.5. AP rank the home team held going INTO this game, so an unranked team shows
-          no badge rather than an em dash inside one. Week-scoped, which is why it cannot be
-          read off dim_team.
-      - name: away_rank
-        description: AP rank the away team held going into this game; null if unranked.
-      - name: winner
-        description: >
-          Name of the winning team. Null when the game is not completed AND null on a tie —
-          the two cases are distinguished by `is_completed`, not by this column.
-      - name: final_margin
-        description: >
-          Absolute points margin. NULL, not zero, for a game with no result — so zero here
-          means exactly one thing: the two teams finished level. Previously
-          `abs(coalesce(home, 0) - coalesce(away, 0))`, which gave all 1,769 unplayed games a
-          margin of 0, indistinguishable from a tie.
-      - name: actual_margin
-        description: >
-          Signed margin, away minus home, following the project convention. Distinct from
-          `final_margin`, which is unsigned.
-      - name: total_points
-        description: >
-          Combined score. Computed in dbt rather than summed in the app, and NULL for a game
-          that has not been played rather than zero.
-      - name: home_wins
-        description: Home team's season win total, for the record shown on the card.
-      - name: home_losses
-        description: Home team's season loss total.
-      - name: away_wins
-        description: Away team's season win total.
-      - name: away_losses
-        description: Away team's season loss total.
-      - name: excitement_index
-        description: CFBD's excitement index for the game; null until computed.
-      - name: is_upset
-        description: Whether the result counted as an upset by the upstream definition.
-      - name: attendance
-        description: Reported attendance; null where not published.
-      - name: total_yards_both_teams
-        description: >
-          R-006. Game-grain total from the two team-grain box-score rows. NULL for most of
-          history — box scores are `recent` scope, 3,360 of 7,662 completed 2025 team-rows
-          carry total_yards and nothing before 2024 does. That renders as an em dash, which
-          is the honest state.
-      - name: rushing_yards_both_teams
-        description: Combined rushing yards for the game, same scope caveat as above.
-      - name: passing_yards_both_teams
-        description: Combined passing yards for the game, same scope caveat as above.
-      - name: turnovers_both_teams
-        description: Combined turnovers for the game, same scope caveat as above.
-      - name: teams_with_box_score
-        description: >
-          2 when both box scores landed, 1 when only one did, 0 when neither. A total built
-          from one team is not a game total, and this is what lets the page say so.
-      - name: spread_at_close
-        description: >
-          R-007. The last line recorded before kickoff where one exists. Read WITH
-          `spread_at_close_basis` — for older games this may be a line CFBD reported to us
-          long afterwards rather than one observed pre-kickoff.
-      - name: spread_at_close_provider
-        description: Which sportsbook that line came from.
-      - name: spread_at_close_basis
-        description: >
-          PROVENANCE, and the reason this column exists. `observed_before_kickoff` means cfdb
-          sampled the line while the market was live. `as_recorded_by_cfbd` means our
-          snapshot history begins 2026-08-15, so for an older game the only line we hold is
-          whatever CFBD returned when we fetched it — a real market number whose timestamp is
-          our fetch time, not a pre-kickoff observation. Calling both "close" would conflate
-          a line we watched with a line we were told about.
-      - name: favorite_covered
-        description: >
-          R-008. Whether the FAVOURITE covered — distinct from which side covered. Four
-          states, and pending is not push: `pending` (no result yet), `push` (landed exactly
-          on the number), `no_favorite` (a pick'em, spread exactly 0 — the not-applicable
-          third state of AC-G.32 and a real case in the data), `yes` or `no`. Null when no
-          spread is held. Follows the away-minus-home convention, so a NEGATIVE spread means
-          the home team was favoured.
       - name: as_of_ts
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
 
@@ -2471,3 +2189,1137 @@ models:
           cannot render these rates without it.
       - name: as_of_ts
         description: AC-G.35. Last load of the `prediction` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_game
+    description: >
+      THE game-grain serving view: one row per game. R-076.
+      Named for its GRAIN, not for a page. This replaces srv_schedule and srv_scoreboard,
+      which were one row per game over fct_game apiece — the same grain over the same fact,
+      split by which page read them. Naming views after pages is what produced two
+      implementations of one column, and one of them shipped broken: srv_scoreboard took team
+      display names off dim_team and rendered an em dash on 12,168 of 110,634 rows.
+      Merging them found the same shape a second time. `home_rank` also had two
+      implementations — one reading fct_game, one rebuilding the AP join in its own CTE. They
+      agreed exactly, which is precisely the state the team name was in before it drifted.
+      THE GRAIN RULE (Marc, 2026-09-02): "Can't add game.team grain to a table that is at game
+      grain." Anything finer lives in srv_game_team, or arrives here as a DERIVED summary —
+      the both-teams box totals below are the second kind.
+    columns:
+      - name: game_sk
+        tests: [unique, not_null]
+        description: >
+          Surrogate key from the game fact — the grain.
+      - name: game_id
+        description: >
+          CFBD game id.
+      - name: season
+        description: >
+          Season the game belongs to.
+      - name: week
+        description: >
+          Week within the season and season_type.
+      - name: season_type
+        description: >
+          `regular` or `postseason`.
+      - name: week_sk
+        description: >
+          Surrogate key of the week, for joining to the week dimension.
+      - name: game_date
+        description: >
+          Calendar date of the game.
+      - name: start_date
+        description: >
+          Scheduled kickoff, timezone-aware, as stored.
+      - name: start_date_et
+        description: >
+          AC-G.34. Kickoff converted to US Eastern and stored WITHOUT a timezone, applied
+          here and never in the app. Do not read this as UTC.
+      - name: kickoff_time_known
+        description: >
+          Whether a real kickoff time is known. FALSE means `start_date` carries a
+          placeholder, typically an unscheduled future game, so a page must not render an
+          hour for it.
+      - name: is_completed
+        description: >
+          Whether the game has finished. A cancelled game reads 0-0 with this false, so
+          "points are not null" is not a substitute for it.
+      - name: is_conference_game
+        description: >
+          Whether both teams were in the same conference that season.
+      - name: is_neutral_site
+        description: >
+          Whether the game was played at a neutral venue.
+      - name: venue
+        description: >
+          Venue name.
+      - name: venue_display
+        description: >
+          Venue name as rendered.
+      - name: network
+        description: >
+          Broadcast network; null where not published.
+      - name: network_abbreviation
+        description: >
+          Short form of `network`, from dim_broadcast_outlet. A column rather than a trim in
+          a view, so the site and the Excel workbook cannot disagree about what a channel is
+          called. Falls back to the full name for an outlet not yet mapped, which renders
+          long and is a visible prompt to add it.
+      - name: attendance
+        description: >
+          Reported attendance; null where not published.
+      - name: excitement_index
+        description: >
+          CFBD's excitement index for the game; null until it has been computed.
+      - name: is_upset
+        description: >
+          Whether the result counted as an upset by the upstream definition.
+      - name: is_fbs_game
+        description: >
+          Whether EITHER team was FBS — not both. A Division II visitor's trip to an FBS
+          stadium is an FBS game, and requiring both would drop 20 of the 25 games on the
+          opening Thursday. 934 of 3,831 games in 2025 qualify. Carried as a column rather
+          than a hardcoded WHERE so the site filters on it with a default that can be
+          widened.
+      - name: home_team_id
+        description: >
+          CFBD team id for the home side.
+      - name: home_team
+        description: >
+          Home team name FROM THE GAME FACT, populated on every row.
+      - name: home_team_slug
+        description: >
+          URL-safe home team identifier.
+      - name: home_team_display
+        description: >
+          Home team display name, falling back to the game fact's name.
+      - name: home_abbreviation
+        description: >
+          Home team abbreviation.
+      - name: home_conference
+        description: >
+          Home team's conference for that season.
+      - name: home_color_on_light
+        description: >
+          Contrast-corrected home colour for a light background.
+      - name: home_color_on_dark
+        description: >
+          Contrast-corrected home colour for a dark background.
+      - name: home_logo_url
+        description: >
+          CFBD logo URL for the home team.
+      - name: home_points
+        description: >
+          Home team's final score; null until the game is scored.
+      - name: home_rank
+        description: >
+          Home team's poll rank at kickoff; null if unranked.
+      - name: away_team_id
+        description: >
+          CFBD team id for the away side.
+      - name: away_team
+        description: >
+          Away team name from the game fact, populated on every row.
+      - name: away_team_slug
+        description: >
+          URL-safe away team identifier.
+      - name: away_team_display
+        description: >
+          Away team display name, falling back to the game fact's name.
+      - name: away_abbreviation
+        description: >
+          Away team abbreviation.
+      - name: away_conference
+        description: >
+          Away team's conference for that season.
+      - name: away_color_on_light
+        description: >
+          Contrast-corrected away colour for a light background.
+      - name: away_color_on_dark
+        description: >
+          Contrast-corrected away colour for a dark background.
+      - name: away_logo_url
+        description: >
+          CFBD logo URL for the away team.
+      - name: away_points
+        description: >
+          Away team's final score; null until the game is scored.
+      - name: away_rank
+        description: >
+          Away team's poll rank at kickoff; null if unranked.
+      - name: winner
+        description: >
+          Name of the winning team. Null when the game is not completed AND null on a tie —
+          the two cases are distinguished by `is_completed`, not by this column.
+      - name: final_margin
+        description: >
+          Absolute points margin. NULL, not zero, for a game with no result — so zero here
+          means exactly one thing: the two teams finished level. Previously
+          `abs(coalesce(home, 0) - coalesce(away, 0))`, which gave all 1,769 unplayed games
+          a margin of 0, indistinguishable from a tie.
+      - name: actual_margin
+        description: >
+          Signed margin, away minus home, following the project convention. Distinct from
+          `final_margin`, which is unsigned.
+      - name: total_points
+        description: >
+          Combined score. Computed in dbt rather than summed in the app, and NULL for a game
+          that has not been played rather than zero.
+      - name: home_wins
+        description: >
+          Home team's season win total, for the record shown on the card.
+      - name: home_losses
+        description: >
+          Home team's season loss total.
+      - name: away_wins
+        description: >
+          Away team's season win total.
+      - name: away_losses
+        description: >
+          Away team's season loss total.
+      - name: total_yards_both_teams
+        description: >
+          R-006. Game-grain total from the two team-grain box-score rows. NULL for most of
+          history — box scores are `recent` scope, 3,360 of 7,662 completed 2025 team-rows
+          carry total_yards and nothing before 2024 does. That renders as an em dash, which
+          is the honest state.
+      - name: rushing_yards_both_teams
+        description: >
+          Combined rushing yards for the game, same scope caveat as above.
+      - name: passing_yards_both_teams
+        description: >
+          Combined passing yards for the game, same scope caveat as above.
+      - name: turnovers_both_teams
+        description: >
+          Combined turnovers for the game, same scope caveat as above.
+      - name: teams_with_box_score
+        description: >
+          2 when both box scores landed, 1 when only one did, 0 when neither. A total built
+          from one team is not a game total, and this is what lets the page say so.
+      - name: spread_current
+        description: >
+          Spread from the most recent snapshot across all providers, in the away-minus-home
+          convention. One value per game — see srv_odds_board for the per-provider
+          breakdown.
+      - name: total_current
+        description: >
+          Over/under from that same most recent snapshot.
+      - name: spread_at_close
+        description: >
+          R-007. The last line recorded before kickoff where one exists. Read WITH
+          `spread_at_close_basis` — for older games this may be a line CFBD reported to us
+          long afterwards rather than one observed pre-kickoff.
+      - name: spread_at_close_provider
+        description: >
+          Which sportsbook that line came from.
+      - name: spread_at_close_basis
+        description: >
+          PROVENANCE, and the reason this column exists. `observed_before_kickoff` means
+          cfdb sampled the line while the market was live. `as_recorded_by_cfbd` means our
+          snapshot history begins 2026-08-15, so for an older game the only line we hold is
+          whatever CFBD returned when we fetched it — a real market number whose timestamp
+          is our fetch time, not a pre-kickoff observation. Calling both "close" would
+          conflate a line we watched with a line we were told about.
+      - name: favorite_covered
+        description: >
+          R-008. Whether the FAVOURITE covered — distinct from which side covered. Four
+          states, and pending is not push: `pending` (no result yet), `push` (landed exactly
+          on the number), `no_favorite` (a pick'em, spread exactly 0 — the not-applicable
+          third state of AC-G.32 and a real case in the data), `yes` or `no`. Null when no
+          spread is held. Follows the away-minus-home convention, so a NEGATIVE spread means
+          the home team was favoured.
+      - name: predicted_margin
+        description: >
+          Model's predicted margin in the away-minus-home convention. Model selection
+          prefers one that actually populates this column, because six of seven models are
+          probability models and ordering by recency alone loses the margin almost every
+          time.
+      - name: predicted_margin_home_perspective
+        description: >
+          `predicted_margin` negated, so positive reads as "home favoured by". Explicitly
+          named because the pack's own sign is preserved on the column above.
+      - name: home_win_probability
+        description: >
+          Model's probability that the home team wins.
+      - name: model_version_key
+        description: >
+          NAME NOTWITHSTANDING, this holds the model NAME — the same quirk as on
+          srv_odds_board, and unlike srv_edge_finder where the identically named column
+          carries the version. Documented rather than renamed, since a serving rename breaks
+          anything querying the warehouse directly.
+      - name: pregame_home_win_probability
+        description: >
+          CFBD's pregame win probability for the home side. READ pregame_wp_basis BEFORE
+          QUOTING IT — for most games this figure was fetched after the game finished and is
+          not a forecast we observed.
+      - name: pregame_wp_basis
+        description: >
+          PROVENANCE, and the reason the column exists. `observed_before_kickoff` means cfdb
+          sampled it while the game was still ahead; `as_recorded_by_cfbd` means the value
+          is real but its timestamp is our fetch time. Measured: only 131 of 1,891 games
+          have a genuine pre-kickoff observation, and all 131 are 2026 — snapshotting began
+          2026-08-15, so every 2024 and 2025 row is the second kind.
+      - name: pregame_wp_snapshot_ts
+        description: >
+          When the pregame probability was observed. Nine distinct timestamps exist across
+          the whole table, which is why this is a VALUE and not a movement series.
+      - name: is_indoors
+        description: >
+          Whether the venue is enclosed, and THE COLUMN THAT QUALIFIES EVERY OTHER WEATHER
+          FIELD. CFBD reports conditions at the venue's LOCATION rather than inside it, so a
+          domed game carries ordinary outdoor readings; rendering them without this states
+          something false.
+      - name: temperature_f
+        description: >
+          Temperature in Fahrenheit at kickoff. Null before 2024 — weather is not collected
+          for earlier seasons, which renders as an em dash rather than a zero.
+      - name: wind_speed_mph
+        description: >
+          Wind speed in miles per hour at kickoff.
+      - name: precipitation_in
+        description: >
+          Precipitation in inches at kickoff.
+      - name: weather_condition_code
+        description: >
+          CFBD's numeric condition code. 18 distinct values; the site maps them to an icon
+          set rather than inventing conditions the data does not carry.
+      - name: weather_condition
+        description: >
+          CFBD's text label for the conditions — Cloudy, Clear, Fair, Light Rain. Null where
+          the feed sends a blank, so a page renders an em dash rather than an empty cell
+          that looks broken.
+      - name: home_pregame_elo
+        description: >
+          The home team's Elo rating going INTO this game. A rating per team per game is a
+          rating per team per week, which is what makes a weekly rating series possible
+          without a single new API call — the project had recorded that as needing
+          /ratings/elo re-fetched by week. Populated on 67,306 of 110,879 rows; null before
+          Elo existed.
+      - name: home_postgame_elo
+        description: >
+          The home team's Elo rating after the game. The difference from the pregame figure
+          is what the result was worth.
+      - name: away_pregame_elo
+        description: >
+          The away team's Elo rating going into this game.
+      - name: away_postgame_elo
+        description: >
+          The away team's Elo rating after the game.
+      - name: home_q1
+        description: >
+          Home points in the first quarter. Null where CFBD sends no line score — 60% of
+          rows, all historical; the earliest game with quarters is 2001.
+      - name: home_q2
+        description: >
+          Home points in the second quarter.
+      - name: home_q3
+        description: >
+          Home points in the third quarter.
+      - name: home_q4
+        description: >
+          Home points in the fourth quarter.
+      - name: home_overtime_points
+        description: >
+          Home points scored after regulation, SUMMED across however many overtimes there
+          were. A column per period would either invent nine of them or truncate a long game
+          — periods reach thirteen in this data. Zero means the game ended in regulation;
+          null means no quarters are held for it.
+      - name: home_periods
+        description: >
+          How many scoring periods were recorded, so a page can render "2OT" honestly rather
+          than inferring it. 4 for a regulation game, 13 at the extreme.
+      - name: away_q1
+        description: >
+          Away points in the first quarter.
+      - name: away_q2
+        description: >
+          Away points in the second quarter.
+      - name: away_q3
+        description: >
+          Away points in the third quarter.
+      - name: away_q4
+        description: >
+          Away points in the fourth quarter.
+      - name: away_overtime_points
+        description: >
+          Away points scored after regulation, summed across all overtimes.
+      - name: away_periods
+        description: >
+          How many scoring periods were recorded for the away side.
+      - name: home_team_record_display
+        description: >
+          The home team's record LEADING INTO this game's week, as a W-L string — extending
+          to W-L-T only where the running tie count is non-zero, since ties existed before
+          1996 and a two-part string misstates those seasons. NOT the same as
+          `home_wins`/`home_losses` above, which are SEASON-FINAL: showing those beside a
+          Week 3 game from a finished season is the composition failure this column exists
+          to prevent. Named `home_team_record_display` and not `home_record_display` because
+          srv_standings already uses that name for "record in home games". Null where the
+          warehouse holds no completed game for the team, since 0-0 there would be a lie.
+      - name: away_team_record_display
+        description: >
+          The away team's record leading into this game's week. See home_team_record_display
+          for the semantics and the deliberate naming.
+      - name: as_of_ts
+        description: >
+          AC-G.35. Last load of the `game` domain, rendered instead of now().
+
+  # ---------------------------------------------------------------------------------------
+  - name: srv_game_team
+    description: >
+      THE game x team serving surface: one row per team per game. R-077.
+      NOTHING SAT AT THIS GRAIN BEFORE, which is why 150 measure columns across four staging
+      models had no downstream consumer and were invisible from the inside — landed, staged,
+      and never once selected.
+      THE GRAIN RULE IS WHY THEY ARE HERE AND NOT ON srv_game: "Can't add game.team grain to
+      a table that is at game grain." srv_game carries game-grain columns and derived
+      both-team summaries; a per-team success rate is neither.
+      COVERAGE IS PARTIAL AND THE FLAGS SAY WHERE. The four sources cover 1,849 to 3,339 games
+      against 110,879 in the spine, because box scores are `recent` scope. The has_* columns
+      distinguish "the endpoint does not cover this game" from "this team recorded nothing",
+      which a null alone cannot. The name join behind them matched 100.00% on all four.
+      Efficiency and explosiveness are complements throughout: success rate says how OFTEN a
+      team stayed on schedule, explosiveness says how BIG the plays that worked were. Reading
+      either alone describes half a team.
+    columns:
+      - name: game_team_advanced_sk
+        description: >
+          Surrogate key over (game_id, team_id) — THE GRAIN, declared and tested. R-077 asked
+          for uniqueness on (game_id, team_id) and this key is exactly that pair, so testing
+          it tests the grain rather than a proxy for it.
+        tests: [unique, not_null]
+      - name: game_team_sk
+        description: >
+          Surrogate key from fct_game_team — the grain, one row per team per game.
+      - name: game_id
+        description: >
+          CFBD game id. Appears on exactly two rows, one per team.
+      - name: season
+        description: >
+          Season the game belongs to.
+      - name: week
+        description: >
+          Week within the season and season_type.
+      - name: season_type
+        description: >
+          `regular`, `postseason`, or one of the two COVID-era spring types.
+      - name: game_date
+        description: >
+          Calendar date of the game.
+      - name: team_id
+        description: >
+          CFBD team id for the side this row describes.
+      - name: team
+        description: >
+          Name of the side this row describes.
+      - name: conference
+        description: >
+          Conference affiliation for that season, from dim_team — fct_game_team carries
+          classification but not conference.
+      - name: classification
+        description: >
+          Division for that season: `fbs`, `fcs` and so on.
+      - name: opponent_team_id
+        description: >
+          CFBD team id of the opponent.
+      - name: opponent
+        description: >
+          Opponent name.
+      - name: is_home
+        description: >
+          Whether this team was the designated home side.
+      - name: is_neutral_site
+        description: >
+          Whether the game was played at a neutral venue.
+      - name: is_completed
+        description: >
+          Whether the game has finished. A cancelled game reads 0-0 with this false, so
+          "points are not null" is not a substitute.
+      - name: points_for
+        description: >
+          Points scored by this team.
+      - name: points_against
+        description: >
+          Points scored by the opponent.
+      - name: margin
+        description: >
+          points_for minus points_against — negative in a loss, computed upstream so no page
+          subtracts.
+      - name: result
+        description: >
+          `W`, `L` or `T` from this team's perspective; null until completed.
+      - name: first_downs
+        description: >
+          First downs gained by this team.
+      - name: total_yards
+        description: >
+          Total offensive yards gained.
+      - name: rushing_yards
+        description: >
+          Rushing yards gained.
+      - name: passing_yards
+        description: >
+          Passing yards gained.
+      - name: rushing_attempts
+        description: >
+          Rushing attempts.
+      - name: turnovers
+        description: >
+          Turnovers committed.
+      - name: interceptions
+        description: >
+          Passes intercepted.
+      - name: fumbles_lost
+        description: >
+          Fumbles lost.
+      - name: third_down_conversions
+        description: >
+          Third downs converted. Read with third_down_attempts, never alone.
+      - name: third_down_attempts
+        description: >
+          Third downs attempted — the denominator for the conversion rate.
+      - name: fourth_down_conversions
+        description: >
+          Fourth downs converted.
+      - name: fourth_down_attempts
+        description: >
+          Fourth downs attempted.
+      - name: penalties
+        description: >
+          Penalties assessed against this team.
+      - name: penalty_yards
+        description: >
+          Penalty yards assessed against this team.
+      - name: possession_seconds
+        description: >
+          Time of possession in seconds, so no page parses a clock.
+      - name: has_box_score
+        description: >
+          Whether the plain box-score columns are populated. Distinguishes "not recorded"
+          from a genuine zero.
+      - name: has_box_advanced
+        description: >
+          Whether /game/box/advanced covered this game. Absence means the endpoint does not
+          reach the game, NOT that the team recorded nothing.
+      - name: has_team_advanced
+        description: >
+          Whether /stats/game/advanced covered this game.
+      - name: has_havoc
+        description: >
+          Whether the havoc feed covered this game.
+      - name: has_ppa
+        description: >
+          Whether the team PPA feed covered this game.
+      - name: plays
+        description: >
+          Plays.
+      - name: ppa_overall_total
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Whole game.
+      - name: ppa_overall_quarter1
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Quarter 1
+          only.
+      - name: ppa_overall_quarter2
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Quarter 2
+          only.
+      - name: ppa_overall_quarter3
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Quarter 3
+          only.
+      - name: ppa_overall_quarter4
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Quarter 4
+          only.
+      - name: ppa_passing_total
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. Whole game.
+      - name: ppa_passing_quarter1
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. Quarter 1 only.
+      - name: ppa_passing_quarter2
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. Quarter 2 only.
+      - name: ppa_passing_quarter3
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. Quarter 3 only.
+      - name: ppa_passing_quarter4
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. Quarter 4 only.
+      - name: ppa_rushing_total
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. Whole game.
+      - name: ppa_rushing_quarter1
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. Quarter 1 only.
+      - name: ppa_rushing_quarter2
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. Quarter 2 only.
+      - name: ppa_rushing_quarter3
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. Quarter 3 only.
+      - name: ppa_rushing_quarter4
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. Quarter 4 only.
+      - name: cumulative_ppa_overall_total
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Whole game.
+      - name: cumulative_ppa_overall_quarter1
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Quarter 1 only.
+      - name: cumulative_ppa_overall_quarter2
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Quarter 2 only.
+      - name: cumulative_ppa_overall_quarter3
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Quarter 3 only.
+      - name: cumulative_ppa_overall_quarter4
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Quarter 4 only.
+      - name: cumulative_ppa_passing_total
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to passing plays. Whole game.
+      - name: cumulative_ppa_passing_quarter1
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to passing plays. Quarter 1 only.
+      - name: cumulative_ppa_passing_quarter2
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to passing plays. Quarter 2 only.
+      - name: cumulative_ppa_passing_quarter3
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to passing plays. Quarter 3 only.
+      - name: cumulative_ppa_passing_quarter4
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to passing plays. Quarter 4 only.
+      - name: cumulative_ppa_rushing_total
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to rushing plays. Whole game.
+      - name: cumulative_ppa_rushing_quarter1
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to rushing plays. Quarter 1 only.
+      - name: cumulative_ppa_rushing_quarter2
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to rushing plays. Quarter 2 only.
+      - name: cumulative_ppa_rushing_quarter3
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to rushing plays. Quarter 3 only.
+      - name: cumulative_ppa_rushing_quarter4
+        description: >
+          Predicted points added ACCUMULATED to that point in the game, rather than the
+          rate. Restricted to rushing plays. Quarter 4 only.
+      - name: success_rate_overall_total
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Whole game.
+      - name: success_rate_overall_quarter1
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Quarter 1 only.
+      - name: success_rate_overall_quarter2
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Quarter 2 only.
+      - name: success_rate_overall_quarter3
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Quarter 3 only.
+      - name: success_rate_overall_quarter4
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Quarter 4 only.
+      - name: success_rate_standard_downs_total
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to standard
+          downs. Whole game.
+      - name: success_rate_standard_downs_quarter1
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to standard
+          downs. Quarter 1 only.
+      - name: success_rate_standard_downs_quarter2
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to standard
+          downs. Quarter 2 only.
+      - name: success_rate_standard_downs_quarter3
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to standard
+          downs. Quarter 3 only.
+      - name: success_rate_standard_downs_quarter4
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to standard
+          downs. Quarter 4 only.
+      - name: success_rate_passing_downs_total
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          downs. Whole game.
+      - name: success_rate_passing_downs_quarter1
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          downs. Quarter 1 only.
+      - name: success_rate_passing_downs_quarter2
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          downs. Quarter 2 only.
+      - name: success_rate_passing_downs_quarter3
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          downs. Quarter 3 only.
+      - name: success_rate_passing_downs_quarter4
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          downs. Quarter 4 only.
+      - name: explosiveness_total
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Whole game.
+      - name: explosiveness_quarter1
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Quarter 1 only.
+      - name: explosiveness_quarter2
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Quarter 2 only.
+      - name: explosiveness_quarter3
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Quarter 3 only.
+      - name: explosiveness_quarter4
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Quarter 4 only.
+      - name: power_success
+        description: >
+          Share of runs on third or fourth down with two or fewer yards to go that gained a
+          first down or a touchdown.
+      - name: stuff_rate
+        description: >
+          Share of runs stopped at or behind the line of scrimmage.
+      - name: line_yards
+        description: >
+          Rushing yards credited to the offensive line rather than to the back.
+      - name: line_yards_average
+        description: >
+          Rushing yards per carry credited to the offensive line rather than the back.
+      - name: second_level_yards
+        description: >
+          Rushing yards gained five to ten yards past the line of scrimmage.
+      - name: second_level_yards_average
+        description: >
+          Per-carry rushing yards gained five to ten yards past the line.
+      - name: open_field_yards
+        description: >
+          Rushing yards gained more than ten yards past the line of scrimmage.
+      - name: open_field_yards_average
+        description: >
+          Per-carry rushing yards gained more than ten yards past the line.
+      - name: havoc_total
+        description: >
+          Share of plays ending in a tackle for loss, forced fumble, interception or pass
+          defended. Whole game.
+      - name: havoc_front_seven
+        description: >
+          Share of plays disrupted by the front seven specifically.
+      - name: havoc_db
+        description: >
+          Share of plays disrupted by the defensive backs specifically.
+      - name: scoring_opportunities
+        description: >
+          Drives reaching the opponent's forty-yard line.
+      - name: scoring_opportunity_points
+        description: >
+          Points scored on drives that reached the opponent's forty.
+      - name: points_per_opportunity
+        description: >
+          Points scored per drive that reached the opponent's forty — finishing, as distinct
+          from moving the ball.
+      - name: average_start
+        description: >
+          Average starting field position.
+      - name: average_starting_predicted_points
+        description: >
+          Expected points implied by the average starting field position.
+      - name: offense_plays
+        description: >
+          Plays. The team's offensive side.
+      - name: offense_drives
+        description: >
+          Drives. The team's offensive side.
+      - name: offense_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. The team's
+          offensive side.
+      - name: offense_total_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. The team's
+          offensive side.
+      - name: offense_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. The team's offensive
+          side.
+      - name: offense_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. The team's offensive side.
+      - name: offense_power_success
+        description: >
+          Share of runs on third or fourth down with two or fewer yards to go that gained a
+          first down or a touchdown. The team's offensive side.
+      - name: offense_stuff_rate
+        description: >
+          Share of runs stopped at or behind the line of scrimmage. The team's offensive
+          side.
+      - name: offense_line_yards
+        description: >
+          Rushing yards credited to the offensive line rather than to the back. The team's
+          offensive side.
+      - name: offense_line_yards_total
+        description: >
+          Rushing yards credited to the offensive line rather than to the back. Whole game.
+          The team's offensive side.
+      - name: offense_second_level_yards
+        description: >
+          Rushing yards gained five to ten yards past the line of scrimmage. The team's
+          offensive side.
+      - name: offense_second_level_yards_total
+        description: >
+          Rushing yards gained five to ten yards past the line of scrimmage. Whole game. The
+          team's offensive side.
+      - name: offense_open_field_yards
+        description: >
+          Rushing yards gained more than ten yards past the line of scrimmage. The team's
+          offensive side.
+      - name: offense_open_field_yards_total
+        description: >
+          Rushing yards gained more than ten yards past the line of scrimmage. Whole game.
+          The team's offensive side.
+      - name: offense_standard_downs_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          standard downs. The team's offensive side.
+      - name: offense_standard_downs_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to standard
+          downs. The team's offensive side.
+      - name: offense_standard_downs_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to standard downs. The team's offensive side.
+      - name: offense_passing_downs_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing downs. The team's offensive side.
+      - name: offense_passing_downs_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          downs. The team's offensive side.
+      - name: offense_passing_downs_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to passing downs. The team's offensive side.
+      - name: offense_rushing_plays_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. The team's offensive side.
+      - name: offense_rushing_plays_total_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. The team's offensive side.
+      - name: offense_rushing_plays_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to rushing
+          plays. The team's offensive side.
+      - name: offense_rushing_plays_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to rushing plays. The team's offensive side.
+      - name: offense_passing_plays_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. The team's offensive side.
+      - name: offense_passing_plays_total_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. The team's offensive side.
+      - name: offense_passing_plays_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          plays. The team's offensive side.
+      - name: offense_passing_plays_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to passing plays. The team's offensive side.
+      - name: defense_plays
+        description: >
+          Plays. The team's defensive side.
+      - name: defense_drives
+        description: >
+          Drives. The team's defensive side.
+      - name: defense_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. The team's
+          defensive side.
+      - name: defense_total_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. The team's
+          defensive side.
+      - name: defense_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. The team's defensive
+          side.
+      - name: defense_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. The team's defensive side.
+      - name: defense_power_success
+        description: >
+          Share of runs on third or fourth down with two or fewer yards to go that gained a
+          first down or a touchdown. The team's defensive side.
+      - name: defense_stuff_rate
+        description: >
+          Share of runs stopped at or behind the line of scrimmage. The team's defensive
+          side.
+      - name: defense_line_yards
+        description: >
+          Rushing yards credited to the offensive line rather than to the back. The team's
+          defensive side.
+      - name: defense_line_yards_total
+        description: >
+          Rushing yards credited to the offensive line rather than to the back. Whole game.
+          The team's defensive side.
+      - name: defense_second_level_yards
+        description: >
+          Rushing yards gained five to ten yards past the line of scrimmage. The team's
+          defensive side.
+      - name: defense_second_level_yards_total
+        description: >
+          Rushing yards gained five to ten yards past the line of scrimmage. Whole game. The
+          team's defensive side.
+      - name: defense_open_field_yards
+        description: >
+          Rushing yards gained more than ten yards past the line of scrimmage. The team's
+          defensive side.
+      - name: defense_open_field_yards_total
+        description: >
+          Rushing yards gained more than ten yards past the line of scrimmage. Whole game.
+          The team's defensive side.
+      - name: defense_standard_downs_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          standard downs. The team's defensive side.
+      - name: defense_standard_downs_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to standard
+          downs. The team's defensive side.
+      - name: defense_standard_downs_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to standard downs. The team's defensive side.
+      - name: defense_passing_downs_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing downs. The team's defensive side.
+      - name: defense_passing_downs_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          downs. The team's defensive side.
+      - name: defense_passing_downs_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to passing downs. The team's defensive side.
+      - name: defense_rushing_plays_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. The team's defensive side.
+      - name: defense_rushing_plays_total_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          rushing plays. The team's defensive side.
+      - name: defense_rushing_plays_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to rushing
+          plays. The team's defensive side.
+      - name: defense_rushing_plays_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to rushing plays. The team's defensive side.
+      - name: defense_passing_plays_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. The team's defensive side.
+      - name: defense_passing_plays_total_ppa
+        description: >
+          Predicted points added — the change in expected points the plays produced, which
+          is the per-play efficiency measure the advanced stats are built on. Restricted to
+          passing plays. The team's defensive side.
+      - name: defense_passing_plays_success_rate
+        description: >
+          Share of plays that stayed ahead of the down-and-distance schedule — the standard
+          efficiency measure, and the counterpart to explosiveness. Restricted to passing
+          plays. The team's defensive side.
+      - name: defense_passing_plays_explosiveness
+        description: >
+          Average value of the plays that DID succeed. Efficiency says how often; this says
+          how big. Restricted to passing plays. The team's defensive side.
+      - name: opponent_conference
+        description: >
+          Conference of the opponent that season.
+      - name: offense_total_plays
+        description: >
+          Plays. The team's offensive side.
+      - name: offense_total_havoc_events
+        description: >
+          COUNT of disrupted plays the team's offence suffered — tackles for loss, forced
+          fumbles, interceptions and passes defended against it. A count, not a rate; read
+          it against offense_total_havoc_rate.
+      - name: offense_front_seven_havoc_events
+        description: >
+          Count of plays against this offence disrupted by the opposing front seven.
+      - name: offense_db_havoc_events
+        description: >
+          Count of plays against this offence disrupted by the opposing defensive backs.
+      - name: offense_havoc_rate
+        description: >
+          Share of plays ending in a tackle for loss, forced fumble, interception or pass
+          defended. The team's offensive side.
+      - name: offense_front_seven_havoc_rate
+        description: >
+          Share of this offence's plays disrupted by the opposing front seven.
+      - name: offense_db_havoc_rate
+        description: >
+          Share of this offence's plays disrupted by the opposing defensive backs.
+      - name: defense_total_plays
+        description: >
+          Plays. The team's defensive side.
+      - name: defense_total_havoc_events
+        description: >
+          COUNT of plays this defence disrupted. A count, not a rate; read it against
+          defense_total_havoc_rate, since a high count on a high-play game is a different
+          statement from a high rate.
+      - name: defense_front_seven_havoc_events
+        description: >
+          Count of plays disrupted by this team's front seven.
+      - name: defense_db_havoc_events
+        description: >
+          Count of plays disrupted by this team's defensive backs.
+      - name: defense_havoc_rate
+        description: >
+          Share of plays ending in a tackle for loss, forced fumble, interception or pass
+          defended. The team's defensive side.
+      - name: defense_front_seven_havoc_rate
+        description: >
+          Share of plays disrupted by this team's front seven.
+      - name: defense_db_havoc_rate
+        description: >
+          Share of plays disrupted by this team's defensive backs.
+      - name: offense_overall
+        description: >
+          Offensive predicted points added per play across the whole game, from the per-game
+          PPA feed — the headline efficiency number for this team's offence.
+      - name: offense_passing
+        description: >
+          Offensive predicted points added per play on passing plays only.
+      - name: offense_rushing
+        description: >
+          Offensive predicted points added per play on rushing plays only.
+      - name: offense_first_down
+        description: >
+          Offensive predicted points added per play on first down.
+      - name: offense_second_down
+        description: >
+          Offensive predicted points added per play on second down.
+      - name: offense_third_down
+        description: >
+          Offensive predicted points added per play on third down.
+      - name: defense_overall
+        description: >
+          Defensive predicted points added per play allowed across the whole game. LOWER IS
+          BETTER here — this is points the defence gave up, not gained.
+      - name: defense_passing
+        description: >
+          Defensive predicted points added allowed per passing play. Lower is better.
+      - name: defense_rushing
+        description: >
+          Defensive predicted points added allowed per rushing play. Lower is better.
+      - name: defense_first_down
+        description: >
+          Defensive predicted points added allowed per first-down play. Lower is better.
+      - name: defense_second_down
+        description: >
+          Defensive predicted points added allowed per second-down play. Lower is better.
+      - name: defense_third_down
+        description: >
+          Defensive predicted points added allowed per third-down play. Lower is better.

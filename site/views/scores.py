@@ -37,7 +37,7 @@ def _rows(season, week, season_type, conference, division='fbs') -> pd.DataFrame
                total_points, total_yards_both_teams, teams_with_box_score,
                spread_at_close, spread_at_close_provider, spread_at_close_basis,
                favorite_covered, is_completed, as_of_ts
-        from srv_scoreboard
+        from srv_game
         where season = :season and season_type = :season_type and is_completed
           and (:week is null or week = :week)
           -- FBS spine: EITHER team FBS, defaulted rather than hardcoded, so
@@ -59,7 +59,7 @@ def _unsettled(scope, now=None) -> pd.DataFrame:
     now = now or datetime.now(timezone.utc)
     return query("""
         select game_id, start_date, (start_date <= :now) as has_kicked
-        from srv_scoreboard
+        from srv_game
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
           and (:division = 'all' or is_fbs_game)
@@ -123,7 +123,7 @@ def _winner(row) -> str:
     columns. Two problems, both found by rehearsing the post-game path against real 2025
     games rather than 2026 fixtures where every score is null:
 
-      1. It is the app owning a definition dbt already owns. srv_scoreboard computes
+      1. It is the app owning a definition dbt already owns. srv_game computes
          `winner` from the points, and a second derivation is a second answer waiting to
          disagree — which it did, on one game in 295.
       2. It indexed into a column that can be NULL and rendered `<strong>None</strong>`.
@@ -202,9 +202,9 @@ def _upset(row) -> str:
 
 def body(page) -> None:
     scope = filters.game_scope()
-    table.dataset_caption("Scores", "srv_scoreboard")
+    table.dataset_caption("Scores", "srv_game")
     chips.spread_sign_note()
-    with states.section("srv_scoreboard"):
+    with states.section("srv_game"):
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)
         table.as_of_caption(df)
@@ -246,7 +246,7 @@ def body(page) -> None:
         # keep their own order.
         df = table.apply_sort(df, columns)
         states.render_or_state(
-            df, "srv_scoreboard",
+            df, "srv_game",
             "Completed results would be listed here.",
             f"No completed games for {scope.describe()} yet.",
             renderer=lambda d: _grouped(d, columns, scope),

@@ -119,8 +119,8 @@ DEFAULT_MARTS = [
 # before its siblings ships a dictionary describing the previous state. Measured during A1:
 # built in DAG order it was 31 columns short of the layer it claimed to describe.
 DEFAULT_SERVING = [
-    "srv_schedule",
-    "srv_scoreboard",
+    "srv_game",
+    "srv_game_team",
     "srv_standings",
     "srv_teams_index",
     "srv_team_overview",
