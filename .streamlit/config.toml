@@ -1,0 +1,16 @@
+# R-099. The site's accent, stated once so Streamlit stops choosing for us.
+#
+# There was no config.toml at all, so primaryColor was Streamlit's default #FF4B4B — which is
+# why the Dense/Stacked radio rendered red. Nobody chose red; nobody chose anything.
+#
+# #1f6feb is already the site's accent and is used consistently in theme.py: every link, the
+# footer, the dataset caption, the `p` chip, and .cfdb-winner. An interactive control painted
+# in the page-title colour would read as body text and look inert — the accent is the one that
+# says "this is a control", and it is already the colour of everything else clickable here.
+#
+# Deliberately ONLY primaryColor. Streamlit's background and text colours are left unset so
+# they continue to follow the viewer's light/dark preference, which is what theme.py's own
+# prefers-color-scheme blocks are written against. Pinning them here would override that and
+# break dark mode for everyone whose OS asks for it.
+[theme]
+primaryColor = "#1f6feb"
