@@ -93,7 +93,7 @@ def test_the_restore_gets_a_longer_budget_than_the_cheap_verbs(monkeypatch):
     monkeypatch.setattr(publish_marts.subprocess, "run",
                         lambda *a, **k: seen.update(k) or subprocess.CompletedProcess(a, 0, b"", b""))
 
-    publish_marts._publish_ssh("count serving srv_scoreboard")
+    publish_marts._publish_ssh("count serving srv_game")
     quick = seen["timeout"]
     publish_marts._publish_ssh("restore serving", stdin=b"dump")
     assert seen["timeout"] > quick
@@ -125,7 +125,7 @@ def test_the_dump_is_compressed_before_it_crosses_the_wire(monkeypatch):
                         lambda verb, stdin=b"": sent.update(verb=verb, stdin=stdin)
                         or subprocess.CompletedProcess([], 0, b"", b""))
 
-    body = b"COPY serving.srv_scoreboard FROM stdin;\n" + b"row\tdata\n" * 5000
+    body = b"COPY serving.srv_game FROM stdin;\n" + b"row\tdata\n" * 5000
     publish_marts.restore_to_serving(body, "serving")
 
     assert sent["verb"] == "restore-gz serving", (

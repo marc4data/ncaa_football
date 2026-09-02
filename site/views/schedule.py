@@ -1,7 +1,7 @@
 """Schedule — page 2.
 
 GRAIN IS ONE ROW PER GAME (AC-2.1). This is the inversion the spec once carried backwards:
-a count on srv_schedule equals the game count for the filtered scope, never twice it,
+a count on srv_game equals the game count for the filtered scope, never twice it,
 because the view reads fct_game rather than fct_game_team.
 """
 import pandas as pd
@@ -23,7 +23,7 @@ def _rows(season: int, week, season_type: str, conference,
                venue_display, network, is_neutral_site, is_conference_game, is_completed,
                spread_current, total_current, predicted_margin, home_win_probability,
                excitement_index, as_of_ts
-        from srv_schedule
+        from srv_game
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
           -- FBS spine: EITHER team FBS, defaulted rather than hardcoded, so
@@ -71,15 +71,15 @@ def _columns(scope) -> list:
 
 def body(page) -> None:
     scope = filters.game_scope()
-    table.dataset_caption("Schedule", "srv_schedule")
+    table.dataset_caption("Schedule", "srv_game")
     chips.spread_sign_note()
-    with states.section("srv_schedule"):
+    with states.section("srv_game"):
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)
         table.as_of_caption(df)
         df = table.apply_sort(df, _columns(scope))
         states.render_or_state(
-            df, "srv_schedule",
+            df, "srv_game",
             "The week's games would be listed here.",
             f"No games match {scope.describe()}.",
             renderer=lambda d: _grouped(d, scope),

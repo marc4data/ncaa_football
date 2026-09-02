@@ -107,7 +107,7 @@ def test_the_private_connector_api_we_depend_on_is_pinned():
 # cfbd_scores_refresh fetches /games and rebuilds the five serving views plus ancestors.
 # Anything else in the warehouse is whatever the last full refresh left behind.
 GAME_DERIVED = ("stg_games", "fct_game", "fct_game_team", "fct_team_record",
-                "srv_scoreboard", "srv_schedule", "srv_matchup", "srv_team_game_log",
+                "srv_game", "srv_game", "srv_matchup", "srv_team_game_log",
                 "srv_today_edges", "srv_standings")
 LEGACY_MARTS = ("mart_team_schedule", "mart_team_season_record")
 
@@ -252,7 +252,7 @@ def test_the_scores_refresh_stays_narrow():
     source = (DAGS / "scores_refresh_dag.py").read_text()
     code = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#"))
     assert "tag:warehouse" not in code
-    assert "srv_scoreboard" in code
+    assert "srv_game" in code
 
 
 def test_the_catalogue_models_get_a_pass_of_their_own_after_everything_else():

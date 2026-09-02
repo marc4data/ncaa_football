@@ -21,7 +21,7 @@ from lib.registry import GROUPS, PAGES   # noqa: E402
 # --- the query contract, enforced in code rather than in review -------------------------
 
 def test_a_valid_query_passes_and_reports_its_relation():
-    assert check_contract("select a from srv_schedule where season=1 limit 10") == "srv_schedule"
+    assert check_contract("select a from srv_game where season=1 limit 10") == "srv_game"
 
 
 @pytest.mark.parametrize("sql,reason", [
@@ -60,7 +60,7 @@ def test_error_state_never_leaks_internals():
     captured = []
     st.markdown = lambda body, **kw: captured.append(body)     # type: ignore
     st.button = lambda *a, **kw: False                          # type: ignore
-    states.error("srv_schedule")
+    states.error("srv_game")
     body = captured[0]
     for leak in ("Traceback", "psycopg2", "password", "5432", "143.110"):
         assert leak not in body
@@ -386,7 +386,7 @@ def test_the_winner_is_read_from_the_view_not_derived_from_a_sign():
 
 
 def test_a_tie_is_a_settled_result_not_a_pending_one():
-    """srv_scoreboard returns NULL for `winner` on a completed game with equal scores.
+    """srv_game returns NULL for `winner` on a completed game with equal scores.
     Rendering that as Pending would claim the game has not been played."""
     from views import scores
     tie = scores._winner({"is_completed": True, "winner": None, "actual_margin": 0})
@@ -398,7 +398,7 @@ def test_a_tie_is_a_settled_result_not_a_pending_one():
 
 def test_the_winner_never_renders_the_string_none():
     """A formatter that indexes into a nullable column and interpolates the result puts
-    `None` on the page. 11% of srv_scoreboard is a game against a team with no dim_team
+    `None` on the page. 11% of srv_game is a game against a team with no dim_team
     row, so the nullable case is the common case, not an edge."""
     from views import scores
     for row in ({"is_completed": True, "winner": None, "actual_margin": 0},
@@ -552,8 +552,8 @@ def test_the_dataset_link_lands_on_the_table():
     from lib import table as table_lib
     captured = []
     st.markdown = lambda body, **kw: captured.append(body)          # type: ignore
-    table_lib.dataset_caption("Schedule", "srv_schedule")
-    assert "table=srv_schedule" in captured[0]
+    table_lib.dataset_caption("Schedule", "srv_game")
+    assert "table=srv_game" in captured[0]
     assert "Dataset: " in captured[0]
 
 

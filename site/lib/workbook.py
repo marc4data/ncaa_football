@@ -70,12 +70,12 @@ class Sheet:
 
 
 SHEETS = [
-    Sheet("Schedule", "srv_schedule", """
+    Sheet("Schedule", "srv_game", """
         select start_date_et, week, away_team_display, away_conference, away_points,
                home_team_display, home_conference, home_points,
                spread_current, total_current, predicted_margin, home_win_probability,
                network, venue_display, is_neutral_site, is_conference_game, is_completed
-        from srv_schedule
+        from srv_game
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
           and (:conference is null or home_conference = :conference
@@ -95,11 +95,11 @@ SHEETS = [
         ("is_completed", "Final"),
     ], has_predictions=True),
 
-    Sheet("Scores", "srv_scoreboard", """
+    Sheet("Scores", "srv_game", """
         select game_date, week, away_team_display, away_points,
                home_team_display, home_points, winner, actual_margin,
                excitement_index, is_upset, attendance, venue_display
-        from srv_scoreboard
+        from srv_game
         where season = :season and season_type = :season_type and is_completed
           and (:week is null or week = :week)
         order by game_date desc, game_id

@@ -6,7 +6,7 @@
 -- record while continuing to look entirely plausible.
 --
 -- It has been verified 3,402/3,402 in fct_prediction. This asserts the same thing where the
--- site actually reads it — srv_scoreboard, whose `winner` column is derived independently
+-- site actually reads it — srv_game, whose `winner` column is derived independently
 -- from the points. Two derivations from the same source agreeing is worth more than one
 -- derivation tested against itself.
 --
@@ -25,7 +25,7 @@ select
     away_points,
     actual_margin,
     winner
-from {{ ref('srv_scoreboard') }}
+from {{ ref('srv_game') }}
 where is_completed
   and home_points is not null
   and away_points is not null

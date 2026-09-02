@@ -5,10 +5,10 @@
 -- on who is an FBS programme, and a Division II visitor is legitimately in the first and
 -- legitimately absent from the second.
 --
--- Found on srv_scoreboard at 11% of rows. Swept for rather than fixed, which turned one
+-- Found on srv_game at 11% of rows. Swept for rather than fixed, which turned one
 -- defect into five:
 --
---   srv_scoreboard      12,168 of 110,634    11.0%
+--   srv_game      12,168 of 110,634    11.0%
 --   srv_team_game_log   12,552 of 221,268     5.7%
 --   srv_standings        7,482 of  30,475    24.6%
 --   srv_rankings           662 of  49,798     1.3%
@@ -25,8 +25,8 @@
 with offenders as (
 
     {% set paired = [
-        ('srv_scoreboard', ['home', 'away']),
-        ('srv_schedule',   ['home', 'away']),
+        ('srv_game', ['home', 'away']),
+        ('srv_game',   ['home', 'away']),
         ('srv_odds_board', ['home', 'away']),
         ('srv_today_edges', ['home', 'away']),
     ] %}

@@ -12,9 +12,9 @@
   in the first and legitimately absent from the second, so dim_team has no row for it —
   which is correct behaviour by dim_team and a trap for anything joining to it for a name.
 
-  Measured, after the first instance was found on srv_scoreboard and swept for:
+  Measured, after the first instance was found on srv_game and swept for:
 
-    srv_scoreboard      12,168 of 110,634    11.0%
+    srv_game      12,168 of 110,634    11.0%
     srv_team_game_log   12,552 of 221,268     5.7%
     srv_standings        7,482 of  30,475    24.6%
     srv_rankings           662 of  49,798     1.3%

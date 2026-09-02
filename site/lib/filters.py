@@ -89,13 +89,13 @@ class GameScope:
 
 @st.cache_data(ttl=3600)
 def _seasons() -> list:
-    df = query("select distinct season from srv_schedule order by season desc limit 200")
+    df = query("select distinct season from srv_game order by season desc limit 200")
     return df["season"].tolist()
 
 
 @st.cache_data(ttl=3600)
 def _weeks(season: int, season_type: str) -> list:
-    df = query("""select distinct week from srv_schedule
+    df = query("""select distinct week from srv_game
                   where season = :season and season_type = :season_type
                   order by week limit 40""",
                {"season": season, "season_type": season_type})
@@ -104,7 +104,7 @@ def _weeks(season: int, season_type: str) -> list:
 
 @st.cache_data(ttl=3600)
 def _conferences(season: int) -> list:
-    df = query("""select distinct home_conference as conference from srv_schedule
+    df = query("""select distinct home_conference as conference from srv_game
                   where season = :season and home_conference is not null
                   order by conference limit 60""", {"season": season})
     return df["conference"].tolist()

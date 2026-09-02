@@ -1,3 +1,18 @@
+-- `spread` IS ALWAYS ZERO, AND IT IS CFBD'S ZERO, NOT OURS. R-089, investigated 2026-09-02.
+--
+-- The column has cardinality 1 across all 263,539 rows: non-null everywhere, one distinct
+-- value, 0. That is the shape of an unnest bug — a key read from the wrong level of the
+-- payload usually presents exactly like this — so it was checked at the source rather than
+-- assumed either way.
+--
+-- It is not an unnest bug. The raw response carries "spread": 0 on every play: 265,253 plays
+-- across 1,715 games in raw_metrics_wp, one distinct value. The model reads what the endpoint
+-- sends, and the endpoint sends zero.
+--
+-- No fix exists on this side. Recorded here so the next person to notice the cardinality does
+-- not spend the afternoon re-deriving it, and so that if CFBD ever starts populating it the
+-- change shows up as a cardinality that is no longer 1.
+
 -- In-game win probability: one row per (game, play). The probability series through a game.
 --
 -- THE THIRD AND LAST WIN PROBABILITY IN THIS PROJECT, and they are three different things:

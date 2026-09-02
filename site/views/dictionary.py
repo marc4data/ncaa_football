@@ -17,6 +17,21 @@ from lib import chips, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
+# OLD DEEP LINKS MUST NOT 404. R-076.
+#
+# srv_schedule and srv_scoreboard were retired into srv_game, and links of the form
+# ?table=srv_schedule exist in the wild — in the workbook, in anything anyone bookmarked, and
+# in the feedback documents this change came from. A dictionary page that answered them with
+# "table not found" would make the rename look like data loss.
+#
+# A redirect map rather than an alias view: an alias in the warehouse is a second name, and a
+# second name is how the two drifted in the first place. This resolves the name at the door
+# and leaves exactly one object underneath.
+RETIRED_VIEWS = {
+    "srv_schedule": "srv_game",
+    "srv_scoreboard": "srv_game",
+}
+
 # SERVING FIRST AND BY DEFAULT (F2-32). The site's promise is that it serves curated data;
 # a dictionary opening on raw and staging invites "so where is that?" — a question the
 # publication boundary answers with "nowhere". The other layers stay available behind an
@@ -36,11 +51,11 @@ def _tables(layer) -> list:
 def body(page) -> None:
     with states.section("srv_data_dictionary"):
         chosen_layer = params.get("tab")
-        # F2-05: a dataset link from another page arrives as ?table=srv_schedule and must
+        # F2-05: a dataset link from another page arrives as ?table=srv_game and must
         # land ON that table. The layer is inferred from it rather than asked for, because
         # a link that lands you on the right page with the wrong filter is still a link
         # that did not work.
-        requested_table = params.get("table")
+        requested_table = RETIRED_VIEWS.get(params.get("table"), params.get("table"))
         layer_label = chosen_layer if chosen_layer in LAYERS else LAYERS[0]
         if requested_table:
             layer_label = ("serving" if requested_table.startswith("srv_")

@@ -1,0 +1,186 @@
+{{ config(materialized='table') }}
+
+-- Record LEADING INTO each week. One row per (season, season_type, week, team). R-084.
+--
+-- Specified by Marc, 2026-09-02: "walk over each week in each season and accumulate the
+-- record leading into the next week. Do a running sum of wins and losses, then build a string
+-- column for current_record as W-L."
+--
+-- WHY IT HAS TO EXIST. fct_team_record is SEASON grain. Rendering it beside a Week 3 game
+-- from a finished season shows the season-final record next to a game played in September —
+-- the composition failure AC-G.33 exists to prevent, and the reason srv_game carries this
+-- rather than the season record.
+--
+-- THE OFF-BY-ONE IS THE ENTIRE POINT OF THE COLUMN. The row for week N is cumulative over
+-- completed games in weeks strictly BEFORE N. The window frame below ends at `1 preceding`,
+-- not `current row`, and that single word is the difference between a correct column and one
+-- that looks right on every row except the ones anyone checks. A Week 5 game must not show a
+-- record containing the Week 5 result.
+--
+-- WALK THE CALENDAR, NOT THE GAMES. The spine is every week in the season crossed with every
+-- team in that season, then results are LEFT joined onto it. A team does not play every week;
+-- building from its games would produce no row for a bye, and a Schedule page filtered to
+-- that week would render an empty record rather than the record carried forward.
+--
+-- ORDER BY SEASON TYPE, THEN WEEK — never week alone. Postseason week numbers restart at 1,
+-- so ordering on week would put a bowl game in the middle of October. The ordinal is derived
+-- from the data's own chronology: within season 2020, regular runs Aug-Dec 2020, postseason
+-- opens 2020-12-21, and the COVID spring season runs Feb-May 2021. Four season types exist in
+-- this warehouse, not two.
+--
+-- ONLY COMPLETED GAMES ACCUMULATE. An unplayed or postponed game contributes nothing, the
+-- same rule that makes total_points null rather than zero.
+--
+-- 0-0 IS NOT THE SAME AS UNKNOWN. Week 1 is legitimately 0-0: no games have been played yet.
+-- But a team with NO completed game anywhere in the season — a Division II side in the spine
+-- because it appears on a schedule, with no result in the warehouse — gets NULL. Marc's rule:
+-- 0-0 there is a lie. `has_completed_games` says which case a null is.
+
+with season_type_ordinal as (
+
+    select * from (values
+        ('regular', 1), ('postseason', 2), ('spring_regular', 3), ('spring_postseason', 4)
+    ) as t(season_type, ordinal)
+
+),
+
+teams_in_season as (
+
+    -- EVERY team on the spine, not just FBS. A Division II visitor appears on the schedule
+    -- and its row needs a record, or the column renders inconsistently down the page.
+    select distinct season, home_team_id as team_id from {{ ref('fct_game') }}
+    where home_team_id is not null
+    union
+    select distinct season, away_team_id from {{ ref('fct_game') }}
+    where away_team_id is not null
+
+),
+
+week_slots as (
+
+    select distinct season, season_type, week from {{ ref('fct_game') }}
+
+),
+
+spine as (
+
+    select
+        t.season, w.season_type, w.week, t.team_id,
+        o.ordinal as season_type_ordinal
+    from teams_in_season t
+    join week_slots w on w.season = t.season
+    join season_type_ordinal o on o.season_type = w.season_type
+
+),
+
+-- One row per team per completed game, from both sides of the fixture.
+team_games as (
+
+    select season, season_type, week, home_team_id as team_id,
+           case when home_points > away_points then 1 else 0 end as win,
+           case when home_points < away_points then 1 else 0 end as loss,
+           case when home_points = away_points then 1 else 0 end as tie
+    from {{ ref('fct_game') }}
+    where is_completed and home_points is not null and away_points is not null
+      and home_team_id is not null
+
+    union all
+
+    select season, season_type, week, away_team_id,
+           case when away_points > home_points then 1 else 0 end,
+           case when away_points < home_points then 1 else 0 end,
+           case when away_points = home_points then 1 else 0 end
+    from {{ ref('fct_game') }}
+    where is_completed and home_points is not null and away_points is not null
+      and away_team_id is not null
+
+),
+
+per_week as (
+
+    select season, season_type, week, team_id,
+           sum(win) as wins, sum(loss) as losses, sum(tie) as ties
+    from team_games
+    group by season, season_type, week, team_id
+
+),
+
+joined as (
+
+    select
+        s.season, s.season_type, s.week, s.team_id, s.season_type_ordinal,
+        coalesce(w.wins, 0)   as week_wins,
+        coalesce(w.losses, 0) as week_losses,
+        coalesce(w.ties, 0)   as week_ties
+    from spine s
+    left join per_week w
+        on  w.season      = s.season
+        and w.season_type = s.season_type
+        and w.week        = s.week
+        and w.team_id     = s.team_id
+
+),
+
+running as (
+
+    select
+        j.*,
+        -- `1 preceding`, NOT `current row`. See the header: this is the off-by-one the
+        -- column exists to get right.
+        sum(week_wins) over (
+            partition by season, team_id order by season_type_ordinal, week
+            rows between unbounded preceding and 1 preceding)   as wins_before,
+        sum(week_losses) over (
+            partition by season, team_id order by season_type_ordinal, week
+            rows between unbounded preceding and 1 preceding)   as losses_before,
+        sum(week_ties) over (
+            partition by season, team_id order by season_type_ordinal, week
+            rows between unbounded preceding and 1 preceding)   as ties_before,
+        -- Does this team have ANY result in the warehouse this season? Distinguishes a
+        -- legitimate 0-0 at week 1 from a team we simply hold no results for.
+        sum(week_wins + week_losses + week_ties) over (
+            partition by season, team_id)                        as season_games
+    from joined j
+
+),
+
+final as (
+
+    select
+        season, season_type, week, team_id, season_type_ordinal,
+        season_games > 0                     as has_completed_games,
+        -- The frame is empty on the first row of each partition, which is a real 0-0 rather
+        -- than a missing value — but only for a team that has results at all.
+        case when season_games > 0 then coalesce(wins_before, 0) end   as wins,
+        case when season_games > 0 then coalesce(losses_before, 0) end as losses,
+        case when season_games > 0 then coalesce(ties_before, 0) end   as ties
+    from running
+
+)
+
+select
+    {{ surrogate_key(['season', 'season_type', 'week', 'team_id']) }} as team_record_week_sk,
+    season,
+    season_type,
+    season_type_ordinal,
+    week,
+    team_id,
+    has_completed_games,
+    wins,
+    losses,
+    ties,
+    -- W-L, extending to W-L-T only when the running tie count is non-zero. Ties existed
+    -- before 1996 and a two-part string MISSTATES those seasons; a three-part string on a
+    -- modern season would be equally wrong in the other direction.
+    --
+    -- NULL where we hold no results for the team. The numeric columns beside it are what a
+    -- page should compute from — nothing should ever parse this string.
+    case
+        when not has_completed_games then null
+        when ties > 0 then cast(wins as {{ dbt.type_string() }}) || '-'
+                        || cast(losses as {{ dbt.type_string() }}) || '-'
+                        || cast(ties as {{ dbt.type_string() }})
+        else cast(wins as {{ dbt.type_string() }}) || '-'
+          || cast(losses as {{ dbt.type_string() }})
+    end                                                              as current_record
+from final
