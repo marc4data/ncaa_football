@@ -244,11 +244,35 @@ def _stacked(df: pd.DataFrame, scope) -> None:
             header = "".join(f"<th>{q}</th>" for q in ("1", "2", "3", "4")) + \
                      ("<th>OT</th>" if ot else "")
             away_ls, home_ls = _line_score(r, "away"), _line_score(r, "home")
-            score_block = (
-                f"<table class='cfdb-linescore'><tr><th></th>{header}</tr>"
-                f"<tr><td class='cfdb-ls-team'>{_team_name(r, 'away')}</td>{away_ls}</tr>"
-                f"<tr><td class='cfdb-ls-team'>{_team_name(r, 'home')}</td>{home_ls}</tr>"
-                f"</table>") if away_ls else ""
+            if away_ls:
+                score_block = (
+                    f"<table class='cfdb-linescore'><tr><th></th>{header}</tr>"
+                    f"<tr><td class='cfdb-ls-team'>{_team_name(r, 'away')}</td>{away_ls}</tr>"
+                    f"<tr><td class='cfdb-ls-team'>{_team_name(r, 'home')}</td>{home_ls}</tr>"
+                    f"</table>")
+            else:
+                # R-092. ABSENT, NOT ZERO — and the card says WHICH.
+                #
+                # Only 44,775 of 110,879 games carry quarters: 64,254 hold an empty array and
+                # 1,850 hold JSON null, and the earliest is 2001. Modern seasons are
+                # effectively complete (3,805 of 3,831 in 2025), so the gap is historical.
+                #
+                # A row of zeros would claim four scoreless quarters, which is the
+                # null-not-zero rule this project has fixed three times elsewhere. Omitting
+                # the block silently would be honest about the value and silent about the
+                # reason, which leaves a reader wondering whether the page is broken.
+                season = r.get("season")
+                why = ("Quarter scores are not recorded before 2001."
+                       if season is not None and not pd.isna(season) and int(season) < 2001
+                       else "No quarter scores recorded for this game.")
+                score_block = (f"<table class='cfdb-linescore'><tr><th></th>{header}</tr>"
+                               f"<tr><td class='cfdb-ls-team'>"
+                               f"{_team_name(r, 'away')}</td><td>—</td><td>—</td>"
+                               f"<td>—</td><td>—</td></tr>"
+                               f"<tr><td class='cfdb-ls-team'>"
+                               f"{_team_name(r, 'home')}</td><td>—</td><td>—</td>"
+                               f"<td>—</td><td>—</td></tr></table>"
+                               f"<div class='cfdb-ls-why'>{why}</div>")
             detail = " · ".join(x for x in [
                 _weather_cell(r),
                 _text(r.get("network_abbreviation")),

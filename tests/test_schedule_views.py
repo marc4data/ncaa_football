@@ -118,3 +118,24 @@ def test_pending_and_tie_are_different_winner_states():
     assert "not yet played" in pending
     assert "level" in tie
     assert pending != tie
+
+
+def test_a_game_with_no_quarters_shows_dashes_and_says_why(counting_markdown, monkeypatch):
+    """R-092. Absent is not zero, and the card says which.
+
+    Only 44,775 of 110,879 games carry quarters and the earliest is 2001. A row of zeros
+    would claim four scoreless quarters; omitting the block silently would be honest about
+    the value and silent about the reason, which reads as a broken page.
+    """
+    captured = []
+    monkeypatch.setattr(schedule.st, "markdown",
+                        lambda body, **kw: captured.append(body))
+    nan = float("nan")
+    df = pd.DataFrame([_row(
+        season=1998, home_q1=nan, home_q2=nan, home_q3=nan, home_q4=nan, home_periods=nan,
+        away_q1=nan, away_q2=nan, away_q3=nan, away_q4=nan, away_periods=nan)])
+    schedule._stacked(df, _Scope())
+    card = next(c for c in captured if "cfdb-gamecard" in c)
+    assert "—" in card, "an absent quarter renders an em dash"
+    assert "not recorded before 2001" in card, "and the card says why"
+    assert ">0<" not in card, "a zero would claim a scoreless quarter"
