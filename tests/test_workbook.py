@@ -338,9 +338,21 @@ def test_every_declared_label_divergence_is_still_real():
             view_labels.setdefault(page.view, {}).setdefault(field, set()).add(label)
 
     for field in workbook.EXPORT_ONLY_LABELS:
+        # TWO SHAPES OF DIVERGENCE, and the second was missed until R-101 produced one.
+        #
+        #   different  the site has a column for the field under another header
+        #   absent     the site does not surface the field as a column at ALL
+        #
+        # The original version only knew the first, so when R-101 folded the neutral-site
+        # glyph into the shared Game column this test read "no longer differs" and asked for
+        # the exception to be dropped — when the divergence had in fact just got wider. An
+        # exception is stale only when the site and the sheet AGREE on a header.
         diverges = any(
-            field in view_labels.get(sheet.view, {})
-            and label not in view_labels[sheet.view][field]
+            field not in view_labels.get(sheet.view, {})
+            or label not in view_labels[sheet.view][field]
             for sheet in workbook.SHEETS
             for name, label in sheet.columns if name == field)
+        exported = any(name == field
+                       for sheet in workbook.SHEETS for name, _ in sheet.columns)
+        assert exported, f"{field} is not exported at all; drop the exception"
         assert diverges, f"{field} no longer differs from the site; drop the exception"

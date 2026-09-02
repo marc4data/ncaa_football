@@ -51,7 +51,15 @@ class Col:
 
     @property
     def css(self) -> str:
-        return "cfdb-num" if self.kind in ("num", "signed") else ""
+        if self.kind in ("num", "signed"):
+            return "cfdb-num"
+        # R-103. A glyph column is neither a number nor prose. Right-aligning "☀ 71°F"
+        # hung it off the right edge of its own header; left-aligning left it stranded
+        # beside a wide neighbour. The kind carries the alignment so the caller does not
+        # hand-write a class per cell.
+        if self.kind == "center":
+            return "cfdb-center"
+        return ""
 
 
 def apply_sort(df: pd.DataFrame, columns: List[Col],
@@ -97,6 +105,15 @@ def _header_cell(column: Col, sortable: bool) -> str:
                                                             "ats", "basis", "status",
                                                             "description", "market",
                                                             "result", "bucket",
+                                                            # R-101/R-103. Both are synthetic
+                                                            # fields with no column behind
+                                                            # them, so a sort link on either
+                                                            # renders an arrow and then does
+                                                            # nothing — apply_sort drops an
+                                                            # unknown field. "weather" has
+                                                            # been offering that dead link
+                                                            # since R-027 shipped.
+                                                            "game", "weather",
                                                             "spread_and_model"):
         return f"<th class='{column.css}'>{column.label}</th>"
 

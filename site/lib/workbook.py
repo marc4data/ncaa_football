@@ -255,12 +255,14 @@ EXPORT_ONLY_LABELS = {
                      "Predicted band — because each tab shows one segment type. The sheet "
                      "stacks all five, so its header has to name the column rather than "
                      "the cut, and Segment sits beside it saying which cut each row is",
-    "is_neutral_site": "R-026: the Schedule page shows a neutral site as an ICON WITH NO "
-                       "HEADER AND NO LABEL — a deliberate exception to the site's "
+    "is_neutral_site": "R-026 then R-101: the Schedule page shows a neutral site as an ICON "
+                       "WITH NO LABEL — a deliberate exception to the site's "
                        "glyph-plus-label rule, decided by Marc against a small known user "
-                       "base. A spreadsheet has no icon convention and no tooltip, so the "
-                       "column keeps a spelled-out header here. This is the divergence "
-                       "being real rather than an oversight",
+                       "base — and R-101 folded that icon into the shared Game column, so "
+                       "the site now has NO COLUMN OF ITS OWN for this field at all. A "
+                       "spreadsheet has no icon convention and no tooltip, so the column "
+                       "keeps a spelled-out header here. This is the divergence being real "
+                       "rather than an oversight",
 }
 
 COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential",
