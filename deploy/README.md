@@ -52,55 +52,37 @@ docker compose --profile tunnel up -d      # once the tunnel token is set
 ./backup.sh                                # on demand; cron runs it nightly
 ```
 
-Redeploy after changing site code or the stack:
+Redeploy after merging to main:
 
 ```bash
-# From the repo root, ON YOUR LAPTOP. The rsyncs push files up; the ssh line runs the
-# rebuild on the droplet and returns you to your own prompt. You never open a console
-# on the droplet itself.
-
-# CFDB_DROPLET_HOST lives in .env, which an interactive shell does not read on its own.
-set -a; . ./.env; set +a
-
-rsync -az deploy/docker-compose.yml deploy/backup.sh $CFDB_DROPLET_HOST:/opt/cfdb/
-rsync -az --delete --exclude '__pycache__' \
-  site/Dockerfile site/requirements.txt \
-  site/app.py site/lib site/views \
-  $CFDB_DROPLET_HOST:/opt/cfdb/site/
-ssh $CFDB_DROPLET_HOST 'cd /opt/cfdb && docker compose build site && docker compose up -d site'
+scripts/deploy_main.sh              # pipeline + site, only what changed
+scripts/deploy_main.sh --site-only  # skip the pipeline
+scripts/deploy_main.sh --force-site # rebuild the site image even if unchanged
 ```
 
-**EVERY PATH COMES FROM `site/`, AND THAT IS THE FIX FOR A REAL DEPLOY FAILURE.**
+**THAT SCRIPT IS THE DEPLOY. THERE IS NO SUPPORTED MANUAL PATH, AND THIS FILE USED TO
+DOCUMENT ONE.**
 
-There used to be a second copy of the Dockerfile and requirements at `deploy/site/`, and
-these instructions shipped THAT one while CI built the one in `site/`. The two drifted, as
-a duplicate always will, and by 2 September the copy being deployed was wrong in two
-independent ways:
+PRODUCTION IS TWO HALVES. The site image in `/opt/cfdb/site` renders pages; the pipeline
+repo in `/opt/cfdb-pipeline/repo` is what Airflow builds dbt models and publishes serving
+from. They are separate images with separate failure modes, and a deploy that moves one
+without the other produces a site asking the database for something the database does not
+have yet.
 
-  Dockerfile        `COPY pages/` — the rename to `views/` never reached it, so the build
-                    failed outright with `"/pages": not found`
-  requirements.txt  `streamlit>=1.40` instead of the `==1.61.1` pin, which exists BECAUSE an
-                    unpinned upgrade blanked every page on 30 August
+That is not hypothetical. On 2 September the instructions here rsynced `site/` and stopped.
+The site went to main; the pipeline stayed on a commit from four PRs earlier; and Schedule
+rendered "Something went wrong reading srv_game" because the page selected three columns
+that the published table — built by the older pipeline — did not carry. Nothing in the
+manual path could have caught it, because the manual path does not know the pipeline exists.
 
-The build failing first is the only reason the second one did not ship. `deploy/site/` is
-deleted rather than corrected: a second copy of a file CI does not check is a defect
-waiting to recur, and `tests/test_deploy_docs.py` now fails if one comes back.
+`deploy_main.sh` does both halves in the right order, refuses to continue on a DAG import
+error, skips the site rebuild when nothing under `site/` changed (a needless rebuild is a
+needless dependency resolution, which is exactly how Streamlit 1.62 arrived unannounced and
+blanked the nav), and fails loudly if the site does not render or report healthy afterwards.
 
-**One rsync, and the source directories have no trailing slash.** Both details are load
-bearing, and both were got wrong on a real deploy:
-
-- `site/lib/` with a trailing slash copies the directory's *contents* into the destination
-  root, so every module lands beside `app.py` and the `lib` package does not exist. Without
-  the slash the directory itself is copied, which is what the Dockerfile's `COPY lib/` needs.
-- Two `--delete` invocations against the same destination fight each other. The second one
-  deleted the `Dockerfile` the first had just placed, and the build then failed with
-  `failed to read dockerfile`. `--delete` is still right — a page module removed from the
-  repo but left on the box keeps being served — it just has to be one command that knows
-  about everything.
-
-The list also has to include `lib/` and `pages/` at all: it once read `app.py` and `db.py`
-alone, which produces a container that builds cleanly, starts cleanly, and raises
-`ModuleNotFoundError: No module named 'lib'` the moment anyone loads a page.
+The individual rsync and docker commands are deliberately NOT reproduced here. Someone
+running them by hand is someone deploying half of production without verifying it, which is
+the whole of what went wrong.
 
 Verify after deploying, because "the container is up" is not "the site works":
 
