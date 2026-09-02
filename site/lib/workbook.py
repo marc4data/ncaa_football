@@ -88,8 +88,8 @@ SHEETS = [
         ("away_points", "Away pts"),
         ("home_team_display", "Home"), ("home_conference", "Home conf"),
         ("home_points", "Home pts"),
-        ("spread_current", "Spread"), ("total_current", "Total"),
-        ("predicted_margin", "Pred margin"), ("home_win_probability", "Home win prob"),
+        ("spread_current", "Spread"), ("total_current", "O/U"),
+        ("predicted_margin", "Pred"), ("home_win_probability", "Home win prob"),
         ("network", "TV"), ("venue_display", "Venue"),
         ("is_neutral_site", "Neutral"), ("is_conference_game", "Conference"),
         ("is_completed", "Final"),
@@ -129,7 +129,7 @@ SHEETS = [
         ("away_team_display", "Away"), ("home_team_display", "Home"),
         ("provider_display", "Book"),
         ("spread", "Spread"), ("spread_open", "Open"),
-        ("total", "Total"), ("total_open", "Total open"),
+        ("total", "O/U"), ("total_open", "O/U open"),
         ("home_moneyline", "Home ML"), ("away_moneyline", "Away ML"),
         ("home_implied_probability", "Home implied"),
         ("away_implied_probability", "Away implied"),
@@ -255,6 +255,12 @@ EXPORT_ONLY_LABELS = {
                      "Predicted band — because each tab shows one segment type. The sheet "
                      "stacks all five, so its header has to name the column rather than "
                      "the cut, and Segment sits beside it saying which cut each row is",
+    "is_neutral_site": "R-026: the Schedule page shows a neutral site as an ICON WITH NO "
+                       "HEADER AND NO LABEL — a deliberate exception to the site's "
+                       "glyph-plus-label rule, decided by Marc against a small known user "
+                       "base. A spreadsheet has no icon convention and no tooltip, so the "
+                       "column keeps a spelled-out header here. This is the divergence "
+                       "being real rather than an oversight",
 }
 
 COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential",

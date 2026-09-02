@@ -120,7 +120,11 @@ def _board(df: pd.DataFrame) -> None:
         Col("provider_display", "Book"),
         Col("spread", "Spread", "signed"),
         Col("spread_open", "Open", "signed"),
-        Col("total", "Total", "num"),
+        # R-087: O/U, not "Total". Schedule and Odds Board showed the same field under two
+        # names, which is exactly what the Data Dictionary exists to prevent. O/U wins
+        # because it is the shorthand a reader recognises without context; "Total" reads
+        # as an arithmetic total beside a column of points.
+        Col("total", "O/U", "num"),
         Col("home_ml", "Home ML", render=_moneyline("home_moneyline")),
         Col("away_ml", "Away ML", render=_moneyline("away_moneyline")),
         Col("home_implied_probability", "Home implied", "num"),
