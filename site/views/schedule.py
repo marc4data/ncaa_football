@@ -12,7 +12,7 @@ relation and the same frame; the stacked view is a different rendering, not a se
 import pandas as pd
 import streamlit as st
 
-from lib import chips, filters, params, shell, states, table
+from lib import chips, filters, fmt, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -42,6 +42,28 @@ WEATHER_GLYPH = {
     25: "⚡",                              # Thunderstorm
 }
 DOME_GLYPH = "⌂"
+NEUTRAL_GLYPH = "◇"
+
+# R-100 / R-113. THE SAME GLYPH THE SCORES PAGE ALREADY USES.
+#
+# Prompt 032 wrote this as ◀. `scores.py` has shipped ▸ against the same `.cfdb-winner`
+# class since it was built, and R-100's own wording is "a relocation, not a new component".
+# Two pages marking a winner with two different characters is a worse outcome than a
+# one-character deviation from the prose, so this reuses the component whole. It also points
+# INTO the number it precedes rather than away from it.
+WINNER_GLYPH = "▸"
+# A tie is completed AND has no winner, which is not the same fact as "not played yet". The
+# chip this replaced kept those apart and so does this: nothing on either row means pending,
+# `=` on BOTH rows means level, ▸ on one row means won.
+TIE_GLYPH = "="
+
+# R-104's fields, rendered. Δ rather than ▷: the direction is already carried by the sign,
+# and a directional glyph beside a negative number is two cues that can disagree.
+MOVE_GLYPH = "Δ"
+
+# R-109. One letter for the score column of a box score, chosen once so a box score on any
+# future page uses the same one. T for Total.
+TOTAL_HEADER = "T"
 
 
 def _rows(season: int, week, season_type: str, conference,
@@ -53,8 +75,9 @@ def _rows(season: int, week, season_type: str, conference,
                away_team_slug, away_team_display, away_abbreviation, away_logo_url,
                away_conference, away_points, away_rank, away_team_record_display,
                venue_display, network, network_abbreviation, is_neutral_site,
-               is_conference_game, is_completed, winner,
+               is_conference_game, is_completed, winner, best_rank_in_game,
                spread_current, total_current, predicted_margin, home_win_probability,
+               spread_move_from_open, total_move_from_open,
                excitement_index,
                is_indoors, temperature_f, weather_condition_code, weather_condition,
                home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
@@ -67,7 +90,13 @@ def _rows(season: int, week, season_type: str, conference,
           -- 'All divisions' in the filter bar genuinely widens it.
           and (:division = 'all' or is_fbs_game)
           and (:conf is null or home_conference = :conf or away_conference = :conf)
-        order by start_date_et, game_id
+        -- R-108. Date, then kickoff, then the best rank ON THE FIELD, then the home name.
+        -- The rank only ever breaks a tie between games kicking at the same minute, which
+        -- is exactly where a reader wants the ranked matchup first. `nulls last` is the
+        -- whole of "unranked last" — without it Postgres sorts NULL high and every unranked
+        -- game leads its own time slot.
+        order by game_date, start_date_et, best_rank_in_game nulls last,
+                 home_team_display, game_id
         limit 400
     """
     return query(sql, {"season": season, "week": week, "season_type": season_type,
@@ -92,6 +121,11 @@ def _text(value) -> str:
     return str(value)
 
 
+def _missing(value) -> bool:
+    """Null in either of the two shapes a serving row hands back."""
+    return value is None or (isinstance(value, float) and pd.isna(value))
+
+
 def _team_name(row, side: str) -> str:
     """Display name, abbreviated past the threshold. R-085."""
     name = _text(row.get(f"{side}_team_display")) or "—"
@@ -100,6 +134,17 @@ def _team_name(row, side: str) -> str:
         # truncation rather than to NaN.
         return _text(row.get(f"{side}_abbreviation")) or name[:TEAM_NAME_MAX]
     return name
+
+
+def _team_abbrev(row, side: str) -> str:
+    """The BOUNDED label for a box-score row. R-109, and the reason R-015 is tractable here.
+
+    "North Carolina" against "TCU" is a 14-character swing in the first column of the box
+    score, and with `table-layout:fixed` a shared colgroup has to be sized for the worst
+    case on the page. The abbreviation caps that swing at three or four characters, so the
+    one geometry computed for the whole page fits every card without truncating any of them.
+    """
+    return _text(row.get(f"{side}_abbreviation")) or _team_name(row, side)
 
 
 def _team_with_record(row, side: str) -> str:
@@ -121,26 +166,54 @@ def _team_with_record(row, side: str) -> str:
     if display and short != str(display):
         base = base.replace(f">{display}<", f">{short}<")
     record = row.get(f"{side}_team_record_display")
-    if record is None or (isinstance(record, float) and pd.isna(record)):
+    if _missing(record):
         return base
     return f"{base}<span class='cfdb-team-record'>{record}</span>"
 
 
-def _winner_cell(row) -> str:
-    """R-029. Who won, without the reader subtracting two numbers.
+def _winner_side(row):
+    """"home", "away", "tie", or None for a game not yet played. R-029, unchanged in fact.
 
-    `winner` is computed in dbt and carries the team NAME; the chip shows the abbreviated
-    form so the column stays narrow. Pending is distinct from a tie: an unplayed game has no
-    winner yet, and a tie has no winner at all — collapsing those into one grey box is the
-    mistake cover_chip_html already refuses to make.
+    `winner` is computed in dbt and carries the team NAME. Pending is distinct from a tie:
+    an unplayed game has no winner YET, and a tie has no winner AT ALL. Collapsing those into
+    one blank is the mistake the chip this replaced already refused to make.
     """
     if not row.get("is_completed"):
-        return chips.chip_html("w", "—", "not yet played")
+        return None
     winner = row.get("winner")
-    if winner is None or (isinstance(winner, float) and pd.isna(winner)):
-        return chips.chip_html("w", "Tie", "the game ended level")
-    side = "home" if winner == row.get("home_team_display") else "away"
-    return chips.chip_html("y", _team_name(row, side), f"{winner} won")
+    if _missing(winner):
+        return "tie"
+    return "home" if winner == row.get("home_team_display") else "away"
+
+
+def _winner_marker(row, side: str) -> str:
+    """R-100 / R-113. The marker, and the SPACE FOR THE MARKER on the row that lacks it.
+
+    If only the winning row carried a character the two scores would no longer line up
+    vertically, and a misaligned pair of numbers reads as a rendering bug rather than as a
+    marker. `.cfdb-winner-spacer` is a fixed-width empty inline-block, already used by the
+    Scores page for exactly this.
+
+    A glyph rather than a colour, so the result survives greyscale and a colour-blind reader
+    (AC-G.22).
+    """
+    state = _winner_side(row)
+    if state == "tie":
+        return f"<span class='cfdb-winner' title='the game ended level'>{TIE_GLYPH}</span>"
+    if state == side:
+        return f"<span class='cfdb-winner' title='won'>{WINNER_GLYPH}</span>"
+    return "<span class='cfdb-winner-spacer'></span>"
+
+
+def _score_cell(row, side: str) -> str:
+    """R-100. The winner marker moved onto the score it describes.
+
+    It used to be its own "Won" column holding a chip with a team name in it — a full column
+    of width to restate something the two numbers beside it already implied, and the name was
+    a third rendering of a team already named twice on the row.
+    """
+    return _winner_marker(row, side) + fmt.number(row.get(f"{side}_points"),
+                                                  f"{side}_points", 0)
 
 
 def _weather_cell(row) -> str:
@@ -153,13 +226,26 @@ def _weather_cell(row) -> str:
     if row.get("is_indoors"):
         return f"<span class='cfdb-wx' title='indoor venue'>{DOME_GLYPH}</span>"
     temp = row.get("temperature_f")
-    if temp is None or pd.isna(temp):
+    if _missing(temp):
         return ""
     code = row.get("weather_condition_code")
-    glyph = WEATHER_GLYPH.get(int(code)) if code is not None and not pd.isna(code) else None
+    glyph = WEATHER_GLYPH.get(int(code)) if not _missing(code) else None
     label = row.get("weather_condition") or "conditions not recorded"
     return (f"<span class='cfdb-wx' title='{label}'>"
             f"{glyph or ''} {float(temp):.0f}°F</span>")
+
+
+def _neutral_glyph(row) -> str:
+    """R-026. ICON ALONE, NO TEXT LABEL.
+
+    A DELIBERATE EXCEPTION to the site's glyph+label convention, decided by Marc against a
+    small known user base and logged in the decision log with its reason. It is not an
+    oversight and it is not to be "fixed" back to glyph+label. R-102's legend is what makes
+    the exception defensible: the page explains the glyph once, at the top.
+    """
+    if not row.get("is_neutral_site"):
+        return ""
+    return f"<span class='cfdb-neutral' title='neutral site'>{NEUTRAL_GLYPH}</span>"
 
 
 def _columns(scope) -> list:
@@ -168,12 +254,11 @@ def _columns(scope) -> list:
         Col("start_date_et", "Kickoff", "time"),
         Col("away", "Away", render=lambda r: _team_with_record(r, "away"),
             link=lambda r: scope.link("team", team=r.get("away_team_slug"))),
-        Col("away_points", "", "num", dp=0),
+        # R-100. The "Won" chip column is gone; the marker rides the score.
+        Col("away_points", "", "num", dp=0, render=lambda r: _score_cell(r, "away")),
         Col("home", "Home", render=lambda r: _team_with_record(r, "home"),
             link=lambda r: scope.link("team", team=r.get("home_team_slug"))),
-        Col("home_points", "", "num", dp=0),
-        # R-029.
-        Col("winner", "Won", render=_winner_cell),
+        Col("home_points", "", "num", dp=0, render=lambda r: _score_cell(r, "home")),
         Col("spread_current", "Spread", "signed"),
         # R-087. O/U, reconciled with Odds Board so one field has one name site-wide.
         Col("total_current", "O/U", "num"),
@@ -181,19 +266,36 @@ def _columns(scope) -> list:
         # column header for one column's benefit, and "Pred" is already the site's shorthand
         # for a model number — the sign note directly above the table explains the sign.
         Col("predicted_margin", "Pred", "signed"),
-        # R-027.
-        Col("weather", "Wx", render=_weather_cell),
+        # R-027 / R-103.
+        Col("weather", "Wx", "center", render=_weather_cell),
         Col("network_abbreviation", "TV"),
-        # R-026. ICON ALONE, NO TEXT LABEL AND NO HEADER WORD.
+        # R-101. ONE COLUMN, WITH A HEADER, FOR BOTH GLYPHS.
         #
-        # A DELIBERATE EXCEPTION to the site's glyph+label convention, decided by Marc
-        # against a small known user base and logged in the decision log with its reason.
-        # It is not an oversight and it is not to be "fixed" back to glyph+label.
-        Col("is_neutral_site", "",
-            render=lambda r: ("<span title='neutral site'>◇</span>"
-                              if r.get("is_neutral_site") else "")),
-        table.details_col(lambda r: scope.link("matchup", game_id=r["game_id"])),
+        # These were two columns — `table.details_col` and a headerless neutral-site glyph —
+        # costing two column widths for at most two characters, one of which was blank on
+        # 95% of rows. R-026's icon-only exception is about the ROW, not the header: a header
+        # on the column is not the glyph+label pattern Marc declined.
+        Col("game", "Game", "center",
+            render=lambda r: (f"<span class='cfdb-details' title='Open the matchup'>"
+                              f"{table.DETAILS_GLYPH}</span>" + _neutral_glyph(r)),
+            link=lambda r: scope.link("matchup", game_id=r["game_id"])),
     ]
+
+
+def _legend() -> None:
+    """R-102. The glyphs, once, above both views.
+
+    Above the tables and OUTSIDE the view branch, so it applies to whichever tab is showing
+    rather than being written twice and drifting.
+    """
+    st.markdown(
+        "<div class='cfdb-legend'>"
+        f"<span>{table.DETAILS_GLYPH} matchup</span>"
+        f"<span>{NEUTRAL_GLYPH} neutral site</span>"
+        f"<span>{MOVE_GLYPH} change since the line opened</span>"
+        f"<span>{WINNER_GLYPH} won &nbsp;·&nbsp; {TIE_GLYPH} tied</span>"
+        "<span>@ at &nbsp;·&nbsp; vs neutral site</span>"
+        "</div>", unsafe_allow_html=True)
 
 
 # --- the two views --------------------------------------------------------------------
@@ -208,25 +310,256 @@ def _dense(df: pd.DataFrame, scope) -> None:
                      link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]))
 
 
-def _line_score(row, side: str) -> str:
-    """Quarter-by-quarter for one side, or nothing.
+# --- the stacked view -----------------------------------------------------------------
 
-    Line scores exist from 2001 and are absent on 60% of rows — CFBD sends an empty array for
-    most of history. An empty cell is the honest rendering; a row of zeros would claim a
-    shutout in four quarters.
-    """
+def _has_periods(row, side: str) -> bool:
     periods = row.get(f"{side}_periods")
-    if periods is None or pd.isna(periods):
-        return ""
+    return not _missing(periods)
+
+
+def _linescore_geometry(df: pd.DataFrame) -> dict:
+    """R-015 FOR THE STACKED VIEW: the box score's shape decided ONCE, for the whole page.
+
+    The dense view has done this since it was built — `_dense` computes `column_layout`
+    outside the day loop and hands the same widths to every day's table. The stacked view had
+    no equivalent: every card's `.cfdb-linescore` auto-sized to its own contents, so a card
+    with an OT column was wider than the one beside it and the row labels started at a
+    different x on every card. In a two-up grid (R-110) that reads as broken alignment.
+
+    Two facts are enough to fix it, and both must be taken over the whole frame rather than
+    per card:
+
+      ot        does ANY game on this page need an OT column. If one does, every card gets
+                the column — blank, not zero, where the game ended in regulation. A blank
+                cell is true (there were no overtime points); a 0 would claim a scoreless
+                overtime that was never played.
+      label_ch  the widest row label on the page, in characters. Abbreviations (R-109) keep
+                this to three or four, which is why the shared width does not have to be
+                sized for "Middle Tennessee State".
+
+    Capped at 8 so one pathological abbreviation cannot widen every card on the page.
+    """
+    any_ot, label = False, 3
+    for _, row in df.iterrows():
+        for side in ("home", "away"):
+            periods = row.get(f"{side}_periods")
+            if not _missing(periods) and int(periods) > 4:
+                any_ot = True
+            label = max(label, len(_team_abbrev(row, side)))
+    return {"ot": any_ot, "label_ch": min(label, 8)}
+
+
+def _ls_width(geo: dict) -> str:
+    """THE TABLE'S OWN WIDTH, WHICH `table-layout:fixed` ALONE DOES NOT GIVE YOU.
+
+    Measured, not assumed: with the colgroup in place and `table-layout:fixed` computed, every
+    numeric column came out identical across all sixty cards on a page and the LABEL column
+    came out anywhere from 31px to 46px. A fixed layout distributes a KNOWN table width by the
+    colgroup; with `width:auto` the browser still runs a content pass to decide what that
+    width is, and the only column whose content varies is the label.
+
+    Stating the sum removes the content pass. The terms are the colgroup's, in order.
+    """
+    numeric = 5 if geo["ot"] else 4                      # quarters, plus OT when the page has any
+    return (f"{_ls_label_em(geo) + numeric * 2.6 + 3 + 1.2:.2f}em")
+
+
+def _ls_label_em(geo: dict) -> float:
+    """The label column, in em — NOT in `ch`, WHICH IS THE WRONG UNIT FOR THIS TEXT.
+
+    `ch` is the advance width of "0". These labels are UPPERCASE text in a PROPORTIONAL face,
+    where a capital runs about 0.62em against roughly 0.5em for the digit, and the cell also
+    carries .35rem of padding on the left and .5rem on the right that the column width has to
+    cover because the cells are border-box.
+
+    Measured on the rendered page with the `ch` version: 30px of column against 45px of
+    content for "NMSU", so every abbreviation on every card was quietly ellipsis-clipped —
+    invisible in a screenshot, which is exactly why it was found by measuring instead.
+
+    0.65 rather than 0.62 leaves a character's worth of headroom for a wide capital.
+    """
+    return geo["label_ch"] * 0.65 + 1.15
+
+
+def _ls_colgroup(geo: dict) -> str:
+    """The shared geometry as markup. `.cfdb-linescore` is `table-layout:fixed`, so these
+    widths are honoured rather than treated as hints — given `_ls_width` above."""
+    cols = [f"<col style='width:{_ls_label_em(geo):.2f}em'>"]
+    cols += ["<col style='width:2.6em'>"] * (5 if geo["ot"] else 4)
+    # THE MARKER PRECEDES THE TOTAL, as it precedes the score in the dense view. Trailing it
+    # put a right-pointing glyph on the far side of the number it describes, so the two views
+    # marked a winner in two directions on one page.
+    cols.append("<col style='width:1.2em'>")    # the winner marker, R-113
+    cols.append("<col style='width:3em'>")      # the total, R-109
+    return "<colgroup>" + "".join(cols) + "</colgroup>"
+
+
+def _ls_header(geo: dict) -> str:
+    quarters = "".join(f"<th>{q}</th>" for q in (1, 2, 3, 4))
+    overtime = "<th>OT</th>" if geo["ot"] else ""
+    return (f"<tr><th></th>{quarters}{overtime}"
+            f"<th class='cfdb-ls-mark'></th>"
+            f"<th title='Total'>{TOTAL_HEADER}</th></tr>")
+
+
+def _ls_row(row, side: str, geo: dict) -> str:
+    """One team's line, ending in the final score and the winner marker.
+
+    R-109 folded the score in here. It used to be a separate bold block on the left of the
+    card, which meant the card stated the same two numbers in two places once quarters
+    existed, and stated them in only one place when they did not.
+    """
+    has = _has_periods(row, side)
     cells = []
     for q in (1, 2, 3, 4):
-        v = row.get(f"{side}_q{q}")
-        cells.append(f"<td>{'' if v is None or pd.isna(v) else int(v)}</td>")
-    overtime = row.get(f"{side}_overtime_points")
-    if periods and int(periods) > 4:
-        cells.append(f"<td class='cfdb-ls-ot'>"
-                     f"{0 if overtime is None or pd.isna(overtime) else int(overtime)}</td>")
-    return "".join(cells)
+        value = row.get(f"{side}_q{q}")
+        # R-092: absent, not zero. A row of zeros would claim four scoreless quarters.
+        cells.append(f"<td>{'—' if not has else ('' if _missing(value) else int(value))}</td>")
+    if geo["ot"]:
+        periods, overtime = row.get(f"{side}_periods"), row.get(f"{side}_overtime_points")
+        if has and int(periods) > 4:
+            cells.append(f"<td class='cfdb-ls-ot'>"
+                         f"{0 if _missing(overtime) else int(overtime)}</td>")
+        else:
+            cells.append("<td></td>")
+    points = row.get(f"{side}_points")
+    cells.append(f"<td class='cfdb-ls-mark'>{_winner_marker(row, side)}</td>")
+    cells.append(f"<td class='cfdb-ls-total'>"
+                 f"{'' if _missing(points) else int(points)}</td>")
+    return (f"<tr><td class='cfdb-ls-team'>{_team_abbrev(row, side)}</td>"
+            f"{''.join(cells)}</tr>")
+
+
+def _score_block(row, geo: dict) -> str:
+    """The box score. R-106 gates this on `is_completed`, so it is never the pre-kick state."""
+    why = ""
+    if not _has_periods(row, "away") and not _has_periods(row, "home"):
+        # R-092. ABSENT, NOT ZERO — and the card says WHICH.
+        #
+        # Only 44,775 of 110,879 games carry quarters: 64,254 hold an empty array and 1,850
+        # hold JSON null, and the earliest is 2001. Modern seasons are effectively complete
+        # (3,805 of 3,831 in 2025), so the gap is historical. Omitting the block silently
+        # would be honest about the value and silent about the reason, which leaves a reader
+        # wondering whether the page is broken.
+        #
+        # This copy is for a COMPLETED game whose quarters were never recorded. It is NOT the
+        # pre-kick state and R-106 is what keeps it from being shown for one: a scheduled
+        # game is not a game whose quarter scores are missing.
+        season = row.get("season")
+        text = ("Quarter scores are not recorded before 2001."
+                if not _missing(season) and int(season) < 2001
+                else "No quarter scores recorded for this game.")
+        why = f"<div class='cfdb-ls-why'>{text}</div>"
+    return (f"<table class='cfdb-linescore' style='width:{_ls_width(geo)}'>"
+            f"{_ls_colgroup(geo)}{_ls_header(geo)}"
+            f"{_ls_row(row, 'away', geo)}{_ls_row(row, 'home', geo)}</table>{why}")
+
+
+def _market_block(row) -> str:
+    """R-106. What occupies the box-score's space BEFORE kickoff.
+
+    Away row carries the total, home row the spread, so each number sits beside the team it
+    is quoted against in the rows above. The move is R-104's field rendered — same field,
+    same name as on Line Movement, whatever the header shows.
+
+    A game with no line yet returns "" and the card shows NOTHING there. Not an empty slot,
+    not a dash: a market that does not exist yet is not a missing value.
+    """
+    lines = []
+    for label, value, move, kind in (
+            ("O/U", row.get("total_current"), row.get("total_move_from_open"), "num"),
+            ("Spread", row.get("spread_current"), row.get("spread_move_from_open"), "sign")):
+        if _missing(value):
+            continue
+        shown = (fmt.signed(value, "spread_current") if kind == "sign"
+                 else fmt.number(value, "total_current"))
+        moved = ("" if _missing(move)
+                 else f"<td class='cfdb-market-move'>{MOVE_GLYPH} "
+                      f"{fmt.signed(move, 'move')}</td>")
+        lines.append(f"<tr><td class='cfdb-market-label'>{label}</td><td>{shown}</td>"
+                     f"{moved or '<td></td>'}</tr>")
+    if not lines:
+        return ""
+    # Fixed columns, so a card whose line has not moved lines up with the one beside it.
+    # 4.6em is "Spread" at this font plus its cell padding — measured after 3.6em clipped it
+    # to "Sprea / d" the moment the table stopped sizing itself to its contents.
+    colgroup = ("<colgroup><col style='width:4.6em'><col style='width:3.4em'>"
+                "<col style='width:4em'></colgroup>")
+    return (f"<table class='cfdb-market' style='width:12em'>"
+            f"{colgroup}{''.join(lines)}</table>")
+
+
+def _team_row(row, side: str, scope) -> str:
+    """R-105 / R-107 / R-112, all three of which live on this one line of the card.
+
+    R-105 — THE WRAPPER. `table.team_cell()` returns SEVERAL sibling spans (logo, rank badge,
+    name), and `_team_with_record` appends a fourth. Interpolating that straight into
+    `.cfdb-gamecard-row`, which was `display:flex; justify-content:space-between`, made every
+    span its own flex item and distributed all of them across 1,400px. The `.4rem` margins
+    were being applied and then overwhelmed. `.cfdb-teamcluster` gives the row exactly one
+    child, which is what makes the margins mean what they say.
+
+    R-107 — THE CARD APPLIES THE LINK ITSELF. `team_cell` does not build an anchor; in the
+    dense table the href comes from the COLUMN's `link`, and a card has no column. Its own
+    docstring records that `slug_field` "was accepted and ignored for weeks, which is why
+    every team name on the site was inert text" — this is that same defect in a new surface,
+    so the card supplies the anchor rather than expecting the cell to carry one.
+
+    R-112 — WHICH SIDE IS HOME. Away-over-home is a convention the reader was expected to
+    already hold, and at a neutral site it tells them something false: the card Marc sent
+    stacks North Carolina over TCU at Aviva Stadium, Dublin. The home row is marked `@`
+    ("North Carolina at TCU") and, at a neutral site, `vs` — which says there is no home side
+    to read into the order. The away row carries the same span, empty, so the two names still
+    start at the same x.
+    """
+    if side == "home":
+        neutral = row.get("is_neutral_site")
+        glyph = "vs" if neutral else "@"
+        title = ("neutral site — neither team is at home" if neutral
+                 else f"at {_text(row.get('home_team_display'))}")
+        marker = f"<span class='cfdb-athome' title='{title}'>{glyph}</span>"
+    else:
+        marker = "<span class='cfdb-athome'></span>"
+    cluster = _team_with_record(row, side)
+    slug = row.get(f"{side}_team_slug")
+    if not _missing(slug):
+        href = scope.link("team", team=slug)
+        cluster = f"<a class='cfdb-teamlink' href='{href}' target='_self'>{cluster}</a>"
+    return (f"<div class='cfdb-gamecard-row'>"
+            f"<span class='cfdb-teamcluster'>{marker}{cluster}</span></div>")
+
+
+def _card(row, scope, geo: dict) -> str:
+    """One game.
+
+    NOTE ON LINKS: the card is a <div>, not an <a>. The dense view makes the whole row a
+    link, but here the team names are already anchors and <a> cannot nest, so Matchup gets
+    its own explicit affordance in the meta line — the same glyph, and the same reasoning,
+    as `table.details_col`.
+    """
+    detail = (_score_block(row, geo) if row.get("is_completed")
+              else _market_block(row))
+    matchup = (f"<a href='{scope.link('matchup', game_id=row['game_id'])}' target='_self' "
+               f"title='Open the matchup'><span class='cfdb-details'>"
+               f"{table.DETAILS_GLYPH}</span></a>")
+    meta = " · ".join(x for x in [
+        _weather_cell(row),
+        _text(row.get("network_abbreviation")),
+        (f"{NEUTRAL_GLYPH} neutral site" if row.get("is_neutral_site") else ""),
+        _text(row.get("venue_display")),
+    ] if x)
+    return (
+        f"<div class='cfdb-gamecard'>"
+        f"  <div class='cfdb-gamecard-top'>"
+        # R-108. The card had no kickoff time at all.
+        f"    <div class='cfdb-gamecard-time'>{fmt.clock(row.get('start_date_et'))}</div>"
+        f"    <div class='cfdb-gamecard-teams'>"
+        f"{_team_row(row, 'away', scope)}{_team_row(row, 'home', scope)}"
+        f"    </div>"
+        f"    <div class='cfdb-gamecard-detail'>{detail}</div>"
+        f"  </div>"
+        f"  <div class='cfdb-gamecard-meta'>{meta}{' · ' if meta else ''}{matchup}</div>"
+        f"</div>")
 
 
 def _stacked(df: pd.DataFrame, scope) -> None:
@@ -234,64 +567,18 @@ def _stacked(df: pd.DataFrame, scope) -> None:
 
     Built from the same frame as the dense view — no second query and no app-side join, which
     is the single-relation rule and also why the two views cannot disagree with each other.
+
+    R-110: the cards go into a CSS grid, not `st.columns`. Streamlit renders server-side and
+    cannot measure a viewport, so `st.columns(2)` would be a fixed two-up that keeps two
+    cards side by side on a phone; `auto-fit` + `minmax` lets the browser reflow on its own,
+    with no JavaScript and no custom component. Day groups still head their own section.
     """
+    geo = _linescore_geometry(df)          # R-015: once for the page, not once per card.
     for day, rows in df.groupby(df["game_date"], sort=True):
         st.markdown(f"<div class='cfdb-daygroup'>{pd.Timestamp(day):%A %d %B %Y}</div>",
                     unsafe_allow_html=True)
-        for _, r in rows.iterrows():
-            ot = r.get("home_periods") is not None and not pd.isna(r.get("home_periods")) \
-                and int(r.get("home_periods") or 0) > 4
-            header = "".join(f"<th>{q}</th>" for q in ("1", "2", "3", "4")) + \
-                     ("<th>OT</th>" if ot else "")
-            away_ls, home_ls = _line_score(r, "away"), _line_score(r, "home")
-            if away_ls:
-                score_block = (
-                    f"<table class='cfdb-linescore'><tr><th></th>{header}</tr>"
-                    f"<tr><td class='cfdb-ls-team'>{_team_name(r, 'away')}</td>{away_ls}</tr>"
-                    f"<tr><td class='cfdb-ls-team'>{_team_name(r, 'home')}</td>{home_ls}</tr>"
-                    f"</table>")
-            else:
-                # R-092. ABSENT, NOT ZERO — and the card says WHICH.
-                #
-                # Only 44,775 of 110,879 games carry quarters: 64,254 hold an empty array and
-                # 1,850 hold JSON null, and the earliest is 2001. Modern seasons are
-                # effectively complete (3,805 of 3,831 in 2025), so the gap is historical.
-                #
-                # A row of zeros would claim four scoreless quarters, which is the
-                # null-not-zero rule this project has fixed three times elsewhere. Omitting
-                # the block silently would be honest about the value and silent about the
-                # reason, which leaves a reader wondering whether the page is broken.
-                season = r.get("season")
-                why = ("Quarter scores are not recorded before 2001."
-                       if season is not None and not pd.isna(season) and int(season) < 2001
-                       else "No quarter scores recorded for this game.")
-                score_block = (f"<table class='cfdb-linescore'><tr><th></th>{header}</tr>"
-                               f"<tr><td class='cfdb-ls-team'>"
-                               f"{_team_name(r, 'away')}</td><td>—</td><td>—</td>"
-                               f"<td>—</td><td>—</td></tr>"
-                               f"<tr><td class='cfdb-ls-team'>"
-                               f"{_team_name(r, 'home')}</td><td>—</td><td>—</td>"
-                               f"<td>—</td><td>—</td></tr></table>"
-                               f"<div class='cfdb-ls-why'>{why}</div>")
-            detail = " · ".join(x for x in [
-                _weather_cell(r),
-                _text(r.get("network_abbreviation")),
-                ("◇ neutral site" if r.get("is_neutral_site") else ""),
-                _text(r.get("venue_display")),
-            ] if x)
-            st.markdown(
-                f"<div class='cfdb-gamecard'>"
-                f"  <div class='cfdb-gamecard-teams'>"
-                f"    <div class='cfdb-gamecard-row'>{_team_with_record(r, 'away')}"
-                f"      <span class='cfdb-gamecard-pts'>"
-                f"{'' if pd.isna(r.get('away_points')) else int(r['away_points'])}</span></div>"
-                f"    <div class='cfdb-gamecard-row'>{_team_with_record(r, 'home')}"
-                f"      <span class='cfdb-gamecard-pts'>"
-                f"{'' if pd.isna(r.get('home_points')) else int(r['home_points'])}</span></div>"
-                f"  </div>"
-                f"  <div class='cfdb-gamecard-detail'>{score_block}"
-                f"    <div class='cfdb-gamecard-meta'>{detail}</div></div>"
-                f"</div>", unsafe_allow_html=True)
+        cards = "".join(_card(r, scope, geo) for _, r in rows.iterrows())
+        st.markdown(f"<div class='cfdb-cardgrid'>{cards}</div>", unsafe_allow_html=True)
 
 
 def body(page) -> None:
@@ -312,6 +599,7 @@ def body(page) -> None:
                           index=keys.index(current) if current in keys else 0,
                           label_visibility="collapsed")
         params.set_params(view=chosen)
+        _legend()
 
         states.render_or_state(
             df, "srv_game",

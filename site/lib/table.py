@@ -51,7 +51,15 @@ class Col:
 
     @property
     def css(self) -> str:
-        return "cfdb-num" if self.kind in ("num", "signed") else ""
+        if self.kind in ("num", "signed"):
+            return "cfdb-num"
+        # R-103. A glyph column is neither a number nor prose. Right-aligning "☀ 71°F"
+        # hung it off the right edge of its own header; left-aligning left it stranded
+        # beside a wide neighbour. The kind carries the alignment so the caller does not
+        # hand-write a class per cell.
+        if self.kind == "center":
+            return "cfdb-center"
+        return ""
 
 
 def apply_sort(df: pd.DataFrame, columns: List[Col],
@@ -97,6 +105,15 @@ def _header_cell(column: Col, sortable: bool) -> str:
                                                             "ats", "basis", "status",
                                                             "description", "market",
                                                             "result", "bucket",
+                                                            # R-101/R-103. Both are synthetic
+                                                            # fields with no column behind
+                                                            # them, so a sort link on either
+                                                            # renders an arrow and then does
+                                                            # nothing — apply_sort drops an
+                                                            # unknown field. "weather" has
+                                                            # been offering that dead link
+                                                            # since R-027 shipped.
+                                                            "game", "weather",
                                                             "spread_and_model"):
         return f"<th class='{column.css}'>{column.label}</th>"
 
@@ -131,15 +148,49 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
     """
     weights = []
     for column in columns:
-        longest = len(str(column.label))
+        widest, has_image = 0, False
         for _, row in df.iterrows():
-            rendered = column.format(row)
-            # Strip tags before measuring — a logo or a chip is markup, not width.
-            text = re.sub(r"<[^>]+>", "", str(rendered))
-            longest = max(longest, len(text))
+            rendered = str(column.format(row))
+            # A LOGO IS WIDTH THE TEXT MEASURE CANNOT SEE. Stripping tags is right for a
+            # chip, whose text IS its width, and wrong for an image, whose text is nothing
+            # and whose box is 20px. Schedule's Away column was short by exactly a logo, so
+            # "New Mexico State" pushed its record onto a second line.
+            if "<img" in rendered or "cfdb-monogram" in rendered:
+                has_image = True
+            # Strip tags before measuring — a chip is markup, not width.
+            widest = max(widest, len(re.sub(r"<[^>]+>", "", rendered)))
+        # NUMBERS ARE SET IN A MONOSPACE FACE and the label is not, so one character is not
+        # one unit in both. `.cfdb-num` is ui-monospace at roughly 0.6em per character
+        # against about 0.52em for the proportional face — near enough 1.15. Without it a
+        # five-character "−10.2" was measured as though it were five characters of prose and
+        # broke across two lines.
+        if column.kind in ("num", "signed"):
+            widest *= 1.15
+        if has_image:
+            widest += 4
+        # AND THE HEADER IS NOT PROSE EITHER. `.cfdb-table th` is uppercased with .02em of
+        # letter-spacing, so six characters of "Spread" occupy more than six characters of
+        # body text. Without this the SPREAD header broke to "SPREA / D" the moment the two
+        # corrections above gave its neighbours their honest share.
+        longest = max(len(str(column.label)) * 1.1, widest)
         # Clamped in both directions: a floor so a two-character header stays readable, a
         # ceiling so one long venue name does not take half the table.
-        weights.append(min(max(longest, 4), 34))
+        #
+        # THEN A PADDING ALLOWANCE, WHICH THE FIRST VERSION LEFT OUT AND WHICH IS WHY NARROW
+        # COLUMNS WRAPPED. Every cell carries .5rem of padding on each side — about two
+        # characters' worth — and that cost is CONSTANT per column while these weights are
+        # PROPORTIONAL. On a wide column it disappears into the rounding; on a six-character
+        # one it is a fifth of the box. Schedule showed both failure modes at once: "SPREAD"
+        # broke to "SPREA / D", and the score column rendered 30 as "3 / 0".
+        #
+        # Adding it before normalising is what makes the share reflect the box the browser
+        # will actually need, and it redistributes toward the narrow columns, which are the
+        # only ones that were ever short.
+        #
+        # The floor is 5 rather than 4 for the same reason R-100 exposed this: a numeric
+        # column that reserves a marker holds a glyph plus its digits, and four characters
+        # does not fit "▸30" once the padding is honest.
+        weights.append(min(max(longest, 5), 34) + 3)
     total = sum(weights) or 1
     return [f"{100 * weight / total:.2f}%" for weight in weights]
 
