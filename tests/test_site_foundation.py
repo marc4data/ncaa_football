@@ -345,8 +345,10 @@ def test_every_site_dependency_is_in_the_site_image_requirements():
     from pathlib import Path
 
     site = Path(__file__).resolve().parents[1] / "site"
-    requirements = (Path(__file__).resolve().parents[1]
-                    / "deploy" / "site" / "requirements.txt").read_text().lower()
+    # `site/requirements.txt`, NOT the copy that used to sit under deploy/. There were two,
+    # this test read the one the deploy shipped, CI built the other, and they had drifted to
+    # different Streamlit constraints by the time a deploy failed on it. One file now.
+    requirements = (site / "requirements.txt").read_text().lower()
 
     # Import name -> distribution name, where they differ.
     DISTRIBUTION = {"dotenv": "python-dotenv", "psycopg2": "psycopg2-binary",

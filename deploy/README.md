@@ -55,14 +55,36 @@ docker compose --profile tunnel up -d      # once the tunnel token is set
 Redeploy after changing site code or the stack:
 
 ```bash
-# from the repo root
+# From the repo root, ON YOUR LAPTOP. The rsyncs push files up; the ssh line runs the
+# rebuild on the droplet and returns you to your own prompt. You never open a console
+# on the droplet itself.
+
+# CFDB_DROPLET_HOST lives in .env, which an interactive shell does not read on its own.
+set -a; . ./.env; set +a
+
 rsync -az deploy/docker-compose.yml deploy/backup.sh $CFDB_DROPLET_HOST:/opt/cfdb/
 rsync -az --delete --exclude '__pycache__' \
-  deploy/site/Dockerfile deploy/site/requirements.txt \
-  site/app.py site/lib site/pages \
+  site/Dockerfile site/requirements.txt \
+  site/app.py site/lib site/views \
   $CFDB_DROPLET_HOST:/opt/cfdb/site/
 ssh $CFDB_DROPLET_HOST 'cd /opt/cfdb && docker compose build site && docker compose up -d site'
 ```
+
+**EVERY PATH COMES FROM `site/`, AND THAT IS THE FIX FOR A REAL DEPLOY FAILURE.**
+
+There used to be a second copy of the Dockerfile and requirements at `deploy/site/`, and
+these instructions shipped THAT one while CI built the one in `site/`. The two drifted, as
+a duplicate always will, and by 2 September the copy being deployed was wrong in two
+independent ways:
+
+  Dockerfile        `COPY pages/` — the rename to `views/` never reached it, so the build
+                    failed outright with `"/pages": not found`
+  requirements.txt  `streamlit>=1.40` instead of the `==1.61.1` pin, which exists BECAUSE an
+                    unpinned upgrade blanked every page on 30 August
+
+The build failing first is the only reason the second one did not ship. `deploy/site/` is
+deleted rather than corrected: a second copy of a file CI does not check is a defect
+waiting to recur, and `tests/test_deploy_docs.py` now fails if one comes back.
 
 **One rsync, and the source directories have no trailing slash.** Both details are load
 bearing, and both were got wrong on a real deploy:
