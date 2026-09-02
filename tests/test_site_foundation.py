@@ -773,3 +773,33 @@ def test_in_progress_is_bounded_so_a_postponed_game_is_never_called_live():
     # The page and the pipeline must agree on what "still settling" means, or the site
     # claims a game is live for longer than the DAG is collecting results for it.
     assert scores.SETTLE_HOURS == pipeline_settle
+
+
+def test_every_parameter_a_page_reads_is_a_known_parameter():
+    """A page reading an unregistered parameter gets None, silently, forever.
+
+    Unknown parameters are ignored by design (AC-G.11) — `?utm_source=x` is noise and
+    deserves nothing. The cost is that a page asking for a parameter nobody registered gets
+    the same silence, and the feature built on it is inert while looking perfectly fine.
+
+    That is not hypothetical. R-043 made the Schedule view a TAB rather than a toggle
+    specifically because a tab is URL-addressable — and `view` was not in KNOWN, so
+    ?view=stacked resolved to None, the radio fell back to its first option, and both tabs
+    rendered the identical dense table. Every test passed. It was caught by rendering both
+    views and noticing the output was byte-identical.
+    """
+    import re
+    from pathlib import Path
+    from lib import params as params_module
+    site = Path(__file__).resolve().parents[1] / "site"
+
+    unregistered = []
+    for path in sorted((site / "views").glob("*.py")) + sorted((site / "lib").glob("*.py")):
+        if path.name == "params.py":
+            continue
+        for name in re.findall(r'params\.get\(\s*"(\w+)"', path.read_text()):
+            if name not in params_module.KNOWN:
+                unregistered.append(f"{path.name}: {name}")
+    assert not unregistered, (
+        "these resolve to None silently and any feature built on them is inert: "
+        f"{sorted(set(unregistered))}")

@@ -89,7 +89,7 @@ def body(page) -> None:
             # `games` is a count of fixtures and has no opponent variant, so offering the
             # control for it would be offering a choice that resolves to nothing.
             scope_options = ["team"] if stat_name == "games" else ["team", "opponent"]
-            current_scope = params.get("scope")
+            current_scope = params.get("stat_scope")
             scope_choice = st.radio(
                 "Scope", scope_options, horizontal=True,
                 index=scope_options.index(current_scope)
@@ -101,7 +101,7 @@ def body(page) -> None:
             direction = st.radio("Order", labels, horizontal=True,
                                  index=labels.index(current_order))
         rank_field, order_code = DIRECTIONS[direction]
-        params.set_params(stat=stat_name, order=order_code, scope=scope_choice)
+        params.set_params(stat=stat_name, order=order_code, stat_scope=scope_choice)
         df = query(f"""
             select season, team_slug, team_display, conference, classification, logo_url,
                    stat_name, stat_base_name, stat_scope, stat_basis,
