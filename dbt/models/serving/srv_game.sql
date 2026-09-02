@@ -360,6 +360,49 @@ select
     l.spread_open,
     l.over_under,
     l.over_under_open,
+
+    -- R-104. HOW FAR THE MARKET HAS MOVED SINCE IT OPENED, computed here and not in the page.
+    --
+    -- spread_open and over_under_open are both already on this row, so `current - open` in
+    -- Streamlit is one line away and forbidden: CLAUDE.md's rule is that a computation
+    -- belongs upstream. Two columns in the view, not two subtractions in a page.
+    --
+    -- NAMED FOR WHAT THE SITE ALREADY CALLS IT. srv_line_movement ships
+    -- `spread_move_from_open` and renders it as "Move". Coining "change" here would be the
+    -- Total-versus-O/U mistake from R-087 committed a second time, three weeks after the rule
+    -- about it was written.
+    --
+    -- SIGN CONVENTION, which is the trap on a page that shows two negative numbers. Spread is
+    -- home-perspective and NEGATIVE FAVOURS THE HOME TEAM, so a move of -1.5 means the market
+    -- moved TOWARD the home side. That is the same reading as the spread beside it and as
+    -- predicted_margin two columns over; there is deliberately no second interpretation of a
+    -- negative number on this row.
+    --
+    -- NULL, NOT ZERO, WHEN IT HAS NOT MOVED — and null again when there is no opening number
+    -- to measure from. A column of 0.0 down an unmoved slate is noise that reads as data, and
+    -- this is the null-not-zero rule the project has now applied to ats_record_display,
+    -- total_points, final_margin, travel_km and line scores. The two nulls are different
+    -- facts — "did not move" and "no open recorded" — and a consumer that needs to tell them
+    -- apart has spread_open beside it.
+    case when l.spread is not null and l.spread_open is not null
+              and l.spread <> l.spread_open
+         then l.spread - l.spread_open end        as spread_move_from_open,
+    case when l.over_under is not null and l.over_under_open is not null
+              and l.over_under <> l.over_under_open
+         then l.over_under - l.over_under_open end as total_move_from_open,
+
+    -- R-108b. The better of the two poll ranks, for the stacked view's sort.
+    --
+    -- least() ignores nulls in both dialects, so an unranked opponent does not erase a ranked
+    -- team's number: least(4, null) is 4. Both unranked gives NULL, which is correct — the
+    -- game has no rank, rather than a rank of nothing.
+    --
+    -- RANK 1 IS THE BEST RANK AND UNRANKED IS NULL, so a consumer sorting on this MUST put
+    -- nulls last or every unranked game leads the page. The column stays honestly null rather
+    -- than coalescing to 999: a sentinel would sort correctly and lie in every other context,
+    -- including the Excel export.
+    least(g.home_rank, g.away_rank)               as best_rank_in_game,
+
     l.home_moneyline,
     l.away_moneyline,
     l.provider_key,

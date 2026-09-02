@@ -2934,6 +2934,29 @@ models:
       - name: over_under_open
         description: >
           Opening over/under for the game from that provider.
+      - name: spread_move_from_open
+        description: >
+          How far the spread has moved since it opened, in points. NAMED FOR WHAT
+          srv_line_movement ALREADY CALLS IT — coining "change" here would be the Total-
+          versus-O/U mistake committed twice. SIGN: spread is home-perspective and negative
+          favours the home team, so -1.5 means the market moved TOWARD the home side, the
+          same reading as the spread and the predicted margin beside it. NULL, not zero,
+          when it has not moved, and null again when no opening number was recorded — those
+          are different facts, and spread_open beside it tells them apart. 1,608 games have
+          moved.
+      - name: total_move_from_open
+        description: >
+          How far the over/under has moved since it opened. Same null-not-zero rule and the
+          same naming reasoning as spread_move_from_open. 1,601 games have moved.
+      - name: best_rank_in_game
+        description: >
+          The better of the two AP ranks, for sorting a slate by how interesting it is.
+          `least()` ignores nulls in both dialects, so a ranked team facing an unranked one
+          keeps its number — LSU at 3 against unranked SE Louisiana gives 3. NULL when
+          neither side is ranked. RANK 1 IS THE BEST AND UNRANKED IS NULL, so anything
+          sorting on this must put nulls LAST or every unranked game leads the page.
+          Deliberately not coalesced to a sentinel: 999 would sort correctly and lie
+          everywhere else, including the Excel export.
       - name: home_moneyline
         description: >
           American-odds moneyline for the home team at the latest snapshot.
