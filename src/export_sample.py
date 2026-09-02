@@ -354,10 +354,29 @@ def export(out_path: Path, conference: str, seasons,
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    from .load_raw_to_postgres import get_conn
+    from .load_raw_to_postgres import PG_HOST, PG_PORT, get_conn
 
     connection = get_conn()
     cursor = connection.cursor()
+
+    # WHICH DATABASE THIS CAME FROM, SAID OUT LOUD AND WRITTEN INTO THE WORKBOOK.
+    #
+    # get_conn() falls back to localhost:5432 when PG_* is unset, and a stale local stack
+    # commonly listens there. A run against it produces a workbook that looks entirely
+    # normal — right sheet names, right structure, plausible row counts — and is describing
+    # a database from days ago. That happened: a serving export returned 18 tables including
+    # srv_schedule and srv_scoreboard, retired hours earlier, and the only visible symptom
+    # was a table count somebody happened to question.
+    #
+    # A workbook with no provenance about its source cannot be checked after the fact, so
+    # the source goes on the Index sheet as well as the console.
+    cursor.execute("select current_setting('server_version'), current_database()")
+    server_version, database = cursor.fetchone()
+    source = f"{PG_HOST}:{PG_PORT}/{database}"
+    print(f"  source: {source}  (PostgreSQL {server_version.split()[0]})")
+    cursor.execute("select count(*) from information_schema.tables where table_schema = %s",
+                   (schema,))
+    print(f"  {cursor.fetchone()[0]} table(s) in {schema}\n")
     cursor.execute("""
         select table_name from information_schema.tables
         where table_schema = %s order by table_name
@@ -431,7 +450,7 @@ def export(out_path: Path, conference: str, seasons,
     print("\nProfiling fields (whole tables, not the exported sample)...")
     _write_fields(book, profile_fields(cursor, tables, schema), header_font,
                   header_fill, schema)
-    _write_index(book, index_rows, members, header_font, header_fill, schema)
+    _write_index(book, index_rows, members, header_font, header_fill, schema, source)
     connection.close()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     book.save(out_path)
@@ -487,7 +506,8 @@ def _write_fields(book, profile, header_font, header_fill,
         tab.column_dimensions[get_column_letter(index)].width = width
 
 
-def _write_index(book, index_rows, members, header_font, header_fill, schema) -> None:
+def _write_index(book, index_rows, members, header_font, header_fill, schema,
+                 source: str = "unrecorded") -> None:
     """What each tab is, and why it holds what it holds.
 
     Without this the workbook cannot answer its own most obvious question: is this tab the
@@ -502,7 +522,8 @@ def _write_index(book, index_rows, members, header_font, header_fill, schema) ->
     # find the file they made this afternoon; this line is the provenance record and has
     # always been UTC. Showing one without the other makes the pair look inconsistent.
     tab.cell(2, 1, f"Generated {datetime.now():%Y-%m-%d %H:%M} local "
-                   f"({datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC)")
+                   f"({datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC) "
+                   f"— from {source}, {schema} schema")
     season_label = ", ".join(str(s) for s in members["seasons"])
     opponents = len(members["team_ids"]) - len(members["member_ids"])
     tab.cell(3, 1, f"Rule: up to {ROW_CAP:,} rows per table. Anything larger is narrowed to "
