@@ -31,17 +31,17 @@ THE RESULT CARD
 
                   ├─ team column ─┤├ line block ┤├──── box score ─────┤
 
-    header row      7:30 PM PDT                    1   2   3   4  OT  F
-    away row      ▣ Auburn      5-5   O/U  51.5 48  3   7   0   7      17
-    home row    @ ▣ Alabama     9-2 ▸ Sprd -7.0 -14  7  10   7   7      31
+    header row      7:30 PM PDT   │ Line Actual │  1   2   3   4  OT  F
+    away row      ▣ Auburn    5-5 │ O/U  51.5  48 │  3   7   0   7      17
+    home row    @ ▣ Alabama   9-2▸│ Sprd -7.0 -14 │  7  10   7   7      31
                   └ team cluster ┘   └ line row ┘   └ quarter cells ┘ └ final cell
     card footer   ☀ 54°F · ESPN · Bryant-Denny · ▤
 
-THE PREVIEW CARD — same three rows, same team column, empty header and no box score.
+THE PREVIEW CARD — same three rows, same team column, no box score.
 
-    header row      7:30 PM PDT
-    away row      ▣ Auburn      5-5   O/U  52.5  Δ +1.5
-    home row    @ ▣ Alabama     8-2   Sprd -7.5  Δ -0.5
+    header row      7:30 PM PDT   │ Line  Δ Open
+    away row      ▣ Auburn    5-5 │ O/U   52.5   +1.5
+    home row    @ ▣ Alabama   8-2 │ Sprd  -7.5   -0.5
     card footer   ☀ 54°F · ESPN · Bryant-Denny · ▤
 
 THE PARTS
@@ -55,8 +55,9 @@ THE PARTS
     team link ................ cfdb-teamlink        logo, rank badge and name; clickable
     team record .............. cfdb-team-record     outside the link, neutral (R-129)
     winner marker ............ cfdb-winner          after the record (R-135)
-    line block ............... cfdb-gc-mid          RESULT card: line against actual
-    line block ............... cfdb-gc-market       PREVIEW card: the current market
+    line block ............... cfdb-gc-mid          BOTH cards; result shows line against
+                                                    actual, preview shows line against move
+    line block header ........ cfdb-gc-mid-head     the Line / Actual (or Delta Open) heads
     quarter cell ............. cfdb-gc-n            one quarter, or the reserved OT track
     final cell ............... cfdb-gc-tot          the F column
     absence note ............. cfdb-ls-why          "no quarter scores recorded" (R-092)
@@ -540,7 +541,9 @@ def _tracks(geo: dict) -> int:
 
 
 # R-149. The middle block's own tracks, as one sub-grid inside a single card-grid cell.
-MIDDLE_TRACK = "10.2rem"
+# Widened from 10.2rem to carry the line block's own horizontal padding, which is what
+# separates it from the box score and from the team column.
+MIDDLE_TRACK = "11.2rem"
 
 
 def _right_span(geo: dict) -> str:
@@ -566,6 +569,20 @@ def _grid_style(geo: dict) -> str:
     # names' baselines by construction. Anything else and the alignment R-114 bought goes.
     return (f"grid-template-columns:minmax(0,1fr) {MIDDLE_TRACK} "
             f"repeat({quarters},{QUARTER_TRACK}) {TOTAL_TRACK}")
+
+
+def _line_block_header(preview: bool) -> str:
+    """Row 1 of the line block. Two headings only — the label column heads nothing.
+
+    "Actual" rather than "Final" on a result card: the box score's last column is already
+    headed F for Final (R-150), and two columns headed the same thing on one card, meaning
+    different things, is worse than a word that is merely less punchy.
+    """
+    second = f"{MOVE_GLYPH} Open" if preview else "Actual"
+    return (f"<div class='cfdb-gc-mid cfdb-gc-mid-head'>"
+            f"<span></span>"
+            f"<span class='cfdb-gc-mid-line'>Line</span>"
+            f"<span class='cfdb-gc-mid-actual'>{second}</span></div>")
 
 
 def _cell(content: str, classes: str) -> str:
@@ -698,13 +715,13 @@ def _market_cells(row, geo: dict) -> tuple:
                  else fmt.number(value, "total_current"))
         moved = "" if _missing(move) else f"{MOVE_GLYPH} {fmt.signed(move, 'move')}"
         lines.append(
-            f"<div class='cfdb-gc-market'>"
-            f"<span class='cfdb-gc-market-label'>{label}</span>"
-            f"<span class='cfdb-gc-market-value'>{shown}</span>"
-            f"<span class='cfdb-gc-market-move'>{moved}</span></div>")
+            f"<div class='cfdb-gc-mid'>"
+            f"<span class='cfdb-gc-mid-label'>{label}</span>"
+            f"<span class='cfdb-gc-mid-line'>{shown}</span>"
+            f"<span class='cfdb-gc-mid-actual'>{moved}</span></div>")
     if not any(lines):
         return "", ""
-    blank = "<div class='cfdb-gc-market'></div>"
+    blank = "<div class='cfdb-gc-mid'></div>"
     return (lines[0] or blank) + tail, (lines[1] or blank) + tail
 
 
@@ -786,7 +803,7 @@ def _card(row, scope, geo: dict) -> str:
     """
     completed = bool(row.get("is_completed"))
     if completed:
-        header = "<div></div>" + _header_cells(geo, row)
+        header = _line_block_header(preview=False) + _header_cells(geo, row)
         mid_away, mid_home = _middle_cells(row)
         away = mid_away + _score_cells(row, "away", geo)
         home = mid_home + _score_cells(row, "home", geo)
@@ -795,12 +812,17 @@ def _card(row, scope, geo: dict) -> str:
         # R-106: the box score is a POST-GAME element. Row 1 carries no header because there
         # are no quarters to head.
         away, home = _market_cells(row, geo)
-        span = _right_span(geo)
-        header = f"<div style='{span}'></div>"
+        # Same shape as the result card: the line block gets its own header cell and the
+        # box-score tracks are one silent span. Splitting it this way is what lets both
+        # variants share `_line_block_header` and keeps the column coverage identical.
+        span = f"grid-column:span {_tracks(geo)}"
+        header = _line_block_header(preview=True) + f"<div style='{span}'></div>"
         if not away:
             # R-106: no line yet means NOTHING there — not an empty slot, not a dash. The row
-            # still has to cover its columns, so it is one silent cell.
-            away = home = f"<div style='{span}'></div>"
+            # still has to cover its columns, so it is two silent cells: an UNCLASSED div in
+            # the line-block track, because `.cfdb-gc-mid` would draw its divider rule beside
+            # an empty column, and the span across the box-score tracks.
+            away = home = f"<div></div><div style='{span}'></div>"
         why = ""
     matchup = (f"<a href='{scope.link('matchup', game_id=row['game_id'])}' target='_self' "
                f"title='Open the matchup'><span class='cfdb-details'>"

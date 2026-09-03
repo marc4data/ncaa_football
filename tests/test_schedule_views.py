@@ -351,7 +351,7 @@ def test_a_scheduled_game_shows_the_market_and_no_box_score():
                  total_move_from_open=1.5, spread_move_from_open=-0.5)
     assert "cfdb-gc-n" not in card and "cfdb-gc-h" not in card
     assert "not recorded" not in card
-    assert "cfdb-gc-market" in card
+    assert "cfdb-gc-mid" in card
     assert "52.5" in card and "-7.5" in card
     assert schedule.MOVE_GLYPH in card
 
@@ -676,6 +676,43 @@ def test_the_card_vocabulary_matches_the_markup():
     # visible region of the card but is absent from the table is a part with no name, which is
     # how "the thing next to the other thing" starts.
     documented = {css for _, css in entries}
-    for css in ("cfdb-gamecard", "cfdb-gc-team", "cfdb-gc-mid", "cfdb-gc-market",
+    for css in ("cfdb-gamecard", "cfdb-gc-team", "cfdb-gc-mid", "cfdb-gc-mid-head",
                 "cfdb-gc-tot", "cfdb-gamecard-meta"):
         assert css in documented, f".{css} renders a region of the card and has no name"
+
+
+def test_the_line_block_heads_only_its_two_number_columns():
+    """The label column heads nothing — "O/U" and "Spread" are self-describing, and a heading
+    over them would be a heading over a heading."""
+    for preview, second in ((False, "Actual"), (True, f"{schedule.MOVE_GLYPH} Open")):
+        head = schedule._line_block_header(preview=preview)
+        assert head.count("<span") == 3, "three cells, so the columns line up"
+        assert "<span></span>" in head, "the label column is deliberately blank"
+        assert ">Line<" in head and f">{second}<" in head
+
+
+def test_nothing_in_the_line_block_is_emphasised():
+    """Marc, on both card variants: the fonts are inconsistent. They were — the actual was
+    weighted on a result card and the line was weighted on a preview card, so the emphasis
+    landed on a different column depending on whether the game had been played.
+
+    The headers are what make the weight unnecessary. Asserted on the stylesheet because the
+    rule is the thing that has to stay gone.
+    """
+    body = (Path(schedule.__file__).resolve().parents[1] / "lib" / "theme.py").read_text()
+    block = body[body.index(".cfdb-gc-mid {"):body.index(".cfdb-gc-mid-head")]
+    assert "font-weight" not in block, (
+        "a weight on one line-block column emphasises it over the other for no reason")
+
+
+def test_both_card_variants_use_one_line_block():
+    """They render different CONTENT — line against actual, line against move — in the same
+    component. Two classes is how the padding, the divider and the weight diverged between a
+    game that has been played and one that has not."""
+    nan = float("nan")
+    result = _card()
+    preview = _card(is_completed=False, winner=None, home_points=nan, away_points=nan,
+                    home_periods=nan, away_periods=nan)
+    for card in (result, preview):
+        assert "cfdb-gc-mid" in card
+    assert "cfdb-gc-market" not in result + preview, "the second class is gone"
