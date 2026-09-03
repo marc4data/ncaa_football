@@ -47,6 +47,10 @@ SUBSTITUTIONS = {
     # EXECUTES the query rather than waving it through — which is the whole point of this
     # script, and why a substitution is the right answer here rather than an exemption.
     "{side}": "home",
+    # The workbook's row cap is a named constant interpolated into every sheet query, because
+    # the contract's LIMIT check matches `limit <digits>` and a bind parameter would fail it.
+    # Any integer executes the same query; the value is not what is under test here.
+    "{ROW_CAP}": "5000",
 }
 
 # A value per bind parameter, so the query executes. These are not assertions about the

@@ -264,8 +264,8 @@ def test_the_index_states_scope_timestamp_counts_and_model_version(built):
     assert "Generated (UTC)" in text
     assert "season 2026" in text and "week 8" in text
     assert "Model version(s)" in text
-    for name, view, count, _ in index_rows:
-        assert name in text and view in text
+    for entry in index_rows:
+        assert entry.name in text and entry.view in text
 
 
 def test_the_filename_encodes_its_own_scope():
@@ -356,3 +356,221 @@ def test_every_declared_label_divergence_is_still_real():
                        for sheet in workbook.SHEETS for name, _ in sheet.columns)
         assert exported, f"{field} is not exported at all; drop the exception"
         assert diverges, f"{field} no longer differs from the site; drop the exception"
+
+
+# === R-184 / R-196: the scope the user asked for, and the truth about what was written ====
+#
+# These are the Part 1 defect tests. Every one of them is negative-tested in
+# `tests/test_workbook_scope_negatives.py`, because the failure being fixed here is
+# specifically a check that agreed with a wrong answer.
+
+GAME_SHEETS = [s for s in workbook.SHEETS if s.view == "srv_game"]
+
+
+def _division_aware_query(recorder=None, in_scope=None):
+    """A stub that HONOURS the division parameter instead of ignoring it.
+
+    A stub that returns the same rows whatever it is asked is how this defect survived: the
+    page, the preview and the file all agreed, and none of them had applied the filter. So
+    this fake behaves like the database on the one axis under test — it drops the non-FBS
+    row when the caller binds a division other than 'all'.
+    """
+    def fake_query(sql, params=None):
+        check_contract(sql)
+        flat = " ".join(sql.split())
+        if recorder is not None:
+            recorder.append((flat, dict(params or {})))
+        for sheet in workbook.SHEETS:
+            if f"from {sheet.view}" in flat:
+                df = _frame(sheet.fields)
+                if sheet.view == "srv_game":
+                    # Row 0 is an FBS game, row 1 is two non-FBS teams.
+                    df["is_fbs_game"] = [True, False]
+                    df["home_classification"] = ["fbs", "ii"]
+                    df["away_classification"] = ["fbs", "iii"]
+                    if (params or {}).get("division", "all") != "all":
+                        df = df[df["is_fbs_game"]].reset_index(drop=True)
+                if in_scope is not None:
+                    df["rows_in_scope"] = in_scope
+                return df
+        return pd.DataFrame([{"model_version": "abc123", "model_name": "stub"}])
+    return fake_query
+
+
+def test_division_reaches_the_query_as_a_bound_parameter(monkeypatch):
+    """THE DEFECT ITSELF. `build()` took four of GameScope's five filters, so `division` was
+    dropped on the floor at `export.py:58` and again at `:86`.
+
+    Asserted on the BINDING rather than on the SQL text, because the SQL was never the
+    problem — the predicate can be perfectly written and still never receive a value.
+    """
+    seen = []
+    monkeypatch.setattr(workbook, "query", _division_aware_query(recorder=seen))
+    workbook.build(2026, 8, "regular", None, "fbs")
+
+    bound = [params for sql, params in seen if "from srv_game" in sql]
+    assert bound, "no srv_game sheet was read at all"
+    for params in bound:
+        assert params.get("division") == "fbs", (
+            "the division filter never reached the query; this is R-184 exactly")
+
+
+def test_a_workbook_scoped_to_fbs_holds_no_game_between_two_non_fbs_teams(monkeypatch):
+    """AND THE SAME BUILD AT 'all' KEEPS IT. A test that only proves the row is absent
+    cannot tell "the filter worked" from "the fixture had nothing to filter"."""
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+
+    def classifications(division):
+        payload, _, _ = workbook.build(2026, 8, "regular", None, division)
+        from openpyxl import load_workbook
+        book = load_workbook(BytesIO(payload))
+        rows = 0
+        for sheet in GAME_SHEETS:
+            if sheet.name in book.sheetnames:
+                tab = book[sheet.name]
+                rows += tab.max_row - workbook.ROW_FIRST_DATA + 1
+        return rows
+
+    narrow, wide = classifications("fbs"), classifications("all")
+    assert narrow < wide, (
+        f"FBS wrote {narrow} rows and All divisions wrote {wide} — the filter changed "
+        "nothing, so this test would pass against the defect it exists to catch")
+
+
+def test_the_export_and_the_page_spell_the_division_rule_identically():
+    """One rule, one spelling. The export must return the set the page displayed, and the
+    way that breaks is not a wrong predicate — it is a SECOND predicate that starts out
+    right and drifts. Compared as text, so a change to either side has to change both.
+
+    EITHER team FBS, not both: a Division II visitor's trip to an FBS stadium is an FBS
+    game, and requiring both drops 20 of the 25 games on the opening Thursday.
+    """
+    page = (Path(__file__).resolve().parents[1] / "site" / "views" / "schedule.py").read_text()
+    predicate = "(:division = 'all' or is_fbs_game)"
+    assert predicate in page, (
+        "the Schedule page no longer spells the rule this way; the export must follow it, "
+        "not the other way round")
+    for sheet in GAME_SHEETS:
+        assert predicate in " ".join(sheet.sql.split()), (
+            f"{sheet.name} reads srv_game but does not apply the page's division rule")
+
+
+def test_every_sheet_query_carries_the_named_cap_and_no_literal_limit():
+    """The cap was four different magic numbers across seven queries — 400, 900, 1000, 2000
+    — and nothing named any of them, so nothing could report one. One constant, reported."""
+    import re as _re
+    for sheet in workbook.SHEETS:
+        limits = _re.findall(r"limit\s+(\d+)", sheet.sql, _re.IGNORECASE)
+        assert limits == [str(workbook.ROW_CAP)], (
+            f"{sheet.name} limits to {limits}, not the named cap {workbook.ROW_CAP}")
+
+
+def test_the_cap_clears_a_full_season_at_the_widest_scope():
+    """Measured, not chosen: a season at All Divisions is 3,745 games on the serving
+    database. A cap below that truncates the single most obvious thing to ask for."""
+    assert workbook.ROW_CAP >= 3745
+
+
+def test_rows_written_and_rows_in_scope_are_two_facts(monkeypatch):
+    """R-196. The preview ran the real query and so did the build, which guaranteed they
+    agreed — and both were wrong by 3,345 rows.
+
+    A count and a cap are two facts about one query, so they come back from one query.
+    """
+    monkeypatch.setattr(workbook, "query", _division_aware_query(in_scope=3745))
+    sheet = GAME_SHEETS[0]
+    read = workbook.read_sheet(sheet, 2026, None, "regular", None, "fbs")
+    assert read.rows == 1, "the honest stub returns one FBS row"
+    assert read.rows_in_scope == 3745
+    assert read.truncated
+
+
+def test_the_index_names_the_truncation_the_number_and_the_cure(monkeypatch):
+    """A silently short workbook is the worst failure this file can have: a plausible number
+    of rows, correctly formatted, with no way for the reader to know what is missing."""
+    monkeypatch.setattr(workbook, "query", _division_aware_query(in_scope=3745))
+    payload, index_rows, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    from openpyxl import load_workbook
+    text = "\n".join(str(c.value) for row in load_workbook(BytesIO(payload))["Index"].iter_rows()
+                     for c in row)
+    assert "Truncated" in text
+    assert "3,745" in text, "the Index must state how many rows were in scope"
+    assert f"{workbook.ROW_CAP:,}" in text, "and what the cap was"
+    assert "Narrow the filters" in text, "and what to do about it"
+    assert any(entry.truncated for entry in index_rows)
+
+
+def test_an_untruncated_workbook_says_so_rather_than_staying_silent(monkeypatch):
+    """The other half of the same claim. 'No warning' is indistinguishable from 'nobody
+    checked', which is the whole lesson of R-194."""
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    payload, _, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    from openpyxl import load_workbook
+    text = "\n".join(str(c.value) for row in load_workbook(BytesIO(payload))["Index"].iter_rows()
+                     for c in row)
+    assert "Complete" in text and "Truncated" not in text
+
+
+def test_the_index_says_when_the_division_filter_could_not_reach_a_sheet(monkeypatch):
+    """Only srv_game carries is_fbs_game — verified against the serving schema, not assumed.
+    So a scope line reading 'FBS' overstates what five of the seven sheets did, and the
+    honest fix is to name it per sheet rather than to quietly imply it."""
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    _, index_rows, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    by_name = {entry.name: entry for entry in index_rows}
+    assert "does not apply" in by_name["Standings"].note
+    assert "does not apply" not in by_name["Schedule"].note
+
+
+def test_the_scope_line_names_the_division_unless_it_excludes_nothing():
+    assert "FBS" in workbook.describe_scope(2026, 8, "regular", None, "fbs")
+    assert "ALL" not in workbook.describe_scope(2026, 8, "regular", None, "all").upper()[10:]
+
+
+def test_no_sheet_query_contains_a_line_comment():
+    """`read_sheet()` sends `" ".join(sql.split())` — the whole query on ONE line.
+
+    So a `--` comment does not comment out its line; it comments out EVERY REMAINING CLAUSE
+    of the query. This is not hypothetical: the R-184 predicate was first written with `--`
+    above it, and the flattened SQL silently lost its own WHERE clause, its ORDER BY and its
+    LIMIT. Postgres reported a syntax error at the next statement, which is a long way from
+    the cause.
+
+    Block comments survive flattening. Use them.
+    """
+    import re as _re
+    for sheet in workbook.SHEETS:
+        # Block comments stripped FIRST. The eighth time in this repo a source-reading check
+        # has matched its own prose: the block comment explaining this rule contains the very
+        # two characters it forbids, and the first version of this test failed on it.
+        code = _re.sub(r"/\*.*?\*/", "", sheet.sql, flags=_re.S)
+        assert "--" not in code, (
+            f"{sheet.name}'s query has a `--` comment. read_sheet() flattens the SQL to one "
+            f"line, so everything after it is commented out. Use /* ... */ instead.")
+
+
+def test_the_flattened_sql_survives_comment_semantics_not_just_string_matching():
+    """The property the test above protects — asserted the way POSTGRES would see it.
+
+    The first version of this test was green with the defect present, which is the failure
+    class this project keeps rediscovering: a true assertion about the wrong property. It
+    checked that the flattened text ENDS WITH the cap, and it does — `limit 5000` is still
+    the last thing in the string when a `--` has commented it out. `check_contract` agreed
+    for the same reason: its LIMIT check is a regex over text, and text is not what runs.
+
+    So apply what the server applies. Flatten, then delete from any `--` to end of line —
+    which, once flattened, is end of statement — and assert what SURVIVES is still the whole
+    query.
+    """
+    import re as _re
+    for sheet in workbook.SHEETS:
+        flat = " ".join(sheet.sql.split())
+        as_parsed = _re.sub(r"/\*.*?\*/", " ", flat, flags=_re.S)
+        as_parsed = _re.sub(r"--.*$", "", as_parsed)
+        assert check_contract(as_parsed) == sheet.view, (
+            f"{sheet.name}'s query does not survive its own comments")
+        assert _re.search(rf"\blimit\s+{workbook.ROW_CAP}\b", as_parsed), (
+            f"{sheet.name} loses its LIMIT once comments are applied — a `--` has swallowed "
+            f"the tail. What the server would run: ...{as_parsed[-110:]}")
+        assert "order by" in as_parsed.lower(), (
+            f"{sheet.name} loses its ORDER BY once comments are applied")

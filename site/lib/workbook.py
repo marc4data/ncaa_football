@@ -27,7 +27,7 @@ Three properties carry most of the weight:
 import io
 import re
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 import pandas as pd
 
@@ -48,6 +48,21 @@ ROW_DISCLAIMER = 2
 ROW_HEADER = 4
 ROW_FIRST_DATA = 5
 
+# THE ROW CAP, NAMED, AND RAISED — R-196.
+#
+# It was `limit 400` written into three of the seven queries as a literal, which is two
+# problems. Nothing named it, so nothing could report it; and 400 is below the size of the
+# thing a user most obviously asks for. Measured on the serving database:
+#
+#     one FBS week          ~55 games   (2025 regular: avg 55.5, range 51-96)
+#     one FBS season        ~900
+#     one season, all divisions        3,745      <- 400 returned 11% of it
+#
+# 5,000 clears a full all-divisions season with room, which is the widest scope the filter
+# bar can express. It is a CAP, not a target: the point is that the file cannot become
+# unbounded, not that it should approach this.
+ROW_CAP = 5000
+
 
 class Sheet:
     """One tab: where it comes from, what it is called, and which columns it shows.
@@ -60,9 +75,24 @@ class Sheet:
 
     def __init__(self, name: str, view: str, sql: str, columns: List[tuple],
                  has_predictions: bool = False, note: str = "", scoped: bool = True):
-        self.name, self.view, self.sql = name, view, sql
+        self.name, self.view = name, view
+        # `{ROW_CAP}` rather than a literal, resolved once here. The contract's LIMIT check
+        # (AC-G.39) matches `limit <digits>`, so a bind parameter would fail it — the cap has
+        # to reach the SQL as a number. `ci/check_page_queries.py` substitutes the same hole
+        # before executing, the way it already does for `{side}`.
+        self.sql = sql.replace("{ROW_CAP}", str(ROW_CAP))
         self.columns, self.has_predictions = columns, has_predictions
         self.note, self.scoped = note, scoped
+
+    @property
+    def division_scoped(self) -> bool:
+        """Whether this sheet's query can honour the Division filter.
+
+        Only `srv_game` carries `is_fbs_game` — checked against the serving schema, not
+        assumed. A sheet that cannot narrow says so on the Index rather than letting the
+        scope line claim a filter it did not apply.
+        """
+        return ":division" in self.sql
 
     @property
     def fields(self) -> List[str]:
@@ -74,14 +104,24 @@ SHEETS = [
         select start_date_et, week, away_team_display, away_conference, away_points,
                home_team_display, home_conference, home_points,
                spread_current, total_current, predicted_margin, home_win_probability,
-               network, venue_display, is_neutral_site, is_conference_game, is_completed
+               network, venue_display, is_neutral_site, is_conference_game, is_completed,
+               count(*) over () as rows_in_scope
         from srv_game
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
+          /* R-184. The Division filter, which this query used to ignore entirely.
+             Predicate copied verbatim from `views/schedule.py` rather than re-derived: the
+             export must return the set the page showed, and two spellings of one rule is
+             how they drift. EITHER team FBS, not both.
+             BLOCK comment, not `--`: read_sheet() flattens this SQL onto ONE line, so a
+             line comment would swallow every clause after it. (And the wording here avoids
+             the word j-o-i-n, because the query contract's FORBIDDEN pattern reads comments
+             too — it caught this comment's first draft.) */
+          and (:division = 'all' or is_fbs_game)
           and (:conference is null or home_conference = :conference
                or away_conference = :conference)
         order by start_date_et, game_id
-        limit 400
+        limit {ROW_CAP}
     """, [
         ("start_date_et", "Kickoff"), ("week", "Wk"),
         ("away_team_display", "Away"), ("away_conference", "Away conf"),
@@ -98,12 +138,14 @@ SHEETS = [
     Sheet("Scores", "srv_game", """
         select game_date, week, away_team_display, away_points,
                home_team_display, home_points, winner, actual_margin,
-               excitement_index, is_upset, attendance, venue_display
+               excitement_index, is_upset, attendance, venue_display,
+               count(*) over () as rows_in_scope
         from srv_game
         where season = :season and season_type = :season_type and is_completed
           and (:week is null or week = :week)
+          and (:division = 'all' or is_fbs_game)          /* R-184, as Schedule */
         order by game_date desc, game_id
-        limit 400
+        limit {ROW_CAP}
     """, [
         ("game_date", "Date"), ("week", "Wk"),
         ("away_team_display", "Away"), ("away_points", "Away pts"),
@@ -118,12 +160,13 @@ SHEETS = [
                provider_display, spread, spread_open, total, total_open,
                home_moneyline, away_moneyline,
                home_implied_probability, away_implied_probability, devig_method,
-               is_best_home_spread, is_best_away_spread, snapshot_ts
+               is_best_home_spread, is_best_away_spread, snapshot_ts,
+               count(*) over () as rows_in_scope
         from srv_odds_board
         where season = :season and is_latest_snapshot
           and (:week is null or week = :week)
         order by start_date_et, game_id, provider_display
-        limit 900
+        limit {ROW_CAP}
     """, [
         ("start_date_et", "Kickoff"), ("week", "Wk"),
         ("away_team_display", "Away"), ("home_team_display", "Home"),
@@ -143,12 +186,13 @@ SHEETS = [
                model_name, confidence_bucket,
                spread_home_perspective, predicted_margin_home_perspective,
                market_implied_home_win_probability, predicted_home_win_probability,
-               actual_home_cover, cover_correct, home_win_correct, is_out_of_sample_week
+               actual_home_cover, cover_correct, home_win_correct, is_out_of_sample_week,
+               count(*) over () as rows_in_scope
         from srv_edge_finder
         where season = :season
           and (:week is null or week = :week)
         order by edge_magnitude desc
-        limit 400
+        limit {ROW_CAP}
     """, [
         ("week", "Wk"), ("away_team", "Away"), ("home_team", "Home"),
         ("market", "Market"), ("edge_unit", "Unit"),
@@ -168,11 +212,12 @@ SHEETS = [
     Sheet("Standings", "srv_standings", """
         select conference, tiebreak_rank, school, wins, losses, ties,
                conference_wins, conference_losses, win_pct,
-               points_for, points_against, point_differential, tiebreak_basis
+               points_for, points_against, point_differential, tiebreak_basis,
+               count(*) over () as rows_in_scope
         from srv_standings
         where season = :season and classification in ('fbs','fcs')
         order by conference, tiebreak_rank
-        limit 1000
+        limit {ROW_CAP}
     """, [
         ("conference", "Conference"), ("tiebreak_rank", "#"), ("school", "Team"),
         ("wins", "W"), ("losses", "L"), ("ties", "T"),
@@ -201,10 +246,11 @@ SHEETS = [
                mean_absolute_margin_error, winner_accuracy_pct, winner_scored,
                ats_accuracy_pct, cover_scored,
                mean_predicted_home_win_probability, actual_home_win_rate,
-               brier_score, log_loss, attribution
+               brier_score, log_loss, attribution,
+               count(*) over () as rows_in_scope
         from srv_model_performance
         order by model_name, segment_type, segment_order, segment_value
-        limit 2000
+        limit {ROW_CAP}
     """, [
         ("segment_type", "Segment"), ("segment_value", "Segment value"),
         ("model_name", "Model"), ("model_version", "Version"),
@@ -224,11 +270,12 @@ SHEETS = [
 
     Sheet("Data dictionary", "srv_data_dictionary", """
         select layer, table_name, column_name, data_type, is_nullable,
-               description_status, column_description
+               description_status, column_description,
+               count(*) over () as rows_in_scope
         from srv_data_dictionary
         where layer = 'serving'
         order by table_name, ordinal_position
-        limit 2000
+        limit {ROW_CAP}
     """, [
         ("layer", "Layer"), ("table_name", "Table"), ("column_name", "Column"),
         ("data_type", "Type"), ("is_nullable", "Nullable"),
@@ -300,16 +347,56 @@ def filename(season: int, week: Optional[int], generated: datetime) -> str:
 
 
 def describe_scope(season: int, week: Optional[int], season_type: str,
-                   conference: Optional[str]) -> str:
+                   conference: Optional[str], division: str = "fbs") -> str:
     bits = [f"season {season}", season_type]
     bits.append(f"week {week}" if week is not None else "all weeks")
     if conference:
         bits.append(conference)
+    # Mirrors `GameScope.describe()`, which also omits the division when it is "all" —
+    # naming a filter that excludes nothing reads as a narrowing that did not happen.
+    if division != "all":
+        bits.append(division.upper())
     return ", ".join(bits)
 
 
-def read_sheet(sheet, season, week, season_type, conference):
-    """Fetch one sheet's rows. Returns (frame, omission_reason).
+class IndexRow(NamedTuple):
+    """One line of the Index's sheet inventory, and what the caller shows in the preview.
+
+    `rows` and `rows_in_scope` travel together everywhere for the reason SheetRead names.
+    """
+    name: str
+    view: str
+    rows: int
+    rows_in_scope: int
+    note: str = ""
+
+    @property
+    def truncated(self) -> bool:
+        return self.rows_in_scope > self.rows
+
+
+class SheetRead(NamedTuple):
+    """What one sheet's query returned.
+
+    `rows` and `rows_in_scope` are DELIBERATELY TWO FIELDS. They were one number for as long
+    as the cap was invisible, and that is precisely how a season export could hold 400 of
+    3,745 games while every number on the page and in the file agreed with every other.
+    """
+    frame: Optional[pd.DataFrame]
+    omission: Optional[str]
+    rows_in_scope: int = 0
+
+    @property
+    def rows(self) -> int:
+        return 0 if self.frame is None else len(self.frame)
+
+    @property
+    def truncated(self) -> bool:
+        return self.rows_in_scope > self.rows
+
+
+def read_sheet(sheet, season, week, season_type, conference, division="fbs"):
+    """Fetch one sheet's rows. Returns a SheetRead.
 
     The two failures here are NOT the same thing and the first draft of this treated them
     as one. AC-15.5 says a sheet whose SOURCE IS MISSING is omitted with a note — that is a
@@ -322,7 +409,7 @@ def read_sheet(sheet, season, week, season_type, conference):
     So: a missing relation is an omission, and anything else is raised.
     """
     params = {"season": season, "week": week if sheet.scoped else None,
-              "season_type": season_type, "conference": conference}
+              "season_type": season_type, "conference": conference, "division": division}
     wanted = set(re.findall(r":(\w+)", sheet.sql))
     try:
         df = query(" ".join(sheet.sql.split()),
@@ -330,11 +417,16 @@ def read_sheet(sheet, season, week, season_type, conference):
     except Exception as exc:                                       # noqa: BLE001
         message = str(exc).lower()
         if "does not exist" in message or "undefined table" in message:
-            return None, f"{sheet.view} has not been built yet"
+            return SheetRead(None, f"{sheet.view} has not been built yet")
         raise
     if df.empty:
-        return None, f"{sheet.view} returned no rows in this scope"
-    return df, None
+        return SheetRead(None, f"{sheet.view} returned no rows in this scope")
+    # ONE QUERY ANSWERS BOTH QUESTIONS. `count(*) over ()` is a window function, and Postgres
+    # evaluates window functions BEFORE the LIMIT — so every returned row carries the size of
+    # the full result set. A second `select count(*)` would be a second implementation of
+    # "what is in scope", free to disagree with the first; this cannot.
+    in_scope = int(df["rows_in_scope"].iloc[0]) if "rows_in_scope" in df.columns else len(df)
+    return SheetRead(df, None, in_scope)
 
 
 def _clean(value):
@@ -374,11 +466,15 @@ def _clean(value):
 
 
 def build(season: int, week: Optional[int], season_type: str = "regular",
-          conference: Optional[str] = None) -> tuple:
+          conference: Optional[str] = None, division: str = "fbs") -> tuple:
     """Build the workbook for one scope. Returns (bytes, index_rows, omitted).
 
     Returns the omissions alongside the bytes rather than logging them, because the caller
     has to show the user what is NOT in the file they are about to download.
+
+    `division` was missing from this signature until R-184, while `GameScope` had carried it
+    since R-165. A user who filtered Schedule to FBS and walked to Excel Export downloaded
+    every Division II fixture in the season — 313 rows for a week that held 83.
     """
     from openpyxl import Workbook
     from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
@@ -398,9 +494,10 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     for sheet in SHEETS:
         # AC-15.5: a sheet with nothing to say is omitted and named. The view name goes in
         # the note so the omission points at an object rather than at a mood.
-        df, reason = read_sheet(sheet, season, week, season_type, conference)
+        read = read_sheet(sheet, season, week, season_type, conference, division)
+        df = read.frame
         if df is None:
-            omitted.append((sheet.name, reason))
+            omitted.append((sheet.name, read.omission))
             continue
 
         tab = book.create_sheet(sheet.name)
@@ -471,9 +568,17 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                     operator="equal", formula=["TRUE"],
                     fill=PatternFill("solid", fgColor="D8EFD3")))
 
-        index_rows.append((sheet.name, sheet.view, len(df), sheet.note))
+        # The note carries what the Index has to be able to say about THIS sheet: that its
+        # rows were cut, and — separately — that the Division filter could not reach it.
+        note = sheet.note
+        if not sheet.division_scoped and division != "all":
+            extra = (f"The Division filter ({division.upper()}) does not apply to "
+                     f"{sheet.view}, which has no game classification to narrow on.")
+            note = f"{note} {extra}".strip()
+        index_rows.append(IndexRow(sheet.name, sheet.view, read.rows,
+                                   read.rows_in_scope, note))
 
-    _write_index(book, season, week, season_type, conference, generated,
+    _write_index(book, season, week, season_type, conference, division, generated,
                  index_rows, omitted, header_font, header_fill, note_font)
 
     buffer = io.BytesIO()
@@ -481,7 +586,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     return buffer.getvalue(), index_rows, omitted
 
 
-def _write_index(book, season, week, season_type, conference, generated,
+def _write_index(book, season, week, season_type, conference, division, generated,
                  index_rows, omitted, header_font, header_fill, note_font) -> None:
     """AC-15.9. The index is the sheet that makes the workbook auditable a month later.
 
@@ -513,7 +618,7 @@ def _write_index(book, season, week, season_type, conference, generated,
 
     for label, value in (
         ("Generated (UTC)", generated.strftime("%Y-%m-%d %H:%M:%S")),
-        ("Scope", describe_scope(season, week, season_type, conference)),
+        ("Scope", describe_scope(season, week, season_type, conference, division)),
         ("Model version(s)", model_version),
         ("Source", "cfdb serving layer; every sheet is one serving view"),
     ):
@@ -522,15 +627,41 @@ def _write_index(book, season, week, season_type, conference, generated,
         row += 1
 
     row += 1
-    for index, label in enumerate(("Sheet", "Serving view", "Rows", "Note"), start=1):
+    # "Rows in scope" is its own COLUMN rather than a footnote, so a reader who sorts or
+    # filters this block still has the pair side by side. A truncation recorded once in prose
+    # at the bottom is a truncation that survives exactly until someone sorts the table.
+    for index, label in enumerate(
+            ("Sheet", "Serving view", "Rows written", "Rows in scope", "Note"), start=1):
         cell = tab.cell(row, index, label)
         cell.font, cell.fill = header_font, header_fill
     row += 1
-    for name, view, count, note in index_rows:
-        tab.cell(row, 1, name)
-        tab.cell(row, 2, view)
-        tab.cell(row, 3, count).number_format = "#,##0"
-        tab.cell(row, 4, note)
+    for entry in index_rows:
+        tab.cell(row, 1, entry.name)
+        tab.cell(row, 2, entry.view)
+        tab.cell(row, 3, entry.rows).number_format = "#,##0"
+        tab.cell(row, 4, entry.rows_in_scope).number_format = "#,##0"
+        tab.cell(row, 5, entry.note)
+        row += 1
+
+    # R-196. The truncation line. A silently short workbook is the worst failure this file
+    # can have, because nothing about it looks wrong — it is a plausible number of rows in a
+    # correctly formatted sheet, and the reader has no way to know what is not there.
+    cut = [e for e in index_rows if e.truncated]
+    row += 1
+    if cut:
+        tab.cell(row, 1, "⚠ Truncated").font = header_font
+        tab.cell(row, 2, f"The row cap is {ROW_CAP:,}. These sheets hit it:")
+        row += 1
+        for entry in cut:
+            tab.cell(row, 1, entry.name)
+            tab.cell(row, 2, f"{entry.rows:,} of {entry.rows_in_scope:,} rows written; "
+                             f"{entry.rows_in_scope - entry.rows:,} not in this file. "
+                             f"Narrow the filters on the Excel Export page to get all of them.")
+            row += 1
+    else:
+        tab.cell(row, 1, "Complete").font = header_font
+        tab.cell(row, 2, f"No sheet hit the {ROW_CAP:,}-row cap; every sheet holds every "
+                         f"row in scope.")
         row += 1
 
     row += 1
@@ -549,5 +680,5 @@ def _write_index(book, season, week, season_type, conference, generated,
     tab.cell(row, 1, "Scope is bounded by the filters on the Excel Export page. cfdb does "
                      "not offer a full-corpus or raw-layer export.").font = note_font
 
-    for index, width in enumerate((26, 34, 12, 60), start=1):
+    for index, width in enumerate((26, 34, 14, 14, 60), start=1):
         tab.column_dimensions[get_column_letter(index)].width = width
