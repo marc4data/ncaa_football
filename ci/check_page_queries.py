@@ -87,7 +87,21 @@ def module_constants(source: str) -> dict:
 
 
 def statements():
-    files = sorted(SITE.joinpath("pages").glob("*.py")) + \
+    # R-182. `views/`, NOT `pages/` — AND THIS CHECK WAS GREEN WHILE SCANNING NEITHER.
+    #
+    # The directory was renamed from `pages/` to `views/` because Streamlit auto-discovers a
+    # folder called `pages/` and builds a competing multipage app from it. The Dockerfile was
+    # updated, the deploy instructions eventually were, and this glob was not. `Path.glob` on a
+    # directory that does not exist yields nothing and raises nothing, so the job kept passing
+    # while checking 10 statements out of `lib/` and NONE of the eighteen page modules.
+    #
+    # It was found by negative-testing the pytest wrapper around it: a deliberately broken
+    # column was reintroduced into schedule.py and the checker still passed. A verification
+    # that cannot fail is not a verification — R-157, and the sharpest instance of it yet
+    # because this one had a whole CI job named after it.
+    #
+    # ASSERTED, NOT ASSUMED, below: an empty scan is now an error rather than a pass.
+    files = sorted(SITE.joinpath("views").glob("*.py")) + \
         sorted(SITE.joinpath("lib").glob("*.py"))
     for path in files:
         source = path.read_text(encoding="utf-8")
@@ -108,6 +122,13 @@ def statements():
 
 def main() -> int:
     import psycopg2
+
+    # A scan that finds nothing is the failure this script spent months not reporting.
+    scanned = list(statements())
+    if len(scanned) < 20:
+        print(f"::error::check_page_queries scanned only {len(scanned)} statements — the "
+              f"source globs are wrong, not the queries", file=sys.stderr)
+        return 1
 
     connection = psycopg2.connect(
         host=os.getenv("PG_HOST", "localhost"),

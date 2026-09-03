@@ -343,25 +343,25 @@ select
     pkt.provider_key              as total_at_close_provider,
     pkt.basis                     as total_at_close_basis,
 
-    -- R-173. WHO WAS SUPPOSED TO WIN? THE LINE ANSWERS THAT DIRECTLY; A POLL RANK IS A PROXY.
+    -- R-181. THE LINE IS THE ONLY BASIS. Marc, settling R-173's two-basis design one round
+    -- after it shipped: "Determine upset based on who the line (spread) expects to win. Upset
+    -- is not determined by ranking. There are only 25-ish teams ranked. Most FBS games have
+    -- lines, so lines is the better option (by far)."
     --
-    -- Marc, on North Carolina at TCU: "TCU favored by 8, but they lose by 5. That's a Level 1
-    -- upset." Neither side was ranked, so the rank basis had nothing to say and the page drew
-    -- a dash. He is right, and the reason is that the two bases answer different questions —
-    -- a poll ranks a team's season, a spread states the expected winner of THIS game.
+    -- MEASURED, BECAUSE HIS PREMISE IS ABOUT COVERAGE AND OURS IS NOT HIS:
+    --     FBS 2025          934 of 934 completed games carry a closing line   100%
+    --     FBS 2024+       1,840 of 1,861                                       98.9%
+    --     every completed  3,201 of 109,108                                     2.9%
+    -- The last figure is pre-2024 history and lower divisions, where we hold no line AND
+    -- usually no rank either. So dropping the rank fallback costs 17,483 historical verdicts
+    -- and nothing at all on the seasons anyone reads.
     --
-    -- So the line leads and the rank is the fallback. That order matters and is not arbitrary:
-    -- where the two disagree, the market is the better read of "supposed to win", and it also
-    -- covers vastly more games — 91,047 of 109,108 completed games carry no rank at all.
+    -- `upset_basis` IS GONE WITH IT. With one basis the column was always 'line' or null,
+    -- which is `upset_level is not null` spelled a second way — and a column that carries no
+    -- information is the "indicator that fires on everything" this project has removed before.
     --
     -- Convention, as everywhere else here: spread is the HOME number and negative means home
     -- favoured; margin is away minus home. A pick'em names no favourite, so it is not a basis.
-    case
-        when not g.is_completed or g.home_points is null then null
-        when pk.spread is not null and pk.spread <> 0 then 'line'
-        when g.home_rank is not null or g.away_rank is not null then 'rank'
-    end                                                    as upset_basis,
-
     case
         when not g.is_completed or g.home_points is null then null
         when pk.spread is null or pk.spread = 0 then null
@@ -371,29 +371,16 @@ select
         else false
     end                                                    as is_upset_by_line,
 
-    -- R-141, INDICATOR 1: THE UPSET SCALE. The verdict above says whether; these say by how
-    -- much. Boundaries are dbt vars (see dbt_project.yml) because Marc asked for them to be
-    -- configurable and a metric definition does not belong in the app.
+    -- R-141, INDICATOR 1: the scale. The verdict above says whether; this says by how much.
+    -- Boundaries are dbt vars because a metric definition does not belong in the app.
     --
     -- BY MARGIN OF VICTORY, NOT BY THE SIZE OF THE SWING. Marc called an 8-point favourite
-    -- losing by 5 a Level 1 upset; the swing would make it 13 and Level 2. Margin it is.
+    -- losing by 5 a Level 1 upset; the swing would make it 13 and Level 2.
     case
         when not g.is_completed or g.home_points is null then null
-        -- Null propagates deliberately. With no basis there is no verdict, and `not null` is
-        -- null rather than true — so without an explicit branch a big unranked win with no
-        -- line would fall through to the margin tests and be labelled an upset blowout.
-        when pk.spread is not null and pk.spread <> 0 then
-            case
-                when not (case when pk.spread < 0 then (g.away_points - g.home_points) > 0
-                               else (g.away_points - g.home_points) < 0 end) then 'none'
-                when abs(g.away_points - g.home_points) > {{ var('upset_margin_blowout') }}
-                    then 'blowout'
-                when abs(g.away_points - g.home_points) > {{ var('upset_margin_big') }}
-                    then 'big'
-                else 'upset'
-            end
-        when g.is_upset is null then null
-        when not g.is_upset then 'none'
+        when pk.spread is null or pk.spread = 0 then null
+        when not (case when pk.spread < 0 then (g.away_points - g.home_points) > 0
+                       else (g.away_points - g.home_points) < 0 end) then 'none'
         when abs(g.away_points - g.home_points) > {{ var('upset_margin_blowout') }}
             then 'blowout'
         when abs(g.away_points - g.home_points) > {{ var('upset_margin_big') }}

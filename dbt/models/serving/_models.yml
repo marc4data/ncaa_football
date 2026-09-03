@@ -2706,17 +2706,14 @@ models:
           upset, and saying `false` there was a claim with no basis behind it on 83% of
           completed games. A market favourite is a different basis and a different question;
           `winner_covered_close` answers that one.
-      - name: upset_basis
-        description: >
-          What the upset verdict was judged against — `line` where a closing spread named a
-          favourite, `rank` where a poll did, null where neither existed. The LINE leads
-          because it states the expected winner of THIS game while a poll ranks a team's
-          season, and because it covers far more games. Null is rendered as a dash: nothing to
-          measure against, not a verdict of "no upset".
       - name: is_upset_by_line
         description: >
-          Whether the side favoured by the closing spread lost outright. Null where no closing
-          line was held or the game was a pick'em, which names no favourite.
+          Whether the side favoured by the closing spread lost outright, and the ONLY basis for
+          an upset here — R-181. Null where no closing line was held or the game was a pick'em,
+          which names no favourite; the page renders that null as a dash rather than as a
+          verdict of "no upset". Poll rank is deliberately not a fallback: roughly 25 teams are
+          ranked in a given week while 100% of completed FBS games in 2025 carry a closing
+          line, so the rank basis added verdicts only where they were least meaningful.
       - name: is_fbs_game
         description: >
           Whether EITHER team was FBS — not both. A Division II visitor's trip to an FBS

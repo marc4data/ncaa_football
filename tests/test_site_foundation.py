@@ -1054,3 +1054,41 @@ def test_nothing_writes_a_legend_into_the_sidebar():
     writers = sorted(p.stem for p in views.glob("*.py")
                      if "st.sidebar" in p.read_text() and "legend" in p.read_text().lower())
     assert writers == [], writers
+
+
+def test_the_query_checker_actually_scans_the_pages():
+    """R-182. THE CI JOB WAS GREEN WHILE CHECKING ALMOST NOTHING.
+
+    `ci/check_page_queries.py` globbed `site/pages/*.py`. That directory has not existed since
+    the rename to `views/` — done because Streamlit auto-discovers a folder called `pages/` and
+    builds a competing multipage app from it. `Path.glob` on a missing directory yields nothing
+    and raises nothing, so the job kept passing while scanning 10 statements out of `lib/` and
+    NONE of the eighteen page modules. That is why R-181's dropped `upset_basis` reached a
+    deployed page with every check green.
+
+    Found by negative-testing the wrapper around it: a deliberately broken column was put back
+    into schedule.py and the checker still passed. A verification that cannot fail is not a
+    verification.
+
+    THIS TEST GUARDS THE SCOPE, NOT THE QUERIES. The queries need a full serving database and
+    CI has one; a developer's warehouse is usually partial, and a test that fails on the dev
+    machine for environmental reasons is a test people learn to ignore. What must never regress
+    is WHAT the checker looks at, and that is environment-independent.
+    """
+    import sys as _sys
+    root = Path(__file__).resolve().parents[1]
+    _sys.path.insert(0, str(root / "ci"))
+    try:
+        import check_page_queries
+    finally:
+        _sys.path.pop(0)
+
+    source = (root / "ci" / "check_page_queries.py").read_text()
+    assert 'joinpath("views")' in source, "the checker must scan the directory that exists"
+    assert 'joinpath("pages")' not in source
+
+    scanned = list(check_page_queries.statements())
+    files = {path.name for path, _, _ in scanned}
+    assert len(scanned) >= 40, f"only {len(scanned)} statements found; the globs are wrong"
+    assert "schedule.py" in files, "the busiest page in the app is not being checked"
+    assert len(files) >= 15, f"only {len(files)} files scanned: {sorted(files)}"

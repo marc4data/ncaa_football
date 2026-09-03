@@ -109,7 +109,27 @@ WEATHER_GLYPH = {
     14: "❄", 15: "❄", 16: "❄",           # snow
     25: "⚡",                              # Thunderstorm
 }
-DOME_GLYPH = "⌂"
+# R-175. A DOMED STADIUM, DRAWN RATHER THAN BORROWED.
+#
+# It was U+2302 HOUSE, and it read as a house because it is one. Marc asked for "some kind of
+# stadium with dome, or simple astrodome wireframe".
+#
+# NOT AN EMOJI, AND THAT IS THE SAME CONSTRAINT R-141 ALREADY SETTLED. 🏟 and 🏛 are
+# emoji-presentation characters: they do not share a baseline with text glyphs, do not size
+# with them, and vary by platform. Choosing one would re-open on this mark exactly the problem
+# the whole indicator system was rebuilt as CSS shapes to avoid. Unicode has no
+# text-presentation dome, so the honest options were an SVG or a worse character.
+#
+# `stroke="currentColor" fill="none"` means it inherits the surrounding colour and themes for
+# free in both palettes; `1em` sizing means it scales with whatever row it sits in, like every
+# other mark. No width/height attributes — CSS owns the box.
+DOME_MARK = (
+    "<svg class='cfdb-dome' viewBox='0 0 20 20' fill='none' stroke='currentColor' "
+    "stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'>"
+    "<path d='M2.5 14.5a7.5 7.5 0 0 1 15 0'/>"      # the shell
+    "<path d='M1.5 14.5h17'/>"                       # the ground line
+    "<path d='M5 14.5v2M15 14.5v2'/>"                # the uprights
+    "</svg>")
 NEUTRAL_GLYPH = "◇"
 
 # R-100 / R-113. THE SAME GLYPH THE SCORES PAGE ALREADY USES.
@@ -154,7 +174,7 @@ def _rows(season: int, week, season_type: str, conference,
                spread_at_close, spread_at_close_basis,
                total_at_close, total_at_close_basis,
                total_points, actual_margin,
-               upset_level, upset_basis, winner_covered_close, over_met,
+               upset_level, winner_covered_close, over_met,
                home_team_record_after_display, away_team_record_after_display,
                excitement_index,
                is_indoors, temperature_f, weather_condition_code, weather_condition,
@@ -312,7 +332,7 @@ def _weather_cell(row) -> str:
     number answering the wrong question, so the dome glyph stands alone.
     """
     if row.get("is_indoors"):
-        return f"<span class='cfdb-wx' title='indoor venue'>{DOME_GLYPH}</span>"
+        return f"<span class='cfdb-wx' title='indoor venue'>{DOME_MARK}</span>"
     temp = row.get("temperature_f")
     if _missing(temp):
         return ""
@@ -330,15 +350,16 @@ def _weather_cell(row) -> str:
 # width than the whole rest of the cell.
 UPSET_LEVEL_CLASS = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
 UPSET_LEVEL_TITLE = {
-    "": "no closing line and no poll rank, so nothing named a favourite",
+    "": "no closing line, so nothing named a favourite",
     "none": "the favourite won",
     "upset": "upset",
     "big": "upset by more than a touchdown",
     "blowout": "upset by more than two touchdowns",
 }
-# R-173. The tooltip says WHAT WAS JUDGED AGAINST, because the two bases answer different
-# questions and a reader checking a surprising verdict needs to know which one produced it.
-UPSET_BASIS_TITLE = {"line": "the closing spread", "rank": "the poll ranking"}
+# R-181. ONE BASIS, so the tooltip states it rather than naming which of two produced the
+# verdict. Still said out loud: a reader checking a surprising upset needs to know it is the
+# closing spread being judged against and not a poll.
+UPSET_AGAINST = "the closing spread"
 
 
 # R-171. "No closing line held" is a DASH, not a shape.
@@ -350,11 +371,10 @@ UPSET_BASIS_TITLE = {"line": "the closing spread", "rank": "the poll ranking"}
 NO_DATA_MARK = "–"
 
 
-def _upset_title(level: str, basis: str) -> str:
-    """The verdict, and what it was judged against. R-173."""
+def _upset_title(level: str) -> str:
+    """The verdict, and what it was judged against. R-181."""
     verdict = UPSET_LEVEL_TITLE.get(level, level)
-    against = UPSET_BASIS_TITLE.get(basis)
-    return f"{verdict}, against {against}" if against else verdict
+    return f"{verdict}, against {UPSET_AGAINST}" if level else verdict
 
 
 def _indicator(shape: str, state: str, title: str, extra: str = "") -> str:
@@ -407,7 +427,7 @@ def _result_strip(row) -> str:
         _indicator("upset",
                    "fill" if upset in UPSET_LEVEL_CLASS
                    else "quiet" if upset == "none" else "nodata",
-                   _upset_title(upset, _text(row.get("upset_basis"))),
+                   _upset_title(upset),
                    UPSET_LEVEL_CLASS.get(upset, "")),
         _indicator("cover", fills.get(cover, "nodata"),
                    {"yes": "the winner also covered the closing spread",
@@ -488,86 +508,137 @@ def _columns(scope) -> list:
     ]
 
 
-# R-159, SECOND ANSWER. The legend's three groups, which is also the order a reader meets
-# them: what the row IS, what HAPPENED, and how it went against the market.
+# R-176. TWO COLUMNS, NOT THREE. Marc: "Result should just have Won and Tied. The rest of the
+# items all belong under Against The Line, which is going to be very long. Maybe move Result
+# under Game so the aspect ratio works better." Eighteen marks split 7 against 11 balances
+# better than 5/7/6 across three columns.
+#
+# §3a RESOLVED BY REMOVING THE PROBLEM RATHER THAN RENAMING AROUND IT. The objection was that
+# a rank-based upset has nothing to do with the line. R-181 made the line the only basis, so
+# every row in that column really is against the line and the heading is now literally true.
+#
+# A SHAPE ENTRY IS (shape, state, extra), NOT A PRE-JOINED CSS STRING. That is what lets
+# `_legend_key` call `_indicator` — see R-178 — so the legend cannot draw a mark the row does
+# not, by construction rather than by test.
 LEGEND_GROUPS = [
     ("Game", [
-        ("cfdb-details", table.DETAILS_GLYPH, "Open the matchup"),
-        ("cfdb-neutral", NEUTRAL_GLYPH, "Neutral site"),
-        ("cfdb-legend-ch", DOME_GLYPH, "Indoors"),
-        ("cfdb-legend-ch", "@", "At the home team"),
-        ("cfdb-legend-ch", "vs", "Neutral site, no home team"),
+        ("glyph", "cfdb-details", table.DETAILS_GLYPH, "Open the matchup"),
+        ("glyph", "cfdb-neutral", NEUTRAL_GLYPH, "Neutral site"),
+        ("glyph", "cfdb-legend-ch", DOME_MARK, "Indoors"),
+        ("glyph", "cfdb-legend-ch", "@", "At the home team"),
+        ("glyph", "cfdb-legend-ch", "vs", "Neutral site, no home team"),
     ]),
     ("Result", [
-        ("cfdb-winner", WINNER_GLYPH, "Won"),
-        ("cfdb-winner", TIE_GLYPH, "Tied"),
-        ("ind cfdb-sh-upset cfdb-ind-quiet", "", "The favourite won"),
-        ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u1", "", "Upset"),
-        ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u2", "", "Upset by 7+"),
-        ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u3", "", "Upset by 14+"),
-        ("ind cfdb-sh-upset cfdb-ind-nodata", "", "No line and no ranking"),
+        ("glyph", "cfdb-winner", WINNER_GLYPH, "Won"),
+        ("glyph", "cfdb-winner", TIE_GLYPH, "Tied"),
     ]),
     ("Against the line", [
-        ("cfdb-legend-ch", MOVE_GLYPH, "Change since the line opened"),
-        ("ind cfdb-sh-cover cfdb-ind-fill cfdb-acc", "", "Winner covered"),
-        ("ind cfdb-sh-cover cfdb-ind-open cfdb-acc", "", "Winner did not cover"),
-        ("ind cfdb-sh-over cfdb-ind-fill cfdb-acc", "", "Over"),
-        ("ind cfdb-sh-over cfdb-ind-open cfdb-acc", "", "Under"),
-        # R-164 chose a fourth state over nothing; R-171 made that state a dash, because a
-        # dotted outline still reads as a value rather than as an absence. R-172 gave the
-        # upset slot the same mark, so it appears in both groups — a reader scanning Result
-        # needs to know what a dash means THERE without cross-referencing another column.
-        ("ind cfdb-sh-cover cfdb-ind-nodata", "", "No closing line held"),
+        ("glyph", "cfdb-legend-ch", MOVE_GLYPH, "Change since the line opened"),
+        ("shape", "upset", "quiet", "", "The favourite won"),
+        ("shape", "upset", "fill", "cfdb-u1", "Upset"),
+        ("shape", "upset", "fill", "cfdb-u2", "Upset by 7+"),
+        ("shape", "upset", "fill", "cfdb-u3", "Upset by 14+"),
+        ("shape", "cover", "fill", "cfdb-acc", "Winner covered"),
+        ("shape", "cover", "open", "cfdb-acc", "Winner did not cover"),
+        ("shape", "over", "fill", "cfdb-acc", "Over"),
+        ("shape", "over", "open", "cfdb-acc", "Under"),
+        ("shape", "cover", "nodata", "", "No closing line held"),
+        ("shape", "upset", "nodata", "", "No line, so no favourite"),
     ]),
 ]
 
+# R-176: the columns are a declared LAYOUT OVER the groups, so a regroup is a change here and
+# `LEGEND_GROUPS` stays the single inventory the completeness tests read.
+LEGEND_COLUMNS = [["Game", "Result"], ["Against the line"]]
 
-def _legend_key(css: str, glyph: str) -> str:
-    """A legend swatch. `ind ...` means one of R-141's shapes; anything else is a glyph."""
-    if css.startswith("ind "):
-        return f"<span class='cfdb-ind {css[4:]}'></span>"
-    return f"<span class='{css}'>{glyph}</span>"
+# R-177. Two worked examples beside the long column's heading. The strip is read as a unit of
+# three and eleven rows explain it one mark at a time; a complete strip teaches the composition
+# in the space of a heading.
+#
+# BUILT BY `_result_strip` FROM A SYNTHETIC ROW, NOT BY HAND. A legend example assembled from
+# its own markup is a second implementation of the strip, and the first thing it does is drift.
+LEGEND_EXAMPLES = [
+    ({"is_completed": True, "upset_level": "none",
+      "winner_covered_close": "yes", "over_met": "yes"},
+     "favourite won · winner covered · over"),
+    ({"is_completed": True, "upset_level": "big",
+      "winner_covered_close": "yes", "over_met": "no"},
+     "upset by 7+ · winner covered · under"),
+]
+
+
+def _legend_key(kind: str, *args) -> str:
+    """A legend swatch. R-178, AND THE POINT IS THAT IT DELEGATES.
+
+    THE OLD VERSION EMITTED ITS OWN EMPTY SPAN, and that is why Marc saw nothing for "No
+    closing line held" and "No line and no ranking". `_indicator` puts the dash INSIDE the
+    span; this function wrote `...></span>` with no content, and `.cfdb-ind-nodata` is
+    transparent by design because on the row the dash is the visible thing and the box only
+    holds R-166's alignment. So the two entries were not faint. They were absent.
+
+    A GREEN TEST WAS HOLDING IT THERE. `test_a_legend_swatch_is_a_shape_or_a_glyph_and_never_
+    both` asserted `shape.endswith("></span>")` — an assertion that a swatch is EMPTY. It
+    passed throughout, and nobody could fix the defect without breaking it.
+
+    The fix is not a dash here too. That would be a second implementation of "what a no-data
+    indicator looks like", and this project has been bitten four times by two implementations
+    of one thing. It calls `_indicator`.
+    """
+    if kind == "glyph":
+        css, glyph = args
+        return f"<span class='{css}'>{glyph}</span>"
+    shape, state, extra = args
+    return _indicator(shape, state, "", extra)
 
 
 def _legend() -> None:
-    """R-159, REVISED. THE SIDEBAR HAD NOTHING SAYING IT WAS THERE.
+    """R-159/R-176. The legend, as a popover, in two columns.
 
-    Marc: "There's nothing on the Nav bar that indicates there's a legend below... and we've
-    got quite a few visual elements so the Legend is particularly important on this page."
-    Both halves are right, and they pull against each other — a legend big enough to explain
-    sixteen marks is too big to leave open, and one tucked below the nav is one nobody finds.
+    NOT A MODAL, deliberately: a legend is consulted WHILE looking at the thing it explains,
+    and a modal covers exactly what the reader is comparing against. `st.popover` opens over
+    the page, dismisses on click-away, and costs one button of space when closed.
 
-    A POPOVER RESOLVES BOTH, and it is why this is not a modal. A legend is consulted WHILE
-    looking at the thing it explains; a modal covers exactly what the reader is comparing
-    against. `st.popover` opens over the page, dismisses on click-away, and costs one button
-    of space when closed.
+    It also keeps the sidebar for navigation. An earlier version lived under the nav and pushed
+    Streamlit's nav past its collapse threshold, hiding eight pages behind "View 8 more".
 
-    It also gives the sidebar back to navigation. The sidebar version pushed Streamlit's nav
-    past its collapse threshold and hid eight pages behind "View 8 more" — fixed at the time
-    with `expanded=True`, but the pressure is gone entirely now.
-
-    THREE GROUPS, IN THE ORDER A READER MEETS THEM: what the row is, what happened, how it
-    went against the market. Sixteen marks in one list is a list nobody reads.
+    EIGHTEEN MARKS, in two columns — Game and Result stacked on the left, the long group on the
+    right. Eighteen in one list is a list nobody reads, and 7 against 11 balances better across
+    two columns than 5/7/6 does across three.
     """
+    by_title = dict(LEGEND_GROUPS)
     with st.popover("Legend", use_container_width=True,
                     help="What every mark on this page means"):
-        columns = st.columns(len(LEGEND_GROUPS))
-        for column, (title, rows) in zip(columns, LEGEND_GROUPS):
-            body = "".join(
-                f"<div class='cfdb-legend-row'>"
-                f"<span class='cfdb-legend-key'>{_legend_key(css, glyph)}</span>"
-                f"<span>{label}</span></div>"
-                for css, glyph, label in rows)
-            column.markdown(
-                f"<div class='cfdb-legend-side'>"
-                f"<div class='cfdb-legend-title'>{title}</div>{body}</div>",
-                unsafe_allow_html=True)
+        columns = st.columns(len(LEGEND_COLUMNS))
+        for column, titles in zip(columns, LEGEND_COLUMNS):
+            blocks = []
+            for title in titles:
+                rows = "".join(
+                    f"<div class='cfdb-legend-row'>"
+                    f"<span class='cfdb-legend-key'>{_legend_key(entry[0], *entry[1:-1])}"
+                    f"</span><span>{entry[-1]}</span></div>"
+                    for entry in by_title[title])
+                head = f"<div class='cfdb-legend-title'>{title}</div>"
+                if title == LEGEND_COLUMNS[-1][0]:
+                    # R-177: the examples ride the heading's line, right-aligned.
+                    samples = "".join(
+                        f"<span class='cfdb-legend-eg' title='{caption}'>"
+                        f"{_result_strip(row)}</span>"
+                        for row, caption in LEGEND_EXAMPLES)
+                    head = (f"<div class='cfdb-legend-head'>"
+                            f"<span class='cfdb-legend-title'>{title}</span>"
+                            f"<span class='cfdb-legend-egs'>{samples}</span></div>")
+                blocks.append(f"{head}{rows}")
+            column.markdown(f"<div class='cfdb-legend-side'>{''.join(blocks)}</div>",
+                            unsafe_allow_html=True)
+        # R-177's captions, once, below the examples they describe — a tooltip on a strip in a
+        # popover is a tooltip inside a tooltip.
+        captions = " &nbsp;·&nbsp; ".join(caption for _, caption in LEGEND_EXAMPLES)
+        st.markdown(f"<div class='cfdb-legend-egcap'>Examples: {captions}</div>",
+                    unsafe_allow_html=True)
         # R-158: the sign convention is a CONVENTION, which is what a legend is for.
-        #
-        # SPREAD_SIGN_NOTE IS MARKDOWN, and this is an HTML block. `**bold**` inside a raw
-        # div is not processed by the markdown pass, so it rendered as literal asterisks —
-        # visible only by looking at it. Converted rather than restated, because a second copy
-        # of this sentence is the drift R-009 wrote it as a shared constant to prevent.
+        # SPREAD_SIGN_NOTE is markdown and this is an HTML block, so `**bold**` would render as
+        # literal asterisks. Converted rather than restated — R-009 made it a shared constant
+        # precisely so there would not be a second copy to drift.
         note = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", chips.SPREAD_SIGN_NOTE)
         st.markdown(f"<div class='cfdb-legend-note'>{note}</div>", unsafe_allow_html=True)
 

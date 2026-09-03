@@ -64,8 +64,20 @@ SCHEDULE = "0 */2 * * *"
 # What this DAG can change, and nothing else. `+` pulls ancestors, so this is the game spine
 # and the views built on it. Deliberately NOT +tag:production — that is 53 models, and a
 # two-request fetch has no business triggering a full transform every two hours.
+# R-192. FOUR COPIES OF ONE NAME, AND THE ANSWER IS THAT NOTHING FELL OUT.
+#
+# This read `+srv_game +srv_game +srv_game +srv_team_game_log +srv_game` — a bulk rename
+# applied to a five-view selector. Traced through git rather than guessed:
+#
+#   before  +srv_scoreboard +srv_schedule +srv_matchup +srv_team_game_log +srv_today_edges
+#   after   srv_scoreboard, srv_schedule, srv_matchup and srv_today_edges ALL became srv_game
+#           (R-076 named views by grain, R-094 retired the last two into it)
+#
+# So every renamed view landed on the same name and none of them was quietly dropped from the
+# two-hourly refresh. dbt does not mind a duplicate selector, which is why it never surfaced.
+# Deduplicated because a selector that says one thing four times is a selector nobody reads.
 SCORES_SELECTOR = (
-    "--select +srv_game +srv_game +srv_game +srv_team_game_log +srv_game"
+    "--select +srv_game +srv_team_game_log"
     # WEATHER IS FETCHED BY THE LINES DAG AND BUILT HERE, exactly as lines themselves are:
     # that DAG lands raw and this one is where dbt runs and the site is published.
     # Refreshing the raw every four hours while rebuilding the model weekly would leave the
@@ -77,7 +89,7 @@ SCORES_SELECTOR = (
 # A TEST THIS DAG CANNOT SATISFY IS A TEST THIS DAG MUST NOT RUN.
 #
 # THE RULE, stated once instead of discovered six times: this DAG fetches /games and rebuilds
-# the five views above plus their ancestors. Nothing else. So any test comparing something it
+# the three views above plus their ancestors. Nothing else. So any test comparing something it
 # DOES refresh against something it does NOT is measuring the gap between two fetch times, not
 # correctness — and it reports that gap as a failure on essentially every run.
 #
