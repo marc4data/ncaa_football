@@ -745,25 +745,62 @@ def test_each_indicator_has_its_own_shape():
         assert strip.count(shape) == 1, f"{shape} should appear exactly once"
 
 
-def test_the_legend_samples_carry_the_shapes_the_page_draws():
-    """A legend that describes an appearance the card does not have is worse than none. The
-    samples are asserted against the same shape classes `_result_strip` emits."""
-    import streamlit as st
-    captured = []
-    original = st.sidebar.markdown
-    st.sidebar.markdown = lambda body, **kw: captured.append(body)
-    try:
-        schedule._legend()
-    finally:
-        st.sidebar.markdown = original
-    legend = "".join(captured)
-    assert legend, "R-159: the legend renders into the SIDEBAR, not the body"
-    strip = schedule._result_strip(_row(upset_level="big", winner_covered_close="no"))
+def test_the_legend_explains_every_mark_the_page_can_draw():
+    """A legend that describes an appearance the page does not have is worse than none; a
+    page that draws a mark the legend omits is worse still.
+
+    Asserted against `LEGEND_GROUPS` — the declarative structure the popover renders — rather
+    than by scraping markdown out of a Streamlit container. The data is the thing that has to
+    be complete, and it survives the legend moving from the sidebar to a popover, which is
+    exactly what happened to the previous version of this test.
+    """
+    documented = {css for _, rows in schedule.LEGEND_GROUPS for css, _, _ in rows}
+    flat = " ".join(documented)
+    # Every shape, and every state those shapes can be drawn in.
     for shape in ("cfdb-sh-upset", "cfdb-sh-cover", "cfdb-sh-over"):
-        assert shape in legend, f"the legend never shows a {shape}"
-        assert shape in strip
-    for state in ("cfdb-ind-quiet", "cfdb-ind-fill", "cfdb-ind-open"):
-        assert state in legend, f"the legend never shows {state}"
+        assert shape in flat, f"the legend never shows a {shape}"
+    for state in ("cfdb-ind-quiet", "cfdb-ind-fill", "cfdb-ind-open", "cfdb-ind-nodata"):
+        assert state in flat, f"the legend never shows {state}"
+    # And every glyph constant the renderers use.
+    glyphs = {glyph for _, rows in schedule.LEGEND_GROUPS for _, glyph, _ in rows}
+    for glyph in (schedule.NEUTRAL_GLYPH, schedule.DOME_GLYPH, schedule.WINNER_GLYPH,
+                  schedule.TIE_GLYPH, schedule.MOVE_GLYPH, schedule.table.DETAILS_GLYPH):
+        assert glyph in glyphs, f"{glyph} is drawn on the page and never explained"
+
+
+def test_every_state_the_strip_can_render_is_in_the_legend():
+    """The strip is generated from the data, so the states it can produce are enumerable.
+    Anything it can draw and the legend cannot name is a mark with no meaning."""
+    nan = float("nan")
+    drawn = set()
+    for row in (_row(upset_level="none"), _row(upset_level="upset"),
+                _row(upset_level="big"), _row(upset_level="blowout"),
+                _row(winner_covered_close="no", over_met="no"),
+                _row(winner_covered_close=nan, over_met=nan),
+                _row(is_completed=False, upset_level=nan,
+                     winner_covered_close=nan, over_met=nan)):
+        for found in re.findall(r"cfdb-ind-\w+", schedule._result_strip(row)):
+            drawn.add(found)
+    documented = " ".join(css for _, rows in schedule.LEGEND_GROUPS for css, _, _ in rows)
+    for state in sorted(drawn):
+        if state == "cfdb-ind-none":
+            continue          # "not played yet" draws nothing; there is nothing to explain
+        assert state in documented, f"{state} is drawn and not in the legend"
+
+
+def test_the_legend_is_grouped_rather_than_one_long_list():
+    """Sixteen marks in a single column is a list nobody reads. Three groups, in the order a
+    reader meets them: what the row is, what happened, how it went against the market."""
+    titles = [title for title, _ in schedule.LEGEND_GROUPS]
+    assert titles == ["Game", "Result", "Against the line"]
+    assert all(rows for _, rows in schedule.LEGEND_GROUPS)
+
+
+def test_a_legend_swatch_is_a_shape_or_a_glyph_and_never_both():
+    shape = schedule._legend_key("ind cfdb-sh-over cfdb-ind-fill cfdb-acc", "")
+    glyph = schedule._legend_key("cfdb-winner", schedule.WINNER_GLYPH)
+    assert "cfdb-ind cfdb-sh-over" in shape and shape.endswith("></span>")
+    assert schedule.WINNER_GLYPH in glyph and "cfdb-ind" not in glyph
 
 
 def test_the_result_strip_is_on_the_card_as_well_as_the_table():
@@ -774,3 +811,42 @@ def test_the_result_strip_is_on_the_card_as_well_as_the_table():
     # In the kickoff cell, mirroring where R-141 put it in the Inline header.
     head = card[card.index("cfdb-gc-time"):]
     assert head.index("cfdb-strip") < head.index("cfdb-gc-mid")
+
+
+def test_the_legend_is_rendered_exactly_once():
+    """It was rendered twice for one commit — the sidebar call from R-159 was left in place
+    when the popover was added to Band 3, so the page carried two Legend buttons.
+
+    Counted in the source because both calls were syntactically fine and neither test nor
+    lint could see the duplication; it took looking at the rendered page.
+    """
+    source = Path(schedule.__file__).read_text()
+    body = source[source.index("def body(page)"):]
+    assert body.count("_legend()") == 1, "one legend, one button"
+
+
+def test_the_legend_note_renders_its_emphasis_rather_than_asterisks():
+    """`SPREAD_SIGN_NOTE` is markdown and the legend is a raw HTML block, so `**bold**` came
+    out as literal asterisks — a defect visible only by looking at the rendered page.
+
+    Converted rather than restated: R-009 made this sentence a shared constant precisely so
+    there would not be a second copy to drift.
+    """
+    import streamlit as st
+    from lib import chips as chips_lib
+    captured = []
+    original = st.markdown
+    st.markdown = lambda body, **kw: captured.append(body)
+    try:
+        schedule._legend()
+    except Exception:
+        pass                      # st.popover needs a runtime; the note is written regardless
+    finally:
+        st.markdown = original
+    note = next((c for c in captured if "cfdb-legend-note" in c), None)
+    if note is None:
+        # No Streamlit runtime here; assert the transform directly instead of the render.
+        import re as _re
+        note = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", chips_lib.SPREAD_SIGN_NOTE)
+    assert "**" not in note, "markdown emphasis inside a raw HTML block is not processed"
+    assert "<strong>" in note

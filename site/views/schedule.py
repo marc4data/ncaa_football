@@ -72,6 +72,8 @@ a single CSS grid, so the line block and the box score are COLUMNS OF THE SAME G
 names — which is the only reason their rows share baselines. Asking to move something "into its
 own table" would undo that; asking to move it to another COLUMN or ROW will not.
 """
+import re
+
 import pandas as pd
 import streamlit as st
 
@@ -378,12 +380,12 @@ def _result_strip(row) -> str:
                    "fill" if upset in UPSET_LEVEL_CLASS else "quiet",
                    UPSET_LEVEL_TITLE.get(upset, upset),
                    UPSET_LEVEL_CLASS.get(upset, "")),
-        _indicator("cover", fills.get(cover, "none"),
+        _indicator("cover", fills.get(cover, "nodata"),
                    {"yes": "the winner also covered the closing spread",
                     "no": "the winner did not cover the closing spread",
                     "push": "the closing spread pushed"}.get(cover, "no closing spread held"),
                    "cfdb-acc"),
-        _indicator("over", fills.get(over, "none"),
+        _indicator("over", fills.get(over, "nodata"),
                    {"yes": "over the closing total",
                     "no": "under the closing total",
                     "push": "landed on the closing total"}.get(over, "no closing total held"),
@@ -457,55 +459,84 @@ def _columns(scope) -> list:
     ]
 
 
+# R-159, SECOND ANSWER. The legend's three groups, which is also the order a reader meets
+# them: what the row IS, what HAPPENED, and how it went against the market.
+LEGEND_GROUPS = [
+    ("Game", [
+        ("cfdb-details", table.DETAILS_GLYPH, "Open the matchup"),
+        ("cfdb-neutral", NEUTRAL_GLYPH, "Neutral site"),
+        ("cfdb-legend-ch", DOME_GLYPH, "Indoors"),
+        ("cfdb-legend-ch", "@", "At the home team"),
+        ("cfdb-legend-ch", "vs", "Neutral site, no home team"),
+    ]),
+    ("Result", [
+        ("cfdb-winner", WINNER_GLYPH, "Won"),
+        ("cfdb-winner", TIE_GLYPH, "Tied"),
+        ("ind cfdb-sh-upset cfdb-ind-quiet", "", "No upset"),
+        ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u1", "", "Upset"),
+        ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u2", "", "Upset by 7+"),
+        ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u3", "", "Upset by 14+"),
+    ]),
+    ("Against the line", [
+        ("cfdb-legend-ch", MOVE_GLYPH, "Change since the line opened"),
+        ("ind cfdb-sh-cover cfdb-ind-fill cfdb-acc", "", "Winner covered"),
+        ("ind cfdb-sh-cover cfdb-ind-open cfdb-acc", "", "Winner did not cover"),
+        ("ind cfdb-sh-over cfdb-ind-fill cfdb-acc", "", "Over"),
+        ("ind cfdb-sh-over cfdb-ind-open cfdb-acc", "", "Under"),
+        # R-164, Marc's pick: a fourth state rather than nothing or a dash.
+        ("ind cfdb-sh-cover cfdb-ind-nodata", "", "No closing line held"),
+    ]),
+]
+
+
+def _legend_key(css: str, glyph: str) -> str:
+    """A legend swatch. `ind ...` means one of R-141's shapes; anything else is a glyph."""
+    if css.startswith("ind "):
+        return f"<span class='cfdb-ind {css[4:]}'></span>"
+    return f"<span class='{css}'>{glyph}</span>"
+
+
 def _legend() -> None:
-    """R-159. THE LEGEND GOES VERTICAL, IN THE SIDEBAR.
+    """R-159, REVISED. THE SIDEBAR HAD NOTHING SAYING IT WAS THERE.
 
-    Marc is right that vertical reads better than a wrapping horizontal strip — the horizontal
-    one measured 52px and two lines at 1440. But a vertical legend IN THE BODY costs a dozen
-    rows and defeats the thing he raised it for, which was getting the first card up the page.
+    Marc: "There's nothing on the Nav bar that indicates there's a legend below... and we've
+    got quite a few visual elements so the Legend is particularly important on this page."
+    Both halves are right, and they pull against each other — a legend big enough to explain
+    sixteen marks is too big to leave open, and one tucked below the nav is one nobody finds.
 
-    The sidebar costs ZERO body height, is naturally vertical, and stays visible while the
-    cards scroll — which is when a legend is actually consulted rather than read once and
-    forgotten. `team.py` already writes page-specific controls to `st.sidebar` under
-    `st.navigation`, so this is a pattern the app runs today rather than one invented here.
+    A POPOVER RESOLVES BOTH, and it is why this is not a modal. A legend is consulted WHILE
+    looking at the thing it explains; a modal covers exactly what the reader is comparing
+    against. `st.popover` opens over the page, dismisses on click-away, and costs one button
+    of space when closed.
 
-    BELOW THE NAV, because navigation is the sidebar's primary job. Schedule-only, because it
-    is Schedule's legend — `render()` is the only caller and other pages never see it.
+    It also gives the sidebar back to navigation. The sidebar version pushed Streamlit's nav
+    past its collapse threshold and hid eight pages behind "View 8 more" — fixed at the time
+    with `expanded=True`, but the pressure is gone entirely now.
 
-    R-161: sentence case, not Title Case. The site's voice is already lowercase.
-    The indicators keep their `title` tooltips, so a collapsed sidebar costs a reader
-    convenience rather than comprehension.
+    THREE GROUPS, IN THE ORDER A READER MEETS THEM: what the row is, what happened, how it
+    went against the market. Sixteen marks in one list is a list nobody reads.
     """
-    rows = [
-        (f"<span class='cfdb-details'>{table.DETAILS_GLYPH}</span>", "Open the matchup"),
-        (f"<span class='cfdb-neutral'>{NEUTRAL_GLYPH}</span>", "Neutral site"),
-        (f"<span class='cfdb-legend-ch'>{DOME_GLYPH}</span>", "Indoors"),
-        (f"<span class='cfdb-winner'>{WINNER_GLYPH}</span>", "Won"),
-        (f"<span class='cfdb-winner'>{TIE_GLYPH}</span>", "Tied"),
-        ("<span class='cfdb-legend-ch'>@</span>", "At the home team"),
-        ("<span class='cfdb-legend-ch'>vs</span>", "Neutral site, no home team"),
-        (f"<span class='cfdb-legend-ch'>{MOVE_GLYPH}</span>", "Change since the line opened"),
-        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-quiet'></span>", "No upset"),
-        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u1'></span>", "Upset"),
-        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u2'></span>",
-         "Upset by 7+"),
-        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u3'></span>",
-         "Upset by 14+"),
-        ("<span class='cfdb-ind cfdb-sh-cover cfdb-ind-fill cfdb-acc'></span>",
-         "Winner covered"),
-        ("<span class='cfdb-ind cfdb-sh-cover cfdb-ind-open cfdb-acc'></span>",
-         "Winner did not cover"),
-        ("<span class='cfdb-ind cfdb-sh-over cfdb-ind-fill cfdb-acc'></span>", "Over"),
-        ("<span class='cfdb-ind cfdb-sh-over cfdb-ind-open cfdb-acc'></span>", "Under"),
-    ]
-    body = "".join(f"<div class='cfdb-legend-row'><span class='cfdb-legend-key'>{glyph}"
-                   f"</span><span>{label}</span></div>" for glyph, label in rows)
-    st.sidebar.markdown(
-        f"<div class='cfdb-legend-side'><div class='cfdb-legend-title'>Legend</div>{body}"
-        # R-158: the sign convention is a CONVENTION, which is precisely what a legend is for.
-        # As its own element it cost two full-width body rows to say something read once.
-        f"<div class='cfdb-legend-note'>{chips.SPREAD_SIGN_NOTE}</div></div>",
-        unsafe_allow_html=True)
+    with st.popover("Legend", use_container_width=True,
+                    help="What every mark on this page means"):
+        columns = st.columns(len(LEGEND_GROUPS))
+        for column, (title, rows) in zip(columns, LEGEND_GROUPS):
+            body = "".join(
+                f"<div class='cfdb-legend-row'>"
+                f"<span class='cfdb-legend-key'>{_legend_key(css, glyph)}</span>"
+                f"<span>{label}</span></div>"
+                for css, glyph, label in rows)
+            column.markdown(
+                f"<div class='cfdb-legend-side'>"
+                f"<div class='cfdb-legend-title'>{title}</div>{body}</div>",
+                unsafe_allow_html=True)
+        # R-158: the sign convention is a CONVENTION, which is what a legend is for.
+        #
+        # SPREAD_SIGN_NOTE IS MARKDOWN, and this is an HTML block. `**bold**` inside a raw
+        # div is not processed by the markdown pass, so it rendered as literal asterisks —
+        # visible only by looking at it. Converted rather than restated, because a second copy
+        # of this sentence is the drift R-009 wrote it as a shared constant to prevent.
+        note = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", chips.SPREAD_SIGN_NOTE)
+        st.markdown(f"<div class='cfdb-legend-note'>{note}</div>", unsafe_allow_html=True)
 
 
 # --- the two views --------------------------------------------------------------------
@@ -896,10 +927,49 @@ def _stacked(df: pd.DataFrame, scope) -> None:
         st.markdown(f"<div class='cfdb-cardgrid'>{cards}</div>", unsafe_allow_html=True)
 
 
+VIEW_KEY = "schedule_view"
+
+
+def _view_switch(keys: list) -> str:
+    """R-043's tab, without the double-take Marc reported: "I select it, then it moves and
+    then quickly moves back. The second time I select it the change sticks."
+
+    THE CAUSE IS AN `index=` ARGUMENT ON A WIDGET WITH NO `key=`, PLUS A URL WRITE.
+    `params.set_params` assigns to `st.query_params`, and that assignment triggers a rerun of
+    its own. So one click produced two passes:
+
+        pass 1   the click sets the widget to Stacked, but `index` is still computed from the
+                 URL, which says Dense — so the explicit index wins and it snaps back
+        pass 2   the URL write from pass 1 has landed, `index` now says Stacked, and it sticks
+
+    The visible flicker IS that sequence. Fixing it means removing the fight rather than
+    damping it: a keyed widget owns its own value, `on_change` writes the URL in the SAME
+    pass, and no `index` is passed at all.
+
+    THE URL IS STILL THE SOURCE OF TRUTH ON ARRIVAL (R-043 — the tab is the URL, so a link to
+    the stacked view lands on the stacked view). The mirror below is what tells an incoming
+    link apart from a click: if the URL has changed since we last wrote it, a link was
+    followed and the widget adopts it; otherwise the widget is authoritative.
+    """
+    from_url = params.get("view")
+    from_url = from_url if from_url in keys else keys[0]
+    mirror = f"{VIEW_KEY}_url"
+    if st.session_state.get(mirror) != from_url:
+        st.session_state[VIEW_KEY] = from_url
+        st.session_state[mirror] = from_url
+
+    def _sync() -> None:
+        picked = st.session_state[VIEW_KEY]
+        st.session_state[mirror] = picked
+        params.set_params(view=picked)
+
+    st.radio("View", keys, key=VIEW_KEY, horizontal=True,
+             format_func=lambda k: VIEWS[k], label_visibility="collapsed",
+             on_change=_sync)
+    return st.session_state[VIEW_KEY]
+
+
 def body(page) -> None:
-    # R-159: the legend renders into the sidebar, so it costs no body height and is written
-    # first — before the query — because nothing in it depends on the data.
-    _legend()
     scope = filters.game_scope()
     with states.section("srv_game"):
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
@@ -907,22 +977,16 @@ def body(page) -> None:
         table.as_of_caption(df)          # R-158: into Band 1, beside the status.
         df = table.apply_sort(df, _columns(scope))
 
-        # R-158 BAND 3: the dataset name and the view switch share one row. The sign note
-        # moved into the legend and the as-of stamp into Band 1, so what were four rows here
-        # is now one.
-        left, right = st.columns([2, 3], vertical_alignment="center")
-        with left:
+        # R-158 BAND 3, reordered: the view switch is the row's only CONTROL, so it leads.
+        # Dataset and the Legend button are references and follow it.
+        switch, dataset, legend_slot = st.columns([2, 2, 1],
+                                                  vertical_alignment="center")
+        with switch:
+            chosen = _view_switch(list(VIEWS))
+        with dataset:
             table.dataset_caption("Schedule", "srv_game")
-        with right:
-            # R-043. The tab is the URL, so a link to the stacked view lands on the stacked
-            # view.
-            keys = list(VIEWS)
-            current = params.get("view")
-            chosen = st.radio("View", keys, horizontal=True,
-                              format_func=lambda k: VIEWS[k],
-                              index=keys.index(current) if current in keys else 0,
-                              label_visibility="collapsed")
-        params.set_params(view=chosen)
+        with legend_slot:
+            _legend()
 
         states.render_or_state(
             df, "srv_game",
