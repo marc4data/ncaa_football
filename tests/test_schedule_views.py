@@ -651,3 +651,31 @@ def test_the_middle_block_mirrors_the_market_block_rows():
     assert "O/U" in away and "51.5" in away and "48" in away
     assert "Spread" in home and "-7.0" in home and "-14" in home
     assert "+" not in away.split("cfdb-gc-mid-actual")[1], "a points total is unsigned"
+
+
+def test_the_card_vocabulary_matches_the_markup():
+    """The names in the module docstring must name things that exist.
+
+    A vocabulary is only useful while it is true. This one exists so a change request can say
+    "the line block" instead of describing a position, which only works if "the line block" is
+    still the thing that renders there. Parsed from the docstring rather than restated here,
+    so there is one list and it is the one Marc reads.
+    """
+    doc = schedule.__doc__
+    assert "THE PARTS" in doc, "the vocabulary section is gone; so is the reason for this test"
+    table = doc[doc.index("THE PARTS"):]
+    entries = re.findall(r"^\s{4}([a-z][a-z ()]+?) \.{3,} (cfdb-[a-z-]+)", table, re.M)
+    assert len(entries) >= 14, f"only parsed {len(entries)} names; the table shape changed"
+
+    source = Path(schedule.__file__).read_text()
+    body = source[source.index('"""', source.index('"""') + 3):]   # past the docstring
+    for name, css in entries:
+        assert css in body, f"'{name}' is documented as .{css}, which nothing renders"
+
+    # And the reverse, for the parts a reader can actually point at. A class that renders a
+    # visible region of the card but is absent from the table is a part with no name, which is
+    # how "the thing next to the other thing" starts.
+    documented = {css for _, css in entries}
+    for css in ("cfdb-gamecard", "cfdb-gc-team", "cfdb-gc-mid", "cfdb-gc-market",
+                "cfdb-gc-tot", "cfdb-gamecard-meta"):
+        assert css in documented, f".{css} renders a region of the card and has no name"

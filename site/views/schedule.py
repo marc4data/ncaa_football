@@ -8,6 +8,68 @@ TWO VIEWS, AS TABS (R-043). Dense is the table; Stacked is the card. Tabs rather
 toggle because a tab is URL-addressable through st.query_params and a toggle is not — the
 same finding that shaped the rest of the site's navigation. Both read the SAME single
 relation and the same frame; the stacked view is a different rendering, not a second query.
+
+
+THE STACKED CARD, NAMED
+=======================
+
+Shared vocabulary, so a change request can point at a part instead of describing it. Every
+name below maps to the class that renders it, and `test_the_card_vocabulary_matches_the_markup`
+fails if a name stops matching the markup — the map cannot rot into fiction.
+
+TWO VARIANTS, and they are deliberately structured differently:
+
+    RESULT CARD    a completed game.  Header row is the box-score headings; the line block
+                   carries the closing line against what actually happened.
+    PREVIEW CARD   a game not yet played.  Header row is empty — there are no quarters to
+                   head — and the line block carries the current market.
+
+("preview" rather than "incomplete": a game in progress is also incomplete, and on a Saturday
+that difference will matter.)
+
+THE RESULT CARD
+
+                  ├─ team column ─┤├ line block ┤├──── box score ─────┤
+
+    header row      7:30 PM PDT                    1   2   3   4  OT  F
+    away row      ▣ Auburn      5-5   O/U  51.5 48  3   7   0   7      17
+    home row    @ ▣ Alabama     9-2 ▸ Sprd -7.0 -14  7  10   7   7      31
+                  └ team cluster ┘   └ line row ┘   └ quarter cells ┘ └ final cell
+    card footer   ☀ 54°F · ESPN · Bryant-Denny · ▤
+
+THE PREVIEW CARD — same three rows, same team column, empty header and no box score.
+
+    header row      7:30 PM PDT
+    away row      ▣ Auburn      5-5   O/U  52.5  Δ +1.5
+    home row    @ ▣ Alabama     8-2   Sprd -7.5  Δ -0.5
+    card footer   ☀ 54°F · ESPN · Bryant-Denny · ▤
+
+THE PARTS
+
+    game card ................ cfdb-gamecard        one game, border and all
+    card grid ................ cfdb-gc              the three rows; ONE grid, see R-114
+    kickoff cell ............. cfdb-gc-time         header row, team column
+    header cell .............. cfdb-gc-h            1 2 3 4 OT F
+    team column .............. cfdb-gc-team         the flexible left column
+    home marker .............. cfdb-athome          the @ or vs before the home team
+    team link ................ cfdb-teamlink        logo, rank badge and name; clickable
+    team record .............. cfdb-team-record     outside the link, neutral (R-129)
+    winner marker ............ cfdb-winner          after the record (R-135)
+    line block ............... cfdb-gc-mid          RESULT card: line against actual
+    line block ............... cfdb-gc-market       PREVIEW card: the current market
+    quarter cell ............. cfdb-gc-n            one quarter, or the reserved OT track
+    final cell ............... cfdb-gc-tot          the F column
+    absence note ............. cfdb-ls-why          "no quarter scores recorded" (R-092)
+    card footer .............. cfdb-gamecard-meta   weather, network, venue, matchup
+    card grid (the page) ..... cfdb-cardgrid        the two-up arrangement OF cards (R-110)
+
+WHAT IS NOT ON THE CARD YET: the result strip (`cfdb-strip`, three indicators) lives in the
+Inline view's Game cell only. If it should appear here too, that is a request, not a bug.
+
+A NOTE ON "SUB-TABLE". There are none. The card was two blocks that agreed until R-114 made it
+a single CSS grid, so the line block and the box score are COLUMNS OF THE SAME GRID as the team
+names — which is the only reason their rows share baselines. Asking to move something "into its
+own table" would undo that; asking to move it to another COLUMN or ROW will not.
 """
 import pandas as pd
 import streamlit as st
