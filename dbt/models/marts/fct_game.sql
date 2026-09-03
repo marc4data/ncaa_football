@@ -120,6 +120,19 @@ select
     g.away_rank,
     case
         when not g.is_completed then null
+        -- NULL WHEN NEITHER SIDE WAS RANKED, BECAUSE THERE IS NO FAVOURITE TO BE UPSET.
+        --
+        -- This branch used to be part of `else false`, and that was a claim we had no basis
+        -- for: 91,047 of 109,108 completed games — 83% — asserted "not an upset" with no
+        -- poll rank on either team. Marc found it on Grand Valley State at Charleston (WV),
+        -- a Division II game with no ranks and no line, drawn on the page as an assessed
+        -- non-upset. There is nothing there to assess.
+        --
+        -- The definition stays RANK-BASED, which is what AC-3.6 documents and what the two
+        -- branches below implement. A market favourite is a different basis and would be a
+        -- different metric — `winner_covered_close` on srv_game already answers that
+        -- question, and conflating the two would give one column two meanings.
+        when g.home_rank is null and g.away_rank is null then null
         -- An upset is the ranked side losing to a side ranked worse or unranked. Stated as
         -- a column because AC-3.6 forbids the app comparing ranks itself.
         when g.home_points > g.away_points and g.away_rank is not null

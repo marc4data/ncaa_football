@@ -330,6 +330,7 @@ def _weather_cell(row) -> str:
 # width than the whole rest of the cell.
 UPSET_LEVEL_CLASS = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
 UPSET_LEVEL_TITLE = {
+    "": "neither team was ranked, so there was no favourite to upset",
     "none": "not an upset",
     "upset": "upset",
     "big": "upset by more than a touchdown",
@@ -385,12 +386,17 @@ def _result_strip(row) -> str:
                 + _indicator("cover", "none", "not played yet")
                 + _indicator("over", "none", "not played yet")
                 + "</span>")
-    upset = _text(row.get("upset_level")) or "none"
+    # R-172. NULL IS NOT "none". `is_upset` is null when neither side was ranked, and the
+    # previous `or "none"` turned that absence into an assessment — a quiet circle claiming we
+    # had looked. It is a dash now, the same mark the cover and total slots already use for
+    # "nothing to measure against".
+    upset = _text(row.get("upset_level"))
     cover, over = _text(row.get("winner_covered_close")), _text(row.get("over_met"))
     fills = {"yes": "fill", "no": "open", "push": "push"}
     parts = [
         _indicator("upset",
-                   "fill" if upset in UPSET_LEVEL_CLASS else "quiet",
+                   "fill" if upset in UPSET_LEVEL_CLASS
+                   else "quiet" if upset == "none" else "nodata",
                    UPSET_LEVEL_TITLE.get(upset, upset),
                    UPSET_LEVEL_CLASS.get(upset, "")),
         _indicator("cover", fills.get(cover, "nodata"),
@@ -489,6 +495,7 @@ LEGEND_GROUPS = [
         ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u1", "", "Upset"),
         ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u2", "", "Upset by 7+"),
         ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u3", "", "Upset by 14+"),
+        ("ind cfdb-sh-upset cfdb-ind-nodata", "", "Neither team ranked"),
     ]),
     ("Against the line", [
         ("cfdb-legend-ch", MOVE_GLYPH, "Change since the line opened"),
@@ -497,7 +504,9 @@ LEGEND_GROUPS = [
         ("ind cfdb-sh-over cfdb-ind-fill cfdb-acc", "", "Over"),
         ("ind cfdb-sh-over cfdb-ind-open cfdb-acc", "", "Under"),
         # R-164 chose a fourth state over nothing; R-171 made that state a dash, because a
-        # dotted outline still reads as a value rather than as an absence.
+        # dotted outline still reads as a value rather than as an absence. R-172 gave the
+        # upset slot the same mark, so it appears in both groups — a reader scanning Result
+        # needs to know what a dash means THERE without cross-referencing another column.
         ("ind cfdb-sh-cover cfdb-ind-nodata", "", "No closing line held"),
     ]),
 ]

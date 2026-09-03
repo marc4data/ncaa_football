@@ -880,3 +880,34 @@ def test_the_unplayed_strip_stays_empty_rather_than_dashed():
                                            winner_covered_close=nan, over_met=nan))
     assert schedule.NO_DATA_MARK not in unplayed
     assert unplayed.count("cfdb-ind-none") == 3
+
+
+def test_an_unranked_game_is_not_assessed_as_a_non_upset():
+    """R-172. `is_upset` is derived from AP poll ranks, and its `else false` branch fired
+    whenever NEITHER team was ranked — so 91,047 of 109,108 completed games claimed "not an
+    upset" with no favourite to be upset. Marc found it on Grand Valley State at Charleston
+    (WV): two Division II sides, no ranks, no line, drawn as an assessed non-upset.
+
+    The model now returns null there and the page draws the same dash the cover and total
+    slots use. "We looked and it was unremarkable" and "there was nothing to look at" are
+    different facts and must not share a mark.
+    """
+    nan = float("nan")
+    no_basis = schedule._result_strip(_row(upset_level=nan, home_rank=nan, away_rank=nan))
+    assessed = schedule._result_strip(_row(upset_level="none"))
+    assert "cfdb-sh-upset cfdb-ind-nodata" in no_basis, "no ranks, no assessment, a dash"
+    assert "cfdb-sh-upset cfdb-ind-quiet" in assessed, "ranked and unremarkable keeps a circle"
+    assert "cfdb-sh-upset cfdb-ind-quiet" not in no_basis
+    # A real upset is unaffected in either direction.
+    assert "cfdb-u2" in schedule._result_strip(_row(upset_level="big"))
+
+
+def test_the_upset_null_does_not_fall_through_to_the_margin_tests():
+    """`not null` is null, not true, so without an explicit branch a big unranked win would
+    have reached `abs(margin) > 14` and been labelled an upset blowout. Asserted on the model
+    because that is where the branch has to be."""
+    sql = (Path(schedule.__file__).resolve().parents[2]
+           / "dbt" / "models" / "serving" / "srv_game.sql").read_text()
+    block = sql[sql.index("as upset_level") - 1200:sql.index("as upset_level")]
+    assert "when g.is_upset is null then null" in block
+    assert block.index("is_upset is null") < block.index("upset_margin_blowout")
