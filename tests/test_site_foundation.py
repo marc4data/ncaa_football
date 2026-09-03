@@ -1042,10 +1042,15 @@ def test_the_navigation_never_collapses_behind_a_disclosure():
     assert "st.navigation(nav, expanded=True)" in source
 
 
-def test_only_schedule_writes_a_legend_to_the_sidebar():
-    """It is Schedule's legend. Left under the nav on every page it would be chrome that lies
-    about eleven other pages."""
+def test_nothing_writes_a_legend_into_the_sidebar():
+    """The legend lived under the nav for one round and pushed Streamlit's nav past its
+    collapse threshold, hiding eight pages behind "View 8 more". It is a popover now, which
+    also gave the sidebar back to navigation — so the pressure is gone rather than damped.
+
+    `expanded=True` stays regardless: it is cheap, and it stops the next thing anyone adds to
+    the sidebar from silently costing the nav again.
+    """
     views = (Path(__file__).resolve().parents[1] / "site" / "views")
     writers = sorted(p.stem for p in views.glob("*.py")
-                     if "cfdb-legend-side" in p.read_text())
-    assert writers == ["schedule"], writers
+                     if "st.sidebar" in p.read_text() and "legend" in p.read_text().lower())
+    assert writers == [], writers

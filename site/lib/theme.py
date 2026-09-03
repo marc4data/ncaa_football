@@ -309,16 +309,16 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 /* R-159. THE LEGEND, VERTICAL, IN THE SIDEBAR — where it costs zero body height and stays
    visible while the cards scroll, which is when a legend is actually consulted.
    R-161: bigger icons, sentence-case labels. */
-.cfdb-legend-side { margin-top:1.2rem; padding-top:.9rem;
-                    border-top:1px solid rgba(127,127,127,.25); font-size:.82rem; }
+/* In a popover now, not the sidebar — three columns rather than one tall list. */
+.cfdb-legend-side { font-size:.84rem; }
 .cfdb-legend-title { font-weight:600; opacity:.7; font-size:.78rem; letter-spacing:.03em;
                      text-transform:uppercase; margin-bottom:.5rem; }
 .cfdb-legend-row { display:flex; align-items:center; gap:.55rem; padding:.16rem 0;
                    opacity:.85; }
 .cfdb-legend-key { flex:0 0 1.6rem; text-align:center; font-size:1.15rem; line-height:1; }
 .cfdb-legend-ch { font-size:1rem; opacity:.8; }
-.cfdb-legend-note { margin-top:.8rem; padding-top:.7rem; font-size:.76rem; opacity:.62;
-                    border-top:1px solid rgba(127,127,127,.18); line-height:1.45; }
+.cfdb-legend-note { margin-top:.9rem; padding-top:.7rem; font-size:.78rem; opacity:.7;
+                    border-top:1px solid rgba(127,127,127,.18); line-height:1.5; }
 
 /* R-166. THE STRIP RIGHT-ALIGNS IN THE KICKOFF CELL, so every card's indicators start and
    end at the same x — the team column is a page-wide track and R-141 already reserves the
@@ -362,6 +362,13 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    active. It is distinguishable from the covered/over indicators by SHAPE — circle against
    square and diamond — so the colour is not carrying the distinction on its own. */
 .cfdb-ind-quiet { background:transparent; border-color:#1f6feb; opacity:.45; }
+/* R-164, Marc's choice of the three offered. `nodata` means WE HOLD NO CLOSING LINE, which
+   is a third thing again: not "not played" (nothing drawn) and not "played, unremarkable"
+   (the quiet accent). Closing lines exist for roughly 3,200 games in the whole warehouse, so
+   on a historical week this is the common case and it deserves to say so rather than leave
+   the reader counting empty slots. Dotted and grey: present, and explicitly not an answer. */
+.cfdb-ind-nodata { background:transparent; border-style:dotted;
+                   border-color:rgba(127,127,127,.7); }
 .cfdb-ind-open { background:transparent; border-color:currentColor; }
 .cfdb-ind-fill { background:currentColor; border-color:currentColor; }
 /* A push is neither: half-filled reads as "landed on the number" without a fourth colour. */
