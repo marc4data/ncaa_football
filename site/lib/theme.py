@@ -51,6 +51,18 @@ CSS = """
   font-size:.82rem; opacity:.75; }
 .cfdb-readiness { font-size:.8rem; opacity:.7; font-family:ui-monospace,Menlo,monospace; }
 
+/* R-144. THE EMPTY BAND ABOVE THE TITLE, AND THE NUMBER IS MEASURED NOT ASSUMED.
+   Streamlit reserves `padding-top:6rem` on the main container for `stHeader`, a FIXED overlay
+   that this site puts nothing in. Pad less than the header's rendered height and the title
+   slides under the hamburger — invisible standing still, obvious the moment content scrolls.
+   MEASURED IN THE DEPLOYED CONTAINER, not locally, because the header renders differently with
+   and without the Deploy button and `--server.headless` changes that:
+       stHeader height   60px   (position:absolute, top 0; hamburger bottom at 45px)
+       default padding   96px
+   4rem = 64px clears the header by 4px and returns 32px of the band. Marc kept stHeader, so
+   the theme switcher and Rerun stay reachable. */
+[data-testid="stMainBlockContainer"], .block-container {
+    padding-top:4rem !important; }
 @media (prefers-color-scheme: dark) {
   .cfdb-state { --cfdb-border:#333a45; --cfdb-bg:#1b1f27; }
   .cfdb-skel-row { background:linear-gradient(90deg,#242933 25%,#2b313c 37%,#242933 63%);
@@ -144,6 +156,12 @@ TABLE_CSS = """
    gracefully rather than break. A name on two lines doubles the row height and reads as a
    fault; an ellipsis reads as "narrow window". R-085 already abbreviates past 18 characters,
    so this only fires on a viewport the Stacked view suits better anyway. */
+/* R-145. Rank, name and record are three different sizes in one line, and default
+   `vertical-align:baseline` on inline boxes lines up their own baselines — which for a 12px
+   span beside a 16px one sits them at visibly different heights once the smaller box has its
+   own line-height. Aligning them all to the largest text's baseline explicitly is what makes
+   the three read as one line. */
+.cfdb-team, .cfdb-rank, .cfdb-team-record { vertical-align:baseline; line-height:1.25; }
 .cfdb-team { margin-left:.4rem; }
 .cfdb-table .cfdb-team { display:inline-block; max-width:100%; vertical-align:bottom;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -241,8 +259,10 @@ TABLE_CSS = """
 /* R-015: anchored to the bottom so two cards in one grid row end level. */
 .cfdb-gamecard-meta { font-size:.78rem; opacity:.7; margin-top:auto; padding-top:.35rem; }
 .cfdb-gamecard-meta a { color:inherit; text-decoration:none; }
-/* R-119: the card's only route to Matchup, and it was too small to read as an affordance. */
-.cfdb-gamecard-meta .cfdb-details { font-size:1.15rem; opacity:.7; vertical-align:-.1em; }
+/* R-148: NO SIZE OR OPACITY OVERRIDE HERE. This block used to set 1.15rem/.7 against the
+   global 1.3rem/.85, which is precisely why the glyph read as less legible in the card than in
+   Inline. Inline is the reference; matching it means having no second rule, not a second rule
+   tuned by eye. */
 .cfdb-gamecard-meta a:hover .cfdb-details { opacity:1; }
 /* R-107: a card is not a table cell, so it cannot borrow .cfdb-cell-link — that one is
    display:block, which inside a flex row would make the anchor a full-width item. */
@@ -270,9 +290,41 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 .cfdb-logo-box { display:inline-block; flex:0 0 auto; vertical-align:middle;
                  border-radius:50%; background:rgba(127,127,127,.14); margin-right:.4rem; }
 .cfdb-logo-box .cfdb-logo { display:block; margin-right:0; }
-/* R-102: the legend the R-026 icon-only exception leans on. */
-.cfdb-legend { font-size:.78rem; opacity:.65; margin:.2rem 0 .5rem; }
-.cfdb-legend span { margin-right:.9rem; white-space:nowrap; }
+/* R-102: the legend the R-026 icon-only exception leans on.
+   R-143: bigger icons, because a legend nobody can read explains nothing. */
+.cfdb-legend { font-size:.85rem; opacity:.75; margin:.2rem 0 .6rem; line-height:1.9; }
+.cfdb-legend span { margin-right:1rem; white-space:nowrap; }
+.cfdb-legend .cfdb-details, .cfdb-legend .cfdb-neutral { font-size:1.3rem; }
+.cfdb-legend-strip .cfdb-ind { margin-right:.15rem; }
+
+/* R-141. THE RESULT STRIP, AS CSS SHAPES RATHER THAN EMOJI.
+   Marc's states mixed emoji-presentation characters with text-presentation ones. Those do not
+   share a baseline, do not size together and vary by platform — and he asked the strip to
+   match the kickoff time's visual size, which emoji will not do reliably. One rule here
+   controls size, baseline and colour for all six states; the semantics are unchanged. */
+.cfdb-strip { display:inline-flex; gap:.2rem; align-items:center; vertical-align:-.08em; }
+.cfdb-strip-gap { display:inline-block; width:.45rem; }
+.cfdb-ind { display:inline-block; width:.72em; height:.72em; border-radius:50%;
+            box-sizing:border-box; border:1.5px solid transparent; }
+/* `none` is a RESERVED BLANK, not an omission: a strip that appears only on completed games
+   shifts the columns beside it the moment a week is half played. */
+.cfdb-ind-none { background:transparent; border-color:transparent; }
+.cfdb-ind-open { background:transparent; border-color:currentColor; }
+.cfdb-ind-fill { background:currentColor; border-color:currentColor; }
+/* A push is neither: half-filled reads as "landed on the number" without a fourth colour. */
+.cfdb-ind-push { background:linear-gradient(90deg, currentColor 50%, transparent 50%);
+                 border-color:currentColor; }
+.cfdb-acc { color:#1f6feb; }
+.cfdb-u1  { color:#d9a406; }
+.cfdb-u2  { color:#e06c1f; }
+.cfdb-u3  { color:#d2333a; }
+
+/* R-149. The middle block's three columns, inside one cell of the card grid. */
+.cfdb-gc-mid { display:grid; grid-template-columns:3.4rem 3.2rem 3.4rem; align-items:center;
+               font-size:.9rem; font-variant-numeric:tabular-nums; padding:.1rem .35rem; }
+.cfdb-gc-mid-label  { opacity:.55; font-size:.8rem; }
+.cfdb-gc-mid-line   { text-align:right; opacity:.75; }
+.cfdb-gc-mid-actual { text-align:right; font-weight:600; }
 @media (prefers-color-scheme: dark) {
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
@@ -282,6 +334,9 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
   /* R-131. #1f6feb on #0e1117 measures about 3.6:1 — below the 4.5:1 a small glyph needs, and
      no amount of font-weight changes a luminance. #58a6ff is the standard lift and clears it. */
   .cfdb-details, .cfdb-neutral, .cfdb-winner { color:#58a6ff; }
+  /* R-141: the accent indicators need the same lift as every other glyph on dark. */
+  .cfdb-acc { color:#58a6ff; }
+  .cfdb-u1 { color:#e8b931; } .cfdb-u2 { color:#f0803c; } .cfdb-u3 { color:#f0555c; }
   .cfdb-teamlink .cfdb-team { color:#58a6ff; text-decoration-color:#58a6ff; }
   .cfdb-table a, .cfdb-cell-link, .cfdb-teamlink .cfdb-team {
       text-decoration-color:#58a6ff !important; }

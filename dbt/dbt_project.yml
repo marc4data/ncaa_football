@@ -71,3 +71,15 @@ models:
       # and nothing else. A new mart that no serving view reads stays out of the runtime
       # path exactly as before.
       +tags: ['production']
+
+# R-141. THE UPSET SCALE'S BOUNDARIES ARE A METRIC DEFINITION, SO THEY LIVE HERE.
+#
+# Marc asked for the split between levels to be configurable. Configurable does NOT mean a
+# constant in schedule.py: the standing rule is that metric definitions live upstream, and the
+# site renders a level it was handed rather than one it computed. Changing the scale is a
+# one-line edit here plus a rebuild, and every consumer moves together.
+#
+# Margins are in points, exclusive: a 7-point upset is level 1, an 8-point upset is level 2.
+vars:
+  upset_margin_big: 7
+  upset_margin_blowout: 14

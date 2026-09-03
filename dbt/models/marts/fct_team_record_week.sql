@@ -144,6 +144,21 @@ running as (
         sum(week_ties) over (
             partition by season, team_id order by season_type_ordinal, week
             rows between unbounded preceding and 1 preceding)   as ties_before,
+        -- R-140. THE SAME WINDOW, `current row` INSTEAD OF `1 preceding`.
+        --
+        -- That one word is the whole difference between "going into this week" and "after it",
+        -- and it is exactly the off-by-one the negative test on current_record flips. A page
+        -- showing a completed game wants the record the game produced; a page showing a
+        -- scheduled one wants the record the teams carry into it. Both, from one model.
+        sum(week_wins) over (
+            partition by season, team_id order by season_type_ordinal, week
+            rows between unbounded preceding and current row)   as wins_after,
+        sum(week_losses) over (
+            partition by season, team_id order by season_type_ordinal, week
+            rows between unbounded preceding and current row)   as losses_after,
+        sum(week_ties) over (
+            partition by season, team_id order by season_type_ordinal, week
+            rows between unbounded preceding and current row)   as ties_after,
         -- Does this team have ANY result in the warehouse this season? Distinguishes a
         -- legitimate 0-0 at week 1 from a team we simply hold no results for.
         sum(week_wins + week_losses + week_ties) over (
@@ -158,7 +173,10 @@ running as (
 
 gated as (
 
+    -- Both flags are computed HERE rather than in the select list below, because Postgres
+    -- cannot reference a select alias from a sibling expression in the same select.
     select r.*,
+           season_games > 0                                   as has_completed_games,
            (season_games > 0
             or (coalesce(fixtures_before, 0) = 0 and is_fbs)) as record_is_known
     from running r
@@ -169,7 +187,7 @@ final as (
 
     select
         season, season_type, week, team_id, season_type_ordinal,
-        season_games > 0                     as has_completed_games,
+        has_completed_games,
         -- R-127. THE GUARD USED TO BE `season_games > 0`, WHICH ASKS ABOUT THE FUTURE.
         --
         -- `season_games` is a window over the WHOLE season partition, so at week 1 of a
@@ -190,7 +208,13 @@ final as (
         record_is_known,
         case when record_is_known then coalesce(wins_before, 0) end   as wins,
         case when record_is_known then coalesce(losses_before, 0) end as losses,
-        case when record_is_known then coalesce(ties_before, 0) end   as ties
+        case when record_is_known then coalesce(ties_before, 0) end   as ties,
+        -- R-140. Gated on results HELD rather than on record_is_known: "after the game" is a
+        -- statement about a game that was played, so unlike the leading-into figure there is
+        -- no case where the answer is a definitional zero.
+        case when has_completed_games then coalesce(wins_after, 0) end   as wins_after,
+        case when has_completed_games then coalesce(losses_after, 0) end as losses_after,
+        case when has_completed_games then coalesce(ties_after, 0) end   as ties_after
     from gated
 
 )
@@ -207,6 +231,9 @@ select
     wins,
     losses,
     ties,
+    wins_after,
+    losses_after,
+    ties_after,
     -- W-L, extending to W-L-T only when the running tie count is non-zero. Ties existed
     -- before 1996 and a two-part string MISSTATES those seasons; a three-part string on a
     -- modern season would be equally wrong in the other direction.
@@ -225,5 +252,15 @@ select
                         || cast(ties as {{ dbt.type_string() }})
         else cast(wins as {{ dbt.type_string() }}) || '-'
           || cast(losses as {{ dbt.type_string() }})
-    end                                                              as current_record
+    end                                                              as current_record,
+    -- R-140. The same string for the record the week LEAVES the team with. Ties extend it to
+    -- three parts on the same rule, and the same null-not-zero discipline applies.
+    case
+        when wins_after is null then null
+        when ties_after > 0 then cast(wins_after as {{ dbt.type_string() }}) || '-'
+                             || cast(losses_after as {{ dbt.type_string() }}) || '-'
+                             || cast(ties_after as {{ dbt.type_string() }})
+        else cast(wins_after as {{ dbt.type_string() }}) || '-'
+          || cast(losses_after as {{ dbt.type_string() }})
+    end                                                              as record_after
 from final

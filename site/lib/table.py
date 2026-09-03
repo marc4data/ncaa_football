@@ -149,7 +149,7 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
     weights = []
     for column in columns:
         widest, has_image, has_record = 0, False, False
-        has_big_glyph = False
+        has_big_glyph = has_strip = False
         for _, row in df.iterrows():
             rendered = str(column.format(row))
             # A LOGO IS WIDTH THE TEXT MEASURE CANNOT SEE. Stripping tags is right for a
@@ -165,6 +165,13 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
             # because the column was sized for the text the glyphs are not.
             if "cfdb-details" in rendered or "cfdb-neutral" in rendered:
                 has_big_glyph = True
+            # R-141's indicators are EMPTY SPANS — pure CSS shapes with no text at all — so
+            # stripping tags leaves literally nothing to measure. The fourth thing in this
+            # function that is width the text cannot see, after the logo, the inline margins
+            # and the oversized glyphs. Three dots plus their gaps and the separator run about
+            # 60px, near enough eight characters.
+            if "cfdb-strip" in rendered:
+                has_strip = True
             # Strip tags before measuring — a chip is markup, not width.
             widest = max(widest, len(re.sub(r"<[^>]+>", "", rendered)))
         # NUMBERS ARE SET IN A MONOSPACE FACE and the label is not, so one character is not
@@ -185,6 +192,8 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
             widest += 1
         if has_big_glyph:
             widest += 5
+        if has_strip:
+            widest += 8
         # AND THE HEADER IS NOT PROSE EITHER. `.cfdb-table th` is uppercased with .02em of
         # letter-spacing, so six characters of "Spread" occupy more than six characters of
         # body text. Without this the SPREAD header broke to "SPREA / D" the moment the two

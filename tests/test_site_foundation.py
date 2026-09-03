@@ -880,7 +880,15 @@ def test_the_streamlit_theme_does_not_pin_the_app_to_the_light_palette():
     background under prefers-color-scheme:dark was rgb(255,255,255) with the bare section and
     rgb(14,17,23) with the per-mode ones.
     """
-    config = (Path(__file__).resolve().parents[1] / ".streamlit" / "config.toml").read_text()
+    # R-099: the file lives at site/.streamlit/config.toml — INSIDE the image's build context,
+    # which is `./site`. At the repo root it was outside the context and could never be copied,
+    # so the deployed radio stayed Streamlit red while every local check said it was fixed.
+    root = Path(__file__).resolve().parents[1]
+    path = root / "site" / ".streamlit" / "config.toml"
+    assert path.exists(), "the config must be inside the site/ build context"
+    assert not (root / ".streamlit" / "config.toml").exists(), (
+        "two config files is how they drift; there is one canonical copy")
+    config = path.read_text()
     body = "\n".join(ln for ln in config.splitlines() if not ln.lstrip().startswith("#"))
     assert "[theme.light]" in body and "[theme.dark]" in body
     assert "\n[theme]" not in "\n" + body, (
@@ -940,3 +948,23 @@ def test_the_column_measure_allows_for_things_that_are_not_text():
               for w in table_lib.column_layout(frame, [plain, logoed, recorded, glyphed])]
     for index, what in ((1, "a logo"), (2, "a record"), (3, "an oversized glyph")):
         assert layout[index] > layout[0], f"{what} is width the measure ignored"
+
+
+def test_the_site_image_copies_everything_the_app_reads_at_runtime():
+    """R-099, AS THE CLASS OF BUG RATHER THAN THE INSTANCE.
+
+    The image is built with `context: ./site`, so anything the running app reads must live
+    under site/ AND be copied by the Dockerfile. The config sat at the repo root — outside the
+    context — so no COPY could have reached it, Streamlit fell back to #FF4B4B, and every local
+    measurement said the accent was fixed because locally there is no build context at all.
+
+    The same wall already produced `lib/lines_cadence.json`, which exists because this image
+    cannot import `src/`. Second collision, same boundary.
+    """
+    root = Path(__file__).resolve().parents[1]
+    dockerfile = (root / "site" / "Dockerfile").read_text()
+    for needed in ("app.py", "lib/", "views/", ".streamlit/"):
+        assert needed in dockerfile, f"{needed} is read at runtime and never copied in"
+    compose = (root / "deploy" / "docker-compose.yml").read_text()
+    assert "context: ./site" in compose, (
+        "if the context widens, this test's premise changes and it should be revisited")

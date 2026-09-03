@@ -71,7 +71,7 @@ MOVE_GLYPH = "Δ"
 # team label in its first column, and once the team row became the box score's row that label
 # sat three inches from the full name it abbreviated — the name twice, which is the monogram
 # problem in a new place.
-TOTAL_HEADER = "T"
+TOTAL_HEADER = "F"   # R-150: Final, not Total.
 
 
 def _rows(season: int, week, season_type: str, conference,
@@ -86,6 +86,11 @@ def _rows(season: int, week, season_type: str, conference,
                is_conference_game, is_completed, winner, best_rank_in_game,
                spread_current, total_current, predicted_margin, home_win_probability,
                spread_move_from_open, total_move_from_open,
+               spread_at_close, spread_at_close_basis,
+               total_at_close, total_at_close_basis,
+               total_points, actual_margin,
+               upset_level, winner_covered_close, over_met,
+               home_team_record_after_display, away_team_record_after_display,
                excitement_index,
                is_indoors, temperature_f, weather_condition_code, weather_condition,
                home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
@@ -153,10 +158,19 @@ def _record_span(row, side: str) -> str:
     substituting the season figure (R-084) — and after R-127 "absent" finally means what it
     says: a team we hold no results for, not a team whose season has not started.
     """
-    record = row.get(f"{side}_team_record_display")
+    # R-140. A COMPLETED GAME SHOWS THE RECORD IT PRODUCED; A SCHEDULED ONE SHOWS THE RECORD
+    # THE TEAM CARRIES IN. Two columns, one slot, chosen by whether the game has been played —
+    # which is the only reading of Marc's sentence that can be true, since a record "after the
+    # game" cannot exist for a game nobody has played.
+    if row.get("is_completed"):
+        record = row.get(f"{side}_team_record_after_display")
+        title = "record after this game"
+    else:
+        record = row.get(f"{side}_team_record_display")
+        title = "record going into this game"
     if _missing(record):
         return ""
-    return f"<span class='cfdb-team-record'>{record}</span>"
+    return f"<span class='cfdb-team-record' title='{title}'>{record}</span>"
 
 
 def _team_with_record(row, side: str) -> str:
@@ -244,6 +258,66 @@ def _weather_cell(row) -> str:
             f"{glyph or ''} {float(temp):.0f}°F</span>")
 
 
+# R-141. THE UPSET LEVELS DIFFER ONLY BY COLOUR, and that is a decision rather than an
+# oversight. It is the third deliberate exception to the site's glyph-plus-label convention
+# after R-026's neutral-site icon, taken for the same reason: a small known user base, a
+# legend that explains it once, and a dense row where three labelled indicators would cost more
+# width than the whole rest of the cell.
+UPSET_LEVEL_CLASS = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
+UPSET_LEVEL_TITLE = {
+    "none": "not an upset",
+    "upset": "upset",
+    "big": "upset by more than a touchdown",
+    "blowout": "upset by more than two touchdowns",
+}
+
+
+def _indicator(state: str, title: str, extra: str = "") -> str:
+    """One shape. SHAPES, NOT EMOJI, AND THAT IS A SUBSTITUTION WORTH FLAGGING.
+
+    Marc's three indicators mixed emoji-presentation characters with text-presentation ones.
+    Those do not share a baseline, do not size together, and render differently per platform —
+    and he asked the strip to match the kickoff time's visual size, which emoji will not do
+    reliably. A span with a background, a border and a radius gives one rule that controls size,
+    baseline and colour across all six states. The SEMANTICS are exactly his; only the rendering
+    technology changed, and he can reject the substitution from the screenshots.
+
+    `none` is a reserved blank rather than an omission — see `_result_strip`.
+    """
+    return f"<span class='cfdb-ind cfdb-ind-{state} {extra}' title='{title}'></span>"
+
+
+def _result_strip(row) -> str:
+    """R-141. Three indicators, populated only for a completed game.
+
+    THE WIDTH IS RESERVED ON EVERY ROW, PLAYED OR NOT. An indicator set that appears only on
+    completed games shifts the columns beside it the moment a week is half played — the
+    alignment failure this page has now fixed three times, and the reason every state renders
+    a span rather than nothing.
+    """
+    if not row.get("is_completed"):
+        return ("<span class='cfdb-strip'>"
+                + _indicator("none", "not played yet") * 3 + "</span>")
+    upset = _text(row.get("upset_level")) or "none"
+    cover, over = _text(row.get("winner_covered_close")), _text(row.get("over_met"))
+    parts = [
+        _indicator("fill" if upset in UPSET_LEVEL_CLASS else "none",
+                   UPSET_LEVEL_TITLE.get(upset, upset),
+                   UPSET_LEVEL_CLASS.get(upset, "")),
+        _indicator({"yes": "fill", "no": "open", "push": "push"}.get(cover, "none"),
+                   {"yes": "the winner also covered the closing spread",
+                    "no": "the winner did not cover the closing spread",
+                    "push": "the closing spread pushed"}.get(cover, "no closing spread held"),
+                   "cfdb-acc"),
+        _indicator({"yes": "fill", "no": "open", "push": "push"}.get(over, "none"),
+                   {"yes": "over the closing total",
+                    "no": "under the closing total",
+                    "push": "landed on the closing total"}.get(over, "no closing total held"),
+                   "cfdb-acc"),
+    ]
+    return f"<span class='cfdb-strip'>{''.join(parts)}</span>"
+
+
 def _neutral_glyph(row) -> str:
     """R-026. ICON ALONE, NO TEXT LABEL.
 
@@ -260,7 +334,10 @@ def _neutral_glyph(row) -> str:
 def _columns(scope) -> list:
     return [
         # AC-2.5: the row goes to the game, the team NAME goes to the team.
-        Col("start_date_et", "Kickoff", "time"),
+        # R-146. The neutral-site flag rides the kickoff cell, which had spare width and is
+        # where a reader already looks for "where and when".
+        Col("start_date_et", "Kickoff", render=lambda r: (
+            f"{fmt.clock(r.get('start_date_et'))}{_neutral_glyph(r)}")),
         Col("away", "Away", render=lambda r: _team_with_record(r, "away"),
             link=lambda r: scope.link("team", team=r.get("away_team_slug"))),
         # R-100. The "Won" chip column is gone; the marker rides the score.
@@ -271,10 +348,20 @@ def _columns(scope) -> list:
         Col("spread_current", "Spread", "signed"),
         # R-087. O/U, reconciled with Odds Board so one field has one name site-wide.
         Col("total_current", "O/U", "num"),
-        # R-086. RENAMED RATHER THAN WRAPPED. A two-line header raises the height of every
-        # column header for one column's benefit, and "Pred" is already the site's shorthand
-        # for a model number — the sign note directly above the table explains the sign.
-        Col("predicted_margin", "Pred", "signed"),
+        # R-137. PRED IS SHED, AND THE BUDGET IS WHY.
+        #
+        # Marc set the floor at 1200px and nominated this column first if the result strip did
+        # not fit. It did not: at 1200 the table wrapped Spread, O/U, Pred, the kickoff time and
+        # half the numbers. Eleven columns in ~605px of content is about 55px each, and a
+        # signed number with a sign, two digits and a decimal needs more than that.
+        #
+        # Pred rather than Wx because it is the least populated of the two — 567 of 934 games in
+        # 2025 carry a predicted margin against 913 of 934 carrying weather — and because the
+        # number remains one click away on Matchup, which is where a reader compares a model to
+        # a market. Weather is nowhere else on this page.
+        #
+        # R-086's note about the header stays true and is why the label was "Pred" at all; this
+        # supersedes the column, not the reasoning.
         # R-027 / R-103.
         Col("weather", "Wx", "center", render=_weather_cell),
         Col("network_abbreviation", "TV"),
@@ -284,10 +371,15 @@ def _columns(scope) -> list:
         # costing two column widths for at most two characters, one of which was blank on
         # 95% of rows. R-026's icon-only exception is about the ROW, not the header: a header
         # on the column is not the glyph+label pattern Marc declined.
+        # R-147. Matchup icon, then the result strip, with a space between them. The strip is
+        # NOT inside the anchor: it is three states of information, not a destination, and a
+        # pointer cursor over it would say otherwise.
         Col("game", "Game", "center",
-            render=lambda r: (f"<span class='cfdb-details' title='Open the matchup'>"
-                              f"{table.DETAILS_GLYPH}</span>" + _neutral_glyph(r)),
-            link=lambda r: scope.link("matchup", game_id=r["game_id"])),
+            render=lambda r: (f"<a class='cfdb-cell-link-alt' "
+                              f"href='{scope.link('matchup', game_id=r['game_id'])}' "
+                              f"target='_self' title='Open the matchup'>"
+                              f"<span class='cfdb-details'>{table.DETAILS_GLYPH}</span></a>"
+                              f"<span class='cfdb-strip-gap'></span>{_result_strip(r)}")),
     ]
 
 
@@ -304,6 +396,23 @@ def _legend() -> None:
         f"<span>{MOVE_GLYPH} change since the line opened</span>"
         f"<span>{WINNER_GLYPH} won &nbsp;·&nbsp; {TIE_GLYPH} tied</span>"
         "<span>@ at &nbsp;·&nbsp; vs neutral site</span>"
+        # R-143. The dome case has existed in `_weather_cell` since R-027 and has never been
+        # explained anywhere.
+        f"<span>{DOME_GLYPH} indoors</span>"
+        # R-141's legend, which is what makes a colour-only scale defensible.
+        "<span class='cfdb-legend-strip'>"
+        "<span class='cfdb-ind cfdb-ind-fill cfdb-u1'></span>"
+        "<span class='cfdb-ind cfdb-ind-fill cfdb-u2'></span>"
+        "<span class='cfdb-ind cfdb-ind-fill cfdb-u3'></span>"
+        " upset &nbsp;·&nbsp; +7 &nbsp;·&nbsp; +14</span>"
+        "<span class='cfdb-legend-strip'>"
+        "<span class='cfdb-ind cfdb-ind-fill cfdb-acc'></span>"
+        "<span class='cfdb-ind cfdb-ind-open cfdb-acc'></span>"
+        " winner covered &nbsp;·&nbsp; did not</span>"
+        "<span class='cfdb-legend-strip'>"
+        "<span class='cfdb-ind cfdb-ind-fill cfdb-acc'></span>"
+        "<span class='cfdb-ind cfdb-ind-open cfdb-acc'></span>"
+        " over &nbsp;·&nbsp; under</span>"
         "</div>", unsafe_allow_html=True)
 
 
@@ -368,9 +477,17 @@ def _tracks(geo: dict) -> int:
     return 4 + (1 if geo["ot"] else 0) + 1
 
 
+# R-149. The middle block's own tracks, as one sub-grid inside a single card-grid cell.
+MIDDLE_TRACK = "10.2rem"
+
+
 def _grid_style(geo: dict) -> str:
     quarters = 4 + (1 if geo["ot"] else 0)
-    return (f"grid-template-columns:minmax(0,1fr) "
+    # R-149 IS A THIRD COLUMN OF THE SAME GRID, not a block bolted beside it. Row 2 and row 3
+    # of the card already exist and already carry the team names and the box score; the market
+    # or result numbers become the middle cell of those same rows, so they arrive on the team
+    # names' baselines by construction. Anything else and the alignment R-114 bought goes.
+    return (f"grid-template-columns:minmax(0,1fr) {MIDDLE_TRACK} "
             f"repeat({quarters},{QUARTER_TRACK}) {TOTAL_TRACK}")
 
 
@@ -422,6 +539,52 @@ def _score_cells(row, side: str, geo: dict) -> str:
     return "".join(cells)
 
 
+def _middle_cells(row) -> tuple:
+    """R-149. The post-game mirror of the pre-game market block.
+
+        label   |  line (at close)  |  actual
+        O/U     |  total_at_close   |  total_points
+        Spread  |  spread_at_close  |  actual_margin
+
+    THE MOVE COLUMN IS NOT BUILT. Marc listed it as "would be nice", and the middle block
+    already takes the card's minimum width from 560px to 700px — a fourth column pushes past
+    what fits beside a two-up grid at the 1200px floor. Said here rather than silently dropped.
+
+    `basis` rides the title because for a game older than 2026-08-15 the closing number is
+    CFBD's recorded line rather than one we watched, and a page that shows the two identically
+    is claiming a provenance it does not have.
+    """
+    rows = []
+    for label, line, actual, basis, signed in (
+            ("O/U", row.get("total_at_close"), row.get("total_points"),
+             row.get("total_at_close_basis"), False),
+            ("Spread", row.get("spread_at_close"), row.get("actual_margin"),
+             row.get("spread_at_close_basis"), True)):
+        if _missing(line) and _missing(actual):
+            rows.append(None)
+            continue
+        shown = ("" if _missing(line) else
+                 (fmt.signed(line, "spread_at_close") if signed
+                  else fmt.number(line, "total_at_close")))
+        # dp=0 on both: a margin and a points total are whole numbers of points. The line
+        # beside them keeps its half-point, which is the real difference between the two
+        # columns and worth seeing.
+        got = ("" if _missing(actual) else
+               (fmt.signed(actual, "actual_margin", 0) if signed
+                else fmt.number(actual, "total_points", 0)))
+        hint = ("the last line before kickoff" if basis == "observed_before_kickoff"
+                else "as recorded by CollegeFootballData, not a line we observed")
+        rows.append(
+            f"<div class='cfdb-gc-mid'>"
+            f"<span class='cfdb-gc-mid-label'>{label}</span>"
+            f"<span class='cfdb-gc-mid-line' title='{hint}'>{shown}</span>"
+            f"<span class='cfdb-gc-mid-actual'>{got}</span></div>")
+    if not any(rows):
+        return "", ""
+    blank = "<div class='cfdb-gc-mid'></div>"
+    return rows[0] or blank, rows[1] or blank
+
+
 def _market_cells(row, geo: dict) -> tuple:
     """R-118. The two market lines as row 2 and row 3 of the same grid.
 
@@ -431,7 +594,7 @@ def _market_cells(row, geo: dict) -> tuple:
     Returns ("", "") when there is no line. A market that does not exist yet is not a missing
     value: R-106 says nothing, not an empty slot and not a dash.
     """
-    span = f"grid-column:span {_tracks(geo)}"
+    span = f"grid-column:span {_tracks(geo) + 1}"
     lines = []
     for label, value, move, kind in (
             ("O/U", row.get("total_current"), row.get("total_move_from_open"), "num"),
@@ -531,8 +694,10 @@ def _card(row, scope, geo: dict) -> str:
     """
     completed = bool(row.get("is_completed"))
     if completed:
-        header = _header_cells(geo, row)
-        away, home = _score_cells(row, "away", geo), _score_cells(row, "home", geo)
+        header = "<div></div>" + _header_cells(geo, row)
+        mid_away, mid_home = _middle_cells(row)
+        away = mid_away + _score_cells(row, "away", geo)
+        home = mid_home + _score_cells(row, "home", geo)
         why = _why_missing(row)
     else:
         # R-106: the box score is a POST-GAME element. Row 1 carries no header because there
