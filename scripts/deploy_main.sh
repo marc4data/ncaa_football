@@ -19,6 +19,7 @@
 #   scripts/deploy_main.sh              pipeline + site, only what changed
 #   scripts/deploy_main.sh --site-only  skip the pipeline
 #   scripts/deploy_main.sh --force-site rebuild the site image even if unchanged
+#   scripts/deploy_main.sh --rebuild    rebuild and publish the data too, whatever changed
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,10 +34,12 @@ PIPELINE_DIR=/opt/cfdb-pipeline
 SITE_DIR=/opt/cfdb/site
 DO_PIPELINE=1
 FORCE_SITE=0
+FORCE_REBUILD=0
 for arg in "$@"; do
   case "$arg" in
     --site-only)  DO_PIPELINE=0 ;;
     --force-site) FORCE_SITE=1 ;;
+    --rebuild)    FORCE_REBUILD=1 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -60,6 +63,41 @@ if [ "$DO_PIPELINE" = 1 ]; then
   else
     echo "  $before -> $after"
     "${SSH[@]}" "git -C $PIPELINE_DIR/repo log --oneline $before..$after" | sed 's/^/    /'
+  fi
+
+  # R-126. A MODEL CHANGE IS NOT DEPLOYED UNTIL THE DATA IS REBUILT.
+  #
+  # Moving the pipeline repo to main updates the SQL; it does not run it. The scores DAG that
+  # would normally rebuild and publish is gated on the live-scoring window, so outside one
+  # every run correctly succeeds having done nothing — and a serving-model change merged on a
+  # Tuesday reaches the site on Saturday. That is not theoretical: on 2 September the site
+  # asked srv_game for three columns the published table did not have, and Schedule rendered
+  # "Something went wrong reading srv_game" until this was done by hand.
+  #
+  # THE TRIGGER IS A DIRECTORY DIFF, AND ITS BLIND SPOT IS DELIBERATE. Marc chose speed over
+  # `state:modified+`, which would need a manifest artefact and a state comparison. So:
+  #
+  #   CAUGHT    any change under dbt/models/serving/
+  #   MISSED    a change to an UPSTREAM model — fct_game, dim_team, a staging view — that
+  #             alters serving output without touching that directory. R-127's change to
+  #             fct_team_record_week is exactly that shape and needed --rebuild by hand.
+  #
+  # When the miss bites, the symptom is the same one as 2 September: a page reading a column
+  # or a value that main has and the droplet does not. `--rebuild` forces it.
+  if [ "$FORCE_REBUILD" = 1 ] || \
+     ! git diff --quiet "$before" "$after" -- dbt/models/serving/ 2>/dev/null; then
+    if [ "$before" = "$after" ] && [ "$FORCE_REBUILD" = 0 ]; then
+      : # nothing moved and nothing forced
+    else
+      echo "  serving models changed — rebuilding and publishing"
+      "${SSH[@]}" "cd $PIPELINE_DIR && docker compose exec -T airflow-scheduler bash -lc \
+        'dbt run --project-dir /opt/airflow/project/dbt --select +tag:production 2>&1 | tail -3'"
+      "${SSH[@]}" "cd $PIPELINE_DIR && docker compose exec -T airflow-scheduler bash -lc \
+        'cd /opt/airflow/project && python -c \"from src.publish_marts import publish_all; \
+         publish_all(schemas=[\\\"serving\\\"], hot=True)\" 2>&1 | tail -2'"
+    fi
+  else
+    echo "  no serving-model change; data left alone"
   fi
 
   # DAGs are read from disk, so no restart is needed for a DAG change. An import error is

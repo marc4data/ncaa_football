@@ -148,7 +148,8 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
     """
     weights = []
     for column in columns:
-        widest, has_image = 0, False
+        widest, has_image, has_record = 0, False, False
+        has_big_glyph = False
         for _, row in df.iterrows():
             rendered = str(column.format(row))
             # A LOGO IS WIDTH THE TEXT MEASURE CANNOT SEE. Stripping tags is right for a
@@ -157,6 +158,13 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
             # "New Mexico State" pushed its record onto a second line.
             if "<img" in rendered or "cfdb-monogram" in rendered:
                 has_image = True
+            if "cfdb-team-record" in rendered:
+                has_record = True
+            # R-131 made these glyphs 1.3rem against a .9rem body, so two characters of
+            # stripped text render about as wide as five. At 1280 the GAME header wrapped
+            # because the column was sized for the text the glyphs are not.
+            if "cfdb-details" in rendered or "cfdb-neutral" in rendered:
+                has_big_glyph = True
             # Strip tags before measuring — a chip is markup, not width.
             widest = max(widest, len(re.sub(r"<[^>]+>", "", rendered)))
         # NUMBERS ARE SET IN A MONOSPACE FACE and the label is not, so one character is not
@@ -166,8 +174,17 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
         # broke across two lines.
         if column.kind in ("num", "signed"):
             widest *= 1.15
+        # THE ALLOWANCE COVERS THE LOGO AND THE MARGIN AFTER IT. 28px of image plus `.4rem`
+        # of margin is about 34px, near enough six characters — measured at 1280, where the
+        # 4-character version left the Away cell 21px short and "Kennesaw State" wrapped onto
+        # two lines. Inline margins are invisible to a text measure and there are two of them
+        # in a team cell, so the second is added below.
         if has_image:
-            widest += 4
+            widest += 6
+        if has_record:
+            widest += 1
+        if has_big_glyph:
+            widest += 5
         # AND THE HEADER IS NOT PROSE EITHER. `.cfdb-table th` is uppercased with .02em of
         # letter-spacing, so six characters of "Spread" occupy more than six characters of
         # body text. Without this the SPREAD header broke to "SPREA / D" the moment the two

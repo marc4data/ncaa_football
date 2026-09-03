@@ -90,3 +90,26 @@ def test_no_document_tells_anyone_to_copy_site_pages():
     directory was renamed to `views/`. Instructions kept saying `pages` long after."""
     for doc in (REPO / "deploy").rglob("*.md"):
         assert not re.search(r"\bsite/pages\b", doc.read_text()), doc
+
+
+def test_the_deploy_rebuilds_the_data_when_serving_models_change():
+    """R-126. Moving the pipeline repo updates the SQL; it does not run it.
+
+    The scores DAG that would normally rebuild is gated on the live-scoring window, so outside
+    one it correctly succeeds having done nothing — and a serving-model change merged midweek
+    reaches the site on Saturday. On 2 September that left Schedule reading three columns the
+    published table did not have.
+    """
+    body = SCRIPT.read_text()
+    assert "dbt/models/serving/" in body, "the directory diff is the trigger"
+    assert "publish_all" in body, "a rebuild that is not published has not been deployed"
+    assert "--rebuild" in body, "and a manual override, because the diff has a known blind spot"
+
+
+def test_the_rebuild_trigger_documents_what_it_misses():
+    """A directory diff cannot see an upstream change — fct_game, dim_team, a staging view —
+    that alters serving output without touching dbt/models/serving/. That gap is accepted
+    deliberately for speed, which only works if it is written down where it will be read."""
+    body = SCRIPT.read_text()
+    window = body[body.index("R-126."):body.index("DAGs are read from disk")]
+    assert "MISSED" in window and "fct_game" in window

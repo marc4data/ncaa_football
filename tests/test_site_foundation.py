@@ -911,3 +911,32 @@ def test_a_null_logo_never_reaches_the_src_attribute():
     # R-121's second half: the monogram sits behind the image, so a file that goes missing
     # later shows the same grey disc rather than a broken-image box.
     assert "cfdb-logo-box" in real
+
+
+def test_the_column_measure_allows_for_things_that_are_not_text():
+    """Every correction here came from a MEASUREMENT, not from reading the code.
+
+    A text measure sees characters. A table cell also contains a logo, two `.4rem` inline
+    margins, and — since R-131 — glyphs at 1.3rem against a .9rem body. All of those are width
+    the measure cannot see, and each one showed up as a specific wrap:
+
+      logo + its margin   "Kennesaw State" onto two lines at 1280 (cell 157px, needed 178px)
+      record margin       the same cell, the last two pixels
+      1.3rem glyphs       the GAME header onto two lines, the column sized for two characters
+
+    Asserted as ORDERING rather than absolute widths, so the test says what it means — a cell
+    carrying extra furniture gets a bigger share than the same text without it — and does not
+    have to be retuned every time a font changes.
+    """
+    import pandas as pd
+    from lib import table as table_lib
+    from lib.table import Col
+    frame = pd.DataFrame([{"a": "Team", "b": "Team", "c": "Team", "d": "Team"}])
+    plain = Col("a", "A")
+    logoed = Col("b", "B", render=lambda r: "<img src='x.png' alt=''>Team")
+    recorded = Col("c", "C", render=lambda r: "Team<span class='cfdb-team-record'>4-2</span>")
+    glyphed = Col("d", "D", render=lambda r: "Team<span class='cfdb-details'>Z</span>")
+    layout = [float(w.rstrip("%"))
+              for w in table_lib.column_layout(frame, [plain, logoed, recorded, glyphed])]
+    for index, what in ((1, "a logo"), (2, "a record"), (3, "an oversized glyph")):
+        assert layout[index] > layout[0], f"{what} is width the measure ignored"
