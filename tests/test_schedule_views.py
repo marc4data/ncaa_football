@@ -850,3 +850,33 @@ def test_the_legend_note_renders_its_emphasis_rather_than_asterisks():
         note = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", chips_lib.SPREAD_SIGN_NOTE)
     assert "**" not in note, "markdown emphasis inside a raw HTML block is not processed"
     assert "<strong>" in note
+
+
+def test_a_game_with_no_closing_line_shows_a_dash_not_an_outline():
+    """R-171. A dotted outline still reads as a value being shown. Marc found it with Division
+    on All Divisions, where lower-division games carry no spread or total at all and the strip
+    came out as three faint marks with nothing saying why.
+
+    The dash keeps the shape class, and therefore the box: R-166 aligns every card's strip by
+    giving the indicators identical footprints, so a mark that sized itself differently would
+    take that alignment out from under a whole column of cards.
+    """
+    nan = float("nan")
+    strip = schedule._result_strip(_row(winner_covered_close=nan, over_met=nan))
+    assert strip.count(schedule.NO_DATA_MARK) == 2, "cover and over, both unmeasurable"
+    assert "cfdb-sh-cover cfdb-ind-nodata" in strip, "the box survives"
+    assert "cfdb-sh-over cfdb-ind-nodata" in strip
+    # The upset slot is a real answer here and must NOT become a dash.
+    assert "cfdb-sh-upset cfdb-ind-quiet" in strip
+    # And a game with a line carries no dashes at all.
+    assert schedule.NO_DATA_MARK not in schedule._result_strip(_row())
+
+
+def test_the_unplayed_strip_stays_empty_rather_than_dashed():
+    """"Not played yet" and "played, no line held" are different facts. A dash on an unplayed
+    game would claim we looked and found nothing."""
+    nan = float("nan")
+    unplayed = schedule._result_strip(_row(is_completed=False, upset_level=nan,
+                                           winner_covered_close=nan, over_met=nan))
+    assert schedule.NO_DATA_MARK not in unplayed
+    assert unplayed.count("cfdb-ind-none") == 3

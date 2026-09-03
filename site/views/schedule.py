@@ -337,6 +337,15 @@ UPSET_LEVEL_TITLE = {
 }
 
 
+# R-171. "No closing line held" is a DASH, not a shape.
+#
+# It was a dotted outline, which still reads as a value being shown — Marc set Division to All
+# Divisions, pulled in lower-division games that carry no spread or total at all, and the strip
+# came out as three faint outlines with nothing saying why. A dash is the site's existing mark
+# for "we hold nothing here": `fmt.EM_DASH` does the same job in every table cell on the site.
+NO_DATA_MARK = "–"
+
+
 def _indicator(shape: str, state: str, title: str, extra: str = "") -> str:
     """One indicator. SHAPES, NOT EMOJI — and a different shape per POSITION.
 
@@ -349,8 +358,12 @@ def _indicator(shape: str, state: str, title: str, extra: str = "") -> str:
     one of them is invisible, which is most of the time. Circle, square, diamond: a reader can
     match any single indicator to its legend entry without counting its neighbours.
     """
+    # THE DASH KEEPS THE SHAPE CLASS AND THEREFORE THE BOX. R-166 aligns every card's strip
+    # by giving the indicators identical footprints; a mark that sized itself differently
+    # would take that alignment out from under a whole column of cards.
+    mark = NO_DATA_MARK if state == "nodata" else ""
     return (f"<span class='cfdb-ind cfdb-sh-{shape} cfdb-ind-{state} {extra}' "
-            f"title='{title}'></span>")
+            f"title='{title}'>{mark}</span>")
 
 
 def _result_strip(row) -> str:
@@ -483,7 +496,8 @@ LEGEND_GROUPS = [
         ("ind cfdb-sh-cover cfdb-ind-open cfdb-acc", "", "Winner did not cover"),
         ("ind cfdb-sh-over cfdb-ind-fill cfdb-acc", "", "Over"),
         ("ind cfdb-sh-over cfdb-ind-open cfdb-acc", "", "Under"),
-        # R-164, Marc's pick: a fourth state rather than nothing or a dash.
+        # R-164 chose a fourth state over nothing; R-171 made that state a dash, because a
+        # dotted outline still reads as a value rather than as an absence.
         ("ind cfdb-sh-cover cfdb-ind-nodata", "", "No closing line held"),
     ]),
 ]
