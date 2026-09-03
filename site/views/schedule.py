@@ -31,7 +31,7 @@ THE RESULT CARD
 
                   ├─ team column ─┤├ line block ┤├──── box score ─────┤
 
-    header row      7:30 PM PDT   │ Line Actual │  1   2   3   4  OT  F
+    header row      7:30 PM PDT ○■◆│ Line Actual │  1   2   3   4  OT  F
     away row      ▣ Auburn    5-5 │ O/U  51.5  48 │  3   7   0   7      17
     home row    @ ▣ Alabama   9-2▸│ Sprd -7.0 -14 │  7  10   7   7      31
                   └ team cluster ┘   └ line row ┘   └ quarter cells ┘ └ final cell
@@ -64,8 +64,8 @@ THE PARTS
     card footer .............. cfdb-gamecard-meta   weather, network, venue, matchup
     card grid (the page) ..... cfdb-cardgrid        the two-up arrangement OF cards (R-110)
 
-WHAT IS NOT ON THE CARD YET: the result strip (`cfdb-strip`, three indicators) lives in the
-Inline view's Game cell only. If it should appear here too, that is a request, not a bug.
+    result strip ............. cfdb-strip           three indicators, in the kickoff cell
+    indicator ................ cfdb-ind             one of them; shape says which
 
 A NOTE ON "SUB-TABLE". There are none. The card was two blocks that agreed until R-114 made it
 a single CSS grid, so the line block and the box score are COLUMNS OF THE SAME GRID as the team
@@ -335,19 +335,20 @@ UPSET_LEVEL_TITLE = {
 }
 
 
-def _indicator(state: str, title: str, extra: str = "") -> str:
-    """One shape. SHAPES, NOT EMOJI, AND THAT IS A SUBSTITUTION WORTH FLAGGING.
+def _indicator(shape: str, state: str, title: str, extra: str = "") -> str:
+    """One indicator. SHAPES, NOT EMOJI — and a different shape per POSITION.
 
-    Marc's three indicators mixed emoji-presentation characters with text-presentation ones.
-    Those do not share a baseline, do not size together, and render differently per platform —
-    and he asked the strip to match the kickoff time's visual size, which emoji will not do
-    reliably. A span with a background, a border and a radius gives one rule that controls size,
-    baseline and colour across all six states. The SEMANTICS are exactly his; only the rendering
-    technology changed, and he can reject the substitution from the screenshots.
+    Marc's three states mixed emoji-presentation characters with text-presentation ones, which
+    do not share a baseline, do not size together and vary by platform. A span with a
+    background, a border and a radius gives one rule for size, baseline and colour.
 
-    `none` is a reserved blank rather than an omission — see `_result_strip`.
+    THE SHAPE IS WHAT MAKES EACH ONE SELF-IDENTIFYING. All three were circles, so they could
+    only be told apart by their position in the strip — and position is unreadable the moment
+    one of them is invisible, which is most of the time. Circle, square, diamond: a reader can
+    match any single indicator to its legend entry without counting its neighbours.
     """
-    return f"<span class='cfdb-ind cfdb-ind-{state} {extra}' title='{title}'></span>"
+    return (f"<span class='cfdb-ind cfdb-sh-{shape} cfdb-ind-{state} {extra}' "
+            f"title='{title}'></span>")
 
 
 def _result_strip(row) -> str:
@@ -355,24 +356,34 @@ def _result_strip(row) -> str:
 
     THE WIDTH IS RESERVED ON EVERY ROW, PLAYED OR NOT. An indicator set that appears only on
     completed games shifts the columns beside it the moment a week is half played — the
-    alignment failure this page has now fixed three times, and the reason every state renders
-    a span rather than nothing.
+    alignment failure this page has fixed three times.
+
+    "NOT AN UPSET" IS AN ANSWER, AND IT USED TO RENDER AS NOTHING. That made it identical to
+    "not played yet", which is a different fact, and it meant the first slot was blank on all
+    124 completed games of a typical week — so the two visible indicators sat in slots two and
+    three and read as slots one and two. It now draws a quiet outline: present, answered,
+    unremarkable. Only a game nobody has played renders truly nothing.
     """
     if not row.get("is_completed"):
         return ("<span class='cfdb-strip'>"
-                + _indicator("none", "not played yet") * 3 + "</span>")
+                + _indicator("upset", "none", "not played yet")
+                + _indicator("cover", "none", "not played yet")
+                + _indicator("over", "none", "not played yet")
+                + "</span>")
     upset = _text(row.get("upset_level")) or "none"
     cover, over = _text(row.get("winner_covered_close")), _text(row.get("over_met"))
+    fills = {"yes": "fill", "no": "open", "push": "push"}
     parts = [
-        _indicator("fill" if upset in UPSET_LEVEL_CLASS else "none",
+        _indicator("upset",
+                   "fill" if upset in UPSET_LEVEL_CLASS else "quiet",
                    UPSET_LEVEL_TITLE.get(upset, upset),
                    UPSET_LEVEL_CLASS.get(upset, "")),
-        _indicator({"yes": "fill", "no": "open", "push": "push"}.get(cover, "none"),
+        _indicator("cover", fills.get(cover, "none"),
                    {"yes": "the winner also covered the closing spread",
                     "no": "the winner did not cover the closing spread",
                     "push": "the closing spread pushed"}.get(cover, "no closing spread held"),
                    "cfdb-acc"),
-        _indicator({"yes": "fill", "no": "open", "push": "push"}.get(over, "none"),
+        _indicator("over", fills.get(over, "none"),
                    {"yes": "over the closing total",
                     "no": "under the closing total",
                     "push": "landed on the closing total"}.get(over, "no closing total held"),
@@ -463,18 +474,21 @@ def _legend() -> None:
         # explained anywhere.
         f"<span>{DOME_GLYPH} indoors</span>"
         # R-141's legend, which is what makes a colour-only scale defensible.
+        # The samples carry the same shape classes the page draws, so the legend cannot
+        # describe an appearance the card does not have.
         "<span class='cfdb-legend-strip'>"
-        "<span class='cfdb-ind cfdb-ind-fill cfdb-u1'></span>"
-        "<span class='cfdb-ind cfdb-ind-fill cfdb-u2'></span>"
-        "<span class='cfdb-ind cfdb-ind-fill cfdb-u3'></span>"
-        " upset &nbsp;·&nbsp; +7 &nbsp;·&nbsp; +14</span>"
+        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-quiet'></span>"
+        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u1'></span>"
+        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u2'></span>"
+        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u3'></span>"
+        " no upset &nbsp;·&nbsp; upset &nbsp;·&nbsp; +7 &nbsp;·&nbsp; +14</span>"
         "<span class='cfdb-legend-strip'>"
-        "<span class='cfdb-ind cfdb-ind-fill cfdb-acc'></span>"
-        "<span class='cfdb-ind cfdb-ind-open cfdb-acc'></span>"
+        "<span class='cfdb-ind cfdb-sh-cover cfdb-ind-fill cfdb-acc'></span>"
+        "<span class='cfdb-ind cfdb-sh-cover cfdb-ind-open cfdb-acc'></span>"
         " winner covered &nbsp;·&nbsp; did not</span>"
         "<span class='cfdb-legend-strip'>"
-        "<span class='cfdb-ind cfdb-ind-fill cfdb-acc'></span>"
-        "<span class='cfdb-ind cfdb-ind-open cfdb-acc'></span>"
+        "<span class='cfdb-ind cfdb-sh-over cfdb-ind-fill cfdb-acc'></span>"
+        "<span class='cfdb-ind cfdb-sh-over cfdb-ind-open cfdb-acc'></span>"
         " over &nbsp;·&nbsp; under</span>"
         "</div>", unsafe_allow_html=True)
 
@@ -839,7 +853,8 @@ def _card(row, scope, geo: dict) -> str:
         f"<div class='cfdb-gamecard'>"
         f"<div class='cfdb-gc' style='{_grid_style(geo)}'>"
         # R-114: the kickoff shares row 1 with the box-score header.
-        f"<div class='cfdb-gc-time'>{fmt.clock(row.get('start_date_et'))}</div>{header}"
+        f"<div class='cfdb-gc-time'>{fmt.clock(row.get('start_date_et'))}"
+        f"<span class='cfdb-strip-gap'></span>{_result_strip(row)}</div>{header}"
         f"{_team_row(row, 'away', scope)}{away}"
         f"{_team_row(row, 'home', scope)}{home}"
         f"</div>{why}"
