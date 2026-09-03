@@ -517,7 +517,15 @@ def test_every_row_of_the_card_covers_every_column():
     for geo in ({"ot": False}, {"ot": True}):
         columns = _columns_in_grid_style(schedule._grid_style(geo))
         assert columns == 2 + schedule._tracks(geo), "middle track counted once, not twice"
-        for label, extra in (("completed", {}), ("scheduled", scheduled),
+        # THE FIXTURE ALWAYS HAD A CLOSING LINE, WHICH IS HOW THE SECOND INSTANCE SHIPPED.
+        # A completed game with no line held returned no middle cell at all, so its row was a
+        # column short and the team column collapsed to zero width — one card in 400 on the
+        # deployed site. Every combination of played/not and line/no-line is exercised here.
+        no_close = dict(spread_at_close=nan, total_at_close=nan,
+                        total_points=nan, actual_margin=nan)
+        for label, extra in (("completed", {}),
+                             ("completed, no closing line", no_close),
+                             ("scheduled", scheduled),
                              ("scheduled, no line", dict(scheduled, spread_current=nan,
                                                          total_current=nan))):
             card = schedule._card(_row(**extra), _Scope(), geo)
