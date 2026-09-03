@@ -902,12 +902,53 @@ def test_an_unranked_game_is_not_assessed_as_a_non_upset():
     assert "cfdb-u2" in schedule._result_strip(_row(upset_level="big"))
 
 
-def test_the_upset_null_does_not_fall_through_to_the_margin_tests():
-    """`not null` is null, not true, so without an explicit branch a big unranked win would
-    have reached `abs(margin) > 14` and been labelled an upset blowout. Asserted on the model
-    because that is where the branch has to be."""
-    sql = (Path(schedule.__file__).resolve().parents[2]
-           / "dbt" / "models" / "serving" / "srv_game.sql").read_text()
-    block = sql[sql.index("as upset_level") - 1200:sql.index("as upset_level")]
-    assert "when g.is_upset is null then null" in block
-    assert block.index("is_upset is null") < block.index("upset_margin_blowout")
+def test_the_upset_scale_cannot_out_run_its_basis():
+    """`not null` is null, not true, so without explicit branches a big win with no line and
+    no rank falls through to the margin tests and comes out 'blowout'.
+
+    GUARDED IN dbt, NOT HERE. The first version of this test sliced 1,200 characters of SQL
+    before `as upset_level` and asserted on the order of two strings inside it — which broke
+    the moment R-173 restructured the expression, without the property itself changing. The
+    dbt assertion checks the same thing against 109,108 real rows and cannot be fooled by a
+    reshuffle; this only makes sure nobody deletes it.
+    """
+    root = Path(schedule.__file__).resolve().parents[2] / "dbt" / "tests"
+    guard = root / "assert_the_upset_scale_agrees_with_the_verdict.sql"
+    assert guard.exists(), "the property is asserted in dbt; this test guards that assertion"
+    body = guard.read_text()
+    assert "upset_basis is null and upset_level is not null" in body
+    assert "upset_basis is not null and upset_level is null" in body
+
+
+def test_the_favourite_by_the_line_losing_is_an_upset():
+    """R-173. Marc, on North Carolina at TCU: "TCU favored by 8, but they lose by 5. That's a
+    Level 1 upset." Neither side was ranked, so the rank basis had nothing to say and the page
+    drew a dash — correct under the old definition and not what an upset means.
+
+    The two bases answer different questions: a poll ranks a team's SEASON, a spread states
+    the expected winner of THIS game. The line leads.
+    """
+    nan = float("nan")
+    strip = schedule._result_strip(_row(upset_level="upset", upset_basis="line",
+                                        home_rank=nan, away_rank=nan))
+    assert "cfdb-u1" in strip, "a level-1 upset, with no rank anywhere"
+    assert "cfdb-sh-upset cfdb-ind-nodata" not in strip
+    assert "against the closing spread" in strip, "and the tooltip says what judged it"
+
+
+def test_the_upset_tooltip_names_its_basis():
+    """A reader checking a surprising verdict needs to know which question produced it."""
+    assert schedule._upset_title("upset", "line") == "upset, against the closing spread"
+    assert schedule._upset_title("upset", "rank") == "upset, against the poll ranking"
+    # No basis, no "against" clause — there is nothing to name.
+    assert "against" not in schedule._upset_title("", "")
+
+
+def test_no_basis_still_reads_as_no_basis():
+    """R-172 does not regress: a game with neither a line nor a rank is still a dash, not a
+    verdict of "the favourite won"."""
+    nan = float("nan")
+    strip = schedule._result_strip(_row(upset_level=nan, upset_basis=nan,
+                                        home_rank=nan, away_rank=nan))
+    assert "cfdb-sh-upset cfdb-ind-nodata" in strip
+    assert "nothing named a favourite" in strip

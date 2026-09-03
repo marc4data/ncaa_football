@@ -154,7 +154,7 @@ def _rows(season: int, week, season_type: str, conference,
                spread_at_close, spread_at_close_basis,
                total_at_close, total_at_close_basis,
                total_points, actual_margin,
-               upset_level, winner_covered_close, over_met,
+               upset_level, upset_basis, winner_covered_close, over_met,
                home_team_record_after_display, away_team_record_after_display,
                excitement_index,
                is_indoors, temperature_f, weather_condition_code, weather_condition,
@@ -330,12 +330,15 @@ def _weather_cell(row) -> str:
 # width than the whole rest of the cell.
 UPSET_LEVEL_CLASS = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
 UPSET_LEVEL_TITLE = {
-    "": "neither team was ranked, so there was no favourite to upset",
-    "none": "not an upset",
+    "": "no closing line and no poll rank, so nothing named a favourite",
+    "none": "the favourite won",
     "upset": "upset",
     "big": "upset by more than a touchdown",
     "blowout": "upset by more than two touchdowns",
 }
+# R-173. The tooltip says WHAT WAS JUDGED AGAINST, because the two bases answer different
+# questions and a reader checking a surprising verdict needs to know which one produced it.
+UPSET_BASIS_TITLE = {"line": "the closing spread", "rank": "the poll ranking"}
 
 
 # R-171. "No closing line held" is a DASH, not a shape.
@@ -345,6 +348,13 @@ UPSET_LEVEL_TITLE = {
 # came out as three faint outlines with nothing saying why. A dash is the site's existing mark
 # for "we hold nothing here": `fmt.EM_DASH` does the same job in every table cell on the site.
 NO_DATA_MARK = "–"
+
+
+def _upset_title(level: str, basis: str) -> str:
+    """The verdict, and what it was judged against. R-173."""
+    verdict = UPSET_LEVEL_TITLE.get(level, level)
+    against = UPSET_BASIS_TITLE.get(basis)
+    return f"{verdict}, against {against}" if against else verdict
 
 
 def _indicator(shape: str, state: str, title: str, extra: str = "") -> str:
@@ -397,7 +407,7 @@ def _result_strip(row) -> str:
         _indicator("upset",
                    "fill" if upset in UPSET_LEVEL_CLASS
                    else "quiet" if upset == "none" else "nodata",
-                   UPSET_LEVEL_TITLE.get(upset, upset),
+                   _upset_title(upset, _text(row.get("upset_basis"))),
                    UPSET_LEVEL_CLASS.get(upset, "")),
         _indicator("cover", fills.get(cover, "nodata"),
                    {"yes": "the winner also covered the closing spread",
@@ -491,11 +501,11 @@ LEGEND_GROUPS = [
     ("Result", [
         ("cfdb-winner", WINNER_GLYPH, "Won"),
         ("cfdb-winner", TIE_GLYPH, "Tied"),
-        ("ind cfdb-sh-upset cfdb-ind-quiet", "", "No upset"),
+        ("ind cfdb-sh-upset cfdb-ind-quiet", "", "The favourite won"),
         ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u1", "", "Upset"),
         ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u2", "", "Upset by 7+"),
         ("ind cfdb-sh-upset cfdb-ind-fill cfdb-u3", "", "Upset by 14+"),
-        ("ind cfdb-sh-upset cfdb-ind-nodata", "", "Neither team ranked"),
+        ("ind cfdb-sh-upset cfdb-ind-nodata", "", "No line and no ranking"),
     ]),
     ("Against the line", [
         ("cfdb-legend-ch", MOVE_GLYPH, "Change since the line opened"),
