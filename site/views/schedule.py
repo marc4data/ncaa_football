@@ -594,8 +594,16 @@ def _middle_cells(row) -> tuple:
             f"<span class='cfdb-gc-mid-label'>{label}</span>"
             f"<span class='cfdb-gc-mid-line' title='{hint}'>{shown}</span>"
             f"<span class='cfdb-gc-mid-actual'>{got}</span></div>")
-    if not any(rows):
-        return "", ""
+    # A CELL ALWAYS, EVEN WITH NOTHING IN IT — and this is the second time that has mattered.
+    #
+    # Returning "" here dropped the middle cell from a completed row, so the row covered one
+    # column fewer than the grid declares and everything after it reflowed one track right,
+    # collapsing the `minmax(0,1fr)` team column to zero width. On the deployed site exactly
+    # one card in 400 hit it: Delta State at Northeastern State, a completed game with no
+    # closing line held, where the name rendered at 0px.
+    #
+    # The empty div is invisible; what it does is hold the column. Same reasoning as the
+    # reserved indicator in `_result_strip` and the reserved OT track in `_score_cells`.
     blank = "<div class='cfdb-gc-mid'></div>"
     return rows[0] or blank, rows[1] or blank
 
