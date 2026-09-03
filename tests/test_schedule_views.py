@@ -109,7 +109,7 @@ def test_an_indoor_game_shows_the_dome_and_no_temperature():
     """R-027: CFBD reports the weather at the venue's LOCATION, not inside it, so a real
     temperature beside a domed game answers the wrong question."""
     cell = schedule._weather_cell(_row(is_indoors=True, temperature_f=94.0))
-    assert schedule.DOME_GLYPH in cell
+    assert schedule.DOME_MARK in cell
     assert "94" not in cell
 
 
@@ -745,62 +745,123 @@ def test_each_indicator_has_its_own_shape():
         assert strip.count(shape) == 1, f"{shape} should appear exactly once"
 
 
-def test_the_legend_explains_every_mark_the_page_can_draw():
-    """A legend that describes an appearance the page does not have is worse than none; a
-    page that draws a mark the legend omits is worse still.
+def _untitled(markup: str) -> str:
+    """Markup with the tooltip stripped — the legend and the row differ only there."""
+    return re.sub(r" title='[^']*'", "", markup)
 
-    Asserted against `LEGEND_GROUPS` — the declarative structure the popover renders — rather
-    than by scraping markdown out of a Streamlit container. The data is the thing that has to
-    be complete, and it survives the legend moving from the sidebar to a popover, which is
-    exactly what happened to the previous version of this test.
+
+def test_the_legend_explains_every_mark_the_page_can_draw():
+    """A legend that describes an appearance the page does not have is worse than none; a page
+    that draws a mark the legend omits is worse still.
+
+    Asserted against `LEGEND_GROUPS`, the declarative inventory the popover renders, rather
+    than by scraping markdown out of a Streamlit container — the data is what has to be
+    complete, and it survives the legend moving between a sidebar, a popover and two columns,
+    all of which have now happened.
     """
-    documented = {css for _, rows in schedule.LEGEND_GROUPS for css, _, _ in rows}
-    flat = " ".join(documented)
-    # Every shape, and every state those shapes can be drawn in.
-    for shape in ("cfdb-sh-upset", "cfdb-sh-cover", "cfdb-sh-over"):
-        assert shape in flat, f"the legend never shows a {shape}"
-    for state in ("cfdb-ind-quiet", "cfdb-ind-fill", "cfdb-ind-open", "cfdb-ind-nodata"):
-        assert state in flat, f"the legend never shows {state}"
-    # And every glyph constant the renderers use.
-    glyphs = {glyph for _, rows in schedule.LEGEND_GROUPS for _, glyph, _ in rows}
-    for glyph in (schedule.NEUTRAL_GLYPH, schedule.DOME_GLYPH, schedule.WINNER_GLYPH,
+    shapes = {(e[1], e[2], e[3]) for _, rows in schedule.LEGEND_GROUPS
+              for e in rows if e[0] == "shape"}
+    glyphs = {e[2] for _, rows in schedule.LEGEND_GROUPS for e in rows if e[0] == "glyph"}
+    for shape in ("upset", "cover", "over"):
+        assert any(s == shape for s, _, _ in shapes), f"no {shape} swatch"
+    for state in ("quiet", "fill", "open", "nodata"):
+        assert any(st == state for _, st, _ in shapes), f"no {state} swatch"
+    for glyph in (schedule.NEUTRAL_GLYPH, schedule.DOME_MARK, schedule.WINNER_GLYPH,
                   schedule.TIE_GLYPH, schedule.MOVE_GLYPH, schedule.table.DETAILS_GLYPH):
-        assert glyph in glyphs, f"{glyph} is drawn on the page and never explained"
+        assert glyph in glyphs, "a mark the page draws and the legend never explains"
 
 
 def test_every_state_the_strip_can_render_is_in_the_legend():
     """The strip is generated from the data, so the states it can produce are enumerable.
-    Anything it can draw and the legend cannot name is a mark with no meaning."""
+    Anything it draws and the legend cannot name is a mark with no meaning."""
     nan = float("nan")
     drawn = set()
     for row in (_row(upset_level="none"), _row(upset_level="upset"),
                 _row(upset_level="big"), _row(upset_level="blowout"),
                 _row(winner_covered_close="no", over_met="no"),
-                _row(winner_covered_close=nan, over_met=nan),
+                _row(upset_level=nan, winner_covered_close=nan, over_met=nan),
                 _row(is_completed=False, upset_level=nan,
                      winner_covered_close=nan, over_met=nan)):
-        for found in re.findall(r"cfdb-ind-\w+", schedule._result_strip(row)):
-            drawn.add(found)
-    documented = " ".join(css for _, rows in schedule.LEGEND_GROUPS for css, _, _ in rows)
+        drawn.update(re.findall(r"cfdb-ind-(\w+)", schedule._result_strip(row)))
+    documented = {e[2] for _, rows in schedule.LEGEND_GROUPS
+                  for e in rows if e[0] == "shape"}
     for state in sorted(drawn):
-        if state == "cfdb-ind-none":
+        if state == "none":
             continue          # "not played yet" draws nothing; there is nothing to explain
         assert state in documented, f"{state} is drawn and not in the legend"
 
 
 def test_the_legend_is_grouped_rather_than_one_long_list():
-    """Sixteen marks in a single column is a list nobody reads. Three groups, in the order a
-    reader meets them: what the row is, what happened, how it went against the market."""
+    """Eighteen marks in a single column is a list nobody reads.
+
+    ASSERTED ON THE SHAPE, NOT ON THREE LITERAL STRINGS. The previous version was
+    `titles == ["Game", "Result", "Against the line"]`, which fails on any regroup AND on any
+    rename — including renames it should not care about. This is round three of this legend
+    and it will not be the last, so the property is: it is grouped, every group is titled and
+    non-empty, every group appears in the column layout exactly once, and no mark is
+    documented twice.
+    """
     titles = [title for title, _ in schedule.LEGEND_GROUPS]
-    assert titles == ["Game", "Result", "Against the line"]
-    assert all(rows for _, rows in schedule.LEGEND_GROUPS)
+    assert len(titles) >= 2 and all(titles), "grouped, and every group titled"
+    assert all(rows for _, rows in schedule.LEGEND_GROUPS), "no empty group"
+    assert len(set(titles)) == len(titles), "no duplicate group title"
+
+    laid_out = [t for column in schedule.LEGEND_COLUMNS for t in column]
+    assert sorted(laid_out) == sorted(titles), (
+        "every group is placed in exactly one column, and no column names a group that is "
+        "not in the inventory")
+
+    labels = [e[-1] for _, rows in schedule.LEGEND_GROUPS for e in rows]
+    assert len(set(labels)) == len(labels), "a mark documented twice is a mark with two meanings"
 
 
-def test_a_legend_swatch_is_a_shape_or_a_glyph_and_never_both():
-    shape = schedule._legend_key("ind cfdb-sh-over cfdb-ind-fill cfdb-acc", "")
-    glyph = schedule._legend_key("cfdb-winner", schedule.WINNER_GLYPH)
-    assert "cfdb-ind cfdb-sh-over" in shape and shape.endswith("></span>")
-    assert schedule.WINNER_GLYPH in glyph and "cfdb-ind" not in glyph
+def test_the_result_group_is_only_won_and_tied():
+    """R-176. Marc: "Result should just have Won and Tied. The rest of the items all belong
+    under Against The Line." """
+    by_title = dict(schedule.LEGEND_GROUPS)
+    assert [e[-1] for e in by_title["Result"]] == ["Won", "Tied"]
+    assert len(by_title["Against the line"]) == 11
+    assert schedule.LEGEND_COLUMNS == [["Game", "Result"], ["Against the line"]]
+
+
+def test_the_worked_examples_are_rendered_by_the_strip_itself():
+    """R-177. A legend example built from its own markup is a second implementation of the
+    strip, and the first thing it does is drift — which is exactly what R-178 was."""
+    assert len(schedule.LEGEND_EXAMPLES) == 2
+    first, second = (schedule._result_strip(row) for row, _ in schedule.LEGEND_EXAMPLES)
+    # favourite won · covered · over
+    assert "cfdb-ind-quiet" in first and first.count("cfdb-ind-fill") == 2
+    # upset by 7+ · covered · under
+    assert "cfdb-u2" in second and "cfdb-ind-open" in second
+    for _, caption in schedule.LEGEND_EXAMPLES:
+        assert caption.count("·") == 2, "a caption names all three slots"
+
+
+def test_the_legend_draws_each_state_exactly_as_the_strip_draws_it():
+    """R-178, AND THE TEST THIS REPLACES WAS HOLDING THE DEFECT IN PLACE.
+
+    Marc: "No closing line held and No Line and No Ranking aren't showing an icon in the
+    legend." They were not faint — they were ABSENT. `_indicator` puts the dash INSIDE the
+    span; `_legend_key` wrote its own empty span; and `.cfdb-ind-nodata` is transparent by
+    design, because on the row the dash is the visible thing and the box only holds R-166's
+    alignment. Two implementations of one mark, and the swatch was the one with nothing in it.
+
+    THE OLD TEST ASSERTED `shape.endswith("></span>")` — literally that a swatch is EMPTY. It
+    was green throughout and nobody could fix the defect without breaking it. R-157 says a
+    green test can prove a true fact about the wrong property; this one went further and
+    enforced the wrong property.
+
+    So the assertion is now the thing that matters: for every state the strip can draw, the
+    legend's swatch is BYTE-IDENTICAL to the strip's, modulo the tooltip. That cannot be
+    satisfied by a second implementation, which makes the shape-or-glyph question moot.
+    """
+    for shape in ("upset", "cover", "over"):
+        for state, extra in (("fill", "cfdb-acc"), ("open", "cfdb-acc"),
+                             ("quiet", ""), ("nodata", ""), ("none", "")):
+            from_strip = schedule._indicator(shape, state, "a title", extra)
+            from_legend = schedule._legend_key("shape", shape, state, extra)
+            assert _untitled(from_strip) == _untitled(from_legend), (
+                f"{shape}/{state}: the legend and the row draw different markup")
 
 
 def test_the_result_strip_is_on_the_card_as_well_as_the_table():
@@ -902,22 +963,20 @@ def test_an_unranked_game_is_not_assessed_as_a_non_upset():
     assert "cfdb-u2" in schedule._result_strip(_row(upset_level="big"))
 
 
-def test_the_upset_scale_cannot_out_run_its_basis():
-    """`not null` is null, not true, so without explicit branches a big win with no line and
-    no rank falls through to the margin tests and comes out 'blowout'.
+def test_the_upset_scale_cannot_out_run_its_verdict():
+    """`not null` is null, not true, so without explicit branches a big win with no line falls
+    through to the margin tests and comes out 'blowout'.
 
-    GUARDED IN dbt, NOT HERE. The first version of this test sliced 1,200 characters of SQL
-    before `as upset_level` and asserted on the order of two strings inside it — which broke
-    the moment R-173 restructured the expression, without the property itself changing. The
-    dbt assertion checks the same thing against 109,108 real rows and cannot be fooled by a
-    reshuffle; this only makes sure nobody deletes it.
+    GUARDED IN dbt, NOT HERE. An earlier version sliced 1,200 characters of SQL and asserted on
+    the order of two strings inside it, which broke on a restructure without the property
+    changing. The dbt assertion checks the same thing against 109,108 real rows.
     """
-    root = Path(schedule.__file__).resolve().parents[2] / "dbt" / "tests"
-    guard = root / "assert_the_upset_scale_agrees_with_the_verdict.sql"
+    guard = (Path(schedule.__file__).resolve().parents[2] / "dbt" / "tests"
+             / "assert_the_upset_scale_agrees_with_the_verdict.sql")
     assert guard.exists(), "the property is asserted in dbt; this test guards that assertion"
     body = guard.read_text()
-    assert "upset_basis is null and upset_level is not null" in body
-    assert "upset_basis is not null and upset_level is null" in body
+    assert "is_upset_by_line is null and upset_level is not null" in body
+    assert "is_upset_by_line is not null and upset_level is null" in body
 
 
 def test_the_favourite_by_the_line_losing_is_an_upset():
@@ -929,8 +988,7 @@ def test_the_favourite_by_the_line_losing_is_an_upset():
     the expected winner of THIS game. The line leads.
     """
     nan = float("nan")
-    strip = schedule._result_strip(_row(upset_level="upset", upset_basis="line",
-                                        home_rank=nan, away_rank=nan))
+    strip = schedule._result_strip(_row(upset_level="upset", home_rank=nan, away_rank=nan))
     assert "cfdb-u1" in strip, "a level-1 upset, with no rank anywhere"
     assert "cfdb-sh-upset cfdb-ind-nodata" not in strip
     assert "against the closing spread" in strip, "and the tooltip says what judged it"
@@ -938,17 +996,16 @@ def test_the_favourite_by_the_line_losing_is_an_upset():
 
 def test_the_upset_tooltip_names_its_basis():
     """A reader checking a surprising verdict needs to know which question produced it."""
-    assert schedule._upset_title("upset", "line") == "upset, against the closing spread"
-    assert schedule._upset_title("upset", "rank") == "upset, against the poll ranking"
-    # No basis, no "against" clause — there is nothing to name.
-    assert "against" not in schedule._upset_title("", "")
+    assert schedule._upset_title("upset") == "upset, against the closing spread"
+    assert schedule._upset_title("none") == "the favourite won, against the closing spread"
+    # No verdict, no "against" clause — there is nothing to name.
+    assert "against" not in schedule._upset_title("")
 
 
 def test_no_basis_still_reads_as_no_basis():
     """R-172 does not regress: a game with neither a line nor a rank is still a dash, not a
     verdict of "the favourite won"."""
     nan = float("nan")
-    strip = schedule._result_strip(_row(upset_level=nan, upset_basis=nan,
-                                        home_rank=nan, away_rank=nan))
+    strip = schedule._result_strip(_row(upset_level=nan, home_rank=nan, away_rank=nan))
     assert "cfdb-sh-upset cfdb-ind-nodata" in strip
     assert "nothing named a favourite" in strip

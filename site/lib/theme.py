@@ -309,8 +309,31 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 /* R-159. THE LEGEND, VERTICAL, IN THE SIDEBAR — where it costs zero body height and stays
    visible while the cards scroll, which is when a legend is actually consulted.
    R-161: bigger icons, sentence-case labels. */
-/* In a popover now, not the sidebar — three columns rather than one tall list. */
+/* In a popover, two columns (R-176) rather than one tall list. */
 .cfdb-legend-side { font-size:.84rem; }
+/* R-174. THE KEY BOX CENTRES ITS CONTENTS, AND A POSITIONAL MARGIN DEFEATS THAT.
+   `.cfdb-neutral` carries `margin-left:.4rem` for the ROW, where the diamond trails the
+   kickoff time and needs a gap (R-146). Inside a 1.6rem centred box that same margin is .4rem
+   of left padding with nothing to balance it, so the glyph sat right of centre — exactly what
+   Marc saw. Cancelled in the legend only; it is still doing its job elsewhere. The other four
+   classes are listed pre-emptively because they carry the same shape of margin and the next
+   mark added to the legend would otherwise repeat this. */
+.cfdb-legend-key .cfdb-neutral,
+.cfdb-legend-key .cfdb-team,
+.cfdb-legend-key .cfdb-rank,
+.cfdb-legend-key .cfdb-winner,
+.cfdb-legend-key .cfdb-ind { margin-left:0; margin-right:0; }
+/* R-175: the dome inherits colour and sizes with its row, like every other mark. */
+.cfdb-dome { width:1.15em; height:1.15em; vertical-align:-.22em; }
+.cfdb-legend-key .cfdb-dome { vertical-align:-.28em; }
+/* R-177: the worked examples ride the long column's heading line. */
+.cfdb-legend-head { display:flex; align-items:baseline; justify-content:space-between;
+                    gap:.8rem; }
+.cfdb-legend-egs { display:inline-flex; gap:.9rem; }
+.cfdb-legend-eg { display:inline-flex; }
+.cfdb-legend-egcap { margin-top:.7rem; font-size:.76rem; opacity:.6; }
+/* The groups stack in the left column, so a second heading needs air above it. */
+.cfdb-legend-side .cfdb-legend-title:not(:first-child) { margin-top:.9rem; }
 .cfdb-legend-title { font-weight:600; opacity:.7; font-size:.78rem; letter-spacing:.03em;
                      text-transform:uppercase; margin-bottom:.5rem; }
 .cfdb-legend-row { display:flex; align-items:center; gap:.55rem; padding:.16rem 0;
@@ -328,12 +351,11 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 .cfdb-gc-time { display:flex; align-items:baseline; justify-content:space-between;
                 padding-right:.9rem; }
 
-/* R-102: the legend the R-026 icon-only exception leans on.
-   R-143: bigger icons, because a legend nobody can read explains nothing. */
-.cfdb-legend { font-size:.85rem; opacity:.75; margin:.2rem 0 .6rem; line-height:1.9; }
-.cfdb-legend span { margin-right:1rem; white-space:nowrap; }
-.cfdb-legend .cfdb-details, .cfdb-legend .cfdb-neutral { font-size:1.3rem; }
-.cfdb-legend-strip .cfdb-ind { margin-right:.15rem; }
+/* R-180. THE HORIZONTAL IN-BODY LEGEND'S RULES ARE DELETED, not kept "just in case".
+   `.cfdb-legend` and `.cfdb-legend-strip` styled a wrapping strip under the view switch that
+   R-159 replaced with a sidebar version and R-169 replaced again with the popover. Dead CSS is
+   a description of a page that no longer exists, and the next person to read it has to prove
+   that before they can ignore it. */
 
 /* R-141. THE RESULT STRIP, AS CSS SHAPES RATHER THAN EMOJI.
    Marc's states mixed emoji-presentation characters with text-presentation ones. Those do not
