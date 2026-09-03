@@ -249,8 +249,12 @@ TABLE_CSS = """
    on their baselines by construction rather than by agreement. */
 /* R-134: the market is the card's ONLY content for a scheduled game and it was the smallest
    text on it. Everything here now reads at the team name's size. */
-.cfdb-gc-market { display:grid; grid-template-columns:4.8rem 1fr 4rem; font-size:1rem;
-                  align-items:center; font-variant-numeric:tabular-nums; }
+/* Fixed columns summing to the middle track (10.2rem), so the market block and the
+   completed card's middle block occupy the same box. `1fr` here was what let the label and
+   the number drift to opposite edges of a six-track span. */
+.cfdb-gc-market { display:grid; grid-template-columns:3.6rem 3.0rem 3.6rem; font-size:1rem;
+                  align-items:center; font-variant-numeric:tabular-nums;
+                  padding:.1rem .35rem; }
 .cfdb-gc-market-label { opacity:.6; }
 .cfdb-gc-market-value { text-align:right; font-weight:600; }
 .cfdb-gc-market-move { text-align:right; opacity:.6; }
