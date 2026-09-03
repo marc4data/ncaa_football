@@ -107,6 +107,35 @@ pre_kick as (
 
 ),
 
+pre_kick_total as (
+
+    -- R-142. THE CLOSING TOTAL, AND IT NEEDS ITS OWN RANKING RATHER THAN A COLUMN ON pre_kick.
+    --
+    -- Not every betting-line row carries an over_under, so taking the total from whichever row
+    -- won the SPREAD's ranking nulls it whenever that row happens to be spread-only — a
+    -- missing number that looks like an absent market. Ranking rows that have a total first is
+    -- the same shape `latest_prediction` above already uses for predicted_margin.
+    --
+    -- Same provenance split as the spread, and for the same reason: our snapshot history
+    -- begins 2026-08-15, so anything older is CFBD's recorded number rather than a line we
+    -- watched. `basis` travels with the value.
+    select game_id, over_under, provider_key, snapshot_ts, basis from (
+        select
+            b.game_id, b.over_under, b.provider_key, b.snapshot_ts,
+            case when b.snapshot_ts <= g.start_date then 'observed_before_kickoff'
+                 else 'as_recorded_by_cfbd' end as basis,
+            row_number() over (
+                partition by b.game_id
+                order by case when b.snapshot_ts <= g.start_date then 0 else 1 end,
+                         b.snapshot_ts desc, b.provider_key
+            ) as recency
+        from {{ ref('fct_betting_line') }} b
+        join {{ ref('fct_game') }} g on g.game_id = b.game_id
+        where b.over_under is not null
+    ) ranked where recency = 1
+
+),
+
 -- R-079 IS A MART, NOT A CTE HERE. The first version of this view held the "latest snapshot
 -- at or before kickoff" selection inline and read stg_game_pregame_wp directly.
 -- ci/check_layering.py failed the build for it and was right to: serving builds on marts.
@@ -310,6 +339,51 @@ select
     pk.spread                     as spread_at_close,
     pk.provider_key               as spread_at_close_provider,
     pk.basis                      as spread_at_close_basis,
+    pkt.over_under                as total_at_close,
+    pkt.provider_key              as total_at_close_provider,
+    pkt.basis                     as total_at_close_basis,
+
+    -- R-141, INDICATOR 1: THE UPSET SCALE. `is_upset` already says whether; these say by how
+    -- much. Boundaries are dbt vars (see dbt_project.yml) because Marc asked for them to be
+    -- configurable and a metric definition does not belong in the app.
+    case
+        when not g.is_completed or g.home_points is null then null
+        when not g.is_upset then 'none'
+        when abs(g.away_points - g.home_points) > {{ var('upset_margin_blowout') }}
+            then 'blowout'
+        when abs(g.away_points - g.home_points) > {{ var('upset_margin_big') }}
+            then 'big'
+        else 'upset'
+    end                                                    as upset_level,
+
+    -- R-141, INDICATOR 2: DID THE TEAM THAT WON ALSO COVER?
+    --
+    -- NOT `favorite_covered`, which is directly above and answers a different question. That
+    -- one asks whether the market's pick was right; this one asks whether the winner beat the
+    -- number. They disagree exactly when an underdog wins outright — the most interesting case
+    -- on the page — so the two must never be conflated, hence the explicit name.
+    --
+    -- Convention, unchanged from favorite_covered: spread is the HOME number and margin is
+    -- away minus home, so the home side covered when the margin came in below the spread.
+    case
+        when not g.is_completed or g.home_points is null then 'pending'
+        when pk.spread is null then null
+        when (g.away_points - g.home_points) = pk.spread then 'push'
+        when g.home_points = g.away_points then 'push'
+        when g.home_points > g.away_points
+            then case when (g.away_points - g.home_points) < pk.spread then 'yes' else 'no' end
+        else case when (g.away_points - g.home_points) > pk.spread then 'yes' else 'no' end
+    end                                                    as winner_covered_close,
+
+    -- R-141, INDICATOR 3: did the game go over the closing total. Push is a real state on a
+    -- whole number, and pending is not the same as no line — the null-not-zero rule again.
+    case
+        when not g.is_completed or g.home_points is null then 'pending'
+        when pkt.over_under is null then null
+        when (g.home_points + g.away_points) = pkt.over_under then 'push'
+        when (g.home_points + g.away_points) > pkt.over_under then 'yes'
+        else 'no'
+    end                                                    as over_met,
 
     -- WHETHER THE FAVOURITE COVERED — distinct from which side covered. Four states, and
     -- pending is not push. A pick'em has no favourite at all, which is a real case here.
@@ -484,6 +558,10 @@ select
     -- collision was avoided deliberately.
     rw_home.current_record        as home_team_record_display,
     rw_away.current_record        as away_team_record_display,
+    -- R-140. The record the game LEFT them with. Null for a game not yet played, which is what
+    -- lets the page show the leading-into figure before kickoff and this one after.
+    case when g.is_completed then rw_home.record_after end as home_team_record_after_display,
+    case when g.is_completed then rw_away.record_after end as away_team_record_after_display,
 
     ao.as_of_ts
 from {{ ref('fct_game') }} g
@@ -507,6 +585,7 @@ left join {{ ref('fct_game_weather') }} w on w.game_id = g.game_id
 -- Record LEADING INTO this game's week, per side. Joined on the full grain including
 -- season_type, because postseason week numbers restart at 1 and joining on week alone would
 -- put a bowl game's record on an October fixture.
+left join pre_kick_total pkt on pkt.game_id = g.game_id
 left join {{ ref('fct_team_record_week') }} rw_home
     on  rw_home.season = g.season and rw_home.season_type = g.season_type
     and rw_home.week = g.week and rw_home.team_id = g.home_team_id

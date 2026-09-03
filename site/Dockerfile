@@ -14,6 +14,16 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # page was actually requested.
 COPY app.py /app/
 COPY lib/ /app/lib/
+# R-099, AND IT WAS NEVER A COLOUR PROBLEM. The accent was chosen correctly a round ago and
+# the radio stayed Streamlit red on the deployed site, because the config lived at the REPO
+# ROOT while `deploy/docker-compose.yml` builds this image with `context: ./site`. The repo
+# root is outside the build context, so no COPY could have reached it — Streamlit looked for
+# /app/.streamlit/config.toml, found nothing, and used its own #FF4B4B.
+#
+# THE SAME WALL ALREADY BIT ONCE: `lib/lines_cadence.json` exists because this image cannot
+# import `src/` for the same reason. One canonical file, inside the context, and the local run
+# is done from inside site/ so dev and prod read the same one.
+COPY .streamlit/ /app/.streamlit/
 # NOT `pages/`: Streamlit auto-discovers that name and overrides st.navigation.
 COPY views/ /app/views/
 

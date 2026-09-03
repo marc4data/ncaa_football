@@ -25,13 +25,17 @@ def _row(**overrides):
         game_date=pd.Timestamp("2025-11-15"), start_date_et=pd.Timestamp("2025-11-15 19:00"),
         home_team_slug="alabama", home_team_display="Alabama", home_abbreviation="ALA",
         home_logo_url=None, home_conference="SEC", home_points=31, home_rank=4,
-        home_team_record_display="8-2",
+        home_team_record_display="8-2", home_team_record_after_display="9-2",
         away_team_slug="auburn", away_team_display="Auburn", away_abbreviation="AUB",
         away_logo_url=None, away_conference="SEC", away_points=17, away_rank=None,
-        away_team_record_display="5-5",
+        away_team_record_display="5-5", away_team_record_after_display="5-6",
         venue_display="Bryant-Denny", network="ESPN", network_abbreviation="ESPN",
         is_neutral_site=False, is_conference_game=True, is_completed=True, winner="Alabama",
         spread_current=-7.5, total_current=52.5, predicted_margin=-6.0,
+        spread_at_close=-7.0, spread_at_close_basis="observed_before_kickoff",
+        total_at_close=51.5, total_at_close_basis="observed_before_kickoff",
+        total_points=48, actual_margin=-14,
+        upset_level="none", winner_covered_close="yes", over_met="no",
         home_win_probability=0.72, excitement_index=5.1,
         is_indoors=False, temperature_f=54.0, weather_condition_code=3,
         weather_condition="Cloudy",
@@ -158,14 +162,17 @@ def test_matchup_and_neutral_share_one_headed_column():
     assert "details" not in columns
     game = columns["game"]
     assert game.label, "R-101 asks for a header; the old neutral column had none"
-    neutral = game.format(_row(is_neutral_site=True))
-    plain = game.format(_row(is_neutral_site=False))
-    assert schedule.NEUTRAL_GLYPH in neutral
-    assert schedule.NEUTRAL_GLYPH not in plain
-    # Both renderings still offer the matchup, which is the destination the column is for.
-    for rendered in (neutral, plain):
-        assert schedule.table.DETAILS_GLYPH in rendered
-    assert game.link(_row()) is not None
+    # R-146 MOVED THE NEUTRAL GLYPH OUT AGAIN, to the kickoff cell. R-101 merged two columns
+    # into one; this is that same column keeping its header and swapping its second occupant
+    # for R-147's result strip.
+    kickoff = columns["start_date_et"]
+    assert schedule.NEUTRAL_GLYPH in kickoff.format(_row(is_neutral_site=True))
+    assert schedule.NEUTRAL_GLYPH not in kickoff.format(_row(is_neutral_site=False))
+    assert schedule.NEUTRAL_GLYPH not in game.format(_row(is_neutral_site=True))
+    rendered = game.format(_row())
+    assert schedule.table.DETAILS_GLYPH in rendered
+    assert "cfdb-strip" in rendered, "R-147: the strip sits right of the matchup icon"
+    assert rendered.index("cfdb-details") < rendered.index("cfdb-strip")
 
 
 def test_the_weather_column_is_centred():
@@ -391,7 +398,7 @@ def test_the_card_emits_three_rows_of_equal_cell_count():
         card = schedule._card(_row(home_periods=5 if geo["ot"] else 4,
                                    away_periods=5 if geo["ot"] else 4), _Scope(), geo)
         grid = _grid_of(card)
-        per_row = 1 + schedule._tracks(geo)
+        per_row = 2 + schedule._tracks(geo)   # team, middle, then the numerics
         parser = _Children()
         parser.feed(grid)
         assert parser.direct == 3 * per_row, (
@@ -430,7 +437,7 @@ def test_a_regulation_game_reserves_the_ot_track_but_draws_nothing_in_it():
     for card in (regulation, overtime):
         parser = _Children()
         parser.feed(_grid_of(card))
-        assert parser.direct == 3 * (1 + schedule._tracks(geo))
+        assert parser.direct == 3 * (2 + schedule._tracks(geo))
     # And nothing is drawn: no border classes on the reserved cells.
     assert regulation.count("cfdb-gc-b") < overtime.count("cfdb-gc-b")
 
@@ -541,3 +548,52 @@ def test_the_winner_spacer_tracks_the_glyphs_size():
     sizes = re.findall(r"font-size:([\d.]+rem)", block)
     assert len(sizes) == 2 and sizes[0] == sizes[1], (
         f"glyph and spacer must share a size, got {sizes}")
+
+
+def test_the_result_strip_reserves_its_width_on_a_scheduled_game():
+    """R-141. An indicator set that appears only on completed games shifts the columns beside
+    it the moment a week is half played — the alignment failure this page has fixed three
+    times. Every state renders a span; `none` is a reserved blank, not an omission."""
+    nan = float("nan")
+    played = schedule._result_strip(_row())
+    scheduled = schedule._result_strip(_row(is_completed=False, upset_level=nan,
+                                            winner_covered_close=nan, over_met=nan))
+    assert played.count("<span class='cfdb-ind") == 3
+    assert scheduled.count("<span class='cfdb-ind") == 3, "same count, played or not"
+    assert scheduled.count("cfdb-ind-none") == 3, "reserved, and nothing drawn"
+    # `none` is also the upset scale's own first state — "not an upset" — so a played game
+    # legitimately carries one. An UPSET draws all three.
+    upset = schedule._result_strip(_row(upset_level="big"))
+    assert "cfdb-ind-none" not in upset, "a played upset draws all three"
+
+
+def test_the_three_indicators_are_shapes_not_emoji():
+    """A substitution worth being able to see. Marc's states mixed emoji-presentation and
+    text-presentation characters, which do not share a baseline or size together — and he
+    asked the strip to match the kickoff time's size, which emoji will not do reliably."""
+    strip = schedule._result_strip(_row())
+    # No emoji and no variation selectors anywhere in the strip — it is spans and classes.
+    assert not any(ord(ch) >= 0x1F000 or ch in "\ufe0e\ufe0f" for ch in strip), strip
+    # The fixture covers (filled) and stayed under (outlined) — one of each in one strip.
+    assert "cfdb-ind-fill" in strip and "cfdb-ind-open" in strip, "filled vs outlined"
+    assert "cfdb-ind-push" in schedule._result_strip(_row(over_met="push"))
+    assert "cfdb-u2" in schedule._result_strip(_row(upset_level="big"))
+
+
+def test_the_record_shown_depends_on_whether_the_game_was_played():
+    """R-140. A record AFTER a game cannot exist for a game nobody has played, which is why
+    the literal reading of Marc's sentence was not built. Completed shows after; scheduled
+    shows going-in."""
+    after = schedule._record_span(_row(), "home")
+    before = schedule._record_span(_row(is_completed=False), "home")
+    assert "9-2" in after and "after" in after
+    assert "8-2" in before and "going into" in before
+
+
+def test_the_middle_block_mirrors_the_market_block_rows():
+    """R-149. O/U on the away row, Spread on the home row — the same two rows the pre-game
+    market uses, so a reader's eye does not move between a played and an unplayed game."""
+    away, home = schedule._middle_cells(_row())
+    assert "O/U" in away and "51.5" in away and "48" in away
+    assert "Spread" in home and "-7.0" in home and "-14" in home
+    assert "+" not in away.split("cfdb-gc-mid-actual")[1], "a points total is unsigned"
