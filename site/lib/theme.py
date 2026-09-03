@@ -184,9 +184,10 @@ TABLE_CSS = """
    FIXED two-up that keeps two cards side by side on a phone. `auto-fit` + `minmax` costs no
    JavaScript and no custom component, and reflows to one column on its own.
 
-   560px, down from 620px: R-114 deleted the box score's row-label column (the team row IS the
-   label now) and moved the kickoff out of a left gutter into row 1, so the card genuinely
-   needs less. Measured content: teams 235 + numerics 13.7rem/219 + padding 48 + gap 14.
+   580px: 560 plus the 1rem MIDDLE_TRACK gained for the line block's padding. R-114 deleted
+   the box score's row-label column (the team row IS the label now) and moved the kickoff
+   out of a left gutter into row 1, so the card genuinely needs less than it did.
+   Measured content: teams 235 + numerics 13.7rem/219 + padding 48 + gap 14.
 
    auto-FILL, NOT auto-FIT, AND THE DIFFERENCE IS VISIBLE ON EVERY MIDWEEK DAY. `auto-fit`
    COLLAPSES tracks it cannot fill, so a Sunday with one game rendered that card at 1460px
@@ -194,7 +195,7 @@ TABLE_CSS = """
    track, so a lone card is the same size as a card with a neighbour and the page stops
    changing shape according to how many games were played. */
 .cfdb-cardgrid { display:grid; gap:.7rem .9rem; align-items:stretch;
-                 grid-template-columns:repeat(auto-fill, minmax(560px, 1fr)); }
+                 grid-template-columns:repeat(auto-fill, minmax(580px, 1fr)); }
 .cfdb-gamecard { display:flex; flex-direction:column; height:100%;
                  padding:.55rem .7rem; border:1px solid rgba(0,0,0,.10);
                  border-radius:6px; }
@@ -249,15 +250,10 @@ TABLE_CSS = """
    on their baselines by construction rather than by agreement. */
 /* R-134: the market is the card's ONLY content for a scheduled game and it was the smallest
    text on it. Everything here now reads at the team name's size. */
-/* Fixed columns summing to the middle track (10.2rem), so the market block and the
-   completed card's middle block occupy the same box. `1fr` here was what let the label and
-   the number drift to opposite edges of a six-track span. */
-.cfdb-gc-market { display:grid; grid-template-columns:3.6rem 3.0rem 3.6rem; font-size:1rem;
-                  align-items:center; font-variant-numeric:tabular-nums;
-                  padding:.1rem .35rem; }
-.cfdb-gc-market-label { opacity:.6; }
-.cfdb-gc-market-value { text-align:right; font-weight:600; }
-.cfdb-gc-market-move { text-align:right; opacity:.6; }
+/* The preview card's line block now uses `.cfdb-gc-mid` above — one set of rules for both
+   variants, so padding, dividers and weight cannot diverge between a game that has been
+   played and one that has not. These classes are retained only for the legend's `Δ` sample. */
+.cfdb-gc-market-move { opacity:.6; }
 /* R-092: why the quarters are missing, not merely that they are. */
 .cfdb-ls-why { font-size:.72rem; opacity:.6; margin-top:.15rem; text-align:right; }
 /* R-015: anchored to the bottom so two cards in one grid row end level. */
@@ -323,12 +319,31 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 .cfdb-u2  { color:#e06c1f; }
 .cfdb-u3  { color:#d2333a; }
 
-/* R-149. The middle block's three columns, inside one cell of the card grid. */
-.cfdb-gc-mid { display:grid; grid-template-columns:3.4rem 3.2rem 3.4rem; align-items:center;
-               font-size:.9rem; font-variant-numeric:tabular-nums; padding:.1rem .35rem; }
+/* R-149. THE LINE BLOCK — one cell of the card grid, three columns of its own, on BOTH card
+   variants. The result card fills them label / line / actual; the preview card fills them
+   label / line / move.
+
+   THE RULES ARE WHAT MAKE IT READ AS A BLOCK. A border-left here draws the divider between
+   the team column and the line block; the box score's own left border (`cfdb-gc-bl`) draws
+   the one on the other side. Both run the full three rows because every row of the grid has
+   a cell in this track — including the header row, which is why `_line_block_header` exists
+   rather than an empty div.
+
+   The padding is deliberately symmetrical and generous: it is the gap between the rules and
+   the numbers, and it is what Marc meant by tightening the block up. The inner columns got
+   NARROWER as the outer padding got wider, which is why MIDDLE_TRACK grew by only 1rem. */
+.cfdb-gc-mid { display:grid; grid-template-columns:3.3rem 2.9rem 3.2rem; align-items:center;
+               font-size:.9rem; font-variant-numeric:tabular-nums; padding:.1rem .9rem;
+               border-left:1px solid rgba(127,127,127,.30); }
+/* ONE WEIGHT, ONE OPACITY, ACROSS THE WHOLE BLOCK. The actual was 600 on the result card and
+   the line was 600 on the preview card, so the emphasis landed on a different column
+   depending on whether the game had been played. The headers say which column is which now,
+   which is what makes the weight unnecessary rather than merely inconsistent. */
 .cfdb-gc-mid-label  { opacity:.55; font-size:.8rem; }
-.cfdb-gc-mid-line   { text-align:right; opacity:.75; }
-.cfdb-gc-mid-actual { text-align:right; font-weight:600; }
+.cfdb-gc-mid-line   { text-align:right; }
+.cfdb-gc-mid-actual { text-align:right; }
+.cfdb-gc-mid-head span { opacity:.55; font-size:.72rem; font-weight:600;
+                         letter-spacing:.02em; }
 @media (prefers-color-scheme: dark) {
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
