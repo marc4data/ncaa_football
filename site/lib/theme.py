@@ -304,11 +304,22 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    controls size, baseline and colour for all six states; the semantics are unchanged. */
 .cfdb-strip { display:inline-flex; gap:.2rem; align-items:center; vertical-align:-.08em; }
 .cfdb-strip-gap { display:inline-block; width:.45rem; }
-.cfdb-ind { display:inline-block; width:.72em; height:.72em; border-radius:50%;
-            box-sizing:border-box; border:1.5px solid transparent; }
+.cfdb-ind { display:inline-block; width:.72em; height:.72em; box-sizing:border-box;
+            border:1.5px solid transparent; }
+/* A SHAPE PER POSITION, so a single indicator can be matched to its legend entry without
+   counting its neighbours. All three were circles, which meant position was the only thing
+   telling them apart — and position is unreadable the moment one of them is invisible. */
+.cfdb-sh-upset { border-radius:50%; }
+.cfdb-sh-cover { border-radius:2px; }
+.cfdb-sh-over  { border-radius:1px; transform:rotate(45deg); width:.62em; height:.62em; }
 /* `none` is a RESERVED BLANK, not an omission: a strip that appears only on completed games
-   shifts the columns beside it the moment a week is half played. */
+   shifts the columns beside it the moment a week is half played. It means NOT PLAYED YET. */
 .cfdb-ind-none { background:transparent; border-color:transparent; }
+/* `quiet` means ANSWERED AND UNREMARKABLE — a game that was played and was not an upset.
+   That used to render as `none`, i.e. as nothing, which made it indistinguishable from a game
+   nobody has played and left the first slot blank on every completed game of a normal week.
+   Two visible indicators then sat in slots two and three and read as slots one and two. */
+.cfdb-ind-quiet { background:transparent; border-color:rgba(127,127,127,.55); }
 .cfdb-ind-open { background:transparent; border-color:currentColor; }
 .cfdb-ind-fill { background:currentColor; border-color:currentColor; }
 /* A push is neither: half-filled reads as "landed on the number" without a fourth colour. */

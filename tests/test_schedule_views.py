@@ -716,3 +716,60 @@ def test_both_card_variants_use_one_line_block():
     for card in (result, preview):
         assert "cfdb-gc-mid" in card
     assert "cfdb-gc-market" not in result + preview, "the second class is gone"
+
+
+def test_a_game_that_was_played_and_was_not_an_upset_still_shows_something():
+    """"Not an upset" is an ANSWER. Rendering it as nothing made it identical to "not played
+    yet", which is a different fact — and since a normal week has no upsets at all (all 124
+    completed games in 2026 week 1 are `none`), the first slot was blank on every row. The two
+    visible indicators then sat in slots two and three and read as slots one and two, so a
+    reader matching them to the legend matched them to the wrong entries.
+    """
+    nan = float("nan")
+    played = schedule._result_strip(_row(upset_level="none"))
+    unplayed = schedule._result_strip(_row(is_completed=False, upset_level=nan,
+                                           winner_covered_close=nan, over_met=nan))
+    assert "cfdb-ind-quiet" in played, "played and unremarkable is still an answer"
+    assert "cfdb-ind-quiet" not in unplayed, "not played is not an answer"
+    assert unplayed.count("cfdb-ind-none") == 3
+    # Three visible marks on a completed row, whatever the result was.
+    assert played.count("cfdb-ind-none") == 0
+
+
+def test_each_indicator_has_its_own_shape():
+    """All three were circles, so they could only be told apart by position — and position is
+    unreadable the moment one of them is invisible. A shape per position lets a reader match a
+    single indicator to its legend entry without counting its neighbours."""
+    strip = schedule._result_strip(_row())
+    for shape in ("cfdb-sh-upset", "cfdb-sh-cover", "cfdb-sh-over"):
+        assert strip.count(shape) == 1, f"{shape} should appear exactly once"
+
+
+def test_the_legend_samples_carry_the_shapes_the_page_draws():
+    """A legend that describes an appearance the card does not have is worse than none. The
+    samples are asserted against the same shape classes `_result_strip` emits."""
+    import streamlit as st
+    captured = []
+    original = st.markdown
+    st.markdown = lambda body, **kw: captured.append(body)
+    try:
+        schedule._legend()
+    finally:
+        st.markdown = original
+    legend = "".join(captured)
+    strip = schedule._result_strip(_row(upset_level="big", winner_covered_close="no"))
+    for shape in ("cfdb-sh-upset", "cfdb-sh-cover", "cfdb-sh-over"):
+        assert shape in legend, f"the legend never shows a {shape}"
+        assert shape in strip
+    for state in ("cfdb-ind-quiet", "cfdb-ind-fill", "cfdb-ind-open"):
+        assert state in legend, f"the legend never shows {state}"
+
+
+def test_the_result_strip_is_on_the_card_as_well_as_the_table():
+    """The legend is shared by both views, so a strip that exists only in Inline means the
+    Stacked view carries a legend for something it does not draw. Marc found exactly that."""
+    card = _card()
+    assert "cfdb-strip" in card
+    # In the kickoff cell, mirroring where R-141 put it in the Inline header.
+    head = card[card.index("cfdb-gc-time"):]
+    assert head.index("cfdb-strip") < head.index("cfdb-gc-mid")
