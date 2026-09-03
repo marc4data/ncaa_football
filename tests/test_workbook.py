@@ -59,14 +59,27 @@ def _frame(fields):
 
 @pytest.fixture
 def built(monkeypatch):
-    """A real workbook, from stubbed reads."""
+    """A real workbook, from stubbed reads.
+
+    CFDB_SITE_HOST is set EXPLICITLY rather than inherited. A test that behaves one way on a
+    laptop with a populated .env and another way on a CI runner is the class of test
+    conftest.py exists to prevent, and the hyperlink work made this module sensitive to it.
+    """
+    monkeypatch.setenv("CFDB_SITE_HOST", "https://cfdb.example")
+
     def fake_query(sql, params=None):
         # Every stubbed query still goes through the contract, so a sheet that violates
         # G-1/G-2 fails here rather than in production.
         check_contract(sql)
         for sheet in workbook.SHEETS:
             if f"from {sheet.view}" in " ".join(sql.split()):
-                return _frame(sheet.fields)
+                # The SELECTED fields, not just the visible columns: the sheet also pulls
+                # what it derives from and what it links with, and a fixture missing those
+                # makes the hyperlinks look absent when they are merely unstubbed.
+                df = _frame(sorted(set(sheet.fields) | set(sheet.selected_fields)))
+                if "game_id" in df.columns:
+                    df["game_id"] = [401752000, 401752001]
+                return df
         return pd.DataFrame([{"model_version": "abc123", "model_name": "stub"}])
 
     monkeypatch.setattr(workbook, "query", fake_query)
@@ -135,8 +148,12 @@ def test_every_prediction_sheet_carries_the_model_disclaimer(built):
 def test_the_out_of_sample_flag_is_a_column_not_a_footnote(built):
     """AC-15.4. A workbook gets sorted and filtered; a sheet-level note does not survive
     that, and the rows it applied to end up looking like ordinary predictions."""
-    edges = next(s for s in workbook.SHEETS if s.name == "Edges")
-    assert "is_out_of_sample_week" in edges.fields
+    # Asserted on every sheet that carries predictions, not on one named sheet — the named
+    # sheet stopped shipping and the test went looking for something that was not there.
+    predicting = [s for s in workbook._ALL_SHEETS if s.has_predictions]
+    assert predicting
+    for sheet in predicting:
+        assert "is_out_of_sample_week" in sheet.fields, sheet.name
 
 
 # --- AC-15.1 / AC-15.2: the scope rule --------------------------------------------------
@@ -150,9 +167,12 @@ def test_every_sheet_reads_exactly_one_serving_view(built):
 def test_scoped_sheets_filter_on_the_season(built):
     """AC-15.1. The two unscoped sheets are provenance — which models produced the
     predicted columns, and what the fields mean — not additional data."""
-    unscoped = {s.name for s in workbook.SHEETS if not s.scoped}
+    # Walks _ALL_SHEETS, INCLUDING the six that do not ship yet. Their SQL is still real
+    # work and still under the CI query checker; letting the property lapse while they sit
+    # out of the shipping list is how they would come back broken.
+    unscoped = {s.name for s in workbook._ALL_SHEETS if not s.scoped}
     assert unscoped == {"Model performance", "Data dictionary"}
-    for sheet in workbook.SHEETS:
+    for sheet in workbook._ALL_SHEETS:
         if sheet.scoped:
             assert ":season" in sheet.sql, sheet.name
 
@@ -208,8 +228,9 @@ def test_numeric_cells_are_numbers_with_the_sites_precision(built):
         if sheet.name not in book.sheetnames:
             continue
         tab = book[sheet.name]
+        first_data = workbook.first_data_row(2 if sheet.has_predictions else 1)
         for index, (field, _) in enumerate(sheet.columns, start=1):
-            cell = tab.cell(workbook.ROW_FIRST_DATA, index)
+            cell = tab.cell(first_data, index)
             if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
                 assert cell.number_format == workbook.number_format(field), field
                 checked += 1
@@ -228,16 +249,26 @@ def test_precision_comes_from_the_same_table_the_site_renders_with():
 
 
 def test_sheets_are_workable_not_merely_readable(built):
-    """AC-15.12: freeze panes, autofilter, and conditional formatting where it earns its
-    place. The deliverable is meant to be worked in."""
+    """AC-15.12: freeze panes, filtering, and conditional formatting where it earns its
+    place. The deliverable is meant to be worked in.
+
+    THE FILTER NOW COMES FROM THE TABLE, NOT FROM `auto_filter` (R-182 trap 1). openpyxl
+    documents that a table must not overlap the worksheet's autofilter, and an overlap is
+    the "we found a problem with some content" repair prompt AC-15.6 forbids. So the
+    affordance is asserted, and the thing that would collide with it is asserted ABSENT.
+    """
     _, book, _, _ = built
     for sheet in workbook.SHEETS:
         if sheet.name not in book.sheetnames:
             continue
         tab = book[sheet.name]
-        assert tab.freeze_panes == f"A{workbook.ROW_FIRST_DATA}", sheet.name
-        assert tab.auto_filter.ref, sheet.name
-    assert len(book["Edges"].conditional_formatting._cf_rules) > 0
+        expected = workbook.first_data_row(2 if sheet.has_predictions else 1)
+        assert tab.freeze_panes == f"A{expected}", sheet.name
+        assert not tab.auto_filter.ref, (
+            f"{sheet.name} has a worksheet autofilter as well as a Table; overlapping them "
+            f"is what produces Excel's repair prompt")
+        assert len(tab.tables) == 1, f"{sheet.name} should carry exactly one Table"
+    assert len(book["Schedule"].conditional_formatting._cf_rules) > 0
 
 
 def test_an_empty_string_becomes_an_empty_cell(built):
@@ -350,10 +381,13 @@ def test_every_declared_label_divergence_is_still_real():
         diverges = any(
             field not in view_labels.get(sheet.view, {})
             or label not in view_labels[sheet.view][field]
-            for sheet in workbook.SHEETS
+            for sheet in workbook._ALL_SHEETS
             for name, label in sheet.columns if name == field)
+        # _ALL_SHEETS, not SHEETS: an exception belonging to a sheet that is written but not
+        # yet SHIPPED is still live documentation, and pruning it now would mean rediscovering
+        # the same divergence when that sheet is converted.
         exported = any(name == field
-                       for sheet in workbook.SHEETS for name, _ in sheet.columns)
+                       for sheet in workbook._ALL_SHEETS for name, _ in sheet.columns)
         assert exported, f"{field} is not exported at all; drop the exception"
         assert diverges, f"{field} no longer differs from the site; drop the exception"
 
@@ -382,7 +416,9 @@ def _division_aware_query(recorder=None, in_scope=None):
             recorder.append((flat, dict(params or {})))
         for sheet in workbook.SHEETS:
             if f"from {sheet.view}" in flat:
-                df = _frame(sheet.fields)
+                df = _frame(sorted(set(sheet.fields) | set(sheet.selected_fields)))
+                if "game_id" in df.columns:
+                    df["game_id"] = [401752000, 401752001]
                 if sheet.view == "srv_game":
                     # Row 0 is an FBS game, row 1 is two non-FBS teams.
                     df["is_fbs_game"] = [True, False]
@@ -428,7 +464,8 @@ def test_a_workbook_scoped_to_fbs_holds_no_game_between_two_non_fbs_teams(monkey
         for sheet in GAME_SHEETS:
             if sheet.name in book.sheetnames:
                 tab = book[sheet.name]
-                rows += tab.max_row - workbook.ROW_FIRST_DATA + 1
+                first = workbook.first_data_row(2 if sheet.has_predictions else 1)
+                rows += tab.max_row - first + 1
         return rows
 
     narrow, wide = classifications("fbs"), classifications("all")
@@ -511,15 +548,34 @@ def test_an_untruncated_workbook_says_so_rather_than_staying_silent(monkeypatch)
     assert "Complete" in text and "Truncated" not in text
 
 
+def test_only_srv_game_sheets_can_honour_the_division_filter():
+    """Verified against the serving schema, not assumed: `is_fbs_game` exists on srv_game and
+    nowhere else. So a scope line reading 'FBS' would overstate what the other six sheets
+    did, and the Index names it per sheet rather than quietly implying it.
+
+    Asserted across ALL seven, because five of the six that cannot honour it are the ones
+    waiting to be converted — this is the property they must come back with.
+    """
+    scoped = {s.name for s in workbook._ALL_SHEETS if s.division_scoped}
+    assert scoped == {"Schedule", "Scores"}, scoped
+    for sheet in workbook._ALL_SHEETS:
+        assert sheet.division_scoped == (sheet.view == "srv_game"), sheet.name
+
+
 def test_the_index_says_when_the_division_filter_could_not_reach_a_sheet(monkeypatch):
-    """Only srv_game carries is_fbs_game — verified against the serving schema, not assumed.
-    So a scope line reading 'FBS' overstates what five of the seven sheets did, and the
-    honest fix is to name it per sheet rather than to quietly imply it."""
+    """The note itself, built for a sheet that cannot narrow. Exercised directly because the
+    only sheet shipping today CAN narrow, and a test that silently covers nothing is R-194.
+    """
     monkeypatch.setattr(workbook, "query", _division_aware_query())
+    standings = next(s for s in workbook._ALL_SHEETS if s.name == "Standings")
+    monkeypatch.setattr(workbook, "SHEETS", [standings])
     _, index_rows, _ = workbook.build(2026, 8, "regular", None, "fbs")
-    by_name = {entry.name: entry for entry in index_rows}
-    assert "does not apply" in by_name["Standings"].note
-    assert "does not apply" not in by_name["Schedule"].note
+    note = next(e for e in index_rows if e.name == "Standings").note
+    assert "does not apply" in note and "FBS" in note
+
+    monkeypatch.setattr(workbook, "SHEETS", workbook._ALL_SHEETS[:1])
+    _, index_rows, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    assert "does not apply" not in next(e for e in index_rows if e.name == "Schedule").note
 
 
 def test_the_scope_line_names_the_division_unless_it_excludes_nothing():
@@ -574,3 +630,330 @@ def test_the_flattened_sql_survives_comment_semantics_not_just_string_matching()
             f"the tail. What the server would run: ...{as_parsed[-110:]}")
         assert "order by" in as_parsed.lower(), (
             f"{sheet.name} loses its ORDER BY once comments are applied")
+
+
+# === R-181 / R-182 / R-183: the layout ====================================================
+
+def test_exactly_one_blank_row_sits_between_the_notes_and_the_header(built):
+    """R-181, Marc's global requirement. Excel treats a blank row as the end of a region, so
+    a second blank changes what a header-click and Ctrl+A select — it is not cosmetic.
+
+    Asserted by READING THE CELLS, not by recomputing the constant. A test that asks
+    `header_row(n) == n + 2` restates the implementation and would pass with the sheet laid
+    out any way at all.
+    """
+    _, book, _, _ = built
+    for name in book.sheetnames:
+        tab = book[name]
+        column_a = [tab.cell(r, 1).value for r in range(1, 12)]
+        notes = 0
+        while notes < len(column_a) and column_a[notes] not in (None, ""):
+            notes += 1
+        assert notes >= 1, f"{name} has no note block at all — attribution is structural"
+        blanks = 0
+        while column_a[notes + blanks] in (None, ""):
+            blanks += 1
+        assert blanks == 1, (
+            f"{name} has {blanks} blank row(s) between its notes and its header, not 1")
+
+
+def test_the_blank_row_holds_on_a_sheet_with_the_disclaimer_and_one_without(monkeypatch):
+    """THE NEGATIVE HALF, and the reason the old layout was wrong.
+
+    Four fixed constants gave exactly one blank row on a sheet WITH the model disclaimer and
+    two on a sheet without — so a test that only ever saw a prediction sheet would have
+    reported the old layout as correct. Both shapes, in one test.
+    """
+    monkeypatch.setenv("CFDB_SITE_HOST", "https://cfdb.example")
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    from openpyxl import load_workbook
+
+    seen = {}
+    for sheet in (next(s for s in workbook._ALL_SHEETS if s.has_predictions),
+                  next(s for s in workbook._ALL_SHEETS if not s.has_predictions)):
+        monkeypatch.setattr(workbook, "SHEETS", [sheet])
+        payload, _, _ = workbook.build(2026, 8, "regular", None, "all")
+        tab = load_workbook(BytesIO(payload))[sheet.name]
+        column_a = [tab.cell(r, 1).value for r in range(1, 12)]
+        # The CONTIGUOUS prefix. Counting non-empty cells in the first three rows instead
+        # counted the header as a note the moment the block was one line long.
+        notes = 0
+        while column_a[notes] not in (None, ""):
+            notes += 1
+        seen[sheet.has_predictions] = (notes, column_a[notes])
+    assert seen[True][0] == 2 and seen[False][0] == 1, seen
+    for _, first_gap in seen.values():
+        assert first_gap in (None, ""), seen
+    assert workbook.header_row(2) != workbook.header_row(1), (
+        "the header address must MOVE with the note block; a constant is what R-181 removed")
+
+
+def test_every_table_name_is_legal_unique_and_has_no_space(built):
+    """R-182. Excel's own constraints, enforced rather than discovered — a duplicate or an
+    illegal displayName is a repair prompt, not an exception, so the file writes cleanly and
+    Excel refuses it."""
+    import re as _re
+    _, book, _, _ = built
+    names = []
+    for sheet_name in book.sheetnames:
+        for table in book[sheet_name].tables.values():
+            names.append(table.displayName)
+    assert names, "no sheet carries an Excel Table"
+    for name in names:
+        assert _re.fullmatch(r"tbl_[A-Za-z0-9_]+", name), name
+        assert " " not in name
+        assert not _re.fullmatch(r"[A-Za-z]{1,3}[0-9]+", name), f"{name} looks like a cell ref"
+    assert len(names) == len(set(names)), f"duplicate table name: {names}"
+
+
+def test_the_index_inventory_is_itself_a_table(built):
+    _, book, _, _ = built
+    assert "tbl_Index" in {t.displayName for t in book["Index"].tables.values()}
+
+
+def test_a_table_never_overlaps_a_worksheet_autofilter(built):
+    """R-182 trap 1, stated as the property rather than as the absence of one line. This is
+    the fault class that produces "we found a problem with some content", which AC-15.6
+    forbids outright."""
+    _, book, _, _ = built
+    for name in book.sheetnames:
+        tab = book[name]
+        if tab.tables:
+            assert not tab.auto_filter.ref, name
+
+
+def test_the_navy_header_survives_the_table_style(built):
+    """R-182 trap 3. A TableStyleInfo's header band would override the manual fill and the
+    file would depend on which Excel applied last. One treatment: the navy stays, stripes off.
+    """
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(2)
+    assert tab.cell(header, 1).fill.fgColor.rgb.endswith("2F4858")
+    for table in tab.tables.values():
+        assert table.tableStyleInfo.showRowStripes is False
+
+
+def test_headers_are_unique_and_non_empty_on_every_sheet():
+    """R-182 trap 2. A Table makes non-empty MANDATORY rather than merely tidy, and the
+    67-column list has several near-collisions — TV/TV (full), the two `covered` columns —
+    each of which had to be spelled distinctly."""
+    for sheet in workbook._ALL_SHEETS:
+        labels = [label for _, label in sheet.columns]
+        assert all(label and label.strip() for label in labels), sheet.name
+        duplicates = {la for la in labels if labels.count(la) > 1}
+        assert not duplicates, f"{sheet.name} has duplicate headers: {duplicates}"
+
+
+def test_freeze_panes_stays_on_the_sheet_not_on_the_table(built):
+    """R-182 trap 4."""
+    _, book, _, _ = built
+    assert book["Schedule"].freeze_panes == f"A{workbook.first_data_row(2)}"
+
+
+# --- R-183, the hyperlinks --------------------------------------------------------------
+
+def test_team_and_matchup_cells_link_back_and_carry_the_scope(built):
+    """A link that drops the season is the defect that made choosing 2025 and clicking a
+    team return a 2026 page. It is worse in a workbook, which is read weeks later."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(2)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    away = tab.cell(header + 1, labels["Away"])
+    assert away.hyperlink is not None, "the team name cell is not linked"
+    target = away.hyperlink.target or away.hyperlink.location
+    assert target.startswith("https://cfdb.example/team?")
+    assert "season=2026" in target and "week=8" in target
+    assert away.value and not str(away.value).startswith("http"), (
+        "the cell's VALUE must stay the team name, so the column still sorts as a name")
+
+
+def test_one_explicit_url_column_exists_because_a_cell_link_is_invisible_to_data(built):
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(2)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    assert "Matchup URL" in labels
+    value = tab.cell(header + 1, labels["Matchup URL"]).value
+    assert str(value).startswith("https://cfdb.example/matchup?"), value
+    assert "season=2026" in str(value)
+    urls = [la for la in labels if la.endswith("URL")]
+    assert urls == ["Matchup URL"], f"one explicit URL column is enough, found {urls}"
+
+
+def test_with_no_site_host_the_workbook_ships_no_links_rather_than_broken_ones(monkeypatch):
+    """R-151's shape: a link that resolves in dev and 404s in the file the user downloaded.
+    A workbook full of `http://None/...` is worse than one with none."""
+    monkeypatch.delenv("CFDB_SITE_HOST", raising=False)
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    assert workbook.site_base_url() is None
+    payload, _, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    from openpyxl import load_workbook
+    book = load_workbook(BytesIO(payload))
+    tab = book["Schedule"]
+    for row in tab.iter_rows():
+        for cell in row:
+            assert cell.hyperlink is None, f"{cell.coordinate} linked with no host set"
+            assert "None/" not in str(cell.value), f"{cell.coordinate} = {cell.value!r}"
+    index = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
+    assert "no hyperlinks" in index, "the Index must say the links are absent and why"
+
+
+def test_a_bare_hostname_becomes_https_and_a_full_url_is_left_alone(monkeypatch):
+    monkeypatch.setenv("CFDB_SITE_HOST", "cfdb.example.com")
+    assert workbook.site_base_url() == "https://cfdb.example.com"
+    monkeypatch.setenv("CFDB_SITE_HOST", "http://localhost:8501/")
+    assert workbook.site_base_url() == "http://localhost:8501"
+
+
+def test_the_index_warns_that_access_will_ask_for_a_sign_in(built):
+    """Someone who was not expecting Cloudflare Access reads the sign-in page as a broken
+    link, and concludes the workbook's links are wrong."""
+    _, book, _, _ = built
+    text = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
+    assert "Cloudflare Access" in text and "sign in" in text
+
+
+# --- R-185, the Schedule sheet ------------------------------------------------------------
+
+def test_the_schedule_sheet_carries_sixty_seven_columns_in_ten_blocks():
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    assert len(schedule.columns) == 67, len(schedule.columns)
+
+
+def test_upset_basis_is_gone_and_must_not_come_back():
+    """R-193. It was dropped from srv_game the same day the column list was first written,
+    and a SELECT naming it is what 500'd the Schedule page. `upset_level` alone now carries
+    "judged against the closing line"."""
+    for sheet in workbook._ALL_SHEETS:
+        assert "upset_basis" not in sheet.sql, sheet.name
+        assert "upset_basis" not in sheet.fields, sheet.name
+
+
+def test_the_two_spread_columns_that_disambiguate_each_other_stay_adjacent():
+    """`Δ Spread` is null when the line did not move AND when no open was ever recorded —
+    two different facts, one blank cell. `Spread open` beside it is the disambiguation, so
+    the adjacency is load-bearing rather than tidy."""
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    labels = [label for _, label in schedule.columns]
+    assert labels.index("Δ Spread") - labels.index("Spread open") == 1
+    assert labels.index("Δ O/U") - labels.index("O/U open") == 1
+
+
+def test_the_result_and_conditions_blocks_sit_right_of_the_market_block():
+    """Blank on every upcoming game, so they go right. A reader opening this on a Wednesday
+    should not scroll past a wall of nothing to reach the numbers they came for."""
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    labels = [label for _, label in schedule.columns]
+    assert labels.index("Spread") < labels.index("Away pts")
+    assert labels.index("Closing spread") < labels.index("Temperature °F")
+
+
+def test_the_derived_columns_are_words_not_booleans_or_timestamps():
+    """`Day` and `Status` exist because a datetime does not answer "is this a Thursday game"
+    and a boolean does not answer "has it been played" without the reader translating."""
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    assert schedule.value_for("weekday", {"game_date": pd.Timestamp("2026-09-05")}) == "Sat"
+    assert schedule.value_for("status", {"is_completed": True}) == "Final"
+    assert schedule.value_for("status", {"is_completed": False}) == "Scheduled"
+    assert schedule.value_for("status", {"is_completed": None}) is None
+    assert schedule.value_for("weekday", {"game_date": None}) is None
+
+
+def test_the_default_sort_is_the_order_by_and_it_is_stable():
+    """A Table's sortState is metadata about a sort that WAS applied; Excel does not
+    re-apply it on open. So the ORDER BY is the default sort, and it needs a tiebreak or two
+    builds of the same scope differ — which a diff of two workbooks depends on."""
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    flat = " ".join(schedule.sql.split())
+    assert "order by start_date_et, game_id" in flat
+
+
+def test_only_the_schedule_sheet_ships_and_the_other_six_are_kept_not_deleted():
+    """Marc: "only 1 data sheet for now". The six are real work and are converted one at a
+    time; deleting them would mean rewriting their SQL and column lists from scratch."""
+    assert [s.name for s in workbook.SHEETS] == ["Schedule"]
+    assert len(workbook.PENDING_SHEETS) == 6
+    assert {s.name for s in workbook.PENDING_SHEETS} == {
+        "Scores", "Odds", "Edges", "Standings", "Model performance", "Data dictionary"}
+
+
+def test_the_index_names_the_six_that_are_not_here_rather_than_dropping_them(built):
+    """A sheet a user had yesterday and does not have today is a question. An Index that
+    does not mention it makes the workbook look broken instead of narrowed."""
+    _, book, _, _ = built
+    text = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
+    for sheet in workbook.PENDING_SHEETS:
+        assert sheet.name in text, sheet.name
+    assert "not converted to the new layout yet" in text
+
+
+def test_nothing_in_the_file_is_a_fault_excel_would_refuse_to_open(built):
+    """AC-15.6 IS A CLAIM ABOUT EXCEL, AND openpyxl OPENING THE FILE DOES NOT PROVE IT.
+
+    openpyxl is forgiving where Excel is not, so this asserts the specific structures Excel
+    rejects with "we found a problem with some content" — the prompt AC-15.6 forbids:
+
+      * a table's declared tableColumns disagreeing with the header cells above them
+      * a duplicate or empty column name inside a table
+      * a table ref that overruns the sheet's used range
+      * a table overlapping a worksheet autofilter (R-182 trap 1)
+      * NaN or infinity in a cell, which is valid XML and still refused
+      * a part that is not well-formed XML
+
+    It still does not replace opening the file in Excel once, by hand. It makes the
+    hand-check a confirmation rather than the only evidence.
+    """
+    import math
+    import re
+    import zipfile
+    from xml.etree import ElementTree
+    from openpyxl.utils import range_boundaries
+
+    payload, book, _, _ = built
+
+    with zipfile.ZipFile(BytesIO(payload)) as archive:
+        assert archive.testzip() is None
+        for name in archive.namelist():
+            if name.endswith((".xml", ".rels")):
+                ElementTree.fromstring(archive.read(name))   # raises if malformed
+
+    seen_tables = 0
+    for name in book.sheetnames:
+        tab = book[name]
+        for table in tab.tables.values():
+            seen_tables += 1
+            min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+            headers = [tab.cell(min_row, c).value for c in range(min_col, max_col + 1)]
+            declared = [c.name for c in table.tableColumns]
+            assert headers == declared, (
+                f"{table.displayName}: the table declares {declared} and the header row "
+                f"says {headers}. Excel refuses the file when these disagree")
+            assert len(set(declared)) == len(declared), table.displayName
+            assert all(h not in (None, "") for h in headers), table.displayName
+            assert max_row <= tab.max_row and max_col <= tab.max_column, (
+                f"{table.displayName}: ref {table.ref} overruns {tab.dimensions}")
+            assert not tab.auto_filter.ref, table.displayName
+    assert seen_tables >= 2, "Index and Schedule should both carry a Table"
+
+    # NaN IS CHECKED IN THE RAW XML, AND THE REASON IS THE WHOLE POINT OF THIS COMMENT.
+    #
+    # The first version of this loop walked the RE-LOADED workbook looking for a float that
+    # is NaN. It could never fail. openpyxl WRITES NaN — as `<c t="n"><v /></c>`, a numeric
+    # cell with no value, which is exactly what Excel objects to — and then READS THAT BACK
+    # AS None. So the object model always looks clean no matter what was written, and the
+    # assertion was unfalsifiable: green with `_clean`'s guards removed entirely.
+    #
+    # Verified by removing both guards and watching this stay green, which is how it was
+    # caught. The bytes are the only place the fault is visible.
+    with zipfile.ZipFile(BytesIO(payload)) as archive:
+        for name in archive.namelist():
+            if not name.startswith("xl/worksheets/"):
+                continue
+            body = archive.read(name).decode("utf-8")
+            empty_numeric = re.findall(r'<c[^>]*t="n"[^>]*>\s*<v\s*/>', body)
+            assert not empty_numeric, (
+                f"{name} has {len(empty_numeric)} numeric cell(s) with no value — that is "
+                f"how a NaN or an infinity reaches the file, and Excel refuses it")
+    assert math is not None
