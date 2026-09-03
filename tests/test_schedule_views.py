@@ -472,18 +472,64 @@ def test_the_losing_total_still_reserves_the_markers_width():
     assert card.count("cfdb-gc-tot") == 2
 
 
-def test_the_market_lines_span_the_numeric_tracks():
-    """R-118 falls out of R-114: the O/U and spread lines are rows 2 and 3 of the same grid,
-    so they sit on the team names' baselines by construction rather than by agreement."""
+class _Spans(HTMLParser):
+    """Direct children of the grid, and how many COLUMNS each one covers."""
+
+    def __init__(self):
+        super().__init__()
+        self.depth, self.spans = 0, []
+
+    def handle_starttag(self, tag, attrs):
+        if self.depth == 1:
+            style = dict(attrs).get("style", "") or ""
+            found = re.search(r"grid-column:span (\d+)", style)
+            self.spans.append(int(found.group(1)) if found else 1)
+        self.depth += 1
+
+    def handle_endtag(self, tag):
+        self.depth -= 1
+
+
+def _columns_in_grid_style(style: str) -> int:
+    """Counted from the template itself rather than from `_tracks`, so the test does not
+    inherit the same arithmetic the code uses — team, middle, the repeated quarters, total."""
+    repeats = int(re.search(r"repeat\((\d+),", style).group(1))
+    return 1 + 1 + repeats + 1
+
+
+def test_every_row_of_the_card_covers_every_column():
+    """THE REGRESSION THIS FILE DID NOT CATCH, AS THE PROPERTY THAT WOULD HAVE.
+
+    R-149 added a middle track and widened the market cell's span to cover it — and left the
+    header row's span at the old width. CSS grid does not complain about a short row: it
+    silently reflows every following cell one column to the right, so the scheduled card put
+    its logos on the far side and pushed the names out of view entirely.
+
+    The old test here counted CELLS, which stayed correct the whole time, because a cell that
+    spans four columns is still one cell. What has to hold is COVERAGE: for every row, the
+    spans must sum to the number of columns the grid declares. Both branches, both geometries,
+    because the scheduled branch is the one that broke and only the completed branch was
+    exercised by the count test.
+    """
     nan = float("nan")
+    scheduled = dict(is_completed=False, winner=None, home_points=nan, away_points=nan,
+                     home_periods=nan, away_periods=nan)
     for geo in ({"ot": False}, {"ot": True}):
-        card = schedule._card(_row(is_completed=False, winner=None, home_points=nan,
-                                   away_points=nan, home_periods=nan, away_periods=nan),
-                              _Scope(), geo)
-        assert f"grid-column:span {schedule._tracks(geo)}" in card
-        parser = _Children()
-        parser.feed(_grid_of(card))
-        assert parser.direct == 3 * 2, "time+span, team+span, team+span"
+        columns = _columns_in_grid_style(schedule._grid_style(geo))
+        assert columns == 2 + schedule._tracks(geo), "middle track counted once, not twice"
+        for label, extra in (("completed", {}), ("scheduled", scheduled),
+                             ("scheduled, no line", dict(scheduled, spread_current=nan,
+                                                         total_current=nan))):
+            card = schedule._card(_row(**extra), _Scope(), geo)
+            parser = _Spans()
+            parser.feed(_grid_of(card))
+            covered = sum(parser.spans)
+            assert covered % columns == 0, (
+                f"{label} ot={geo['ot']}: {covered} columns covered is not a whole number "
+                f"of {columns}-column rows")
+            assert covered == 3 * columns, (
+                f"{label} ot={geo['ot']}: three rows of {columns} = {3 * columns}, "
+                f"got {covered}")
 
 
 def test_the_stacked_weather_is_the_dense_weather():

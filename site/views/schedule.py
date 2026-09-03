@@ -481,6 +481,21 @@ def _tracks(geo: dict) -> int:
 MIDDLE_TRACK = "10.2rem"
 
 
+def _right_span(geo: dict) -> str:
+    """Everything to the right of the team column, as ONE span. R-149's regression fix.
+
+    A scheduled card fills the row with two cells — the team cluster and one wide cell — so
+    that wide cell has to cover EVERY remaining track: the middle block's and the box score's.
+    The two places that needed this number computed it separately, R-149 widened one of them
+    and not the other, and the header row came out a column short. CSS grid does not complain
+    about that; it silently reflows every following cell one column right, which is why the
+    logos ended up on the far side of the card with the names pushed out of view.
+
+    One function, so the two cannot disagree again.
+    """
+    return f"grid-column:span {_tracks(geo) + 1}"
+
+
 def _grid_style(geo: dict) -> str:
     quarters = 4 + (1 if geo["ot"] else 0)
     # R-149 IS A THIRD COLUMN OF THE SAME GRID, not a block bolted beside it. Row 2 and row 3
@@ -594,7 +609,14 @@ def _market_cells(row, geo: dict) -> tuple:
     Returns ("", "") when there is no line. A market that does not exist yet is not a missing
     value: R-106 says nothing, not an empty slot and not a dash.
     """
-    span = f"grid-column:span {_tracks(geo) + 1}"
+    # THE MARKET OCCUPIES THE MIDDLE TRACK, NOT THE WHOLE RIGHT SIDE.
+    #
+    # Spanning everything let the inner `1fr` stretch, so the label sat at one edge and the
+    # number at the other with a hand's width of nothing between them. In the middle track it
+    # lands at exactly the x where a COMPLETED card puts its O/U and Spread — the two card
+    # types are deliberately structured differently, and this is what keeps a reader's eye in
+    # one place as they scan down a day that mixes them.
+    tail = f"<div style='grid-column:span {_tracks(geo)}'></div>"
     lines = []
     for label, value, move, kind in (
             ("O/U", row.get("total_current"), row.get("total_move_from_open"), "num"),
@@ -606,14 +628,14 @@ def _market_cells(row, geo: dict) -> tuple:
                  else fmt.number(value, "total_current"))
         moved = "" if _missing(move) else f"{MOVE_GLYPH} {fmt.signed(move, 'move')}"
         lines.append(
-            f"<div class='cfdb-gc-market' style='{span}'>"
+            f"<div class='cfdb-gc-market'>"
             f"<span class='cfdb-gc-market-label'>{label}</span>"
             f"<span class='cfdb-gc-market-value'>{shown}</span>"
             f"<span class='cfdb-gc-market-move'>{moved}</span></div>")
     if not any(lines):
         return "", ""
-    blank = f"<div style='{span}'></div>"
-    return lines[0] or blank, lines[1] or blank
+    blank = "<div class='cfdb-gc-market'></div>"
+    return (lines[0] or blank) + tail, (lines[1] or blank) + tail
 
 
 def _why_missing(row) -> str:
@@ -703,9 +725,11 @@ def _card(row, scope, geo: dict) -> str:
         # R-106: the box score is a POST-GAME element. Row 1 carries no header because there
         # are no quarters to head.
         away, home = _market_cells(row, geo)
-        span = f"grid-column:span {_tracks(geo)}"
+        span = _right_span(geo)
         header = f"<div style='{span}'></div>"
         if not away:
+            # R-106: no line yet means NOTHING there — not an empty slot, not a dash. The row
+            # still has to cover its columns, so it is one silent cell.
             away = home = f"<div style='{span}'></div>"
         why = ""
     matchup = (f"<a href='{scope.link('matchup', game_id=row['game_id'])}' target='_self' "
