@@ -106,12 +106,26 @@ TABLE_CSS = """
 .cfdb-table th a.cfdb-sort:hover { text-decoration:underline; }
 .cfdb-sort-arrow { opacity:.35; margin-left:.25rem; font-size:.7rem; }
 .cfdb-table th.cfdb-sorted .cfdb-sort-arrow { opacity:1; }
-.cfdb-winner { color:#1f6feb; font-weight:700; margin-right:.15rem; }
-.cfdb-winner-spacer { display:inline-block; width:.75em; }
-.cfdb-details { opacity:.55; font-size:1rem; }
+/* R-133. THE SPACER'S WIDTH IS IN `em`, SO IT ONLY MATCHES WHILE THE FONT SIZES MATCH.
+   Both carry the same font-size deliberately: if the spacer stops resolving to the glyph's
+   width the two scores stop aligning vertically, which is the whole thing R-120 was built to
+   prevent and the reason the size is stated twice rather than inherited. */
+.cfdb-winner { color:#1f6feb; font-weight:700; margin-right:.15rem;
+               font-size:1.3rem; line-height:1; vertical-align:-.1em; }
+.cfdb-winner-spacer { display:inline-block; font-size:1.3rem; width:.75em; }
+/* R-135: in the card the marker rides the team cluster, at the team name's size. */
+.cfdb-gc-team .cfdb-winner, .cfdb-gc-team .cfdb-winner-spacer { font-size:1rem; }
+.cfdb-gc-team .cfdb-winner { margin-left:.4rem; margin-right:0; }
+/* R-131. MARC ASKED FOR BOLD AND BOLD IS NOT THE FIX, SO IT IS NOT WHAT THIS DOES.
+   The problem on dark is LUMINANCE, not weight: #1f6feb on #0e1117 is about 3.6:1, and
+   thickening a stroke that is already the wrong brightness buys very little. Size, opacity
+   and — in the dark block below — a lighter blue are what make it legible. The blue also
+   says the glyph is a link, which is R-134's ask for the card. */
+.cfdb-details { opacity:.85; font-size:1.3rem; color:#1f6feb; vertical-align:-.12em; }
 /* R-101: the neutral-site glyph now shares a column with the matchup glyph, so it
    needs its own separation from it rather than a column border. */
-.cfdb-neutral { opacity:.55; margin-left:.35rem; }
+.cfdb-neutral { opacity:.85; margin-left:.4rem; font-size:1.15rem; color:#1f6feb;
+                vertical-align:-.06em; }
 /* R-107: a card is not a table cell, so it cannot borrow .cfdb-cell-link — that one
    is display:block to make a whole <td> the target, which inside a flex row would
    make the anchor a full-width item and undo R-105. */
@@ -125,14 +139,28 @@ TABLE_CSS = """
 /* R-103: a third alignment. A single glyph plus a two-digit temperature is neither
    a number nor prose, and right-aligning it hung the column off its own header. */
 .cfdb-table th.cfdb-center, .cfdb-table td.cfdb-center { text-align:center; }
+/* CLIP, DO NOT WRAP. The Inline table carries eleven columns, and below about 1400px the
+   team columns are genuinely tight — Marc resizes often (R-125), so it has to degrade
+   gracefully rather than break. A name on two lines doubles the row height and reads as a
+   fault; an ellipsis reads as "narrow window". R-085 already abbreviates past 18 characters,
+   so this only fires on a viewport the Stacked view suits better anyway. */
 .cfdb-team { margin-left:.4rem; }
-.cfdb-rank { font-size:.72rem; font-weight:700; opacity:.7; margin-left:.3rem; }
+.cfdb-table .cfdb-team { display:inline-block; max-width:100%; vertical-align:bottom;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* R-132: no font-size — it sits in the row and reads at the row's size. */
+.cfdb-rank { font-weight:700; opacity:.7; margin-left:.3rem; }
 .cfdb-daygroup { font-weight:600; margin:1.1rem 0 .3rem; font-size:.95rem; }
 /* R-088: the record sits beside the team name, smaller and regular weight — not its own
    column, which would cost a column's width for two characters. */
-.cfdb-team-record { font-size:.75rem; font-weight:400; opacity:.65; margin-left:.4rem; }
+/* NOWRAP because "5-2" IS ONE TOKEN. Without it the browser treats the hyphen as a break
+   opportunity and renders "5-" above "2" the moment the column is a few pixels tight — which
+   it became when R-132 gave the rank badge the row's font size. A record split across two
+   lines reads as a rendering fault, and it would bite at some viewport width regardless. */
+.cfdb-team-record { font-size:.75rem; font-weight:400; opacity:.65; margin-left:.4rem;
+                    white-space:nowrap; }
 /* R-027: weather is a glyph plus a temperature, or a dome glyph alone. */
-.cfdb-wx { white-space:nowrap; font-size:.85rem; }
+/* R-130: no font-size — it is a data cell and reads at the row's size like the rest. */
+.cfdb-wx { white-space:nowrap; }
 /* R-110: THE BROWSER DECIDES HOW MANY CARDS FIT, NOT THE SERVER.
    Streamlit renders server-side and cannot measure a viewport, so `st.columns(2)` would be a
    FIXED two-up that keeps two cards side by side on a phone. `auto-fit` + `minmax` costs no
@@ -201,11 +229,13 @@ TABLE_CSS = """
 .cfdb-winner-spacer { display:inline-block; width:.75em; }
 /* R-118: the market occupies the same two row tracks as the team names, so its two lines sit
    on their baselines by construction rather than by agreement. */
-.cfdb-gc-market { display:grid; grid-template-columns:4.4rem 1fr 3.6rem; font-size:.85rem;
+/* R-134: the market is the card's ONLY content for a scheduled game and it was the smallest
+   text on it. Everything here now reads at the team name's size. */
+.cfdb-gc-market { display:grid; grid-template-columns:4.8rem 1fr 4rem; font-size:1rem;
                   align-items:center; font-variant-numeric:tabular-nums; }
-.cfdb-gc-market-label { opacity:.6; font-size:.78rem; }
+.cfdb-gc-market-label { opacity:.6; }
 .cfdb-gc-market-value { text-align:right; font-weight:600; }
-.cfdb-gc-market-move { text-align:right; opacity:.6; font-size:.76rem; }
+.cfdb-gc-market-move { text-align:right; opacity:.6; }
 /* R-092: why the quarters are missing, not merely that they are. */
 .cfdb-ls-why { font-size:.72rem; opacity:.6; margin-top:.15rem; text-align:right; }
 /* R-015: anchored to the bottom so two cards in one grid row end level. */
@@ -216,19 +246,24 @@ TABLE_CSS = """
 .cfdb-gamecard-meta a:hover .cfdb-details { opacity:1; }
 /* R-107: a card is not a table cell, so it cannot borrow .cfdb-cell-link — that one is
    display:block, which inside a flex row would make the anchor a full-width item. */
-/* R-117: THE COLOUR HAS TO MOVE OFF THE ANCHOR AND ONTO THE NAME.
-   `color:inherit` on the record was not enough and the measurement said so: it inherits from
-   its parent, the parent is the anchor, and Streamlit's own `a` rule paints that rgb(0,84,163)
-   — so the record rendered in link blue and read as a second link, which is the exact failure
-   R-117 warned about. Both rules below are needed: the anchor gives up the colour, and the
-   NAME takes the accent explicitly. The record then inherits body text and stays dimmed by
-   its own opacity, in either theme, with no hardcoded palette. */
+/* R-129 REVERSES R-117, which Marc asked for one round ago and has now seen rendered.
+   The record is OUT of the anchor in the card rather than styled to look non-clickable: a
+   pointer cursor over dead text is worse than either state, and styling alone cannot remove
+   the cursor. The colour rules stay because the dense table wraps whole CELLS in an anchor,
+   which it did before R-117 too, so the record still needs telling not to look like a link
+   there. R-136: the underline takes the LINK colour instead of the anchor's inherited one. */
 .cfdb-teamlink { color:inherit !important; text-decoration:none; display:flex;
                  align-items:center; min-width:0; }
-.cfdb-teamlink .cfdb-team { color:#1f6feb; }
+.cfdb-teamlink .cfdb-team { color:#1f6feb; text-decoration-color:#1f6feb; }
 .cfdb-teamlink:hover .cfdb-team { text-decoration:underline; }
-.cfdb-teamlink .cfdb-team-record { color:inherit; text-decoration:none; }
-.cfdb-teamlink:hover .cfdb-team-record { text-decoration:none; }
+.cfdb-team-record { text-decoration:none !important; }
+a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
+/* R-136: Streamlit underlines anchors and draws the line in the ANCHOR's colour, which is the
+   body text here — a light rule under blue text, which fights on dark.
+   `!important` because Streamlit's own `.stMarkdown a` outranks a two-class selector; measured
+   without it the decoration stayed rgb(49,51,63) in light and rgb(250,250,250) in dark. */
+.cfdb-table a, .cfdb-cell-link, .cfdb-teamlink .cfdb-team {
+    text-decoration-color:#1f6feb !important; }
 /* R-121: the monogram sits BEHIND the image, so a file that goes missing later paints the
    same grey disc a null gives instead of the browser's broken-image box. Streamlit strips
    event handlers, so `onerror` is not available here. */
@@ -244,6 +279,12 @@ TABLE_CSS = """
   /* A 10%-black border on a #0e1117 background is invisible, so every card edge
      disappeared in dark mode and the grid read as one undivided block. */
   .cfdb-gamecard { border-color:#333a45; }
+  /* R-131. #1f6feb on #0e1117 measures about 3.6:1 — below the 4.5:1 a small glyph needs, and
+     no amount of font-weight changes a luminance. #58a6ff is the standard lift and clears it. */
+  .cfdb-details, .cfdb-neutral, .cfdb-winner { color:#58a6ff; }
+  .cfdb-teamlink .cfdb-team { color:#58a6ff; text-decoration-color:#58a6ff; }
+  .cfdb-table a, .cfdb-cell-link, .cfdb-teamlink .cfdb-team {
+      text-decoration-color:#58a6ff !important; }
 }
 </style>
 """

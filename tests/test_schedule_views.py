@@ -229,26 +229,23 @@ class _Children(HTMLParser):
         self.depth -= 1
 
 
-def test_the_team_cluster_is_one_element_not_five_loose_spans():
-    """R-105, AND THE ONLY ASSERTION THAT CATCHES IT.
+def test_the_linked_part_of_the_cluster_travels_as_one_element():
+    """R-105 still, narrowed by R-129.
 
-    `team_cell` returns SEVERAL sibling spans and `_team_with_record` appends another. When
-    those were interpolated straight into a flex row with `justify-content:space-between`,
-    every one of them became a flex item and the row distributed all five across ~1,400px —
-    logo hard left, name adrift near the centre, record right of centre.
+    `team_cell` returns SEVERAL sibling spans. When those went straight into a flex row with
+    `justify-content:space-between`, every one became a flex item and the row spread all five
+    across ~1,400px. What must stay together is the LINKED part — logo, rank badge, name.
 
-    A version that only removed `justify-content` from the CSS leaves five loose children and
-    passes any test asserting on classes or rendered text. It fails this one.
+    R-129 then took the record back OUT of that anchor, so this asserts both halves: the three
+    linked things are inside it and the record is not.
     """
-    parser = _Children()
-    parser.feed(schedule._team_row(_row(), "away", _Scope()))
-    # The reserved home/neutral marker, and the cluster. Nothing else loose.
-    assert parser.direct == 2, "logo, rank, name and record must travel as one child"
     row = schedule._team_row(_row(away_logo_url="https://x/y.png"), "away", _Scope())
     link = row[row.index("<a "):row.index("</a>")]
-    # R-117: the record travels INSIDE the anchor now, not as a sibling beside it.
-    for part in ("cfdb-logo", "cfdb-team'", "cfdb-team-record"):
-        assert part in link, f"{part} escaped the cluster"
+    for part in ("cfdb-logo", "cfdb-team'"):
+        assert part in link, f"{part} escaped the anchor"
+    assert "cfdb-team-record" not in link, (
+        "R-129: the record is not a hyperlink; styling cannot remove a pointer cursor")
+    assert "cfdb-team-record" in row, "but it is still on the row"
 
 
 def test_the_card_links_both_teams_and_the_matchup():
@@ -438,17 +435,26 @@ def test_a_regulation_game_reserves_the_ot_track_but_draws_nothing_in_it():
     assert regulation.count("cfdb-gc-b") < overtime.count("cfdb-gc-b")
 
 
-def test_the_winner_marker_has_no_column_of_its_own():
-    """R-120. It sat in a narrow track between OT and T, which pushed the totals toward the
-    card's edge and meant nothing on a tie or an unplayed game."""
+def test_the_winner_marker_sits_after_the_record_not_in_the_total():
+    """R-135 REVERSES R-120, which Marc asked for one round ago and has now seen.
+
+    Both halves matter. The marker has to arrive in the cluster AND leave the total cell — a
+    version that adds it to the cluster and forgets to remove it from the total renders two
+    markers per winning row and passes any test that only looks for one.
+    """
     card = _card()
-    assert "cfdb-ls-mark" not in card, "the dedicated column is gone"
-    grid = _grid_of(card)
-    # Two total cells, away then home. Alabama (home) won 31-17.
-    cells = [c[:c.index("</div>")] for c in grid.split("cfdb-gc-tot")[1:]]
-    away, home = cells
-    assert schedule.WINNER_GLYPH in home and "31" in home, "the marker rides the total"
-    assert schedule.WINNER_GLYPH not in away and "17" in away
+    assert "cfdb-ls-mark" not in card, "and it still has no column of its own"
+    cluster = card[card.index("cfdb-gc-team"):]
+    cluster = cluster[:cluster.index("</div>")]
+    assert cluster.index("cfdb-team-record") < cluster.index("cfdb-winner"), (
+        "R-135: after the record")
+    totals = [c[:c.index("</div>")] for c in card.split("cfdb-gc-tot")[1:]]
+    assert len(totals) == 2
+    for cell in totals:
+        assert schedule.WINNER_GLYPH not in cell and "cfdb-winner" not in cell, (
+            "the total cell gives up the marker and its spacer entirely")
+    # The winning side still carries it exactly once. Alabama (home) won 31-17.
+    assert card.count(schedule.WINNER_GLYPH) == 1
 
 
 def test_the_losing_total_still_reserves_the_markers_width():
@@ -514,3 +520,24 @@ def test_the_record_does_not_inherit_the_link_colour():
     assert "color:inherit !important" in block, "the anchor must give up the link colour"
     assert ".cfdb-teamlink .cfdb-team { color:" in block, (
         "and the NAME must take the accent, or nothing is a link any more")
+
+
+def test_the_view_label_changed_but_the_url_parameter_did_not():
+    """R-128. The dict key is the `?view=` value. Renaming it would break every existing link
+    to the table view, which is the silent breakage R-097 was about."""
+    assert schedule.VIEWS["dense"] == "Inline"
+    assert set(schedule.VIEWS) == {"dense", "stacked"}, (
+        "the KEYS are the URL contract; only the labels are free")
+    from lib import params
+    assert "dense" in params.ENUM_PARAMS["view"]
+
+
+def test_the_winner_spacer_tracks_the_glyphs_size():
+    """R-133 asks for a much bigger marker in the Inline view. The spacer's width is `.75em`,
+    so it only equals the glyph's width while the two font sizes agree — and if it stops
+    agreeing the two scores stop aligning, which is what R-120 existed to prevent."""
+    body = (Path(schedule.__file__).resolve().parents[1] / "lib" / "theme.py").read_text()
+    block = body[body.index(".cfdb-winner {"):body.index(".cfdb-gc-team .cfdb-winner")]
+    sizes = re.findall(r"font-size:([\d.]+rem)", block)
+    assert len(sizes) == 2 and sizes[0] == sizes[1], (
+        f"glyph and spacer must share a size, got {sizes}")

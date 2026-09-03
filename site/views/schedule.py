@@ -16,7 +16,10 @@ from lib import chips, filters, fmt, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
-VIEWS = {"dense": "Dense", "stacked": "Stacked"}
+# R-128. THE LABEL CHANGED; THE KEY DID NOT, AND THAT IS THE WHOLE POINT.
+# The dict key is the `?view=` value, so renaming it would break every existing link to the
+# table view — R-097 was about exactly this class of silent breakage.
+VIEWS = {"dense": "Inline", "stacked": "Stacked"}
 
 # R-085. A CHARACTER COUNT, NOT A WRAP PREDICTION.
 #
@@ -141,6 +144,21 @@ def _team_name(row, side: str) -> str:
     return name
 
 
+def _record_span(row, side: str) -> str:
+    """The record, on its own. R-129 needs it separable from the part that is a link.
+
+    The record is the one LEADING INTO this game's week, from fct_team_record_week — not the
+    season-final record, which is what fct_team_record would give and which would show 11-2
+    beside a game played in September. Renders NOTHING when it is absent rather than
+    substituting the season figure (R-084) — and after R-127 "absent" finally means what it
+    says: a team we hold no results for, not a team whose season has not started.
+    """
+    record = row.get(f"{side}_team_record_display")
+    if _missing(record):
+        return ""
+    return f"<span class='cfdb-team-record'>{record}</span>"
+
+
 def _team_with_record(row, side: str) -> str:
     """Team cell with the record beside the name, smaller and regular weight. R-088.
 
@@ -159,10 +177,7 @@ def _team_with_record(row, side: str) -> str:
     short = _team_name(row, side)
     if display and short != str(display):
         base = base.replace(f">{display}<", f">{short}<")
-    record = row.get(f"{side}_team_record_display")
-    if _missing(record):
-        return base
-    return f"{base}<span class='cfdb-team-record'>{record}</span>"
+    return base + _record_span(row, side)
 
 
 def _winner_side(row):
@@ -399,11 +414,11 @@ def _score_cells(row, side: str, geo: dict) -> str:
         cells.append(_cell(
             "" if not game_ot else ("0" if _missing(overtime) else str(int(overtime))),
             "cfdb-gc-n" + (" cfdb-gc-b" if game_ot else "")))
-    # R-120: the marker rides the total instead of owning a track of its own.
+    # R-135: the total is just the total now. The marker moved to the team cluster, so this
+    # cell carries no spacer either — both totals are plain numbers and align on their own.
     points = row.get(f"{side}_points")
     total = "" if _missing(points) else str(int(points))
-    cells.append(_cell(f"{_winner_marker(row, side)}{total}",
-                       "cfdb-gc-tot cfdb-gc-b cfdb-gc-bl"))
+    cells.append(_cell(total, "cfdb-gc-tot cfdb-gc-b cfdb-gc-bl"))
     return "".join(cells)
 
 
@@ -486,12 +501,25 @@ def _team_row(row, side: str, scope) -> str:
         marker = f"<span class='cfdb-athome' title='{title}'>{glyph}</span>"
     else:
         marker = "<span class='cfdb-athome'></span>"
-    cluster = _team_with_record(row, side)
+    # R-129 REVERSES R-117. The record leaves the anchor entirely rather than being styled to
+    # look non-clickable — styling cannot remove the pointer cursor, and dead text under a
+    # pointer is worse than either state.
+    linked = table.team_cell(row, f"{side}_team_slug", f"{side}_team_display",
+                             f"{side}_logo_url", f"{side}_rank")
+    display = row.get(f"{side}_team_display")
+    short = _team_name(row, side)
+    if display and short != str(display):
+        linked = linked.replace(f">{display}<", f">{short}<")
     slug = row.get(f"{side}_team_slug")
     if not _missing(slug):
         href = scope.link("team", team=slug)
-        cluster = f"<a class='cfdb-teamlink' href='{href}' target='_self'>{cluster}</a>"
-    return f"<div class='cfdb-gc-team'>{marker}{cluster}</div>"
+        linked = f"<a class='cfdb-teamlink' href='{href}' target='_self'>{linked}</a>"
+    # R-135 REVERSES R-120: the marker moves out of the total cell to sit after the record, at
+    # the team name's size. It TRAILS the cluster, so unlike R-120 nothing shifts when only one
+    # row carries it — the spacer is kept anyway so the two rows stay identical in structure
+    # and a later change to alignment or ordering cannot reintroduce the drift.
+    return (f"<div class='cfdb-gc-team'>{marker}{linked}"
+            f"{_record_span(row, side)}{_winner_marker(row, side)}</div>")
 
 
 def _card(row, scope, geo: dict) -> str:
