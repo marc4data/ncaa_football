@@ -885,3 +885,29 @@ def test_the_streamlit_theme_does_not_pin_the_app_to_the_light_palette():
     assert "[theme.light]" in body and "[theme.dark]" in body
     assert "\n[theme]" not in "\n" + body, (
         "a bare [theme] section resolves base=light and disables dark mode")
+
+
+def test_a_null_logo_never_reaches_the_src_attribute():
+    """R-121, AND IT IS THE NaN BUG A THIRD TIME.
+
+    `if logo_url:` looks like a null guard and is not one for a DataFrame. read_sql gives a
+    NULL in an object column as float('nan'), NaN IS TRUTHY, so a team with no logo took the
+    image branch and the f-string interpolated the float — emitting `<img src='nan'>`, a
+    relative URL that 404s against the app's own host and paints the browser's broken-image
+    box on every page that renders a team.
+
+    That is the exact thing `logo_or_monogram`'s own docstring and AC-G.28 promise never
+    happens. Cowork found it in a screenshot of two FCS teams; the unit tests all passed
+    because they were written with None, which is falsy and harmless.
+    """
+    from lib import identity
+    for empty in (None, float("nan"), "", "   "):
+        rendered = identity.logo_or_monogram(empty, "Thomas")
+        assert "<img" not in rendered, f"{empty!r} produced an image tag"
+        assert "nan" not in rendered.lower()
+        assert "cfdb-monogram-empty" in rendered
+    real = identity.logo_or_monogram("https://cdn.example/1.png", "Thomas")
+    assert "src='https://cdn.example/1.png'" in real
+    # R-121's second half: the monogram sits behind the image, so a file that goes missing
+    # later shows the same grey disc rather than a broken-image box.
+    assert "cfdb-logo-box" in real

@@ -138,70 +138,103 @@ TABLE_CSS = """
    FIXED two-up that keeps two cards side by side on a phone. `auto-fit` + `minmax` costs no
    JavaScript and no custom component, and reflows to one column on its own.
 
-   THE MINIMUM IS MEASURED FROM THE CONTENT, NOT FROM THE CURRENT RENDER. The card Marc
-   screenshotted occupied ~1,400px, almost all of it the empty space R-105 removes. Widest
-   thing a card must hold on one line, at the sizes declared below:
+   560px, down from 620px: R-114 deleted the box score's row-label column (the team row IS the
+   label now) and moved the kickoff out of a left gutter into row 1, so the card genuinely
+   needs less. Measured content: teams 235 + numerics 13.7rem/219 + padding 48 + gap 14.
 
-     time      "12:00 PM PDT"                                     ~ 92px
-     teams     marker 14 + logo 20 + rank 22 + 18ch name 135 + record 40 + gaps  ~ 235px
-     detail    label 5ch 42 + four quarters + OT + T at 2.6em 190 + marker 14    ~ 246px
-     padding   card 22 + two 0.8rem gaps 26                                      ~  48px
-
-   621px rounds to 620. At a 1,400px content column that is two-up with room; below ~1,260px
-   the browser drops to one. `align-items:stretch` keeps two cards in a row the same height —
-   R-015 horizontally is undone by ragged heights vertically. */
+   auto-FILL, NOT auto-FIT, AND THE DIFFERENCE IS VISIBLE ON EVERY MIDWEEK DAY. `auto-fit`
+   COLLAPSES tracks it cannot fill, so a Sunday with one game rendered that card at 1460px
+   while every other day rendered 723px — measured, not guessed. `auto-fill` keeps the empty
+   track, so a lone card is the same size as a card with a neighbour and the page stops
+   changing shape according to how many games were played. */
 .cfdb-cardgrid { display:grid; gap:.7rem .9rem; align-items:stretch;
-                 grid-template-columns:repeat(auto-fit, minmax(620px, 1fr)); }
+                 grid-template-columns:repeat(auto-fill, minmax(560px, 1fr)); }
 .cfdb-gamecard { display:flex; flex-direction:column; height:100%;
                  padding:.55rem .7rem; border:1px solid rgba(0,0,0,.10);
                  border-radius:6px; }
-.cfdb-gamecard-top { display:flex; gap:.8rem; align-items:flex-start; }
-/* R-108: kickoff on the left, where a schedule is read from. */
-.cfdb-gamecard-time { flex:0 0 auto; font-size:.8rem; opacity:.7; padding-top:.15rem;
-                      white-space:nowrap; font-variant-numeric:tabular-nums; }
-.cfdb-gamecard-teams { flex:1 1 auto; min-width:0; }
-/* R-105: THE ROW HAS ONE CHILD, AND THAT IS THE WHOLE FIX.
-   It used to have four or five — logo, rank badge, name, record, points — all interpolated
-   straight into a `justify-content:space-between` flex row, which distributed every one of
-   them across the full width. The .4rem margins were applied and then overwhelmed. */
-.cfdb-gamecard-row { display:flex; align-items:center; padding:.12rem 0; min-width:0; }
-/* THE BOUNDARY: table.team_cell() is built for a TABLE cell, where the column supplies the
-   box. Its output is several sibling spans, so dropping it into a flex container makes each
-   span a flex item. Anything putting team_cell() in a flex context must wrap it. */
-.cfdb-teamcluster { display:flex; align-items:center; min-width:0; }
-.cfdb-teamcluster .cfdb-team { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-/* R-112: which side is home, in one character. "@ TCU" reads as "at TCU" under the
-   away-over-home convention; "vs TCU" says there is no home side to read into it. */
+
+/* R-114: ONE GRID, NOT TWO BLOCKS THAT AGREE.
+   Marc's diagnosis, exactly right: the box score has a header row the teams block does not,
+   so its two rows sat one header-height low, forever. It was a flex row of three independent
+   children and no amount of font tuning fixes that.
+
+   Three rows that mean the same thing on both sides:
+       row 1   kickoff time             |  1  2  3  4  (OT)  T
+       row 2   away logo, name, record  |  away quarters, total
+       row 3   home logo, name, record  |  home quarters, total
+
+   The team cluster and the numeric cells are cells of the SAME grid, so they share ROW
+   TRACKS. Alignment survives a font change, a long name, a missing logo and a two-up reflow
+   because it is geometry rather than coincidence — which is also why R-115 can keep the box
+   score smaller than the team name (the track sets the baseline, not the text).
+
+   R-015 IS NOT UNPICKED BY THIS. The page-wide `ot` fact is still decided once outside the
+   day loop and still applies to every card; what changed is that the widths are grid tracks
+   in rem rather than a <table>'s colgroup. That removes the failure `_ls_width` was written
+   for — `table-layout:fixed` with `width:auto` still runs a content pass, which let the label
+   column vary 31–46px across sixty cards — because a grid track is not negotiable. */
+.cfdb-gc { display:grid; align-items:center; column-gap:0; row-gap:.1rem; }
+.cfdb-gc-time { font-size:.82rem; opacity:.7; font-variant-numeric:tabular-nums;
+                white-space:nowrap; }
+/* R-114's visible payoff: with the time out of the left gutter the logo starts at the
+   card's edge instead of after an empty column. */
+.cfdb-gc-team { display:flex; align-items:center; min-width:0; padding:.1rem 0; }
+.cfdb-gc-team .cfdb-team { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* R-112: which side is home, in one character. */
 .cfdb-athome { display:inline-block; width:1.5em; flex:0 0 auto; font-size:.8rem;
                opacity:.6; }
-.cfdb-gamecard-detail { flex:0 0 auto; text-align:right; }
-/* R-015: anchored to the bottom so two cards in one grid row end level. */
-.cfdb-gamecard-meta { font-size:.78rem; opacity:.7; margin-top:auto; padding-top:.3rem; }
-.cfdb-gamecard-meta a { color:inherit; text-decoration:none; }
-.cfdb-linescore { border-collapse:collapse; font-size:.78rem; table-layout:fixed; }
-.cfdb-linescore th, .cfdb-linescore td { padding:.05rem .35rem; text-align:right;
-                                         font-variant-numeric:tabular-nums; }
-.cfdb-linescore th { opacity:.6; font-weight:600; }
-.cfdb-ls-team { text-align:left; opacity:.75; padding-right:.5rem !important;
-                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cfdb-ls-ot { font-weight:700; }
-/* R-109: the score is the last column of the box score, not a separate block. */
-.cfdb-ls-total { font-weight:700; }
-/* R-113: the marker's own column, so it is reserved on the losing row too. */
-.cfdb-ls-mark { width:1.2em; padding:0 !important; text-align:right !important; }
+/* R-115: bigger than the .78rem it was, still below the team name. */
+.cfdb-gc-h, .cfdb-gc-n, .cfdb-gc-tot { font-size:.85rem; text-align:right;
+    padding:.12rem .3rem; font-variant-numeric:tabular-nums; }
+.cfdb-gc-h { font-size:.72rem; opacity:.55; font-weight:600; }
+.cfdb-gc-tot { font-weight:700; }
+/* R-116: the track is reserved on every card; the BORDERS are what make a column visible.
+   A regulation game gets the cell and none of these classes, so the reader sees an OT column
+   only on a game that had one and every box score still starts and ends at the same x. */
+.cfdb-gc-b   { border-right:1px solid rgba(127,127,127,.30);
+               border-bottom:1px solid rgba(127,127,127,.30); }
+.cfdb-gc-bl  { border-left:1px solid rgba(127,127,127,.30); }
+.cfdb-gc-bt  { border-top:1px solid rgba(127,127,127,.30); }
+/* R-120: the marker lives INSIDE the total cell now. It had a track of its own between OT
+   and T, which pushed the totals toward the card edge and meant nothing on a tie or an
+   unplayed game. The spacer is what keeps the two totals aligned. */
+.cfdb-winner-spacer { display:inline-block; width:.75em; }
+/* R-118: the market occupies the same two row tracks as the team names, so its two lines sit
+   on their baselines by construction rather than by agreement. */
+.cfdb-gc-market { display:grid; grid-template-columns:4.4rem 1fr 3.6rem; font-size:.85rem;
+                  align-items:center; font-variant-numeric:tabular-nums; }
+.cfdb-gc-market-label { opacity:.6; font-size:.78rem; }
+.cfdb-gc-market-value { text-align:right; font-weight:600; }
+.cfdb-gc-market-move { text-align:right; opacity:.6; font-size:.76rem; }
 /* R-092: why the quarters are missing, not merely that they are. */
 .cfdb-ls-why { font-size:.72rem; opacity:.6; margin-top:.15rem; text-align:right; }
-/* R-106: the pre-kick occupant of the same box. */
-/* R-015 APPLIES HERE TOO. Without a fixed layout the market block sizes itself to its own
-   contents, so a card whose line has not moved renders a narrower box than the one beside it
-   and the two O/U numbers sit at different x. Constant widths rather than a computed geometry
-   because, unlike the box score, nothing about this block varies with the page. */
-.cfdb-market { border-collapse:collapse; font-size:.78rem; margin-left:auto;
-               table-layout:fixed; }
-.cfdb-market td { padding:.05rem .35rem; text-align:right;
-                  font-variant-numeric:tabular-nums; }
-.cfdb-market-label { text-align:left !important; opacity:.6; white-space:nowrap; }
-.cfdb-market-move { opacity:.6; font-size:.72rem; }
+/* R-015: anchored to the bottom so two cards in one grid row end level. */
+.cfdb-gamecard-meta { font-size:.78rem; opacity:.7; margin-top:auto; padding-top:.35rem; }
+.cfdb-gamecard-meta a { color:inherit; text-decoration:none; }
+/* R-119: the card's only route to Matchup, and it was too small to read as an affordance. */
+.cfdb-gamecard-meta .cfdb-details { font-size:1.15rem; opacity:.7; vertical-align:-.1em; }
+.cfdb-gamecard-meta a:hover .cfdb-details { opacity:1; }
+/* R-107: a card is not a table cell, so it cannot borrow .cfdb-cell-link — that one is
+   display:block, which inside a flex row would make the anchor a full-width item. */
+/* R-117: THE COLOUR HAS TO MOVE OFF THE ANCHOR AND ONTO THE NAME.
+   `color:inherit` on the record was not enough and the measurement said so: it inherits from
+   its parent, the parent is the anchor, and Streamlit's own `a` rule paints that rgb(0,84,163)
+   — so the record rendered in link blue and read as a second link, which is the exact failure
+   R-117 warned about. Both rules below are needed: the anchor gives up the colour, and the
+   NAME takes the accent explicitly. The record then inherits body text and stays dimmed by
+   its own opacity, in either theme, with no hardcoded palette. */
+.cfdb-teamlink { color:inherit !important; text-decoration:none; display:flex;
+                 align-items:center; min-width:0; }
+.cfdb-teamlink .cfdb-team { color:#1f6feb; }
+.cfdb-teamlink:hover .cfdb-team { text-decoration:underline; }
+.cfdb-teamlink .cfdb-team-record { color:inherit; text-decoration:none; }
+.cfdb-teamlink:hover .cfdb-team-record { text-decoration:none; }
+/* R-121: the monogram sits BEHIND the image, so a file that goes missing later paints the
+   same grey disc a null gives instead of the browser's broken-image box. Streamlit strips
+   event handlers, so `onerror` is not available here. */
+.cfdb-logo-box { display:inline-block; flex:0 0 auto; vertical-align:middle;
+                 border-radius:50%; background:rgba(127,127,127,.14); margin-right:.4rem; }
+.cfdb-logo-box .cfdb-logo { display:block; margin-right:0; }
 /* R-102: the legend the R-026 icon-only exception leans on. */
 .cfdb-legend { font-size:.78rem; opacity:.65; margin:.2rem 0 .5rem; }
 .cfdb-legend span { margin-right:.9rem; white-space:nowrap; }
