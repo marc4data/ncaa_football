@@ -750,13 +750,14 @@ def test_the_legend_samples_carry_the_shapes_the_page_draws():
     samples are asserted against the same shape classes `_result_strip` emits."""
     import streamlit as st
     captured = []
-    original = st.markdown
-    st.markdown = lambda body, **kw: captured.append(body)
+    original = st.sidebar.markdown
+    st.sidebar.markdown = lambda body, **kw: captured.append(body)
     try:
         schedule._legend()
     finally:
-        st.markdown = original
+        st.sidebar.markdown = original
     legend = "".join(captured)
+    assert legend, "R-159: the legend renders into the SIDEBAR, not the body"
     strip = schedule._result_strip(_row(upset_level="big", winner_covered_close="no"))
     for shape in ("cfdb-sh-upset", "cfdb-sh-cover", "cfdb-sh-over"):
         assert shape in legend, f"the legend never shows a {shape}"

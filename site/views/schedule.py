@@ -31,7 +31,7 @@ THE RESULT CARD
 
                   ├─ team column ─┤├ line block ┤├──── box score ─────┤
 
-    header row      7:30 PM PDT ○■◆│ Line Actual │  1   2   3   4  OT  F
+    header row      7:30 PM PDT ○■◆│ Line Actual │  1   2   3   4  OT  T
     away row      ▣ Auburn    5-5 │ O/U  51.5  48 │  3   7   0   7      17
     home row    @ ▣ Alabama   9-2▸│ Sprd -7.0 -14 │  7  10   7   7      31
                   └ team cluster ┘   └ line row ┘   └ quarter cells ┘ └ final cell
@@ -134,7 +134,7 @@ MOVE_GLYPH = "Δ"
 # team label in its first column, and once the team row became the box score's row that label
 # sat three inches from the full name it abbreviated — the name twice, which is the monogram
 # problem in a new place.
-TOTAL_HEADER = "F"   # R-150: Final, not Total.
+TOTAL_HEADER = "T"   # R-162 REVERSES R-150: Marc checked the major sites; they use T.
 
 
 def _rows(season: int, week, season_type: str, conference,
@@ -458,39 +458,54 @@ def _columns(scope) -> list:
 
 
 def _legend() -> None:
-    """R-102. The glyphs, once, above both views.
+    """R-159. THE LEGEND GOES VERTICAL, IN THE SIDEBAR.
 
-    Above the tables and OUTSIDE the view branch, so it applies to whichever tab is showing
-    rather than being written twice and drifting.
+    Marc is right that vertical reads better than a wrapping horizontal strip — the horizontal
+    one measured 52px and two lines at 1440. But a vertical legend IN THE BODY costs a dozen
+    rows and defeats the thing he raised it for, which was getting the first card up the page.
+
+    The sidebar costs ZERO body height, is naturally vertical, and stays visible while the
+    cards scroll — which is when a legend is actually consulted rather than read once and
+    forgotten. `team.py` already writes page-specific controls to `st.sidebar` under
+    `st.navigation`, so this is a pattern the app runs today rather than one invented here.
+
+    BELOW THE NAV, because navigation is the sidebar's primary job. Schedule-only, because it
+    is Schedule's legend — `render()` is the only caller and other pages never see it.
+
+    R-161: sentence case, not Title Case. The site's voice is already lowercase.
+    The indicators keep their `title` tooltips, so a collapsed sidebar costs a reader
+    convenience rather than comprehension.
     """
-    st.markdown(
-        "<div class='cfdb-legend'>"
-        f"<span>{table.DETAILS_GLYPH} matchup</span>"
-        f"<span>{NEUTRAL_GLYPH} neutral site</span>"
-        f"<span>{MOVE_GLYPH} change since the line opened</span>"
-        f"<span>{WINNER_GLYPH} won &nbsp;·&nbsp; {TIE_GLYPH} tied</span>"
-        "<span>@ at &nbsp;·&nbsp; vs neutral site</span>"
-        # R-143. The dome case has existed in `_weather_cell` since R-027 and has never been
-        # explained anywhere.
-        f"<span>{DOME_GLYPH} indoors</span>"
-        # R-141's legend, which is what makes a colour-only scale defensible.
-        # The samples carry the same shape classes the page draws, so the legend cannot
-        # describe an appearance the card does not have.
-        "<span class='cfdb-legend-strip'>"
-        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-quiet'></span>"
-        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u1'></span>"
-        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u2'></span>"
-        "<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u3'></span>"
-        " no upset &nbsp;·&nbsp; upset &nbsp;·&nbsp; +7 &nbsp;·&nbsp; +14</span>"
-        "<span class='cfdb-legend-strip'>"
-        "<span class='cfdb-ind cfdb-sh-cover cfdb-ind-fill cfdb-acc'></span>"
-        "<span class='cfdb-ind cfdb-sh-cover cfdb-ind-open cfdb-acc'></span>"
-        " winner covered &nbsp;·&nbsp; did not</span>"
-        "<span class='cfdb-legend-strip'>"
-        "<span class='cfdb-ind cfdb-sh-over cfdb-ind-fill cfdb-acc'></span>"
-        "<span class='cfdb-ind cfdb-sh-over cfdb-ind-open cfdb-acc'></span>"
-        " over &nbsp;·&nbsp; under</span>"
-        "</div>", unsafe_allow_html=True)
+    rows = [
+        (f"<span class='cfdb-details'>{table.DETAILS_GLYPH}</span>", "Open the matchup"),
+        (f"<span class='cfdb-neutral'>{NEUTRAL_GLYPH}</span>", "Neutral site"),
+        (f"<span class='cfdb-legend-ch'>{DOME_GLYPH}</span>", "Indoors"),
+        (f"<span class='cfdb-winner'>{WINNER_GLYPH}</span>", "Won"),
+        (f"<span class='cfdb-winner'>{TIE_GLYPH}</span>", "Tied"),
+        ("<span class='cfdb-legend-ch'>@</span>", "At the home team"),
+        ("<span class='cfdb-legend-ch'>vs</span>", "Neutral site, no home team"),
+        (f"<span class='cfdb-legend-ch'>{MOVE_GLYPH}</span>", "Change since the line opened"),
+        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-quiet'></span>", "No upset"),
+        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u1'></span>", "Upset"),
+        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u2'></span>",
+         "Upset by 7+"),
+        ("<span class='cfdb-ind cfdb-sh-upset cfdb-ind-fill cfdb-u3'></span>",
+         "Upset by 14+"),
+        ("<span class='cfdb-ind cfdb-sh-cover cfdb-ind-fill cfdb-acc'></span>",
+         "Winner covered"),
+        ("<span class='cfdb-ind cfdb-sh-cover cfdb-ind-open cfdb-acc'></span>",
+         "Winner did not cover"),
+        ("<span class='cfdb-ind cfdb-sh-over cfdb-ind-fill cfdb-acc'></span>", "Over"),
+        ("<span class='cfdb-ind cfdb-sh-over cfdb-ind-open cfdb-acc'></span>", "Under"),
+    ]
+    body = "".join(f"<div class='cfdb-legend-row'><span class='cfdb-legend-key'>{glyph}"
+                   f"</span><span>{label}</span></div>" for glyph, label in rows)
+    st.sidebar.markdown(
+        f"<div class='cfdb-legend-side'><div class='cfdb-legend-title'>Legend</div>{body}"
+        # R-158: the sign convention is a CONVENTION, which is precisely what a legend is for.
+        # As its own element it cost two full-width body rows to say something read once.
+        f"<div class='cfdb-legend-note'>{chips.SPREAD_SIGN_NOTE}</div></div>",
+        unsafe_allow_html=True)
 
 
 # --- the two views --------------------------------------------------------------------
@@ -882,24 +897,32 @@ def _stacked(df: pd.DataFrame, scope) -> None:
 
 
 def body(page) -> None:
+    # R-159: the legend renders into the sidebar, so it costs no body height and is written
+    # first — before the query — because nothing in it depends on the data.
+    _legend()
     scope = filters.game_scope()
-    table.dataset_caption("Schedule", "srv_game")
-    chips.spread_sign_note()
     with states.section("srv_game"):
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)
-        table.as_of_caption(df)
+        table.as_of_caption(df)          # R-158: into Band 1, beside the status.
         df = table.apply_sort(df, _columns(scope))
 
-        # R-043. The tab is the URL, so a link to the stacked view lands on the stacked view.
-        keys = list(VIEWS)
-        current = params.get("view")
-        chosen = st.radio("View", keys, horizontal=True,
-                          format_func=lambda k: VIEWS[k],
-                          index=keys.index(current) if current in keys else 0,
-                          label_visibility="collapsed")
+        # R-158 BAND 3: the dataset name and the view switch share one row. The sign note
+        # moved into the legend and the as-of stamp into Band 1, so what were four rows here
+        # is now one.
+        left, right = st.columns([2, 3], vertical_alignment="center")
+        with left:
+            table.dataset_caption("Schedule", "srv_game")
+        with right:
+            # R-043. The tab is the URL, so a link to the stacked view lands on the stacked
+            # view.
+            keys = list(VIEWS)
+            current = params.get("view")
+            chosen = st.radio("View", keys, horizontal=True,
+                              format_func=lambda k: VIEWS[k],
+                              index=keys.index(current) if current in keys else 0,
+                              label_visibility="collapsed")
         params.set_params(view=chosen)
-        _legend()
 
         states.render_or_state(
             df, "srv_game",

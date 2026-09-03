@@ -102,12 +102,64 @@ def _weeks(season: int, season_type: str) -> list:
     return df["week"].tolist()
 
 
+# R-165. THE CACHE KEY CARRIES `division` BECAUSE THE RESULT NOW DEPENDS ON IT.
+# A key that misses a dependency is a stale option list, and a stale option list looks like a
+# data bug and gets debugged as one.
 @st.cache_data(ttl=3600)
-def _conferences(season: int) -> list:
-    df = query("""select distinct home_conference as conference from srv_game
-                  where season = :season and home_conference is not null
-                  order by conference limit 60""", {"season": season})
-    return df["conference"].tolist()
+def _conferences(season: int, division: str = "all") -> list:
+    """The conferences that actually appear in a season, narrowed by division.
+
+    HOME AND AWAY, NOT HOME ONLY. The previous query read `home_conference` alone, so a
+    conference whose members never hosted in a season was simply missing from the filter — a
+    silent omission rather than an empty result. Pre-existing, two lines to fix, and this is
+    the query that fixes it.
+
+    ONE RELATION, ONE PASS (G-2). The two sides are unioned inside a single scan of srv_game
+    rather than joined, because the app is not allowed to join and does not need to: a
+    conference is present if it appears on either side of any game.
+
+    `division` is the filter bar's own value — 'fbs' means "either team is FBS", matching the
+    spine rule the pages use, and 'all' means no narrowing at all.
+    """
+    # TWO QUERIES, NOT A UNION, AND THE CONTRACT IS RIGHT TO INSIST.
+    #
+    # The first version wrote this as one `union all` over the two sides. `check_contract`
+    # rejected it — G-2 is one relation per query, and `union` is in the forbidden list — and
+    # the rule earns its keep here: a union inside the app is the shape that becomes a join
+    # inside the app. Two compliant reads of the same relation, combined in Python, is not
+    # metric arithmetic; it is deduplicating a list of names.
+    both = set()
+    for side in ("home", "away"):
+        df = query(f"""
+            select distinct {side}_conference as conference
+            from srv_game
+            where season = :season
+              and {side}_conference is not null
+              and (:division = 'all' or is_fbs_game)
+            order by conference
+            limit 200
+        """, {"season": season, "division": division})
+        both.update(df["conference"].tolist())
+    return sorted(both)
+
+
+def resolve_conference(current, options: list):
+    """R-165. Does the incoming conference survive the current division? (value, dropped).
+
+    ONE RULE FOR TWO ENTRY POINTS, DELIBERATELY. A conference can stop being valid because the
+    reader changed Division, or because they arrived on `?division=fbs&conference=Big+Sky`
+    from a bookmark or from a link built before the cascade existed. Both land here, so a
+    bookmark cannot behave differently from a click — which is the property AC-G.13 needs,
+    since scope travels in query params by design.
+
+    Falling back to All rather than 404ing or serving a filter that disagrees with the URL:
+    the reader asked for a narrower view than exists, and the honest answer is the wider one
+    plus a notice. `dropped` is what makes the notice possible — a filter that changes itself
+    silently is R-010/R-011 again.
+    """
+    if not current or current in options:
+        return current, None
+    return None, current
 
 
 def game_scope(show_week: bool = True, show_conference: bool = True,
@@ -140,7 +192,6 @@ def game_scope(show_week: bool = True, show_conference: bool = True,
     weeks = _weeks(season, season_type)
     week_options = ["All"] + [str(w) for w in weeks]
     current_week = str(params.get("week"))
-    conferences = ["All"] + _conferences(season)
     current_conf = params.get("conference")
     division_labels = list(DIVISIONS)
     current_division = params.get("division") or DEFAULT_DIVISION
@@ -150,7 +201,11 @@ def game_scope(show_week: bool = True, show_conference: bool = True,
     # A horizontal row under the title. Columns rather than the sidebar, per the amendment.
     # Always five slots. A bar that changes shape per page is a bar the reader has to
     # re-learn, and a missing control reads as a missing feature.
-    slots = st.columns([1.1, 1.0, 1.2, 1.5, 1.1])
+    # R-158 BAND 2: the five filters, the state chip and the Reset button on ONE row. The
+    # chip and the button are both about the filter state and cost two further full-width rows
+    # to say so. The last two slots are narrow because they hold a chip and a button, not a
+    # control.
+    slots = st.columns([1.05, 0.95, 1.0, 1.15, 1.5, 1.7, 1.1], vertical_alignment="bottom")
     index = 0
 
     with slots[index]:
@@ -175,6 +230,39 @@ def game_scope(show_week: bool = True, show_conference: bool = True,
         if not show_week:
             week_choice = "All"
     index += 1
+    # R-165. DIVISION IS DECLARED BEFORE CONFERENCE, WHICH IS THE WHOLE IMPLEMENTATION.
+    #
+    # Marc's first instinct was Conference on the far left; he corrected it to far right, and
+    # the correction is what makes this simple. A cascading control has to be read before the
+    # list it controls can be computed, so declaration order and visual order now agree and no
+    # out-of-order column machinery is needed.
+    #
+    # Two chains, each with its controller first:  WHEN season -> type -> week
+    #                                              WHO  division -> conference
+    with slots[index]:
+        division_label = st.selectbox(
+            "Division", division_labels, index=division_labels.index(division_label),
+            key="flt_div",
+            help="FBS by default. A game counts as FBS if EITHER team is FBS, so a "
+                 "non-FBS visitor's trip to an FBS stadium is included.")
+    index += 1
+    division = DIVISIONS[division_label]
+    conferences = ["All"] + _conferences(season, division)
+
+    # R-165. A CONFERENCE THAT IS NO LONGER AN OPTION FALLS BACK TO ALL, AND SAYS SO.
+    #
+    # Switching Division from All to FBS with "Big Sky" selected leaves a value that is not in
+    # the new list. Streamlit would silently reset the widget to index 0, which is the same
+    # class of defect as R-010/R-011 — filter state changing without telling anyone.
+    #
+    # THE URL HALF IS THE SAME CODE PATH, DELIBERATELY. `?division=fbs&conference=Big+Sky` is
+    # reachable from a bookmark or from a link built before this change, and it resolves here
+    # exactly as an in-session switch does: to All, with the notice shown. One rule, so a
+    # bookmark cannot behave differently from a click.
+    dropped_conference = None
+    if show_conference:
+        current_conf, dropped_conference = resolve_conference(current_conf, conferences)
+
     with slots[index]:
         conference = st.selectbox(
             "Conference", conferences if show_conference else ["All"],
@@ -184,17 +272,9 @@ def game_scope(show_week: bool = True, show_conference: bool = True,
             help=conference_note or None)
         if not show_conference:
             conference = "All"
-    index += 1
-    with slots[index]:
-        division_label = st.selectbox(
-            "Division", division_labels, index=division_labels.index(division_label),
-            key="flt_div",
-            help="FBS by default. A game counts as FBS if EITHER team is FBS, so a "
-                 "non-FBS visitor's trip to an FBS stadium is included.")
 
     week = None if week_choice == "All" else int(week_choice)
     conf = None if conference == "All" else conference
-    division = DIVISIONS[division_label]
 
     # Written back on every render, which is what makes the scope survive a page change.
     params.set_params(
@@ -202,11 +282,15 @@ def game_scope(show_week: bool = True, show_conference: bool = True,
         season_type=None if season_type == "regular" else season_type)
 
     scope = GameScope(season, week, season_type, conf, division)
-    _summary(scope, seasons[0] if seasons else season)
+    _summary(scope, seasons[0] if seasons else season, slots[5], slots[6])
+    if dropped_conference:
+        st.warning(
+            f"**{dropped_conference}** is not in {division_label}, so the conference filter "
+            f"was cleared. Pick another, or widen Division.", icon=":material/filter_alt:")
     return scope
 
 
-def _summary(scope: GameScope, newest_season: int) -> None:
+def _summary(scope: GameScope, newest_season: int, chip_slot, reset_slot) -> None:
     """AC-G.18b: the filter is VISIBLE STATE, and anything off-default is marked.
 
     Persisting silently is worse than not persisting at all. Not persisting was a bug you
@@ -229,22 +313,29 @@ def _summary(scope: GameScope, newest_season: int) -> None:
     if scope.division != DEFAULT_DIVISION:
         off_default.append(next(k for k, v in DIVISIONS.items() if v == scope.division))
 
+    # R-158 BAND 2. The chip and the button now render INTO the filter row's last two slots
+    # rather than onto two more full-width rows of their own. They describe the controls
+    # immediately to their left, which is where a reader looks for them.
     if not off_default:
-        st.markdown(
-            f"<div class='cfdb-scope'>Showing <strong>Season {scope.season}</strong>, "
-            f"all weeks, FBS.</div>", unsafe_allow_html=True)
+        with chip_slot:
+            st.markdown(
+                f"<div class='cfdb-scope'>Season <strong>{scope.season}</strong>, "
+                f"all weeks, FBS.</div>", unsafe_allow_html=True)
         return
 
     chips = "".join(f"<span class='cfdb-scope-chip'>{value}</span>" for value in off_default)
-    st.markdown(
-        f"<div class='cfdb-scope cfdb-scope-active'>Filtered: {chips}</div>",
-        unsafe_allow_html=True)
+    with chip_slot:
+        st.markdown(
+            f"<div class='cfdb-scope cfdb-scope-active'>Filtered: {chips}</div>",
+            unsafe_allow_html=True)
     # One click back to the default state, present only when there is something to reset —
     # a permanently visible reset button is noise on the page it is least needed.
-    if st.button(f"Reset to Season {newest_season}", key="flt_reset"):
-        params.set_params(season=None, week=None, conference=None, division=None,
-                          season_type=None)
-        st.rerun()
+    with reset_slot:
+        if st.button(f"Reset to {newest_season}", key="flt_reset",
+                     help=f"Clear every filter and return to Season {newest_season}."):
+            params.set_params(season=None, week=None, conference=None, division=None,
+                              season_type=None)
+            st.rerun()
 
 
 def clear() -> None:

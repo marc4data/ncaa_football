@@ -968,3 +968,84 @@ def test_the_site_image_copies_everything_the_app_reads_at_runtime():
     compose = (root / "deploy" / "docker-compose.yml").read_text()
     assert "context: ./site" in compose, (
         "if the context widens, this test's premise changes and it should be revisited")
+
+
+def test_a_conference_that_the_division_excludes_falls_back_and_says_so():
+    """R-165. A conference selected under one division may not exist under another — measured:
+    49 of the 72 conferences in 2025 disappear when Division narrows from All to FBS.
+
+    Streamlit would silently reset the widget to index 0. That is the same class of defect as
+    R-010/R-011, where filter state changed without telling anyone, so the drop is returned
+    rather than swallowed and the caller renders a notice.
+    """
+    from lib.filters import resolve_conference
+    options = ["All", "ACC", "Big Ten", "SEC"]
+    assert resolve_conference("SEC", options) == ("SEC", None)
+    assert resolve_conference(None, options) == (None, None)
+    value, dropped = resolve_conference("Centennial", options)
+    assert value is None, "an impossible filter must not survive"
+    assert dropped == "Centennial", "and the caller has to be able to say which one went"
+
+
+def test_a_bookmarked_url_resolves_the_same_way_a_click_does():
+    """THE URL HALF IS NOT OPTIONAL. `?division=fbs&conference=Big+Sky` is reachable from a
+    bookmark or from a link built before the cascade existed, and scope travels in query
+    params by design (AC-G.13).
+
+    Asserted as ONE code path rather than two behaviours: `game_scope` reads the conference
+    from the URL and hands it to the same resolver an in-session change uses, so there is no
+    second rule that could drift.
+    """
+    from pathlib import Path as _P
+    source = (_P(__file__).resolve().parents[1] / "site" / "lib" / "filters.py").read_text()
+    body = source[source.index("def game_scope("):]
+    assert body.count("resolve_conference(") == 1, (
+        "two call sites would be two chances to diverge")
+    assert 'params.get("conference")' in body, "the URL value is what gets resolved"
+
+
+def test_the_conference_option_list_is_cached_on_everything_it_depends_on():
+    """R-165. `_conferences` was keyed on season alone and now depends on division too. A
+    cache key that misses a dependency is a stale option list, which looks like a data bug and
+    gets debugged as one."""
+    import inspect
+    from lib import filters
+    signature = inspect.signature(filters._conferences.__wrapped__)
+    assert list(signature.parameters) == ["season", "division"]
+
+
+def test_the_conference_list_reads_both_sides_of_the_fixture():
+    """A conference whose members never HOSTED in a season was missing from the filter — a
+    silent omission rather than an empty result. Pre-existing; this is the query that fixes
+    it."""
+    from pathlib import Path as _P
+    source = (_P(__file__).resolve().parents[1] / "site" / "lib" / "filters.py").read_text()
+    body = source[source.index("def _conferences("):source.index("def resolve_conference(")]
+    assert 'for side in ("home", "away")' in body
+    # STRIP THE COMMENTARY BEFORE ASSERTING ON THE CODE. The first version of the check below
+    # matched the docstring EXPLAINING why there is no union — the seventh time a
+    # source-reading test in this repo has matched its own prose. G-2 is one relation per
+    # query, and a union inside the app is the shape that becomes a join inside the app.
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("#"))
+    code = code.replace(body[body.index('"""'):body.index('"""', body.index('"""') + 3)], "")
+    assert "union" not in code.lower()
+
+
+def test_the_navigation_never_collapses_behind_a_disclosure():
+    """R-159. Streamlit's default `expanded=False` hides a long nav behind "View N more" once
+    the sidebar runs out of room, and Schedule's legend pushed it over that line — eight of
+    eighteen pages, every Betting and Reference page, disappeared the moment the legend
+    shipped. A page-specific legend must never cost the sidebar its primary job.
+    """
+    source = (Path(__file__).resolve().parents[1] / "site" / "app.py").read_text()
+    assert "st.navigation(nav, expanded=True)" in source
+
+
+def test_only_schedule_writes_a_legend_to_the_sidebar():
+    """It is Schedule's legend. Left under the nav on every page it would be chrome that lies
+    about eleven other pages."""
+    views = (Path(__file__).resolve().parents[1] / "site" / "views")
+    writers = sorted(p.stem for p in views.glob("*.py")
+                     if "cfdb-legend-side" in p.read_text())
+    assert writers == ["schedule"], writers
