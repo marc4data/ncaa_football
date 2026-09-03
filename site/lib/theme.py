@@ -367,8 +367,20 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    (the quiet accent). Closing lines exist for roughly 3,200 games in the whole warehouse, so
    on a historical week this is the common case and it deserves to say so rather than leave
    the reader counting empty slots. Dotted and grey: present, and explicitly not an answer. */
-.cfdb-ind-nodata { background:transparent; border-style:dotted;
-                   border-color:rgba(127,127,127,.7); }
+/* R-171. A DASH, NOT AN OUTLINE. The dotted version still read as a value being shown —
+   with Division on All Divisions, lower-division games carry no spread or total at all and
+   the strip came out as three faint outlines with nothing saying why.
+
+   It keeps `.cfdb-ind`'s box so R-166's alignment survives, and cancels the diamond's
+   rotation, which would otherwise tip the dash onto its side in the third slot. */
+/* WIDTH AND HEIGHT ARE RESTATED, AND font-size IS NOT TOUCHED. `.cfdb-ind` sizes its box in
+   `em` of its OWN font-size, so setting a font-size here silently grew the box — measured:
+   four distinct indicator widths across a page instead of two, which is R-166's alignment
+   coming apart one slot at a time. The dash inherits its size and the box is pinned. */
+.cfdb-ind-nodata { background:transparent; border-color:transparent;
+                   color:rgba(127,127,127,.85); transform:none;
+                   width:.72em; height:.72em; line-height:.66em;
+                   text-align:center; font-weight:700; }
 .cfdb-ind-open { background:transparent; border-color:currentColor; }
 .cfdb-ind-fill { background:currentColor; border-color:currentColor; }
 /* A push is neither: half-filled reads as "landed on the number" without a fourth colour. */
