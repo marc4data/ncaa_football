@@ -2701,7 +2701,11 @@ models:
           CFBD's excitement index for the game; null until it has been computed.
       - name: is_upset
         description: >
-          Whether the result counted as an upset by the upstream definition.
+          Whether a RANKED side lost to a side ranked worse or unranked. AP poll only, at the
+          time of the game. NULL where neither team was ranked — there is no favourite to be
+          upset, and saying `false` there was a claim with no basis behind it on 83% of
+          completed games. A market favourite is a different basis and a different question;
+          `winner_covered_close` answers that one.
       - name: is_fbs_game
         description: >
           Whether EITHER team was FBS — not both. A Division II visitor's trip to an FBS

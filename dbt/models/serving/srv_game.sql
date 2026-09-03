@@ -348,6 +348,12 @@ select
     -- configurable and a metric definition does not belong in the app.
     case
         when not g.is_completed or g.home_points is null then null
+        -- NULL PROPAGATES DELIBERATELY. `is_upset` is null when neither side was ranked, and
+        -- `not null` is null rather than true — so without this branch the row would fall
+        -- through to the margin tests below and a big unranked win would be labelled an
+        -- upset blowout. The page renders this null as a dash (R-171), which is the same
+        -- "nothing to measure against" the cover and total indicators already show.
+        when g.is_upset is null then null
         when not g.is_upset then 'none'
         when abs(g.away_points - g.home_points) > {{ var('upset_margin_blowout') }}
             then 'blowout'
