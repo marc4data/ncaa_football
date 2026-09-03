@@ -42,6 +42,11 @@ SQL = re.compile(r'"""\s*(select\b.*?)"""', re.DOTALL | re.IGNORECASE)
 # exists to prove the columns are real, and `select *` proves only that the table is.
 SUBSTITUTIONS = {
     "{rank_field}": "rank_desc",
+    # R-165's conference list runs the same query once per side of the fixture, so the two
+    # halves differ only by this prefix. Resolving it to one side means the check still
+    # EXECUTES the query rather than waving it through — which is the whole point of this
+    # script, and why a substitution is the right answer here rather than an exemption.
+    "{side}": "home",
 }
 
 # A value per bind parameter, so the query executes. These are not assertions about the

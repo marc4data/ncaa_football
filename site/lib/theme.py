@@ -63,6 +63,14 @@ CSS = """
    the theme switcher and Rerun stay reachable. */
 [data-testid="stMainBlockContainer"], .block-container {
     padding-top:4rem !important; }
+/* R-163. R-144 FIXED THE CONTAINER AND MARC STILL SAW THE BAND, BECAUSE IT WAS A DIFFERENT
+   ELEMENT. Streamlit's own `h1` carries padding of its own that nothing had touched.
+   MEASURED IN THE DEPLOYED CONTAINER, on the pinned version, per R-151:
+       h1   padding-top 20px, padding-bottom 16px, box 89px tall for one line of text
+   The title needs separation from the status beside it, not 36px of it. 0/8 keeps the
+   descender clear and returns 28px. */
+.cfdb-app h1, [data-testid="stMainBlockContainer"] h1 {
+    padding-top:0 !important; padding-bottom:.5rem !important; }
 @media (prefers-color-scheme: dark) {
   .cfdb-state { --cfdb-border:#333a45; --cfdb-bg:#1b1f27; }
   .cfdb-skel-row { background:linear-gradient(90deg,#242933 25%,#2b313c 37%,#242933 63%);
@@ -290,6 +298,36 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 .cfdb-logo-box { display:inline-block; flex:0 0 auto; vertical-align:middle;
                  border-radius:50%; background:rgba(127,127,127,.14); margin-right:.4rem; }
 .cfdb-logo-box .cfdb-logo { display:block; margin-right:0; }
+/* R-158 BAND 1: readiness and the as-of stamp ride the title's line, right-aligned. */
+/* Slightly smaller than the body variant: at 1200 the full string needs about 380px
+   and Band 1's right column offers about 320px, so it wrapped. The wrap only cost 2px
+   of page height — the title is taller than two lines of this — but a status line
+   broken mid-sentence reads as a fault. */
+.cfdb-readiness-right { text-align:right; font-size:.74rem; white-space:normal; }
+.cfdb-asof-inline { text-align:right; font-size:.78rem; opacity:.6; margin-top:.15rem; }
+
+/* R-159. THE LEGEND, VERTICAL, IN THE SIDEBAR — where it costs zero body height and stays
+   visible while the cards scroll, which is when a legend is actually consulted.
+   R-161: bigger icons, sentence-case labels. */
+.cfdb-legend-side { margin-top:1.2rem; padding-top:.9rem;
+                    border-top:1px solid rgba(127,127,127,.25); font-size:.82rem; }
+.cfdb-legend-title { font-weight:600; opacity:.7; font-size:.78rem; letter-spacing:.03em;
+                     text-transform:uppercase; margin-bottom:.5rem; }
+.cfdb-legend-row { display:flex; align-items:center; gap:.55rem; padding:.16rem 0;
+                   opacity:.85; }
+.cfdb-legend-key { flex:0 0 1.6rem; text-align:center; font-size:1.15rem; line-height:1; }
+.cfdb-legend-ch { font-size:1rem; opacity:.8; }
+.cfdb-legend-note { margin-top:.8rem; padding-top:.7rem; font-size:.76rem; opacity:.62;
+                    border-top:1px solid rgba(127,127,127,.18); line-height:1.45; }
+
+/* R-166. THE STRIP RIGHT-ALIGNS IN THE KICKOFF CELL, so every card's indicators start and
+   end at the same x — the team column is a page-wide track and R-141 already reserves the
+   strip's width, so the alignment is geometry rather than tuning. Padding keeps them off
+   R-152's divider rule at the column's right edge.
+   Flex INSIDE an existing cell changes nothing about the grid; adding a cell would. */
+.cfdb-gc-time { display:flex; align-items:baseline; justify-content:space-between;
+                padding-right:.9rem; }
+
 /* R-102: the legend the R-026 icon-only exception leans on.
    R-143: bigger icons, because a legend nobody can read explains nothing. */
 .cfdb-legend { font-size:.85rem; opacity:.75; margin:.2rem 0 .6rem; line-height:1.9; }
@@ -319,7 +357,11 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    That used to render as `none`, i.e. as nothing, which made it indistinguishable from a game
    nobody has played and left the first slot blank on every completed game of a normal week.
    Two visible indicators then sat in slots two and three and read as slots one and two. */
-.cfdb-ind-quiet { background:transparent; border-color:rgba(127,127,127,.55); }
+/* R-160. THE QUIET STATE TAKES THE ACCENT, as Marc asked. The caution stands and is worth
+   leaving here: it means "played, nothing remarkable", and an accent border can read as
+   active. It is distinguishable from the covered/over indicators by SHAPE — circle against
+   square and diamond — so the colour is not carrying the distinction on its own. */
+.cfdb-ind-quiet { background:transparent; border-color:#1f6feb; opacity:.45; }
 .cfdb-ind-open { background:transparent; border-color:currentColor; }
 .cfdb-ind-fill { background:currentColor; border-color:currentColor; }
 /* A push is neither: half-filled reads as "landed on the number" without a fourth colour. */

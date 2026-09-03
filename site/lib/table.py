@@ -348,6 +348,19 @@ def dataset_caption(label: str, table_name: str) -> None:
 
 
 def as_of_caption(df: pd.DataFrame) -> None:
-    """AC-G.35: every page states when its own data was loaded."""
-    if df is not None and not df.empty and "as_of_ts" in df.columns:
-        st.caption(fmt.as_of(df["as_of_ts"].max()))
+    """AC-G.35: every page states when its own data was loaded.
+
+    R-158: rendered into Band 1's placeholder when the page has reserved one, so the stamp
+    sits beside the status instead of costing a full-width row of its own. A page that has not
+    been reorganised has no slot and gets the caption where it always was — the fallback is
+    what keeps this a one-page change rather than an eighteen-page one.
+    """
+    if df is None or df.empty or "as_of_ts" not in df.columns:
+        return
+    text = fmt.as_of(df["as_of_ts"].max())
+    from lib import shell
+    slot = shell.as_of_slot()
+    if slot is not None:
+        slot.markdown(f"<div class='cfdb-asof-inline'>{text}</div>", unsafe_allow_html=True)
+    else:
+        st.caption(text)

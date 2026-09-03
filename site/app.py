@@ -54,4 +54,11 @@ for group in GROUPS:
     ]
 
 theme.hide_nav_entries([p.url_path_for_nav for p in PAGES if not p.in_nav])
-st.navigation(nav).run()
+# R-159. `expanded=True` IS NOT COSMETIC HERE — IT PROTECTS THE NAV FROM THE LEGEND.
+#
+# Streamlit's default is `expanded=False`, which collapses a long nav behind "View 8 more"
+# once the sidebar runs out of room. Adding Schedule's legend below the nav pushed it over
+# that threshold, so eight of eighteen pages — every Betting page, every Reference page —
+# vanished behind a disclosure the moment the legend shipped. Navigation is the sidebar's
+# primary job and a page-specific legend must never cost it.
+st.navigation(nav, expanded=True).run()
