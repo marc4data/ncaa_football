@@ -113,8 +113,14 @@ TABLE_CSS = """
 .cfdb-footer a { color:#1f6feb; text-decoration:none; }
 .cfdb-footer a:hover { text-decoration:underline; }
 .cfdb-footer-links { opacity:.85; }
-.cfdb-footer-links a[aria-label] { display:inline-block; min-width:1.4em;
-    text-align:center; font-weight:700; }
+/* The icon links sit in a line of .82rem text, so an icon at 1em would read as smaller than
+   the words beside it — a drawing needs more box than a letter to carry the same weight.
+   Sized in `em` so it stays proportional if the footer's font-size ever changes, and given
+   its own line-height so the taller box does not push the footer's two lines apart. */
+.cfdb-icon { width:1.45em; height:1.45em; vertical-align:-.36em; }
+.cfdb-footer-links a.cfdb-icon-link { display:inline-block; line-height:1;
+    margin:0 .05em; }
+.cfdb-footer-links a.cfdb-icon-link:hover { opacity:.7; text-decoration:none; }
 /* AC-G.18b. The neutral form states the scope; the active form marks it, because a
    filter inherited from another page has to be legible on arrival rather than inferable
    from the URL. */
