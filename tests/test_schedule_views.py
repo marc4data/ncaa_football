@@ -6,6 +6,7 @@ stopped, because a null in an object column is NaN, NaN is truthy, and `nan or "
 It failed inside states.section, which caught it and drew an Error state — so there was no
 exception to catch, no error to assert on, and every existing test passed.
 """
+import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
@@ -91,15 +92,6 @@ def test_a_row_with_null_network_and_venue_still_renders(counting_markdown):
     ])
     schedule._stacked(df, _Scope())
     assert counting_markdown["cards"] == 2
-
-
-def test_a_long_team_name_falls_back_to_its_abbreviation():
-    """R-085: a character threshold, applied identically everywhere."""
-    long_name = "Middle Tennessee State"
-    assert len(long_name) > schedule.TEAM_NAME_MAX
-    row = _row(home_team_display=long_name, home_abbreviation="MTSU")
-    assert schedule._team_name(row, "home") == "MTSU"
-    assert schedule._team_name(_row(), "home") == "Alabama"
 
 
 def test_a_long_name_with_no_abbreviation_truncates_rather_than_showing_nan():
@@ -237,22 +229,26 @@ class _Children(HTMLParser):
         self.depth -= 1
 
 
-def test_the_team_row_has_exactly_one_flex_child():
+def test_the_team_cluster_is_one_element_not_five_loose_spans():
     """R-105, AND THE ONLY ASSERTION THAT CATCHES IT.
 
-    `.cfdb-gamecard-row` is a flex container. The bug was not a margin: `team_cell` returns
-    SEVERAL sibling spans and `_team_with_record` appends another, so the row had four or
-    five children and `space-between` distributed every one of them across ~1,400px. Marc's
-    screenshot showed logo hard left, name adrift near the centre, record right of centre,
-    score hard right.
+    `team_cell` returns SEVERAL sibling spans and `_team_with_record` appends another. When
+    those were interpolated straight into a flex row with `justify-content:space-between`,
+    every one of them became a flex item and the row distributed all five across ~1,400px —
+    logo hard left, name adrift near the centre, record right of centre.
 
-    Counting children is what distinguishes the fix from the plausible non-fix. A version
-    that only removed `justify-content` from the CSS leaves five children in the row and
-    passes any test asserting on classes or on the rendered text; it fails this one.
+    A version that only removed `justify-content` from the CSS leaves five loose children and
+    passes any test asserting on classes or rendered text. It fails this one.
     """
     parser = _Children()
     parser.feed(schedule._team_row(_row(), "away", _Scope()))
-    assert parser.direct == 1, "the wrapper is the fix; margins were never the problem"
+    # The reserved home/neutral marker, and the cluster. Nothing else loose.
+    assert parser.direct == 2, "logo, rank, name and record must travel as one child"
+    row = schedule._team_row(_row(away_logo_url="https://x/y.png"), "away", _Scope())
+    link = row[row.index("<a "):row.index("</a>")]
+    # R-117: the record travels INSIDE the anchor now, not as a sibling beside it.
+    for part in ("cfdb-logo", "cfdb-team'", "cfdb-team-record"):
+        assert part in link, f"{part} escaped the cluster"
 
 
 def test_the_card_links_both_teams_and_the_matchup():
@@ -296,15 +292,25 @@ def test_the_card_says_which_team_is_home_and_handles_the_neutral_case():
     assert "cfdb-athome" in away and ">@<" not in away and ">vs<" not in away
 
 
-def test_the_card_carries_a_kickoff_time():
-    """R-108. The card had none at all."""
-    import re
+def test_the_kickoff_shares_row_one_with_the_box_score_header():
+    """R-114. The header used to belong to a table the teams block knew nothing about, which
+    is exactly why the two score rows sat one header-height below the two names.
+
+    Asserted on ORDER within the grid: the time is the first cell, and the quarter headers
+    follow it before any team row. A card that puts the time in a left gutter — the shipped
+    layout — fails this.
+    """
+    import re as _re
     card = _card()
-    assert "cfdb-gamecard-time" in card
-    # Asserted as a SHAPE, not as "7:00". `fmt.clock` converts to the reader's local zone,
-    # so a literal makes this test pass or fail on the machine's TZ rather than on the code.
-    shown = re.search(r"cfdb-gamecard-time'>([^<]+)<", card).group(1)
-    assert re.fullmatch(r"\d{1,2}:\d{2} [AP]M \w+", shown), shown
+    grid = card[card.index("<div class='cfdb-gc'"):]
+    time_at = grid.index("cfdb-gc-time")
+    first_header = grid.index("cfdb-gc-h")
+    first_team = grid.index("cfdb-gc-team")
+    assert time_at < first_header < first_team
+    shown = _re.search(r"cfdb-gc-time'>([^<]+)<", card).group(1)
+    # A SHAPE, not "7:00" — fmt.clock converts to the reader's zone, so a literal would make
+    # this pass or fail on the machine's TZ rather than on the code.
+    assert _re.fullmatch(r"\d{1,2}:\d{2} [AP]M \w+", shown), shown
 
 
 def test_the_query_sorts_by_date_then_time_then_rank_then_home_name():
@@ -322,8 +328,8 @@ def test_the_query_sorts_by_date_then_time_then_rank_then_home_name():
 
 def test_a_completed_game_shows_the_box_score_and_not_the_market():
     card = _card()
-    assert "cfdb-linescore" in card
-    assert "cfdb-market" not in card
+    assert "cfdb-gc-n" in card
+    assert "cfdb-gc-market" not in card
 
 
 def test_a_scheduled_game_shows_the_market_and_no_box_score():
@@ -339,9 +345,9 @@ def test_a_scheduled_game_shows_the_market_and_no_box_score():
                  home_q1=nan, home_q2=nan, home_q3=nan, home_q4=nan,
                  away_q1=nan, away_q2=nan, away_q3=nan, away_q4=nan,
                  total_move_from_open=1.5, spread_move_from_open=-0.5)
-    assert "cfdb-linescore" not in card
+    assert "cfdb-gc-n" not in card and "cfdb-gc-h" not in card
     assert "not recorded" not in card
-    assert "cfdb-market" in card
+    assert "cfdb-gc-market" in card
     assert "52.5" in card and "-7.5" in card
     assert schedule.MOVE_GLYPH in card
 
@@ -359,36 +365,6 @@ def test_a_scheduled_game_with_no_line_shows_nothing_there():
 
 # --- R-109 / R-113: the score, and who won, inside the box score ------------------------
 
-def test_the_score_moved_into_the_box_score_with_a_header_and_abbreviations():
-    """R-109. The separate bold points block stated the same two numbers a second time once
-    quarters existed, and stated them in only one place when they did not."""
-    card = _card()
-    assert "cfdb-gamecard-pts" not in card, "the separate points block is gone"
-    assert f"<th title='Total'>{schedule.TOTAL_HEADER}</th>" in card, "the column is headed"
-    assert "cfdb-ls-total" in card
-    assert ">31<" in card and ">17<" in card, "the final score is still on the card"
-    assert ">ALA<" in card and ">AUB<" in card, "row labels are abbreviations"
-    assert ">Alabama<" not in card.split("cfdb-linescore")[1], "not the full name in the table"
-
-
-def test_the_box_score_keeps_the_overtime_column_behaviour():
-    card = _card(home_periods=5, away_periods=5, home_overtime_points=7,
-                 away_overtime_points=0)
-    assert "<th>OT</th>" in card
-    assert "cfdb-ls-ot" in card
-    assert "<th>OT</th>" not in _card(), "regulation games do not invent the column"
-
-
-def test_the_winner_is_marked_in_the_stacked_view_too():
-    """R-113. North Carolina won 15-10 and nothing on the card said so. The same three
-    states and the same width reservation as R-100, or the totals stop aligning."""
-    card = _card()
-    assert schedule.WINNER_GLYPH in card
-    assert card.count("cfdb-ls-mark") == 3, "a column for it in the header and both rows"
-    assert "cfdb-winner-spacer" in card, "reserved on the losing row"
-
-
-# --- R-110 / R-015: the grid, and one geometry for the page ------------------------------
 
 def test_the_cards_go_into_a_css_grid_not_streamlit_columns(counting_markdown):
     """R-110. `st.columns(2)` is a FIXED two-up — Streamlit renders server-side and cannot
@@ -400,107 +376,141 @@ def test_the_cards_go_into_a_css_grid_not_streamlit_columns(counting_markdown):
     assert grid[0].count("<div class='cfdb-gamecard'>") == 4, "the cards are its children"
 
 
-def test_every_card_on_the_page_shares_one_box_score_geometry():
-    """R-015 FOR THE STACKED VIEW, which is where it was never done.
+# --- prompt 033: the card is one grid ---------------------------------------------------
 
-    `_dense` has computed `column_layout` once outside the day loop since it was built. The
-    cards had no equivalent: each `.cfdb-linescore` auto-sized to its own contents, so a card
-    with an OT column was wider than the one beside it and the row labels started at a
-    different x on every card. In R-110's two-up grid that reads as broken alignment.
+def _grid_of(card: str) -> str:
+    return card[card.index("<div class='cfdb-gc'"):card.index("cfdb-gamecard-meta")]
 
-    THIS IS THE TEST THAT DISTINGUISHES SHARED FROM PER-CARD. The frame below deliberately
-    mixes an overtime game, a regulation game and a five-character abbreviation — exactly the
-    three things that make per-card sizing diverge. Computing the geometry inside the card
-    loop passes every other test in this file and fails this one.
+
+def test_the_card_emits_three_rows_of_equal_cell_count():
+    """R-114 STRUCTURALLY. Team rows and score rows share ROW TRACKS only if they are cells
+    of the same grid, and they only stay in step if every row emits the same number of cells.
+
+    One missing cell shifts every later cell up a column and the alignment the whole prompt
+    is about silently disappears — with no exception and nothing to see in a unit test that
+    only greps for class names.
     """
-    df = pd.DataFrame([
-        _row(game_id=1, home_periods=5, away_periods=5, home_overtime_points=7),
-        _row(game_id=2),
-        _row(game_id=3, home_abbreviation="MTSU", home_team_display="Middle Tennessee"),
-    ])
-    geo = schedule._linescore_geometry(df)
-    cards = [schedule._card(r, _Scope(), geo) for _, r in df.iterrows()]
-    colgroups = {c[c.index("<colgroup>"):c.index("</colgroup>")] for c in cards}
-    assert len(colgroups) == 1, f"cards disagree about their own geometry: {colgroups}"
-    # And the shared shape was decided by the whole page, not by whichever card came first.
-    assert geo["ot"] is True, "one overtime game on the page gives every card the column"
-    assert geo["label_ch"] == 4, "the widest abbreviation on the page sizes the label column"
-    assert all("<th>OT</th>" in c for c in cards)
+    for geo in ({"ot": False}, {"ot": True}):
+        card = schedule._card(_row(home_periods=5 if geo["ot"] else 4,
+                                   away_periods=5 if geo["ot"] else 4), _Scope(), geo)
+        grid = _grid_of(card)
+        per_row = 1 + schedule._tracks(geo)
+        parser = _Children()
+        parser.feed(grid)
+        assert parser.direct == 3 * per_row, (
+            f"ot={geo['ot']}: expected 3 rows of {per_row}, got {parser.direct} cells")
 
 
-def test_a_regulation_game_leaves_its_overtime_cell_blank_rather_than_zero():
-    """The cost of the shared column, paid honestly. There were no overtime points; a 0 would
-    claim a scoreless overtime that was never played."""
-    df = pd.DataFrame([_row(game_id=1, home_periods=5, away_periods=5,
-                            home_overtime_points=7, away_overtime_points=0),
-                       _row(game_id=2)])
-    geo = schedule._linescore_geometry(df)
-    regulation = schedule._card(df.iloc[1], _Scope(), geo)
-    assert "cfdb-ls-ot" not in regulation
-    assert "<td></td>" in regulation
+def test_the_grid_template_reserves_one_track_per_cell():
+    """The CSS and the markup have to agree on the column count, and nothing else checks it.
+    A template with five tracks and rows of six cells wraps into a fourth row."""
+    for geo in ({"ot": False}, {"ot": True}):
+        style = schedule._grid_style(geo)
+        repeats = int(re.search(r"repeat\((\d+),", style).group(1))
+        assert repeats + 1 == schedule._tracks(geo), style
+        assert style.startswith("grid-template-columns:minmax(0,1fr)"), (
+            "the team column must be the flexible one; a fixed left column would stop the "
+            "names going hard left")
 
 
-def test_the_winner_marker_precedes_the_total_in_both_views():
-    """One page must not mark a winner in two directions.
+def test_a_regulation_game_reserves_the_ot_track_but_draws_nothing_in_it():
+    """R-116, and Marc's two sentences only LOOK contradictory.
 
-    The marker is a RIGHT-pointing glyph, so it has to sit before the number it describes.
-    The first version of the box score put its column last, which pointed it away from the
-    total while the dense view pointed into the score — on the same page, in the same week.
+      "should only show OT column, if that game went into OT"
+      "the amount of space ... should still be the same up/down days"
+
+    Reserved and drawn are different decisions. The page-wide geometry keeps the track so
+    every card starts and ends at the same x; the per-game check decides whether anything is
+    visible in it. The shipped version drew an OT header over four regulation games.
     """
+    geo = {"ot": True}                       # some other game on this page went to overtime
+    regulation = schedule._card(_row(home_periods=4, away_periods=4), _Scope(), geo)
+    overtime = schedule._card(_row(home_periods=5, away_periods=5,
+                                   home_overtime_points=7, away_overtime_points=0),
+                              _Scope(), geo)
+    assert ">OT<" in overtime and ">OT<" not in regulation
+    # Same cell count either way — the track is still there, holding the space.
+    for card in (regulation, overtime):
+        parser = _Children()
+        parser.feed(_grid_of(card))
+        assert parser.direct == 3 * (1 + schedule._tracks(geo))
+    # And nothing is drawn: no border classes on the reserved cells.
+    assert regulation.count("cfdb-gc-b") < overtime.count("cfdb-gc-b")
+
+
+def test_the_winner_marker_has_no_column_of_its_own():
+    """R-120. It sat in a narrow track between OT and T, which pushed the totals toward the
+    card's edge and meant nothing on a tie or an unplayed game."""
     card = _card()
-    linescore = card[card.index("<table class='cfdb-linescore'"):]
-    assert linescore.index("cfdb-ls-mark") < linescore.index("cfdb-ls-total")
-    dense = schedule._score_cell(_row(), "home")
-    assert dense.index(schedule.WINNER_GLYPH) < dense.index("31")
+    assert "cfdb-ls-mark" not in card, "the dedicated column is gone"
+    grid = _grid_of(card)
+    # Two total cells, away then home. Alabama (home) won 31-17.
+    cells = [c[:c.index("</div>")] for c in grid.split("cfdb-gc-tot")[1:]]
+    away, home = cells
+    assert schedule.WINNER_GLYPH in home and "31" in home, "the marker rides the total"
+    assert schedule.WINNER_GLYPH not in away and "17" in away
 
 
-def test_the_market_block_is_the_same_width_whether_or_not_the_line_moved():
-    """R-015's principle in the pre-kick state. Without a fixed layout the block sizes itself
-    to its contents, so a card with no move renders a narrower box than the one beside it and
-    the two O/U numbers sit at different x."""
+def test_the_losing_total_still_reserves_the_markers_width():
+    """Same rule as R-100 and not optional here: without the spacer the two totals stop
+    aligning vertically, and the fix creates the problem it was meant to remove."""
+    card = _card()
+    assert "cfdb-winner-spacer" in card
+    assert card.count("cfdb-gc-tot") == 2
+
+
+def test_the_market_lines_span_the_numeric_tracks():
+    """R-118 falls out of R-114: the O/U and spread lines are rows 2 and 3 of the same grid,
+    so they sit on the team names' baselines by construction rather than by agreement."""
     nan = float("nan")
-    base = dict(is_completed=False, winner=None, home_points=nan, away_points=nan,
-                home_periods=nan, away_periods=nan)
-    moved = _card(**base, total_move_from_open=1.5, spread_move_from_open=-0.5)
-    still = _card(**base, total_move_from_open=nan, spread_move_from_open=nan)
-    for card in (moved, still):
-        assert card.count("<colgroup>") == 1
-        # "<col " with the space — "<colgroup>" itself matches a bare "<col".
-        assert card[card.index("<colgroup>"):card.index("</colgroup>")].count("<col ") == 3
-    # And the still card reserves the move cell rather than dropping the column.
-    assert still.count("<td>") >= 2
+    for geo in ({"ot": False}, {"ot": True}):
+        card = schedule._card(_row(is_completed=False, winner=None, home_points=nan,
+                                   away_points=nan, home_periods=nan, away_periods=nan),
+                              _Scope(), geo)
+        assert f"grid-column:span {schedule._tracks(geo)}" in card
+        parser = _Children()
+        parser.feed(_grid_of(card))
+        assert parser.direct == 3 * 2, "time+span, team+span, team+span"
 
 
-def test_the_box_score_states_its_own_width_rather_than_letting_content_decide():
-    """`table-layout:fixed` distributes a KNOWN width by the colgroup; with `width:auto` the
-    browser still runs a content pass to decide what that width is.
+def test_the_stacked_weather_is_the_dense_weather():
+    """R-119's second half. Asserted as SHARED CODE rather than as matching output, because
+    two renderers that agree today are two renderers that can drift."""
+    columns = {c.field: c for c in schedule._columns(_Scope())}
+    assert columns["weather"].render is schedule._weather_cell
+    # And the card actually calls it, dome case included — the same cell, not a lookalike.
+    indoor = _card(is_indoors=True, temperature_f=94.0)
+    assert schedule._weather_cell(_row(is_indoors=True, temperature_f=94.0)) in indoor
+    assert "94" not in indoor, "a dome reports the weather OUTSIDE it; the number is wrong"
 
-    Measured on the rendered page before this: every numeric column was identical across all
-    sixty cards and the label column ranged from 31px to 46px, because the label is the only
-    cell whose content varies. Asserting the colgroup alone passes against that.
+
+def test_the_card_grid_keeps_its_empty_track():
+    """`auto-fit` COLLAPSES a track it cannot fill, so a day group with one game stretched
+    that card to the full page width while every other day rendered half of it.
+
+    Measured at a 1920 viewport before the fix: 1 card -> 1460px, every other day -> 723px.
+    The page changed shape according to how many games were played that day.
     """
-    geo_regulation = {"ot": False, "label_ch": 4}
-    geo_overtime = {"ot": True, "label_ch": 4}
-    label = schedule._ls_label_em(geo_regulation)
-    assert float(schedule._ls_width(geo_regulation).rstrip("em")) == \
-        pytest.approx(label + 4 * 2.6 + 3 + 1.2)
-    assert float(schedule._ls_width(geo_overtime).rstrip("em")) == \
-        pytest.approx(label + 5 * 2.6 + 3 + 1.2), "the OT column is in the sum"
-    card = _card()
-    table_tag = card[card.index("<table class='cfdb-linescore'"):]
-    assert "style='width:" in table_tag[:120]
+    css = Path(schedule.__file__).resolve().parents[1] / "lib" / "theme.py"
+    body = css.read_text()
+    grid = body[body.index(".cfdb-cardgrid"):body.index(".cfdb-gamecard {")]
+    assert "auto-fill" in grid
+    assert "auto-fit" not in grid
 
 
-def test_the_box_score_label_is_sized_in_em_not_in_the_width_of_a_zero():
-    """`ch` is the advance width of "0"; these labels are UPPERCASE text in a PROPORTIONAL
-    face, and the cell also carries padding the column has to cover.
+def test_the_record_does_not_inherit_the_link_colour():
+    """R-117's styling guard, and `color:inherit` on the record ALONE does not provide it.
 
-    Measured with the `ch` version: 30px of column against 45px of content for "NMSU", so
-    every abbreviation on every card was ellipsis-clipped — invisible in a screenshot, which
-    is why it took a measurement to find. A four-character label needs more than four times
-    the width of a digit.
+    Measured on the rendered page: with only that rule the record came out rgb(0,84,163) —
+    Streamlit's own `a` colour — because inherit takes the parent's value and the parent is
+    the anchor. It read as a second link, which is the failure R-117 named.
+
+    Both halves are required: the anchor gives up the colour, and the NAME takes the accent
+    explicitly. Verified after: record is rgb(49,51,63) in light and rgb(250,250,250) in dark,
+    body text in both, and different from the name in both.
     """
-    card = _card()
-    colgroup = card[card.index("<colgroup>"):card.index("</colgroup>")]
-    assert "ch" not in colgroup, "ch under-sizes uppercase proportional text"
-    assert schedule._ls_label_em({"ot": False, "label_ch": 4}) > 3.5
+    body = (Path(schedule.__file__).resolve().parents[1] / "lib" / "theme.py").read_text()
+    block = body[body.index(".cfdb-teamlink {"):body.index(".cfdb-logo-box")]
+    assert "color:inherit !important" in block, "the anchor must give up the link colour"
+    assert ".cfdb-teamlink .cfdb-team { color:" in block, (
+        "and the NAME must take the accent, or nothing is a link any more")

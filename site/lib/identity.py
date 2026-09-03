@@ -8,6 +8,7 @@ a data site and a misleading one:
   2. Contrast is computed in dbt, never here. dim_team ships color_on_light and
      color_on_dark already solved for WCAG; the app reads them.
 """
+import math
 from typing import Optional
 
 
@@ -39,12 +40,31 @@ def logo_or_monogram(logo_url: Optional[str], display_name: str,
     Same box either way, so a missing logo does not shift the layout, and no broken-image
     glyph is ever rendered. Logos come from our own cache; nothing is hotlinked (AC-G.27).
     """
-    if logo_url:
+    # R-121. `if logo_url:` WAS THE BUG, AND IT IS THE NaN ONE AGAIN.
+    #
+    # read_sql gives a NULL in an object column as float('nan'), and NaN IS TRUTHY. So a team
+    # with no logo took the image branch and f-string interpolated the float, emitting
+    # `<img src='nan'>` — a relative URL that 404s against the app's own host and paints the
+    # browser's broken-image box. Exactly what AC-G.28 and the line below it promise never
+    # happens, on the two teams Cowork spotted in a screenshot.
+    #
+    # This is the same defect as `r.get("network_abbreviation") or ""` in the stacked view,
+    # which cost fifteen of fifty-nine cards and is why `_text()` exists. That fix was made in
+    # the view; this module never got the guard, so every page rendering a team carried it.
+    missing = logo_url is None or (isinstance(logo_url, float) and math.isnan(logo_url))
+    if not missing and str(logo_url).strip():
         # alt is EMPTY on purpose. The team name is rendered immediately beside this, so
         # the image is decorative — and a non-empty alt means a CDN failure paints the name
         # a second time next to a broken-image glyph.
-        return (f"<img class='cfdb-logo' src='{logo_url}' alt='' "
-                f"style='width:{size_px}px;height:{size_px}px'>")
+        #
+        # THE MONOGRAM BEHIND IT IS THE CLIENT-SIDE HALF of R-121. Streamlit's sanitiser
+        # strips event handlers, so `onerror` is not available — verified, not assumed. A
+        # background on the wrapper is the fallback that survives: if the file 404s later the
+        # img paints nothing over it and the reader sees the same grey disc a null gives.
+        return (f"<span class='cfdb-logo-box' "
+                f"style='width:{size_px}px;height:{size_px}px'>"
+                f"<img class='cfdb-logo' src='{logo_url}' alt='' "
+                f"style='width:{size_px}px;height:{size_px}px'></span>")
     # NO INITIALS. The monogram used to render "OD" beside "Ohio Dominican", which reads as
     # the name twice — Marc flagged it on three teams across two passes. The box stays so a
     # missing logo does not shift the row (AC-G.28 is about FOOTPRINT), but it is empty:
