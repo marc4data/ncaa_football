@@ -343,16 +343,55 @@ select
     pkt.provider_key              as total_at_close_provider,
     pkt.basis                     as total_at_close_basis,
 
-    -- R-141, INDICATOR 1: THE UPSET SCALE. `is_upset` already says whether; these say by how
-    -- much. Boundaries are dbt vars (see dbt_project.yml) because Marc asked for them to be
-    -- configurable and a metric definition does not belong in the app.
+    -- R-173. WHO WAS SUPPOSED TO WIN? THE LINE ANSWERS THAT DIRECTLY; A POLL RANK IS A PROXY.
+    --
+    -- Marc, on North Carolina at TCU: "TCU favored by 8, but they lose by 5. That's a Level 1
+    -- upset." Neither side was ranked, so the rank basis had nothing to say and the page drew
+    -- a dash. He is right, and the reason is that the two bases answer different questions —
+    -- a poll ranks a team's season, a spread states the expected winner of THIS game.
+    --
+    -- So the line leads and the rank is the fallback. That order matters and is not arbitrary:
+    -- where the two disagree, the market is the better read of "supposed to win", and it also
+    -- covers vastly more games — 91,047 of 109,108 completed games carry no rank at all.
+    --
+    -- Convention, as everywhere else here: spread is the HOME number and negative means home
+    -- favoured; margin is away minus home. A pick'em names no favourite, so it is not a basis.
     case
         when not g.is_completed or g.home_points is null then null
-        -- NULL PROPAGATES DELIBERATELY. `is_upset` is null when neither side was ranked, and
-        -- `not null` is null rather than true — so without this branch the row would fall
-        -- through to the margin tests below and a big unranked win would be labelled an
-        -- upset blowout. The page renders this null as a dash (R-171), which is the same
-        -- "nothing to measure against" the cover and total indicators already show.
+        when pk.spread is not null and pk.spread <> 0 then 'line'
+        when g.home_rank is not null or g.away_rank is not null then 'rank'
+    end                                                    as upset_basis,
+
+    case
+        when not g.is_completed or g.home_points is null then null
+        when pk.spread is null or pk.spread = 0 then null
+        -- Home was favoured and lost, or away was favoured and lost. A tie upsets nobody.
+        when pk.spread < 0 and (g.away_points - g.home_points) > 0 then true
+        when pk.spread > 0 and (g.away_points - g.home_points) < 0 then true
+        else false
+    end                                                    as is_upset_by_line,
+
+    -- R-141, INDICATOR 1: THE UPSET SCALE. The verdict above says whether; these say by how
+    -- much. Boundaries are dbt vars (see dbt_project.yml) because Marc asked for them to be
+    -- configurable and a metric definition does not belong in the app.
+    --
+    -- BY MARGIN OF VICTORY, NOT BY THE SIZE OF THE SWING. Marc called an 8-point favourite
+    -- losing by 5 a Level 1 upset; the swing would make it 13 and Level 2. Margin it is.
+    case
+        when not g.is_completed or g.home_points is null then null
+        -- Null propagates deliberately. With no basis there is no verdict, and `not null` is
+        -- null rather than true — so without an explicit branch a big unranked win with no
+        -- line would fall through to the margin tests and be labelled an upset blowout.
+        when pk.spread is not null and pk.spread <> 0 then
+            case
+                when not (case when pk.spread < 0 then (g.away_points - g.home_points) > 0
+                               else (g.away_points - g.home_points) < 0 end) then 'none'
+                when abs(g.away_points - g.home_points) > {{ var('upset_margin_blowout') }}
+                    then 'blowout'
+                when abs(g.away_points - g.home_points) > {{ var('upset_margin_big') }}
+                    then 'big'
+                else 'upset'
+            end
         when g.is_upset is null then null
         when not g.is_upset then 'none'
         when abs(g.away_points - g.home_points) > {{ var('upset_margin_blowout') }}
