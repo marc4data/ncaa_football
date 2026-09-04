@@ -937,7 +937,7 @@ def test_the_legend_is_rendered_exactly_once():
     """
     source = Path(schedule.__file__).read_text()
     body = source[source.index("def body(page)"):]
-    assert body.count("_legend()") == 1, "one legend, one button"
+    assert body.count("_legend(df)") == 1, "one legend, one button"
 
 
 def test_the_legend_note_renders_its_emphasis_rather_than_asterisks():
@@ -953,7 +953,7 @@ def test_the_legend_note_renders_its_emphasis_rather_than_asterisks():
     original = st.markdown
     st.markdown = lambda body, **kw: captured.append(body)
     try:
-        schedule._legend()
+        schedule._legend(None)
     except Exception:
         pass                      # st.popover needs a runtime; the note is written regardless
     finally:
@@ -1065,50 +1065,76 @@ def test_no_basis_still_reads_as_no_basis():
     assert "nothing named a favorite" in strip
 
 
-def test_the_legend_thresholds_agree_with_the_warehouse():
-    """THEY DID NOT, AND HAD NOT SINCE R-141.
+def test_the_legend_thresholds_come_from_the_data_not_from_the_app():
+    """R-224. THEY WERE STRING LITERALS, AND THEY WERE WRONG BY ONE.
 
-    `srv_game` classifies with a STRICT `>`: `> upset_margin_big` is level 2, so a 7-point
-    win is level 1 and a 14-point win is level 2. The legend said "Upset by 7+" and "Upset by
-    14+", claiming the opposite at both boundaries — 138 completed games in the live data
-    carried a level the legend contradicted.
+    `srv_game` classifies with a strict `>`, so a 7-point win is level 1 and a 14-point win is
+    level 2. The legend said "Upset by 7+" and "Upset by 14+", claiming the opposite at both
+    boundaries — 138 completed games in the live data carried a level it contradicted. The data
+    was never wrong; only the labels were, which is the worse failure because nothing breaks.
 
-    The data was never wrong. Only the labels were, which is the worse failure: nothing
-    breaks, the page just states something false about numbers that are correct.
-
-    Asserted against the dbt vars, not against 8 and 15, so changing a var moves the test and
-    the label together.
+    The numbers are columns on the frame now, so this feeds a frame and reads the labels back.
+    A hardcoded label cannot pass: change the columns and the words must change with them.
     """
-    import re
-    from lib.metrics import UPSET_BIG_MARGIN, UPSET_BLOWOUT_MARGIN
     from views import schedule
 
-    labels = [entry[-1] for _, entries in schedule.LEGEND_GROUPS for entry in entries]
-    upsets = [text for text in labels if text.startswith("Upset by")]
-    assert len(upsets) == 3, upsets
+    def bands(big, blowout):
+        frame = pd.DataFrame([{"upset_margin_big": big, "upset_margin_blowout": blowout}])
+        return [entry[-1] for _, entries in schedule._legend_groups(frame)
+                for entry in entries if str(entry[-1]).startswith("Upset by")]
 
-    numbers = [tuple(int(n) for n in re.findall(r"\d+", text)) for text in upsets]
-    assert numbers == [
-        (UPSET_BIG_MARGIN,),                            # level 1: up to and including big
-        (UPSET_BIG_MARGIN + 1, UPSET_BLOWOUT_MARGIN),   # level 2: the band between
-        (UPSET_BLOWOUT_MARGIN + 1,),                    # level 3: above blowout
-    ], numbers
-    # The boundary values themselves must never appear as the START of a band: that is the
-    # off-by-one, spelled exactly as it shipped.
-    assert f"Upset by {UPSET_BIG_MARGIN}+" not in labels
-    assert f"Upset by {UPSET_BLOWOUT_MARGIN}+" not in labels
+    assert bands(7, 14) == ["Upset by 7 or fewer", "Upset by 8–14", "Upset by 15+"]
+    # AND THEY MOVE. A literal would sit still here, which is what the whole change is about.
+    #
+    # This replaces a test that changed a module constant and RELOADED the module to prove the
+    # same thing. That was the right test while the numbers were a constant; now they come
+    # from the frame, feeding two frames proves it directly and without reloading a view
+    # module mid-suite.
+    assert bands(9, 21) == ["Upset by 9 or fewer", "Upset by 10–21", "Upset by 22+"]
+    # The boundary values must never START a band: that is the off-by-one, spelled as it shipped.
+    assert "Upset by 7+" not in bands(7, 14) and "Upset by 14+" not in bands(7, 14)
 
 
-def test_the_page_and_the_workbook_describe_the_upset_levels_the_same_way():
-    """Two legends for one metric is the thing R-224 is about. Until the thresholds come from
-    a column they at least have to come from the same reader — and the workbook's version was
-    right while the page's was wrong, which is how the disagreement was found."""
-    from lib import metrics, workbook
-    assert (workbook.UPSET_BIG_MARGIN, workbook.UPSET_BLOWOUT_MARGIN) == (
-        metrics.UPSET_BIG_MARGIN, metrics.UPSET_BLOWOUT_MARGIN)
-    described = {mark: text for _, mark, text in workbook.MARK_LEGEND}
-    assert f"{metrics.UPSET_BIG_MARGIN} or fewer" in described["●"]
-    assert f"{metrics.UPSET_BIG_MARGIN + 1} to {metrics.UPSET_BLOWOUT_MARGIN}" in described["●●"]
+def test_a_frame_without_the_columns_still_renders_a_coherent_legend():
+    """A page that raised because one column was missing would trade a wrong label for a blank
+    screen, which is a bad trade for a legend. The shipped defaults cover it — and they are
+    NOT a production path, which is why `srv_game` carries the columns at all."""
+    from views import schedule
+    bands = [entry[-1] for _, entries in schedule._legend_groups(pd.DataFrame())
+             for entry in entries if str(entry[-1]).startswith("Upset by")]
+    assert bands == ["Upset by 7 or fewer", "Upset by 8–14", "Upset by 15+"]
+
+
+def test_nothing_in_the_app_reads_the_thresholds_from_a_file_any_more():
+    """The stopgap read dbt_project.yml, which is outside the site image's build context — so
+    the deployed page ran on a fallback that was correct by coincidence. R-225 guards the
+    boundary generally; this pins the specific thing that crossed it."""
+    from lib import metrics
+    import ast
+    module = ast.parse(
+        (Path(__file__).resolve().parents[1] / "site" / "lib" / "metrics.py").read_text())
+    # THE DOCSTRING EXPLAINS the file read that was removed, so a naive substring search
+    # matches its own prose — the eighth time in this repo. Strip docstrings and check code.
+    for node in ast.walk(module):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef)):
+            if (node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)):
+                node.body = node.body[1:] or [ast.Pass()]
+    code = ast.unparse(ast.fix_missing_locations(module))
+    assert "dbt_project.yml" not in code, "metrics.py reads the dbt project file again"
+    assert "__file__" not in code, "metrics.py resolves a path at all"
+    assert not hasattr(metrics, "_upset_thresholds")
+    assert metrics.BIG_COLUMN == "upset_margin_big"
+
+
+def test_the_page_and_the_workbook_phrase_the_bands_from_one_function():
+    """Two legends for one metric is the thing R-224 is about, and the workbook's version was
+    right while the page's was wrong — which is how the disagreement was found. Both now call
+    `metrics.upset_bands`, so they cannot differ by a word or by a number."""
+    from lib import metrics
+    one, two, three = metrics.upset_bands(7, 14)
+    assert (one, two, three) == ("Upset by 7 or fewer", "Upset by 8–14", "Upset by 15+")
+    assert metrics.upset_bands(9, 21)[1] == "Upset by 10–21"
 
 
 def test_no_user_facing_string_uses_british_spelling():
@@ -1132,46 +1158,6 @@ def test_no_user_facing_string_uses_british_spelling():
             offenders.append(f"{path.name}:{number}: {line.strip()[:70]}")
     assert not offenders, offenders
 
-
-def test_the_legend_labels_MOVE_when_the_threshold_moves(monkeypatch):
-    """DERIVATION, NOT COINCIDENCE.
-
-    The test above compares the labels to the vars, and a hardcoded "Upset by 15+" passes it
-    — because 15 is the right answer today. That is the failure this project keeps finding:
-    a true assertion about the wrong property. It would go on passing the day someone changes
-    `upset_margin_blowout`, which is the only day it matters.
-
-    So this changes the threshold and reloads the module. If the labels are literals they
-    stay put and this fails; if they are derived they follow.
-    """
-    import importlib
-    import re
-    from lib import metrics
-    from views import schedule
-
-    def labels_of(module):
-        return [entry[-1] for _, entries in module.LEGEND_GROUPS for entry in entries
-                if str(entry[-1]).startswith("Upset by")]
-
-    before = labels_of(schedule)
-    monkeypatch.setattr(metrics, "UPSET_BIG_MARGIN", 9)
-    monkeypatch.setattr(metrics, "UPSET_BLOWOUT_MARGIN", 21)
-    try:
-        importlib.reload(schedule)
-        after = labels_of(schedule)
-        assert after != before, (
-            "the thresholds changed and the legend did not — the labels are hardcoded")
-        numbers = sorted({int(n) for text in after for n in re.findall(r"\d+", text)})
-        assert numbers == [9, 10, 21, 22], numbers
-    finally:
-        # Restore the module for every test after this one; monkeypatch undoes the constants
-        # but not the reload that read them.
-        monkeypatch.undo()
-        importlib.reload(schedule)
-    assert labels_of(schedule) == before
-
-
-# === the week band ========================================================================
 
 def test_the_band_appears_once_per_week_not_once_per_day(counting_markdown):
     """THE THING THE SPEC WARNS ABOUT FIRST. Both views grouped by day only, so bolting the

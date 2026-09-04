@@ -78,7 +78,7 @@ import pandas as pd
 import streamlit as st
 
 from lib import chips, distribution, filters, fmt, params, shell, states, table
-from lib.metrics import UPSET_BIG_MARGIN, UPSET_BLOWOUT_MARGIN
+from lib import metrics
 from lib.query import query
 from lib.table import Col
 
@@ -521,6 +521,9 @@ def _columns(scope) -> list:
 # A SHAPE ENTRY IS (shape, state, extra), NOT A PRE-JOINED CSS STRING. That is what lets
 # `_legend_key` call `_indicator` — see R-178 — so the legend cannot draw a mark the row does
 # not, by construction rather than by test.
+# Sentinels, so the entry that must carry a threshold is findable without matching prose.
+UPSET_BAND_1, UPSET_BAND_2, UPSET_BAND_3 = "\x00band1", "\x00band2", "\x00band3"
+
 LEGEND_GROUPS = [
     ("Game", [
         ("glyph", "cfdb-details", table.DETAILS_GLYPH, "Open the matchup"),
@@ -548,10 +551,15 @@ LEGEND_GROUPS = [
         # is a STOPGAP: the thresholds still reach the page by reading a file, and the real
         # fix is carrying them as columns on `srv_game` the way `training_week_floor` already
         # is (R-224). Then the page reads the row it is already fetching.
-        ("shape", "upset", "fill", "cfdb-u1", f"Upset by {UPSET_BIG_MARGIN} or fewer"),
-        ("shape", "upset", "fill", "cfdb-u2",
-         f"Upset by {UPSET_BIG_MARGIN + 1}\u2013{UPSET_BLOWOUT_MARGIN}"),
-        ("shape", "upset", "fill", "cfdb-u3", f"Upset by {UPSET_BLOWOUT_MARGIN + 1}+"),
+        # PLACEHOLDERS, replaced per render by `_legend_groups(df)`.
+        #
+        # These numbers cannot be baked in any more, and the reason is the whole of R-224:
+        # they are a metric definition, they live in dbt vars, and the app must read them from
+        # the row rather than know them. What sits here is the shape of the entry; the words
+        # come from `metrics.upset_bands()`, which is also what the workbook uses.
+        ("shape", "upset", "fill", "cfdb-u1", UPSET_BAND_1),
+        ("shape", "upset", "fill", "cfdb-u2", UPSET_BAND_2),
+        ("shape", "upset", "fill", "cfdb-u3", UPSET_BAND_3),
         ("shape", "cover", "fill", "cfdb-acc", "Winner covered"),
         ("shape", "cover", "open", "cfdb-acc", "Winner did not cover"),
         ("shape", "over", "fill", "cfdb-acc", "Over"),
@@ -605,7 +613,24 @@ def _legend_key(kind: str, *args) -> str:
     return _indicator(shape, state, "", extra)
 
 
-def _legend() -> None:
+def _legend_groups(df) -> list:
+    """LEGEND_GROUPS with the upset bands filled in from the data.
+
+    The thresholds are columns on `srv_game` (R-224), so the legend is a function of the frame
+    rather than a module constant. That is the point: a constant is what was wrong by one for
+    months, and a constant read from a file is what silently ran on a fallback in the
+    container.
+
+    `LEGEND_GROUPS` stays the inventory the completeness tests walk — this only substitutes
+    three labels into it.
+    """
+    bands = dict(zip((UPSET_BAND_1, UPSET_BAND_2, UPSET_BAND_3),
+                     metrics.upset_bands(*metrics.from_frame(df))))
+    return [(title, [entry[:-1] + (bands.get(entry[-1], entry[-1]),) for entry in entries])
+            for title, entries in LEGEND_GROUPS]
+
+
+def _legend(df=None) -> None:
     """R-159/R-176. The legend, as a popover, in two columns.
 
     NOT A MODAL, deliberately: a legend is consulted WHILE looking at the thing it explains,
@@ -619,7 +644,7 @@ def _legend() -> None:
     right. Eighteen in one list is a list nobody reads, and 7 against 11 balances better across
     two columns than 5/7/6 does across three.
     """
-    by_title = dict(LEGEND_GROUPS)
+    by_title = dict(_legend_groups(df))
     with st.popover("Legend", use_container_width=True,
                     help="What every mark on this page means"):
         columns = st.columns(len(LEGEND_COLUMNS))
@@ -1245,7 +1270,7 @@ def body(page) -> None:
         with dataset:
             table.dataset_caption("Schedule", "srv_game")
         with legend_slot:
-            _legend()
+            _legend(df)
 
         states.render_or_state(
             df, "srv_game",

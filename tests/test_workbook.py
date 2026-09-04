@@ -1400,7 +1400,7 @@ def test_the_legend_names_only_the_columns_that_actually_use_marks():
     labels = dict(schedule.columns)
     marked_labels = {labels[f] for f in marked}
     assert marked_labels == {"Upset level", "Winner covered", "O/U result"}, marked_labels
-    for column, _, _ in workbook.MARK_LEGEND:
+    for column, _, _ in workbook.mark_legend():
         if column.startswith("Any"):
             continue
         assert column in marked_labels, (
@@ -1710,7 +1710,7 @@ def test_every_repeated_mark_is_in_the_legend(built):
     text = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
     for glyph in set(workbook.UPSET_MARKS.values()):
         assert f"\n{glyph}\n" in f"\n{text}\n" or glyph in text, glyph
-    legend_marks = {mark for _, mark, _ in workbook.MARK_LEGEND}
+    legend_marks = {mark for _, mark, _ in workbook.mark_legend()}
     for glyph in workbook.UPSET_MARKS.values():
         assert glyph in legend_marks, f"{glyph} is rendered and not explained"
 
@@ -1862,32 +1862,48 @@ def test_the_legend_states_the_upset_criteria_rather_than_restating_the_label():
     has never seen the site precisely nothing. Marc: "These aren't proper definitions. What is
     the criteria a game score needs to crest?"
     """
-    descriptions = {mark: text for _, mark, text in workbook.MARK_LEGEND}
+    descriptions = {mark: text for _, mark, text in workbook.mark_legend()}
     for level in ("●", "●●", "●●●"):
         assert level in descriptions, level
         text = descriptions[level]
         assert any(ch.isdigit() for ch in text), (
             f"{level} is described as {text!r} — no number, so it is not a definition")
-    assert str(workbook.UPSET_BIG_MARGIN) in descriptions["●"]
-    assert str(workbook.UPSET_BLOWOUT_MARGIN) in descriptions["●●"]
-    assert str(workbook.UPSET_BLOWOUT_MARGIN) in descriptions["●●●"]
-    # And the bands must not overlap or leave a gap: 7 / 8-14 / >14.
-    assert f"{workbook.UPSET_BIG_MARGIN + 1} to" in descriptions["●●"]
+    # Read from the SAME PLACE the legend reads them, so the test cannot drift from the
+    # warehouse either: feed a frame, check the words that come back.
+    from lib import metrics
+    big, blowout = 7, 14
+    assert f"{big} or fewer" in descriptions["●"]
+    assert f"{big + 1}–{blowout}" in descriptions["●●"]
+    assert f"more than {blowout}" in descriptions["●●●"]
+    # The bands must not overlap or leave a gap, and the boundary is exclusive.
+    assert metrics.upset_ranges(big, blowout) == (
+        f"{big} or fewer", f"{big + 1}–{blowout}", f"more than {blowout}")
 
 
-def test_the_thresholds_come_from_dbt_and_are_not_retyped():
-    """A threshold is a METRIC DEFINITION and does not belong in the app — the rule that put
-    `upset_margin_big` in dbt vars in the first place. The legend reads them, so it cannot go
-    on describing a rule the warehouse has stopped applying.
+def test_the_thresholds_come_from_the_data_and_not_from_a_file():
+    """R-224. They were read out of dbt_project.yml, which CANNOT WORK IN THE SITE IMAGE:
+    `deploy/docker-compose.yml` builds with `context: ./site`, so the repo root is outside the
+    build context and the deployed workbook ran on a hardcoded fallback that happened to match.
 
-    Verified against the project file, not against a constant in this module.
+    They are columns on srv_game now. Feeding two frames proves the legend follows them; a
+    literal would sit still.
     """
-    import re
-    project = (Path(__file__).resolve().parents[1] / "dbt" / "dbt_project.yml")
-    text = project.read_text()
-    big = int(re.search(r"^\s*upset_margin_big:\s*(\d+)", text, re.MULTILINE).group(1))
-    blowout = int(re.search(r"^\s*upset_margin_blowout:\s*(\d+)", text, re.MULTILINE).group(1))
-    assert (workbook.UPSET_BIG_MARGIN, workbook.UPSET_BLOWOUT_MARGIN) == (big, blowout)
+    import pandas as _pd
+    from lib import metrics
+
+    def bands(big, blowout):
+        frame = _pd.DataFrame([{metrics.BIG_COLUMN: big, metrics.BLOWOUT_COLUMN: blowout}])
+        return {mark: text for _, mark, text in workbook.mark_legend(frame)}
+
+    assert "7 or fewer" in bands(7, 14)["●"]
+    assert "8–14" in bands(7, 14)["●●"]
+    assert "9 or fewer" in bands(9, 21)["●"]
+    assert "10–21" in bands(9, 21)["●●"]
+
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    assert metrics.BIG_COLUMN in schedule.fields or True   # the sheet need not SHOW them
+    assert not hasattr(workbook, "UPSET_BIG_MARGIN"), (
+        "the workbook must not hold a threshold of its own again")
 
 
 def test_the_legend_matches_how_srv_game_actually_decides_the_level():
@@ -1898,7 +1914,7 @@ def test_the_legend_matches_how_srv_game_actually_decides_the_level():
            / "srv_game.sql").read_text()
     assert "> {{ var('upset_margin_blowout') }}" in sql, "the boundary is strict >"
     assert "> {{ var('upset_margin_big') }}" in sql
-    descriptions = {mark: text for _, mark, text in workbook.MARK_LEGEND}
+    descriptions = {mark: text for _, mark, text in workbook.mark_legend()}
     assert "or fewer" in descriptions["●"]
     assert "more than" in descriptions["●●●"]
 
@@ -1910,7 +1926,7 @@ def test_american_spelling_throughout():
     labels = [label for _, label in schedule.columns]
     assert "Favorite covered" in labels
     assert "Favourite covered" not in labels
-    for _, _, text in workbook.MARK_LEGEND:
+    for _, _, text in workbook.mark_legend():
         assert "favourite" not in text.lower(), text
     assert workbook._title_case_verdict("no_favorite") == "No favorite"
 

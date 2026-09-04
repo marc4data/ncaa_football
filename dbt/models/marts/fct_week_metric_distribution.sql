@@ -1,7 +1,7 @@
 {{ config(
     materialized='incremental',
     unique_key='week_metric_distribution_sk',
-    incremental_strategy='append'
+    incremental_strategy='delete+insert'
 ) }}
 
 -- THE SHAPE OF ONE WEEK'S MARKET, AS OF ONE DAY. One row per
@@ -31,9 +31,25 @@
 -- cards showing exactly that, and two meanings of "final" on one screen is a defect waiting
 -- to be read. `is_locked` is Marc's own word and agrees with games_locked / games_live.
 --
+-- TWO DIFFERENT RULES ABOUT WRITING, AND THE FIRST VERSION HAD ONLY ONE.
+--
 -- ONCE LOCKED, NEVER REWRITTEN. A week whose last game has kicked off produces the same row
 -- every day forever, so it is written once and then skipped — otherwise a finished season
 -- gets a new identical row every night for eight months.
+--
+-- BUT TODAY'S ROW IS REPLACEABLE, and it was not. The first version also skipped any week
+-- already written for today's as_of_date, so the day's FIRST run set the figure and the other
+-- five did nothing. Measured: two runs in one day, 454 rows then 454 rows.
+--
+-- That is literal compliance with "re-calc each day" and it fails exactly where it matters. On
+-- a Saturday the 00:00 run writes "60 games live, not locked", games kick off all afternoon,
+-- and the row does not move until Sunday — so the page shows the morning's distribution all
+-- evening and the tooltip goes on saying games are still to come after they have finished. The
+-- week then locks a full day late.
+--
+-- `delete+insert` on the surrogate key, which CONTAINS as_of_date, replaces today's row and
+-- cannot touch any earlier day. The history is still one immutable row per past day, which is
+-- the feature; today simply tracks the four-hourly cadence the DAG already runs on.
 
 {% set bin_count = var('distribution_bin_count') %}
 {% set bins = var('distribution_bins') %}
@@ -202,7 +218,12 @@ left join tails t
 where w.n > 0
 
 {% if is_incremental() %}
-  -- Never rewrite a locked week, and never write the same day twice.
+  -- Never rewrite a LOCKED week. Deliberately NOT `or prior.as_of_date = w.as_of_date`:
+  -- today's row must be regenerated so it can move, and delete+insert replaces it in place.
+  --
+  -- A week that locks partway through today is covered by the same clause. This morning's row
+  -- said not-locked, so it does not match, so the week is rebuilt and today's row becomes the
+  -- locked one — which is what should happen and what the old guard prevented for 24 hours.
   and not exists (
       select 1 from {{ this }} prior
       where prior.season = w.season
@@ -210,6 +231,6 @@ where w.n > 0
         and prior.week = w.week
         and prior.span = w.span
         and prior.metric = w.metric
-        and (prior.as_of_date = w.as_of_date or prior.is_locked)
+        and prior.is_locked
   )
 {% endif %}

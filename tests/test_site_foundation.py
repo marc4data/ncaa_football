@@ -1092,3 +1092,94 @@ def test_the_query_checker_actually_scans_the_pages():
     assert len(scanned) >= 40, f"only {len(scanned)} statements found; the globs are wrong"
     assert "schedule.py" in files, "the busiest page in the app is not being checked"
     assert len(files) >= 15, f"only {len(files)} files scanned: {sorted(files)}"
+
+
+def test_no_site_module_reaches_outside_the_image(capsys):
+    """R-225, RUN AS A UNIT TEST TOO so a developer sees it before CI does.
+
+    The image is built with `context: ./site`. Anything above that directory is not in the
+    container, and every crossing so far has FALLEN BACK rather than failed: a config at the
+    repo root left the deployed radio Streamlit-red, and `lib/metrics.py` read dbt's vars and
+    quietly used hardcoded values that happened to match.
+
+    The check itself is `ci/check_site_paths.py`; this is the wrapper that makes it part of
+    the suite, and it asserts the SCAN SIZE as well as the result — a check that finds nothing
+    because it globbed the wrong directory is how `ci/check_page_queries.py` stayed green for
+    months while examining nothing.
+    """
+    import importlib.util
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("check_site_paths",
+                                                  root / "ci" / "check_site_paths.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    scanned = [p for p in module.SITE.rglob("*.py") if "__pycache__" not in p.parts]
+    assert len(scanned) >= 15, f"only {len(scanned)} modules scanned"
+    found = module.violations()
+    assert not found, [f"{m.name}:{line} {why}" for m, line, why in found]
+
+
+def test_the_boundary_check_catches_every_way_it_has_actually_been_crossed(
+        tmp_path, monkeypatch):
+    """A GUARD THAT HAS NEVER FAILED IS NOT EVIDENCE — and the first version of this one
+    missed a third of the real cases.
+
+    Fed the three shapes that actually happened plus one variant: reading dbt's project file
+    through `parents[2]`, a config referenced as `../.streamlit/...`, and a literal naming
+    `src/`. The `..` case was MISSED until it was tested, because the check only looked for
+    directory names.
+    """
+    import importlib.util
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("check_site_paths",
+                                                  root / "ci" / "check_site_paths.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    fake_site = tmp_path / "site"
+    (fake_site / "lib").mkdir(parents=True)
+    monkeypatch.setattr(module, "SITE", fake_site)
+
+    offenders = {
+        "reads_dbt.py": 'from pathlib import Path\nP = Path(__file__).resolve().parents[2]\n',
+        "climbs_out.py": 'CONFIG = "../.streamlit/config.toml"\n',
+        "names_src.py": 'C = "src/lines_cadence.py"\n',
+        "climbs_mid_path.py": 'C = "lib/../../dbt/dbt_project.yml"\n',
+    }
+    for name, body in offenders.items():
+        (fake_site / "lib" / name).write_text(body)
+    caught = {module_path.name for module_path, _, _ in module.violations()}
+    assert caught == set(offenders), f"missed: {set(offenders) - caught}"
+
+    # ...and the shapes that are FINE must not be flagged, or the check gets switched off.
+    for name, body in {
+        "own_dir.py": 'from pathlib import Path\nP = Path(__file__).resolve().parents[1]\n',
+        "sibling.py": 'C = "lib/site_config.json"\n',
+        "a_url.py": 'U = "https://collegefootballdata.com/docs/src/x"\n',
+    }.items():
+        (fake_site / "lib" / name).write_text(body)
+    still = {m.name for m, _, _ in module.violations()}
+    assert "own_dir.py" not in still, "parents[1] from site/lib is site/ — that is legal"
+    assert "sibling.py" not in still, "a path inside site/ must not be flagged"
+
+
+def test_the_boundary_check_does_not_flag_a_url_that_happens_to_contain_a_directory_name():
+    """A false positive is how a check gets switched off. `https://.../docs/src/x` is not a
+    filesystem path, and the first version flagged it because it looked for `/src/` anywhere
+    in a string."""
+    import importlib.util
+    import tempfile
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("check_site_paths",
+                                                  root / "ci" / "check_site_paths.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    fake = Path(tempfile.mkdtemp()) / "site" / "lib"
+    fake.mkdir(parents=True)
+    module.SITE = fake.parent
+    (fake / "a_url.py").write_text(
+        'U = "https://collegefootballdata.com/docs/src/x"\n'
+        'M = "mailto:marc4data@gmail.com"\n')
+    assert module.violations() == []

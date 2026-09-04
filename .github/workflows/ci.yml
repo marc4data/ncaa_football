@@ -225,6 +225,14 @@ jobs:
         # from raw. This reads the compiled dependency graph, where that would show up.
         run: python ci/check_layering.py
 
+      - name: Assert the site image's boundary
+        # R-225. The image is built with `context: ./site`, so anything above that directory
+        # does not exist in the container. Three modules have reached past it — a config at
+        # the repo root, a constant in src/, the dbt vars — and each one FELL BACK rather than
+        # failing, so the deployed site was wrong or coincidentally right and nothing said so.
+        # The layer check above guards the data boundary by machine; this is the other half.
+        run: python ci/check_site_paths.py
+
       - name: Assert the fixture exercised both date eras
         env:
           PGPASSWORD: cfdb

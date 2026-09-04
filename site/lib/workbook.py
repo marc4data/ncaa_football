@@ -323,42 +323,55 @@ MARK_COLOURS = {
 # push mark is not.
 COLOURED_MARKS = set(MARK_COLOURS)
 
-# The thresholds, from the ONE module allowed to know them. They were read here directly
-# until the site's own legend turned out to hardcode the same two numbers — and to have them
-# wrong. Two readers of one definition is one too many.
-UPSET_BIG_MARGIN = metrics.UPSET_BIG_MARGIN
-UPSET_BLOWOUT_MARGIN = metrics.UPSET_BLOWOUT_MARGIN
+# THE THRESHOLDS COME FROM THE DATA, so there is nothing to hold here.
+#
+# They were read from dbt_project.yml in this module until R-224 put them on `srv_game` as
+# columns, which is the only version that is correct inside the site image — the repo root is
+# outside the build context, so the file read was running on a fallback. `mark_legend(df)`
+# below takes the frame the workbook is already writing.
 
 # The Index legend. R-026's icon-only exception on the SITE is defensible because R-102's
 # legend explains it once — that is the stated reason in the code. A workbook travels further
 # and has no tooltip at all, so the same exception needs the same support or it is just
 # undecodable symbols. This block is not optional.
-MARK_LEGEND = [
-    # A LEGEND MUST DEFINE, NOT RESTATE. The first version said "a level 2 upset", which tells
-    # a reader who has never seen the site precisely nothing. The thresholds are dbt vars
-    # (`upset_margin_big` = 7, `upset_margin_blowout` = 14) and they are stated here as the
-    # numbers a reader can check against the score in the same row.
-    #
-    # BY MARGIN OF VICTORY, NOT BY THE SIZE OF THE SWING, which is Marc's own call recorded in
-    # srv_game.sql: an 8-point favorite losing by 5 is Level 1, not the Level 2 the 13-point
-    # swing would make it.
-    ("Upset level", "○", "the favorite won"),
-    ("Upset level", "●",
-     f"Level 1 upset — the underdog won by {UPSET_BIG_MARGIN} or fewer"),
-    ("Upset level", "●●",
-     f"Level 2 upset — the underdog won by {UPSET_BIG_MARGIN + 1} to {UPSET_BLOWOUT_MARGIN}"),
-    ("Upset level", "●●●",
-     f"Level 3 upset — the underdog won by more than {UPSET_BLOWOUT_MARGIN}"),
-    ("Upset level", "–",
-     "no closing line, so there was no favorite to upset"),
-    ("Winner covered", "■", "the winner also covered the closing spread"),
-    ("Winner covered", "□", "the winner did not cover"),
-    ("O/U result", "▲", "the two scores together went OVER the closing total"),
-    ("O/U result", "▽", "they stayed UNDER it"),
-    ("Any of the three", PUSH_MARK, "push — the result landed exactly on the number, so neither side won the bet"),
-    ("Any of the three", "·", "not settled yet"),
-    ("Any of the three", "–", "cfdb holds no closing line for this game"),
-]
+
+
+def mark_legend(df=None) -> list:
+    """The legend rows, phrased from the thresholds THIS workbook's data carries.
+
+    A function rather than a constant because the numbers are columns now (R-224). The bands
+    come from `metrics.upset_bands`, the same call the Schedule page makes, so the two legends
+    cannot differ by a word or by a number — which they did, for months.
+    """
+    band_1, band_2, band_3 = metrics.upset_criteria(*metrics.from_frame(df))
+    return [
+        # A LEGEND MUST DEFINE, NOT RESTATE. The first version said "a level 2 upset", which tells
+        # a reader who has never seen the site precisely nothing. The thresholds are dbt vars
+        # and they arrive as COLUMNS on srv_game (R-224), so they are stated here as the
+        # numbers a reader can check against the score in the same row — and they follow the
+        # warehouse if it ever changes them.
+        #
+        # BY MARGIN OF VICTORY, NOT BY THE SIZE OF THE SWING, which is Marc's own call recorded in
+        # srv_game.sql: an 8-point favorite losing by 5 is Level 1, not the Level 2 the 13-point
+        # swing would make it.
+        ("Upset level", "○", "the favorite won"),
+        ("Upset level", "●",
+         f"Level 1 upset — {band_1}"),
+        ("Upset level", "●●",
+         f"Level 2 upset — {band_2}"),
+        ("Upset level", "●●●",
+         f"Level 3 upset — {band_3}"),
+        ("Upset level", "–",
+         "no closing line, so there was no favorite to upset"),
+        ("Winner covered", "■", "the winner also covered the closing spread"),
+        ("Winner covered", "□", "the winner did not cover"),
+        ("O/U result", "▲", "the two scores together went OVER the closing total"),
+        ("O/U result", "▽", "they stayed UNDER it"),
+        ("Any of the three", PUSH_MARK,
+         "push — the result landed exactly on the number, so neither side won the bet"),
+        ("Any of the three", "·", "not settled yet"),
+        ("Any of the three", "–", "cfdb holds no closing line for this game"),
+    ]
 
 
 # One shared alignment object rather than one per cell: openpyxl stores styles by identity
@@ -1747,6 +1760,10 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     note_font = Font(italic=True, size=9, color="555555")
 
     index_rows, omitted = [], []
+    # The frame the LEGEND is phrased from: the first shipped sheet that carries the
+    # threshold columns. One workbook, one set of numbers — they are constant across
+    # srv_game, so any row of it answers, and a sheet without them falls back.
+    legend_frame = None
 
     for sheet in SHEETS:
         # AC-15.5: a sheet with nothing to say is omitted and named. The view name goes in
@@ -1933,11 +1950,16 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             extra = (f"The Division filter ({division.upper()}) does not apply to "
                      f"{sheet.view}, which has no game classification to narrow on.")
             note = f"{note} {extra}".strip()
+        if legend_frame is None and metrics.BIG_COLUMN in df.columns:
+            legend_frame = df
         index_rows.append(IndexRow(sheet.name, sheet.view, read.rows,
                                    read.rows_in_scope, note))
 
+    # THE FRAME GOES WITH IT, so the legend's thresholds come from the rows this
+    # workbook actually contains rather than from a constant (R-224).
     _write_index(book, season, week, season_type, conference, division, generated,
-                 index_rows, omitted, header_font, header_fill, note_font, site_host)
+                 index_rows, omitted, header_font, header_fill, note_font,
+                 site_host, legend_frame)
 
     buffer = io.BytesIO()
     book.save(buffer)
@@ -1951,7 +1973,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
 
 def _write_index(book, season, week, season_type, conference, division, generated,
                  index_rows, omitted, header_font, header_fill, note_font,
-                 site_host=None) -> None:
+                 site_host=None, df=None) -> None:
     """AC-15.9. The index is the sheet that makes the workbook auditable a month later.
 
     It states when the file was made, exactly what scope it covers, how many rows each tab
@@ -2105,7 +2127,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
                          "the site. Favorite covered is a word, not a mark, and can also "
                          "read \"No favorite\".")
         row += 1
-        for column, mark, meaning in MARK_LEGEND:
+        for column, mark, meaning in mark_legend(df):
             tab.cell(row, 1, column)
             glyph = tab.cell(row, 2, mark)
             # The legend's glyph must be the SAME SIZE AND COLOUR as the one in the sheet, or

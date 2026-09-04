@@ -396,6 +396,26 @@ select
         else 'upset'
     end                                                    as upset_level,
 
+    -- R-224. THE THRESHOLDS TRAVEL WITH THE VERDICT.
+    --
+    -- The two numbers that decide the level above, carried as columns so nothing downstream
+    -- has to know them. Precedent two hundred lines below: `training_week_floor` is a dbt var
+    -- surfaced the same way, and `srv_edge_finder` builds its warning sentence from it.
+    --
+    -- WHY THIS WAS NEEDED. `views/schedule.py` hardcoded "Upset by 7+" and "Upset by 14+" as
+    -- string literals from R-141 until 2026-09-04, and they were WRONG BY ONE at both ends —
+    -- the boundary is exclusive, so a 7-point win is level 1. 138 completed games carried a
+    -- level the legend contradicted. The stopgap fix read dbt_project.yml from the app, which
+    -- CANNOT WORK IN THE SITE IMAGE: `deploy/docker-compose.yml` builds with `context: ./site`
+    -- so the repo root is outside the build context, and the deployed page has been running on
+    -- a hardcoded fallback that happens to match.
+    --
+    -- A column is the fix the codebase already had. The page and the workbook each read a row
+    -- they were fetching anyway: no file access, no fallback, correct in the container by
+    -- construction, and a `dbt run` after changing a var moves every label at once.
+    {{ var('upset_margin_big') }}                          as upset_margin_big,
+    {{ var('upset_margin_blowout') }}                      as upset_margin_blowout,
+
     -- R-141, INDICATOR 2: DID THE TEAM THAT WON ALSO COVER?
     --
     -- NOT `favorite_covered`, which is directly above and answers a different question. That
