@@ -27,6 +27,7 @@ Three properties carry most of the weight:
 import io
 import os
 import re
+import zipfile
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import quote
@@ -166,6 +167,115 @@ def _weekday(record):
         return None
 
 
+# ==========================================================================================
+# R-219. THE SITE'S MARKS, IN THE SHEET.
+#
+# Spec §3.4 said a spreadsheet has no icon convention and no tooltip, so these get spelled-out
+# words. Marc looked at the built file and overrode it. This builds what he asked and makes it
+# defensible the way the site made its own icon-only exception defensible.
+#
+# The site's system maps onto text-presentation Unicode almost exactly, and that is the piece
+# that makes it work at all: R-141 chose SHAPE PLUS FILL — circle / square / diamond, filled or
+# open — precisely so every mark is self-identifying without colour, and those shapes exist as
+# geometric characters.
+#
+# GEOMETRIC SHAPES, NOT EMOJI. R-141 and R-175 both turned on this: an emoji-presentation
+# character has no fixed baseline or size across platforms, and a workbook is opened on more
+# platforms than a web page is. Every mark below is text-presentation.
+#
+# THE COST, SO IT IS A DECISION AND NOT A SURPRISE: the filter dropdown on these three columns
+# now lists shapes. A reader who wants "show me every upset" picks a symbol from a list rather
+# than reading the word "upset" — a real reduction in the one thing a spreadsheet is better at
+# than a page. THE REVERT IS THESE THREE DICTIONARIES; nothing else knows about it.
+# FILLED MEANS IT HAPPENED, OPEN MEANS IT DID NOT — R-141's shape-plus-fill system, which is
+# what makes each mark self-identifying without colour.
+#
+# "Favourite won" was first drawn as an em dash, and that was a defect: the no-data mark is
+# an EN dash, and at 11pt the two are indistinguishable. "The favourite won" and "cfdb holds
+# no closing line" are opposite claims and must not look the same. An open circle against a
+# filled one says it in the same visual language as the rest.
+UPSET_MARKS = {"none": "○", "upset": "●", "big": "●", "blowout": "●"}
+COVER_MARKS = {"yes": "■", "no": "□", "push": "◨", "pending": "·"}
+OVER_MARKS = {"yes": "▲", "no": "▼", "push": "◨", "pending": "·"}
+NO_DATA_MARK = "–"        # the site's own mark for "we hold nothing here"
+
+# The Index legend. R-026's icon-only exception on the SITE is defensible because R-102's
+# legend explains it once — that is the stated reason in the code. A workbook travels further
+# and has no tooltip at all, so the same exception needs the same support or it is just
+# undecodable symbols. This block is not optional.
+MARK_LEGEND = [
+    ("Upset level", "●", "an upset against the closing line (the site shades this by level; "
+                         "in the workbook any ● is an upset)"),
+    ("Upset level", "○", "the favourite won"),
+    # `Favourite covered` is DELIBERATELY NOT LISTED HERE. Marc's CSV marks it
+    # `yes/no = Yes/No`, so it renders as words, and naming it beside the marks would tell a
+    # reader to look for a shape that is not there.
+    ("Winner covered", "■", "the winner covered the closing spread"),
+    ("Winner covered", "□", "the winner did not cover"),
+    ("O/U result", "▲", "the total went over"),
+    ("O/U result", "▼", "the total stayed under"),
+    ("Any of the three", "◨", "push — landed exactly on the number"),
+    ("Any of the three", "·", "not settled yet"),
+    ("Any of the three", "–", "cfdb holds no closing line for this game"),
+]
+
+
+def _marked(marks):
+    """Render one of the site's marks, or a dash where cfdb holds nothing.
+
+    NaN IS NOT FALSE AND IS NOT AN EMPTY STRING. This project has been bitten three times by
+    `if value:` on a pandas null — network_abbreviation, logo_url, upset_level — so the null
+    check here is explicit rather than truthiness.
+    """
+    def render(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return NO_DATA_MARK
+        return marks.get(str(value), NO_DATA_MARK)
+    return render
+
+
+# Postgres renders a boolean as 't'/'f' the moment anything touches it as text — a CSV
+# export, a driver without type mapping, a copy through pandas' object dtype. AND 'f' IS A
+# NON-EMPTY STRING, SO `bool('f')` IS TRUE. That is the same family as the NaN-truthiness
+# bug this project has hit three times, and it turns every False into "Yes" silently.
+# Caught by building a real workbook and reading row 1, not by any test written first.
+FALSE_TEXT = {"f", "false", "n", "no", "0", ""}
+TRUE_TEXT = {"t", "true", "y", "yes", "1"}
+
+
+def _yes_no(value):
+    """R-218. A boolean as a word, because Marc asked and because a filter dropdown reading
+    Yes / No beats one reading TRUE / FALSE.
+
+    THE COST, NOTED ON THE INDEX: a text "Yes" is not a boolean to a formula, so
+    `=SUM(--(range="Yes"))` replaces `=COUNTIF(range,TRUE)`.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in FALSE_TEXT:
+            return "No"
+        if text in TRUE_TEXT:
+            return "Yes"
+        # Anything else is not a boolean at all, and guessing is how 'f' became "Yes".
+        return None
+    return "Yes" if bool(value) else "No"
+
+
+def _title_case_verdict(value):
+    """`yes` / `no` / `push` / `pending` / `no_favorite` as words a reader can filter on.
+
+    Already a string, so this is title-casing rather than a boolean conversion — and
+    `no_favorite` becomes "No favourite", NOT "No_favorite", which is what a naive
+    `.title()` would leave behind.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).replace("_", " ").strip()
+    return text[:1].upper() + text[1:] if text else None
+
+
 def _status(record):
     """Scheduled / Final. `is_completed` is a boolean the reader has to translate; a word is
     what they would have written in the cell themselves."""
@@ -196,13 +306,34 @@ class Sheet:
     def __init__(self, name: str, view: str, sql: str, columns: List[tuple],
                  has_predictions: bool = False, note: str = "", scoped: bool = True,
                  derived: Optional[Dict[str, Callable]] = None,
-                 link_fields: Optional[Dict[str, str]] = None):
+                 link_fields: Optional[Dict[str, str]] = None,
+                 display: Optional[Dict[str, Callable]] = None,
+                 sheet_disclaimer: Optional[bool] = None,
+                 freeze_before: Optional[str] = None):
         self.name, self.view = name, view
         # Columns the sheet COMPUTES rather than selects — a weekday name, a status word, a
         # URL. They are real columns to the reader and to Excel; they simply have no
         # counterpart in the view, and putting them here keeps `fields` the single list that
         # both the writer and the width measurement walk.
         self.derived: Dict[str, Callable] = derived or {}
+        # How a value is RENDERED, applied after it is fetched or derived. Separate from
+        # `derived` on purpose: one answers "where does this value come from", the other
+        # "what does the reader see". A boolean is still a boolean in the view.
+        self.display: Dict[str, Callable] = display or {}
+        # WHETHER THE SHEET WRITES THE MODEL DISCLAIMER, which is NOT the same question as
+        # whether it carries predictions (R-221). Marc removed row 2 from Schedule, and the
+        # sheet still has six prediction columns — what makes that safe is the per-row
+        # `attribution` column, not the absence of predictions. Conflating the two flags
+        # would have made the model lie about the sheet.
+        self.sheet_disclaimer = has_predictions if sheet_disclaimer is None \
+            else sheet_disclaimer
+        # THE FIRST COLUMN THAT SCROLLS, by LABEL — named for what Excel actually does.
+        #
+        # `freeze_panes = "M4"` splits BEFORE M, so M is the first column to move and A–L
+        # stay. Calling this `freeze_after` invited an off-by-one every time it was read, and
+        # produced one: Marc's macro freezes at M, and "freeze after column M" would have put
+        # it at N. Held by LABEL rather than letter so reordering the sheet moves it too.
+        self.freeze_before = freeze_before
         # {column field -> what it links to}. Resolved at build time because the target
         # origin is an environment value, not a repo one.
         self.link_fields: Dict[str, str] = link_fields or {}
@@ -259,9 +390,19 @@ class Sheet:
         return {f for f in self.link_fields if f.endswith("_url")}
 
     def value_for(self, field: str, record):
-        """One cell's value: computed if this sheet derives it, selected otherwise."""
+        """One cell's value: computed if this sheet derives it, selected otherwise, then
+        rendered if this sheet has a display rule for it."""
         builder = self.derived.get(field)
-        return builder(record) if builder is not None else record.get(field)
+        value = builder(record) if builder is not None else record.get(field)
+        renderer = self.display.get(field)
+        return renderer(value) if renderer is not None else value
+
+    def freeze_column(self) -> int:
+        """1-based index of the first column that SCROLLS, or 1 for no horizontal freeze."""
+        if not self.freeze_before:
+            return 1
+        labels = [label for _, label in self.columns]
+        return labels.index(self.freeze_before) + 1
 
     def hyperlinks(self, base: str, **scope) -> Dict[str, Callable]:
         """{field -> record -> url}, or {} when nothing told us the site's origin."""
@@ -289,46 +430,49 @@ class Sheet:
 # data starts, which is exactly the thing R-181 exists to fix.
 _ALL_SHEETS = [
     # ======================================================================================
-    # THE SCHEDULE SHEET — sixty-seven columns in ten labelled blocks (R-185).
+    # THE SCHEDULE SHEET — FIFTY-SIX COLUMNS IN MARC'S ORDER (R-214, R-215).
     #
-    # Marc: "a sheet that includes all of the data points we have included on the Schedule
-    # page (including filters and any fields used in the underlying logic)." That is what
-    # sixty-seven means; it is not padding.
+    # THE ORDER IS `claude_work/supporting_files/cfdb_schedule_column_order.csv`, TAKEN
+    # LITERALLY. It supersedes spec §3.2's block ordering. Reconciled before building: 67
+    # columns built, 11 removed, 56 remain, and his file has exactly 56 rows with no extras
+    # and nothing missing.
     #
-    # THE ORDER IS REASONED AND THE REASONING IS THE PART THAT GETS LOST.
+    # The shape is worth naming so nobody "improves" it later:
+    #     scope → fixture → market → result → context → model → keys
     #
-    #   MIRROR THE PAGE, not filter-first. In an Excel Table EVERY column is filterable, so
-    #   position buys reading order and adjacency, not capability. "Put the filters on the
-    #   left" is a non-argument once the data is a Table.
+    # ELEVEN COLUMNS CAME OUT (R-214), and two consequences are recorded on the Index rather
+    # than left for a reader to discover:
     #
-    #   EMPTY COLUMNS GO RIGHT. Blocks H and I are blank on every upcoming game. A reader
-    #   opening this on a Wednesday should not scroll past a wall of nothing to reach the
-    #   market numbers, which are the reason they opened it.
+    #   `Spread open` and `O/U open` went, so `Δ Spread` LOSES ITS DISAMBIGUATOR. The delta
+    #   is null both when the line did not move and when no opening number was recorded —
+    #   two facts, one blank — and the neighbouring column was what told them apart. No
+    #   sentinel is invented; the Index says the blank means either.
     #
-    # Default sort is the ORDER BY: a Table's `sortState` is metadata about a sort that was
-    # applied and Excel does not re-apply it on open. `start_date_et, game_id` matches AC-2.2
-    # and is stable between builds, which a diff of two workbooks depends on.
+    #   All six CLOSING-LINE columns went, so `Upset level`, `Winner covered` and
+    #   `O/U result` lose the number they were judged against. The verdicts are still
+    #   correct; they are no longer auditable from the workbook alone. The Matchup URL is
+    #   where a reader goes to see the line.
     # ======================================================================================
     Sheet("Schedule", "srv_game", """
-        select week, start_date_et, kickoff_time_known, game_date, is_current_week,
+        select season, season_type, week, is_current_week, start_date_et,
+               best_rank_in_game, is_completed,
                away_rank, away_team_display, away_team_record_display,
-               home_rank, home_team_display, home_team_record_display, best_rank_in_game,
-               is_neutral_site, venue_display, is_indoors, network_abbreviation, network,
-               season, season_type, away_conference, home_conference,
-               away_classification, home_classification, is_conference_game, is_fbs_game,
-               spread_current, spread_open, spread_move_from_open,
-               total_current, over_under_open, total_move_from_open,
+               home_rank, home_team_display, home_team_record_display,
                provider_key, line_snapshot_ts,
-               spread_at_close, spread_at_close_provider, spread_at_close_basis,
-               total_at_close, total_at_close_provider, total_at_close_basis,
-               predicted_margin, home_win_probability, confidence_bucket,
-               model_name, model_version_key, is_out_of_sample_week,
+               spread_current, spread_move_from_open,
+               total_current, total_move_from_open,
                away_points, home_points, winner, actual_margin, final_margin, total_points,
                upset_level, is_upset_by_line, winner_covered_close, favorite_covered,
-               over_met, excitement_index, attendance,
+               over_met,
                temperature_f, weather_condition, wind_speed_mph, precipitation_in,
+               excitement_index, attendance,
+               is_neutral_site, venue_display, is_indoors, network_abbreviation,
+               away_conference, home_conference, away_classification, home_classification,
+               is_conference_game, is_fbs_game,
+               predicted_margin, home_win_probability, confidence_bucket,
+               model_name, model_version_key, is_out_of_sample_week,
                game_id, as_of_ts, attribution,
-               is_completed, home_team_slug, away_team_slug,
+               home_team_slug, away_team_slug,
                count(*) over () as rows_in_scope
         from srv_game
         where season = :season and season_type = :season_type
@@ -347,56 +491,58 @@ _ALL_SHEETS = [
         order by start_date_et, game_id
         limit {ROW_CAP}
     """, [
-        # --- BLOCK A — WHEN. The reader's first question. -------------------------------
+        # --- scope ----------------------------------------------------------------------
+        ("season", "Season"),                       # "0": 2025, never "2,025" (R-216)
+        ("season_type", "Season type"),
         ("week", "Wk"),
-        ("start_date_et", "Kickoff"),
-        ("kickoff_time_known", "Kickoff confirmed"),
-        ("weekday", "Day"),
-        ("status", "Status"),
         ("is_current_week", "Current week"),
-        # --- BLOCK B — THE FIXTURE ------------------------------------------------------
+        # --- the fixture. Freeze lands after `Home record`, which is column M. ------------
+        ("start_date_et", "Kickoff"),
+        ("best_rank_in_game", "Best rank"),
+        ("status", "Status"),
         ("away_rank", "Away rank"),
         ("away_team_display", "Away"),
         ("away_team_record_display", "Away record"),
         ("home_rank", "Home rank"),
         ("home_team_display", "Home"),
         ("home_team_record_display", "Home record"),
-        ("best_rank_in_game", "Best rank"),
-        # --- BLOCK C — WHERE AND HOW TO WATCH -------------------------------------------
+        # --- the market -------------------------------------------------------------------
+        ("provider_key", "Book"),
+        ("line_snapshot_ts", "Line taken"),
+        ("spread_current", "Spread"),
+        ("spread_move_from_open", "Δ Spread"),
+        ("total_current", "O/U"),
+        ("total_move_from_open", "Δ O/U"),
+        # --- the result -------------------------------------------------------------------
+        ("away_points", "Away pts"),
+        ("home_points", "Home pts"),
+        ("winner", "Winner"),
+        ("actual_margin", "Margin (away−home)"),
+        ("final_margin", "Final margin"),
+        ("total_points", "Total points"),
+        ("upset_level", "Upset level"),
+        ("is_upset_by_line", "Upset by line"),
+        ("winner_covered_close", "Winner covered"),
+        ("favorite_covered", "Favourite covered"),
+        ("over_met", "O/U result"),
+        # --- context ----------------------------------------------------------------------
+        ("temperature_f", "Temperature °F"),
+        ("weather_condition", "Condition"),
+        ("wind_speed_mph", "Wind mph"),
+        ("precipitation_in", "Precipitation in"),
+        ("excitement_index", "Excitement"),
+        ("attendance", "Attendance"),
         ("is_neutral_site", "Neutral site"),
         ("venue_display", "Venue"),
         ("is_indoors", "Indoors"),
         ("network_abbreviation", "TV"),
-        ("network", "TV (full)"),
-        # --- BLOCK D — SCOPE. The filter columns, spelled out. ---------------------------
-        ("season", "Season"),
-        ("season_type", "Season type"),
         ("away_conference", "Away conference"),
         ("home_conference", "Home conference"),
         ("away_classification", "Away division"),
         ("home_classification", "Home division"),
         ("is_conference_game", "Conference game"),
         ("is_fbs_game", "FBS game"),
-        # --- BLOCK E — THE MARKET NOW. Why someone opens this on a Wednesday. ------------
-        ("spread_current", "Spread"),
-        # `Spread open` sits beside `Δ Spread` DELIBERATELY and the two must stay adjacent:
-        # the delta is null when the line did not move AND when no open was ever recorded.
-        # Two different facts, one blank cell; the column beside it is the disambiguation.
-        ("spread_open", "Spread open"),
-        ("spread_move_from_open", "Δ Spread"),
-        ("total_current", "O/U"),
-        ("over_under_open", "O/U open"),
-        ("total_move_from_open", "Δ O/U"),
-        ("provider_key", "Book"),
-        ("line_snapshot_ts", "Line taken"),
-        # --- BLOCK F — THE CLOSING LINE. What the result gets judged against. ------------
-        ("spread_at_close", "Closing spread"),
-        ("spread_at_close_provider", "Closing spread book"),
-        ("spread_at_close_basis", "Closing spread basis"),
-        ("total_at_close", "Closing O/U"),
-        ("total_at_close_provider", "Closing O/U book"),
-        ("total_at_close_basis", "Closing O/U basis"),
-        # --- BLOCK G — THE MODEL --------------------------------------------------------
+        # --- the model --------------------------------------------------------------------
         ("predicted_margin", "Pred margin"),
         ("home_win_probability", "Home win prob"),
         ("confidence_bucket", "Confidence"),
@@ -405,38 +551,40 @@ _ALL_SHEETS = [
         # AC-15.4: per ROW, never a footnote. A workbook gets filtered and sorted, and a
         # caption does not survive either.
         ("is_out_of_sample_week", "Out-of-sample week"),
-        # --- BLOCK H — THE RESULT. Blank on every upcoming game, hence its position. ------
-        ("away_points", "Away pts"),
-        ("home_points", "Home pts"),
-        ("winner", "Winner"),
-        ("actual_margin", "Margin (away−home)"),
-        ("final_margin", "Final margin"),
-        ("total_points", "Total points"),
-        # R-193: judged against the CLOSING LINE, and there is no longer a second basis to
-        # name. `upset_basis` was dropped the same day the column list was first written.
-        ("upset_level", "Upset level"),
-        ("is_upset_by_line", "Upset by line"),
-        ("winner_covered_close", "Winner covered"),
-        # A DIFFERENT QUESTION from the one beside it: this one can also say no_favorite.
-        ("favorite_covered", "Favourite covered"),
-        ("over_met", "O/U result"),
-        ("excitement_index", "Excitement"),
-        ("attendance", "Attendance"),
-        # --- BLOCK I — CONDITIONS AT KICKOFF. Qualified by Indoors in block C. ------------
-        ("temperature_f", "Temperature °F"),
-        ("weather_condition", "Condition"),
-        ("wind_speed_mph", "Wind mph"),
-        ("precipitation_in", "Precipitation in"),
-        # --- BLOCK J — KEYS AND PROVENANCE ----------------------------------------------
+        # --- keys and provenance ------------------------------------------------------------
         ("game_id", "Game id"),
-        # The one EXPLICIT url column. A cell hyperlink is invisible to anything that reads
-        # the file as data, so the visible column is what survives a copy into another tool.
-        # One is enough; team links stay as cell links only.
         ("matchup_url", "Matchup URL"),
         ("as_of_ts", "As of"),
+        # R-221. The sheet-level disclaimer is gone; THIS column is what replaces it, and it
+        # is strictly stronger — attribution carried per row survives filtering, sorting and
+        # copy-paste, which a line in row 2 does not.
         ("attribution", "Attribution"),
-    ], has_predictions=True,
-        derived={"weekday": _weekday, "status": _status},
+    ],
+        has_predictions=True,          # it does carry predictions...
+        sheet_disclaimer=False,        # ...and says so per row instead of in row 2 (R-221)
+        derived={"status": _status},
+        display={
+            # R-218. Booleans as words. `Out-of-sample week` is deliberately NOT here:
+            # Marc's CSV marks six fields t/f = Yes/No and leaves that one blank, and the
+            # CSV is authoritative. Flagged in the report as the one boolean left raw.
+            "is_current_week": _yes_no,
+            "is_upset_by_line": _yes_no,
+            "is_neutral_site": _yes_no,
+            "is_indoors": _yes_no,
+            "is_conference_game": _yes_no,
+            "is_fbs_game": _yes_no,
+            "favorite_covered": _title_case_verdict,
+            # R-219. The site's marks.
+            "upset_level": _marked(UPSET_MARKS),
+            "winner_covered_close": _marked(COVER_MARKS),
+            "over_met": _marked(OVER_MARKS),
+        },
+        # Marc's macro freezes at M2. The COLUMN is his and is kept literally: M is the
+        # first column to scroll, so Season through Home stay on screen while the market and
+        # the result move. The ROW is not his — the header is not row 1 — so it is computed.
+        # (Worth knowing: this splits the two record columns. `Home record` scrolls while
+        # `Away record` stays. Moving the freeze one column right is a one-word change.)
+        freeze_before="Home record",
         link_fields={"away_team_display": "team", "home_team_display": "team",
                      "matchup_url": "matchup"}),
 
@@ -618,17 +766,9 @@ EXPORT_ONLY_LABELS = {
     # --- R-182 TRAP 2 made these mandatory to resolve rather than merely tidy. -----------
     # An Excel Table requires unique, non-empty headers, and the Schedule sheet carries both
     # halves of two pairs the page only ever shows one of at a time.
-    "network": "the sheet carries BOTH `network_abbreviation` and `network`, because a "
-               "spreadsheet reader filtering on 'ESPN' and one reading 'ESPN College "
-               "Extra' want different columns. The page shows one of them under 'TV', so "
-               "the long form has to be spelled differently — a Table forbids duplicate "
-               "headers outright",
     # The next three are all the same divergence: the page can abbreviate because the column
     # sits inside a labelled block with neighbours giving it context. A workbook column
     # travels alone, gets sorted away from its neighbours, and is read a month later.
-    "spread_at_close": "the page's 'Close' sits under the line block's own heading, which "
-                       "says what is closing. The workbook column has no heading above it "
-                       "and no guaranteed neighbour, so it names itself",
     "total_points": "the page's 'Pts' sits in the box score beside the two teams' scores. "
                     "Alone in a spreadsheet, 'Pts' does not distinguish the game total "
                     "from either team's",
@@ -646,23 +786,142 @@ EXPORT_ONLY_LABELS = {
                        "rather than an oversight",
 }
 
+# A one-character column is unreadable however short its data is. Measured against the
+# narrowest real content on the sheet — "Wk" holds one or two digits — 6 leaves room for the
+# filter button a Table puts in every header cell.
+MIN_COLUMN_WIDTH = 6
+
+# Excel's default row height is 15pt for an 11pt font, and a wrapped line needs about 13pt
+# once the header's own padding is allowed for. Both are conventions rather than constants
+# openpyxl exposes, so they are named here rather than appearing as bare numbers.
+HEADER_LINE_HEIGHT = 13.0
+MIN_HEADER_HEIGHT = 15.0
+
+
+def _header_height(labels_and_widths) -> float:
+    """How tall the header row must be for every label to wrap without clipping.
+
+    A column's width is in CHARACTERS, so a label needs ceil(len / width) lines at minimum —
+    but Excel wraps on word boundaries, so a long word cannot be split and a short width
+    wastes the tail of a line. Wrapping properly rather than dividing is the difference
+    between "Margin (away−home)" reporting two lines and reporting the four it really takes.
+    """
+    worst = 1
+    for label, width in labels_and_widths:
+        text, usable = str(label), max(int(width), 1)
+        lines, current = 1, ""
+        for word in text.split():
+            candidate = f"{current} {word}".strip()
+            if len(candidate) <= usable:
+                current = candidate
+                continue
+            if current:
+                lines += 1
+            # A single word longer than the column still has to go somewhere: Excel breaks
+            # it across lines rather than clipping, so account for that instead of assuming
+            # every word fits.
+            current = word
+            while len(current) > usable:
+                lines += 1
+                current = current[usable:]
+        worst = max(worst, lines)
+    return max(MIN_HEADER_HEIGHT, worst * HEADER_LINE_HEIGHT)
+
+
 COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential",
-                       "actual_margin", "predicted_margin"}
+                       "predicted_margin"}
+
+# R-220. Marc supplied a screenshot of the exact rule: Data Bar · automatic min and max ·
+# direction Context · SOLID fill · positive BLUE, negative RED · solid black borders on both ·
+# axis position MIDPOINT · black axis. `actual_margin` moves off the colour scale to get it;
+# `predicted_margin` keeps its scale because he named one column.
+DATA_BAR_FIELDS = {"actual_margin"}
+
+# WHY THIS IS HAND-WRITTEN XML AND NOT A DataBarRule.
+#
+# openpyxl's DataBarRule writes the LEGACY `<dataBar>` element, which carries one colour, a
+# min and a max. It has NO negative fill colour, NO border colours and NO axis position — so
+# three of the seven things in Marc's screenshot cannot be said with it at all. Those live in
+# the CF14 extension (`x14:dataBar`), which openpyxl does not model.
+#
+# The cost is honest: this is the class of hand-written XML that produces the repair prompt
+# AC-15.6 forbids, so it is verified by OPENING THE FILE, not by openpyxl reading it back.
+#
+# The shape is a legacy `<dataBar>` for readers that only understand CF12, plus an `x14`
+# block carrying the rest, tied together by an `x14:id` GUID. Excel prefers the extension and
+# ignores the legacy element; anything older degrades to a plain blue bar rather than to
+# nothing.
+DATA_BAR_GUID_PREFIX = "{FFFFFFFF-CCCC-BBBB-AAAA-"
+DATA_BAR_POSITIVE = "FF638EC6"      # blue
+DATA_BAR_NEGATIVE = "FFFF0000"      # red
+DATA_BAR_AXIS = "FF000000"          # black axis and black borders
+
+
+def _data_bar_guid(index: int) -> str:
+    """A stable per-rule GUID. Deterministic, so two builds of one scope are byte-identical —
+    a random one would make a diff of two workbooks useless."""
+    return f"{DATA_BAR_GUID_PREFIX}{index:012X}}}"
+
+
+def _add_data_bar(tab, span: str) -> None:
+    """Record that this range wants Marc's data bar. The XML is injected after save."""
+    tab._cfdb_data_bars = getattr(tab, "_cfdb_data_bars", [])
+    tab._cfdb_data_bars.append(span)
+
+
 FLAG_FIELDS = {"cover_correct", "home_win_correct", "is_upset", "is_out_of_sample_week",
                "is_best_home_spread", "is_best_away_spread", "actual_home_cover"}
+
+
+# R-216. TWO SETS AND A RULE, REPLACING A MEMBERSHIP TUPLE THAT WAS WRONG THREE TIMES.
+#
+# The old `number_format` tested one hardcoded tuple and let everything else fall through to
+# a decimal format. That shape produced three separate defects at once — decimals on a rank,
+# decimals on a game id, and `season` rendering as "2,025" because it WAS in the tuple and
+# the tuple's only format grouped thousands. A list every new integer column has to be
+# remembered into will be wrong again on the next column.
+#
+# THE RULE THAT DECIDES, stated once so the next column is obvious:
+#
+#     A THOUSANDS SEPARATOR IS FOR A QUANTITY YOU MIGHT TOTAL.
+#     A rank, an id, a season and a week are LABELS THAT HAPPEN TO BE NUMERIC,
+#     and a comma in one of them is a bug.
+#
+# Attendance is a count you would sum, so 74,109 is right. Season 2025 is a name, so "2,025"
+# is nonsense. That is the whole distinction.
+COUNT_FIELDS = {
+    "attendance", "games", "home_points", "away_points", "total_points",
+    "wins", "losses", "ties", "conference_wins", "conference_losses",
+    "points_for", "points_against", "n", "winner_scored", "cover_scored",
+}
+
+# Numbers you never sum. Anything matching these patterns joins them automatically, which is
+# the part the tuple could not express — a `_rank` or an `_id` added next month is covered
+# without anyone remembering this file exists.
+# `best_rank_in_game` is here rather than caught by the suffix, and it is worth saying why:
+# the suffix rule sees the END of a name, and this one carries `rank` in the MIDDLE. That
+# gap is the reason the test below enumerates the real columns and asserts on meaning rather
+# than re-implementing this pattern — a test that repeated the rule would have agreed with
+# it and missed the same column.
+PLAIN_INTEGER = {"season", "week", "tiebreak_rank", "game_id", "bin_index",
+                 "best_rank_in_game"}
+PLAIN_INTEGER_SUFFIXES = ("_rank", "_id")
+
+
+def is_plain_integer(field: str) -> bool:
+    """A numeric label: no decimal point, no thousands separator."""
+    return field in PLAIN_INTEGER or field.endswith(PLAIN_INTEGER_SUFFIXES)
 
 
 def number_format(field: str) -> str:
     """Excel format string at the SAME precision the site renders (AC-G.31, AC-15.7).
 
-    Derived from fmt.precision_for rather than restated, so a column cannot read 1 dp on
-    screen and 2 dp in the workbook. Integer-ish columns are the explicit exception:
-    attendance, a moneyline and a week number are counts, and a decimal point on any of
-    them makes it look like a measurement.
+    Decimals are derived from fmt.precision_for rather than restated, so a column cannot
+    read 1 dp on screen and 2 dp in the workbook.
     """
-    if field in ("attendance", "week", "season", "games", "home_points", "away_points",
-                 "wins", "losses", "ties", "conference_wins", "conference_losses",
-                 "tiebreak_rank", "n"):
+    if is_plain_integer(field):
+        return "0"
+    if field in COUNT_FIELDS:
         return "#,##0"
     if field.endswith("moneyline"):
         return "+#,##0;-#,##0"
@@ -799,6 +1058,128 @@ def _clean(value):
     return value
 
 
+X14_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+XM_NS = "http://schemas.microsoft.com/office/excel/2006/main"
+
+
+def _inject_data_bars(payload: bytes, wanted: dict) -> bytes:
+    """Rewrite the saved workbook so the data-bar ranges carry Marc's full rule.
+
+    `wanted` is {sheet name -> [range, ...]}. Each range gets TWO things written into that
+    sheet's XML:
+
+      * a legacy `<conditionalFormatting><cfRule type="dataBar">` block carrying an
+        `<extLst>` pointer to the x14 rule, so a reader that only speaks CF12 still draws a
+        plain blue bar rather than nothing;
+      * an `<x14:conditionalFormatting>` inside the sheet's own `<extLst>`, carrying the
+        negative colour, both borders, the midpoint axis and the axis colour — the four
+        things the legacy element cannot express.
+
+    Done as a post-save rewrite rather than through openpyxl because openpyxl has no model
+    for x14 and silently drops unknown elements on write. Rewriting the finished bytes is
+    the only place the extension survives.
+
+    ORDER MATTERS AND EXCEL IS STRICT ABOUT IT. In the sheet's schema `conditionalFormatting`
+    comes after `mergeCells`/`hyperlinks` and before `dataValidations`... but crucially both
+    it and `extLst` must sit in schema order relative to `tableParts`, which is LAST. Getting
+    this wrong is the repair prompt, which is why the insertion points are anchored on
+    specific elements rather than appended.
+    """
+    from xml.etree import ElementTree
+
+    if not wanted:
+        return payload
+
+    source = zipfile.ZipFile(io.BytesIO(payload))
+    # Sheet name -> part name, read from the workbook's own relationships rather than guessed
+    # from ordering, because `sheet1.xml` is not reliably the first tab. PARSED, not
+    # regexed: the first version matched `name=` before `r:id=` and openpyxl does not
+    # guarantee attribute order, so it silently produced an empty target and then tried to
+    # read a part called "xl/".
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+          "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+          "pr": "http://schemas.openxmlformats.org/package/2006/relationships"}
+    book_xml = ElementTree.fromstring(source.read("xl/workbook.xml"))
+    rels_xml = ElementTree.fromstring(source.read("xl/_rels/workbook.xml.rels"))
+    rel_targets = {rel.get("Id"): rel.get("Target")
+                   for rel in rels_xml.findall("pr:Relationship", ns)}
+    part_for = {}
+    for element in book_xml.findall("m:sheets/m:sheet", ns):
+        target = rel_targets.get(element.get(f"{{{ns['r']}}}id"), "")
+        if not target:
+            continue
+        # The Target may be relative to xl/ ("worksheets/sheet2.xml") or absolute
+        # ("/xl/worksheets/sheet2.xml") depending on the writer. Normalise rather than
+        # assume — assuming produced "xl/xl/worksheets/sheet2.xml".
+        target = target.lstrip("/")
+        part_for[element.get("name")] = target if target.startswith("xl/") \
+            else "xl/" + target
+
+    rewritten = {}
+    counter = 0
+    for sheet_name, spans in wanted.items():
+        part = part_for.get(sheet_name)
+        if not part:
+            continue
+        body = source.read(part).decode("utf-8")
+        legacy, extended = [], []
+        for span in spans:
+            counter += 1
+            guid = _data_bar_guid(counter)
+            legacy.append(
+                f'<conditionalFormatting sqref="{span}">'
+                f'<cfRule type="dataBar" priority="{counter}">'
+                f'<dataBar><cfvo type="min"/><cfvo type="max"/>'
+                f'<color rgb="{DATA_BAR_POSITIVE}"/></dataBar>'
+                f'<extLst><ext uri="{{B025F937-C7B1-47D3-B67F-A62EFF666E3E}}" '
+                f'xmlns:x14="{X14_NS}"><x14:id>{guid}</x14:id></ext></extLst>'
+                f'</cfRule></conditionalFormatting>')
+            extended.append(
+                f'<x14:conditionalFormatting xmlns:xm="{XM_NS}">'
+                f'<x14:cfRule type="dataBar" id="{guid}">'
+                f'<x14:dataBar minLength="0" maxLength="100" gradient="0" '
+                f'border="1" negativeBarColorSameAsPositive="0" '
+                f'negativeBarBorderColorSameAsPositive="0" '
+                f'axisPosition="middle">'
+                f'<x14:cfvo type="autoMin"/><x14:cfvo type="autoMax"/>'
+                f'<x14:borderColor rgb="{DATA_BAR_AXIS}"/>'
+                f'<x14:negativeFillColor rgb="{DATA_BAR_NEGATIVE}"/>'
+                f'<x14:negativeBorderColor rgb="{DATA_BAR_AXIS}"/>'
+                f'<x14:axisColor rgb="{DATA_BAR_AXIS}"/>'
+                f'</x14:dataBar></x14:cfRule>'
+                f'<xm:sqref>{span}</xm:sqref>'
+                f'</x14:conditionalFormatting>')
+
+        # The legacy block goes immediately before <pageMargins>, <tableParts> or </worksheet>
+        # — whichever comes first — which is where the schema allows it.
+        for stop in ("<pageMargins", "<tableParts", "</worksheet>"):
+            at = body.find(stop)
+            if at != -1:
+                body = body[:at] + "".join(legacy) + body[at:]
+                break
+
+        block = (f'<extLst><ext uri="{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}" '
+                 f'xmlns:x14="{X14_NS}">'
+                 f'<x14:conditionalFormattings>{"".join(extended)}'
+                 f'</x14:conditionalFormattings></ext></extLst>')
+        # `extLst` is the LAST child of worksheet, after tableParts.
+        body = body.replace("</worksheet>", block + "</worksheet>")
+        rewritten[part] = body.encode("utf-8")
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as target:
+        for item in source.infolist():
+            # Directory entries have no content; `read()` on one raises. openpyxl does not
+            # normally write them, but a rewrite must not depend on that.
+            if item.is_dir():
+                target.writestr(item, b"")
+                continue
+            data = rewritten.get(item.filename, source.read(item.filename))
+            target.writestr(item, data)
+    source.close()
+    return out.getvalue()
+
+
 def build(season: int, week: Optional[int], season_type: str = "regular",
           conference: Optional[str] = None, division: str = "fbs") -> tuple:
     """Build the workbook for one scope. Returns (bytes, index_rows, omitted).
@@ -843,7 +1224,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         # AC-15.3 / AC-15.4, written before anything else so no sheet can exist without it.
         # The block is however many lines this sheet needs; the header address follows from
         # it (R-181) rather than being a constant every sheet has to agree with.
-        notes = [CFBD_CREDIT] + ([MODEL_DISCLAIMER] if sheet.has_predictions else [])
+        notes = [CFBD_CREDIT] + ([MODEL_DISCLAIMER] if sheet.sheet_disclaimer else [])
         for offset, text in enumerate(notes):
             tab.cell(ROW_CREDIT + offset, 1, text).font = note_font
         row_header = header_row(len(notes))
@@ -881,7 +1262,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         last_row = row_first_data + len(df) - 1
         last_column = get_column_letter(len(sheet.columns))
         # AC-15.12: native Excel affordances, so the file is workable rather than readable.
-        tab.freeze_panes = f"A{row_first_data}"
+        tab.freeze_panes = (f"{get_column_letter(sheet.freeze_column())}{row_first_data}")
         # R-182 TRAP 1: NO `tab.auto_filter.ref` HERE. A Table brings its own filter buttons,
         # and openpyxl documents that a table must not overlap the worksheet's autofilter —
         # an overlap is exactly the "we found a problem with some content" repair prompt that
@@ -896,21 +1277,24 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             name="TableStyleLight1", showFirstColumn=False, showLastColumn=False,
             showRowStripes=False, showColumnStripes=False)
         tab.add_table(table)
-        # WIDTHS FROM THE DATA, not from the header.
+        # WIDTHS FROM THE DATA, AND ONLY FROM THE DATA (R-217).
         #
-        # The previous version sized every column from its LABEL, so a "Spread" column got
-        # 11 characters regardless of what was in it and numeric cells rendered as #######,
-        # while a description column got the same treatment and ran off the screen.
+        # The previous version seeded each width with `len(label)`, and its own comment said
+        # the header rows were excluded from the measurement. They were — the 120-character
+        # credit line in A1 is not measured. BUT THE COLUMN LABEL WAS, so "Conference game"
+        # set a 15-wide column over data that is three characters, and Marc found four of
+        # them: Home rank, Current week, Best rank, Conference game. Every one is a long
+        # header over short data.
         #
-        # Measured over the actual values, then clamped. The clamp matters in both
-        # directions: a floor so a two-character header is still readable, and a ceiling so
-        # one 400-character description does not set the width for the sheet. The header
-        # rows are written ABOVE the table and are not measured — the credit line in A1 is
-        # 120 characters and would otherwise decide column A on its own, which is exactly
-        # how a header blows out the first column.
+        # R-057 confirmed these widths and was right at the time: the header was not wrapping
+        # then, so the label had to fit on one line. It wraps now, so it does not.
+        #
+        # The floor is the trade. A one-character column is unreadable even when its data is
+        # one character, so 6 is the narrowest anything gets.
+        widths = {}
         for index, (field, label) in enumerate(sheet.columns, start=1):
             letter = get_column_letter(index)
-            longest = len(str(label))
+            longest = 0
             for offset in range(len(df)):
                 value = tab.cell(row_first_data + offset, index).value
                 if value is None:
@@ -918,26 +1302,52 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 if isinstance(value, datetime):
                     rendered = 17
                 elif isinstance(value, float):
-                    # A float renders at its FORMAT width, not its repr: 0.07894736842105
-                    # occupies four characters once the number format is applied.
-                    rendered = len(number_format(field).replace("#,##", "").replace(";", ""))
-                    rendered = max(rendered, 8)
+                    if is_plain_integer(field):
+                        # R-216 made these render as "0", so a rank occupies as many
+                        # characters as it has digits. The blanket 8-character floor below
+                        # was written when every float carried decimals, and it kept a
+                        # two-digit rank column ten wide — which is the same defect R-217
+                        # is about, arriving from the other direction.
+                        rendered = len(f"{int(value)}")
+                    else:
+                        # A float renders at its FORMAT width, not its repr:
+                        # 0.07894736842105 occupies four characters once the number format
+                        # is applied.
+                        rendered = len(
+                            number_format(field).replace("#,##", "").replace(";", ""))
+                        rendered = max(rendered, 8)
                 else:
                     rendered = len(str(value))
                 longest = max(longest, rendered)
             ceiling = 60 if field.endswith("description") or field == "attribution" else 28
-            tab.column_dimensions[letter].width = min(max(longest + 3, 9), ceiling)
+            width = min(max(longest + 2, MIN_COLUMN_WIDTH), ceiling)
+            widths[label] = width
+            tab.column_dimensions[letter].width = width
             span = f"{letter}{row_first_data}:{letter}{last_row}"
-            if field in COLOUR_SCALE_FIELDS:
+            if field in DATA_BAR_FIELDS:
+                _add_data_bar(tab, span)
+            elif field in COLOUR_SCALE_FIELDS:
                 tab.conditional_formatting.add(span, ColorScaleRule(
                     start_type="min", start_color="F8696B",
                     mid_type="percentile", mid_value=50, mid_color="FFEB84",
                     end_type="max", end_color="63BE7B"))
             elif field in FLAG_FIELDS:
+                # R-218 TRAP. Once a boolean column renders "Yes", a rule comparing to TRUE
+                # matches nothing — NO ERROR, NO WARNING, the highlight simply disappears.
+                # The formula follows what the cell actually holds.
+                formula = '"Yes"' if field in sheet.display else "TRUE"
                 tab.conditional_formatting.add(span, CellIsRule(
-                    operator="equal", formula=["TRUE"],
+                    operator="equal", formula=[formula],
                     fill=PatternFill("solid", fgColor="D8EFD3")))
 
+        # THE HEADER ROW HEIGHT IS COMPUTED, NOT 38 (R-217).
+        #
+        # Marc's macro uses 38pt, which is three lines and a good default — but it is a
+        # default that happens to fit today's headers, and the next long one would silently
+        # clip. Measuring cannot clip: for each label, at that column's FINAL width, work out
+        # how many lines it needs and take the worst.
+        tab.row_dimensions[row_header].height = _header_height(
+            [(label, widths[label]) for _, label in sheet.columns])
         # The note carries what the Index has to be able to say about THIS sheet: that its
         # rows were cut, and — separately — that the Division filter could not reach it.
         note = sheet.note
@@ -953,7 +1363,10 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
 
     buffer = io.BytesIO()
     book.save(buffer)
-    return buffer.getvalue(), index_rows, omitted
+    wanted = {name: getattr(book[name], "_cfdb_data_bars", []) for name in book.sheetnames}
+    payload = _inject_data_bars(buffer.getvalue(),
+                                {k: v for k, v in wanted.items() if v})
+    return payload, index_rows, omitted
 
 
 def _write_index(book, season, week, season_type, conference, division, generated,
@@ -965,6 +1378,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
     holds, which model version produced any predicted column, and — the part that matters
     most — what is NOT here and why.
     """
+    from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
 
@@ -1079,6 +1493,52 @@ def _write_index(book, season, week, season_type, conference, division, generate
                          "(CFDB_SITE_HOST) was not set where it was built. Links are "
                          "omitted rather than guessed, because a wrong link is worse than "
                          "no link.")
+    row += 1
+
+    # R-219. THE LEGEND IS NOT OPTIONAL.
+    #
+    # R-026's icon-only exception on the SITE is defensible because R-102's legend explains
+    # it once — that is the stated reason in the code. A workbook travels further than a page
+    # does and has no tooltip at all, so the same exception needs the same support or the
+    # three verdict columns are undecodable symbols.
+    if any(s.display for s in SHEETS):
+        row += 1
+        tab.cell(row, 1, "Legend").font = header_font
+        tab.cell(row, 2, "Upset level, Winner covered and O/U result use the same marks as "
+                         "the site. Favourite covered is a word, not a mark, and can also "
+                         "read \"No favorite\".")
+        row += 1
+        for column, mark, meaning in MARK_LEGEND:
+            tab.cell(row, 1, column)
+            tab.cell(row, 2, mark).font = Font(bold=True)
+            tab.cell(row, 3, meaning)
+            row += 1
+        row += 1
+        tab.cell(row, 1, "Yes / No columns").font = header_font
+        tab.cell(row, 2, 'Boolean columns read "Yes" and "No" rather than TRUE and FALSE, '
+                         'which filters and reads better. The cost: they are TEXT, so a '
+                         'formula needs =SUM(--(range="Yes")) rather than '
+                         '=COUNTIF(range,TRUE).')
+        row += 1
+
+    # R-214, consequence 1. `Spread open` and `O/U open` are gone, and they were the
+    # disambiguator: a blank delta means two different things and nothing else in the file
+    # tells them apart. No sentinel is invented; the reader is told.
+    row += 1
+    tab.cell(row, 1, "Blank Δ Spread / Δ O/U").font = header_font
+    tab.cell(row, 2, "A blank delta means EITHER the line did not move OR cfdb holds no "
+                     "opening line for that game. The two are not distinguishable in this "
+                     "workbook — the opening-line columns are not included. The Matchup URL "
+                     "shows which it is.")
+    row += 1
+
+    # R-214, consequence 2. The verdicts are still correct; they are no longer checkable
+    # from the file alone, and saying so is cheaper than a reader concluding they are wrong.
+    row += 1
+    tab.cell(row, 1, "Upset / covered / O-U result").font = header_font
+    tab.cell(row, 2, "These are judged against the CLOSING line, which is not a column in "
+                     "this workbook. The verdicts are correct but cannot be checked against "
+                     "a number here; follow the Matchup URL to see the line each one used.")
     row += 1
 
     # A blank cell means cfdb HOLDS NOTHING, not zero. Said once, because the alternative is
