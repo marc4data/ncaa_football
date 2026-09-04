@@ -225,6 +225,16 @@ jobs:
         # from raw. This reads the compiled dependency graph, where that would show up.
         run: python ci/check_layering.py
 
+      - name: Assert no test can block the two-hourly publish
+        # SEVEN TESTS HAVE STRADDLED THE GATED DAG'S REFRESH BOUNDARY, comparing something it
+        # rebuilds against something it does not. The seventh blocked three consecutive runs
+        # on 2026-09-04 and would have blocked all twelve on a Saturday, because
+        # publish_to_serving sits downstream of dbt_test on all_success — so a false failure
+        # does not just report a problem, it stops the site updating.
+        #
+        # Six point fixes and a prose rule did not prevent a seventh. This reads the manifest.
+        run: python ci/check_test_refresh_scope.py
+
       - name: Assert the site image's boundary
         # R-225. The image is built with `context: ./site`, so anything above that directory
         # does not exist in the container. Three modules have reached past it — a config at

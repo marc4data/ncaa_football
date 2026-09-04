@@ -375,7 +375,11 @@ def test_the_query_sorts_by_date_then_time_then_rank_then_home_name():
     """R-108's second half. `nulls last` IS the whole of "unranked last" — without it
     Postgres sorts NULL high and every unranked game leads its own time slot."""
     sql = Path(schedule.__file__).read_text()
-    order = sql[sql.index("order by game_date"):sql.index("limit 400")]
+    # `limit 400` became `limit {ROW_CAP}` when the cap was named and raised (R-227), and
+    # slicing on the old literal silently produced an empty string that every assertion below
+    # then passed against. Anchored on the placeholder.
+    order = sql[sql.index("order by game_date"):sql.index("limit {ROW_CAP}")]
+    assert order, "the ORDER BY slice is empty — the anchor no longer matches"
     assert "start_date_et" in order
     assert "best_rank_in_game nulls last" in order
     assert order.index("start_date_et") < order.index("best_rank_in_game")
@@ -1266,3 +1270,99 @@ def test_the_band_admits_it_is_fbs_only_when_the_page_is_not(counting_markdown):
         [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), _Scope())
     band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
     assert "FBS only" not in band, "at the FBS setting there is nothing to warn about"
+
+
+# === R-227: the page was dropping games silently ==========================================
+
+def test_the_page_says_so_when_it_is_showing_fewer_games_than_the_filters_select(monkeypatch):
+    """THE SAME DEFECT R-196 FIXED IN THE EXPORT, LEFT ON THE PAGE.
+
+    `limit 400` was a literal, and 2026 week 1 holds 456 games at All Divisions — fifty-six
+    dropped with nothing said. A silently short page is worse than a slow one: the reader has
+    no way to know, and the count they are reading is wrong in a direction they cannot guess.
+    """
+    from views import schedule
+    shown = pd.DataFrame([_row(game_id=i, week=1, game_date="2026-09-03") for i in range(5)])
+    shown["rows_in_scope"] = 456
+
+    seen = {}
+    monkeypatch.setattr(schedule.st, "warning", lambda text, **k: seen.update(text=text))
+    schedule._truncation_note(shown)
+    assert "5" in seen["text"] and "456" in seen["text"]
+    assert "451" in seen["text"], "it must name how many are missing, not just the two totals"
+    assert "narrow" in seen["text"].lower(), "and what to do about it"
+
+
+def test_both_views_actually_call_the_truncation_check(counting_markdown, monkeypatch):
+    """CALLING THE FUNCTION IS THE HALF THAT MATTERS.
+
+    A mutation that deleted `_truncation_note(df)` from `_by_week` left every test green,
+    because they all called the function directly. A correct function nobody calls is the
+    same defect as no function.
+    """
+    from views import schedule
+    rows = pd.DataFrame([_row(game_id=i, week=1, game_date="2026-09-03") for i in range(3)])
+    rows["rows_in_scope"] = 456
+
+    for renderer in (schedule._stacked, schedule._dense):
+        seen = []
+        monkeypatch.setattr(schedule.st, "warning", lambda t, **k: seen.append(t))
+        renderer(rows, _Scope())
+        assert seen, f"{renderer.__name__} rendered a truncated page and said nothing"
+        assert "456" in seen[0]
+
+
+def test_the_games_query_asks_for_the_in_scope_count(monkeypatch):
+    """`count(*) over ()` is what makes the warning possible at all — a window function is
+    evaluated BEFORE the LIMIT, so one query answers both "how many are there" and "how many
+    did I get". Dropping it leaves the warning permanently silent and nothing else changes.
+    """
+    # Read from the source rather than by calling `_rows`, which is `@st.cache_data`-wrapped
+    # and has no cache to clear without a Streamlit runtime.
+    source = Path(schedule.__file__).read_text()
+    games_query = source[source.index("select game_id, season, week"):
+                         source.index("limit {ROW_CAP}")]
+    assert "count(*) over () as rows_in_scope" in " ".join(games_query.split()), (
+        "without the window count the truncation warning can never fire, and nothing else "
+        "about the page changes")
+
+
+def test_a_page_that_is_not_truncated_says_nothing(monkeypatch):
+    """A warning on every page is a warning nobody reads."""
+    from views import schedule
+    full = pd.DataFrame([_row(game_id=i, week=1, game_date="2026-09-03") for i in range(5)])
+    full["rows_in_scope"] = 5
+    called = []
+    monkeypatch.setattr(schedule.st, "warning", lambda *a, **k: called.append(a))
+    schedule._truncation_note(full)
+    schedule._truncation_note(pd.DataFrame())
+    assert not called
+
+
+def test_the_cap_clears_the_biggest_week_the_warehouse_has_ever_held():
+    """Measured, not chosen: the largest single week across every season is 456 games, and
+    the typical one is 50. A cap below the worst case is the defect, and a cap of infinity is
+    a browser tab nobody wants — a whole season at All Divisions is 3,745 games."""
+    from views import schedule
+    assert schedule.ROW_CAP >= 456 * 2, (
+        "the cap should clear the worst observed week with real headroom")
+    assert schedule.ROW_CAP < 3745, "but still bound a whole-season view"
+
+
+def test_the_page_query_carries_the_named_cap_and_no_literal_limit():
+    """The literal was the problem: nothing named it, so nothing could report it."""
+    import re
+    # COMMENTS STRIPPED FIRST. The comment explaining why the literal went says "limit 400",
+    # so a bare substring search matches its own prose — the ninth time in this repo.
+    source = "\n".join(line for line in Path(schedule.__file__).read_text().splitlines()
+                       if not line.lstrip().startswith("#"))
+    # PARSED, NOT SUBSTRING-MATCHED. `"limit 400" in source` also matches `limit 4000` — the
+    # distributions query's own cap — so the first version failed on a line it had no quarrel
+    # with. Read the limits as tokens and judge them individually.
+    limits = re.findall(r"\blimit\s+(\S+)", source)
+    assert "{ROW_CAP}" in limits, f"the games query no longer uses the named cap: {limits}"
+    assert "400" not in limits, "the bare literal that dropped 56 games is back"
+    # 4000 bounds the distributions read, which is a different query with a different shape:
+    # a few hundred rows per season, and it is not what a reader scrolls.
+    unexpected = [x for x in limits if x.isdigit() and x not in ("1", "4000")]
+    assert not unexpected, f"unexplained numeric limit(s): {unexpected}"

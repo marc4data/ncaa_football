@@ -1,3 +1,24 @@
+{{ config(tags=['full_refresh_only']) }}
+-- TAGGED `full_refresh_only`, AND IT IS THE SEVENTH TEST TO NEED IT.
+--
+-- `cfbd_scores_refresh` rebuilds `srv_game` and its ancestors every two hours. It does NOT
+-- rebuild `fct_team_series` — verified against the compiled manifest, not assumed. So the
+-- second half of this test compares a view that advances with every completed game against a
+-- fact that only moves on the weekly build, and the gap it measures is the interval between
+-- two refreshes rather than a defect.
+--
+-- IT BROKE ON 2026-09-04 AND TOOK THE SITE'S FRESHNESS WITH IT. `publish_to_serving` sits
+-- downstream of `dbt_test` on the default all_success rule, so three consecutive runs — 02:00,
+-- 04:00, 06:00, all retries exhausted — left the serving database untouched. The only reason
+-- the site was not eight hours stale is that a deploy happened to publish by hand.
+--
+-- SATURDAY IS WHY THIS MATTERED NOW. It started failing after the first games of the week
+-- completed. A November Saturday settles ~298 games, so every one of the day's twelve runs
+-- would have failed and the site would not have updated from morning to midnight.
+--
+-- Full authority still applies on the weekly `+tag:production` build, which refreshes both
+-- sides and where a genuine disagreement is a genuine defect.
+--
 -- The series must add up, and must agree with the view the site already serves.
 --
 -- fct_team_series derives the head-to-head record from the game spine instead of fetching

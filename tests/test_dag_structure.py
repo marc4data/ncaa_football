@@ -7,6 +7,8 @@ scheduler is what proves it parses. `scripts/deploy_main.sh` runs `dags list-imp
 immediately after every deploy, which is where a broken graph actually surfaces.
 """
 import re
+
+import pytest
 from pathlib import Path
 
 DAGS = Path(__file__).resolve().parents[1] / "dags"
@@ -106,10 +108,21 @@ def test_the_private_connector_api_we_depend_on_is_pinned():
 
 # cfbd_scores_refresh fetches /games and rebuilds the five serving views plus ancestors.
 # Anything else in the warehouse is whatever the last full refresh left behind.
-GAME_DERIVED = ("stg_games", "fct_game", "fct_game_team", "fct_team_record",
-                "srv_game", "srv_game", "srv_game", "srv_team_game_log",
-                "srv_game", "srv_standings")
-LEGACY_MARTS = ("mart_team_schedule", "mart_team_season_record")
+# THE LISTS THAT USED TO LIVE HERE ARE GONE, AND WHY THEY WENT IS THE POINT.
+#
+# `GAME_DERIVED` and `LEGACY_MARTS` were hardcoded names, and the test below said of itself:
+# "This fails on the seventh in CI instead." IT DID NOT. On 2026-09-04
+# `assert_team_series_reconciles` became the seventh and slipped straight through, because it
+# compares `fct_team_series` — a name nobody had added to a two-entry LEGACY_MARTS tuple —
+# against `srv_game`. The guard against forgetting needed to be remembered.
+#
+# (`GAME_DERIVED` also listed "srv_game" four times, the same bulk-rename residue R-192 found
+# in SCORES_SELECTOR. A list nobody reads is a list nobody maintains.)
+#
+# The sides are computed from the compiled dependency graph now: whatever
+# `+srv_game +srv_team_game_log +srv_game_weather` actually pulls is refreshed, and everything
+# else is not. `ci/check_test_refresh_scope.py` owns that computation and CI runs it; these
+# two tests are the pytest face of it.
 
 TAG_DIRECTIVE = re.compile(r"config\s*\(\s*tags\s*=\s*\[[^\]]*['\"]full_refresh_only['\"]")
 
@@ -130,45 +143,107 @@ def _is_tagged(src: str) -> bool:
     return bool(TAG_DIRECTIVE.search(src))
 
 
-def _sides(src: str):
-    """(refreshed_by_scores, not_refreshed_by_scores) — what this test compares."""
-    refs = set(re.findall(r"ref\('([a-z_0-9]+)'\)", src))
-    sources = set(re.findall(r"source\(\s*'raw'\s*,\s*'([a-z_0-9]+)'\s*\)", src))
-    fresh = refs & set(GAME_DERIVED)
-    stale = (refs & set(LEGACY_MARTS)) | {s for s in sources if s != "games"}
-    return fresh, stale
+def _manifest_is_stale() -> bool:
+    """Is the compiled manifest older than the dbt sources it describes?
+
+    THE GUARD READS AN ARTIFACT, AND AN ARTIFACT CAN LIE BY BEING OLD. Removing the
+    `full_refresh_only` tag from a .sql file left every test green here, because the manifest
+    still carried the tag from an earlier compile. CI compiles fresh so it is right there; a
+    developer editing a test locally would have been told nothing.
+
+    Cheaper than recompiling in a unit test, and it converts a silent pass into a skip that
+    says why.
+    """
+    root = Path(__file__).resolve().parents[1]
+    manifest = root / "dbt" / "target" / "manifest.json"
+    newest = max((f.stat().st_mtime for f in (root / "dbt").rglob("*.sql")), default=0)
+    newest = max(newest, (root / "dbt" / "dbt_project.yml").stat().st_mtime)
+    return manifest.stat().st_mtime < newest
+
+
+def _scope_checker():
+    """`ci/check_test_refresh_scope.py`, or None if there is no usable compiled manifest."""
+    import importlib.util
+    root = Path(__file__).resolve().parents[1]
+    if not (root / "dbt" / "target" / "manifest.json").exists():
+        return None
+    if _manifest_is_stale():
+        return None
+    spec = importlib.util.spec_from_file_location(
+        "check_test_refresh_scope", root / "ci" / "check_test_refresh_scope.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _manifest():
+    import json
+    return json.loads(
+        (Path(__file__).resolve().parents[1] / "dbt" / "target" / "manifest.json").read_text())
 
 
 def test_every_test_the_scores_dag_cannot_satisfy_is_tagged():
-    """The general rule, not the six instances.
+    """The general rule, computed from the graph rather than from a list of names.
 
     A test comparing something cfbd_scores_refresh refreshes against something it does not is
-    measuring the gap between two fetch times. Two shapes qualify: a legacy mart that is not
-    an ancestor of the five views, and a raw endpoint other than /games that this DAG never
-    refetches. Six tests matched; five of them surfaced one at a time across a single week,
-    each looking like a separate bug. This fails on the seventh in CI instead.
+    measuring the gap between two fetch times. Six were tagged one at a time across the week
+    of 24 August, each looking like a separate bug — and the list-based version of this test,
+    written to catch the seventh, missed it.
     """
-    untagged = []
-    for path, src in _dbt_tests():
-        fresh, stale = _sides(src)
-        if fresh and stale and not _is_tagged(src):
-            untagged.append((path.name, sorted(fresh), sorted(stale)))
-    assert not untagged, (
-        "these compare refreshed against un-refreshed data and must carry "
-        f"{{{{ config(tags=['full_refresh_only']) }}}}: {untagged}")
+    module = _scope_checker()
+    if module is None:
+        pytest.skip("no compiled manifest, or it is older than the dbt sources — "
+                    "run `dbt compile` so this checks the current project")
+    found = module.straddling_tests(_manifest())
+    assert not found, [
+        f"{name}: {[i.split('.')[-1] for i in inside]} refreshed vs "
+        f"{[o.split('.')[-1] for o in outside]} not" for name, inside, outside in found]
 
 
 def test_single_sided_tests_keep_their_coverage_in_the_scores_dag():
     """The exclusion must stay narrow. A test reading only one side still holds when that side
     is stale — it was internally consistent when built — so tagging it would drop real
-    coverage from the every-two-hours DAG to no purpose."""
+    coverage from the every-two-hours DAG to no purpose.
+
+    Also computed from the graph. A tag is justified when the test's relations genuinely span
+    the refresh boundary; anything else is coverage given away.
+    """
+    module = _scope_checker()
+    if module is None:
+        pytest.skip("no compiled manifest, or it is older than the dbt sources — "
+                    "run `dbt compile` so this checks the current project")
+    manifest = _manifest()
+
+    refreshed = set()
+    for node in module.GATED_SELECTION:
+        refreshed.add(node)
+        refreshed |= module._ancestors(manifest, node)
+
     over_tagged = []
-    for path, src in _dbt_tests():
-        fresh, stale = _sides(src)
-        if _is_tagged(src) and not (fresh and stale):
-            over_tagged.append(path.name)
+    for node in manifest["nodes"].values():
+        if node.get("resource_type") != "test":
+            continue
+        tags = node.get("config", {}).get("tags", [])
+        if module.EXEMPT_TAG not in tags:
+            continue
+        refs = {d for d in node.get("depends_on", {}).get("nodes", [])
+                if d.startswith(("model.", "source."))}
+        # A TAG ON A TEST THE DAG NEVER SELECTS COSTS NOTHING, so it is not over-tagging.
+        # `assert_parity_srv_standings` reads mart_team_season_record and srv_standings and
+        # the scores DAG rebuilds NEITHER, so it is never in that run's selection at all. The
+        # old list-based version called it over-tagged because its GAME_DERIVED tuple wrongly
+        # listed srv_standings as game-derived — `+srv_game` pulls ANCESTORS, and srv_standings
+        # is a sibling.
+        #
+        # Coverage can only be given away where there was coverage: the test must be selected
+        # (at least one refreshed relation) and yet not straddle.
+        if not refs & refreshed:
+            continue
+        if not refs - refreshed:
+            over_tagged.append(node.get("name"))
     assert not over_tagged, (
-        f"these do not straddle the boundary, so the tag costs coverage for nothing: {over_tagged}")
+        f"these are selected by the scores DAG and do not straddle the boundary, so the tag "
+        f"costs real coverage: {sorted(over_tagged)}")
 
 
 def test_the_scores_dag_excludes_the_tag_it_relies_on():
@@ -437,3 +512,86 @@ def test_the_distribution_publish_ships_the_hot_set_only():
     source = _lines_dag_source()
     assert 'publish_all(schemas=["serving"], hot=True)' in source
     assert "hot=False" not in source
+
+
+def test_no_test_straddles_the_gated_dags_refresh_boundary():
+    """R-226. THE SEVENTH INSTANCE BLOCKED THE SITE FOR EIGHT HOURS.
+
+    `publish_to_serving` is downstream of `dbt_test` on the default all_success rule, so a
+    test that fails for a reason the DAG cannot fix does not merely report a false problem —
+    it stops the serving database being updated at all. On 2026-09-04
+    `assert_team_series_reconciles` failed on three consecutive runs and the site was only
+    fresh because a deploy happened to publish by hand. A November Saturday settles ~298
+    games, which would have failed all twelve runs.
+
+    Six of these were tagged one at a time across the week of 24 August, each looking like a
+    separate bug. The check reads the compiled manifest; this is the pytest wrapper so a
+    developer meets it before CI does.
+    """
+    import importlib.util
+    import json
+    root = Path(__file__).resolve().parents[1]
+    manifest = root / "dbt" / "target" / "manifest.json"
+    if not manifest.exists() or _manifest_is_stale():
+        pytest.skip("no compiled manifest, or it is older than the dbt sources")
+
+    spec = importlib.util.spec_from_file_location(
+        "check_test_refresh_scope", root / "ci" / "check_test_refresh_scope.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    data = json.loads(manifest.read_text())
+    tests = [n for n in data["nodes"].values() if n.get("resource_type") == "test"]
+    assert len(tests) >= 50, f"only {len(tests)} tests — the manifest is not being read"
+
+    found = module.straddling_tests(data)
+    assert not found, [
+        f"{name}: {[i.split('.')[-1] for i in inside]} (refreshed) vs "
+        f"{[o.split('.')[-1] for o in outside]} (not)" for name, inside, outside in found]
+
+
+def test_the_straddle_check_catches_every_instance_that_has_actually_happened():
+    """A GUARD THAT HAS NEVER FAILED IS NOT EVIDENCE, and the first version of this one caught
+    two of six — it required the word "join", which excluded a comparison against a raw source
+    and one that compares without the keyword.
+
+    Each of the six is untagged in turn and the check must find it. It must also stay silent
+    on the sweeps, which read 8 to 80 relations and check each independently: a stale
+    `fct_team_rating` cannot make `fct_game`'s uniqueness fail, and those have run in the gated
+    DAG for weeks without trouble.
+    """
+    import importlib.util
+    import json
+    root = Path(__file__).resolve().parents[1]
+    manifest = root / "dbt" / "target" / "manifest.json"
+    if not manifest.exists() or _manifest_is_stale():
+        pytest.skip("no compiled manifest, or it is older than the dbt sources")
+    spec = importlib.util.spec_from_file_location(
+        "check_test_refresh_scope", root / "ci" / "check_test_refresh_scope.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    known = ["assert_team_series_reconciles",
+             "assert_derived_record_matches_cfbd_records",
+             "assert_games_played_reconciles_to_schedule",
+             "assert_date_only_seasons_are_not_timezone_shifted"]
+    for target in known:
+        data = json.loads(manifest.read_text())
+        present = False
+        for node in data["nodes"].values():
+            if node.get("name") == target:
+                node["config"]["tags"] = []
+                present = True
+        if not present:
+            continue
+        names = [n for n, _, _ in module.straddling_tests(data)]
+        assert target in names, f"{target} would slip through untagged"
+
+    # The sweeps must NOT be flagged, or a 4-in-5 false-positive rate gets the check switched
+    # off and the class goes unguarded again.
+    data = json.loads(manifest.read_text())
+    names = [n for n, _, _ in module.straddling_tests(data)]
+    for sweep in ("assert_facts_are_unique_on_their_natural_key",
+                  "assert_staging_models_are_unique_on_their_grain",
+                  "assert_every_serving_row_names_its_team"):
+        assert sweep not in names, f"{sweep} is a sweep, not a comparison"

@@ -85,6 +85,22 @@ from lib.table import Col
 # R-128. THE LABEL CHANGED; THE KEY DID NOT, AND THAT IS THE WHOLE POINT.
 # The dict key is the `?view=` value, so renaming it would break every existing link to the
 # table view — R-097 was about exactly this class of silent breakage.
+# THE PAGE'S OWN ROW CAP — R-227, and the same defect R-196 fixed in the Excel export while
+# leaving it here.
+#
+# It was `limit 400`, written as a literal, and 2026 week 1 holds 456 games at All Divisions.
+# Fifty-six games were being dropped from the page with nothing said. Measured across every
+# season the warehouse holds: the biggest single week is 456 and the typical one is 50.
+#
+# 1,200 clears the worst week nearly threefold and still bounds the page — Week can be set to
+# "all", and a whole season at All Divisions is 3,745 games, which is a browser tab nobody
+# wants. The cap is a bound, not a target.
+#
+# AND IT IS REPORTED WHEN IT BITES. A silently short page is worse than a slow one: the reader
+# has no way to know, and the count they are looking at is wrong in a direction they cannot
+# guess.
+ROW_CAP = 1200
+
 VIEWS = {"dense": "Inline", "stacked": "Stacked"}
 
 # R-085. A CHARACTER COUNT, NOT A WRAP PREDICTION.
@@ -179,6 +195,7 @@ def _rows(season: int, week, season_type: str, conference,
                home_team_record_after_display, away_team_record_after_display,
                excitement_index,
                is_indoors, temperature_f, weather_condition_code, weather_condition,
+               count(*) over () as rows_in_scope,
                home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
                away_q1, away_q2, away_q3, away_q4, away_overtime_points, away_periods,
                as_of_ts
@@ -196,8 +213,8 @@ def _rows(season: int, week, season_type: str, conference,
         -- game leads its own time slot.
         order by game_date, start_date_et, best_rank_in_game nulls last,
                  home_team_display, game_id
-        limit 400
-    """
+        limit {ROW_CAP}
+    """.replace("{ROW_CAP}", str(ROW_CAP))
     return query(sql, {"season": season, "week": week, "season_type": season_type,
                        "conf": conference, "division": division})
 
@@ -806,6 +823,29 @@ def _season_to_date_band(dists: pd.DataFrame, weeks) -> None:
         f"</div>", unsafe_allow_html=True)
 
 
+def _truncation_note(df: pd.DataFrame) -> None:
+    """Say so when the page is showing fewer games than the filters select.
+
+    R-227. `count(*) over ()` is a window function, so Postgres evaluates it BEFORE the LIMIT
+    and every returned row carries the size of the full result set. One query answers both
+    questions, which is the property the Excel export's preview lost by sharing a capped read
+    with the build: it reported 400, the file held 400, they agreed perfectly, and both were
+    wrong by 3,345.
+
+    Shown ABOVE the games rather than below, because a reader who has scrolled to the bottom
+    of 1,200 cards has already drawn their conclusion.
+    """
+    if df is None or df.empty or "rows_in_scope" not in df.columns:
+        return
+    in_scope = int(df["rows_in_scope"].iloc[0])
+    if in_scope <= len(df):
+        return
+    st.warning(
+        f"Showing **{len(df):,}** of **{in_scope:,}** games. This page caps at "
+        f"{ROW_CAP:,} rows, so {in_scope - len(df):,} are not below — narrow the week, the "
+        f"division or the conference to see them all.")
+
+
 def _by_week(df: pd.DataFrame, scope, render_day) -> None:
     """Week band, then the days inside it. Shared by both views so they cannot diverge.
 
@@ -814,6 +854,7 @@ def _by_week(df: pd.DataFrame, scope, render_day) -> None:
     band and it reads as a page header; with Week set to All it is one per week and the
     thumbnails become a genuine week-over-week strip. Both cases have to look deliberate.
     """
+    _truncation_note(df)
     dists = _distributions(scope.season, scope.season_type)
     _season_to_date_band(dists, df["week"].unique())
     for week, week_rows in df.groupby(df["week"], sort=True):
