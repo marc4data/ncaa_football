@@ -30,6 +30,19 @@ select
     t.classification,
     t.opponent_team_id,
     t.opponent,
+    -- THE DIVISION FILTER NEEDS A GAME-LEVEL FACT, AND THIS VIEW ONLY HAD TEAM-LEVEL ONES.
+    --
+    -- `classification` is the TEAM's, so filtering on it would keep the FBS side of an
+    -- FBS-vs-FCS game and drop the other — one row for a game that has two, which breaks the
+    -- pairing every other thing on the Scores sheet is built on (the banding, the possession
+    -- sum, the away-then-home order).
+    --
+    -- The predicate is srv_game.is_fbs_game's, taken literally rather than re-derived:
+    -- `(home_classification = 'fbs' or away_classification = 'fbs')`. Here the same two
+    -- classifications are called `classification` and `opponent_classification`, and they are
+    -- symmetric across a game's two rows, so both rows agree by construction. Two spellings
+    -- of one rule is how Schedule and the export drifted in R-184.
+    (t.classification = 'fbs' or t.opponent_classification = 'fbs') as is_fbs_game,
     t.is_home,
     t.is_neutral_site,
     t.is_completed,

@@ -1918,6 +1918,12 @@ models:
       - name: opponent
         description: >
           Opponent name.
+      - name: is_fbs_game
+        description: >
+          Whether EITHER side of this game is FBS — the same predicate srv_game carries, so
+          the Division filter selects the same games from both views. Symmetric across a
+          game's two rows: filtering on it keeps both or neither, which team-level
+          `classification` cannot do.
       - name: is_home
         description: >
           Whether this team was the designated home side.
