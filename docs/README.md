@@ -40,7 +40,6 @@ from a constant somebody has to remember to change.
 
 ## Also here
 
-`request_register.md` (including nine requests that were dropped, and why) ·
 `roadmap.md` · `model_reconciliation.md` · `phase1_model_spec.md` ·
 `site_ia_and_layouts.md` (a competitive review of ESPN, CBS and NCAA.com) ·
 `team_identity_spec.md` · `wireframe_v03.html` (clickable, eighteen pages) ·
