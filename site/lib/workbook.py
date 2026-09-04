@@ -194,7 +194,13 @@ def _weekday(record):
 # an EN dash, and at 11pt the two are indistinguishable. "The favourite won" and "cfdb holds
 # no closing line" are opposite claims and must not look the same. An open circle against a
 # filled one says it in the same visual language as the rest.
-UPSET_MARKS = {"none": "○", "upset": "●", "big": "●", "blowout": "●"}
+# THE MARK REPEATS WITH THE LEVEL (Marc, round 4). One circle, two, three.
+#
+# The site distinguishes the three levels by SHADE, which a spreadsheet cannot carry into a
+# filter dropdown — "show me every blowout" would mean picking a colour. Repetition carries
+# the same ordering, sorts correctly (●● sorts after ●), and each value is its own entry in
+# the dropdown. It is also readable without the legend in a way that shade is not.
+UPSET_MARKS = {"none": "○", "upset": "●", "big": "●●", "blowout": "●●●"}
 COVER_MARKS = {"yes": "■", "no": "□", "push": "◨", "pending": "·"}
 OVER_MARKS = {"yes": "▲", "no": "▼", "push": "◨", "pending": "·"}
 NO_DATA_MARK = "–"        # the site's own mark for "we hold nothing here"
@@ -222,8 +228,9 @@ OPEN_MARKS = {"○", "□"}
 # and has no tooltip at all, so the same exception needs the same support or it is just
 # undecodable symbols. This block is not optional.
 MARK_LEGEND = [
-    ("Upset level", "●", "an upset against the closing line (the site shades this by level; "
-                         "in the workbook any ● is an upset)"),
+    ("Upset level", "●", "an upset — the favourite lost outright"),
+    ("Upset level", "●●", "a level 2 upset (the site shades this; here the mark repeats)"),
+    ("Upset level", "●●●", "a level 3 upset"),
     ("Upset level", "○", "the favourite won"),
     # `Favourite covered` is DELIBERATELY NOT LISTED HERE. Marc's CSV marks it
     # `yes/no = Yes/No`, so it renders as words, and naming it beside the marks would tell a
@@ -241,6 +248,66 @@ MARK_LEGEND = [
 # One shared alignment object rather than one per cell: openpyxl stores styles by identity
 # and a fresh Alignment for each of 80 rows inflates the styles table for no benefit.
 CENTRED = None      # built lazily in `build`, where Alignment is imported
+
+# A TEXT COLUMN WITH FEWER THAN THIS MANY DISTINCT VALUES IS A CATEGORY, NOT PROSE.
+#
+# Marc: "for any text fields with cardinality <5 make them center aligned". The reasoning
+# holds — Yes/No, Final/Scheduled, a verdict word — those are labels, and a label centred in
+# a narrow column reads as a value rather than as the start of a sentence. A team name or a
+# venue is prose and stays left, where the eye finds the first letter.
+#
+# MEASURED FROM THE DATA IN THIS EXPORT, which has a consequence worth knowing: a column can
+# be centred in a one-week file and left-aligned in a full-season one, because the season saw
+# a fifth distinct value. `Condition` is the likely one — a week of clear weather has three
+# values and a season has a dozen. Declaring the set instead would be stable but would need
+# maintaining by hand, and would be wrong the first time a column changed. Alignment is
+# cosmetic and the measurement is honest, so measurement wins; if the wobble annoys, the fix
+# is a declared set and it is one dictionary.
+LOW_CARDINALITY = 5
+
+# ...AND ENOUGH ROWS TO TELL A CATEGORY FROM A SMALL SAMPLE.
+#
+# With three games in scope, EVERY text column has fewer than five distinct values — the team
+# names included. Centring them all would be the rule firing on no evidence, and a one-game
+# export would come out looking nothing like a fifty-game one. Below this many rows the
+# measurement is not worth making and text stays left, which is the safe default.
+MIN_ROWS_TO_JUDGE_CARDINALITY = 12
+
+
+def _low_cardinality_text(df, fields) -> set:
+    """Text columns in this frame holding fewer than LOW_CARDINALITY distinct values.
+
+    Nulls do not count towards the total — a column of Yes/No/blank is still two categories,
+    and counting the blank would push a three-value column over the line for no reason.
+    """
+    out = set()
+    if len(df) < MIN_ROWS_TO_JUDGE_CARDINALITY:
+        return out
+    for field in fields:
+        if field not in df.columns:
+            continue
+        values = df[field].dropna()
+        if values.empty:
+            continue
+        if not all(isinstance(v, str) for v in values.head(50)):
+            continue
+        if values.nunique() < LOW_CARDINALITY:
+            out.add(field)
+
+    # AN away_/home_ PAIR IS ONE DECISION, NOT TWO.
+    #
+    # Measured on real data, `Home record` came out centred and `Away record` left, because
+    # in one week the home side happened to hold four distinct records and the away side
+    # five. Two identical columns aligned differently reads as a defect, and it is a coin
+    # flip that would land the other way next week. So a pair agrees, and it agrees on PROSE
+    # — the safe default — whenever either half looks like prose.
+    for field in list(out):
+        for this, that in (("away_", "home_"), ("home_", "away_")):
+            if field.startswith(this):
+                sibling = that + field[len(this):]
+                if sibling in fields and sibling not in out:
+                    out.discard(field)
+    return out
 
 
 def _marked(marks):
@@ -855,11 +922,41 @@ MIN_COLUMN_WIDTH = 6
 # breaks, and one broken word is a better trade than a 13-wide column of "0.00".
 HEADER_WORD_CAP = 12
 
+# WIDTHS MARC SET BY HAND, IN EXCEL CHARACTER UNITS.
+#
+# These OVERRIDE the measurement for these columns and nothing else. Measuring is right by
+# default — it is what stopped a 15-character header sizing a 3-character column — but it
+# cannot know that a column is worth an extra character because of how the header wraps, or
+# worth one fewer because the reader never scans it. Marc read these off Excel's own width
+# dialog with the real file in front of him, which is better information than the measurement
+# has.
+#
+# Keyed by LABEL, so they follow the column if the order changes again.
+WIDTH_OVERRIDES = {
+    "Winner covered": 8.0,
+    "Final margin": 5.85,
+    "Season": 5.6,
+    "Wind mph": 5.5,
+    "Pred margin": 6.5,
+    "Home win prob": 7.7,
+}
+
 # Excel's default row height is 15pt for an 11pt font, and a wrapped line needs about 13pt
 # once the header's own padding is allowed for. Both are conventions rather than constants
 # openpyxl exposes, so they are named here rather than appearing as bare numbers.
 HEADER_LINE_HEIGHT = 13.0
-MIN_HEADER_HEIGHT = 15.0
+
+# 50pt, AND IT IS A FLOOR RATHER THAN A FIXED HEIGHT.
+#
+# Marc: the header needs "enough room to be above the drop-down filters". An Excel Table puts
+# a filter button INSIDE the header cell, bottom-right, and it overlaps the last line of a
+# wrapped label — so a header sized to exactly fit its text has its final word sitting under
+# the button.
+#
+# Setting it to 50 outright would give back what R-217 bought: a longer header in a future
+# column would clip silently again. So the computed height still wins whenever it is taller,
+# and 50 is only the minimum. Today the computation returns 39, so 50 applies.
+MIN_HEADER_HEIGHT = 50.0
 
 
 def _header_height(labels_and_widths) -> float:
@@ -889,7 +986,11 @@ def _header_height(labels_and_widths) -> float:
                 lines += 1
                 current = current[usable:]
         worst = max(worst, lines)
-    return max(MIN_HEADER_HEIGHT, worst * HEADER_LINE_HEIGHT)
+    # The FLOOR IS NOT APPLIED HERE. This answers "how tall must it be to not clip", and the
+    # caller decides whether a taller minimum applies for a different reason (filter buttons).
+    # Folding the two together made a unit test comparing a short label to a long one return
+    # the same number for both, and it stopped being a test.
+    return worst * HEADER_LINE_HEIGHT
 
 
 COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential",
@@ -1408,13 +1509,16 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             cell.alignment = Alignment(vertical="top", horizontal="center", wrap_text=True)
 
         links = sheet.hyperlinks(site_host, **link_scope) if site_host else {}
+        # Measured on the RENDERED values, not the raw ones: `is_indoors` is a boolean in the
+        # frame and reads "Yes"/"No" in the sheet, and it is the sheet the reader looks at.
+        rendered = pd.DataFrame(
+            {field: [sheet.value_for(field, record) for _, record in df.iterrows()]
+             for field in sheet.fields})
+        centred_fields = sheet.centred | _low_cardinality_text(rendered, sheet.fields)
         for offset, (_, record) in enumerate(df.iterrows()):
             for index, field in enumerate(sheet.fields, start=1):
                 builder = links.get(field)
-                if field in sheet.centred:
-                    cell_alignment = CENTRED
-                else:
-                    cell_alignment = None
+                cell_alignment = CENTRED if field in centred_fields else None
                 if field in sheet.url_value_fields:
                     # A WORD, not the url, with the url behind it (Marc, round 3). With no
                     # origin resolved the cell is blank rather than a label that goes
@@ -1507,7 +1611,8 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             ceiling = 60 if field.endswith("description") or field == "attribution" else 28
             longest_word = max((len(w) for w in str(label).split()), default=0)
             floor = max(MIN_COLUMN_WIDTH, min(longest_word, HEADER_WORD_CAP))
-            width = min(max(longest + 2, floor), ceiling)
+            width = WIDTH_OVERRIDES.get(
+                label, min(max(longest + 2, floor), ceiling))
             widths[label] = width
             tab.column_dimensions[letter].width = width
             span = f"{letter}{row_first_data}:{letter}{last_row}"
@@ -1533,8 +1638,9 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         # default that happens to fit today's headers, and the next long one would silently
         # clip. Measuring cannot clip: for each label, at that column's FINAL width, work out
         # how many lines it needs and take the worst.
-        tab.row_dimensions[row_header].height = _header_height(
-            [(label, widths[label]) for _, label in sheet.columns])
+        tab.row_dimensions[row_header].height = max(
+            MIN_HEADER_HEIGHT,
+            _header_height([(label, widths[label]) for _, label in sheet.columns]))
         # The note carries what the Index has to be able to say about THIS sheet: that its
         # rows were cut, and — separately — that the Division filter could not reach it.
         note = sheet.note

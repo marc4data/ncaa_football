@@ -83,7 +83,16 @@ def built(monkeypatch):
                 # them every verdict cell is the no-data dash and any test about the marks
                 # passes while proving nothing — which is exactly what the colour test
                 # refused to do.
-                for column, values in (("upset_level", ["upset", "none"]),
+                # Distinct team and venue names, because the alignment rule now depends on
+                # CARDINALITY: with both rows reading "text" the fixture made a team column
+                # look like a two-value category and centred it, which is not what real data
+                # does. A fixture that misrepresents the shape of the data cannot test a rule
+                # that reads the shape of the data.
+                for column, values in (("away_team_display", ["Rice", "Auburn"]),
+                                       ("home_team_display", ["Louisville", "Texas"]),
+                                       ("venue_display", ["Cardinal Stadium", "DKR"]),
+                                       ("winner", ["Louisville", "Texas"]),
+                                       ("upset_level", ["upset", "none"]),
                                        ("winner_covered_close", ["yes", "no"]),
                                        ("over_met", ["yes", "no"]),
                                        ("favorite_covered", ["yes", "no_favorite"])):
@@ -1170,7 +1179,7 @@ def test_the_header_row_wraps_and_its_height_is_computed_not_hardcoded(built):
     header = workbook.header_row(1)
     assert tab.cell(header, 1).alignment.wrap_text is True
     height = tab.row_dimensions[header].height
-    assert height and height > workbook.MIN_HEADER_HEIGHT
+    assert height and height >= workbook.MIN_HEADER_HEIGHT
 
     from openpyxl.utils import get_column_letter
     worst = 0
@@ -1178,8 +1187,13 @@ def test_the_header_row_wraps_and_its_height_is_computed_not_hardcoded(built):
             next(s for s in workbook.SHEETS if s.name == "Schedule").columns, start=1):
         width = tab.column_dimensions[get_column_letter(index)].width
         worst = max(worst, workbook._header_height([(label, width)]))
-    assert height == worst, (
-        f"the row is {height}pt and the tallest label needs {worst}pt")
+    # THE FLOOR IS A FLOOR, NOT A FIXED HEIGHT. Marc's 50pt gives the labels room above the
+    # Table's filter buttons, which sit inside the header cell and overlap the last line. But
+    # a longer header in some future column must still be able to push the row taller, or
+    # R-217's "computing cannot clip" is given straight back.
+    assert height == max(worst, workbook.MIN_HEADER_HEIGHT), (
+        f"the row is {height}pt, the tallest label needs {worst}pt and the floor is "
+        f"{workbook.MIN_HEADER_HEIGHT}pt")
 
 
 def test_a_longer_header_makes_the_row_taller_which_a_hardcoded_38_could_not():
@@ -1238,10 +1252,14 @@ def test_the_verdict_columns_use_the_sites_marks_and_a_dash_for_nothing():
     workbook is opened on more platforms than a page is."""
     for marks in (workbook.UPSET_MARKS, workbook.COVER_MARKS, workbook.OVER_MARKS):
         for glyph in marks.values():
-            assert len(glyph) == 1, glyph
+            # A mark may REPEAT to carry a level (●, ●●, ●●●) but it is always repetitions
+            # of ONE character — two different shapes in one cell would be a new mark rather
+            # than a stronger one.
+            assert 1 <= len(glyph) <= 3, glyph
+            assert len(set(glyph)) == 1, f"{glyph!r} mixes shapes"
             # Emoji live above U+1F000, and the presentation selector is U+FE0F. Neither
             # may appear here.
-            assert ord(glyph) < 0x1F000, f"{glyph!r} is emoji-presentation"
+            assert ord(glyph[0]) < 0x1F000, f"{glyph!r} is emoji-presentation"
             assert "️" not in glyph
     render = workbook._marked(workbook.COVER_MARKS)
     assert render("yes") == "■" and render("push") == "◨"
@@ -1476,6 +1494,11 @@ def test_a_column_is_never_narrower_than_the_longest_word_in_its_header(built):
     for index in range(1, tab.max_column + 1):
         label = str(tab.cell(header, index).value)
         width = tab.column_dimensions[get_column_letter(index)].width
+        if label in workbook.WIDTH_OVERRIDES:
+            # Marc set this one by hand with the real file open, which is better information
+            # than the measurement has. The override is asserted instead.
+            assert width == workbook.WIDTH_OVERRIDES[label], label
+            continue
         longest_word = max((len(w) for w in label.split()), default=0)
         expected_floor = max(workbook.MIN_COLUMN_WIDTH,
                              min(longest_word, workbook.HEADER_WORD_CAP))
@@ -1573,3 +1596,167 @@ def test_the_open_marks_in_the_sheet_carry_the_same_colour(built):
                 assert cell.font.size >= 12
                 coloured += 1
     assert coloured, "no open mark appeared in the fixture, so this proved nothing"
+
+
+# === round four ===========================================================================
+
+def test_low_cardinality_text_is_centred_and_prose_is_not(monkeypatch):
+    """Marc: "for any text fields with cardinality <5 make them center aligned".
+
+    A frame with ENOUGH ROWS TO JUDGE, because the rule reads the shape of the data and the
+    two-row fixture cannot show it: with two rows every text column looks like a category,
+    team names included.
+    """
+    import pandas as _pd
+    rows = workbook.MIN_ROWS_TO_JUDGE_CARDINALITY + 8
+    frame = _pd.DataFrame({
+        "status": ["Final", "Scheduled"] * (rows // 2),                  # 2 distinct
+        "season_type": ["regular"] * rows,                               # 1
+        "home_team_display": [f"Team {i}" for i in range(rows)],         # all distinct
+        "venue_display": [f"Stadium {i}" for i in range(rows)],          # all distinct
+        "weather_condition": ["Clear", "Rain", "Cloudy", "Fog", "Snow"] * (rows // 5),
+    })
+    found = workbook._low_cardinality_text(frame, list(frame.columns))
+    assert "status" in found and "season_type" in found
+    assert "home_team_display" not in found, "a team name is prose, not a category"
+    assert "venue_display" not in found
+    assert "weather_condition" not in found, "five distinct values is NOT fewer than five"
+
+
+def test_the_cardinality_rule_declines_to_judge_a_short_export():
+    """A one-game export must not come out looking nothing like a fifty-game one. Below the
+    threshold every text column is trivially low-cardinality and the rule abstains."""
+    import pandas as _pd
+    tiny = _pd.DataFrame({"home_team_display": ["Rice", "Auburn"]})
+    assert workbook._low_cardinality_text(tiny, ["home_team_display"]) == set()
+
+
+def test_nulls_do_not_count_towards_cardinality():
+    """A column of Yes / No / blank is two categories. Counting the blank would push a
+    three-value column over the line for no reason a reader would recognise."""
+    import pandas as _pd
+    rows = workbook.MIN_ROWS_TO_JUDGE_CARDINALITY + 4
+    frame = _pd.DataFrame({"verdict": (["Yes", "No", None, "Push"] * rows)[:rows]})
+    assert "verdict" in workbook._low_cardinality_text(frame, ["verdict"])
+
+
+def test_the_header_row_clears_the_tables_filter_buttons(built):
+    """Marc: the header needs "enough room to be above the drop-down filters". An Excel Table
+    puts a filter button INSIDE the header cell, and it overlaps the last line of a wrapped
+    label."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    assert tab.row_dimensions[workbook.header_row(1)].height >= 50
+
+
+def test_the_fifty_point_floor_never_shortens_a_header_that_needs_more(monkeypatch):
+    """The floor must not become a FIXED height — that is R-217's clipping defect returning
+    by another route.
+
+    Asserted on a BUILT FILE, not only on the computation. The first version tested
+    `_header_height` alone and stayed green when the build was changed to write
+    MIN_HEADER_HEIGHT unconditionally: the function was still right and the workbook was
+    still wrong. Nothing in the fixture needs more than 50pt, so this makes a sheet that does.
+    """
+    tall = workbook._header_height([("Supercalifragilistic Expialidocious Header", 6)])
+    assert tall > workbook.MIN_HEADER_HEIGHT
+
+    monkeypatch.setenv("CFDB_SITE_HOST", "https://cfdb.example")
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    stretched = workbook.Sheet(
+        "Schedule", schedule.view, schedule.sql,
+        [(schedule.columns[0][0], "Supercalifragilistic Expialidocious Header")]
+        + list(schedule.columns[1:]),
+        has_predictions=schedule.has_predictions,
+        sheet_disclaimer=schedule.sheet_disclaimer,
+        derived=schedule.derived, display=schedule.display,
+        link_fields=schedule.link_fields, freeze_before=schedule.freeze_before)
+    monkeypatch.setattr(workbook, "SHEETS", [stretched])
+    payload, _, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    from openpyxl import load_workbook
+    tab = load_workbook(BytesIO(payload))["Schedule"]
+    height = tab.row_dimensions[workbook.header_row(1)].height
+    assert height > workbook.MIN_HEADER_HEIGHT, (
+        f"a header needing {tall}pt was written at {height}pt — the floor has become a "
+        f"ceiling and long headers will clip")
+
+
+def test_the_upset_mark_repeats_once_per_level():
+    """Marc, round 4. The site distinguishes levels by SHADE, which a filter dropdown cannot
+    carry — "show me every blowout" would mean picking a colour. Repetition keeps the
+    ordering, sorts correctly (●● after ●) and gives each level its own dropdown entry."""
+    assert workbook.UPSET_MARKS["upset"] == "●"
+    assert workbook.UPSET_MARKS["big"] == "●●"
+    assert workbook.UPSET_MARKS["blowout"] == "●●●"
+    assert workbook.UPSET_MARKS["none"] == "○"
+    levels = ["upset", "big", "blowout"]
+    lengths = [len(workbook.UPSET_MARKS[k]) for k in levels]
+    assert lengths == sorted(lengths) == [1, 2, 3], "the mark must grow WITH the level"
+    assert sorted(workbook.UPSET_MARKS[k] for k in levels) == ["●", "●●", "●●●"], (
+        "repetition must sort in level order, which is half the reason for it")
+
+
+def test_every_repeated_mark_is_in_the_legend(built):
+    """Two circles is a different value from one in the filter dropdown, so it needs its own
+    line. A legend that explains ● and leaves the reader to infer ●●● is not a legend."""
+    _, book, _, _ = built
+    text = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
+    for glyph in set(workbook.UPSET_MARKS.values()):
+        assert f"\n{glyph}\n" in f"\n{text}\n" or glyph in text, glyph
+    legend_marks = {mark for _, mark, _ in workbook.MARK_LEGEND}
+    for glyph in workbook.UPSET_MARKS.values():
+        assert glyph in legend_marks, f"{glyph} is rendered and not explained"
+
+
+def test_the_hand_set_widths_are_exactly_what_marc_measured(built):
+    """Six columns he sized himself in Excel's width dialog with the real file open. That is
+    better information than the measurement has, so it wins for these and nothing else."""
+    from openpyxl.utils import get_column_letter
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    assert workbook.WIDTH_OVERRIDES == {
+        "Winner covered": 8.0, "Final margin": 5.85, "Season": 5.6,
+        "Wind mph": 5.5, "Pred margin": 6.5, "Home win prob": 7.7}
+    for label, expected in workbook.WIDTH_OVERRIDES.items():
+        letter = get_column_letter(labels[label])
+        assert tab.column_dimensions[letter].width == expected, label
+
+
+def test_winner_covered_is_centred_as_well_as_widened(built):
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    index = labels["Winner covered"]
+    assert tab.cell(header, index).alignment.horizontal == "center"
+    assert tab.cell(header + 1, index).alignment.horizontal == "center"
+
+
+def test_an_away_home_pair_is_aligned_the_same_way():
+    """Measured on 83 real games: `Home record` came out centred and `Away record` left,
+    because that week the home side held four distinct records and the away side five.
+
+    Two identical columns aligned differently reads as a defect, and it is a coin flip that
+    lands the other way next week. A pair agrees, on prose — the safe default.
+    """
+    import pandas as _pd
+    rows = workbook.MIN_ROWS_TO_JUDGE_CARDINALITY + 8
+    frame = _pd.DataFrame({
+        "away_team_record_display": [f"{i}-0" for i in range(rows)],       # many
+        "home_team_record_display": ["1-0", "0-1"] * (rows // 2),          # few
+    })
+    fields = list(frame.columns)
+    found = workbook._low_cardinality_text(frame, fields)
+    assert found == set(), (
+        f"the pair disagreed: {found} centred while its sibling was not")
+
+    # And a genuinely low-cardinality pair still centres, both halves.
+    both = _pd.DataFrame({
+        "away_classification": ["fbs", "fcs"] * (rows // 2),
+        "home_classification": ["fbs"] * rows,
+    })
+    assert workbook._low_cardinality_text(both, list(both.columns)) == {
+        "away_classification", "home_classification"}
