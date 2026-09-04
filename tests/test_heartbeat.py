@@ -102,7 +102,7 @@ def test_an_unreachable_host_is_the_alarm_not_an_error(monkeypatch, capsys):
 def test_a_stale_cadence_fails_and_names_itself(monkeypatch, capsys):
     fresh = {name: 60 for name in chk.CADENCES}
     fresh["scores_refresh"] = 7 * 3600            # budget is 5h
-    monkeypatch.setattr(chk, "read_ages", lambda _h: fresh)
+    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}))
     assert chk.main(["host"]) == 1
     out = capsys.readouterr().out
     assert "STALE" in out and "scores_refresh" in out
@@ -111,14 +111,15 @@ def test_a_stale_cadence_fails_and_names_itself(monkeypatch, capsys):
 
 def test_a_cadence_that_never_beat_is_not_silently_ok(monkeypatch, capsys):
     """A missing key reads as "no news". It is the opposite."""
-    monkeypatch.setattr(chk, "read_ages",
-                        lambda _h: {n: 60 for n in chk.CADENCES if n != "weekly_results"})
+    monkeypatch.setattr(
+        chk, "read_ages",
+        lambda _h: ({n: 60 for n in chk.CADENCES if n != "weekly_results"}, {}))
     assert chk.main(["host"]) == 1
     assert "NEVER BEAT" in capsys.readouterr().out
 
 
 def test_all_fresh_passes(monkeypatch, capsys):
-    monkeypatch.setattr(chk, "read_ages", lambda _h: {n: 60 for n in chk.CADENCES})
+    monkeypatch.setattr(chk, "read_ages", lambda _h: ({n: 60 for n in chk.CADENCES}, {}))
     assert chk.main(["host"]) == 0
     assert "beating within budget" in capsys.readouterr().out
 
@@ -167,3 +168,120 @@ def test_the_monitoring_key_can_only_read_heartbeats():
         "this key takes no client input at all; parsing any would create a surface")
     assert "docker" not in code, "Docker socket access is root by another name"
     assert "pipeline_heartbeat" in code
+
+
+# === the watcher reads failures now, because absence is too slow ===========================
+
+def _watcher():
+    import importlib.util
+    from pathlib import Path as _Path
+    root = _Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("check_heartbeats",
+                                                  root / "ci" / "check_heartbeats.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _fake_ssh(monkeypatch, module, stdout: str):
+    import subprocess
+
+    def fake_run(*_a, **_k):
+        return subprocess.CompletedProcess([], 0, stdout, "")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+
+def test_the_watcher_reads_failed_tasks_as_well_as_missing_beats(monkeypatch):
+    """ABSENCE TAKES HOURS; A FAILURE IS KNOWABLE IMMEDIATELY.
+
+    On 2026-09-04 `dbt_test` began failing at 02:27. The scores heartbeat did not cross its
+    five-hour budget until 05:07, and this watcher's own cadence — nominally two-hourly,
+    measured at 3.1 to 6.8 hours between runs — pushed detection past eleven hours. The
+    pipeline published nothing from midnight and nothing said so.
+    """
+    module = _watcher()
+    _fake_ssh(monkeypatch, module,
+              "scores_refresh|600\nlines_snapshot|900\n"
+              "failed|cfbd_scores_refresh.dbt_test|1200\n")
+    ages, failures = module.read_ages("host")
+    assert ages == {"scores_refresh": 600, "lines_snapshot": 900}
+    assert failures == {"cfbd_scores_refresh.dbt_test": 1200}
+
+
+def test_a_failed_task_fails_the_watcher_even_when_every_beat_is_fresh(monkeypatch, capsys):
+    """The exact shape of 2026-09-04's first two hours: heartbeats still inside budget,
+    because the DAG had beaten at midnight, and the publish already dead."""
+    module = _watcher()
+    fresh = "\n".join(f"{name}|60" for name in module.CADENCES)
+    _fake_ssh(monkeypatch, module, fresh + "\nfailed|cfbd_scores_refresh.dbt_test|900\n")
+    assert module.main(["host"]) == 1
+    printed = capsys.readouterr().out
+    assert "cfbd_scores_refresh.dbt_test" in printed
+    assert "did not run" in printed, "it must say what the failure COST, not just that it was"
+
+
+def test_a_clean_pipeline_still_passes(monkeypatch):
+    module = _watcher()
+    _fake_ssh(monkeypatch, module, "\n".join(f"{n}|60" for n in module.CADENCES))
+    assert module.main(["host"]) == 0
+
+
+def test_an_older_forced_command_does_not_break_the_watcher(monkeypatch):
+    """The droplet's script and this checker deploy together but are separate files, and a
+    monitor that crashes on output it does not recognise is a monitor that is off."""
+    module = _watcher()
+    _fake_ssh(monkeypatch, module, "\n".join(f"{n}|60" for n in module.CADENCES))
+    ages, failures = module.read_ages("host")
+    assert failures == {} and len(ages) == len(module.CADENCES)
+    assert module.main(["host"]) == 0
+
+
+def test_the_watcher_runs_far_more_often_than_the_dag_it_watches():
+    """GITHUB'S SCHEDULER IS NOT A CLOCK. This asked for two-hourly and measured 3.1 to 6.8
+    hours between runs over four days — never once inside 2.5. The alarm has to be cheaper
+    and more frequent than the thing it watches, or it is three cycles behind."""
+    import re
+    from pathlib import Path as _Path
+    workflow = (_Path(__file__).resolve().parents[1]
+                / ".github" / "workflows" / "heartbeat.yml").read_text()
+    crons = re.findall(r"cron:\s*'([^']+)'", workflow)
+    assert crons, "the watcher has no schedule at all"
+    minutes = crons[0].split()[0]
+    assert minutes.startswith("*/"), f"expected a sub-hourly cron, got {crons[0]!r}"
+    assert int(minutes[2:]) <= 30, (
+        f"{crons[0]!r} is not frequent enough to survive GitHub's scheduling delay")
+
+
+def test_the_forced_command_reports_failures_in_the_shape_the_watcher_parses():
+    """THE SCRIPT AND THE WATCHER DEPLOY SEPARATELY — the shell goes to the droplet by scp
+    and the checker runs on GitHub — so a mismatch is a monitor that reads nothing and says
+    everything is fine.
+
+    Asserted on the script's text because there is no droplet in CI. Narrow on purpose: the
+    prefix and the separator are the contract, and the SQL around them is free to change.
+    """
+    from pathlib import Path as _Path
+    script = (_Path(__file__).resolve().parents[1]
+              / "deploy" / "cfdb_heartbeat.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+    assert "'failed|'" in code, (
+        "the forced command no longer emits failure lines; the watcher would go back to "
+        "waiting for a stale heartbeat, which took eleven hours on 2026-09-04")
+    assert "task_instance" in code and "state = 'failed'" in code
+    assert "airflow" in code, "failures live in the Airflow metadata database, not the warehouse"
+
+
+def test_the_watcher_and_the_forced_command_agree_on_the_failure_format():
+    """Round-trip: feed the parser exactly what the script's SQL produces."""
+    module = _watcher()
+    line = "failed|cfbd_scores_refresh.dbt_test|8100"
+    import subprocess
+
+    class Done:
+        returncode, stdout, stderr = 0, line + "\n", ""
+
+    module.subprocess.run = lambda *a, **k: Done()
+    _, failures = module.read_ages("host")
+    assert failures == {"cfbd_scores_refresh.dbt_test": 8100}
+    del subprocess

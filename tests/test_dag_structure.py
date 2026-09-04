@@ -595,3 +595,34 @@ def test_the_straddle_check_catches_every_instance_that_has_actually_happened():
                   "assert_staging_models_are_unique_on_their_grain",
                   "assert_every_serving_row_names_its_team"):
         assert sweep not in names, f"{sweep} is a sweep, not a comparison"
+
+
+def test_incremental_models_tolerate_a_new_column():
+    """A COLUMN ADDED TO AN INCREMENTAL MODEL BREAKS ITS NEXT RUN, AND CI CANNOT SEE IT.
+
+    `is_locked` was added to `fct_week_metric_distribution_bin` on 2026-09-04 and its
+    incremental guard reads `prior.is_locked`. The table already on the droplet predated the
+    column, so the next scheduled run failed with `column prior.is_locked does not exist` —
+    forty minutes after a deploy where every check was green, because CI builds the project
+    from empty and never exercises the incremental branch against an older table.
+
+    `on_schema_change='sync_all_columns'` makes the next one an ALTER rather than an outage.
+    Asserted on every incremental model, not just the two that were bitten.
+    """
+    import re
+    models = Path(__file__).resolve().parents[1] / "dbt" / "models"
+    missing = []
+    for path in sorted(models.rglob("*.sql")):
+        # THE WHOLE FILE, not a fixed head. The first version read 1200 characters and the
+        # explanatory comment inside the config block pushed the setting past it — so the
+        # check reported two models as unconfigured when they had just been configured.
+        # A window is a magic number pretending to be a parser.
+        text = path.read_text().replace('"', "'")
+        if "materialized='incremental'" not in text:
+            continue
+        if not re.search(r"on_schema_change\s*=\s*'(sync_all_columns|append_new_columns)'",
+                         text):
+            missing.append(path.name)
+    assert not missing, (
+        f"incremental models with no on_schema_change: {missing} — adding a column to one "
+        f"fails its next run in production and passes every check in CI")

@@ -15,6 +15,9 @@ import argparse
 import json
 import os
 import smtplib
+import urllib.error
+import urllib.request
+from errno import ENETUNREACH
 import socket
 import sys
 import traceback
@@ -36,6 +39,15 @@ SMTP_USER = "ALERT_SMTP_USER"
 SMTP_PASSWORD = "ALERT_SMTP_PASSWORD"
 SMTP_FROM = "ALERT_EMAIL_FROM"
 SMTP_TO = "ALERT_EMAIL_TO"
+
+# THE PATH THAT ACTUALLY WORKS FROM THE DROPLET.
+#
+# 443 is open and every SMTP port is not, so an HTTPS POST is the only alert this host can
+# send on its own. Any receiver that accepts a JSON body works — a Slack or Discord incoming
+# webhook, a healthchecks.io or Better Stack endpoint, an email API. Unset means no webhook;
+# the failure is still recorded to disk and the GitHub-side watcher still sees it.
+WEBHOOK_URL = "ALERT_WEBHOOK_URL"
+WEBHOOK_TIMEOUT_SECONDS = 10
 
 
 def smtp_configured() -> bool:
@@ -76,7 +88,61 @@ def diagnose(exc: BaseException) -> str:
         return f"Host did not resolve. Check {SMTP_HOST} (Gmail is smtp.gmail.com)."
     if isinstance(exc, (ConnectionRefusedError, socket.timeout, TimeoutError)):
         return f"Nothing answered. Check {SMTP_PORT} (587 for STARTTLS) and any firewall."
+    # ERRNO 101 IS NOT A CONFIGURATION PROBLEM AND NO AMOUNT OF FIXING SETTINGS WILL HELP.
+    #
+    # DigitalOcean blocks outbound SMTP from droplets by default — measured on this host,
+    # 2026-09-04: ports 25, 465, 587 and 2525 all unreachable while 443 to GitHub and to CFBD
+    # is open. Every failure of 2026-09-04 logged "could not send failure email" and nobody
+    # was told for eight hours, because the generic message read like a transient.
+    #
+    # Say the true thing instead: from this host, email cannot be the alert path.
+    if isinstance(exc, OSError) and getattr(exc, "errno", None) == ENETUNREACH:
+        return ("The network refused the connection outright (ENETUNREACH). This host blocks "
+                "outbound SMTP — DigitalOcean does so by default on every port, and no "
+                "credential or port change fixes it. EMAIL CANNOT BE THE ALERT PATH FROM "
+                f"HERE. Use {WEBHOOK_URL}, which goes over 443, or rely on the GitHub-side "
+                "heartbeat watcher, which reads the pipeline from outside.")
     return "Unexpected SMTP error — see the exception above."
+
+
+def webhook_configured() -> bool:
+    return bool(os.getenv(WEBHOOK_URL))
+
+
+def send_webhook(subject: str, body: str) -> bool:
+    """POST the alert over 443. Never raises.
+
+    THE ONLY ALERT THIS HOST CAN SEND ITSELF. Outbound SMTP is blocked here on every port and
+    443 is open, so the choice is a webhook or nothing.
+
+    NEVER RAISES, for the same reason `heartbeat.ping` does not: an alerting outage must not
+    fail the callback that is already reporting a failure. It returns False and says why, and
+    the failure is on disk either way.
+
+    The payload carries `text` and `content` with the same string because Slack reads the
+    first and Discord the second, and sending both means the receiver can be swapped without
+    a code change. Anything else that accepts JSON gets the full object.
+    """
+    url = os.getenv(WEBHOOK_URL)
+    if not url:
+        return False
+    payload = json.dumps({
+        "text": f"{subject}\n\n{body}",
+        "content": f"{subject}\n\n{body}",
+        "subject": subject,
+        "body": body,
+        "source": "cfdb",
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=WEBHOOK_TIMEOUT_SECONDS) as response:
+            ok = 200 <= response.status < 300
+            print(f"ALERT: webhook -> HTTP {response.status}")
+            return ok
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        print(f"ALERT: webhook FAILED ({type(error).__name__}: {error})")
+        return False
 
 
 def format_email(event: Dict[str, Any],
@@ -179,7 +245,10 @@ def send_failure_email(event: Dict[str, Any], raise_on_error: bool = False,
             server.send_message(message)
         return True
     except Exception as exc:  # never raise from an alert path
+        # SAY WHAT TO DO ABOUT IT, NOT JUST THAT IT HAPPENED. The bare message read like a
+        # transient and was logged eight times on 2026-09-04 while nobody was told anything.
         print(f"ALERT: could not send failure email: {exc}")
+        print(f"ALERT: {diagnose(exc)}")
         if raise_on_error:
             raise
         return False
@@ -384,10 +453,29 @@ def failure_callback(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
                         "kind": "triage", **summary})
 
     emailed = send_failure_email(event, summary=summary, triage_note=triage_note)
+
+    # BOTH PATHS, BECAUSE ONE OF THEM CANNOT WORK HERE. Outbound SMTP is blocked on this host
+    # and 443 is not, so the webhook is the only alert the droplet can send itself. Tried
+    # regardless of whether the email succeeded: on a box where both work, a duplicate alert
+    # is a nuisance and a missed one is eight hours of silence.
+    subject, body = format_email(event, summary, triage_note)
+    notified = send_webhook(subject, body)
+
     print(f"ALERT: {event.get('dag_id')}.{event.get('task_id')} failed "
-          f"(logged={logged}, triaged={bool(summary)}, emailed={emailed}): "
-          f"{event.get('error')}")
-    return {"logged": logged, "triaged": bool(summary), "emailed": emailed}
+          f"(logged={logged}, triaged={bool(summary)}, emailed={emailed}, "
+          f"webhook={notified}): {event.get('error')}")
+
+    # THE LOUD PART. If nothing left the box, the only thing standing between this failure and
+    # nobody knowing is the GitHub-side watcher — which now reads failures directly, but runs
+    # on a scheduler measured at three to seven hours. Saying so in the log is what turns
+    # "alerting is configured" from an assumption into something checkable.
+    if not emailed and not notified:
+        print("ALERT: NOTHING LEFT THIS HOST. No email (SMTP is blocked outbound here) and "
+              f"no webhook ({WEBHOOK_URL} unset). Detection now depends entirely on the "
+              "GitHub heartbeat watcher noticing the missing beat or the failed task.")
+
+    return {"logged": logged, "triaged": bool(summary), "emailed": emailed,
+            "webhook": notified}
 
 
 def _describe_config() -> None:

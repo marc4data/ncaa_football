@@ -19,7 +19,17 @@ on:
     # Every two hours. The tightest budget is five hours (the two-hourly scores cadence plus
     # room for one missed run), so checking on this interval detects a stop inside seven —
     # against the four DAYS it took last time.
-    - cron: '15 */2 * * *'
+    # EVERY TWENTY MINUTES, BECAUSE GITHUB'S SCHEDULER IS NOT A CLOCK.
+    #
+    # This asked for two-hourly and MEASURED 3.1 to 6.8 hours between runs over four days —
+    # not once did it fire within 2.5 hours. GitHub delays and drops scheduled workflows under
+    # load, and there is no setting that changes that.
+    #
+    # The alarm therefore has to be cheaper and more frequent than the thing it watches. At
+    # twenty minutes the same delay factor lands around forty-five, which is inside the
+    # two-hourly DAG's own cycle instead of three cycles behind it. The job is a single SSH
+    # and a comparison — about eleven seconds — so the cost of asking more often is nil.
+    - cron: '*/20 * * * *'
   workflow_dispatch:
 
 # Never more than one in flight: a slow SSH must not stack up runs, and a queued monitor is

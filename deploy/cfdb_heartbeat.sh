@@ -43,3 +43,27 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
   group by heartbeat_name
   order by heartbeat_name
 "
+
+# AND RECENT FAILURES, BECAUSE ABSENCE IS TOO SLOW A SIGNAL ON A GAME DAY.
+#
+# A stale heartbeat eventually reveals a broken pipeline, but only after the threshold — five
+# hours for the two-hourly DAG. On 2026-09-04 `dbt_test` began failing at 02:27 and the
+# heartbeat did not cross its threshold until 05:07; the watcher's own cadence then delayed
+# detection further. A failed task is knowable the moment it happens, and reporting it turns
+# hours of silence into one watcher run.
+#
+# `failed|<dag>.<task>|<seconds ago>`, distinct from the heartbeat lines by its prefix so an
+# older monitor that does not know about them simply ignores the lines it cannot parse.
+#
+# Six hours because the two-hourly DAG retries for roughly thirty minutes: a window shorter
+# than a few runs would let a failure scroll out of view between watcher runs, which are
+# themselves four hours apart in practice.
+"${PSQL[@]}" -d "${CFDB_AIRFLOW_DB:-airflow}" -c "
+  select 'failed|' || dag_id || '.' || task_id || '|' ||
+         floor(extract(epoch from (now() - max(end_date))))::bigint
+  from task_instance
+  where state = 'failed'
+    and end_date > now() - interval '6 hours'
+  group by dag_id, task_id
+  order by dag_id, task_id
+" || echo "failed_query_unavailable|airflow|0"
