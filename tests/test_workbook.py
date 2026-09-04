@@ -1573,7 +1573,7 @@ def test_the_legend_glyphs_match_the_sheet_in_size_and_colour(built):
     seen = {}
     for row in tab.iter_rows():
         for cell in row:
-            if cell.value in workbook.OPEN_MARKS or cell.value in ("●", "■", "▲"):
+            if cell.value in workbook.COLOURED_MARKS or cell.value in ("●", "■", "▲"):
                 seen[cell.value] = cell.font
     assert seen, "no legend glyphs found on the Index"
     # 12 IS MARC'S NUMBER, asserted as the requirement rather than against the constant.
@@ -1724,7 +1724,7 @@ def test_the_hand_set_widths_are_exactly_what_marc_measured(built):
     header = workbook.header_row(1)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     assert workbook.WIDTH_OVERRIDES == {
-        "Winner covered": 8.0, "Final margin": 5.85, "Season": 5.6,
+        "Kickoff": 11.5, "Winner covered": 8.0, "Final margin": 5.85, "Season": 5.6,
         "Wind mph": 5.5, "Pred margin": 6.5, "Home win prob": 7.7}
     for label in workbook.WIDTH_OVERRIDES:
         letter = get_column_letter(labels[label])
@@ -1926,10 +1926,12 @@ def test_under_is_unfilled_and_red_and_over_is_not():
     direction. ▽ is the open form of ▲, so the pair still reads as one system."""
     assert workbook.OVER_MARKS["no"] == "▽"
     assert workbook.OVER_MARKS["yes"] == "▲"
-    assert workbook.MARK_COLOURS["▽"] == workbook.UNDER_COLOUR
+    assert workbook.MARK_COLOURS["▽"] == workbook.RED_MARK_COLOUR
     assert "▲" not in workbook.MARK_COLOURS, "over stays the default colour"
-    assert workbook.UNDER_COLOUR != workbook.OPEN_MARK_COLOUR, (
+    assert workbook.RED_MARK_COLOUR != workbook.OPEN_MARK_COLOUR, (
         "under must be distinguishable from the other open marks, which is the point")
+    # Push is red too (Marc, round 9) — it shares the colour, not the shape.
+    assert workbook.MARK_COLOURS[workbook.PUSH_MARK] == workbook.RED_MARK_COLOUR
 
 
 def test_the_under_colour_passes_contrast_too():
@@ -1938,8 +1940,8 @@ def test_the_under_colour_passes_contrast_too():
         channels = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
                     for c in channels]
         return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
-    contrast = 1.05 / (luminance(workbook.UNDER_COLOUR[2:]) + 0.05)
-    assert contrast >= 4.5, f"{workbook.UNDER_COLOUR} is {contrast:.2f}:1 against white"
+    contrast = 1.05 / (luminance(workbook.RED_MARK_COLOUR[2:]) + 0.05)
+    assert contrast >= 4.5, f"{workbook.RED_MARK_COLOUR} is {contrast:.2f}:1 against white"
 
 
 def test_every_coloured_mark_is_drawn_the_same_way_in_the_legend_and_the_column(built):
@@ -2187,3 +2189,35 @@ def test_the_date_column_width_follows_its_format(built):
         f"Kickoff is {kickoff} and As of is {as_of}; the shorter format must take the "
         f"narrower column")
     assert workbook.rendered_date_width("start_date_et") == len("Sep-05 19:00") + 1
+
+
+def test_the_push_mark_is_red_wherever_it_appears(built):
+    """Marc, round 9. Push shares the colour with Under but not the shape — red says "not the
+    outcome you wanted", the glyph says which one."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    seen = 0
+    for label in ("Winner covered", "O/U result"):
+        for row in range(header + 1, tab.max_row + 1):
+            cell = tab.cell(row, labels[label])
+            if cell.value == workbook.PUSH_MARK:
+                assert cell.font.color.rgb == workbook.RED_MARK_COLOUR, cell.coordinate
+                seen += 1
+    # And in the legend, drawn identically — the failure this file has already fixed twice.
+    for row in book["Index"].iter_rows():
+        for cell in row:
+            if cell.value == workbook.PUSH_MARK:
+                assert cell.font.color.rgb == workbook.RED_MARK_COLOUR
+                seen += 1
+    assert seen, "no push mark appeared anywhere, so this proved nothing"
+
+
+def test_the_colour_constant_is_not_named_after_only_one_of_its_uses():
+    """It was UNDER_COLOUR when only Under used it. A constant called "under" that also
+    colours the push mark is the kind of small lie that makes the next reader distrust every
+    other name in the file."""
+    assert not hasattr(workbook, "UNDER_COLOUR")
+    users = {g for g, c in workbook.MARK_COLOURS.items() if c == workbook.RED_MARK_COLOUR}
+    assert users == {"▽", workbook.PUSH_MARK}

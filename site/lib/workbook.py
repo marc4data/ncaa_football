@@ -279,10 +279,15 @@ def _upset_thresholds() -> tuple:
 
 OPEN_MARK_COLOUR = "FFB7410E"
 
-# Under gets its OWN colour rather than the shared open one. Measured the same way as the
-# other: #C00000 is 5.89:1 against white, comfortably past AA, and is Excel's own "dark red"
-# so it will not look foreign beside the rest of the sheet.
-UNDER_COLOUR = "FFC00000"
+# RED, for the two marks that mean "not the good outcome" — Under, and a push.
+#
+# It started as UNDER_COLOUR when only one mark used it. Renamed rather than reused under the
+# old name: a constant called "under" that also colours the push mark is the kind of small
+# lie that makes the next reader distrust every other name in the file.
+#
+# Measured the same way as the burnt sienna: #C00000 is 5.89:1 against white, comfortably
+# past AA, and is Excel's own "dark red" so it does not look foreign beside the rest.
+RED_MARK_COLOUR = "FFC00000"
 
 MARK_FONT_SIZE = 12
 
@@ -323,8 +328,16 @@ URL_CELL_LABEL = "Matchup"
 # colours now and a set could only answer "is it coloured", not "which colour" — and the
 # legend has to render each glyph exactly as the column does or it is a picture of a
 # different mark.
-MARK_COLOURS = {"○": OPEN_MARK_COLOUR, "□": OPEN_MARK_COLOUR, "▽": UNDER_COLOUR}
-OPEN_MARKS = set(MARK_COLOURS)
+MARK_COLOURS = {
+    "○": OPEN_MARK_COLOUR,      # the favorite won
+    "□": OPEN_MARK_COLOUR,      # did not cover
+    "▽": RED_MARK_COLOUR,       # under
+    PUSH_MARK: RED_MARK_COLOUR,  # push
+}
+
+# Named for what it IS — the marks that carry a colour — rather than for "open", which the
+# push mark is not.
+COLOURED_MARKS = set(MARK_COLOURS)
 
 # The thresholds, READ FROM dbt's OWN VARS rather than retyped, so the legend cannot describe
 # a rule the warehouse has stopped applying.
@@ -1089,6 +1102,7 @@ CSV_LABEL_OVERRIDES = {
 }
 
 WIDTH_OVERRIDES = {
+    "Kickoff": 11.5,
     "Winner covered": 8.0,
     "Final margin": 5.85,
     "Season": 5.6,
