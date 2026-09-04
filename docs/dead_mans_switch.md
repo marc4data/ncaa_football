@@ -70,3 +70,45 @@ success would be the worst outcome available.
 Recorded in `docs/decision_log.md`. Deliberately silencing a cadence and watching the alarm
 arrive is the only evidence that any of this works; a switch nobody has tripped is a switch
 nobody knows is connected.
+
+## The alarm path, as it actually stands (2026-09-04)
+
+Measured, not assumed:
+
+| Path | Works? | Evidence |
+|---|---|---|
+| Droplet → SMTP | **No** | ports 25, 465, 587, 2525 all unreachable; DigitalOcean blocks outbound SMTP by default |
+| Droplet → HTTPS | **Yes** | POST from the Airflow container returned HTTP 200 |
+| GitHub Actions cron | **Unreliable** | asked for 12/day, delivered ~3–5; asking for 72/day delivered the same ~3–5 |
+| GitHub → email on a failed workflow | **Yes** | two arrived on 2026-09-04 |
+
+So the only fast, reliable alarm is **the droplet pushing over 443**, and the code for it has
+existed since this switch was built. It has never had a URL, and `ping()` says so into a task
+log nobody reads:
+
+    heartbeat: no monitor configured for 'scores_refresh'
+    (CFDB_HEARTBEAT_URL_SCORES_REFRESH unset) — warehouse row written,
+    nothing is watching for absence
+
+### To turn it on
+
+Three environment variables on the droplet's Airflow containers. No code change.
+
+    CFDB_HEARTBEAT_URL_SCORES_REFRESH   ping URL for the 2-hourly cadence
+    CFDB_HEARTBEAT_URL_LINES_SNAPSHOT   ping URL for the 4-hourly cadence
+    ALERT_WEBHOOK_URL                   POST target for a failed task
+
+The first two are pinged on every successful run, so the monitor alerts on **absence** — the
+failure mode that went unnoticed for eight hours on 2026-09-04, when the publish had been dead
+since midnight and every heartbeat looked healthy right up until the threshold.
+
+`ALERT_WEBHOOK_URL` fires on the **event** instead, within seconds, and carries the same
+subject and body the email would have. The payload sets `text` and `content` to the same
+string so a Slack or Discord webhook works unchanged.
+
+### Why the GitHub watcher stays
+
+It reads the pipeline from OUTSIDE, so it still answers the one question a pushed heartbeat
+cannot: is the box itself alive. It also reads failed tasks directly now rather than waiting
+for a heartbeat to go stale. It is a backstop that runs a few times a day, and it should never
+again be the only thing in the list.

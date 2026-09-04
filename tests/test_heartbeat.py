@@ -237,20 +237,46 @@ def test_an_older_forced_command_does_not_break_the_watcher(monkeypatch):
     assert module.main(["host"]) == 0
 
 
-def test_the_watcher_runs_far_more_often_than_the_dag_it_watches():
-    """GITHUB'S SCHEDULER IS NOT A CLOCK. This asked for two-hourly and measured 3.1 to 6.8
-    hours between runs over four days — never once inside 2.5. The alarm has to be cheaper
-    and more frequent than the thing it watches, or it is three cycles behind."""
+def test_the_watcher_asks_often_even_though_asking_does_not_help():
+    """A MEASURED DISAPPOINTMENT, RECORDED SO NOBODY RETRIES IT.
+
+    The cron was two-hourly and delivered runs 3.1 to 6.8 hours apart. Changing it to */20 on
+    the reasoning that the same delay factor would land near forty-five minutes produced
+    exactly ONE scheduled run in the following 7.1 hours — the identical count to the 7.1
+    hours before, against twenty-one requested.
+
+    GitHub throttles per repository, not per requested interval. The frequent cron stays
+    because a run costs eleven seconds and more attempts cannot hurt; it is NOT a fix, and
+    this test exists so the next person does not spend an afternoon tuning it.
+    """
     import re
     from pathlib import Path as _Path
     workflow = (_Path(__file__).resolve().parents[1]
                 / ".github" / "workflows" / "heartbeat.yml").read_text()
     crons = re.findall(r"cron:\s*'([^']+)'", workflow)
     assert crons, "the watcher has no schedule at all"
-    minutes = crons[0].split()[0]
-    assert minutes.startswith("*/"), f"expected a sub-hourly cron, got {crons[0]!r}"
-    assert int(minutes[2:]) <= 30, (
-        f"{crons[0]!r} is not frequent enough to survive GitHub's scheduling delay")
+    # The comment above the cron must not claim a delivered cadence again.
+    assert "IT DID NOT" in workflow, (
+        "the measurement that disproved the frequent-cron theory has been removed")
+
+
+def test_the_push_path_is_the_one_that_can_actually_be_fast():
+    """`beat()` records THEN pings, so the durable row is never lost to a flaky GET, and the
+    ping is what an external dead-man's switch watches for.
+
+    Nothing here needs writing: the code has been in place since the heartbeat was built and
+    has never had a URL. That is the whole gap — `ping` prints "nothing is watching for
+    absence" into a task log nobody reads.
+    """
+    import inspect
+    from src import heartbeat
+    source = inspect.getsource(heartbeat.beat)
+    assert "record(" in source and "ping(" in source
+    assert source.index("record(") < source.index("ping("), (
+        "the durable record must be written before the network call")
+    assert heartbeat.PING_ENV_PREFIX == "CFDB_HEARTBEAT_URL_"
+    assert heartbeat.PING_TIMEOUT_SECONDS <= 15, (
+        "a heartbeat that hangs delays the DAG it is reporting on")
 
 
 def test_the_forced_command_reports_failures_in_the_shape_the_watcher_parses():

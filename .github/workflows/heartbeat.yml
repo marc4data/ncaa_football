@@ -19,16 +19,21 @@ on:
     # Every two hours. The tightest budget is five hours (the two-hourly scores cadence plus
     # room for one missed run), so checking on this interval detects a stop inside seven —
     # against the four DAYS it took last time.
-    # EVERY TWENTY MINUTES, BECAUSE GITHUB'S SCHEDULER IS NOT A CLOCK.
+    # ASKING MORE OFTEN BUYS NOTHING, AND THAT IS MEASURED RATHER THAN ASSUMED.
     #
-    # This asked for two-hourly and MEASURED 3.1 to 6.8 hours between runs over four days —
-    # not once did it fire within 2.5 hours. GitHub delays and drops scheduled workflows under
-    # load, and there is no setting that changes that.
+    # This was two-hourly and delivered 3.1 to 6.8 hours between runs. It was changed to
+    # */20 on the reasoning that the same delay factor would land near forty-five minutes.
+    # IT DID NOT. Over the 7.1 hours after the change GitHub delivered ONE scheduled run
+    # against twenty-one requested — exactly the same count as the 7.1 hours before it.
     #
-    # The alarm therefore has to be cheaper and more frequent than the thing it watches. At
-    # twenty minutes the same delay factor lands around forty-five, which is inside the
-    # two-hourly DAG's own cycle instead of three cycles behind it. The job is a single SSH
-    # and a comparison — about eleven seconds — so the cost of asking more often is nil.
+    # GitHub throttles scheduled workflows per repository, not per requested interval, so
+    # there is no cron that makes this a reliable alarm. It stays at */20 because the runs
+    # cost eleven seconds and more attempts cannot hurt, NOT because the frequency works.
+    #
+    # THIS IS A BACKSTOP, NOT THE ALARM. The alarm is the droplet pushing over 443, which is
+    # proven reachable (HTTP 200 from the Airflow container) and needs only a monitor URL:
+    # CFDB_HEARTBEAT_URL_<CADENCE> for absence, ALERT_WEBHOOK_URL for failures. Until those
+    # are set, detection depends on this — a few times a day, whenever GitHub feels like it.
     - cron: '*/20 * * * *'
   workflow_dispatch:
 
