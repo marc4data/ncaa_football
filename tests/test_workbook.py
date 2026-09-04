@@ -1993,3 +1993,120 @@ def test_every_mark_lives_in_the_geometric_shapes_block_or_is_the_dash():
                     continue
                 assert ord(character) in allowed, (
                     f"{character!r} U+{ord(character):04X} is outside Geometric Shapes")
+
+
+# === round seven ==========================================================================
+
+def test_the_ignored_errors_block_is_a_direct_child_of_the_worksheet(built):
+    """IT WASN'T, AND THAT IS WHY THE GREEN CORNERS SURVIVED A WHOLE ROUND.
+
+    The first version anchored on the earliest `<extLst`, and the earliest one in the
+    document is NESTED INSIDE the data bar's own `<cfRule>`. So the block went in there:
+    well-formed XML, valid zip, opens cleanly — and completely invisible to Excel, which went
+    on flagging every record cell.
+
+    Excel does not complain about a mis-nested element; it ignores it. That is worse than a
+    repair prompt, because nothing tells you.
+    """
+    import zipfile as _zip
+    from xml.etree import ElementTree
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    payload = built[0]
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        for name in archive.namelist():
+            if not name.startswith("xl/worksheets/sheet"):
+                continue
+            root = ElementTree.fromstring(archive.read(name))
+            anywhere = [e for e in root.iter() if e.tag == main + "ignoredErrors"]
+            direct = [c for c in root if c.tag == main + "ignoredErrors"]
+            assert len(anywhere) == len(direct), (
+                f"{name}: ignoredErrors exists but is nested, so Excel will ignore it")
+
+
+def test_the_validator_detects_a_mis_nested_top_level_element():
+    """A validator that cannot fail is what let this through. Fed the exact shape that
+    shipped — ignoredErrors inside a cfRule — it must object."""
+    good = (b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            b'<sheetData/><hyperlinks/><ignoredErrors/><tableParts/></worksheet>')
+    bad = (b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+           b'<sheetData/><conditionalFormatting><cfRule><ignoredErrors/></cfRule>'
+           b'</conditionalFormatting><hyperlinks/><tableParts/></worksheet>')
+    assert workbook.sheet_order_violations(good) == []
+    faults = workbook.sheet_order_violations(bad)
+    assert faults and faults[0][0] == "ignoredErrors", faults
+    assert "NESTED" in faults[0][1]
+
+
+def test_ignored_errors_sits_after_hyperlinks_where_the_schema_puts_it(built):
+    """The ordering half of the same fix. CT_Worksheet runs
+    ...conditionalFormatting, hyperlinks, pageMargins... then ignoredErrors, then tableParts.
+    The broken version was before hyperlinks, which is a second way to be wrong."""
+    import zipfile as _zip
+    payload = built[0]
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        body = archive.read("xl/worksheets/sheet2.xml").decode("utf-8")
+    ignored, hyperlinks = body.find("<ignoredErrors>"), body.find("<hyperlinks")
+    table_parts = body.find("<tableParts")
+    assert ignored != -1
+    if hyperlinks != -1:
+        assert ignored > hyperlinks, "ignoredErrors must follow hyperlinks"
+    if table_parts != -1:
+        assert ignored < table_parts, "and precede tableParts"
+
+
+def test_the_record_columns_are_centred(built):
+    """Marc: centre them "so there is some padding between the warning tag and the text".
+    A won-lost record is a short token, not prose, and the cardinality rule cannot reach it —
+    a week of play produces well over five distinct records."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    for label in ("Away record", "Home record"):
+        index = labels[label]
+        assert tab.cell(header + 1, index).alignment.horizontal == "center", label
+    assert workbook.ALWAYS_CENTRED_LABELS == {"Away record", "Home record"}
+
+
+def test_every_mark_cell_names_the_same_font(built):
+    """WHY A CENTRED COLUMN LOOKED CROOKED, AND WHY ALIGNMENT COULD NOT FIX IT.
+
+    Measured against the font files Excel actually uses: Calibri and Aptos — its old and
+    current defaults — HAVE NO FILLED SQUARE (U+25A0). So □ was drawn by Calibri at 0.604 em
+    and ■ by whatever macOS substituted, at its own width, in the same column. Two advance
+    widths in one column read as crooked no matter how the cells are aligned.
+
+    Naming a font that carries all seven marks at one width is the fix. If a reader lacks it,
+    Excel substitutes ONE font for the whole run, so they still share a width — better than
+    substituting per glyph, which is what happens today.
+    """
+    _, book, _, _ = built
+    schedule = next(s for s in workbook.SHEETS if s.name == "Schedule")
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    marked = {dict(schedule.columns)[f] for f in schedule.centred}
+    checked = 0
+    for label in marked:
+        for row in range(header + 1, tab.max_row + 1):
+            cell = tab.cell(row, labels[label])
+            if cell.value is None:
+                continue
+            assert cell.font.name == workbook.MARK_FONT_NAME, (
+                f"{label} row {row} is {cell.font.name!r}; a mark drawn in the default font "
+                f"may fall back per glyph and break the column's alignment")
+            checked += 1
+    assert checked, "no mark cells were checked, so this proved nothing"
+
+
+def test_the_legend_glyphs_use_the_same_font_as_the_column(built):
+    """Otherwise the legend shows a mark of a different size and shape from the one in the
+    sheet, which is the failure this file already fixed once for colour and size."""
+    _, book, _, _ = built
+    seen = 0
+    for row in book["Index"].iter_rows():
+        for cell in row:
+            if isinstance(cell.value, str) and cell.value and cell.value[0] in "●○■□▲▽▣":
+                assert cell.font.name == workbook.MARK_FONT_NAME, cell.value
+                seen += 1
+    assert seen >= 7

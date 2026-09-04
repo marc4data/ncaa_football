@@ -270,6 +270,36 @@ UNDER_COLOUR = "FFC00000"
 
 MARK_FONT_SIZE = 12
 
+# THE MARK CELLS NAME THEIR OWN FONT, AND THIS IS WHY THE COLUMN LOOKED CROOKED.
+#
+# Marc reported Winner covered as not horizontally centred. Every cell in it IS centred —
+# checked on all 83 rows of a real file. The problem was never alignment; it was that the
+# glyphs were coming from TWO DIFFERENT FONTS.
+#
+# Measured against the actual font files on the machine Excel runs on:
+#
+#     glyph   Calibri   Aptos    Arial   Arial Unicode MS
+#     ●       0.604     0.749    0.604   0.6001
+#     ○       0.550     0.749    0.604   0.6001
+#     ■       MISSING   MISSING  0.604   0.6001
+#     □       0.604     0.750    0.604   0.6001
+#     ▲       MISSING   MISSING  0.990   0.6001
+#     ▽       MISSING   MISSING  MISSING 0.6001
+#     ▣       MISSING   MISSING  MISSING 0.6001
+#
+# Calibri and Aptos — Excel's old and current defaults — HAVE NO FILLED SQUARE. So □ was
+# drawn by Calibri at 0.604 em and ■ by whatever font macOS substituted, at its own width,
+# in the same column. Centring cannot rescue two different advance widths. Calibri's own
+# ● and ○ differ by 0.054 em too, which is the same defect in miniature.
+#
+# Arial Unicode MS carries all seven at EXACTLY 0.6001 em. Naming it means every mark in a
+# column is measured the same way.
+#
+# Degrading safely matters as much as being right here: if a reader does not have this font,
+# Excel substitutes ONE font for the whole run, so the marks still share a width — which is
+# strictly better than today, where the substitution happens per glyph.
+MARK_FONT_NAME = "Arial Unicode MS"
+
 # What the Matchup cell says. The URL is the hyperlink, not the text.
 URL_CELL_LABEL = "Matchup"
 
@@ -335,6 +365,14 @@ CENTRED = None      # built lazily in `build`, where Alignment is imported
 # cosmetic and the measurement is honest, so measurement wins; if the wobble annoys, the fix
 # is a declared set and it is one dictionary.
 LOW_CARDINALITY = 5
+
+# Columns centred BY NAME, whatever their cardinality says.
+#
+# A won-lost record is a short token, not prose — "1-0" left-aligned in a 10-wide column sits
+# hard against the left edge with the error tag right beside it, which is what Marc is
+# describing. Centring gives it air on both sides. The cardinality rule cannot reach these:
+# a week of play produces well over five distinct records.
+ALWAYS_CENTRED_LABELS = {"Away record", "Home record"}
 
 # ...AND ENOUGH ROWS TO TELL A CATEGORY FROM A SMALL SAMPLE.
 #
@@ -1403,25 +1441,51 @@ CT_WORKSHEET_SEQUENCE = (
 )
 
 
-def sheet_order_violations(sheet_xml: bytes) -> list:
-    """Children of <worksheet> that appear out of CT_Worksheet order.
+# Elements that are only ever DIRECT children of <worksheet>. Finding one deeper in the tree
+# means an injection went into the wrong parent — which is not an ordering fault and would
+# otherwise pass an ordering check silently.
+TOP_LEVEL_ONLY = ("ignoredErrors", "conditionalFormatting", "hyperlinks", "tableParts",
+                  "dataValidations", "pageMargins", "printOptions")
 
-    Returns a list of (element, previous_element) pairs; empty means the part is in order.
-    Reads only DIRECT children, because ordering is a constraint on this level and the
-    nested `extLst` inside a cfRule is a different element with different rules.
+
+def sheet_order_violations(sheet_xml: bytes) -> list:
+    """Ways this sheet part would be rejected or silently ignored by Excel.
+
+    TWO faults, not one, because the second cost a round:
+
+      ORDER     a direct child of <worksheet> out of CT_Worksheet sequence. Excel refuses the
+                file, replaces the part and opens the tab empty.
+      NESTING   an element that belongs at the top level found somewhere deeper. Excel does
+                NOT complain — it simply ignores it. The `ignoredErrors` block spent a whole
+                round inside a `<cfRule>`, perfectly well-formed and doing nothing, and the
+                first version of this function could not see it because it walked only direct
+                children.
+
+    Returns (element, context) pairs; empty means the part is sound.
     """
     from xml.etree import ElementTree
     main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
     root = ElementTree.fromstring(sheet_xml)
-    rank, last_name, last_rank, out = {n: i for i, n in enumerate(CT_WORKSHEET_SEQUENCE)}, None, -1, []
+
+    def local(tag):
+        return tag[len(main):] if tag.startswith(main) else tag
+
+    rank = {n: i for i, n in enumerate(CT_WORKSHEET_SEQUENCE)}
+    last_name, last_rank, out = None, -1, []
     for child in root:
-        name = child.tag[len(main):] if child.tag.startswith(main) else child.tag
+        name = local(child.tag)
         position = rank.get(name)
         if position is None:            # not a schema element we model; skip rather than guess
             continue
         if position < last_rank:
             out.append((name, last_name))
         last_name, last_rank = name, max(last_rank, position)
+
+    direct = {id(child) for child in root}
+    for element in root.iter():
+        name = local(element.tag)
+        if name in TOP_LEVEL_ONLY and id(element) not in direct and element is not root:
+            out.append((name, "NESTED — not a direct child of <worksheet>"))
     return out
 
 
@@ -1558,9 +1622,22 @@ def _inject_data_bars(payload: bytes, wanted: dict, text_columns=None) -> bytes:
                 f'<ignoredError sqref="{span}" numberStoredAsText="1" '
                 f'twoDigitTextYear="1"/>' for span in ranges)
             marker = f"<ignoredErrors>{ignored}</ignoredErrors>"
-            candidates = [body.find(tag) for tag in SHEET_ELEMENTS_AFTER_IGNORED_ERRORS]
-            found = [i for i in candidates if i != -1]
-            at = min(found) if found else body.find("</worksheet>")
+            # ANCHORED ON A TOP-LEVEL ELEMENT, WHICH THE FIRST VERSION WAS NOT.
+            #
+            # It searched for the earliest of a list that included `<extLst`, and the
+            # earliest `<extLst` in this document is the one NESTED INSIDE the data bar's
+            # own `<cfRule>`. So the block landed inside cfRule — well-formed XML, valid
+            # zip, and completely invisible to Excel, which went on flagging every record
+            # cell. It also slipped past the order validator, because that walks the DIRECT
+            # children of <worksheet> and this was never one of them.
+            #
+            # `<tableParts>` is unique and always a direct child, and the schema puts it
+            # after ignoredErrors, so it is a safe anchor. `rfind` on extLst finds the
+            # worksheet-level one (added above, last in the document) rather than a nested
+            # one. Both are checked, earliest wins.
+            anchors = [body.find("<tableParts"), body.rfind("<extLst"),
+                       body.find("</worksheet>")]
+            at = min(i for i in anchors if i != -1)
             body = body[:at] + marker + body[at:]
 
         rewritten[part] = body.encode("utf-8")
@@ -1657,7 +1734,10 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         rendered = pd.DataFrame(
             {field: [sheet.value_for(field, record) for _, record in df.iterrows()]
              for field in sheet.fields})
-        centred_fields = sheet.centred | _low_cardinality_text(rendered, sheet.fields)
+        by_name = {field for field, label in sheet.columns
+                   if label in ALWAYS_CENTRED_LABELS}
+        centred_fields = (sheet.centred | by_name
+                          | _low_cardinality_text(rendered, sheet.fields))
         for offset, (_, record) in enumerate(df.iterrows()):
             for index, field in enumerate(sheet.fields, start=1):
                 builder = links.get(field)
@@ -1687,9 +1767,10 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 if field in sheet.open_mark_fields and value in MARK_COLOURS:
                     # The open marks carry their own colour, so "did not happen" is legible
                     # at a glance rather than only on close inspection of the shape.
-                    cell.font = Font(color=MARK_COLOURS[value], size=MARK_FONT_SIZE)
+                    cell.font = Font(name=MARK_FONT_NAME, color=MARK_COLOURS[value],
+                                     size=MARK_FONT_SIZE)
                 elif field in sheet.display and field in sheet.centred:
-                    cell.font = Font(size=MARK_FONT_SIZE)
+                    cell.font = Font(name=MARK_FONT_NAME, size=MARK_FONT_SIZE)
 
         last_row = row_first_data + len(df) - 1
         last_column = get_column_letter(len(sheet.columns))
@@ -1982,7 +2063,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
             # The legend's glyph must be the SAME SIZE AND COLOUR as the one in the sheet, or
             # it is a picture of a different mark. 12pt because at 11 the difference between
             # ○ and ● is a couple of pixels of ink.
-            glyph.font = Font(bold=True, size=MARK_FONT_SIZE,
+            glyph.font = Font(name=MARK_FONT_NAME, bold=True, size=MARK_FONT_SIZE,
                               color=MARK_COLOURS.get(mark))
             glyph.alignment = Alignment(horizontal="center")
             tab.cell(row, 3, meaning)
