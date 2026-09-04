@@ -221,14 +221,19 @@ def _weekday(record):
 # are already spoken for (filled = it happened, open = it did not), so a push needs to leave
 # that language rather than find a third position inside it.
 #
-# ═ says "equal", which is exactly what a push is: the result landed on the number and
-# neither side won. It is measured at the same 0.6001 em as every other mark in Arial Unicode
-# MS, and it is East-Asian-Width Ambiguous like the rest, so the column still lines up.
+# ══ says "equal", which is exactly what a push is: the result landed on the number and
+# neither side won. DOUBLED, because a single ═ is one short bar and reads as a dash at a
+# glance — two of them read unmistakably as an equals sign. The same trick as the upset
+# levels: repeat the character rather than find a different one, so the metrics cannot drift.
+#
+# Each glyph measures 0.6001 em in Arial Unicode MS, identical to every other mark, and is
+# East-Asian-Width Ambiguous like the rest, so the column still lines up.
 #
 # It comes from Box Drawing rather than Geometric Shapes, which is a deliberate exception to
 # the one-block rule below — the block rule exists to keep METRICS consistent, and this glyph
 # is metrically identical. The test asserts the width, and allows this one by name.
-PUSH_MARK = "═"
+PUSH_GLYPH = "═"
+PUSH_MARK = PUSH_GLYPH * 2
 
 UPSET_MARKS = {"none": "○", "upset": "●", "big": "●●", "blowout": "●●●"}
 COVER_MARKS = {"yes": "■", "no": "□", "push": PUSH_MARK, "pending": "·"}
@@ -289,6 +294,12 @@ OPEN_MARK_COLOUR = "FFB7410E"
 # past AA, and is Excel's own "dark red" so it does not look foreign beside the rest.
 RED_MARK_COLOUR = "FFC00000"
 
+# BLUE, for the push. It is not a loss and it is not a win, so it should not borrow the
+# colour of either. #0070C0 is 5.15:1 against white — past AA — and is Excel's own standard
+# blue, the same reasoning that picked its standard dark red above: a reader who has ever
+# used the fill palette has seen this exact colour.
+BLUE_MARK_COLOUR = "FF0070C0"
+
 MARK_FONT_SIZE = 12
 
 # THE MARK CELLS NAME THEIR OWN FONT, AND THIS IS WHY THE COLUMN LOOKED CROOKED.
@@ -331,8 +342,8 @@ URL_CELL_LABEL = "Matchup"
 MARK_COLOURS = {
     "○": OPEN_MARK_COLOUR,      # the favorite won
     "□": OPEN_MARK_COLOUR,      # did not cover
-    "▽": RED_MARK_COLOUR,       # under
-    PUSH_MARK: RED_MARK_COLOUR,  # push
+    "▽": RED_MARK_COLOUR,        # under
+    PUSH_MARK: BLUE_MARK_COLOUR,  # push — neither side won, so neither side's colour
 }
 
 # Named for what it IS — the marks that carry a colour — rather than for "open", which the

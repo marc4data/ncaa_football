@@ -1930,8 +1930,9 @@ def test_under_is_unfilled_and_red_and_over_is_not():
     assert "▲" not in workbook.MARK_COLOURS, "over stays the default colour"
     assert workbook.RED_MARK_COLOUR != workbook.OPEN_MARK_COLOUR, (
         "under must be distinguishable from the other open marks, which is the point")
-    # Push is red too (Marc, round 9) — it shares the colour, not the shape.
-    assert workbook.MARK_COLOURS[workbook.PUSH_MARK] == workbook.RED_MARK_COLOUR
+    # Push is BLUE (Marc, round 10): it is neither a win nor a loss, so it borrows neither
+    # side's colour.
+    assert workbook.MARK_COLOURS[workbook.PUSH_MARK] == workbook.BLUE_MARK_COLOUR
 
 
 def test_the_under_colour_passes_contrast_too():
@@ -1992,7 +1993,7 @@ def test_every_mark_lives_in_the_geometric_shapes_block_or_is_the_dash():
     # dot, and the push equals sign. The block rule exists to keep metrics consistent, and
     # the width test above is what actually enforces that — this one guards against a mark
     # being borrowed from somewhere arbitrary.
-    exceptions = {"·", workbook.PUSH_MARK}
+    exceptions = {"·", workbook.PUSH_GLYPH}
     for marks in (workbook.UPSET_MARKS, workbook.COVER_MARKS, workbook.OVER_MARKS):
         for glyph in marks.values():
             for character in glyph:
@@ -2114,7 +2115,7 @@ def test_the_legend_glyphs_use_the_same_font_as_the_column(built):
     for row in book["Index"].iter_rows():
         for cell in row:
             if isinstance(cell.value, str) and cell.value and \
-                    cell.value[0] in "●○■□▲▽" + workbook.PUSH_MARK:
+                    cell.value[0] in "●○■□▲▽" + workbook.PUSH_GLYPH:
                 assert cell.font.name == workbook.MARK_FONT_NAME, cell.value
                 seen += 1
     assert seen >= 7
@@ -2130,7 +2131,7 @@ def test_push_is_an_equals_sign_not_a_third_kind_of_square():
     it happened, open = it did not), so a push has to leave that language rather than find a
     third position inside it. ═ says "equal", which is what a push is.
     """
-    assert workbook.PUSH_MARK == "═"
+    assert workbook.PUSH_MARK == "══"
     assert workbook.COVER_MARKS["push"] == workbook.PUSH_MARK
     assert workbook.OVER_MARKS["push"] == workbook.PUSH_MARK
     squares = {"■", "□", "▣", "▤", "▥", "▦", "▩", "◧", "◨"}
@@ -2145,8 +2146,9 @@ def test_the_push_mark_still_measures_the_same_as_every_other_mark():
     because it is metrically identical — 0.6001 em in the pinned font, same as ■ □ ● ○ ▲ ▽.
     Width is the property that keeps the column straight; the block is a proxy for it."""
     import unicodedata
-    assert unicodedata.east_asian_width(workbook.PUSH_MARK) == "A"
-    assert len(workbook.PUSH_MARK) == 1
+    assert len(set(workbook.PUSH_MARK)) == 1, "one repeated character, not two shapes"
+    for character in workbook.PUSH_MARK:
+        assert unicodedata.east_asian_width(character) == "A"
 
 
 def test_the_kickoff_prints_as_month_day_and_time(built):
@@ -2191,9 +2193,9 @@ def test_the_date_column_width_follows_its_format(built):
     assert workbook.rendered_date_width("start_date_et") == len("Sep-05 19:00") + 1
 
 
-def test_the_push_mark_is_red_wherever_it_appears(built):
-    """Marc, round 9. Push shares the colour with Under but not the shape — red says "not the
-    outcome you wanted", the glyph says which one."""
+def test_the_push_mark_is_blue_wherever_it_appears(built):
+    """Marc, round 10. A push is neither a win nor a loss, so it borrows neither side's
+    colour — red is for Under and the open marks, blue is for the outcome that was neither."""
     _, book, _, _ = built
     tab = book["Schedule"]
     header = workbook.header_row(1)
@@ -2203,13 +2205,13 @@ def test_the_push_mark_is_red_wherever_it_appears(built):
         for row in range(header + 1, tab.max_row + 1):
             cell = tab.cell(row, labels[label])
             if cell.value == workbook.PUSH_MARK:
-                assert cell.font.color.rgb == workbook.RED_MARK_COLOUR, cell.coordinate
+                assert cell.font.color.rgb == workbook.BLUE_MARK_COLOUR, cell.coordinate
                 seen += 1
     # And in the legend, drawn identically — the failure this file has already fixed twice.
     for row in book["Index"].iter_rows():
         for cell in row:
             if cell.value == workbook.PUSH_MARK:
-                assert cell.font.color.rgb == workbook.RED_MARK_COLOUR
+                assert cell.font.color.rgb == workbook.BLUE_MARK_COLOUR
                 seen += 1
     assert seen, "no push mark appeared anywhere, so this proved nothing"
 
@@ -2220,4 +2222,31 @@ def test_the_colour_constant_is_not_named_after_only_one_of_its_uses():
     other name in the file."""
     assert not hasattr(workbook, "UNDER_COLOUR")
     users = {g for g, c in workbook.MARK_COLOURS.items() if c == workbook.RED_MARK_COLOUR}
-    assert users == {"▽", workbook.PUSH_MARK}
+    assert users == {"▽"}
+
+
+def test_the_push_mark_is_a_doubled_glyph_not_a_new_shape():
+    """A single ═ is one short bar and reads as a dash at a glance. Two read unmistakably as
+    an equals sign. Repeating the character rather than finding a wider one is the same trick
+    the upset levels use, and it means the metrics cannot drift: two glyphs of 0.6001 em."""
+    assert workbook.PUSH_MARK == workbook.PUSH_GLYPH * 2
+    assert len(workbook.PUSH_MARK) == 2
+    assert workbook.PUSH_GLYPH == "═"
+
+
+def test_the_three_mark_colours_mean_three_different_things():
+    """Burnt sienna = it did not happen. Red = the wrong side of the number. Blue = neither
+    side won. Three colours, three claims, no overlap — and all three measured against white
+    rather than chosen by eye."""
+    def contrast(argb):
+        channels = [int(argb[2:][i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        channels = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                    for c in channels]
+        luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+        return 1.05 / (luminance + 0.05)
+
+    colours = {workbook.OPEN_MARK_COLOUR, workbook.RED_MARK_COLOUR,
+               workbook.BLUE_MARK_COLOUR}
+    assert len(colours) == 3, "two of the mark colours are the same value"
+    for colour in colours:
+        assert contrast(colour) >= 4.5, f"{colour} is {contrast(colour):.2f}:1 on white"
