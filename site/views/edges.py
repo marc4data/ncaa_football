@@ -253,7 +253,7 @@ def _track_record(market: str, market_label: str) -> None:
             # Not a break-even line, because moneyline bets are priced per game.
             st.caption(
                 "Moneyline bets are priced per game, so there is no single break-even rate "
-                "to compare these against — a high hit rate on short-priced favourites can "
+                "to compare these against — a high hit rate on short-priced favorites can "
                 "still lose money.")
         table.as_of_caption(df)
 

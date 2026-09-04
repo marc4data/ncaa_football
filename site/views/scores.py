@@ -151,7 +151,7 @@ UPSET_LEGEND = ("Upset scale — **!** under 10 points · **!!** 10 to 20 · **!
 def _favorite_covered(row) -> str:
     """R-008. Four states, and none of them is another one.
 
-    `pending` is not `push` — AC-G.20 — and a pick'em has no favourite at all, which is the
+    `pending` is not `push` — AC-G.20 — and a pick'em has no favorite at all, which is the
     not-applicable third state of AC-G.32 rather than a missing value. All four come from
     the view; nothing here decides which side was favoured.
     """
@@ -159,13 +159,13 @@ def _favorite_covered(row) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return fmt.EM_DASH
     return {
-        "yes":         chips.chip_html("y", "Covered", "the market favourite covered"),
-        "no":          chips.chip_html("n", "No", "the favourite did not cover"),
+        "yes":         chips.chip_html("y", "Covered", "the market favorite covered"),
+        "no":          chips.chip_html("n", "No", "the favorite did not cover"),
         "push":        chips.chip_html("w", "Push",
                                        "landed exactly on the number, a settled result"),
         "pending":     chips.chip_html("w", "Pending", "not played yet"),
         "no_favorite": chips.chip_html("w", "Pick-em",
-                                       "the spread was zero, so there was no favourite"),
+                                       "the spread was zero, so there was no favorite"),
     }.get(str(value), fmt.EM_DASH)
 
 

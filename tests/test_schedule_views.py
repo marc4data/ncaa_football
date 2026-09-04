@@ -829,7 +829,7 @@ def test_the_worked_examples_are_rendered_by_the_strip_itself():
     strip, and the first thing it does is drift — which is exactly what R-178 was."""
     assert len(schedule.LEGEND_EXAMPLES) == 2
     first, second = (schedule._result_strip(row) for row, _ in schedule.LEGEND_EXAMPLES)
-    # favourite won · covered · over
+    # favorite won · covered · over
     assert "cfdb-ind-quiet" in first and first.count("cfdb-ind-fill") == 2
     # upset by 7+ · covered · under
     assert "cfdb-u2" in second and "cfdb-ind-open" in second
@@ -946,7 +946,7 @@ def test_the_unplayed_strip_stays_empty_rather_than_dashed():
 def test_an_unranked_game_is_not_assessed_as_a_non_upset():
     """R-172. `is_upset` is derived from AP poll ranks, and its `else false` branch fired
     whenever NEITHER team was ranked — so 91,047 of 109,108 completed games claimed "not an
-    upset" with no favourite to be upset. Marc found it on Grand Valley State at Charleston
+    upset" with no favorite to be upset. Marc found it on Grand Valley State at Charleston
     (WV): two Division II sides, no ranks, no line, drawn as an assessed non-upset.
 
     The model now returns null there and the page draws the same dash the cover and total
@@ -979,7 +979,7 @@ def test_the_upset_scale_cannot_out_run_its_verdict():
     assert "is_upset_by_line is not null and upset_level is null" in body
 
 
-def test_the_favourite_by_the_line_losing_is_an_upset():
+def test_the_favorite_by_the_line_losing_is_an_upset():
     """R-173. Marc, on North Carolina at TCU: "TCU favored by 8, but they lose by 5. That's a
     Level 1 upset." Neither side was ranked, so the rank basis had nothing to say and the page
     drew a dash — correct under the old definition and not what an upset means.
@@ -997,15 +997,121 @@ def test_the_favourite_by_the_line_losing_is_an_upset():
 def test_the_upset_tooltip_names_its_basis():
     """A reader checking a surprising verdict needs to know which question produced it."""
     assert schedule._upset_title("upset") == "upset, against the closing spread"
-    assert schedule._upset_title("none") == "the favourite won, against the closing spread"
+    assert schedule._upset_title("none") == "the favorite won, against the closing spread"
     # No verdict, no "against" clause — there is nothing to name.
     assert "against" not in schedule._upset_title("")
 
 
 def test_no_basis_still_reads_as_no_basis():
     """R-172 does not regress: a game with neither a line nor a rank is still a dash, not a
-    verdict of "the favourite won"."""
+    verdict of "the favorite won"."""
     nan = float("nan")
     strip = schedule._result_strip(_row(upset_level=nan, home_rank=nan, away_rank=nan))
     assert "cfdb-sh-upset cfdb-ind-nodata" in strip
-    assert "nothing named a favourite" in strip
+    assert "nothing named a favorite" in strip
+
+
+def test_the_legend_thresholds_agree_with_the_warehouse():
+    """THEY DID NOT, AND HAD NOT SINCE R-141.
+
+    `srv_game` classifies with a STRICT `>`: `> upset_margin_big` is level 2, so a 7-point
+    win is level 1 and a 14-point win is level 2. The legend said "Upset by 7+" and "Upset by
+    14+", claiming the opposite at both boundaries — 138 completed games in the live data
+    carried a level the legend contradicted.
+
+    The data was never wrong. Only the labels were, which is the worse failure: nothing
+    breaks, the page just states something false about numbers that are correct.
+
+    Asserted against the dbt vars, not against 8 and 15, so changing a var moves the test and
+    the label together.
+    """
+    import re
+    from lib.metrics import UPSET_BIG_MARGIN, UPSET_BLOWOUT_MARGIN
+    from views import schedule
+
+    labels = [entry[-1] for _, entries in schedule.LEGEND_GROUPS for entry in entries]
+    upsets = [text for text in labels if text.startswith("Upset by")]
+    assert len(upsets) == 3, upsets
+
+    numbers = [tuple(int(n) for n in re.findall(r"\d+", text)) for text in upsets]
+    assert numbers == [
+        (UPSET_BIG_MARGIN,),                            # level 1: up to and including big
+        (UPSET_BIG_MARGIN + 1, UPSET_BLOWOUT_MARGIN),   # level 2: the band between
+        (UPSET_BLOWOUT_MARGIN + 1,),                    # level 3: above blowout
+    ], numbers
+    # The boundary values themselves must never appear as the START of a band: that is the
+    # off-by-one, spelled exactly as it shipped.
+    assert f"Upset by {UPSET_BIG_MARGIN}+" not in labels
+    assert f"Upset by {UPSET_BLOWOUT_MARGIN}+" not in labels
+
+
+def test_the_page_and_the_workbook_describe_the_upset_levels_the_same_way():
+    """Two legends for one metric is the thing R-224 is about. Until the thresholds come from
+    a column they at least have to come from the same reader — and the workbook's version was
+    right while the page's was wrong, which is how the disagreement was found."""
+    from lib import metrics, workbook
+    assert (workbook.UPSET_BIG_MARGIN, workbook.UPSET_BLOWOUT_MARGIN) == (
+        metrics.UPSET_BIG_MARGIN, metrics.UPSET_BLOWOUT_MARGIN)
+    described = {mark: text for _, mark, text in workbook.MARK_LEGEND}
+    assert f"{metrics.UPSET_BIG_MARGIN} or fewer" in described["●"]
+    assert f"{metrics.UPSET_BIG_MARGIN + 1} to {metrics.UPSET_BLOWOUT_MARGIN}" in described["●●"]
+
+
+def test_no_user_facing_string_uses_british_spelling():
+    """Marc: "Use US version of favorite". The site said favourite and the workbook said
+    favorite, in two legends describing the same three marks."""
+    from pathlib import Path as _Path
+    site = _Path(__file__).resolve().parents[1] / "site"
+    # ONE exemption, spelled out rather than pattern-matched: CSV_LABEL_OVERRIDES quotes the
+    # header in Marc's column-order file verbatim, and rewriting the quote would make the
+    # recorded divergence look like a typo instead of a decision.
+    exempt = '"Favourite covered": "Favorite covered"'
+    offenders = []
+    for path in sorted(site.rglob("*.py")):
+        if "__pycache__" in str(path):
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            if "avourite" not in line:
+                continue
+            if exempt in line or "Marc's CSV" in line:
+                continue
+            offenders.append(f"{path.name}:{number}: {line.strip()[:70]}")
+    assert not offenders, offenders
+
+
+def test_the_legend_labels_MOVE_when_the_threshold_moves(monkeypatch):
+    """DERIVATION, NOT COINCIDENCE.
+
+    The test above compares the labels to the vars, and a hardcoded "Upset by 15+" passes it
+    — because 15 is the right answer today. That is the failure this project keeps finding:
+    a true assertion about the wrong property. It would go on passing the day someone changes
+    `upset_margin_blowout`, which is the only day it matters.
+
+    So this changes the threshold and reloads the module. If the labels are literals they
+    stay put and this fails; if they are derived they follow.
+    """
+    import importlib
+    import re
+    from lib import metrics
+    from views import schedule
+
+    def labels_of(module):
+        return [entry[-1] for _, entries in module.LEGEND_GROUPS for entry in entries
+                if str(entry[-1]).startswith("Upset by")]
+
+    before = labels_of(schedule)
+    monkeypatch.setattr(metrics, "UPSET_BIG_MARGIN", 9)
+    monkeypatch.setattr(metrics, "UPSET_BLOWOUT_MARGIN", 21)
+    try:
+        importlib.reload(schedule)
+        after = labels_of(schedule)
+        assert after != before, (
+            "the thresholds changed and the legend did not — the labels are hardcoded")
+        numbers = sorted({int(n) for text in after for n in re.findall(r"\d+", text)})
+        assert numbers == [9, 10, 21, 22], numbers
+    finally:
+        # Restore the module for every test after this one; monkeypatch undoes the constants
+        # but not the reload that read them.
+        monkeypatch.undo()
+        importlib.reload(schedule)
+    assert labels_of(schedule) == before

@@ -161,7 +161,7 @@ def _overview(row) -> None:
                    if row.get("conference_standing") == row.get("conference_standing")
                    and row.get("conference_standing") is not None else "—")
     cols[3].metric("ATS", row.get("ats_record_display") or "—")
-    st.caption(f"ATS as favourite {row.get('ats_as_favorite_display') or '—'} · "
+    st.caption(f"ATS as favorite {row.get('ats_as_favorite_display') or '—'} · "
                f"as underdog {row.get('ats_as_underdog_display') or '—'}")
 
 

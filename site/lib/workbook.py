@@ -28,14 +28,13 @@ import io
 import os
 import re
 import zipfile
-from pathlib import Path
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import quote
 
 import pandas as pd
 
-from lib import fmt
+from lib import fmt, metrics
 from lib.query import query
 
 CFBD_CREDIT = ("Data from CollegeFootballData.com. Used under their terms; attribution is "
@@ -256,32 +255,6 @@ NO_DATA_MARK = "–"        # the site's own mark for "we hold nothing here"
 # this project has already had to fix a glyph that was 3.6:1.
 
 
-def _upset_thresholds() -> tuple:
-    """`upset_margin_big` and `upset_margin_blowout`, from dbt's project file.
-
-    THE LEGEND MUST NOT RETYPE A METRIC DEFINITION. These live in `dbt/dbt_project.yml`
-    because a threshold is a metric definition and does not belong in the app — the same rule
-    that put them there in the first place. Reading them means the legend cannot go on
-    describing a rule the warehouse has stopped applying.
-
-    Parsed rather than imported: the site image has no dbt and no yaml dependency, and adding
-    one to read two integers would be a poor trade. Falls back to the shipped values so a
-    workbook still builds where the repo is not mounted.
-    """
-    import re as _re
-    project = Path(__file__).resolve().parents[2] / "dbt" / "dbt_project.yml"
-    defaults = (7, 14)
-    try:
-        text = project.read_text(encoding="utf-8")
-    except OSError:
-        return defaults
-    found = []
-    for name, fallback in (("upset_margin_big", 7), ("upset_margin_blowout", 14)):
-        match = _re.search(rf"^\s*{name}:\s*(\d+)\s*$", text, _re.MULTILINE)
-        found.append(int(match.group(1)) if match else fallback)
-    return tuple(found)
-
-
 OPEN_MARK_COLOUR = "FFB7410E"
 
 # RED, for the two marks that mean "not the good outcome" — Under, and a push.
@@ -350,9 +323,11 @@ MARK_COLOURS = {
 # push mark is not.
 COLOURED_MARKS = set(MARK_COLOURS)
 
-# The thresholds, READ FROM dbt's OWN VARS rather than retyped, so the legend cannot describe
-# a rule the warehouse has stopped applying.
-UPSET_BIG_MARGIN, UPSET_BLOWOUT_MARGIN = _upset_thresholds()
+# The thresholds, from the ONE module allowed to know them. They were read here directly
+# until the site's own legend turned out to hardcode the same two numbers — and to have them
+# wrong. Two readers of one definition is one too many.
+UPSET_BIG_MARGIN = metrics.UPSET_BIG_MARGIN
+UPSET_BLOWOUT_MARGIN = metrics.UPSET_BLOWOUT_MARGIN
 
 # The Index legend. R-026's icon-only exception on the SITE is defensible because R-102's
 # legend explains it once — that is the stated reason in the code. A workbook travels further

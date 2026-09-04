@@ -187,7 +187,7 @@ def _market(row) -> None:
                      "cfdb holds lines from 2013 onward, and only for games books priced.")
         return
     cols = st.columns(4)
-    # AC-1.4 again: a home favourite is a NEGATIVE spread. Stated on the page, because this
+    # AC-1.4 again: a home favorite is a NEGATIVE spread. Stated on the page, because this
     # is the number a reader is most likely to invert.
     cols[0].metric("Spread (home)", fmt.signed(row.get("spread"), "spread"),
                    help="Negative means the home team is favoured.")

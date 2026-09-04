@@ -85,7 +85,7 @@ def _week_floor_note(df: pd.DataFrame) -> None:
 
 
 def _spread_and_model(row) -> str:
-    """AC-1.4: a home favourite shows a NEGATIVE spread and a NEGATIVE predicted margin,
+    """AC-1.4: a home favorite shows a NEGATIVE spread and a NEGATIVE predicted margin,
     and the two point the same way. This is the number most likely to be misread, so the
     convention is stated on the page rather than assumed."""
     spread = fmt.signed(row.get("spread_current"), "spread")

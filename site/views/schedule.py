@@ -78,6 +78,7 @@ import pandas as pd
 import streamlit as st
 
 from lib import chips, filters, fmt, params, shell, states, table
+from lib.metrics import UPSET_BIG_MARGIN, UPSET_BLOWOUT_MARGIN
 from lib.query import query
 from lib.table import Col
 
@@ -350,8 +351,8 @@ def _weather_cell(row) -> str:
 # width than the whole rest of the cell.
 UPSET_LEVEL_CLASS = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
 UPSET_LEVEL_TITLE = {
-    "": "no closing line, so nothing named a favourite",
-    "none": "the favourite won",
+    "": "no closing line, so nothing named a favorite",
+    "none": "the favorite won",
     "upset": "upset",
     "big": "upset by more than a touchdown",
     "blowout": "upset by more than two touchdowns",
@@ -534,16 +535,29 @@ LEGEND_GROUPS = [
     ]),
     ("Against the line", [
         ("glyph", "cfdb-legend-ch", MOVE_GLYPH, "Change since the line opened"),
-        ("shape", "upset", "quiet", "", "The favourite won"),
-        ("shape", "upset", "fill", "cfdb-u1", "Upset"),
-        ("shape", "upset", "fill", "cfdb-u2", "Upset by 7+"),
-        ("shape", "upset", "fill", "cfdb-u3", "Upset by 14+"),
+        ("shape", "upset", "quiet", "", "The favorite won"),
+        # THESE NUMBERS WERE WRONG BY ONE, AND HAD BEEN SINCE R-141.
+        #
+        # `srv_game` classifies with a STRICT `>`: a 7-point win is level 1 and a 14-point win
+        # is level 2. The labels said "7+" and "14+", which claimed the opposite at both
+        # boundaries — 138 completed games in the current data carry a level the legend
+        # contradicts. The data was never wrong; only this was, which is the worse failure
+        # because nothing breaks visibly.
+        #
+        # Derived from the dbt vars rather than retyped, so the two cannot drift again. This
+        # is a STOPGAP: the thresholds still reach the page by reading a file, and the real
+        # fix is carrying them as columns on `srv_game` the way `training_week_floor` already
+        # is (R-224). Then the page reads the row it is already fetching.
+        ("shape", "upset", "fill", "cfdb-u1", f"Upset by {UPSET_BIG_MARGIN} or fewer"),
+        ("shape", "upset", "fill", "cfdb-u2",
+         f"Upset by {UPSET_BIG_MARGIN + 1}\u2013{UPSET_BLOWOUT_MARGIN}"),
+        ("shape", "upset", "fill", "cfdb-u3", f"Upset by {UPSET_BLOWOUT_MARGIN + 1}+"),
         ("shape", "cover", "fill", "cfdb-acc", "Winner covered"),
         ("shape", "cover", "open", "cfdb-acc", "Winner did not cover"),
         ("shape", "over", "fill", "cfdb-acc", "Over"),
         ("shape", "over", "open", "cfdb-acc", "Under"),
         ("shape", "cover", "nodata", "", "No closing line held"),
-        ("shape", "upset", "nodata", "", "No line, so no favourite"),
+        ("shape", "upset", "nodata", "", "No line, so no favorite"),
     ]),
 ]
 
@@ -560,7 +574,7 @@ LEGEND_COLUMNS = [["Game", "Result"], ["Against the line"]]
 LEGEND_EXAMPLES = [
     ({"is_completed": True, "upset_level": "none",
       "winner_covered_close": "yes", "over_met": "yes"},
-     "favourite won · winner covered · over"),
+     "favorite won · winner covered · over"),
     ({"is_completed": True, "upset_level": "big",
       "winner_covered_close": "yes", "over_met": "no"},
      "upset by 7+ · winner covered · under"),
