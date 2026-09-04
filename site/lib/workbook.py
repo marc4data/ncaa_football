@@ -1162,8 +1162,25 @@ def _header_height(labels_and_widths) -> float:
     return worst * HEADER_LINE_HEIGHT
 
 
-COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential",
-                       "predicted_margin"}
+# TWO SCALES, BECAUSE THE COLUMNS MEAN DIFFERENT THINGS.
+#
+# A colour scale asserts good and bad. That is fair on a quantity with a direction — a bigger
+# edge, a better point differential — and wrong on one that only has a SIDE.
+#
+# `actual_margin` and `predicted_margin` are both AWAY MINUS HOME, so negative means the home
+# team. Measured across 106,554 completed games: `actual_margin < 0` means a home win with no
+# exceptions at all, and it is 64% of FBS games since 2024. The default scale painted red at
+# the minimum, so the most common outcome in the sport was alarming on nearly two rows in
+# three — Marc's point, and the numbers agree with it.
+#
+# Reversed for those two, so red marks the AWAY win: the less expected result, which is the
+# one worth a reader's eye.
+COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential"}
+
+# Away-minus-home. Negative is the home team and the common case, so the scale runs the other
+# way. Kept as its own set rather than a flag on each field, because the question "which side
+# does negative mean" is the whole reason these differ.
+REVERSED_SCALE_FIELDS = {"predicted_margin"}
 
 # R-220. Marc supplied a screenshot of the exact rule: Data Bar · automatic min and max ·
 # direction Context · SOLID fill · positive BLUE, negative RED · solid black borders on both ·
@@ -1199,8 +1216,17 @@ DATA_BAR_SIMPLE = os.getenv("CFDB_SIMPLE_DATA_BAR", "").lower() in ("1", "true",
 # ignores the legacy element; anything older degrades to a plain blue bar rather than to
 # nothing.
 DATA_BAR_GUID_PREFIX = "{FFFFFFFF-CCCC-BBBB-AAAA-"
-DATA_BAR_POSITIVE = "FF638EC6"      # blue
-DATA_BAR_NEGATIVE = "FFFF0000"      # red
+# THE BAR POINTS THE WAY THE SCORE DID, AND THE COLOUR FOLLOWS THE SAME RULE AS THE SCALES.
+#
+# `actual_margin` is away minus home, so the bar grows LEFT when the home team won and RIGHT
+# when the away team did. Blue for the home win because it is 64% of games and a red common
+# case reads as an alarm that never means anything; red for the away win, which is the result
+# a reader is scanning for.
+#
+# Marc's original screenshot said positive blue and negative red. That was before either of us
+# had noticed which side of zero the home team lives on.
+DATA_BAR_POSITIVE = "FFFF0000"      # away won — the less expected result
+DATA_BAR_NEGATIVE = "FF638EC6"      # home won — the common one
 DATA_BAR_AXIS = "FF000000"          # black axis and black borders
 
 
@@ -1920,11 +1946,17 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 _mark_text_column(tab, span)
             if field in DATA_BAR_FIELDS:
                 _add_data_bar(tab, span)
-            elif field in COLOUR_SCALE_FIELDS:
+            elif field in COLOUR_SCALE_FIELDS or field in REVERSED_SCALE_FIELDS:
+                # Red at the end a reader should NOTICE. For a quantity with a direction that
+                # is the minimum; for an away-minus-home margin it is the positive end, where
+                # the away team won.
+                low, high = ("F8696B", "63BE7B")
+                if field in REVERSED_SCALE_FIELDS:
+                    low, high = high, low
                 tab.conditional_formatting.add(span, ColorScaleRule(
-                    start_type="min", start_color="F8696B",
+                    start_type="min", start_color=low,
                     mid_type="percentile", mid_value=50, mid_color="FFEB84",
-                    end_type="max", end_color="63BE7B"))
+                    end_type="max", end_color=high))
             elif field in FLAG_FIELDS:
                 # R-218 TRAP. Once a boolean column renders "Yes", a rule comparing to TRUE
                 # matches nothing — NO ERROR, NO WARNING, the highlight simply disappears.
@@ -2149,6 +2181,16 @@ def _write_index(book, season, week, season_type, conference, division, generate
     # R-214, consequence 1. `Spread open` and `O/U open` are gone, and they were the
     # disambiguator: a blank delta means two different things and nothing else in the file
     # tells them apart. No sentinel is invented; the reader is told.
+    # A BARE COLOUR IS AS UNDECODABLE AS A BARE GLYPH. The marks get a legend for exactly
+    # this reason; the bar earns one on the same argument.
+    row += 1
+    tab.cell(row, 1, "Margin bar").font = header_font
+    tab.cell(row, 2, "Margin (away−home) is drawn as a bar from a centre line. It grows LEFT "
+                     "in blue when the home team won — 64% of games — and RIGHT in red when "
+                     "the away team did, which is the result worth noticing. The colours are "
+                     "the direction, not a judgement about the game.")
+    row += 1
+
     row += 1
     tab.cell(row, 1, "Blank Δ Spread / Δ O/U").font = header_font
     tab.cell(row, 2, "A blank delta means EITHER the line did not move OR cfdb holds no "
