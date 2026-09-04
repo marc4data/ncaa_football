@@ -141,6 +141,21 @@ fi
 # THE SITE IS NOT DEPLOYED UNTIL IT RENDERS. "The data is correct" and "the site works" are
 # different claims (CLAUDE.md, 2026-08-31); this checks the second one.
 echo "  verifying..."
+# THE MONITOR'S FORCED COMMAND SHIPS WITH THE DEPLOY, because it did not and drifted.
+#
+# `deploy/cfdb_heartbeat.sh` is what the GitHub watcher runs over SSH, and it was installed by
+# hand. On 2026-09-04 the checker learned to read failure lines and the droplet's copy did not
+# have them for another hour — the monitor reported a clean pipeline while two DAGs were
+# failing, which is the exact silence the change was meant to end.
+#
+# Same argument as the site and the pipeline repo: one deploy path, or "deployed" means
+# different things in different places.
+if [[ -f deploy/cfdb_heartbeat.sh ]]; then
+  echo "  syncing the monitor's forced command..."
+  scp -q -o BatchMode=yes deploy/cfdb_heartbeat.sh "$SERVING_SSH_HOST:/usr/local/bin/cfdb_heartbeat.sh"
+  "${SSH[@]}" 'chown root:root /usr/local/bin/cfdb_heartbeat.sh && chmod 0755 /usr/local/bin/cfdb_heartbeat.sh'
+fi
+
 scp -q -o BatchMode=yes ci/site_smoke.py "$SERVING_SSH_HOST:/tmp/site_smoke.py"
 smoke=$("${SSH[@]}" "cd /opt/cfdb && docker compose cp /tmp/site_smoke.py site:/app/site_smoke.py \
           >/dev/null 2>&1 && docker compose exec -T site python /app/site_smoke.py 2>&1 \

@@ -626,3 +626,22 @@ def test_incremental_models_tolerate_a_new_column():
     assert not missing, (
         f"incremental models with no on_schema_change: {missing} — adding a column to one "
         f"fails its next run in production and passes every check in CI")
+
+
+def test_the_deploy_ships_the_monitors_forced_command():
+    """IT DID NOT, AND THEY DRIFTED THE SAME DAY.
+
+    `deploy/cfdb_heartbeat.sh` is what the GitHub watcher executes over SSH. It was installed
+    by hand, so when the checker learned to read failure lines on 2026-09-04 the droplet's
+    copy went on emitting only heartbeats — and the monitor reported a clean pipeline while
+    two DAGs were failing. That is the exact silence the change was meant to end,
+    reintroduced by a deploy gap.
+
+    Same argument the deploy script already makes about the site and the pipeline repo: one
+    deploy path, or "deployed" means different things in different places.
+    """
+    script = DEPLOY_SCRIPT.read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+    assert "cfdb_heartbeat.sh" in code, (
+        "the forced command is not deployed, so the watcher and the box it watches can drift")
+    assert "/usr/local/bin/cfdb_heartbeat.sh" in code

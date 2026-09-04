@@ -285,3 +285,35 @@ def test_the_watcher_and_the_forced_command_agree_on_the_failure_format():
     _, failures = module.read_ages("host")
     assert failures == {"cfbd_scores_refresh.dbt_test": 8100}
     del subprocess
+
+
+def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none():
+    """THE DEFECT THIS CHANGE EXISTS TO REMOVE, REINTRODUCED ONE LAYER DOWN.
+
+    The first version echoed `failed_query_unavailable|airflow|0` when the query could not
+    run — a shape the watcher discards as unparseable. A monitor that had lost sight of
+    failures then looked exactly like a pipeline that had none, which is the same silence
+    that cost eight hours.
+
+    It emits a `failed|` line instead, so an unreadable metadata database raises the alarm
+    rather than muting it. (It was not hypothetical: the monitor user's .pgpass named the
+    `cfdb` database specifically and could not read `airflow` at all.)
+    """
+    from pathlib import Path as _Path
+    script = (_Path(__file__).resolve().parents[1]
+              / "deploy" / "cfdb_heartbeat.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+    assert "failed_query_unavailable" not in code, (
+        "the fallback must use the `failed|` shape the watcher parses, or it is discarded")
+    assert "failed|MONITOR." in code
+
+    module = _watcher()
+
+    class Done:
+        returncode = 0
+        stdout = "scores_refresh|60\nfailed|MONITOR.cannot_read_airflow_metadata|0\n"
+        stderr = ""
+
+    module.subprocess.run = lambda *a, **k: Done()
+    _, failures = module.read_ages("host")
+    assert "MONITOR.cannot_read_airflow_metadata" in failures
