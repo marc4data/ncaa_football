@@ -358,3 +358,82 @@ def test_a_slow_sweep_is_excluded_for_cost_and_says_so():
         tags = set(re.findall(r"'([a-z_]+)'", config.group(1))) if config else set()
         assert not {"slow_sweep", "full_refresh_only"} <= tags, (
             f"{path.name} claims both exclusion reasons; they are different claims")
+
+
+# === the lines DAG grew a transform chain =================================================
+
+def _lines_dag_source():
+    return (Path(__file__).resolve().parents[1] / "dags" / "lines_snapshot_dag.py").read_text()
+
+
+def test_the_distributions_are_built_on_the_lines_cadence_not_the_scores_one():
+    """A DISTRIBUTION IS A FUNCTION OF LINES, NOT OF RESULTS.
+
+    `cfbd_scores_refresh` already runs the exact chain these models need — dbt run, dbt test,
+    publish serving — every two hours, so the machinery was never missing. Its GATE is the
+    mismatch: it asks whether games are SETTLING, and lines move on a Tuesday when nothing is
+    settling at all. Widening that gate would spend exactly what it was built to save.
+    """
+    lines = _lines_dag_source()
+    scores = (Path(__file__).resolve().parents[1] / "dags" / "scores_refresh_dag.py").read_text()
+    assert "srv_week_metric_distribution" in lines
+    assert "srv_week_metric_distribution" not in scores, (
+        "the distributions must not also be built on the two-hourly scores cadence — two "
+        "DAGs building one model is two answers to when it is current")
+
+
+def test_the_transform_never_blocks_a_lines_snapshot():
+    """THE FETCH IS THE IRREVERSIBLE PART OF THIS DAG. The market at 14:00 cannot be observed
+    again at 18:00, so nothing may sit between the gate and the snapshot — and a dbt failure
+    least of all.
+
+    Asserted on the dependency line: the transform hangs off `load`, downstream of the
+    snapshot, and the snapshot chain does not wait for it.
+    """
+    source = _lines_dag_source()
+    assert "gate >> snapshot >> load >> beat" in source, (
+        "the lines chain must remain a straight line from gate to heartbeat")
+    assert "[load, weather] >> dbt_distribution" in source
+    # ...and nothing downstream of dbt is upstream of the snapshot or the heartbeat.
+    assert "dbt_distribution >> snapshot" not in source
+    assert "publish_distribution >> beat" not in source
+
+
+def test_the_heartbeat_still_watches_only_the_lines_chain():
+    """The switch monitors the LINES cadence specifically. A stale-lines alarm raised by a
+    broken dbt model would send someone looking in the wrong place — the same reasoning that
+    already keeps `weather` off the heartbeat's path."""
+    source = _lines_dag_source()
+    beat_line = next(line for line in source.splitlines()
+                     if line.strip().startswith("gate >> snapshot >> load >> beat"))
+    assert "dbt" not in beat_line and "publish" not in beat_line
+
+
+def test_the_selector_pulls_ancestors_and_not_the_whole_project():
+    """A four-hourly job has no business rebuilding 53 models. `+` pulls what the two serving
+    views need — the facts, the shared value model and the market mart — and nothing else."""
+    source = _lines_dag_source()
+    assert "+srv_week_metric_distribution" in source
+    assert "tag:production" not in source
+    assert "--select" in source
+
+
+def test_both_dbt_dags_name_the_project_directory_the_same_way():
+    """Two spellings of one location is how a deploy breaks on one DAG and not the other."""
+    import re
+    paths = set()
+    for name in ("lines_snapshot_dag.py", "scores_refresh_dag.py"):
+        text = (Path(__file__).resolve().parents[1] / "dags" / name).read_text()
+        found = re.search(r'DBT_PROJECT_DIR = "([^"]+)"', text)
+        assert found, name
+        paths.add(found.group(1))
+    assert len(paths) == 1, paths
+
+
+def test_the_distribution_publish_ships_the_hot_set_only():
+    """The heavy player tables are 608 MB of the serving schema and this link is the
+    pipeline's failure point — 59 MB has taken 17 minutes when it is busy. A four-hourly job
+    must not put 182 MB on it."""
+    source = _lines_dag_source()
+    assert 'publish_all(schemas=["serving"], hot=True)' in source
+    assert "hot=False" not in source

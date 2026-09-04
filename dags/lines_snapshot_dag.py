@@ -34,6 +34,7 @@ dbt's job downstream.
 from datetime import datetime, timedelta, timezone
 
 from airflow import DAG
+from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import (
     PythonOperator,
     ShortCircuitOperator,
@@ -43,10 +44,36 @@ from airflow.utils.trigger_rule import TriggerRule
 from src.alerting import failure_callback
 from src.lines_cadence import load_config, should_snapshot
 from src.load_raw_to_postgres import load_endpoint
+from src.publish_marts import publish_all
 from src.snapshot import snapshot_lines, snapshot_weather
 
 # Finest cadence, always. The gate below decides which runs actually do work.
 SCHEDULE = "0 */4 * * *"
+
+# Same path the scores DAG uses. Two spellings of one location is how a deploy
+# breaks on one DAG and not the other.
+DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
+
+# WHY THE WEEKLY DISTRIBUTIONS ARE BUILT HERE AND NOT ON THE SCORES DAG.
+#
+# `cfbd_scores_refresh` already runs exactly this chain — dbt run over a selector, dbt test,
+# publish serving — every two hours, so the machinery was never missing. Its GATE is the
+# mismatch: `cadence_gate` there asks whether games are SETTLING, which is a question about
+# results. A distribution is a function of LINES and WEATHER, both of which move on a Tuesday
+# when nothing is settling at all. Widening that gate would spend exactly what it was built
+# to save, on every quiet day of the year.
+#
+# This DAG is the structurally right home: the distribution is a function of what it already
+# fetches, it runs on the cadence those inputs move at, and its season-aware short-circuit is
+# already written. It also closes a gap that predates this work — until now the DAG landed
+# raw and loaded it, and dbt ran somewhere else.
+#
+# `+` pulls ancestors, so this is the two distribution facts, the value model they share, and
+# the market mart underneath — NOT the whole project. A four-hourly job has no business
+# rebuilding 53 models.
+DISTRIBUTION_SELECTOR = (
+    "--select +srv_week_metric_distribution +srv_week_metric_distribution_bin"
+)
 
 default_args = {
     "owner": "cfdb",
@@ -172,8 +199,43 @@ with DAG(
         retries=1,
     )
 
-    # The dead-man's switch. This DAG has no publish step — a lines snapshot is not
-    # user-facing on its own — so `load` is the end of its success path.
+    # BUILD AND PUBLISH THE DISTRIBUTIONS, AS A SIBLING CHAIN.
+    #
+    # Same reasoning as `weather` above, and it matters more here: a dbt failure must never
+    # cost a lines snapshot. The market at 14:00 cannot be observed again at 18:00, so the
+    # fetch is the irreversible part of this DAG and nothing may be allowed to block it.
+    # Hanging the transform off `load` in series would do exactly that.
+    #
+    # So it hangs off `load` — it needs the raw in the warehouse — but the HEARTBEAT does
+    # not wait for it. The switch monitors the LINES cadence specifically, and a stale-lines
+    # alarm raised by a broken dbt model would send someone looking in the wrong place.
+    # Failures are still loud: these are leaves, so a failure fails the run and fires
+    # on_failure_callback.
+    dbt_distribution = BashOperator(
+        task_id="dbt_build_distributions",
+        bash_command=(f"dbt run --project-dir {DBT_PROJECT_DIR} "
+                      f"{DISTRIBUTION_SELECTOR}"),
+        # One retry. These models are append-only and skip a week already written, so a
+        # rerun is cheap and idempotent — but the next scheduled run rebuilds them anyway.
+        retries=1,
+    )
+    dbt_distribution_test = BashOperator(
+        task_id="dbt_test_distributions",
+        bash_command=(f"dbt test --project-dir {DBT_PROJECT_DIR} "
+                      f"{DISTRIBUTION_SELECTOR}"),
+        retries=1,
+    )
+    # HOT ONLY, for the reason the scores DAG documents at length: the heavy player tables
+    # are 608 MB of the serving schema and this link is the pipeline's failure point. The
+    # distribution views are a few hundred rows and ride the hot set.
+    publish_distribution = PythonOperator(
+        task_id="publish_distributions",
+        python_callable=lambda **_: publish_all(schemas=["serving"], hot=True),
+        retries=1,
+    )
+
+    # The dead-man's switch. It watches the LINES chain only — see the comment on the
+    # distribution tasks for why the transform is deliberately not upstream of it.
     beat = PythonOperator(
         task_id="heartbeat",
         # NONE_FAILED, NOT the default all_success. This DAG is gated, so a run that
@@ -193,3 +255,7 @@ with DAG(
     # Parallel leaf. See the comment on `weather`: it fails the run without silencing the
     # lines heartbeat.
     gate >> weather
+    # The transform chain needs the raw loaded, and the weather refreshed, before it runs —
+    # a distribution built from last run's weather would be a forecast up to four hours stale
+    # sitting on top of current lines. It is downstream of both and upstream of nothing.
+    [load, weather] >> dbt_distribution >> dbt_distribution_test >> publish_distribution
