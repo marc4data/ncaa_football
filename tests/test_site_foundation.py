@@ -174,16 +174,36 @@ def test_built_pages_pass_the_query_contract():
     import re
     from pathlib import Path
     site = Path(__file__).resolve().parents[1] / "site"
+
+    # PLACEHOLDERS ARE RESOLVED BY THE CI SCRIPT'S OWN LOGIC, not by a second copy of it.
+    #
+    # A named cap reaches the SQL as `{ROW_CAP}` because the contract's LIMIT rule matches
+    # `limit <digits>` and a bind parameter would fail it; a shared column list reaches it as
+    # `{COLUMNS}` so two queries cannot drift apart. `ci/check_page_queries.py` already knows
+    # how to resolve both — a fixed dictionary here would be a second substitution table to
+    # keep in step, and it was already wrong about {COLUMNS} on its first attempt.
+    import importlib.util
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("check_page_queries",
+                                                  root / "ci" / "check_page_queries.py")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+
     checked = 0
-    for path in (site / "views").glob("*.py"):
+    for path in list((site / "views").glob("*.py")) + [site / "lib" / "filters.py"]:
         source = path.read_text()
-        for sql in re.findall(r'"""\s*(select\b.*?)"""', source, re.DOTALL | re.IGNORECASE):
-            check_contract(" ".join(sql.split()))
-            checked += 1
-    for path in [site / "lib" / "filters.py"]:
-        for sql in re.findall(r'"""\s*(select\b.*?)"""', path.read_text(),
+        constants = checker.module_constants(source)
+        for sql in re.findall(r'"""\s*(select\b.*?)"""', source,
                               re.DOTALL | re.IGNORECASE):
-            check_contract(" ".join(sql.split()))
+            flat = " ".join(sql.split())
+            for name, value in constants.items():
+                flat = flat.replace("{" + name + "}", " ".join(value.split()))
+            for hole, value in checker.SUBSTITUTIONS.items():
+                flat = flat.replace(hole, value)
+            assert "{" not in flat, (
+                f"uninterpolated placeholder in {path.name}: {flat[:110]} — teach "
+                f"ci/check_page_queries.py's SUBSTITUTIONS about it, not this test")
+            check_contract(flat)
             checked += 1
     assert checked >= 5, f"expected several page queries, found {checked}"
 
