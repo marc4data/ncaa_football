@@ -47,6 +47,47 @@ CSS = """
 .cfdb-monogram { display:inline-block; text-align:center; border-radius:4px; color:#fff;
   font-size:.72rem; font-weight:700; vertical-align:middle; }
 .cfdb-hint { opacity:.55; margin-left:.25rem; cursor:help; }
+/* THE WEEK BAND AND ITS DISTRIBUTIONS.
+   One row, and it must stay one row: prompt 036 spent a round removing eleven rows from above
+   the first card, and a band that wraps hands them straight back. The thumbnails are
+   `flex-shrink` and the label is not, so a narrow viewport squeezes the pictures rather than
+   pushing them onto a second line. */
+.cfdb-weekband { display:flex; align-items:center; gap:1rem; flex-wrap:nowrap;
+    margin:.2rem 0 .5rem; padding:.35rem 0; border-top:1px solid rgba(127,127,127,.28);
+    border-bottom:1px solid rgba(127,127,127,.28); overflow:hidden; }
+.cfdb-weekband-title { font-weight:700; font-size:.95rem; white-space:nowrap;
+    letter-spacing:.02em; flex:0 0 auto; }
+.cfdb-weekband-strip { display:flex; gap:1.1rem; align-items:center; min-width:0;
+    flex:1 1 auto; justify-content:flex-end; }
+
+.cfdb-dist { display:inline-flex; align-items:center; gap:.35rem; min-width:0;
+    flex:0 1 auto; }
+.cfdb-dist-label { font-size:.66rem; letter-spacing:.06em; text-transform:uppercase;
+    opacity:.62; white-space:nowrap; }
+.cfdb-dist-median { font-size:.78rem; font-variant-numeric:tabular-nums; opacity:.9;
+    white-space:nowrap; }
+/* The SVG carries the colour; the bars are drawn in currentColor so the whole thing themes
+   for free and needs no light/dark variant. */
+.cfdb-dist-svg { display:block; color:inherit; }
+/* An absent week reserves the SAME WIDTH as a present one. R-141: an element that appears
+   only when populated shifts everything beside it the moment a week is half-priced. */
+.cfdb-dist-empty { opacity:.45; }
+.cfdb-dist-none { font-size:.9rem; opacity:.6; }
+
+.cfdb-dist-panel { border:1px solid rgba(127,127,127,.25); border-radius:6px;
+    padding:.6rem .75rem; margin:.4rem 0; }
+.cfdb-dist-head { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.3rem; }
+.cfdb-dist-sub { font-size:.72rem; opacity:.6;
+    font-family:ui-monospace,Menlo,monospace; }
+.cfdb-dist-body { display:flex; gap:.9rem; align-items:flex-start; }
+.cfdb-dist-body .cfdb-dist-svg { flex:1 1 auto; min-width:0; }
+/* The stats are a TABLE, not a caption — label left, value right, monospace. That is what
+   makes them scannable and it is what plot_distribution does. */
+.cfdb-dist-stats { flex:0 0 auto; font-family:ui-monospace,Menlo,monospace;
+    font-size:.72rem; min-width:6.5rem; }
+.cfdb-dist-stat { display:flex; justify-content:space-between; gap:.8rem; opacity:.85; }
+.cfdb-dist-stat b { font-variant-numeric:tabular-nums; }
+
 .cfdb-footer { margin-top:2.5rem; padding-top:.8rem; border-top:1px solid #e3e6ea;
   font-size:.82rem; opacity:.75; }
 .cfdb-readiness { font-size:.8rem; opacity:.7; font-family:ui-monospace,Menlo,monospace; }

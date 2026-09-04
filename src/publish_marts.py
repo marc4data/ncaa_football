@@ -136,6 +136,11 @@ DEFAULT_SERVING = [
     "srv_team_rating",
     "srv_data_dictionary",
     "srv_game_weather",
+    # The weekly distributions. Small — one row per week per metric per day, and ten bin rows
+    # under it — so they ride the hot publish rather than the weekly one: the numbers move
+    # every time a line moves, and a week-old distribution on a live page is worse than none.
+    "srv_week_metric_distribution",
+    "srv_week_metric_distribution_bin",
     "srv_team_roster",
     "srv_game_travel",
     "srv_edge_bucket_performance",

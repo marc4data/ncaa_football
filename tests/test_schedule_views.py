@@ -47,8 +47,62 @@ def _row(**overrides):
 
 
 class _Scope:
+    """The bits of GameScope the renderers touch.
+
+    `season` / `season_type` / `division` arrived when the week band did: `_by_week` reads a
+    distribution for the season, and the band's FBS-only note depends on the division. The
+    stub grew rather than the tests being pointed at a real GameScope, because a real one
+    needs Streamlit session state and these tests deliberately run without it.
+    """
+    season = 2026
+    season_type = "regular"
+    division = "fbs"
+
     def link(self, page, **kwargs):
         return "/x"
+
+
+def _distribution_frame():
+    """Two weeks of distribution rows, in the shape srv_week_metric_distribution returns."""
+    import pandas as _pd
+    rows = []
+    for week in (1, 2):
+        for span in ("week", "season_to_date"):
+            if span == "season_to_date" and week == 1:
+                continue                      # week 1 has nothing before it, so no row
+            for metric, counts in (("market_implied_favorite_points", "0,0,0,3,25,14,9,2,0,0"),
+                                   ("market_implied_underdog_points", "0,3,9,25,15,1,0,0,0,0"),
+                                   ("total", "0,1,4,16,17,8,6,1,0,0")):
+                rows.append({
+                    "season": 2026, "season_type": "regular", "week": week, "span": span,
+                    "metric": metric, "as_of_date": "2026-09-04", "recency": 1,
+                    "bin_counts": counts, "bin_min": 0, "bin_max": 60, "bin_incr": 6.0,
+                    "bin_count": 10, "below_min_count": 0, "above_max_count": 0,
+                    "n": 53, "games_in_week": 53, "coverage_pct": 100.0,
+                    "games_locked": 53, "games_live": 0, "is_locked": True,
+                    "min_value": 18.5, "max_value": 45.0, "p25": 27.5, "p50": 29.8,
+                    "p75": 32.0, "whisker_lo": 21.3, "whisker_hi": 38.0, "outlier_count": 5,
+                })
+    return _pd.DataFrame(rows)
+
+
+@pytest.fixture(autouse=True)
+def no_database(monkeypatch):
+    """THE WEEK BAND MADE THESE TESTS REACH A DATABASE, AND THEY WENT ON PASSING.
+
+    `_by_week` reads `srv_week_metric_distribution`, so the moment the band landed every card
+    test opened a connection — and every one stayed green, because a Postgres happened to be
+    running on this laptop. Stopping the container turned four of them into
+    `OperationalError`, which is how it was found.
+
+    That is precisely what `conftest.no_ambient_credentials` exists to prevent one level up: a
+    test whose result depends on ambient environment cannot be trusted when it matters. So the
+    read is stubbed here, with realistic rows rather than an empty frame — an empty one would
+    exercise only the absent-week path and quietly stop testing the band at all.
+    """
+    from views import schedule as _schedule
+    monkeypatch.setattr(_schedule, "_distributions",
+                        lambda season, season_type: _distribution_frame())
 
 
 @pytest.fixture
@@ -1115,3 +1169,114 @@ def test_the_legend_labels_MOVE_when_the_threshold_moves(monkeypatch):
         monkeypatch.undo()
         importlib.reload(schedule)
     assert labels_of(schedule) == before
+
+
+# === the week band ========================================================================
+
+def test_the_band_appears_once_per_week_not_once_per_day(counting_markdown):
+    """THE THING THE SPEC WARNS ABOUT FIRST. Both views grouped by day only, so bolting the
+    band onto that loop would have repeated it above Thursday, Friday and Saturday.
+
+    Two weeks, four days: two bands, four day headings.
+    """
+    from views import schedule
+    rows = pd.DataFrame(
+        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(3)]
+        + [_row(game_id=10 + i, week=1, game_date="2026-09-05") for i in range(2)]
+        + [_row(game_id=20 + i, week=2, game_date="2026-09-10") for i in range(4)]
+        + [_row(game_id=30 + i, week=2, game_date="2026-09-12") for i in range(1)])
+    schedule._stacked(rows, _Scope())
+    html = "\n".join(counting_markdown["html"])
+    # Two week bands plus one season-to-date, keyed on the LATEST week shown — week 2 here,
+    # so the reference runs through week 1.
+    assert html.count("cfdb-weekband-title") == 3, "two week bands plus season-to-date"
+    assert "through week 1" in html
+    assert html.count(">Week 1<") == 1 and html.count(">Week 2<") == 1
+    assert html.count("cfdb-daygroup") == 4
+
+
+def test_both_views_render_the_same_band(counting_markdown):
+    """`_by_week` is shared precisely so the dense and stacked views cannot drift about where
+    the band goes or what is in it."""
+    from views import schedule
+    rows = pd.DataFrame(
+        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(3)])
+    schedule._stacked(rows, _Scope())
+    stacked = [h for h in counting_markdown["html"] if "cfdb-weekband" in h]
+    counting_markdown["html"].clear()
+    schedule._dense(rows, _Scope())
+    dense = [h for h in counting_markdown["html"] if "cfdb-weekband" in h]
+    assert stacked and stacked == dense
+
+
+def test_the_band_carries_three_metrics_and_the_implied_pair_leads():
+    """The implied pair is the headline because it is the only thing here that MOVES with the
+    season — measured 20.3 points of gap in weeks 1-3 against 10.1 from week 5 on, replicating
+    across two seasons. The O/U is the control: it swings 1.4 points all year."""
+    from views import schedule
+    assert [m for m, _ in schedule.BAND_METRICS] == [
+        "market_implied_favorite_points", "market_implied_underdog_points", "total"]
+
+
+def test_the_implied_pair_shares_one_axis(counting_markdown):
+    """Drawn on the same scale, the horizontal gap between the two humps IS the spread, and
+    the pair converging through the season is visible without reading a number. Different
+    axes would make that gap meaningless."""
+    from views import schedule
+    schedule._stacked(pd.DataFrame(
+        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), _Scope())
+    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
+    # Both thumbnails draw ten bars over the same viewBox, so a value at the same fraction of
+    # the axis lands at the same pixel in both.
+    assert band.count("viewBox='0 0 120 28'") == 3
+
+
+def test_a_week_with_no_distribution_still_reserves_the_space(counting_markdown, monkeypatch):
+    """R-141 again: a band that grows a thumbnail when a week gets priced shifts everything
+    beside it mid-season."""
+    from views import schedule
+    monkeypatch.setattr(schedule, "_distributions", lambda s, t: pd.DataFrame())
+    schedule._stacked(pd.DataFrame(
+        [_row(game_id=i, week=7, game_date="2026-10-10") for i in range(2)]), _Scope())
+    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
+    assert band.count("cfdb-dist-empty") == 3
+    assert "width:120px" in band
+    assert ">Week 7<" in band, "the band itself still renders — only its pictures are absent"
+
+
+def test_season_to_date_is_absent_in_week_one_rather_than_zero(counting_markdown):
+    """There is nothing before week 1, so there is no row. An Empty state, not a zero — the
+    same rule a week nobody has priced gets."""
+    from views import schedule
+    schedule._stacked(pd.DataFrame(
+        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), _Scope())
+    html = "\n".join(counting_markdown["html"])
+    assert "Season to date" not in html
+
+    counting_markdown["html"].clear()
+    schedule._stacked(pd.DataFrame(
+        [_row(game_id=i, week=2, game_date="2026-09-10") for i in range(2)]), _Scope())
+    html = "\n".join(counting_markdown["html"])
+    assert "Season to date" in html and "through week 1" in html
+
+
+def test_the_band_admits_it_is_fbs_only_when_the_page_is_not(counting_markdown):
+    """With Division set to All the cards below include games these numbers exclude. Saying so
+    is cheaper than a reader adding them up and finding they disagree — and much cheaper than
+    a division dimension on the grain, which roughly triples the rows to fix a mismatch that
+    appears at one filter setting."""
+    from views import schedule
+
+    class AllDivisions(_Scope):
+        division = "all"
+
+    schedule._stacked(pd.DataFrame(
+        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), AllDivisions())
+    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
+    assert "FBS only" in band
+
+    counting_markdown["html"].clear()
+    schedule._stacked(pd.DataFrame(
+        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), _Scope())
+    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
+    assert "FBS only" not in band, "at the FBS setting there is nothing to warn about"

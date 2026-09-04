@@ -1,0 +1,51 @@
+# THE ONE BIN EDGE REAL DATA DOES NOT EXERCISE.
+#
+# `assert_distribution_bins_are_exhaustive_and_disjoint` is the flagship invariant on these
+# models, and a mutation test found it could not see one thing: making the LAST bin half-open
+# left it green, because no observed value happens to equal bin_max exactly. The closed
+# last-bin clause was therefore unverified — a defensive branch nobody had ever proved.
+#
+# A value sitting exactly on the ceiling is not exotic. Totals are posted at half points and
+# the ceiling is 80; one 80.0 game strands itself outside every bin, gets counted in neither
+# tail, and the histogram silently drops it.
+#
+# So the case is synthesised. This is the only place in the project that needs a unit test
+# rather than a data test, and it is because the property is about an input that has not
+# occurred yet.
+unit_tests:
+  - name: a_value_exactly_on_the_ceiling_lands_in_the_last_bin
+    model: fct_week_metric_distribution_bin
+    # The model is incremental; the unit test exercises the FIRST build, where every row is
+    # emitted and the anti-join is not in play. The incremental branch is about not writing a
+    # row twice, which is a different property and not what this is testing.
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('int_week_metric_value')
+        rows:
+          # total's configured range is 30..80 in ten bins of 5, so bin 10 is [75, 80].
+          - {game_id: 1, season: 2026, season_type: regular, week: 1,
+             as_of_date: "2026-09-01", has_kicked: false, is_indoors: false,
+             metric: total, value: 80.0}
+          - {game_id: 2, season: 2026, season_type: regular, week: 1,
+             as_of_date: "2026-09-01", has_kicked: false, is_indoors: false,
+             metric: total, value: 30.0}
+          - {game_id: 3, season: 2026, season_type: regular, week: 1,
+             as_of_date: "2026-09-01", has_kicked: false, is_indoors: false,
+             metric: total, value: 52.5}
+    expect:
+      rows:
+        # ALL TEN BINS, because a unit test compares the whole result set. The empty ones are
+        # part of the claim: every bin is emitted, so a renderer never has to infer a missing
+        # index. Bins are half-open [lo, hi) except the last, which is closed.
+        - {span: week, metric: total, bin_index: 1, games: 1}  # 30.0, the floor   # [30, 35)
+        - {span: week, metric: total, bin_index: 2, games: 0}   # [35, 40)
+        - {span: week, metric: total, bin_index: 3, games: 0}   # [40, 45)
+        - {span: week, metric: total, bin_index: 4, games: 0}   # [45, 50)
+        - {span: week, metric: total, bin_index: 5, games: 1}  # 52.5, the midpoint   # [50, 55)
+        - {span: week, metric: total, bin_index: 6, games: 0}   # [55, 60)
+        - {span: week, metric: total, bin_index: 7, games: 0}   # [60, 65)
+        - {span: week, metric: total, bin_index: 8, games: 0}   # [65, 70)
+        - {span: week, metric: total, bin_index: 9, games: 0}   # [70, 75)
+        - {span: week, metric: total, bin_index: 10, games: 1}  # 80.0, the CEILING — the case real data has never produced   # [75, 80]

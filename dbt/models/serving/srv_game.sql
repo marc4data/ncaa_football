@@ -25,15 +25,14 @@
 
 with latest_line as (
 
-    -- Most recent line of all, for the "current" market number. Distinct from pre_kick below,
-    -- which answers a different question and must not be conflated with it.
-    select game_id, spread, over_under, spread_open, over_under_open,
-           home_moneyline, away_moneyline, provider_key, snapshot_ts
-    from (
-        select b.*, row_number() over (partition by b.game_id
-                                       order by b.snapshot_ts desc, b.provider_key) as recency
-        from {{ ref('fct_betting_line') }} b
-    ) r where recency = 1
+    -- THE MARKET IS A MART NOW (fct_game_market). This was the newest-snapshot ranking
+    -- inline; the weekly distribution models need the same "current line" rule and cannot
+    -- reach a serving view, so it moved down a layer rather than being copied into one.
+    -- Aliased so every reference below reads exactly as it did.
+    select game_id, spread_current as spread, total_current as over_under,
+           spread_open, over_under_open, home_moneyline, away_moneyline,
+           current_provider_key as provider_key, line_snapshot_ts as snapshot_ts
+    from {{ ref('fct_game_market') }}
 
 ),
 
@@ -84,56 +83,32 @@ game_box as (
 
 ),
 
+-- THE CLOSING LINE IS A MART NOW (fct_game_market), NOT TWO CTEs HERE.
+--
+-- It was extracted when the weekly distribution models needed the same rule and could not
+-- reach a serving view — marts cannot read serving. Copying it down a layer would have made
+-- three implementations of one definition. The reasoning that used to live here (why the
+-- spread and the total rank separately, why `basis` travels with each number) moved with it.
+--
+-- Aliased to `pk` / `pkt` so every reference below reads exactly as it did.
 pre_kick as (
-
-    -- The last line recorded BEFORE kickoff, and its provenance. Our snapshot history begins
-    -- 2026-08-15, so for an older game the only line held is whatever CFBD returned when we
-    -- fetched it — a real market number whose timestamp is our FETCH time, not a pre-kickoff
-    -- observation. Calling both "close" would conflate a line we watched with one we were
-    -- told about, which is why basis travels with the number.
-    select game_id, spread, provider_key, snapshot_ts, basis from (
-        select
-            b.game_id, b.spread, b.provider_key, b.snapshot_ts,
-            case when b.snapshot_ts <= g.start_date then 'observed_before_kickoff'
-                 else 'as_recorded_by_cfbd' end as basis,
-            row_number() over (
-                partition by b.game_id
-                order by case when b.snapshot_ts <= g.start_date then 0 else 1 end,
-                         b.snapshot_ts desc, b.provider_key
-            ) as recency
-        from {{ ref('fct_betting_line') }} b
-        join {{ ref('fct_game') }} g on g.game_id = b.game_id
-    ) ranked where recency = 1
-
+    select game_id, spread_at_close as spread, spread_at_close_provider as provider_key,
+           spread_at_close_ts as snapshot_ts, spread_at_close_basis as basis
+    from {{ ref('fct_game_market') }}
+    -- NO `where spread_at_close is not null`. The original ranked EVERY betting-line row and
+    -- took the top one, whose spread may be null — so six games carry a provider and a basis
+    -- for a spread that does not exist. Filtering them out here changed six rows, which the
+    -- before/after comparison caught. That is a behaviour change, and an extraction is not
+    -- the place to make one. Flagged separately: a provider for a number we do not hold is
+    -- arguably noise, but removing it is a decision rather than a tidy-up.
 ),
 
 pre_kick_total as (
-
-    -- R-142. THE CLOSING TOTAL, AND IT NEEDS ITS OWN RANKING RATHER THAN A COLUMN ON pre_kick.
-    --
-    -- Not every betting-line row carries an over_under, so taking the total from whichever row
-    -- won the SPREAD's ranking nulls it whenever that row happens to be spread-only — a
-    -- missing number that looks like an absent market. Ranking rows that have a total first is
-    -- the same shape `latest_prediction` above already uses for predicted_margin.
-    --
-    -- Same provenance split as the spread, and for the same reason: our snapshot history
-    -- begins 2026-08-15, so anything older is CFBD's recorded number rather than a line we
-    -- watched. `basis` travels with the value.
-    select game_id, over_under, provider_key, snapshot_ts, basis from (
-        select
-            b.game_id, b.over_under, b.provider_key, b.snapshot_ts,
-            case when b.snapshot_ts <= g.start_date then 'observed_before_kickoff'
-                 else 'as_recorded_by_cfbd' end as basis,
-            row_number() over (
-                partition by b.game_id
-                order by case when b.snapshot_ts <= g.start_date then 0 else 1 end,
-                         b.snapshot_ts desc, b.provider_key
-            ) as recency
-        from {{ ref('fct_betting_line') }} b
-        join {{ ref('fct_game') }} g on g.game_id = b.game_id
-        where b.over_under is not null
-    ) ranked where recency = 1
-
+    select game_id, total_at_close as over_under, total_at_close_provider as provider_key,
+           total_at_close_ts as snapshot_ts, total_at_close_basis as basis
+    from {{ ref('fct_game_market') }}
+    -- The total's own ranking DID filter `over_under is not null` in the original (R-142), and
+    -- that filter lives in the mart now, so nothing more is needed here.
 ),
 
 -- R-079 IS A MART, NOT A CTE HERE. The first version of this view held the "latest snapshot
@@ -342,6 +317,39 @@ select
     pkt.over_under                as total_at_close,
     pkt.provider_key              as total_at_close_provider,
     pkt.basis                     as total_at_close_basis,
+
+    -- R-200/R-204. WHAT THE MARKET'S OWN TWO NUMBERS SAY THE SCORE SHOULD BE.
+    --
+    -- `market_implied_`, not `line_implied_` or `expected_`: the prefix names the PROVENANCE,
+    -- and this family already exists (`market_implied_home_win_probability`). These are
+    -- arithmetic on published numbers, so they carry CFBD attribution and NOT the model
+    -- disclaimer — which is the whole reason the prefix is a licence boundary wearing a
+    -- naming convention. `points`, not `score`, to line up with `predicted_home_points` and
+    -- the actual `home_points` in a column list.
+    --
+    -- NO BRANCHING, AND THE SIGN DOES THE WORK. The spread is home-perspective and negative
+    -- favours home, so subtracting it adds to the home side. Verified on all 1,930 FBS games
+    -- with a line: implied_home + implied_away = total on every row, and greatest/least of
+    -- the pair equals the abs() form on every row. Marc's instinct that this needed a
+    -- home/away case statement was reasonable and turns out to be unnecessary.
+    --
+    -- Locked with the same rule as everything else here: the closing number once it exists,
+    -- the live one before that.
+    (coalesce(pkt.over_under, l.over_under) - coalesce(pk.spread, l.spread)) / 2.0
+                                  as market_implied_home_points,
+    (coalesce(pkt.over_under, l.over_under) + coalesce(pk.spread, l.spread)) / 2.0
+                                  as market_implied_away_points,
+    -- greatest/least rather than a second case statement, so the favourite/underdog rule
+    -- exists in exactly ONE place and the distribution model derives from these rather than
+    -- re-deriving the arithmetic.
+    greatest(
+        (coalesce(pkt.over_under, l.over_under) - coalesce(pk.spread, l.spread)) / 2.0,
+        (coalesce(pkt.over_under, l.over_under) + coalesce(pk.spread, l.spread)) / 2.0)
+                                  as market_implied_favorite_points,
+    least(
+        (coalesce(pkt.over_under, l.over_under) - coalesce(pk.spread, l.spread)) / 2.0,
+        (coalesce(pkt.over_under, l.over_under) + coalesce(pk.spread, l.spread)) / 2.0)
+                                  as market_implied_underdog_points,
 
     -- R-181. THE LINE IS THE ONLY BASIS. Marc, settling R-173's two-basis design one round
     -- after it shipped: "Determine upset based on who the line (spread) expects to win. Upset

@@ -77,7 +77,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from lib import chips, filters, fmt, params, shell, states, table
+from lib import chips, distribution, filters, fmt, params, shell, states, table
 from lib.metrics import UPSET_BIG_MARGIN, UPSET_BLOWOUT_MARGIN
 from lib.query import query
 from lib.table import Col
@@ -657,16 +657,156 @@ def _legend() -> None:
         st.markdown(f"<div class='cfdb-legend-note'>{note}</div>", unsafe_allow_html=True)
 
 
+# === THE WEEK BAND ========================================================================
+#
+# Marc: *"I'd start with a Week subgrouping in Schedule and have each of the metrics shown in
+# that header bar."*
+#
+# THREE METRICS, AND WHICH THREE IS THE ARGUMENT. The implied pair is the headline because it
+# is the only thing on this page that moves with the season: measured over 2024-25, the gap
+# between the implied favorite and underdog runs 20.3 points in weeks 1-3 and 10.1 from week 5
+# on, and it replicates to a tenth of a point across the two seasons. The O/U rides alongside
+# as the CONTROL — it swings 1.4 points all season, and a reader who sees two numbers moving
+# and one holding still learns something the two alone do not tell them.
+#
+# The implied pair shares one axis (0..60), so the horizontal gap between the two humps IS the
+# spread and the pair converging through the season is visible without reading a number.
+#
+# `spread_abs` and `temperature_f` are computed and published; they are simply not in this
+# band. Three fits at 1200px and four does not, and prompt 036 spent a round removing eleven
+# rows from above the first card — a band that wraps hands them straight back.
+BAND_METRICS = [
+    ("market_implied_favorite_points", "Implied fav"),
+    ("market_implied_underdog_points", "Implied dog"),
+    ("total", "O/U"),
+]
+
+
+@st.cache_data(ttl=900)
+def _distributions(season: int, season_type: str) -> pd.DataFrame:
+    """Every distribution row for this season, both spans.
+
+    ONE RELATION, as the contract requires. The whole season is fetched rather than the weeks
+    on screen because it is a few hundred rows either way and the cache key is then the season
+    rather than the filter state — a reader stepping through weeks hits the cache instead of
+    the database.
+    """
+    return query("""
+        select season, season_type, week, span, metric, as_of_date,
+               games_in_week, n, coverage_pct, games_locked, games_live, is_locked,
+               mean, stddev, min_value, max_value,
+               p02, p05, p25, p50, p75, p95, p98,
+               iqr, whisker_lo, whisker_hi, outlier_count,
+               bin_min, bin_max, bin_incr, bin_count,
+               below_min_count, above_max_count, bin_counts,
+               row_number() over (partition by season, season_type, week, span, metric
+                                  order by as_of_date desc) as recency
+        from srv_week_metric_distribution
+        where season = :season and season_type = :season_type
+        order by week, span, metric
+        limit 4000
+    """, {"season": season, "season_type": season_type})
+
+
+def _latest(df: pd.DataFrame, week: int, span: str, metric: str):
+    """The newest snapshot for one grain, or None.
+
+    None is a real answer: a week nobody has priced has no row, and the renderer draws a
+    reserved empty box rather than nothing. The snapshot history is what makes "the O/U
+    tightened over four days" answerable and is not what a header bar shows, so only the
+    latest is used here.
+    """
+    if df is None or df.empty:
+        return None
+    hit = df[(df["recency"] == 1) & (df["week"] == week)
+             & (df["span"] == span) & (df["metric"] == metric)]
+    return None if hit.empty else hit.iloc[0]
+
+
+def _band_strip(dists: pd.DataFrame, week: int, span: str) -> str:
+    return "".join(distribution.thumbnail(_latest(dists, week, span, metric), label)
+                   for metric, label in BAND_METRICS)
+
+
+def _week_band(dists: pd.DataFrame, week: int, scope) -> None:
+    """One row above a week's games. Never two, and never repeated per day."""
+    note = ""
+    if scope.division == "all":
+        # THE DISTRIBUTION IS FBS-ONLY AND THE PAGE'S DIVISION FILTER IS NOT.
+        # With Division set to All, the cards below include games these numbers exclude.
+        # Saying so is cheaper than a reader adding them up and finding they disagree; the
+        # alternative was a division dimension on the grain, which roughly triples the rows
+        # to fix a mismatch that only appears at this one setting.
+        note = ("<span class='cfdb-dist-label' title='These distributions cover FBS games "
+                "only \u2014 either team FBS \u2014 while the cards below include every "
+                "division you have selected.'>FBS only</span>")
+    st.markdown(
+        f"<div class='cfdb-weekband'>"
+        f"<span class='cfdb-weekband-title'>Week {int(week)}</span>{note}"
+        f"<span class='cfdb-weekband-strip'>{_band_strip(dists, week, 'week')}</span>"
+        f"</div>", unsafe_allow_html=True)
+
+
+def _season_to_date_band(dists: pd.DataFrame, weeks) -> None:
+    """The reference line, at the top of the page.
+
+    ACCUMULATES THROUGH THE WEEK BEFORE THE ONE SHOWN, so the reference does not contain the
+    thing being referenced — the same rule srv_game's `series` CTE applies to a head-to-head
+    record. In week 1 there is nothing before it, so there is no row and no band: an Empty
+    state rather than a zero.
+
+    KEYED ON THE LATEST WEEK ON SCREEN, not the earliest. Schedule's default is one week, and
+    for that case the two are identical — through W-1, no overlap with what is shown. With
+    Week set to All the earliest is week 1, which has no season-to-date row at all, and the
+    band would silently vanish exactly when "an overall reference" is most useful. The latest
+    week gives the fullest figure the season has.
+
+    The honest cost of that choice, stated once: in a multi-week view the reference DOES
+    overlap the weeks below it. That is fine there — the per-week bands are already the
+    week-over-week story, and this line's job is the season as a whole — but it is a real
+    difference from the single-week case and not an oversight.
+    """
+    if not len(weeks):
+        return
+    week = int(max(weeks))
+    if not any(_latest(dists, week, "season_to_date", m) is not None
+               for m, _ in BAND_METRICS):
+        return
+    st.markdown(
+        f"<div class='cfdb-weekband'>"
+        f"<span class='cfdb-weekband-title'>Season to date</span>"
+        f"<span class='cfdb-dist-label'>through week {week - 1}</span>"
+        f"<span class='cfdb-weekband-strip'>"
+        f"{_band_strip(dists, week, 'season_to_date')}</span>"
+        f"</div>", unsafe_allow_html=True)
+
+
+def _by_week(df: pd.DataFrame, scope, render_day) -> None:
+    """Week band, then the days inside it. Shared by both views so they cannot diverge.
+
+    THE BAND MUST NOT REPEAT PER DAY, which is why the grouping is week-then-day rather than
+    the day-only grouping both views had. With Schedule's default single week that is one
+    band and it reads as a page header; with Week set to All it is one per week and the
+    thumbnails become a genuine week-over-week strip. Both cases have to look deliberate.
+    """
+    dists = _distributions(scope.season, scope.season_type)
+    _season_to_date_band(dists, df["week"].unique())
+    for week, week_rows in df.groupby(df["week"], sort=True):
+        _week_band(dists, week, scope)
+        for day, rows in week_rows.groupby(week_rows["game_date"], sort=True):
+            st.markdown(f"<div class='cfdb-daygroup'>{pd.Timestamp(day):%A %d %B %Y}</div>",
+                        unsafe_allow_html=True)
+            render_day(rows)
+
+
 # --- the two views --------------------------------------------------------------------
 
 def _dense(df: pd.DataFrame, scope) -> None:
     """AC-2.2: grouped by day, kickoff order within a day, with day headers."""
     layout = table.column_layout(df, _columns(scope))
-    for day, rows in df.groupby(df["game_date"], sort=True):
-        st.markdown(f"<div class='cfdb-daygroup'>{pd.Timestamp(day):%A %d %B %Y}</div>",
-                    unsafe_allow_html=True)
-        table.render(rows, _columns(scope), caption="", layout=layout,
-                     link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]))
+    _by_week(df, scope, lambda rows: table.render(
+        rows, _columns(scope), caption="", layout=layout,
+        link_builder=lambda r: scope.link("matchup", game_id=r["game_id"])))
 
 
 # --- the stacked view -----------------------------------------------------------------
@@ -1038,11 +1178,12 @@ def _stacked(df: pd.DataFrame, scope) -> None:
     with no JavaScript and no custom component. Day groups still head their own section.
     """
     geo = _linescore_geometry(df)          # R-015: once for the page, not once per card.
-    for day, rows in df.groupby(df["game_date"], sort=True):
-        st.markdown(f"<div class='cfdb-daygroup'>{pd.Timestamp(day):%A %d %B %Y}</div>",
-                    unsafe_allow_html=True)
+
+    def day_of_cards(rows):
         cards = "".join(_card(r, scope, geo) for _, r in rows.iterrows())
         st.markdown(f"<div class='cfdb-cardgrid'>{cards}</div>", unsafe_allow_html=True)
+
+    _by_week(df, scope, day_of_cards)
 
 
 VIEW_KEY = "schedule_view"

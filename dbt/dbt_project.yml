@@ -83,3 +83,47 @@ models:
 vars:
   upset_margin_big: 7
   upset_margin_blowout: 14
+
+  # ------------------------------------------------------------------------------------
+  # WEEKLY DISTRIBUTION BINS (R-197). CONFIGURATION, NOT DATA — and the edges are FIXED and
+  # identical across every week, which is the decision that cannot be revisited cheaply.
+  #
+  # If each week binned itself, week-over-week comparison would be meaningless and a row of
+  # sparklines actively misleading: different-shaped pictures on different axes read as
+  # different distributions. Fixed edges make the edges configuration, which is why they
+  # live here next to the upset margins rather than in the app.
+  #
+  # MEASURED, NOT CHOSEN. Every bound below was set from the observed range over FBS 2024+
+  # with the closing line where held, then checked for clipping. Five of six clip nothing at
+  # all; temperature clips ONE game of 1,853 (a 105.6°F kickoff), which is an honest tail
+  # rather than a cliff and is reported on the row as above_max_count.
+  #
+  #       metric                            min     max    observed range
+  #       spread                            -56     +34    -55.5 .. +32.5
+  #       spread_abs                          0      60      1.0 .. 55.5
+  #       total                              30      80     33.0 .. 78.5
+  #       market_implied_favorite_points      0      60     18.5 .. 59.5
+  #       market_implied_underdog_points      0      60      2.5 .. 38.8
+  #       temperature_f                      15     105     15.8 .. 105.6
+  #
+  # TEN BINS, not the twenty an earlier draft proposed. A week holds ~55 FBS games (2025
+  # regular: avg 55.5, range 51-96), and twenty bins over 55 observations is a scatter, not a
+  # distribution — measured on 2025 week 9, twenty bins gave six empty ones and a single bar
+  # of 14. Sturges on n=55 is ~7; ten is the compromise, and a 120px sparkline cannot resolve
+  # more.
+  #
+  # THE IMPLIED PAIR SHARES ONE AXIS ON PURPOSE (0..60). Drawn on the same scale, the gap
+  # between the two humps IS the spread, and the pair converging through the season is the
+  # whole picture. Zero clipping on both at these bounds.
+  #
+  # Changing an edge after snapshot rows exist invalidates comparison across the change. If
+  # one has to move, that is a new bin_version on the row, not an edit.
+  # ------------------------------------------------------------------------------------
+  distribution_bin_count: 10
+  distribution_bins:
+    spread:                         {min: -56, max: 34}
+    spread_abs:                     {min: 0,   max: 60}
+    total:                          {min: 30,  max: 80}
+    market_implied_favorite_points: {min: 0,   max: 60}
+    market_implied_underdog_points: {min: 0,   max: 60}
+    temperature_f:                  {min: 15,  max: 105}
