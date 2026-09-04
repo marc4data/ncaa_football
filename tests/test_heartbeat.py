@@ -260,7 +260,6 @@ def test_the_watcher_asks_often_even_though_asking_does_not_help():
         "the measurement that disproved the frequent-cron theory has been removed")
 
 
-
 def test_the_push_path_is_the_one_that_can_actually_be_fast():
     """`beat()` records THEN pings, so the durable row is never lost to a flaky GET, and the
     ping is what an external dead-man's switch watches for.
@@ -276,7 +275,9 @@ def test_the_push_path_is_the_one_that_can_actually_be_fast():
     assert source.index("record(") < source.index("ping("), (
         "the durable record must be written before the network call")
     assert heartbeat.PING_ENV_PREFIX == "CFDB_HEARTBEAT_URL_"
-    assert heartbeat.ping_url_for("scores_refresh") is None or True
+    assert heartbeat.PING_TIMEOUT_SECONDS <= 15, (
+        "a heartbeat that hangs delays the DAG it is reporting on")
+
 
 def test_the_forced_command_reports_failures_in_the_shape_the_watcher_parses():
     """THE SCRIPT AND THE WATCHER DEPLOY SEPARATELY — the shell goes to the droplet by scp
