@@ -14,6 +14,117 @@
 -- against 110,879 in the spine, because box scores are `recent` scope. has_box_advanced /
 -- has_team_advanced / has_havoc / has_ppa distinguish "the endpoint does not cover this game"
 -- from "this team recorded nothing", which a null alone cannot.
+-- ==========================================================================================
+-- THE MARKET, FROM THIS TEAM'S SIDE OF THE LINE (R-260).
+--
+-- Marc wanted ATS and line-implied points on Scores, and neither existed at this grain:
+-- srv_game carries `market_implied_home_points` / `_away_points` at GAME grain and
+-- `winner_covered_close` as a verdict about the winner, not about a team. A game x team sheet
+-- needs the number from the row's own perspective.
+--
+-- THE SIGN DOES ALL THE WORK, AND IT IS THE SAME IDENTITY R-201 VERIFIED.
+-- `spread` is home-perspective and negative favours home, so with
+--     team_spread = spread for the home row, -spread for the away row
+-- BOTH derived values fall out with no branch anywhere:
+--     line-implied points = (total - team_spread) / 2
+--     ATS margin          = margin + team_spread          (positive means covered)
+-- For the home row the first is R-201's `(total - spread) / 2` unchanged; for the away row it
+-- becomes `(total + spread) / 2`, which is the other half of the same identity. One CASE, at
+-- the top, and nothing downstream has to know which side of the game it is on.
+--
+-- WHICH LINE. "Finished" is the lock rule srv_game already uses — the closing number once it
+-- exists, the live one before that — so the two views cannot disagree about what the line was.
+-- "Open" is the opening number as recorded.
+with market as (
+
+    select game_id,
+           coalesce(spread_at_close, spread_current) as spread_final,
+           coalesce(total_at_close,  total_current)  as total_final,
+           spread_open,
+           over_under_open                           as total_open
+    from {{ ref('fct_game_market') }}
+
+),
+
+team_line as (
+
+    select
+        g.game_team_sk,
+        g.margin,
+        g.points_for,
+        g.is_completed,
+        case when g.is_home then m.spread_final else -m.spread_final end as spread_final,
+        case when g.is_home then m.spread_open  else -m.spread_open  end as spread_open,
+        m.total_final,
+        m.total_open
+    from {{ ref('fct_game_team') }} g
+    left join market m on m.game_id = g.game_id
+
+),
+
+team_market_raw as (
+
+    select
+        game_team_sk,
+        margin,
+        points_for,
+        is_completed,
+        spread_final,
+        spread_open,
+        total_final,
+        total_open,
+        (total_final - spread_final) / 2.0 as line_implied_points_final,
+        (total_open  - spread_open)  / 2.0 as line_implied_points_open,
+        margin + spread_final              as ats_margin_final,
+        margin + spread_open               as ats_margin_open
+    from team_line
+
+),
+
+team_market as (
+
+    -- EVERY `_open` COLUMN IS NULL WHEN IT EQUALS ITS CLOSING COUNTERPART (Marc: "only
+    -- calculate it for opening line if it's different than the ending line"). Applied per
+    -- column rather than per game, so a column is blank exactly when it would have repeated
+    -- the value immediately to its left, and populated whenever it carries something new.
+    --
+    -- Worth knowing before reading a file: this suppresses less than it sounds. In 2025 the
+    -- spread moved on 753 of 888 FBS games and the total on 756 — the open half is populated
+    -- about 85% of the time, so a blank there is a genuine "the market never changed its
+    -- mind", not the common case.
+    select
+        game_team_sk,
+        spread_final,
+        total_final,
+        line_implied_points_final,
+        points_for - line_implied_points_final as points_vs_line_implied_final,
+        ats_margin_final,
+        case when spread_final is null then null
+             when not is_completed    then 'pending'
+             when ats_margin_final > 0 then 'yes'
+             when ats_margin_final < 0 then 'no'
+             else 'push' end                   as covered_final,
+
+        case when spread_open = spread_final then null else spread_open end
+                                               as spread_open,
+        case when total_open = total_final then null else total_open end
+                                               as total_open,
+        case when line_implied_points_open = line_implied_points_final then null
+             else line_implied_points_open end as line_implied_points_open,
+        case when line_implied_points_open = line_implied_points_final then null
+             else points_for - line_implied_points_open end
+                                               as points_vs_line_implied_open,
+        case when ats_margin_open = ats_margin_final then null
+             else ats_margin_open end          as ats_margin_open,
+        case when spread_open is null or spread_open = spread_final then null
+             when not is_completed     then 'pending'
+             when ats_margin_open > 0  then 'yes'
+             when ats_margin_open < 0  then 'no'
+             else 'push' end                   as covered_open
+    from team_market_raw
+
+)
+
 select
     a.game_team_advanced_sk,
     t.game_team_sk,
@@ -224,7 +335,22 @@ select
     a.defense_rushing,
     a.defense_first_down,
     a.defense_second_down,
-    a.defense_third_down
+    a.defense_third_down,
+    mk.spread_final,
+    mk.total_final,
+    mk.line_implied_points_final,
+    mk.points_vs_line_implied_final,
+    mk.ats_margin_final,
+    mk.covered_final,
+    mk.spread_open,
+    mk.total_open,
+    mk.line_implied_points_open,
+    mk.points_vs_line_implied_open,
+    mk.ats_margin_open,
+    mk.covered_open
 from {{ ref('fct_game_team') }} t
 join {{ ref('fct_game_team_advanced') }} a on a.game_team_sk = t.game_team_sk
 left join {{ ref('dim_team') }} d on d.season = t.season and d.team_id = t.team_id
+-- LEFT, not inner: a Division III fixture has no line and must keep its row. An inner join
+-- here would silently narrow the view to games a sportsbook priced.
+left join team_market mk on mk.game_team_sk = t.game_team_sk

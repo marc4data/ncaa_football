@@ -2622,6 +2622,64 @@ models:
       - name: defense_third_down
         description: >
           Defensive predicted points added allowed per third-down play. Lower is better.
+      - name: spread_final
+        description: >
+          The spread FROM THIS TEAM'S SIDE — negative means this team was favoured. The
+          home-perspective number negated on the away row, which is what lets every derived
+          column below be one expression with no branch. "Final" is srv_game's lock rule:
+          the closing number once it exists, the live one before that.
+      - name: total_final
+        description: Over/under on the same locked line. Game-level, identical on both rows.
+      - name: line_implied_points_final
+        description: >
+          `(total_final - spread_final) / 2` — what the market's own two numbers imply this
+          team scores. R-201 verified the identity on 1,930 games: the two rows of a game
+          always sum to the total, and the larger of the pair is always
+          `(total + abs(spread)) / 2`.
+          NOT "expected points". These come from the market, not from cfdb's model, and
+          "expected" reads as a prediction — the one framing the training-pack licence cares
+          about (R-201 section 2.1). Called line-implied everywhere, Excel header included.
+      - name: points_vs_line_implied_final
+        description: >
+          Actual points scored minus line-implied. Unlike ATS margin the two rows of a game
+          do NOT cancel: together they sum to the game's total points minus the over/under,
+          which is the over/under result expressed in points.
+      - name: ats_margin_final
+        description: >
+          `margin + spread_final`. Positive means this team beat the number. The two rows of
+          a game are exact negatives of each other, so a pair that does not cancel is a
+          defect rather than a close call.
+      - name: covered_final
+        description: >
+          `yes` / `no` / `push`, `pending` before the game is played, null when no line was
+          recorded. Per TEAM, unlike srv_game's `winner_covered_close`, which is a verdict
+          about whoever won.
+      - name: spread_open
+        description: >
+          The opening spread from this team's side, NULL WHEN IT EQUALS `spread_final` —
+          Marc's rule, applied per column so a blank means "this never changed" rather than
+          "this is missing". It suppresses less than it sounds: the spread moved on 753 of
+          888 FBS games in 2025.
+      - name: total_open
+        description: Opening over/under, null when unchanged. 756 of 888 moved in 2025.
+      - name: line_implied_points_open
+        description: >
+          Line-implied points from the opening line, null when identical to the closing
+          figure. It depends on both inputs, so it is populated when EITHER the spread or the
+          total moved.
+      - name: points_vs_line_implied_open
+        description: >
+          Actual points minus the opening line-implied figure; null when the open and closing
+          implied figures agree.
+      - name: ats_margin_open
+        description: >
+          What this team's result would have graded at against the opening spread; null when
+          the spread did not move.
+      - name: covered_open
+        description: >
+          The cover verdict against the OPENING spread, null when the spread did not move.
+          Where this differs from `covered_final` the line movement changed the outcome,
+          which is the comparison the pair exists to make.
 
   # ---------------------------------------------------------------------------------------
   - name: srv_game

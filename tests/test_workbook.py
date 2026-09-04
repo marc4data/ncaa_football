@@ -87,8 +87,20 @@ def built(monkeypatch):
         # Every stubbed query still goes through the contract, so a sheet that violates
         # G-1/G-2 fails here rather than in production.
         check_contract(sql)
+        flat = " ".join(sql.split())
         for sheet in workbook.SHEETS:
-            if f"from {sheet.view}" in " ".join(sql.split()):
+            # WORD BOUNDARY, AND THE SUBSTRING VERSION HID AN EMPTY SHEET FOR A WHOLE ROUND.
+            #
+            # `"from srv_game" in "from srv_game_team"` is True. Schedule comes first in
+            # SHEETS, so every Scores query matched Schedule and was handed a frame built
+            # from SCHEDULE's fields — meaning the Scores sheet was constructed with none of
+            # its own columns present, and every `built`-based assertion about it ran against
+            # an empty sheet while passing.
+            #
+            # Caught only because the banding test refused to pass on finding nothing to
+            # compare. R-157 again: the tests that survive are the ones that fail loudly when
+            # handed nothing.
+            if re.search(rf"\bfrom {re.escape(sheet.view)}\b", flat):
                 # The SELECTED fields, not just the visible columns: the sheet also pulls
                 # what it derives from and what it links with, and a fixture missing those
                 # makes the hyperlinks look absent when they are merely unstubbed.
@@ -123,7 +135,15 @@ def built(monkeypatch):
                                        ("opponent", ["Northwestern",
                                                      "Texas A&M"]),
                                        ("conference", ["SEC", "Big Ten"]),
-                                       ("result", ["W", "L"])):
+                                       ("result", ["W", "L"]),
+                                       # Scores' own columns. `game_no` drives the banding,
+                                       # so the two rows carry different parities — without
+                                       # that the band test has nothing to compare. Possession
+                                       # must be numeric or the minutes derivation raises.
+                                       ("game_no", [1, 2]),
+                                       ("possession_seconds", [1546, 2054]),
+                                       ("covered_final", ["yes", "no"]),
+                                       ("covered_open", ["yes", "push"])):
                     if column in df.columns:
                         df[column] = values
                 return df
@@ -329,7 +349,14 @@ def test_numeric_cells_are_numbers_with_the_sites_precision(built):
         for index, (field, _) in enumerate(sheet.columns, start=1):
             cell = tab.cell(first_data, index)
             if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
-                assert cell.number_format == workbook.number_format(field), field
+                # THROUGH THE SHEET'S OWN RULES, not the bare defaults. A sheet may declare
+                # its own decimal default and its own set of naturally-integer columns
+                # (R-259), and comparing against the module defaults would report every one
+                # of those as a mismatch — while quietly asserting nothing about whether the
+                # sheet's rules were applied at all.
+                assert cell.number_format == workbook.number_format(
+                    field, sheet.decimals, sheet.integer_fields,
+                    sheet.site_precision), f"{sheet.name}.{field}"
                 checked += 1
     assert checked > 10
 
@@ -1895,25 +1922,70 @@ def test_the_ignored_errors_block_is_in_schema_order(built):
                 assert not workbook.sheet_order_violations(archive.read(name)), name
 
 
+def _sheet_parts(payload):
+    """{sheet name -> worksheet XML}, resolved through the workbook's relationships.
+
+    Not `sheet1.xml is the first tab` — openpyxl does not guarantee that, and the data-bar
+    injector learned the same lesson the hard way.
+    """
+    import zipfile as _zip
+    from xml.etree import ElementTree
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+          "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+          "pr": "http://schemas.openxmlformats.org/package/2006/relationships"}
+    out = {}
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        book = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+        rels = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        targets = {r.get("Id"): r.get("Target")
+                   for r in rels.findall("pr:Relationship", ns)}
+        for element in book.findall("m:sheets/m:sheet", ns):
+            target = (targets.get(element.get(f"{{{ns['r']}}}id")) or "").lstrip("/")
+            if not target:
+                continue
+            part = target if target.startswith("xl/") else "xl/" + target
+            out[element.get("name")] = archive.read(part).decode("utf-8")
+    return out
+
+
 def test_a_numeric_column_is_not_told_to_ignore_text_errors(built):
     """The suppression is scoped to columns that HOLD text. Blanket-ignoring the whole sheet
-    would also silence the warning on a column where text really is a mistake."""
+    would also silence the warning on a column where text really is a mistake.
+
+    PER SHEET, AND THAT IS THE FIX. The first version pooled every `ignoredError` range in
+    the file into one set of column LETTERS and checked Schedule's columns against it —
+    correct while one sheet shipped, and wrong the moment a second did: column AJ is
+    `Attendance` on Schedule and a text column on Scores, so Scores' legitimate suppression
+    was read as Schedule's mistake.
+
+    Generalised while fixing it. Every shipped sheet is checked, and the rule is stated as
+    the property rather than a list of three column names: a column whose first data cell is
+    a number must not be in that sheet's suppression set.
+    """
     import re
-    import zipfile as _zip
     from openpyxl.utils import get_column_letter
     payload, book, _, _ = built
-    with _zip.ZipFile(BytesIO(payload)) as archive:
-        body = "".join(archive.read(n).decode("utf-8") for n in archive.namelist()
-                       if n.startswith("xl/worksheets/sheet"))
-    covered = {span.split(":")[0].rstrip("0123456789")
-               for span in re.findall(r'<ignoredError sqref="([^"]+)"', body)}
-    tab = book["Schedule"]
-    header = workbook.header_row(1)
-    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
-    for label in ("Season", "Wk", "Attendance"):
-        letter = get_column_letter(labels[label])
-        assert letter not in covered, (
-            f"{label} holds numbers; silencing text warnings there hides a real mistake")
+    parts = _sheet_parts(payload)
+
+    checked = 0
+    for sheet in workbook.SHEETS:
+        if sheet.name not in book.sheetnames:
+            continue
+        covered = {span.split(":")[0].rstrip("0123456789")
+                   for span in re.findall(r'<ignoredError sqref="([^"]+)"',
+                                          parts[sheet.name])}
+        assert covered, f"{sheet.name} suppresses nothing — the injection did not happen"
+        tab = book[sheet.name]
+        first_data = workbook.first_data_row(2 if sheet.sheet_disclaimer else 1)
+        for index in range(1, tab.max_column + 1):
+            value = tab.cell(first_data, index).value
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                letter = get_column_letter(index)
+                assert letter not in covered, (
+                    f"{sheet.name}!{letter} ({tab.cell(workbook.header_row(1), index).value}) "
+                    f"holds numbers; silencing text warnings there hides a real mistake")
+                checked += 1
+    assert checked > 20, checked
 
 
 # === round six ============================================================================
@@ -2152,7 +2224,17 @@ def test_the_record_columns_are_centred(built):
     for label in ("Away record", "Home record"):
         index = labels[label]
         assert tab.cell(header + 1, index).alignment.horizontal == "center", label
-    assert workbook.ALWAYS_CENTRED_LABELS == {"Away record", "Home record"}
+    assert {"Away record", "Home record"} <= workbook.ALWAYS_CENTRED_LABELS
+
+    # NOT AN EXACT-SET ASSERTION ANY MORE, AND THE REPLACEMENT IS STRICTER ABOUT THE THING
+    # THAT ACTUALLY GOES WRONG. Pinning the set stopped it becoming a dumping ground, but it
+    # also went red for a deliberate addition (R-262 named the two cover verdicts), which
+    # makes it a change-detector rather than a rule. What matters is that every name in it is
+    # a label some shipped sheet really has: a stale entry is silent, does nothing, and is
+    # exactly what a dumping ground looks like.
+    shipped = {label for sheet in workbook.SHEETS for _, label in sheet.columns}
+    assert workbook.ALWAYS_CENTRED_LABELS <= shipped, (
+        workbook.ALWAYS_CENTRED_LABELS - shipped)
 
 
 def test_every_mark_cell_names_the_same_font(built):
@@ -2422,29 +2504,47 @@ def _marcs_fields():
     return rows[1:]
 
 
+# The twelve market columns Marc asked for after the first pass (R-260). Named here rather
+# than derived from the sheet, so a column silently vanishing from the block fails the test
+# instead of shrinking the expectation to match itself.
+MARKET_FIELDS = frozenset({
+    "spread_final", "total_final", "line_implied_points_final",
+    "points_vs_line_implied_final", "ats_margin_final", "covered_final",
+    "spread_open", "total_open", "line_implied_points_open",
+    "points_vs_line_implied_open", "ats_margin_open", "covered_open",
+})
+
+
 def test_the_scores_sheet_carries_every_field_marc_listed():
     """131 IN, 131 OUT — the shuffle of R-258 moved columns and lost none.
 
     Asserted against Marc's file rather than against a list retyped from it, because a list
-    retyped from it would agree with whatever I typed. The count is checked explicitly: a
-    field silently absent from BOTH sides would satisfy a set comparison alone.
+    retyped from it would agree with whatever I typed. Counts are checked explicitly: a field
+    silently absent from BOTH sides would satisfy a set comparison alone.
 
-    Two deliberate differences, and they are the only two allowed:
+    Three deliberate differences, and they are the only three allowed:
       * `possession_seconds` is selected and DISPLAYED as `possession_minutes` (R-259);
-      * `game_no` is displayed and not selected — it is computed in the query (R-257).
+      * `game_no` is displayed and not selected — it is computed in the query (R-257);
+      * the twelve MARKET_FIELDS are additions Marc asked for after seeing the first pass.
     """
     marc = _marcs_fields()
     assert len(marc) == 131, len(marc)
 
     sheet = _scores()
-    assert sorted(sheet.selected_fields) == sorted(marc), (
-        set(sheet.selected_fields) ^ set(marc))
+    assert sorted(sheet.selected_fields) == sorted(set(marc) | MARKET_FIELDS), (
+        set(sheet.selected_fields) ^ (set(marc) | MARKET_FIELDS))
+    assert len(sheet.selected_fields) == 143
 
     displayed = sheet.fields
-    assert len(displayed) == 132, len(displayed)
-    assert len(set(displayed)) == 132, "a field is displayed twice"
-    assert set(displayed) - set(marc) == {"game_no", "possession_minutes"}
+    assert len(displayed) == 144, len(displayed)
+    assert len(set(displayed)) == 144, "a field is displayed twice"
+    assert set(displayed) - set(marc) == {"game_no", "possession_minutes"} | MARKET_FIELDS
     assert set(marc) - set(displayed) == {"possession_seconds"}
+
+    # And every one of Marc's own 131 is still shown — the assertion the shuffle exists to
+    # survive, stated separately from the arithmetic above so it cannot be satisfied by a
+    # compensating change on the other side.
+    assert set(marc) - {"possession_seconds"} <= set(displayed)
 
 
 def test_every_scores_category_is_one_contiguous_run_of_columns():
@@ -2718,29 +2818,47 @@ def test_the_scores_table_does_not_use_excels_own_row_stripes(built):
         assert style.showRowStripes in (False, None, 0), name
 
 
-def test_the_scores_banding_reads_a_column_value_not_a_row_position(built):
-    """A rule computed from row position lands between the wrong rows the moment the reader
-    sorts the Table, which is the one thing a Table exists to let them do.
+def test_the_scores_banding_is_painted_on_the_cells_and_follows_the_game(built):
+    """THE THIRD ATTEMPT AT THIS BAND, AND THE FIRST ONE THE TEST CAN SEE.
 
-    Asserts the formula names the `Game #` COLUMN with an absolute reference and a relative
-    row — that shape is what makes each row ask its own game number.
+    Rounds one and two were conditional-format rules — F2F5F7, then DEE2E4 — and Marc could
+    not make out either. The tests covered the rule's formula, the column it read and the
+    range it spanned, all structural, none of which is evidence that a fill was DRAWN. A
+    painted fill is a real entry in cellXfs and can be read straight back out of the file,
+    which is what this asserts.
+
+    Parity comes from `game_no`, so a shaded block is exactly one game. Row parity would band
+    the wrong unit entirely: two rows per game means it would shade every away row and leave
+    every home row bare.
     """
-    from openpyxl.utils import get_column_letter
     _, book, _, _ = built
     tab = book["Scores"]
     sheet = _scores()
-    letter = get_column_letter(sheet.fields.index("game_no") + 1)
     first = workbook.first_data_row(1)
+    band_index = sheet.fields.index("game_no") + 1
+    last_column = len(sheet.columns)
 
-    formulas = [rule.formula[0]
-                for rules in tab.conditional_formatting
+    seen = {}
+    for row in range(first, tab.max_row + 1):
+        number = tab.cell(row, band_index).value
+        if not isinstance(number, (int, float)):
+            continue
+        fills = {tab.cell(row, i).fill.fgColor.rgb for i in range(1, last_column + 1)}
+        assert len(fills) == 1, f"row {row} is only partly banded: {fills}"
+        seen.setdefault(int(number) % 2, set()).add(fills.pop())
+
+    assert set(seen) == {0, 1}, "the fixture has games of only one parity — nothing compared"
+    even = seen[0].pop()
+    assert even.endswith(workbook.SCORES_BAND_FILL), even
+    # And the odd games are LEFT ALONE rather than painted white, so the sheet still prints
+    # without a full-bleed background.
+    assert not any(f.endswith(workbook.SCORES_BAND_FILL) for f in seen[1]), seen[1]
+
+    # No conditional format is doing this any more — if one comes back, the two mechanisms
+    # would disagree the moment a reader sorts the Table.
+    formulas = [rule.formula[0] for rules in tab.conditional_formatting
                 for rule in rules.rules if rule.formula]
-    banding = [f for f in formulas if f.startswith("MOD(")]
-    assert len(banding) == 1, formulas
-    assert banding[0] == f"MOD(${letter}{first},2)=0", banding[0]
-    # The reference is to the game number, not to whatever column happens to sit there.
-    assert tab.cell(workbook.header_row(1),
-                    sheet.fields.index("game_no") + 1).value == "Game #"
+    assert not [f for f in formulas if f.startswith("MOD(")], formulas
 
 
 def test_the_scores_freeze_keeps_team_and_opponent_and_still_leaves_room(built):
@@ -2844,3 +2962,136 @@ def test_every_scores_label_is_unique_and_says_something():
     assert workbook.scores_label("offense_front_seven_havoc_rate") == \
         "Off front 7 havoc rate"
     assert workbook.scores_label("defense_passing_downs_ppa") == "Def passing downs PPA"
+
+
+def test_the_game_band_is_actually_visible_against_white():
+    """THE ASSERTION THAT WAS MISSING WHEN THE BANDING SHIPPED.
+
+    The first pass tested the formula, the column it reads and the range it covers — every
+    structural property — and never that the colour could be SEEN. It went out at F2F5F7,
+    which is 3.9 dE from white against a just-noticeable difference of about 2.3, and Marc
+    reported the separation "missing between every other game". Nothing was wrong with the
+    rule; the band was simply below the threshold of perception on his screen.
+
+    A floor of 8 dE is comfortably above JND without going past Marc's 10-20% tint rule for
+    print. The ceiling matters too: a band dark enough to fight the text would be a different
+    complaint with the same cause.
+    """
+    def lin(hexcolour):
+        return [(c / 255 / 12.92 if c / 255 <= 0.04045
+                 else ((c / 255 + 0.055) / 1.055) ** 2.4)
+                for c in (int(hexcolour[0:2], 16), int(hexcolour[2:4], 16),
+                          int(hexcolour[4:6], 16))]
+
+    def lab(linear):
+        matrix = ((0.4124, 0.3576, 0.1805), (0.2126, 0.7152, 0.0722),
+                  (0.0193, 0.1192, 0.9505))
+        x, y, z = [sum(matrix[i][j] * linear[j] for j in range(3)) for i in range(3)]
+        white = (0.95047, 1.0, 1.08883)
+
+        def f(t):
+            return t ** (1 / 3) if t > 216 / 24389 else (841 / 108) * t + 4 / 29
+        fx, fy, fz = (f(v / w) for v, w in zip((x, y, z), white))
+        return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+    delta = math.dist(lab(lin("FFFFFF")), lab(lin(workbook.SCORES_BAND_FILL)))
+    assert delta >= 8.0, (
+        f"#{workbook.SCORES_BAND_FILL} is {delta:.1f} dE from white — a just-noticeable "
+        f"difference is about 2.3, and a band a reader has to hunt for is not a band")
+    assert delta <= 22.0, (
+        f"#{workbook.SCORES_BAND_FILL} is {delta:.1f} dE from white, dark enough to compete "
+        f"with the text it sits behind")
+    # And it is the shade actually written into the file's rule, not a constant beside it.
+    assert workbook.SCORES_BAND_FILL != "F2F5F7", "back to the invisible one"
+
+
+def test_the_market_columns_keep_football_precision_where_football_writes_halves():
+    """R-259's own argument, applied inside the sheet that overrides it.
+
+    A spread is `-6.5` everywhere in football and never `-6.50`; that is exactly why the 2dp
+    default was not made global. The same reasoning exempts the six market columns quoted in
+    halves — and deliberately does NOT exempt the line-implied pair, because halving a total
+    produces quarter points and the second digit is real there.
+    """
+    sheet = _scores()
+
+    def fmt(field):
+        return workbook.number_format(field, sheet.decimals, sheet.integer_fields,
+                                      sheet.site_precision)
+
+    for field in ("spread_final", "spread_open", "total_final", "total_open",
+                  "ats_margin_final", "ats_margin_open"):
+        assert fmt(field) == "#,##0.0", field
+    for field in ("line_implied_points_final", "line_implied_points_open",
+                  "points_vs_line_implied_final", "points_vs_line_implied_open"):
+        assert fmt(field) == "#,##0.00", field
+
+    # A quarter point is reachable, which is what makes the second digit necessary rather
+    # than decorative: total 52.0 with spread -6.5 implies 29.25 and 22.75.
+    assert (52.0 - -6.5) / 2 == 29.25
+    assert (52.0 - 6.5) / 2 == 22.75
+
+
+def test_the_cover_verdicts_read_as_words(built):
+    """R-262. Marc: "for Scores, let's transition to Yes/No instead of the glyphs."
+
+    Schedule keeps ■/□ because its verdict columns sit in a dense block that shares one
+    legend and one glyph vocabulary. Scores has two cover columns among 144, most of them
+    numeric, and a reader arriving at column AC has no reason to have read the Index. A word
+    needs no key — and it filters and sorts on something a human can type.
+
+    `push` and `pending` stay as themselves. Folding either into "No" would be a claim about
+    a result that does not exist: a push is the bet refunded, and a pending game has not been
+    graded at all.
+    """
+    sheet = _scores()
+    for field in ("covered_final", "covered_open"):
+        render = sheet.display[field]
+        assert render("yes") == "Yes"
+        assert render("no") == "No"
+        assert render("push") == "Push"
+        assert render("pending") == "Pending"
+
+    # No mark survives on this sheet — the glyph vocabulary is Schedule's now.
+    assert not sheet.centred, sheet.centred
+    _, book, _, _ = built
+    tab = book["Scores"]
+    body = {str(c.value) for row in tab.iter_rows(min_row=workbook.first_data_row(1))
+            for c in row if c.value is not None}
+    for glyph in set(workbook.COVER_MARKS.values()) | set(workbook.UPSET_MARKS.values()):
+        assert glyph not in body, f"{glyph} is still being written to Scores"
+
+    # THE TWO COLUMNS STILL DIFFER ON ABSENCE, AND THEY SHOULD.
+    #
+    # On the closing column a null means no line was ever recorded — the no-data dash. On the
+    # opening column it means the spread never moved, which the eleven columns beside it say
+    # by being empty.
+    assert sheet.display["covered_final"](None) == workbook.NO_DATA_MARK
+    assert sheet.display["covered_open"](None) is None
+
+
+def test_the_cover_columns_are_centred_whatever_this_week_contained():
+    """A verdict column is a category regardless of how many verdicts happened to occur.
+
+    Left to the cardinality rule this is decided by accident: Yes / No / Push / Pending / –
+    is five distinct values against a threshold of "fewer than five", so one week centres and
+    the next does not — and the closing and opening columns can disagree with each other in
+    the same file, which reads as a defect.
+    """
+    assert {"Covered", "Covered open"} <= workbook.ALWAYS_CENTRED_LABELS
+
+
+def test_the_market_block_sits_between_the_result_and_the_box_score():
+    """Marc: "These fields should be inserted between Result and 1st Downs." """
+    sheet = _scores()
+    labels = [label for _, label in sheet.columns]
+    market = [i for i, (f, _) in enumerate(sheet.columns)
+              if sheet.field_category[f] == "Market"]
+    assert labels[min(market) - 1] == "Result"
+    assert labels[max(market) + 1] == "1st downs"
+    assert len(market) == 12, len(market)
+    # The closing half is always populated and comes first; the conditionally-blank half is
+    # contiguous after it rather than interleaved.
+    fields = [sheet.columns[i][0] for i in market]
+    assert all(f.endswith("_final") for f in fields[:6]), fields[:6]
+    assert all(f.endswith("_open") for f in fields[6:]), fields[6:]
