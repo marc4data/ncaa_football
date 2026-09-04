@@ -1267,7 +1267,7 @@ def test_the_verdict_columns_use_the_sites_marks_and_a_dash_for_nothing():
             assert ord(glyph[0]) < 0x1F000, f"{glyph!r} is emoji-presentation"
             assert "️" not in glyph
     render = workbook._marked(workbook.COVER_MARKS)
-    assert render("yes") == "■" and render("push") == "▣"
+    assert render("yes") == "■" and render("push") == workbook.PUSH_MARK
     assert render(None) == workbook.NO_DATA_MARK
     assert render(float("nan")) == workbook.NO_DATA_MARK
     assert render("something_new") == workbook.NO_DATA_MARK
@@ -1986,10 +1986,15 @@ def test_every_mark_lives_in_the_geometric_shapes_block_or_is_the_dash():
     """One block means one designer drew them, which is the practical reason they share
     metrics. A mark borrowed from elsewhere is the next ◨."""
     allowed = set(range(0x25A0, 0x2600))
+    # Two deliberate exceptions, both by name so a THIRD cannot arrive unnoticed: the pending
+    # dot, and the push equals sign. The block rule exists to keep metrics consistent, and
+    # the width test above is what actually enforces that — this one guards against a mark
+    # being borrowed from somewhere arbitrary.
+    exceptions = {"·", workbook.PUSH_MARK}
     for marks in (workbook.UPSET_MARKS, workbook.COVER_MARKS, workbook.OVER_MARKS):
         for glyph in marks.values():
             for character in glyph:
-                if character == "·":            # the pending dot, deliberately tiny
+                if character in exceptions:
                     continue
                 assert ord(character) in allowed, (
                     f"{character!r} U+{ord(character):04X} is outside Geometric Shapes")
@@ -2106,7 +2111,79 @@ def test_the_legend_glyphs_use_the_same_font_as_the_column(built):
     seen = 0
     for row in book["Index"].iter_rows():
         for cell in row:
-            if isinstance(cell.value, str) and cell.value and cell.value[0] in "●○■□▲▽▣":
+            if isinstance(cell.value, str) and cell.value and \
+                    cell.value[0] in "●○■□▲▽" + workbook.PUSH_MARK:
                 assert cell.font.name == workbook.MARK_FONT_NAME, cell.value
                 seen += 1
     assert seen >= 7
+
+
+# === round eight ==========================================================================
+
+def test_push_is_an_equals_sign_not_a_third_kind_of_square():
+    """Marc: the push mark "is not very discernable from the filled square that is Covered".
+
+    It was ▣ — a white square containing a small black one — which at 12pt next to ■ is a
+    filled square with a hairline round it. The fill states are already spoken for (filled =
+    it happened, open = it did not), so a push has to leave that language rather than find a
+    third position inside it. ═ says "equal", which is what a push is.
+    """
+    assert workbook.PUSH_MARK == "═"
+    assert workbook.COVER_MARKS["push"] == workbook.PUSH_MARK
+    assert workbook.OVER_MARKS["push"] == workbook.PUSH_MARK
+    squares = {"■", "□", "▣", "▤", "▥", "▦", "▩", "◧", "◨"}
+    assert workbook.PUSH_MARK not in squares, (
+        "push must not be another square — that is the confusion being fixed")
+    circles = {"●", "○", "◉", "◎", "◐", "◑"}
+    assert workbook.PUSH_MARK not in circles
+
+
+def test_the_push_mark_still_measures_the_same_as_every_other_mark():
+    """It comes from Box Drawing rather than Geometric Shapes, which is only acceptable
+    because it is metrically identical — 0.6001 em in the pinned font, same as ■ □ ● ○ ▲ ▽.
+    Width is the property that keeps the column straight; the block is a proxy for it."""
+    import unicodedata
+    assert unicodedata.east_asian_width(workbook.PUSH_MARK) == "A"
+    assert len(workbook.PUSH_MARK) == 1
+
+
+def test_the_kickoff_prints_as_month_day_and_time(built):
+    """Marc: force `mmm-dd hh:mm`. A reader scanning a week's slate wants "Sep-05 19:00" —
+    the year is redundant with the Season column right there and the filename carrying it."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    cell = tab.cell(header + 1, labels["Kickoff"])
+    assert cell.number_format == "mmm-dd hh:mm"
+    # In Excel `mm` is MINUTES after an hour token and MONTH otherwise, so the month must be
+    # spelled `mmm` or the format silently means something else.
+    assert cell.number_format.startswith("mmm"), "a bare mm here would print minutes"
+
+
+def test_provenance_timestamps_keep_their_year(built):
+    """`As of` and `Line taken` exist to be checked against something OUTSIDE the file. A
+    provenance timestamp without a year is not one."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    for label in ("As of", "Line taken"):
+        assert "yyyy" in tab.cell(header + 1, labels[label]).number_format, label
+
+
+def test_the_date_column_width_follows_its_format(built):
+    """The measurement hardcoded 17 characters for every datetime, which was right for
+    `yyyy-mm-dd hh:mm` and would have left the shorter kickoff column five characters too
+    wide — R-217's defect arriving from the date side."""
+    from openpyxl.utils import get_column_letter
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    kickoff = tab.column_dimensions[get_column_letter(labels["Kickoff"])].width
+    as_of = tab.column_dimensions[get_column_letter(labels["As of"])].width
+    assert kickoff < as_of, (
+        f"Kickoff is {kickoff} and As of is {as_of}; the shorter format must take the "
+        f"narrower column")
+    assert workbook.rendered_date_width("start_date_et") == len("Sep-05 19:00") + 1

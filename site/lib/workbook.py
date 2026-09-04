@@ -214,12 +214,28 @@ def _weekday(record):
 # filter dropdown — "show me every blowout" would mean picking a colour. Repetition carries
 # the same ordering, sorts correctly (●● sorts after ●), and each value is its own entry in
 # the dropdown. It is also readable without the legend in a way that shade is not.
+# PUSH IS AN EQUALS SIGN, NOT A THIRD KIND OF SQUARE.
+#
+# It was ▣ — a white square containing a small black one — and Marc is right that it does not
+# read: at 12pt, next to ■, it is a filled square with a hairline round it. The fill states
+# are already spoken for (filled = it happened, open = it did not), so a push needs to leave
+# that language rather than find a third position inside it.
+#
+# ═ says "equal", which is exactly what a push is: the result landed on the number and
+# neither side won. It is measured at the same 0.6001 em as every other mark in Arial Unicode
+# MS, and it is East-Asian-Width Ambiguous like the rest, so the column still lines up.
+#
+# It comes from Box Drawing rather than Geometric Shapes, which is a deliberate exception to
+# the one-block rule below — the block rule exists to keep METRICS consistent, and this glyph
+# is metrically identical. The test asserts the width, and allows this one by name.
+PUSH_MARK = "═"
+
 UPSET_MARKS = {"none": "○", "upset": "●", "big": "●●", "blowout": "●●●"}
-COVER_MARKS = {"yes": "■", "no": "□", "push": "▣", "pending": "·"}
+COVER_MARKS = {"yes": "■", "no": "□", "push": PUSH_MARK, "pending": "·"}
 # Under is UNFILLED AND RED (Marc, round 6). Filled/open already carries "it happened / it
 # did not"; red carries the direction a bettor cares about. ▽ is the open form of ▲, so the
 # pair still reads as one system rather than two.
-OVER_MARKS = {"yes": "▲", "no": "▽", "push": "▣", "pending": "·"}
+OVER_MARKS = {"yes": "▲", "no": "▽", "push": PUSH_MARK, "pending": "·"}
 NO_DATA_MARK = "–"        # the site's own mark for "we hold nothing here"
 
 # THE OPEN MARKS CARRY A COLOUR, AND THE COLOUR WAS MEASURED RATHER THAN PICKED.
@@ -340,7 +356,7 @@ MARK_LEGEND = [
     ("Winner covered", "□", "the winner did not cover"),
     ("O/U result", "▲", "the two scores together went OVER the closing total"),
     ("O/U result", "▽", "they stayed UNDER it"),
-    ("Any of the three", "▣", "push — landed exactly on the number"),
+    ("Any of the three", PUSH_MARK, "push — the result landed exactly on the number, so neither side won the bet"),
     ("Any of the three", "·", "not settled yet"),
     ("Any of the three", "–", "cfdb holds no closing line for this game"),
 ]
@@ -1272,6 +1288,38 @@ def number_format(field: str) -> str:
     return "#,##0." + "0" * fmt.precision_for(field)
 
 
+# DATE FORMATS PER FIELD, because a kickoff and an audit timestamp are read for different
+# reasons.
+#
+# Marc: force the kickoff to `mmm-dd hh:mm`. A reader scanning a week's slate wants "Sep-05
+# 19:00" — the year is redundant when the Season column is right there and the file name
+# carries it too. `As of` and `Line taken` keep the full stamp: those exist to be checked
+# against something outside the file, and a provenance timestamp without a year is not one.
+#
+# In Excel `mm` means MINUTES after an hour token and MONTH otherwise, which is why the month
+# here is `mmm` and there is no ambiguity to resolve.
+DATE_FORMATS = {"start_date_et": "mmm-dd hh:mm"}
+DEFAULT_DATE_FORMAT = "yyyy-mm-dd hh:mm"
+
+
+def date_format(field: str) -> str:
+    return DATE_FORMATS.get(field, DEFAULT_DATE_FORMAT)
+
+
+def rendered_date_width(field: str) -> int:
+    """How wide a formatted date actually prints.
+
+    The width measurement used a hardcoded 17 for every datetime, which was right for
+    `yyyy-mm-dd hh:mm` and would have left a `mmm-dd hh:mm` column five characters too wide —
+    the same defect R-217 fixed for headers, arriving from the date side. Counted from the
+    format, so a shorter format takes a narrower column without anyone remembering to.
+    """
+    pattern = date_format(field)
+    # Each `mmm` prints three characters, every other token prints its own length, and the
+    # separators print themselves.
+    return len(pattern) + (1 if "mmm" in pattern else 0)
+
+
 def filename(season: int, week: Optional[int], generated: datetime) -> str:
     """AC-15.10: the filename states its own scope.
 
@@ -1753,7 +1801,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     cell.number_format = number_format(field)
                 elif isinstance(value, datetime):
-                    cell.number_format = "yyyy-mm-dd hh:mm"
+                    cell.number_format = date_format(field)
                 # R-183. The link goes ON the cell whose text is already the label, never as
                 # a HYPERLINK() formula: the value stays real text, so the column still
                 # sorts, filters and copies as a name.
@@ -1813,7 +1861,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 if value is None:
                     continue
                 if isinstance(value, datetime):
-                    rendered = 17
+                    rendered = rendered_date_width(field)
                 elif isinstance(value, float):
                     if is_plain_integer(field):
                         # R-216 made these render as "0", so a rank occupies as many
