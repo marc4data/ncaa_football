@@ -293,12 +293,28 @@ def test_the_deploy_script_verifies_the_site_renders():
     assert "fail " in code, "a failed verification must stop the deploy, not just print"
 
 
-def test_the_deploy_script_disables_applefile_companions_when_syncing():
-    """macOS tar emits `._*` files that match the raw loader's *.json glob. 1,772 of them
-    came across during the migration and had to be deleted before anything would parse."""
+def test_the_site_is_synced_from_the_commit_not_from_the_working_directory():
+    """TWO DEFECTS, ONE CAUSE, AND THE SECOND ONE PUT UN-MERGED CODE ON THE LIVE SITE.
+
+    The script tarred up the local `site/` directory while the pipeline half reset the droplet
+    to origin/main — so "deploy origin/main" deployed whichever branch happened to be checked
+    out. On 2026-09-04 that shipped an unreviewed page for about twenty minutes.
+
+    It also meant macOS `tar` was reading the working tree, which emits `._*` AppleDouble
+    companions; 1,772 of those came across during the migration and matched the raw loader's
+    *.json glob. `COPYFILE_DISABLE=1` was the guard for that, and this test asserted it.
+
+    `git archive` removes both at once: it reads the commit, and it cannot emit AppleDouble
+    files because it is not macOS tar. So the assertion is now about the cause rather than
+    about one of its symptoms.
+    """
     code = "\n".join(ln for ln in DEPLOY_SCRIPT.read_text().splitlines()
                      if not ln.lstrip().startswith("#"))
-    assert "COPYFILE_DISABLE=1" in code
+    assert "git archive" in code and "origin/main:site" in code
+    assert "tar czf - -C site" not in code, (
+        "the site is being read from the working directory again")
+    assert "COPYFILE_DISABLE" not in code, (
+        "COPYFILE_DISABLE guards macOS tar; if it is back, so is the working-tree read")
 
 
 # --- the warehouse is the product, so the warehouse gets refreshed ------------------------
