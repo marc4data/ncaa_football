@@ -55,6 +55,13 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # `failed|<dag>.<task>|<seconds ago>`, distinct from the heartbeat lines by its prefix so an
 # older monitor that does not know about them simply ignores the lines it cannot parse.
 #
+# IF THE QUERY ITSELF CANNOT RUN, THAT IS REPORTED AS A FAILURE TOO. The first version echoed
+# a differently-shaped line, which the watcher silently discarded as unparseable — so a
+# monitor that had lost sight of failures looked exactly like a pipeline with none. That is
+# the defect this whole change exists to remove, reintroduced one layer down. The monitor
+# user needed `*` in the database field of its .pgpass to read the airflow metadata; without
+# it this line is what says so.
+#
 # Six hours because the two-hourly DAG retries for roughly thirty minutes: a window shorter
 # than a few runs would let a failure scroll out of view between watcher runs, which are
 # themselves four hours apart in practice.
@@ -66,4 +73,4 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
     and end_date > now() - interval '6 hours'
   group by dag_id, task_id
   order by dag_id, task_id
-" || echo "failed_query_unavailable|airflow|0"
+" || echo "failed|MONITOR.cannot_read_airflow_metadata|0"
