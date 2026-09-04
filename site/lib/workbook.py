@@ -28,6 +28,7 @@ import io
 import os
 import re
 import zipfile
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import quote
@@ -179,6 +180,19 @@ def _weekday(record):
 # open — precisely so every mark is self-identifying without colour, and those shapes exist as
 # geometric characters.
 #
+# EVERY MARK SHARES ONE EAST-ASIAN-WIDTH CLASS, AND THAT IS WHY THE COLUMN LOOKS STRAIGHT.
+#
+# Marc: "Winner Covered values (icons) doesn't seem centered horizontally." Every cell in that
+# column IS centred — checked on all 83 rows of a real file, header included. What was ragged
+# was the GLYPHS: ■ □ ○ ● ▲ ▽ are all East-Asian-Width AMBIGUOUS, and the push mark was ◨
+# (U+25E8), which is NEUTRAL and rare enough that most fonts have no glyph for it. A fallback
+# font brings its own advance width, so those cells sat at a different offset from the rest
+# and the column read as crooked rather than as centred.
+#
+# ▣ (U+25A3) is Ambiguous like the others, lives in the same Geometric Shapes block, and says
+# "neither filled nor empty" — which is what a push is. A test pins the width class so the
+# next mark cannot reintroduce the problem.
+#
 # GEOMETRIC SHAPES, NOT EMOJI. R-141 and R-175 both turned on this: an emoji-presentation
 # character has no fixed baseline or size across platforms, and a workbook is opened on more
 # platforms than a web page is. Every mark below is text-presentation.
@@ -190,8 +204,8 @@ def _weekday(record):
 # FILLED MEANS IT HAPPENED, OPEN MEANS IT DID NOT — R-141's shape-plus-fill system, which is
 # what makes each mark self-identifying without colour.
 #
-# "Favourite won" was first drawn as an em dash, and that was a defect: the no-data mark is
-# an EN dash, and at 11pt the two are indistinguishable. "The favourite won" and "cfdb holds
+# "Favorite won" was first drawn as an em dash, and that was a defect: the no-data mark is
+# an EN dash, and at 11pt the two are indistinguishable. "The favorite won" and "cfdb holds
 # no closing line" are opposite claims and must not look the same. An open circle against a
 # filled one says it in the same visual language as the rest.
 # THE MARK REPEATS WITH THE LEVEL (Marc, round 4). One circle, two, three.
@@ -201,8 +215,11 @@ def _weekday(record):
 # the same ordering, sorts correctly (●● sorts after ●), and each value is its own entry in
 # the dropdown. It is also readable without the legend in a way that shade is not.
 UPSET_MARKS = {"none": "○", "upset": "●", "big": "●●", "blowout": "●●●"}
-COVER_MARKS = {"yes": "■", "no": "□", "push": "◨", "pending": "·"}
-OVER_MARKS = {"yes": "▲", "no": "▼", "push": "◨", "pending": "·"}
+COVER_MARKS = {"yes": "■", "no": "□", "push": "▣", "pending": "·"}
+# Under is UNFILLED AND RED (Marc, round 6). Filled/open already carries "it happened / it
+# did not"; red carries the direction a bettor cares about. ▽ is the open form of ▲, so the
+# pair still reads as one system rather than two.
+OVER_MARKS = {"yes": "▲", "no": "▽", "push": "▣", "pending": "·"}
 NO_DATA_MARK = "–"        # the site's own mark for "we hold nothing here"
 
 # THE OPEN MARKS CARRY A COLOUR, AND THE COLOUR WAS MEASURED RATHER THAN PICKED.
@@ -216,30 +233,84 @@ NO_DATA_MARK = "–"        # the site's own mark for "we hold nothing here"
 # Literal burnt sienna (#E97451) MEASURES 2.97:1 AGAINST WHITE and fails WCAG AA outright.
 # #B7410E is the same family and measures 5.56:1. Contrast checked, not eyeballed, because
 # this project has already had to fix a glyph that was 3.6:1.
+
+
+def _upset_thresholds() -> tuple:
+    """`upset_margin_big` and `upset_margin_blowout`, from dbt's project file.
+
+    THE LEGEND MUST NOT RETYPE A METRIC DEFINITION. These live in `dbt/dbt_project.yml`
+    because a threshold is a metric definition and does not belong in the app — the same rule
+    that put them there in the first place. Reading them means the legend cannot go on
+    describing a rule the warehouse has stopped applying.
+
+    Parsed rather than imported: the site image has no dbt and no yaml dependency, and adding
+    one to read two integers would be a poor trade. Falls back to the shipped values so a
+    workbook still builds where the repo is not mounted.
+    """
+    import re as _re
+    project = Path(__file__).resolve().parents[2] / "dbt" / "dbt_project.yml"
+    defaults = (7, 14)
+    try:
+        text = project.read_text(encoding="utf-8")
+    except OSError:
+        return defaults
+    found = []
+    for name, fallback in (("upset_margin_big", 7), ("upset_margin_blowout", 14)):
+        match = _re.search(rf"^\s*{name}:\s*(\d+)\s*$", text, _re.MULTILINE)
+        found.append(int(match.group(1)) if match else fallback)
+    return tuple(found)
+
+
 OPEN_MARK_COLOUR = "FFB7410E"
+
+# Under gets its OWN colour rather than the shared open one. Measured the same way as the
+# other: #C00000 is 5.89:1 against white, comfortably past AA, and is Excel's own "dark red"
+# so it will not look foreign beside the rest of the sheet.
+UNDER_COLOUR = "FFC00000"
+
 MARK_FONT_SIZE = 12
 
 # What the Matchup cell says. The URL is the hyperlink, not the text.
 URL_CELL_LABEL = "Matchup"
-OPEN_MARKS = {"○", "□"}
+
+# WHICH MARK IS DRAWN IN WHICH COLOUR. A mapping rather than a set, because there are two
+# colours now and a set could only answer "is it coloured", not "which colour" — and the
+# legend has to render each glyph exactly as the column does or it is a picture of a
+# different mark.
+MARK_COLOURS = {"○": OPEN_MARK_COLOUR, "□": OPEN_MARK_COLOUR, "▽": UNDER_COLOUR}
+OPEN_MARKS = set(MARK_COLOURS)
+
+# The thresholds, READ FROM dbt's OWN VARS rather than retyped, so the legend cannot describe
+# a rule the warehouse has stopped applying.
+UPSET_BIG_MARGIN, UPSET_BLOWOUT_MARGIN = _upset_thresholds()
 
 # The Index legend. R-026's icon-only exception on the SITE is defensible because R-102's
 # legend explains it once — that is the stated reason in the code. A workbook travels further
 # and has no tooltip at all, so the same exception needs the same support or it is just
 # undecodable symbols. This block is not optional.
 MARK_LEGEND = [
-    ("Upset level", "●", "an upset — the favourite lost outright"),
-    ("Upset level", "●●", "a level 2 upset (the site shades this; here the mark repeats)"),
-    ("Upset level", "●●●", "a level 3 upset"),
-    ("Upset level", "○", "the favourite won"),
-    # `Favourite covered` is DELIBERATELY NOT LISTED HERE. Marc's CSV marks it
-    # `yes/no = Yes/No`, so it renders as words, and naming it beside the marks would tell a
-    # reader to look for a shape that is not there.
-    ("Winner covered", "■", "the winner covered the closing spread"),
+    # A LEGEND MUST DEFINE, NOT RESTATE. The first version said "a level 2 upset", which tells
+    # a reader who has never seen the site precisely nothing. The thresholds are dbt vars
+    # (`upset_margin_big` = 7, `upset_margin_blowout` = 14) and they are stated here as the
+    # numbers a reader can check against the score in the same row.
+    #
+    # BY MARGIN OF VICTORY, NOT BY THE SIZE OF THE SWING, which is Marc's own call recorded in
+    # srv_game.sql: an 8-point favorite losing by 5 is Level 1, not the Level 2 the 13-point
+    # swing would make it.
+    ("Upset level", "○", "the favorite won"),
+    ("Upset level", "●",
+     f"Level 1 upset — the underdog won by {UPSET_BIG_MARGIN} or fewer"),
+    ("Upset level", "●●",
+     f"Level 2 upset — the underdog won by {UPSET_BIG_MARGIN + 1} to {UPSET_BLOWOUT_MARGIN}"),
+    ("Upset level", "●●●",
+     f"Level 3 upset — the underdog won by more than {UPSET_BLOWOUT_MARGIN}"),
+    ("Upset level", "–",
+     "no closing line, so there was no favorite to upset"),
+    ("Winner covered", "■", "the winner also covered the closing spread"),
     ("Winner covered", "□", "the winner did not cover"),
-    ("O/U result", "▲", "the total went over"),
-    ("O/U result", "▼", "the total stayed under"),
-    ("Any of the three", "◨", "push — landed exactly on the number"),
+    ("O/U result", "▲", "the two scores together went OVER the closing total"),
+    ("O/U result", "▽", "they stayed UNDER it"),
+    ("Any of the three", "▣", "push — landed exactly on the number"),
     ("Any of the three", "·", "not settled yet"),
     ("Any of the three", "–", "cfdb holds no closing line for this game"),
 ]
@@ -357,7 +428,7 @@ def _title_case_verdict(value):
     """`yes` / `no` / `push` / `pending` / `no_favorite` as words a reader can filter on.
 
     Already a string, so this is title-casing rather than a boolean conversion — and
-    `no_favorite` becomes "No favourite", NOT "No_favorite", which is what a naive
+    `no_favorite` becomes "No favorite", NOT "No_Favorite", which is what a naive
     `.title()` would leave behind.
     """
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -633,7 +704,7 @@ _ALL_SHEETS = [
         ("upset_level", "Upset level"),
         ("is_upset_by_line", "Upset by line"),
         ("winner_covered_close", "Winner covered"),
-        ("favorite_covered", "Favourite covered"),
+        ("favorite_covered", "Favorite covered"),
         ("over_met", "O/U result"),
         # --- context ----------------------------------------------------------------------
         ("temperature_f", "Temperature °F"),
@@ -912,7 +983,7 @@ MIN_COLUMN_WIDTH = 6
 # ...AND A COLUMN IS NEVER NARROWER THAN THE LONGEST WORD IN ITS HEADER, up to this cap.
 #
 # Measuring the data alone (R-217) was right and went too far: at a flat floor of 6, Excel
-# breaks "Favourite" mid-word into "Favouri / te", which is harder to read than the wide
+# breaks "Favorite" mid-word into "Favori / te", which is harder to read than the wide
 # column it replaced. Marc: "shrinking is a little aggressive, to the point it's making some
 # of the headers really difficult to read."
 #
@@ -952,6 +1023,17 @@ def effective_width(label: str, measured: Optional[float] = None) -> float:
 # has.
 #
 # Keyed by LABEL, so they follow the column if the order changes again.
+#
+# NOTE the US spelling below: Marc's CSV writes "Favourite covered" and he has since asked for
+# American spelling throughout, so the shipped label is "Favorite covered". That is the ONE
+# place the sheet deliberately departs from the CSV, and CSV_LABEL_OVERRIDES records it so the
+# reconciliation test can tell a decision from a typo.
+# The single place the built sheet departs from Marc's column-order CSV, with its reason.
+# Anything not in here must match the CSV exactly.
+CSV_LABEL_OVERRIDES = {
+    "Favourite covered": "Favorite covered",   # US spelling, Marc 2026-09-03
+}
+
 WIDTH_OVERRIDES = {
     "Winner covered": 8.0,
     "Final margin": 5.85,
@@ -1602,10 +1684,10 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                         cell.style = "Hyperlink"
                 if cell_alignment is not None:
                     cell.alignment = cell_alignment
-                if field in sheet.open_mark_fields and value in OPEN_MARKS:
+                if field in sheet.open_mark_fields and value in MARK_COLOURS:
                     # The open marks carry their own colour, so "did not happen" is legible
                     # at a glance rather than only on close inspection of the shape.
-                    cell.font = Font(color=OPEN_MARK_COLOUR, size=MARK_FONT_SIZE)
+                    cell.font = Font(color=MARK_COLOURS[value], size=MARK_FONT_SIZE)
                 elif field in sheet.display and field in sheet.centred:
                     cell.font = Font(size=MARK_FONT_SIZE)
 
@@ -1891,7 +1973,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
         row += 1
         tab.cell(row, 1, "Legend").font = header_font
         tab.cell(row, 2, "Upset level, Winner covered and O/U result use the same marks as "
-                         "the site. Favourite covered is a word, not a mark, and can also "
+                         "the site. Favorite covered is a word, not a mark, and can also "
                          "read \"No favorite\".")
         row += 1
         for column, mark, meaning in MARK_LEGEND:
@@ -1901,7 +1983,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
             # it is a picture of a different mark. 12pt because at 11 the difference between
             # ○ and ● is a couple of pixels of ink.
             glyph.font = Font(bold=True, size=MARK_FONT_SIZE,
-                              color=OPEN_MARK_COLOUR if mark in OPEN_MARKS else None)
+                              color=MARK_COLOURS.get(mark))
             glyph.alignment = Alignment(horizontal="center")
             tab.cell(row, 3, meaning)
             row += 1

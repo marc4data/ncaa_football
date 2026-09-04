@@ -942,9 +942,14 @@ def test_the_schedule_sheet_carries_marcs_fifty_six_columns_in_his_order():
               / "cfdb_schedule_column_order.csv")
     if not source.exists():                      # the CSV lives outside this repo
         pytest.skip("Marc's column-order CSV is not present in this checkout")
-    wanted = [row["Field"] for row in _csv.DictReader(source.open())]
+    wanted = [workbook.CSV_LABEL_OVERRIDES.get(row["Field"], row["Field"])
+              for row in _csv.DictReader(source.open())]
     schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
     assert [label for _, label in schedule.columns] == wanted
+    # The override list is not a licence to drift: every entry must still name a real CSV row.
+    csv_fields = {row["Field"] for row in _csv.DictReader(source.open())}
+    for original in workbook.CSV_LABEL_OVERRIDES:
+        assert original in csv_fields, f"{original!r} is not in the CSV at all"
 
 
 def test_the_eleven_removed_columns_are_gone_from_the_select_as_well_as_the_headers():
@@ -1262,7 +1267,7 @@ def test_the_verdict_columns_use_the_sites_marks_and_a_dash_for_nothing():
             assert ord(glyph[0]) < 0x1F000, f"{glyph!r} is emoji-presentation"
             assert "️" not in glyph
     render = workbook._marked(workbook.COVER_MARKS)
-    assert render("yes") == "■" and render("push") == "◨"
+    assert render("yes") == "■" and render("push") == "▣"
     assert render(None) == workbook.NO_DATA_MARK
     assert render(float("nan")) == workbook.NO_DATA_MARK
     assert render("something_new") == workbook.NO_DATA_MARK
@@ -1568,7 +1573,7 @@ def test_the_legend_glyphs_match_the_sheet_in_size_and_colour(built):
     seen = {}
     for row in tab.iter_rows():
         for cell in row:
-            if cell.value in workbook.OPEN_MARKS or cell.value in ("●", "■", "▲", "▼"):
+            if cell.value in workbook.OPEN_MARKS or cell.value in ("●", "■", "▲"):
                 seen[cell.value] = cell.font
     assert seen, "no legend glyphs found on the Index"
     # 12 IS MARC'S NUMBER, asserted as the requirement rather than against the constant.
@@ -1577,9 +1582,9 @@ def test_the_legend_glyphs_match_the_sheet_in_size_and_colour(built):
     assert workbook.MARK_FONT_SIZE >= 12, workbook.MARK_FONT_SIZE
     for glyph, font in seen.items():
         assert font.size >= 12, (glyph, font.size)
-        if glyph in workbook.OPEN_MARKS:
+        if glyph in workbook.MARK_COLOURS:
             assert font.color is not None and \
-                font.color.rgb == workbook.OPEN_MARK_COLOUR, (glyph, font.color)
+                font.color.rgb == workbook.MARK_COLOURS[glyph], (glyph, font.color)
 
 
 def test_the_open_marks_in_the_sheet_carry_the_same_colour(built):
@@ -1591,8 +1596,9 @@ def test_the_open_marks_in_the_sheet_carry_the_same_colour(built):
     for row in range(header + 1, tab.max_row + 1):
         for label in ("Upset level", "Winner covered", "O/U result"):
             cell = tab.cell(row, labels[label])
-            if cell.value in workbook.OPEN_MARKS:
-                assert cell.font.color.rgb == workbook.OPEN_MARK_COLOUR, cell.coordinate
+            if cell.value in workbook.MARK_COLOURS:
+                assert cell.font.color.rgb == workbook.MARK_COLOURS[cell.value], \
+                    cell.coordinate
                 assert cell.font.size >= 12
                 coloured += 1
     assert coloured, "no open mark appeared in the fixture, so this proved nothing"
@@ -1845,3 +1851,145 @@ def test_a_numeric_column_is_not_told_to_ignore_text_errors(built):
         letter = get_column_letter(labels[label])
         assert letter not in covered, (
             f"{label} holds numbers; silencing text warnings there hides a real mistake")
+
+
+# === round six ============================================================================
+
+def test_the_legend_states_the_upset_criteria_rather_than_restating_the_label():
+    """A LEGEND MUST DEFINE, NOT RESTATE.
+
+    The first version said "a level 2 upset (the site shades this)", which tells a reader who
+    has never seen the site precisely nothing. Marc: "These aren't proper definitions. What is
+    the criteria a game score needs to crest?"
+    """
+    descriptions = {mark: text for _, mark, text in workbook.MARK_LEGEND}
+    for level in ("●", "●●", "●●●"):
+        assert level in descriptions, level
+        text = descriptions[level]
+        assert any(ch.isdigit() for ch in text), (
+            f"{level} is described as {text!r} — no number, so it is not a definition")
+    assert str(workbook.UPSET_BIG_MARGIN) in descriptions["●"]
+    assert str(workbook.UPSET_BLOWOUT_MARGIN) in descriptions["●●"]
+    assert str(workbook.UPSET_BLOWOUT_MARGIN) in descriptions["●●●"]
+    # And the bands must not overlap or leave a gap: 7 / 8-14 / >14.
+    assert f"{workbook.UPSET_BIG_MARGIN + 1} to" in descriptions["●●"]
+
+
+def test_the_thresholds_come_from_dbt_and_are_not_retyped():
+    """A threshold is a METRIC DEFINITION and does not belong in the app — the rule that put
+    `upset_margin_big` in dbt vars in the first place. The legend reads them, so it cannot go
+    on describing a rule the warehouse has stopped applying.
+
+    Verified against the project file, not against a constant in this module.
+    """
+    import re
+    project = (Path(__file__).resolve().parents[1] / "dbt" / "dbt_project.yml")
+    text = project.read_text()
+    big = int(re.search(r"^\s*upset_margin_big:\s*(\d+)", text, re.MULTILINE).group(1))
+    blowout = int(re.search(r"^\s*upset_margin_blowout:\s*(\d+)", text, re.MULTILINE).group(1))
+    assert (workbook.UPSET_BIG_MARGIN, workbook.UPSET_BLOWOUT_MARGIN) == (big, blowout)
+
+
+def test_the_legend_matches_how_srv_game_actually_decides_the_level():
+    """The wording has to match the SQL, not just the numbers. `srv_game` uses strict `>`, so
+    a 7-point win is Level 1 and an exactly-14-point win is Level 2 — the legend's "7 or
+    fewer" and "8 to 14" say the same thing, and "more than 14" is the third band."""
+    sql = (Path(__file__).resolve().parents[1] / "dbt" / "models" / "serving"
+           / "srv_game.sql").read_text()
+    assert "> {{ var('upset_margin_blowout') }}" in sql, "the boundary is strict >"
+    assert "> {{ var('upset_margin_big') }}" in sql
+    descriptions = {mark: text for _, mark, text in workbook.MARK_LEGEND}
+    assert "or fewer" in descriptions["●"]
+    assert "more than" in descriptions["●●●"]
+
+
+def test_american_spelling_throughout():
+    """Marc: "Use US version of favorite". The column header, the legend and the divergence
+    note all say favorite."""
+    schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
+    labels = [label for _, label in schedule.columns]
+    assert "Favorite covered" in labels
+    assert "Favourite covered" not in labels
+    for _, _, text in workbook.MARK_LEGEND:
+        assert "favourite" not in text.lower(), text
+    assert workbook._title_case_verdict("no_favorite") == "No favorite"
+
+
+def test_the_one_departure_from_marcs_csv_is_recorded_not_silent():
+    """His column-order CSV is authoritative, so a label that differs from it must be a
+    DECISION with a reason attached, not a typo nobody noticed."""
+    assert workbook.CSV_LABEL_OVERRIDES == {"Favourite covered": "Favorite covered"}
+
+
+def test_under_is_unfilled_and_red_and_over_is_not():
+    """Marc, round 6. Filled/open already carries "it happened / it did not"; red carries the
+    direction. ▽ is the open form of ▲, so the pair still reads as one system."""
+    assert workbook.OVER_MARKS["no"] == "▽"
+    assert workbook.OVER_MARKS["yes"] == "▲"
+    assert workbook.MARK_COLOURS["▽"] == workbook.UNDER_COLOUR
+    assert "▲" not in workbook.MARK_COLOURS, "over stays the default colour"
+    assert workbook.UNDER_COLOUR != workbook.OPEN_MARK_COLOUR, (
+        "under must be distinguishable from the other open marks, which is the point")
+
+
+def test_the_under_colour_passes_contrast_too():
+    def luminance(hex_rgb):
+        channels = [int(hex_rgb[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        channels = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                    for c in channels]
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+    contrast = 1.05 / (luminance(workbook.UNDER_COLOUR[2:]) + 0.05)
+    assert contrast >= 4.5, f"{workbook.UNDER_COLOUR} is {contrast:.2f}:1 against white"
+
+
+def test_every_coloured_mark_is_drawn_the_same_way_in_the_legend_and_the_column(built):
+    """Two colours now, so "is it coloured" is no longer a sufficient question — the legend
+    has to use the RIGHT one for each glyph or it is a picture of a different mark."""
+    _, book, _, _ = built
+    index_fonts = {}
+    for row in book["Index"].iter_rows():
+        for cell in row:
+            if cell.value in workbook.MARK_COLOURS:
+                index_fonts[cell.value] = cell.font
+    for glyph, colour in workbook.MARK_COLOURS.items():
+        if glyph in index_fonts:
+            assert index_fonts[glyph].color.rgb == colour, glyph
+
+
+def test_every_mark_shares_one_east_asian_width_class():
+    """WHY THE COLUMN LOOKED CROOKED WHEN EVERY CELL WAS CENTRED.
+
+    Marc reported Winner covered as not horizontally centred. Every cell in it is centred —
+    verified on all 83 rows of a real file, header included. What was ragged was the glyphs:
+    ■ □ ○ ● ▲ ▽ are all East-Asian-Width AMBIGUOUS, and the push mark was ◨ (U+25E8), which
+    is NEUTRAL and rare enough that most fonts have no glyph for it. The fallback font brings
+    its own advance width, so those cells sat at a different offset and the column read as
+    crooked.
+
+    Alignment could never have fixed that, which is why this asserts the width class rather
+    than the alignment. Mixing classes in one column is the defect.
+    """
+    import unicodedata
+    widths = {}
+    for marks in (workbook.UPSET_MARKS, workbook.COVER_MARKS, workbook.OVER_MARKS):
+        for glyph in marks.values():
+            for character in glyph:
+                widths[character] = unicodedata.east_asian_width(character)
+    widths[workbook.NO_DATA_MARK] = unicodedata.east_asian_width(workbook.NO_DATA_MARK)
+    classes = set(widths.values())
+    assert classes == {"A"}, (
+        "the marks mix width classes and will not line up: "
+        + repr({c: w for c, w in widths.items() if w != "A"}))
+
+
+def test_every_mark_lives_in_the_geometric_shapes_block_or_is_the_dash():
+    """One block means one designer drew them, which is the practical reason they share
+    metrics. A mark borrowed from elsewhere is the next ◨."""
+    allowed = set(range(0x25A0, 0x2600))
+    for marks in (workbook.UPSET_MARKS, workbook.COVER_MARKS, workbook.OVER_MARKS):
+        for glyph in marks.values():
+            for character in glyph:
+                if character == "·":            # the pending dot, deliberately tiny
+                    continue
+                assert ord(character) in allowed, (
+                    f"{character!r} U+{ord(character):04X} is outside Geometric Shapes")
