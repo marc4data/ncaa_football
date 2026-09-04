@@ -65,12 +65,34 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # Six hours because the two-hourly DAG retries for roughly thirty minutes: a window shorter
 # than a few runs would let a failure scroll out of view between watcher runs, which are
 # themselves four hours apart in practice.
+#
+# ONLY WHERE THE TASK'S MOST RECENT RUN FAILED — "has failed" is not "is failing".
+#
+# The first version reported any failure inside the window regardless of what happened after
+# it, so a task that failed once and succeeded on the next run stayed red for six hours. On
+# 2026-09-04 that put three tasks on the alarm at once, all three healthy: a distribution
+# test fixed at 22:33, a scores dbt_test with eight successes behind it, and a build from
+# fourteen hours earlier. The pipeline was fine and the switch said otherwise.
+#
+# THAT IS WORSE THAN A LATE ALARM, and this project has the entry to prove it. "Silence is
+# not success" was added after four days of unnoticed downtime; an alarm that is always on is
+# the same failure wearing the opposite mask, because the next real outage arrives on a board
+# that is already red and changes nothing anybody looks at.
+#
+# `recency = 1` is the whole fix: rank each task's runs in the window newest first and report
+# it only if the newest one failed. A task that failed five hours ago and has not run since
+# is still reported, which is correct — nothing has shown it recovered.
 "${PSQL[@]}" -d "${CFDB_AIRFLOW_DB:-airflow}" -c "
   select 'failed|' || dag_id || '.' || task_id || '|' ||
-         floor(extract(epoch from (now() - max(end_date))))::bigint
-  from task_instance
-  where state = 'failed'
-    and end_date > now() - interval '6 hours'
-  group by dag_id, task_id
+         floor(extract(epoch from (now() - end_date)))::bigint
+  from (
+    select dag_id, task_id, state, end_date,
+           row_number() over (partition by dag_id, task_id
+                              order by end_date desc) as recency
+    from task_instance
+    where end_date > now() - interval '6 hours'
+      and state in ('failed', 'success')
+  ) ranked
+  where recency = 1 and state = 'failed'
   order by dag_id, task_id
 " || echo "failed|MONITOR.cannot_read_airflow_metadata|0"

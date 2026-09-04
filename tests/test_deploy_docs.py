@@ -92,24 +92,48 @@ def test_no_document_tells_anyone_to_copy_site_pages():
         assert not re.search(r"\bsite/pages\b", doc.read_text()), doc
 
 
-def test_the_deploy_rebuilds_the_data_when_serving_models_change():
+def test_the_deploy_rebuilds_and_publishes_the_data_it_changes():
     """R-126. Moving the pipeline repo updates the SQL; it does not run it.
 
     The scores DAG that would normally rebuild is gated on the live-scoring window, so outside
     one it correctly succeeds having done nothing — and a serving-model change merged midweek
     reaches the site on Saturday. On 2 September that left Schedule reading three columns the
     published table did not have.
+
+    THE DECISION MOVED OUT OF THE SHELL (R-264). It used to be a directory diff and a
+    `publish_all` inlined here; both now live in `src/deploy_models.py`, where they can be
+    tested. What this asserts is that the script still HAS the step and still has the manual
+    override — the rest is covered by tests/test_deploy_models.py.
     """
     body = SCRIPT.read_text()
-    assert "dbt/models/serving/" in body, "the directory diff is the trigger"
-    assert "publish_all" in body, "a rebuild that is not published has not been deployed"
-    assert "--rebuild" in body, "and a manual override, because the diff has a known blind spot"
+    assert "src.deploy_models" in body, "the rebuild-and-publish step is gone entirely"
+    assert "--rebuild" in body, "the full-rebuild override must survive"
+    assert "fail \"model rebuild/publish failed\"" in body, (
+        "a failed rebuild must fail the deploy rather than be reported and passed over")
 
 
-def test_the_rebuild_trigger_documents_what_it_misses():
-    """A directory diff cannot see an upstream change — fct_game, dim_team, a staging view —
-    that alters serving output without touching dbt/models/serving/. That gap is accepted
-    deliberately for speed, which only works if it is written down where it will be read."""
-    body = SCRIPT.read_text()
-    window = body[body.index("R-126."):body.index("DAGs are read from disk")]
-    assert "MISSED" in window and "fct_game" in window
+def test_the_rebuild_selects_on_state_so_it_cannot_miss_an_upstream_change():
+    """THE BLIND SPOT IS CLOSED, AND THIS IS THE TEST THAT USED TO DOCUMENT IT.
+
+    Its previous form asserted that the script WROTE DOWN what its directory diff could not
+    see — an upstream change to fct_game, dim_team or a staging view that alters serving
+    output without touching `dbt/models/serving/`. Accepting a known gap and recording it was
+    the right trade while the alternative was expensive; it stopped being the right trade when
+    the artefact that removes the gap turned out to already exist on the droplet.
+
+    So the assertion inverts: not "the gap is documented" but "there is no gap". A state
+    comparison sees a changed macro and a changed upstream model, and `+` carries the rebuild
+    down to every serving table that reads them.
+    """
+    from pathlib import Path as _P
+    module = (_P(__file__).resolve().parents[1] / "src" / "deploy_models.py").read_text()
+    assert "state:modified+" in module
+    assert "tag:production" in module
+    # The old trigger must be gone rather than left beside the new one — two triggers is two
+    # answers to "does this need rebuilding", and the weaker one wins by running first.
+    # CODE ONLY. The comments still name the old trigger, and should — the reason the diff
+    # was replaced is worth more to the next reader than the diff was.
+    code = "\n".join(ln for ln in SCRIPT.read_text().splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "dbt/models/serving/" not in code, (
+        "the directory diff is still running in the deploy script")
