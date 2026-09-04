@@ -10,7 +10,9 @@ a compromise — the properties under test are properties of the WRITER, and a f
 one row of each awkward type (null, NaN, a tz-aware timestamp, an empty string, a bool)
 exercises them harder than real data does.
 """
+import itertools
 import math
+import re
 import sys
 import zipfile
 from datetime import datetime, timezone
@@ -24,6 +26,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 
 from lib import workbook                                # noqa: E402
 from lib.query import check_contract                    # noqa: E402
+
+# WHICH SERVING VIEWS ACTUALLY CARRY `is_fbs_game`, READ OFF THE MODELS RATHER THAN LISTED.
+#
+# A hardcoded list here would be a second copy of the fact, and the first copy is the dbt
+# model. The previous version of the division test hardcoded the view NAME instead of the
+# property and went red when srv_game_team gained the column — the test was defending the
+# state of the world in September rather than the rule.
+SERVING_MODELS = Path(__file__).resolve().parents[1] / "dbt" / "models" / "serving"
+VIEWS_WITH_IS_FBS_GAME = {
+    path.stem for path in SERVING_MODELS.glob("*.sql")
+    if re.search(r"\bas\s+is_fbs_game\b", path.read_text(encoding="utf-8"))
+}
+# A glob that finds nothing would make the test above vacuously true for every sheet.
+assert VIEWS_WITH_IS_FBS_GAME, "no serving model declares is_fbs_game — the glob is wrong"
 
 
 def _frame(fields):
@@ -95,7 +111,19 @@ def built(monkeypatch):
                                        ("upset_level", ["upset", "none"]),
                                        ("winner_covered_close", ["yes", "no"]),
                                        ("over_met", ["yes", "no"]),
-                                       ("favorite_covered", ["yes", "no_favorite"])):
+                                       ("favorite_covered", ["yes", "no_favorite"]),
+                                       # Scores measures its frozen pane in CHARACTERS, and
+                                       # a column of the literal string "text" is four wide.
+                                       # Real school names are the widest thing on the sheet
+                                       # and they are what makes that measurement mean
+                                       # anything — a fixture narrower than the data turns
+                                       # the width assertion into a formality.
+                                       ("team", ["Mississippi State",
+                                                 "Southern California"]),
+                                       ("opponent", ["Northwestern",
+                                                     "Texas A&M"]),
+                                       ("conference", ["SEC", "Big Ten"]),
+                                       ("result", ["W", "L"])):
                     if column in df.columns:
                         df[column] = values
                 return df
@@ -411,14 +439,38 @@ def test_export_labels_agree_with_the_site(built):
         for field, label in re.findall(r'Col\(\s*"(\w+)"\s*,\s*"([^"]*)"', path.read_text()):
             view_labels.setdefault(page.view, {}).setdefault(field, set()).add(label)
 
-    mismatches = []
+    mismatches, compared = [], {}
     for sheet in workbook.SHEETS:
         shown_on_page = view_labels.get(sheet.view, {})
+        compared[sheet.name] = 0
         for field, label in sheet.columns:
             shown = shown_on_page.get(field)
-            if shown and label not in shown and field not in workbook.EXPORT_ONLY_LABELS:
+            if not shown:
+                continue
+            compared[sheet.name] += 1
+            if label not in shown and field not in workbook.EXPORT_ONLY_LABELS:
                 mismatches.append((sheet.name, field, label, sorted(shown)))
     assert not mismatches, mismatches
+
+    # WHAT THIS TEST DID NOT CHECK, SAID OUT LOUD.
+    #
+    # The comparison is per (view, field), so a sheet whose view no page reads is skipped
+    # entirely — silently, and with a green tick. Scores is exactly that since R-255: 132
+    # columns from srv_game_team, which no page reads, so ZERO of its labels are checked
+    # here. That is not a defect in the sheet; there is genuinely nothing to agree with. It
+    # is a gap in coverage, and a gap nobody can see is the one that gets forgotten.
+    #
+    # So the sheets with no counterpart are enumerated. The day a page reads srv_game_team,
+    # this assertion fails and the sheet joins the comparison — which is the right time to
+    # notice, rather than the day the two names quietly diverge.
+    uncovered = {name for name, n in compared.items() if n == 0}
+    assert uncovered == {"Scores"}, (
+        f"sheets compared against no page: {uncovered or 'none'} — expected exactly "
+        f"{{'Scores'}}, whose view srv_game_team no page reads")
+    # And Schedule really is compared — 13 of its 56 columns share a field name with the
+    # Schedule page today. A floor rather than the exact number, so a legitimate page change
+    # does not fail this, but a drop to nothing does.
+    assert compared["Schedule"] >= 10, compared
 
 
 def test_every_declared_label_divergence_is_still_real():
@@ -619,18 +671,25 @@ def test_an_untruncated_workbook_says_so_rather_than_staying_silent(monkeypatch)
     assert "Complete" in text and "Truncated" not in text
 
 
-def test_only_srv_game_sheets_can_honour_the_division_filter():
-    """Verified against the serving schema, not assumed: `is_fbs_game` exists on srv_game and
-    nowhere else. So a scope line reading 'FBS' would overstate what the other six sheets
-    did, and the Index names it per sheet rather than quietly implying it.
+def test_only_sheets_whose_view_carries_is_fbs_game_can_honour_the_division_filter():
+    """A scope line reading 'FBS' must not overstate what a sheet actually did.
 
-    Asserted across ALL seven, because five of the six that cannot honour it are the ones
-    waiting to be converted — this is the property they must come back with.
+    THE OLD VERSION OF THIS TEST TIED THE PROPERTY TO A TABLE NAME — `sheet.view ==
+    "srv_game"` — and that was a true statement about the world on the day it was written
+    rather than the rule it was standing in for. R-255 added `is_fbs_game` to srv_game_team
+    for exactly this reason, and the test went red for a sheet that had become MORE correct.
+
+    The rule is: a sheet can narrow if and only if its view carries the column. Both halves
+    are asserted, so a sheet cannot claim the filter without the column, and cannot have the
+    column and quietly ignore it.
     """
     scoped = {s.name for s in workbook._ALL_SHEETS if s.division_scoped}
     assert scoped == {"Schedule", "Scores"}, scoped
     for sheet in workbook._ALL_SHEETS:
-        assert sheet.division_scoped == (sheet.view == "srv_game"), sheet.name
+        carries = sheet.view in VIEWS_WITH_IS_FBS_GAME
+        assert sheet.division_scoped == carries, sheet.name
+        if carries:
+            assert "is_fbs_game" in " ".join(sheet.sql.split()), sheet.name
 
 
 def test_the_index_says_when_the_division_filter_could_not_reach_a_sheet(monkeypatch):
@@ -1024,13 +1083,17 @@ def test_the_default_sort_is_the_order_by_and_it_is_stable():
     assert "order by start_date_et, game_id" in flat
 
 
-def test_only_the_schedule_sheet_ships_and_the_other_six_are_kept_not_deleted():
-    """Marc: "only 1 data sheet for now". The six are real work and are converted one at a
-    time; deleting them would mean rewriting their SQL and column lists from scratch."""
-    assert [s.name for s in workbook.SHEETS] == ["Schedule"]
-    assert len(workbook.PENDING_SHEETS) == 6
+def test_two_sheets_ship_and_the_other_five_are_kept_not_deleted():
+    """Schedule and Scores (R-255). The five are real work and are converted one at a time;
+    deleting them would mean rewriting their SQL and column lists from scratch.
+
+    Both halves matter: that the shipped list is exactly what we think, and that nothing
+    fell out of `_ALL_SHEETS` on the way. Seven in, seven accounted for.
+    """
+    assert [s.name for s in workbook.SHEETS] == ["Schedule", "Scores"]
     assert {s.name for s in workbook.PENDING_SHEETS} == {
-        "Scores", "Odds", "Edges", "Standings", "Model performance", "Data dictionary"}
+        "Odds", "Edges", "Standings", "Model performance", "Data dictionary"}
+    assert len(workbook.SHEETS) + len(workbook.PENDING_SHEETS) == len(workbook._ALL_SHEETS)
 
 
 def test_the_index_names_the_six_that_are_not_here_rather_than_dropping_them(built):
@@ -2337,3 +2400,447 @@ def test_the_index_explains_what_the_bar_colours_mean(built):
     assert "Margin bar" in text
     assert "home team won" in text and "away team did" in text
     assert "not a judgement" in text
+
+
+# ==========================================================================================
+# THE SCORES SHEET (R-255 … R-259)
+# ==========================================================================================
+
+SCORES_CSV = Path(__file__).resolve().parent / "fixtures" / "cfdb_scores_column_order.csv"
+
+
+def _scores():
+    return next(s for s in workbook.SHEETS if s.name == "Scores")
+
+
+def _marcs_fields():
+    """The 131 field names from Marc's own CSV, vendored under tests/fixtures."""
+    import csv
+    with SCORES_CSV.open(encoding="utf-8-sig") as handle:
+        rows = [row[0].strip() for row in csv.reader(handle) if row and row[0].strip()]
+    assert rows[0] == "Field", rows[0]
+    return rows[1:]
+
+
+def test_the_scores_sheet_carries_every_field_marc_listed():
+    """131 IN, 131 OUT — the shuffle of R-258 moved columns and lost none.
+
+    Asserted against Marc's file rather than against a list retyped from it, because a list
+    retyped from it would agree with whatever I typed. The count is checked explicitly: a
+    field silently absent from BOTH sides would satisfy a set comparison alone.
+
+    Two deliberate differences, and they are the only two allowed:
+      * `possession_seconds` is selected and DISPLAYED as `possession_minutes` (R-259);
+      * `game_no` is displayed and not selected — it is computed in the query (R-257).
+    """
+    marc = _marcs_fields()
+    assert len(marc) == 131, len(marc)
+
+    sheet = _scores()
+    assert sorted(sheet.selected_fields) == sorted(marc), (
+        set(sheet.selected_fields) ^ set(marc))
+
+    displayed = sheet.fields
+    assert len(displayed) == 132, len(displayed)
+    assert len(set(displayed)) == 132, "a field is displayed twice"
+    assert set(displayed) - set(marc) == {"game_no", "possession_minutes"}
+    assert set(marc) - set(displayed) == {"possession_seconds"}
+
+
+def test_every_scores_category_is_one_contiguous_run_of_columns():
+    """THE ENTIRE POINT OF R-258: a reader scanning the header strip sees each band once.
+
+    Marc: "We might need to do some more column shuffling to avoid bounding between those
+    categories." His CSV had three breaks — opponent_conference stranded at field 117, and
+    both havoc runs cut off from their own side. This is the assertion that they are gone
+    and that nobody reintroduces one.
+    """
+    sheet = _scores()
+    seen, previous = [], None
+    for field, _ in sheet.columns:
+        category = sheet.field_category[field]
+        if category != previous:
+            assert category not in seen, f"{category} appears in two separate runs"
+            seen.append(category)
+            previous = category
+    assert seen == [name for name, _ in workbook.SCORES_BLOCKS], seen
+
+
+def test_the_scores_sheet_names_no_special_teams_category():
+    """Marc named five categories and srv_game_team supports four.
+
+    There is no punt, kick, field-goal or return column in the view. An empty fifth band
+    would be a promise the data cannot keep, and `average_start` — which special teams
+    influence — is field position, not a special-teams statistic.
+    """
+    categories = {name for name, _ in workbook.SCORES_BLOCKS}
+    assert not any("special" in name.lower() for name in categories), categories
+    assert not any(
+        any(token in field for token in ("punt", "kick", "field_goal", "return"))
+        for field, _ in _scores().columns)
+
+
+def test_every_scores_header_fill_is_readable_and_distinguishable():
+    """WHITE BOLD ON EVERY FILL, so every fill clears 4.5:1 — AND adjacent bands have to be
+    told apart from each other, which contrast against white says nothing about.
+
+    Both halves are asserted because they fail independently: four colours can each be dark
+    enough and still be four shades of the same navy. The separation check runs under normal
+    vision and both red-green dichromacies, because five blocks of colour read left to right
+    is a categorical palette and hue alone collapses under deuteranopia.
+    """
+    def channels(hexcolour):
+        raw = [int(hexcolour[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+        return [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in raw]
+
+    def contrast(hexcolour):
+        r, g, b = channels(hexcolour)
+        return 1.05 / (0.2126 * r + 0.7152 * g + 0.0722 * b + 0.05)
+
+    def lab(linear):
+        matrix = ((0.4124, 0.3576, 0.1805), (0.2126, 0.7152, 0.0722),
+                  (0.0193, 0.1192, 0.9505))
+        x, y, z = [sum(matrix[i][j] * linear[j] for j in range(3)) for i in range(3)]
+        white = (0.95047, 1.0, 1.08883)
+
+        def f(t):
+            return t ** (1 / 3) if t > 216 / 24389 else (841 / 108) * t + 4 / 29
+        fx, fy, fz = (f(v / w) for v, w in zip((x, y, z), white))
+        return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+    # Vienot 1999 dichromat matrices, applied in linear sRGB.
+    dichromats = {
+        "protanopia": ((0.11238, 0.88762, 0.0), (0.11238, 0.88762, 0.0),
+                       (0.00401, -0.00401, 1.0)),
+        "deuteranopia": ((0.29275, 0.70725, 0.0), (0.29275, 0.70725, 0.0),
+                         (-0.02234, 0.02234, 1.0)),
+    }
+
+    def seen_as(hexcolour, kind):
+        linear = channels(hexcolour)
+        if kind is None:
+            return linear
+        matrix = dichromats[kind]
+        return [min(1.0, max(0.0, sum(matrix[i][j] * linear[j] for j in range(3))))
+                for i in range(3)]
+
+    fills = workbook.CATEGORY_FILLS
+    assert set(fills) == {name for name, _ in workbook.SCORES_BLOCKS}
+    for name, colour in fills.items():
+        assert contrast(colour) >= 4.5, f"{name} #{colour} is {contrast(colour):.2f}:1"
+
+    # OVER THE BANDS, NOT OVER THE DISTINCT COLOURS. The first version compared
+    # `set(fills.values())`, which deduplicates — so giving two bands the SAME hex made the
+    # collision vanish from the comparison and the test went green on the one arrangement it
+    # exists to forbid. R-157, and it survived a round of review before a mutation caught it.
+    assert len(set(fills.values())) == len(fills), "two bands share a fill"
+    for first, second in itertools.combinations(sorted(fills), 2):
+        for kind in (None, "protanopia", "deuteranopia"):
+            delta = math.dist(lab(seen_as(fills[first], kind)),
+                              lab(seen_as(fills[second], kind)))
+            assert delta >= 10.0, (
+                f"{first} (#{fills[first]}) and {second} (#{fills[second]}) are only "
+                f"{delta:.1f} dE apart under {kind or 'normal vision'} — a just-noticeable "
+                f"difference is about 2.3, and two header bands need much more than that")
+
+
+def test_the_header_fill_written_into_the_file_is_the_category_colour(built):
+    """The palette above is a set of constants until something writes it.
+
+    Reads the FILE, not the model: a category whose fill never reached a cell would satisfy
+    every assertion in the test above.
+    """
+    _, book, _, _ = built
+    tab = book["Scores"]
+    sheet = _scores()
+    header = workbook.header_row(1)
+    seen = {}
+    for index, (field, _) in enumerate(sheet.columns, start=1):
+        written = tab.cell(header, index).fill.fgColor.rgb
+        expected = workbook.CATEGORY_FILLS[sheet.field_category[field]]
+        assert written.endswith(expected), (field, written, expected)
+        seen.setdefault(sheet.field_category[field], written)
+    # Distinct FILLS, not distinct categories: five categories all painted navy would satisfy
+    # a count of the keys and give the reader no boundary anywhere.
+    assert len(seen) == len(workbook.SCORES_BLOCKS)
+    assert len(set(seen.values())) == len(workbook.SCORES_BLOCKS), seen
+
+
+# ---- the query's own ordering, executed rather than pattern-matched ----------------------
+
+def _run_scores_sql(rows, sql=None):
+    """Execute the REAL Scores query against sqlite, over rows we supply.
+
+    A test that greps the SQL for "case season_type" proves the string is present and
+    nothing about what it does. sqlite speaks window functions, named parameters and block
+    comments, so the production statement runs unmodified and the ORDER BY is exercised for
+    real — which is what makes the negative test below meaningful.
+    """
+    return _execute_scores_sql(rows, sql or _scores().sql, division="all")
+
+
+# Columns the query FILTERS on without SELECTING them. The synthetic table needs them or the
+# statement will not compile — and each is asserted to be genuinely referenced, so this set
+# cannot quietly outlive the predicate it exists for.
+SCORES_PREDICATE_ONLY = ("is_fbs_game",)
+
+
+def _execute_scores_sql(rows, sql, division="all"):
+    import sqlite3
+    sheet = _scores()
+    statement = " ".join(sql.split())
+    for name in SCORES_PREDICATE_ONLY:
+        assert name in statement, f"{name} is no longer referenced by the Scores query"
+    columns = sorted(set(sheet.selected_fields) | set(SCORES_PREDICATE_ONLY))
+    connection = sqlite3.connect(":memory:")
+    connection.execute(
+        "create table srv_game_team (%s)" % ", ".join(f'"{c}"' for c in columns))
+    connection.executemany(
+        "insert into srv_game_team (%s) values (%s)"
+        % (", ".join(f'"{c}"' for c in columns), ", ".join("?" * len(columns))),
+        [[row.get(c) for c in columns] for row in rows])
+    cursor = connection.execute(statement, {
+        "season": 2025, "season_type": "regular", "week": None,
+        "division": division, "conference": None})
+    names = [d[0] for d in cursor.description]
+    return [dict(zip(names, r)) for r in cursor.fetchall()]
+
+
+def _pair(game_id, week, date, season_type="regular", season=2025):
+    """One game as its two rows — away first in the input, so the ORDER BY has to do work."""
+    base = {"season": season, "season_type": season_type, "week": week,
+            "game_date": date, "game_id": game_id, "is_fbs_game": 1,
+            "conference": "SEC", "opponent_conference": "SEC",
+            "possession_seconds": 1800}
+    return [dict(base, is_home=1, team=f"home{game_id}"),
+            dict(base, is_home=0, team=f"away{game_id}")]
+
+
+def test_the_regular_season_sorts_before_the_postseason():
+    """MARC NAMED THE ORDER — "Season (regular then post season)" — WHICH IS THE TELL THAT HE
+    EXPECTED IT TO NEED SAYING. Alphabetically 'postseason' < 'regular', so a plain
+    `order by season_type` puts January's bowls ahead of September.
+
+    THE FULL STATEMENT CANNOT SHOW THIS, AND THAT IS WORTH KNOWING RATHER THAN WORKING
+    AROUND. `season_type` is a scope filter — `where season_type = :season_type` — so every
+    row in any one export shares a value and the CASE never fires. It is still correct, and
+    it is what makes the order right the day a second season type reaches one sheet. So the
+    ordering CONSTANT is executed here, over rows the filter would never let coexist.
+
+    NEGATIVE-TESTED IN THE SAME FUNCTION: the CASE is swapped for the bare column and the
+    same rows re-run. If that still came out right, this test would be proving nothing.
+    """
+    import sqlite3
+    rows = [("postseason", 15, "2025-12-20", 2), ("regular", 1, "2025-08-30", 1)]
+
+    def order_by(expression):
+        connection = sqlite3.connect(":memory:")
+        connection.execute("create table t (season int, season_type text, week int, "
+                           "game_date text, game_id int)")
+        connection.executemany(
+            "insert into t (season_type, week, game_date, game_id) values (?,?,?,?)", rows)
+        return [r[0] for r in connection.execute(
+            f"select season_type from t order by {expression}")]
+
+    assert order_by(workbook.SCORES_GAME_ORDER) == ["regular", "postseason"]
+
+    naive = workbook.SCORES_GAME_ORDER.replace(
+        "case season_type when 'regular' then 1 when 'postseason' then 2 else 3 end",
+        "season_type")
+    assert naive != workbook.SCORES_GAME_ORDER, "the CASE was not found to remove"
+    assert order_by(naive) == ["postseason", "regular"], (
+        "removing the CASE did not break the order, so the CASE is not what fixes it")
+
+    # And the constant is what the sheet actually orders by, rather than a copy of it.
+    flat = " ".join(_scores().sql.split())
+    assert flat.count(workbook.SCORES_GAME_ORDER) == 2, (
+        "the sort key and game_no's window must be the same expression")
+
+
+def test_a_game_is_two_adjacent_rows_with_the_away_row_first():
+    """THE GRAIN, ASSERTED. Everything else on this sheet — the banding, the possession sum,
+    the row count Marc was told to expect — reads as broken if a pair ever comes apart.
+    """
+    rows = (_pair(3, 2, "2025-09-06") + _pair(1, 1, "2025-08-30")
+            + _pair(2, 1, "2025-08-31"))
+    result = _run_scores_sql(rows)
+    assert len(result) == 6
+    for first, second in zip(result[::2], result[1::2]):
+        assert first["game_id"] == second["game_id"], "a game's two rows are not adjacent"
+        assert (first["is_home"], second["is_home"]) == (0, 1), "home row came first"
+
+
+def test_game_no_is_dense_gapless_and_shared_by_both_rows_of_a_game():
+    """R-257's whole premise: the band follows a VALUE, so it survives a re-sort.
+
+    Dense and gapless matters because the band is `MOD(game_no,2)` — a gap would put two
+    shaded games or two bare games side by side and the boundary would vanish exactly where
+    the reader needs it.
+    """
+    rows = (_pair(9, 3, "2025-09-13") + _pair(4, 1, "2025-08-30")
+            + _pair(7, 2, "2025-09-06"))
+    result = _run_scores_sql(rows)
+    numbers = [r["game_no"] for r in result]
+    assert numbers == [1, 1, 2, 2, 3, 3], numbers
+    per_game = {}
+    for row in result:
+        per_game.setdefault(row["game_id"], set()).add(row["game_no"])
+    assert all(len(v) == 1 for v in per_game.values()), per_game
+    assert sorted(n for s in per_game.values() for n in s) == list(range(1, 4))
+
+
+def test_the_division_filter_keeps_both_rows_of_a_game_or_neither():
+    """WHY `is_fbs_game` HAD TO BE ADDED TO srv_game_team (R-255).
+
+    Narrowing on the team's own `classification` would have kept the FBS side of an
+    FBS-vs-FCS game and left the other behind — a game with one row, which quietly breaks
+    the grain every other rule here depends on.
+    """
+    fbs = _pair(1, 1, "2025-08-30")
+    other = [dict(row, game_id=2, is_fbs_game=0) for row in _pair(2, 1, "2025-08-31")]
+    result = _run_scores_sql(fbs + other)
+    assert len(result) == 4
+
+    narrowed = _execute_scores_sql(fbs + other, _scores().sql, division="fbs")
+    assert [r["game_id"] for r in narrowed] == [1, 1], narrowed
+
+
+# ---- what the file itself carries --------------------------------------------------------
+
+def test_the_scores_table_does_not_use_excels_own_row_stripes(built):
+    """WITH TWO ROWS PER GAME, `showRowStripes` BANDS THE WRONG UNIT — it shades every away
+    row and leaves every home row bare. R-182 set it False for the navy header; it now does
+    double duty and this is the line that stops it being switched back on.
+    """
+    _, book, _, _ = built
+    for name in ("Scores", "Schedule"):
+        style = book[name].tables[workbook.table_name(name)].tableStyleInfo
+        assert style.showRowStripes in (False, None, 0), name
+
+
+def test_the_scores_banding_reads_a_column_value_not_a_row_position(built):
+    """A rule computed from row position lands between the wrong rows the moment the reader
+    sorts the Table, which is the one thing a Table exists to let them do.
+
+    Asserts the formula names the `Game #` COLUMN with an absolute reference and a relative
+    row — that shape is what makes each row ask its own game number.
+    """
+    from openpyxl.utils import get_column_letter
+    _, book, _, _ = built
+    tab = book["Scores"]
+    sheet = _scores()
+    letter = get_column_letter(sheet.fields.index("game_no") + 1)
+    first = workbook.first_data_row(1)
+
+    formulas = [rule.formula[0]
+                for rules in tab.conditional_formatting
+                for rule in rules.rules if rule.formula]
+    banding = [f for f in formulas if f.startswith("MOD(")]
+    assert len(banding) == 1, formulas
+    assert banding[0] == f"MOD(${letter}{first},2)=0", banding[0]
+    # The reference is to the game number, not to whatever column happens to sit there.
+    assert tab.cell(workbook.header_row(1),
+                    sheet.fields.index("game_no") + 1).value == "Game #"
+
+
+def test_the_scores_freeze_keeps_team_and_opponent_and_still_leaves_room(built):
+    """The freeze exists so team and opponent stay on screen while the metrics scroll.
+
+    THE FIRST VERSION FROZE THE WHOLE GAME BLOCK, WHICH IS WHAT THE SPEC SAID AND DOES NOT
+    FIT. Measured on the real week-2 file, those twenty columns are 200 characters wide
+    against the ~110-130 an Excel window shows: the frozen pane filled the window and nothing
+    could scroll into view. Twelve columns — through `Opponent` — come to 138.
+
+    ASSERTED ON THE COLUMN BUDGET, NOT ON CHARACTERS, and the difference matters. The `built`
+    fixture holds two rows, so its columns are narrower than production's: the whole Game
+    block measures 143 characters there against 200 on the real file, and a character
+    threshold set from real data would wave the bad freeze through. The column count is the
+    same in both, so that is what the budget is expressed in — 12, derived from the real
+    measurement and recorded here beside it.
+    """
+    from openpyxl.utils import get_column_letter
+    _, book, _, _ = built
+    sheet = _scores()
+    tab = book["Scores"]
+    first_scrolling = sheet.freeze_column()
+    frozen = sheet.columns[:first_scrolling - 1]
+
+    assert {"Team", "Opponent"} <= {label for _, label in frozen}, frozen
+    assert all(sheet.field_category[f] == "Game" for f, _ in frozen), (
+        "the freeze reaches past the Game block")
+    assert len(frozen) <= 12, (
+        f"{len(frozen)} frozen columns; 12 is 138 characters on real data and 20 — the whole "
+        f"Game block — is 200, against the ~110-130 an Excel window shows")
+
+    expected = f"{get_column_letter(first_scrolling)}{workbook.first_data_row(1)}"
+    assert tab.freeze_panes == expected
+
+
+def test_possession_is_minutes_and_a_games_two_rows_sum_to_sixty():
+    """Marc asked for minutes; the choice pays for itself. At 2dp a game's two rows total
+    60.00, so every game carries its own arithmetic check and a row that does not pair is
+    visible without leaving the sheet.
+    """
+    sheet = _scores()
+    assert "possession_seconds" not in sheet.fields, "both spellings shipped"
+    assert dict(sheet.columns)["possession_minutes"] == "Possession min"
+
+    for away, home in ((1546, 2054), (2217, 1383), (1800, 1800)):
+        pair = [sheet.value_for("possession_minutes", {"possession_seconds": away}),
+                sheet.value_for("possession_minutes", {"possession_seconds": home})]
+        assert round(sum(pair), 2) == 60.00, (away, home, pair)
+    assert sheet.value_for("possession_minutes", {"possession_seconds": None}) is None
+
+
+def test_the_scores_number_formats_split_counts_from_decimals():
+    """R-259, and the reason the integer set is MEASURED rather than named.
+
+    Every one of these was decided by counting fractional values across 110,879 rows, and
+    four of them contradict what the column name suggests. A test that re-derived the rule
+    from the names would agree with the names and miss all four.
+    """
+    sheet = _scores()
+
+    def fmt(field):
+        return workbook.number_format(field, sheet.decimals, sheet.integer_fields)
+
+    # Whole in every row, so no decimal point.
+    for field in ("first_downs", "penalty_yards", "plays", "line_yards",
+                  "offense_plays", "offense_db_havoc_events",
+                  "offense_line_yards_total"):
+        assert fmt(field) == "#,##0", field
+
+    # Fractional somewhere, so two decimals — including three that READ like counts.
+    for field in ("offense_success_rate", "offense_ppa", "havoc_total",
+                  "offense_total_havoc_events", "offense_front_seven_havoc_events",
+                  "line_yards_average", "possession_minutes"):
+        assert fmt(field) == "#,##0.00", field
+
+    # R-216 still owns the separator: a label that happens to be numeric stays bare.
+    for field in ("season", "week", "game_id", "team_id", "opponent_team_id"):
+        assert fmt(field) == "0", field
+
+    # And the sheet-wide default does NOT leak on to Schedule, where a spread is `-6.5`.
+    schedule = next(s for s in workbook.SHEETS if s.name == "Schedule")
+    assert schedule.decimals is None
+    assert workbook.number_format(
+        "spread_current", schedule.decimals, schedule.integer_fields) == "#,##0.0"
+
+
+def test_every_scores_label_is_unique_and_says_something():
+    """131 labels are rule-derived, so a bad rule produces 131 bad labels at once.
+
+    `front_seven` is the one that caught it: substituting word by word turned
+    `offense_front_seven_havoc_rate` into "Off front front 7 havoc rate".
+    """
+    sheet = _scores()
+    labels = [label for _, label in sheet.columns]
+    assert len(set(labels)) == len(labels), "two columns share a header"
+    for field, label in sheet.columns:
+        assert label and (label[0].isupper() or label[0].isdigit()), (field, label)
+        assert "_" not in label, (field, label)
+        words = label.split()
+        assert len(words) == len(set(words)), (field, label)
+    assert workbook.scores_label("offense_front_seven_havoc_rate") == \
+        "Off front 7 havoc rate"
+    assert workbook.scores_label("defense_passing_downs_ppa") == "Def passing downs PPA"

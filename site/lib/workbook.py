@@ -503,6 +503,25 @@ def _title_case_verdict(value):
     return text[:1].upper() + text[1:] if text else None
 
 
+def _possession_minutes(record):
+    """Time of possession in minutes, from the view's seconds (Marc, R-259).
+
+    At 2dp a game's two rows SHOULD sum to 60.00, which mm:ss cannot give the reader — every
+    game carries its own arithmetic check, and a row that does not pair is visible without
+    leaving the sheet. The seconds column is not shipped alongside; two spellings of one
+    measurement is a column of noise.
+
+    AND THE CHECK FIRES, WHICH IS THE POINT OF HAVING IT. Across 3,411 games where both rows
+    carry possession, 3,261 total exactly 60:00, 14 exceed it (overtime) and 136 fall short —
+    4.4% where CFBD's own numbers do not reconcile. The column is not claiming they will
+    always add up; it is making it visible when they do not.
+    """
+    seconds = record.get("possession_seconds")
+    if seconds is None or (isinstance(seconds, float) and pd.isna(seconds)):
+        return None
+    return float(seconds) / 60.0
+
+
 def _status(record):
     """Scheduled / Final. `is_completed` is a boolean the reader has to translate; a word is
     what they would have written in the cell themselves."""
@@ -536,7 +555,11 @@ class Sheet:
                  link_fields: Optional[Dict[str, str]] = None,
                  display: Optional[Dict[str, Callable]] = None,
                  sheet_disclaimer: Optional[bool] = None,
-                 freeze_before: Optional[str] = None):
+                 freeze_before: Optional[str] = None,
+                 field_category: Optional[Dict[str, str]] = None,
+                 integer_fields: frozenset = frozenset(),
+                 decimals: Optional[int] = None,
+                 band_field: Optional[str] = None):
         self.name, self.view = name, view
         # Columns the sheet COMPUTES rather than selects — a weekday name, a status word, a
         # URL. They are real columns to the reader and to Excel; they simply have no
@@ -568,7 +591,26 @@ class Sheet:
         # (AC-G.39) matches `limit <digits>`, so a bind parameter would fail it — the cap has
         # to reach the SQL as a number. `ci/check_page_queries.py` substitutes the same hole
         # before executing, the way it already does for `{side}`.
-        self.sql = sql.replace("{ROW_CAP}", str(ROW_CAP))
+        # {field -> category name}, which drives the header FILL (R-258). Empty on a sheet
+        # with one category, and `build` falls back to the single navy in that case.
+        self.field_category: Dict[str, str] = field_category or {}
+        # Numeric columns that are naturally whole. Consulted BEFORE the sheet's decimal
+        # default, so a count does not acquire ".00".
+        self.integer_fields = integer_fields
+        # This sheet's default decimal places for a real decimal, or None to keep deriving
+        # them from `fmt.precision_for` as Schedule does.
+        self.decimals = decimals
+        # The column whose PARITY bands the rows. A value, never a row position — see
+        # SCORES_BAND_FIELD for why the position-based version silently lies after a sort.
+        self.band_field = band_field
+        # Holes resolved once, here. The contract's LIMIT check (AC-G.39) matches
+        # `limit <digits>`, so the cap has to reach the SQL as a number rather than a bind
+        # parameter; the sort key is shared between the ORDER BY and `game_no`'s window and
+        # is interpolated so the two cannot disagree. `ci/check_page_queries.py` resolves
+        # both the same way before executing.
+        for hole, value in SQL_HOLES.items():
+            sql = sql.replace("{" + hole + "}", value)
+        self.sql = sql
         self.columns, self.has_predictions = columns, has_predictions
         self.note, self.scoped = note, scoped
 
@@ -599,13 +641,25 @@ class Sheet:
                          re.IGNORECASE | re.DOTALL)
         if not body:
             return []
-        out = []
-        for piece in body.group(1).split(","):
-            piece = piece.strip()
-            if not piece or "(" in piece:
-                continue
-            out.append(piece.split()[-1])
-        return out
+        # SPLIT ON TOP-LEVEL COMMAS ONLY. A plain `.split(",")` walks straight into a window
+        # function's own commas: Scores' `dense_rank() over (order by season, <case>, week,
+        # game_date, game_id) as game_no` came apart into six pieces, four of which look like
+        # bare column names. Two of them — `end` and `game_no` — carry no bracket at all and
+        # were reported as selected columns that do not exist, which is precisely the class of
+        # error this property exists to prevent a fixture from inheriting.
+        out, depth, piece = [], 0, ""
+        for character in body.group(1):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+            if character == "," and depth == 0:
+                out.append(piece)
+                piece = ""
+            else:
+                piece += character
+        out.append(piece)
+        return [p.split()[-1] for p in (t.strip() for t in out) if p and "(" not in p]
 
     @property
     def centred(self) -> set:
@@ -644,6 +698,10 @@ class Sheet:
         renderer = self.display.get(field)
         return renderer(value) if renderer is not None else value
 
+    def header_fill_for(self, field: str, default: str) -> str:
+        """This column's header fill: its category's, or the sheet-wide default."""
+        return CATEGORY_FILLS.get(self.field_category.get(field, ""), default)
+
     def freeze_column(self) -> int:
         """1-based index of the first column that SCROLLS, or 1 for no horizontal freeze."""
         if not self.freeze_before:
@@ -665,8 +723,278 @@ class Sheet:
         return out
 
 
-# ONLY THE SCHEDULE SHEET SHIPS THIS PASS. Marc: "only 1 data sheet for now (mapped to the
-# Schedule page)", confirmed 2026-09-03 against the alternative of converting all seven.
+# ==========================================================================================
+# THE SCORES SHEET — srv_game_team, 131 FIELDS, GAME x TEAM GRAIN (R-255 … R-259)
+#
+# MARC: "We are going to veer Scores away from Schedule. Source Scores from srv_game_team."
+# The order is `claude_work/supporting_files/cfdb_scores_column_order.csv`, taken literally.
+#
+# THE GRAIN IS THE THING TO HOLD ON TO: one row per team per game, so A GAME IS TWO ROWS.
+# The sort, the banding, the possession check and the row count all follow from that one
+# fact, and every one of them breaks if a filter ever splits a pair.
+# ==========================================================================================
+
+# THE FIVE CATEGORY BANDS, AND THE SHUFFLE THAT MADE EACH ONE CONTIGUOUS (R-258).
+#
+# Marc: "We might need to do some more column shuffling to avoid bounding between those
+# categories." He was right, in exactly three places. Reading his CSV as given:
+#
+#     field 117    opponent_conference   -> basic info, stranded between advanced blocks
+#     fields 118-124  offense_*havoc*    -> a SECOND offence block, cut off from the first
+#     fields 125-131  defense_*havoc*    -> a second defence block
+#
+# Three moves fix all three, and nothing else moves: opponent_conference goes up beside
+# `opponent`, and each havoc run joins the end of its own side. 131 in, 131 out — asserted,
+# because a shuffle that loses a column looks exactly like a shuffle that did not.
+#
+# STRUCTURAL, NOT ASSERTED-AFTERWARDS. The columns are BUILT from these blocks, so a
+# category physically cannot be non-contiguous. The test still checks it, which catches
+# someone hand-editing the flattened list back into one long tuple.
+#
+# MARC NAMED FIVE CATEGORIES AND THERE ARE FOUR — plus Game. srv_game_team carries no punt,
+# kick, field-goal or return column; checked against all 190 columns of the view, not
+# assumed. `average_start` and `average_starting_predicted_points` are field-position
+# metrics that special teams INFLUENCE, and colouring them as special teams would be a claim
+# the data does not support. Four bands ship; an empty fifth would be a promise.
+SCORES_BLOCKS = (
+    ("Game", (
+        "game_no", "game_id", "season", "season_type", "week", "game_date", "team_id", "team",
+        "conference", "classification", "opponent_team_id", "opponent", "opponent_conference",
+        "is_home", "is_neutral_site", "is_completed", "points_for", "points_against",
+        "margin", "result",
+    )),
+    ("Box score", (
+        "first_downs", "total_yards", "rushing_yards", "passing_yards", "rushing_attempts",
+        "turnovers", "interceptions", "fumbles_lost", "third_down_conversions",
+        "third_down_attempts", "fourth_down_conversions", "fourth_down_attempts", "penalties",
+        "penalty_yards", "possession_minutes",
+    )),
+    ("Team advanced", (
+        "plays", "ppa_overall_total", "ppa_passing_total", "ppa_rushing_total",
+        "cumulative_ppa_overall_total", "cumulative_ppa_passing_total",
+        "cumulative_ppa_rushing_total", "success_rate_overall_total",
+        "success_rate_standard_downs_total", "success_rate_passing_downs_total",
+        "explosiveness_total", "power_success", "stuff_rate", "line_yards",
+        "line_yards_average", "second_level_yards", "second_level_yards_average",
+        "open_field_yards", "open_field_yards_average", "havoc_total", "havoc_front_seven",
+        "havoc_db", "scoring_opportunities", "scoring_opportunity_points",
+        "points_per_opportunity", "average_start", "average_starting_predicted_points",
+    )),
+    ("Offense", (
+        "offense_plays", "offense_drives", "offense_ppa", "offense_total_ppa",
+        "offense_success_rate", "offense_explosiveness", "offense_power_success",
+        "offense_stuff_rate", "offense_line_yards", "offense_line_yards_total",
+        "offense_second_level_yards", "offense_second_level_yards_total",
+        "offense_open_field_yards", "offense_open_field_yards_total",
+        "offense_standard_downs_ppa", "offense_standard_downs_success_rate",
+        "offense_standard_downs_explosiveness", "offense_passing_downs_ppa",
+        "offense_passing_downs_success_rate", "offense_passing_downs_explosiveness",
+        "offense_rushing_plays_ppa", "offense_rushing_plays_total_ppa",
+        "offense_rushing_plays_success_rate", "offense_rushing_plays_explosiveness",
+        "offense_passing_plays_ppa", "offense_passing_plays_total_ppa",
+        "offense_passing_plays_success_rate", "offense_passing_plays_explosiveness",
+        "offense_total_plays", "offense_total_havoc_events",
+        "offense_front_seven_havoc_events", "offense_db_havoc_events", "offense_havoc_rate",
+        "offense_front_seven_havoc_rate", "offense_db_havoc_rate",
+    )),
+    ("Defense", (
+        "defense_plays", "defense_drives", "defense_ppa", "defense_total_ppa",
+        "defense_success_rate", "defense_explosiveness", "defense_power_success",
+        "defense_stuff_rate", "defense_line_yards", "defense_line_yards_total",
+        "defense_second_level_yards", "defense_second_level_yards_total",
+        "defense_open_field_yards", "defense_open_field_yards_total",
+        "defense_standard_downs_ppa", "defense_standard_downs_success_rate",
+        "defense_standard_downs_explosiveness", "defense_passing_downs_ppa",
+        "defense_passing_downs_success_rate", "defense_passing_downs_explosiveness",
+        "defense_rushing_plays_ppa", "defense_rushing_plays_total_ppa",
+        "defense_rushing_plays_success_rate", "defense_rushing_plays_explosiveness",
+        "defense_passing_plays_ppa", "defense_passing_plays_total_ppa",
+        "defense_passing_plays_success_rate", "defense_passing_plays_explosiveness",
+        "defense_total_plays", "defense_total_havoc_events",
+        "defense_front_seven_havoc_events", "defense_db_havoc_events", "defense_havoc_rate",
+        "defense_front_seven_havoc_rate", "defense_db_havoc_rate",
+    )),
+)
+
+# WHITE BOLD SITS ON ALL FIVE, so each needs 4.5:1 against white — and the bands have to be
+# told apart from EACH OTHER, which contrast against white says nothing about. Measured, not
+# eyeballed, the way the marks were:
+#
+#     band              hex        contrast on white
+#     Game              2F4858       9.59:1     the existing cfdb navy, kept
+#     Box score         6B4C7A       7.14:1
+#     Team advanced     4A6670       6.13:1
+#     Offense           A63A16       6.49:1
+#     Defense           1E6B54       6.39:1
+#
+# Across all TEN pairs, under normal vision and both red-green dichromacies, the closest two
+# colours are 11.2 dE apart (Box score / Team advanced under deuteranopia) against a
+# just-noticeable difference of about 2.3. The palette is spread over hue AND lightness on
+# purpose: hue alone collapses under deuteranopia, which is what makes red-and-green the
+# wrong choice for two blocks that sit side by side.
+#
+# FIVE FILLS RATHER THAN FOUR, and that is a change of mind worth recording. The first pass
+# gave Box score and Team advanced one colour on the argument that the split between them is
+# which CFBD endpoint served them rather than anything about football. True, but it produced
+# a 42-column run with no boundary in it — the widest band on the sheet, and the one place a
+# reader most needs a landmark. A visible boundary at every block beats a tidy taxonomy.
+#
+# THIS SUPERSEDES R-182 TRAP 3's single-fill header, which was settled before category
+# colours were asked for. `showRowStripes` stays False — see SCORES_BAND_FIELD.
+CATEGORY_FILLS = {
+    "Game": "2F4858",
+    "Box score": "6B4C7A",
+    "Team advanced": "4A6670",
+    "Offense": "A63A16",
+    "Defense": "1E6B54",
+}
+
+# Labels are RULE-DERIVED with overrides, not 131 hand-typed strings. 131 chances to typo is
+# not a trade worth making when the names follow a pattern; the exceptions are listed and the
+# test asserts every label is unique and non-empty.
+SCORES_WORDS = {
+    "offense": "Off", "defense": "Def", "ppa": "PPA", "db": "DB",
+    "first": "1st", "second": "2nd", "third": "3rd", "fourth": "4th",
+    "opponent": "Opp", "average": "Avg",
+}
+SCORES_LABEL_OVERRIDES = {
+    "game_no": "Game #", "game_id": "Game id", "season": "Season",
+    "season_type": "Season type", "week": "Wk", "game_date": "Date",
+    "team_id": "Team id", "team": "Team", "conference": "Conference",
+    "classification": "Division", "opponent_team_id": "Opp team id",
+    "opponent": "Opponent", "opponent_conference": "Opp conference",
+    "is_home": "Home game", "is_neutral_site": "Neutral site",
+    "is_completed": "Completed", "points_for": "Pts for",
+    "points_against": "Pts against", "margin": "Margin", "result": "Result",
+    "possession_minutes": "Possession min",
+    "average_start": "Avg start", "average_starting_predicted_points": "Avg start pred pts",
+    "scoring_opportunities": "Scoring opps",
+    "scoring_opportunity_points": "Scoring opp pts",
+    "points_per_opportunity": "Pts per opp",
+    "havoc_front_seven": "Havoc front 7", "havoc_db": "Havoc DB",
+}
+
+
+def scores_label(field: str) -> str:
+    """A readable header for one srv_game_team column."""
+    if field in SCORES_LABEL_OVERRIDES:
+        return SCORES_LABEL_OVERRIDES[field]
+    # `front_seven` is ONE idea and has to be substituted as one. Word-by-word turns
+    # `offense_front_seven_havoc_rate` into "Off front front 7 havoc rate" — the `front`
+    # survives and the `seven` becomes `7` beside it.
+    name = field.replace("front_seven", "front7")
+    words = [SCORES_WORDS.get(w, w) for w in name.split("_")]
+    text = " ".join(words).replace("front7", "front 7")
+    return text[0].upper() + text[1:]
+
+
+def _flatten_blocks(blocks):
+    """(columns, {field -> category}) from the block structure above."""
+    columns, category = [], {}
+    for name, fields in blocks:
+        for field in fields:
+            columns.append((field, scores_label(field)))
+            category[field] = name
+    return columns, category
+
+
+SCORES_COLUMNS, SCORES_CATEGORY = _flatten_blocks(SCORES_BLOCKS)
+
+# `regular` BEFORE `postseason`, WHICH A PLAIN SORT GETS BACKWARDS.
+#
+# Marc named the order explicitly — "Season (regular then post season)" — and alphabetically
+# 'postseason' < 'regular', so `order by season_type` puts January's bowls ahead of
+# September. The CASE is load-bearing, not decoration, and the test removes it to prove that.
+#
+# WORTH KNOWING: inside ONE export it never fires, because `season_type` is a scope filter
+# and every row in the file shares a value. It is right anyway, and it is what makes the
+# ordering correct the day the filter widens or a second season_type reaches one sheet.
+#
+# THE GAME ORDER, shared by the sort and by `game_no` so the numbering and the row order
+# cannot disagree. `is_home` is appended only to the ORDER BY: false sorts first in Postgres,
+# which is away-then-home, which is how a scoreboard is written.
+#
+# ONE PLAIN LITERAL, not an f-string assembled from parts. `ci/check_page_queries.py` resolves
+# these holes by reading module-level `NAME = "..."` constants out of the AST, and it reads
+# `ast.Constant` only — an f-string is a `JoinedStr` and would be invisible to it, so the
+# Scores query would reach the checker with an unresolved `{SCORES_GAME_ORDER}` and be
+# reported as broken rather than executed.
+SCORES_GAME_ORDER = ("season, case season_type when 'regular' then 1 "
+                     "when 'postseason' then 2 else 3 end, week, game_date, game_id")
+
+# BAND ON A REAL COLUMN, NOT ON ROW POSITION (R-257).
+#
+# Marc asked for "some kind of subgrouping to show the change between games". Two things that
+# look obvious are both wrong here:
+#
+#   Excel's own row stripes alternate every ROW, so with two rows per game they would shade
+#   the away row of every game and leave the home row bare — banding the wrong unit entirely.
+#   R-182 already set showRowStripes=False for the navy header; it now does double duty.
+#
+#   A rule like `=$A2<>$A1` is computed from row POSITION, so the moment a reader re-sorts
+#   the Table — which is the entire point of shipping a Table — the lines land between the
+#   wrong rows. A format that silently lies after a sort is worse than no format.
+#
+# `game_no` is DATA. It travels with its row, so the band survives any sort, and it is useful
+# on its own: filter to one game, or read off how many games are in scope. Not hidden — a
+# hidden column driving visible formatting is the thing nobody can debug six months later.
+SCORES_BAND_FIELD = "game_no"
+SCORES_BAND_FILL = "F2F5F7"     # a very light tint of the Game navy; survives a mono printer
+
+# NATURALLY INTEGER, MEASURED OVER ALL 110,879 ROWS rather than inferred from the column name.
+#
+# Marc: "If the number is numeric and not naturally an integer, only show 2 decimal points."
+# Deciding that from names would have been wrong four times, and the count is the point:
+#
+#   `line_yards`, `second_level_yards`, `open_field_yards` are numeric-typed and WHOLE in
+#   every row — they are totals. Their `_average` siblings are not.
+#   `havoc_total` READS like a count and is fractional in 3,685 rows — it is a rate.
+#   `offense_total_havoc_events` is whole in all but FIFTEEN rows, so it is not an integer
+#   either; formatting it as one would round those fifteen away in silence.
+#   `offense_db_havoc_events` IS whole everywhere, while its front-seven sibling is not.
+#
+# R-216's rule still decides the SEPARATOR: a comma is for a quantity you might total, so a
+# season and an id stay bare. This set only decides the DECIMAL POINT.
+SCORES_INTEGER_FIELDS = frozenset({
+    "game_no", "points_for", "points_against", "margin",
+    "first_downs", "total_yards", "rushing_yards", "passing_yards", "rushing_attempts",
+    "turnovers", "interceptions", "fumbles_lost",
+    "third_down_conversions", "third_down_attempts",
+    "fourth_down_conversions", "fourth_down_attempts", "penalties", "penalty_yards",
+    "plays", "line_yards", "second_level_yards", "open_field_yards",
+    "scoring_opportunities", "scoring_opportunity_points",
+    "offense_plays", "offense_drives", "offense_total_plays", "offense_db_havoc_events",
+    "offense_line_yards_total", "offense_second_level_yards_total",
+    "offense_open_field_yards_total",
+    "defense_plays", "defense_drives", "defense_total_plays", "defense_db_havoc_events",
+    "defense_line_yards_total", "defense_second_level_yards_total",
+    "defense_open_field_yards_total",
+})
+
+# TWO DECIMALS ON THIS SHEET, AND DELIBERATELY NOT GLOBALLY (R-259).
+#
+# Schedule derives precision from `fmt.precision_for` so a column reads the same in the
+# workbook as on the site (AC-G.31) — and a spread is written `-6.5` everywhere in football,
+# never `-6.50`. Two sheets with two stated defaults is not drift; one rule applied where it
+# is wrong is.
+#
+# ⚠ REPORTED TO MARC, NOT DECIDED HERE: the rates are stored as PROPORTIONS (0-1), so 2dp
+# renders 0.2549 as 0.25. Measured on week 2 of 2025, 133 FBS team-rows: offense_havoc_rate
+# holds 91 distinct values at 3dp and 25 at 2dp; offense_success_rate, 111 and 45. Marc's
+# call — this constant is the whole change.
+SCORES_DECIMALS = 2
+
+
+# The f-string holes any sheet's SQL may carry, resolved once in `Sheet.__init__`.
+# `ci/check_page_queries.py` resolves the same two before executing — ROW_CAP from its own
+# SUBSTITUTIONS table, SCORES_GAME_ORDER by reading this module's constants — so the checker
+# runs the query the workbook runs rather than a placeholder-shaped approximation of it.
+SQL_HOLES = {"ROW_CAP": str(ROW_CAP), "SCORES_GAME_ORDER": SCORES_GAME_ORDER}
+
+
+# SCHEDULE AND SCORES SHIP; FIVE SHEETS ARE STILL PENDING. Marc took the one-sheet
+# decision of 2026-09-03 ("only 1 data sheet for now") and reopened it for Scores
+# specifically, on a new source — R-255. The remaining five are unchanged.
 #
 # The other six are NOT deleted. Their SQL and column lists are real work and each gets the
 # same treatment one at a time; they sit in PENDING_SHEETS, are named on the Index so the
@@ -835,25 +1163,119 @@ _ALL_SHEETS = [
         link_fields={"away_team_display": "team", "home_team_display": "team",
                      "matchup_url": "matchup"}),
 
-    Sheet("Scores", "srv_game", """
-        select game_date, week, away_team_display, away_points,
-               home_team_display, home_points, winner, actual_margin,
-               excitement_index, is_upset, attendance, venue_display,
+    # ======================================================================================
+    # THE SCORES SHEET — VEERED AWAY FROM SCHEDULE (Marc, R-255).
+    #
+    # It used to be twelve columns of srv_game: the same game-grain fixture Schedule already
+    # covers, with fewer columns. That made it a worse Schedule rather than a different
+    # sheet, which is presumably why Marc moved it: srv_game_team sits at game x TEAM, so
+    # Scores now answers "how did each team play" where Schedule answers "what happened in
+    # this fixture". Two grains, two sheets, no overlap to keep in step.
+    #
+    # THE SELECT LIST IS MARC'S CSV ORDER, VERBATIM. The DISPLAY order is the same 131 fields
+    # regrouped into contiguous category bands (SCORES_BLOCKS). Keeping the select in his
+    # order means the two artefacts can be read against each other line by line; the test
+    # asserts they hold the same set.
+    # ======================================================================================
+    Sheet(
+        "Scores", "srv_game_team", """
+        select game_id, season, season_type, week, game_date, team_id, team, conference,
+               classification, opponent_team_id, opponent, is_home, is_neutral_site,
+               is_completed, points_for, points_against, margin, result, first_downs,
+               total_yards, rushing_yards, passing_yards, rushing_attempts, turnovers,
+               interceptions, fumbles_lost, third_down_conversions, third_down_attempts,
+               fourth_down_conversions, fourth_down_attempts, penalties, penalty_yards,
+               possession_seconds, plays, ppa_overall_total, ppa_passing_total,
+               ppa_rushing_total, cumulative_ppa_overall_total,
+               cumulative_ppa_passing_total, cumulative_ppa_rushing_total,
+               success_rate_overall_total, success_rate_standard_downs_total,
+               success_rate_passing_downs_total, explosiveness_total, power_success,
+               stuff_rate, line_yards, line_yards_average, second_level_yards,
+               second_level_yards_average, open_field_yards, open_field_yards_average,
+               havoc_total, havoc_front_seven, havoc_db, scoring_opportunities,
+               scoring_opportunity_points, points_per_opportunity, average_start,
+               average_starting_predicted_points, offense_plays, offense_drives,
+               offense_ppa, offense_total_ppa, offense_success_rate, offense_explosiveness,
+               offense_power_success, offense_stuff_rate, offense_line_yards,
+               offense_line_yards_total, offense_second_level_yards,
+               offense_second_level_yards_total, offense_open_field_yards,
+               offense_open_field_yards_total, offense_standard_downs_ppa,
+               offense_standard_downs_success_rate, offense_standard_downs_explosiveness,
+               offense_passing_downs_ppa, offense_passing_downs_success_rate,
+               offense_passing_downs_explosiveness, offense_rushing_plays_ppa,
+               offense_rushing_plays_total_ppa, offense_rushing_plays_success_rate,
+               offense_rushing_plays_explosiveness, offense_passing_plays_ppa,
+               offense_passing_plays_total_ppa, offense_passing_plays_success_rate,
+               offense_passing_plays_explosiveness, defense_plays, defense_drives,
+               defense_ppa, defense_total_ppa, defense_success_rate, defense_explosiveness,
+               defense_power_success, defense_stuff_rate, defense_line_yards,
+               defense_line_yards_total, defense_second_level_yards,
+               defense_second_level_yards_total, defense_open_field_yards,
+               defense_open_field_yards_total, defense_standard_downs_ppa,
+               defense_standard_downs_success_rate, defense_standard_downs_explosiveness,
+               defense_passing_downs_ppa, defense_passing_downs_success_rate,
+               defense_passing_downs_explosiveness, defense_rushing_plays_ppa,
+               defense_rushing_plays_total_ppa, defense_rushing_plays_success_rate,
+               defense_rushing_plays_explosiveness, defense_passing_plays_ppa,
+               defense_passing_plays_total_ppa, defense_passing_plays_success_rate,
+               defense_passing_plays_explosiveness, opponent_conference,
+               offense_total_plays, offense_total_havoc_events,
+               offense_front_seven_havoc_events, offense_db_havoc_events,
+               offense_havoc_rate, offense_front_seven_havoc_rate, offense_db_havoc_rate,
+               defense_total_plays, defense_total_havoc_events,
+               defense_front_seven_havoc_events, defense_db_havoc_events,
+               defense_havoc_rate, defense_front_seven_havoc_rate, defense_db_havoc_rate,
+               dense_rank() over (order by {SCORES_GAME_ORDER}) as game_no,
                count(*) over () as rows_in_scope
-        from srv_game
-        where season = :season and season_type = :season_type and is_completed
+        from srv_game_team
+        where season = :season and season_type = :season_type
           and (:week is null or week = :week)
-          and (:division = 'all' or is_fbs_game)          /* R-184, as Schedule */
-        order by game_date desc, game_id
+          /* The Division filter, mapped through THIS view's spine. srv_game answers it with
+             `is_fbs_game`; srv_game_team had only the TEAM's `classification`, and narrowing
+             on that would keep the FBS half of an FBS-vs-FCS game and lose the other — one
+             row for a game that has two. So `is_fbs_game` was added to srv_game_team with
+             srv_game's predicate copied literally, and both rows of a game carry the same
+             value.
+             BLOCK comment, not `--`: read_sheet() flattens this onto ONE line, so a line
+             comment would swallow every clause after it. And the wording avoids d-r-o-p as
+             well as j-o-i-n — the contract's FORBIDDEN regex reads comments, and it caught
+             this comment's first draft on the second of those. */
+          and (:division = 'all' or is_fbs_game)
+          and (:conference is null or conference = :conference
+               or opponent_conference = :conference)
+        order by {SCORES_GAME_ORDER}, is_home
         limit {ROW_CAP}
-    """, [
-        ("game_date", "Date"), ("week", "Wk"),
-        ("away_team_display", "Away"), ("away_points", "Away pts"),
-        ("home_team_display", "Home"), ("home_points", "Home pts"),
-        ("winner", "Winner"), ("actual_margin", "Margin (away−home)"),
-        ("excitement_index", "Excitement"), ("is_upset", "Upset"),
-        ("attendance", "Attendance"), ("venue_display", "Venue"),
-    ]),
+    """,
+        SCORES_COLUMNS,
+        # The header block is the only place a reader learns the grain, and every surprise on
+        # this sheet comes from it.
+        note="One row per team per game, so a game is TWO rows and a week of 83 games is 166 "
+             "rows. Sorted chronologically, away row then home row, with Game # banding the "
+             "pair. Season totals are wrong here unless you filter to one team. Possession "
+             "min should total 60.00 across a game's two rows; about 4% of games do not, "
+             "which is the source data rather than the arithmetic.",
+        derived={"possession_minutes": _possession_minutes},
+        display={"is_home": _yes_no, "is_neutral_site": _yes_no, "is_completed": _yes_no},
+        field_category=SCORES_CATEGORY,
+        integer_fields=SCORES_INTEGER_FIELDS,
+        decimals=SCORES_DECIMALS,
+        band_field=SCORES_BAND_FIELD,
+        # FREEZING THE WHOLE GAME BLOCK WAS THE INSTRUCTION AND IT DOES NOT FIT ON A SCREEN.
+        #
+        # Measured on the real week-2 file: the twenty Game columns are 200 characters wide,
+        # and Excel at 100% on a 1920px display shows roughly 110-130. Freeze there and the
+        # frozen pane fills the window — nothing scrolls into view, which is the opposite of
+        # what a freeze is for.
+        #
+        # So it lands at the narrowest prefix that still holds the stated INTENT — "team and
+        # opponent stay on screen while the metric columns scroll". Frozen: Game # through
+        # Opponent, twelve columns and 138 characters. Still wide, because `Team` and
+        # `Opponent` alone are 24 each; making it genuinely comfortable would mean moving
+        # those two to the front of the block, which is a fourth shuffle Marc has not asked
+        # for. Reported with the numbers rather than done quietly.
+        #
+        # Held by LABEL and resolved to an index, never a hardcoded letter.
+        freeze_before="Opp conference"),
 
     Sheet("Odds", "srv_odds_board", """
         select start_date_et, week, away_team_display, home_team_display,
@@ -987,19 +1409,24 @@ _ALL_SHEETS = [
 
 # What the workbook writes, and what it does not write YET. Split rather than filtered, so
 # adding a converted sheet is moving one name and cannot be done by accident.
-SHEETS = [s for s in _ALL_SHEETS if s.name == "Schedule"]
-PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name != "Schedule"]
+SHIPPED = ("Schedule", "Scores")
+SHEETS = [s for s in _ALL_SHEETS if s.name in SHIPPED]
+PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name not in SHIPPED]
 PENDING_REASON = ("not converted to the new layout yet; it ships in a later pass rather "
                   "than mixing two header layouts in one file")
 
 # Which page each sheet came from, for the Index's link back. Held here rather than on Sheet
-# because it is a fact about the SITE, and the six pending sheets need it the day they ship.
+# because it is a fact about the SITE, and the pending sheets need it the day they ship.
 PAGE_FOR_SHEET = {
     "Schedule": "schedule", "Scores": "scores", "Odds": "odds", "Edges": "edges",
     "Standings": "standings", "Model performance": "performance",
     "Data dictionary": "dictionary",
 }
-assert len(SHEETS) == 1 and len(PENDING_SHEETS) == 6
+# The split is asserted at IMPORT, not in a test: moving a sheet between the two lists is a
+# one-word edit, and this is what makes "I shipped a sheet" and "I lost a sheet" different
+# events. Seven sheets exist; two ship.
+assert len(SHEETS) == 2 and len(PENDING_SHEETS) == 5
+assert set(SHIPPED) <= {s.name for s in _ALL_SHEETS}
 
 # Conditional formatting goes on the columns a reader is scanning for outliers. Anything
 # else would be decoration, and a spreadsheet where everything is highlighted highlights
@@ -1312,19 +1739,33 @@ def is_plain_integer(field: str) -> bool:
     return field in PLAIN_INTEGER or field.endswith(PLAIN_INTEGER_SUFFIXES)
 
 
-def number_format(field: str) -> str:
+def number_format(field: str, decimals: Optional[int] = None,
+                  integers: frozenset = frozenset()) -> str:
     """Excel format string at the SAME precision the site renders (AC-G.31, AC-15.7).
 
     Decimals are derived from fmt.precision_for rather than restated, so a column cannot
     read 1 dp on screen and 2 dp in the workbook.
+
+    A SHEET MAY OVERRIDE BOTH HALVES, and R-259 is why. Scores is 131 columns of PPA,
+    success rates and explosiveness, and `precision_for` gives those 3, 1 and 1 — a success
+    rate stored as 0-1 would render `0.3`. So that sheet passes `decimals=2` and its own set
+    of naturally-integer columns, MEASURED over the data rather than guessed from the names.
+
+    The two arguments are separate on purpose: `integers` decides whether there is a decimal
+    point at all, `decimals` decides how many digits follow one. R-216's rule still owns the
+    thousands separator either way — a season is not "2,025" on any sheet.
     """
     if is_plain_integer(field):
         return "0"
+    if field in integers:
+        # A count, so it takes the separator R-216 reserves for quantities you might total.
+        return "#,##0"
     if field in COUNT_FIELDS:
         return "#,##0"
     if field.endswith("moneyline"):
         return "+#,##0;-#,##0"
-    return "#,##0." + "0" * fmt.precision_for(field)
+    places = fmt.precision_for(field) if decimals is None else decimals
+    return "#,##0." + "0" * places
 
 
 # DATE FORMATS PER FIELD, because a kickoff and an audit timestamp are read for different
@@ -1766,7 +2207,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     every Division II fixture in the season — 313 rows for a week that held 83.
     """
     from openpyxl import Workbook
-    from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
+    from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, FormulaRule
     from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -1811,9 +2252,14 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         row_header = header_row(len(notes))
         row_first_data = first_data_row(len(notes))
 
-        for index, (_, label) in enumerate(sheet.columns, start=1):
+        for index, (field, label) in enumerate(sheet.columns, start=1):
             cell = tab.cell(row_header, index, label)
-            cell.font, cell.fill = header_font, header_fill
+            # R-258. One fill per CATEGORY, so a reader scanning 131 headers left to right
+            # can see where offence stops and defence starts without reading a word. A sheet
+            # with no categories declared gets the single navy, unchanged.
+            cell.font = header_font
+            cell.fill = PatternFill("solid",
+                                    fgColor=sheet.header_fill_for(field, "2F4858"))
             # Marc: top and centre. Vertical TOP matters more than it sounds — with a wrapped
             # header the row is as tall as the worst label, so a centred one-line header
             # floats in the middle of a four-line row and no two headers share a baseline.
@@ -1842,7 +2288,8 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                     value = _clean(sheet.value_for(field, record))
                 cell = tab.cell(row_first_data + offset, index, value)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    cell.number_format = number_format(field)
+                    cell.number_format = number_format(
+                        field, sheet.decimals, sheet.integer_fields)
                 elif isinstance(value, datetime):
                     cell.number_format = date_format(field)
                 # R-183. The link goes ON the cell whose text is already the label, never as
@@ -1881,6 +2328,24 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             name="TableStyleLight1", showFirstColumn=False, showLastColumn=False,
             showRowStripes=False, showColumnStripes=False)
         tab.add_table(table)
+        # R-257. BAND EVERY OTHER GAME, on the parity of a real column.
+        #
+        # The rule reads `$<game_no column><this row>`, so each row asks its OWN game number
+        # — which means the shading follows the game through any re-sort the reader does.
+        # A rule comparing a cell to the one above it (`=$A5<>$A4`) would be computed from
+        # row POSITION and would land between the wrong rows the moment the Table is sorted,
+        # which is the one thing a Table exists to let you do.
+        #
+        # SHADE ONLY, NO TOP BORDER. A border marking "first row of this game" has no
+        # data-derived answer after a re-sort — away-then-home is the order we ship, not a
+        # property of the row — so it would be exactly the format that silently lies.
+        if sheet.band_field and sheet.band_field in sheet.fields:
+            band_letter = get_column_letter(sheet.fields.index(sheet.band_field) + 1)
+            tab.conditional_formatting.add(
+                f"A{row_first_data}:{last_column}{last_row}",
+                FormulaRule(formula=[f"MOD(${band_letter}{row_first_data},2)=0"],
+                            fill=PatternFill("solid", fgColor=SCORES_BAND_FILL),
+                            stopIfTrue=False))
         # WIDTHS FROM THE DATA, AND ONLY FROM THE DATA (R-217).
         #
         # The previous version seeded each width with `len(label)`, and its own comment said
@@ -1906,7 +2371,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 if isinstance(value, datetime):
                     rendered = rendered_date_width(field)
                 elif isinstance(value, float):
-                    if is_plain_integer(field):
+                    if is_plain_integer(field) or field in sheet.integer_fields:
                         # R-216 made these render as "0", so a rank occupies as many
                         # characters as it has digits. The blanket 8-character floor below
                         # was written when every float carried decimals, and it kept a
@@ -1918,7 +2383,8 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                         # 0.07894736842105 occupies four characters once the number format
                         # is applied.
                         rendered = len(
-                            number_format(field).replace("#,##", "").replace(";", ""))
+                            number_format(field, sheet.decimals, sheet.integer_fields)
+                            .replace("#,##", "").replace(";", ""))
                         rendered = max(rendered, 8)
                 else:
                     rendered = len(str(value))
