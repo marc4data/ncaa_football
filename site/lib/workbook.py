@@ -400,7 +400,14 @@ LOW_CARDINALITY = 5
 # hard against the left edge with the error tag right beside it, which is what Marc is
 # describing. Centring gives it air on both sides. The cardinality rule cannot reach these:
 # a week of play produces well over five distinct records.
-ALWAYS_CENTRED_LABELS = {"Away record", "Home record"}
+# The two cover verdicts join them for a related reason (R-262). A verdict column is a
+# CATEGORY whatever this week happened to contain, and the cardinality rule would decide it
+# by accident: Yes / No / Push / Pending / – is five distinct values and the threshold is
+# "fewer than five", so a week with a push and a game without a line would come out left
+# while the week before came out centred. Worse, the closing and opening columns could
+# disagree with each other — the same coin flip the away_/home_ harmonisation below exists to
+# stop. Naming them settles it once.
+ALWAYS_CENTRED_LABELS = {"Away record", "Home record", "Covered", "Covered open"}
 
 # ...AND ENOUGH ROWS TO TELL A CATEGORY FROM A SMALL SAMPLE.
 #
@@ -479,6 +486,33 @@ def _marked_or_blank(marks):
             return None
         return marks.get(str(value), NO_DATA_MARK)
     return render
+
+
+# THE COVER VERDICT AS A WORD (R-262).
+#
+# `push` and `pending` are kept as themselves rather than folded into No. A push is the bet
+# refunded and a pending game has not been graded — calling either of them "No" would be a
+# claim about a result that does not exist yet, and the workbook gets filtered on this column.
+COVER_WORDS = {"yes": "Yes", "no": "No", "push": "Push", "pending": "Pending"}
+
+
+def _cover_word(value):
+    """Yes / No / Push / Pending, or the no-data dash where no line was ever recorded."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return NO_DATA_MARK
+    return COVER_WORDS.get(str(value), NO_DATA_MARK)
+
+
+def _cover_word_or_blank(value):
+    """As `_cover_word`, but BLANK where the value is absent.
+
+    For the opening-line column only. There a null means the spread never moved, which is a
+    fact about the market rather than a gap in our data, and the eleven columns beside it
+    already say it by being empty.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return COVER_WORDS.get(str(value), NO_DATA_MARK)
 
 
 # Postgres renders a boolean as 't'/'f' the moment anything touches it as text — a CSV
@@ -1009,18 +1043,35 @@ SCORES_GAME_ORDER = ("season, case season_type when 'regular' then 1 "
 # hidden column driving visible formatting is the thing nobody can debug six months later.
 SCORES_BAND_FIELD = "game_no"
 
-# A 16% TINT OF THE GAME NAVY, AND THE FIRST ATTEMPT WAS TOO FAINT TO SEE.
+# PAINTED ON THE CELLS, NOT BY A CONDITIONAL FORMAT — AND THAT IS THE THIRD ATTEMPT.
 #
-# It shipped at F2F5F7, which measures 3.9 dE from white against a just-noticeable difference
-# of about 2.3 — technically present, and Marc reported the separation "missing between every
-# other game", which is what a barely-perceptible tint looks like: visible on some rows, some
-# screens, some angles. The rule and the pairing were both correct; only the colour was.
+# Round 1 shipped a conditional-format rule at F2F5F7. Marc: the separation is "missing
+# between every other game". Diagnosed as too faint (3.9 dE from white against a
+# just-noticeable difference of 2.3) and re-shipped at DEE2E4, 10.5 dE. Marc, again: still
+# not discernible.
 #
-#     F2F5F7   8% ... 3.9 dE from white   <- shipped, invisible
-#     DEE2E4  16% ... 10.5 dE             <- now
+# WHAT THE SECOND REPORT RULES OUT. A colour that measures 10.5 dE is not invisible. Two
+# rounds of the same complaint at two very different lightnesses says the fill is not being
+# DRAWN, not that it is hard to see — and the corroborating detail is Marc's own: the header
+# colours "look excellent". Those are direct cell fills. The band was the only thing on the
+# sheet painted by a conditional format.
 #
-# 16% is inside Marc's "light pastel 10-20% tint" rule for print, and greyscale 225 keeps it
-# a light band rather than a grey block on a mono laser printer.
+# I COULD NOT CONFIRM THE MECHANISM AND STOPPED TRYING. Excel's AppleScript bridge returns
+# `missing value` for the interior colour of a format condition AND for the header fills that
+# demonstrably render, so it cannot distinguish the two; `do Visual Basic` was removed from
+# Excel for Mac, so DisplayFormat is unreachable. The likely culprit is that a dxf's solid
+# fill takes its colour from `bgColor` while openpyxl writes `fgColor`, but that is a
+# hypothesis I have no way to test from here, and Marc has now reported this twice.
+#
+# So the band stops depending on anything being evaluated at open time. A direct fill is a
+# real entry in cellXfs; it renders or the file is corrupt, and it can be read straight back
+# out of the saved workbook by the test below.
+#
+# THE COST, STATED PLAINLY: a painted fill does NOT follow a row when the reader re-sorts the
+# Table, which is exactly what R-257 wanted the rule for. The band now describes the order the
+# file was written in. `Game #` is the column that survives a sort, which is why R-257 put it
+# in the sheet as data rather than hiding it — the durable answer was always the column, and
+# the shading was always only a convenience for the default view.
 SCORES_BAND_FILL = "DEE2E4"
 
 # NATURALLY INTEGER, MEASURED OVER ALL 110,879 ROWS rather than inferred from the column name.
@@ -1342,12 +1393,17 @@ _ALL_SHEETS = [
              "which is the source data rather than the arithmetic.",
         derived={"possession_minutes": _possession_minutes},
         display={"is_home": _yes_no, "is_neutral_site": _yes_no, "is_completed": _yes_no,
-                 # The site's own cover marks, so ■/□ mean here exactly what they mean on
-                 # Schedule's `Winner covered`. A game with no line renders the no-data dash
-                 # rather than an empty cell, which is a different fact.
-                 "covered_final": _marked(COVER_MARKS),
-                 # BLANK, not a dash, when the spread never moved — see _marked_or_blank.
-                 "covered_open": _marked_or_blank(COVER_MARKS)},
+                 # WORDS, NOT MARKS (Marc, R-262). Schedule uses ■/□ for `Winner covered`
+                 # because it sits in a dense block of verdict columns that share one legend
+                 # and one glyph vocabulary. Scores has two cover columns among 144, most of
+                 # them numeric, and a reader arriving at column AC has no reason to have
+                 # read a legend on the Index. A word needs no key.
+                 #
+                 # It also means the column filters and sorts on something a human types:
+                 # `Yes` in a filter box beats hunting for a glyph in a drop-down list.
+                 "covered_final": _cover_word,
+                 # BLANK, not a dash, when the spread never moved — see _cover_word_or_blank.
+                 "covered_open": _cover_word_or_blank},
         field_category=SCORES_CATEGORY,
         integer_fields=SCORES_INTEGER_FIELDS,
         site_precision=SCORES_SITE_PRECISION,
@@ -2302,7 +2358,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     every Division II fixture in the season — 313 rows for a week that held 83.
     """
     from openpyxl import Workbook
-    from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, FormulaRule
+    from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
     from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -2424,24 +2480,25 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             name="TableStyleLight1", showFirstColumn=False, showLastColumn=False,
             showRowStripes=False, showColumnStripes=False)
         tab.add_table(table)
-        # R-257. BAND EVERY OTHER GAME, on the parity of a real column.
+        # R-257 / R-261. BAND EVERY OTHER GAME, painted onto the cells.
         #
-        # The rule reads `$<game_no column><this row>`, so each row asks its OWN game number
-        # — which means the shading follows the game through any re-sort the reader does.
-        # A rule comparing a cell to the one above it (`=$A5<>$A4`) would be computed from
-        # row POSITION and would land between the wrong rows the moment the Table is sorted,
-        # which is the one thing a Table exists to let you do.
+        # Read from `game_no`, which is real data on the row, so the parity is the game's and
+        # not the row number's — two rows per game means a row-parity band would shade the
+        # away row of every game and leave the home row bare.
         #
-        # SHADE ONLY, NO TOP BORDER. A border marking "first row of this game" has no
-        # data-derived answer after a re-sort — away-then-home is the order we ship, not a
-        # property of the row — so it would be exactly the format that silently lies.
+        # Applied to the whole used width including the columns whose own fill is set
+        # elsewhere; nothing on the body of this sheet sets one, so there is nothing to
+        # overwrite. Rows whose game number is odd are left alone rather than painted white,
+        # so the sheet still prints without a full-bleed background.
         if sheet.band_field and sheet.band_field in sheet.fields:
-            band_letter = get_column_letter(sheet.fields.index(sheet.band_field) + 1)
-            tab.conditional_formatting.add(
-                f"A{row_first_data}:{last_column}{last_row}",
-                FormulaRule(formula=[f"MOD(${band_letter}{row_first_data},2)=0"],
-                            fill=PatternFill("solid", fgColor=SCORES_BAND_FILL),
-                            stopIfTrue=False))
+            band_index = sheet.fields.index(sheet.band_field) + 1
+            band = PatternFill("solid", fgColor=SCORES_BAND_FILL)
+            for offset in range(len(df)):
+                row = row_first_data + offset
+                number = tab.cell(row, band_index).value
+                if isinstance(number, (int, float)) and int(number) % 2 == 0:
+                    for index in range(1, len(sheet.columns) + 1):
+                        tab.cell(row, index).fill = band
         # WIDTHS FROM THE DATA, AND ONLY FROM THE DATA (R-217).
         #
         # The previous version seeded each width with `len(label)`, and its own comment said
