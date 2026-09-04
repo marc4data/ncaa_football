@@ -2266,3 +2266,74 @@ def test_the_three_mark_colours_mean_three_different_things():
     assert len(colours) == 3, "two of the mark colours are the same value"
     for colour in colours:
         assert contrast(colour) >= 4.5, f"{colour} is {contrast(colour):.2f}:1 on white"
+
+
+# === R-228: red was on the common outcome =================================================
+
+def _is_reddish(argb: str) -> bool:
+    """Red channel clearly dominant. Compares the CHANNELS rather than the hex string, so a
+    different shade of the same intent still reads as red."""
+    red, green, blue = (int(argb[2:][i:i + 2], 16) for i in (0, 2, 4))
+    return red > green + 40 and red > blue + 40
+
+
+def _is_bluish(argb: str) -> bool:
+    red, green, blue = (int(argb[2:][i:i + 2], 16) for i in (0, 2, 4))
+    return blue > red + 30
+
+
+def test_the_home_win_side_of_the_margin_bar_is_not_the_alarming_colour():
+    """MEASURED, NOT PREFERRED. `actual_margin` is away minus home, so negative is a home win
+    — verified across 106,554 completed games with no exceptions — and that is 64% of FBS
+    games since 2024.
+
+    The bar shipped with negative in red, so the most common outcome in the sport was
+    alarming on nearly two rows in three. A colour that means "look here" and appears on the
+    majority of rows means nothing at all.
+
+    Asserted on the CHANNELS and on the SIDE, not against the constants: the first version of
+    this test compared `negativeFillColor` to `DATA_BAR_NEGATIVE`, which follows whatever the
+    constant says and passed happily through the swap it was meant to catch.
+    """
+    assert _is_bluish(workbook.DATA_BAR_NEGATIVE), (
+        "negative is a home win, the common case — it must not be the alarming colour")
+    assert _is_reddish(workbook.DATA_BAR_POSITIVE), (
+        "positive is an away win, the result worth noticing")
+
+
+def test_the_away_minus_home_scales_run_the_opposite_way_to_the_others():
+    """A colour scale asserts good and bad. Fair on a quantity with a direction — a bigger
+    edge, a better point differential — and wrong on one that only has a SIDE."""
+    assert "predicted_margin" in workbook.REVERSED_SCALE_FIELDS
+    assert "predicted_margin" not in workbook.COLOUR_SCALE_FIELDS, (
+        "a field in both sets would take whichever branch is written first")
+    # The columns that genuinely have a direction keep the ordinary scale.
+    assert {"edge_value", "edge_magnitude", "point_differential"} <= workbook.COLOUR_SCALE_FIELDS
+    assert not (workbook.COLOUR_SCALE_FIELDS & workbook.REVERSED_SCALE_FIELDS)
+
+
+def test_a_reversed_scale_puts_red_at_the_top_and_a_normal_one_at_the_bottom(built):
+    """Asserted on the BUILT rule rather than on the sets, because the branch that reads them
+    is where a reversal actually happens or fails to."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    scales = [rule for rule_set in tab.conditional_formatting for rule in rule_set.rules
+              if rule.colorScale is not None]
+    assert scales, "the Schedule sheet has no colour scale at all"
+    for rule in scales:
+        first = rule.colorScale.color[0].rgb
+        last = rule.colorScale.color[-1].rgb
+        # predicted_margin is the only scaled column on this sheet, and it is reversed.
+        assert _is_reddish(last) and not _is_reddish(first), (
+            f"the scale runs {first} -> {last}; red belongs at the away-win end")
+
+
+def test_the_index_explains_what_the_bar_colours_mean(built):
+    """A bare colour is as undecodable as a bare glyph, and the marks get a legend for exactly
+    that reason. It must also say the colours are a DIRECTION rather than a verdict — a red
+    bar on a 40-point away win is not a judgement about the game."""
+    _, book, _, _ = built
+    text = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
+    assert "Margin bar" in text
+    assert "home team won" in text and "away team did" in text
+    assert "not a judgement" in text
