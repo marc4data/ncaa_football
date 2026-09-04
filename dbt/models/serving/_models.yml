@@ -2680,6 +2680,58 @@ models:
           The cover verdict against the OPENING spread, null when the spread did not move.
           Where this differs from `covered_final` the line movement changed the outcome,
           which is the comparison the pair exists to make.
+      - name: team_slug
+        description: >
+          URL slug for this row's team, from the `team_identity` macro so the dim-miss
+          fallback has one spelling rather than one per view. What the site's team links use.
+      - name: team_display
+        description: >
+          Canonical display name from dim_team, falling back to the fact's own `team`. The
+          macro emits it alongside the slug; taking one without the other would be the second
+          spelling the macro exists to prevent.
+      - name: team_logo_url
+        description: >
+          This team's logo. Null for a non-FBS opponent held as a dim_team stub — 587 of 626
+          rows in a week-2 2025 sample carry one, and the page must render a name without it.
+      - name: opponent_team_slug
+        description: >
+          The opponent's slug, same macro. Named `opponent_team_slug` and not
+          `opponent_slug`, matching `home_team_slug` / `away_team_slug` on srv_game — a third
+          spelling of the same idea is how these drift.
+      - name: opponent_team_display
+        description: Canonical display name for the opponent.
+      - name: opponent_logo_url
+        description: The opponent's logo; null on the same stub rows as team_logo_url.
+      - name: team_rank
+        description: >
+          This row's own poll rank, picked from fct_game's home/away pair by `is_home`. Null
+          for an unranked team, which is nearly all of them — 24 of 626 in the same sample.
+      - name: opponent_rank
+        description: The other side's rank, by the same pick. Null when unranked.
+      - name: venue_display
+        description: >
+          Game-grain, repeated across the pair. The grain rule forbids pushing FINER grain
+          into a coarser view, not the reverse; asserted symmetric across a game's two rows.
+      - name: attendance
+        description: Game-grain, repeated across the pair.
+      - name: excitement_index
+        description: Game-grain, repeated across the pair.
+      - name: is_upset
+        description: >
+          Game-grain, repeated across the pair. NOT this team's own result — `result` and
+          `margin` answer that from this row's side.
+      - name: as_of_ts
+        description: >
+          Freshness for the whole view, from mart_as_of's `game` domain. Read as a SCALAR
+          SUBQUERY rather than a cross join: a second row for one domain would silently
+          double every row of this view, and a scalar subquery raises instead.
+      - name: attribution
+        description: >
+          CFBD credit. NO cfdb model prediction travels on this view — box scores, advanced
+          stats and arithmetic on published market numbers — so it deliberately does not
+          borrow dim_model_version's disclaimer, which would imply predictions that are not
+          here. AC-G.41 is satisfied by the column existing and being accurate, not by it
+          naming a model.
 
   # ---------------------------------------------------------------------------------------
   - name: srv_game
