@@ -461,6 +461,26 @@ def _marked(marks):
     return render
 
 
+def _marked_or_blank(marks):
+    """A mark, or an EMPTY CELL where the value is absent.
+
+    For the `_open` columns only, and the distinction is the point. Everywhere else a null
+    means "cfdb holds nothing here" and earns the no-data dash. In the opening-line block a
+    null means "the market never changed its mind", which is a fact about the market rather
+    than a gap in our data — and every numeric column in that block already says it by being
+    blank. A dash here would make the mark column disagree with the eleven columns beside it.
+
+    Named to keep the `_marked` prefix, because `Sheet.centred` recognises a mark column by
+    that prefix on the renderer's qualname. Renaming this to something tidier would silently
+    un-centre the column.
+    """
+    def render(value):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        return marks.get(str(value), NO_DATA_MARK)
+    return render
+
+
 # Postgres renders a boolean as 't'/'f' the moment anything touches it as text — a CSV
 # export, a driver without type mapping, a copy through pandas' object dtype. AND 'f' IS A
 # NON-EMPTY STRING, SO `bool('f')` IS TRUE. That is the same family as the NaN-truthiness
@@ -558,6 +578,7 @@ class Sheet:
                  freeze_before: Optional[str] = None,
                  field_category: Optional[Dict[str, str]] = None,
                  integer_fields: frozenset = frozenset(),
+                 site_precision: frozenset = frozenset(),
                  decimals: Optional[int] = None,
                  band_field: Optional[str] = None):
         self.name, self.view = name, view
@@ -597,6 +618,8 @@ class Sheet:
         # Numeric columns that are naturally whole. Consulted BEFORE the sheet's decimal
         # default, so a count does not acquire ".00".
         self.integer_fields = integer_fields
+        # Columns that keep `fmt.precision_for` even on a sheet with its own decimal default.
+        self.site_precision = site_precision
         # This sheet's default decimal places for a real decimal, or None to keep deriving
         # them from `fmt.precision_for` as Schedule does.
         self.decimals = decimals
@@ -763,6 +786,17 @@ SCORES_BLOCKS = (
         "is_home", "is_neutral_site", "is_completed", "points_for", "points_against",
         "margin", "result",
     )),
+    # THE MARKET, BETWEEN Result AND 1st downs (Marc, R-260). Closing line first — always
+    # populated — then the opening line, whose columns are blank wherever they would have
+    # repeated their closing counterpart. Grouped by LINE rather than interleaved in
+    # final/open pairs, so the conditionally-blank half stays in one region instead of
+    # scattering gaps through the block.
+    ("Market", (
+        "spread_final", "total_final", "line_implied_points_final",
+        "points_vs_line_implied_final", "ats_margin_final", "covered_final",
+        "spread_open", "total_open", "line_implied_points_open",
+        "points_vs_line_implied_open", "ats_margin_open", "covered_open",
+    )),
     ("Box score", (
         "first_downs", "total_yards", "rushing_yards", "passing_yards", "rushing_attempts",
         "turnovers", "interceptions", "fumbles_lost", "third_down_conversions",
@@ -822,14 +856,20 @@ SCORES_BLOCKS = (
 #
 #     band              hex        contrast on white
 #     Game              2F4858       9.59:1     the existing cfdb navy, kept
+#     Market            5C6B2F       5.83:1
 #     Box score         6B4C7A       7.14:1
 #     Team advanced     4A6670       6.13:1
 #     Offense           A63A16       6.49:1
 #     Defense           1E6B54       6.39:1
 #
-# Across all TEN pairs, under normal vision and both red-green dichromacies, the closest two
-# colours are 11.2 dE apart (Box score / Team advanced under deuteranopia) against a
-# just-noticeable difference of about 2.3. The palette is spread over hue AND lightness on
+# Across all FIFTEEN pairs, under normal vision and both red-green dichromacies, the closest
+# two colours are 10.5 dE apart (Market / Offense under protanopia) against a
+# just-noticeable difference of about 2.3.
+#
+# THE SIXTH BAND WAS THE HARD ONE AND EYEBALLING WOULD HAVE GOT IT WRONG. A dark gold
+# (7A5C00) reads as obviously distinct from the sienna next to it and measures 1.5 dE from it
+# under deuteranopia — indistinguishable. Of five candidates only the olive cleared the
+# threshold; crimson, graphite and bronze all landed between 7 and 9. The palette is spread over hue AND lightness on
 # purpose: hue alone collapses under deuteranopia, which is what makes red-and-green the
 # wrong choice for two blocks that sit side by side.
 #
@@ -843,6 +883,7 @@ SCORES_BLOCKS = (
 # colours were asked for. `showRowStripes` stays False — see SCORES_BAND_FIELD.
 CATEGORY_FILLS = {
     "Game": "2F4858",
+    "Market": "5C6B2F",
     "Box score": "6B4C7A",
     "Team advanced": "4A6670",
     "Offense": "A63A16",
@@ -872,7 +913,35 @@ SCORES_LABEL_OVERRIDES = {
     "scoring_opportunity_points": "Scoring opp pts",
     "points_per_opportunity": "Pts per opp",
     "havoc_front_seven": "Havoc front 7", "havoc_db": "Havoc DB",
+    # THE MARKET (R-260). "Line-implied", never "expected" or "projected" — R-201 section 2.1
+    # settled that as a LICENCE point rather than a style one: these come from the market,
+    # not from cfdb's model, and a header reading "Expected pts" presents a bookmaker's
+    # number as a prediction of ours. Marc's phrasing was "points expected"; the wording here
+    # is the ruling he already has on the books, not a second-guess of the ask.
+    "spread_final": "Spread", "total_final": "O/U",
+    "line_implied_points_final": "Line-implied pts",
+    "points_vs_line_implied_final": "Pts vs implied",
+    "ats_margin_final": "ATS margin", "covered_final": "Covered",
+    "spread_open": "Spread open", "total_open": "O/U open",
+    "line_implied_points_open": "Line-implied pts open",
+    "points_vs_line_implied_open": "Pts vs implied open",
+    "ats_margin_open": "ATS margin open", "covered_open": "Covered open",
 }
+
+# COLUMNS THAT KEEP THE SITE'S PRECISION RATHER THAN THIS SHEET'S 2dp DEFAULT.
+#
+# R-259 refused to flip the 2dp rule globally because a spread is written `-6.5` everywhere in
+# football and never `-6.50`. That argument does not stop at the sheet boundary: these six are
+# the same market numbers, quoted in halves, and `fmt.precision_for` already gives them 1dp.
+# Exempting them here is the rule being applied consistently, not an exception to it.
+#
+# The line-implied columns are NOT exempt, and the difference is real: a spread of -6.5 with a
+# total of 51.5 implies 29.0 and 22.5, but -6.5 with 52.0 implies 29.25 and 22.75. Quarter
+# points are a consequence of halving, so those need the second digit.
+SCORES_SITE_PRECISION = frozenset({
+    "spread_final", "spread_open", "total_final", "total_open",
+    "ats_margin_final", "ats_margin_open",
+})
 
 
 def scores_label(field: str) -> str:
@@ -939,7 +1008,20 @@ SCORES_GAME_ORDER = ("season, case season_type when 'regular' then 1 "
 # on its own: filter to one game, or read off how many games are in scope. Not hidden — a
 # hidden column driving visible formatting is the thing nobody can debug six months later.
 SCORES_BAND_FIELD = "game_no"
-SCORES_BAND_FILL = "F2F5F7"     # a very light tint of the Game navy; survives a mono printer
+
+# A 16% TINT OF THE GAME NAVY, AND THE FIRST ATTEMPT WAS TOO FAINT TO SEE.
+#
+# It shipped at F2F5F7, which measures 3.9 dE from white against a just-noticeable difference
+# of about 2.3 — technically present, and Marc reported the separation "missing between every
+# other game", which is what a barely-perceptible tint looks like: visible on some rows, some
+# screens, some angles. The rule and the pairing were both correct; only the colour was.
+#
+#     F2F5F7   8% ... 3.9 dE from white   <- shipped, invisible
+#     DEE2E4  16% ... 10.5 dE             <- now
+#
+# 16% is inside Marc's "light pastel 10-20% tint" rule for print, and greyscale 225 keeps it
+# a light band rather than a grey block on a mono laser printer.
+SCORES_BAND_FILL = "DEE2E4"
 
 # NATURALLY INTEGER, MEASURED OVER ALL 110,879 ROWS rather than inferred from the column name.
 #
@@ -1225,6 +1307,10 @@ _ALL_SHEETS = [
                defense_total_plays, defense_total_havoc_events,
                defense_front_seven_havoc_events, defense_db_havoc_events,
                defense_havoc_rate, defense_front_seven_havoc_rate, defense_db_havoc_rate,
+               spread_final, total_final, line_implied_points_final,
+               points_vs_line_implied_final, ats_margin_final, covered_final,
+               spread_open, total_open, line_implied_points_open,
+               points_vs_line_implied_open, ats_margin_open, covered_open,
                dense_rank() over (order by {SCORES_GAME_ORDER}) as game_no,
                count(*) over () as rows_in_scope
         from srv_game_team
@@ -1255,9 +1341,16 @@ _ALL_SHEETS = [
              "min should total 60.00 across a game's two rows; about 4% of games do not, "
              "which is the source data rather than the arithmetic.",
         derived={"possession_minutes": _possession_minutes},
-        display={"is_home": _yes_no, "is_neutral_site": _yes_no, "is_completed": _yes_no},
+        display={"is_home": _yes_no, "is_neutral_site": _yes_no, "is_completed": _yes_no,
+                 # The site's own cover marks, so ■/□ mean here exactly what they mean on
+                 # Schedule's `Winner covered`. A game with no line renders the no-data dash
+                 # rather than an empty cell, which is a different fact.
+                 "covered_final": _marked(COVER_MARKS),
+                 # BLANK, not a dash, when the spread never moved — see _marked_or_blank.
+                 "covered_open": _marked_or_blank(COVER_MARKS)},
         field_category=SCORES_CATEGORY,
         integer_fields=SCORES_INTEGER_FIELDS,
+        site_precision=SCORES_SITE_PRECISION,
         decimals=SCORES_DECIMALS,
         band_field=SCORES_BAND_FIELD,
         # FREEZING THE WHOLE GAME BLOCK WAS THE INSTRUCTION AND IT DOES NOT FIT ON A SCREEN.
@@ -1740,7 +1833,8 @@ def is_plain_integer(field: str) -> bool:
 
 
 def number_format(field: str, decimals: Optional[int] = None,
-                  integers: frozenset = frozenset()) -> str:
+                  integers: frozenset = frozenset(),
+                  site_precision: frozenset = frozenset()) -> str:
     """Excel format string at the SAME precision the site renders (AC-G.31, AC-15.7).
 
     Decimals are derived from fmt.precision_for rather than restated, so a column cannot
@@ -1764,7 +1858,8 @@ def number_format(field: str, decimals: Optional[int] = None,
         return "#,##0"
     if field.endswith("moneyline"):
         return "+#,##0;-#,##0"
-    places = fmt.precision_for(field) if decimals is None else decimals
+    places = fmt.precision_for(field) if decimals is None or field in site_precision \
+        else decimals
     return "#,##0." + "0" * places
 
 
@@ -2289,7 +2384,8 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 cell = tab.cell(row_first_data + offset, index, value)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     cell.number_format = number_format(
-                        field, sheet.decimals, sheet.integer_fields)
+                        field, sheet.decimals, sheet.integer_fields,
+                        sheet.site_precision)
                 elif isinstance(value, datetime):
                     cell.number_format = date_format(field)
                 # R-183. The link goes ON the cell whose text is already the label, never as
@@ -2383,7 +2479,8 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                         # 0.07894736842105 occupies four characters once the number format
                         # is applied.
                         rendered = len(
-                            number_format(field, sheet.decimals, sheet.integer_fields)
+                            number_format(field, sheet.decimals, sheet.integer_fields,
+                                          sheet.site_precision)
                             .replace("#,##", "").replace(";", ""))
                         rendered = max(rendered, 8)
                 else:

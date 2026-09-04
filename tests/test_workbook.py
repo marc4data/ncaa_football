@@ -2422,29 +2422,47 @@ def _marcs_fields():
     return rows[1:]
 
 
+# The twelve market columns Marc asked for after the first pass (R-260). Named here rather
+# than derived from the sheet, so a column silently vanishing from the block fails the test
+# instead of shrinking the expectation to match itself.
+MARKET_FIELDS = frozenset({
+    "spread_final", "total_final", "line_implied_points_final",
+    "points_vs_line_implied_final", "ats_margin_final", "covered_final",
+    "spread_open", "total_open", "line_implied_points_open",
+    "points_vs_line_implied_open", "ats_margin_open", "covered_open",
+})
+
+
 def test_the_scores_sheet_carries_every_field_marc_listed():
     """131 IN, 131 OUT — the shuffle of R-258 moved columns and lost none.
 
     Asserted against Marc's file rather than against a list retyped from it, because a list
-    retyped from it would agree with whatever I typed. The count is checked explicitly: a
-    field silently absent from BOTH sides would satisfy a set comparison alone.
+    retyped from it would agree with whatever I typed. Counts are checked explicitly: a field
+    silently absent from BOTH sides would satisfy a set comparison alone.
 
-    Two deliberate differences, and they are the only two allowed:
+    Three deliberate differences, and they are the only three allowed:
       * `possession_seconds` is selected and DISPLAYED as `possession_minutes` (R-259);
-      * `game_no` is displayed and not selected — it is computed in the query (R-257).
+      * `game_no` is displayed and not selected — it is computed in the query (R-257);
+      * the twelve MARKET_FIELDS are additions Marc asked for after seeing the first pass.
     """
     marc = _marcs_fields()
     assert len(marc) == 131, len(marc)
 
     sheet = _scores()
-    assert sorted(sheet.selected_fields) == sorted(marc), (
-        set(sheet.selected_fields) ^ set(marc))
+    assert sorted(sheet.selected_fields) == sorted(set(marc) | MARKET_FIELDS), (
+        set(sheet.selected_fields) ^ (set(marc) | MARKET_FIELDS))
+    assert len(sheet.selected_fields) == 143
 
     displayed = sheet.fields
-    assert len(displayed) == 132, len(displayed)
-    assert len(set(displayed)) == 132, "a field is displayed twice"
-    assert set(displayed) - set(marc) == {"game_no", "possession_minutes"}
+    assert len(displayed) == 144, len(displayed)
+    assert len(set(displayed)) == 144, "a field is displayed twice"
+    assert set(displayed) - set(marc) == {"game_no", "possession_minutes"} | MARKET_FIELDS
     assert set(marc) - set(displayed) == {"possession_seconds"}
+
+    # And every one of Marc's own 131 is still shown — the assertion the shuffle exists to
+    # survive, stated separately from the arithmetic above so it cannot be satisfied by a
+    # compensating change on the other side.
+    assert set(marc) - {"possession_seconds"} <= set(displayed)
 
 
 def test_every_scores_category_is_one_contiguous_run_of_columns():
@@ -2844,3 +2862,120 @@ def test_every_scores_label_is_unique_and_says_something():
     assert workbook.scores_label("offense_front_seven_havoc_rate") == \
         "Off front 7 havoc rate"
     assert workbook.scores_label("defense_passing_downs_ppa") == "Def passing downs PPA"
+
+
+def test_the_game_band_is_actually_visible_against_white():
+    """THE ASSERTION THAT WAS MISSING WHEN THE BANDING SHIPPED.
+
+    The first pass tested the formula, the column it reads and the range it covers — every
+    structural property — and never that the colour could be SEEN. It went out at F2F5F7,
+    which is 3.9 dE from white against a just-noticeable difference of about 2.3, and Marc
+    reported the separation "missing between every other game". Nothing was wrong with the
+    rule; the band was simply below the threshold of perception on his screen.
+
+    A floor of 8 dE is comfortably above JND without going past Marc's 10-20% tint rule for
+    print. The ceiling matters too: a band dark enough to fight the text would be a different
+    complaint with the same cause.
+    """
+    def lin(hexcolour):
+        return [(c / 255 / 12.92 if c / 255 <= 0.04045
+                 else ((c / 255 + 0.055) / 1.055) ** 2.4)
+                for c in (int(hexcolour[0:2], 16), int(hexcolour[2:4], 16),
+                          int(hexcolour[4:6], 16))]
+
+    def lab(linear):
+        matrix = ((0.4124, 0.3576, 0.1805), (0.2126, 0.7152, 0.0722),
+                  (0.0193, 0.1192, 0.9505))
+        x, y, z = [sum(matrix[i][j] * linear[j] for j in range(3)) for i in range(3)]
+        white = (0.95047, 1.0, 1.08883)
+
+        def f(t):
+            return t ** (1 / 3) if t > 216 / 24389 else (841 / 108) * t + 4 / 29
+        fx, fy, fz = (f(v / w) for v, w in zip((x, y, z), white))
+        return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+    delta = math.dist(lab(lin("FFFFFF")), lab(lin(workbook.SCORES_BAND_FILL)))
+    assert delta >= 8.0, (
+        f"#{workbook.SCORES_BAND_FILL} is {delta:.1f} dE from white — a just-noticeable "
+        f"difference is about 2.3, and a band a reader has to hunt for is not a band")
+    assert delta <= 22.0, (
+        f"#{workbook.SCORES_BAND_FILL} is {delta:.1f} dE from white, dark enough to compete "
+        f"with the text it sits behind")
+    # And it is the shade actually written into the file's rule, not a constant beside it.
+    assert workbook.SCORES_BAND_FILL != "F2F5F7", "back to the invisible one"
+
+
+def test_the_market_columns_keep_football_precision_where_football_writes_halves():
+    """R-259's own argument, applied inside the sheet that overrides it.
+
+    A spread is `-6.5` everywhere in football and never `-6.50`; that is exactly why the 2dp
+    default was not made global. The same reasoning exempts the six market columns quoted in
+    halves — and deliberately does NOT exempt the line-implied pair, because halving a total
+    produces quarter points and the second digit is real there.
+    """
+    sheet = _scores()
+
+    def fmt(field):
+        return workbook.number_format(field, sheet.decimals, sheet.integer_fields,
+                                      sheet.site_precision)
+
+    for field in ("spread_final", "spread_open", "total_final", "total_open",
+                  "ats_margin_final", "ats_margin_open"):
+        assert fmt(field) == "#,##0.0", field
+    for field in ("line_implied_points_final", "line_implied_points_open",
+                  "points_vs_line_implied_final", "points_vs_line_implied_open"):
+        assert fmt(field) == "#,##0.00", field
+
+    # A quarter point is reachable, which is what makes the second digit necessary rather
+    # than decorative: total 52.0 with spread -6.5 implies 29.25 and 22.75.
+    assert (52.0 - -6.5) / 2 == 29.25
+    assert (52.0 - 6.5) / 2 == 22.75
+
+
+def test_the_cover_verdicts_use_the_sites_own_marks(built):
+    """■ and □ mean the same thing on Scores as on Schedule's `Winner covered`.
+
+    Two columns, both graded per TEAM, where srv_game's equivalent grades the winner. The
+    marks are shared so a reader does not have to learn a second vocabulary halfway across
+    the workbook — and because the Index legend explains them once for the whole file.
+    """
+    sheet = _scores()
+    assert {"covered_final", "covered_open"} <= sheet.centred, (
+        "a mark column that is not centred is a mark column nobody lined up")
+
+    for field in ("covered_final", "covered_open"):
+        render = sheet.display[field]
+        assert render("yes") == workbook.COVER_MARKS["yes"]
+        assert render("no") == workbook.COVER_MARKS["no"]
+        assert render("push") == workbook.PUSH_MARK
+
+    # THE TWO COLUMNS DIFFER ON ABSENCE, AND THEY SHOULD.
+    #
+    # On the closing column a null means no line was ever recorded — cfdb holds nothing, so
+    # the no-data dash. On the opening column it means the spread never moved, which is a
+    # fact about the market, and every other `_open` column says it by being blank. A dash
+    # there would make the mark column contradict the eleven beside it.
+    assert sheet.display["covered_final"](None) == workbook.NO_DATA_MARK
+    assert sheet.display["covered_open"](None) is None
+
+    _, book, _, _ = built
+    index = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
+    for mark in (workbook.COVER_MARKS["yes"], workbook.COVER_MARKS["no"],
+                 workbook.PUSH_MARK):
+        assert mark in index, f"{mark} is used on Scores and absent from the legend"
+
+
+def test_the_market_block_sits_between_the_result_and_the_box_score():
+    """Marc: "These fields should be inserted between Result and 1st Downs." """
+    sheet = _scores()
+    labels = [label for _, label in sheet.columns]
+    market = [i for i, (f, _) in enumerate(sheet.columns)
+              if sheet.field_category[f] == "Market"]
+    assert labels[min(market) - 1] == "Result"
+    assert labels[max(market) + 1] == "1st downs"
+    assert len(market) == 12, len(market)
+    # The closing half is always populated and comes first; the conditionally-blank half is
+    # contiguous after it rather than interleaved.
+    fields = [sheet.columns[i][0] for i in market]
+    assert all(f.endswith("_final") for f in fields[:6]), fields[:6]
+    assert all(f.endswith("_open") for f in fields[6:]), fields[6:]
