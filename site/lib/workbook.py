@@ -922,6 +922,26 @@ MIN_COLUMN_WIDTH = 6
 # breaks, and one broken word is a better trade than a 13-wide column of "0.00".
 HEADER_WORD_CAP = 12
 
+# Excel's "character width" is the width of a `0` in the workbook font, and real letters are
+# wider than a zero — so a six-character word does not fit in a six-wide column. Measured
+# against the headers in this sheet, 0.7 is enough to stop the last letter wrapping.
+WORD_PADDING = 0.7
+
+
+def effective_width(label: str, measured: Optional[float] = None) -> float:
+    """The width a column actually gets: hand-set if there is one, measured otherwise, and
+    never below what the header's longest word needs.
+
+    A function rather than an expression inline in `build`, because the tests have to be able
+    to ask the same question the writer answers — asserting a hardcoded 6.7 would restate the
+    arithmetic instead of checking it.
+    """
+    longest_word = max((len(w) for w in str(label).split()), default=0)
+    floor = min(longest_word, HEADER_WORD_CAP) + WORD_PADDING
+    base = WIDTH_OVERRIDES.get(label, measured if measured is not None else floor)
+    return max(base, floor)
+
+
 # WIDTHS MARC SET BY HAND, IN EXCEL CHARACTER UNITS.
 #
 # These OVERRIDE the measurement for these columns and nothing else. Measuring is right by
@@ -1039,6 +1059,22 @@ def _data_bar_guid(index: int) -> str:
     """A stable per-rule GUID. Deterministic, so two builds of one scope are byte-identical —
     a random one would make a diff of two workbooks useless."""
     return f"{DATA_BAR_GUID_PREFIX}{index:012X}}}"
+
+
+def _mark_text_column(tab, span: str) -> None:
+    """Record that this range holds TEXT ON PURPOSE, so Excel stops warning about it.
+
+    "1-0" is a won-lost record. Excel sees text that could be a number or a date, flags every
+    cell with a green corner and offers to convert it — which would turn 1-0 into 1 January.
+    The advice is correct in general and wrong here, and 166 green triangles across two
+    columns is noise the reader has to learn to ignore.
+
+    `ignoredErrors` is the OOXML way to say "I meant this". openpyxl MODELS the element and
+    never writes it — `Worksheet` has no `ignored_errors` attribute — so it goes through the
+    same post-save injection as the data bar, and past the same order check.
+    """
+    tab._cfdb_text_columns = getattr(tab, "_cfdb_text_columns", [])
+    tab._cfdb_text_columns.append(span)
 
 
 def _add_data_bar(tab, span: str) -> None:
@@ -1255,6 +1291,12 @@ def _clean(value):
 # reachable in a test — a guard nothing can exercise is a guard nobody should trust.
 CF_ANCHOR = "</conditionalFormatting>"
 
+# Everything CT_Worksheet places after `ignoredErrors`.
+SHEET_ELEMENTS_AFTER_IGNORED_ERRORS = (
+    "<smartTags", "<drawing", "<legacyDrawing", "<picture", "<oleObjects", "<controls",
+    "<webPublishItems", "<tableParts", "<extLst", "</worksheet>",
+)
+
 SHEET_ELEMENTS_AFTER_CF = (
     "<dataValidations", "<hyperlinks", "<printOptions", "<pageMargins", "<pageSetup",
     "<headerFooter", "<rowBreaks", "<colBreaks", "<customProperties", "<cellWatches",
@@ -1305,7 +1347,7 @@ X14_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
 XM_NS = "http://schemas.microsoft.com/office/excel/2006/main"
 
 
-def _inject_data_bars(payload: bytes, wanted: dict) -> bytes:
+def _inject_data_bars(payload: bytes, wanted: dict, text_columns=None) -> bytes:
     """Rewrite the saved workbook so the data-bar ranges carry Marc's full rule.
 
     `wanted` is {sheet name -> [range, ...]}. Each range gets TWO things written into that
@@ -1330,7 +1372,8 @@ def _inject_data_bars(payload: bytes, wanted: dict) -> bytes:
     """
     from xml.etree import ElementTree
 
-    if not wanted:
+    text_columns = text_columns or {}
+    if not wanted and not text_columns:
         return payload
 
     source = zipfile.ZipFile(io.BytesIO(payload))
@@ -1360,11 +1403,13 @@ def _inject_data_bars(payload: bytes, wanted: dict) -> bytes:
 
     rewritten = {}
     counter = 0
-    for sheet_name, spans in wanted.items():
+    for sheet_name in set(wanted) | set(text_columns):
+        spans = wanted.get(sheet_name, [])
         part = part_for.get(sheet_name)
         if not part:
             continue
-        body = source.read(part).decode("utf-8")
+        body = rewritten.get(part) or source.read(part)
+        body = body.decode("utf-8") if isinstance(body, bytes) else body
         legacy, extended = [], []
         for span in spans:
             counter += 1
@@ -1414,12 +1459,28 @@ def _inject_data_bars(payload: bytes, wanted: dict) -> bytes:
             at = min(found) if found else body.find("</worksheet>")
         body = body[:at] + "".join(legacy) + body[at:]
 
-        block = (f'<extLst><ext uri="{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}" '
-                 f'xmlns:x14="{X14_NS}">'
-                 f'<x14:conditionalFormattings>{"".join(extended)}'
-                 f'</x14:conditionalFormattings></ext></extLst>')
-        # `extLst` is the LAST child of worksheet, after tableParts.
-        body = body.replace("</worksheet>", block + "</worksheet>")
+        if extended:
+            block = (f'<extLst><ext uri="{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}" '
+                     f'xmlns:x14="{X14_NS}">'
+                     f'<x14:conditionalFormattings>{"".join(extended)}'
+                     f'</x14:conditionalFormattings></ext></extLst>')
+            # `extLst` is the LAST child of worksheet, after tableParts.
+            body = body.replace("</worksheet>", block + "</worksheet>")
+
+        # `ignoredErrors` sits between `cellWatches` and `smartTags` in CT_Worksheet, which
+        # in practice means after conditionalFormatting/hyperlinks and before tableParts and
+        # extLst. Anchored on the first element the schema puts after it, never appended.
+        ranges = text_columns.get(sheet_name, [])
+        if ranges:
+            ignored = "".join(
+                f'<ignoredError sqref="{span}" numberStoredAsText="1" '
+                f'twoDigitTextYear="1"/>' for span in ranges)
+            marker = f"<ignoredErrors>{ignored}</ignoredErrors>"
+            candidates = [body.find(tag) for tag in SHEET_ELEMENTS_AFTER_IGNORED_ERRORS]
+            found = [i for i in candidates if i != -1]
+            at = min(found) if found else body.find("</worksheet>")
+            body = body[:at] + marker + body[at:]
+
         rewritten[part] = body.encode("utf-8")
 
     # FAIL HERE RATHER THAN IN EXCEL. A sheet whose children are out of CT_Worksheet order
@@ -1611,11 +1672,24 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             ceiling = 60 if field.endswith("description") or field == "attribution" else 28
             longest_word = max((len(w) for w in str(label).split()), default=0)
             floor = max(MIN_COLUMN_WIDTH, min(longest_word, HEADER_WORD_CAP))
-            width = WIDTH_OVERRIDES.get(
-                label, min(max(longest + 2, floor), ceiling))
+            # A HAND-SET WIDTH WINS, BUT NOT BELOW THE HEADER'S OWN LONGEST WORD.
+            #
+            # Marc set Season to 5.6 and then reported it "isn't wide enough... doesn't look
+            # like it was touched". It WAS touched — it was written at exactly 5.6 — and that
+            # is narrower than the word "Season", which is six characters. Excel wraps it
+            # mid-word, so the column reads "Seaso / n" and looks untouched rather than
+            # narrow. A measurement taken from a column whose header already fits cannot
+            # anticipate that.
+            #
+            # So an override is honoured down to the point where its own header stops being
+            # readable, and no further. Only two of the six are affected, and by a fraction.
+            width = effective_width(label, min(max(longest + 2, floor), ceiling))
             widths[label] = width
             tab.column_dimensions[letter].width = width
             span = f"{letter}{row_first_data}:{letter}{last_row}"
+            if any(isinstance(tab.cell(row_first_data + offset, index).value, str)
+                   for offset in range(len(df))):
+                _mark_text_column(tab, span)
             if field in DATA_BAR_FIELDS:
                 _add_data_bar(tab, span)
             elif field in COLOUR_SCALE_FIELDS:
@@ -1657,8 +1731,10 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     buffer = io.BytesIO()
     book.save(buffer)
     wanted = {name: getattr(book[name], "_cfdb_data_bars", []) for name in book.sheetnames}
+    text = {name: getattr(book[name], "_cfdb_text_columns", []) for name in book.sheetnames}
     payload = _inject_data_bars(buffer.getvalue(),
-                                {k: v for k, v in wanted.items() if v})
+                                {k: v for k, v in wanted.items() if v},
+                                {k: v for k, v in text.items() if v})
     return payload, index_rows, omitted
 
 

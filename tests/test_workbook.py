@@ -1495,9 +1495,9 @@ def test_a_column_is_never_narrower_than_the_longest_word_in_its_header(built):
         label = str(tab.cell(header, index).value)
         width = tab.column_dimensions[get_column_letter(index)].width
         if label in workbook.WIDTH_OVERRIDES:
-            # Marc set this one by hand with the real file open, which is better information
-            # than the measurement has. The override is asserted instead.
-            assert width == workbook.WIDTH_OVERRIDES[label], label
+            # A hand-set width wins, but not below its own header word — see
+            # test_a_hand_set_width_is_still_floored_at_its_header_word.
+            assert width == workbook.effective_width(label), label
             continue
         longest_word = max((len(w) for w in label.split()), default=0)
         expected_floor = max(workbook.MIN_COLUMN_WIDTH,
@@ -1720,9 +1720,28 @@ def test_the_hand_set_widths_are_exactly_what_marc_measured(built):
     assert workbook.WIDTH_OVERRIDES == {
         "Winner covered": 8.0, "Final margin": 5.85, "Season": 5.6,
         "Wind mph": 5.5, "Pred margin": 6.5, "Home win prob": 7.7}
-    for label, expected in workbook.WIDTH_OVERRIDES.items():
+    for label in workbook.WIDTH_OVERRIDES:
         letter = get_column_letter(labels[label])
-        assert tab.column_dimensions[letter].width == expected, label
+        assert tab.column_dimensions[letter].width == workbook.effective_width(label), label
+
+
+def test_a_hand_set_width_is_still_floored_at_its_header_word():
+    """Marc set Season to 5.6 and then reported it "isn't wide enough... doesn't look like it
+    was touched". IT WAS TOUCHED — written at exactly 5.6 — and 5.6 is narrower than the word
+    "Season". Excel wraps mid-word, so it reads "Seaso / n" and looks untouched rather than
+    narrow. A width measured on a column whose header already fits cannot anticipate that.
+
+    Three of the six are raised, each by a fraction; the other three are honoured exactly.
+    """
+    assert workbook.effective_width("Season") > 5.6
+    assert workbook.effective_width("Final margin") > 5.85
+    assert workbook.effective_width("Pred margin") > 6.5
+    assert workbook.effective_width("Winner covered") == 8.0
+    assert workbook.effective_width("Wind mph") == 5.5
+    assert workbook.effective_width("Home win prob") == 7.7
+    for label in workbook.WIDTH_OVERRIDES:
+        longest_word = max(len(w) for w in label.split())
+        assert workbook.effective_width(label) >= longest_word, label
 
 
 def test_winner_covered_is_centred_as_well_as_widened(built):
@@ -1760,3 +1779,69 @@ def test_an_away_home_pair_is_aligned_the_same_way():
     })
     assert workbook._low_cardinality_text(both, list(both.columns)) == {
         "away_classification", "home_classification"}
+
+
+def test_text_columns_tell_excel_the_text_is_deliberate(built):
+    """A won-lost record is "1-0". Excel sees text that could be a number or a date, puts a
+    green corner on every cell and offers to convert it — which would turn 1-0 into
+    1 January. Correct advice in general, wrong here, and 166 green triangles across two
+    columns is noise a reader has to learn to ignore.
+
+    Read from the RAW XML: openpyxl models `IgnoredErrors` and never writes it — `Worksheet`
+    has no `ignored_errors` attribute — so it goes in through the same injection as the data
+    bar, and a test that re-loaded the file would find nothing.
+    """
+    import re
+    import zipfile as _zip
+    payload = built[0]
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        body = "".join(archive.read(n).decode("utf-8") for n in archive.namelist()
+                       if n.startswith("xl/worksheets/sheet"))
+    assert "<ignoredErrors>" in body, "Excel will keep flagging the record columns"
+    assert 'numberStoredAsText="1"' in body
+    assert 'twoDigitTextYear="1"' in body
+
+    # And it must cover the columns that actually hold the text, not an arbitrary range.
+    tab = built[1]["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    from openpyxl.utils import get_column_letter
+    covered = set()
+    for span in re.findall(r'<ignoredError sqref="([^"]+)"', body):
+        covered.add(span.split(":")[0].rstrip("0123456789"))
+    for label in ("Away record", "Home record"):
+        letter = get_column_letter(labels[label])
+        assert letter in covered, f"{label} (column {letter}) is still flagged"
+
+
+def test_the_ignored_errors_block_is_in_schema_order(built):
+    """`ignoredErrors` sits between `cellWatches` and `smartTags` in CT_Worksheet. Putting it
+    anywhere else is the repair prompt again — the same failure the data bar already caused
+    once, from a different element."""
+    import zipfile as _zip
+    payload = built[0]
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        for name in archive.namelist():
+            if name.startswith("xl/worksheets/sheet"):
+                assert not workbook.sheet_order_violations(archive.read(name)), name
+
+
+def test_a_numeric_column_is_not_told_to_ignore_text_errors(built):
+    """The suppression is scoped to columns that HOLD text. Blanket-ignoring the whole sheet
+    would also silence the warning on a column where text really is a mistake."""
+    import re
+    import zipfile as _zip
+    from openpyxl.utils import get_column_letter
+    payload, book, _, _ = built
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        body = "".join(archive.read(n).decode("utf-8") for n in archive.namelist()
+                       if n.startswith("xl/worksheets/sheet"))
+    covered = {span.split(":")[0].rstrip("0123456789")
+               for span in re.findall(r'<ignoredError sqref="([^"]+)"', body)}
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    for label in ("Season", "Wk", "Attendance"):
+        letter = get_column_letter(labels[label])
+        assert letter not in covered, (
+            f"{label} holds numbers; silencing text warnings there hides a real mistake")
