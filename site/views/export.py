@@ -41,8 +41,22 @@ def body(page) -> None:
         return
 
     st.subheader("What this workbook will contain")
-    for name, view, count in planned:
-        st.markdown(f"- **{name}** — {count:,} row(s) from `{view}`")
+    # R-196. SCOPE-COUNT AND WRITTEN-COUNT ARE SHOWN SEPARATELY, and the preview is the right
+    # place for it rather than only the Index: the Index tells a reader what happened after
+    # they have the file, and this is where they can still narrow the filters and prevent it.
+    for entry in planned:
+        if entry.truncated:
+            st.markdown(
+                f"- **{entry.name}** — {entry.rows_in_scope:,} row(s) in scope from "
+                f"`{entry.view}`, **{entry.rows:,} written** "
+                f"(the {workbook.ROW_CAP:,}-row cap)")
+        else:
+            st.markdown(f"- **{entry.name}** — {entry.rows:,} row(s) from `{entry.view}`")
+    if any(entry.truncated for entry in planned):
+        st.warning(
+            f"A sheet above hit the {workbook.ROW_CAP:,}-row cap, so the workbook will hold "
+            f"fewer games than your filters select. Narrow the scope — a week, a conference "
+            f"or a division — to get all of them. The workbook's Index records this too.")
     if missing:
         st.subheader("What it will not contain")
         for name, reason in missing:
@@ -56,7 +70,8 @@ def body(page) -> None:
         started = datetime.now(timezone.utc)
         with st.spinner("Building…"):
             payload, index_rows, omitted = workbook.build(
-                scope.season, scope.week, scope.season_type, scope.conference)
+                scope.season, scope.week, scope.season_type, scope.conference,
+                scope.division)
         elapsed = (datetime.now(timezone.utc) - started).total_seconds()
         name = workbook.filename(scope.season, scope.week, started)
         st.download_button(
@@ -66,7 +81,7 @@ def body(page) -> None:
         # asserted in a document nobody opens next to the running site.
         st.caption(
             f"{len(index_rows)} sheet(s), "
-            f"{sum(count for _, _, count, _ in index_rows):,} rows, built in "
+            f"{sum(entry.rows for entry in index_rows):,} rows, built in "
             f"{elapsed:.1f}s.")
 
 
@@ -82,12 +97,14 @@ def _preview(scope) -> tuple:
         # Shares the builder's reader, so the preview and the file cannot disagree about
         # what is in scope — including about why something is not. A second implementation
         # of "is this sheet available" is a second answer waiting to diverge.
-        df, reason = workbook.read_sheet(
-            sheet, scope.season, scope.week, scope.season_type, scope.conference)
-        if df is None:
-            missing.append((sheet.name, reason))
+        read = workbook.read_sheet(
+            sheet, scope.season, scope.week, scope.season_type, scope.conference,
+            scope.division)
+        if read.frame is None:
+            missing.append((sheet.name, read.omission))
         else:
-            planned.append((sheet.name, sheet.view, len(df)))
+            planned.append(workbook.IndexRow(sheet.name, sheet.view, read.rows,
+                                             read.rows_in_scope))
     return planned, missing
 
 
