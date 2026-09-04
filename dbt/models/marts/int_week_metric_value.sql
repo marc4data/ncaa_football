@@ -1,4 +1,4 @@
-{{ config(materialized='view') }}
+{{ config(materialized='table') }}
 
 -- ONE GAME'S CONTRIBUTION TO ONE METRIC, AS OF TODAY. Long: one row per (game, metric).
 --
@@ -6,9 +6,30 @@
 -- values, and computing them twice would be two definitions of one metric — the defect this
 -- project has spent two rounds removing from the upset thresholds.
 --
--- A VIEW rather than a table (no storage for 110k x 6 rows) and rather than EPHEMERAL, which
--- was the first choice. Ephemeral inlines cleanly but has no relation, and dbt unit tests
--- cannot introspect columns for a model that does not exist in the database:
+-- ⚠ A TABLE, AND IT USED TO BE A VIEW. THE VIEW BROKE THE PIPELINE EVERY TWO HOURS.
+--
+-- The reasoning below is still why this is not EPHEMERAL. What it missed is that a view has
+-- a live dependency on its parents, and dbt's Postgres view materialisation ends with
+--
+--     drop view if exists <relation>__dbt_backup cascade
+--
+-- (`dbt/include/postgres/macros/relations/view/drop.sql`). Rebuilding a parent renames the
+-- old relation to `__dbt_backup`, Postgres follows the rename on every dependent, and the
+-- CASCADE then takes the dependents with it.
+--
+-- This model reads `fct_game_market`, which is a view, and which `cfbd_scores_refresh`
+-- rebuilds every two hours as an ancestor of `+srv_game`. So every scores refresh silently
+-- DROPPED this model, and the next `cfbd_lines_snapshot` failed on `dbt test` with the exact
+-- error quoted below — after its own `dbt run` had created the model twenty minutes earlier.
+-- Four consecutive lines runs failed that way on 2026-09-04, taking `publish_distributions`
+-- with them and holding the dead-man's switch red.
+--
+-- A table has no dependency to cascade through: the rows are copied at build time. It costs
+-- storage for 110k x 6 rows, which is the price of the model surviving its own parent being
+-- rebuilt. Two DAGs touching one lineage is the normal case here, not the exception.
+--
+-- Ephemeral remains wrong for the original reason: it inlines cleanly but has no relation,
+-- and dbt unit tests cannot introspect columns for a model that does not exist:
 --
 --     Not able to get columns for unit test 'int_week_metric_value' ...
 --     because the relation doesn't exist
