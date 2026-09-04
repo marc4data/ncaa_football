@@ -343,3 +343,100 @@ def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none()
     module.subprocess.run = lambda *a, **k: Done()
     _, failures = module.read_ages("host")
     assert "MONITOR.cannot_read_airflow_metadata" in failures
+
+
+def _failure_sql():
+    """The failure query, lifted out of the shell script so the test runs the real thing."""
+    from pathlib import Path as _Path
+    script = (_Path(__file__).resolve().parents[1]
+              / "deploy" / "cfdb_heartbeat.sh").read_text()
+    import re as _re
+    match = _re.search(r"select 'failed\|'.*?order by dag_id, task_id", script, _re.S)
+    assert match, "the failure query moved or changed shape"
+    return match.group()
+
+
+# A synthetic clock. `end_date` has to increase with time for `order by end_date desc` to
+# mean "most recent first" — storing "minutes ago" inverts it, which is a mistake that makes
+# the query look broken while the test is what is wrong.
+NOW_MINUTES = 100_000
+
+
+def _run_failure_sql(rows, sql=None):
+    """Execute it against sqlite over synthetic task_instance rows.
+
+    `rows` are (dag, task, state, minutes_ago) and are converted to an increasing clock here.
+
+    Two Postgres-isms are swapped out — the interval literal and `extract(epoch ...)::bigint`
+    — and NOTHING ELSE. The defect this guards was entirely in the ranking, so the ranking
+    runs unmodified: `row_number() over (partition by dag_id, task_id order by end_date
+    desc)` and the `recency = 1` that reads it.
+    """
+    import re as _re
+    import sqlite3
+    statement = sql or _failure_sql()
+    statement = statement.replace(
+        "end_date > now() - interval '6 hours'", f"end_date > {NOW_MINUTES - 360}")
+    statement = _re.sub(
+        r"floor\(extract\(epoch from \(now\(\) - end_date\)\)\)::bigint",
+        # PARENTHESISED. In SQLite `||` binds TIGHTER than `*`, so a bare multiplication
+        # parses as `('failed|…' || end_date) * 60` and every row collapses to the number 0 —
+        # which reads as the query returning nothing rather than the substitution being wrong.
+        f"(({NOW_MINUTES} - end_date) * 60)", statement)
+    connection = sqlite3.connect(":memory:")
+    connection.execute("create table task_instance "
+                       "(dag_id text, task_id text, state text, end_date int)")
+    connection.executemany(
+        "insert into task_instance values (?,?,?,?)",
+        [(d, t, st, NOW_MINUTES - ago) for d, t, st, ago in rows])
+    return [r[0] for r in connection.execute(statement)]
+
+
+def test_a_task_that_failed_and_then_recovered_is_not_reported():
+    """"HAS FAILED" IS NOT "IS FAILING", AND THE FIRST VERSION COULD NOT TELL THEM APART.
+
+    It reported any failure inside the six-hour window whatever happened afterwards, so a
+    task that failed once and succeeded on the next run stayed on the alarm for six hours. On
+    2026-09-04 that put three healthy tasks up at once — a distribution test fixed twenty
+    minutes earlier, a scores dbt_test with eight successes behind it, and a build from
+    fourteen hours before.
+
+    An alarm that is always on is the same failure as an alarm that never fires: this
+    project's "silence is not success" entry was written after four days of unnoticed
+    downtime, and a permanently-red board is how the NEXT four days go unnoticed.
+
+    NEGATIVE-TESTED IN THE SAME FUNCTION — drop `recency = 1` and the recovered task comes
+    back, which is the behaviour that shipped.
+    """
+    rows = [
+        # failed, then recovered — must be silent
+        ("lines", "dbt_test", "failed", 130),
+        ("lines", "dbt_test", "success", 10),
+        # succeeded, then broke — must be reported
+        ("scores", "publish", "success", 200),
+        ("scores", "publish", "failed", 20),
+        # failed and has not run since — still broken, still reported
+        ("sync", "to_databricks", "failed", 300),
+        # never failed
+        ("weekly", "load", "success", 45),
+    ]
+    reported = _run_failure_sql(rows)
+    assert reported == ["failed|scores.publish|1200", "failed|sync.to_databricks|18000"], \
+        reported
+
+    broken = _failure_sql().replace("where recency = 1 and state = 'failed'",
+                                    "where state = 'failed'")
+    assert broken != _failure_sql(), "the recency filter was not found to remove"
+    without = _run_failure_sql(rows, broken)
+    assert any("lines.dbt_test" in line for line in without), (
+        "removing `recency = 1` did not resurrect the recovered task, so it is not what "
+        "suppresses it")
+
+
+def test_a_failure_outside_the_window_is_not_reported():
+    """The window still bounds it — an old failure with no run since scrolls out of view
+    rather than sitting on the alarm forever. Six hours covers a few runs of the two-hourly
+    DAG, which is the reasoning the script records."""
+    assert _run_failure_sql([("old", "task", "failed", 400)]) == []
+    assert _run_failure_sql([("recent", "task", "failed", 359)]) == \
+        ["failed|recent.task|21540"]
