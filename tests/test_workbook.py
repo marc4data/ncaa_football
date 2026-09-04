@@ -1331,3 +1331,78 @@ def test_the_legend_names_only_the_columns_that_actually_use_marks():
             continue
         assert column in marked_labels, (
             f"the legend lists {column!r} among the marks, and that column renders words")
+
+
+def test_every_sheet_part_is_in_ct_worksheet_order(built):
+    """THE CHECK THAT WAS MISSING, AND THE FILE SHIPPED BROKEN BECAUSE OF IT.
+
+    `CT_Worksheet`'s children are an ORDERED SEQUENCE. Excel validates it; openpyxl does
+    not, and neither does "is this well-formed XML" — the file parsed perfectly and Excel
+    still refused it, replaced the whole sheet part and opened the Schedule tab EMPTY.
+
+    The R-220 injection put its `<conditionalFormatting>` block before `<pageMargins>`,
+    which on a sheet with hyperlinks lands AFTER `<hyperlinks>`. The schema puts
+    conditionalFormatting first. Every prior check passed: well-formed XML, tables matching
+    their headers, no NaN, no autofilter overlap. Order was the one property nothing tested.
+    """
+    import zipfile as _zip
+    payload = built[0]
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        checked = 0
+        for name in archive.namelist():
+            if not name.startswith("xl/worksheets/sheet"):
+                continue
+            checked += 1
+            violations = workbook.sheet_order_violations(archive.read(name))
+            assert not violations, (
+                f"{name}: {violations} — Excel will refuse this file and open the tab empty")
+        assert checked >= 2
+
+
+def test_the_order_validator_actually_detects_a_misplaced_block():
+    """A validator that cannot fail is the thing that let this through in the first place.
+    Fed the exact shape that broke Excel, it must object."""
+    good = (b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            b'<sheetData/><conditionalFormatting sqref="A1"/><hyperlinks/><pageMargins/>'
+            b'</worksheet>')
+    bad = (b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+           b'<sheetData/><hyperlinks/><conditionalFormatting sqref="A1"/><pageMargins/>'
+           b'</worksheet>')
+    assert workbook.sheet_order_violations(good) == []
+    assert workbook.sheet_order_violations(bad) == [("conditionalFormatting", "hyperlinks")]
+
+
+def test_the_build_refuses_to_emit_a_sheet_excel_would_reject(monkeypatch):
+    """Fail at build time, not in the user's Excel. Verified by forcing the injection to the
+    wrong place and asserting `build` raises rather than returning bytes."""
+    monkeypatch.setenv("CFDB_SITE_HOST", "https://cfdb.example")
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    # Force the fallback path AND point it at the exact wrong place — before <pageMargins>,
+    # which on a sheet with hyperlinks lands after them. This is the shape that shipped.
+    monkeypatch.setattr(workbook, "CF_ANCHOR", "<<no such element>>")
+    monkeypatch.setattr(workbook, "SHEET_ELEMENTS_AFTER_CF", ("<pageMargins", "</worksheet>"))
+    with pytest.raises(RuntimeError) as excinfo:
+        workbook.build(2026, 8, "regular", None, "fbs")
+    assert "CT_Worksheet order" in str(excinfo.value)
+
+
+def test_the_simple_data_bar_fallback_writes_no_extension_and_stays_in_order(monkeypatch):
+    """R-220's route (b), kept reachable rather than kept in a comment.
+
+    The x14 route fought back once and cost a broken file, so the simpler rendering is one
+    environment variable away and is tested — a fallback nobody exercises is a fallback that
+    does not work when it is needed.
+    """
+    import zipfile as _zip
+    monkeypatch.setenv("CFDB_SITE_HOST", "https://cfdb.example")
+    monkeypatch.setattr(workbook, "DATA_BAR_SIMPLE", True)
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    payload, _, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    with _zip.ZipFile(BytesIO(payload)) as archive:
+        body = "".join(archive.read(n).decode("utf-8") for n in archive.namelist()
+                       if n.startswith("xl/worksheets/sheet"))
+        for name in archive.namelist():
+            if name.startswith("xl/worksheets/sheet"):
+                assert not workbook.sheet_order_violations(archive.read(name)), name
+    assert "x14:dataBar" not in body, "the fallback must not write the extension"
+    assert "dataBar" in body, "but it must still draw a bar"

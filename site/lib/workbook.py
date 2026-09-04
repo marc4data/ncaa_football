@@ -837,6 +837,19 @@ COLOUR_SCALE_FIELDS = {"edge_value", "edge_magnitude", "point_differential",
 # `predicted_margin` keeps its scale because he named one column.
 DATA_BAR_FIELDS = {"actual_margin"}
 
+# ROUTE (b), KEPT REACHABLE ON PURPOSE.
+#
+# Prompt 039 said: do the x14 route, and if it fights back ship the single-colour bar and say
+# so. It fought back once — the first attempt put its block out of CT_Worksheet order and
+# Excel opened the Schedule tab empty. The CAUSE was the insertion point, not the extension,
+# and it is fixed and now checkable. But "we know why it broke" is not the same as "it works
+# in Excel", so the simpler rendering stays one flag away rather than needing to be rewritten
+# under pressure.
+#
+# `False` = Marc's full rule via x14. `True` = a plain single-colour bar with a midpoint axis,
+# entirely through openpyxl's supported API — honest, and not what he drew.
+DATA_BAR_SIMPLE = os.getenv("CFDB_SIMPLE_DATA_BAR", "").lower() in ("1", "true", "yes")
+
 # WHY THIS IS HAND-WRITTEN XML AND NOT A DataBarRule.
 #
 # openpyxl's DataBarRule writes the LEGACY `<dataBar>` element, which carries one colour, a
@@ -864,7 +877,17 @@ def _data_bar_guid(index: int) -> str:
 
 
 def _add_data_bar(tab, span: str) -> None:
-    """Record that this range wants Marc's data bar. The XML is injected after save."""
+    """Record that this range wants Marc's data bar. The XML is injected after save.
+
+    Under DATA_BAR_SIMPLE the supported API is used instead and nothing is injected, so the
+    fallback shares no code with the thing it is a fallback for.
+    """
+    if DATA_BAR_SIMPLE:
+        from openpyxl.formatting.rule import DataBarRule
+        tab.conditional_formatting.add(span, DataBarRule(
+            start_type="min", end_type="max", color=DATA_BAR_POSITIVE[2:],
+            showValue=True, minLength=None, maxLength=None))
+        return
     tab._cfdb_data_bars = getattr(tab, "_cfdb_data_bars", [])
     tab._cfdb_data_bars.append(span)
 
@@ -1058,6 +1081,61 @@ def _clean(value):
     return value
 
 
+# CT_Worksheet's children are an ORDERED SEQUENCE and Excel validates it. These are the
+# elements the schema places AFTER `conditionalFormatting`, in schema order — so the first
+# of them that appears in a sheet is the latest point a conditionalFormatting block may be
+# inserted. `extLst` is deliberately last: it is the final child, after `tableParts`.
+# The preferred anchor: openpyxl's own conditional formatting is provably in the right place,
+# so appending after the last one cannot be out of order. Named so the fallback path below is
+# reachable in a test — a guard nothing can exercise is a guard nobody should trust.
+CF_ANCHOR = "</conditionalFormatting>"
+
+SHEET_ELEMENTS_AFTER_CF = (
+    "<dataValidations", "<hyperlinks", "<printOptions", "<pageMargins", "<pageSetup",
+    "<headerFooter", "<rowBreaks", "<colBreaks", "<customProperties", "<cellWatches",
+    "<ignoredErrors", "<smartTags", "<drawing", "<legacyDrawing", "<picture",
+    "<oleObjects", "<controls", "<webPublishItems", "<tableParts", "<extLst",
+    "</worksheet>",
+)
+
+# The FULL sequence, for validation. Excel refuses a sheet whose children are out of order
+# and reports it as "a problem with some content" — no clue which element, no line number.
+# This project shipped exactly that once, so the order is now checkable rather than reasoned
+# about.
+CT_WORKSHEET_SEQUENCE = (
+    "sheetPr", "dimension", "sheetViews", "sheetFormatPr", "cols", "sheetData",
+    "sheetCalcPr", "sheetProtection", "protectedRanges", "scenarios", "autoFilter",
+    "sortState", "dataConsolidate", "customSheetViews", "mergeCells", "phoneticPr",
+    "conditionalFormatting", "dataValidations", "hyperlinks", "printOptions",
+    "pageMargins", "pageSetup", "headerFooter", "rowBreaks", "colBreaks",
+    "customProperties", "cellWatches", "ignoredErrors", "smartTags", "drawing",
+    "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts",
+    "extLst",
+)
+
+
+def sheet_order_violations(sheet_xml: bytes) -> list:
+    """Children of <worksheet> that appear out of CT_Worksheet order.
+
+    Returns a list of (element, previous_element) pairs; empty means the part is in order.
+    Reads only DIRECT children, because ordering is a constraint on this level and the
+    nested `extLst` inside a cfRule is a different element with different rules.
+    """
+    from xml.etree import ElementTree
+    main = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    root = ElementTree.fromstring(sheet_xml)
+    rank, last_name, last_rank, out = {n: i for i, n in enumerate(CT_WORKSHEET_SEQUENCE)}, None, -1, []
+    for child in root:
+        name = child.tag[len(main):] if child.tag.startswith(main) else child.tag
+        position = rank.get(name)
+        if position is None:            # not a schema element we model; skip rather than guess
+            continue
+        if position < last_rank:
+            out.append((name, last_name))
+        last_name, last_rank = name, max(last_rank, position)
+    return out
+
+
 X14_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
 XM_NS = "http://schemas.microsoft.com/office/excel/2006/main"
 
@@ -1150,13 +1228,26 @@ def _inject_data_bars(payload: bytes, wanted: dict) -> bytes:
                 f'<xm:sqref>{span}</xm:sqref>'
                 f'</x14:conditionalFormatting>')
 
-        # The legacy block goes immediately before <pageMargins>, <tableParts> or </worksheet>
-        # — whichever comes first — which is where the schema allows it.
-        for stop in ("<pageMargins", "<tableParts", "</worksheet>"):
-            at = body.find(stop)
-            if at != -1:
-                body = body[:at] + "".join(legacy) + body[at:]
-                break
+        # WHERE THE LEGACY BLOCK GOES, AND THIS IS THE PART THAT BROKE EXCEL.
+        #
+        # `CT_Worksheet` is an ordered SEQUENCE, not a bag. Excel validates it and refuses
+        # the file — "We found a problem with some content" — when a child is out of place,
+        # which is exactly what happened: the first version inserted before `<pageMargins>`,
+        # and on a sheet with hyperlinks that lands AFTER `<hyperlinks>`. The schema puts
+        # `conditionalFormatting` BEFORE `hyperlinks`, so Excel replaced the whole sheet part
+        # and the Schedule tab opened empty.
+        #
+        # Preferred insertion point is right after the conditional formatting openpyxl has
+        # already written, because that is provably in the right place. Failing that, before
+        # the earliest element the schema says must follow it.
+        at = body.rfind(CF_ANCHOR)
+        if at != -1:
+            at += len(CF_ANCHOR)
+        else:
+            candidates = [body.find(tag) for tag in SHEET_ELEMENTS_AFTER_CF]
+            found = [i for i in candidates if i != -1]
+            at = min(found) if found else body.find("</worksheet>")
+        body = body[:at] + "".join(legacy) + body[at:]
 
         block = (f'<extLst><ext uri="{{78C0D931-6437-407d-A8EE-F0AAD7539E65}}" '
                  f'xmlns:x14="{X14_NS}">'
@@ -1165,6 +1256,17 @@ def _inject_data_bars(payload: bytes, wanted: dict) -> bytes:
         # `extLst` is the LAST child of worksheet, after tableParts.
         body = body.replace("</worksheet>", block + "</worksheet>")
         rewritten[part] = body.encode("utf-8")
+
+    # FAIL HERE RATHER THAN IN EXCEL. A sheet whose children are out of CT_Worksheet order
+    # is a file Excel refuses with "we found a problem with some content", replaces the whole
+    # part, and opens with the tab EMPTY — with no indication of which element was wrong.
+    # This shipped once. Raising costs a build; the alternative costs the user their data.
+    for part, body in rewritten.items():
+        violations = sheet_order_violations(body)
+        if violations:
+            raise RuntimeError(
+                f"{part} would be rejected by Excel: element(s) out of CT_Worksheet order "
+                f"{violations}. The data-bar injection put a block in the wrong place.")
 
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as target:
