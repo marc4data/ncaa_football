@@ -17,11 +17,25 @@ from lib import filters, shell, states, workbook
 def body(page) -> None:
     scope = filters.game_scope()
 
+    # DESCRIBES WHAT SHIPS, AND IT IS BUILT FROM `SHEETS` RATHER THAN LISTED.
+    #
+    # The previous sentence named all seven tabs — "schedule, results, the odds board, model
+    # edges, standings, model provenance and the field definitions" — and had been wrong since
+    # the day only Schedule shipped. A page that oversells the file is the same defect as an
+    # Index that hides an omission, arriving before the download instead of after it.
     st.markdown(
-        "A workbook of the games currently in scope — schedule, results, the odds board, "
-        "model edges, standings, model provenance and the field definitions. Everything is "
-        "read from the serving layer, formatted as real Excel: typed numbers, freeze panes, "
-        "autofilter and conditional formatting on the columns worth scanning.")
+        f"A workbook of the games currently in scope: **{_sheet_list()}**. Everything is read "
+        f"from the serving layer, formatted as real Excel: typed numbers, freeze panes, an "
+        f"Excel Table per sheet and conditional formatting on the columns worth scanning.")
+
+    # THE TWO SHEETS ARE AT DIFFERENT GRAINS AND THE ROW COUNTS BELOW WILL LOOK WRONG WITHOUT
+    # THIS. Schedule is one row per game; Scores is one row per team per game, so the same
+    # week shows 83 and 166. Left unexplained that reads as a bug in the preview, which is the
+    # one thing this preview exists not to be.
+    st.caption(
+        "Schedule is one row per game. Scores is one row per **team** per game — the same "
+        "week of football, counted twice — so its row count is double, and a season total "
+        "there is wrong unless you filter to one team.")
 
     # The scope rule, stated where someone would otherwise go looking for the control that
     # does not exist. Saying why is better than leaving an apparent omission.
@@ -30,7 +44,11 @@ def body(page) -> None:
         "raw-data download: CFBD's terms prohibit redistributing their data as data, and a "
         "workbook travels further than a page does.")
 
-    with states.section("srv_game"):
+    # NAMES EVERY VIEW THE PREVIEW READS, not just the first. The error state prints this
+    # string, and "srv_game" on a failure that came from srv_game_team sends the reader to the
+    # wrong object — the same class of misdirection the heartbeat comment warns about in the
+    # lines DAG.
+    with states.section(", ".join(sorted({s.view for s in workbook.SHEETS}))):
         planned, missing = _preview(scope)
 
     if not planned:
@@ -57,14 +75,28 @@ def body(page) -> None:
             f"A sheet above hit the {workbook.ROW_CAP:,}-row cap, so the workbook will hold "
             f"fewer games than your filters select. Narrow the scope — a week, a conference "
             f"or a division — to get all of them. The workbook's Index records this too.")
-    if missing:
+    # TWO KINDS OF ABSENCE, AND THEY ARE NOT THE SAME QUESTION.
+    #
+    # `missing` is "this sheet has no rows for your filters" — narrow the scope differently
+    # and it comes back. The pending sheets are "this tab does not exist yet in this layout"
+    # and no filter brings them back. Both were already named on the workbook's Index; only
+    # the first was named HERE, so a reader who remembered the Odds tab had to download the
+    # file to find out it was gone. The preview is the place to answer that.
+    if missing or workbook.PENDING_SHEETS:
         st.subheader("What it will not contain")
-        for name, reason in missing:
-            st.markdown(f"- **{name}** — {reason}")
+    for name, reason in missing:
+        st.markdown(f"- **{name}** — {reason}")
+    if missing:
         st.caption(
             "Omitted rather than shipped as an empty tab (AC-15.5). The same list is "
             "written onto the workbook's index sheet, so the file explains itself if it is "
             "opened somewhere else.")
+    if workbook.PENDING_SHEETS:
+        names = ", ".join(f"**{sheet.name}**" for sheet in workbook.PENDING_SHEETS)
+        st.markdown(f"- {names} — {workbook.PENDING_REASON}")
+        st.caption(
+            "Not a filter result: no scope brings these back. They are converted one at a "
+            "time, and the workbook's Index names them too.")
 
     if st.button("Build the workbook", type="primary"):
         started = datetime.now(timezone.utc)
@@ -83,6 +115,19 @@ def body(page) -> None:
             f"{len(index_rows)} sheet(s), "
             f"{sum(entry.rows for entry in index_rows):,} rows, built in "
             f"{elapsed:.1f}s.")
+
+
+def _sheet_list() -> str:
+    """The shipped sheets, in the order the workbook writes them.
+
+    Read from `SHEETS` rather than written out, so converting a pending sheet updates this
+    sentence by moving one name in `workbook.py` — which is the only way a description of a
+    file stays true to the file.
+    """
+    names = [sheet.name.lower() for sheet in workbook.SHEETS]
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def _preview(scope) -> tuple:
