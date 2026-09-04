@@ -79,6 +79,16 @@ def built(monkeypatch):
                 df = _frame(sorted(set(sheet.fields) | set(sheet.selected_fields)))
                 if "game_id" in df.columns:
                     df["game_id"] = [401752000, 401752001]
+                # Realistic verdicts, so the mark rendering is actually exercised. Without
+                # them every verdict cell is the no-data dash and any test about the marks
+                # passes while proving nothing — which is exactly what the colour test
+                # refused to do.
+                for column, values in (("upset_level", ["upset", "none"]),
+                                       ("winner_covered_close", ["yes", "no"]),
+                                       ("over_met", ["yes", "no"]),
+                                       ("favorite_covered", ["yes", "no_favorite"])):
+                    if column in df.columns:
+                        df[column] = values
                 return df
         return pd.DataFrame([{"model_version": "abc123", "model_name": "stub"}])
 
@@ -824,17 +834,58 @@ def test_team_and_matchup_cells_link_back_and_carry_the_scope(built):
         "the cell's VALUE must stay the team name, so the column still sorts as a name")
 
 
-def test_one_explicit_url_column_exists_because_a_cell_link_is_invisible_to_data(built):
+def test_the_matchup_cell_reads_a_word_and_carries_the_url_behind_it(built):
+    """Round 3 REVERSES round 2's decision here, and the reversal is Marc's.
+
+    Round 2 put the raw URL in the cell so anything reading the file as DATA could see it —
+    a cell hyperlink is invisible to a CSV export or a pivot. He looked at it: a 90-character
+    URL in every row of a 56-column sheet costs more width and legibility than that buys, and
+    `Game id` beside it already reconstructs the link.
+
+    So the cell says "Matchup" and the URL is the hyperlink.
+    """
     _, book, _, _ = built
     tab = book["Schedule"]
     header = workbook.header_row(1)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
-    assert "Matchup URL" in labels
-    value = tab.cell(header + 1, labels["Matchup URL"]).value
-    assert str(value).startswith("https://cfdb.example/matchup?"), value
-    assert "season=2026" in str(value)
-    urls = [la for la in labels if la.endswith("URL")]
-    assert urls == ["Matchup URL"], f"one explicit URL column is enough, found {urls}"
+    cell = tab.cell(header + 1, labels["Matchup URL"])
+    assert cell.value == workbook.URL_CELL_LABEL == "Matchup"
+    assert not str(cell.value).startswith("http"), "the URL is the link, not the text"
+    target = cell.hyperlink.target or cell.hyperlink.location
+    assert target.startswith("https://cfdb.example/matchup?")
+    assert "season=2026" in target and "week=8" in target
+
+
+def test_the_index_links_each_sheet_back_to_its_page_with_the_same_filters(built):
+    """Round 3. A workbook read in November should land on the week it covers, not on
+    whatever week the site is showing when the link is clicked — which is the same defect
+    that made choosing 2025 and clicking a team return a 2026 page."""
+    _, book, _, _ = built
+    tab = book["Index"]
+    found = {}
+    for row in tab.iter_rows():
+        for cell in row:
+            if cell.value in ("Schedule", "srv_game") and cell.hyperlink:
+                found[cell.value] = cell.hyperlink.target or cell.hyperlink.location
+    assert "Schedule" in found, "the sheet name does not link back to its page"
+    assert found["Schedule"].startswith("https://cfdb.example/schedule?")
+    assert "season=2026" in found["Schedule"] and "week=8" in found["Schedule"]
+
+    assert "srv_game" in found, "the serving view does not link into the data dictionary"
+    # The site's own convention, not a second spelling of it: lib/table.py already writes
+    # `/dictionary?table=<name>` for every dataset caption on every page.
+    assert found["srv_game"] == "https://cfdb.example/dictionary?table=srv_game"
+
+
+def test_the_index_links_are_absent_rather_than_broken_with_no_host(monkeypatch):
+    monkeypatch.delenv("CFDB_SITE_HOST", raising=False)
+    monkeypatch.setattr(workbook, "query", _division_aware_query())
+    payload, _, _ = workbook.build(2026, 8, "regular", None, "fbs")
+    from openpyxl import load_workbook
+    tab = load_workbook(BytesIO(payload))["Index"]
+    for row in tab.iter_rows():
+        for cell in row:
+            assert cell.hyperlink is None, cell.coordinate
 
 
 def test_with_no_site_host_the_workbook_ships_no_links_rather_than_broken_ones(monkeypatch):
@@ -1406,3 +1457,119 @@ def test_the_simple_data_bar_fallback_writes_no_extension_and_stays_in_order(mon
                 assert not workbook.sheet_order_violations(archive.read(name)), name
     assert "x14:dataBar" not in body, "the fallback must not write the extension"
     assert "dataBar" in body, "but it must still draw a bar"
+
+
+# === round three: legibility ==============================================================
+
+def test_a_column_is_never_narrower_than_the_longest_word_in_its_header(built):
+    """Round 3. R-217 measured the data and went too far: at a flat floor of 6, Excel breaks
+    "Favourite" into "Favouri / te", which is harder to read than the wide column it
+    replaced. Marc: "shrinking is a little aggressive".
+
+    The floor is the longest WORD now, capped. "Conference game" lands at 10 — not the 15
+    that started this, and not the 6 that broke the word.
+    """
+    from openpyxl.utils import get_column_letter
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    for index in range(1, tab.max_column + 1):
+        label = str(tab.cell(header, index).value)
+        width = tab.column_dimensions[get_column_letter(index)].width
+        longest_word = max((len(w) for w in label.split()), default=0)
+        expected_floor = max(workbook.MIN_COLUMN_WIDTH,
+                             min(longest_word, workbook.HEADER_WORD_CAP))
+        assert width >= expected_floor, (
+            f"{label!r} is {width} wide; its longest word is {longest_word} and will break")
+        # ...and the change must not have undone R-217. A column is still not as wide as its
+        # whole header just because the header is long.
+        if len(label) > workbook.HEADER_WORD_CAP and " " in label:
+            assert width < len(label), f"{label!r} is back to fitting its entire header"
+
+
+def test_the_header_is_top_aligned_and_centred(built):
+    """Marc, round 3. Vertical TOP matters more than it sounds: with a wrapped header the row
+    is as tall as the WORST label, so a vertically centred one-line header floats in the
+    middle of a four-line row and no two headers share a baseline."""
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    for index in range(1, tab.max_column + 1):
+        alignment = tab.cell(header, index).alignment
+        assert alignment.vertical == "top", index
+        assert alignment.horizontal == "center", index
+        assert alignment.wrap_text is True, index
+
+
+def test_the_mark_columns_are_centred_and_the_others_are_not(built):
+    """A one-character mark left-aligned in a 6-wide column reads as a typo."""
+    _, book, _, _ = built
+    schedule = next(s for s in workbook.SHEETS if s.name == "Schedule")
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    centred_labels = {dict(schedule.columns)[f] for f in schedule.centred}
+    assert centred_labels == {"Upset level", "Winner covered", "O/U result"}
+    for label in centred_labels:
+        cell = tab.cell(header + 1, labels[label])
+        assert cell.alignment.horizontal == "center", label
+    assert tab.cell(header + 1, labels["Away"]).alignment.horizontal != "center"
+
+
+def test_the_open_marks_are_coloured_and_the_colour_passes_contrast():
+    """Marc asked for the OPEN form to carry the colour, and he is right about why: the
+    filled shapes are the common case, so colouring the exception is what makes it pop.
+
+    LITERAL BURNT SIENNA FAILS. #E97451 measures 2.97:1 against white — below WCAG AA's 4.5.
+    The shipped colour is measured, because this project has already had to fix a glyph that
+    was 3.6:1.
+    """
+    def luminance(hex_rgb):
+        channels = [int(hex_rgb[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        channels = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                    for c in channels]
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+    rgb = workbook.OPEN_MARK_COLOUR[2:]          # strip the alpha openpyxl wants
+    contrast = (1.0 + 0.05) / (luminance(rgb) + 0.05)
+    assert contrast >= 4.5, f"#{rgb} is {contrast:.2f}:1 against white"
+    assert luminance(rgb) < luminance("E97451"), (
+        "the shipped colour must be darker than literal burnt sienna, which fails")
+
+
+def test_the_legend_glyphs_match_the_sheet_in_size_and_colour(built):
+    """A legend whose mark is a different size or colour from the one in the column is a
+    picture of a DIFFERENT mark, which is worse than no legend."""
+    _, book, _, _ = built
+    tab = book["Index"]
+    seen = {}
+    for row in tab.iter_rows():
+        for cell in row:
+            if cell.value in workbook.OPEN_MARKS or cell.value in ("●", "■", "▲", "▼"):
+                seen[cell.value] = cell.font
+    assert seen, "no legend glyphs found on the Index"
+    # 12 IS MARC'S NUMBER, asserted as the requirement rather than against the constant.
+    # The first version compared to MARK_FONT_SIZE, so lowering the constant moved the test
+    # with it and the check stayed green — a test that restates the implementation.
+    assert workbook.MARK_FONT_SIZE >= 12, workbook.MARK_FONT_SIZE
+    for glyph, font in seen.items():
+        assert font.size >= 12, (glyph, font.size)
+        if glyph in workbook.OPEN_MARKS:
+            assert font.color is not None and \
+                font.color.rgb == workbook.OPEN_MARK_COLOUR, (glyph, font.color)
+
+
+def test_the_open_marks_in_the_sheet_carry_the_same_colour(built):
+    _, book, _, _ = built
+    tab = book["Schedule"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    coloured = 0
+    for row in range(header + 1, tab.max_row + 1):
+        for label in ("Upset level", "Winner covered", "O/U result"):
+            cell = tab.cell(row, labels[label])
+            if cell.value in workbook.OPEN_MARKS:
+                assert cell.font.color.rgb == workbook.OPEN_MARK_COLOUR, cell.coordinate
+                assert cell.font.size >= 12
+                coloured += 1
+    assert coloured, "no open mark appeared in the fixture, so this proved nothing"

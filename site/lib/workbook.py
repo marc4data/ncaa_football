@@ -199,6 +199,24 @@ COVER_MARKS = {"yes": "■", "no": "□", "push": "◨", "pending": "·"}
 OVER_MARKS = {"yes": "▲", "no": "▼", "push": "◨", "pending": "·"}
 NO_DATA_MARK = "–"        # the site's own mark for "we hold nothing here"
 
+# THE OPEN MARKS CARRY A COLOUR, AND THE COLOUR WAS MEASURED RATHER THAN PICKED.
+#
+# Shape alone works on the site because the marks sit inches apart in a legend the reader has
+# just seen. In a spreadsheet they sit in a column of 80 rows and ○ against ● is a small
+# difference to scan. Marc asked for the OPEN form to be the coloured one — "it seems to be
+# more contrasting than changing the filled version to a blue or green" — and he is right:
+# the filled shapes are the common case, and colouring the exception is what makes it pop.
+#
+# Literal burnt sienna (#E97451) MEASURES 2.97:1 AGAINST WHITE and fails WCAG AA outright.
+# #B7410E is the same family and measures 5.56:1. Contrast checked, not eyeballed, because
+# this project has already had to fix a glyph that was 3.6:1.
+OPEN_MARK_COLOUR = "FFB7410E"
+MARK_FONT_SIZE = 12
+
+# What the Matchup cell says. The URL is the hyperlink, not the text.
+URL_CELL_LABEL = "Matchup"
+OPEN_MARKS = {"○", "□"}
+
 # The Index legend. R-026's icon-only exception on the SITE is defensible because R-102's
 # legend explains it once — that is the stated reason in the code. A workbook travels further
 # and has no tooltip at all, so the same exception needs the same support or it is just
@@ -218,6 +236,11 @@ MARK_LEGEND = [
     ("Any of the three", "·", "not settled yet"),
     ("Any of the three", "–", "cfdb holds no closing line for this game"),
 ]
+
+
+# One shared alignment object rather than one per cell: openpyxl stores styles by identity
+# and a fresh Alignment for each of 80 rows inflates the styles table for no benefit.
+CENTRED = None      # built lazily in `build`, where Alignment is imported
 
 
 def _marked(marks):
@@ -381,11 +404,31 @@ class Sheet:
         return out
 
     @property
-    def url_value_fields(self) -> set:
-        """Columns whose VALUE is a URL, not just columns that carry a link.
+    def centred(self) -> set:
+        """Columns whose values are marks, and are therefore centred.
 
-        The distinction matters: a cell hyperlink is invisible to anything that reads the
-        file as data, so one column shows the URL as text and survives a copy elsewhere.
+        Derived from `display` rather than listed again: a column that renders a shape is
+        exactly a column that should be centred, and two lists would drift.
+        """
+        return {field for field, renderer in self.display.items()
+                if getattr(renderer, "__qualname__", "").startswith("_marked")}
+
+    @property
+    def open_mark_fields(self) -> set:
+        return self.centred
+
+    @property
+    def url_value_fields(self) -> set:
+        """Columns built FROM a url, whether or not they show it.
+
+        The original argument for this column was that a cell hyperlink is invisible to
+        anything reading the file as data, so one column should show the URL as text.
+        MARC OVERRODE THAT after seeing it: a 90-character URL in every row of a 56-column
+        sheet costs more width and legibility than the machine-readability is worth to him,
+        and the `Game id` column beside it already reconstructs the link.
+
+        So the cell reads `URL_CELL_LABEL` and carries the link. The distinction the property
+        name draws — value comes from a url builder, not from the frame — still holds.
         """
         return {f for f in self.link_fields if f.endswith("_url")}
 
@@ -744,6 +787,14 @@ SHEETS = [s for s in _ALL_SHEETS if s.name == "Schedule"]
 PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name != "Schedule"]
 PENDING_REASON = ("not converted to the new layout yet; it ships in a later pass rather "
                   "than mixing two header layouts in one file")
+
+# Which page each sheet came from, for the Index's link back. Held here rather than on Sheet
+# because it is a fact about the SITE, and the six pending sheets need it the day they ship.
+PAGE_FOR_SHEET = {
+    "Schedule": "schedule", "Scores": "scores", "Odds": "odds", "Edges": "edges",
+    "Standings": "standings", "Model performance": "performance",
+    "Data dictionary": "dictionary",
+}
 assert len(SHEETS) == 1 and len(PENDING_SHEETS) == 6
 
 # Conditional formatting goes on the columns a reader is scanning for outliers. Anything
@@ -790,6 +841,19 @@ EXPORT_ONLY_LABELS = {
 # narrowest real content on the sheet — "Wk" holds one or two digits — 6 leaves room for the
 # filter button a Table puts in every header cell.
 MIN_COLUMN_WIDTH = 6
+
+# ...AND A COLUMN IS NEVER NARROWER THAN THE LONGEST WORD IN ITS HEADER, up to this cap.
+#
+# Measuring the data alone (R-217) was right and went too far: at a flat floor of 6, Excel
+# breaks "Favourite" mid-word into "Favouri / te", which is harder to read than the wide
+# column it replaced. Marc: "shrinking is a little aggressive, to the point it's making some
+# of the headers really difficult to read."
+#
+# So the floor is the longest WORD, not the whole label. "Conference game" gets 10 rather
+# than the 15 that started this, and rather than the 6 that broke the word. The cap keeps one
+# very long word ("Precipitation") from undoing the change for everyone else — that one still
+# breaks, and one broken word is a better trade than a 13-wide column of "0.00".
+HEADER_WORD_CAP = 12
 
 # Excel's default row height is 15pt for an 11pt font, and a wrapped line needs about 13pt
 # once the header's own padding is allowed for. Both are conventions rather than constants
@@ -1306,6 +1370,9 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     book = Workbook()
     book.remove(book.active)              # the default sheet, before Index is written
 
+    global CENTRED
+    CENTRED = Alignment(horizontal="center", vertical="center")
+
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="2F4858")
     note_font = Font(italic=True, size=9, color="555555")
@@ -1335,16 +1402,24 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         for index, (_, label) in enumerate(sheet.columns, start=1):
             cell = tab.cell(row_header, index, label)
             cell.font, cell.fill = header_font, header_fill
-            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            # Marc: top and centre. Vertical TOP matters more than it sounds — with a wrapped
+            # header the row is as tall as the worst label, so a centred one-line header
+            # floats in the middle of a four-line row and no two headers share a baseline.
+            cell.alignment = Alignment(vertical="top", horizontal="center", wrap_text=True)
 
         links = sheet.hyperlinks(site_host, **link_scope) if site_host else {}
         for offset, (_, record) in enumerate(df.iterrows()):
             for index, field in enumerate(sheet.fields, start=1):
                 builder = links.get(field)
+                if field in sheet.centred:
+                    cell_alignment = CENTRED
+                else:
+                    cell_alignment = None
                 if field in sheet.url_value_fields:
-                    # The column IS the url. With no origin resolved it is simply blank,
-                    # which is the honest rendering of "nobody told us where the site is".
-                    value = _clean(builder(record)) if builder else None
+                    # A WORD, not the url, with the url behind it (Marc, round 3). With no
+                    # origin resolved the cell is blank rather than a label that goes
+                    # nowhere — a link-shaped thing that does nothing is worse than absence.
+                    value = URL_CELL_LABEL if (builder and builder(record)) else None
                 else:
                     value = _clean(sheet.value_for(field, record))
                 cell = tab.cell(row_first_data + offset, index, value)
@@ -1360,6 +1435,14 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                     if target:
                         cell.hyperlink = target
                         cell.style = "Hyperlink"
+                if cell_alignment is not None:
+                    cell.alignment = cell_alignment
+                if field in sheet.open_mark_fields and value in OPEN_MARKS:
+                    # The open marks carry their own colour, so "did not happen" is legible
+                    # at a glance rather than only on close inspection of the shape.
+                    cell.font = Font(color=OPEN_MARK_COLOUR, size=MARK_FONT_SIZE)
+                elif field in sheet.display and field in sheet.centred:
+                    cell.font = Font(size=MARK_FONT_SIZE)
 
         last_row = row_first_data + len(df) - 1
         last_column = get_column_letter(len(sheet.columns))
@@ -1422,7 +1505,9 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                     rendered = len(str(value))
                 longest = max(longest, rendered)
             ceiling = 60 if field.endswith("description") or field == "attribution" else 28
-            width = min(max(longest + 2, MIN_COLUMN_WIDTH), ceiling)
+            longest_word = max((len(w) for w in str(label).split()), default=0)
+            floor = max(MIN_COLUMN_WIDTH, min(longest_word, HEADER_WORD_CAP))
+            width = min(max(longest + 2, floor), ceiling)
             widths[label] = width
             tab.column_dimensions[letter].width = width
             span = f"{letter}{row_first_data}:{letter}{last_row}"
@@ -1480,7 +1565,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
     holds, which model version produced any predicted column, and — the part that matters
     most — what is NOT here and why.
     """
-    from openpyxl.styles import Font
+    from openpyxl.styles import Alignment, Font
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
 
@@ -1526,8 +1611,25 @@ def _write_index(book, season, week, season_type, conference, division, generate
     row += 1
     inventory_header = row - 1
     for entry in index_rows:
-        tab.cell(row, 1, entry.name)
-        tab.cell(row, 2, entry.view)
+        # THE INDEX IS A WAY BACK IN, not just a manifest (Marc, round 3).
+        #
+        # The sheet name links to the page it came from, CARRYING THE SAME FILTERS the file
+        # was built with — so someone reading the workbook in November lands on the week it
+        # covers rather than on this week. The serving view links to its own entry in the
+        # data dictionary, using the site's existing `?table=` convention rather than a
+        # second spelling of it.
+        name_cell = tab.cell(row, 1, entry.name)
+        view_cell = tab.cell(row, 2, entry.view)
+        if site_host:
+            page = PAGE_FOR_SHEET.get(entry.name)
+            if page:
+                carried = _scoped_query(season=season, week=week, season_type=season_type,
+                                        conference=conference, division=division)
+                name_cell.hyperlink = f"{site_host}/{page}?{carried}" if carried \
+                    else f"{site_host}/{page}"
+                name_cell.style = "Hyperlink"
+            view_cell.hyperlink = f"{site_host}/dictionary?table={entry.view}"
+            view_cell.style = "Hyperlink"
         tab.cell(row, 3, entry.rows).number_format = "#,##0"
         tab.cell(row, 4, entry.rows_in_scope).number_format = "#,##0"
         tab.cell(row, 5, entry.note)
@@ -1612,7 +1714,13 @@ def _write_index(book, season, week, season_type, conference, division, generate
         row += 1
         for column, mark, meaning in MARK_LEGEND:
             tab.cell(row, 1, column)
-            tab.cell(row, 2, mark).font = Font(bold=True)
+            glyph = tab.cell(row, 2, mark)
+            # The legend's glyph must be the SAME SIZE AND COLOUR as the one in the sheet, or
+            # it is a picture of a different mark. 12pt because at 11 the difference between
+            # ○ and ● is a couple of pixels of ink.
+            glyph.font = Font(bold=True, size=MARK_FONT_SIZE,
+                              color=OPEN_MARK_COLOUR if mark in OPEN_MARKS else None)
+            glyph.alignment = Alignment(horizontal="center")
             tab.cell(row, 3, meaning)
             row += 1
         row += 1
