@@ -1,7 +1,23 @@
+-- ADDING A COLUMN TO AN INCREMENTAL MODEL IS A PRODUCTION-ONLY FAILURE.
+--
+-- `is_locked` was added to `fct_week_metric_distribution_bin` on 2026-09-04 and its
+-- incremental guard reads `prior.is_locked`. The table already on the droplet predated the
+-- column, so the very next scheduled run died with `column prior.is_locked does not exist` —
+-- forty minutes after a deploy where every check was green.
+--
+-- CI CANNOT CATCH THIS. It builds the project from empty every time, so the incremental
+-- branch never meets a table with an older shape; the first run that does is the scheduled
+-- one, in production.
+--
+-- `append_new_columns`, NOT `sync_all_columns`. Both prevent the failure and only one is safe
+-- on a table whose point is durable history: sync also DROPS columns the model stops
+-- selecting, which silently deletes the history in them. Adding is recoverable; dropping is
+-- not.
 {{ config(
     materialized='incremental',
     unique_key='week_metric_distribution_sk',
-    incremental_strategy='delete+insert'
+    incremental_strategy='delete+insert',
+    on_schema_change='append_new_columns'
 ) }}
 
 -- THE SHAPE OF ONE WEEK'S MARKET, AS OF ONE DAY. One row per

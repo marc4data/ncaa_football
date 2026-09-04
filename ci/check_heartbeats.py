@@ -55,17 +55,27 @@ def read_ages(host: str) -> dict:
         raise RuntimeError(
             f"could not read heartbeats from {host} (exit {result.returncode}): "
             f"{result.stderr.strip()[:400]}")
-    ages = {}
+    ages, failures = {}, {}
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line or "|" not in line:
             continue
-        name, _, age = line.partition("|")
+        head, _, rest = line.partition("|")
+        # `failed|<dag>.<task>|<seconds ago>` — a different shape from a heartbeat line, and
+        # deliberately so: a monitor running against an older forced command sees a name it
+        # has no budget for and says so, rather than mis-reading a failure as a cadence.
+        if head.strip() == "failed":
+            task, _, age = rest.partition("|")
+            try:
+                failures[task.strip()] = int(age)
+            except ValueError:
+                continue
+            continue
         try:
-            ages[name.strip()] = int(age)
+            ages[head.strip()] = int(rest)
         except ValueError:
             continue
-    return ages
+    return ages, failures
 
 
 def describe(seconds: int) -> str:
@@ -80,7 +90,7 @@ def main(argv=None) -> int:
     host = (argv or sys.argv[1:] or ["cfdb_monitor@localhost"])[0]
 
     try:
-        ages = read_ages(host)
+        ages, failures = read_ages(host)
     except Exception as error:                                           # noqa: BLE001
         # THE DROPLET BEING UNREACHABLE IS THE ALARM, not a reason to exit quietly.
         print(f"::error::the pipeline host is unreachable — {error}")
@@ -102,21 +112,39 @@ def main(argv=None) -> int:
     for line in missing:
         print(f"  MISSING {line}")
 
+    # A FAILED TASK IS KNOWABLE THE MOMENT IT HAPPENS; ABSENCE TAKES HOURS.
+    #
+    # On 2026-09-04 `dbt_test` began failing at 02:27. The scores heartbeat did not cross its
+    # five-hour budget until 05:07, and this watcher's own cadence — nominally two-hourly,
+    # measured at 3.1 to 6.8 hours — pushed detection past eleven hours. The pipeline had
+    # been publishing nothing since midnight and nothing said so.
+    #
+    # Reading failures directly turns that into one watcher run. It is reported as an ERROR
+    # rather than a note because a failed task in a gated pipeline is not a transient: the
+    # DAG has already exhausted its own retries by the time this sees it.
+    for task, age in sorted(failures.items()):
+        print(f"  FAILED  {task}: last failed {describe(age)} ago")
+
     unknown = sorted(set(ages) - set(CADENCES))
     if unknown:
         # Not a failure: a new DAG that beats before anyone adds it here is better than one
         # that does not beat at all. Worth saying so it gets a budget.
         print(f"\n  note: beating but unmonitored — {', '.join(unknown)}")
 
-    if stale or missing:
+    if stale or missing or failures:
         print()
         for line in stale + missing:
             print(f"::error::heartbeat absent — {line}")
-        print("::error::the pipeline has stopped emitting on at least one cadence. "
-              "Silence is not success.")
+        for task, age in sorted(failures.items()):
+            print(f"::error::task failed — {task}, {describe(age)} ago. A gated DAG has "
+                  f"exhausted its retries; anything downstream of it, including the publish, "
+                  f"did not run.")
+        if stale or missing:
+            print("::error::the pipeline has stopped emitting on at least one cadence. "
+                  "Silence is not success.")
         return 1
 
-    print(f"\nAll {len(ok)} cadences beating within budget.")
+    print(f"\nAll {len(ok)} cadences beating within budget, no failed tasks in the window.")
     return 0
 
 

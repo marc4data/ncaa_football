@@ -113,8 +113,10 @@ def test_failure_callback_reports_both_channels(tmp_path, monkeypatch):
                                         "exception": RuntimeError("boom")})
 
     # `triaged` is False with no ANTHROPIC_API_KEY set, which is also the assertion that
-    # the test suite never reaches the network.
-    assert result == {"logged": True, "triaged": False, "emailed": False}
+    # the test suite never reaches the network. `webhook` joined the report when the droplet
+    # turned out to have no working SMTP path at all — the callback now tries both and says
+    # which, if either, left the host.
+    assert result == {"logged": True, "triaged": False, "emailed": False, "webhook": False}
     assert "boom" in (tmp_path / "failures.jsonl").read_text()
 
 
@@ -217,3 +219,111 @@ def test_one_email_per_attempt_but_a_retry_still_alerts(tmp_path, monkeypatch):
     alerting.record_failure(first)
     assert alerting.already_alerted(event(2)) is True     # Airflow's second call
     assert alerting.already_alerted(event(3)) is False    # a real retry
+
+
+# === the droplet cannot send email, and pretending otherwise cost eight hours ==============
+
+def test_a_blocked_network_is_diagnosed_as_blocked_rather_than_misconfigured():
+    """ERRNO 101 IS NOT A SETTINGS PROBLEM.
+
+    Measured on the droplet 2026-09-04: SMTP ports 25, 465, 587 and 2525 are all unreachable
+    while 443 to GitHub and to CFBD is open. DigitalOcean blocks outbound SMTP by default.
+
+    Every failure that day logged "could not send failure email" and stopped there, which
+    reads like a transient and invites another look at the credentials. It cannot be fixed by
+    a credential or a port, and the message has to say so or the next person spends the
+    afternoon on App Passwords.
+    """
+    from errno import ENETUNREACH
+    note = alerting.diagnose(OSError(ENETUNREACH, "Network is unreachable"))
+    assert "blocks outbound SMTP" in note
+    assert "EMAIL CANNOT BE THE ALERT PATH" in note
+    assert alerting.WEBHOOK_URL in note, "it must name the path that does work"
+
+
+def test_the_webhook_is_the_path_that_works_and_never_raises(monkeypatch):
+    """443 is open and every SMTP port is not, so an HTTPS POST is the only alert this host
+    can send itself.
+
+    NEVER RAISES, for the reason `heartbeat.ping` does not: an alerting outage must not fail
+    the callback that is already reporting a failure.
+    """
+    monkeypatch.setenv(alerting.WEBHOOK_URL, "https://example.invalid/hook")
+
+    def explode(*_a, **_k):
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(alerting.urllib.request, "urlopen", explode)
+    assert alerting.send_webhook("subject", "body") is False
+
+
+def test_the_webhook_payload_suits_the_receivers_it_is_likely_to_meet(monkeypatch):
+    """`text` for Slack, `content` for Discord, both carrying the same string — so the
+    receiver can be swapped for whatever Marc picks without a code change."""
+    import json
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake(request, timeout=None):
+        captured["body"] = json.loads(request.data.decode())
+        captured["url"] = request.full_url
+        return FakeResponse()
+
+    monkeypatch.setenv(alerting.WEBHOOK_URL, "https://hooks.example/abc")
+    monkeypatch.setattr(alerting.urllib.request, "urlopen", fake)
+    assert alerting.send_webhook("[cfdb] FAILURE - dbt_test", "it broke") is True
+    assert captured["body"]["text"] == captured["body"]["content"]
+    assert "dbt_test" in captured["body"]["text"]
+    assert captured["body"]["source"] == "cfdb"
+
+
+def test_no_webhook_configured_is_not_an_error(monkeypatch):
+    """A box with no webhook is the state today. It must be quiet about it here and loud in
+    the callback, not the other way round."""
+    monkeypatch.delenv(alerting.WEBHOOK_URL, raising=False)
+    assert alerting.send_webhook("s", "b") is False
+
+
+def test_the_callback_says_so_when_nothing_left_the_host(tmp_path, monkeypatch, capsys):
+    """THE ASSUMPTION THAT COST EIGHT HOURS. "Alerting is configured" was true and useless:
+    the email path could not work and nothing said the alert had gone nowhere."""
+    monkeypatch.setattr(alerting, "ALERT_LOG", tmp_path / "failures.jsonl")
+    for key in (alerting.SMTP_HOST, alerting.SMTP_FROM, alerting.SMTP_TO,
+                alerting.WEBHOOK_URL):
+        monkeypatch.delenv(key, raising=False)
+
+    alerting.failure_callback({"task_instance": FakeTaskInstance(),
+                               "exception": RuntimeError("boom")})
+    printed = capsys.readouterr().out
+    assert "NOTHING LEFT THIS HOST" in printed
+    assert "GitHub heartbeat watcher" in printed, (
+        "it must name what detection now depends on, or the log is just an apology")
+
+
+def test_the_callback_actually_attempts_the_webhook(tmp_path, monkeypatch):
+    """CALLING IT IS THE HALF THAT MATTERS. Hardcoding the result to False broke no test,
+    because every assertion was about the printed summary rather than about the attempt —
+    and a webhook nobody calls is the same as no webhook, which is the state that cost eight
+    hours."""
+    monkeypatch.setattr(alerting, "ALERT_LOG", tmp_path / "failures.jsonl")
+    for key in (alerting.SMTP_HOST, alerting.SMTP_FROM, alerting.SMTP_TO):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(alerting.WEBHOOK_URL, "https://hooks.example/abc")
+
+    sent = {}
+    monkeypatch.setattr(alerting, "send_webhook",
+                        lambda subject, body: sent.update(subject=subject, body=body) or True)
+
+    result = alerting.failure_callback({"task_instance": FakeTaskInstance(),
+                                        "exception": RuntimeError("boom")})
+    assert result["webhook"] is True
+    assert "FAILURE" in sent["subject"], "the webhook gets the same subject the email would"
+    assert "boom" in sent["body"]
