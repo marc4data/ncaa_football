@@ -618,3 +618,92 @@ def test_the_win_column_is_frozen_immediately_after_points_for():
     sheet = scores.SCORES_SHEET
     order = [f for f, _ in sheet.columns]
     assert order[order.index("points_for") + 1] == "won"
+
+
+# --- the back button ---------------------------------------------------------------------
+
+class _CountingParams(dict):
+    """A st.query_params stand-in that counts what Streamlit would treat as a URL write.
+
+    Each one is a `history.pushState` in the frontend, so counting writes counts history
+    entries — which is the thing the user actually feels.
+    """
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.writes = 0
+
+    def __setitem__(self, key, value):
+        self.writes += 1
+        super().__setitem__(key, value)
+
+    def pop(self, key, default=None):
+        self.writes += 1
+        return super().pop(key, default)
+
+
+def test_re_affirming_a_parameter_does_not_add_a_history_entry(monkeypatch):
+    """⚠ THE DOUBLE BACK BUTTON. Marc: "when I click out to a link (Matchup, Team) I have to
+    hit the back button twice."
+
+    Streamlit handles a Python-side query-param write with
+
+        window.history.pushState({}, "", pathname + "?" + queryString)
+
+    — a PUSH, not a replace. So a page that writes back what the URL already says still adds
+    an entry, and Back returns to the same page with the same parameters, which reads as the
+    button being broken.
+
+    Measured before the fix: arriving at a matchup page wrote 2 parameters identical to the
+    ones in the URL it had just been given, and `filters.game_scope()` wrote 5 on EVERY
+    render of every scoped page. One click, several entries.
+    """
+    from lib import params
+    at_rest = {"season": "2025", "week": "2", "division": "fbs", "game_id": "401752817"}
+
+    # What matchup.py does on arrival.
+    qp = _CountingParams(at_rest)
+    monkeypatch.setattr(params.st, "query_params", qp)
+    params.set_params(game_id=401752817, season=2025)
+    assert qp.writes == 0, "the matchup page still pushes history for values already in it"
+
+    # What the filter bar does on every render of every scoped page.
+    qp = _CountingParams(at_rest)
+    monkeypatch.setattr(params.st, "query_params", qp)
+    params.set_params(season=2025, week=2, conference=None, division="fbs",
+                      season_type=None)
+    assert qp.writes == 0, "the filter bar still pushes history on an unchanged scope"
+
+
+def test_a_real_change_still_writes_exactly_once(monkeypatch):
+    """The filter must not become inert. A parameter that genuinely changes is navigation and
+    earns its history entry — one, not none and not several."""
+    from lib import params
+    qp = _CountingParams({"season": "2025", "week": "2", "division": "fbs"})
+    monkeypatch.setattr(params.st, "query_params", qp)
+
+    params.set_params(week=5)
+    assert qp.writes == 1 and qp["week"] == "5"
+
+    qp.writes = 0
+    params.set_params(division=None)
+    assert qp.writes == 1 and "division" not in qp
+
+    # Mixed: one change and two re-affirmations pays for the change only.
+    qp.writes = 0
+    params.set_params(season=2025, week=5, conference="SEC")
+    assert qp.writes == 1, "a re-affirmation rode along with the real change"
+    assert qp["conference"] == "SEC"
+
+
+def test_the_parameter_still_reaches_the_url_which_is_what_ac_g13_asks_for(monkeypatch):
+    """Comparing before writing must not weaken the rule it sits under. AC-G.13 wants the
+    parameter IN THE URL so a middle-click yields a working link — and it is, either because
+    it was already there or because this put it there. What changed is only that it stops
+    being announced twice."""
+    from lib import params
+    qp = _CountingParams({})
+    monkeypatch.setattr(params.st, "query_params", qp)
+    params.set_params(season=2025, team="auburn")
+    assert qp == {"season": "2025", "team": "auburn"}
+    assert qp.writes == 2, "a first write is a real one"
