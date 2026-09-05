@@ -31,7 +31,7 @@ def test_the_description_names_exactly_the_sheets_that_ship():
     for sheet in workbook.PENDING_SHEETS:
         assert sheet.name.lower() not in described, (
             f"{sheet.name} is described as shipping and does not")
-    assert described == "schedule and scores", described
+    assert described == "schedule, scores and data dictionary", described
 
 
 def test_no_sheet_name_is_hardcoded_into_the_pages_prose():
@@ -149,7 +149,7 @@ def test_the_page_body_runs_and_says_what_the_workbook_holds(monkeypatch):
 
     # Real row counts at the two real grains, so the caption about doubling is exercised
     # against numbers that actually double.
-    counts = {"Schedule": 83, "Scores": 166}
+    counts = {"Schedule": 83, "Scores": 166, "Data dictionary": 371}
 
     def fake_read(sheet, *_a, **_k):
         import pandas as pd
@@ -160,7 +160,7 @@ def test_the_page_body_runs_and_says_what_the_workbook_holds(monkeypatch):
     export.body(page=None)
 
     out = recorder.rendered
-    assert "schedule and scores" in out
+    assert "schedule, scores and data dictionary" in out
     assert "83 row(s)" in out and "166 row(s)" in out
     assert "srv_game_team" in out
     # The grain caption, because 83 beside 166 reads as a defect without it.

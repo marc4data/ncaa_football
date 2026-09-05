@@ -63,6 +63,23 @@ CHANGED_SELECTOR = "state:modified+,tag:production"
 
 SERVING_SCHEMA = "serving"
 
+# CATALOGUE MODELS, WHICH NO SELECTOR CAN REACH AND WHICH GO STALE IN SILENCE.
+#
+# Both read the live database catalogue — table and column COMMENTS, written by persist_docs
+# at the moment each model is built — and neither declares a ref on the models it describes,
+# because there is nothing to ref: the dependency is on other models' SIDE EFFECTS.
+#
+# ⚠ THAT MAKES THEM INVISIBLE TO `state:modified+`, AND THIS SCRIPT INTRODUCED THE PROBLEM.
+# The old deploy rebuilt `+tag:production`, which swept them up by accident. Selecting only
+# what changed does not, because nothing that changed is upstream of them — so every deploy
+# after R-273 left the dictionary describing the layer as it stood BEFORE the deploy.
+# Measured on 2026-09-05: srv_game_team had 223 columns and the dictionary knew 203.
+#
+# The weekly DAG already solves this with a second pass for exactly the same reason
+# (`dbt_catalogue`, ahead of dbt_test). This is that pass, in the other place serving models
+# get built. Two small tables; the cost is a couple of seconds.
+CATALOGUE_MODELS = ("srv_data_dictionary", "srv_system_health")
+
 
 def previous_manifest() -> Optional[Path]:
     """The last successfully-deployed manifest, or None if there is not one to compare to."""
@@ -117,6 +134,23 @@ def models_built(run_results: Path, manifest: Path) -> List[str]:
     return sorted(set(n for n in built if n))
 
 
+def _built_anything() -> bool:
+    """Whether the run that just finished created anything at all.
+
+    Read from run_results rather than from the selector, for the same reason the publish is:
+    the selector says what was asked for.
+    """
+    results = TARGET_DIR / "run_results.json"
+    if not results.is_file():
+        return False
+    try:
+        payload = json.loads(results.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return False
+    return any(entry.get("status") == "success"
+               for entry in payload.get("results", []))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--full", action="store_true",
@@ -164,6 +198,27 @@ def main(argv=None) -> int:
             return 1
 
     tables = models_built(run_results, manifest)
+
+    # SECOND PASS, AFTER READING THE FIRST RUN'S RESULTS AND NOT BEFORE.
+    #
+    # ⚠ `dbt run` OVERWRITES run_results.json, so a catalogue pass placed above this line
+    # would replace the record of what the main run built — and the publish, which reads that
+    # file precisely because the selector cannot be trusted, would then ship the two catalogue
+    # tables and silently omit the model the deploy was for.
+    #
+    # Only when something was actually built: a deploy that changed no model has nothing new
+    # to catalogue, and rebuilding anyway would make "nothing to do" cost two table writes.
+    if tables or _built_anything():
+        print(f"  refreshing the catalogue: {', '.join(CATALOGUE_MODELS)}")
+        catalogue = run_dbt(" ".join(CATALOGUE_MODELS), None)
+        if catalogue.returncode != 0:
+            print("\n".join((catalogue.stdout or "").strip().splitlines()[-3:]))
+            print("  ::error:: the catalogue pass failed; the dictionary would be stale")
+            return 1
+        # Its own results, read from the file it just rewrote, and UNIONED with the first
+        # run's rather than replacing them.
+        tables = sorted(set(tables) | set(models_built(run_results, manifest)))
+
     if not tables:
         print("  nothing in the serving layer changed; no publish needed")
     else:

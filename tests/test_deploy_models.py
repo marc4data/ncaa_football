@@ -225,3 +225,92 @@ def test_a_failed_publish_does_not_mark_the_change_deployed(tmp_path, monkeypatc
     with pytest.raises(RuntimeError):
         dm.main([])
     assert not (tmp_path / "deployed" / "manifest.json").exists()
+
+
+def test_the_catalogue_pass_does_not_eat_the_first_runs_results(tmp_path, monkeypatch):
+    """⚠ THE ORDERING BUG THIS ALMOST SHIPPED.
+
+    `dbt run` overwrites run_results.json. A catalogue pass placed before the publish reads
+    that file would replace the record of what the MAIN run built — and the publish, which
+    reads it precisely because the selector cannot be trusted, would ship the two catalogue
+    tables and silently omit the model the deploy was for.
+
+    The failure is invisible from the outside: the deploy reports success, publishes two
+    tables, and the one that changed stays stale in serving.
+    """
+    monkeypatch.setattr(dm, "TARGET_DIR", tmp_path)
+    monkeypatch.setattr(dm, "DEPLOYED_STATE", tmp_path / "deployed")
+    monkeypatch.setattr(dm, "previous_manifest", lambda: None)
+
+    nodes = {
+        "model.c.srv_game_team": {"resource_type": "model", "schema": "serving",
+                                  "name": "srv_game_team"},
+        "model.c.srv_data_dictionary": {"resource_type": "model", "schema": "serving",
+                                        "name": "srv_data_dictionary"},
+        "model.c.srv_system_health": {"resource_type": "model", "schema": "serving",
+                                      "name": "srv_system_health"},
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps({"nodes": nodes}))
+
+    class _Done:
+        returncode, stdout, stderr = 0, "Done. PASS=1", ""
+
+    calls = []
+
+    def fake_run(selector, _state):
+        calls.append(selector)
+        built = ("srv_data_dictionary", "srv_system_health") if len(calls) > 1 \
+            else ("srv_game_team",)
+        (tmp_path / "run_results.json").write_text(json.dumps({"results": [
+            {"unique_id": f"model.c.{name}", "status": "success"} for name in built]}))
+        (tmp_path / "manifest.json").write_text(json.dumps({"nodes": nodes}))
+        return _Done()
+
+    monkeypatch.setattr(dm, "run_dbt", fake_run)
+
+    published = []
+    import src.publish_marts as pm
+    monkeypatch.setattr(pm, "publish_schema", lambda tables, _schema: published.extend(tables))
+    monkeypatch.setattr(pm, "DEFAULT_SERVING",
+                        ["srv_game_team", "srv_data_dictionary", "srv_system_health"])
+
+    assert dm.main([]) == 0
+    assert len(calls) == 2, "the catalogue pass did not run"
+    assert "srv_game_team" in published, (
+        "the catalogue pass ate the first run's results — the changed model was not shipped")
+    assert "srv_data_dictionary" in published, "the refreshed dictionary was not shipped"
+
+
+def test_a_deploy_that_built_nothing_skips_the_catalogue_pass(tmp_path, monkeypatch):
+    """Two table writes on every no-op deploy is a cost with nothing behind it."""
+    monkeypatch.setattr(dm, "TARGET_DIR", tmp_path)
+    monkeypatch.setattr(dm, "DEPLOYED_STATE", tmp_path / "deployed")
+    monkeypatch.setattr(dm, "previous_manifest", lambda: None)
+    (tmp_path / "manifest.json").write_text(json.dumps({"nodes": {}}))
+
+    class _Done:
+        returncode, stdout, stderr = 0, "Nothing to do", ""
+
+    calls = []
+
+    def fake_run(selector, _state):
+        calls.append(selector)
+        (tmp_path / "run_results.json").write_text(json.dumps({"results": []}))
+        (tmp_path / "manifest.json").write_text(json.dumps({"nodes": {}}))
+        return _Done()
+
+    monkeypatch.setattr(dm, "run_dbt", fake_run)
+    assert dm.main([]) == 0
+    assert calls == [dm.FULL_SELECTOR], calls
+
+
+def test_the_catalogue_models_are_the_two_no_selector_can_reach():
+    """Both read the live catalogue — table and column COMMENTS — and declare no ref on the
+    models they describe, because the dependency is on other models' SIDE EFFECTS. That makes
+    them invisible to `state:modified+`, which is what this script selects with."""
+    assert set(dm.CATALOGUE_MODELS) == {"srv_data_dictionary", "srv_system_health"}
+    dag = (Path(__file__).resolve().parents[1] / "dags" / "weekly_refresh_dag.py").read_text()
+    for model in dm.CATALOGUE_MODELS:
+        assert model in dag, (
+            f"{model} is not in the weekly DAG's second pass — the two places serving models "
+            f"get built disagree about what needs cataloguing")

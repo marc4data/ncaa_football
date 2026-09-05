@@ -2732,6 +2732,41 @@ models:
           borrow dim_model_version's disclaimer, which would imply predictions that are not
           here. AC-G.41 is satisfied by the column existing and being accurate, not by it
           naming a model.
+      - name: pregame_elo
+        description: >
+          This team's Elo rating going INTO the game, from its own side — the home/away pair
+          on fct_game pivoted by `is_home`. `pregame`, not `elo_before`: stg_games, fct_game
+          and srv_game all already carry the word, and a second name for one concept is the
+          R-087 defect. It is also what removes the off-by-one worry entirely, because a
+          field that states which side of the event it falls on needs no investigation.
+          Null for a team CFBD does not rate — every FBS row in 2025 has one and no FCS row
+          does, so a blank means "not rated" rather than "missing".
+      - name: postgame_elo
+        description: >
+          The rating leaving the game. SAFE ON A RESULTS PAGE ONLY: Scores filters to
+          completed games (R-278), which makes this a result in the same family as the final
+          score rather than a forecast contaminated by the outcome. The two interlock — if
+          that filter is ever relaxed, this column has to be reconsidered.
+      - name: opponent_pregame_elo
+        description: The other side's rating going in, by the same pivot.
+      - name: opponent_postgame_elo
+        description: The other side's rating coming out.
+      - name: elo_delta
+        description: >
+          `postgame_elo - pregame_elo` — what this game did to the team's standing. Null-safe
+          by construction: an unrated team has no delta, and 0 would claim the rating did not
+          move.
+          A ZERO IS USUALLY NOT LUCK. Measured over 2025: all 125 games against an unrated
+          opponent have a delta of exactly 0, against 18 of 1,524 rated matchups. CFBD's Elo
+          does not move for a game the other side is not rated for.
+      - name: record_before_display
+        description: >
+          The team's W-L record LEADING INTO this game, from fct_team_record_week, joined on
+          all four of (season, season_type, week, team_id). The fourth key is the trap:
+          postseason week numbers restart, so joining on three silently matches a bowl game
+          to a September row. `_before` rather than a bare `record` because on a game x team
+          row the two readings differ by exactly one game — this one — and a reader would
+          never spot which they were looking at.
 
   # ---------------------------------------------------------------------------------------
   - name: srv_game
@@ -3275,3 +3310,59 @@ models:
       - name: as_of_ts
         description: >
           AC-G.35. Last load of the `game` domain, rendered instead of now().
+      - name: total_at_close
+        description: >
+          The over/under as it stood at kickoff, from fct_game_market. Paired with
+          spread_at_close; the two are locked on the same rule — the closing number once it
+          exists, the live one before that.
+      - name: total_at_close_provider
+        description: Which book that closing total came from.
+      - name: total_at_close_basis
+        description: >
+          How the closing total was obtained: `observed_before_kickoff` is a snapshot cfdb
+          took, `as_recorded_by_cfbd` is a number reported afterwards. Not the same claim —
+          cfdb began sampling on 15 August 2026, so earlier games carry the second.
+      - name: market_implied_home_points
+        description: >
+          `(total - spread) / 2` — what the market's own two numbers imply the home team
+          scores. `market_implied_`, not `expected_`: the prefix names the PROVENANCE, and
+          these are arithmetic on published numbers, so they carry CFBD attribution and NOT
+          the model disclaimer. The prefix is a licence boundary wearing a naming convention.
+      - name: market_implied_away_points
+        description: >
+          `(total + spread) / 2`. The sign does the work — the spread is home-perspective, so
+          no branch and no "who is favoured" lookup. Verified on 1,930 games: the pair sums
+          to the total on every row.
+      - name: market_implied_favorite_points
+        description: The larger of the implied pair, which is `(total + abs(spread)) / 2`.
+      - name: market_implied_underdog_points
+        description: >
+          The smaller of the pair. A NEGATIVE VALUE IS IMPOSSIBLE and would mean
+          `abs(spread) > total` — its first appearance is bad line data, and a dbt test
+          exists for exactly that because it would be invisible in an aggregate.
+      - name: upset_level
+        description: >
+          How large an upset the result was, by margin against the line: `none`, `upset`,
+          `big`, `blowout`. The thresholds live in one place and the workbook's legend is
+          phrased from them, so the page, the file and the definition cannot drift.
+      - name: upset_margin_big
+        description: The margin at which an upset becomes `big`. Carried as a column so the
+          legend states the criterion rather than restating the label.
+      - name: upset_margin_blowout
+        description: The margin at which an upset becomes `blowout`.
+      - name: winner_covered_close
+        description: >
+          Whether the team that WON also covered the closing spread: `yes` / `no` / `push`.
+          A verdict about the winner, which is why srv_game_team answers the same question
+          per TEAM with `covered_final` instead of carrying this one down a grain.
+      - name: over_met
+        description: >
+          Whether the total went over, under or pushed against the closing over/under.
+          `pending` before the game is played, null where no total was recorded.
+      - name: home_team_record_after_display
+        description: >
+          The home team's W-L record INCLUDING this game. Its sibling
+          `home_team_record_display` is the record LEADING INTO it; the two differ by exactly
+          one game and the suffix is what keeps a reader from guessing which they have.
+      - name: away_team_record_after_display
+        description: As home_team_record_after_display, for the away side.

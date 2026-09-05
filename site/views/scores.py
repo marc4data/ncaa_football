@@ -307,6 +307,8 @@ def _kind(field: str, series) -> tuple:
     # minutes) and was false of numbers, which take this path instead.
     if workbook.is_plain_integer(field):
         return "plain", 0          # a label that happens to be numeric: 2025, 401752817
+    if field in workbook.RATING_FIELDS:
+        return "num", 0            # a magnitude you compare: 1,543
     if field in SCORES_SHEET.integer_fields:
         return "num", 0            # a quantity you might total: 1,234
     if field in SCORES_SHEET.site_precision:

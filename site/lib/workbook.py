@@ -585,6 +585,86 @@ def _won(record):
     return {"W": "Yes", "L": "No", "T": "Tie"}.get(str(value).upper())
 
 
+# COLUMNS THE WORKBOOK COMPUTES, WHICH NO CATALOGUE CAN KNOW ABOUT (R-291).
+#
+# The dictionary is generated from the database, and six of the columns the file PRINTS are
+# not in it: they are derived by the export or computed in its query. A reader sees them,
+# looks them up, and finds nothing — the same gap the Header column closes, arriving from the
+# other side.
+#
+# So they get rows of their own, marked `derived` rather than `authored`, because the
+# provenance is genuinely different: these are defined here, in this module, and not by a dbt
+# description. Anything printed with no definition anywhere is what the coverage test forbids.
+DERIVED_COLUMN_DEFINITIONS = {
+    ("srv_game", "status"): (
+        "text",
+        "Computed by the export: Final, In progress, or the kickoff time. Derived from "
+        "`is_completed` and `start_date_et`, not stored."),
+    ("srv_game", "matchup_url"): (
+        "text",
+        "Built by the export: a link to this game's matchup page on the site, carrying the "
+        "filters the workbook was generated with."),
+    ("srv_game_team", "matchup_url"): (
+        "text", "As srv_game.matchup_url."),
+    ("srv_game_team", "game_no"): (
+        "integer",
+        "Computed in the export's query: a dense rank over the sheet's own sort, so a game's "
+        "two rows share a number and the numbering is gapless. It is what the row banding "
+        "reads, and what makes the pairing recoverable after the reader re-sorts the table."),
+    ("srv_game_team", "won"): (
+        "text",
+        "Derived by the export from `result`: Yes / No / Tie. Read from the view's own "
+        "verdict rather than by comparing the two scores, which disagrees on ties."),
+    ("srv_game_team", "possession_minutes"): (
+        "numeric",
+        "Derived by the export: `possession_seconds` / 60. A game's two rows should total "
+        "60.00, which gives every game its own arithmetic check — about 4% do not, which is "
+        "CFBD's source data rather than the arithmetic."),
+}
+
+
+def _with_derived_columns(df):
+    """Append a row per computed column, so the dictionary covers the FILE.
+
+    Appended rather than unioned in SQL for the obvious reason: there is nothing in the
+    database to union. Sorted back into table/column order so the sheet still reads as one
+    list rather than a catalogue with an appendix.
+    """
+    if df is None or df.empty:
+        return df
+    known = set(zip(df["table_name"], df["column_name"]))
+    extra = [{"table_name": table, "column_name": column,
+              "data_type": data_type, "is_nullable": "YES",
+              "description_status": "derived", "column_description": definition,
+              "ordinal_position": 10_000,
+              "rows_in_scope": df["rows_in_scope"].iloc[0]
+              if "rows_in_scope" in df.columns else len(df)}
+             for (table, column), (data_type, definition)
+             in DERIVED_COLUMN_DEFINITIONS.items()
+             if (table, column) not in known and table in dictionary_tables()]
+    if not extra:
+        return df
+    out = pd.concat([df, pd.DataFrame(extra)], ignore_index=True)
+    out["rows_in_scope"] = len(out)
+    return out.sort_values(["table_name", "ordinal_position", "column_name"],
+                           kind="mergesort").reset_index(drop=True)
+
+
+def _sheet_header_for(record):
+    """The header THIS WORKBOOK prints for a column, or blank where no sheet prints it.
+
+    The join the dictionary was missing. Without it the sheet documents `points_for` while
+    the file it ships beside is headed `Pts for`, and a reader searching for what they can
+    see finds nothing.
+
+    Blank rather than a dash where a column is in the view but on no sheet: an em dash would
+    read as "this has no header", where the truth is "this workbook does not print it".
+    """
+    table = record.get("table_name")
+    column = record.get("column_name")
+    return SHEET_HEADERS.get((table, column), "")
+
+
 def _possession_minutes(record):
     """Time of possession in minutes, from the view's seconds (Marc, R-259).
 
@@ -642,7 +722,8 @@ class Sheet:
                  integer_fields: frozenset = frozenset(),
                  site_precision: frozenset = frozenset(),
                  decimals: Optional[int] = None,
-                 band_field: Optional[str] = None):
+                 band_field: Optional[str] = None,
+                 augment: Optional[Callable] = None):
         self.name, self.view = name, view
         # Columns the sheet COMPUTES rather than selects — a weekday name, a status word, a
         # URL. They are real columns to the reader and to Excel; they simply have no
@@ -688,6 +769,9 @@ class Sheet:
         # The column whose PARITY bands the rows. A value, never a row position — see
         # SCORES_BAND_FIELD for why the position-based version silently lies after a sort.
         self.band_field = band_field
+        # A frame transform applied after the read. One user: the dictionary, which has to
+        # add rows for columns the database does not contain.
+        self.augment = augment
         # Holes resolved once, here. The contract's LIMIT check (AC-G.39) matches
         # `limit <digits>`, so the cap has to reach the SQL as a number rather than a bind
         # parameter; the sort key is shared between the ORDER BY and `game_no`'s window and
@@ -1272,6 +1356,7 @@ _ALL_SHEETS = [
                is_neutral_site, venue_display, is_indoors, network_abbreviation,
                away_conference, home_conference, away_classification, home_classification,
                is_conference_game, is_fbs_game,
+               home_pregame_elo, away_pregame_elo,
                predicted_margin, home_win_probability, confidence_bucket,
                model_name, model_version_key, is_out_of_sample_week,
                game_id, as_of_ts, attribution,
@@ -1345,6 +1430,16 @@ _ALL_SHEETS = [
         ("home_classification", "Home division"),
         ("is_conference_game", "Conference game"),
         ("is_fbs_game", "FBS game"),
+        # R-290b. PREGAME ONLY, AND THE OMISSION IS THE POINT. Marc named pregame and was
+        # precise: Schedule includes UNPLAYED games — that is what it is for — and postgame
+        # Elo is null on exactly those rows. A column empty on the page's primary population
+        # is worse than absent, because it reads as a data defect rather than as a fact about
+        # when the number exists. Do not "complete the set".
+        #
+        # Game grain here, so it takes the home/away pair as srv_game already carries them,
+        # rather than the team-side pivot Scores uses.
+        ("home_pregame_elo", "Home pregame Elo"),
+        ("away_pregame_elo", "Away pregame Elo"),
         # --- the model --------------------------------------------------------------------
         ("predicted_margin", "Pred margin"),
         ("home_win_probability", "Home win prob"),
@@ -1651,26 +1746,44 @@ _ALL_SHEETS = [
              "predicted-probability decile. Filter on Segment. Conference rows count a "
              "game under both teams' conferences, so they exceed the overall row."),
 
+    # ======================================================================================
+    # THE DATA DICTIONARY (R-291). Marc: "add a data dictionary sheet in the Excel output.
+    # Table, field, data type, definition."
+    #
+    # ⚠ THE ONE THING THAT WOULD MAKE IT USELESS: the dictionary is generated from the
+    # DATABASE and the workbook is labelled for HUMANS. A reader looks at a column headed
+    # `Pts for`, turns to the dictionary, searches for "Pts for" — and it is not there,
+    # because the database calls it `points_for`. Nothing joins the two.
+    #
+    # `SCORES_COLUMNS` has been a list of (field, label) pairs the whole time. The join
+    # existed in the code and had never been used for this. The `Header` column below is it.
+    #
+    # SCOPED TO THE VIEWS THIS WORKBOOK ACTUALLY SHIPS, derived from `SHEETS` rather than
+    # listed — five sheets are still pending, and the moment one converts a hardcoded list
+    # would be wrong with nothing failing.
+    # ======================================================================================
     Sheet("Data dictionary", "srv_data_dictionary", """
-        select layer, table_name, column_name, data_type, is_nullable,
-               description_status, column_description,
+        select table_name, column_name, data_type, is_nullable,
+               description_status, column_description, ordinal_position,
                count(*) over () as rows_in_scope
         from srv_data_dictionary
-        where layer = 'serving'
+        where layer = 'serving' and table_name = any(:dictionary_tables)
         order by table_name, ordinal_position
         limit {ROW_CAP}
     """, [
-        ("layer", "Layer"), ("table_name", "Table"), ("column_name", "Column"),
-        ("data_type", "Type"), ("is_nullable", "Nullable"),
-        ("description_status", "Status"), ("column_description", "Description"),
+        ("table_name", "Table"), ("column_name", "Field"), ("header", "Header"),
+        ("data_type", "Data type"), ("is_nullable", "Nullable"),
+        ("description_status", "Status"), ("column_description", "Definition"),
     ], scoped=False,
+        derived={"header": _sheet_header_for},
+        augment=_with_derived_columns,
         note="AC-15.8 / AC-16.7: generated from the same view the site's Data Dictionary "
              "page reads, so the workbook and the page cannot disagree."),
 ]
 
 # What the workbook writes, and what it does not write YET. Split rather than filtered, so
 # adding a converted sheet is moving one name and cannot be done by accident.
-SHIPPED = ("Schedule", "Scores")
+SHIPPED = ("Schedule", "Scores", "Data dictionary")
 SHEETS = [s for s in _ALL_SHEETS if s.name in SHIPPED]
 PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name not in SHIPPED]
 PENDING_REASON = ("not converted to the new layout yet; it ships in a later pass rather "
@@ -1678,6 +1791,28 @@ PENDING_REASON = ("not converted to the new layout yet; it ships in a later pass
 
 # Which page each sheet came from, for the Index's link back. Held here rather than on Sheet
 # because it is a fact about the SITE, and the pending sheets need it the day they ship.
+# {(view, column) -> the header this workbook prints}. Built from the sheets themselves, so
+# a column that gains a sheet gains a header here with nothing else to edit — and a column on
+# no sheet is simply absent, which is what `_sheet_header_for` renders as blank.
+#
+# The DICTIONARY SHEET ITSELF IS EXCLUDED. It documents the serving layer; documenting its own
+# presentation of that layer is a mirror facing a mirror, and `srv_data_dictionary` is not one
+# of the views the workbook ships DATA from.
+SHEET_HEADERS = {
+    (sheet.view, field): label
+    for sheet in _ALL_SHEETS if sheet.view != "srv_data_dictionary"
+    for field, label in sheet.columns
+}
+
+# The serving views this workbook ships data from — what the dictionary sheet documents.
+# DERIVED FROM `SHEETS`, never listed: five sheets are pending, and the day one converts a
+# hardcoded list is wrong and nothing fails.
+
+
+def dictionary_tables() -> list:
+    return sorted({s.view for s in SHEETS if s.view != "srv_data_dictionary"})
+
+
 PAGE_FOR_SHEET = {
     "Schedule": "schedule", "Scores": "scores", "Odds": "odds", "Edges": "edges",
     "Standings": "standings", "Model performance": "performance",
@@ -1686,7 +1821,7 @@ PAGE_FOR_SHEET = {
 # The split is asserted at IMPORT, not in a test: moving a sheet between the two lists is a
 # one-word edit, and this is what makes "I shipped a sheet" and "I lost a sheet" different
 # events. Seven sheets exist; two ship.
-assert len(SHEETS) == 2 and len(PENDING_SHEETS) == 5
+assert len(SHEETS) == 3 and len(PENDING_SHEETS) == 4
 assert set(SHIPPED) <= {s.name for s in _ALL_SHEETS}
 
 # Conditional formatting goes on the columns a reader is scanning for outliers. Anything
@@ -2000,6 +2135,24 @@ PLAIN_INTEGER = {"season", "week", "tiebreak_rank", "game_id", "bin_index",
 # magnitude you compare, and that is the distinction the rule was reaching for.
 PLAIN_INTEGER_SUFFIXES = ("_rank", "_id")
 
+# RATINGS: whole, with a separator, on EVERY sheet (Marc: "Make ELO #,###").
+#
+# A third category, and it earns one. R-216 split numbers into "a quantity you might total"
+# and "a label that happens to be numeric", and an Elo is neither: you would never sum two
+# ratings, and it is not a name. What Marc's instruction settles is that the rule was really
+# reaching for IDENTIFIER vs MAGNITUDE — a season and a game id are names, a rating is a
+# magnitude you compare, and at four digits the group is what makes a column of them
+# scannable.
+#
+# Module level rather than a per-sheet set, because Schedule carries the pair too (R-290b)
+# and a rating formatted two ways across one workbook is the drift these rules exist to stop.
+RATING_FIELDS = frozenset({
+    "pregame_elo", "postgame_elo", "elo_delta",
+    "opponent_pregame_elo", "opponent_postgame_elo",
+    "home_pregame_elo", "away_pregame_elo",
+    "home_postgame_elo", "away_postgame_elo",
+})
+
 
 def is_plain_integer(field: str) -> bool:
     """A numeric label: no decimal point, no thousands separator."""
@@ -2025,6 +2178,8 @@ def number_format(field: str, decimals: Optional[int] = None,
     """
     if is_plain_integer(field):
         return "0"
+    if field in RATING_FIELDS:
+        return "#,##0"
     if field in integers:
         # A count, so it takes the separator R-216 reserves for quantities you might total.
         return "#,##0"
@@ -2147,7 +2302,10 @@ def read_sheet(sheet, season, week, season_type, conference, division="fbs",
               "season_type": season_type, "conference": conference, "division": division,
               # R-278. The workbook takes every row; the page passes True. Named here with
               # the extract's default so a sheet that never mentions it is unaffected.
-              "completed_only": completed_only}
+              "completed_only": completed_only,
+              # R-291. The dictionary documents the views this workbook ships, and asks for
+              # them by name rather than cataloguing all of serving.
+              "dictionary_tables": dictionary_tables()}
     wanted = set(re.findall(r":(\w+)", sheet.sql))
     try:
         df = query(" ".join(sheet.sql.split()),
@@ -2157,6 +2315,8 @@ def read_sheet(sheet, season, week, season_type, conference, division="fbs",
         if "does not exist" in message or "undefined table" in message:
             return SheetRead(None, f"{sheet.view} has not been built yet")
         raise
+    if sheet.augment is not None:
+        df = sheet.augment(df)
     if df.empty:
         return SheetRead(None, f"{sheet.view} returned no rows in this scope")
     # ONE QUERY ANSWERS BOTH QUESTIONS. `count(*) over ()` is a window function, and Postgres
