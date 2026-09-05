@@ -88,21 +88,31 @@ def _distribution_frame():
 
 @pytest.fixture(autouse=True)
 def no_database(monkeypatch):
-    """THE WEEK BAND MADE THESE TESTS REACH A DATABASE, AND THEY WENT ON PASSING.
+    """A RENDER TEST THAT REACHES A DATABASE IS A TEST THAT PASSES FOR THE WRONG REASON.
 
-    `_by_week` reads `srv_week_metric_distribution`, so the moment the band landed every card
-    test opened a connection — and every one stayed green, because a Postgres happened to be
-    running on this laptop. Stopping the container turned four of them into
-    `OperationalError`, which is how it was found.
+    The week band read `srv_week_metric_distribution` from inside `_by_week`, so the moment it
+    landed every card test opened a connection — and every one stayed green, because a
+    Postgres happened to be running on this laptop. Stopping the container turned four of them
+    into `OperationalError`, which is how it was found. That is exactly what
+    `conftest.no_ambient_credentials` prevents one level up: a test whose result depends on
+    ambient environment cannot be trusted at the moment it matters.
 
-    That is precisely what `conftest.no_ambient_credentials` exists to prevent one level up: a
-    test whose result depends on ambient environment cannot be trusted when it matters. So the
-    read is stubbed here, with realistic rows rather than an empty frame — an empty one would
-    exercise only the absent-week path and quietly stop testing the band at all.
+    The band is gone (R-274) and with it the read, so the old stub has nothing to stub. This
+    replaces it with the stronger thing: any query from a render path raises HERE, loudly,
+    instead of quietly succeeding on whatever database happens to be up. It costs nothing
+    while the page is pure rendering, and it is waiting if the band ever comes back.
     """
+    from lib import query as _query
+
+    def forbidden(*_a, **_k):
+        raise AssertionError(
+            "a Schedule render test reached the database — stub the read, or this test is "
+            "measuring whether Postgres is running")
+
+    monkeypatch.setattr(_query, "query", forbidden)
     from views import schedule as _schedule
-    monkeypatch.setattr(_schedule, "_distributions",
-                        lambda season, season_type: _distribution_frame())
+    if hasattr(_schedule, "query"):
+        monkeypatch.setattr(_schedule, "query", forbidden)
 
 
 @pytest.fixture
@@ -1163,113 +1173,32 @@ def test_no_user_facing_string_uses_british_spelling():
     assert not offenders, offenders
 
 
-def test_the_band_appears_once_per_week_not_once_per_day(counting_markdown):
-    """THE THING THE SPEC WARNS ABOUT FIRST. Both views grouped by day only, so bolting the
-    band onto that loop would have repeated it above Thursday, Friday and Saturday.
+def test_the_schedule_page_renders_no_distribution_band(counting_markdown):
+    """R-274. THE BAND IS WITHDRAWN FROM THE PAGE, AND THIS IS WHAT MAKES THAT DELIBERATE.
 
-    Two weeks, four days: two bands, four day headings.
+    Marc, the night before the season's biggest slate: "take down the histograms on the
+    schedule page... I'm not a fan of how they look right now and we've got eyes on the site."
+    Presentation only — the models, the serving views and `lib/distribution.py` all stay, and
+    `tests/test_distribution.py` still covers the renderer in full.
+
+    Seven tests asserted the band's behaviour and are gone with it; deleting them and leaving
+    nothing would mean the band could reappear by accident with no test noticing either way.
+    This one fails if any of that markup comes back, so the restore has to be a decision.
     """
-    from views import schedule
-    rows = pd.DataFrame(
-        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(3)]
-        + [_row(game_id=10 + i, week=1, game_date="2026-09-05") for i in range(2)]
-        + [_row(game_id=20 + i, week=2, game_date="2026-09-10") for i in range(4)]
-        + [_row(game_id=30 + i, week=2, game_date="2026-09-12") for i in range(1)])
-    schedule._stacked(rows, _Scope())
-    html = "\n".join(counting_markdown["html"])
-    # Two week bands plus one season-to-date, keyed on the LATEST week shown — week 2 here,
-    # so the reference runs through week 1.
-    assert html.count("cfdb-weekband-title") == 3, "two week bands plus season-to-date"
-    assert "through week 1" in html
-    assert html.count(">Week 1<") == 1 and html.count(">Week 2<") == 1
-    assert html.count("cfdb-daygroup") == 4
+    from views import schedule as _s
+    rows = pd.DataFrame([_row(game_id=i, week=w, game_date=d)
+                         for i, (w, d) in enumerate(
+                             [(1, "2026-09-03"), (1, "2026-09-05"), (2, "2026-09-12")])])
+    for renderer in (_s._stacked, _s._dense):
+        renderer(rows, _Scope())
+    html = "".join(counting_markdown["html"])
+    for marker in ("cfdb-weekband", "cfdb-dist-label", "distribution"):
+        assert marker not in html, f"{marker} is back on the Schedule page"
 
-
-def test_both_views_render_the_same_band(counting_markdown):
-    """`_by_week` is shared precisely so the dense and stacked views cannot drift about where
-    the band goes or what is in it."""
-    from views import schedule
-    rows = pd.DataFrame(
-        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(3)])
-    schedule._stacked(rows, _Scope())
-    stacked = [h for h in counting_markdown["html"] if "cfdb-weekband" in h]
-    counting_markdown["html"].clear()
-    schedule._dense(rows, _Scope())
-    dense = [h for h in counting_markdown["html"] if "cfdb-weekband" in h]
-    assert stacked and stacked == dense
-
-
-def test_the_band_carries_three_metrics_and_the_implied_pair_leads():
-    """The implied pair is the headline because it is the only thing here that MOVES with the
-    season — measured 20.3 points of gap in weeks 1-3 against 10.1 from week 5 on, replicating
-    across two seasons. The O/U is the control: it swings 1.4 points all year."""
-    from views import schedule
-    assert [m for m, _ in schedule.BAND_METRICS] == [
-        "market_implied_favorite_points", "market_implied_underdog_points", "total"]
-
-
-def test_the_implied_pair_shares_one_axis(counting_markdown):
-    """Drawn on the same scale, the horizontal gap between the two humps IS the spread, and
-    the pair converging through the season is visible without reading a number. Different
-    axes would make that gap meaningless."""
-    from views import schedule
-    schedule._stacked(pd.DataFrame(
-        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), _Scope())
-    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
-    # Both thumbnails draw ten bars over the same viewBox, so a value at the same fraction of
-    # the axis lands at the same pixel in both.
-    assert band.count("viewBox='0 0 120 28'") == 3
-
-
-def test_a_week_with_no_distribution_still_reserves_the_space(counting_markdown, monkeypatch):
-    """R-141 again: a band that grows a thumbnail when a week gets priced shifts everything
-    beside it mid-season."""
-    from views import schedule
-    monkeypatch.setattr(schedule, "_distributions", lambda s, t: pd.DataFrame())
-    schedule._stacked(pd.DataFrame(
-        [_row(game_id=i, week=7, game_date="2026-10-10") for i in range(2)]), _Scope())
-    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
-    assert band.count("cfdb-dist-empty") == 3
-    assert "width:120px" in band
-    assert ">Week 7<" in band, "the band itself still renders — only its pictures are absent"
-
-
-def test_season_to_date_is_absent_in_week_one_rather_than_zero(counting_markdown):
-    """There is nothing before week 1, so there is no row. An Empty state, not a zero — the
-    same rule a week nobody has priced gets."""
-    from views import schedule
-    schedule._stacked(pd.DataFrame(
-        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), _Scope())
-    html = "\n".join(counting_markdown["html"])
-    assert "Season to date" not in html
-
-    counting_markdown["html"].clear()
-    schedule._stacked(pd.DataFrame(
-        [_row(game_id=i, week=2, game_date="2026-09-10") for i in range(2)]), _Scope())
-    html = "\n".join(counting_markdown["html"])
-    assert "Season to date" in html and "through week 1" in html
-
-
-def test_the_band_admits_it_is_fbs_only_when_the_page_is_not(counting_markdown):
-    """With Division set to All the cards below include games these numbers exclude. Saying so
-    is cheaper than a reader adding them up and finding they disagree — and much cheaper than
-    a division dimension on the grain, which roughly triples the rows to fix a mismatch that
-    appears at one filter setting."""
-    from views import schedule
-
-    class AllDivisions(_Scope):
-        division = "all"
-
-    schedule._stacked(pd.DataFrame(
-        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), AllDivisions())
-    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
-    assert "FBS only" in band
-
-    counting_markdown["html"].clear()
-    schedule._stacked(pd.DataFrame(
-        [_row(game_id=i, week=1, game_date="2026-09-03") for i in range(2)]), _Scope())
-    band = next(h for h in counting_markdown["html"] if "cfdb-weekband" in h)
-    assert "FBS only" not in band, "at the FBS setting there is nothing to warn about"
+    # And the module no longer carries the plumbing, so a half-restore is visible too.
+    for gone in ("BAND_METRICS", "_distributions", "_week_band", "_season_to_date_band",
+                 "_band_strip"):
+        assert not hasattr(schedule, gone), gone
 
 
 # === R-227: the page was dropping games silently ==========================================
