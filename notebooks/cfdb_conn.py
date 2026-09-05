@@ -5,17 +5,32 @@ one place rather than being retyped (and drifting) per notebook.
 
 WHAT THIS CONNECTS TO
 ---------------------
-The `srv_*` views are the serving layer: denormalized, pre-joined, one row per grain, built
-by dbt into the `serving` schema. They exist in three places and this module reaches any of
-them by flipping one environment variable:
-
-    postgres    the local transform warehouse (docker compose up -d postgres) -- the
-                default, and the only one that needs no secrets
+    warehouse   the droplet's TRANSFORM warehouse -- the pipeline stack's Postgres at
+                /opt/cfdb-pipeline, where dbt builds. Everything that has been BUILT.
+                The default.
+    published   the droplet's SERVING Postgres -- /opt/cfdb, what the Streamlit site reads.
+                Everything that has been PUBLISHED, which is a subset and can lag.
     databricks  the transform warehouse after the M4 cutover, catalog `workspace`
-    serving     the droplet's serving Postgres, which the Streamlit site reads
 
-The serving droplet publishes no ports (see src/publish_marts.py), so `serving` only works
-from inside the compose network or through an SSH tunnel you opened yourself.
+⚠️  THE FIRST TWO ARE DIFFERENT DATABASES AND THEY DISAGREE ON PURPOSE. A model dbt built an
+hour ago is in `warehouse` and is not in `published` until a publish runs. Both answer every
+query without complaint, so the wrong one does not error -- it gives you a plausible number.
+Which is why check() prints the instance and the data's age on every connect.
+
+⚠️  CORRECTED 2026-09-05 (R-318). This module used to offer a backend called `remote`,
+documented in two places as "the droplet's serving Postgres", whose shipped address
+(CFDB_DROPLET_PG_ADDR = 172.19.0.2) was measured to be the WAREHOUSE container. The name
+said one instance, the comment said one instance, and the value was the other. A reader who
+trusted the comment reached the wrong database and got rows back. It is now two backends
+named for what they actually reach, and neither pins an address -- see tunnel_command().
+
+`published` is deliberately NOT called `serving`, because `serving` is also the name of a
+dbt SCHEMA that exists in BOTH instances. That collision is most of how the original
+confusion survived review.
+
+NEITHER IS LOCAL. There is no local Postgres; it was dropped on 2026-09-05 (R-296). Both
+backends reach the droplet through an SSH tunnel you open yourself -- the droplet publishes
+these to its own loopback and nothing further, so `tunnel_command()` prints the line.
 
 READ-ONLY BY CONSTRUCTION
 -------------------------
@@ -86,7 +101,10 @@ except ImportError:  # python-dotenv is in requirements.txt; keep the import sof
 # to maintain; the notebook-only knobs are the two CFDB_NOTEBOOK_* ones.
 # --------------------------------------------------------------------------------------
 
-BACKEND = os.getenv("CFDB_NOTEBOOK_BACKEND", "postgres").strip().lower()
+# Defaults to `warehouse`: it holds everything dbt has built, where `published` holds a
+# subset that can lag. The old default was `postgres` -> localhost:5432, a database that
+# no longer exists (R-296) and, before that, a stale copy that answered anyway.
+BACKEND = os.getenv("CFDB_NOTEBOOK_BACKEND", "warehouse").strip().lower()
 
 # The dbt layer schemas (dbt/dbt_project.yml). Serving is what a notebook normally wants;
 # marts and staging are here for when you need to see behind a serving view.
@@ -99,30 +117,36 @@ STAGING_SCHEMA = "staging"
 # on Postgres and expensive on Databricks. Raise it per call with limit=, or limit=None.
 DEFAULT_LIMIT = 5_000
 
+# BOTH ENDS OF BOTH TUNNELS ARE LOCAL ADDRESSES, which is why they are ordinary values and
+# not secrets: 127.0.0.1 is your own machine and the port is whichever one you forwarded.
+# Nothing here names the droplet -- deploy/README.md is explicit that the host is addressed
+# by environment variable and never by a literal, and tunnel_command() builds the ssh line
+# from those variables.
+#
+# NO ADDRESS IS PINNED ANY MORE. The retired CFDB_DROPLET_PG_ADDR stored the warehouse
+# container's Docker IP, which is reassigned whenever the stack is recreated -- after which
+# the tunnel opens successfully against nothing, or against whatever now holds it.
 _PG = {
-    "postgres": {
-        "host": os.getenv("PG_HOST", "localhost"),
-        "port": os.getenv("PG_PORT", "5432"),
+    "warehouse": {
+        "host": os.getenv("CFDB_WAREHOUSE_HOST", "127.0.0.1"),
+        "port": os.getenv("CFDB_WAREHOUSE_PORT", "15433"),
         "user": os.getenv("PG_USER", "cfdb"),
         "password": os.getenv("PG_PASSWORD", "cfdb"),
         "database": os.getenv("PG_DB", "cfdb"),
     },
-    # THE DROPLET'S SERVING POSTGRES, THROUGH AN SSH TUNNEL. The defaults below are the
-    # LOCAL end of that tunnel, which is why they are ordinary values and not secrets:
-    # 127.0.0.1 is your own machine, and the port is whichever one you forwarded.
-    #
-    # Nothing here names the droplet. deploy/README.md is explicit that the host is
-    # addressed by environment variable and never by a literal -- not because an IP is
-    # secret, but because a literal in a repo that may go public is a complete map with no
-    # upside. `tunnel_command()` builds the ssh line from those variables instead.
-    "remote": {
-        "host": os.getenv("CFDB_REMOTE_PG_HOST", "127.0.0.1"),
-        "port": os.getenv("CFDB_REMOTE_PG_PORT", "15432"),
-        "user": os.getenv("CFDB_REMOTE_PG_USER", "cfdb"),
-        "password": os.getenv("CFDB_REMOTE_PG_PASSWORD", "cfdb"),
-        "database": os.getenv("CFDB_REMOTE_PG_DB", "cfdb"),
+    "published": {
+        "host": os.getenv("CFDB_PUBLISHED_HOST", "127.0.0.1"),
+        "port": os.getenv("CFDB_PUBLISHED_PORT", "15434"),
+        "user": os.getenv("CFDB_READ_USER", "cfdb_read"),
+        "password": os.getenv("CFDB_READ_PASSWORD", ""),
+        "database": os.getenv("CFDB_PUBLISHED_DB", "cfdb"),
     },
 }
+
+# The droplet-side address each backend's tunnel terminates on. The serving stack binds its
+# Postgres to the droplet's loopback deliberately (deploy/docker-compose.yml, 127.0.0.1:5433);
+# docker-compose.yml now does the same for the warehouse on 5432.
+_DROPLET_SIDE = {"warehouse": "127.0.0.1:5432", "published": "127.0.0.1:5433"}
 
 _DATABRICKS = {
     "server_hostname": os.getenv("DATABRICKS_SERVER_HOSTNAME", ""),
@@ -137,9 +161,20 @@ class ConfigError(RuntimeError):
 
 
 def _backend() -> str:
-    if BACKEND not in ("postgres", "remote", "databricks"):
+    if BACKEND in ("postgres", "remote"):
+        # Named rather than silently remapped: `remote` reached the WAREHOUSE while calling
+        # itself serving, so a notebook that set it may have drawn a conclusion from the
+        # instance it did not mean. Saying so is the point (R-318).
+        was = {"postgres": "the LOCAL Postgres, dropped 2026-09-05 (R-296)",
+               "remote": "labelled 'serving' but resolving to the WAREHOUSE"}[BACKEND]
         raise ConfigError(
-            f"CFDB_NOTEBOOK_BACKEND={BACKEND!r} is not one of postgres, remote, databricks"
+            f"CFDB_NOTEBOOK_BACKEND={BACKEND!r} was retired on 2026-09-05 -- it meant {was}. "
+            f"Use 'warehouse' (what dbt built) or 'published' (what the site reads). If you "
+            f"had {BACKEND!r} set, 'warehouse' is the instance you were actually reaching."
+        )
+    if BACKEND not in ("warehouse", "published", "databricks"):
+        raise ConfigError(
+            f"CFDB_NOTEBOOK_BACKEND={BACKEND!r} is not one of warehouse, published, databricks"
         )
     return BACKEND
 
@@ -385,40 +420,52 @@ def peek(table: str, n: int = 5, schema: Optional[str] = None) -> pd.DataFrame:
         return q(f"select * from {t(table, schema)}", limit=n).head(n)
 
 
-def tunnel_command() -> str:
-    """The ssh line that opens the tunnel this notebook's `remote` backend reads through.
+def tunnel_command(backend: Optional[str] = None) -> str:
+    """The ssh line that opens the tunnel the active backend reads through.
 
-    Built from environment variables so no droplet address lives in a tracked file:
+    ⚠️  THIS IS WHERE R-318 LIVED. It read:
 
-        CFDB_DROPLET_HOST     root@<droplet>            the box
-        CFDB_DROPLET_PG_ADDR  172.19.0.2:5432           serving Postgres ON ITS DOCKER
-                                                        NETWORK -- it is not published to
-                                                        the droplet's host, which is why
-                                                        the forward targets a container IP
-                                                        rather than localhost
-        CFDB_REMOTE_PG_PORT   15432                     the local end
+            CFDB_DROPLET_PG_ADDR  172.19.0.2:5432   serving Postgres ON ITS DOCKER NETWORK
 
-    Put the first two in the repo-root .env once and this prints a runnable line forever.
+        and 172.19.0.2 was measured on 2026-09-05 to be cfdb-pipeline-warehouse-1 -- the
+        WAREHOUSE. The serving Postgres is 172.18.0.4. Two instances, one label, and the
+        wrong one answers without complaining.
+
+    Two things changed. The backends are named for the instance they reach, and the address
+    is no longer carried in .env at all: each tunnel terminates on the DROPLET'S OWN
+    LOOPBACK, which is a fixed address that does not move when a container is recreated.
+    A Docker-assigned IP was the wrong thing to pin -- it is reassigned whenever the stack
+    comes up, after which the tunnel opens successfully against nothing.
+
+        CFDB_DROPLET_HOST      root@<droplet>     the box; never a literal in a tracked file
+        CFDB_WAREHOUSE_PORT    15433              local end, warehouse
+        CFDB_PUBLISHED_PORT    15434              local end, published
+
+    The repo's scripts/warehouse_tunnel.sh opens the warehouse one for you and falls back to
+    resolving the container address if the droplet has not yet been redeployed with the
+    loopback bind.
     """
+    name = backend or _backend()
+    if name == "databricks":
+        raise ConfigError("the databricks backend needs no tunnel")
     host = os.getenv("CFDB_DROPLET_HOST", "root@<CFDB_DROPLET_HOST unset>")
-    remote = os.getenv("CFDB_DROPLET_PG_ADDR", "172.19.0.2:5432")
-    local_port = _PG["remote"]["port"]
-    return f"ssh -N -L {local_port}:{remote} {host}"
+    return f"ssh -N -L {_PG[name]['port']}:{_DROPLET_SIDE[name]} {host}"
 
 
 def _diagnose(exc: Exception) -> str:
     """Turn a connection failure into the thing you actually have to do about it."""
     text = str(exc).lower()
     name = _backend()
-    if name == "remote" and ("refused" in text or "timeout" in text or "timed out" in text):
+    if name in ("warehouse", "published") and (
+            "refused" in text or "timeout" in text or "timed out" in text):
         return (
-            "The tunnel does not appear to be up. Open it in another terminal and leave it "
-            f"running:\n\n    {tunnel_command()}\n\n"
+            f"The {name} tunnel does not appear to be up. Open it in another terminal and "
+            f"leave it running:\n\n    {tunnel_command()}\n\n"
             "It prints nothing when it works -- `-N` means no remote command, so a silent "
-            "terminal is the success case."
+            "terminal is the success case.\n\n"
+            "THERE IS NO LOCAL FALLBACK. The laptop Postgres was dropped on 2026-09-05 "
+            "(R-296); a tunnel is the only way to either instance."
         )
-    if name == "postgres" and "refused" in text:
-        return ("The local warehouse is not running:\n\n    docker compose up -d postgres")
     return ""
 
 
@@ -447,8 +494,13 @@ def freshness() -> pd.DataFrame:
 def check() -> None:
     """Print what this notebook is connected to, and prove it with a live query."""
     name = _backend()
+    # WHICH INSTANCE, SPELLED OUT. "backend: warehouse" is a word; this says what the word
+    # means, because the two Postgres backends answer every query and differ in their answers.
+    means = {"warehouse": "droplet TRANSFORM warehouse -- what dbt has BUILT",
+             "published": "droplet SERVING Postgres -- what has been PUBLISHED; a subset",
+             "databricks": "Databricks warehouse (M4)"}
     print(f"repo root : {REPO_ROOT}")
-    print(f"backend   : {name}")
+    print(f"backend   : {name}  ({means.get(name, '?')})")
     if name == "databricks":
         print(f"catalog   : {_DATABRICKS['catalog']}")
         print(f"host      : {_DATABRICKS['server_hostname'] or '(unset)'}")
