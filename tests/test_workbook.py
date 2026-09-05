@@ -479,25 +479,31 @@ def test_export_labels_agree_with_the_site(built):
                 mismatches.append((sheet.name, field, label, sorted(shown)))
     assert not mismatches, mismatches
 
-    # WHAT THIS TEST DID NOT CHECK, SAID OUT LOUD.
+    # WHAT THIS TEST DOES NOT CHECK, AND WHY THAT IS NOW THE GOOD ANSWER FOR SCORES.
     #
-    # The comparison is per (view, field), so a sheet whose view no page reads is skipped
-    # entirely — silently, and with a green tick. Scores is exactly that since R-255: 132
-    # columns from srv_game_team, which no page reads, so ZERO of its labels are checked
-    # here. That is not a defect in the sheet; there is genuinely nothing to agree with. It
-    # is a gap in coverage, and a gap nobody can see is the one that gets forgotten.
+    # The comparison scrapes literal `Col("field", "Label")` pairs out of each page, so a
+    # sheet whose labels are not declared that way is skipped — silently, with a green tick.
+    # Scores has been skipped since R-255, first because no page read srv_game_team at all.
     #
-    # So the sheets with no counterpart are enumerated. The day a page reads srv_game_team,
-    # this assertion fails and the sheet joins the comparison — which is the right time to
-    # notice, rather than the day the two names quietly diverge.
+    # It is still skipped and the reason has inverted. R-267 pointed the page at that view AND
+    # built its columns from `workbook.SCORES_COLUMNS` directly, so there are no literal pairs
+    # to scrape and the two label sets are IDENTICAL BY CONSTRUCTION rather than merely in
+    # agreement. Agreement can drift; one source cannot. So the assertion changes from "this
+    # gap is known" to "this gap is closed by there being one list", which is checked below.
     uncovered = {name for name, n in compared.items() if n == 0}
     assert uncovered == {"Scores"}, (
-        f"sheets compared against no page: {uncovered or 'none'} — expected exactly "
-        f"{{'Scores'}}, whose view srv_game_team no page reads")
-    # And Schedule really is compared — 13 of its 56 columns share a field name with the
-    # Schedule page today. A floor rather than the exact number, so a legitimate page change
-    # does not fail this, but a drop to nothing does.
-    assert compared["Schedule"] >= 10, compared
+        f"sheets compared against no page: {uncovered or 'none'}")
+
+    scores_source = (site / "views" / "scores.py").read_text()
+    assert "workbook.SCORES_COLUMNS" in scores_source, (
+        "the Scores page no longer takes its labels from the sheet — it is back to declaring "
+        "them, and nothing here compares the two")
+
+    # And Schedule really is compared. SEVEN of its 56 columns share a field name with a page
+    # reading srv_game; it was thirteen until R-267, because the old Scores page also declared
+    # srv_game columns and those counted toward the same pool. A floor rather than the exact
+    # number, so a legitimate page change does not fail this — but a drop to nothing does.
+    assert compared["Schedule"] >= 7, compared
 
 
 def test_every_declared_label_divergence_is_still_real():

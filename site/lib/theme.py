@@ -130,7 +130,47 @@ def inject() -> None:
 TABLE_CSS = """
 <style>
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
-    table-layout:fixed; }
+    table-layout:fixed;
+    /* The opaque ground a frozen column paints itself with. A TOKEN because it has to have a
+       value in both themes: a hardcoded #fff is a white stripe down a dark page, and a
+       TRANSPARENT sticky cell shows the scrolled content sliding underneath it, which is the
+       classic failure and reads as a rendering bug rather than a missing colour. */
+    --cfdb-sticky-bg:#ffffff; }
+
+/* R-269. HORIZONTAL SCROLLING, WHICH THE PERCENTAGE LAYOUT MADE IMPOSSIBLE.
+   `width:100%` plus a percentage colgroup cannot overflow — thirty-nine columns compress
+   until unreadable and there is nothing wider than the viewport to scroll. `max-content`
+   lets the colgroup's pixel widths set the table's width; `min-width:100%` keeps a narrow
+   table filling the page rather than shrinking to its content. Opt-in, because the other
+   seventeen callers of render() want neither. */
+.cfdb-scroll { overflow-x:auto; }
+.cfdb-table-wide { width:max-content; min-width:100%; }
+.cfdb-table th.cfdb-sticky, .cfdb-table td.cfdb-sticky {
+    position:sticky; background:var(--cfdb-sticky-bg); z-index:2; }
+/* The header's frozen cells sit above the body's, or a scrolled row paints over them at the
+   intersection. */
+.cfdb-table th.cfdb-sticky { z-index:3; }
+/* Where the frozen block ends. Without it the reader cannot tell which columns are pinned
+   and which merely happen to be at the left edge. A box-shadow rather than a border because
+   a border would change the column's width and push the sticky offsets out by a pixel each. */
+.cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #d7dae0; }
+/* The row hover is translucent, so it would let the scrolled content through on a frozen
+   cell. Opaque equivalents of the same tint, over each theme's own ground. */
+.cfdb-table tbody tr:hover td.cfdb-sticky { background:#f4f7fd; }
+/* R-267. Alternating RUNS of one game, so a game's two rows read as a unit. Shaded on the
+   row and repeated on its frozen cells, which are opaque and would otherwise stay white. */
+.cfdb-table tbody tr.cfdb-gameband > td { background:#f5f7f9; }
+.cfdb-table tbody tr.cfdb-gameband > td.cfdb-sticky { background:#f5f7f9; }
+/* R-270. Back to the compound default. Rendered only while a user sort is active, so it is
+   never a control that does nothing. */
+.cfdb-resetsort { display:inline-block; font-size:.8rem; font-weight:600; color:#1f6feb;
+  text-decoration:none; border:1px solid #d7dae0; border-radius:4px;
+  padding:.2rem .55rem; margin-bottom:.4rem; }
+.cfdb-resetsort:hover { text-decoration:underline; }
+.cfdb-resetsort-note { font-size:.75rem; opacity:.55; margin-left:.5rem; }
+/* R-271. The globe sits INSIDE a text link, so it needs the baseline nudge the icon-only
+   marks do not — without it the word rides high against the drawing. */
+.cfdb-icon-inline { width:.95em; height:.95em; vertical-align:-.13em; margin-right:.25em; }
 .cfdb-table td, .cfdb-table th { overflow:hidden; text-overflow:ellipsis; }
 .cfdb-table caption { caption-side:top; text-align:left; font-size:.8rem; opacity:.6;
   padding-bottom:.4rem; }
@@ -488,6 +528,13 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 @media (prefers-color-scheme: dark) {
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
+  /* R-269. The sticky ground, in the theme that would otherwise get a white stripe. */
+  .cfdb-table { --cfdb-sticky-bg:#0e1117; }
+  .cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #333a45; }
+  .cfdb-table tbody tr:hover td.cfdb-sticky { background:#161b24; }
+  .cfdb-table tbody tr.cfdb-gameband > td,
+  .cfdb-table tbody tr.cfdb-gameband > td.cfdb-sticky { background:#151a22; }
+  .cfdb-resetsort { color:#58a6ff; border-color:#333a45; }
   /* A 10%-black border on a #0e1117 background is invisible, so every card edge
      disappeared in dark mode and the grid read as one undivided block. */
   .cfdb-gamecard { border-color:#333a45; }

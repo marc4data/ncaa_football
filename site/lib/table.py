@@ -93,7 +93,7 @@ def apply_sort(df: pd.DataFrame, columns: List[Col],
                           kind="mergesort")
 
 
-def _header_cell(column: Col, sortable: bool) -> str:
+def _header_cell(column: Col, sortable: bool, freeze: str = "") -> str:
     """A header, and a sort toggle where the column has something to sort by."""
     # A synthetic column has no field to sort by — "Spread · model" is two numbers in one
     # cell, and the details glyph is not data. Those render as plain headers rather than
@@ -115,7 +115,7 @@ def _header_cell(column: Col, sortable: bool) -> str:
                                                             # since R-027 shipped.
                                                             "game", "weather",
                                                             "spread_and_model"):
-        return f"<th class='{column.css}'>{column.label}</th>"
+        return f"<th class='{column.css}{freeze}'>{column.label}</th>"
 
     current = params.get("sort")
     order = params.get("order") or "asc"
@@ -125,12 +125,17 @@ def _header_cell(column: Col, sortable: bool) -> str:
     arrow = ("▲" if order == "asc" else "▼") if is_active else "⇅"
     href = params.link_here(sort=column.field, order=next_order)
     active = " cfdb-sorted" if is_active else ""
-    return (f"<th class='{column.css}{active}'>"
+    return (f"<th class='{column.css}{active}{freeze}'>"
             f"<a class='cfdb-sort' href='{href}' target='_self'>{column.label}"
             f"<span class='cfdb-sort-arrow'>{arrow}</span></a></th>")
 
 
-def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
+PIXELS_PER_CHARACTER = 8.5
+MIN_COLUMN_PIXELS = 44
+
+
+def column_layout(df: pd.DataFrame, columns: List[Col],
+                  unit: str = "%") -> List[str]:
     """Column widths computed ONCE over the whole dataset, for reuse across every group.
 
     F2-06, raised five times across two passes and by frequency the number one item in the
@@ -217,13 +222,28 @@ def column_layout(df: pd.DataFrame, columns: List[Col]) -> List[str]:
         # column that reserves a marker holds a glyph plus its digits, and four characters
         # does not fit "▸30" once the padding is honest.
         weights.append(min(max(longest, 5), 34) + 3)
+    if unit == "px":
+        # PERCENTAGES CANNOT OVERFLOW, WHICH IS THE WHOLE PROBLEM (R-269).
+        #
+        # A percentage resolves against a container that is already constrained, so thirty-nine
+        # columns do not spill past the viewport — they compress until every cell is
+        # unreadable, and there is nothing to scroll because nothing is wider than the screen.
+        # The MEASUREMENT above is right and is kept; only the unit has to change.
+        #
+        # The weights are in characters-plus-padding, so one constant converts them. 8.5px is
+        # measured against `.cfdb-table`'s .9rem body text, and the floor keeps a two-character
+        # column from collapsing to nothing once it is no longer sharing out a fixed total.
+        return [f"{max(int(weight * PIXELS_PER_CHARACTER), MIN_COLUMN_PIXELS)}px"
+                for weight in weights]
     total = sum(weights) or 1
     return [f"{100 * weight / total:.2f}%" for weight in weights]
 
 
 def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
            link_builder: Optional[Callable] = None, max_rows: int = 300,
-           layout: Optional[List[str]] = None, sortable: bool = True) -> None:
+           layout: Optional[List[str]] = None, sortable: bool = True,
+           scroll: bool = False, sticky: int = 0,
+           row_class: Optional[Callable] = None) -> None:
     """An HTML table, because Streamlit's dataframe cannot hold a chip or a link.
 
     AC-G.47: the table carries header semantics and a caption naming its source view.
@@ -247,27 +267,62 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     colgroup = ("<colgroup>"
                 + "".join(f"<col style='width:{width}'>" for width in layout)
                 + "</colgroup>") if layout else ""
-    head = "".join(_header_cell(c, sortable) for c in columns)
+
+    # WHERE EACH FROZEN COLUMN HAS TO SIT, IN PIXELS (R-269).
+    #
+    # `position:sticky` cannot go on a <col> — the browser ignores it there — so it goes on
+    # every th and td of the frozen columns, and each needs its own `left` offset: the sum of
+    # the widths to its left. That is only computable when the layout is in px, which is the
+    # second reason percentages had to go.
+    #
+    # `sticky` is silently ignored without a px layout rather than half-applied. A sticky
+    # column with no left offset pins to 0 and stacks all of them on top of each other, which
+    # looks like a rendering bug and is very hard to read back to this line.
+    offsets, edge = {}, -1
+    if scroll and sticky and layout and all(w.endswith("px") for w in layout[:sticky]):
+        running = 0
+        for index in range(min(sticky, len(layout))):
+            offsets[index] = running
+            running += int(layout[index][:-2])
+        edge = min(sticky, len(layout)) - 1
+
+    def freeze(index: int) -> str:
+        if index not in offsets:
+            return ""
+        css = " cfdb-sticky" + (" cfdb-sticky-edge" if index == edge else "")
+        return f"{css}' style='left:{offsets[index]}px"
+
+    head = "".join(_header_cell(c, sortable, freeze(i))
+                   for i, c in enumerate(columns))
     body = []
     for _, row in df.head(max_rows).iterrows():
         row_href = link_builder(row) if link_builder else None
         cells = []
-        for column in columns:
+        for index, column in enumerate(columns):
             content = column.format(row)
             href = column.link(row) if column.link else row_href
             css = "cfdb-cell-link" + (" cfdb-cell-link-alt" if column.link else "")
             if href:
                 content = f"<a class='{css}' href='{href}' target='_self'>{content}</a>"
-            cells.append(f"<td class='{column.css}'>{content}</td>")
+            cells.append(f"<td class='{column.css}{freeze(index)}'>{content}</td>")
         joined = "".join(cells)
-        body.append(f"<tr class='cfdb-linked'>{joined}</tr>" if row_href
+        # An extra class per row, for a caller that bands on something only it can know —
+        # Scores shades alternating RUNS of one game, which is a property of the rendered
+        # order and not of the row.
+        extra = (row_class(row) or "") if row_class else ""
+        classes = " ".join(filter(None, ["cfdb-linked" if row_href else "", extra]))
+        body.append(f"<tr class='{classes}'>{joined}</tr>" if classes
                     else f"<tr>{joined}</tr>")
-    st.markdown(
-        "<table class='cfdb-table'>"
-        + (f"<caption>{caption}</caption>" if caption else "")
-        + colgroup
-        + f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>",
-        unsafe_allow_html=True)
+    table_css = "cfdb-table" + (" cfdb-table-wide" if scroll else "")
+    markup = ("<table class='" + table_css + "'>"
+              + (f"<caption>{caption}</caption>" if caption else "")
+              + colgroup
+              + f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>")
+    if scroll:
+        # The scroll container is a WRAPPER, not the table: `overflow-x` on the table itself
+        # does nothing, and putting it on an ancestor Streamlit owns is not ours to set.
+        markup = f"<div class='cfdb-scroll'>{markup}</div>"
+    st.markdown(markup, unsafe_allow_html=True)
     if len(df) > max_rows:
         st.caption(f"Showing {max_rows:,} of {len(df):,} rows.")
 
