@@ -791,45 +791,42 @@ class Sheet:
 # fact, and every one of them breaks if a filter ever splits a pair.
 # ==========================================================================================
 
-# THE FIVE CATEGORY BANDS, AND THE SHUFFLE THAT MADE EACH ONE CONTIGUOUS (R-258).
+# THE SEVEN CATEGORY BANDS. THE ORDER IS MARC'S FILE, AND THE FILE IS THE TEST FIXTURE.
 #
-# Marc: "We might need to do some more column shuffling to avoid bounding between those
-# categories." He was right, in exactly three places. Reading his CSV as given:
+# `tests/fixtures/cfdb_scores_column_order_v2.csv` — 144 rows of Position/Field/Category, from
+# the "Updated format request." sheet of his attachment. It SUPERSEDES the 131-field v1 list,
+# which predates the Market block. The structure below is generated from that file and the
+# test asserts the two match on order AND category, so the file is authoritative rather than
+# merely consulted.
 #
-#     field 117    opponent_conference   -> basic info, stranded between advanced blocks
-#     fields 118-124  offense_*havoc*    -> a SECOND offence block, cut off from the first
-#     fields 125-131  defense_*havoc*    -> a second defence block
+# R-264 IS A PERMUTATION, NOT AN EDIT. 144 in, 144 out: seven columns lift out of the front
+# block and go to the far right, and every other column keeps its relative position. Verified
+# before building, and asserted after.
 #
-# Three moves fix all three, and nothing else moves: opponent_conference goes up beside
-# `opponent`, and each havoc run joins the end of its own side. 131 in, 131 out — asserted,
-# because a shuffle that loses a column looks exactly like a shuffle that did not.
+#     team_id · conference · classification · opponent_team_id · opponent_conference
+#     is_neutral_site · is_completed
 #
-# STRUCTURAL, NOT ASSERTED-AFTERWARDS. The columns are BUILT from these blocks, so a
-# category physically cannot be non-contiguous. The test still checks it, which catches
-# someone hand-editing the flattened list back into one long tuple.
+# THEY ARE THEIR OWN CATEGORY BECAUSE THE FIRST ANSWER BROKE AN INVARIANT. Marc's initial
+# sketch painted all seven the same navy as the Game block — which is one category in two
+# separate runs, at columns 1-13 and again at 138-144. `SCORES_BLOCKS` is a structure of
+# CONTIGUOUS runs precisely so that a split category is impossible rather than merely tested,
+# and two tests forbid it. Shown the conflict, Marc made them their own band (2026-09-05):
+# "Can change the block at the end to ancillary data points and use a different color."
 #
-# MARC NAMED FIVE CATEGORIES AND THERE ARE FOUR — plus Game. srv_game_team carries no punt,
-# kick, field-goal or return column; checked against all 190 columns of the view, not
-# assumed. `average_start` and `average_starting_predicted_points` are field-position
-# metrics that special teams INFLUENCE, and colouring them as special teams would be a claim
-# the data does not support. Four bands ship; an empty fifth would be a promise.
+# The earlier shuffle (R-258) is still in force underneath this one: opponent_conference had
+# been stranded at field 117 between the advanced blocks and both havoc runs were cut off from
+# their own side. Those three moves are what made each category one run in the first place;
+# this one keeps that true while moving the keys out of the reader's way.
 SCORES_BLOCKS = (
     ("Game", (
-        "game_no", "game_id", "season", "season_type", "week", "game_date", "team_id", "team",
-        "conference", "classification", "opponent_team_id", "opponent", "opponent_conference",
-        "is_home", "is_neutral_site", "is_completed", "points_for", "points_against",
-        "margin", "result",
+        "game_no", "game_id", "season", "season_type", "week", "game_date", "team",
+        "opponent", "is_home", "points_for", "points_against", "margin", "result",
     )),
-    # THE MARKET, BETWEEN Result AND 1st downs (Marc, R-260). Closing line first — always
-    # populated — then the opening line, whose columns are blank wherever they would have
-    # repeated their closing counterpart. Grouped by LINE rather than interleaved in
-    # final/open pairs, so the conditionally-blank half stays in one region instead of
-    # scattering gaps through the block.
     ("Market", (
         "spread_final", "total_final", "line_implied_points_final",
-        "points_vs_line_implied_final", "ats_margin_final", "covered_final",
-        "spread_open", "total_open", "line_implied_points_open",
-        "points_vs_line_implied_open", "ats_margin_open", "covered_open",
+        "points_vs_line_implied_final", "ats_margin_final", "covered_final", "spread_open",
+        "total_open", "line_implied_points_open", "points_vs_line_implied_open",
+        "ats_margin_open", "covered_open",
     )),
     ("Box score", (
         "first_downs", "total_yards", "rushing_yards", "passing_yards", "rushing_attempts",
@@ -882,6 +879,10 @@ SCORES_BLOCKS = (
         "defense_front_seven_havoc_events", "defense_db_havoc_events", "defense_havoc_rate",
         "defense_front_seven_havoc_rate", "defense_db_havoc_rate",
     )),
+    ("Ancillary", (
+        "team_id", "conference", "classification", "opponent_team_id", "opponent_conference",
+        "is_neutral_site", "is_completed",
+    )),
 )
 
 # WHITE BOLD SITS ON ALL FIVE, so each needs 4.5:1 against white — and the bands have to be
@@ -890,15 +891,29 @@ SCORES_BLOCKS = (
 #
 #     band              hex        contrast on white
 #     Game              2F4858       9.59:1     the existing cfdb navy, kept
+#     Ancillary         1C4080      10.03:1     the highest on the sheet
 #     Market            5C6B2F       5.83:1
 #     Box score         6B4C7A       7.14:1
 #     Team advanced     4A6670       6.13:1
 #     Offense           A63A16       6.49:1
 #     Defense           1E6B54       6.39:1
 #
-# Across all FIFTEEN pairs, under normal vision and both red-green dichromacies, the closest
-# two colours are 10.5 dE apart (Market / Offense under protanopia) against a
-# just-noticeable difference of about 2.3.
+# Across all TWENTY-ONE pairs, under normal vision and both red-green dichromacies, the closest
+# two colours are 10.5 dE apart (Market / Offense under protanopia) against a just-noticeable
+# difference of about 2.3.
+#
+# THAT WAS ALSO THE CLOSEST PAIR WITH SIX BANDS, which is the number that mattered when the
+# seventh was chosen: `1C4080` does not tighten the palette anywhere. Its own nearest
+# neighbour is 18.1 dE (Box score, protanopia), and it sits 31.2 and 37.7 dE from the other
+# two blues — it lands in a real hue gap between the navy at 249 degrees and the plum at 317.
+#
+# AND THE OBVIOUS CHOICE FOR "ANCILLARY" IS THE ONE THAT CANNOT WORK. A quiet neutral grey is
+# semantically exactly right and fails every time, measured: graphite 3F4448 at 8.9 dE, mid
+# grey 4A4A4A at 8.7, warm graphite 55504B at 4.5. The palette already carries two low-chroma
+# bands (Game and Team advanced), and under dichromacy a grey collapses towards them. This is
+# the second time that finding has come up — the sixth band saw graphite land between 7 and 9
+# — so it is a confirmation rather than a discovery. Ancillary earns its quietness from
+# POSITION and NAME, not from desaturation.
 #
 # THE SIXTH BAND WAS THE HARD ONE AND EYEBALLING WOULD HAVE GOT IT WRONG. A dark gold
 # (7A5C00) reads as obviously distinct from the sienna next to it and measures 1.5 dE from it
@@ -922,6 +937,7 @@ CATEGORY_FILLS = {
     "Team advanced": "4A6670",
     "Offense": "A63A16",
     "Defense": "1E6B54",
+    "Ancillary": "1C4080",
 }
 
 # Labels are RULE-DERIVED with overrides, not 131 hand-typed strings. 131 chances to typo is
@@ -1409,22 +1425,22 @@ _ALL_SHEETS = [
         site_precision=SCORES_SITE_PRECISION,
         decimals=SCORES_DECIMALS,
         band_field=SCORES_BAND_FIELD,
-        # FREEZING THE WHOLE GAME BLOCK WAS THE INSTRUCTION AND IT DOES NOT FIT ON A SCREEN.
+        # TEN COLUMNS, ENDING ON `Pts for` — SET BY THE SITE, NOT BY THIS SHEET (R-265).
         #
-        # Measured on the real week-2 file: the twenty Game columns are 200 characters wide,
-        # and Excel at 100% on a 1920px display shows roughly 110-130. Freeze there and the
-        # frozen pane fills the window — nothing scrolls into view, which is the opposite of
-        # what a freeze is for.
+        # Marc chose the page's frozen block as Game # · Date · Team · Pts for. The site can
+        # freeze four columns that are not adjacent; Excel can only freeze a contiguous
+        # PREFIX, so the closest honest analogue is everything up to and including the last
+        # of those four. A through J.
         #
-        # So it lands at the narrowest prefix that still holds the stated INTENT — "team and
-        # opponent stay on screen while the metric columns scroll". Frozen: Game # through
-        # Opponent, twelve columns and 138 characters. Still wide, because `Team` and
-        # `Opponent` alone are 24 each; making it genuinely comfortable would mean moving
-        # those two to the front of the block, which is a fourth shuffle Marc has not asked
-        # for. Reported with the numbers rather than done quietly.
+        # `Pts for` AND NOT `Pts against`, AND THE REASON IS THE GRAIN. Each row is one team,
+        # so `Pts for` is that team's score and `Pts against` is the other team's — which is
+        # already on screen one row away, in its own `Pts for`. Freezing both would freeze
+        # the same two numbers twice and spend a column doing it.
         #
-        # Held by LABEL and resolved to an index, never a hardcoded letter.
-        freeze_before="Opp conference"),
+        # It also stays under the twelve-column budget the freeze test measured against real
+        # widths (twenty columns came to 200 characters against the ~110-130 an Excel window
+        # shows). Held by LABEL and resolved to an index, never a hardcoded letter.
+        freeze_before="Pts against"),
 
     Sheet("Odds", "srv_odds_board", """
         select start_date_et, week, away_team_display, home_team_display,

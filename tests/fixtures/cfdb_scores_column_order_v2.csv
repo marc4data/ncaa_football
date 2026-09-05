@@ -1,0 +1,145 @@
+Position,Field,Category
+1,game_no,Game
+2,game_id,Game
+3,season,Game
+4,season_type,Game
+5,week,Game
+6,game_date,Game
+7,team,Game
+8,opponent,Game
+9,is_home,Game
+10,points_for,Game
+11,points_against,Game
+12,margin,Game
+13,result,Game
+14,spread_final,Market
+15,total_final,Market
+16,line_implied_points_final,Market
+17,points_vs_line_implied_final,Market
+18,ats_margin_final,Market
+19,covered_final,Market
+20,spread_open,Market
+21,total_open,Market
+22,line_implied_points_open,Market
+23,points_vs_line_implied_open,Market
+24,ats_margin_open,Market
+25,covered_open,Market
+26,first_downs,Box score
+27,total_yards,Box score
+28,rushing_yards,Box score
+29,passing_yards,Box score
+30,rushing_attempts,Box score
+31,turnovers,Box score
+32,interceptions,Box score
+33,fumbles_lost,Box score
+34,third_down_conversions,Box score
+35,third_down_attempts,Box score
+36,fourth_down_conversions,Box score
+37,fourth_down_attempts,Box score
+38,penalties,Box score
+39,penalty_yards,Box score
+40,possession_minutes,Box score
+41,plays,Team advanced
+42,ppa_overall_total,Team advanced
+43,ppa_passing_total,Team advanced
+44,ppa_rushing_total,Team advanced
+45,cumulative_ppa_overall_total,Team advanced
+46,cumulative_ppa_passing_total,Team advanced
+47,cumulative_ppa_rushing_total,Team advanced
+48,success_rate_overall_total,Team advanced
+49,success_rate_standard_downs_total,Team advanced
+50,success_rate_passing_downs_total,Team advanced
+51,explosiveness_total,Team advanced
+52,power_success,Team advanced
+53,stuff_rate,Team advanced
+54,line_yards,Team advanced
+55,line_yards_average,Team advanced
+56,second_level_yards,Team advanced
+57,second_level_yards_average,Team advanced
+58,open_field_yards,Team advanced
+59,open_field_yards_average,Team advanced
+60,havoc_total,Team advanced
+61,havoc_front_seven,Team advanced
+62,havoc_db,Team advanced
+63,scoring_opportunities,Team advanced
+64,scoring_opportunity_points,Team advanced
+65,points_per_opportunity,Team advanced
+66,average_start,Team advanced
+67,average_starting_predicted_points,Team advanced
+68,offense_plays,Offense
+69,offense_drives,Offense
+70,offense_ppa,Offense
+71,offense_total_ppa,Offense
+72,offense_success_rate,Offense
+73,offense_explosiveness,Offense
+74,offense_power_success,Offense
+75,offense_stuff_rate,Offense
+76,offense_line_yards,Offense
+77,offense_line_yards_total,Offense
+78,offense_second_level_yards,Offense
+79,offense_second_level_yards_total,Offense
+80,offense_open_field_yards,Offense
+81,offense_open_field_yards_total,Offense
+82,offense_standard_downs_ppa,Offense
+83,offense_standard_downs_success_rate,Offense
+84,offense_standard_downs_explosiveness,Offense
+85,offense_passing_downs_ppa,Offense
+86,offense_passing_downs_success_rate,Offense
+87,offense_passing_downs_explosiveness,Offense
+88,offense_rushing_plays_ppa,Offense
+89,offense_rushing_plays_total_ppa,Offense
+90,offense_rushing_plays_success_rate,Offense
+91,offense_rushing_plays_explosiveness,Offense
+92,offense_passing_plays_ppa,Offense
+93,offense_passing_plays_total_ppa,Offense
+94,offense_passing_plays_success_rate,Offense
+95,offense_passing_plays_explosiveness,Offense
+96,offense_total_plays,Offense
+97,offense_total_havoc_events,Offense
+98,offense_front_seven_havoc_events,Offense
+99,offense_db_havoc_events,Offense
+100,offense_havoc_rate,Offense
+101,offense_front_seven_havoc_rate,Offense
+102,offense_db_havoc_rate,Offense
+103,defense_plays,Defense
+104,defense_drives,Defense
+105,defense_ppa,Defense
+106,defense_total_ppa,Defense
+107,defense_success_rate,Defense
+108,defense_explosiveness,Defense
+109,defense_power_success,Defense
+110,defense_stuff_rate,Defense
+111,defense_line_yards,Defense
+112,defense_line_yards_total,Defense
+113,defense_second_level_yards,Defense
+114,defense_second_level_yards_total,Defense
+115,defense_open_field_yards,Defense
+116,defense_open_field_yards_total,Defense
+117,defense_standard_downs_ppa,Defense
+118,defense_standard_downs_success_rate,Defense
+119,defense_standard_downs_explosiveness,Defense
+120,defense_passing_downs_ppa,Defense
+121,defense_passing_downs_success_rate,Defense
+122,defense_passing_downs_explosiveness,Defense
+123,defense_rushing_plays_ppa,Defense
+124,defense_rushing_plays_total_ppa,Defense
+125,defense_rushing_plays_success_rate,Defense
+126,defense_rushing_plays_explosiveness,Defense
+127,defense_passing_plays_ppa,Defense
+128,defense_passing_plays_total_ppa,Defense
+129,defense_passing_plays_success_rate,Defense
+130,defense_passing_plays_explosiveness,Defense
+131,defense_total_plays,Defense
+132,defense_total_havoc_events,Defense
+133,defense_front_seven_havoc_events,Defense
+134,defense_db_havoc_events,Defense
+135,defense_havoc_rate,Defense
+136,defense_front_seven_havoc_rate,Defense
+137,defense_db_havoc_rate,Defense
+138,team_id,Ancillary
+139,conference,Ancillary
+140,classification,Ancillary
+141,opponent_team_id,Ancillary
+142,opponent_conference,Ancillary
+143,is_neutral_site,Ancillary
+144,is_completed,Ancillary

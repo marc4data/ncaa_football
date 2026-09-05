@@ -2488,20 +2488,27 @@ def test_the_index_explains_what_the_bar_colours_mean(built):
 # THE SCORES SHEET (R-255 … R-259)
 # ==========================================================================================
 
-SCORES_CSV = Path(__file__).resolve().parent / "fixtures" / "cfdb_scores_column_order.csv"
+SCORES_CSV = (Path(__file__).resolve().parent / "fixtures"
+              / "cfdb_scores_column_order_v2.csv")
 
 
 def _scores():
     return next(s for s in workbook.SHEETS if s.name == "Scores")
 
 
-def _marcs_fields():
-    """The 131 field names from Marc's own CSV, vendored under tests/fixtures."""
+def _marcs_order():
+    """[(field, category)] in position order, from Marc's own file under tests/fixtures.
+
+    v2 supersedes the 131-field v1 list, which predates the Market block. It carries the
+    CATEGORY as well as the order, which is what lets the test assert the block structure
+    rather than only its contents.
+    """
     import csv
     with SCORES_CSV.open(encoding="utf-8-sig") as handle:
-        rows = [row[0].strip() for row in csv.reader(handle) if row and row[0].strip()]
-    assert rows[0] == "Field", rows[0]
-    return rows[1:]
+        rows = list(csv.DictReader(handle))
+    assert [r["Position"] for r in rows] == [str(i) for i in range(1, len(rows) + 1)], (
+        "the file's Position column is not 1..n in order")
+    return [(r["Field"].strip(), r["Category"].strip()) for r in rows]
 
 
 # The twelve market columns Marc asked for after the first pass (R-260). Named here rather
@@ -2515,36 +2522,67 @@ MARKET_FIELDS = frozenset({
 })
 
 
-def test_the_scores_sheet_carries_every_field_marc_listed():
-    """131 IN, 131 OUT — the shuffle of R-258 moved columns and lost none.
+def test_the_sheet_is_exactly_the_order_and_the_categories_marc_asked_for():
+    """144 IN, 144 OUT — R-264 is a permutation, and this asserts it against the FILE.
 
-    Asserted against Marc's file rather than against a list retyped from it, because a list
-    retyped from it would agree with whatever I typed. Counts are checked explicitly: a field
-    silently absent from BOTH sides would satisfy a set comparison alone.
+    Order AND category, position by position. A test comparing only the SET would pass on a
+    sheet with every column in the wrong place; one comparing only the order would pass with
+    the seven ancillary keys painted as Game — the arrangement Marc first sketched, and the
+    one that breaks the contiguity invariant.
 
-    Three deliberate differences, and they are the only three allowed:
-      * `possession_seconds` is selected and DISPLAYED as `possession_minutes` (R-259);
-      * `game_no` is displayed and not selected — it is computed in the query (R-257);
-      * the twelve MARKET_FIELDS are additions Marc asked for after seeing the first pass.
+    Asserted against `tests/fixtures/cfdb_scores_column_order_v2.csv` rather than a list
+    retyped from it, because a retyped list agrees with whatever I typed.
     """
-    marc = _marcs_fields()
-    assert len(marc) == 131, len(marc)
+    marc = _marcs_order()
+    assert len(marc) == 144, len(marc)
 
     sheet = _scores()
-    assert sorted(sheet.selected_fields) == sorted(set(marc) | MARKET_FIELDS), (
-        set(sheet.selected_fields) ^ (set(marc) | MARKET_FIELDS))
-    assert len(sheet.selected_fields) == 143
+    built = [(field, sheet.field_category[field]) for field, _ in sheet.columns]
+    assert built == marc, [
+        (i, b, m) for i, (b, m) in enumerate(zip(built, marc), start=1) if b != m][:8]
+
+    # The BLOCKS are what the writer walks, so they are checked too: the flattened list
+    # agreeing while the structure itself is wrong is exactly what this catches.
+    flattened = [(f, name) for name, fields in workbook.SCORES_BLOCKS for f in fields]
+    assert flattened == marc
+
+
+def test_the_reorder_moved_seven_columns_and_lost_none():
+    """THE PERMUTATION, STATED AS A PERMUTATION.
+
+    The test above would also pass if a column were renamed on both sides at once. This one
+    names what moved and asserts nothing else did, so a change that drops one field and adds
+    another of the same category cannot slip through.
+    """
+    moved = ["team_id", "conference", "classification", "opponent_team_id",
+             "opponent_conference", "is_neutral_site", "is_completed"]
+    marc = _marcs_order()
+    assert [f for f, c in marc if c == "Ancillary"] == moved
+
+    sheet = _scores()
+    rest = [f for f, _ in sheet.columns if f not in moved]
+    assert rest == [f for f, c in marc if c != "Ancillary"]
+    assert len(rest) == 137 and len(moved) == 7
+
+
+def test_the_select_list_and_the_display_list_differ_only_where_they_must():
+    """`game_no` is computed by the query, so it is displayed and not selected.
+    `possession_seconds` is selected and displayed as `possession_minutes` (R-259).
+    Those are the only two, and stating them separately from the counts means a compensating
+    change on the other side cannot satisfy this.
+    """
+    marc = {f for f, _ in _marcs_order()}
+    sheet = _scores()
 
     displayed = sheet.fields
-    assert len(displayed) == 144, len(displayed)
-    assert len(set(displayed)) == 144, "a field is displayed twice"
-    assert set(displayed) - set(marc) == {"game_no", "possession_minutes"} | MARKET_FIELDS
-    assert set(marc) - set(displayed) == {"possession_seconds"}
+    assert len(displayed) == 144 and len(set(displayed)) == 144
+    assert set(displayed) == marc
 
-    # And every one of Marc's own 131 is still shown — the assertion the shuffle exists to
-    # survive, stated separately from the arithmetic above so it cannot be satisfied by a
-    # compensating change on the other side.
-    assert set(marc) - {"possession_seconds"} <= set(displayed)
+    selected = set(sheet.selected_fields)
+    assert len(sheet.selected_fields) == 143
+    assert selected - marc == {"possession_seconds"}
+    assert marc - selected == {"game_no", "possession_minutes"}
+    assert MARKET_FIELDS <= marc, "the market block is no longer in the sheet"
 
 
 def test_every_scores_category_is_one_contiguous_run_of_columns():
@@ -3095,3 +3133,55 @@ def test_the_market_block_sits_between_the_result_and_the_box_score():
     fields = [sheet.columns[i][0] for i in market]
     assert all(f.endswith("_final") for f in fields[:6]), fields[:6]
     assert all(f.endswith("_open") for f in fields[6:]), fields[6:]
+
+
+def test_the_freeze_lands_on_pts_for_and_never_reaches_the_ancillary_block(built):
+    """R-265. The site freezes Game # · Date · Team · Pts for; Excel can only freeze a
+    contiguous PREFIX, so the sheet freezes everything up to and including the last of those.
+
+    `Pts for` AND NOT `Pts against`, and the reason is the grain: each row is one team, so
+    `Pts for` is that team's score and `Pts against` is the other team's — already on screen
+    one row away in its own `Pts for`. Freezing both spends a column showing the same two
+    numbers twice.
+
+    The Ancillary assertion is the one that earns its place. Those seven keys moved to the far
+    right precisely to be out of the reader's way, and a freeze that reached them would put
+    them permanently back in front of everything else.
+    """
+    from openpyxl.utils import get_column_letter
+    _, book, _, _ = built
+    sheet = _scores()
+    first_scrolling = sheet.freeze_column()
+
+    assert book["Scores"].freeze_panes == f"K{workbook.first_data_row(1)}"
+    assert get_column_letter(first_scrolling) == "K"
+
+    frozen = sheet.columns[:first_scrolling - 1]
+    assert [label for _, label in frozen][-1] == "Pts for"
+    assert {"Team", "Opponent", "Pts for"} <= {label for _, label in frozen}
+    assert "Pts against" not in {label for _, label in frozen}
+    assert all(sheet.field_category[f] == "Game" for f, _ in frozen)
+    assert not any(sheet.field_category[f] == "Ancillary" for f, _ in frozen)
+
+
+def test_the_ancillary_block_is_last_and_holds_the_keys(built):
+    """The seven columns earn their quietness from POSITION, not from a muted colour — a
+    neutral grey was measured and fails dichromacy against the palette's two low-chroma bands.
+    So being last is load-bearing, not incidental.
+    """
+    sheet = _scores()
+    tail = sheet.columns[-7:]
+    assert all(sheet.field_category[f] == "Ancillary" for f, _ in tail), tail
+    assert [f for f, _ in tail] == [
+        "team_id", "conference", "classification", "opponent_team_id",
+        "opponent_conference", "is_neutral_site", "is_completed"]
+
+    # And they are painted their own colour in the file, not the Game navy Marc first sketched
+    # — which would have been one category in two runs.
+    _, book, _, _ = built
+    tab = book["Scores"]
+    header = workbook.header_row(1)
+    for index in range(len(sheet.columns) - 6, len(sheet.columns) + 1):
+        assert tab.cell(header, index).fill.fgColor.rgb.endswith(
+            workbook.CATEGORY_FILLS["Ancillary"])
+    assert workbook.CATEGORY_FILLS["Ancillary"] != workbook.CATEGORY_FILLS["Game"]

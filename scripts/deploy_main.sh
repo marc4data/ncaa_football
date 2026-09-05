@@ -115,7 +115,7 @@ pipeline_half() {
     "${SSH[@]}" "git -C $PIPELINE_DIR/repo log --oneline $before..$after" | sed 's/^/    /'
   fi
 
-  # R-126 / R-264. A MODEL CHANGE IS NOT DEPLOYED UNTIL THE DATA IS REBUILT.
+  # R-126 / R-273. A MODEL CHANGE IS NOT DEPLOYED UNTIL THE DATA IS REBUILT.
   #
   # Moving the pipeline repo to main updates the SQL; it does not run it. The scores DAG that
   # would normally rebuild and publish is gated on the live-scoring window, so outside one

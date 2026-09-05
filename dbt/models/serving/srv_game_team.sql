@@ -347,10 +347,59 @@ select
     mk.line_implied_points_open,
     mk.points_vs_line_implied_open,
     mk.ats_margin_open,
-    mk.covered_open
+    mk.covered_open,
+
+    -- ======================================================================================
+    -- WHAT THE SCORES PAGE NEEDS, AND NOTHING THE GRAIN ALREADY ANSWERS (R-266).
+    --
+    -- Repointing the page at this view costs it team logos, team links, rank badges and its
+    -- freshness caption unless these come with it. All additive: no existing column changes.
+    --
+    -- THREE COLUMNS ARE DELIBERATELY ABSENT. srv_game's `winner`, `favorite_covered` and
+    -- `actual_margin` are game-grain verdicts, and this view already answers each of them
+    -- from THIS team's side — `result`, `covered_final`, `margin`. Carrying both would be one
+    -- question with two answers on one row, which is the defect the grain rule was written
+    -- after, and this file's own header already refuses `winner_covered_close` for it.
+    -- ======================================================================================
+
+    -- Identity, through the macro rather than a second spelling of the slug fallback. It
+    -- emits the display name as well as the slug; both are wanted here and splitting the pair
+    -- to take one would be exactly the duplication the macro exists to prevent.
+    {{ team_identity('d', 't.team') }},
+    d.logo_source_url                     as team_logo_url,
+    {{ team_identity('o', 't.opponent', prefix='opponent_') }},
+    o.logo_source_url                     as opponent_logo_url,
+
+    -- The rank from this row's own side. fct_game holds them home/away, as srv_game does.
+    case when t.is_home then fg.home_rank else fg.away_rank end as team_rank,
+    case when t.is_home then fg.away_rank else fg.home_rank end as opponent_rank,
+
+    -- GAME-GRAIN FACTS REPEATED ACROSS THE PAIR, and that direction is the allowed one: the
+    -- grain rule forbids pushing finer grain into a coarser view, not the reverse. They are
+    -- symmetric across a game's two rows by construction, and tested to be.
+    fg.venue                              as venue_display,
+    fg.attendance,
+    fg.excitement_index,
+    fg.is_upset,
+
+    -- Provenance. A SCALAR SUBQUERY, not a cross join: mart_as_of holding two rows for one
+    -- domain would silently double every row of this view, and a scalar subquery raises
+    -- instead. srv_game cross joins it; this is the safer of the two spellings.
+    (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') as as_of_ts,
+    -- NO MODEL PREDICTION TRAVELS ON THIS VIEW, so this is CFBD credit and says so rather
+    -- than borrowing dim_model_version's disclaimer, which would imply predictions that are
+    -- not here. Box scores, advanced stats and arithmetic on published market numbers.
+    'Data from CollegeFootballData.com. Contains no cfdb model predictions.'
+                                          as attribution
 from {{ ref('fct_game_team') }} t
 join {{ ref('fct_game_team_advanced') }} a on a.game_team_sk = t.game_team_sk
 left join {{ ref('dim_team') }} d on d.season = t.season and d.team_id = t.team_id
 -- LEFT, not inner: a Division III fixture has no line and must keep its row. An inner join
 -- here would silently narrow the view to games a sportsbook priced.
 left join team_market mk on mk.game_team_sk = t.game_team_sk
+-- The opponent's identity, from the same season-scoped dimension as the team's. LEFT for the
+-- same reason `d` is: a non-FBS opponent exists as a stub or not at all.
+left join {{ ref('dim_team') }} o on o.season = t.season and o.team_id = t.opponent_team_id
+-- Game-grain context. One row per game_id, so this cannot fan out — asserted by the row-count
+-- half of the parity check rather than assumed.
+left join {{ ref('fct_game') }} fg on fg.game_id = t.game_id
