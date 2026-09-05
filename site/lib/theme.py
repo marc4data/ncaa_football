@@ -122,6 +122,17 @@ CSS = """
 """
 
 
+# NO PYTHON THEME RESOLUTION ANY MORE, AND THE REASON IS WORTH KEEPING.
+#
+# `st.context.theme` reports the ACTIVE theme, which is the right question — and it answers
+# it one rerun late. Streamlit repaints the moment the reader flips the switch; Python only
+# hears about it on the next script run, so the tokens lagged and some frozen cells kept the
+# previous theme's colour until a tab change forced another pass. That is exactly what Marc
+# saw: "The switch between Light and Dark misses some of the Frozen columns."
+#
+# The tokens are built from `Canvas` and `CanvasText` instead, which follow the `color-scheme`
+# property Streamlit sets from that same active theme — live, in the same frame, with nothing
+# to synchronise. See TABLE_CSS.
 def inject() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     st.markdown(TABLE_CSS, unsafe_allow_html=True)
@@ -129,8 +140,115 @@ def inject() -> None:
 
 TABLE_CSS = """
 <style>
+/* THE OPAQUE GROUND A FROZEN COLUMN PAINTS ITSELF WITH, AND THE BAND BEHIND A GAME.
+   Tokens, because they need a value in both themes: a hardcoded #fff is a white stripe down
+   a dark page, and a TRANSPARENT sticky cell shows the scrolled content sliding underneath —
+   the classic failure, and it reads as a rendering bug rather than a missing colour.
+
+   ⚠ BUILT FROM `Canvas` AND `CanvasText`, WHICH ARE LIVE. Two earlier attempts asked the
+   wrong source and both were wrong in a way Marc could see:
+
+     prefers-color-scheme  answers what the OPERATING SYSTEM prefers. A reader on a dark
+                           system who switches the app to Light gets a light page painted
+                           with dark cells — which is what happened.
+     st.context.theme      answers what the app is rendering, but only when Python next
+                           runs. Switching the theme repaints immediately and the tokens
+                           lag a rerun, so some frozen cells kept the old colour until a
+                           tab change forced another pass. Marc: "seems like there might be
+                           something upstream that isn't getting touched."
+
+   Streamlit sets `color-scheme: light|dark` on its own container from the ACTIVE theme
+   (verified in its bundle: `colorScheme: isLight ? light : dark`, beside `backgroundColor:
+   colors.bgColor`). CSS system colours follow that property, so `Canvas` IS the page and
+   `CanvasText` IS the text — with no Python in the loop and nothing to go stale. The theme
+   switch repaints these in the same frame it repaints everything else.
+
+   `color-mix` derives the rest from the same two, so the band and the rules track the theme
+   instead of being two more colours to keep in step. */
+:root {
+  --cfdb-sticky-bg: Canvas;
+  --cfdb-band-bg:   color-mix(in srgb, CanvasText 6%,  Canvas);
+  --cfdb-hover-bg:  color-mix(in srgb, CanvasText 10%, Canvas);
+  --cfdb-muted:     color-mix(in srgb, CanvasText 62%, Canvas);
+  --cfdb-rule:      color-mix(in srgb, CanvasText 20%, Canvas);
+}
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
     table-layout:fixed; }
+
+/* R-269. HORIZONTAL SCROLLING, WHICH THE PERCENTAGE LAYOUT MADE IMPOSSIBLE.
+   `width:100%` plus a percentage colgroup cannot overflow — thirty-nine columns compress
+   until unreadable and there is nothing wider than the viewport to scroll. `max-content`
+   lets the colgroup's pixel widths set the table's width; `min-width:100%` keeps a narrow
+   table filling the page rather than shrinking to its content. Opt-in, because the other
+   seventeen callers of render() want neither. */
+/* R-281. THE CONTAINER HAD NO HEIGHT, SO THE HORIZONTAL BAR WAS 5,300px BELOW THE FOLD.
+   Measured on the running page: scrollHeight 6275 / clientHeight 6275, max-height none, in a
+   917px window — horizontal scrolling was reachable only after scrolling the whole page down.
+   Constraining the height puts the bar at the bottom of the visible box, where the reader is
+   looking, and gives the table its own vertical scroll. */
+.cfdb-scroll { overflow-x:auto; overflow-y:auto; max-height:70vh; }
+/* AND THAT MAKES A STICKY HEADER NECESSARY, NOT MERELY POSSIBLE. Prompt 044 put it out of
+   scope because vertical stickiness inside Streamlit's own scroll container is a separate
+   problem — a reason that expires the moment the table owns its vertical scroll. With 166
+   rows scrolling inside the box, a header that scrolls away is worse than what was fixed. */
+.cfdb-scroll .cfdb-table thead th { position:sticky; top:0;
+    background:var(--cfdb-sticky-bg); z-index:3;
+    /* ⚠ opacity:1 IS THE WHOLE FIX FOR THE GHOSTING, AND IT IS NOT A STYLE PREFERENCE.
+       `.cfdb-table th` carries opacity:.65, which was harmless while headers were opaque
+       against the page — but OPACITY APPLIES TO THE WHOLE CELL, background included. A 65%
+       header cannot hide anything sliding under it, so rows scrolled through their own
+       column labels and the two sets of text overlapped. Marc: "Can we mute the fields when
+       they slide behind. I find that more distracting than informative."
+       The muting the opacity was doing is now done by COLOUR, which does not make the cell
+       see-through. Same for the frozen body cells below. */
+    opacity:1; color:var(--cfdb-muted,#5d6672); }
+.cfdb-scroll .cfdb-table td.cfdb-sticky { opacity:1; }
+/* THREE LAYERS NOW, AND THE CORNER IS THE ONE THAT BREAKS. A cell that is both frozen-left
+   and in the sticky header must outrank both; at equal z-index it renders in DOM order and
+   looks fine until a row scrolls under it. */
+.cfdb-scroll .cfdb-table thead th.cfdb-sticky { z-index:4; }
+.cfdb-table-wide { width:max-content; min-width:100%; }
+.cfdb-table th.cfdb-sticky, .cfdb-table td.cfdb-sticky {
+    position:sticky; background:var(--cfdb-sticky-bg); z-index:2; }
+/* The header's frozen cells sit above the body's, or a scrolled row paints over them at the
+   intersection. */
+.cfdb-table th.cfdb-sticky { z-index:3; }
+/* R-282. Denser rows, which is the other half of Marc's ask. The headers wrap because the
+   columns got narrower; the rows get shorter because the padding did. */
+.cfdb-table-wide td { padding:.22rem .45rem; }
+.cfdb-table-wide th { padding:.3rem .45rem; vertical-align:bottom; }
+/* Where the frozen block ends. Without it the reader cannot tell which columns are pinned
+   and which merely happen to be at the left edge. A box-shadow rather than a border because
+   a border would change the column's width and push the sticky offsets out by a pixel each. */
+.cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #d7dae0; }
+/* The row hover is translucent, so it would let the scrolled content through on a frozen
+   cell. Opaque equivalents of the same tint, over each theme's own ground. */
+.cfdb-table tbody tr:hover td.cfdb-sticky { background:var(--cfdb-hover-bg); }
+/* R-267. Alternating RUNS of one game, so a game's two rows read as a unit. Shaded on the
+   row and repeated on its frozen cells, which are opaque and would otherwise stay white. */
+.cfdb-table tbody tr.cfdb-gameband > td { background:var(--cfdb-band-bg); }
+.cfdb-table tbody tr.cfdb-gameband > td.cfdb-sticky { background:var(--cfdb-band-bg); }
+/* R-270. Back to the compound default. Rendered only while a user sort is active, so it is
+   never a control that does nothing. */
+/* R-283. THE TAB BAR. It went out as bare anchors — classes emitted, no rules written — so
+   six tabs rendered as a run of underlined links with no spaces between them. They are
+   anchors because the tab has to live in the URL; they should not LOOK like prose links. */
+.cfdb-tabbar { display:flex; gap:.25rem; flex-wrap:wrap; margin:.2rem 0 .6rem;
+  border-bottom:1px solid var(--cfdb-rule,#d7dae0); }
+.cfdb-tab { display:inline-block; padding:.35rem .8rem; font-size:.85rem; font-weight:600;
+  color:inherit; opacity:.6; text-decoration:none; border:1px solid transparent;
+  border-bottom:none; border-radius:5px 5px 0 0; margin-bottom:-1px; }
+.cfdb-tab:hover { opacity:.9; text-decoration:none; background:var(--cfdb-band-bg); }
+.cfdb-tab-on { opacity:1; border-color:var(--cfdb-rule,#d7dae0);
+  background:var(--cfdb-sticky-bg); }
+.cfdb-resetsort { display:inline-block; font-size:.8rem; font-weight:600; color:#1f6feb;
+  text-decoration:none; border:1px solid #d7dae0; border-radius:4px;
+  padding:.2rem .55rem; margin-bottom:.4rem; }
+.cfdb-resetsort:hover { text-decoration:underline; }
+.cfdb-resetsort-note { font-size:.75rem; opacity:.55; margin-left:.5rem; }
+/* R-271. The globe sits INSIDE a text link, so it needs the baseline nudge the icon-only
+   marks do not — without it the word rides high against the drawing. */
+.cfdb-icon-inline { width:.95em; height:.95em; vertical-align:-.13em; margin-right:.25em; }
 .cfdb-table td, .cfdb-table th { overflow:hidden; text-overflow:ellipsis; }
 .cfdb-table caption { caption-side:top; text-align:left; font-size:.8rem; opacity:.6;
   padding-bottom:.4rem; }
@@ -488,6 +606,13 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 @media (prefers-color-scheme: dark) {
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
+  /* R-269. The sticky tokens are NOT redefined here any more — they are built from Canvas
+     and follow the active theme on their own. A value here would override the live one with
+     a guess about the operating system, which is the defect this block used to contain. */
+  .cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #333a45; }
+
+
+  .cfdb-resetsort { color:#58a6ff; border-color:#333a45; }
   /* A 10%-black border on a #0e1117 background is invisible, so every card edge
      disappeared in dark mode and the grid read as one undivided block. */
   .cfdb-gamecard { border-color:#333a45; }

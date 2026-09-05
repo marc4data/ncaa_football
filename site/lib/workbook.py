@@ -134,6 +134,16 @@ CELL_REFERENCE = re.compile(r"^[A-Za-z]{1,3}[0-9]+$")
 def _team_url(base, slug, **scope):
     if not base or not slug or (isinstance(slug, float) and pd.isna(slug)):
         return None
+    # A SLUG HAS NO SPACES, AND THIS GUARD EXISTS BECAUSE A DISPLAY NAME IS TRUTHY (R-289).
+    #
+    # `Sheet.hyperlinks` used to find the slug field by string surgery on Schedule's naming
+    # convention. On a sheet whose display column is plainly `team`, that surgery is a no-op
+    # and hands the TEAM NAME to this function — "Western Illinois" is truthy, clears the
+    # check above, and produces `/team?...&team=Western%20Illinois`: a hyperlink that is
+    # written, looks right in the cell, and resolves to nothing. The convention is gone now
+    # and every slug is stated, but a wrong link is worse than no link and this is cheap.
+    if isinstance(slug, str) and (" " in slug or slug != slug.strip()):
+        return None
     query = _scoped_query(**scope, team=slug)
     return f"{base}/team?{query}" if query else f"{base}/team"
 
@@ -557,6 +567,24 @@ def _title_case_verdict(value):
     return text[:1].upper() + text[1:] if text else None
 
 
+def _won(record):
+    """Whether THIS row's team won, as a word in the file and a glyph on the page.
+
+    Marc: "I know we have a Result column, but can we add a Win column that has the glyph we
+    use on Schedule." Both, and they are not redundant: `result` is W / L / T, which is three
+    states in a letter; the Win column is the thing the eye finds when scanning a stack of
+    166 rows for who came out on top.
+
+    DERIVED FROM `result`, WHICH IS READ FROM THE VIEW — never from comparing the two scores.
+    That comparison is what disagreed with srv_game on 1 game in 295 the first time it met
+    real data, and a tie is the case it gets wrong.
+    """
+    value = record.get("result")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return {"W": "Yes", "L": "No", "T": "Tie"}.get(str(value).upper())
+
+
 def _possession_minutes(record):
     """Time of possession in minutes, from the view's seconds (Marc, R-259).
 
@@ -767,12 +795,29 @@ class Sheet:
         return labels.index(self.freeze_before) + 1
 
     def hyperlinks(self, base: str, **scope) -> Dict[str, Callable]:
-        """{field -> record -> url}, or {} when nothing told us the site's origin."""
+        """{field -> record -> url}, or {} when nothing told us the site's origin.
+
+        THE SLUG FIELD IS STATED, NOT DERIVED (R-289). This used to read
+
+            slug_field = field.replace("_team_display", "_team_slug")
+
+        which is correct on Schedule and a no-op everywhere else. On Scores the display
+        column is `team`, so the replace changed nothing and the TEAM NAME was passed where a
+        slug belongs — producing a hyperlink that is written, looks right, and goes nowhere.
+
+        It is the same shape as the defect on the page (R-287): an identifier inferred from a
+        naming convention rather than named. A convention that happens to hold on one sheet
+        is not a rule, so both sheets now say which column carries the slug.
+        """
         out: Dict[str, Callable] = {}
-        for field, kind in self.link_fields.items():
+        for field, spec in self.link_fields.items():
+            kind, source = spec if isinstance(spec, tuple) else (spec, None)
             if kind == "team":
-                slug_field = field.replace("_team_display", "_team_slug")
-                out[field] = (lambda record, sf=slug_field:
+                if not source:
+                    raise ValueError(
+                        f"{self.name}.{field} links to a team without naming its slug "
+                        f"column; deriving it is what shipped a link to nowhere")
+                out[field] = (lambda record, sf=source:
                               _team_url(base, record.get(sf), **scope))
             elif kind == "matchup":
                 out[field] = (lambda record:
@@ -819,8 +864,17 @@ class Sheet:
 # this one keeps that true while moving the keys out of the reader's way.
 SCORES_BLOCKS = (
     ("Game", (
-        "game_no", "game_id", "season", "season_type", "week", "game_date", "team",
-        "opponent", "is_home", "points_for", "points_against", "margin", "result",
+        "game_no", "game_id", "season", "season_type", "week", "game_date",
+        # Marc, 2026-09-05: "Reorder columns to Rank Before, Team, Record." Rank leads into
+        # the team it qualifies and the record follows it, so the three read as one identity
+        # cluster instead of the rank sitting eleven columns away from the name.
+        "team_rank", "team", "record_before_display",
+        "opponent", "is_home", "points_for", "won", "points_against", "margin", "result",
+        # R-290. Outcome context, beside the team it describes. Marc chose this over
+        # appending to Ancillary: they read as part of the result, and the Game Results tab
+        # picks them up with no extra mapping. It shifts everything from `spread_final`
+        # rightward, which is the cost he accepted.
+        "pregame_elo", "postgame_elo", "elo_delta",
     )),
     ("Market", (
         "spread_final", "total_final", "line_implied_points_final",
@@ -882,6 +936,11 @@ SCORES_BLOCKS = (
     ("Ancillary", (
         "team_id", "conference", "classification", "opponent_team_id", "opponent_conference",
         "is_neutral_site", "is_completed",
+        # R-289. EXPORT-ONLY, and the far right is where a reference key belongs. A
+        # `cell.hyperlink` is invisible to a formula, to pandas and to anything reading the
+        # file as data — which is half of what an extract is for — so the URL is a value too.
+        # Never rendered on a page tab; the partition test accounts for it explicitly.
+        "matchup_url",
     )),
 )
 
@@ -976,7 +1035,23 @@ SCORES_LABEL_OVERRIDES = {
     "line_implied_points_open": "Line-implied pts open",
     "points_vs_line_implied_open": "Pts vs implied open",
     "ats_margin_open": "ATS margin open", "covered_open": "Covered open",
+    # R-284/R-285/R-286. `Pregame Elo`, never `Elo before`: the vocabulary rule says grep for
+    # an existing prefix before inventing one, and stg_games, fct_game and srv_game all
+    # already say pregame/postgame. `Record before` keeps Marc's own word, and keeps the
+    # column honest about whether this game is counted in it.
+    "team_rank": "Rank", "record_before_display": "Record before",
+    "won": "Win",
+    "pregame_elo": "Pregame Elo", "postgame_elo": "Postgame Elo",
+    "elo_delta": "Elo delta",
+    "matchup_url": "Matchup URL",
 }
+
+# SELECTED BUT NOT PRINTED. The page needs a slug to link a team and a logo to draw one; the
+# sheet needs neither, and a 149-column file does not want four more. They ride in the frame
+# and out of the column list — a different thing from R-279's HIDDEN_ON_PAGE, where the
+# column IS printed in the file and merely not shown on the site.
+SCORES_PASSENGERS = ("team_slug", "opponent_team_slug",
+                     "team_logo_url", "opponent_logo_url", "opponent_rank")
 
 # COLUMNS THAT KEEP THE SITE'S PRECISION RATHER THAN THIS SHEET'S 2dp DEFAULT.
 #
@@ -1105,6 +1180,10 @@ SCORES_BAND_FILL = "DEE2E4"
 # R-216's rule still decides the SEPARATOR: a comma is for a quantity you might total, so a
 # season and an id stay bare. This set only decides the DECIMAL POINT.
 SCORES_INTEGER_FIELDS = frozenset({
+    # Marc: "Both ELOs should be INT." A rating is quoted whole everywhere it appears, and
+    # 1,543.62 reads as a measurement rather than a rating. The delta joins them for the same
+    # reason — it is the difference between two whole numbers.
+    "pregame_elo", "postgame_elo", "elo_delta",
     "game_no", "points_for", "points_against", "margin",
     "first_downs", "total_yards", "rushing_yards", "passing_yards", "rushing_attempts",
     "turnovers", "interceptions", "fumbles_lost",
@@ -1309,7 +1388,8 @@ _ALL_SHEETS = [
         # (Worth knowing: this splits the two record columns. `Home record` scrolls while
         # `Away record` stays. Moving the freeze one column right is a one-word change.)
         freeze_before="Home record",
-        link_fields={"away_team_display": "team", "home_team_display": "team",
+        link_fields={"away_team_display": ("team", "away_team_slug"),
+                     "home_team_display": ("team", "home_team_slug"),
                      "matchup_url": "matchup"}),
 
     # ======================================================================================
@@ -1378,6 +1458,13 @@ _ALL_SHEETS = [
                points_vs_line_implied_final, ats_margin_final, covered_final,
                spread_open, total_open, line_implied_points_open,
                points_vs_line_implied_open, ats_margin_open, covered_open,
+               team_rank, record_before_display, pregame_elo, postgame_elo,
+               elo_delta,
+               /* Passengers: the page links and draws with these; the sheet prints
+                  neither. R-287 — the page had 996 team anchors and one destination
+                  because this list was never widened when the view was. */
+               team_slug, opponent_team_slug, team_logo_url, opponent_logo_url,
+               opponent_rank,
                dense_rank() over (order by {SCORES_GAME_ORDER}) as game_no,
                count(*) over () as rows_in_scope
         from srv_game_team
@@ -1396,6 +1483,13 @@ _ALL_SHEETS = [
           and (:division = 'all' or is_fbs_game)
           and (:conference is null or conference = :conference
                or opponent_conference = :conference)
+          /* R-278. THE ONE PLACE THE TWO SURFACES LEGITIMATELY DIFFER, PARAMETERISED SO IT
+             IS VISIBLE AS ONE. The workbook is a data extract and carries `Completed` as a
+             column, so it wants every row; the Scores PAGE is a results page and wants
+             results. A second query for the page is how Schedule and the export drifted in
+             R-184, so the divergence is a bound value rather than a second statement.
+             Defaulted to false — the extract's behaviour is the unchanged one. */
+          and (not :completed_only or is_completed)
         order by {SCORES_GAME_ORDER}, is_home
         limit {ROW_CAP}
     """,
@@ -1407,7 +1501,7 @@ _ALL_SHEETS = [
              "pair. Season totals are wrong here unless you filter to one team. Possession "
              "min should total 60.00 across a game's two rows; about 4% of games do not, "
              "which is the source data rather than the arithmetic.",
-        derived={"possession_minutes": _possession_minutes},
+        derived={"possession_minutes": _possession_minutes, "won": _won},
         display={"is_home": _yes_no, "is_neutral_site": _yes_no, "is_completed": _yes_no,
                  # WORDS, NOT MARKS (Marc, R-262). Schedule uses ■/□ for `Winner covered`
                  # because it sits in a dense block of verdict columns that share one legend
@@ -1425,6 +1519,8 @@ _ALL_SHEETS = [
         site_precision=SCORES_SITE_PRECISION,
         decimals=SCORES_DECIMALS,
         band_field=SCORES_BAND_FIELD,
+        # R-289. Both links Marc asked for, with the slug column NAMED rather than derived.
+        link_fields={"team": ("team", "team_slug"), "matchup_url": "matchup"},
         # TEN COLUMNS, ENDING ON `Pts for` — SET BY THE SITE, NOT BY THIS SHEET (R-265).
         #
         # Marc chose the page's frozen block as Game # · Date · Team · Pts for. The site can
@@ -1896,6 +1992,12 @@ COUNT_FIELDS = {
 # it and missed the same column.
 PLAIN_INTEGER = {"season", "week", "tiebreak_rank", "game_id", "bin_index",
                  "best_rank_in_game"}
+# MARC OVERRULED THE SEPARATOR CALL, AND HE IS READING THE COLUMN. R-216's rule — "a comma is
+# for a quantity you might total" — put Elo with the labels on the argument that a rating is
+# not a count. He asked for `#,###` after seeing it: at four digits the group makes 1,543
+# scannable in a column of them, where 1543 sits in the eye like a year. The rule still holds
+# for a season and a game id, which are identifiers rather than magnitudes; an Elo is a
+# magnitude you compare, and that is the distinction the rule was reaching for.
 PLAIN_INTEGER_SUFFIXES = ("_rank", "_id")
 
 
@@ -2027,7 +2129,8 @@ class SheetRead(NamedTuple):
         return self.rows_in_scope > self.rows
 
 
-def read_sheet(sheet, season, week, season_type, conference, division="fbs"):
+def read_sheet(sheet, season, week, season_type, conference, division="fbs",
+               completed_only: bool = False):
     """Fetch one sheet's rows. Returns a SheetRead.
 
     The two failures here are NOT the same thing and the first draft of this treated them
@@ -2041,7 +2144,10 @@ def read_sheet(sheet, season, week, season_type, conference, division="fbs"):
     So: a missing relation is an omission, and anything else is raised.
     """
     params = {"season": season, "week": week if sheet.scoped else None,
-              "season_type": season_type, "conference": conference, "division": division}
+              "season_type": season_type, "conference": conference, "division": division,
+              # R-278. The workbook takes every row; the page passes True. Named here with
+              # the extract's default so a sheet that never mentions it is unaffected.
+              "completed_only": completed_only}
     wanted = set(re.findall(r":(\w+)", sheet.sql))
     try:
         df = query(" ".join(sheet.sql.split()),

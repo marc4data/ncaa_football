@@ -72,16 +72,41 @@ def get(name: str, default: Any = None) -> Any:
 
 
 def set_params(**kwargs) -> None:
-    """Write parameters, dropping any set to None.
+    """Write parameters, dropping any set to None — and ONLY the ones that differ.
 
     AC-G.13: navigation happens by writing params, never by mutating session state alone —
     that is what makes a middle-click yield a working URL instead of the home page.
+
+    ⚠ EVERY WRITE IS A HISTORY ENTRY, WHICH IS WHY THE FILTER IS NOT AN OPTIMISATION.
+    Marc: "when I click out to a link (Matchup, Team) I have to hit the back button twice."
+
+    Streamlit's frontend handles a Python-side query-param write with
+
+        window.history.pushState({}, "", pathname + "?" + queryString)
+
+    — a PUSH, not a replace. So a page that re-affirms what the URL already says still adds
+    an entry, and Back then returns to the same page with the same parameters, which looks
+    like the button not working.
+
+    Two places do exactly that on arrival, measured rather than inferred: `matchup.py` writes
+    `game_id` and `season` straight back (2 entries), and `filters.game_scope()` writes the
+    whole scope on EVERY render of every scoped page (5). One click, several entries.
+
+    Comparing first makes a re-affirmation free. A write that changes nothing was never
+    navigation, and the URL is unchanged either way — so nothing about AC-G.13 is weakened:
+    the parameter is still in the URL, still linkable, still middle-clickable. It simply is
+    not announced twice.
     """
+    changes = {}
     for key, value in kwargs.items():
-        if value is None:
+        wanted = None if value is None else str(value)
+        if st.query_params.get(key) != wanted:
+            changes[key] = wanted
+    for key, wanted in changes.items():
+        if wanted is None:
             st.query_params.pop(key, None)
         else:
-            st.query_params[key] = str(value)
+            st.query_params[key] = wanted
 
 
 def link(page: str, **kwargs) -> str:

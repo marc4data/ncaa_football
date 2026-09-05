@@ -51,9 +51,28 @@ LINKEDIN_MARK = (
 # afterthought bolted to the bottom. The website link reads as a destination rather than as
 # a bare hostname: a URL printed as its own label makes the reader parse a string to learn
 # it is a personal site.
+# R-271. "About Marc", with a mark that says it is a website.
+#
+# AN INLINE SVG, AND THERE IS A TEST THAT INSISTS. 🌐 and 🔗 carry the same defect U+2709 did
+# (R-141, R-175): no fixed presentation, so one platform draws a hairline dingbat and another
+# a full-colour emoji, and nothing in CSS decides which. A globe drawn in strokes has one
+# appearance everywhere and scales with the text beside it.
+#
+# AND IT MUST NOT CARRY `cfdb-icon-link`. That class marks the ICON-ONLY anchors, and the
+# footer test asserts their content is a drawing and nothing else — this one is a word plus a
+# glyph, so wearing that class would make it fail for being what it is meant to be.
+GLOBE_MARK = (
+    "<svg class='cfdb-icon cfdb-icon-inline' viewBox='0 0 20 20' fill='none' "
+    "stroke='currentColor' stroke-width='1.5' stroke-linecap='round' "
+    "stroke-linejoin='round' aria-hidden='true'>"
+    "<circle cx='10' cy='10' r='7.5'/>"          # the globe
+    "<path d='M2.5 10h15'/>"                     # the equator
+    "<path d='M10 2.5a11.5 11.5 0 0 1 0 15a11.5 11.5 0 0 1 0-15z'/>"  # a meridian
+    "</svg>")
+
 AUTHOR_LINKS = (
     '<a href="https://marc4data.netlify.app/" target="_blank" rel="noopener">'
-    "Marc's Website</a>"
+    f"{GLOBE_MARK}About Marc</a>"
     ' · <a class="cfdb-icon-link" href="mailto:marc4data@gmail.com" title="Email Marc" '
     f'aria-label="Email Marc">{MAIL_MARK}</a>'
     ' · <a class="cfdb-icon-link" href="https://www.linkedin.com/in/marc4data/" '

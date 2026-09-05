@@ -51,7 +51,9 @@ OVERVIEW, GAMES, BETTING, DELIVERABLE, REFERENCE, BACK = (
 PAGES = [
     Page("today", "Today", OVERVIEW, "srv_game", True, True, True),
     Page("schedule", "Schedule", GAMES, "srv_game", True, True, True),
-    Page("scores", "Scores", GAMES, "srv_game", True, True, True),
+    # R-267. srv_game_team, not srv_game: the page is a stacked scoreboard at game x
+    # TEAM grain now, reading the same statement the Excel sheet does.
+    Page("scores", "Scores", GAMES, "srv_game_team", True, True, True),
     Page("rankings", "Rankings", GAMES, "srv_rankings", True, True, True),
     Page("standings", "Standings", GAMES, "srv_standings", True, True, True),
     # Scope is BUILT. fct_team_season_stat derives stat_scope and stat_base_name from

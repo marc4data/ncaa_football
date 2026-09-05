@@ -55,18 +55,30 @@ def test_the_cfbd_credit_is_a_link_and_not_just_the_words():
         "markdown link syntax does not render inside unsafe_allow_html")
 
 
-def test_the_website_link_reads_as_a_destination_not_as_a_hostname():
-    """A URL printed as its own label makes the reader parse a string to learn it is a
-    personal site. The link text says whose site it is; the href stays the URL."""
+def test_the_website_link_says_about_marc_and_shows_it_is_a_website():
+    """R-271. A URL printed as its own label makes the reader parse a string to learn it is a
+    personal site; "Marc's Website" fixed that and said the obvious part. "About Marc" names
+    what is on the other side, and a globe carries the rest.
+
+    THE GLYPH IS A DRAWING, WHICH IS NOT A STYLE CHOICE HERE. 🌐 and 🔗 have no fixed
+    presentation — one platform draws a hairline dingbat, another a full-colour emoji, and
+    nothing in CSS decides which. That is the defect U+2709 had (R-141, R-175), and the test
+    below still forbids it across the whole footer.
+    """
     site = [(href, inner) for href, inner in _anchors(attribution.AUTHOR_LINKS)
             if "netlify" in href]
     assert len(site) == 1, "exactly one link to Marc's own site"
     href, inner = site[0]
-    text = _visible(inner)
-    assert text == "Marc's Website"
-    assert "netlify" not in text and "://" not in text, (
-        f"the label is still a URL: {text!r}")
+    assert _visible(inner) == "About Marc"
+    assert "netlify" not in _visible(inner) and "://" not in _visible(inner)
     assert href.startswith("https://"), href
+    assert "<svg" in inner, "the website mark is missing"
+
+    # AND IT MUST NOT WEAR `cfdb-icon-link`. That class marks the ICON-ONLY anchors, and the
+    # test below asserts their content is a drawing and nothing else — this one is a word
+    # plus a glyph, so the class would make it fail for being exactly what it should be.
+    anchor = re.search(r"<a\s[^>]*netlify[^>]*>", attribution.AUTHOR_LINKS).group()
+    assert "cfdb-icon-link" not in anchor, anchor
 
 
 def test_each_icon_link_is_a_drawing_with_an_accessible_name():

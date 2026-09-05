@@ -397,35 +397,35 @@ def test_every_site_dependency_is_in_the_site_image_requirements():
 
 # --- the post-game render path -----------------------------------------------------------
 
-def test_the_winner_is_read_from_the_view_not_derived_from_a_sign():
-    """The page used to pick the winner by the sign of actual_margin and index into a
-    display column. Two derivations of one definition disagree eventually, and this pair
-    disagreed on 1 game in 295 the first time it was run against real completed games."""
+def test_the_scores_page_reads_the_result_and_derives_nothing_from_a_sign():
+    """THE LESSON SURVIVES THE PAGE THAT TAUGHT IT.
+
+    Three tests used to guard `scores._winner`, which existed because the page had picked the
+    winner from the sign of `actual_margin` and indexed into a display column — two
+    derivations of one definition, which disagreed on 1 game in 295 the first time they met
+    real completed games. It also had to render a tie as settled rather than pending, and
+    never as the string "None".
+
+    R-267 retired the function. At game x TEAM grain the answer is a column: `result` is
+    W / L / T for THIS row's team, and `margin` is already signed from its side, so there is
+    nothing left to derive and no nullable display column to index into. That is a better fix
+    than the formatter was — but only while nothing reintroduces the comparison, which is
+    what this asserts.
+    """
+    from pathlib import Path as _P
+    source = (_P(__file__).resolve().parents[1] / "site" / "views" / "scores.py").read_text()
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("#"))
+    for derivation in ("actual_margin", "_winner", "home_team_display", "away_team_display"):
+        assert derivation not in code, (
+            f"{derivation} is back on the Scores page — the winner is a column now")
+
+    # `result` is rendered as it arrives, with no formatter in front of it.
     from views import scores
-    row = {"is_completed": True, "winner": "Alpha State", "actual_margin": -7,
-           "home_team_display": "Alpha State", "away_team_display": "Beta Tech"}
-    assert "Alpha State" in scores._winner(row)
-
-
-def test_a_tie_is_a_settled_result_not_a_pending_one():
-    """srv_game returns NULL for `winner` on a completed game with equal scores.
-    Rendering that as Pending would claim the game has not been played."""
-    from views import scores
-    tie = scores._winner({"is_completed": True, "winner": None, "actual_margin": 0})
-    pending = scores._winner({"is_completed": False, "winner": None})
-    assert "Tie" in tie
-    assert "Pending" in pending
-    assert tie != pending
-
-
-def test_the_winner_never_renders_the_string_none():
-    """A formatter that indexes into a nullable column and interpolates the result puts
-    `None` on the page. 11% of srv_game is a game against a team with no dim_team
-    row, so the nullable case is the common case, not an edge."""
-    from views import scores
-    for row in ({"is_completed": True, "winner": None, "actual_margin": 0},
-                {"is_completed": False, "winner": None, "actual_margin": None}):
-        assert "None" not in scores._winner(row)
+    from lib import workbook
+    labels = dict(workbook.SCORES_COLUMNS)
+    assert labels["result"] == "Result"
+    assert "result" in scores.tab_fields(("Game",))
 
 
 # --- indicators that fire on everything indicate nothing ---------------------------------
