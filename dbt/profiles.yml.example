@@ -1,14 +1,43 @@
+# Copy to dbt/profiles.yml and fill the environment variables. That copy is gitignored
+# (.gitignore line 14), so it is PER WORKING COPY and git can never correct it for you.
+# scripts/preflight_env.py exists because of that; run it after copying.
+#
+# ==========================================================================================
+# THERE IS NO LOCAL WAREHOUSE. THIS FILE USED TO SAY THERE WAS.
+#
+# Until 2026-09-05 the default target here was `dev` -> host: localhost, port 5432, and every
+# working copy's real profile was a verbatim copy of it. The Postgres it named was dropped on
+# 2026-09-05 (R-296). dbt builds in the WAREHOUSE on the droplet -- the pipeline stack's
+# Postgres at /opt/cfdb-pipeline -- and has since 30 August. See CLAUDE.md, "Environments".
+#
+# The localhost target is gone rather than corrected, because a wrong default that connects
+# is worse than no default at all: it does not error, it answers.
+# ==========================================================================================
+
 cfdb_profile:
-  target: dev
+  # The developer target. Named for the instance it reaches, not for the person reaching it:
+  # `dev` said nothing about which database it meant, which is how it stayed wrong.
+  target: warehouse
+
   outputs:
-    dev:
+    # THE DROPLET'S WAREHOUSE, THROUGH AN SSH LOCAL-FORWARD YOU OPEN YOURSELF.
+    # Open the tunnel first (it prints nothing when it works):
+    #
+    #     scripts/warehouse_tunnel.sh
+    #
+    # then point this at its local end. See CLAUDE.md, "Reaching the warehouse".
+    warehouse:
       type: postgres
-      host: localhost
-      user: cfdb
-      password: cfdb
-      port: 5432
-      dbname: cfdb
+      # NO FALLBACK, DELIBERATELY. An unset variable must fail here, loudly, naming itself.
+      # The previous fallback was `localhost`, and a missing tunnel therefore did not fail --
+      # it connected to whatever else was listening on 5432.
+      host: "{{ env_var('CFDB_WAREHOUSE_HOST') }}"
+      port: "{{ env_var('CFDB_WAREHOUSE_PORT') | int }}"
+      user: "{{ env_var('PG_USER', 'cfdb') }}"
+      password: "{{ env_var('PG_PASSWORD', 'cfdb') }}"
+      dbname: "{{ env_var('PG_DB', 'cfdb') }}"
       schema: public
+      threads: 4
 
     # M4 target. Serverless SQL warehouse on Databricks Free Edition; the warehouse
     # auto-starts on first query, so an initial `dbt debug` can take ~30s.

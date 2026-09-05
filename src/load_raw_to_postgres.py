@@ -7,15 +7,56 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-PG_HOST = os.getenv("PG_HOST", "localhost")
-PG_PORT = int(os.getenv("PG_PORT", "5432"))
+# NO `localhost` FALLBACK, AND THIS IS THE FILE THAT MATTERS MOST FOR IT (R-312).
+#
+# get_conn() below is imported by every loader, by publish_marts, by deploy_status and by
+# export_sample — so this one default decided where the whole pipeline wrote. It said
+# `localhost:5432`, which since 2026-09-05 is a database that does not exist (R-296), and
+# before that was a stale local stack. export_sample.py already carries the post-mortem: a
+# serving export ran against it and produced a workbook with the right sheet names, the
+# right structure and plausible row counts, describing a database from days ago. The only
+# visible symptom was a table count somebody happened to question.
+#
+# A default that cannot work is worse than none: it does not error, it answers. Airflow sets
+# PG_HOST on the compose network and CI sets it in the workflow env, so removing the
+# fallback changes nothing in either — it fails only the case that was already wrong, a
+# loader run by hand from a working copy with no tunnel and no .env.
+#
+# THE REFUSAL IS IN pg_params(), NOT AT IMPORT. Half this module is pure functions
+# (payload_row_count and friends) that the unit tests import without ever opening a
+# connection, and a module that cannot be imported without a warehouse would make every one
+# of those tests need one. Fail where the database is actually wanted.
 PG_USER = os.getenv("PG_USER", "cfdb")
 PG_PASSWORD = os.getenv("PG_PASSWORD", "cfdb")
 PG_DB = os.getenv("PG_DB", "cfdb")
 
+_NO_TARGET = (
+    "PG_HOST/PG_PORT are not set, and there is no default — deliberately. dbt and the "
+    "loaders build in the droplet's WAREHOUSE; there is no local Postgres (dropped "
+    "2026-09-05, R-296). Open scripts/warehouse_tunnel.sh, set CFDB_WAREHOUSE_HOST and "
+    "CFDB_WAREHOUSE_PORT in .env (see .env.example), then run "
+    "python scripts/preflight_env.py."
+)
+
+
+def pg_params() -> dict:
+    """Connection parameters for the warehouse, or a refusal naming what to do about it.
+
+    Read at call time rather than import time so that a working copy which fixes its .env
+    does not have to restart a long-lived process to pick it up.
+    """
+    host = os.getenv("PG_HOST") or os.getenv("CFDB_WAREHOUSE_HOST") or ""
+    port = os.getenv("PG_PORT") or os.getenv("CFDB_WAREHOUSE_PORT") or ""
+    if not host or not port:
+        raise RuntimeError(_NO_TARGET)
+    return {"host": host, "port": int(port),
+            "user": os.getenv("PG_USER", "cfdb"),
+            "password": os.getenv("PG_PASSWORD", "cfdb"),
+            "dbname": os.getenv("PG_DB", "cfdb")}
+
 
 def get_conn():
-    return psycopg2.connect(host=PG_HOST, port=PG_PORT, user=PG_USER, password=PG_PASSWORD, dbname=PG_DB)
+    return psycopg2.connect(**pg_params())
 
 
 def payload_row_count(payload) -> int:

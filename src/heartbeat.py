@@ -76,12 +76,13 @@ def record(name: str, dag_id: str = "", run_id: str = "",
     class of lie as beating on failure.
     """
     import psycopg2
+    # One place resolves the warehouse target, and one place refuses a default that
+    # cannot work (R-312). Rolling our own getenv here is how it drifted before.
+    from .load_raw_to_postgres import pg_params
 
     beat_at = beat_at or datetime.now(timezone.utc)
     connection = psycopg2.connect(
-        host=os.getenv("PG_HOST", "localhost"), port=os.getenv("PG_PORT", "5432"),
-        user=os.getenv("PG_USER", "cfdb"), password=os.getenv("PG_PASSWORD", "cfdb"),
-        dbname=os.getenv("PG_DB", "cfdb"), connect_timeout=10)
+        connect_timeout=10, **pg_params())
     try:
         with connection, connection.cursor() as cursor:
             _ensure_table(cursor)

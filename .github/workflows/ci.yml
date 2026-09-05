@@ -195,6 +195,14 @@ jobs:
           PGPASSWORD: cfdb
         run: psql -h localhost -U cfdb -d cfdb -v ON_ERROR_STOP=1 -f ci/fixtures.sql
 
+      # R-313. The guard runs HERE as well as on a laptop, and it must PASS here: CI's
+      # profile resolves to the workflow's Postgres service container, which is a correct
+      # `localhost`, and the `ci` target is exempt from the host checks by name. This step is
+      # what stops the guard from being tightened later in a way that breaks the one
+      # environment nobody runs by hand.
+      - name: Preflight — say which database this build reaches
+        run: python scripts/preflight_env.py --no-connect
+
       - name: dbt build
         run: dbt build --project-dir dbt
 

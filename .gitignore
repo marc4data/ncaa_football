@@ -6,6 +6,12 @@ __pycache__/
 .venv-modelpack/
 .env
 .env.*
+# ...EXCEPT the example, which is the whole point of having one (R-313). `.env.*` above
+# would swallow it, and an example file that cannot be committed prevents nothing. It
+# carries KEY NAMES AND COMMENTS ONLY — never a value — which is what makes it safe to
+# track and what makes it worth tracking: .env is per working copy and hand-copied, and
+# three keys once lived in exactly one clone's .env and nowhere else.
+!.env.example
 venv/
 .DS_Store
 .vscode/

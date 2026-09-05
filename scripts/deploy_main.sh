@@ -12,9 +12,9 @@
 # halves that live there and verifies each one, because the site and the pipeline are
 # separate images with separate failure modes.
 #
-# THE LAPTOP STACK IS NOT TOUCHED. It is paused as the M3 rollback and decommissioned when
-# M3 closes (decision log 2026-08-31). Refreshing it here would quietly recreate the
-# two-productions problem this script exists to end.
+# THERE IS NO LAPTOP STACK. It was paused as the M3 rollback and DECOMMISSIONED on
+# 2026-09-05 (R-296); the Postgres it ran was dropped with it. This script never touched it
+# and there is now nothing to touch. Production is the droplet and nothing else.
 #
 #   scripts/deploy_main.sh              pipeline + site, only what changed
 #   scripts/deploy_main.sh --site-only  skip the pipeline
@@ -73,6 +73,51 @@ trap 'ssh -O exit -o ControlPath="$SSH_SOCKET" "$SERVING_SSH_HOST" >/dev/null 2>
 # the loser prints "ControlSocket already exists, disabling multiplexing" and pays for its own
 # connection — the multiplexing silently does not happen for half the deploy.
 "${SSH[@]}" true >/dev/null 2>&1 || fail "cannot reach $SERVING_SSH_HOST over ssh"
+
+# ==========================================================================================
+# ONE DEPLOY AT A TIME (R-314). THE LOCK LIVES ON THE DROPLET, NOT HERE.
+#
+# This script is executable in EVERY working copy, and there are now three side by side
+# under one parent — claude_code/, wt-drives/, cfdb_deploy/ — each with its own copy. "Only
+# one session publishes" was a sentence in a prompt, and a prompt is not what runs.
+#
+# The lock is remote deliberately. A lockfile in /tmp would serialise two shells on this
+# laptop and do nothing at all about a second machine, and the resource being protected is
+# not on this laptop: it is /opt/cfdb-pipeline and /opt/cfdb on the droplet. One lock beside
+# the thing it protects covers every caller that can reach it, which is every caller there is.
+#
+# `mkdir` rather than a lockfile because mkdir is atomic on POSIX: it either creates the
+# directory or fails, with no test-then-set window for two deploys started a second apart to
+# both pass through. IT REFUSES, IT NEVER QUEUES — a second deploy that waited would run
+# against a tree the first one moved underneath it, which is worse than being told no.
+# ==========================================================================================
+LOCK_DIR=/opt/cfdb/locks/deploy.lock
+LOCK_HOLDER="$(whoami)@$(hostname -s) $REPO_ROOT $(git rev-parse --abbrev-ref HEAD) pid $$"
+LOCK_HELD=0
+
+if "${SSH[@]}" "mkdir -p /opt/cfdb/locks && mkdir $LOCK_DIR" 2>/dev/null; then
+  LOCK_HELD=1
+  "${SSH[@]}" "printf '%s\n%s\n' \"$LOCK_HOLDER\" \"\$(date -u +%FT%TZ)\" > $LOCK_DIR/holder" || true
+else
+  held="$("${SSH[@]}" "cat $LOCK_DIR/holder 2>/dev/null" || true)"
+  age="$("${SSH[@]}" "find $LOCK_DIR -maxdepth 0 -mmin +60 2>/dev/null" || true)"
+  echo "::error::ANOTHER DEPLOY HOLDS THE LOCK. Refusing rather than queueing." >&2
+  echo "  lock   : $SERVING_SSH_HOST:$LOCK_DIR" >&2
+  echo "  holder : ${held:-(no holder file — the lock was taken but not stamped)}" >&2
+  if [ -n "$age" ]; then
+    echo >&2
+    echo "  THE LOCK IS OVER AN HOUR OLD, so the deploy that took it has probably died." >&2
+    echo "  Check, then clear it BY HAND — it is not cleared automatically, because a lock" >&2
+    echo "  that expires on a timer is a lock that expires mid-deploy:" >&2
+    echo "      ssh \$SERVING_SSH_HOST 'rm -rf $LOCK_DIR'" >&2
+  fi
+  exit 3
+fi
+
+# Released however we leave — success, failure, or ^C. Chained onto the existing trap rather
+# than replacing it, so the ssh master is still torn down too.
+trap '[ "$LOCK_HELD" = 1 ] && ssh "${SSH_OPTS[@]}" "$SERVING_SSH_HOST" "rm -rf $LOCK_DIR" >/dev/null 2>&1;
+      ssh -O exit -o ControlPath="$SSH_SOCKET" "$SERVING_SSH_HOST" >/dev/null 2>&1 || true' EXIT
 
 PIPELINE_DIR=/opt/cfdb-pipeline
 SITE_DIR=/opt/cfdb/site

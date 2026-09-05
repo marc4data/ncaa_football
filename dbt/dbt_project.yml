@@ -9,6 +9,19 @@ test-paths: ["tests"]
 target-path: "target"
 clean-targets: ["target"]
 
+# EVERY dbt INVOCATION SAYS WHICH DATABASE IT REACHED, AND REFUSES THE ONE THAT IS GONE.
+#
+# dbt/profiles.yml is gitignored, so it is per working copy and hand-copied, and a fix that
+# merges to main does not reach it. On 2026-09-05 that cost a session: a profile copied from
+# the old template pointed at localhost:5432, a Postgres dropped that same day, and the
+# conclusion drawn was "there is no warehouse to build against." There is; it is on the
+# droplet. See dbt/macros/preflight_target.sql and scripts/preflight_env.py.
+#
+# on-run-start rather than a README paragraph, because this is the one place a dbt run
+# cannot route around.
+on-run-start:
+  - "{{ preflight_target() }}"
+
 models:
   cfdb_dbt:
     +materialized: view

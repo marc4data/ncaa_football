@@ -1,10 +1,18 @@
-# Local Airflow 3 for cfdb. Runs alongside the Postgres in docker-compose.yml, reusing it
-# for Airflow's own metadata database (a separate `airflow` database on the same server).
+# THE PIPELINE STACK. IT RUNS ON THE DROPLET, at /opt/cfdb-pipeline — not on a laptop.
 #
-# Bring up:
+# Airflow 3, merged with docker-compose.yml, which supplies the `postgres` service this file
+# depends on and connects to: that service is THE WAREHOUSE, where dbt builds, and it also
+# carries Airflow's own metadata in a separate `airflow` database on the same server. This
+# file defines no Postgres of its own; see docker-compose.yml before changing either.
+#
+# Brought up by scripts/deploy_main.sh, which is the only supported way. The commands are:
 #   docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d airflow-init
 #   docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d
-#   open http://localhost:8080   (local stack logs in as admin automatically)
+#
+# The UI is on the droplet's 8080 and is not published; reach it over an SSH forward if you
+# need it. The header here used to say "open http://localhost:8080 (local stack logs in as
+# admin automatically)", which described a laptop stack that was decommissioned on
+# 2026-09-05 (R-296). See CLAUDE.md, "Environments".
 #
 # Secrets come from .env and are never baked into the image. Generate them once with:
 #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

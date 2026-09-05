@@ -30,7 +30,6 @@ honest about how big the gap is.
 """
 import argparse
 import json
-import os
 import re
 import sys
 from dataclasses import dataclass
@@ -218,10 +217,11 @@ def landed_from_database() -> Dict[str, int]:
     fails instead of quietly answering from somewhere else.
     """
     import psycopg2
+    # One place resolves the warehouse target, and one place refuses a default that
+    # cannot work (R-312). Rolling our own getenv here is how it drifted before.
+    from src.load_raw_to_postgres import pg_params
     connection = psycopg2.connect(
-        host=os.getenv("PG_HOST", "localhost"), port=os.getenv("PG_PORT", "5432"),
-        user=os.getenv("PG_USER", "cfdb"), password=os.getenv("PG_PASSWORD", "cfdb"),
-        dbname=os.getenv("PG_DB", "cfdb"), connect_timeout=10)
+        connect_timeout=10, **pg_params())
     counts: Dict[str, int] = {}
     try:
         with connection, connection.cursor() as cursor:

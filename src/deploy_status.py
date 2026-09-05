@@ -12,13 +12,56 @@ The pin still requires a person to run scripts/deploy_main.sh. This does not aut
 — deliberately, because automatic advancement would give back the protection the pin
 exists for. It makes the gap measurable, and lets System Overview raise it.
 """
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
-DEPLOY_DIR = Path(__file__).resolve().parents[2] / "cfdb_deploy"
+# ==========================================================================================
+# WHERE THE DEPLOY TREE IS (R-315). ANCHORED, NOT COUNTED.
+#
+# This was `Path(__file__).resolve().parents[2] / "cfdb_deploy"` — three levels up from this
+# file and hope. Under the old two-clone layout that was correct from one clone and a
+# nonexistent path from the other; the 2026-09-05 worktree migration happened to make it
+# correct from every working copy, which is worse, because a path that is right by accident
+# of placement is one `mv` from being wrong again and the failure mode is a SILENT
+# MISRESOLVE — deploy_status() returns severity "unknown" and System Overview shows a shrug.
+#
+# MEASURED, and this is why it is not left alone: from a working copy it resolves correctly,
+# and INSIDE THE AIRFLOW CONTAINER IT DOES NOT. docker-compose.airflow.yml mounts
+# ../cfdb_deploy/src at /opt/airflow/project/src, so parents[2] there is /opt/airflow and the
+# answer is /opt/airflow/cfdb_deploy, which is not mounted and does not exist. Nothing calls
+# this from a DAG today — it is run by hand — so that has never surfaced.
+#
+# CFDB_DEPLOY_DIR first, so the container can simply say where it is. Then the directory
+# depth, kept as the convenient default for a laptop. Then a repo-root marker walk, so a
+# working copy nested differently still finds its sibling rather than reporting "unknown".
+# ==========================================================================================
+
+
+def _find_deploy_dir() -> Path:
+    override = os.getenv("CFDB_DEPLOY_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    here = Path(__file__).resolve()
+    candidate = here.parents[2] / "cfdb_deploy"
+    if candidate.exists():
+        return candidate
+
+    # Walk up to the repo root (the directory holding dbt/dbt_project.yml) and look beside it.
+    for parent in here.parents:
+        if (parent / "dbt" / "dbt_project.yml").exists():
+            sibling = parent.parent / "cfdb_deploy"
+            if sibling.exists():
+                return sibling
+            break
+    return candidate          # report the miss against the conventional path, not a guess
+
+
+DEPLOY_DIR = _find_deploy_dir()
 
 # Commits behind main. Chosen rather than elapsed time because one commit that changes a DAG
 # matters more than a week of none, and staleness is about content, not clock.
