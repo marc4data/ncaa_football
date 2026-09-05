@@ -31,10 +31,20 @@ from pathlib import Path
 
 MANIFEST = Path("dbt/target/manifest.json")
 
-# What `cfbd_scores_refresh` rebuilds, mirroring SCORES_SELECTOR. `+` pulls ancestors.
-GATED_SELECTION = ("model.cfdb_dbt.srv_game",
+# What the PARTIAL-REBUILD DAGs rebuild, mirroring their selectors. `+` pulls ancestors.
+#
+# R-338: this listed only the scores DAG's three roots, so the over-tagging check reasoned
+# about half the pattern. cfbd_lines_snapshot is the same shape of job and its two roots were
+# missing, which is the same one-instance blindness that let the exclusion itself go unapplied
+# to that DAG for a day and a half.
+GATED_SELECTION = (
+                   # cfbd_scores_refresh — SCORES_SELECTOR
+                   "model.cfdb_dbt.srv_game",
                    "model.cfdb_dbt.srv_team_game_log",
-                   "model.cfdb_dbt.srv_game_weather")
+                   "model.cfdb_dbt.srv_game_weather",
+                   # cfbd_lines_snapshot — DISTRIBUTION_SELECTOR
+                   "model.cfdb_dbt.srv_week_metric_distribution",
+                   "model.cfdb_dbt.srv_week_metric_distribution_bin")
 
 EXEMPT_TAG = "full_refresh_only"
 # Also excluded by the DAG, so also not a risk to it.
