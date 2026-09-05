@@ -2528,67 +2528,81 @@ MARKET_FIELDS = frozenset({
 })
 
 
-def test_the_sheet_is_exactly_the_order_and_the_categories_marc_asked_for():
-    """144 IN, 144 OUT — R-264 is a permutation, and this asserts it against the FILE.
+# What has been added to Marc's ratified 144 since he ratified it, and why each one. Named
+# here so the test below can subtract them and compare the remainder against his own file —
+# regenerating the CSV from the code would make that comparison circular, and the whole point
+# of the fixture is that it is an artefact he reviewed.
+ADDED_SINCE_RATIFIED = {
+    "team_rank": "R-284. Rank in the week, from the game's own row",
+    "record_before_display": "R-285. The record leading into this game",
+    "pregame_elo": "R-286. Already in the warehouse, never surfaced here",
+    "postgame_elo": "R-286. Safe only because Scores is completed-only (R-278)",
+    "matchup_url": "R-289. Export-only; a cell hyperlink is invisible to a formula",
+}
+# Of those, the one that never reaches a page tab.
+EXPORT_ONLY = {"matchup_url"}
 
-    Order AND category, position by position. A test comparing only the SET would pass on a
-    sheet with every column in the wrong place; one comparing only the order would pass with
-    the seven ancillary keys painted as Game — the arrangement Marc first sketched, and the
-    one that breaks the contiguity invariant.
 
-    Asserted against `tests/fixtures/cfdb_scores_column_order_v2.csv` rather than a list
-    retyped from it, because a retyped list agrees with whatever I typed.
+def test_marcs_ratified_order_survives_underneath_every_addition():
+    """144 RATIFIED, 149 SHIPPED, AND THE 144 ARE STILL EXACTLY THEMSELVES.
+
+    Subtracting the declared additions must give back Marc's file — same fields, same order,
+    same categories, position by position. That is what makes "we added five columns" a
+    checkable claim rather than an assurance: anything else that moved shows up here.
+
+    Deliberately NOT a comparison against a regenerated CSV. Regenerating it from the block
+    structure would compare the code against itself and pass no matter what shifted.
     """
     marc = _marcs_order()
-    assert len(marc) == 144, len(marc)
+    assert len(marc) == 144
 
     sheet = _scores()
     built = [(field, sheet.field_category[field]) for field, _ in sheet.columns]
-    assert built == marc, [
-        (i, b, m) for i, (b, m) in enumerate(zip(built, marc), start=1) if b != m][:8]
+    remainder = [(f, c) for f, c in built if f not in ADDED_SINCE_RATIFIED]
+    assert remainder == marc, [
+        (i, b, m) for i, (b, m) in enumerate(zip(remainder, marc), start=1) if b != m][:8]
 
-    # The BLOCKS are what the writer walks, so they are checked too: the flattened list
-    # agreeing while the structure itself is wrong is exactly what this catches.
-    flattened = [(f, name) for name, fields in workbook.SCORES_BLOCKS for f in fields]
-    assert flattened == marc
+    assert len(built) == 149, len(built)
+    assert {f for f, _ in built} - {f for f, _ in marc} == set(ADDED_SINCE_RATIFIED)
 
 
-def test_the_reorder_moved_seven_columns_and_lost_none():
-    """THE PERMUTATION, STATED AS A PERMUTATION.
+def test_each_addition_sits_where_it_was_asked_to_sit():
+    """Placement was a decision, so it is asserted rather than left to the order above.
 
-    The test above would also pass if a column were renamed on both sides at once. This one
-    names what moved and asserts nothing else did, so a change that drops one field and adds
-    another of the same category cannot slip through.
+    The four outcome columns go after `result` in the Game block — Marc chose that over
+    appending to Ancillary, because they read as part of the result. The URL goes to the far
+    right of Ancillary, where the reference keys already live.
     """
-    moved = ["team_id", "conference", "classification", "opponent_team_id",
-             "opponent_conference", "is_neutral_site", "is_completed"]
-    marc = _marcs_order()
-    assert [f for f, c in marc if c == "Ancillary"] == moved
-
     sheet = _scores()
-    rest = [f for f, _ in sheet.columns if f not in moved]
-    assert rest == [f for f, c in marc if c != "Ancillary"]
-    assert len(rest) == 137 and len(moved) == 7
+    labels = [f for f, _ in sheet.columns]
+    game = [f for f, _ in sheet.columns if sheet.field_category[f] == "Game"]
+    assert game[-5:] == ["result", "team_rank", "record_before_display",
+                         "pregame_elo", "postgame_elo"], game[-6:]
+    assert labels[-1] == "matchup_url", labels[-3:]
+    assert sheet.field_category["matchup_url"] == "Ancillary"
 
 
-def test_the_select_list_and_the_display_list_differ_only_where_they_must():
-    """`game_no` is computed by the query, so it is displayed and not selected.
-    `possession_seconds` is selected and displayed as `possession_minutes` (R-259).
-    Those are the only two, and stating them separately from the counts means a compensating
-    change on the other side cannot satisfy this.
+def test_the_select_list_carries_what_the_page_needs_and_the_sheet_does_not_print():
+    """THREE KINDS OF DIFFERENCE BETWEEN SELECTED AND PRINTED, AND ONLY THREE.
+
+      computed   `game_no` and `matchup_url` are built, not selected
+      renamed    `possession_seconds` is selected and printed as `possession_minutes`
+      passengers slugs, logos and the opponent's rank ride in the frame for the PAGE to link
+                 and draw with; the sheet prints none of them
+
+    The third is the one that was missing, and its absence is why every team link on the page
+    pointed at the same place (R-287): the view had the columns, the SELECT did not, and each
+    layer below turned the gap into silence rather than an error.
     """
-    marc = {f for f, _ in _marcs_order()}
+    marc = {f for f, _ in _marcs_order()} | set(ADDED_SINCE_RATIFIED)
     sheet = _scores()
-
-    displayed = sheet.fields
-    assert len(displayed) == 144 and len(set(displayed)) == 144
-    assert set(displayed) == marc
-
     selected = set(sheet.selected_fields)
-    assert len(sheet.selected_fields) == 143
-    assert selected - marc == {"possession_seconds"}
-    assert marc - selected == {"game_no", "possession_minutes"}
-    assert MARKET_FIELDS <= marc, "the market block is no longer in the sheet"
+
+    assert set(sheet.fields) == marc
+    assert selected - marc == {"possession_seconds"} | set(workbook.SCORES_PASSENGERS)
+    assert marc - selected == {"game_no", "possession_minutes", "matchup_url"}
+    for passenger in ("team_slug", "team_logo_url", "team_rank"):
+        assert passenger in selected, f"{passenger} never reaches the page"
 
 
 def test_every_scores_category_is_one_contiguous_run_of_columns():
@@ -2729,7 +2743,7 @@ def _run_scores_sql(rows, sql=None):
 SCORES_PREDICATE_ONLY = ("is_fbs_game",)
 
 
-def _execute_scores_sql(rows, sql, division="all"):
+def _execute_scores_sql(rows, sql, division="all", completed_only=False):
     import sqlite3
     sheet = _scores()
     statement = " ".join(sql.split())
@@ -2745,7 +2759,11 @@ def _execute_scores_sql(rows, sql, division="all"):
         [[row.get(c) for c in columns] for row in rows])
     cursor = connection.execute(statement, {
         "season": 2025, "season_type": "regular", "week": None,
-        "division": division, "conference": None})
+        "division": division, "conference": None,
+        # R-278. The extract's default: every row. The page's True is exercised by its own
+        # test, on a MIXED scope — a finished week passes either way, which is the R-084
+        # shape and the reason a completed-only bug was invisible on week 2.
+        "completed_only": 1 if completed_only else 0})
     names = [d[0] for d in cursor.description]
     return [dict(zip(names, r)) for r in cursor.fetchall()]
 
@@ -3131,7 +3149,8 @@ def test_the_market_block_sits_between_the_result_and_the_box_score():
     labels = [label for _, label in sheet.columns]
     market = [i for i, (f, _) in enumerate(sheet.columns)
               if sheet.field_category[f] == "Market"]
-    assert labels[min(market) - 1] == "Result"
+    # `Postgame Elo` now, not `Result` — R-290 put four outcome columns after it.
+    assert labels[min(market) - 1] == "Postgame Elo"
     assert labels[max(market) + 1] == "1st downs"
     assert len(market) == 12, len(market)
     # The closing half is always populated and comes first; the conditionally-blank half is
@@ -3176,18 +3195,85 @@ def test_the_ancillary_block_is_last_and_holds_the_keys(built):
     So being last is load-bearing, not incidental.
     """
     sheet = _scores()
-    tail = sheet.columns[-7:]
+    tail = sheet.columns[-8:]
     assert all(sheet.field_category[f] == "Ancillary" for f, _ in tail), tail
     assert [f for f, _ in tail] == [
         "team_id", "conference", "classification", "opponent_team_id",
-        "opponent_conference", "is_neutral_site", "is_completed"]
+        "opponent_conference", "is_neutral_site", "is_completed",
+        # R-289. The export-only reference key, last of all.
+        "matchup_url"]
 
     # And they are painted their own colour in the file, not the Game navy Marc first sketched
     # — which would have been one category in two runs.
     _, book, _, _ = built
     tab = book["Scores"]
     header = workbook.header_row(1)
-    for index in range(len(sheet.columns) - 6, len(sheet.columns) + 1):
+    for index in range(len(sheet.columns) - 7, len(sheet.columns) + 1):
         assert tab.cell(header, index).fill.fgColor.rgb.endswith(
             workbook.CATEGORY_FILLS["Ancillary"])
     assert workbook.CATEGORY_FILLS["Ancillary"] != workbook.CATEGORY_FILLS["Game"]
+
+
+def test_the_page_filters_to_completed_games_and_the_extract_does_not(built):
+    """R-278. THE MIXED SCOPE IS THE TEST.
+
+    Marc looked at 2025 week 2, which is entirely finished, so the page looked right — the
+    defect only appears on a live week, which is every week from now on. That is the R-084
+    shape: a uniform population hides it, and a finished week passes either way.
+
+    The divergence is a bound parameter on ONE statement rather than a second query. The
+    extract wants every row and the results page wants results; a second query for the page
+    is how Schedule and the export drifted in R-184.
+    """
+    played = _pair(1, 1, "2025-08-30")
+    unplayed = [dict(row, game_id=2, is_completed=0) for row in _pair(2, 1, "2025-08-31")]
+    for row in played:
+        row["is_completed"] = 1
+    rows = played + unplayed
+
+    everything = _execute_scores_sql(rows, _scores().sql, completed_only=False)
+    assert sorted(r["game_id"] for r in everything) == [1, 1, 2, 2], everything
+
+    results_only = _execute_scores_sql(rows, _scores().sql, completed_only=True)
+    assert sorted(r["game_id"] for r in results_only) == [1, 1], results_only
+
+    # And it still keeps a game WHOLE — a filter that dropped one side of a pair would break
+    # the stacking the same way a bad cap does.
+    assert len(results_only) % 2 == 0
+
+
+def test_a_team_hyperlink_carries_a_slug_and_never_a_display_name(built):
+    """R-289. NEGATIVE-TESTED, BECAUSE THE BUG WRITES A LINK THAT LOOKS RIGHT.
+
+    `Sheet.hyperlinks` used to find the slug by string surgery on Schedule's naming. On
+    Scores the display column is plainly `team`, so the surgery was a no-op and the TEAM NAME
+    went where a slug belongs — "Western Illinois" is truthy, so every guard passed and the
+    file got `/team?...&team=Western%20Illinois`: written, correct-looking, resolves to
+    nothing.
+
+    Two things stop it now, and both are asserted: the slug column is NAMED per sheet, and
+    `_team_url` refuses a value with a space in it.
+    """
+    sheet = _scores()
+    assert sheet.link_fields["team"] == ("team", "team_slug")
+    for name, spec in sheet.link_fields.items():
+        kind = spec[0] if isinstance(spec, tuple) else spec
+        if kind == "team":
+            assert isinstance(spec, tuple) and spec[1], f"{name} derives its slug"
+
+    links = sheet.hyperlinks("https://x.test", season=2025, week=2,
+                             season_type="regular", conference=None, division="fbs")
+    assert links["team"]({"team_slug": "auburn", "team": "Auburn"}) \
+        .endswith("team=auburn")
+
+    # THE BUG, EXACTLY: a display name where the slug belongs.
+    assert links["team"]({"team_slug": "Western Illinois"}) is None, (
+        "a team NAME was accepted as a slug — this is the link that goes nowhere")
+    assert links["team"]({"team_slug": None}) is None
+
+    # And deriving instead of naming is now an error rather than a silent wrong link.
+    import pytest as _pytest
+    broken = workbook.Sheet("X", "v", "select a from v limit 1", [("a", "A")],
+                            link_fields={"team": "team"})
+    with _pytest.raises(ValueError, match="without naming its slug"):
+        broken.hyperlinks("https://x.test")

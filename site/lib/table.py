@@ -31,6 +31,13 @@ class Col:
         if self.render is not None:
             return self.render(row)
         value = row.get(self.field)
+        if self.kind == "plain":
+            # R-280. A NUMERIC LABEL: no decimal point and NO THOUSANDS SEPARATOR. A season
+            # is 2025 and a game id is 401752817; a comma in either is a bug, and the
+            # workbook has said so in a comment since R-216 while the page printed 2,025.
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                return fmt.EM_DASH
+            return f"{int(value)}"
         if self.kind == "num":
             return fmt.number(value, self.field, self.dp)
         if self.kind == "signed":
@@ -51,7 +58,7 @@ class Col:
 
     @property
     def css(self) -> str:
-        if self.kind in ("num", "signed"):
+        if self.kind in ("num", "signed", "plain"):
             return "cfdb-num"
         # R-103. A glyph column is neither a number nor prose. Right-aligning "☀ 71°F"
         # hung it off the right edge of its own header; left-aligning left it stranded
@@ -132,10 +139,36 @@ def _header_cell(column: Col, sortable: bool, freeze: str = "") -> str:
 
 PIXELS_PER_CHARACTER = 8.5
 MIN_COLUMN_PIXELS = 44
+# Three lines of header is already a lot; past that the LABEL is the problem.
+HEADER_LINE_CAP = 3
+
+
+def header_lines(columns: List[Col], layout: List[str]) -> int:
+    """How many lines the deepest header needs at these widths.
+
+    Computed rather than chosen, for the reason R-217 computes it in the workbook: a
+    hardcoded height fits today's labels and clips the next long one. Words are not broken,
+    so the depth follows the longest WORD that has to fit, not the character count.
+    """
+    deepest = 1
+    for column, width in zip(columns, layout):
+        if not width.endswith("px"):
+            continue
+        # .78rem uppercase with .02em of tracking runs a little under 7px per character.
+        capacity = max(int(int(width[:-2]) / 6.8) - 1, 1)
+        line, used = 1, 0
+        for word in str(column.label).split():
+            need = len(word) + (1 if used else 0)
+            if used and used + need > capacity:
+                line, used = line + 1, len(word)
+            else:
+                used += need
+        deepest = max(deepest, line)
+    return min(deepest, HEADER_LINE_CAP)
 
 
 def column_layout(df: pd.DataFrame, columns: List[Col],
-                  unit: str = "%") -> List[str]:
+                  unit: str = "%", seed_from_label: bool = True) -> List[str]:
     """Column widths computed ONCE over the whole dataset, for reuse across every group.
 
     F2-06, raised five times across two passes and by frequency the number one item in the
@@ -203,7 +236,21 @@ def column_layout(df: pd.DataFrame, columns: List[Col],
         # letter-spacing, so six characters of "Spread" occupy more than six characters of
         # body text. Without this the SPREAD header broke to "SPREA / D" the moment the two
         # corrections above gave its neighbours their honest share.
-        longest = max(len(str(column.label)) * 1.1, widest)
+        # R-282. THE LABEL IS A FLOOR ONLY WHERE THE CALLER WANTS ONE.
+        #
+        # `max(label, data)` means a long header WIDENS its column instead of wrapping inside
+        # it — precisely backwards from "increase the vertical size of the headers to get some
+        # wordwrap and make the data fields more dense". Measured on Scores: Team and Opponent
+        # 212px each, Conference 170, every one set by the label rather than by the data.
+        #
+        # R-217 already ruled on this for the WORKBOOK — "widths measured from the DATA, not
+        # seeded with the header label, and the header row height computed from wrap depth" —
+        # and the page, built second, did not inherit it. Not a new decision; the existing one,
+        # applied to the other surface.
+        #
+        # The seventeen other callers keep the floor. Their tables fit on a screen, where a
+        # wrapped header costs more than a wide column does.
+        longest = max(len(str(column.label)) * 1.1, widest) if seed_from_label else widest
         # Clamped in both directions: a floor so a two-character header stays readable, a
         # ceiling so one long venue name does not take half the table.
         #
@@ -243,7 +290,8 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
            link_builder: Optional[Callable] = None, max_rows: int = 300,
            layout: Optional[List[str]] = None, sortable: bool = True,
            scroll: bool = False, sticky: int = 0,
-           row_class: Optional[Callable] = None) -> None:
+           row_class: Optional[Callable] = None,
+           header_height: Optional[int] = None) -> None:
     """An HTML table, because Streamlit's dataframe cannot hold a chip or a link.
 
     AC-G.47: the table carries header semantics and a caption naming its source view.
@@ -313,11 +361,14 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
         classes = " ".join(filter(None, ["cfdb-linked" if row_href else "", extra]))
         body.append(f"<tr class='{classes}'>{joined}</tr>" if classes
                     else f"<tr>{joined}</tr>")
+    # Set on the ROW, not per cell: it is the row's height that has to hold every header.
+    head_style = f" style='height:{header_height}px'" if header_height else ""
     table_css = "cfdb-table" + (" cfdb-table-wide" if scroll else "")
     markup = ("<table class='" + table_css + "'>"
               + (f"<caption>{caption}</caption>" if caption else "")
               + colgroup
-              + f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>")
+              + f"<thead><tr{head_style}>{head}</tr></thead>"
+              + f"<tbody>{''.join(body)}</tbody></table>")
     if scroll:
         # The scroll container is a WRAPPER, not the table: `overflow-x` on the table itself
         # does nothing, and putting it on an ancestor Streamlit owns is not ours to set.

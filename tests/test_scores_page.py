@@ -21,26 +21,41 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "scores.py").
 
 # --- the tabs cover the sheet, exactly once ------------------------------------------------
 
-def test_every_export_column_appears_on_exactly_one_tab():
-    """Marc's "if it's possible include all the columns in the Excel output", as one
-    assertion. Both halves matter: a column on two tabs is a reader comparing two copies, and
-    a column on none is silently absent from the site while present in the file.
+def test_the_tabs_and_the_hidden_set_partition_the_sheet_exactly():
+    """R-279. THE RULE CHANGED AND THE TEST HAD TO CHANGE WITH IT, IN THE HARDER DIRECTION.
 
-    The frozen four are excluded from the once-only half because they are on every tab
-    deliberately — that is what "hold consistent with several different tabs" means.
+    It used to be "every sheet column appears on exactly one tab" — Marc's "include all the
+    columns". He then asked for six of them to leave the web interface and stay in the file,
+    so that assertion is no longer true and cannot simply be relaxed to "at most one": that
+    would let a column vanish by accident, which is what the original existed to prevent.
+
+    A PARTITION IS WHAT KEEPS IT IMPOSSIBLE. Every sheet column is on a tab or explicitly
+    hidden with a reason, never both and never neither — so a new column must be assigned or
+    declared, and forgetting it fails here.
     """
     everything = {field for field, _ in workbook.SCORES_COLUMNS}
     union, twice = set(), []
-    for _label, blocks in scores.TABS:
+    for _slug, _label, blocks in scores.TABS:
         own = set(scores.tab_fields(blocks)) - set(scores.FROZEN)
         twice += sorted(union & own)
         union |= own
+    shown = union | set(scores.FROZEN)
+    hidden = set(scores.HIDDEN_ON_PAGE)
 
     assert twice == [], twice
-    assert union | set(scores.FROZEN) == everything, {
-        "on no tab": sorted(everything - (union | set(scores.FROZEN))),
-        "on a tab but not the sheet": sorted((union | set(scores.FROZEN)) - everything)}
-    assert len(everything) == 144
+    assert not (shown & hidden), sorted(shown & hidden)
+    assert shown | hidden == everything, {
+        "in neither": sorted(everything - shown - hidden),
+        "not a sheet column": sorted((shown | hidden) - everything)}
+    assert len(everything) == 149
+
+    # Every hidden column carries a REASON, because "hidden" without one is indistinguishable
+    # from "forgotten" the next time somebody reads the list.
+    for field, why in scores.HIDDEN_ON_PAGE.items():
+        assert why and len(why) > 12, (field, why)
+
+    # And the export-only column is hidden by definition, not by coincidence.
+    assert "matchup_url" in hidden
 
 
 def test_the_tabs_are_built_from_the_blocks_not_from_a_copied_list():
@@ -48,7 +63,7 @@ def test_the_tabs_are_built_from_the_blocks_not_from_a_copied_list():
     the first time a column joined a band. The mapping is tab label -> block name."""
     assert "workbook.SCORES_BLOCKS" in SOURCE
     block_names = {name for name, _ in workbook.SCORES_BLOCKS}
-    named = {b for _label, blocks in scores.TABS for b in blocks}
+    named = {b for _slug, _label, blocks in scores.TABS for b in blocks}
     assert named == block_names, named ^ block_names
 
 
@@ -62,7 +77,8 @@ def test_six_tabs_cover_seven_bands_and_ancillary_rides_with_game():
     assert len(workbook.SCORES_BLOCKS) == 7
     game_results = scores.tab_fields(("Game", "Ancillary"))
     ancillary = [f for f, _ in workbook.SCORES_COLUMNS
-                 if workbook.SCORES_CATEGORY[f] == "Ancillary"]
+                 if workbook.SCORES_CATEGORY[f] == "Ancillary"
+                 and f not in scores.HIDDEN_ON_PAGE]
     assert game_results[-len(ancillary):] == ancillary, "ancillary is not at the far right"
 
 
@@ -71,7 +87,7 @@ def test_the_frozen_four_lead_every_tab_in_the_same_order():
     tabs." Same four, same order, first on all six — a frozen block that moved between tabs
     would be worse than none."""
     assert scores.FROZEN == ("game_no", "game_date", "team", "points_for")
-    for _label, blocks in scores.TABS:
+    for _slug, _label, blocks in scores.TABS:
         assert scores.tab_fields(blocks)[:4] == list(scores.FROZEN)
 
 
@@ -271,3 +287,159 @@ def test_nothing_on_the_page_pivots_or_pairs():
                      if not line.lstrip().startswith("#"))
     for reshape in (".pivot", ".unstack", ".merge(", "groupby"):
         assert reshape not in code, f"{reshape} on a page whose grain is the point"
+
+
+# --- round 2 ---------------------------------------------------------------------------------
+
+def test_the_page_asks_for_completed_games_and_the_sheet_does_not():
+    """R-278. The divergence is a bound parameter on ONE statement, not a second query."""
+    assert '"completed_only": True' in SOURCE
+    assert ":completed_only" in scores.SCORES_SHEET.sql
+
+
+def test_a_numeric_column_carries_a_comma_exactly_when_the_sheet_does():
+    """R-280. THE PROPERTY, OVER EVERY NUMERIC COLUMN AT ONCE.
+
+    Spot-checking `season` would have passed the day `game_id` broke. The page's rendered
+    string must contain a comma if and only if the sheet's number format for that field
+    contains `#,##0` — which asserts the two surfaces agree about all of them together.
+    """
+    sheet = scores.SCORES_SHEET
+    checked = 0
+    for field, _label in workbook.SCORES_COLUMNS:
+        fmt = workbook.number_format(field, sheet.decimals, sheet.integer_fields,
+                                     sheet.site_precision)
+        if not fmt.startswith(("0", "#,##0", "+#")):
+            continue
+        kind, dp = scores._kind(field, pd.Series([1234567], dtype="int64"))
+        if kind not in ("plain", "num", "signed"):
+            continue
+        rendered = Col(field, "x", kind, dp=dp).format({field: 1234567})
+        sheet_groups = "#,##0" in fmt
+        assert ("," in rendered) == sheet_groups, (
+            f"{field}: page {rendered!r}, sheet format {fmt!r}")
+        checked += 1
+    assert checked > 100, checked
+
+    # The two that were wrong, named so the regression is legible.
+    assert Col("season", "Season", "plain", dp=0).format({"season": 2025}) == "2025"
+    assert Col("game_id", "Game id", "plain", dp=0).format(
+        {"game_id": 401752817}) == "401752817"
+
+
+def test_the_comma_test_can_fail(monkeypatch):
+    """Negative test for the loop above: collapse the split back and it must go red."""
+    original = scores._kind
+    monkeypatch.setattr(scores, "_kind",
+                        lambda f, s: ("num", 0) if original(f, s)[0] == "plain"
+                        else original(f, s))
+    with __import__("pytest").raises(AssertionError):
+        test_a_numeric_column_carries_a_comma_exactly_when_the_sheet_does()
+
+
+def test_every_tab_survives_a_sort_and_a_reset(monkeypatch):
+    """R-283. ALL SIX, NOT ONE — five of them are the ones that were broken.
+
+    The tab is a URL parameter and `params.link_here` preserves every known parameter, so
+    the sort links and the reset link carry it without either knowing it exists. That is the
+    fix being structural rather than a helper somebody has to remember.
+    """
+    from lib import params
+    for slug, _label, _blocks in scores.TABS:
+        current = {"tab": slug, "season": "2025", "week": "2"}
+        monkeypatch.setattr(params.st, "query_params", dict(current))
+
+        sort_href = params.link_here(sort="total_yards", order="desc")
+        assert f"tab={slug}" in sort_href, sort_href
+        assert "sort=total_yards" in sort_href
+
+        reset_href = params.link_here(sort=None, order=None)
+        assert f"tab={slug}" in reset_href, reset_href
+        assert "sort=" not in reset_href and "order=" not in reset_href
+        assert "season=2025" in reset_href, "the reset threw away the scope"
+
+
+def test_an_unknown_tab_falls_back_rather_than_raising(monkeypatch):
+    """A hand-edited `?tab=` is noise, not a request (AC-G.11)."""
+    monkeypatch.setattr(scores.params, "get", lambda k: "nonsense" if k == "tab" else None)
+    assert scores._active_tab() == scores.TABS[0]
+    monkeypatch.setattr(scores.params, "get", lambda k: "offense" if k == "tab" else None)
+    assert scores._active_tab()[1] == "Offense"
+
+
+def test_the_team_cell_draws_a_logo_and_only_badges_a_ranked_team():
+    """R-284. Through `table.team_cell`, which already obeys AC-1.5 — an unranked team shows
+    NO badge, not an em dash in one. A second team cell would not."""
+    ranked = table.team_cell({"team": "Auburn", "team_slug": "auburn",
+                              "team_logo_url": "https://x/a.png", "team_rank": 7},
+                             "team_slug", "team", "team_logo_url", "team_rank")
+    assert "cfdb-rank" in ranked and "#7" in ranked and "<img" in ranked
+
+    unranked = table.team_cell({"team": "Rice", "team_slug": "rice",
+                                "team_logo_url": None, "team_rank": None},
+                               "team_slug", "team", "team_logo_url", "team_rank")
+    assert "cfdb-rank" not in unranked, "an unranked team was badged"
+    assert "Rice" in unranked
+
+
+def test_the_team_link_refuses_to_point_nowhere():
+    """R-287. 996 anchors, 1 distinct href, 0 carrying a team. `team_link` returns None where
+    the slug is missing — the page hand-rolled the href instead, and `params.link` silently
+    DROPS a None parameter, so what came back was a syntactically perfect URL missing the one
+    thing it exists to carry."""
+    builder = table.team_link("team_slug")
+    assert builder({"team_slug": None, "season": 2025}) is None
+    assert builder({"team_slug": "auburn", "season": 2025}) is not None
+    # CODE, NOT PROSE. The comment beside the fix quotes the broken call, and quoting the
+    # bug where the fix lives is worth more than the assertion's convenience.
+    code = "\n".join(line for line in SOURCE.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "team_link(" in code
+    assert 'scope.link("team"' not in code, "the hand-built team href is back"
+
+
+def test_the_matchup_affordance_is_visible_and_not_in_the_scrolling_region():
+    """R-288. The links were correct and had no cue but a pointer cursor, which a touch
+    device never shows. The glyph sits at the right edge of the FROZEN block — appended to
+    the scrolling columns it would be 8,322px from the team name on Offense."""
+    assert "details_col" in SOURCE
+    assert "columns.insert(len(FROZEN)" in SOURCE
+    assert "sticky=len(FROZEN) + 1" in SOURCE
+
+
+def test_the_header_wraps_instead_of_widening_its_column():
+    """R-282. The label used to set a FLOOR under the width, so a long header widened its
+    column rather than wrapping inside it — backwards from the ask. R-217 already ruled on
+    this for the workbook; the page, built second, did not inherit it."""
+    frame = pd.DataFrame({"x": [1, 2]})
+    wide = [Col("x", "A Very Long Header Indeed", "num")]
+    seeded = table.column_layout(frame, wide, unit="px", seed_from_label=True)
+    unseeded = table.column_layout(frame, wide, unit="px", seed_from_label=False)
+    assert int(unseeded[0][:-2]) < int(seeded[0][:-2]), (seeded, unseeded)
+
+    # And the height is COMPUTED from the wrap that width forces, not chosen.
+    assert table.header_lines(wide, unseeded) > table.header_lines(wide, seeded)
+    assert table.header_lines(wide, ["4000px"]) == 1
+    assert table.header_lines(wide, unseeded) <= table.HEADER_LINE_CAP
+
+
+def test_the_scroll_box_has_a_height_and_a_sticky_header_with_a_layered_corner():
+    """R-281. The container had NO height constraint — scrollHeight 6275 in a 917px window —
+    so the horizontal bar sat about 5,300px below the fold.
+
+    THE CORNER IS THE CELL NO ONE CHECKS. Frozen-left AND in the sticky header, it has to
+    outrank both; at equal z-index it renders in DOM order and looks fine until a row scrolls
+    under it.
+    """
+    css = theme.TABLE_CSS
+    assert "max-height:" in css and "overflow-y:auto" in css
+    assert "thead th { position:sticky" in css and "top:0" in css
+
+    def layer(selector):
+        block = css[css.index(selector):]
+        return int(block[block.index("z-index:") + 8:].split(";")[0])
+
+    body_frozen = layer(".cfdb-table th.cfdb-sticky, .cfdb-table td.cfdb-sticky")
+    header_row = layer(".cfdb-scroll .cfdb-table thead th {")
+    corner = layer(".cfdb-scroll .cfdb-table thead th.cfdb-sticky")
+    assert corner > header_row > body_frozen, (corner, header_row, body_frozen)

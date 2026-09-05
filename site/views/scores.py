@@ -121,6 +121,27 @@ SCORES_SHEET = next(s for s in workbook.SHEETS if s.name == "Scores")
 # cannot, where the same decision had to become "everything up to Pts for" (R-265).
 FROZEN = ("game_no", "game_date", "team", "points_for")
 
+# R-279. IN THE FILE, NOT ON THE PAGE. Marc: "keep the other fields in the dataset, but don't
+# present them in the web interface. They still belong in the Excel output."
+#
+# HIDING IS A RENDER-LIST DECISION, NEVER A SELECT DECISION — `game_id` drives the matchup
+# link and `game_no` drives the banding, and both are hidden from some tabs while riding in
+# every frame.
+#
+# Each one has to be redundant on THIS page rather than merely noisy, so each says why.
+HIDDEN_ON_PAGE = {
+    "game_id": "an opaque key; the row already links to the matchup",
+    "season": "the filter bar says it",
+    "season_type": "the filter bar says it",
+    "week": "the filter bar says it",
+    "opponent": "IT IS THE PAIRED ROW — the stacked format's whole premise",
+    "is_home": "it is the away-above-home ORDER; the same premise said twice",
+    "points_against": "the paired row's `Pts for`, one line away",
+    # R-289. Written into the workbook as a value because a cell hyperlink is invisible to a
+    # formula; on a page the anchor IS the link, so the URL as text is noise.
+    "matchup_url": "export-only; the page has the link itself",
+}
+
 # Marc's six tabs, mapped onto the export's colour bands. These are TAB LABELS, not a rename
 # of anything in the workbook — his ruling: "There's a single Excel sheet, Scores, with
 # several different columns grouped by color, but on the same page. On the website, the data
@@ -133,14 +154,53 @@ FROZEN = ("game_no", "game_date", "team", "points_for")
 #
 # THE BLOCKS ARE THE SOURCE, not a copy of the field lists. A column added to a band reaches
 # its tab with no second list to maintain.
+#
+# (slug, label, blocks). THE SLUG IS WHAT GOES IN THE URL, and the URL is why these are
+# anchors rather than `st.tabs` — see `_tab_bar`.
 TABS = (
-    ("Game Results", ("Game", "Ancillary")),
-    ("Against The Line", ("Market",)),
-    ("Box Score", ("Box score",)),
-    ("Stats", ("Team advanced",)),
-    ("Offense", ("Offense",)),
-    ("Defense", ("Defense",)),
+    ("results", "Game Results", ("Game", "Ancillary")),
+    ("line", "Against The Line", ("Market",)),
+    ("box", "Box Score", ("Box score",)),
+    ("stats", "Stats", ("Team advanced",)),
+    ("offense", "Offense", ("Offense",)),
+    ("defense", "Defense", ("Defense",)),
 )
+
+
+def _active_tab() -> tuple:
+    """The tab the URL asks for, or the first. An unknown slug falls back rather than
+    raising — a hand-edited `?tab=` is noise, not a request (AC-G.11)."""
+    wanted = params.get("tab")
+    for entry in TABS:
+        if entry[0] == wanted:
+            return entry
+    return TABS[0]
+
+
+def _tab_bar(active: str) -> None:
+    """R-283. THE TAB LIVES IN THE URL, WHICH IS WHY THESE ARE ANCHORS.
+
+    Marc: "Clicking a sort while on Against The Line or Box Score resets the user to the Game
+    Results tab." `st.tabs` keeps its selection client-side and never touches the URL, so
+    every sort link rebuilt the page at the default tab. None of the eighteen sort anchors
+    carried a tab parameter because there was no tab parameter to carry.
+
+    Making the tab a URL parameter fixes it for EVERY control at once rather than one at a
+    time: `params.link_here` preserves every known parameter, `tab` is already one, so the
+    sort links and the reset link pick it up with no change to either. A helper that had to
+    remember to add it is a helper someone forgets to use.
+
+    It is also the same requirement `apply_sort` is server-side FOR — a sorted view has to
+    survive a reload and be sendable to somebody. A tab in session state fails that for
+    exactly the reason a client-side sorter would have.
+    """
+    links = []
+    for slug, label, _blocks in TABS:
+        css = "cfdb-tab" + (" cfdb-tab-on" if slug == active else "")
+        href = params.link_here(tab=slug)
+        links.append(f"<a class='{css}' href='{href}' target='_self'>{label}</a>")
+    st.markdown(f"<div class='cfdb-tabbar'>{''.join(links)}</div>",
+                unsafe_allow_html=True)
 
 
 def tab_fields(blocks) -> list:
@@ -150,16 +210,27 @@ def tab_fields(blocks) -> list:
     not rendered twice — which is why the union test has to treat them separately.
     """
     own = [field for name, fields in workbook.SCORES_BLOCKS if name in blocks
-           for field in fields if field not in FROZEN]
+           for field in fields
+           if field not in FROZEN and field not in HIDDEN_ON_PAGE]
     return list(FROZEN) + own
 
 
 def _rows(scope) -> pd.DataFrame:
-    """The export's own statement, run for this scope."""
+    """The export's own statement, run for this scope — with the one bound difference.
+
+    R-278. `completed_only` is the only place the two surfaces legitimately diverge: the
+    workbook is a data extract and carries `Completed` as a column, so it wants every row;
+    this is a RESULTS page. A second query would be how Schedule and the export drifted in
+    R-184, so it is a parameter on one statement.
+
+    IT WAS INVISIBLE ON THE WEEK MARC WAS LOOKING AT. 2025 week 2 is entirely finished, so
+    the page looked correct; the defect only shows on a live week, which is every week from
+    here. The test uses a mixed scope for exactly that reason.
+    """
     return query(" ".join(SCORES_SHEET.sql.split()),
                  {"season": scope.season, "week": scope.week,
                   "season_type": scope.season_type, "conference": scope.conference,
-                  "division": scope.division})
+                  "division": scope.division, "completed_only": True})
 
 
 def _rendered(df: pd.DataFrame) -> pd.DataFrame:
@@ -173,10 +244,22 @@ def _rendered(df: pd.DataFrame) -> pd.DataFrame:
     out = pd.DataFrame(
         {field: [SCORES_SHEET.value_for(field, record) for _, record in df.iterrows()]
          for field in SCORES_SHEET.fields})
-    # Carried through for the links and the banding; not displayed by any tab.
-    for passenger in ("game_id", "team_slug", "rows_in_scope"):
-        if passenger in df.columns:
-            out[passenger] = df[passenger].values
+    # CARRIED THROUGH FOR THE LINKS, THE LOGOS AND THE BANDING, and taken from the sheet's
+    # own declared list rather than a second one here — which is how the logos went missing
+    # after the slugs were fixed: the SELECT had them, this function did not name them, and
+    # `team_cell` drew a monogram for every team without complaining.
+    #
+    # AND WITHOUT THE `in df.columns` GUARD THAT MADE THE ORIGINAL FAILURE SILENT. A missing
+    # passenger is a broken page, not a cosmetic loss — R-287 is what four layers of
+    # reasonable-looking silence produced. If the SELECT stops carrying one, say so here.
+    passengers = ("game_id", "rows_in_scope") + workbook.SCORES_PASSENGERS
+    missing = [name for name in passengers if name not in df.columns]
+    if missing:
+        raise KeyError(
+            f"the Scores statement no longer selects {missing} — the page links and draws "
+            f"with these, and a missing one renders as a monogram or a link to nowhere")
+    for passenger in passengers:
+        out[passenger] = df[passenger].values
     return out
 
 
@@ -189,10 +272,22 @@ def _kind(field: str, series) -> tuple:
     """
     if not pd.api.types.is_numeric_dtype(series):
         return "", None
+    # R-280. THE WORKBOOK SPLITS THREE WAYS AND THIS SPLIT TWO, SO THE PAGE PRINTED "2,025".
+    #
+    # `is_plain_integer` documents itself as "a numeric label: no decimal point, no thousands
+    # separator", and the format table's comment reads "a season is not '2,025' on any
+    # sheet." The page rendered 2,025 and game ids as 401,752,817, because both branches
+    # below returned the same ("num", 0) and `fmt.number` puts a separator on everything.
+    #
+    # AND THE DOCSTRING ABOVE READ AS SATISFIED WHILE THIS WAS TRUE. It says a second TABLE
+    # of column types would be a second answer waiting to disagree — correct, and this was
+    # not a second table, it was a second and COARSER SPLIT, which disagrees just as well.
+    # "One renderer, two outputs" is true of `value_for` (Yes/No, cover words, possession
+    # minutes) and was false of numbers, which take this path instead.
     if workbook.is_plain_integer(field):
-        return "num", 0
+        return "plain", 0          # a label that happens to be numeric: 2025, 401752817
     if field in SCORES_SHEET.integer_fields:
-        return "num", 0
+        return "num", 0            # a quantity you might total: 1,234
     if field in SCORES_SHEET.site_precision:
         return "signed" if "spread" in field or "margin" in field else "num", 1
     return "num", SCORES_SHEET.decimals
@@ -204,11 +299,26 @@ def _columns(fields, frame, scope) -> list:
     out = []
     for field in fields:
         kind, dp = _kind(field, frame[field]) if field in frame else ("", None)
-        column = Col(field, labels.get(field, field), kind, dp=dp)
         if field == "team":
-            column = Col(field, labels[field], kind, dp=dp,
-                         link=lambda r: scope.link("team", team=r.get("team_slug")))
-        out.append(column)
+            # R-284/R-287. LOGO, RANK AND A WORKING LINK, ALL FROM MACHINERY THAT EXISTS.
+            #
+            # `team_cell` draws logo-or-monogram plus a rank badge and already obeys AC-1.5 —
+            # an unranked team gets NO badge, not an em dash in one. `team_link` returns None
+            # where the slug is missing, which is the whole point: the page used to hand-build
+            # `scope.link("team", team=r.get("team_slug"))`, the slug was never in the frame,
+            # `params.link` drops a None parameter, and every one of 996 team anchors pointed
+            # at `/team` with no team. Four layers each did something reasonable and the
+            # result looked like a working link.
+            #
+            # `team_rank` is the rank carried ON THIS GAME — `case when is_home then
+            # home_rank else away_rank` off fct_game — so it is genuinely "rank in the week",
+            # not a season-end rank borrowed backwards.
+            out.append(Col(field, labels[field],
+                           render=lambda r: table.team_cell(
+                               r, "team_slug", "team", "team_logo_url", "team_rank"),
+                           link=table.team_link("team_slug")))
+            continue
+        out.append(Col(field, labels.get(field, field), kind, dp=dp))
     return out
 
 
@@ -295,20 +405,32 @@ def body(page) -> None:
         frame = _rendered(raw)
 
         def show(df):
+            slug, _label, blocks = _active_tab()
+            _tab_bar(slug)
             _reset_link()
-            labels = [label for label, _ in TABS]
-            for tab, (label, blocks) in zip(st.tabs(labels), TABS):
-                with tab:
-                    fields = [f for f in tab_fields(blocks) if f in df.columns]
-                    columns = _columns(fields, df, scope)
-                    ordered = _sorted_or_default(df, columns)
-                    cap = _pairs_only(ordered, 300)
-                    table.render(
-                        ordered, columns, caption="",
-                        layout=table.column_layout(ordered, columns, unit="px"),
-                        link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]),
-                        max_rows=cap, scroll=True, sticky=len(FROZEN),
-                        row_class=_band(ordered))
+            fields = [f for f in tab_fields(blocks) if f in df.columns]
+            columns = _columns(fields, df, scope)
+            # R-288. THE MATCHUP LINK WORKS AND WAS INVISIBLE. 26,228 anchors over 83 distinct
+            # hrefs — one per game, all correct — with no cue but a pointer cursor, which a
+            # touch device never shows. The old page carried this glyph column and the rewrite
+            # dropped it.
+            #
+            # AT THE RIGHT-HAND EDGE OF THE FROZEN BLOCK, not appended to the scrolling
+            # columns: on Offense that would put it 8,322px from the team name it belongs to.
+            # Not at the far LEFT either — that is Marc's scoreboard identity, and he asked
+            # for density, not width.
+            columns.insert(len(FROZEN), table.details_col(
+                lambda r: scope.link("matchup", game_id=r["game_id"])))
+            ordered = _sorted_or_default(df, columns)
+            cap = _pairs_only(ordered, 300)
+            layout = table.column_layout(ordered, columns, unit="px",
+                                         seed_from_label=False)
+            table.render(
+                ordered, columns, caption="", layout=layout,
+                link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]),
+                max_rows=cap, scroll=True, sticky=len(FROZEN) + 1,
+                row_class=_band(ordered),
+                header_height=22 + 14 * table.header_lines(columns, layout))
 
         states.render_or_state(
             frame, SCORES_SHEET.view,

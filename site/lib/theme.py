@@ -143,13 +143,32 @@ TABLE_CSS = """
    lets the colgroup's pixel widths set the table's width; `min-width:100%` keeps a narrow
    table filling the page rather than shrinking to its content. Opt-in, because the other
    seventeen callers of render() want neither. */
-.cfdb-scroll { overflow-x:auto; }
+/* R-281. THE CONTAINER HAD NO HEIGHT, SO THE HORIZONTAL BAR WAS 5,300px BELOW THE FOLD.
+   Measured on the running page: scrollHeight 6275 / clientHeight 6275, max-height none, in a
+   917px window — horizontal scrolling was reachable only after scrolling the whole page down.
+   Constraining the height puts the bar at the bottom of the visible box, where the reader is
+   looking, and gives the table its own vertical scroll. */
+.cfdb-scroll { overflow-x:auto; overflow-y:auto; max-height:70vh; }
+/* AND THAT MAKES A STICKY HEADER NECESSARY, NOT MERELY POSSIBLE. Prompt 044 put it out of
+   scope because vertical stickiness inside Streamlit's own scroll container is a separate
+   problem — a reason that expires the moment the table owns its vertical scroll. With 166
+   rows scrolling inside the box, a header that scrolls away is worse than what was fixed. */
+.cfdb-scroll .cfdb-table thead th { position:sticky; top:0;
+    background:var(--cfdb-sticky-bg); z-index:3; }
+/* THREE LAYERS NOW, AND THE CORNER IS THE ONE THAT BREAKS. A cell that is both frozen-left
+   and in the sticky header must outrank both; at equal z-index it renders in DOM order and
+   looks fine until a row scrolls under it. */
+.cfdb-scroll .cfdb-table thead th.cfdb-sticky { z-index:4; }
 .cfdb-table-wide { width:max-content; min-width:100%; }
 .cfdb-table th.cfdb-sticky, .cfdb-table td.cfdb-sticky {
     position:sticky; background:var(--cfdb-sticky-bg); z-index:2; }
 /* The header's frozen cells sit above the body's, or a scrolled row paints over them at the
    intersection. */
 .cfdb-table th.cfdb-sticky { z-index:3; }
+/* R-282. Denser rows, which is the other half of Marc's ask. The headers wrap because the
+   columns got narrower; the rows get shorter because the padding did. */
+.cfdb-table-wide td { padding:.22rem .45rem; }
+.cfdb-table-wide th { padding:.3rem .45rem; vertical-align:bottom; }
 /* Where the frozen block ends. Without it the reader cannot tell which columns are pinned
    and which merely happen to be at the left edge. A box-shadow rather than a border because
    a border would change the column's width and push the sticky offsets out by a pixel each. */

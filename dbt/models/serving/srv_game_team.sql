@@ -374,6 +374,46 @@ select
     case when t.is_home then fg.home_rank else fg.away_rank end as team_rank,
     case when t.is_home then fg.away_rank else fg.home_rank end as opponent_rank,
 
+    -- ELO, PIVOTED THE SAME WAY, AND IT WAS ALREADY IN THE WAREHOUSE (R-286).
+    --
+    -- A round was nearly spent specifying a week-scoped /ratings/elo fetch, a staging model
+    -- and a backfill. None of it was needed: CFBD's /games payload carries all four ratings
+    -- per game, stg_games unnests them, fct_game keeps them and srv_game exposes them. Only
+    -- this view lacked them, and R-083 had already written the conclusion down in fct_game:
+    -- "A rating per team per GAME is a rating per team per WEEK... the games spine has
+    -- carried it all along, unused." Reading the season-grain stg_rating_elo and concluding
+    -- the data did not exist is a true fact about the wrong object.
+    --
+    -- `pregame` / `postgame`, NOT `elo_before`. The vocabulary rule: grep for an existing
+    -- prefix before inventing one, and these three names already exist upstream. It is also
+    -- what removes the off-by-one worry entirely — a field that states which side of the
+    -- event it falls on needs no investigation, where a parameterised endpoint that does not
+    -- would have needed one.
+    --
+    -- POSTGAME ELO IS SAFE HERE ONLY BECAUSE SCORES SHOWS COMPLETED GAMES (R-278). On a page
+    -- of unplayed fixtures a postgame rating is hindsight sitting next to a forecast; on a
+    -- results page it is a result, in the same family as the final score. THE TWO INTERLOCK:
+    -- if the completed-only filter is ever relaxed, this column has to be reconsidered.
+    case when t.is_home then fg.home_pregame_elo  else fg.away_pregame_elo  end
+                                                                as pregame_elo,
+    case when t.is_home then fg.home_postgame_elo else fg.away_postgame_elo end
+                                                                as postgame_elo,
+    case when t.is_home then fg.away_pregame_elo  else fg.home_pregame_elo  end
+                                                                as opponent_pregame_elo,
+    case when t.is_home then fg.away_postgame_elo else fg.home_postgame_elo end
+                                                                as opponent_postgame_elo,
+
+    -- THE RECORD LEADING INTO THIS GAME, WHICH IS NOT THE RECORD INCLUDING IT (R-285).
+    --
+    -- `record_before_display`, and the name is the guard. On a game x team row a bare
+    -- "record" is ambiguous about whether this game is counted, the two readings differ by
+    -- exactly one game, and a reader would never spot which they were looking at. srv_game
+    -- had the same problem from the other direction and settled on
+    -- `home_team_record_display` because `home_record_display` already meant "record in home
+    -- games" on srv_standings — checked against both before settling this one.
+    rw.current_record                                           as record_before_display,
+    
+
     -- GAME-GRAIN FACTS REPEATED ACROSS THE PAIR, and that direction is the allowed one: the
     -- grain rule forbids pushing finer grain into a coarser view, not the reverse. They are
     -- symmetric across a game's two rows by construction, and tested to be.
@@ -403,3 +443,11 @@ left join {{ ref('dim_team') }} o on o.season = t.season and o.team_id = t.oppon
 -- Game-grain context. One row per game_id, so this cannot fan out — asserted by the row-count
 -- half of the parity check rather than assumed.
 left join {{ ref('fct_game') }} fg on fg.game_id = t.game_id
+-- ALL FOUR KEYS, AND THE FOURTH IS THE TRAP. Postseason week numbers RESTART, so joining on
+-- (season, week, team_id) silently matches a bowl game to a September record row. The
+-- uniqueness of the result is asserted by its own dbt test rather than trusted.
+left join {{ ref('fct_team_record_week') }} rw
+       on rw.season      = t.season
+      and rw.season_type = t.season_type
+      and rw.week        = t.week
+      and rw.team_id     = t.team_id
