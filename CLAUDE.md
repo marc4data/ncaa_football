@@ -87,7 +87,7 @@ different states, neither visible to the other. `scripts/preflight_env.py` and t
     3. EVERY working copy, BY HAND, because git cannot do it:
          cp dbt/profiles.yml.example dbt/profiles.yml
          cp .env.example .env   (or diff an existing .env against it) and fill the values
-         delete the retired CFDB_DROPLET_PG_ADDR from .env
+         delete the retired CFDB_DROPLET_PG_ADDR and CFDB_REMOTE_PG_PORT from .env
     4. EVERY working copy runs `python scripts/preflight_env.py`. It must pass in each, and
        CI must stay green — the workflow runs the same check.
     5. Only then does feature work resume.
