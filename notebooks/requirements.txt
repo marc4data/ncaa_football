@@ -1,0 +1,13 @@
+# The analysis notebooks' own dependencies, deliberately separate from the repo-root
+# requirements.txt -- the same split, and for the same reason, as site/requirements.txt.
+#
+# The root list is the RUNTIME stack: ingestion, dbt, the Databricks driver. CI installs it
+# on every pull request, and nothing in it plots anything, because nothing in production
+# does. Adding matplotlib there would put a charting library on every Airflow worker to
+# serve a notebook that never runs on one.
+#
+# Install alongside the root list, not instead of it -- cfdb_conn needs sqlalchemy and a
+# driver from there:
+#
+#     pip install -r requirements-dev.txt -r notebooks/requirements.txt ipykernel
+matplotlib>=3.8
