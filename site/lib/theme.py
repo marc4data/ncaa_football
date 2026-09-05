@@ -122,20 +122,70 @@ CSS = """
 """
 
 
+# What each theme's tokens are, resolved in PYTHON because CSS cannot see the answer.
+THEME_TOKENS = {
+    "light": {"--cfdb-sticky-bg": "#ffffff", "--cfdb-band-bg": "#f1f4f7",
+              "--cfdb-hover-bg": "#f4f7fd", "--cfdb-rule": "#d7dae0",
+              "--cfdb-muted": "#5d6672"},
+    "dark": {"--cfdb-sticky-bg": "#0e1117", "--cfdb-band-bg": "#171c25",
+             "--cfdb-hover-bg": "#1b2029", "--cfdb-rule": "#333a45",
+             "--cfdb-muted": "#9aa4b2"},
+}
+
+
+def resolved_theme_css() -> str:
+    """Tokens for the theme the app is ACTUALLY rendering, or "" when it cannot be known.
+
+    `prefers-color-scheme` answers a different question than the one being asked. It reports
+    the operating system's preference; what the tokens need is what Streamlit is painting.
+    Those agree until a reader on a dark system switches the app to Light — at which point
+    every rule in the dark media block applies over a light page. Marc hit exactly that:
+    "I checked light mode and the color and banding is pretty jacked up."
+
+    It only became visible now because these are the first OPAQUE backgrounds on the site.
+    Everything before them was transparent, so a wrong colour had nothing to paint.
+
+    `st.context.theme` carries the active theme and returns `{'type': None}` when Streamlit
+    has not resolved one — in which case this emits nothing and the media-query fallback in
+    TABLE_CSS stands, which is the best guess available rather than a wrong certainty.
+    """
+    try:
+        kind = (st.context.theme or {}).get("type")
+    except Exception:                                              # noqa: BLE001
+        return ""
+    tokens = THEME_TOKENS.get(kind)
+    if not tokens:
+        return ""
+    body = " ".join(f"{name}:{value};" for name, value in tokens.items())
+    return f"<style>:root {{ {body} }}</style>"
+
+
 def inject() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     st.markdown(TABLE_CSS, unsafe_allow_html=True)
+    # LAST, so it wins. A media query adds no specificity, so source order decides between
+    # this and the fallback above.
+    resolved = resolved_theme_css()
+    if resolved:
+        st.markdown(resolved, unsafe_allow_html=True)
 
 
 TABLE_CSS = """
 <style>
+/* THE OPAQUE GROUND A FROZEN COLUMN PAINTS ITSELF WITH, AND THE BAND BEHIND A GAME.
+   Tokens, because they need a value in both themes: a hardcoded #fff is a white stripe down
+   a dark page, and a TRANSPARENT sticky cell shows the scrolled content sliding underneath —
+   the classic failure, and it reads as a rendering bug rather than a missing colour.
+
+   ⚠ ON :root, AND THE MEDIA QUERY BELOW IS ONLY A FALLBACK. `prefers-color-scheme` answers
+   "what does the OS prefer", and the question is "what is this app rendering". Those come
+   apart the moment a reader on a dark system switches Streamlit to Light — which Marc did,
+   and got a light page painted with dark cell backgrounds. `resolved_theme_css()` reads the
+   ACTIVE theme from Python and overrides these; this pair is what shows while it cannot. */
+:root { --cfdb-sticky-bg:#ffffff; --cfdb-band-bg:#f1f4f7; --cfdb-hover-bg:#f4f7fd;
+        --cfdb-muted:#5d6672; }
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
-    table-layout:fixed;
-    /* The opaque ground a frozen column paints itself with. A TOKEN because it has to have a
-       value in both themes: a hardcoded #fff is a white stripe down a dark page, and a
-       TRANSPARENT sticky cell shows the scrolled content sliding underneath it, which is the
-       classic failure and reads as a rendering bug rather than a missing colour. */
-    --cfdb-sticky-bg:#ffffff; }
+    table-layout:fixed; }
 
 /* R-269. HORIZONTAL SCROLLING, WHICH THE PERCENTAGE LAYOUT MADE IMPOSSIBLE.
    `width:100%` plus a percentage colgroup cannot overflow — thirty-nine columns compress
@@ -154,7 +204,17 @@ TABLE_CSS = """
    problem — a reason that expires the moment the table owns its vertical scroll. With 166
    rows scrolling inside the box, a header that scrolls away is worse than what was fixed. */
 .cfdb-scroll .cfdb-table thead th { position:sticky; top:0;
-    background:var(--cfdb-sticky-bg); z-index:3; }
+    background:var(--cfdb-sticky-bg); z-index:3;
+    /* ⚠ opacity:1 IS THE WHOLE FIX FOR THE GHOSTING, AND IT IS NOT A STYLE PREFERENCE.
+       `.cfdb-table th` carries opacity:.65, which was harmless while headers were opaque
+       against the page — but OPACITY APPLIES TO THE WHOLE CELL, background included. A 65%
+       header cannot hide anything sliding under it, so rows scrolled through their own
+       column labels and the two sets of text overlapped. Marc: "Can we mute the fields when
+       they slide behind. I find that more distracting than informative."
+       The muting the opacity was doing is now done by COLOUR, which does not make the cell
+       see-through. Same for the frozen body cells below. */
+    opacity:1; color:var(--cfdb-muted,#5d6672); }
+.cfdb-scroll .cfdb-table td.cfdb-sticky { opacity:1; }
 /* THREE LAYERS NOW, AND THE CORNER IS THE ONE THAT BREAKS. A cell that is both frozen-left
    and in the sticky header must outrank both; at equal z-index it renders in DOM order and
    looks fine until a row scrolls under it. */
@@ -175,13 +235,24 @@ TABLE_CSS = """
 .cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #d7dae0; }
 /* The row hover is translucent, so it would let the scrolled content through on a frozen
    cell. Opaque equivalents of the same tint, over each theme's own ground. */
-.cfdb-table tbody tr:hover td.cfdb-sticky { background:#f4f7fd; }
+.cfdb-table tbody tr:hover td.cfdb-sticky { background:var(--cfdb-hover-bg); }
 /* R-267. Alternating RUNS of one game, so a game's two rows read as a unit. Shaded on the
    row and repeated on its frozen cells, which are opaque and would otherwise stay white. */
-.cfdb-table tbody tr.cfdb-gameband > td { background:#f5f7f9; }
-.cfdb-table tbody tr.cfdb-gameband > td.cfdb-sticky { background:#f5f7f9; }
+.cfdb-table tbody tr.cfdb-gameband > td { background:var(--cfdb-band-bg); }
+.cfdb-table tbody tr.cfdb-gameband > td.cfdb-sticky { background:var(--cfdb-band-bg); }
 /* R-270. Back to the compound default. Rendered only while a user sort is active, so it is
    never a control that does nothing. */
+/* R-283. THE TAB BAR. It went out as bare anchors — classes emitted, no rules written — so
+   six tabs rendered as a run of underlined links with no spaces between them. They are
+   anchors because the tab has to live in the URL; they should not LOOK like prose links. */
+.cfdb-tabbar { display:flex; gap:.25rem; flex-wrap:wrap; margin:.2rem 0 .6rem;
+  border-bottom:1px solid var(--cfdb-rule,#d7dae0); }
+.cfdb-tab { display:inline-block; padding:.35rem .8rem; font-size:.85rem; font-weight:600;
+  color:inherit; opacity:.6; text-decoration:none; border:1px solid transparent;
+  border-bottom:none; border-radius:5px 5px 0 0; margin-bottom:-1px; }
+.cfdb-tab:hover { opacity:.9; text-decoration:none; background:var(--cfdb-band-bg); }
+.cfdb-tab-on { opacity:1; border-color:var(--cfdb-rule,#d7dae0);
+  background:var(--cfdb-sticky-bg); }
 .cfdb-resetsort { display:inline-block; font-size:.8rem; font-weight:600; color:#1f6feb;
   text-decoration:none; border:1px solid #d7dae0; border-radius:4px;
   padding:.2rem .55rem; margin-bottom:.4rem; }
@@ -548,11 +619,12 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
   /* R-269. The sticky ground, in the theme that would otherwise get a white stripe. */
-  .cfdb-table { --cfdb-sticky-bg:#0e1117; }
+  :root { --cfdb-sticky-bg:#0e1117; --cfdb-band-bg:#171c25; --cfdb-hover-bg:#1b2029;
+          --cfdb-muted:#9aa4b2; }
   .cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #333a45; }
-  .cfdb-table tbody tr:hover td.cfdb-sticky { background:#161b24; }
-  .cfdb-table tbody tr.cfdb-gameband > td,
-  .cfdb-table tbody tr.cfdb-gameband > td.cfdb-sticky { background:#151a22; }
+
+
+  :root { --cfdb-rule:#333a45; }
   .cfdb-resetsort { color:#58a6ff; border-color:#333a45; }
   /* A 10%-black border on a #0e1117 background is invisible, so every card edge
      disappeared in dark mode and the grid read as one undivided block. */

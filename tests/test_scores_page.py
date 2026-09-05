@@ -47,7 +47,7 @@ def test_the_tabs_and_the_hidden_set_partition_the_sheet_exactly():
     assert shown | hidden == everything, {
         "in neither": sorted(everything - shown - hidden),
         "not a sheet column": sorted((shown | hidden) - everything)}
-    assert len(everything) == 149
+    assert len(everything) == 150
 
     # Every hidden column carries a REASON, because "hidden" without one is indistinguishable
     # from "forgotten" the next time somebody reads the list.
@@ -82,13 +82,17 @@ def test_six_tabs_cover_seven_bands_and_ancillary_rides_with_game():
     assert game_results[-len(ancillary):] == ancillary, "ancillary is not at the far right"
 
 
-def test_the_frozen_four_lead_every_tab_in_the_same_order():
+def test_the_frozen_block_leads_every_tab_in_the_same_order():
     """"The identifying rows should be frozen and hold consistent with several different
     tabs." Same four, same order, first on all six — a frozen block that moved between tabs
     would be worse than none."""
-    assert scores.FROZEN == ("game_no", "game_date", "team", "points_for")
+    assert scores.FROZEN == ("game_no", "game_date", "team_rank", "team",
+                             "record_before_display", "points_for")
     for _slug, _label, blocks in scores.TABS:
-        assert scores.tab_fields(blocks)[:4] == list(scores.FROZEN)
+        assert scores.tab_fields(blocks)[:len(scores.FROZEN)] == list(scores.FROZEN)
+    # Rank immediately before the team it qualifies, record immediately after.
+    assert scores.FROZEN.index("team_rank") + 1 == scores.FROZEN.index("team")
+    assert scores.FROZEN.index("team") + 1 == scores.FROZEN.index("record_before_display")
 
 
 # --- the default sort, and what a user sort does to it -------------------------------------
@@ -242,10 +246,21 @@ def test_the_sticky_background_is_a_token_with_a_value_in_both_themes():
     dark = css[css.index("@media (prefers-color-scheme: dark)"):]
     assert "--cfdb-sticky-bg:" in dark, "no dark value — the frozen columns go white"
     assert "background:var(--cfdb-sticky-bg)" in css
+
+    # AND THE MEDIA QUERY IS ONLY THE FALLBACK. It answers what the OS prefers; the tokens
+    # need what the app is rendering, and those come apart the moment a reader on a dark
+    # system switches Streamlit to Light — which is what made the page "pretty jacked up".
+    assert set(theme.THEME_TOKENS) == {"light", "dark"}
+    for tokens in theme.THEME_TOKENS.values():
+        assert {"--cfdb-sticky-bg", "--cfdb-band-bg", "--cfdb-hover-bg",
+                "--cfdb-rule"} <= set(tokens)
+    assert theme.THEME_TOKENS["light"] != theme.THEME_TOKENS["dark"]
     # The row hover is translucent and would let the scrolled content through, so the frozen
-    # cells get an opaque equivalent in each theme.
-    assert "tr:hover td.cfdb-sticky" in css
-    assert "tr:hover td.cfdb-sticky" in dark
+    # cells get an opaque one — ONCE, through a token, rather than a rule repeated per theme.
+    # A duplicated rule is a second place for the two to disagree, which is what the tokens
+    # exist to remove.
+    assert "tr:hover td.cfdb-sticky { background:var(--cfdb-hover-bg)" in css
+    assert "--cfdb-hover-bg" in dark
 
 
 def test_the_other_pages_are_untouched_by_the_scroll_flag():
@@ -443,3 +458,87 @@ def test_the_scroll_box_has_a_height_and_a_sticky_header_with_a_layered_corner()
     header_row = layer(".cfdb-scroll .cfdb-table thead th {")
     corner = layer(".cfdb-scroll .cfdb-table thead th.cfdb-sticky")
     assert corner > header_row > body_frozen, (corner, header_row, body_frozen)
+
+
+def test_the_sticky_header_is_opaque_because_opacity_hides_nothing():
+    """⚠ THE GHOSTING, AND ITS CAUSE WAS ONE INHERITED DECLARATION.
+
+    `.cfdb-table th` carries `opacity:.65` — harmless while headers sat opaque against the
+    page, and fatal once they became sticky, because OPACITY APPLIES TO THE WHOLE CELL,
+    background included. A 65% header cannot hide anything sliding underneath it, so rows
+    scrolled through their own column labels and the two sets of text overlapped.
+
+    Marc: "Can we mute the fields when they slide behind. I find that more distracting than
+    informative." The muting is done by COLOUR now, which does not make the cell see-through.
+    """
+    css = theme.TABLE_CSS
+    header = css[css.index(".cfdb-scroll .cfdb-table thead th {"):]
+    header = header[:header.index("}")]
+    assert "opacity:1" in header, "the sticky header is translucent and will ghost"
+    assert "background:var(--cfdb-sticky-bg)" in header
+    assert "--cfdb-muted" in header, "muted by opacity again rather than by colour"
+
+    # And the frozen body cells, for the same reason from the other direction.
+    assert ".cfdb-scroll .cfdb-table td.cfdb-sticky { opacity:1; }" in css
+
+    # The base rule that caused it is still there — it is right for a non-scrolling table,
+    # and this asserts the override exists rather than that the cause was removed.
+    assert "opacity:.65" in css
+
+
+def test_the_tab_bar_has_rules_and_not_just_class_names():
+    """It shipped as bare anchors: classes emitted, no CSS written, so six tabs rendered as a
+    run of underlined links with no spacing. Marc: "The Tabs also regressed to just look like
+    hyperlinks." """
+    css = theme.TABLE_CSS
+    assert ".cfdb-tabbar {" in css and ".cfdb-tab {" in css and ".cfdb-tab-on {" in css
+    bar = css[css.index(".cfdb-tabbar {"):]
+    assert "display:flex" in bar[:200]
+    tab = css[css.index(".cfdb-tab {"):]
+    assert "text-decoration:none" in tab[:260], "still reads as a hyperlink"
+
+
+def test_an_unranked_team_renders_an_empty_cell_not_a_dash():
+    """Marc: "NULL (empty) for Rank if it doesn't exist." Most teams are unranked, so a
+    column of em dashes is a column of noise — and a dash reads as "we hold nothing", where
+    the truth is "this team is not in the poll", which is a fact rather than a gap."""
+    frame = pd.DataFrame([{"team_rank": 7.0}, {"team_rank": None}])
+    cols = scores._columns(["team_rank"], frame, None)
+    assert cols[0].format({"team_rank": 7.0}) == "7"
+    assert cols[0].format({"team_rank": None}) == ""
+    assert cols[0].format({"team_rank": float("nan")}) == ""
+
+
+def test_the_page_names_the_poll_behind_the_rank_column():
+    """A "#21" with no poll named is a number with no authority behind it, and fct_game joins
+    exactly one poll on purpose — `poll_name = 'AP Top 25'`."""
+    assert scores.RANK_POLL == "AP Top 25"
+    assert "RANK_POLL" in SOURCE
+    marts = (Path(__file__).resolve().parents[1] / "dbt" / "models" / "marts"
+             / "fct_game.sql").read_text()
+    assert f"poll_name = '{scores.RANK_POLL}'" in marts, (
+        "the page names a poll the mart does not join")
+
+
+def test_both_elo_columns_are_whole_numbers_without_a_separator():
+    """Marc: "Both ELOs should be INT." A rating is quoted 1543, never 1,543.62 — R-216's
+    rule puts it with the labels rather than the countables, because it is not a count of
+    anything you would total."""
+    sheet = scores.SCORES_SHEET
+    for field in ("pregame_elo", "postgame_elo", "elo_delta"):
+        assert workbook.number_format(field, sheet.decimals, sheet.integer_fields,
+                                      sheet.site_precision) == "0", field
+        kind, dp = scores._kind(field, pd.Series([1543.62]))
+        assert (kind, dp) == ("plain", 0), (field, kind, dp)
+    assert Col("pregame_elo", "x", "plain", dp=0).format({"pregame_elo": 1543.62}) == "1543"
+
+
+def test_postgame_elo_is_in_the_file_and_not_on_the_page():
+    """Marc: "I would suppress Postgame ELO in the web interface (keep in Excel)." The delta
+    is what a reader wants from the pair and it sits beside the pregame rating, so the
+    postgame value is one subtraction away and costs a column to show."""
+    assert "postgame_elo" in scores.HIDDEN_ON_PAGE
+    assert "postgame_elo" in {f for f, _ in workbook.SCORES_COLUMNS}
+    on_a_tab = {f for _s, _l, b in scores.TABS for f in scores.tab_fields(b)}
+    assert "postgame_elo" not in on_a_tab
+    assert "elo_delta" in on_a_tab, "the delta has to be there if the rating is not"

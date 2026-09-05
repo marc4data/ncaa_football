@@ -412,6 +412,18 @@ select
     -- `home_team_record_display` because `home_record_display` already meant "record in home
     -- games" on srv_standings — checked against both before settling this one.
     rw.current_record                                           as record_before_display,
+
+    -- WHAT THIS GAME DID TO THE RATING (Marc, 2026-09-05: "Add a field for Delta ELO as
+    -- Post - Pre"). Prompt 045 argued against a computed delta — two columns and a
+    -- subtraction the reader can see beats a third column — and Marc overruled it after
+    -- seeing the page. He is right for a table this wide: the two Elo columns are far
+    -- enough apart on the eye that the subtraction stops being free, and the delta is the
+    -- number the page is actually for.
+    --
+    -- Null-safe by construction: null minus anything is null, which is correct — an
+    -- unrated team has no delta, and 0 would be a claim that the rating did not move.
+    case when t.is_home then fg.home_postgame_elo - fg.home_pregame_elo
+         else fg.away_postgame_elo - fg.away_pregame_elo end     as elo_delta,
     
 
     -- GAME-GRAIN FACTS REPEATED ACROSS THE PAIR, and that direction is the allowed one: the

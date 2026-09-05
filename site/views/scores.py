@@ -119,7 +119,18 @@ SCORES_SHEET = next(s for s in workbook.SHEETS if s.name == "Scores")
 # The four columns that stay put while the rest scrolls. Marc's choice, and it is a
 # CONSTRUCTED set rather than a prefix — which is exactly what the site can do and Excel
 # cannot, where the same decision had to become "everything up to Pts for" (R-265).
-FROZEN = ("game_no", "game_date", "team", "points_for")
+# Marc, 2026-09-05: "Reorder columns to Rank Before, Team, Record." The rank leads into the
+# team it qualifies and the record follows, so the three read as one identity cluster — and
+# all three are frozen, because splitting them would put the rank on screen and the record
+# off it, which is the arrangement the reorder exists to end.
+FROZEN = ("game_no", "game_date", "team_rank", "team", "record_before_display",
+          "points_for")
+
+# WHICH POLL THE RANK IS. `fct_game` joins fct_poll_rank with `poll_name = 'AP Top 25'`, one
+# poll on purpose — so the page has to say which, or a "#21" is a number with no authority
+# behind it. Read from nowhere: this is a literal in the mart and a literal here, and the two
+# would have to be kept in step by hand if the mart ever took a second poll.
+RANK_POLL = "AP Top 25"
 
 # R-279. IN THE FILE, NOT ON THE PAGE. Marc: "keep the other fields in the dataset, but don't
 # present them in the web interface. They still belong in the Excel output."
@@ -140,6 +151,10 @@ HIDDEN_ON_PAGE = {
     # R-289. Written into the workbook as a value because a cell hyperlink is invisible to a
     # formula; on a page the anchor IS the link, so the URL as text is noise.
     "matchup_url": "export-only; the page has the link itself",
+    # Marc, 2026-09-05: "I would suppress Postgame ELO in the web interface (keep in Excel)."
+    # `Elo delta` is the number a reader wants from the pair, and it is beside the pregame
+    # rating — so the postgame value is one subtraction away and costs a column to show.
+    "postgame_elo": "the delta says what it did; the rating itself is in the file",
 }
 
 # Marc's six tabs, mapped onto the export's colour bands. These are TAB LABELS, not a rename
@@ -299,6 +314,16 @@ def _columns(fields, frame, scope) -> list:
     out = []
     for field in fields:
         kind, dp = _kind(field, frame[field]) if field in frame else ("", None)
+        if field == "team_rank":
+            # BLANK, NOT A DASH. Marc: "NULL (empty) for Rank if it doesn't exist." Most
+            # teams are unranked, so a column of em dashes is a column of noise — and an
+            # em dash reads as "we hold nothing", where the truth is "this team is not in
+            # the poll", which is a fact rather than a gap.
+            out.append(Col(field, labels[field], "plain", dp=0,
+                           render=lambda r: ("" if pd.isna(r.get("team_rank"))
+                                             or r.get("team_rank") is None
+                                             else f"{int(r['team_rank'])}")))
+            continue
         if field == "team":
             # R-284/R-287. LOGO, RANK AND A WORKING LINK, ALL FROM MACHINERY THAT EXISTS.
             #
@@ -313,9 +338,11 @@ def _columns(fields, frame, scope) -> list:
             # `team_rank` is the rank carried ON THIS GAME — `case when is_home then
             # home_rank else away_rank` off fct_game — so it is genuinely "rank in the week",
             # not a season-end rank borrowed backwards.
+            # NO RANK BADGE HERE ANY MORE — the reorder gave rank its own column, and a
+            # badge beside it would be the same number twice on one row.
             out.append(Col(field, labels[field],
                            render=lambda r: table.team_cell(
-                               r, "team_slug", "team", "team_logo_url", "team_rank"),
+                               r, "team_slug", "team", "team_logo_url"),
                            link=table.team_link("team_slug")))
             continue
         out.append(Col(field, labels.get(field, field), kind, dp=dp))
@@ -398,6 +425,11 @@ def body(page) -> None:
     scope = filters.game_scope()
     table.dataset_caption("Scores", SCORES_SHEET.view)
     chips.spread_sign_note()
+    # The poll behind the Rank column, said once. A "#21" with no poll named is a number
+    # with no authority behind it, and cfdb joins exactly one poll on purpose.
+    st.caption(f"**Rank** is the {RANK_POLL} position going into the game — blank where the "
+               f"team was unranked. **Elo delta** is postgame minus pregame; the postgame "
+               f"rating itself is in the Excel export.")
     with states.section(SCORES_SHEET.view):
         raw = _rows(scope)
         table.as_of_caption(raw)

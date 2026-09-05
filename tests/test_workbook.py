@@ -2537,6 +2537,7 @@ ADDED_SINCE_RATIFIED = {
     "record_before_display": "R-285. The record leading into this game",
     "pregame_elo": "R-286. Already in the warehouse, never surfaced here",
     "postgame_elo": "R-286. Safe only because Scores is completed-only (R-278)",
+    "elo_delta": "Marc, after seeing the page: postgame minus pregame, on both surfaces",
     "matchup_url": "R-289. Export-only; a cell hyperlink is invisible to a formula",
 }
 # Of those, the one that never reaches a page tab.
@@ -2562,7 +2563,7 @@ def test_marcs_ratified_order_survives_underneath_every_addition():
     assert remainder == marc, [
         (i, b, m) for i, (b, m) in enumerate(zip(remainder, marc), start=1) if b != m][:8]
 
-    assert len(built) == 149, len(built)
+    assert len(built) == 150, len(built)
     assert {f for f, _ in built} - {f for f, _ in marc} == set(ADDED_SINCE_RATIFIED)
 
 
@@ -2576,8 +2577,9 @@ def test_each_addition_sits_where_it_was_asked_to_sit():
     sheet = _scores()
     labels = [f for f, _ in sheet.columns]
     game = [f for f, _ in sheet.columns if sheet.field_category[f] == "Game"]
-    assert game[-5:] == ["result", "team_rank", "record_before_display",
-                         "pregame_elo", "postgame_elo"], game[-6:]
+    # Marc's reorder: rank leads into the team it qualifies, record follows it.
+    assert game[6:9] == ["team_rank", "team", "record_before_display"], game[:10]
+    assert game[-4:] == ["result", "pregame_elo", "postgame_elo", "elo_delta"], game[-5:]
     assert labels[-1] == "matchup_url", labels[-3:]
     assert sheet.field_category["matchup_url"] == "Ancillary"
 
@@ -2599,7 +2601,8 @@ def test_the_select_list_carries_what_the_page_needs_and_the_sheet_does_not_prin
     selected = set(sheet.selected_fields)
 
     assert set(sheet.fields) == marc
-    assert selected - marc == {"possession_seconds"} | set(workbook.SCORES_PASSENGERS)
+    assert selected - marc == {"possession_seconds"} | set(workbook.SCORES_PASSENGERS), (
+        selected - marc)
     assert marc - selected == {"game_no", "possession_minutes", "matchup_url"}
     for passenger in ("team_slug", "team_logo_url", "team_rank"):
         assert passenger in selected, f"{passenger} never reaches the page"
@@ -3150,7 +3153,7 @@ def test_the_market_block_sits_between_the_result_and_the_box_score():
     market = [i for i, (f, _) in enumerate(sheet.columns)
               if sheet.field_category[f] == "Market"]
     # `Postgame Elo` now, not `Result` — R-290 put four outcome columns after it.
-    assert labels[min(market) - 1] == "Postgame Elo"
+    assert labels[min(market) - 1] == "Elo delta"
     assert labels[max(market) + 1] == "1st downs"
     assert len(market) == 12, len(market)
     # The closing half is always populated and comes first; the conditionally-blank half is
@@ -3178,8 +3181,9 @@ def test_the_freeze_lands_on_pts_for_and_never_reaches_the_ancillary_block(built
     sheet = _scores()
     first_scrolling = sheet.freeze_column()
 
-    assert book["Scores"].freeze_panes == f"K{workbook.first_data_row(1)}"
-    assert get_column_letter(first_scrolling) == "K"
+    # M now, not K: the reorder put Rank and Record inside the frozen prefix.
+    assert book["Scores"].freeze_panes == f"M{workbook.first_data_row(1)}"
+    assert get_column_letter(first_scrolling) == "M"
 
     frozen = sheet.columns[:first_scrolling - 1]
     assert [label for _, label in frozen][-1] == "Pts for"

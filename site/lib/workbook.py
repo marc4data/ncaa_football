@@ -846,13 +846,17 @@ class Sheet:
 # this one keeps that true while moving the keys out of the reader's way.
 SCORES_BLOCKS = (
     ("Game", (
-        "game_no", "game_id", "season", "season_type", "week", "game_date", "team",
+        "game_no", "game_id", "season", "season_type", "week", "game_date",
+        # Marc, 2026-09-05: "Reorder columns to Rank Before, Team, Record." Rank leads into
+        # the team it qualifies and the record follows it, so the three read as one identity
+        # cluster instead of the rank sitting eleven columns away from the name.
+        "team_rank", "team", "record_before_display",
         "opponent", "is_home", "points_for", "points_against", "margin", "result",
         # R-290. Outcome context, beside the team it describes. Marc chose this over
         # appending to Ancillary: they read as part of the result, and the Game Results tab
         # picks them up with no extra mapping. It shifts everything from `spread_final`
         # rightward, which is the cost he accepted.
-        "team_rank", "record_before_display", "pregame_elo", "postgame_elo",
+        "pregame_elo", "postgame_elo", "elo_delta",
     )),
     ("Market", (
         "spread_final", "total_final", "line_implied_points_final",
@@ -1019,6 +1023,7 @@ SCORES_LABEL_OVERRIDES = {
     # column honest about whether this game is counted in it.
     "team_rank": "Rank", "record_before_display": "Record before",
     "pregame_elo": "Pregame Elo", "postgame_elo": "Postgame Elo",
+    "elo_delta": "Elo delta",
     "matchup_url": "Matchup URL",
 }
 
@@ -1156,6 +1161,10 @@ SCORES_BAND_FILL = "DEE2E4"
 # R-216's rule still decides the SEPARATOR: a comma is for a quantity you might total, so a
 # season and an id stay bare. This set only decides the DECIMAL POINT.
 SCORES_INTEGER_FIELDS = frozenset({
+    # Marc: "Both ELOs should be INT." A rating is quoted whole everywhere it appears, and
+    # 1,543.62 reads as a measurement rather than a rating. The delta joins them for the same
+    # reason — it is the difference between two whole numbers.
+    "pregame_elo", "postgame_elo", "elo_delta",
     "game_no", "points_for", "points_against", "margin",
     "first_downs", "total_yards", "rushing_yards", "passing_yards", "rushing_attempts",
     "turnovers", "interceptions", "fumbles_lost",
@@ -1431,6 +1440,7 @@ _ALL_SHEETS = [
                spread_open, total_open, line_implied_points_open,
                points_vs_line_implied_open, ats_margin_open, covered_open,
                team_rank, record_before_display, pregame_elo, postgame_elo,
+               elo_delta,
                /* Passengers: the page links and draws with these; the sheet prints
                   neither. R-287 — the page had 996 team anchors and one destination
                   because this list was never widened when the view was. */
@@ -1962,7 +1972,11 @@ COUNT_FIELDS = {
 # than re-implementing this pattern — a test that repeated the rule would have agreed with
 # it and missed the same column.
 PLAIN_INTEGER = {"season", "week", "tiebreak_rank", "game_id", "bin_index",
-                 "best_rank_in_game"}
+                 "best_rank_in_game",
+                 # An Elo rating is quoted 1543, never 1,543 — it is a rating, not a count of
+                 # anything, so R-216's "a separator is for a quantity you might total" puts
+                 # it here rather than in COUNT_FIELDS. The delta follows the pair.
+                 "pregame_elo", "postgame_elo", "elo_delta"}
 PLAIN_INTEGER_SUFFIXES = ("_rank", "_id")
 
 
