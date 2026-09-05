@@ -167,8 +167,11 @@ def _dictionary(df: pd.DataFrame) -> None:
         if not description.empty:
             st.caption(str(description.iloc[0]))
         table.render(rows, [
-            Col("column_name", "Column"),
-            Col("data_type", "Type"),
+            # R-291. Marc named the vocabulary — "Table, field, data type, definition" — and
+            # the workbook's dictionary sheet uses his words. AC-15.8 wants the two surfaces
+            # to agree, and the page is the one that moves: he specified it.
+            Col("column_name", "Field"),
+            Col("data_type", "Data type"),
             Col("is_nullable", "Nullable", "bool"),
             Col("status", "Status", render=_status),
             Col("description", "Description", render=_description),

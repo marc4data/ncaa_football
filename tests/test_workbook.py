@@ -87,6 +87,37 @@ def built(monkeypatch):
         # Every stubbed query still goes through the contract, so a sheet that violates
         # G-1/G-2 fails here rather than in production.
         check_contract(sql)
+
+        # THE DICTIONARY GETS A REALISTIC FRAME, NOT A SYNTHETIC ONE. Its rows are (view,
+        # column) pairs from the catalogue, and the test that matters asserts every column
+        # the workbook PRINTS has one. A frame of the string "text" would make that test
+        # pass by matching nothing, which is the failure mode it exists to catch.
+        if "from srv_data_dictionary" in " ".join(sql.split()):
+            rows = [{"table_name": view, "column_name": field,
+                     "data_type": "text", "is_nullable": "YES",
+                     "description_status": "authored",
+                     "column_description": f"what {field} means",
+                     "ordinal_position": i}
+                    for i, (view, field) in enumerate(sorted(workbook.SHEET_HEADERS), 1)
+                    if view in workbook.dictionary_tables()]
+            # ...plus columns the views carry and no sheet prints, which is most of them and
+            # is what the blank-Header case is for.
+            rows += [{"table_name": "srv_game_team", "column_name": name,
+                      "data_type": "text", "is_nullable": "YES",
+                      "description_status": "UNDOCUMENTED", "column_description": None,
+                      "ordinal_position": 900 + i}
+                     for i, name in enumerate(("game_team_sk", "has_ppa"))]
+            # Deliberately WITHOUT the export's derived columns: the real catalogue does
+            # not contain them either, and the augment hook is what puts them back. A fixture
+            # that included them would make the coverage test pass without the hook.
+            printed = {(v, f) for v, f in workbook.SHEET_HEADERS}
+            rows = [r for r in rows
+                    if (r["table_name"], r["column_name"]) not in
+                    workbook.DERIVED_COLUMN_DEFINITIONS]
+            assert printed, "no printed columns to build a dictionary from"
+            frame = pd.DataFrame(rows)
+            frame["rows_in_scope"] = len(frame)
+            return frame
         flat = " ".join(sql.split())
         for sheet in workbook.SHEETS:
             # WORD BOUNDARY, AND THE SUBSTRING VERSION HID AN EMPTY SHEET FOR A WHOLE ROUND.
@@ -1037,7 +1068,21 @@ def test_the_schedule_sheet_carries_marcs_fifty_six_columns_in_his_order():
     wanted = [workbook.CSV_LABEL_OVERRIDES.get(row["Field"], row["Field"])
               for row in _csv.DictReader(source.open())]
     schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
-    assert [label for _, label in schedule.columns] == wanted
+
+    # R-290b added two, and subtracting them must give Marc's file back exactly — same
+    # labels, same order. That keeps "we added two columns" a checkable claim rather than an
+    # assurance: anything else that shifted shows up right here.
+    added = {"Home pregame Elo", "Away pregame Elo"}
+    built = [label for _, label in schedule.columns]
+    assert [label for label in built if label not in added] == wanted
+    assert set(built) - set(wanted) == added
+
+    # PREGAME ONLY, AND THE OMISSION IS THE POINT. Schedule includes UNPLAYED games — that is
+    # what it is for — and postgame Elo is null on exactly those rows. A column empty on the
+    # page's primary population reads as a data defect rather than as a fact about when the
+    # number exists. Marc named pregame and was precise; this stops anyone completing the set.
+    assert not [f for f, _ in schedule.columns if "postgame" in f], (
+        "postgame Elo is on Schedule, where it is null on every unplayed game")
     # The override list is not a licence to drift: every entry must still name a real CSV row.
     csv_fields = {row["Field"] for row in _csv.DictReader(source.open())}
     for original in workbook.CSV_LABEL_OVERRIDES:
@@ -1116,16 +1161,16 @@ def test_the_default_sort_is_the_order_by_and_it_is_stable():
     assert "order by start_date_et, game_id" in flat
 
 
-def test_two_sheets_ship_and_the_other_five_are_kept_not_deleted():
-    """Schedule and Scores (R-255). The five are real work and are converted one at a time;
+def test_three_sheets_ship_and_the_other_four_are_kept_not_deleted():
+    """Schedule, Scores and the Data dictionary (R-291). The four are real work and are converted one at a time;
     deleting them would mean rewriting their SQL and column lists from scratch.
 
     Both halves matter: that the shipped list is exactly what we think, and that nothing
     fell out of `_ALL_SHEETS` on the way. Seven in, seven accounted for.
     """
-    assert [s.name for s in workbook.SHEETS] == ["Schedule", "Scores"]
+    assert [s.name for s in workbook.SHEETS] == ["Schedule", "Scores", "Data dictionary"]
     assert {s.name for s in workbook.PENDING_SHEETS} == {
-        "Odds", "Edges", "Standings", "Model performance", "Data dictionary"}
+        "Odds", "Edges", "Standings", "Model performance"}
     assert len(workbook.SHEETS) + len(workbook.PENDING_SHEETS) == len(workbook._ALL_SHEETS)
 
 
@@ -3284,3 +3329,79 @@ def test_a_team_hyperlink_carries_a_slug_and_never_a_display_name(built):
                             link_fields={"team": "team"})
     with _pytest.raises(ValueError, match="without naming its slug"):
         broken.hyperlinks("https://x.test")
+
+
+def test_every_column_in_the_file_is_in_the_dictionary_with_its_own_header(built):
+    """R-291. COVERAGE OF THE FILE, NOT THE SIZE OF THE DICTIONARY.
+
+    A dictionary listing 350 columns while the workbook holds 209 is silently wrong in the
+    direction nobody checks — it looks thorough. So this asserts the opposite direction:
+    every column the workbook PRINTS has a row, matched on field.
+
+    AND THE HEADER IS THE HALF THAT MAKES IT USABLE. The dictionary is generated from the
+    database and the workbook is labelled for humans: a reader looks at a column headed
+    `Pts for`, searches the dictionary for "Pts for", and finds nothing, because the database
+    calls it `points_for`. `SCORES_COLUMNS` has been a list of (field, label) pairs the whole
+    time; the join existed and had never been used for this.
+    """
+    _, book, _, _ = built
+    tab = book["Data dictionary"]
+    header = workbook.header_row(1)
+    labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
+    assert {"Table", "Field", "Header", "Data type", "Definition"} <= set(labels)
+
+    documented = {}
+    for row in range(workbook.first_data_row(1), tab.max_row + 1):
+        table = tab.cell(row, labels["Table"]).value
+        field = tab.cell(row, labels["Field"]).value
+        documented[(table, field)] = tab.cell(row, labels["Header"]).value
+
+    missing, wrong = [], []
+    for sheet in workbook.SHEETS:
+        if sheet.view == "srv_data_dictionary":
+            continue
+        for field, label in sheet.columns:
+            key = (sheet.view, field)
+            if key not in documented:
+                missing.append(key)
+            elif documented[key] != label:
+                wrong.append((key, documented[key], label))
+
+    assert not missing, f"{len(missing)} printed columns have no dictionary row: {missing[:6]}"
+
+    # SIX OF THEM ARE NOT IN THE DATABASE AT ALL — derived by the export or computed in its
+    # query — so the catalogue cannot know them and they carry definitions written here. A
+    # reader looking up `Possession min` gets an answer either way, which is the whole job.
+    for key in workbook.DERIVED_COLUMN_DEFINITIONS:
+        if key[0] in workbook.dictionary_tables():
+            assert key in documented, f"{key} is printed and defined nowhere"
+    assert not wrong, wrong[:6]
+    assert len(documented) > 200, len(documented)
+
+
+def test_the_dictionary_scope_follows_the_sheets_that_ship(monkeypatch):
+    """Five sheets were pending when this was written. A hardcoded list of views would be
+    wrong the day one converts, and nothing would fail — so the scope is read from the sheets
+    themselves and adding one extends it with no other edit."""
+    assert workbook.dictionary_tables() == ["srv_game", "srv_game_team"]
+
+    odds = next(s for s in workbook._ALL_SHEETS if s.name == "Odds")
+    monkeypatch.setattr(workbook, "SHEETS", list(workbook.SHEETS) + [odds])
+    assert workbook.dictionary_tables() == ["srv_game", "srv_game_team", "srv_odds_board"]
+
+    # And it never documents itself: a dictionary cataloguing its own presentation of the
+    # layer is a mirror facing a mirror.
+    assert "srv_data_dictionary" not in workbook.dictionary_tables()
+
+
+def test_a_column_the_workbook_does_not_print_has_a_blank_header():
+    """Blank rather than a dash. An em dash reads as "this has no header", where the truth is
+    "this workbook does not print it" — and the views carry far more columns than the sheets
+    do."""
+    sheet = next(s for s in workbook.SHEETS if s.name == "Data dictionary")
+    assert sheet.value_for("header", {"table_name": "srv_game_team",
+                                      "column_name": "points_for"}) == "Pts for"
+    assert sheet.value_for("header", {"table_name": "srv_game_team",
+                                      "column_name": "game_team_sk"}) == ""
+    assert sheet.value_for("header", {"table_name": "srv_game",
+                                      "column_name": "away_points"}) == "Away pts"
