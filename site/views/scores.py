@@ -124,7 +124,13 @@ SCORES_SHEET = next(s for s in workbook.SHEETS if s.name == "Scores")
 # all three are frozen, because splitting them would put the rank on screen and the record
 # off it, which is the arrangement the reorder exists to end.
 FROZEN = ("game_no", "game_date", "team_rank", "team", "record_before_display",
-          "points_for")
+          "points_for", "won")
+
+# Schedule's own winner marker, reused whole rather than redrawn. R-100's wording — "a
+# relocation, not a new component" — and two pages marking a winner with two different
+# characters is a worse outcome than either character. A GLYPH rather than a colour, so the
+# result survives greyscale and a colour-blind reader (AC-G.22).
+WIN_GLYPHS = {"Yes": "▸", "Tie": "="}
 
 # WHICH POLL THE RANK IS. `fct_game` joins fct_poll_rank with `poll_name = 'AP Top 25'`, one
 # poll on purpose — so the page has to say which, or a "#21" is a number with no authority
@@ -314,6 +320,15 @@ def _columns(fields, frame, scope) -> list:
     out = []
     for field in fields:
         kind, dp = _kind(field, frame[field]) if field in frame else ("", None)
+        if field == "won":
+            # Nothing at all on a loss: the marker's job is to find the winner in a stack of
+            # 166 rows, and a second glyph meaning "not this one" is 83 more things to read.
+            out.append(Col(field, labels[field], "center",
+                           render=lambda r: (
+                               f"<span class='cfdb-winner' title='won'>"
+                               f"{WIN_GLYPHS[r['won']]}</span>"
+                               if r.get("won") in WIN_GLYPHS else "")))
+            continue
         if field == "team_rank":
             # BLANK, NOT A DASH. Marc: "NULL (empty) for Rank if it doesn't exist." Most
             # teams are unranked, so a column of em dashes is a column of noise — and an

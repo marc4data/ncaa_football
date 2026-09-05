@@ -567,6 +567,24 @@ def _title_case_verdict(value):
     return text[:1].upper() + text[1:] if text else None
 
 
+def _won(record):
+    """Whether THIS row's team won, as a word in the file and a glyph on the page.
+
+    Marc: "I know we have a Result column, but can we add a Win column that has the glyph we
+    use on Schedule." Both, and they are not redundant: `result` is W / L / T, which is three
+    states in a letter; the Win column is the thing the eye finds when scanning a stack of
+    166 rows for who came out on top.
+
+    DERIVED FROM `result`, WHICH IS READ FROM THE VIEW — never from comparing the two scores.
+    That comparison is what disagreed with srv_game on 1 game in 295 the first time it met
+    real data, and a tie is the case it gets wrong.
+    """
+    value = record.get("result")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return {"W": "Yes", "L": "No", "T": "Tie"}.get(str(value).upper())
+
+
 def _possession_minutes(record):
     """Time of possession in minutes, from the view's seconds (Marc, R-259).
 
@@ -851,7 +869,7 @@ SCORES_BLOCKS = (
         # the team it qualifies and the record follows it, so the three read as one identity
         # cluster instead of the rank sitting eleven columns away from the name.
         "team_rank", "team", "record_before_display",
-        "opponent", "is_home", "points_for", "points_against", "margin", "result",
+        "opponent", "is_home", "points_for", "won", "points_against", "margin", "result",
         # R-290. Outcome context, beside the team it describes. Marc chose this over
         # appending to Ancillary: they read as part of the result, and the Game Results tab
         # picks them up with no extra mapping. It shifts everything from `spread_final`
@@ -1022,6 +1040,7 @@ SCORES_LABEL_OVERRIDES = {
     # already say pregame/postgame. `Record before` keeps Marc's own word, and keeps the
     # column honest about whether this game is counted in it.
     "team_rank": "Rank", "record_before_display": "Record before",
+    "won": "Win",
     "pregame_elo": "Pregame Elo", "postgame_elo": "Postgame Elo",
     "elo_delta": "Elo delta",
     "matchup_url": "Matchup URL",
@@ -1482,7 +1501,7 @@ _ALL_SHEETS = [
              "pair. Season totals are wrong here unless you filter to one team. Possession "
              "min should total 60.00 across a game's two rows; about 4% of games do not, "
              "which is the source data rather than the arithmetic.",
-        derived={"possession_minutes": _possession_minutes},
+        derived={"possession_minutes": _possession_minutes, "won": _won},
         display={"is_home": _yes_no, "is_neutral_site": _yes_no, "is_completed": _yes_no,
                  # WORDS, NOT MARKS (Marc, R-262). Schedule uses ■/□ for `Winner covered`
                  # because it sits in a dense block of verdict columns that share one legend
@@ -1972,11 +1991,13 @@ COUNT_FIELDS = {
 # than re-implementing this pattern — a test that repeated the rule would have agreed with
 # it and missed the same column.
 PLAIN_INTEGER = {"season", "week", "tiebreak_rank", "game_id", "bin_index",
-                 "best_rank_in_game",
-                 # An Elo rating is quoted 1543, never 1,543 — it is a rating, not a count of
-                 # anything, so R-216's "a separator is for a quantity you might total" puts
-                 # it here rather than in COUNT_FIELDS. The delta follows the pair.
-                 "pregame_elo", "postgame_elo", "elo_delta"}
+                 "best_rank_in_game"}
+# MARC OVERRULED THE SEPARATOR CALL, AND HE IS READING THE COLUMN. R-216's rule — "a comma is
+# for a quantity you might total" — put Elo with the labels on the argument that a rating is
+# not a count. He asked for `#,###` after seeing it: at four digits the group makes 1,543
+# scannable in a column of them, where 1543 sits in the eye like a year. The rule still holds
+# for a season and a game id, which are identifiers rather than magnitudes; an Elo is a
+# magnitude you compare, and that is the distinction the rule was reaching for.
 PLAIN_INTEGER_SUFFIXES = ("_rank", "_id")
 
 

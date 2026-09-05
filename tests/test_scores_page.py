@@ -47,7 +47,7 @@ def test_the_tabs_and_the_hidden_set_partition_the_sheet_exactly():
     assert shown | hidden == everything, {
         "in neither": sorted(everything - shown - hidden),
         "not a sheet column": sorted((shown | hidden) - everything)}
-    assert len(everything) == 150
+    assert len(everything) == 151
 
     # Every hidden column carries a REASON, because "hidden" without one is indistinguishable
     # from "forgotten" the next time somebody reads the list.
@@ -87,7 +87,7 @@ def test_the_frozen_block_leads_every_tab_in_the_same_order():
     tabs." Same four, same order, first on all six — a frozen block that moved between tabs
     would be worse than none."""
     assert scores.FROZEN == ("game_no", "game_date", "team_rank", "team",
-                             "record_before_display", "points_for")
+                             "record_before_display", "points_for", "won")
     for _slug, _label, blocks in scores.TABS:
         assert scores.tab_fields(blocks)[:len(scores.FROZEN)] == list(scores.FROZEN)
     # Rank immediately before the team it qualifies, record immediately after.
@@ -236,31 +236,57 @@ def test_sticky_is_ignored_rather_than_half_applied_without_pixel_widths():
     assert "cfdb-sticky" not in captured["html"]
 
 
-def test_the_sticky_background_is_a_token_with_a_value_in_both_themes():
-    """A TRANSPARENT sticky cell shows the scrolled content sliding underneath it — the
-    classic failure, and it reads as a rendering bug rather than a missing colour. A
-    hardcoded #fff is a white stripe down a dark page, which is the same mistake wearing the
-    other hat."""
-    css = theme.TABLE_CSS
-    assert "--cfdb-sticky-bg:#ffffff" in css
-    dark = css[css.index("@media (prefers-color-scheme: dark)"):]
-    assert "--cfdb-sticky-bg:" in dark, "no dark value — the frozen columns go white"
-    assert "background:var(--cfdb-sticky-bg)" in css
+def test_the_theme_tokens_are_live_rather_than_resolved_from_anywhere():
+    """TWO EARLIER ATTEMPTS ASKED THE WRONG SOURCE AND BOTH WERE VISIBLY WRONG.
 
-    # AND THE MEDIA QUERY IS ONLY THE FALLBACK. It answers what the OS prefers; the tokens
-    # need what the app is rendering, and those come apart the moment a reader on a dark
-    # system switches Streamlit to Light — which is what made the page "pretty jacked up".
-    assert set(theme.THEME_TOKENS) == {"light", "dark"}
-    for tokens in theme.THEME_TOKENS.values():
-        assert {"--cfdb-sticky-bg", "--cfdb-band-bg", "--cfdb-hover-bg",
-                "--cfdb-rule"} <= set(tokens)
-    assert theme.THEME_TOKENS["light"] != theme.THEME_TOKENS["dark"]
-    # The row hover is translucent and would let the scrolled content through, so the frozen
-    # cells get an opaque one — ONCE, through a token, rather than a rule repeated per theme.
-    # A duplicated rule is a second place for the two to disagree, which is what the tokens
-    # exist to remove.
+      prefers-color-scheme  reports what the OPERATING SYSTEM prefers. A reader on a dark
+                            system who switches the app to Light gets a light page painted
+                            with dark cells — Marc: "the color and banding is pretty jacked
+                            up."
+      st.context.theme      reports what the app is rendering, but only when Python next
+                            runs. The theme repaints immediately and the tokens lagged a
+                            rerun, so some frozen cells kept the old colour until a tab
+                            change forced another pass — Marc: "misses some of the Frozen
+                            columns... requires a reload."
+
+    Streamlit sets `color-scheme` on its container from the ACTIVE theme, so CSS system
+    colours follow it in the same frame. Nothing to synchronise, nothing to go stale.
+
+    A TRANSPARENT sticky cell is still the failure being prevented — it shows the scrolled
+    content sliding underneath — so the tokens must resolve to a real colour, not to
+    `transparent` or `inherit`.
+    """
+    css = theme.TABLE_CSS
+    assert "--cfdb-sticky-bg: Canvas" in css
+    for token in ("--cfdb-band-bg", "--cfdb-hover-bg", "--cfdb-muted", "--cfdb-rule"):
+        assert f"{token}:" in css, token
+        line = css[css.index(f"{token}:"):]
+        line = line[:line.index(";")]
+        assert "Canvas" in line, f"{token} is not derived from the live page colour: {line}"
+        assert "transparent" not in line and "inherit" not in line
+
+    # The dark media block must NOT redefine them — a value there would override the live
+    # one with a guess about the operating system, which is the defect it used to contain.
+    dark = css[css.index("@media (prefers-color-scheme: dark)"):]
+    for token in ("--cfdb-sticky-bg", "--cfdb-band-bg", "--cfdb-hover-bg", "--cfdb-muted"):
+        assert f"{token}:" not in dark, f"{token} is guessed from the OS again"
+
+    # And no Python is in the loop.
+    assert not hasattr(theme, "THEME_TOKENS")
+    assert not hasattr(theme, "resolved_theme_css")
+    # PARSED, NOT GREPPED. The stale source is named in two comments on purpose — one of
+    # them inside the CSS string, where a `#` filter cannot see it — and recording why it was
+    # wrong is worth more than the assertion's convenience. An AST walk asks the only
+    # question that matters: does anything EXECUTE it.
+    import ast
+    tree = ast.parse(Path(theme.__file__).read_text())
+    reads = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Attribute) and n.attr == "theme"
+             and isinstance(n.value, ast.Attribute) and n.value.attr == "context"]
+    assert not reads, "theme.py reads st.context.theme again — it lags a rerun"
+
+    assert "background:var(--cfdb-sticky-bg)" in css
     assert "tr:hover td.cfdb-sticky { background:var(--cfdb-hover-bg)" in css
-    assert "--cfdb-hover-bg" in dark
 
 
 def test_the_other_pages_are_untouched_by_the_scroll_flag():
@@ -520,17 +546,27 @@ def test_the_page_names_the_poll_behind_the_rank_column():
         "the page names a poll the mart does not join")
 
 
-def test_both_elo_columns_are_whole_numbers_without_a_separator():
-    """Marc: "Both ELOs should be INT." A rating is quoted 1543, never 1,543.62 — R-216's
-    rule puts it with the labels rather than the countables, because it is not a count of
-    anything you would total."""
+def test_both_elo_columns_are_whole_numbers_with_a_thousands_separator():
+    """Marc: "Both ELOs should be INT", then "Make ELO #,###".
+
+    R-216's rule — a comma is for a quantity you might total — first put Elo with the LABELS,
+    on the argument that a rating is not a count. Marc overruled it while reading the column,
+    and the distinction the rule was reaching for turns out to be identifier vs magnitude: a
+    season and a game id are names that happen to be numeric, an Elo is a magnitude you
+    compare, and at four digits the group is what makes a column of them scannable.
+    """
     sheet = scores.SCORES_SHEET
     for field in ("pregame_elo", "postgame_elo", "elo_delta"):
         assert workbook.number_format(field, sheet.decimals, sheet.integer_fields,
-                                      sheet.site_precision) == "0", field
+                                      sheet.site_precision) == "#,##0", field
         kind, dp = scores._kind(field, pd.Series([1543.62]))
-        assert (kind, dp) == ("plain", 0), (field, kind, dp)
-    assert Col("pregame_elo", "x", "plain", dp=0).format({"pregame_elo": 1543.62}) == "1543"
+        assert (kind, dp) == ("num", 0), (field, kind, dp)
+    assert Col("pregame_elo", "x", "num", dp=0).format({"pregame_elo": 1543.62}) == "1,544"
+
+    # And the identifiers keep the rule: a season is still not "2,025".
+    for field in ("season", "game_id"):
+        assert workbook.number_format(field, sheet.decimals, sheet.integer_fields,
+                                      sheet.site_precision) == "0", field
 
 
 def test_postgame_elo_is_in_the_file_and_not_on_the_page():
@@ -542,3 +578,43 @@ def test_postgame_elo_is_in_the_file_and_not_on_the_page():
     on_a_tab = {f for _s, _l, b in scores.TABS for f in scores.tab_fields(b)}
     assert "postgame_elo" not in on_a_tab
     assert "elo_delta" in on_a_tab, "the delta has to be there if the rating is not"
+
+
+def test_the_win_column_reuses_schedules_glyph_and_reads_the_result():
+    """Marc: "can we add a Win column that has the glyph we use on Schedule."
+
+    THE SAME COMPONENT, NOT A SECOND ONE. Two pages marking a winner with two different
+    characters is worse than either character — R-100's "a relocation, not a new component".
+    A glyph rather than a colour, so it survives greyscale and a colour-blind reader.
+
+    And it is DERIVED FROM `result`, which is read from the view. Comparing the two scores is
+    what disagreed with srv_game on 1 game in 295 the first time it met real data, and a tie
+    is the case it gets wrong.
+    """
+    from views import schedule
+    assert scores.WIN_GLYPHS["Yes"] == schedule.WINNER_GLYPH
+    assert scores.WIN_GLYPHS["Tie"] == schedule.TIE_GLYPH
+
+    sheet = scores.SCORES_SHEET
+    assert sheet.value_for("won", {"result": "W"}) == "Yes"
+    assert sheet.value_for("won", {"result": "L"}) == "No"
+    assert sheet.value_for("won", {"result": "T"}) == "Tie"
+    assert sheet.value_for("won", {"result": None}) is None
+
+    frame = pd.DataFrame([{"won": "Yes"}, {"won": "No"}, {"won": "Tie"}])
+    col = scores._columns(["won"], frame, None)[0]
+    assert schedule.WINNER_GLYPH in col.format({"won": "Yes"})
+    assert "cfdb-winner" in col.format({"won": "Yes"})
+    # NOTHING on a loss: the marker's job is to find the winner in a stack of 166 rows, and a
+    # second glyph meaning "not this one" is 83 more things to read.
+    assert col.format({"won": "No"}) == ""
+    assert schedule.TIE_GLYPH in col.format({"won": "Tie"})
+
+
+def test_the_win_column_is_frozen_immediately_after_points_for():
+    """Marc: "It should be right after PTS FOR and Frozen on the left." """
+    assert scores.FROZEN[-1] == "won"
+    assert scores.FROZEN[-2] == "points_for"
+    sheet = scores.SCORES_SHEET
+    order = [f for f, _ in sheet.columns]
+    assert order[order.index("points_for") + 1] == "won"

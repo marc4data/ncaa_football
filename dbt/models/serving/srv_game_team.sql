@@ -422,6 +422,13 @@ select
     --
     -- Null-safe by construction: null minus anything is null, which is correct — an
     -- unrated team has no delta, and 0 would be a claim that the rating did not move.
+    --
+    -- ⚠ A ZERO DELTA IS USUALLY NOT LUCK. Measured over 2025: every one of the 125 games
+    -- against an UNRATED opponent has a delta of exactly 0, against 18 of 1,524 rated
+    -- matchups. CFBD's Elo does not move for a game the other side is not rated for — so a 0
+    -- beside an FCS opponent means "this did not count towards the rating", not "the rating
+    -- happened not to change". That is their number and not ours to adjust; it is recorded
+    -- here because a column of zeroes otherwise reads as a defect.
     case when t.is_home then fg.home_postgame_elo - fg.home_pregame_elo
          else fg.away_postgame_elo - fg.away_pregame_elo end     as elo_delta,
     

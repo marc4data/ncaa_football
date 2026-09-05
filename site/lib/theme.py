@@ -122,52 +122,20 @@ CSS = """
 """
 
 
-# What each theme's tokens are, resolved in PYTHON because CSS cannot see the answer.
-THEME_TOKENS = {
-    "light": {"--cfdb-sticky-bg": "#ffffff", "--cfdb-band-bg": "#f1f4f7",
-              "--cfdb-hover-bg": "#f4f7fd", "--cfdb-rule": "#d7dae0",
-              "--cfdb-muted": "#5d6672"},
-    "dark": {"--cfdb-sticky-bg": "#0e1117", "--cfdb-band-bg": "#171c25",
-             "--cfdb-hover-bg": "#1b2029", "--cfdb-rule": "#333a45",
-             "--cfdb-muted": "#9aa4b2"},
-}
-
-
-def resolved_theme_css() -> str:
-    """Tokens for the theme the app is ACTUALLY rendering, or "" when it cannot be known.
-
-    `prefers-color-scheme` answers a different question than the one being asked. It reports
-    the operating system's preference; what the tokens need is what Streamlit is painting.
-    Those agree until a reader on a dark system switches the app to Light — at which point
-    every rule in the dark media block applies over a light page. Marc hit exactly that:
-    "I checked light mode and the color and banding is pretty jacked up."
-
-    It only became visible now because these are the first OPAQUE backgrounds on the site.
-    Everything before them was transparent, so a wrong colour had nothing to paint.
-
-    `st.context.theme` carries the active theme and returns `{'type': None}` when Streamlit
-    has not resolved one — in which case this emits nothing and the media-query fallback in
-    TABLE_CSS stands, which is the best guess available rather than a wrong certainty.
-    """
-    try:
-        kind = (st.context.theme or {}).get("type")
-    except Exception:                                              # noqa: BLE001
-        return ""
-    tokens = THEME_TOKENS.get(kind)
-    if not tokens:
-        return ""
-    body = " ".join(f"{name}:{value};" for name, value in tokens.items())
-    return f"<style>:root {{ {body} }}</style>"
-
-
+# NO PYTHON THEME RESOLUTION ANY MORE, AND THE REASON IS WORTH KEEPING.
+#
+# `st.context.theme` reports the ACTIVE theme, which is the right question — and it answers
+# it one rerun late. Streamlit repaints the moment the reader flips the switch; Python only
+# hears about it on the next script run, so the tokens lagged and some frozen cells kept the
+# previous theme's colour until a tab change forced another pass. That is exactly what Marc
+# saw: "The switch between Light and Dark misses some of the Frozen columns."
+#
+# The tokens are built from `Canvas` and `CanvasText` instead, which follow the `color-scheme`
+# property Streamlit sets from that same active theme — live, in the same frame, with nothing
+# to synchronise. See TABLE_CSS.
 def inject() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     st.markdown(TABLE_CSS, unsafe_allow_html=True)
-    # LAST, so it wins. A media query adds no specificity, so source order decides between
-    # this and the fallback above.
-    resolved = resolved_theme_css()
-    if resolved:
-        st.markdown(resolved, unsafe_allow_html=True)
 
 
 TABLE_CSS = """
@@ -177,13 +145,33 @@ TABLE_CSS = """
    a dark page, and a TRANSPARENT sticky cell shows the scrolled content sliding underneath —
    the classic failure, and it reads as a rendering bug rather than a missing colour.
 
-   ⚠ ON :root, AND THE MEDIA QUERY BELOW IS ONLY A FALLBACK. `prefers-color-scheme` answers
-   "what does the OS prefer", and the question is "what is this app rendering". Those come
-   apart the moment a reader on a dark system switches Streamlit to Light — which Marc did,
-   and got a light page painted with dark cell backgrounds. `resolved_theme_css()` reads the
-   ACTIVE theme from Python and overrides these; this pair is what shows while it cannot. */
-:root { --cfdb-sticky-bg:#ffffff; --cfdb-band-bg:#f1f4f7; --cfdb-hover-bg:#f4f7fd;
-        --cfdb-muted:#5d6672; }
+   ⚠ BUILT FROM `Canvas` AND `CanvasText`, WHICH ARE LIVE. Two earlier attempts asked the
+   wrong source and both were wrong in a way Marc could see:
+
+     prefers-color-scheme  answers what the OPERATING SYSTEM prefers. A reader on a dark
+                           system who switches the app to Light gets a light page painted
+                           with dark cells — which is what happened.
+     st.context.theme      answers what the app is rendering, but only when Python next
+                           runs. Switching the theme repaints immediately and the tokens
+                           lag a rerun, so some frozen cells kept the old colour until a
+                           tab change forced another pass. Marc: "seems like there might be
+                           something upstream that isn't getting touched."
+
+   Streamlit sets `color-scheme: light|dark` on its own container from the ACTIVE theme
+   (verified in its bundle: `colorScheme: isLight ? light : dark`, beside `backgroundColor:
+   colors.bgColor`). CSS system colours follow that property, so `Canvas` IS the page and
+   `CanvasText` IS the text — with no Python in the loop and nothing to go stale. The theme
+   switch repaints these in the same frame it repaints everything else.
+
+   `color-mix` derives the rest from the same two, so the band and the rules track the theme
+   instead of being two more colours to keep in step. */
+:root {
+  --cfdb-sticky-bg: Canvas;
+  --cfdb-band-bg:   color-mix(in srgb, CanvasText 6%,  Canvas);
+  --cfdb-hover-bg:  color-mix(in srgb, CanvasText 10%, Canvas);
+  --cfdb-muted:     color-mix(in srgb, CanvasText 62%, Canvas);
+  --cfdb-rule:      color-mix(in srgb, CanvasText 20%, Canvas);
+}
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
     table-layout:fixed; }
 
@@ -618,13 +606,12 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 @media (prefers-color-scheme: dark) {
   .cfdb-table th { border-bottom-color:#333a45; }
   .cfdb-table td { border-bottom-color:#242933; }
-  /* R-269. The sticky ground, in the theme that would otherwise get a white stripe. */
-  :root { --cfdb-sticky-bg:#0e1117; --cfdb-band-bg:#171c25; --cfdb-hover-bg:#1b2029;
-          --cfdb-muted:#9aa4b2; }
+  /* R-269. The sticky tokens are NOT redefined here any more — they are built from Canvas
+     and follow the active theme on their own. A value here would override the live one with
+     a guess about the operating system, which is the defect this block used to contain. */
   .cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #333a45; }
 
 
-  :root { --cfdb-rule:#333a45; }
   .cfdb-resetsort { color:#58a6ff; border-color:#333a45; }
   /* A 10%-black border on a #0e1117 background is invisible, so every card edge
      disappeared in dark mode and the grid read as one undivided block. */

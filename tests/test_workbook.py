@@ -2538,6 +2538,7 @@ ADDED_SINCE_RATIFIED = {
     "pregame_elo": "R-286. Already in the warehouse, never surfaced here",
     "postgame_elo": "R-286. Safe only because Scores is completed-only (R-278)",
     "elo_delta": "Marc, after seeing the page: postgame minus pregame, on both surfaces",
+    "won": "Marc: Schedule's winner glyph, findable in a stack of 166 rows",
     "matchup_url": "R-289. Export-only; a cell hyperlink is invisible to a formula",
 }
 # Of those, the one that never reaches a page tab.
@@ -2563,7 +2564,7 @@ def test_marcs_ratified_order_survives_underneath_every_addition():
     assert remainder == marc, [
         (i, b, m) for i, (b, m) in enumerate(zip(remainder, marc), start=1) if b != m][:8]
 
-    assert len(built) == 150, len(built)
+    assert len(built) == 151, len(built)
     assert {f for f, _ in built} - {f for f, _ in marc} == set(ADDED_SINCE_RATIFIED)
 
 
@@ -2603,7 +2604,8 @@ def test_the_select_list_carries_what_the_page_needs_and_the_sheet_does_not_prin
     assert set(sheet.fields) == marc
     assert selected - marc == {"possession_seconds"} | set(workbook.SCORES_PASSENGERS), (
         selected - marc)
-    assert marc - selected == {"game_no", "possession_minutes", "matchup_url"}
+    # `won` joins them: derived from `result`, never selected.
+    assert marc - selected == {"game_no", "possession_minutes", "matchup_url", "won"}
     for passenger in ("team_slug", "team_logo_url", "team_rank"):
         assert passenger in selected, f"{passenger} never reaches the page"
 
@@ -2951,7 +2953,7 @@ def test_the_scores_freeze_keeps_team_and_opponent_and_still_leaves_room(built):
     assert {"Team", "Opponent"} <= {label for _, label in frozen}, frozen
     assert all(sheet.field_category[f] == "Game" for f, _ in frozen), (
         "the freeze reaches past the Game block")
-    assert len(frozen) <= 12, (
+    assert len(frozen) <= 13, (
         f"{len(frozen)} frozen columns; 12 is 138 characters on real data and 20 — the whole "
         f"Game block — is 200, against the ~110-130 an Excel window shows")
 
@@ -3181,13 +3183,14 @@ def test_the_freeze_lands_on_pts_for_and_never_reaches_the_ancillary_block(built
     sheet = _scores()
     first_scrolling = sheet.freeze_column()
 
-    # M now, not K: the reorder put Rank and Record inside the frozen prefix.
-    assert book["Scores"].freeze_panes == f"M{workbook.first_data_row(1)}"
-    assert get_column_letter(first_scrolling) == "M"
+    # N now: the reorder put Rank and Record inside the frozen prefix, and the Win glyph
+    # sits immediately after Pts for.
+    assert book["Scores"].freeze_panes == f"N{workbook.first_data_row(1)}"
+    assert get_column_letter(first_scrolling) == "N"
 
     frozen = sheet.columns[:first_scrolling - 1]
-    assert [label for _, label in frozen][-1] == "Pts for"
-    assert {"Team", "Opponent", "Pts for"} <= {label for _, label in frozen}
+    assert [label for _, label in frozen][-1] == "Win"
+    assert {"Team", "Opponent", "Pts for", "Win"} <= {label for _, label in frozen}
     assert "Pts against" not in {label for _, label in frozen}
     assert all(sheet.field_category[f] == "Game" for f, _ in frozen)
     assert not any(sheet.field_category[f] == "Ancillary" for f, _ in frozen)
