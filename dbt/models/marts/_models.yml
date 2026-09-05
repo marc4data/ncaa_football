@@ -113,9 +113,15 @@ models:
         description: The game this drive belongs to.
         data_tests:
           - not_null
+          # TAGGED `full_refresh_only` for the same reason as
+          # assert_no_drives_exist_before_the_scope_boundary: fct_game is refreshed by
+          # cfbd_scores_refresh and fct_drive is not, so this compares a fresh parent against a
+          # stale child every two hours, and a failure here would gate publish_to_serving.
           - relationships:
               to: ref('fct_game')
               field: game_id
+              config:
+                tags: ['full_refresh_only']
       - name: drive_number
         description: >
           Possession order within the game, 1..n. The chart's y-axis. Dense and gapless in all
@@ -136,6 +142,15 @@ models:
         description: >
           Field position at the snap, 0 = the offense's own goal line, 100 = the opponent's.
           THE coordinate: offense-relative, so both bands share one x scale driving right.
+          Verified on the built model: `= 100 - start_yards_to_goal` with ZERO exceptions over
+          all 78,536 rows, and the same for the end pair.
+      - name: start_yardline
+        description: >
+          CFBD's absolute yardline, in the HOME team's frame. ⚠️ EVIDENCE, NOT A RENDERING
+          COORDINATE — use start_yards_from_own_goal. It disagrees with the offense-relative
+          frame on 39,143 of 78,536 drives, so a bar keyed off this mirrors the away band and
+          reads as a rendering fault. The 578 rows where they agree are all at yardline 50,
+          where the two formulas coincide.
       - name: end_yards_from_own_goal
         description: >
           Field position at the end of the drive, same frame. May be less than the start — a
@@ -143,24 +158,36 @@ models:
           drives where CFBD's coordinate is broken; `is_end_on_field` is the flag for that.
       - name: is_end_on_field
         description: >
-          False where end_yards_from_own_goal falls outside 0..100 (118 of 78,502). The page
+          False where end_yards_from_own_goal falls outside 0..100 (118 of 78,536, range -78..193
+          on the built model). The page
           renders the row and suppresses the bar; a missing possession is a worse lie than a
           bar that admits it does not know where it ended.
       - name: is_negative_drive
-        description: Whether the drive ended behind where it started. 8,750 of 78,502 do.
+        description: >
+          Whether the drive ended behind where it started, by the COORDINATE delta — 8,786 of
+          78,536 on the built model. Deliberately not `yards < 0`, which is 7,946: the 840-row
+          gap between the two is the `yards`-versus-coordinates split again, in miniature.
       - name: start_clock_display
         description: >
           The game clock at the snap, as a reader says it — "Q2 07:14". One of the two forms of
-          "start time"; null outside regulation, where college football has no clock.
+          "start time".
+
+          ⚠️ THIS FORM IS NOT NULL IN OVERTIME — measured, it carries the literal `OT` / `2OT`
+          on all 326 overtime drives. Only elapsed_from_kickoff_seconds goes null there, so a
+          null-check written against this column never fires.
       - name: elapsed_from_kickoff_seconds
         description: >
           Seconds from kickoff to the snap. The other form of "start time". Null outside
           regulation rather than extrapolated — an overtime possession is not 900 seconds of
-          anything, and inventing a duration is worse than admitting there is none.
+          anything, and inventing a duration is worse than admitting there is none. Measured on
+          the built model: null on all 326 overtime drives plus the 24 CFBD reports as period 0,
+          350 in total. Order those rows by drive_number.
       - name: elapsed_display
         description: Drive duration as mm:ss, pre-formatted — a page formatting a duration is the app computing.
       - name: drive_result
-        description: CFBD free text, 25 distinct values measured. Raw; use drive_result_key to branch on.
+        description: >
+          CFBD free text; 25 distinct values, confirmed on the built model. Raw — branch on
+          drive_result_key, which is unmapped on 0 rows.
       - name: drive_result_key
         description: >
           Normalised result. Null means UNMAPPED, which fails
@@ -180,9 +207,11 @@ models:
       - name: scoring_side
         description: >
           Who scored, or null if nobody did. ⚠️ A `TD` SUFFIX ON A TURNOVER MEANS THE DEFENSE
-          SCORED — 'INT TD', 'PUNT TD', 'FUMBLE RETURN TD' and six more, ~900 drives. A chart
-          keying an offensive-touchdown icon off the substring "TD" puts every one of them on
-          the wrong side of the game.
+          SCORED. Measured on the built model: 908 drives across ten values — INT TD (430),
+          FUMBLE RETURN TD (195), PUNT TD (107), PUNT RETURN TD (86), FUMBLE TD (61),
+          MISSED FG TD (14), DOWNS TD (7), END OF HALF TD (5), FG TD (2), END OF GAME TD (1).
+          A chart keying an offensive-touchdown icon off the substring "TD" puts every one of
+          them on the wrong side of the game.
         data_tests:
           - accepted_values:
               values: ['offense', 'defense']
@@ -191,6 +220,8 @@ models:
       - name: yards
         description: >
           Net yards gained by the offense, as CFBD reports it. ⚠️ NOT the bar's length: it
-          disagrees with the end-minus-start coordinate delta on 11,987 of 78,502 drives (15%),
-          because the end coordinate is where a return finished. Both are right; they measure
-          different things.
+          disagrees with the end-minus-start coordinate delta on 11,950 of 78,418 drives
+          (15.2%) on the built model — 34% of touchdowns and 21% of interceptions — because the
+          end coordinate is where a RETURN finished and `yards` is what the offense gained.
+          Both are right; they measure different things, so a bar drawn from `yards` will not
+          land on the end coordinate the same row carries.

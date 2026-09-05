@@ -151,11 +151,12 @@ cross join scope s
 -- AC-G.35: the page's "as of" stamp is a COLUMN sourced from when this view's data was last
 -- loaded, never from now() in the app.
 --
--- ⚠️ 'game' IS THE CLOSEST HONEST DOMAIN, NOT THE RIGHT ONE. mart_as_of maps endpoints to
--- domains and has no row for 'drives', so this stamp is really "when /games last loaded".
--- Drives are fetched on the same cadence, so it is close — but it is not the same fetch, and
--- a drive chart could read fresher or staler than it is.
+-- R-353, MADE. This read the 'game' domain, which B046 correctly called the closest honest
+-- answer and the wrong one: mart_as_of had no 'drives' row at all. ('drives', 'drive') is now
+-- in its endpoint_domain list, so this reads the fetch it actually describes.
 --
--- THE FIX IS ONE LINE — ('drives', 'drive') in mart_as_of's endpoint_domain list — AND IT IS
--- NOT IN THIS PROMPT'S FILES (Part 0b). Reported rather than made.
-cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao_src
+-- MEASURED, and it is why the borrowed stamp was not merely imprecise: at the time this was
+-- built /drives had last landed 2026-09-03 and /games 2026-09-05. The old stamp reported
+-- drive data as two days FRESHER than it was. Drifting optimistic is the direction that
+-- costs something, because the freshness column exists to stop someone trusting stale data.
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'drive') ao_src

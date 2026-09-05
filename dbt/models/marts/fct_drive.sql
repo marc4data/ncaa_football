@@ -149,12 +149,17 @@ select
     100 - end_yards_to_goal                                 as end_yards_from_own_goal,
 
     -- A DRIVE CAN LOSE YARDS, so end < start is legitimate and is never clamped and never
-    -- abs()'d — a sack-and-punt rendered as a forward bar is a lie about the game. Measured:
-    -- 8,750 of 78,502 drives end behind where they started.
+    -- abs()'d — a sack-and-punt rendered as a forward bar is a lie about the game.
+    --
+    -- MEASURED ON THE BUILT MODEL (B050): 8,786 of 78,536. Note this is the COORDINATE delta,
+    -- not `yards < 0`, which is 7,946 — the 840-row gap between the two definitions is the
+    -- same yards-versus-coordinates split documented on the `yards` column, and is the reason
+    -- this flag is not defined as `yards < 0`.
     (100 - end_yards_to_goal) < (100 - start_yards_to_goal) as is_negative_drive,
 
     -- WHAT IS *NOT* LEGITIMATE IS AN END POSITION OFF THE FIELD, and 118 drives (0.15%) have
-    -- one: end_yards_from_own_goal ranges -78..193 in the raw layer, concentrated in
+    -- one — confirmed unchanged on the built model, range -78..193, with starts clean at 0 of
+    -- 78,536: end_yards_from_own_goal ranges -78..193 in the raw layer, concentrated in
     -- 'Uncategorized' (80) and 'TD' (34). Two different CFBD defects sit underneath — a
     -- coordinate that overshoots the goal line on a scoring play, and rows where yardline and
     -- yards_to_goal carry the same number in the home frame.

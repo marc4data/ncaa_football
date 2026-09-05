@@ -3426,23 +3426,73 @@ models:
           own.
         data_tests: [not_null]
       - name: start_yards_from_own_goal
-        description: Bar start. 0 = the offense's own goal line, 100 = the opponent's.
+        description: >
+          Bar start. 0 = the offense's own goal line, 100 = the opponent's.
+
+          ⚠️ THIS IS THE ONLY COORDINATE BOTH BANDS CAN SHARE. Draw the bar from this and
+          `end_yards_from_own_goal`, never from `start_yardline`. `yardline` is absolute in the
+          HOME team's frame, so on a two-band chart the away band mirrors and reads as a
+          rendering fault — measured on the built model, 39,143 of 78,536 drives have
+          `start_yardline <> start_yards_from_own_goal`.
+
+          The identity `= 100 - start_yards_to_goal` holds with ZERO exceptions across all
+          78,536 rows, and the same for the end pair. The 578 rows where the two frames agree
+          are all at yardline 50, where the formulas coincide.
       - name: end_yards_from_own_goal
-        description: Bar end, same frame. May be less than the start, and is never clamped.
+        description: >
+          Bar end, same frame. May be less than the start, and is never clamped.
+
+          ⚠️ NOT `start_yards_from_own_goal + yards`. See `yards`: the two measure different
+          things and disagree on 15.2% of drives.
+
+      - name: start_yardline
+        description: >
+          CFBD's absolute yardline, in the HOME team's frame. ⚠️ Carried as evidence, NOT for
+          rendering — use `start_yards_from_own_goal`. Keying a bar off this mirrors the away
+          band, on 39,143 of 78,536 drives.
+
+      - name: yards
+        description: >
+          Net yards the OFFENSE gained. ⚠️ NOT THE LENGTH OF THE BAR and not the coordinate
+          delta. Measured on the built model, the two disagree on 11,950 of 78,418 drives
+          (15.2%) — 34% of touchdowns, 21% of interceptions. The end coordinate is where a
+          RETURN finished; `yards` is what the offense did. Both are correct and they answer
+          different questions, so a bar drawn from `yards` will not land on the end coordinate
+          the same row carries.
+
+      - name: is_negative_drive
+        description: >
+          The drive ended behind where it started, by the COORDINATE delta — 8,786 of 78,536 on
+          the built model. Deliberately not `yards < 0`, which is 7,946; the 840-row gap between
+          them is `yards`-versus-coordinates again. Never clamped and never abs()'d: a
+          sack-and-punt drawn as a forward bar is a lie about the game.
       - name: is_end_on_field
         description: False where CFBD's end coordinate falls off the field. Render the row, suppress the bar.
       - name: start_clock_display
         description: '"Q2 07:14" — the game clock at the snap. One of two start-time forms; Marc picks one in pass 2.'
       - name: elapsed_from_kickoff_seconds
-        description: Seconds from kickoff to the snap — the other start-time form. Null outside regulation.
+        description: >
+          Seconds from kickoff to the snap — the other start-time form. Null outside regulation
+          rather than extrapolated: overtime possessions are not 900 seconds of anything.
+          Measured: null on all 326 overtime drives, plus 24 more where CFBD reports period 0.
+
+          ⚠️ ONLY THIS FORM GOES NULL. `start_clock_display` carries the literal `OT` / `2OT`
+          and `elapsed_display` carries a real duration, so a null-check written against those
+          never fires. Order overtime rows by `drive_number`.
       - name: elapsed_display
         description: Duration as mm:ss, pre-formatted.
       - name: drive_result_key
         description: Normalised result — what the icon branches on. Never null where drive_result is not.
       - name: scoring_side
         description: >
-          `offense`, `defense`, or null. ⚠️ Read this, not the result text: a `TD` suffix on a
-          turnover means the DEFENSE scored, on roughly 900 drives.
+          `offense`, `defense`, or null.
+
+          ⚠️ READ THIS COLUMN, NOT THE RESULT TEXT. A `TD` suffix on a turnover or a kick means
+          the DEFENSE scored. Measured on the built model: 908 drives across ten `drive_result`
+          values — `INT TD` (430), `FUMBLE RETURN TD` (195), `PUNT TD` (107), `PUNT RETURN TD`
+          (86), `FUMBLE TD` (61), `MISSED FG TD` (14), `DOWNS TD` (7), `END OF HALF TD` (5),
+          `FG TD` (2), `END OF GAME TD` (1). Keying an offensive-touchdown icon off the
+          substring `TD` puts every one of them on the wrong side of the game.
       - name: drives_min_season
         description: >
           Earliest season the warehouse holds drives for. Identical on every row by
