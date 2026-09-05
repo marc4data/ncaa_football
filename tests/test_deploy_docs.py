@@ -100,7 +100,7 @@ def test_the_deploy_rebuilds_and_publishes_the_data_it_changes():
     reaches the site on Saturday. On 2 September that left Schedule reading three columns the
     published table did not have.
 
-    THE DECISION MOVED OUT OF THE SHELL (R-264). It used to be a directory diff and a
+    THE DECISION MOVED OUT OF THE SHELL (R-273). It used to be a directory diff and a
     `publish_all` inlined here; both now live in `src/deploy_models.py`, where they can be
     tested. What this asserts is that the script still HAS the step and still has the manual
     override — the rest is covered by tests/test_deploy_models.py.
