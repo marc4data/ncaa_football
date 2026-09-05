@@ -22,6 +22,9 @@ Usage:
   python -m src.publish_marts --marts mart_team_schedule
 """
 import argparse
+import contextlib
+import getpass
+import socket
 import gzip
 import os
 import subprocess
@@ -183,14 +186,16 @@ def local_pg_env() -> dict:
     return env
 
 
-def _direct_pg() -> bool:
-    """Whether to reach the transform warehouse directly rather than through Docker.
-
-    Airflow has no Docker socket and must not be given one — socket access is root on the
-    host. Inside the compose network it reaches Postgres by service name, so when PG_HOST
-    is set this takes the direct route and the Docker path is only used from a laptop.
-    """
-    return bool(os.getenv("PG_HOST"))
+# RETIRED 2026-09-05 (R-312). _direct_pg() used to choose between a direct psql/pg_dump and
+# `docker compose exec -T postgres` — the second being the LAPTOP's local Postgres, which was
+# decommissioned with the rest of the local stack (R-296). There is nothing on the other side
+# of that branch any more.
+#
+# It is gone rather than left returning True, because a dead branch that still reads like a
+# supported path is how somebody concludes the laptop route is available. Both callers now
+# take the direct route unconditionally: Airflow reaches the warehouse by compose service
+# name, a laptop reaches it through scripts/warehouse_tunnel.sh, and pg_params() refuses to
+# guess when neither is configured.
 
 
 def _pg_dump_binary() -> str:
@@ -219,10 +224,11 @@ def _pg_dump_binary() -> str:
 
 
 def _local_psql_args() -> List[str]:
-    return ["-h", os.getenv("PG_HOST", "localhost"),
-            "-p", os.getenv("PG_PORT", "5432"),
-            "-U", os.getenv("PG_USER", "cfdb"),
-            "-d", os.getenv("PG_DB", "cfdb")]
+    # Same source, same refusal as everywhere else — see load_raw_to_postgres (R-312).
+    from .load_raw_to_postgres import pg_params
+    cfg = pg_params()
+    return ["-h", cfg["host"], "-p", str(cfg["port"]),
+            "-U", cfg["user"], "-d", cfg["dbname"]]
 
 
 def dump_marts(marts: List[str], schema: str = MARTS_SCHEMA) -> bytes:
@@ -232,14 +238,7 @@ def dump_marts(marts: List[str], schema: str = MARTS_SCHEMA) -> bytes:
         table_args += ["-t", f"{schema}.{mart}"]
 
     flags = ["--clean", "--if-exists", "--no-owner", "--no-privileges"]
-    if _direct_pg():
-        command = [_pg_dump_binary()] + _local_psql_args() + flags + table_args
-    else:
-        command = [
-            "docker", "compose", "exec", "-T", "postgres",
-            "pg_dump", "-U", os.getenv("PG_USER", "cfdb"),
-            "-d", os.getenv("PG_DB", "cfdb"),
-        ] + flags + table_args
+    command = [_pg_dump_binary()] + _local_psql_args() + flags + table_args
 
     result = subprocess.run(command, capture_output=True, env=local_pg_env())
     if result.returncode != 0:
@@ -341,12 +340,7 @@ def verify(marts: List[str], schema: str = MARTS_SCHEMA) -> None:
     """Count rows on both sides and refuse to call a mismatch a success."""
     for mart in marts:
         count_sql = f"select count(*) from {schema}.{mart}"
-        if _direct_pg():
-            local_cmd = ["psql"] + _local_psql_args() + ["-tAc", count_sql]
-        else:
-            local_cmd = ["docker", "compose", "exec", "-T", "postgres", "psql", "-U",
-                         os.getenv("PG_USER", "cfdb"), "-d", os.getenv("PG_DB", "cfdb"),
-                         "-tAc", count_sql]
+        local_cmd = ["psql"] + _local_psql_args() + ["-tAc", count_sql]
         local = subprocess.run(local_cmd, capture_output=True, env=local_pg_env())
         if _use_restricted():
             remote = _publish_ssh(f"count {schema} {mart}")
@@ -377,6 +371,74 @@ def publish_schema(tables: List[str], schema: str) -> None:
     verify(tables, schema)
 
 
+# ==========================================================================================
+# ONE PUBLISH AT A TIME (R-314). A POSTGRES ADVISORY LOCK ON THE WAREHOUSE.
+#
+# `pg_dump --clean --if-exists` against ONE serving Postgres, callable from every working
+# copy and from Airflow. Two publishes overlapping means one dropping tables the other is
+# restoring into, and the visible symptom is the site rendering an empty page.
+#
+# WHY NOT THE DROPLET LOCK scripts/deploy_main.sh USES. That one is a `mkdir` over root SSH.
+# This job deliberately does not have root SSH: it goes through a forced-command identity
+# with no shell, and "the remote side chooses nothing" is the security property that makes
+# the restricted key worth having. Sending it an arbitrary mkdir would give that back.
+#
+# WHY AN ADVISORY LOCK RATHER THAN A LOCKFILE. It is held by a CONNECTION, so it is released
+# when the connection ends — including when the process is killed, which is the case a
+# lockfile gets wrong. On 29 August a restore ran 34 minutes and the worker was killed
+# without a traceback; a lockfile would have survived that and blocked every retry
+# afterwards. There is no stale advisory lock to clear, ever.
+#
+# The lock lives on the WAREHOUSE because that is the one instance every publisher already
+# connects to — Airflow on the compose network, a laptop through the tunnel. The serving
+# Postgres would be the more obvious home and is unreachable except through the forced
+# command, which is the same reason as above.
+#
+# IT REFUSES, IT NEVER QUEUES. try_ rather than a blocking lock: a publish that waited would
+# start by dumping a warehouse the first publish has since rebuilt, and ship it as current.
+# ==========================================================================================
+# Arbitrary but fixed. Advisory lock keys are a global namespace on the instance, so this is
+# recorded here rather than computed, and changing it silently disables the lock.
+PUBLISH_LOCK_KEY = 8_140_927_318
+
+
+@contextlib.contextmanager
+def publish_lock():
+    """Hold the publish lock for the duration of the block, or refuse and say who holds it."""
+    from .load_raw_to_postgres import get_conn
+
+    connection = get_conn()
+    connection.autocommit = True
+    holder = f"{getpass.getuser()}@{socket.gethostname()} pid {os.getpid()}"
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("select pg_try_advisory_lock(%s)", (PUBLISH_LOCK_KEY,))
+            if not cursor.fetchone()[0]:
+                cursor.execute("""
+                    select coalesce(a.application_name, ''), a.usename, a.client_addr,
+                           a.backend_start
+                    from pg_locks l join pg_stat_activity a on a.pid = l.pid
+                    where l.locktype = 'advisory' and l.objid = %s and l.granted
+                """, (PUBLISH_LOCK_KEY % 2**32,))
+                other = cursor.fetchone()
+                detail = (f"held by {other[1]}@{other[2] or 'local'} since {other[3]}"
+                          if other else "held by a connection this session cannot see")
+                raise RuntimeError(
+                    f"ANOTHER PUBLISH IS RUNNING — refusing rather than queueing.\n"
+                    f"  lock   : advisory {PUBLISH_LOCK_KEY} on the warehouse\n"
+                    f"  {detail}\n"
+                    f"  this   : {holder}\n\n"
+                    f"  A second publish would dump a warehouse the first one has already\n"
+                    f"  rebuilt and ship it to the site as current. Wait for it to finish;\n"
+                    f"  there is nothing to clear — the lock ends with its connection.")
+            # Named so the refusal above can say who, without a table to keep in sync.
+            cursor.execute("select set_config('application_name', %s, false)",
+                           (f"cfdb_publish {holder}",))
+        yield
+    finally:
+        connection.close()          # releases the advisory lock; no explicit unlock needed
+
+
 def publish_all(schemas: Optional[List[str]] = None, hot: bool = False) -> dict:
     """Publish every contracted schema. The entry point Airflow calls.
 
@@ -391,15 +453,16 @@ def publish_all(schemas: Optional[List[str]] = None, hot: bool = False) -> dict:
     """
     schemas = schemas or ["marts", "serving"]
     published = {}
-    for schema in schemas:
-        if schema == SERVING_SCHEMA:
-            # `hot` ships only the fast-moving views; see HEAVY_SERVING for why. The default
-            # stays the full list, so a caller that says nothing still gets everything.
-            tables = HOT_SERVING if hot else DEFAULT_SERVING
-        else:
-            tables = DEFAULT_MARTS
-        publish_schema(tables, schema)
-        published[schema] = len(tables)
+    with publish_lock():
+        for schema in schemas:
+            if schema == SERVING_SCHEMA:
+                # `hot` ships only the fast-moving views; see HEAVY_SERVING for why. The
+                # default stays the full list, so a caller that says nothing gets everything.
+                tables = HOT_SERVING if hot else DEFAULT_SERVING
+            else:
+                tables = DEFAULT_MARTS
+            publish_schema(tables, schema)
+            published[schema] = len(tables)
     transport = "restricted publish key" if _use_restricted() else "root ssh"
     print(f"Published via {transport}: "
           + ", ".join(f"{k}={v} table(s)" for k, v in published.items()))
@@ -429,8 +492,11 @@ def main() -> int:
                 print(f"  would publish {schema}.{t}")
         return 0
 
-    for tables, schema in plan:
-        publish_schema(tables, schema)
+    # The same lock publish_all takes. main() is the HAND-RUN path — the one that exists in
+    # every working copy — so it is the caller that most needs it, not the one to exempt.
+    with publish_lock():
+        for tables, schema in plan:
+            publish_schema(tables, schema)
 
     print("\nPublish complete.")
     return 0

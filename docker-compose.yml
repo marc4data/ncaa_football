@@ -1,4 +1,28 @@
-version: '3.8'
+# THE WAREHOUSE. NOT A LOCAL DEVELOPMENT DATABASE — DO NOT `docker compose up` THIS.
+#
+# ==========================================================================================
+# READ THIS BEFORE CHANGING ANYTHING HERE (R-312).
+#
+# This file was very nearly DELETED on 2026-09-05 as "the local Postgres", because that is
+# what it looked like and what CLAUDE.md advertised it as: `docker compose up --build`, under
+# "Key commands", as the way to develop.
+#
+# It is not that. docker-compose.airflow.yml defines NO postgres service of its own — it
+# only `depends_on: postgres` and connects to the host `postgres` (PG_HOST: postgres). The
+# service below IS that host. The pipeline stack on the droplet runs the two files merged:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d
+#
+# so THIS is the definition of the transform warehouse that dbt has built into since
+# 30 August, and Airflow's own metadata database lives on the same server. Deleting it would
+# have deleted production's warehouse.
+#
+# What was actually wrong was the framing, not the file. Running it on a laptop stood up a
+# SECOND database with the same name, on the port the old dbt/profiles.yml.example pointed
+# at — which is how a dbt build could succeed against nothing anyone meant. That local
+# instance was dropped on 2026-09-05 (R-296) and is not coming back. See CLAUDE.md,
+# "Environments".
+# ==========================================================================================
 services:
   postgres:
     image: postgres:15
@@ -8,17 +32,17 @@ services:
       POSTGRES_PASSWORD: cfdb
       POSTGRES_DB: cfdb
     ports:
-      - "5432:5432"
+      # BOUND TO LOOPBACK, mirroring what the serving stack does deliberately in
+      # deploy/docker-compose.yml ("127.0.0.1:5433:5432"). It was "5432:5432", which is
+      # 0.0.0.0 — every interface — and the droplet's firewall was the only thing between the
+      # warehouse and the internet. A firewall is a good second line and a poor first one.
+      #
+      # On the droplet this is also the stable end for scripts/warehouse_tunnel.sh: a
+      # loopback publish does not move, whereas the container IP that script resolves today
+      # is reassigned every time the stack is recreated.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  # Placeholder for Airflow, dbt runner, worker images. Uncomment/configure when ready.
-  # airflow:
-  #   image: apache/airflow:2.7.1
-  #   environment:
-  #     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-  #   depends_on:
-  #     - postgres
 
 volumes:
   postgres_data:
