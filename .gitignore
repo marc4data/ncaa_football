@@ -69,3 +69,8 @@ model_outputs/
 *.pem
 id_ed25519*
 cfdb_publish_ed25519*
+
+# Notebook output. cfdb_plots.save() writes here; the figures are regenerable from the
+# notebook that made them, so the notebook is what belongs in git.
+notebooks/figures/
+notebooks/.ipynb_checkpoints/
