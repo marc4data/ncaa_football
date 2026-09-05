@@ -3366,3 +3366,95 @@ models:
           one game and the suffix is what keeps a reader from guessing which they have.
       - name: away_team_record_after_display
         description: As home_team_record_after_display, for the away side.
+
+  # ==========================================================================================
+  # APPENDED BY PROMPT B046 (session B). Session A is editing the srv_game_team block above;
+  # this is at the end of the file so the two edits cannot touch the same lines.
+  # ==========================================================================================
+  - name: srv_drive
+    description: >
+      One row per drive — what the Matchup post-game Drives chart reads, and nothing else.
+      Named for its grain rather than for the tab: the Defense split is these same rows
+      re-sourced by is_home_offense, not a second model.
+
+      Every label and filter the chart needs is a column here (G-2, G-3): one relation, a WHERE
+      on game_id, no joins and no arithmetic in the app. That includes the mm:ss duration, the
+      band a drive belongs to, and the endzone team's logo, mascot and contrast-safe colour.
+
+      The scope boundary rides on every row as drives_min_season / drives_max_season, so a game
+      outside the window — which returns no rows at all — can still be explained by a single
+      `select drives_min_season from srv_drive limit 1`. An absence with a reason is a state;
+      an empty chart is a defect.
+    columns:
+      - name: drive_sk
+        description: Surrogate key over drive_id — the grain.
+        data_tests: [unique, not_null]
+      - name: game_id
+        description: The game. The only column the page filters on.
+        data_tests: [not_null]
+      - name: drive_number
+        description: Possession order within the game — the y-axis.
+        data_tests: [not_null]
+      - name: band
+        description: >
+          Which half of the chart this drive is drawn in. Away above home, per the layout, and
+          resolved here so the page orders on a column instead of re-deriving the convention.
+        data_tests:
+          - accepted_values:
+              values: ['home', 'away']
+      - name: band_order
+        description: 1 for away, 2 for home. The sort key behind `band`, so the page never sorts on a word.
+      - name: offense_team_display
+        description: >
+          The team whose offense this band is — the rail label. Falls back to the name on the
+          fact where dim_team has no row, so a non-FBS side is still named rather than blank.
+        data_tests: [not_null]
+      - name: opponent_team_display
+        description: The team being driven at. Its endzone is at x=100 in this band.
+        data_tests: [not_null]
+      - name: opponent_color_on_light
+        description: >
+          The endzone colour on a light surface, contrast-checked upstream by dim_team and
+          coalesced to neutral grey where the team has no row at all. Never null — an endzone
+          in fallback grey is correct, one in an unreadable team colour is not, and one in NULL
+          is a crash.
+        data_tests: [not_null]
+      - name: opponent_color_source
+        description: >
+          Which rung of dim_team's contrast ladder produced the colour — `primary`, `alternate`,
+          `adjusted` or `fallback`. It is how the page knows to say the colour is not the team's
+          own.
+        data_tests: [not_null]
+      - name: start_yards_from_own_goal
+        description: Bar start. 0 = the offense's own goal line, 100 = the opponent's.
+      - name: end_yards_from_own_goal
+        description: Bar end, same frame. May be less than the start, and is never clamped.
+      - name: is_end_on_field
+        description: False where CFBD's end coordinate falls off the field. Render the row, suppress the bar.
+      - name: start_clock_display
+        description: '"Q2 07:14" — the game clock at the snap. One of two start-time forms; Marc picks one in pass 2.'
+      - name: elapsed_from_kickoff_seconds
+        description: Seconds from kickoff to the snap — the other start-time form. Null outside regulation.
+      - name: elapsed_display
+        description: Duration as mm:ss, pre-formatted.
+      - name: drive_result_key
+        description: Normalised result — what the icon branches on. Never null where drive_result is not.
+      - name: scoring_side
+        description: >
+          `offense`, `defense`, or null. ⚠️ Read this, not the result text: a `TD` suffix on a
+          turnover means the DEFENSE scored, on roughly 900 drives.
+      - name: drives_min_season
+        description: >
+          Earliest season the warehouse holds drives for. Identical on every row by
+          construction, so a page with no rows for its game can still read it with a
+          `limit 1` and say "cfdb holds drives from 2024" instead of rendering nothing.
+        data_tests: [not_null]
+      - name: drives_max_season
+        description: Latest season the warehouse holds drives for. Same constant-column reasoning.
+        data_tests: [not_null]
+      - name: as_of_ts
+        description: >
+          When the data behind this view was last loaded (AC-G.35). ⚠️ Sourced from the `game`
+          domain, which is the closest honest answer and not the right one — mart_as_of has no
+          `drives` endpoint row. The fix is one line in mart_as_of, outside this prompt's files.
+        data_tests: [not_null]

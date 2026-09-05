@@ -85,3 +85,112 @@ models:
               values: ['W', 'L', 'T']
               config:
                 where: "result is not null"
+
+  # ==========================================================================================
+  # APPENDED BY PROMPT B046 (session B). Everything above belongs to other prompts — this block
+  # is at the end so a concurrent edit higher in the file cannot conflict with it.
+  # ==========================================================================================
+  - name: fct_drive
+    description: >
+      One row per drive — the layer between a game and its plays, and the spine the Matchup
+      post-game Drives chart is drawn on. Scope is 2024 onward, measured from the raw manifest:
+      /drives is `recent` scope, the same as /plays.
+
+      Season, week and team ids are resolved here, exactly as fct_play resolves them, because
+      the /drives payload carries a game id and nothing else.
+
+      The column the chart is drawn on is `start_yards_from_own_goal` / `end_yards_from_own_goal`
+      (100 - yards_to_goal). `yardline` is an absolute coordinate in the HOME team's frame and
+      must never be used for geometry — drawn on it, the away band mirrors the home band.
+    columns:
+      - name: drive_sk
+        description: Surrogate key over drive_id — the grain.
+        data_tests: [unique, not_null]
+      - name: drive_id
+        description: CFBD drive id. Text, never numeric — an 18-digit id CFBD never promised is a number.
+        data_tests: [unique, not_null]
+      - name: game_id
+        description: The game this drive belongs to.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('fct_game')
+              field: game_id
+      - name: drive_number
+        description: >
+          Possession order within the game, 1..n. The chart's y-axis. Dense and gapless in all
+          but four games of 3,343 — see assert_a_drive_number_sequence_is_dense.
+        data_tests: [not_null]
+      - name: season
+        description: Resolved from fct_game; /drives carries no season.
+        data_tests: [not_null]
+      - name: week
+        description: Resolved from fct_game; /drives carries no week.
+        data_tests: [not_null]
+      - name: is_home_offense
+        description: >
+          Whether the offense on this drive is the home team. The only link to home and away on
+          the payload, and what puts a drive in the away band or the home band.
+        data_tests: [not_null]
+      - name: start_yards_from_own_goal
+        description: >
+          Field position at the snap, 0 = the offense's own goal line, 100 = the opponent's.
+          THE coordinate: offense-relative, so both bands share one x scale driving right.
+      - name: end_yards_from_own_goal
+        description: >
+          Field position at the end of the drive, same frame. May be less than the start — a
+          drive can lose yards — and is never clamped. May also fall outside 0..100 on 118
+          drives where CFBD's coordinate is broken; `is_end_on_field` is the flag for that.
+      - name: is_end_on_field
+        description: >
+          False where end_yards_from_own_goal falls outside 0..100 (118 of 78,502). The page
+          renders the row and suppresses the bar; a missing possession is a worse lie than a
+          bar that admits it does not know where it ended.
+      - name: is_negative_drive
+        description: Whether the drive ended behind where it started. 8,750 of 78,502 do.
+      - name: start_clock_display
+        description: >
+          The game clock at the snap, as a reader says it — "Q2 07:14". One of the two forms of
+          "start time"; null outside regulation, where college football has no clock.
+      - name: elapsed_from_kickoff_seconds
+        description: >
+          Seconds from kickoff to the snap. The other form of "start time". Null outside
+          regulation rather than extrapolated — an overtime possession is not 900 seconds of
+          anything, and inventing a duration is worse than admitting there is none.
+      - name: elapsed_display
+        description: Drive duration as mm:ss, pre-formatted — a page formatting a duration is the app computing.
+      - name: drive_result
+        description: CFBD free text, 25 distinct values measured. Raw; use drive_result_key to branch on.
+      - name: drive_result_key
+        description: >
+          Normalised result. Null means UNMAPPED, which fails
+          assert_every_drive_result_maps_to_a_known_key rather than rendering a blank icon.
+        data_tests:
+          - not_null:
+              config:
+                where: "drive_result is not null"
+      - name: drive_result_category
+        description: >
+          Icon family — coarser than the key on purpose, so pass 2 picks one glyph per family
+          and overrides only where it wants to.
+        data_tests:
+          - accepted_values:
+              values: ['offensive score', 'defensive score', 'turnover', 'punt', 'kick',
+                       'clock', 'unknown']
+      - name: scoring_side
+        description: >
+          Who scored, or null if nobody did. ⚠️ A `TD` SUFFIX ON A TURNOVER MEANS THE DEFENSE
+          SCORED — 'INT TD', 'PUNT TD', 'FUMBLE RETURN TD' and six more, ~900 drives. A chart
+          keying an offensive-touchdown icon off the substring "TD" puts every one of them on
+          the wrong side of the game.
+        data_tests:
+          - accepted_values:
+              values: ['offense', 'defense']
+              config:
+                where: "scoring_side is not null"
+      - name: yards
+        description: >
+          Net yards gained by the offense, as CFBD reports it. ⚠️ NOT the bar's length: it
+          disagrees with the end-minus-start coordinate delta on 11,987 of 78,502 drives (15%),
+          because the end coordinate is where a return finished. Both are right; they measure
+          different things.
