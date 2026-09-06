@@ -25,8 +25,99 @@ Data scope (synced with Cowork `CLAUDE.md`, 2026-08-15)
   coaches, rankings, and season-scoped teams, before Week 1 and regardless of whether any game
   has been played.
 
+Environments
+------------
+⚠️ **THERE IS NO LOCAL WAREHOUSE, AND THERE IS NOT GOING TO BE ONE.** The laptop Postgres was
+dropped on 2026-09-05 (R-296). This section replaces the line that used to sit under Key
+commands — *"Local Docker Compose (development): `docker compose up --build`"* — which is
+what a fresh session read, believed, and acted on.
+
+**Three databases. Two of them are real and they are not the same one.**
+
+| Instance | Where | Holds | Written by |
+|---|---|---|---|
+| **Warehouse** (transform) | droplet, pipeline stack `/opt/cfdb-pipeline` — service **`warehouse`**, `PG_HOST=warehouse`, `PG_DB=cfdb`, container `cfdb-pipeline-warehouse-1`, **no published host port** | `raw`, `staging`, `marts`, `serving` — **dbt builds here** | Airflow → dbt; the `src/` loaders |
+| **Serving** | droplet, serving stack `/opt/cfdb` — `deploy/docker-compose.yml`, bound `127.0.0.1:5433`, container `cfdb-postgres-1` | the published subset the site reads | `src/publish_marts.py` only |
+| ~~Local Postgres~~ | ~~laptop~~ | **DROPPED 2026-09-05, R-296** | nobody |
+
+The distinction is the whole point. A question answered against serving sees only what has
+been *published*; the same question against the warehouse sees what has been *built*. Both
+answer. Neither errors. **"There is no warehouse to build against" was concluded on
+2026-09-05 from the serving instance — a true fact about the wrong object.**
+
+⚠️ **PRODUCTION RUNS A COMPOSE FILE THAT IS NOT IN GIT. This is the current state, not a
+plan.** A051 measured the droplet on 2026-09-05:
+
+| | this repository says | the droplet actually runs |
+|---|---|---|
+| Postgres service name | `postgres` | **`warehouse`** |
+| `PG_HOST` | `postgres` | **`warehouse`** |
+| how it is composed | two files merged, `-f docker-compose.yml -f docker-compose.airflow.yml` | **one hand-merged file**, `/opt/cfdb-pipeline/docker-compose.yml`, 6,987 bytes |
+| warehouse host port | `5432:5432` in the root compose | **none — nothing is published** |
+
+That file was **hand-edited on 2026-09-05 at 07:35, has a `.bak` beside it, and carries six
+inline literal credentials.** So a deploy does not reproduce it, a `git diff` cannot show you
+what production is, and **reading the repo tells you the intent rather than the fact.**
+
+**Read the droplet for facts and the repo for intent, until this is reconciled.**
+Reconciliation is its own work and is deliberately not folded into the environment fix — the
+warehouse serves live pages, and rewriting the file it runs from is not a change to make in
+passing. Two independent confirmations that the warehouse publishes no port: the running
+file says so in its own comment, and `scripts/warehouse_tunnel.sh`'s loopback path (Path 1)
+never triggers, so it always falls through to resolving the container address.
+
+⚠️ **`docker-compose.yml` at the repo root is neither a local dev database nor production.**
+It is git's model of the warehouse — the `postgres` service `docker-compose.airflow.yml`
+depends on. Running it on a laptop stands up a second database with the same name on the same
+port, which is exactly how a dbt build succeeds against nothing anyone meant. Editing its port
+line does not change production, which does not run it.
+
+**Reaching the warehouse**
+
+```bash
+scripts/warehouse_tunnel.sh          # another terminal; leave it running
+python scripts/preflight_env.py      # prints working copy, profile, target, host, database
+```
+
+This is a **read-and-build** path, not a deploy path, and the difference is structural rather
+than promised: the tunnel forwards one port and runs no remote command. Changing what the
+site shows is still `scripts/deploy_main.sh` and still nothing else — see `deploy/README.md`,
+which removed the manual deploy commands deliberately.
+
+**The two files git cannot fix for you**
+
+`dbt/profiles.yml` (.gitignore line 14) and `.env` (line 7) are untracked, so they are **per
+working copy and hand-copied**, and this repo now has three working copies side by side:
+
+    ncaa_football/claude_code/     main + in-flight branches
+    ncaa_football/wt-drives/       worktree, feature work
+    ncaa_football/cfdb_deploy/     worktree pinned to main; Airflow's mounts point here
+
+Merging a fix to the template changes **nothing** in any of them until someone re-copies it.
+On 2026-09-05 one working copy's root had *no* `dbt/profiles.yml` at all while its own
+worktree had one pointing at `localhost:5432`. Two directories of one repository, in
+different states, neither visible to the other. `scripts/preflight_env.py` and the
+`on-run-start` hook in `dbt/dbt_project.yml` exist so that the next such copy says so on the
+**first** dbt command rather than the twelfth model.
+
+**Resync after the environment fix merges (R-317)**
+
+    1. The environment fix merges to main.
+    2. EVERY working copy fetches and rebases:
+         claude_code/ (and its in-flight branch)    wt-drives/    cfdb_deploy/
+    3. EVERY working copy, BY HAND, because git cannot do it:
+         cp dbt/profiles.yml.example dbt/profiles.yml
+         cp .env.example .env   (or diff an existing .env against it) and fill the values
+         delete the retired CFDB_DROPLET_PG_ADDR and CFDB_REMOTE_PG_PORT from .env
+    4. EVERY working copy runs `python scripts/preflight_env.py`. It must pass in each, and
+       CI must stay green — the workflow runs the same check.
+    5. Only then does feature work resume.
+
+⚠️ **Step 3 is the one that will be skipped.** That is precisely why step 4 exists: if it is
+skipped, step 4 fails loudly and says which working copy and which file.
+
 Key commands
-- Local Docker Compose (development): `docker compose up --build`
+- Reach the warehouse: `scripts/warehouse_tunnel.sh` then `python scripts/preflight_env.py`
 - Run ingestion (example): `python -m src.ingest fetch teams`
 - Historical backfill (idempotent, resumable): `python -m src.backfill --seasons 2024 2025`
 - Curated deep history: `python -m src.backfill --full-history`
@@ -35,6 +126,19 @@ Key commands
 - Lint: `flake8 src dags tests` · Tests: `pytest -q`
 - CI runs both on every PR to `main` (`.github/workflows/ci.yml`). The live CFBD
   smoke test is a manual `workflow_dispatch` job — unit tests never hit the API.
+
+Deploying and publishing are SINGLE-FLIGHT, and it is a mechanism now (R-314)
+- `scripts/deploy_main.sh` and `python -m src.publish_marts` are executable in **every**
+  working copy, and there are three. *"Only one session publishes"* was a sentence in a
+  prompt, and a prompt is not what runs.
+- The deploy takes a lock **on the droplet** (`/opt/cfdb/locks/deploy.lock`, atomic `mkdir`,
+  released on exit) — remote because the resource is remote, and a laptop lockfile would do
+  nothing about a second machine. The publish takes a **Postgres advisory lock** on the
+  warehouse, because the publish identity is a forced command that cannot run `mkdir`, and
+  because an advisory lock dies with its connection and so can never go stale.
+- **Both refuse loudly and neither queues.** A second deploy would run against a tree the
+  first one moved underneath it; a second publish would ship a warehouse the first has
+  already rebuilt.
 
 Licensed material — NEVER COMMIT
 - `cfdb_model_pack/` is the CFB Model Training Pack (2026 Edition, Rad Sports Analytics).

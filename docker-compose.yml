@@ -1,3 +1,37 @@
+# ⚠️ PRODUCTION DOES NOT RUN THIS FILE. Read the next paragraph before you trust it.
+#
+# ==========================================================================================
+# WHAT THIS FILE IS, AND WHAT IT IS NOT (R-312, corrected by measurement R-357).
+#
+# It was very nearly DELETED on 2026-09-05 as "the local Postgres", because that is what it
+# looked like and what CLAUDE.md advertised it as: `docker compose up --build`, under
+# "Key commands", as the way to develop. It is not that either.
+#
+# WHAT IT IS: git's model of the transform warehouse. docker-compose.airflow.yml defines no
+# postgres service of its own — it only `depends_on: postgres` and connects to the host
+# `postgres` — so within this repository, the service below is that host.
+#
+# WHAT IT IS NOT: what the droplet runs. A051 measured the pipeline stack on 2026-09-05 and
+# found a SINGLE HAND-MERGED COMPOSE FILE at /opt/cfdb-pipeline/docker-compose.yml (6,987
+# bytes, hand-edited 2026-09-05 07:35, a .bak beside it, six inline literal credentials). In
+# it the service is named `warehouse`, not `postgres`; PG_HOST is `warehouse`; and the
+# warehouse PUBLISHES NO HOST PORT AT ALL. The container is `cfdb-pipeline-warehouse-1`.
+#
+# So this file and production have diverged, and RECONCILING THEM IS SEPARATE WORK that is
+# deliberately not done here. Until it happens, treat this file as a description of intent
+# and the droplet as the description of fact. See CLAUDE.md, "Environments".
+#
+# ⚠️ DO NOT EDIT THE PORT LINE BELOW EXPECTING TO CHANGE PRODUCTION. It is inert twice over:
+# production does not run this file, and production's own file publishes nothing. Narrowing
+# it to loopback is real work and it lives on `env/warehouse-loopback-bind`, to land WITH the
+# compose reconciliation rather than before it — narrowing a port on a file nobody runs is a
+# change that does nothing today and something surprising later.
+#
+# The framing was the original bug, not the file. Running it on a laptop stood up a SECOND
+# database with the same name, on the port the old dbt/profiles.yml.example pointed at, which
+# is how a dbt build could succeed against nothing anyone meant. That local instance was
+# dropped on 2026-09-05 (R-296) and is not coming back.
+# ==========================================================================================
 version: '3.8'
 services:
   postgres:
@@ -11,14 +45,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  # Placeholder for Airflow, dbt runner, worker images. Uncomment/configure when ready.
-  # airflow:
-  #   image: apache/airflow:2.7.1
-  #   environment:
-  #     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-  #   depends_on:
-  #     - postgres
 
 volumes:
   postgres_data:

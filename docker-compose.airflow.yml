@@ -1,10 +1,26 @@
-# Local Airflow 3 for cfdb. Runs alongside the Postgres in docker-compose.yml, reusing it
-# for Airflow's own metadata database (a separate `airflow` database on the same server).
+# THE PIPELINE STACK. IT RUNS ON THE DROPLET, at /opt/cfdb-pipeline — not on a laptop.
 #
-# Bring up:
-#   docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d airflow-init
-#   docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d
-#   open http://localhost:8080   (local stack logs in as admin automatically)
+# ⚠️ BUT NOT THIS FILE, AND NOT AS WRITTEN HERE (R-357, measured by A051 on 2026-09-05).
+#
+# In git, this file carries no postgres service of its own: it `depends_on: postgres`, sets
+# PG_HOST: postgres, and expects docker-compose.yml to supply that service when the two are
+# merged with `-f docker-compose.yml -f docker-compose.airflow.yml`.
+#
+# THE DROPLET DOES NOT DO THAT. It runs ONE hand-merged file at
+# /opt/cfdb-pipeline/docker-compose.yml — 6,987 bytes, hand-edited 2026-09-05 07:35, with a
+# .bak beside it and six inline literal credentials. In it the Postgres service is named
+# `warehouse`, PG_HOST is `warehouse`, and the warehouse publishes NO host port. The running
+# container is `cfdb-pipeline-warehouse-1`.
+#
+# So the two-file bring-up below is git's intent, not an account of production. Reconciling
+# them is separate work and is deliberately not done here; until it lands, read the droplet
+# for facts and this file for intent. See CLAUDE.md, "Environments".
+#
+# Deploys go through scripts/deploy_main.sh, which is the only supported way.
+#
+# The UI is on the droplet's 8080 and is not published; reach it over an SSH forward if you
+# need it. This header used to say "open http://localhost:8080 (local stack logs in as admin
+# automatically)", which described a laptop stack decommissioned on 2026-09-05 (R-296).
 #
 # Secrets come from .env and are never baked into the image. Generate them once with:
 #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

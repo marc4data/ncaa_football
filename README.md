@@ -25,19 +25,29 @@ public. See [`docs/publication_boundary.md`](docs/publication_boundary.md).
 
 ## Setup
 
+**There is no local warehouse.** The pipeline runs on the droplet: dbt builds into the
+warehouse Postgres in the pipeline stack, and the site reads a published subset from a
+second, separate serving Postgres. The laptop Postgres this README used to open with
+(`docker compose up -d postgres`) was decommissioned on 2026-09-05 and is not coming back —
+running it stood up a second database with the same name on the same port, which is how a
+green dbt build could mean nothing. See **Environments** in `CLAUDE.md`.
+
 ```bash
-docker compose up -d postgres                    # local warehouse/serving Postgres
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt              # includes runtime deps + pytest/flake8
+pip install -r requirements-dev.txt              # runtime deps + pytest/flake8
+
+cp .env.example .env                             # then fill it in — key names and comments only
+cp dbt/profiles.yml.example dbt/profiles.yml      # gitignored, so PER WORKING COPY
+
+scripts/warehouse_tunnel.sh                      # another terminal; leave it running
+python scripts/preflight_env.py                  # says which database you just reached
 ```
 
-Create `.env` (never committed):
-
-```
-CFBD_API_KEY=<your key>
-DATABRICKS_HOST=<workspace URL>
-DATABRICKS_TOKEN=<token>
-```
+Both files you copied are gitignored, so a `git pull` can never correct them and each
+working copy has its own. That is what `scripts/preflight_env.py` is for: run it after
+copying, and it tells you which working copy, which profile file and which database — and
+fails distinctly for *no profile here* versus *a profile pointing at the database that was
+dropped*.
 
 ## Ingestion
 
@@ -256,13 +266,21 @@ guarantee. Verified byte-identical by md5 on the largest file in the corpus (34 
 
 ## Full rebuild from scratch
 
+Against the warehouse, through the tunnel — there is nowhere else to rebuild to.
+
 ```bash
-docker compose up -d postgres
+scripts/warehouse_tunnel.sh          # another terminal; leave running
+python scripts/preflight_env.py      # confirm which database before writing to it
+
 python -m src.backfill --seasons 2024 2025
 python -m src.validate_raw
 python -m src.load_raw_to_postgres --all
-cd dbt && DBT_PROFILES_DIR=. dbt run && DBT_PROFILES_DIR=. dbt test
+cd dbt && dbt run && dbt test
 ```
+
+`DBT_PROFILES_DIR=.` is no longer needed: `dbt/profiles.yml` is where dbt looks by default
+when run from `dbt/`, and every dbt invocation now prints the target, host and database it
+resolved before it builds anything.
 
 Raw is never mutated, so this rebuilds every downstream table from data already on disk —
 no re-fetching unless the raw layer has gaps.
@@ -280,18 +298,16 @@ stub the network and never hit the API.
 
 ## Airflow
 
-Local Airflow 3.3.1 (api-server + scheduler + dag-processor, LocalExecutor), reusing the
-project Postgres for its own metadata in a separate `airflow` database.
+Airflow 3.3.1 (api-server + scheduler + dag-processor, LocalExecutor) **on the droplet**, at
+`/opt/cfdb-pipeline`. It shares the warehouse Postgres for its own metadata in a separate
+`airflow` database, and it reads code from a git worktree pinned to `main` — never a working
+tree. Deploying it is `scripts/deploy_main.sh` and nothing else; see `deploy/README.md` for
+why the individual commands are not reproduced.
+
+The UI is on the droplet's port 8080 and is not published. Reach it over a forward:
 
 ```bash
-# one-time: create the metadata database and generate secrets into .env
-docker compose exec postgres psql -U cfdb -d cfdb -c "CREATE DATABASE airflow OWNER cfdb;"
-python -c "from cryptography.fernet import Fernet; print('AIRFLOW_FERNET_KEY='+Fernet.generate_key().decode())" >> .env
-python -c "import secrets; print('AIRFLOW_JWT_SECRET='+secrets.token_hex(32))" >> .env
-
-docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d airflow-init
-docker compose -f docker-compose.yml -f docker-compose.airflow.yml up -d
-open http://localhost:8080
+ssh -N -L 8080:127.0.0.1:8080 $CFDB_DROPLET_HOST    # then http://localhost:8080
 ```
 
 Two settings that are easy to get wrong and fail confusingly:
@@ -399,11 +415,17 @@ call functions in `src/`, which land raw responses. Meaning is dbt's job.
 
 ## Site (M6, in development)
 
-Streamlit reading marts from serving Postgres. Runs locally against the current marts
-while hosting comes online.
+Streamlit reading the serving Postgres. It runs in production on the droplet behind a
+Cloudflare Tunnel and Cloudflare Access; `deploy/README.md` has the deployment.
+
+Running the site locally is still supported and still useful — it is a *reader*, so it needs
+a connection to the serving database and creates nothing. Point `SERVING_PG_HOST` at the
+local end of a forward to the droplet's serving Postgres (`127.0.0.1:5433` there; a
+different instance from the warehouse):
 
 ```bash
-streamlit run site/app.py     # http://localhost:8501
+ssh -N -L 15434:127.0.0.1:5433 $CFDB_DROPLET_HOST   # another terminal
+SERVING_PG_HOST=127.0.0.1 SERVING_PG_PORT=15434 streamlit run site/app.py
 ```
 
 Two boundaries the code enforces rather than documents:

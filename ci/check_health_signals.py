@@ -59,6 +59,13 @@ def observed() -> list:
     import psycopg2
 
     connection = psycopg2.connect(
+        # THIS `localhost` IS CORRECT — DO NOT "FIX" IT (R-312).
+        #
+        # It is the CI workflow's Postgres service container, seeded from ci/fixtures.sql,
+        # and .github/workflows/ci.yml sets PG_HOST explicitly anyway. The 2026-09-05 sweep
+        # removed localhost defaults everywhere they meant "the laptop database that was
+        # dropped"; this one never meant that, and scripts/preflight_env.py exempts the `ci`
+        # target by name for the same reason.
         host=os.getenv("PG_HOST", "localhost"),
         port=int(os.getenv("PG_PORT", "5432")),
         dbname=os.getenv("PG_DB", "cfdb"),
