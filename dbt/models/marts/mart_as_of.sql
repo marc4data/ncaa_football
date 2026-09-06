@@ -19,6 +19,16 @@ with endpoint_domain as (
         ('games_teams',  'game'),
         ('calendar',     'game'),
         ('records',      'game'),
+        -- R-353. Drives are their own domain and were missing entirely, so srv_drive read the
+        -- 'game' stamp — the closest honest answer available and the wrong one. It is wrong in
+        -- the direction that matters: /drives last landed 2026-09-03 while /games landed
+        -- 2026-09-05, so borrowing the game stamp reported drive data as two days FRESHER than
+        -- it was. A freshness column that flatters is worse than none.
+        --
+        -- 'drives' is the FLATTENED label, verified against raw.raw_manifest in the warehouse
+        -- (17 loads) rather than read off the API path — see the note above; the path spelling
+        -- matches nothing and fails silently.
+        ('drives',       'drive'),
         ('lines',        'market'),
         ('rankings',     'rankings'),
         ('stats_season', 'stats'),
