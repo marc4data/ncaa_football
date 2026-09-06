@@ -8,7 +8,27 @@ services:
       POSTGRES_PASSWORD: cfdb
       POSTGRES_DB: cfdb
     ports:
-      - "5432:5432"
+      # ⚠️ THIS BRANCH LANDS WITH THE COMPOSE RECONCILIATION, NOT BEFORE IT (R-358).
+      #
+      # Narrowing the warehouse from 0.0.0.0 to the droplet's loopback, mirroring what the
+      # serving stack already does deliberately in deploy/docker-compose.yml
+      # ("127.0.0.1:5433:5432"). 0.0.0.0 publishes on every interface, leaving the droplet's
+      # firewall as the only thing between the warehouse and the internet — a good second
+      # line and a poor first one.
+      #
+      # WHY IT IS NOT ON env/droplet-only. It is a RUNTIME change to production, and today is
+      # inside the 2026-08-27..09-07 change gate. It is also inert in a way that makes it
+      # worse rather than safer to slip in quietly: production does not run this file at all
+      # (it runs a hand-merged /opt/cfdb-pipeline/docker-compose.yml naming the service
+      # `warehouse`), and that file publishes no host port. So merging this changes nothing
+      # today and changes something the day the two are reconciled — which is exactly the
+      # shape of surprise that reconciliation should not be carrying uninvited.
+      #
+      # Merge it WITH the reconciliation, and check then whether a published loopback port is
+      # still wanted at all: scripts/warehouse_tunnel.sh works without one, and not
+      # publishing is the stronger posture. This branch exists so the option is written down,
+      # not so it is taken by default.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
