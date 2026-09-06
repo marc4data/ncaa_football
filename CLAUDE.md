@@ -36,8 +36,8 @@ what a fresh session read, believed, and acted on.
 
 | Instance | Where | Holds | Written by |
 |---|---|---|---|
-| **Warehouse** (transform) | droplet, pipeline stack `/opt/cfdb-pipeline` — `docker-compose.yml` + `docker-compose.airflow.yml` merged, `PG_HOST=postgres`, `PG_DB=cfdb` | `raw`, `staging`, `marts`, `serving` — **dbt builds here** | Airflow → dbt; the `src/` loaders |
-| **Serving** | droplet, serving stack `/opt/cfdb` — `deploy/docker-compose.yml`, bound `127.0.0.1:5433` | the published subset the site reads | `src/publish_marts.py` only |
+| **Warehouse** (transform) | droplet, pipeline stack `/opt/cfdb-pipeline` — service **`warehouse`**, `PG_HOST=warehouse`, `PG_DB=cfdb`, container `cfdb-pipeline-warehouse-1`, **no published host port** | `raw`, `staging`, `marts`, `serving` — **dbt builds here** | Airflow → dbt; the `src/` loaders |
+| **Serving** | droplet, serving stack `/opt/cfdb` — `deploy/docker-compose.yml`, bound `127.0.0.1:5433`, container `cfdb-postgres-1` | the published subset the site reads | `src/publish_marts.py` only |
 | ~~Local Postgres~~ | ~~laptop~~ | **DROPPED 2026-09-05, R-296** | nobody |
 
 The distinction is the whole point. A question answered against serving sees only what has
@@ -45,11 +45,32 @@ been *published*; the same question against the warehouse sees what has been *bu
 answer. Neither errors. **"There is no warehouse to build against" was concluded on
 2026-09-05 from the serving instance — a true fact about the wrong object.**
 
-⚠️ **`docker-compose.yml` at the repo root is NOT a local dev database.** It defines the
-`postgres` service that `docker-compose.airflow.yml` depends on and connects to — i.e. it is
-the *warehouse's* definition, deployed to the droplet. Running it on a laptop stands up a
-second database with the same name on the same port, which is exactly how a dbt build
-succeeds against nothing anyone meant.
+⚠️ **PRODUCTION RUNS A COMPOSE FILE THAT IS NOT IN GIT. This is the current state, not a
+plan.** A051 measured the droplet on 2026-09-05:
+
+| | this repository says | the droplet actually runs |
+|---|---|---|
+| Postgres service name | `postgres` | **`warehouse`** |
+| `PG_HOST` | `postgres` | **`warehouse`** |
+| how it is composed | two files merged, `-f docker-compose.yml -f docker-compose.airflow.yml` | **one hand-merged file**, `/opt/cfdb-pipeline/docker-compose.yml`, 6,987 bytes |
+| warehouse host port | `5432:5432` in the root compose | **none — nothing is published** |
+
+That file was **hand-edited on 2026-09-05 at 07:35, has a `.bak` beside it, and carries six
+inline literal credentials.** So a deploy does not reproduce it, a `git diff` cannot show you
+what production is, and **reading the repo tells you the intent rather than the fact.**
+
+**Read the droplet for facts and the repo for intent, until this is reconciled.**
+Reconciliation is its own work and is deliberately not folded into the environment fix — the
+warehouse serves live pages, and rewriting the file it runs from is not a change to make in
+passing. Two independent confirmations that the warehouse publishes no port: the running
+file says so in its own comment, and `scripts/warehouse_tunnel.sh`'s loopback path (Path 1)
+never triggers, so it always falls through to resolving the container address.
+
+⚠️ **`docker-compose.yml` at the repo root is neither a local dev database nor production.**
+It is git's model of the warehouse — the `postgres` service `docker-compose.airflow.yml`
+depends on. Running it on a laptop stands up a second database with the same name on the same
+port, which is exactly how a dbt build succeeds against nothing anyone meant. Editing its port
+line does not change production, which does not run it.
 
 **Reaching the warehouse**
 
