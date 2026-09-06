@@ -2850,6 +2850,21 @@ models:
       - name: excitement_index
         description: >
           CFBD's excitement index for the game; null until it has been computed.
+      - name: lead_changes
+        description: >
+          How many times the win-probability leader changed during the game. The excitement
+          card's plain-language companion to excitement_index — "4 lead changes" is a
+          sentence a reader can check against their memory of the game; an index is not.
+          Derived from play-level win probability; null for games with no play data.
+      - name: largest_single_play_swing
+        description: >
+          The biggest change in home win probability produced by one play, in probability
+          points. Identifies the game's turning point. Null for games with no play data.
+      - name: home_win_probability_range
+        description: >
+          Highest minus lowest home win probability across the game, in probability points.
+          A game that never left 60-70% ran flat; one spanning 5-95% did not. Null for games
+          with no play data.
       - name: is_upset
         description: >
           Whether a RANKED side lost to a side ranked worse or unranked. AP poll only, at the
