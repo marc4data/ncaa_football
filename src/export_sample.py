@@ -354,25 +354,29 @@ def export(out_path: Path, conference: str, seasons,
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    from .load_raw_to_postgres import PG_HOST, PG_PORT, get_conn
+    from .load_raw_to_postgres import get_conn, pg_params
 
+    # Read once for the provenance line below; get_conn() resolves the same params.
+    warehouse = pg_params()
     connection = get_conn()
     cursor = connection.cursor()
 
     # WHICH DATABASE THIS CAME FROM, SAID OUT LOUD AND WRITTEN INTO THE WORKBOOK.
     #
-    # get_conn() falls back to localhost:5432 when PG_* is unset, and a stale local stack
-    # commonly listens there. A run against it produces a workbook that looks entirely
-    # normal — right sheet names, right structure, plausible row counts — and is describing
-    # a database from days ago. That happened: a serving export returned 18 tables including
-    # srv_schedule and srv_scoreboard, retired hours earlier, and the only visible symptom
-    # was a table count somebody happened to question.
+    # A run against the wrong warehouse produces a workbook that looks entirely normal —
+    # right sheet names, right structure, plausible row counts — and is describing a
+    # database from days ago. That happened while get_conn() still defaulted to
+    # localhost:5432: a serving export returned 18 tables including srv_schedule and
+    # srv_scoreboard, retired hours earlier, and the only visible symptom was a table count
+    # somebody happened to question. R-312 removed that fallback — pg_params() refuses
+    # rather than guesses — but a live tunnel can still point at the wrong warehouse, so
+    # this line stays.
     #
     # A workbook with no provenance about its source cannot be checked after the fact, so
     # the source goes on the Index sheet as well as the console.
     cursor.execute("select current_setting('server_version'), current_database()")
     server_version, database = cursor.fetchone()
-    source = f"{PG_HOST}:{PG_PORT}/{database}"
+    source = f"{warehouse['host']}:{warehouse['port']}/{database}"
     print(f"  source: {source}  (PostgreSQL {server_version.split()[0]})")
     cursor.execute("select count(*) from information_schema.tables where table_schema = %s",
                    (schema,))
