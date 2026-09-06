@@ -28,17 +28,18 @@
 # recreated, and the tunnel then opens SUCCESSFULLY against nothing, or against whatever now
 # holds the address. It does not error; it answers.
 #
-# TWO PATHS, PREFERRED IN ORDER, and the first one is the one that should win:
+# TWO PATHS, AND AS OF 2026-09-05 ONLY THE SECOND ONE FIRES:
 #
-#   1. 127.0.0.1:5432 ON THE DROPLET. docker-compose.yml now binds the warehouse to the
-#      droplet's loopback, mirroring what deploy/docker-compose.yml already does for the
-#      serving Postgres. A loopback publish does not move, so there is nothing to resolve.
-#      It takes effect at the next scripts/deploy_main.sh and not before.
-#   2. THE CONTAINER IP, RESOLVED NOW. What works today, and what keeps working if the
-#      pipeline stack on the droplet turns out to run a compose file that differs from the
-#      one in git — see the label filter below, which is where that doubt is recorded.
+#   1. 127.0.0.1:5432 ON THE DROPLET. Kept as a probe, but it does NOT trigger today and is
+#      not expected to: A051 measured the pipeline stack and the warehouse PUBLISHES NO HOST
+#      PORT AT ALL. The root docker-compose.yml's `5432:5432` is not what production runs
+#      (see the header of that file). This path becomes live only when the compose
+#      reconciliation lands together with `env/warehouse-loopback-bind`.
+#   2. THE CONTAINER IP, RESOLVED NOW. This is the working path, every time.
 #
-# Resolved at tunnel time either way, so neither can go stale in a .env.
+# Path 1 earns its keep as a MEASUREMENT rather than a shortcut: it failing is one of the two
+# independent confirmations that the warehouse publishes nothing, the other being the running
+# compose file's own comment. Leave it in.
 
 set -euo pipefail
 
@@ -56,15 +57,19 @@ LOCAL_PORT="${CFDB_WAREHOUSE_PORT:-${CFDB_REMOTE_PG_PORT:-15433}}"
 
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=20)
 
-# WHICH CONTAINER IS THE WAREHOUSE — ASKED, NOT ASSUMED.
+# WHICH CONTAINER IS THE WAREHOUSE — ASKED, NOT ASSUMED, AND NOW ANSWERED.
 #
-# Path 2 resolves by COMPOSE LABEL rather than by container name, because the NAME IS EXACTLY
-# WHAT IS IN DOUBT. The droplet reports `cfdb-pipeline-warehouse-1`, which implies a compose
-# service named `warehouse`; docker-compose.yml in this repo names it `postgres`, and
-# docker-compose.airflow.yml connects to it as `postgres` (PG_HOST: postgres). Either the
-# droplet runs a compose file that differs from the one in git, or the name was transcribed.
-# A label filter is correct under both readings, and it PRINTS WHAT IT FOUND — which is how
-# that question gets answered rather than guessed at again.
+# Path 2 resolves by COMPOSE LABEL rather than by container name. The name was in doubt when
+# this was written; A051 settled it, and the answer is the uncomfortable one:
+#
+#   the droplet runs a compose file THAT IS NOT IN GIT — one hand-merged
+#   /opt/cfdb-pipeline/docker-compose.yml naming the service `warehouse`, where this repo
+#   names it `postgres`. Container: cfdb-pipeline-warehouse-1.
+#
+# So the label filter is not belt-and-braces, it is the only thing here that is correct: a
+# lookup by service name would have to pick one of the two spellings and would be wrong on
+# the droplet. It also PRINTS WHAT IT FOUND on every run, which is how the divergence stays
+# visible instead of being rediscovered. See CLAUDE.md, "Environments".
 probe=$(ssh "${SSH_OPTS[@]}" "$CFDB_DROPLET_HOST" '
   # Path 1: is the warehouse already on the droplet loopback?
   if (exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null; then echo "LOOPBACK 127.0.0.1"; fi
@@ -87,9 +92,10 @@ else
       ssh \$CFDB_DROPLET_HOST 'cd /opt/cfdb-pipeline && docker compose ps'"
   NAME=$(echo "$line" | awk '{print $2}' | sed "s#^/##")
   ADDR=$(echo "$line" | awk '{print $4}')
-  echo "note: reached by container IP. That address is reassigned when the stack is"
-  echo "      recreated. Run scripts/deploy_main.sh to pick up the loopback bind in"
-  echo "      docker-compose.yml, after which this resolves to 127.0.0.1 and stops moving."
+  echo "note: reached by container IP — the expected path today. The warehouse publishes no"
+  echo "      host port, and this address is reassigned whenever the stack is recreated, so"
+  echo "      it is resolved fresh each time and never stored. A stable loopback end arrives"
+  echo "      with the compose reconciliation (env/warehouse-loopback-bind), not before."
 fi
 
 echo "warehouse : ${NAME} @ ${ADDR}:5432  (resolved just now, not stored)"
