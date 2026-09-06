@@ -96,7 +96,49 @@ select
     t.over_under                    as total_at_close,
     t.provider_key                  as total_at_close_provider,
     t.basis                         as total_at_close_basis,
-    t.snapshot_ts                   as total_at_close_ts
+    t.snapshot_ts                   as total_at_close_ts,
+
+    -- ============================================================================
+    -- "FAVOURITE" IS NOT ONE THING, AND NOTHING RECORDED WHICH ONE A ROW MEANT (R-393).
+    --
+    -- The Looking Back recap lists derive it two different ways without saying so. Two of
+    -- them rank on the SPREAD (points missed, points covered by); the third ranks on
+    -- market-implied win probability, which comes from the MONEYLINE. A single column called
+    -- `favorite` would silently mean one of two things depending on which list read it.
+    --
+    -- THEY DISAGREE, MEASURED: of 114 completed 2026 games carrying both, 2 disagree.
+    -- One is the -100000 sentinel (R-391 nulls it, so that one resolves itself). The other is
+    -- Nevada -1 vs Western Kentucky, where the moneyline had the AWAY side favoured — and
+    -- that game is currently #2 on the "favourites that covered" list. Under the moneyline
+    -- definition it is not on that list at all; it is an underdog winning by 35.
+    --
+    -- So both derivations are carried, with the prefix holding the provenance per
+    -- cfdb-metric-naming, and a flag where they part company. No column here is named bare
+    -- `favorite`: the page picks a definition and says which, and the disagreement is
+    -- countable rather than invisible.
+    --
+    -- Spread convention, verified rather than assumed: from the HOME perspective, negative =
+    -- home favoured (Missouri -55.5 vs Arkansas-Pine Bluff; home won by 40).
+    -- ============================================================================
+    case when coalesce(s.spread, l.spread) < 0 then 'home'
+         when coalesce(s.spread, l.spread) > 0 then 'away' end   as spread_favorite_side,
+
+    -- A MORE NEGATIVE MONEYLINE IS THE SHORTER PRICE. Null-safe on purpose: a book that posts
+    -- one side only must not make that side the favourite by default.
+    case when l.home_moneyline is null or l.away_moneyline is null then null
+         when l.home_moneyline < l.away_moneyline then 'home'
+         when l.away_moneyline < l.home_moneyline then 'away' end as moneyline_favorite_side,
+
+    -- Null when either derivation is unavailable — NOT false. "They agree" and "we cannot
+    -- tell" are different answers and collapsing them is how the disagreement got missed.
+    case when coalesce(s.spread, l.spread) is null
+              or coalesce(s.spread, l.spread) = 0
+              or l.home_moneyline is null or l.away_moneyline is null
+              or l.home_moneyline = l.away_moneyline then null
+         else (case when coalesce(s.spread, l.spread) < 0 then 'home' else 'away' end)
+              is distinct from
+              (case when l.home_moneyline < l.away_moneyline then 'home' else 'away' end)
+    end                                                          as favorite_definitions_disagree
 from latest l
 -- FULL OUTER throughout: a game can hold a total and no spread, or a closing line and no
 -- current one. A left join from any single side would silently drop the others, which is the

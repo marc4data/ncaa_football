@@ -77,6 +77,44 @@ resolved as (
         and a.player_id = w.athlete_id
         and a.team      = w.team
 
+),
+
+-- ============================================================================
+-- THE SOURCE LISTS THE SAME ATHLETE TWICE, AND THE LEADERBOARD UNDERNEATH SUMS (R-392).
+--
+-- CAUSE FOUND, not merely symptom removed. The duplication is in the CFBD payload itself:
+-- inside ONE game, ONE team, ONE category and ONE stat type, the same athlete id appears
+-- twice in `athletes[]`. Delaware's receiving/YDS array for game 401864424 holds 12 entries
+-- of which six ids appear twice; Merrimack's holds 13 with six repeats. It is not a re-run
+-- without a delete, not two ids for one player, and not our key: raw holds exactly one
+-- payload for that game, and that payload lists the game exactly once.
+--
+-- 502 groups across 2026, ~0.5% of rows, concentrated in `defensive` (294).
+--
+-- WHY IT MATTERS HERE RATHER THAN AT STAGING. Staging is the faithful unnesting of the
+-- payload and should keep the shape the source sent, duplicates included -- that is what
+-- makes it auditable. The MART is where grain is asserted, and this one's grain is
+-- game x team x category x type x athlete, which is exactly what repeats.
+--
+-- SAFE BECAUSE THE ROWS ARE IDENTICAL: same value, same raw string, same athlete id. This
+-- discards a copy, not a measurement. A top-N by max was already unaffected; the defensive
+-- leaderboard sums tackles, TFL and sacks, so it over-counted -- and UNEVENLY, which moves
+-- the ranking rather than shifting every row by the same amount.
+--
+-- assert_player_game_stats_are_one_row_per_athlete_stat fails if this stops holding.
+-- ============================================================================
+deduplicated as (
+
+    select * from (
+        select r.*,
+               row_number() over (
+                   partition by r.game_id, r.team, r.stat_category, r.stat_type, r.athlete_id
+                   order by r.stat_raw
+               ) as copy_number
+        from resolved r
+    ) numbered
+    where copy_number = 1
+
 )
 
 select
@@ -123,4 +161,4 @@ select
          then {{ safe_numeric(split_at('stat_raw', '/', 1)) }} end as stat_made,
     case when stat_raw like '%/%'
          then {{ safe_numeric(split_at('stat_raw', '/', 2)) }} end as stat_attempted
-from resolved
+from deduplicated
