@@ -200,7 +200,7 @@ def test_every_test_the_scores_dag_cannot_satisfy_is_tagged():
         f"{[o.split('.')[-1] for o in outside]} not" for name, inside, outside in found]
 
 
-def test_single_sided_tests_keep_their_coverage_in_the_scores_dag():
+def test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags():
     """The exclusion must stay narrow. A test reading only one side still holds when that side
     is stale — it was internally consistent when built — so tagging it would drop real
     coverage from the every-two-hours DAG to no purpose.
@@ -246,8 +246,95 @@ def test_single_sided_tests_keep_their_coverage_in_the_scores_dag():
         f"costs real coverage: {sorted(over_tagged)}")
 
 
-def test_the_scores_dag_excludes_the_tag_it_relies_on():
-    assert "--exclude tag:full_refresh_only" in _code("scores_refresh_dag.py")
+# --- the exclusion, on EVERY partial-rebuild DAG ------------------------------------------
+
+FULL_REFRESH_MARKER = "tag:production"
+# The COMMAND, not the words. databricks_sync_dag.py discusses "dbt test outcomes" in a
+# docstring and runs no dbt at all; matching prose would have enrolled it and made this
+# check unsatisfiable for a DAG it does not describe.
+DBT_TEST_COMMAND = "dbt test --project-dir"
+
+
+def _dbt_dags():
+    """(partial_rebuild, full_refresh) DAG filenames, DISCOVERED rather than listed.
+
+    R-338. The predecessor of this check asserted the exclusion on ONE filename:
+
+        assert "--exclude tag:full_refresh_only" in _code("scores_refresh_dag.py")
+
+    That is a guard scoped to one instance of a two-instance pattern, so it reported success
+    about the half it was pointed at. cfbd_lines_snapshot ran without the exclusion, failed
+    every four-hourly run from 2026-09-04 08:00, and published nothing for a day and a half
+    with the suite green throughout. A hardcoded pair would fail the same way at DAG three,
+    so the DAGs are discovered from what the code does.
+
+    THE DEFINITION, which is the load-bearing part: a DAG runs `dbt test`, and is a
+    PARTIAL-REBUILD DAG unless its dbt commands target `tag:production`. The weekly DAGs
+    select `+tag:production tag:warehouse` and so rebuild both sides of the tagged
+    assertions — they are where those tests have their authority and must NOT exclude them.
+    Anything else rebuilds a slice and then tests that slice, sweeping up assertions that
+    straddle the edge of its own selector.
+    """
+    partial, full = [], []
+    for path in sorted(DAGS.glob("*_dag.py")):
+        code = _code(path.name)
+        if DBT_TEST_COMMAND not in code:
+            continue
+        (full if FULL_REFRESH_MARKER in code else partial).append(path.name)
+    return partial, full
+
+
+def test_every_partial_rebuild_dag_excludes_the_full_refresh_tags():
+    """A partial-rebuild DAG must not assert a full-refresh invariant.
+
+    The rule and its reasoning live in src/dbt_selectors.py; this is the enforcement.
+    """
+    partial, full = _dbt_dags()
+
+    # AN EMPTY SCAN IS THE FAILURE THIS FILE EXISTS TO AVOID REPEATING. A discovery rule that
+    # matches nothing passes silently and proves nothing — the same shape as the `views/` glob
+    # that left ci/check_page_queries.py green while scanning no page at all.
+    assert len(partial) >= 2, (
+        f"discovery found {len(partial)} partial-rebuild DAG(s) — the rule is wrong, not the "
+        f"DAGs. Saw dbt-test DAGs: partial={partial} full={full}")
+    assert full, f"no full-refresh DAG found; the tagged tests would run nowhere. {full}"
+
+    # THE CONSTANT, NOT THE LITERAL. Hoisting the string to src/dbt_selectors.py is the
+    # point of R-337, so the literal no longer appears in any DAG and grepping for it would
+    # fail every DAG that had correctly adopted the fix — which is exactly what the first
+    # draft of this check did.
+    missing = [name for name in partial
+               if "PARTIAL_REBUILD_TEST_EXCLUDE" not in _code(name)]
+    assert not missing, (
+        f"these DAGs run `dbt test` over a narrow selector without excluding "
+        f"tag:full_refresh_only, so they will assert invariants only a full refresh can "
+        f"satisfy: {missing}")
+
+
+def test_the_full_refresh_dags_do_not_exclude_the_tags_they_are_the_authority_for():
+    """The other direction, and the one that makes the exclusion safe rather than a mute.
+
+    Excluding these tests everywhere would convert a loud failure into silence. They are
+    suppressed on the frequent jobs precisely BECAUSE the weekly jobs run them against a
+    graph where both sides are fresh.
+    """
+    _, full = _dbt_dags()
+    wrongly = [name for name in full
+               if "PARTIAL_REBUILD_TEST_EXCLUDE" in _code(name)
+               or "--exclude tag:full_refresh_only" in _code(name)]
+    assert not wrongly, (
+        f"these rebuild +tag:production and are where the tagged tests have authority, so "
+        f"excluding them there means nothing runs them at all: {wrongly}")
+
+
+def test_the_exclusion_is_defined_once_and_imported():
+    """Two copies in two files is how the two DAGs diverged (R-337)."""
+    partial, _ = _dbt_dags()
+    literal = 'exclude tag:full_refresh_only tag:slow_sweep"'
+    inline = [name for name in partial if literal in _code(name)]
+    assert not inline, (
+        f"these hardcode the exclusion instead of importing PARTIAL_REBUILD_TEST_EXCLUDE "
+        f"from src.dbt_selectors, which is what let the two copies drift: {inline}")
 
 
 # --- one deploy path, one meaning ---------------------------------------------------------
@@ -427,14 +514,20 @@ def test_a_slow_sweep_is_excluded_for_cost_and_says_so():
     data. slow_sweep is about COST — a test that would be perfectly valid every two hours and
     simply is not worth minutes there.
 
-    Collapsing them would make test_single_sided_tests_keep_their_coverage_in_the_scores_dag
+    Collapsing them would make test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags
     unenforceable, because a tag that means two things cannot be checked for either.
     """
-    src = _code("scores_refresh_dag.py")
-    assert "tag:slow_sweep" in src, (
-        "the two-hourly DAG must exclude the slow sweeps, or it stops being cheap")
-    assert "tag:full_refresh_only" in src, (
+    # R-337 MOVED THESE STRINGS. The exclusion is defined once in src/dbt_selectors.py and
+    # imported by every partial-rebuild DAG, so the two tags no longer appear in any DAG file
+    # — asserting on the DAG would now fail precisely because the fix was applied. The
+    # property is unchanged; only its address is.
+    shared = (Path(__file__).resolve().parents[1] / "src" / "dbt_selectors.py").read_text()
+    assert "tag:slow_sweep" in shared, (
+        "the frequent DAGs must exclude the slow sweeps, or they stop being cheap")
+    assert "tag:full_refresh_only" in shared, (
         "excluding one reason must not drop the other")
+    # And every partial-rebuild DAG must actually apply it — enforced by
+    # test_every_partial_rebuild_dag_excludes_the_full_refresh_tags, which discovers them.
 
     # And nothing may wear both: that would be a claim that it is simultaneously
     # unsatisfiable here and merely expensive here.

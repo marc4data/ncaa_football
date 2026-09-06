@@ -42,6 +42,7 @@ from airflow.providers.standard.operators.python import (
 from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
+from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
 from src.lines_cadence import load_config, should_snapshot
 from src.load_raw_to_postgres import load_endpoint
 from src.publish_marts import publish_all
@@ -219,10 +220,21 @@ with DAG(
         # rerun is cheap and idempotent — but the next scheduled run rebuilds them anyway.
         retries=1,
     )
+    # R-337: THE EXCLUSION THIS DAG SPENT A DAY AND A HALF WITHOUT.
+    #
+    # This is a partial-rebuild job, so it must not assert full-refresh invariants — see
+    # src/dbt_selectors.py for the rule. `stg_games` is in DISTRIBUTION_SELECTOR and
+    # `mart_team_season_record` is in neither selector, so before this flag every run
+    # advanced one side of assert_games_played_reconciles_to_schedule and never the other.
+    # From 2026-09-04 08:00 the test failed on every run, publish_distributions never
+    # executed, and the reported gap grew from 108 team-games to 216 inside a day.
+    #
+    # The four tests this suppresses HERE keep full authority on the weekly DAGs, which
+    # rebuild the whole production set and so refresh both sides of every comparison.
     dbt_distribution_test = BashOperator(
         task_id="dbt_test_distributions",
         bash_command=(f"dbt test --project-dir {DBT_PROJECT_DIR} "
-                      f"{DISTRIBUTION_SELECTOR}"),
+                      f"{DISTRIBUTION_SELECTOR} {PARTIAL_REBUILD_TEST_EXCLUDE}"),
         retries=1,
     )
     # HOT ONLY, for the reason the scores DAG documents at length: the heavy player tables

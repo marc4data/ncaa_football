@@ -47,6 +47,7 @@ from airflow.providers.standard.operators.python import (
 from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
+from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
 from src.lines_cadence import load_config
 from src.load_raw_to_postgres import load_endpoint
 from src.publish_marts import publish_all
@@ -123,19 +124,12 @@ SCORES_SELECTOR = (
 # prediction assertions read a single unchanged source. Tagging those would drop real coverage
 # from the every-two-hours DAG for nothing. tests/test_dag_structure.py enforces both
 # directions, so the seventh instance fails in CI rather than at 02:00 on a game day.
-# TWO TAGS, TWO REASONS, AND THEY ARE NOT INTERCHANGEABLE.
-#
-#   full_refresh_only  this DAG CANNOT satisfy the test — it straddles the refresh boundary
-#                      and would report a gap between two fetch times as a failure.
-#   slow_sweep         this DAG CAN satisfy it, but the test costs minutes and re-checks a
-#                      property that only changes when a model changes. Excluded to keep the
-#                      two-hourly job cheap, which is the whole reason it can be two-hourly.
-#
-# Kept apart so the first tag's meaning stays enforceable:
-# test_single_sided_tests_keep_their_coverage_in_the_scores_dag asserts nothing wears it
-# without straddling the boundary, and that check is only worth having while the tag means
-# one thing.
-TEST_EXCLUDE = "--exclude tag:full_refresh_only tag:slow_sweep"
+# THE TWO TAGS AND WHY THEY ARE NOT INTERCHANGEABLE NOW LIVE IN src/dbt_selectors.py,
+# imported above as PARTIAL_REBUILD_TEST_EXCLUDE and used directly in the dbt test command
+# below. The literal used to be defined here and only here, and cfbd_lines_snapshot — the same
+# shape of job — never got it, so it failed every four-hourly run from 2026-09-04 08:00 and
+# published nothing for a day and a half (R-337). No local alias: one name, so the guard that
+# checks for it cannot be fooled by a rename.
 
 default_args = {
     "owner": "cfdb",
@@ -218,7 +212,7 @@ with DAG(
     dbt_test = BashOperator(
         task_id="dbt_test",
         bash_command=(f"dbt test --project-dir {DBT_PROJECT_DIR} "
-                      f"{SCORES_SELECTOR} {TEST_EXCLUDE}"),
+                      f"{SCORES_SELECTOR} {PARTIAL_REBUILD_TEST_EXCLUDE}"),
     )
     # Serving only. The legacy marts are on the weekly cadence and this DAG does not touch
     # what they are built from.
