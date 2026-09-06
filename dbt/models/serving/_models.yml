@@ -3508,3 +3508,184 @@ models:
           domain, which is the closest honest answer and not the right one — mart_as_of has no
           `drives` endpoint row. The fix is one line in mart_as_of, outside this prompt's files.
         data_tests: [not_null]
+  - name: srv_week_metric_distribution
+    description: >
+      ONE ROW, ONE PICTURE — everything a distribution chart draws, flattened so a page
+      reads a single relation in a single pass (G-2). One row per (season, season_type,
+      week, span, metric, as_of_date).
+      
+      Precomputed rather than derived at render time for two reasons. Computing the
+      percentiles and box geometry in the app means pulling every game row into the page to
+      throw it away, on every rerun, for a picture 120 pixels wide. And it is the only way
+      the brief is expressible at all: "re-calc each day until kick-off then it's locked"
+      asks for a value computed AS OF A DAY, where a number computed at render time is
+      computed NOW. That is a snapshot, and a snapshot is a table.
+      
+      ⚠️ THE LOCK RULE IS PER GAME, NOT PER WEEK. Kickoff is per game and a week's games
+      kick off across three or four days, so a game contributes its CLOSING number once it
+      has started and its LIVE number before that. A mid-slate row is therefore a MIXTURE —
+      see `games_locked`, `games_live` and `is_locked`.
+    columns:
+      - name: season
+        description: "{{ doc('season') }}"
+      - name: season_type
+        description: "{{ doc('season_type') }}"
+      - name: week
+        description: "{{ doc('week') }}"
+      - name: span
+        description: "{{ doc('span') }}"
+      - name: metric
+        description: "{{ doc('metric') }}"
+      - name: as_of_date
+        description: "{{ doc('as_of_date') }}"
+      - name: games_in_week
+        description: >
+          Games in scope for this row's span, whether or not they carried a value. The
+          denominator.
+      - name: n
+        description: >
+          Games that actually carried a value. ⚠️ Not optional context: a temperature
+          distribution over the 9 games of a week that had weather looks identical to one
+          over 124, and the median it reports is a different claim entirely.
+      - name: coverage_pct
+        description: >
+          `n` as a percentage of `games_in_week`, to one decimal. Null when `games_in_week`
+          is 0.
+      - name: games_locked
+        description: >
+          Games in scope that have already kicked off, contributing their CLOSING number.
+      - name: games_live
+        description: >
+          Games in scope that have not yet kicked off, contributing their LIVE number. ⚠️ A
+          mid-slate row is a MIXTURE of locked and live, deliberately — a week's games kick
+          off across three or four days.
+      - name: is_locked
+        description: >
+          True when `games_live` is 0: every game in scope has kicked off and this row will
+          never change again. ⚠️ `is_locked`, not `is_final` — “Final” already means
+          `is_completed` on this site, and two meanings on one screen is a defect waiting to
+          be read.
+      - name: excluded_indoor
+        description: >
+          Games dropped from a temperature distribution for being played indoors. 0 for
+          every other metric.
+      - name: mean
+        description: >
+          Arithmetic mean of the values in scope.
+      - name: stddev
+        description: >
+          Sample standard deviation of the values in scope.
+      - name: min_value
+        description: >
+          Smallest value in scope. The data's floor, not the histogram's — see `bin_min`.
+      - name: max_value
+        description: >
+          Largest value in scope. The data's ceiling, not the histogram's — see `bin_max`.
+      - name: p02
+        description: >
+          2nd percentile of the values in scope, continuously interpolated.
+      - name: p05
+        description: >
+          5th percentile of the values in scope, continuously interpolated.
+      - name: p25
+        description: >
+          25th percentile of the values in scope, continuously interpolated. The box's lower
+          edge.
+      - name: p50
+        description: >
+          50th percentile of the values in scope, continuously interpolated. The median —
+          the box's line.
+      - name: p75
+        description: >
+          75th percentile of the values in scope, continuously interpolated. The box's upper
+          edge.
+      - name: p95
+        description: >
+          95th percentile of the values in scope, continuously interpolated.
+      - name: p98
+        description: >
+          98th percentile of the values in scope, continuously interpolated.
+      - name: iqr
+        description: >
+          Interquartile range, `p75 - p25`. The height of the box.
+      - name: whisker_lo
+        description: >
+          The LOWEST observation still within 1.5×IQR of the box. ⚠️ An actual data point,
+          NOT `p25 - 1.5×IQR` — matplotlib's convention. Computing the bound instead draws a
+          whisker past the data, which looks like a bug and is one.
+      - name: whisker_hi
+        description: >
+          The HIGHEST observation still within 1.5×IQR of the box. An actual data point, not
+          the computed bound.
+      - name: outlier_count
+        description: >
+          Values falling beyond the whiskers. 0 rather than null when there are none.
+      - name: bin_min
+        description: "{{ doc('bin_min') }}"
+      - name: bin_max
+        description: "{{ doc('bin_max') }}"
+      - name: bin_incr
+        description: "{{ doc('bin_incr') }}"
+      - name: bin_count
+        description: "{{ doc('bin_count') }}"
+      - name: below_min_count
+        description: >
+          Values below `bin_min`. Counted rather than clipped, so the histogram can say what
+          it left off the edge.
+      - name: above_max_count
+        description: >
+          Values above `bin_max`. Counted rather than clipped.
+      - name: bin_counts
+        description: >
+          The per-bin game counts as a comma-delimited string, ORDERED BY bin_index. ⚠️ A
+          string rather than an array because array aggregates differ between Postgres and
+          Databricks and this project has one portability layer, not two. ⚠️ The order IS
+          the histogram — parse in order; a shape drawn from shuffled counts is wrong in a
+          way that looks plausible.
+      - name: as_of_ts
+        description: "{{ doc('as_of_ts') }}"
+  - name: srv_week_metric_distribution_bin
+    description: >
+      The long form of the histogram: one row per bin, for anything that wants rows rather
+      than a picture — a pivot table, the Excel export, a test that checks exhaustiveness
+      without parsing a string.
+      
+      Its own serving view rather than left in marts because the export reads the serving
+      layer only, and a sheet that reached into marts would bypass the boundary every other
+      sheet respects. The wide form is `srv_week_metric_distribution`, whose `bin_counts`
+      string carries the same numbers.
+    columns:
+      - name: season
+        description: "{{ doc('season') }}"
+      - name: season_type
+        description: "{{ doc('season_type') }}"
+      - name: week
+        description: "{{ doc('week') }}"
+      - name: span
+        description: "{{ doc('span') }}"
+      - name: metric
+        description: "{{ doc('metric') }}"
+      - name: as_of_date
+        description: "{{ doc('as_of_date') }}"
+      - name: bin_index
+        description: >
+          1-based position of this bin, ascending from `bin_min`.
+      - name: bin_lower
+        description: >
+          Lower edge of this bin: `bin_min + (bin_index - 1) × bin_incr`.
+      - name: bin_upper
+        description: >
+          Upper edge of this bin: `bin_min + bin_index × bin_incr`.
+      - name: games
+        description: >
+          Number of games whose value fell in this bin.
+      - name: bin_min
+        description: "{{ doc('bin_min') }}"
+      - name: bin_max
+        description: "{{ doc('bin_max') }}"
+      - name: bin_incr
+        description: "{{ doc('bin_incr') }}"
+      - name: bin_count
+        description: "{{ doc('bin_count') }}"
+      - name: as_of_ts
+        description: "{{ doc('as_of_ts') }}"
