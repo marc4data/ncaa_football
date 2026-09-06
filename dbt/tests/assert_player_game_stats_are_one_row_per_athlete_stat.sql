@@ -9,7 +9,7 @@
 -- deduplicates it. This fails if that dedupe is removed, or if the source starts repeating
 -- an athlete with DIFFERENT values, which would be a different and worse problem -- a real
 -- disagreement rather than a copy, and one this model must not silently pick a winner from.
-select game_id, team, stat_category, stat_type, athlete_id, count(*) as rows_found
+select game_id, team, stat_category, stat_type, player_id, count(*) as rows_found
 from {{ ref('fct_player_game_stat') }}
 group by 1, 2, 3, 4, 5
 having count(*) > 1
