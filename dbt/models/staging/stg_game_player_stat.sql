@@ -83,6 +83,52 @@ athlete_rows as (
     from type_rows
 
 )
+-- ==========================================================================================
+-- THE SOURCE REPEATS ENTRIES INSIDE ONE PAYLOAD, AND SOMETIMES DISAGREES WITH ITSELF (R-398).
+--
+-- This is what took the publish path down from 2026-09-04 to 09-07. ONE game did it:
+-- 401864424, Delaware vs Merrimack, played 09-03. Its CFBD payload lists the game once and
+-- carries two `teams[]` entries, correctly -- but INSIDE one team's array the same entry
+-- appears twice. Merrimack: 61 stats, 29 repeated categories. Delaware: 70 stats, 35.
+--
+-- assert_staging_models_are_unique_on_their_grain is severity='error' and it sits in both
+-- cfbd_scores_refresh.dbt_test and cfbd_lines_snapshot.dbt_test_distributions, which gate
+-- publish_to_serving and publish_distributions. One malformed payload therefore froze the
+-- whole site for three days across two game days.
+--
+-- ⚠️ MOST OF THE REPEATS ARE COPIES. SOME ARE NOT, AND THAT DISTINCTION IS THE WHOLE CARE
+-- TAKEN HERE. Merrimack's firstDowns is reported as BOTH 7 AND 6 in the same array. Across
+-- the two affected models: 488 of 502 player keys and 34 of 64 team keys are byte-identical
+-- copies; the remaining 44 are the source giving two different answers.
+--
+-- Nothing in the payload adjudicates them -- no timestamp, no ordinal, no "final" marker --
+-- and the score does not either. So this does NOT pretend to resolve them. It picks
+-- deterministically so the grain contract holds and the pipeline runs, and it RECORDS that
+-- the source disagreed, in a column, on the row. `source_value_count` > 1 is the audit
+-- trail: assert_source_disagreements_stay_visible counts them, so a silent growth from 44
+-- to 4,400 is a failing test rather than a quiet re-ranking of a leaderboard.
+--
+-- WHY max() AND NOT "the last one". Array position would be the better rule -- an appended
+-- array reads as correction-wins -- but ordinality is `with ordinality` in Postgres and
+-- `posexplode` in Spark, and this model must build on both. Inventing that macro during an
+-- outage is a bigger change than the outage warrants. max() is arbitrary and stable; it is
+-- labelled arbitrary rather than dressed up as a judgement.
+-- ==========================================================================================
+,
+
+deduplicated as (
+
+    select
+        game_id, team, conference, home_away, points, stat_category, stat_type,
+        {{ json_get_string('athlete', 'id') }}   as athlete_id,
+        max({{ json_get_string('athlete', 'name') }}) as athlete_name,
+        max({{ json_get_string('athlete', 'stat') }}) as stat_raw,
+        count(distinct {{ json_get_string('athlete', 'stat') }}) as source_value_count
+    from athlete_rows
+    group by game_id, team, conference, home_away, points, stat_category, stat_type,
+             {{ json_get_string('athlete', 'id') }}
+
+)
 
 select
     game_id,
@@ -92,7 +138,8 @@ select
     points,
     stat_category,
     stat_type,
-    {{ json_get_string('athlete', 'id') }}   as athlete_id,
-    {{ json_get_string('athlete', 'name') }} as athlete_name,
-    {{ json_get_string('athlete', 'stat') }} as stat_raw
-from athlete_rows
+    athlete_id,
+    athlete_name,
+    stat_raw,
+    source_value_count
+from deduplicated
