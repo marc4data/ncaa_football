@@ -2190,6 +2190,42 @@ INSERT INTO raw.raw_drives (filename, content, status_code, params, fetched_at, 
    "startDefenseScore": 0,
    "endOffenseScore": 7,
    "endDefenseScore": 0
+  },
+  {
+   "id": "90012",
+   "gameId": 9001,
+   "offense": "Beta Tech",
+   "offenseConference": "Test Conference",
+   "defense": "Alpha State",
+   "defenseConference": "Test Conference",
+   "driveNumber": 2,
+   "scoring": false,
+   "startPeriod": 1,
+   "startYardline": 80,
+   "startYardsToGoal": 80,
+   "startTime": {
+    "minutes": 9,
+    "seconds": 0
+   },
+   "endPeriod": 1,
+   "endYardline": 88,
+   "endYardsToGoal": 88,
+   "endTime": {
+    "minutes": 7,
+    "seconds": 30
+   },
+   "elapsed": {
+    "minutes": 1,
+    "seconds": 30
+   },
+   "plays": 3,
+   "yards": -8,
+   "driveResult": "PUNT",
+   "isHomeOffense": false,
+   "startOffenseScore": 0,
+   "startDefenseScore": 7,
+   "endOffenseScore": 0,
+   "endDefenseScore": 7
   }
  ]
 }', 200, '{"year": "2024", "seasonType": "regular"}',
