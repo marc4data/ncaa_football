@@ -3065,6 +3065,22 @@ INSERT INTO raw.raw_manifest
    '2026-01-01T00:00:53Z', '2026-01-01T00:00:53Z')
 ON CONFLICT DO NOTHING;
 
+-- THE 'drives' MANIFEST ROW IS LOAD-BEARING, NOT DECORATION.
+--
+-- mart_as_of maps endpoints to domains and takes max(fetched_at) per domain; srv_drive then
+-- CROSS JOINs `where domain = 'drive'`. With no drives row here that subquery returns nothing,
+-- the cross join yields nothing, and srv_drive builds EMPTY while every model reports success —
+-- caught only by assert_srv_drive_keeps_every_drive comparing it against fct_drive.
+--
+-- B046 predicted exactly this in that test's own comment ("if the domain row ever disappears,
+-- this returns zero rows and the count goes to nothing"); R-353 made it live by pointing
+-- srv_drive at 'drive' instead of borrowing 'game'. The endpoint label is the FLATTENED form —
+-- src/ingest.fetch turns '/drives' into 'drives' — and the API-path spelling matches nothing
+-- and fails silently, which is the trap that made stg_api_usage_endpoint return zero rows.
+INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
+('drives', '2026-01-01T00-00-59-001Z.json', '{"year": "2024", "seasonType": "regular"}', 200, 2, '2026-01-01T00:00:59Z', now())
+ON CONFLICT DO NOTHING;
+
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('teams', '2026-01-01T00-00-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:00Z', now()),
 ('teams', '2026-01-01T00-00-00-002Z.json', '{"year": "1900"}', 200, 2, '2026-01-01T00:00:00Z', now()),
