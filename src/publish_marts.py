@@ -137,6 +137,19 @@ DEFAULT_SERVING = [
     "srv_line_movement",
     "srv_system_health",
     "srv_team_rating",
+    # Drive grain, for the Matchup page's Drives chart (R-369). In the HOT set, and BEFORE
+    # srv_data_dictionary so the catalogue still describes a layer that contains it.
+    #
+    # Measured on the warehouse rather than guessed: 40 MB over 78,536 rows — 8.5% of the hot
+    # set and smaller than four tables already in it (srv_game_team 112, srv_game 72,
+    # srv_team_game_log 69, srv_team_stats 53). Nowhere near the heavy three, which are
+    # 138-306 MB each and split out because the wire is the pipeline's failure point.
+    #
+    # Hot rather than weekly on cadence too: drives ACCUMULATE DURING a game, so the
+    # two-hourly refresh is the point rather than an overhead — the same argument that puts
+    # srv_game and srv_game_team here, and the opposite of the player tables, which change
+    # when games are played rather than while they are.
+    "srv_drive",
     "srv_data_dictionary",
     "srv_game_weather",
     # The weekly distributions. Small — one row per week per metric per day, and ten bin rows
