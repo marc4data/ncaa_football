@@ -1324,8 +1324,9 @@ models:
         description: CFBD athlete id, shared with the game log and the drill-down.
       - name: player_slug
         description: >
-          URL-safe identifier, name AND player id. The id is load-bearing: 1,343 name-and-
-          season combinations map to more than one athlete, including nine Jayden Williamses.
+          URL-safe identifier, name AND player id. The id is load-bearing: 1,343
+          name-and-season combinations map to more than one athlete, including nine Jayden
+          Williamses.
       - name: player_name
         description: Player name as the stats feed publishes it.
       - name: position
@@ -3115,8 +3116,9 @@ models:
       - name: spread_move_from_open
         description: >
           How far the spread has moved since it opened, in points. NAMED FOR WHAT
-          srv_line_movement ALREADY CALLS IT — coining "change" here would be the Total-
-          versus-O/U mistake committed twice. SIGN: spread is home-perspective and negative
+          srv_line_movement ALREADY CALLS IT — coining "change" here would be the
+          Total-versus-O/U mistake committed twice. SIGN: spread is home-perspective and
+          negative
           favours the home team, so -1.5 means the market moved TOWARD the home side, the
           same reading as the spread and the predicted margin beside it. NULL, not zero,
           when it has not moved, and null again when no opening number was recorded — those
