@@ -3382,6 +3382,278 @@ models:
       - name: away_team_record_after_display
         description: As home_team_record_after_display, for the away side.
 
+  # ==========================================================================================
+  # APPENDED BY PROMPT B046 (session B). Session A is editing the srv_game_team block above;
+  # this is at the end of the file so the two edits cannot touch the same lines.
+  # ==========================================================================================
+  - name: srv_drive
+    description: >
+      One row per drive — what the Matchup post-game Drives chart reads, and nothing else.
+      Named for its grain rather than for the tab: the Defense split is these same rows
+      re-sourced by is_home_offense, not a second model.
+
+      Every label and filter the chart needs is a column here (G-2, G-3): one relation, a WHERE
+      on game_id, no joins and no arithmetic in the app. That includes the mm:ss duration, the
+      band a drive belongs to, and the endzone team's logo, mascot and contrast-safe colour.
+
+      The scope boundary rides on every row as drives_min_season / drives_max_season, so a game
+      outside the window — which returns no rows at all — can still be explained by a single
+      `select drives_min_season from srv_drive limit 1`. An absence with a reason is a state;
+      an empty chart is a defect.
+    columns:
+      - name: drive_sk
+        description: Surrogate key over drive_id — the grain.
+        data_tests: [unique, not_null]
+      - name: game_id
+        description: The game. The only column the page filters on.
+        data_tests: [not_null]
+      - name: drive_number
+        description: Possession order within the game — the y-axis.
+        data_tests: [not_null]
+      - name: band
+        description: >
+          Which half of the chart this drive is drawn in. Away above home, per the layout, and
+          resolved here so the page orders on a column instead of re-deriving the convention.
+        data_tests:
+          - accepted_values:
+              values: ['home', 'away']
+      - name: band_order
+        description: 1 for away, 2 for home. The sort key behind `band`, so the page never sorts on a word.
+      - name: offense_team_display
+        description: >
+          The team whose offense this band is — the rail label. Falls back to the name on the
+          fact where dim_team has no row, so a non-FBS side is still named rather than blank.
+        data_tests: [not_null]
+      - name: opponent_team_display
+        description: The team being driven at. Its endzone is at x=100 in this band.
+        data_tests: [not_null]
+      - name: opponent_color_on_light
+        description: >
+          The endzone colour on a light surface, contrast-checked upstream by dim_team and
+          coalesced to neutral grey where the team has no row at all. Never null — an endzone
+          in fallback grey is correct, one in an unreadable team colour is not, and one in NULL
+          is a crash.
+        data_tests: [not_null]
+      - name: opponent_color_source
+        description: >
+          Which rung of dim_team's contrast ladder produced the colour — `primary`, `alternate`,
+          `adjusted` or `fallback`. It is how the page knows to say the colour is not the team's
+          own.
+        data_tests: [not_null]
+      - name: start_yards_from_own_goal
+        description: >
+          Bar start. 0 = the offense's own goal line, 100 = the opponent's.
+
+          ⚠️ THIS IS THE ONLY COORDINATE BOTH BANDS CAN SHARE. Draw the bar from this and
+          `end_yards_from_own_goal`, never from `start_yardline`. `yardline` is absolute in the
+          HOME team's frame, so on a two-band chart the away band mirrors and reads as a
+          rendering fault — measured on the built model, 39,143 of 78,536 drives have
+          `start_yardline <> start_yards_from_own_goal`.
+
+          The identity `= 100 - start_yards_to_goal` holds with ZERO exceptions across all
+          78,536 rows, and the same for the end pair. The 578 rows where the two frames agree
+          are all at yardline 50, where the formulas coincide.
+      - name: end_yards_from_own_goal
+        description: >
+          Bar end, same frame. May be less than the start, and is never clamped.
+
+          ⚠️ NOT `start_yards_from_own_goal + yards`. See `yards`: the two measure different
+          things and disagree on 15.2% of drives.
+
+      - name: start_yardline
+        description: >
+          CFBD's absolute yardline, in the HOME team's frame. ⚠️ Carried as evidence, NOT for
+          rendering — use `start_yards_from_own_goal`. Keying a bar off this mirrors the away
+          band, on 39,143 of 78,536 drives.
+
+      - name: yards
+        description: >
+          Net yards the OFFENSE gained. ⚠️ NOT THE LENGTH OF THE BAR and not the coordinate
+          delta. Measured on the built model, the two disagree on 11,950 of 78,418 drives
+          (15.2%) — 34% of touchdowns, 21% of interceptions. The end coordinate is where a
+          RETURN finished; `yards` is what the offense did. Both are correct and they answer
+          different questions, so a bar drawn from `yards` will not land on the end coordinate
+          the same row carries.
+
+      - name: is_negative_drive
+        description: >
+          The drive ended behind where it started, by the COORDINATE delta — 8,786 of 78,536 on
+          the built model. Deliberately not `yards < 0`, which is 7,946; the 840-row gap between
+          them is `yards`-versus-coordinates again. Never clamped and never abs()'d: a
+          sack-and-punt drawn as a forward bar is a lie about the game.
+      - name: is_end_on_field
+        description: False where CFBD's end coordinate falls off the field. Render the row, suppress the bar.
+      - name: start_clock_display
+        description: '"Q2 07:14" — the game clock at the snap. One of two start-time forms; Marc picks one in pass 2.'
+      - name: elapsed_from_kickoff_seconds
+        description: >
+          Seconds from kickoff to the snap — the other start-time form. Null outside regulation
+          rather than extrapolated: overtime possessions are not 900 seconds of anything.
+          Measured: null on all 326 overtime drives, plus 24 more where CFBD reports period 0.
+
+          ⚠️ ONLY THIS FORM GOES NULL. `start_clock_display` carries the literal `OT` / `2OT`
+          and `elapsed_display` carries a real duration, so a null-check written against those
+          never fires. Order overtime rows by `drive_number`.
+      - name: elapsed_display
+        description: Duration as mm:ss, pre-formatted.
+      - name: drive_result_key
+        description: Normalised result — what the icon branches on. Never null where drive_result is not.
+      - name: scoring_side
+        description: >
+          `offense`, `defense`, or null.
+
+          ⚠️ READ THIS COLUMN, NOT THE RESULT TEXT. A `TD` suffix on a turnover or a kick means
+          the DEFENSE scored. Measured on the built model: 908 drives across ten `drive_result`
+          values — `INT TD` (430), `FUMBLE RETURN TD` (195), `PUNT TD` (107), `PUNT RETURN TD`
+          (86), `FUMBLE TD` (61), `MISSED FG TD` (14), `DOWNS TD` (7), `END OF HALF TD` (5),
+          `FG TD` (2), `END OF GAME TD` (1). Keying an offensive-touchdown icon off the
+          substring `TD` puts every one of them on the wrong side of the game.
+      - name: drives_min_season
+        description: >
+          Earliest season the warehouse holds drives for. Identical on every row by
+          construction, so a page with no rows for its game can still read it with a
+          `limit 1` and say "cfdb holds drives from 2024" instead of rendering nothing.
+        data_tests: [not_null]
+      - name: drives_max_season
+        description: Latest season the warehouse holds drives for. Same constant-column reasoning.
+        data_tests: [not_null]
+      - name: as_of_ts
+        description: "{{ doc('as_of_ts') }}"
+        data_tests: [not_null]
+      - name: drive_id
+        description: >
+          CFBD's identifier for the drive. Held as TEXT, not numeric — an eighteen-digit id
+          CFBD never promised would stay numeric. Joins to `stg_play.drive_id`.
+      - name: season
+        description: "{{ doc('season') }}"
+      - name: week
+        description: "{{ doc('week') }}"
+      - name: season_type
+        description: "{{ doc('season_type') }}"
+      - name: game_date
+        description: >
+          Calendar date of the game this drive belongs to.
+      - name: is_completed
+        description: >
+          True when the game has finished. ⚠️ This is what the Excel export labels “Final” —
+          a different thing from the distribution band's `is_locked`.
+      - name: is_home_offense
+        description: >
+          True when the home team had the ball. ⚠️ The ONLY link to home and away on this
+          payload — the source names offense and defense by school and never by side. `band`
+          and `band_order` derive from it.
+      - name: offense
+        description: >
+          School name of the team with the ball, as the source spells it.
+      - name: offense_team_id
+        description: >
+          `dim_team` id for the offense, resolved within the season. Null for a non-FBS team
+          — the join is LEFT by design so their drives are kept rather than dropped.
+      - name: offense_conference
+        description: >
+          Conference of the offense in that season.
+      - name: offense_team_slug
+        description: >
+          URL-safe identifier for the offense, for deep links.
+      - name: offense_mascot
+        description: >
+          Mascot of the offense. Identity chrome, not data encoding.
+      - name: offense_logo_url
+        description: >
+          Logo for the offense. May be null — render the degraded state, never a crash.
+      - name: opponent_team_id
+        description: >
+          `dim_team` id for the team opposing the offense — the same TEAM as
+          `defense_team_id`, but not always the same VALUE, and the provenance is the other
+          way round from what it looks like. This one comes from the GAME SPINE: fct_drive
+          sets it as `case when is_home_offense then away_team_id else home_team_id end` off
+          fct_game, so it is never null. ⚠️ PREFER IT over `defense_team_id`, which is
+          resolved by school-name lookup into `dim_team` and is therefore NULL on 379 drives
+          (0.5%) whose opponent is non-FBS. The `opponent_*` chrome columns hang off this
+          id.
+      - name: opponent_team_slug
+        description: >
+          URL-safe identifier for the opponent, for deep links.
+      - name: opponent_mascot
+        description: >
+          Mascot of the opponent. Identity chrome, not data encoding.
+      - name: opponent_logo_url
+        description: >
+          Logo for the opponent. May be null — render the degraded state.
+      - name: opponent_color_on_dark
+        description: >
+          Opponent colour, contrast-checked for a dark background. Falls back to grey rather
+          than to an unreadable team colour or to null; `opponent_color_source` says which
+          was used.
+      - name: defense
+        description: >
+          School name of the team without the ball, as the source spells it.
+      - name: defense_team_id
+        description: >
+          `dim_team` id for the defense — the same team as `opponent_team_id`, resolved by
+          joining `dim_team` on the source's own `defense` school name. ⚠️ That join is LEFT
+          and it misses: this is NULL on 379 drives (0.5%) where the opposing team is
+          non-FBS and so not in `dim_team` for that season, while `opponent_team_id` is
+          populated on all 78,536. Use `opponent_team_id` to identify the other side; use
+          this only when you specifically want the source-name-matched id.
+      - name: defense_conference
+        description: >
+          Conference of the defense in that season.
+      - name: start_yards_to_goal
+        description: >
+          Distance to the offense's target end zone at the snap that began the drive, in
+          yards. Offense-relative: 75 means the offense started 25 yards from its OWN goal.
+          A touchback is 75.
+      - name: end_yardline
+        description: >
+          CFBD's absolute yardline where the drive ended, in the HOME team's frame. ⚠️
+          Evidence only — do NOT plot it. On an absolute axis the away band mirrors and
+          reads as a rendering fault. 118 drives (0.15%) end off the field, range -93..173;
+          `is_end_on_field` flags them — render the row, suppress the bar.
+      - name: end_yards_to_goal
+        description: >
+          Distance to the offense's target end zone where the drive ended, offense-relative.
+          ⚠️ This is where a RETURN finished, which is why it disagrees with `yards` on 15%
+          of drives (34% of touchdowns).
+      - name: start_period
+        description: >
+          Quarter the drive began in. 5 and above is overtime; 0 appears in the source and
+          is a defect rather than a period.
+      - name: end_period
+        description: >
+          Quarter the drive ended in.
+      - name: elapsed_seconds
+        description: >
+          Duration of the drive in seconds. `elapsed_display` is the same value
+          pre-formatted as 2:14.
+      - name: drive_result
+        description: >
+          The source's own result text, verbatim — 25 distinct values. ⚠️ NEVER branch on
+          this string. A `TD` suffix on a turnover or a kick means the DEFENSE scored (~900
+          drives across ten values). Read `drive_result_key` or `scoring_side` instead.
+      - name: drive_result_category
+        description: >
+          Icon family for the result: offensive score, defensive score, turnover, punt,
+          kick, clock, or unknown. The safe thing to key a symbol off.
+      - name: is_scoring_drive
+        description: >
+          True when the drive produced points. ⚠️ Says nothing about WHICH side scored —
+          read `scoring_side` before choosing a colour or an icon.
+      - name: plays
+        description: >
+          Number of plays in the drive, as the source reports it.
+      - name: start_offense_score
+        description: >
+          Score of the team with the ball as the drive began.
+      - name: start_defense_score
+        description: >
+          Score of the team without the ball as the drive began.
+      - name: end_offense_score
+        description: >
+          Score of the team with the ball as the drive ended.
+      - name: end_defense_score
+        description: >
+          Score of the team without the ball as the drive ended.
   - name: srv_week_metric_distribution
     description: >
       ONE ROW, ONE PICTURE — everything a distribution chart draws, flattened so a page

@@ -2190,6 +2190,42 @@ INSERT INTO raw.raw_drives (filename, content, status_code, params, fetched_at, 
    "startDefenseScore": 0,
    "endOffenseScore": 7,
    "endDefenseScore": 0
+  },
+  {
+   "id": "90012",
+   "gameId": 9001,
+   "offense": "Beta Tech",
+   "offenseConference": "Test Conference",
+   "defense": "Alpha State",
+   "defenseConference": "Test Conference",
+   "driveNumber": 2,
+   "scoring": false,
+   "startPeriod": 1,
+   "startYardline": 80,
+   "startYardsToGoal": 80,
+   "startTime": {
+    "minutes": 9,
+    "seconds": 0
+   },
+   "endPeriod": 1,
+   "endYardline": 88,
+   "endYardsToGoal": 88,
+   "endTime": {
+    "minutes": 7,
+    "seconds": 30
+   },
+   "elapsed": {
+    "minutes": 1,
+    "seconds": 30
+   },
+   "plays": 3,
+   "yards": -8,
+   "driveResult": "PUNT",
+   "isHomeOffense": false,
+   "startOffenseScore": 0,
+   "startDefenseScore": 7,
+   "endOffenseScore": 0,
+   "endDefenseScore": 7
   }
  ]
 }', 200, '{"year": "2024", "seasonType": "regular"}',
@@ -3027,6 +3063,22 @@ INSERT INTO raw.raw_manifest
   ('metrics_wp_pregame', '2026-01-01T00-00-41-002Z.json',
    '{"year": "2024", "seasonType": "regular"}', 200, 1,
    '2026-01-01T00:00:53Z', '2026-01-01T00:00:53Z')
+ON CONFLICT DO NOTHING;
+
+-- THE 'drives' MANIFEST ROW IS LOAD-BEARING, NOT DECORATION.
+--
+-- mart_as_of maps endpoints to domains and takes max(fetched_at) per domain; srv_drive then
+-- CROSS JOINs `where domain = 'drive'`. With no drives row here that subquery returns nothing,
+-- the cross join yields nothing, and srv_drive builds EMPTY while every model reports success —
+-- caught only by assert_srv_drive_keeps_every_drive comparing it against fct_drive.
+--
+-- B046 predicted exactly this in that test's own comment ("if the domain row ever disappears,
+-- this returns zero rows and the count goes to nothing"); R-353 made it live by pointing
+-- srv_drive at 'drive' instead of borrowing 'game'. The endpoint label is the FLATTENED form —
+-- src/ingest.fetch turns '/drives' into 'drives' — and the API-path spelling matches nothing
+-- and fails silently, which is the trap that made stg_api_usage_endpoint return zero rows.
+INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
+('drives', '2026-01-01T00-00-59-001Z.json', '{"year": "2024", "seasonType": "regular"}', 200, 2, '2026-01-01T00:00:59Z', now())
 ON CONFLICT DO NOTHING;
 
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
