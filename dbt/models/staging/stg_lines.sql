@@ -106,8 +106,22 @@ select
     cast({{ json_get_string('line', 'spreadOpen') }} as numeric)     as spread_open,
     cast({{ json_get_string('line', 'overUnder') }} as numeric)      as over_under,
     cast({{ json_get_string('line', 'overUnderOpen') }} as numeric)  as over_under_open,
-    {{ safe_int(json_get_string('line', 'homeMoneyline')) }}         as home_moneyline,
-    {{ safe_int(json_get_string('line', 'awayMoneyline')) }}         as away_moneyline,
+    -- -100000 IS A SENTINEL, NOT A PRICE (R-391). CFBD returns it on 1,345 snapshots across
+    -- 26 games. Read literally it is a -1000:1 favourite, a 99.999% implied win probability,
+    -- and no book has ever posted it. Left as a number it survives the de-vig: on those rows
+    -- fct_market_probability returns a plausible-looking 0.98, which is higher than any real
+    -- price in the table and therefore sorts to the TOP of "the most surprising result of the
+    -- week". A fabricated certainty at the head of a list about upsets.
+    --
+    -- Nulled here rather than downstream because this is the layer that decides what the
+    -- payload MEANT, and it did not mean a price. The fact that it was seen is not lost: the
+    -- raw layer is immutable, and the two flags below record it in the model.
+    case when {{ safe_int(json_get_string('line', 'homeMoneyline')) }} = -100000 then null
+         else {{ safe_int(json_get_string('line', 'homeMoneyline')) }} end as home_moneyline,
+    case when {{ safe_int(json_get_string('line', 'awayMoneyline')) }} = -100000 then null
+         else {{ safe_int(json_get_string('line', 'awayMoneyline')) }} end as away_moneyline,
+    ({{ safe_int(json_get_string('line', 'homeMoneyline')) }} = -100000)    as home_moneyline_is_sentinel,
+    ({{ safe_int(json_get_string('line', 'awayMoneyline')) }} = -100000)    as away_moneyline_is_sentinel,
     row_number() over (
         partition by
             game_id,

@@ -251,6 +251,20 @@ select
     g.network_abbreviation,
     g.attendance,
     g.excitement_index,
+
+    -- WHY THIS GAME WAS EXCITING, NOT JUST HOW MUCH (R-394).
+    --
+    -- excitement_index is a number with no story. These three say what produced it, and the
+    -- mart was already built: fct_game_win_probability_summary holds 1,715 rows, one per game,
+    -- derived from stg_game_win_probability's 263,539 play rows. None of it reached serving,
+    -- so the card could show "8.7" and not "4 lead changes".
+    --
+    -- GRAIN: the summary is one row per game and srv_game is one row per game, so this is a
+    -- join, not an aggregate. assert_srv_game_is_still_one_row_per_game fails if it fans out,
+    -- which is the defect this shape of change produces.
+    wps.lead_changes,
+    wps.largest_single_play_swing,
+    wps.home_win_probability_range,
     g.is_upset,
 
     -- FBS SPINE. EITHER team, not both: a Division II visitor's trip to an FBS stadium is an
@@ -652,4 +666,5 @@ left join {{ ref('fct_team_record_week') }} rw_home
 left join {{ ref('fct_team_record_week') }} rw_away
     on  rw_away.season = g.season and rw_away.season_type = g.season_type
     and rw_away.week = g.week and rw_away.team_id = g.away_team_id
+left join {{ ref('fct_game_win_probability_summary') }} wps on wps.game_id = g.game_id
 cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao

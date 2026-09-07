@@ -72,7 +72,12 @@ select
     l.over_under,
     l.over_under_open,
     l.home_moneyline,
-    l.away_moneyline
+    l.away_moneyline,
+    -- R-391. Carried, not dropped: stg_lines nulled the -100000 sentinel so it cannot be
+    -- mistaken for a price, and these say a price was claimed and refused. Without them a
+    -- null moneyline is indistinguishable from a book that simply did not post one.
+    l.home_moneyline_is_sentinel,
+    l.away_moneyline_is_sentinel
 from lines l
 left join {{ ref('dim_provider') }} p on p.provider_key = l.provider_key
 {% if is_incremental() %}
