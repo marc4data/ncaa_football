@@ -3577,8 +3577,8 @@ models:
         description: >
           `dim_team` id for the defense — the same team as `opponent_team_id`, resolved by
           joining `dim_team` on the source's own `defense` school name. ⚠️ That join is LEFT
-          and it misses: this is NULL on 379 drives (0.5%) where the opposing team is non-
-          FBS and so not in `dim_team` for that season, while `opponent_team_id` is
+          and it misses: this is NULL on 379 drives (0.5%) where the opposing team is
+          non-FBS and so not in `dim_team` for that season, while `opponent_team_id` is
           populated on all 78,536. Use `opponent_team_id` to identify the other side; use
           this only when you specifically want the source-name-matched id.
       - name: defense_conference
