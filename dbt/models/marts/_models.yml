@@ -272,11 +272,11 @@ models:
           enormous excursion.
       - name: market_implied_win_probability_largest_excursion
         description: The widest that probability ever departed from its opening value, signed.
-      - name: open_predates_snapshot_gap
+      - name: movement_spans_snapshot_gap
         description: >
-          True when this game's snapshot window SPANS the three days with no snapshots at all,
-          so its movement is measured across that hole and its excursion is a floor rather than
-          a measurement. It asks whether the window spans the gap, not merely whether the line
-          opened before it: the second reading is true of every 2024 and 2025 game, all of which
-          finished a year before the outage, and would flag 1,728 rows where 98 is correct.
+          True when this game's snapshot window spans the three days that hold no snapshots at
+          all, so its movement is measured across that hole and its excursion is a floor rather
+          than a measurement. Both ends are tested, and the second end is worth 1,630 rows:
+          asking only whether the line opened before the gap flags 1,728 games, asking whether
+          the window spans it flags 98, and all 98 are in 2026 where the outage happened.
         data_tests: [not_null]

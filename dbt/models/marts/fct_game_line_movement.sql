@@ -221,17 +221,16 @@ select
     -- no snapshots at all (see snapshot_gap_* in dbt_project.yml), which means its movement is
     -- measured ACROSS that hole and its excursion is a FLOOR rather than a measurement.
     --
-    -- ⚠️ IT IS "SPANS", NOT "OPENED BEFORE", AND THE DIFFERENCE IS 1,630 WRONGLY FLAGGED ROWS.
-    -- The first draft asked only whether the line opened before the gap, which is true of every
-    -- 2024 and 2025 game — all of them opened, moved and finished a year before the outage and
-    -- none was measured across anything. Measured: 1,728 rows flagged by the wrong test, 98 by
-    -- the right one, and all 98 are in 2026 where the outage actually happened. A caveat that
-    -- fires on 93% of rows indicates nothing, which is the same defect as an indicator that
-    -- fires on all 34,061 colour rows.
+    -- ⚠️ THE SPANNING TEST IS WORTH 1,630 ROWS, AND THAT IS WHY BOTH CLAUSES ARE HERE.
+    -- Measured: 1,728 rows flagged by asking only whether the line opened before the gap, 98 by
+    -- asking whether the window spans it, and all 98 are in 2026 where the outage actually
+    -- happened — every 2024 and 2025 game opened, moved and finished a year before it and was
+    -- measured across nothing. A caveat that fires on 93% of rows indicates nothing, which is
+    -- the same defect as an indicator that fires on all 34,061 colour rows.
     -- ---------------------------------------------------------------------------------------
     (a.first_snapshot_ts < timestamp '{{ var("snapshot_gap_start") }} 00:00:00+00'
      and l.last_snapshot_ts > timestamp '{{ var("snapshot_gap_end") }} 23:59:59+00')
-                                                             as open_predates_snapshot_gap
+                                                             as movement_spans_snapshot_gap
 from aggregated a
 join latest l on l.game_id = a.game_id
 left join opening_probability op on op.game_id = a.game_id
