@@ -74,6 +74,10 @@ def body(page) -> None:
         # page that is otherwise complete.
         _weather(game_id)
         _travel(game_id)
+        # Drives are their own section for the same reason weather is: they exist for
+        # 2024 onward only, so a pre-2024 game shows one Empty block rather than
+        # blanking a page that is otherwise complete.
+        _drives(game_id)
 
 
 def _picker() -> None:
@@ -386,6 +390,175 @@ def _travel(game_id) -> None:
                 # Signed on purpose: arriving 1,500 m higher and 1,500 m lower are
                 # different experiences and a magnitude would erase which happened.
                 "—" if change is None or pd.isna(change) else f"{float(change):+,.0f} m")
+        table.as_of_caption(df)
+
+
+# The colour ladder's sourced rungs, mirrored from lib.identity so the caption below says
+# "fell back" only when it actually did. `primary`/`alternate` are the team's own; `adjusted`
+# and `fallback` are cfdb's, and only those two are debt worth naming.
+_SOURCED_COLOR_RUNGS = ("primary", "alternate")
+
+
+def _drive_colors(df) -> dict:
+    """Each band's own colour, recovered from the OTHER band's `opponent_color_*`.
+
+    ⚠️ srv_drive HAS NO `offense_color_*` COLUMNS. Verified against information_schema on the
+    serving instance, not read off the model: the identity pair is asymmetric — `offense_*`
+    carries team_id, slug, display, mascot and logo_url, and the three contrast colours exist
+    on `opponent_*` alone.
+
+    It is still recoverable from ONE game's rows without a join, because possession
+    alternates: the home team is the opponent on every away-band drive, and vice versa. So a
+    band's colour is read off the complementary band. That is a lookup within the single
+    result set this panel already fetched, not a join and not a metric.
+
+    It is also a workaround, and the honest fix is upstream — `offense_color_on_light` /
+    `_on_dark` / `_source` on srv_drive, mirroring what opponent_* already has. That is a
+    data-layer change and gets its own round; recorded in the B066 report rather than
+    smuggled in here.
+    """
+    colors = {}
+    for band in ("home", "away"):
+        other = df[df["band"] == ("away" if band == "home" else "home")]
+        if other.empty:
+            continue
+        row = other.iloc[0]
+        colors[band] = {"color_on_light": row.get("opponent_color_on_light"),
+                        "color_on_dark": row.get("opponent_color_on_dark"),
+                        "color_source": row.get("opponent_color_source")}
+    return colors
+
+
+def _drive_bar(row) -> str:
+    """The drive drawn on the field, 0 = the offense's own goal line, 100 = the opponent's.
+
+    ⚠️ `start_yards_from_own_goal` and `end_yards_from_own_goal` are the ONLY coordinates both
+    bands can share. `yardline` is absolute in the HOME team's frame, so a bar keyed off it
+    mirrors the away band and reads as a rendering fault — it disagrees with the
+    offense-relative frame on roughly half of all drives.
+
+    ⚠️ AND THE BAR IS NOT `yards` LONG. yards is what the offense gained; the end coordinate
+    is where a RETURN finished, and the two disagree on 15% of drives (34% of touchdowns). The
+    bar is drawn from the coordinates because the bar is a position, not a gain.
+
+    An off-field end coordinate suppresses the bar and keeps the row: 0.15% of drives carry a
+    broken end coordinate, and a missing possession is a worse lie than a bar that admits it
+    does not know where it ended.
+    """
+    start, end = row.get("start_yards_from_own_goal"), row.get("end_yards_from_own_goal")
+    if not row.get("is_end_on_field") or pd.isna(start) or pd.isna(end):
+        return ("<div style='opacity:.5;font-size:.75rem' "
+                "title='CFBD's end coordinate for this drive falls off the field'>"
+                "position unavailable</div>")
+    lo, hi = sorted((float(start), float(end)))
+    backwards = float(end) < float(start)
+    fill = "#b45309" if backwards else "#334155"
+    return (
+        "<div style='position:relative;height:8px;background:rgba(128,128,128,.18);"
+        "border-radius:4px' title='own "
+        f"{start:g} to {end:g}{' — lost yards' if backwards else ''}'>"
+        f"<div style='position:absolute;left:{lo}%;width:{max(hi - lo, 0.8)}%;"
+        f"height:8px;background:{fill};border-radius:4px'></div></div>")
+
+
+def _drives(game_id) -> None:
+    """The alternating possession sequence — how the game actually went.
+
+    THE SINGLE MOST LEGIBLE "how did this game go" ARTEFACT (matchup post-game spec §1.4),
+    and it was the blocker there: stg_drive had landed and nothing read it. fct_drive and
+    srv_drive now exist and are published, so this is the thing that reads them.
+
+    ⚠️ SCORING IS READ FROM `scoring_side`, NEVER FROM THE RESULT TEXT. A `TD` suffix on a
+    turnover or a kick means the DEFENCE scored — 908 drives across ten drive_result values,
+    measured. Keying an offensive-touchdown mark off the substring "TD" puts every one of
+    them on the wrong side of the game.
+    """
+    st.subheader("Drives")
+    with states.section("srv_drive"):
+        # Single table, single WHERE, always by game_id — srv_drive is 81,433 rows and the
+        # rule that governs srv_matchup governs this.
+        #
+        # THE LIMIT IS THE CONTRACT, NOT DECORATION. lib.query rejects an unbounded select
+        # outright (AC-G.39) and rejected this one while it was being written: "an unbounded
+        # select is a defect even where today's filter happens to make it small". 200 is far
+        # above the measured ceiling — the longest game in 81,433 rows carries 38 drives,
+        # p99.9 is 37, the mean 23.5 — so it bounds the blast radius without ever truncating
+        # a real game.
+        df = query("""
+            select drive_number, band, band_order, is_home_offense,
+                   offense_team_display, offense_logo_url,
+                   opponent_team_display,
+                   opponent_color_on_light, opponent_color_on_dark, opponent_color_source,
+                   drive_result, drive_result_category, scoring_side, is_scoring_drive,
+                   plays, yards, elapsed_display,
+                   start_yards_from_own_goal, end_yards_from_own_goal,
+                   is_end_on_field, is_negative_drive,
+                   end_offense_score, end_defense_score,
+                   as_of_ts
+            from srv_drive
+            where game_id = :game_id
+            order by drive_number
+            limit 200
+        """, {"game_id": game_id})
+
+        if df.empty:
+            # EMPTY, NOT DEGRADED. Drives are collected from 2024 onward, so a 2023 game has
+            # none and never will — that is the scope of the data, not a fault in it.
+            states.empty(
+                "The drive-by-drive sequence would be here.",
+                "Drives are collected from 2024 onward, and a game that has not kicked off "
+                "yet has none.")
+            return
+
+        colors = _drive_colors(df)
+
+        # DEGRADED IS A SEPARATE STATE FROM EMPTY, and this is the one that produces it: the
+        # drives are all here, but a side's colour is cfdb's rather than the team's, so the
+        # band reads in a neutral grey. Said once, above the sequence, rather than on every row.
+        fell_back = sorted({
+            str(row.get("opponent_team_display"))
+            for _, row in df.iterrows()
+            if row.get("opponent_color_source")
+            and row["opponent_color_source"] not in _SOURCED_COLOR_RUNGS})
+        if fell_back:
+            st.caption(
+                "Colour for " + ", ".join(fell_back) + " is cfdb's rather than the team's, "
+                "so that side is banded in a neutral tone. Every drive below is present.")
+
+        scored = int(df["is_scoring_drive"].fillna(False).astype(bool).sum())
+        st.caption(f"{len(df)} drives · {scored} scoring")
+
+        for _, row in df.iterrows():
+            # identity.text_on defaults to the on-LIGHT variant, which is what team.py
+            # does and the only precedent in the app — there is no theme detection here.
+            # Both contrast-safe variants are selected above so the helper chooses, and
+            # a missing colour falls to its neutral rather than to anything computed.
+            accent = identity.text_on(colors.get(row.get("band")))
+            logo = identity.logo_or_monogram(
+                row.get("offense_logo_url"), row.get("offense_team_display") or "?", 18)
+            # The score AFTER the drive, from the offense's own perspective, so a scoring
+            # drive shows what it made the scoreboard say.
+            side = row.get("scoring_side")
+            mark = ("<span style='font-weight:600'>▲ offence</span>" if side == "offense"
+                    else "<span style='font-weight:600'>▼ defence</span>" if side == "defense"
+                    else "")
+            yards = row.get("yards")
+            yards_text = "—" if pd.isna(yards) else f"{int(yards):+d} yd"
+            body_row = (
+                f"<div style='border-left:4px solid {accent};padding:.35rem .6rem;"
+                f"margin-bottom:.25rem;"
+                f"background:{'rgba(120,160,120,.13)' if row.get('is_scoring_drive') else 'transparent'}'>"
+                f"<div style='display:flex;align-items:center;gap:.5rem;flex-wrap:wrap'>"
+                f"<span style='opacity:.55;font-size:.75rem;min-width:1.6rem'>"
+                f"{'' if pd.isna(row.get('drive_number')) else int(row['drive_number'])}</span>"
+                f"{logo}<span style='font-weight:600'>{row.get('offense_team_display') or '?'}</span>"
+                f"<span style='opacity:.85'>{row.get('drive_result') or '—'}</span>{mark}"
+                f"<span style='opacity:.6;font-size:.8rem;margin-left:auto'>"
+                f"{'' if pd.isna(row.get('plays')) else int(row['plays'])} plays · {yards_text}"
+                f" · {row.get('elapsed_display') or '—'}</span></div>"
+                f"<div style='margin-top:.25rem'>{_drive_bar(row)}</div></div>")
+            st.markdown(body_row, unsafe_allow_html=True)
+
         table.as_of_caption(df)
 
 
