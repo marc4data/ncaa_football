@@ -6,7 +6,7 @@ WHY THIS EXISTS
 `.gitignore` line 14 is `dbt/profiles.yml` and line 7 is `.env`. The two files that decide
 WHICH DATABASE dbt talks to are therefore the two files a `git pull` cannot correct. They are
 per working copy and hand-copied, and this repository now has three working copies side by
-side (claude_code/, wt-drives/, cfdb_deploy/) with three separate untracked copies, none of
+side (claude_code/, wt-b/, cfdb_deploy/) with three separate untracked copies, none of
 them visible to the others.
 
 That produced the bug this file is the answer to. On 2026-09-05 one working copy's root had
