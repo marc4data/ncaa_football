@@ -31,7 +31,8 @@ with latest_line as (
     -- Aliased so every reference below reads exactly as it did.
     select game_id, spread_current as spread, total_current as over_under,
            spread_open, over_under_open, home_moneyline, away_moneyline,
-           current_provider_key as provider_key, line_snapshot_ts as snapshot_ts
+           current_provider_key as provider_key, line_snapshot_ts as snapshot_ts,
+           spread_favorite_side, moneyline_favorite_side, favorite_definitions_disagree
     from {{ ref('fct_game_market') }}
 
 ),
@@ -508,6 +509,16 @@ select
     l.spread_open,
     l.over_under,
     l.over_under_open,
+
+    -- BOTH DERIVATIONS OF "FAVOURITE", CARRIED RATHER THAN RE-DERIVED (R-429).
+    -- A060 (R-393) added these to fct_game_market and stopped there, so they never reached
+    -- serving and the app could not read them. The Looking Back recap lists need both: two
+    -- rank on the SPREAD and the third on implied win probability, which is the MONEYLINE,
+    -- and of 114 completed 2026 games carrying both, 2 disagree. Deriving either in
+    -- Streamlit would be metric maths in the app, which is the rule these columns exist for.
+    l.spread_favorite_side,
+    l.moneyline_favorite_side,
+    l.favorite_definitions_disagree,
 
     -- R-104. HOW FAR THE MARKET HAS MOVED SINCE IT OPENED, computed here and not in the page.
     --

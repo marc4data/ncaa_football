@@ -3107,6 +3107,22 @@ models:
       - name: spread_open
         description: >
           Opening spread for the game from that provider.
+      - name: spread_favorite_side
+        description: >
+          Which side the CLOSING SPREAD made the favourite — 'home', 'away', or null for a
+          pick'em or a game with no line. Carried from fct_game_market rather than derived in
+          the page: two of the three Looking Back recap lists rank on this axis and the app
+          does no metric maths.
+      - name: moneyline_favorite_side
+        description: >
+          Which side the MONEYLINE made the favourite — the shorter price. Null when either
+          price is missing or the two are equal. A different question from
+          spread_favorite_side and not always the same answer.
+      - name: favorite_definitions_disagree
+        description: >
+          True where the spread and the moneyline name different favourites; NULL — not false
+          — when either derivation is unavailable, because "they agree" and "we cannot tell"
+          are different answers. Of 114 completed 2026 games carrying both, 2 disagree.
       - name: over_under
         description: >
           Over/under at the most recent snapshot.
