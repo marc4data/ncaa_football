@@ -590,7 +590,7 @@ select
     lm.market_implied_win_probability_largest_excursion
                                    as line_market_implied_win_probability_largest_excursion,
     lm.snapshot_count              as line_snapshot_count,
-    lm.open_predates_snapshot_gap  as line_open_predates_snapshot_gap,
+    lm.movement_spans_snapshot_gap as line_movement_spans_snapshot_gap,
 
     -- R-108b. The better of the two poll ranks, for the stacked view's sort.
     --

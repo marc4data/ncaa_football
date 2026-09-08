@@ -35,7 +35,12 @@ COLUMNS = """
     actual_margin, actual_margin_home_perspective,
     series_games, series_home_team_wins, series_away_team_wins, series_ties,
     series_first_season, series_last_season,
-    model_version_key, attribution, as_of_ts
+    model_version_key, attribution, as_of_ts,
+    line_movement_provider_key, line_snapshot_count, line_movement_spans_snapshot_gap,
+    line_spread_move_from_open, line_spread_largest_excursion,
+    line_total_move_from_open, line_total_largest_excursion,
+    line_market_implied_win_probability_move_from_open,
+    line_market_implied_win_probability_largest_excursion
 """
 
 
@@ -67,6 +72,7 @@ def body(page) -> None:
         table.as_of_caption(df)
 
         _market(row)
+        _line_movement(row)
         _model(row)
         _series(row)
         # Its own view and its own section: weather exists for 2024 onward only, and a
@@ -212,6 +218,102 @@ def _market(row) -> None:
                f"snapshot {fmt.local_time(row.get('line_snapshot_ts'))}. "
                f"Opening spread {fmt.signed(row.get('spread_open'), 'spread')}, "
                f"opening total {fmt.number(row.get('over_under_open'), 'over_under')}.")
+
+
+def _line_movement(row) -> None:
+    """How far the line travelled between opening and now — the market's history, not its state.
+
+    WHAT THE NET MOVE CANNOT SHOW, AND WHY THERE ARE TWO NUMBERS PER MARKET. A line that goes
+    out three points and comes back reads as no move at all: 16 spreads and 6 probabilities in
+    the built model are exactly that round trip. The excursion is the widest departure from the
+    open, signed so it keeps the direction it departed in, and it is a DIFFERENT measurement
+    from the net move — `assert_line_excursion_is_not_just_the_net_move` fails if the two ever
+    collapse into one.
+
+    ⚠️ READ `line_snapshot_count` BEFORE BELIEVING AN EXCURSION. 1,577 of 1,854 games carry a
+    single snapshot, because 2024 and 2025 were backfilled one row per game, and on those the
+    excursion equals the net move by construction rather than by measurement. The panel says so
+    rather than drawing two numbers that look independent and are not.
+
+    ⚠️ THE BOOK IS NAMED ON THE PANEL. Every measure is one book's, set by the
+    `line_movement_provider` variable, because a move measured against another book's price is
+    not a move. A market figure that does not say whose price it came from is the provenance
+    defect the `market_implied_` prefix rule exists to prevent.
+
+    NO THRESHOLD IS APPLIED. A059 measured the distributions and stopped there — Marc sets what
+    counts as a big move — so nothing here is highlighted, coloured or ranked by a cutoff.
+    """
+    st.subheader("Line movement")
+    # Its own section, like weather and drives: this reads columns the rest of the page does
+    # not, so a movement failure degrades one block rather than blanking a Matchup that is
+    # otherwise complete. No second query — the measures are already on the srv_game row the
+    # page fetched, and re-asking for data in hand is a round trip the display-only contract
+    # does not need.
+    with states.section("srv_game"):
+        snapshots = row.get("line_snapshot_count")
+        if pd.isna(snapshots):
+            # EMPTY, NOT DEGRADED. No snapshot history is the absence of a market to track,
+            # not a fault in tracking it: the movement mart covers the seasons the snapshot
+            # loader runs for, and a game outside them never had a line observed twice.
+            states.empty(
+                "How the line moved would be here.",
+                "No line snapshots have been recorded for this game, so there is no opening "
+                "price to measure a move against.")
+            return
+
+        cols = st.columns(3)
+        # Spread and total in points, probability in PROBABILITY POINTS — moneylines are not
+        # comparable as numbers (-110 to -130 and +200 to +180 are 4.1 and 2.4 points), so the
+        # movement is expressed in the units the distribution was measured in.
+        cols[0].metric(
+            "Spread move", fmt.signed(row.get("line_spread_move_from_open"), "spread"),
+            help="Current spread minus the opening spread. Negative means the home team is "
+                 "favoured by more than it was.")
+        cols[1].metric(
+            "Total move", fmt.signed(row.get("line_total_move_from_open"), "over_under"))
+        cols[2].metric(
+            "Home win probability move",
+            fmt.signed(row.get("line_market_implied_win_probability_move_from_open"), "", dp=2),
+            help="De-vigged, in probability points.")
+
+        wide = st.columns(3)
+        wide[0].metric(
+            "Widest spread excursion",
+            fmt.signed(row.get("line_spread_largest_excursion"), "spread"),
+            help="The furthest the spread ever got from its open, keeping the direction.")
+        wide[1].metric(
+            "Widest total excursion",
+            fmt.signed(row.get("line_total_largest_excursion"), "over_under"))
+        wide[2].metric(
+            "Widest probability excursion",
+            fmt.signed(row.get("line_market_implied_win_probability_largest_excursion"),
+                       "", dp=2))
+
+        observed = int(snapshots)
+        book = row.get("line_movement_provider_key") or "an unnamed book"
+        st.caption(
+            f"Measured across {observed} snapshot{'' if observed == 1 else 's'} "
+            f"from {book}. Every figure above is that one book's, because a move measured "
+            f"against a different book's price is not a move.")
+
+        if observed == 1:
+            # DEGRADED, AND IT IS THE COMMON CASE. One observation cannot show a path, so the
+            # excursion is the net move restated rather than a second fact. Said plainly
+            # instead of drawing six numbers of which three are echoes.
+            st.caption(
+                "This game's line was observed once, so the widest excursion is the net move "
+                "restated rather than a separate measurement.")
+
+        if bool(row.get("line_movement_spans_snapshot_gap")):
+            # THE OTHER DEGRADED STATE, and it travels on the row rather than in a footnote
+            # somewhere: three days in 2026 hold no snapshots at all, and a window spanning
+            # them was not observed throughout. The excursion is then a floor — the line may
+            # have gone further while nobody was looking — and a floor presented as a
+            # measurement is the defect the caveat exists to prevent.
+            st.caption(
+                "This game's line was being tracked across the three days that hold no "
+                "snapshots, so the widest excursion above is a floor rather than a "
+                "measurement — the line may have travelled further unobserved.")
 
 
 def _model(row) -> None:

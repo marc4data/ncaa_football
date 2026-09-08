@@ -3434,7 +3434,7 @@ models:
           How many snapshots this game's line was observed at, from the measured book. Read it
           before drawing a movement chart: 1,577 of 1,854 games carry a single snapshot, and on
           those an excursion equals the net move by construction rather than by measurement.
-      - name: line_open_predates_snapshot_gap
+      - name: line_movement_spans_snapshot_gap
         description: >
           True when this game's snapshot window spans the three days that hold no snapshots at
           all, so its movement is measured across that hole and the excursion is a floor rather
