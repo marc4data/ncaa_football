@@ -701,7 +701,9 @@ def test_the_straddle_check_catches_every_instance_that_has_actually_happened():
     data = json.loads(manifest.read_text())
     names = [n for n, _, _ in module.straddling_tests(data)]
     for sweep in ("assert_facts_are_unique_on_their_natural_key",
-                  "assert_staging_models_are_unique_on_their_grain",
+                  # R-420: one sweep became two, split by severity. Both must stay excluded.
+                  "assert_site_facing_staging_models_are_unique_on_their_grain",
+                  "assert_warehouse_only_staging_models_are_unique_on_their_grain",
                   "assert_every_serving_row_names_its_team"):
         assert sweep not in names, f"{sweep} is a sweep, not a comparison"
 

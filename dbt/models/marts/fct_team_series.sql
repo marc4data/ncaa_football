@@ -1,4 +1,18 @@
-{{ config(materialized='table') }}
+{{ config(materialized='table', tags=['production']) }}
+-- ⚠️ TAGGED `production` BECAUSE NOTHING REBUILT IT, AND ITS TEST COMPARED IT TO LIVE DATA
+-- (R-418/R-419).
+--
+-- This model was reachable from NO build selector -- not `+tag:production`, not the weekly
+-- `+tag:production tag:warehouse`, not `+srv_game`. It was built once and then frozen while
+-- srv_game, which computes the same head-to-head independently, was rebuilt every two hours.
+-- assert_team_series_reconciles compares the two, so it failed 221 pairs and the count could
+-- only grow: Campbell v Western Carolina held 2 games here against 4 in fct_game, missing
+-- both 2026 meetings.
+--
+-- It is referenced by nothing except that test, so the tag is what gives the comparison two
+-- current sides rather than one current and one archaeological. If this model is genuinely
+-- dead, deleting it and its test is the better answer -- that is a call for Marc, and the
+-- tag is the smaller, reversible move in the meantime.
 
 -- The all-time head-to-head record between two teams: one row per unordered pair.
 --

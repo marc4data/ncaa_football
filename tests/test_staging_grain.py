@@ -15,7 +15,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGING = ROOT / "dbt" / "models" / "staging"
-GRAIN_TEST = ROOT / "dbt" / "tests" / "assert_staging_models_are_unique_on_their_grain.sql"
+# R-420 SPLIT THE SWEEP AND MOVED THE LIST. The 70-model list used to live in the test file;
+# it now lives in dbt/macros/staging_grains.sql as the single source both halves filter, so
+# these checks follow it there. The halves differ only in severity -- error for the 20 models
+# the site depends on, warn for the 50 it does not -- so the list they share is what these
+# tests are actually about.
+GRAIN_TEST = ROOT / "dbt" / "macros" / "staging_grains.sql"
 
 # Models whose grain is genuinely not one row per anything, with the reason. Adding to this is
 # a decision; forgetting to add a model is not.
@@ -41,9 +46,15 @@ def params_deduped_models() -> set:
 
 
 def enumerated_in_grain_test() -> set:
-    body = GRAIN_TEST.read_text()
-    listing = body[body.index("set staging_grains"):body.index("%}", body.index("set staging_grains"))]
-    return set(re.findall(r"\('(stg_[a-z_]+)'", listing))
+    """Model names in the shared grain list.
+
+    Read by regex over the whole file rather than by slicing between two markers. The old
+    version sliced from `set staging_grains` to the next `%}`, which broke the moment R-420
+    moved the list into a macro returning it — three tests failed with `substring not found`,
+    which says nothing about what is wrong. The names are the only thing these checks care
+    about, and a regex finds them wherever the list happens to live.
+    """
+    return set(re.findall(r"\('(stg_[a-z_]+)'", GRAIN_TEST.read_text()))
 
 
 def test_the_grain_sweep_exists():
@@ -61,7 +72,7 @@ def test_every_params_deduped_model_declares_a_grain():
     missing = params_deduped_models() - enumerated_in_grain_test() - set(GRAIN_EXEMPT)
     assert not missing, (
         f"these staging models dedup on `params` but declare no grain: {sorted(missing)}. "
-        f"Add them to assert_staging_models_are_unique_on_their_grain.sql, or to "
+        f"Add them to dbt/macros/staging_grains.sql, or to "
         f"GRAIN_EXEMPT here with the reason.")
 
 
