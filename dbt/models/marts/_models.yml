@@ -225,3 +225,58 @@ models:
           end coordinate is where a RETURN finished and `yards` is what the offense gained.
           Both are right; they measure different things, so a bar drawn from `yards` will not
           land on the end coordinate the same row carries.
+
+  - name: fct_game_line_movement
+    description: >
+      How far the line travelled, at game grain — one row per game, one book. The derived
+      summary the grain rule calls for: srv_line_movement is snapshot grain, a panel wants a
+      row per game, and Streamlit cannot aggregate.
+    columns:
+      - name: game_line_movement_sk
+        data_tests: [not_null, unique]
+      - name: game_id
+        description: One row per game. Unique by construction.
+        data_tests: [not_null, unique]
+      - name: provider_key
+        description: >
+          The one book every measure on this row is taken from, set by the
+          `line_movement_provider` variable. Two books carry current snapshots and mixing them
+          measures a move against a different book's price.
+        data_tests: [not_null]
+      - name: snapshot_count
+        description: >
+          How many snapshots this game's line was observed at. Read it before drawing anything:
+          1,577 of 1,854 rows carry a single snapshot, because 2024 and 2025 were backfilled one
+          row per game, and on those an excursion equals the net move by construction rather
+          than by measurement.
+        data_tests: [not_null]
+      - name: spread_move_from_open
+        description: Current spread minus the opening spread. Where the line ended up.
+      - name: spread_largest_excursion
+        description: >
+          The widest the spread ever departed from its open, signed, keeping the direction of
+          that departure. Where the line went on the way, which the net move cannot show — a
+          line that goes out three points and comes back reads as no move and a three-point
+          excursion. Not max(abs()), which would lose the direction.
+      - name: total_move_from_open
+        description: Current total minus the opening total.
+      - name: total_largest_excursion
+        description: The same widest-departure measure for the total.
+      - name: market_implied_win_probability_move_from_open
+        description: >
+          The home side's de-vigged win probability now minus at the open, in PROBABILITY
+          POINTS. Moneylines are not comparable as numbers — minus 110 to minus 130 and plus
+          200 to plus 180 are 4.1 and 2.4 points — so the movement is expressed in the units
+          the distribution was measured in. The de-vig is fct_market_probability's, and only
+          snapshots it marks usable are counted, so a sentinel moneyline cannot register as an
+          enormous excursion.
+      - name: market_implied_win_probability_largest_excursion
+        description: The widest that probability ever departed from its opening value, signed.
+      - name: open_predates_snapshot_gap
+        description: >
+          True when this game's snapshot window SPANS the three days with no snapshots at all,
+          so its movement is measured across that hole and its excursion is a floor rather than
+          a measurement. It asks whether the window spans the gap, not merely whether the line
+          opened before it: the second reading is true of every 2024 and 2025 game, all of which
+          finished a year before the outage, and would flag 1,728 rows where 98 is correct.
+        data_tests: [not_null]

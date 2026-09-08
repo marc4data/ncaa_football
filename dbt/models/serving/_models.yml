@@ -3399,6 +3399,47 @@ models:
           one game and the suffix is what keeps a reader from guessing which they have.
       - name: away_team_record_after_display
         description: As home_team_record_after_display, for the away side.
+      - name: line_movement_provider_key
+        description: >
+          The one book the whole `line_*` movement family is measured from. It is deliberately
+          separate from `provider_key` above, which is whichever book supplied the most recent
+          snapshot — measured, that is a different book on 1,520 of the 1,603 rows carrying an
+          excursion, so pairing `spread_move_from_open` with `line_spread_largest_excursion`
+          would compare a move against another book's price.
+      - name: line_spread_move_from_open
+        description: >
+          Current spread minus the opening spread, from the measured book. Pair this with
+          `line_spread_largest_excursion`; the two are the same book by construction.
+      - name: line_spread_largest_excursion
+        description: >
+          The widest the spread ever departed from its open, signed, keeping the direction. A
+          line that goes out three points and comes back reads as no move and a three-point
+          excursion, which is the thing a movement panel exists to show. On games with a real
+          snapshot history the two measures differ on 17% of spreads.
+      - name: line_total_move_from_open
+        description: Current total minus the opening total, from the measured book.
+      - name: line_total_largest_excursion
+        description: The same widest-departure measure for the total.
+      - name: line_market_implied_win_probability_move_from_open
+        description: >
+          The home side's de-vigged win probability now minus at the open, in PROBABILITY
+          POINTS rather than American odds — minus 110 to minus 130 and plus 200 to plus 180
+          are not comparable as numbers, and are 4.1 and 2.4 points as probabilities.
+      - name: line_market_implied_win_probability_largest_excursion
+        description: >
+          The widest that probability ever departed from its opening value, signed. Differs
+          from the net move on 29% of games with a real snapshot history.
+      - name: line_snapshot_count
+        description: >
+          How many snapshots this game's line was observed at, from the measured book. Read it
+          before drawing a movement chart: 1,577 of 1,854 games carry a single snapshot, and on
+          those an excursion equals the net move by construction rather than by measurement.
+      - name: line_open_predates_snapshot_gap
+        description: >
+          True when this game's snapshot window spans the three days that hold no snapshots at
+          all, so its movement is measured across that hole and the excursion is a floor rather
+          than a measurement. The caveat rides on the row because one that cannot travel with
+          the row does not survive to the page.
 
   # ==========================================================================================
   # APPENDED BY PROMPT B046 (session B). Session A is editing the srv_game_team block above;
