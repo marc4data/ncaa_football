@@ -32,12 +32,39 @@
 -- closed in ingestion (2026-08-18) rather than papered over here, and the exclusion is now
 -- removed — 2020 is back in scope and passing.
 
-with cfbd as (
+-- ==========================================================================================
+-- ⚠️ THIS READ EVERY HISTORICAL PAYLOAD, NOT THE LATEST ONE (R-418/R-419).
+--
+-- raw_records is append-only: /records for 2026 has been fetched 18 times, from 2026-08-15
+-- to 2026-09-08. Without a recency filter this unnested ALL of them, so our current record
+-- was compared against every snapshot back to mid-August -- and of course we are "ahead" of
+-- the 15 August one. It failed 744 team-seasons, ALL of them 2026, ALL of them with us
+-- ahead and none behind, which is the signature of comparing against stale copies rather
+-- than of a real disagreement.
+--
+-- Measured: 744 failures reading all payloads, 0 reading only the newest per params.
+--
+-- Every staging model already does this -- `row_number() over (partition by params order by
+-- filename desc)` and keep recency = 1. The test did not, which is the same blind spot as
+-- R-410's append-only model: an assertion that could not see how its own source accumulates.
+--
+-- The 0-0 scope and the FBS/FCS scope below are unchanged and still independently correct.
+-- ==========================================================================================
+with cfbd_payloads as (
     select
         cast({{ json_get_string('params', 'year') }} as int) as season,
-        {{ json_array_elements(json_get_object('content', 'data')) }} as rec
+        content,
+        row_number() over (partition by params order by filename desc) as recency
     from {{ source('raw', 'raw_records') }}
     where status_code = 200
+),
+
+cfbd as (
+    select
+        season,
+        {{ json_array_elements(json_get_object('content', 'data')) }} as rec
+    from cfbd_payloads
+    where recency = 1
 ),
 
 cfbd_flat as (

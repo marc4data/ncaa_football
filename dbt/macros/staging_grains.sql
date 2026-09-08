@@ -1,37 +1,29 @@
--- Every staging model holds one row per the grain its documentation claims.
---
--- WHY STAGING NEEDS THIS AND NOT JUST THE FACTS. Staging is where the raw layer's
--- multiplicity is resolved, so it is where the resolution can be wrong, and a duplicate
--- introduced here is inherited by every mart downstream. The fact-level sweep
--- (assert_facts_are_unique_on_their_natural_key) catches the consequence one layer late,
--- after the fan-out has already been joined into something.
---
--- THE SPECIFIC FAILURE THIS EXISTS FOR. Staging models dedup with
--- `row_number() over (partition by params ...)`, which keeps the newest response PER REQUEST.
--- That is correct only while different requests return disjoint entities. It held for /games
--- until a season-scoped fetch was added next to the week-scoped ones; the two overlapped,
--- params-level dedup could not see it, and 211 duplicate game_ids reached fct_game. The fix
--- was a second dedup on the entity id — but the same shape is present in every model that
--- partitions by params, and nothing was watching the others.
---
--- Checked when this test was written, against the landed corpus: /games/teams held 3,414
--- games across 35 param sets and /games/players 3,413, with no id appearing in two fetches.
--- Disjoint TODAY. This is the tripwire for the day a season-scoped fetch is added.
---
--- Enumerating the class rather than testing one model at a time is deliberate. Six separate
--- outages in four days came from patching one instance of a defect class at a time; the
--- lesson recorded then was to enumerate the class before the third patch.
---
--- stg_rating_core DECLARES FOUR KEYS, NOT TWO. /ratings/core publishes the rating AS OF a
--- point in the season, so its grain is (season, team, through_season_type, through_week).
--- The landed data holds exactly one as-of point per season today, which is precisely the
--- condition under which a (season, team) declaration passes every build and starts silently
--- dropping rows the moment CFBD serves a second one.
---
--- Note for anyone editing the list below: it is a single Jinja expression, so NO comment
--- syntax works inside it — neither `--` nor `{# #}`. Both are compilation errors. Comments
--- about individual entries belong up here.
-{% set staging_grains = [
+{#-
+  The staging grain list, and the split between models the site depends on and models it does
+  not (R-420).
+
+  ONE LIST, TWO CONSEQUENCES. assert_staging_models_are_unique_on_their_grain enumerated 70
+  models at dbt's default severity of `error`, in a singular test, and dbt's default
+  indirect_selection is `eager` -- so a test is selected when ANY of its parents is. A
+  duplicate in ANY of the 70 therefore failed a gating test in BOTH two-hourly DAGs and
+  stopped BOTH publishes. On 2026-09-08 that meant a duplicate in stg_draft_pick could stop
+  the site from updating.
+
+  Measured in A063: 20 of the 70 are ancestors of a `+tag:production` model. The other 50 are
+  warehouse-only -- a duplicate there stops the site updating while affecting nothing it
+  renders.
+
+  Marc's ruling, 2026-09-08: the 20 keep `error`; the 50 move to `warn`. Both keep running
+  everywhere and surface in the R-412 alert payload; only the consequence differs.
+
+  ⚠️ THE SPLIT IS DERIVED FROM THE GRAPH, NOT PASTED. A hardcoded list is wrong the day a
+  serving view gains an ancestor, and it is wrong in the safe-looking direction -- a model
+  silently demoted to `warn` while the site now depends on it. `site_facing_staging()` walks
+  depends_on from every `production`-tagged node and returns the staging models it reaches.
+-#}
+
+{% macro staging_grains() %}
+  {{ return([
     ('stg_games',              ['game_id']),
     ('stg_teams',              ['season', 'team_id']),
     ('stg_venues',             ['venue_id']),
@@ -101,22 +93,48 @@
     ('stg_passing_team_season',  ['season', 'team']),
     ('stg_passing_team_game',    ['game_id', 'team']),
     ('stg_passing_play',         ['play_id']),
-    ('stg_api_recent_request',   ['api', 'endpoint', 'requested_at']),
-] %}
+    ('stg_api_recent_request',   ['api', 'endpoint', 'requested_at'])
+  ]) }}
+{% endmacro %}
 
-{% for model, grain in staging_grains %}
-select
-    '{{ model }}'                                 as model_name,
-    '{{ grain | join(", ") }}'                    as grain,
-    count(*)                                      as duplicate_keys
-from (
-    select {{ grain | join(', ') }}
-    from {{ ref(model) }}
-    group by {{ grain | join(', ') }}
-    having count(*) > 1
-) d
-having count(*) > 0
-{% if not loop.last %}
-union all
-{% endif %}
-{% endfor %}
+
+{% macro site_facing_staging() %}
+  {#- Staging models reachable, transitively, from any node tagged `production`.
+      Returns a list of bare model names. Empty during parsing, which is why every caller
+      must tolerate an empty list rather than treating it as "nothing is site-facing". -#}
+  {% set reached = [] %}
+  {% if execute %}
+    {% set frontier = [] %}
+    {% for uid, node in graph.nodes.items() %}
+      {% if 'production' in (node.config.tags or []) or 'production' in (node.tags or []) %}
+        {% do frontier.append(uid) %}
+      {% endif %}
+    {% endfor %}
+    {#- ⚠️ A NAMESPACE, BECAUSE JINJA'S `{% set %}` DOES NOT ESCAPE A `{% for %}`.
+        The first draft reassigned `frontier` inside the loop; the assignment was discarded at
+        each iteration, the walk never advanced past the seed nodes, and site_facing_staging()
+        returned an EMPTY LIST. Every staging model then landed in the warn half and NOTHING
+        gated the publish -- a guard silently disabled, in the same commit that split it.
+        `dbt compile` caught it: 0 models on the error side, 46 on the warn side. -#}
+    {% set ns = namespace(frontier=frontier, seen={}) %}
+    {% for _ in range(30) %}{# depth bound: the DAG is nowhere near 30 deep #}
+      {% set next_frontier = [] %}
+      {% for uid in ns.frontier %}
+        {% if uid not in ns.seen %}
+          {% do ns.seen.update({uid: true}) %}
+          {% set node = graph.nodes.get(uid) %}
+          {% if node %}
+            {% if node.name.startswith('stg_') and node.name not in reached %}
+              {% do reached.append(node.name) %}
+            {% endif %}
+            {% for parent in (node.depends_on.nodes or []) %}
+              {% do next_frontier.append(parent) %}
+            {% endfor %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+      {% set ns.frontier = next_frontier %}
+    {% endfor %}
+  {% endif %}
+  {{ return(reached) }}
+{% endmacro %}
