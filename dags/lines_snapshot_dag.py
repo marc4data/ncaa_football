@@ -42,6 +42,7 @@ from airflow.providers.standard.operators.python import (
 from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
+from src.dbt_artifacts import load_run_results
 from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
 from src.lines_cadence import load_config, should_snapshot
 from src.load_raw_to_postgres import load_endpoint
@@ -266,8 +267,34 @@ with DAG(
     gate >> snapshot >> load >> beat
     # Parallel leaf. See the comment on `weather`: it fails the run without silencing the
     # lines heartbeat.
+    # THE ALERT COULD NOT SAY WHAT BROKE, AND EVERY EMAIL COST A SESSION (R-412).
+    #
+    # deploy/cfdb_heartbeat.sh reads Airflow's metadata database, so it can say
+    # "dbt_test failed" and structurally nothing more -- it never sees dbt's
+    # run_results.json. Five days of alerts in September 2026 all carried the same
+    # sentence while the cause changed underneath it three times: a duplicated payload,
+    # then a test that could not see an append-only model. Each one cost a whole session
+    # to turn into a single fact, and an alert that cannot distinguish those trains its
+    # reader to ignore it.
+    #
+    # This lands run_results.json into raw.raw_dbt_test_result, which the heartbeat's
+    # forced command ALREADY has read access to -- it connects to this database as this
+    # user. No privilege is widened; the join moves to where the reader already is.
+    #
+    # all_done, not all_success: a failing dbt test is exactly when this row is worth
+    # having, and the default rule would skip the capture in precisely that case.
+    capture_test_results = PythonOperator(
+        task_id="capture_test_results",
+        python_callable=lambda **_: load_run_results(),
+        trigger_rule="all_done",
+    )
+
     gate >> weather
     # The transform chain needs the raw loaded, and the weather refreshed, before it runs —
     # a distribution built from last run's weather would be a forecast up to four hours stale
     # sitting on top of current lines. It is downstream of both and upstream of nothing.
     [load, weather] >> dbt_distribution >> dbt_distribution_test >> publish_distribution
+    # A SEPARATE BRANCH OFF the test, NOT on the publish chain (R-412). See the same
+    # note in scores_refresh_dag: an `all_done` capture downstream of publish becomes a
+    # leaf that reports success whether or not publish ran (R-297).
+    dbt_distribution_test >> capture_test_results

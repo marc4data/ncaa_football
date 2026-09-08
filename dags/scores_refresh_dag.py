@@ -47,6 +47,7 @@ from airflow.providers.standard.operators.python import (
 from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
+from src.dbt_artifacts import load_run_results
 from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
 from src.lines_cadence import load_config
 from src.load_raw_to_postgres import load_endpoint
@@ -249,4 +250,31 @@ with DAG(
                 run_id=getattr(c.get("dag_run"), "run_id", "") or ""),
     )
 
+    # THE ALERT COULD NOT SAY WHAT BROKE, AND EVERY EMAIL COST A SESSION (R-412).
+    #
+    # deploy/cfdb_heartbeat.sh reads Airflow's metadata database, so it can say
+    # "dbt_test failed" and structurally nothing more -- it never sees dbt's
+    # run_results.json. Five days of alerts in September 2026 all carried the same
+    # sentence while the cause changed underneath it three times: a duplicated payload,
+    # then a test that could not see an append-only model. Each one cost a whole session
+    # to turn into a single fact, and an alert that cannot distinguish those trains its
+    # reader to ignore it.
+    #
+    # This lands run_results.json into raw.raw_dbt_test_result, which the heartbeat's
+    # forced command ALREADY has read access to -- it connects to this database as this
+    # user. No privilege is widened; the join moves to where the reader already is.
+    #
+    # all_done, not all_success: a failing dbt test is exactly when this row is worth
+    # having, and the default rule would skip the capture in precisely that case.
+    capture_test_results = PythonOperator(
+        task_id="capture_test_results",
+        python_callable=lambda **_: load_run_results(),
+        trigger_rule="all_done",
+    )
+
     gate >> fetch >> load >> dbt_run >> dbt_test >> publish >> beat
+    # A SEPARATE BRANCH OFF dbt_test, NOT ON THE PUBLISH CHAIN (R-412). Capture is
+    # `all_done`, so putting it downstream of publish would make it a leaf that succeeds
+    # whether or not publish ran -- the exact defect R-297 fixed. publish stays the leaf
+    # that decides this run's state.
+    dbt_test >> capture_test_results

@@ -96,3 +96,36 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
   where recency = 1 and state = 'failed'
   order by dag_id, task_id
 " || echo "failed|MONITOR.cannot_read_airflow_metadata|0"
+
+# AND WHICH TEST, BECAUSE "dbt_test failed" HAS NEVER ONCE BEEN ENOUGH (R-412).
+#
+# The line above comes from Airflow's metadata database, which knows a task failed and
+# structurally cannot know why -- it never sees dbt's run_results.json. Between 2026-09-04
+# and 09-08 that produced five days of identical emails while the cause changed underneath
+# them three times: a duplicated CFBD payload, then a test that could not see an append-only
+# model. Each cost a full session to turn into one fact, and an alert that cannot tell those
+# apart teaches its reader to stop opening it.
+#
+# WHERE THE JOIN HAPPENS, AND WHY HERE. The DAGs now run `capture_test_results` (all_done)
+# which loads run_results.json into raw.raw_dbt_test_result. That table lives in THIS
+# database, which this forced command already reads as this user for the heartbeat query
+# above. So the payload costs no new privilege at all -- specifically NOT filesystem access
+# to run_results.json, which would widen a forced command that is restricted on purpose.
+#
+# One line per failing test: name, how many rows failed, how long ago. Not the log.
+# 6 hours matches the failure window above so the two signals describe the same period.
+"${PSQL[@]}" -c "
+  select 'failed_test|' ||
+         split_part(unique_id, '.', 3) || '|' ||
+         coalesce(failures, 0)::text || '|' ||
+         floor(extract(epoch from (now() - generated_at)))::bigint
+  from (
+    select unique_id, failures, generated_at, status,
+           row_number() over (partition by unique_id
+                              order by generated_at desc) as recency
+    from raw.raw_dbt_test_result
+    where generated_at > now() - interval '6 hours'
+  ) ranked
+  where recency = 1 and status in ('fail', 'error')
+  order by failures desc nulls last, unique_id
+" || echo "failed_test|MONITOR.cannot_read_dbt_results|0|0"
