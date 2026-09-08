@@ -569,9 +569,15 @@ select
     -- predicted_margin_home_perspective without flipping a sign itself.
     g.home_points - g.away_points as actual_margin_home_perspective,
 
-    -- HEAD TO HEAD AS IT STOOD BEFORE THIS GAME, from srv_matchup. Distinct from
-    -- fct_team_series, which is the all-time record per unordered pair: this is per-game and
+    -- HEAD TO HEAD AS IT STOOD BEFORE THIS GAME, from srv_matchup. Per-game, and it
     -- excludes the fixture on its own row.
+    --
+    -- This used to be contrasted with fct_team_series, the all-time record per unordered
+    -- pair. That model was DELETED on 2026-09-08 (R-425): it was reachable from no build
+    -- selector, so it was built once and frozen while this view recomputed the same
+    -- head-to-head every two hours, and the only thing that read it was its own
+    -- reconciliation test — which therefore compared live data against a fixed snapshot and
+    -- failed 221 pairs, blocking the weekly publish. This is now the only derivation.
     ser.series_games,
     ser.series_home_team_wins,
     ser.series_away_team_wins,
