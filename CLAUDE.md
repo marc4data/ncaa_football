@@ -122,6 +122,10 @@ Key commands
 - Historical backfill (idempotent, resumable): `python -m src.backfill --seasons 2024 2025`
 - Curated deep history: `python -m src.backfill --full-history`
 - Audit the raw layer after any backfill: `python -m src.validate_raw`
+- Export a schema to Excel: `scripts/warehouse_tunnel.sh`, then
+  `python -m src.export_sample --schema staging|serving --conference "Big 12" --season 2025 2026`
+  — see README.md, "Exporting the data to Excel", for the arguments and the one
+  warning that matters (never hardcode the warehouse container IP).
 - Install dev tooling: `pip install -r requirements-dev.txt`
 - Lint: `flake8 src dags tests` · Tests: `pytest -q`
 - CI runs both on every PR to `main` (`.github/workflows/ci.yml`). The live CFBD
