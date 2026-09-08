@@ -117,3 +117,88 @@ def test_a_team_with_no_previous_rank_is_not_rendered_as_no_change():
     """R-431. A blank or a zero reads as 'held station', which is the opposite of the truth."""
     assert "unranked last week" in SOURCE
     assert "pd.isna(row.prev_rank)" in SOURCE
+
+
+# --- the panels are actually CONSTRUCTIBLE ---------------------------------------------
+
+def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
+    """EXERCISE THE PAGE'S render path. Do not grep it, and do not rebuild it.
+
+    Two drafts of this test were wrong before this one, and both failures are the same shape.
+    The first checked the page's SOURCE for column names, and passed while
+    `Col(..., decimals=1)` and `Col(..., fmt=...)` were both wrong — Col takes `dp` and
+    `render` — so the page would have tracebacked the first time anyone opened it.
+    ci/check_page_queries.py could not see it either: it only executes SQL.
+
+    The second draft constructed its own Col list and asserted that formatted. It passed with
+    the bug deliberately reintroduced, because it was testing a list the test wrote rather
+    than the one the page writes.
+
+    This one stubs table.render to CAPTURE whatever the page hands it, calls each panel, and
+    formats a row through every captured column. If the page builds a Col wrongly, the
+    construction raises inside the panel and this fails.
+    """
+    import sys
+    import types
+
+    sys.path.insert(0, str(ROOT / "site"))
+    saved_st = sys.modules.get("streamlit")
+    stub = types.ModuleType("streamlit")
+    for name in ("subheader", "caption", "markdown", "write", "title", "line_chart"):
+        setattr(stub, name, lambda *a, **k: None)
+    stub.radio = lambda *a, **k: (a[1][0] if len(a) > 1 and a[1] else None)
+    stub.cache_data = lambda *a, **k: (lambda f: f)
+    stub.cache_resource = lambda *a, **k: (lambda f: f)
+    sys.modules["streamlit"] = stub
+    try:
+        from lib import table as table_module
+        from views import today as page
+
+        captured = []
+
+        def capture_render(df, columns, *a, **k):
+            captured.append(columns)
+
+        def capture_ros(df, view, what, why, renderer=None, **k):
+            if renderer is not None and df is not None and not df.empty:
+                renderer(df)
+
+        table_module.render = capture_render
+        page.table.render = capture_render
+        page.states.render_or_state = capture_ros
+
+        row = {"away_team_display": "Away", "home_team_display": "Home",
+               "away_points": 21, "home_points": 24, "excitement_index": 8.5,
+               "lead_changes": 4, "actual_margin": 3,
+               "spread_favorite_side": "home", "moneyline_favorite_side": "home",
+               "favorite_definitions_disagree": False,
+               "spread_at_close": -3.5, "spread_current": -3.5,
+               "market_implied_home_win_probability": 0.62,
+               "market_implied_away_win_probability": 0.38}
+        games = pd.DataFrame([row])
+
+        class Scope:
+            season, week, season_type, conference, division = 2026, 1, "regular", None, "fbs"
+
+            def describe(self):
+                return "2026 wk1"
+
+            def link(self, page_name, **k):
+                return "#"
+
+        page._most_exciting(games, Scope())
+        page._recap_lists(games, Scope())
+
+        assert captured, "no panel handed any columns to table.render"
+        sample = pd.Series({**row, "favorite": "Home", "opponent": "Away", "spread": 3.5,
+                            "fav_margin": 3, "ats": -0.5, "fav_win_prob": 0.62,
+                            "underdog": "Away", "beat": 0.5, "score": "21-24",
+                            "matchup": "Away at Home"})
+        for columns in captured:
+            for col in columns:
+                assert isinstance(col.format(sample), str)
+    finally:
+        if saved_st is not None:
+            sys.modules["streamlit"] = saved_st
+        else:
+            sys.modules.pop("streamlit", None)

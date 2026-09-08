@@ -126,10 +126,10 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
         "The week's most exciting games would be here.",
         f"No completed games with an excitement index for {scope.describe()}.",
         renderer=lambda d: table.render(d, [
-            Col("matchup", "Game", fmt=lambda r: f"{r.away_team_display} at {r.home_team_display}"),
-            Col("score", "Score", fmt=lambda r: f"{int(r.away_points)}–{int(r.home_points)}"
+            Col("matchup", "Game", render=lambda r: f"{r.away_team_display} at {r.home_team_display}"),
+            Col("score", "Score", render=lambda r: f"{int(r.away_points)}–{int(r.home_points)}"
                 if pd.notna(r.away_points) else "—"),
-            Col("excitement_index", "Excitement", kind="num", decimals=1),
+            Col("excitement_index", "Excitement", kind="num", dp=1),
             Col("lead_changes", "Lead changes", kind="num"),
         ], caption="Ranked by CFBD excitement index."))
 
@@ -171,15 +171,15 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
     covers = graded[graded["ats"] < 0].sort_values("ats").head(10)
 
     cols = [Col("favorite", "Favorite"), Col("opponent", "Opponent"),
-            Col("spread", "Spread", kind="num", decimals=1),
+            Col("spread", "Spread", kind="num", dp=1),
             Col("fav_margin", "Margin", kind="num"),
-            Col("ats", "vs spread", kind="num", decimals=1)]
+            Col("ats", "vs spread", kind="num", dp=1)]
 
     st.markdown("**Underperformers — by points missed against the closing spread**")
     table.render(missed, cols, caption="Favorites, ranked by how far short of the number they finished.")
 
     st.markdown("**Underperformers — by how likely the market thought they were to win**")
-    table.render(lost, cols + [Col("fav_win_prob", "Win prob", kind="num", decimals=3)],
+    table.render(lost, cols + [Col("fav_win_prob", "Win prob", kind="num", dp=3)],
                  caption="Favorites that lost outright, ranked by pregame market-implied win probability.")
 
     st.markdown("**Biggest underdog covers**")
@@ -189,8 +189,8 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
         "reader's question differs — who disappointed, and who was undervalued.")
     table.render(covers.assign(underdog=covers["opponent"], beat=covers["ats"].abs()),
                  [Col("underdog", "Underdog"), Col("favorite", "Favorite"),
-                  Col("spread", "Getting", kind="num", decimals=1),
-                  Col("beat", "Covered by", kind="num", decimals=1)],
+                  Col("spread", "Getting", kind="num", dp=1),
+                  Col("beat", "Covered by", kind="num", dp=1)],
                  caption="The mirror of the first list.")
 
     disagree = int(graded["favorite_definitions_disagree"].fillna(False).sum())
