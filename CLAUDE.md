@@ -90,7 +90,7 @@ which removed the manual deploy commands deliberately.
 working copy and hand-copied**, and this repo now has three working copies side by side:
 
     ncaa_football/claude_code/     main + in-flight branches
-    ncaa_football/wt-drives/       worktree, feature work
+    ncaa_football/wt-b/            session B worktree, feature work
     ncaa_football/cfdb_deploy/     worktree pinned to main; Airflow's mounts point here
 
 Merging a fix to the template changes **nothing** in any of them until someone re-copies it.
@@ -104,7 +104,7 @@ different states, neither visible to the other. `scripts/preflight_env.py` and t
 
     1. The environment fix merges to main.
     2. EVERY working copy fetches and rebases:
-         claude_code/ (and its in-flight branch)    wt-drives/    cfdb_deploy/
+         claude_code/ (and its in-flight branch)    wt-b/    cfdb_deploy/
     3. EVERY working copy, BY HAND, because git cannot do it:
          cp dbt/profiles.yml.example dbt/profiles.yml
          cp .env.example .env   (or diff an existing .env against it) and fill the values

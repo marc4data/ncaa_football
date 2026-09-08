@@ -78,7 +78,7 @@ trap 'ssh -O exit -o ControlPath="$SSH_SOCKET" "$SERVING_SSH_HOST" >/dev/null 2>
 # ONE DEPLOY AT A TIME (R-314). THE LOCK LIVES ON THE DROPLET, NOT HERE.
 #
 # This script is executable in EVERY working copy, and there are now three side by side
-# under one parent — claude_code/, wt-drives/, cfdb_deploy/ — each with its own copy. "Only
+# under one parent — claude_code/, wt-b/, cfdb_deploy/ — each with its own copy. "Only
 # one session publishes" was a sentence in a prompt, and a prompt is not what runs.
 #
 # The lock is remote deliberately. A lockfile in /tmp would serialise two shells on this
