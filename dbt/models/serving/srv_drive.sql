@@ -68,6 +68,24 @@ select
     ot.mascot                                              as offense_mascot,
     ot.logo_source_url                                     as offense_logo_url,
 
+    -- R-442. THE OFFENSE'S OWN COLOURS, WHICH THIS VIEW DID NOT CARRY UNTIL NOW.
+    --
+    -- The identity pair was asymmetric: opponent_* had the contrast trio below and offense_*
+    -- had none, so the drive chart recovered each band's colour from the OTHER band's
+    -- opponent_color_* — correct, because possession alternates, and a workaround. B066's
+    -- gate found it by querying information_schema rather than reading this file, which is
+    -- the only reason it was found at all.
+    --
+    -- Same coalesce fallbacks and the same color_source semantics as the endzone trio, and
+    -- for the same reason: dim_team walks the contrast ladder and lands on neutral grey when
+    -- nothing clears 3:1, so a team WITH a row always has a readable colour. A non-FBS
+    -- offense has no row at all, the left join leaves null, and it gets the same neutral grey
+    -- with color_source saying which. Grey is correct; an unreadable team colour is not, and
+    -- NULL is a crash.
+    coalesce(ot.color_on_light, '#6b6b68')                 as offense_color_on_light,
+    coalesce(ot.color_on_dark,  '#9a9a96')                 as offense_color_on_dark,
+    coalesce(ot.color_source, 'fallback')                  as offense_color_source,
+
     -- ---------------------------------------------------------------------------------------
     -- THE ENDZONE AT x=100: the team being driven at. A different team in each band, which is
     -- what "endzones labelled with the opposing team" means once both offenses drive right.

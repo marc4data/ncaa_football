@@ -3576,6 +3576,29 @@ models:
       - name: offense_mascot
         description: >
           Mascot of the offense. Identity chrome, not data encoding.
+      - name: offense_color_on_light
+        description: >
+          The rail colour for the band that has the ball, on a light surface —
+          contrast-checked upstream by dim_team and coalesced to neutral grey where the team
+          has no row at all. Never null, on the same reasoning as the endzone trio: grey is
+          correct, an unreadable team colour is not, and NULL is a crash.
+
+          Added in R-442. Until then the identity pair was asymmetric — opponent_* carried
+          the contrast trio and offense_* carried none — so the drive chart recovered each
+          band's colour from the other band's opponent_color_*. That worked because
+          possession alternates, and it was a workaround; this is the column it stood in for.
+        data_tests: [not_null]
+      - name: offense_color_on_dark
+        description: >
+          The same rail colour on a dark surface. Both variants ride the row so the page
+          chooses rather than computes — there is no contrast maths in the app.
+        data_tests: [not_null]
+      - name: offense_color_source
+        description: >
+          Which rung of the colour ladder the rail colour came from: primary or alternate are
+          the team's own, adjusted and fallback are cfdb's. Only the last two are debt worth
+          flagging, and a page renders them as a Degraded state rather than a failure.
+        data_tests: [not_null]
       - name: offense_logo_url
         description: >
           Logo for the offense. May be null — render the degraded state, never a crash.
