@@ -53,6 +53,10 @@ SUBSTITUTIONS = {
     # matter here: any integer executes the same query, and the value is not what is under
     # test. The models own the real numbers.
     "{ROW_CAP}": "5000",
+    # Today's leaderboard depth, chosen by a user radio (10/25/50) and interpolated for the
+    # same reason ROW_CAP is: the contract's LIMIT check matches `limit <digits>` and a bind
+    # parameter fails it. Any integer executes the same query; the value is not under test.
+    "{DEPTH}": "25",
 }
 
 # A value per bind parameter, so the query executes. These are not assertions about the
