@@ -94,6 +94,32 @@ models:
 #
 # Margins are in points, exclusive: a 7-point upset is level 1, an 8-point upset is level 2.
 vars:
+  # ------------------------------------------------------------------------------------
+  # THE BOOK LINE MOVEMENT IS MEASURED AGAINST (R-449). ONE PROVIDER, AND THAT IS THE POINT.
+  #
+  # Two providers carry current snapshots — measured 2026-09-08 on the 2026 season,
+  # draftkings 14,221 snapshots over 224 games and bovada 6,729 over 139. Mixing them
+  # compares a move against a DIFFERENT BOOK'S price: two books rarely open on the same
+  # number, so a "move" spanning both is partly the spread between books rather than
+  # anything the market did.
+  #
+  # DraftKings because it has the wider coverage of the two, not because it is better. A
+  # variable rather than a literal in a `where` so the choice is visible, reviewable and
+  # changeable in one place — and so that the day a third book appears, this is a
+  # configuration decision rather than an archaeology exercise.
+  line_movement_provider: draftkings
+
+  # THE THREE DAYS WITH NO SNAPSHOTS AT ALL: 2026-08-25, 08-26 and 08-27, the laptop-outage
+  # and droplet-migration window. Confirmed 2026-09-08 against fct_betting_line — 08-24 has
+  # 745 snapshots, 08-28 has 1,358, and the three days between have zero.
+  #
+  # A game whose line opened before this window has its movement measured ACROSS it, so the
+  # excursion is a floor rather than a measurement: the widest departure could have happened
+  # in the dark. The dates live here rather than in the model because they are a fact about
+  # the pipeline's history, not about betting.
+  snapshot_gap_start: '2026-08-25'
+  snapshot_gap_end: '2026-08-27'
+
   upset_margin_big: 7
   upset_margin_blowout: 14
 

@@ -550,6 +550,48 @@ select
               and l.over_under <> l.over_under_open
          then l.over_under - l.over_under_open end as total_move_from_open,
 
+    -- ---------------------------------------------------------------------------------------
+    -- HOW FAR THE LINE TRAVELLED, from fct_game_line_movement (R-449).
+    --
+    -- COLUMNS ON srv_game RATHER THAN A SECOND GAME-GRAIN VIEW. srv_line_movement is snapshot
+    -- grain and a panel wants one row per game; the app cannot aggregate. The grain rule says
+    -- a finer fact arrives as a derived summary at game grain computed in dbt, and srv_game is
+    -- already the game-grain view — a second one beside it is the defect that rule names.
+    --
+    -- ⚠️ *_move_from_open ABOVE AND *_largest_excursion HERE ARE DIFFERENT MEASUREMENTS. The
+    -- move is where the line ended up; the excursion is the widest it ever departed from the
+    -- open, signed, keeping that direction. A line that went out three points and came back
+    -- reads as no move and a three-point excursion, which is the whole reason a movement panel
+    -- exists. Measured on games with a real snapshot history: they differ on 17% of spreads
+    -- and 29% of win probabilities.
+    --
+    -- ⚠️ snapshot_count IS NOT DECORATION. 1,577 of 1,854 games carry a SINGLE snapshot — 2024
+    -- and 2025 were backfilled one row per game — and on those an excursion is equal to the
+    -- move by construction rather than by measurement. A page that draws a movement chart
+    -- should read this first.
+    -- ---------------------------------------------------------------------------------------
+    -- ⚠️ THE WHOLE SET IS ONE BOOK'S, AND THAT IS WHY IT IS PREFIXED. srv_game's
+    -- `spread_move_from_open` above comes from `latest_line`, which takes the most recent
+    -- snapshot ACROSS providers — measured, that is bovada on 1,520 of the 1,603 rows that
+    -- also carry an excursion. Pairing it with a DraftKings excursion would compare a move
+    -- against a different book's price, which is partly the spread between books rather than
+    -- anything the market did, and it would look like data.
+    --
+    -- So the movement set carries its OWN net move from the same book, and `line_` says which
+    -- family a column belongs to. No second word is coined for "move" — `_move_from_open` and
+    -- `_largest_excursion` are the vocabulary throughout, here and in the mart.
+    lm.provider_key                as line_movement_provider_key,
+    lm.spread_move_from_open       as line_spread_move_from_open,
+    lm.spread_largest_excursion    as line_spread_largest_excursion,
+    lm.total_move_from_open        as line_total_move_from_open,
+    lm.total_largest_excursion     as line_total_largest_excursion,
+    lm.market_implied_win_probability_move_from_open
+                                   as line_market_implied_win_probability_move_from_open,
+    lm.market_implied_win_probability_largest_excursion
+                                   as line_market_implied_win_probability_largest_excursion,
+    lm.snapshot_count              as line_snapshot_count,
+    lm.open_predates_snapshot_gap  as line_open_predates_snapshot_gap,
+
     -- R-108b. The better of the two poll ranks, for the stacked view's sort.
     --
     -- least() ignores nulls in both dialects, so an unranked opponent does not erase a ranked
@@ -673,6 +715,9 @@ left join current_week cw
     on  cw.season = g.season and cw.season_type = g.season_type and cw.week = g.week
 left join {{ ref('fct_game_pregame_wp') }} wp on wp.game_id = g.game_id
 left join {{ ref('fct_game_weather') }} w on w.game_id = g.game_id
+-- Game grain both sides, so this cannot fan out; LEFT because a game with no snapshots
+-- from the measured book keeps its row with null movement rather than disappearing.
+left join {{ ref('fct_game_line_movement') }} lm on lm.game_id = g.game_id
 -- Record LEADING INTO this game's week, per side. Joined on the full grain including
 -- season_type, because postseason week numbers restart at 1 and joining on week alone would
 -- put a bowl game's record on an October fixture.
