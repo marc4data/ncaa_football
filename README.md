@@ -183,6 +183,60 @@ That distinction is load-bearing. `records` returned 668 rows for 2024 and 2025 
 newest response against its best across *all* params flags every endpoint the moment a new
 season opens — the first version of the mart did exactly that and produced 8 false positives.
 
+## Exporting the data to Excel
+
+**If you are coming back to this after a long gap, this is the section you want.** Two
+commands, in two terminals.
+
+```bash
+# terminal 1 — leave it running. It prints what it resolved, then goes quiet.
+# Silence is success; Ctrl-C closes it.
+scripts/warehouse_tunnel.sh
+
+# terminal 2
+python -m src.export_sample --schema staging --conference "Big 12" --season 2025 2026
+```
+
+**No environment prefix is needed.** `.env` carries `CFDB_WAREHOUSE_HOST=127.0.0.1` and
+`CFDB_WAREHOUSE_PORT=15433`; `pg_params()` reads `PG_HOST`/`PG_PORT` first and falls back to
+those, and user, password and database all default to `cfdb`.
+
+### The two schemas
+
+| `--schema` | what it is |
+|---|---|
+| `staging` | one model per CFBD endpoint, JSON unpacked and failed responses filtered out — the layer BELOW the site's serving views |
+| `serving` | what the site actually reads: pre-joined, one relation per page section, with the display rules already applied |
+
+### The other arguments
+
+- `--season` takes **several years** — `--season 2025 2026`. Conference membership resolves
+  per season and the results are unioned, so a team that changed conference is handled
+  correctly rather than silently dropped from one of the years.
+- `--conference` is an exact `dim_team.conference` value: `"Big 12"`, `"SEC"`.
+- `--out` defaults to `data/exports/<schema>_sample_<yyyymmdd>_<hhmm>.xlsx`, stamped in
+  **local time**, so two runs in the same day cannot overwrite each other.
+- The workbook's **Index** sheet records which database it came from, e.g.
+  `from 127.0.0.1:15433/cfdb, staging schema`. Check it before trusting a workbook you find
+  later.
+
+### ⚠️ Never hardcode the warehouse container's IP
+
+An older note going around says to tunnel with `-L 15432:172.19.0.2:5432`. **Do not.** Docker
+reassigns that address whenever the pipeline stack is recreated, and the tunnel then opens
+*successfully* against whatever now holds it — or against nothing. **It does not error; it
+answers.** You get a workbook with the right sheet names, plausible row counts, and data from
+somewhere else, and the only clue is a number that looks slightly off.
+
+`scripts/warehouse_tunnel.sh` exists to prevent exactly that: it asks the droplet which
+container is the warehouse, resolves the address fresh on every run, prints what it found, and
+stores nothing. It reads the droplet's address from `CFDB_DROPLET_HOST` in `.env`.
+
+Two more things that used to be wrong in that note: the module is **`src.export_sample`**, not
+`src.export_staging_sample` — it was renamed when it learned to export `serving` too — and the
+local port is **15433**, not 15432. Port 5432 is refused outright; that was the laptop database,
+dropped in 2026-09.
+
 ## Layers
 
 Schema per layer in both engines (decision log 2026-08-17), rather than a naming convention
