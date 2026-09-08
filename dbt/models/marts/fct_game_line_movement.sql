@@ -119,6 +119,28 @@ latest as (
 
 ),
 
+-- THE OPEN IS RESOLVED ONCE PER GAME, AND THAT IS A BUG FIX RATHER THAN A TIDY-UP.
+--
+-- fct_betting_line carries spread_open on each snapshot, and CFBD STOPS SUPPLYING IT: game
+-- 401866411 has 94 snapshots of which the last 12 carry spread = -38.5 and spread_open = NULL.
+-- Measuring departures with `where spread_open is not null` therefore excluded exactly the
+-- snapshots the net move was computed from — the move read -3.0 against a widest departure of
+-- -2.0, an excursion NARROWER than the move, which the widest departure cannot be.
+--
+-- assert_line_excursion_is_not_just_the_net_move's invariant clause caught it on the first run.
+-- Resolving the open per game and measuring every snapshot that has a PRICE against it makes
+-- the invariant true by construction rather than by luck.
+game_open as (
+
+    select
+        game_id,
+        max(spread_open)     as spread_open,
+        max(over_under_open) as total_open
+    from joined
+    group by game_id
+
+),
+
 aggregated as (
 
     select
@@ -128,21 +150,22 @@ aggregated as (
         count(*)                                             as snapshot_count,
         count(j.home_win_probability_pct)                    as usable_probability_snapshots,
 
-        max(j.spread_open)                                   as spread_open,
-        max(j.over_under_open)                               as total_open,
+        max(o.spread_open)                                   as spread_open,
+        max(o.total_open)                                    as total_open,
 
         -- THE EXCURSION IS THE SIGNED WIDEST DEPARTURE, not the widest absolute value dressed
         -- up as one. max(abs()) would lose the direction, and a line that went 3 points the
         -- wrong way is a different story from one that went 3 the right way.
-        max(j.spread - j.spread_open) filter (where j.spread is not null
-                                          and j.spread_open is not null) as spread_max_up,
-        min(j.spread - j.spread_open) filter (where j.spread is not null
-                                          and j.spread_open is not null) as spread_max_down,
-        max(j.over_under - j.over_under_open) filter (where j.over_under is not null
-                                          and j.over_under_open is not null) as total_max_up,
-        min(j.over_under - j.over_under_open) filter (where j.over_under is not null
-                                          and j.over_under_open is not null) as total_max_down
+        max(j.spread - o.spread_open) filter (where j.spread is not null
+                                          and o.spread_open is not null) as spread_max_up,
+        min(j.spread - o.spread_open) filter (where j.spread is not null
+                                          and o.spread_open is not null) as spread_max_down,
+        max(j.over_under - o.total_open) filter (where j.over_under is not null
+                                          and o.total_open is not null) as total_max_up,
+        min(j.over_under - o.total_open) filter (where j.over_under is not null
+                                          and o.total_open is not null) as total_max_down
     from joined j
+    join game_open o on o.game_id = j.game_id
     group by j.game_id
 
 )

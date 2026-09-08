@@ -3,58 +3,71 @@
 -- WHY THIS TEST EXISTS. `*_largest_excursion` and `*_move_from_open` are trivially equal on a
 -- game whose line only ever moved one way, and a bug that made them equal EVERYWHERE — an
 -- excursion that accidentally read the last snapshot instead of the widest — would look like
--- clean data. Every row would carry a plausible number and nothing would raise. A059 measured
--- excursion exceeding net move at every decile and roughly a third of games ending where they
--- started having moved in between; a round trip is invisible to net move and is exactly what
--- a movement panel exists to show.
+-- clean data. Every row would carry a plausible number and nothing would raise. A round trip is
+-- invisible to net move and is exactly what a movement panel exists to show.
 --
--- ⚠️ IT ASKS THE QUESTION ONLY OF GAMES THAT COULD ANSWER IT. 1,577 of 1,854 rows carry a
--- single snapshot — 2024 and 2025 were backfilled with one row per game — and on those the two
--- measures are equal BY CONSTRUCTION, not by defect. Asserting over all rows would make this
--- fail on correct data; asserting over none would make it vacuous. Among the 224 games with a
--- real snapshot history the two differ on 17% of spreads and 29% of win probabilities, so the
--- threshold below is far under what correct data produces and far over zero.
+-- ⚠️ IT ASSERTS TWO THINGS, AND THE FIRST ONE IS THE SCALE-FREE ONE. A first draft required
+-- "at least 50 games with a snapshot history", which is a production-shaped number written into
+-- a test that also runs against a CI fixture holding one game — so it passed against the
+-- warehouse and failed CI, which is the assertion having an opinion about the data volume
+-- rather than about the data.
 --
--- NOT TAGGED full_refresh_only, AND THE PROJECT'S OWN GUARD IS WHY. The tag was on it for one
--- draft; test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags rejected it —
--- "these are selected by the scores DAG and do not straddle the boundary, so the tag costs real
--- coverage". Correct: this test reads ONE model, so there is no fresh-side-against-stale-side to
--- protect against, and excluding it from the two-hourly run would simply stop it running. The
--- tag is for tests that span a refresh boundary, and applying it defensively is how coverage
--- disappears quietly.
+--   1. THE INVARIANT, on every row, everywhere: the widest departure from the open cannot be
+--      NARROWER than the final one. |excursion| >= |move| is true by the definition of widest,
+--      so a violation is a logic error and needs no population to detect.
+--
+--   2. THE DIVERGENCE, asked only where the data can answer it: if any game was observed at
+--      more than three snapshots, then at least one such game must show excursion <> move.
+--      Guarded by the data rather than by a constant, so it is strong against the warehouse
+--      (1,577 of 1,854 games carry a single snapshot; among the 224 with real histories the two
+--      differ on 17% of spreads and 29% of win probabilities) and silent where no game has a
+--      history to diverge over.
 
-with measurable as (
+with movement as (
 
-    select *
-    from {{ ref('fct_game_line_movement') }}
-    where snapshot_count > 3
+    select * from {{ ref('fct_game_line_movement') }}
 
 ),
 
-counted as (
+invariant_breaks as (
+
+    select
+        game_id,
+        'excursion is narrower than the net move, which the widest departure cannot be'
+            as failure
+    from movement
+    where (spread_move_from_open is not null and spread_largest_excursion is not null
+           and abs(spread_largest_excursion) < abs(spread_move_from_open))
+       or (total_move_from_open is not null and total_largest_excursion is not null
+           and abs(total_largest_excursion) < abs(total_move_from_open))
+       or (market_implied_win_probability_move_from_open is not null
+           and market_implied_win_probability_largest_excursion is not null
+           and abs(market_implied_win_probability_largest_excursion)
+               < abs(market_implied_win_probability_move_from_open))
+
+),
+
+with_history as (
 
     select
         count(*)                                                       as games,
         count(*) filter (
             where spread_largest_excursion is distinct from spread_move_from_open
-        )                                                              as spread_differs,
-        count(*) filter (
-            where market_implied_win_probability_largest_excursion
+               or market_implied_win_probability_largest_excursion
                   is distinct from market_implied_win_probability_move_from_open
-        )                                                              as probability_differs
-    from measurable
+        )                                                              as diverging
+    from movement
+    where snapshot_count > 3
 
 )
 
+select game_id, failure from invariant_breaks
+
+union all
+
 select
-    games,
-    spread_differs,
-    probability_differs,
-    'excursion never departs from the net move on any game with a snapshot history — '
-    || 'the two columns are measuring the same thing'                  as failure
-from counted
--- A scope with nothing in it cannot answer, and a test that passes on an empty scope is the
--- assertion this project has recorded three times.
-where games < 50
-   or spread_differs = 0
-   or probability_differs = 0
+    null::bigint,
+    'no game with a snapshot history shows the excursion departing from the net move — '
+    || 'the two columns are measuring the same thing'
+from with_history
+where games > 0 and diverging = 0
