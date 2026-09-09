@@ -32,4 +32,4 @@ select
     g.stat_attempted,
     ao.as_of_ts
 from {{ ref('fct_player_game_stat') }} g
-cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'player_game') ao

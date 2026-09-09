@@ -44,4 +44,4 @@ select
     w.is_precipitating,
     ao.as_of_ts
 from {{ ref('fct_game_weather') }} w
-cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'weather') ao

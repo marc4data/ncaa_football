@@ -36,7 +36,56 @@ with endpoint_domain as (
         ('conferences',  'team'),
         ('venues',       'team'),
         ('info',         'ops'),
-        ('info_usage',   'ops')
+        ('info_usage',   'ops'),
+        -- ==================================================================================
+        -- R-489. R-353 FIXED ONE INSTANCE OF THIS AND LEFT THE CLASS OPEN. These are the
+        -- rest, found by walking every serving view's lineage against the domain it joins
+        -- rather than by waiting for someone to notice a caption (A077/R-488).
+        --
+        -- THE RULE THAT DECIDES WHICH ENDPOINTS BELONG TO A DOMAIN: the endpoints that
+        -- supply the view's SUBJECT, not the ones it joins for LOOKUPS. Every serving view
+        -- reaches dim_team for identity, so 'teams' and 'conferences' are in almost every
+        -- lineage; mapping them into every domain would make the whole site read 25 days old
+        -- because reference data legitimately reloads rarely. `game` has never included them
+        -- and that was already right.
+        --
+        -- ⚠️ EVERY LABEL BELOW WAS VERIFIED AGAINST raw.raw_manifest, not derived from the
+        -- API path. A label that matches nothing does not error — it contributes no rows and
+        -- the domain is silently built from whatever remains, which is the single most likely
+        -- way to ship a fix that does nothing. See the note at the top of this list.
+
+        -- Ratings. THE ONE MARC COULD SEE: srv_team_rating joined 'team', whose three
+        -- endpoints are all reference lookups last loaded 2026-08-15, while the five
+        -- endpoints that actually produce the ratings had loaded that morning. The page
+        -- rendered 552 rows of current sp+/fpi/elo/ppa under a caption saying they were
+        -- twenty-five days old. Wrong in the direction that makes a reader DISCOUNT
+        -- something they should trust — the mirror of R-353 and just as false.
+        ('ratings_sp',          'rating'),
+        ('ratings_srs',         'rating'),
+        ('ratings_elo',         'rating'),
+        ('ratings_fpi',         'rating'),
+        ('ppa_teams',           'rating'),
+
+        -- Weather. srv_game_weather is fed by games_weather and joined 'game', which does not
+        -- contain it. Both happened to sit at 2026-09-09 the day this was found, so there was
+        -- no visible drift — which is exactly why it needed finding by lineage rather than by
+        -- looking at numbers. The moment /games/weather stalls and /games does not, the
+        -- caption flatters.
+        ('games_weather',       'weather'),
+
+        -- Player box scores, and play-level attribution. Both joined 'game' and neither is
+        -- fed by it.
+        ('games_players',       'player_game'),
+        ('plays',               'play'),
+        ('plays_stats',         'play'),
+
+        -- Player season stats. 'stats' maps stats_season, which is the TEAM season endpoint;
+        -- srv_player_stats is fed by stats_player_season and never touched it.
+        ('stats_player_season', 'player_stats'),
+
+        -- Roster. srv_team_roster joined 'team'. roster and teams both last loaded 08-15, so
+        -- like weather there is no drift today and the mapping was still wrong.
+        ('roster',              'roster')
     ) as t(endpoint, domain)
 ),
 loads as (

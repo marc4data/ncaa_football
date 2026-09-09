@@ -44,4 +44,4 @@ select
     p.ppa,
     ao.as_of_ts
 from {{ ref('fct_play_stat') }} p
-cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') ao
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'play') ao
