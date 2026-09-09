@@ -256,6 +256,22 @@ def test_every_panel_is_assigned_to_exactly_one_tab(page):
     assert len(assigned) == len(set(assigned)), "a panel is on both tabs"
 
 
+def test_every_named_panel_actually_resolves_to_a_function(page):
+    """⚠️ THE COST OF NAMING PANELS INSTEAD OF REFERENCING THEM. Names are resolved out of the
+    module at call time — which is what makes the lazy guarantee testable — and the price is
+    that a typo in TABS is a KeyError at render rather than at import. The fixture patches
+    only the names it knows, so it cannot catch that; this asserts against the real module."""
+    _, matchup = page
+    for _slug, _label, panels in matchup.TABS:
+        for name in panels:
+            resolved = vars(matchup).get(name)
+            assert callable(resolved), f"TABS names {name!r}, which is not a function here"
+            # ⚠️ __name__, not merely callable: the fixture's recorders are callable too, so
+            # a bare callable check would quietly pass on a patched module and prove nothing.
+            assert getattr(resolved, "__name__", None) == name, \
+                f"{name!r} resolved to something other than the real panel"
+
+
 def test_a_completed_game_still_reaches_every_panel_across_the_two_tabs(page):
     run, matchup = page
     reached = []
