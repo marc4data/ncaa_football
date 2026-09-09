@@ -121,6 +121,62 @@ def test_a_team_with_no_previous_rank_is_not_rendered_as_no_change():
 
 # --- the panels are actually CONSTRUCTIBLE ---------------------------------------------
 
+# ⚠️ THE MODULES THAT MUST BE RELOADED, AND WHY THIS TUPLE EXISTS (R-447).
+#
+# Every module here holds its own `import streamlit as st`, so it binds whatever streamlit
+# was in sys.modules AT ITS FIRST IMPORT and never looks again. Swapping sys.modules is
+# therefore a no-op against an already-imported module — and tests/test_site_foundation.py
+# imports every view module in the registry against the REAL streamlit, and sorts BEFORE
+# this file. Session B measured it (B069, R-447): in a full run this test's stub reached
+# neither views.today nor lib.states, and the test passed anyway because the capture works
+# by explicit attribute patching, which is independent of the stub.
+#
+# Order matters: dependencies before views.today, so the page re-imports the reloaded ones.
+# This is the mechanism tests/test_matchup_drives.py and tests/test_view_columns.py already
+# use. It is deliberately the same one — a third approach would be a third thing to get
+# wrong.
+_RELOAD = ("lib.query", "lib.table", "lib.states", "lib.attribution", "lib.filters",
+           "lib.shell", "views.today")
+
+
+def _reload_all():
+    import importlib
+    for name in _RELOAD:
+        importlib.reload(importlib.import_module(name))
+
+
+def _stub_streamlit():
+    """A stub that RECORDS what reached it, so an assertion can depend on being bound.
+
+    The recording is the point. A stub of no-op lambdas cannot be distinguished from real
+    streamlit tolerating the same calls headlessly, which is exactly how the inert version
+    of this test passed for a round. `calls` is empty if the page is talking to the real
+    module, and the test requires the page's own headings to be in it.
+    """
+    import types
+
+    calls = []
+    stub = types.ModuleType("streamlit")
+
+    def _record(name):
+        def fn(*a, **k):
+            calls.append((name, a[0] if a else None))
+            return None
+        return fn
+
+    for name in ("subheader", "caption", "markdown", "write", "title", "line_chart",
+                 "dataframe", "columns", "container", "info", "warning", "error"):
+        setattr(stub, name, _record(name))
+    # Returns the FIRST option so a branch is taken rather than skipped. Under real
+    # streamlit this returns whatever the widget state holds, which is why a run against
+    # the real module is not the same test.
+    stub.radio = lambda *a, **k: (calls.append(("radio", a[0] if a else None))
+                                  or (a[1][0] if len(a) > 1 and a[1] else None))
+    stub.cache_data = lambda *a, **k: (lambda f: f)
+    stub.cache_resource = lambda *a, **k: (lambda f: f)
+    return stub, calls
+
+
 def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
     """EXERCISE THE PAGE'S render path. Do not grep it, and do not rebuild it.
 
@@ -134,25 +190,41 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
     the bug deliberately reintroduced, because it was testing a list the test wrote rather
     than the one the page writes.
 
+    ⚠️ THE THIRD DRAFT — this test as it shipped in A067 — was INERT in a full run, and
+    passed while inert. It swapped sys.modules["streamlit"] but never reloaded the modules
+    that had already bound the real one. See _RELOAD above. The repair (R-447) reloads them,
+    puts them back, and — because a pass is not a proof for a test that passed while inert —
+    makes the assertion DEPEND on the stub: the stub records, and the page's own headings
+    must be in that recording. Against real streamlit `calls` is empty and this test fails
+    rather than passing quietly.
+
     This one stubs table.render to CAPTURE whatever the page hands it, calls each panel, and
     formats a row through every captured column. If the page builds a Col wrongly, the
     construction raises inside the panel and this fails.
     """
     import sys
-    import types
 
-    sys.path.insert(0, str(ROOT / "site"))
+    # ⚠️ BOTH of these are undone in the finally, and the pre-repair version undid neither
+    # the sys.path entry nor the module bindings. A test file that leaves the stub bound
+    # breaks other test files: B066's first draft failed six tests in test_site_foundation
+    # and test_scores_page that way. monkeypatch cannot do this either — its sys.modules
+    # undo runs AFTER fixture teardown — so the swap and the restore are both by hand.
+    site_path = str(ROOT / "site")
+    path_added = site_path not in sys.path
+    if path_added:
+        sys.path.insert(0, site_path)
     saved_st = sys.modules.get("streamlit")
-    stub = types.ModuleType("streamlit")
-    for name in ("subheader", "caption", "markdown", "write", "title", "line_chart"):
-        setattr(stub, name, lambda *a, **k: None)
-    stub.radio = lambda *a, **k: (a[1][0] if len(a) > 1 and a[1] else None)
-    stub.cache_data = lambda *a, **k: (lambda f: f)
-    stub.cache_resource = lambda *a, **k: (lambda f: f)
+    stub, calls = _stub_streamlit()
     sys.modules["streamlit"] = stub
     try:
-        from lib import table as table_module
-        from views import today as page
+        _reload_all()
+        page = sys.modules["views.today"]
+        table_module = sys.modules["lib.table"]
+
+        # The stub is bound only if the reload above actually happened. Assert it here
+        # rather than trusting it, because this is the exact thing that was silently false.
+        assert page.st is stub, "views.today is not talking to the stub — the reload failed"
+        assert sys.modules["lib.states"].st is stub, "lib.states is not talking to the stub"
 
         captured = []
 
@@ -190,6 +262,16 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
         page._recap_lists(games, Scope())
 
         assert captured, "no panel handed any columns to table.render"
+
+        # ⚠️ THE ASSERTION THAT DEPENDS ON THE STUB. Under real streamlit these calls go
+        # somewhere else and `calls` is empty, so this fails instead of passing quietly —
+        # which is the whole difference between this version and the inert one.
+        headings = [arg for name, arg in calls if name == "subheader"]
+        assert "Most exciting" in headings, \
+            f"_most_exciting's heading never reached the stub; recorded: {headings}"
+        assert "How the week went against the market" in headings, \
+            f"_recap_lists' heading never reached the stub; recorded: {headings}"
+
         sample = pd.Series({**row, "favorite": "Home", "opponent": "Away", "spread": 3.5,
                             "fav_margin": 3, "ats": -0.5, "fav_win_prob": 0.62,
                             "underdog": "Away", "beat": 0.5, "score": "21-24",
@@ -202,3 +284,6 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
             sys.modules["streamlit"] = saved_st
         else:
             sys.modules.pop("streamlit", None)
+        _reload_all()
+        if path_added and site_path in sys.path:
+            sys.path.remove(site_path)

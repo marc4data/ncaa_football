@@ -21,15 +21,50 @@ serving Postgres, the Streamlit site, and a Cloudflare Tunnel connector.
 ## The security posture, and why it looks like this
 
 **No inbound ports.** The firewall allows SSH and nothing else; the tunnel dials *out* to
-Cloudflare, so the site is reachable without opening anything. Postgres is not published to
-the host at all — it exists only on the Docker network, where the site reaches it by
-service name. Cloudflare Access is the auth boundary; there is no auth code in the app.
+Cloudflare, so the site is reachable without opening anything. Cloudflare Access is the auth
+boundary; there is no auth code in the app.
+
+⚠️ **CORRECTED 2026-09-08 (A071/R-445) — MEASURED, NOT REASONED.** This paragraph used to say
+Postgres *"is not published to the host at all — it exists only on the Docker network"*. That
+is **false**, and it has been false for as long as the serving stack has run this way:
+
+    $ docker ps --format "{{.Names}} | {{.Ports}}"
+    cfdb-postgres-1 | 127.0.0.1:5433->5432/tcp
+
+The serving Postgres **is** published, to the droplet's **loopback only**. The security
+claim the paragraph was making still holds — loopback is not reachable from outside the box,
+and the firewall allows only SSH — but the mechanism stated was the wrong one, and the wrong
+mechanism is what someone reasons from later. It is also what makes
+`scripts/serving_tunnel.sh` possible at all: an SSH local-forward to `127.0.0.1:5433` reaches
+it, which a Docker-network-only Postgres could not do. `README.md` documented that forward
+while this page denied the port existed, and **the two have contradicted each other in the
+repo without either being checked.**
+
+⚠️ **The container is `cfdb-postgres-1`.** `cfdb-serving` is the droplet's HOSTNAME, not a
+container name — a `docker exec cfdb-serving …` looks plausible and cannot work.
 
 **Two database roles.** The owner runs migrations and receives publishes; the site connects
 as `cfdb_read`, which holds SELECT and nothing else. Serving is read-only by architecture.
 
-Secrets live in `/opt/cfdb/.env` (0600), generated on the box so they never transit a
-laptop or a git history.
+Secrets live in `/opt/cfdb/.env` (0600), generated on the box so they never transit a git
+history.
+
+⚠️ **`CFDB_READ_PASSWORD` IS NOW THE ONE EXCEPTION TO "never transit a laptop" — Marc's
+ruling, R-445, 2026-09-08.** This sentence used to say *"never transit a laptop or a git
+history"* and that is no longer true of the read role. It stays true of every other secret
+here, and of `cfdb_read` in git.
+
+The reason is that the previous arrangement had a cost nobody had priced: with the credential
+on the box only, **no local session could read serving at all**, so every render check ran on
+the droplet — B066's four-state check did, and paid for it. `cfdb_read` holds SELECT on
+`serving` and nothing else, so a laptop copy widens where it is held without widening what it
+can do, and `scripts/verify_read_credential.py` re-measures that limit on demand from
+whichever machine holds it rather than trusting this paragraph.
+
+**The value is still generated on the box and set there.** Rotating it is
+`ALTER ROLE cfdb_read PASSWORD …` against the serving Postgres, and it must then be pasted
+into the `.env` of **each working copy** — they are gitignored and per-worktree, so nothing
+propagates. Report it by fingerprint (`sha256`, first eight hex), never by value.
 
 ## Layout
 
