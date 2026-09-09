@@ -1,0 +1,18 @@
+{
+  "//": "Project permissions for cfdb. Committed on purpose: this file lives INSIDE the repo, so every worktree gets it. The rules that used to live in ncaa_football/.claude are a sibling of the repo and no worktree ever loaded them. NO ssh rules here and no host literals - the repo is public. Machine-specific or host-specific rules belong in an untracked .claude/settings.local.json.",
+  "permissions": {
+    "allow": [
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git branch *)",
+      "Bash(git rebase *)",
+      "Bash(git worktree *)",
+      "Bash(git fetch *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(gh pr *)",
+      "Bash(gh run *)",
+      "Bash(gh api *)"
+    ]
+  }
+}
