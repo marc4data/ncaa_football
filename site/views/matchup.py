@@ -20,6 +20,7 @@ from lib.table import Col
 
 COLUMNS = """
     game_id, season, season_type, week, start_date_et, venue_display, attendance,
+    home_team_id, away_team_id,
     is_completed, is_conference_game, is_neutral_site,
     home_team, home_abbreviation, home_conference, home_logo_url, home_color_on_light,
     home_color_on_dark, home_points, home_wins, home_losses,
@@ -75,6 +76,10 @@ def body(page) -> None:
         _line_movement(row)
         _model(row)
         _series(row)
+        # A pre-game block, and it sits with the other pre-game blocks: market,
+        # model, history, then form. Weather and travel are conditions and drives
+        # are the game itself, so both stay below it.
+        _yardage(row)
         # Its own view and its own section: weather exists for 2024 onward only, and a
         # nested section means a weather failure degrades one block rather than blanking a
         # page that is otherwise complete.
@@ -388,6 +393,184 @@ def _series(row) -> None:
     if pd.notna(ties) and int(ties):
         st.caption(f"{int(ties)} of those ended in a tie — college football had no "
                    f"overtime before 1996.")
+
+
+# --- R-463: offence against defence -------------------------------------------------------
+
+# ⚠️ THE PAIRING IS ACROSS SIDES, AND IT IS THE ONE THING HERE THAT IS EASY TO GET
+# BACKWARDS. Marc's comparison, verbatim: "how team A produces passing yards compared to how
+# Team B allows passing yards." So a team's `_for` sits beside the OTHER side's `_allowed`.
+# Pairing a team's `_for` with its own `_allowed` describes one team rather than a matchup,
+# and it would look entirely reasonable on screen — which is why
+# test_the_pairing_runs_across_sides_not_down_one exists and was watched go red.
+_YARDAGE_DIMENSIONS = (
+    ("Rushing", "rushing_yards_for_per_game", "rushing_yards_allowed_per_game"),
+    ("Passing", "passing_yards_for_per_game", "passing_yards_allowed_per_game"),
+    # TOTAL EARNS ITS ROW ON A MEASUREMENT, NOT ON SYMMETRY. It is rushing + passing in
+    # 13,686 of the 13,728 rows that carry any form, and differs in 42 by up to 11 yards —
+    # so it is the source's own total rather than our arithmetic, and adding the two above
+    # in this file would be metric maths in the app. It renders last and subordinate,
+    # because 99.7% of the time it is the sum of the two lines over it.
+    ("Total", "total_yards_for_per_game", "total_yards_allowed_per_game"),
+)
+
+_YARDAGE_COLUMNS = """
+    team_id, team_display, team_slug, logo_url, color_on_light, color_on_dark,
+    conference, classification, is_fbs, games_counted,
+    rushing_yards_for_per_game, passing_yards_for_per_game, total_yards_for_per_game,
+    rushing_yards_allowed_per_game, passing_yards_allowed_per_game,
+    total_yards_allowed_per_game, as_of_ts
+"""
+
+
+def _yardage_direction(offence, defence) -> str:
+    """One direction of the comparison: this side's attack against that side's defence."""
+    accent = identity.text_on(offence)
+    logo = identity.logo_or_monogram(
+        offence.get("logo_url"), str(offence.get("team_display") or "?"), 20)
+    lines = []
+    for label, for_column, allowed_column in _YARDAGE_DIMENSIONS:
+        subdued = " opacity:.75;font-size:.9rem;" if label == "Total" else ""
+        lines.append(
+            f"<div style='display:flex;align-items:baseline;gap:.5rem;{subdued}"
+            f"padding:.15rem 0'>"
+            f"<span style='min-width:4.5rem;opacity:.6;font-size:.8rem'>{label}</span>"
+            f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
+            f"{fmt.number(offence.get(for_column), 'yards')}</span>"
+            f"<span style='opacity:.45;font-size:.8rem'>gained</span>"
+            f"<span style='opacity:.35;margin:0 .2rem'>vs</span>"
+            f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
+            f"{fmt.number(defence.get(allowed_column), 'yards')}</span>"
+            f"<span style='opacity:.45;font-size:.8rem'>allowed</span></div>")
+    return (
+        f"<div style='border-left:4px solid {accent};padding:.4rem .7rem;"
+        f"margin-bottom:.5rem'>"
+        f"<div style='display:flex;align-items:center;gap:.45rem;margin-bottom:.2rem'>"
+        f"{logo}<span style='font-weight:600'>{offence.get('team_display') or '?'}</span>"
+        f"<span style='opacity:.6;font-size:.85rem'>offence against "
+        f"{defence.get('team_display') or '?'}'s defence</span></div>"
+        + "".join(lines) + "</div>")
+
+
+def _yardage(row) -> None:
+    """Offence against defence, per game, LEADING INTO this game's own week (R-463).
+
+    ⚠️ THE POINT-IN-TIME PROPERTY IS THE VIEW'S, NOT THIS PANEL'S. Marc, 2026-09-09: "Can't
+    find ourselves at Week 10 and looking back to the matchups for a team in Week 2 and have
+    their data for Week 2 showing like they've played through Week 10." srv_team_week is
+    built at (season, season_type, week) grain over completed games in weeks strictly
+    BEFORE the row's own week, so reading the row for THIS game's week is already the
+    answer. Nothing here computes, adjusts or re-derives it, and nothing reads a
+    season-grain view to approximate it.
+
+    ⚠️ THE `_per_game` COLUMNS ARE RENDERED, NEVER THE SUMS. The sums ship so something can
+    re-aggregate; a division in this file would be metric maths in the app, which is the rule
+    the serving layer exists to keep. There is no `group by` and no `sum(` in the query
+    below and there must never be one — the grain returns exactly one row per side.
+
+    ⚠️ `games_counted` TRAVELS WITH THE NUMBERS FOR BOTH SIDES (AC-G.33), because the two
+    can differ — 401752754 is 7 against 8 — and it is NOT "games played": it counts
+    completed games both sides of whose box score cfdb holds. A reader comparing 154.4 to
+    84.5 without knowing one is over seven games and the other over eight is being misled by
+    two true numbers.
+
+    NOTHING IS RANKED, COLOURED BY ADVANTAGE OR CALLED AN EDGE. Marc sets the line, not the
+    page — the same rule _line_movement carries a test for.
+    """
+    st.subheader("Offence against defence")
+    # Its own section and its own view: this is the only block on the page that reads
+    # srv_team_week, so a failure here degrades one panel rather than blanking a Matchup
+    # that is otherwise complete.
+    with states.section("srv_team_week", degraded_if_missing="srv_team_week",
+                        explanation="Week-grain team form has not been built yet."):
+        home_id, away_id = row.get("home_team_id"), row.get("away_team_id")
+        if pd.isna(home_id) or pd.isna(away_id):
+            states.empty(
+                "Each side's yardage against the other's defence would be here.",
+                "This game's schedule row does not identify both teams, so there is "
+                "nothing to look the two sides up by.")
+            return
+
+        # ONE QUERY, TWO ROWS. The grain returns exactly one row per (season, season_type,
+        # week, team), which is the whole reason srv_team_week exists in this shape, so the
+        # limit is the grain restated rather than a guess at a ceiling (AC-G.39).
+        df = query(f"""
+            select {_YARDAGE_COLUMNS}
+            from srv_team_week
+            where season = :season
+              and season_type = :season_type
+              and week = :week
+              and team_id in (:home_team_id, :away_team_id)
+            limit 2
+        """, {"season": int(row["season"]), "season_type": row["season_type"],
+              "week": int(row["week"]),
+              "home_team_id": int(home_id), "away_team_id": int(away_id)})
+
+        by_team = {int(r["team_id"]): r for _, r in df.iterrows()}
+        home, away = by_team.get(int(home_id)), by_team.get(int(away_id))
+
+        if home is None and away is None:
+            # EMPTY. Neither side is carried at week grain, which is an absence of data
+            # about this fixture rather than a fault in a side of it.
+            states.empty(
+                "Each side's yardage against the other's defence would be here.",
+                f"Neither {row.get('home_team')} nor {row.get('away_team')} is carried in "
+                f"the week-by-week team record for this season.")
+            return
+
+        if home is None or away is None:
+            # ⚠️ DEGRADED, AND THE WHOLE PANEL — NOT HALF OF IT. Both directions of Marc's
+            # comparison need both rows: with one side absent, the only thing left to draw
+            # is one team's own for-and-allowed, which is a description of that team wearing
+            # the layout of a matchup. That is the precise confusion 1c warns about, so the
+            # panel says it cannot rather than rendering half a comparison as a whole one.
+            #
+            # It is Degraded rather than Empty because it is ours: srv_team_week inner joins
+            # dim_team, and dim_team does not list every opponent an FBS side schedules.
+            missing = row.get("home_team") if home is None else row.get("away_team")
+            states.degraded(
+                "srv_team_week",
+                f"cfdb holds no week-by-week record for {missing} this season, and both "
+                f"directions of this comparison need both sides — so showing the other "
+                f"team's own figures here would read as a matchup while describing one "
+                f"team.")
+            return
+
+        counted = [int(side["games_counted"] or 0) for side in (home, away)]
+        if not all(counted):
+            # EMPTY, AND THE TWO REASONS ARE DIFFERENT CLAIMS. The per-game columns are NULL
+            # BY DESIGN where nothing has been counted — srv_team_week's own comment: "0.0
+            # yards per game is a measurement it did not make" — so a zero must never be
+            # drawn here. But "nobody has played yet" and "cfdb holds no box scores for
+            # these sides" are opposite statements, and collapsing them is the same lie
+            # _model refuses to tell about a missing forecast. Measured: at the opening week
+            # of a regular season, games_counted is 0 for every team in all 157 seasons; a
+            # zero at any later week means the box scores were never held.
+            opening = str(row.get("season_type")) == "regular" and int(row["week"]) == 1
+            why = ("Neither side has played a counted game yet, so there is no per-game "
+                   "figure to show — a zero here would be a measurement cfdb did not make."
+                   if opening else
+                   "cfdb holds no box scores for " + (
+                       f"{row.get('home_team')} or {row.get('away_team')}" if not any(counted)
+                       else f"{row.get('home_team') if not counted[0] else row.get('away_team')}")
+                   + " in the weeks before this game, so there is no per-game figure to "
+                     "show — a zero here would be a measurement cfdb did not make.")
+            states.empty(
+                "Each side's yardage against the other's defence would be here.", why)
+            return
+
+        st.markdown(_yardage_direction(away, home), unsafe_allow_html=True)
+        st.markdown(_yardage_direction(home, away), unsafe_allow_html=True)
+
+        # AC-G.33. The denominator is not decoration and it is named for each side
+        # separately, because a bye or a missing box score makes the two differ.
+        st.caption(
+            f"Yards per game leading into week {int(row['week'])}, over "
+            f"{counted[0]} completed game{'' if counted[0] == 1 else 's'} for "
+            f"{home.get('team_display')} and {counted[1]} for {away.get('team_display')}. "
+            f"games_counted is not games played — it counts the completed games both "
+            f"sides of whose box score cfdb holds.")
+        table.as_of_caption(df)
 
 
 def _weather(game_id) -> None:
