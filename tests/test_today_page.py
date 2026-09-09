@@ -177,6 +177,92 @@ def _stub_streamlit():
     return stub, calls
 
 
+# ⚠️ THE PANELS THIS FILE EXERCISES — AND THE REASON IT IS A DECLARED LIST (R-475).
+#
+# This test calls panels BY NAME. A panel added to today.py and not added here is unguarded
+# against the exact defect this file exists for: `Col(..., decimals=1)` construction failures
+# that CI cannot see, because check_page_queries only executes SQL and the site-image job
+# never calls a panel. The list being silent about a new panel is the fallback-at-100% shape.
+#
+# So the list is declared here and `test_every_panel_in_the_module_is_exercised` asserts it
+# against the module. Adding a panel to today.py without adding it here FAILS rather than
+# quietly covering less — which is what the A071 repair was about one layer down.
+#
+# The values are invokers because the panels do not share a signature: the two recap panels
+# are handed a frame the page already fetched, and _movers does its own query so it can count
+# what it dropped.
+PANELS = {
+    "_most_exciting": lambda page, games, scope: page._most_exciting(games, scope),
+    "_recap_lists": lambda page, games, scope: page._recap_lists(games, scope),
+    "_movers": lambda page, games, scope: page._movers(scope, 10),
+    # ⚠️ THESE TWO WERE ALREADY UNEXERCISED WHEN THE GUARD ABOVE WAS WRITTEN (R-475).
+    # A074 assumed the exercised set was complete and that only a NEW panel could fall out of
+    # it. It was not: _leaderboards builds fifteen Cols across four boards and _bump builds
+    # three, and none had ever been called by a test. The guard found them on its first run,
+    # which is the argument for deriving the set from the module instead of trusting a list.
+    "_leaderboards": lambda page, games, scope: page._leaderboards(scope, 10),
+    "_bump": lambda page, games, scope: page._bump(scope),
+}
+
+
+def _panels_defined_in(source: str) -> set:
+    """Every module-level panel in today.py, found by what it DOES rather than by its name.
+
+    A panel is a function that hands columns to the table renderer — directly via
+    `table.render` or through `states.render_or_state`. Discovering them from the source is
+    what makes the exercised list falsifiable: a naming convention would let a panel opt out
+    of coverage by being called something else.
+    """
+    import ast
+
+    found = set()
+    for node in ast.parse(source).body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        body = ast.dump(node)
+        if "attr='render'" in body or "attr='render_or_state'" in body:
+            found.add(node.name)
+    return found
+
+
+def _unexercised(exercised) -> set:
+    """Panels today.py defines that `exercised` does not call. The guard's whole logic, as a
+    function, so a negative test can hand it a deliberately short set and see it complain —
+    a guard whose failure path has never run is a guard nobody has tested."""
+    return _panels_defined_in(SOURCE) - set(exercised)
+
+
+def test_the_exercised_set_guard_can_fail():
+    """Rule 10. Drop a panel from the set and the guard must name it.
+
+    ⚠️ THE POINT IS THE FAILURE PATH, not the arithmetic. This whole file exists because a
+    check that passed while inert was read as evidence for a year of rounds; a coverage guard
+    that has only ever been seen passing is the same claim with the same backing.
+    """
+    assert _unexercised(PANELS) == set(), "precondition: the real set covers the module"
+    for dropped in ("_movers", "_leaderboards", "_most_exciting"):
+        short = {k: v for k, v in PANELS.items() if k != dropped}
+        assert _unexercised(short) == {dropped}, \
+            f"dropping {dropped} from the exercised set was not caught"
+
+
+def test_every_panel_in_the_module_is_exercised():
+    """R-475. THE LIST ABOVE MUST COVER THE MODULE, not merely be consistent with itself.
+
+    Without this, adding a panel to today.py silently reduces what the panel-exercise test
+    covers, and the suite stays green while covering less — the signature of the A071 defect
+    and of B072's self-skipping dag tests. Two greens that mean different things is the thing
+    worth preventing.
+    """
+    defined = _panels_defined_in(SOURCE)
+    missing = _unexercised(PANELS)
+    assert not missing, (
+        f"panels in today.py that no test exercises: {sorted(missing)}. "
+        f"Add them to PANELS in this file — a panel nobody calls is a Col nobody builds.")
+    stale = set(PANELS) - defined
+    assert not stale, f"PANELS names functions today.py no longer defines: {sorted(stale)}"
+
+
 def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
     """EXERCISE THE PAGE'S render path. Do not grep it, and do not rebuild it.
 
@@ -246,7 +332,28 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
                "favorite_definitions_disagree": False,
                "spread_at_close": -3.5, "spread_current": -3.5,
                "market_implied_home_win_probability": 0.62,
-               "market_implied_away_win_probability": 0.38}
+               "market_implied_away_win_probability": 0.38,
+               # R-475's columns, at the SCALES published serving actually uses: the spread
+               # figures are points, and the win-probability ones are already probability
+               # POINTS while market_implied_*_win_probability above is a 0-1 fraction. The
+               # two do not share a scale and the fixture says so.
+               "game_id": 401752817,
+               "line_spread_largest_excursion": -6.0,
+               "line_spread_move_from_open": -3.0,
+               "line_total_largest_excursion": 4.0,
+               "line_total_move_from_open": 1.5,
+               "line_market_implied_win_probability_largest_excursion": 6.78,
+               "line_market_implied_win_probability_move_from_open": 2.10,
+               "line_snapshot_count": 94,
+               "line_movement_spans_snapshot_gap": True,
+               "line_movement_provider_key": "draftkings",
+               # What _leaderboards' four boards and _bump's chart read. One frame serves
+               # every panel because the query is stubbed once; the panels differ in which
+               # columns they reach for, not in where they get them.
+               "week": 1, "poll_name": "AP Top 25", "team_display": "Home", "rank": 5,
+               "opponent": "Away", "total_yards": 400, "rushing_yards": 150,
+               "passing_yards": 250, "player_name": "Player One", "team": "Home",
+               "stat_category": "rushing", "stat_value": 120}
         games = pd.DataFrame([row])
 
         class Scope:
@@ -258,8 +365,16 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
             def link(self, page_name, **k):
                 return "#"
 
-        page._most_exciting(games, Scope())
-        page._recap_lists(games, Scope())
+        # _movers runs its OWN query so it can count the games it dropped, so the query is
+        # stubbed rather than the frame handed in. Everything else about it is the real panel.
+        page.query = lambda *a, **k: games
+
+        scope = Scope()
+        for name, invoke in PANELS.items():
+            before = len(captured)
+            invoke(page, games, scope)
+            assert len(captured) > before, \
+                f"panel {name} handed no columns to table.render — it rendered nothing"
 
         assert captured, "no panel handed any columns to table.render"
 
