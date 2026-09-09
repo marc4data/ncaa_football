@@ -3917,3 +3917,89 @@ models:
         description: "{{ doc('bin_count') }}"
       - name: as_of_ts
         description: "{{ doc('as_of_ts') }}"
+
+  # ⚠️ APPENDED AT THE END, TOUCHING NOTHING ABOVE. This file is edited by both sessions and
+  # collides regardless; the charter's rule is that the non-owning session appends. A075/R-476.
+  - name: srv_team_week
+    description: >
+      Team form LEADING INTO a week: one row per season x season_type x week x team.
+      Serving held season grain (srv_team_overview) and game grain (srv_team_game_log) and
+      nothing between them, so anything scoped to a week and fed from the season row showed a
+      full season of yardage beside a September game — the composition failure AC-G.33 exists
+      to prevent. Every cumulative figure here is over completed games in weeks strictly
+      BEFORE the row's own week, the same off-by-one fct_team_record_week gets right for wins
+      and losses. Built on the shared dim_team_week calendar spine, so a bye week carries the
+      previous total forward rather than rendering empty.
+    columns:
+      - name: team_week_sk
+        description: Surrogate key over season, season_type, week and team — the grain.
+      - name: season
+        description: "{{ doc('season') }}"
+      - name: season_type
+        description: "{{ doc('season_type') }}"
+      - name: season_type_ordinal
+        description: >
+          Chronological rank of the season type within the season, so ordering never uses
+          week alone — postseason week numbers restart at 1 and a bowl game would otherwise
+          sort into the middle of October.
+      - name: week
+        description: "{{ doc('week') }}"
+      - name: team_id
+        description: The team this row describes, as cfbd identifies it.
+      - name: team_slug
+        description: URL segment for the team's own page.
+      - name: team_display
+        description: The team's name as it should be shown.
+      - name: logo_url
+        description: Source URL of the team's logo, or null where none is held.
+      - name: color_on_light
+        description: The team's colour, adjusted for legibility on a light background.
+      - name: color_on_dark
+        description: The team's colour, adjusted for legibility on a dark background.
+      - name: conference
+        description: The conference this team played in during this season.
+      - name: classification
+        description: Division this team played in during this season — fbs, fcs and below.
+      - name: is_fbs
+        description: Whether this team is FBS in this season.
+      - name: games_counted
+        description: >
+          The denominator, and NOT the same thing as games played. It is the number of
+          completed games before this week for which BOTH sides of the box score are held,
+          which is what the sums here were actually computed over. A completed game with no
+          box score contributes nothing and is not counted, so dividing by games played would
+          understate every average by exactly the games we hold nothing for. 0 means nothing
+          has been counted yet, which is why every figure beside it is null rather than zero.
+      - name: total_yards_for
+        description: >
+          Total yards gained over completed games in weeks strictly before this one. Null
+          when games_counted is 0.
+      - name: rushing_yards_for
+        description: Rushing yards gained, cumulative before this week. Null when nothing counted.
+      - name: passing_yards_for
+        description: Net passing yards gained, cumulative before this week. Null when nothing counted.
+      - name: total_yards_allowed
+        description: >
+          Total yards conceded, cumulative before this week — the opponent's production in the
+          same games, taken from the opponent's own row of each fixture.
+      - name: rushing_yards_allowed
+        description: Rushing yards conceded, cumulative before this week.
+      - name: passing_yards_allowed
+        description: Net passing yards conceded, cumulative before this week.
+      - name: total_yards_for_per_game
+        description: >
+          total_yards_for divided by games_counted, to one decimal. Computed here rather than
+          in the app: a division in the page is metric maths in the app, which the serving
+          layer exists to prevent. Null when games_counted is 0.
+      - name: rushing_yards_for_per_game
+        description: rushing_yards_for divided by games_counted, to one decimal.
+      - name: passing_yards_for_per_game
+        description: passing_yards_for divided by games_counted, to one decimal.
+      - name: total_yards_allowed_per_game
+        description: total_yards_allowed divided by games_counted, to one decimal.
+      - name: rushing_yards_allowed_per_game
+        description: rushing_yards_allowed divided by games_counted, to one decimal.
+      - name: passing_yards_allowed_per_game
+        description: passing_yards_allowed divided by games_counted, to one decimal.
+      - name: as_of_ts
+        description: "{{ doc('as_of_ts') }}"

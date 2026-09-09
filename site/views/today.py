@@ -14,6 +14,8 @@ that already exist (`spread_favorite_side`, `moneyline_favorite_side`, `actual_m
 a cover in Streamlit would be metric maths in the app, which is the rule those columns exist
 to keep.
 """
+import math
+
 import pandas as pd
 import streamlit as st
 
@@ -130,6 +132,32 @@ def _line_movement(scope) -> pd.DataFrame:
           and (:division = 'all' or is_fbs_game)
           and (:conf is null or home_conference = :conf or away_conference = :conf)
         order by game_id
+        limit 400
+    """, {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
+          "conf": scope.conference, "division": scope.division})
+
+
+def _yardage_profile(scope) -> pd.DataFrame:
+    """One row per team, as the team stood ENTERING the week in scope. R-477.
+
+    Reads srv_team_week, which is week grain — the whole reason R-476 exists. The season-grain
+    srv_team_overview would answer the same question with a full season of yardage beside a
+    September game, which is the defect Marc caught in the spec this round came from.
+
+    The per-game columns are read AS PUBLISHED. Dividing here would be metric maths in the
+    app; the view carries both the sums and the per-game figures for exactly that reason.
+    """
+    return query("""
+        select team_id, team_display, team_slug, conference, week,
+               games_counted,
+               total_yards_for_per_game, total_yards_allowed_per_game,
+               as_of_ts
+        from srv_team_week
+        where season = :season and season_type = :season_type
+          and (:week is null or week = :week)
+          and (:division = 'all' or is_fbs)
+          and (:conf is null or conference = :conf)
+        order by team_display
         limit 400
     """, {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
           "conf": scope.conference, "division": scope.division})
@@ -353,6 +381,171 @@ def _movers(scope, depth: int) -> None:
                        f"\u201chas a gap\u201d is a floor, not a measurement.{caveat}"))
 
 
+def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380) -> str:
+    """The scatter itself. Inline SVG in currentColor, following lib/distribution.py's
+    precedent — one series, one hue, no legend, hairline axes (the chart standard's §7).
+
+    ⚠️ THE DEFENCE AXIS RUNS THE OTHER WAY, AND THAT IS THE WHOLE DESIGN DECISION.
+    Low yards allowed is GOOD. Plotted the obvious way — value increasing upward, as a reader
+    trained on cartesian axes expects — the best defences land at the bottom and the chart
+    reads backwards to anyone scanning for "up and right is good", which is how everyone scans
+    a scatter before reading a word of it.
+    So yards allowed increases DOWNWARD: the strongest defences are at the TOP, the strongest
+    offences at the RIGHT, and the top-right corner is unambiguously the good one. In SVG this
+    needs no flip — y already grows downward — which is precisely why it is easy to ship the
+    wrong orientation without noticing you chose one.
+
+    An axis label alone would not carry this, so the direction is stated three ways: arrows on
+    both axis titles, the words "better" on each, and a corner marker. No colour scale, no
+    threshold line, no quadrant shading — none of those judgements has been made.
+    """
+    pad_l, pad_r, pad_t, pad_b = 56, 18, 20, 46
+    pw, ph = width - pad_l - pad_r, height - pad_t - pad_b
+    x0, x1 = x_dom
+    y0, y1 = y_dom
+
+    def sx(v):
+        return pad_l + (float(v) - x0) / (x1 - x0) * pw
+
+    def sy(v):
+        # NOT flipped: small "allowed" -> small y -> top of the plot. See the docstring.
+        return pad_t + (float(v) - y0) / (y1 - y0) * ph
+
+    def esc(t):
+        return (str(t).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))
+
+    parts = []
+    # ⚠️ TICKS ARE WALKED BY THE STEP, NOT SLICED INTO A FIXED COUNT. The first version drew
+    # five evenly-spaced ticks across the domain, which puts them on 75s when the domain is
+    # 250-550 — the bounds were round and everything between them was not. The chart standard
+    # §0.2 wants the bounds to BE ticks so every render lands on the same round numbers and
+    # two charts are comparable at a glance; that only holds if the whole ladder is round.
+
+    def ladder(lo, hi, step):
+        n, out = 0, []
+        while lo + n * step <= hi + 1e-9:
+            out.append(lo + n * step)
+            n += 1
+        return out
+
+    for v in ladder(x0, x1, x_step):
+        gx = sx(v)
+        parts.append(f"<line class='cfdb-sc-grid' x1='{gx:.1f}' y1='{pad_t}' "
+                     f"x2='{gx:.1f}' y2='{pad_t + ph}'/>")
+        parts.append(f"<text class='cfdb-sc-tick' x='{gx:.1f}' y='{pad_t + ph + 14}' "
+                     f"text-anchor='middle'>{v:.0f}</text>")
+    for v in ladder(y0, y1, y_step):
+        gy = sy(v)
+        parts.append(f"<line class='cfdb-sc-grid' x1='{pad_l}' y1='{gy:.1f}' "
+                     f"x2='{pad_l + pw}' y2='{gy:.1f}'/>")
+        parts.append(f"<text class='cfdb-sc-tick' x='{pad_l - 8}' y='{gy + 3:.1f}' "
+                     f"text-anchor='end'>{v:.0f}</text>")
+
+    for r in rows:
+        cx, cy = sx(r["x"]), sy(r["y"])
+        parts.append(
+            f"<circle class='cfdb-sc-pt' cx='{cx:.1f}' cy='{cy:.1f}' r='3.5'>"
+            f"<title>{esc(r['team'])} — {r['x']:.1f} gained, {r['y']:.1f} allowed "
+            f"per game over {int(r['games'])} game(s)</title></circle>")
+
+    # The good corner, named. A reader scans the shape first, so this is a mark and not prose.
+    parts.append(f"<text class='cfdb-sc-corner' x='{pad_l + pw - 2}' y='{pad_t + 12}' "
+                 f"text-anchor='end'>better \u2197</text>")
+    parts.append(f"<text class='cfdb-sc-axis' x='{pad_l + pw / 2:.0f}' y='{height - 8}' "
+                 f"text-anchor='middle'>Yards gained per game \u2192 better</text>")
+    parts.append(f"<text class='cfdb-sc-axis' transform='rotate(-90 12 {pad_t + ph / 2:.0f})' "
+                 f"x='12' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>"
+                 f"\u2191 better \u2014 fewer yards allowed per game</text>")
+
+    return (f"<div class='cfdb-scatter'><svg viewBox='0 0 {width} {height}' "
+            f"role='img' aria-label='Yards gained per game against yards allowed per game; "
+            f"stronger teams sit toward the top right'>{''.join(parts)}</svg></div>")
+
+
+def _profile(scope) -> None:
+    """R-477. Offence against defence, per game, as the teams stood ENTERING the week in
+    scope.
+
+    ⚠️ THE COPY SAYS "the week in scope" OR "the selected week", never the present-tense
+    phrasing. Looking Back is week-selectable, so present-tense wording names whichever week
+    the READER is on rather than the current one.
+    test_the_week_floor_is_named_not_hardcoded_in_copy exists for exactly this and caught the
+    first draft of this panel. ⚠️ It greps the SOURCE, so it cannot tell page copy from a
+    comment discussing page copy — which is why this note describes the banned phrasing
+    instead of quoting it. Weakening the test to allow the quote would be the wrong trade.
+    """
+    st.subheader("Offence and defence, per game")
+
+    with states.section("srv_team_week"):
+        # ⚠️ A SCATTER NEEDS ONE POINT PER TEAM, WHICH NEEDS ONE WEEK. The week filter offers
+        # "All", and under it srv_team_week returns every week for every team — sixteen points
+        # per team, not one. Aggregating them down here would be the app deriving a figure,
+        # which is the rule this whole layer exists to keep, so the honest answer is to ask
+        # for a week rather than to quietly draw the wrong chart.
+        if scope.week is None:
+            states.empty(
+                "The offence-and-defence chart would be here.",
+                "This chart shows each team as it stood entering ONE week, so it needs a "
+                "week rather than the whole season. Pick a week above.")
+            return
+
+        teams = _yardage_profile(scope)
+        if teams.empty:
+            states.empty(
+                "The offence-and-defence chart would be here.",
+                f"No teams in scope for {scope.describe()}.")
+            return
+
+        table.as_of_caption(teams)
+        playable = teams[(teams["games_counted"].fillna(0) > 0)
+                         & teams["total_yards_for_per_game"].notna()
+                         & teams["total_yards_allowed_per_game"].notna()]
+        dropped = len(teams) - len(playable)
+
+        # ⚠️ WEEK 1 IS EVERY TEAM. Nothing has been played before it, so no team has a point
+        # and the honest render is an Empty state rather than an empty pair of axes — an empty
+        # chart says "we drew this and there was nothing", which reads as a fault.
+        if playable.empty:
+            states.empty(
+                "The offence-and-defence chart would be here.",
+                f"No team has played a completed game before {scope.describe()}, so there is "
+                f"nothing to plot yet. Week 1 is always empty here — the figures are what a "
+                f"team carries INTO the week.")
+            return
+
+        xs = playable["total_yards_for_per_game"].astype(float)
+        ys = playable["total_yards_allowed_per_game"].astype(float)
+
+        # Domain rounded OUT to a whole tick, per the chart standard §0.2, so the bounds ARE
+        # ticks and every render of this chart lands on the same round numbers.
+        def domain(series, step=50):
+            lo = math.floor(series.min() / step) * step
+            hi = math.ceil(series.max() / step) * step
+            return (lo, hi if hi > lo else lo + step), step
+
+        rows = [{"team": t, "x": x, "y": y, "games": g}
+                for t, x, y, g in zip(playable["team_display"], xs, ys,
+                                      playable["games_counted"])]
+
+        x_dom, x_step = domain(xs)
+        y_dom, y_step = domain(ys)
+        st.markdown(_scatter_svg(rows, x_dom, y_dom, x_step, y_step),
+                    unsafe_allow_html=True)
+
+        # ⚠️ SAY WHAT WAS DROPPED AND WHY. A silently shorter chart is the same defect as a
+        # silently shorter list — the reader cannot tell 130 teams from 130 of 136.
+        note = (f"{len(playable)} teams. Each point is one team as it stood ENTERING "
+                f"{scope.describe()} — every figure is over completed games in earlier weeks, "
+                f"never the selected week's own game. Up and to the right is stronger on "
+                f"both sides: "
+                f"the vertical axis runs downward so fewer yards allowed is higher.")
+        if dropped:
+            note += (f" {dropped} teams are not plotted because they had no completed game "
+                     f"before the selected week.")
+        st.caption(note)
+
+
 def _leaderboards(scope, depth: int) -> None:
     st.subheader("Leaderboards")
 
@@ -484,6 +677,7 @@ def body(page) -> None:
             _recap_lists(games, scope)
 
     _movers(scope, depth)
+    _profile(scope)
     _leaderboards(scope, depth)
     _bump(scope)
     _looking_forward(scope)
