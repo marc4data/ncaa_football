@@ -193,6 +193,73 @@ DEFAULT_SERVING = [
 # Selective publishing needs no change to the fragile part. publish_schema already takes an
 # explicit table list, and the dump carries --clean --if-exists, which drops only the tables
 # IN the dump — so a hot publish leaves these three untouched rather than deleting them.
+# ==========================================================================================
+# WHY A TABLE MAY BE PUBLISHED HOT AND BUILT WEEKLY. A079/R-533.
+#
+# HOT_SERVING is shipped on every gate-open run of cfbd_scores_refresh. A table in it that no
+# gated DAG REBUILDS is therefore re-published, unchanged, several times a day — arriving on
+# the site looking exactly as fresh as the rows beside it that genuinely moved. A078 found
+# srv_team_week doing that and then measured the list: 18 of 24.
+#
+# ⚠️ THE POINT IS NOT THAT WEEKLY IS WRONG. It is that "weekly" must be a DECISION rather than
+# an oversight, and until this dict existed there was no way to tell the two apart — the two
+# lists that had to agree were HOT_SERVING and the DAG selectors, and nothing checked them
+# against each other. ci/check_publish_build_agreement.py now does, and it reads this dict.
+#
+# To add a table here you must be able to finish the sentence "this is rebuilt weekly because
+# its own data only changes weekly". If you cannot, put it in a selector instead.
+#
+# Every entry below was confirmed against the model's OWN lineage on 2026-09-09 — walking each
+# view to its raw sources with mart_as_of's subtree excluded, because mart_as_of reaches
+# fct_prediction and would otherwise put `model_prediction` and `lines` in every answer.
+WEEKLY_BY_DESIGN = {
+    "srv_data_dictionary":
+        "Not endpoint-derived at all — it reads information_schema, so there is no fetch "
+        "cadence to keep up with. Confirmed: zero raw sources in its lineage.",
+    "srv_drive":
+        "Its subject is /drives, fetched only by cfbd_results_refresh (Sunday) and "
+        "cfbd_midweek_results (Thursday). Rebuilding hot would rebuild from raw that has not "
+        "moved. `games` is in its lineage as the spine join, not as its subject.",
+    "srv_rankings":
+        "Its subject is /rankings, fetched by the Sunday and Tuesday weekly DAGs. Polls "
+        "publish weekly; there is nothing between them to pick up.",
+    "srv_rankings_compare":
+        "Same source and same cadence as srv_rankings — /rankings only.",
+    "srv_team_rating":
+        "Its subject is ratings_sp / _srs / _elo / _fpi and ppa_teams, all in the weekly "
+        "REVISIONIST bucket. A077 gave these their own `rating` as-of domain for the same "
+        "reason. `games` appears only via the identity join.",
+    "srv_team_stats":
+        "Its subject is stats_season, weekly REVISIONIST.",
+    "srv_team_roster":
+        "Its subject is /roster, a reference endpoint. A077 measured it last loaded "
+        "2026-08-15 and published that honestly rather than flattering it.",
+    "srv_system_health":
+        "Its subject is the pipeline's own ops tables — dbt_test_result, deploy_status, info, "
+        "warehouse_usage — which the weekly DAGs' dbt_catalogue step already rebuilds.",
+    "srv_game_travel":
+        "Travel distance is a property of the FIXTURE, not of the result: it is computed from "
+        "venue geography and the schedule, and does not change when a game finals. `games` is "
+        "in the lineage because the fixture is, not because the score is.",
+    # ⚠️ THE THREE PREDICTION VIEWS ARE JUSTIFIED TODAY AND THE JUSTIFICATION HAS AN EXPIRY.
+    # A077/R-491 measured it: all 3,402 rows in fct_prediction are season 2025, every one for
+    # a completed game, last generated 2026-08-19, and NO DAG produces them —
+    # src/load_predictions.py is a hand-run load. So there is nothing for a rebuild to pick up.
+    #
+    # ⚠️ But their subject is model MINUS market, and the market half is /lines, fetched every
+    # four hours. The moment predictions are generated again these three stop being
+    # weekly-by-design and belong in a selector. Recorded here so that is a decision rather
+    # than a thing nobody revisits.
+    "srv_edge_finder":
+        "No predictions have been generated since 2026-08-19 and no DAG produces them "
+        "(A077/R-491), so there is nothing to rebuild. ⚠️ EXPIRES the moment the prediction "
+        "pipeline runs — its market half is /lines, fetched four-hourly.",
+    "srv_edge_bucket_performance":
+        "Same as srv_edge_finder — no prediction pipeline. ⚠️ Same expiry.",
+    "srv_model_performance":
+        "Same as srv_edge_finder — no prediction pipeline. ⚠️ Same expiry.",
+}
+
 HEAVY_SERVING = [
     "srv_player_stats",
     "srv_player_game_log",
