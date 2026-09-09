@@ -243,6 +243,17 @@ jobs:
         # Six point fixes and a prose rule did not prevent a seventh. This reads the manifest.
         run: python ci/check_test_refresh_scope.py
 
+      - name: Assert what we publish hot is what we rebuild
+        # A079/R-533. HOT_SERVING and the gated DAGs' selectors are two lists that must agree,
+        # and until now nothing checked that they did. srv_team_week was shipped on every
+        # gate-open run and rebuilt only on the weekly build — for weeks, with every run green,
+        # because neither list is wrong on its own. They were only wrong about each other.
+        #
+        # A078 found that one by hand and then measured the rest: 18 of 24. This is the guard
+        # so there is never a nineteenth. A table may still be weekly — it just has to say so
+        # in WEEKLY_BY_DESIGN, beside the list, where the next maintainer reads it.
+        run: python ci/check_publish_build_agreement.py
+
       - name: Assert the site image's boundary
         # R-225. The image is built with `context: ./site`, so anything above that directory
         # does not exist in the container. Three modules have reached past it — a config at

@@ -101,6 +101,46 @@ SCORES_SELECTOR = (
     # feeds srv_game. Measured with `dbt ls`: 38 models before, 40 after. The two are
     # fct_team_yardage_week and srv_team_week themselves.
     " +srv_team_week"
+    # R-530. srv_game_team, for the same reason and on a bigger table: 222,098 rows, game
+    # grain, and it sits beside srv_game in the SAME TABLE on Scores. On a Saturday night a
+    # reader was handed srv_game rows that had just moved next to srv_game_team rows built
+    # last Sunday, looking equally fresh.
+    #
+    # ⚠️ WHAT THIS DOES AND DOES NOT MAKE FRESH, because the honest half matters. fct_game_team
+    # takes its SCORELINE from fct_game — points, result, is_completed — and that is what this
+    # DAG refetches, so the scoreline now moves with the games. Its BOX SCORE half comes from
+    # stg_game_box_team / stg_game_team_advanced / _havoc / _ppa, which read raw that only
+    # cfbd_results_refresh fetches. Those columns cannot move faster than their fetch and this
+    # line does not pretend otherwise; it rebuilds them from unchanged raw, which is cheap and
+    # keeps the model consistent rather than half-built.
+    " +srv_game_team"
+    # R-532. THE ODDS BOARDS, and the argument was already written twelve lines above this one.
+    #
+    # The weather note says refreshing raw every four hours while rebuilding the model weekly
+    # leaves the page "showing a forecast up to seven days stale on top of current data — a
+    # worse failure than not collecting it, because it would look fresh." That is exactly the
+    # odds boards: cfbd_lines_snapshot fetches `lines` every four hours and rebuilds only the
+    # two distribution views, while srv_odds_board and srv_line_movement — the two pages built
+    # to display price movement — were assembled on the weekly build and published hot.
+    #
+    # ⚠️ WHY HERE AND NOT ON THE LINES DAG, which fetches them. Measured rather than assumed:
+    # over the seven days to 2026-09-09 the scores gate OPENED 50 times and skipped 37, so it
+    # fires about 7x a day — MORE OFTEN than the four-hourly fetch that supplies the prices.
+    # Putting the boards behind this gate therefore cannot leave them stale relative to their
+    # own source. The alternative — teaching cfbd_lines_snapshot to build srv_* — would make
+    # two DAGs write serving, and the publish advisory lock exists precisely because that is
+    # the thing to avoid. A's judgement, recorded here rather than escalated.
+    " +srv_odds_board +srv_line_movement"
+    # R-533. The last three game-derived views in HOT_SERVING, added because the marginal cost
+    # is THREE MODELS and nothing else — every ancestor is already here. Measured, not assumed.
+    #
+    # All three move when a game finals: srv_standings carries the records, srv_team_overview
+    # the record and ATS, and srv_teams_index carries games_played/wins/losses/yards_for (A077
+    # found that out the hard way, when it was rendering this week's record under an "as of
+    # Aug 15" caption). Leaving them weekly would have shipped the new
+    # check_publish_build_agreement guard RED on the day it was written, which is a worse way
+    # to end a round than spending three models.
+    " +srv_standings +srv_team_overview +srv_teams_index"
 )
 
 # A TEST THIS DAG CANNOT SATISFY IS A TEST THIS DAG MUST NOT RUN.

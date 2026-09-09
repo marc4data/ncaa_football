@@ -51,6 +51,18 @@ GATED_SELECTION = (
                    # leaves the straddle check reasoning about the old selection, which fails
                    # in the direction that looks fine.
                    "model.cfdb_dbt.srv_team_week",
+                   # R-530 / R-532. Same round, same reason: both were published on the hot
+                   # publish and rebuilt only weekly. ⚠️ Updating this mirror is the step
+                   # test_dag_structure.py:120 warns about by name — A078 remembered it, and
+                   # the round before that is the one where a name nobody added to a tuple let
+                   # the seventh straddling test through.
+                   "model.cfdb_dbt.srv_game_team",
+                   "model.cfdb_dbt.srv_odds_board",
+                   "model.cfdb_dbt.srv_line_movement",
+                   # R-533. Three models marginal; all ancestors already selected.
+                   "model.cfdb_dbt.srv_standings",
+                   "model.cfdb_dbt.srv_team_overview",
+                   "model.cfdb_dbt.srv_teams_index",
                    # cfbd_lines_snapshot — DISTRIBUTION_SELECTOR
                    "model.cfdb_dbt.srv_week_metric_distribution",
                    "model.cfdb_dbt.srv_week_metric_distribution_bin")
