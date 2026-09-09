@@ -100,6 +100,41 @@ def _player_board(scope, depth: int, categories, stat_type: str) -> pd.DataFrame
          "conf": scope.conference, "cats": list(categories), "stat_type": stat_type})
 
 
+def _line_movement(scope) -> pd.DataFrame:
+    """Every completed game in scope with its line-movement columns, ranked in the panel.
+
+    ⚠️ NOT FILTERED TO GAMES THAT MOVED. The panel needs the games with NO snapshots in order
+    to say how many it is not showing — a list that silently shortens is the fallback-at-100%
+    defect, and the count is only knowable here. So this reads the scope and the panel does
+    the ranking and the arithmetic of what it dropped.
+
+    ⚠️ THERE ARE TEN `line_*` COLUMNS, NOT ELEVEN. A074's prompt and INDEX.md both say
+    eleven; counted from published serving's information_schema on 2026-09-09 it is ten, and
+    `line_snapshot_ts` is the tenth (not read here). The likely source of the miscount is that
+    `srv_game` ALSO carries older unprefixed `spread_move_from_open` and `total_move_from_open`
+    from before B070 — different columns with confusable names. The nine selected below are
+    read as published; nothing here derives a movement figure.
+    """
+    return query("""
+        select game_id, home_team_display, away_team_display,
+               line_spread_largest_excursion, line_spread_move_from_open,
+               line_total_largest_excursion, line_total_move_from_open,
+               line_market_implied_win_probability_largest_excursion,
+               line_market_implied_win_probability_move_from_open,
+               line_snapshot_count, line_movement_spans_snapshot_gap,
+               line_movement_provider_key, as_of_ts
+        from srv_game
+        where season = :season and season_type = :season_type
+          and (:week is null or week = :week)
+          and is_completed
+          and (:division = 'all' or is_fbs_game)
+          and (:conf is null or home_conference = :conf or away_conference = :conf)
+        order by game_id
+        limit 400
+    """, {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
+          "conf": scope.conference, "division": scope.division})
+
+
 def _rankings(scope) -> pd.DataFrame:
     """Full season of AP and Coaches, for the bump chart and its companion table."""
     return query("""
@@ -199,6 +234,123 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
             f"⚠️ In {disagree} of these games the spread and the moneyline named different "
             "favorites. The first and third lists use the spread; the second uses the "
             "moneyline, because that is what an implied win probability comes from.")
+
+
+def _movers(scope, depth: int) -> None:
+    """R-475. The week's games ranked by how far the line travelled.
+
+    ⚠️ RANKED BY LARGEST EXCURSION, NOT BY NET MOVE, and that is the whole point of the
+    panel. A059 measured that excursion exceeds net move at every decile and that roughly a
+    third of games END WHERE THEY STARTED having moved in between — so a ranking on net move
+    hides precisely the games worth looking at. Both numbers are shown; only the excursion
+    orders the list.
+
+    ⚠️ NO THRESHOLD, NO COLOUR SCALE, NO "BIG MOVER" BADGE. A059 measured the distributions
+    and deliberately stopped there: Marc sets the line, not the page. This shows the ranked
+    list and the numbers.
+
+    ⚠️ THE EXCURSION IS SIGNED, so the ranking is on its MAGNITUDE while the displayed value
+    keeps its direction — a 6-point move toward the home side and one toward the away side
+    are equally far travelled and belong equally high on the list.
+
+    ⚠️ THE WIN-PROBABILITY COLUMNS ARE ALREADY IN PROBABILITY POINTS. Measured on published
+    serving 2026 wk1: `market_implied_home_win_probability` runs 0.068…0.98 while
+    `line_market_implied_win_probability_largest_excursion` runs -13.4…+10.6. They do NOT
+    share a scale. Multiplying this one by 100 — the obvious thing to do to a column whose
+    name says "probability" — renders 1,338 points and looks merely large rather than wrong.
+    """
+    st.subheader("The week's movers")
+
+    with states.section("srv_game"):
+        games = _line_movement(scope)
+        if games.empty:
+            states.empty(
+                "The week's line movement would be here.",
+                f"No completed games for {scope.describe()}.")
+            return
+
+        moved = games[games["line_spread_largest_excursion"].notna()]
+        # THE THREE POPULATIONS, kept apart because they are different facts. A game with one
+        # snapshot is not a game with no snapshots: the first was priced and never re-priced,
+        # the second was never seen. Collapsing them into "no data" would overstate the hole.
+        no_snapshots = int((games["line_snapshot_count"].fillna(0) == 0).sum())
+        too_few = len(games) - len(moved) - no_snapshots
+
+        # THE BOOK, READ FROM THE DATA RATHER THAN NAMED IN A LITERAL. These figures are
+        # DraftKings-only by construction, and a movement number without its source is the
+        # provenance defect the `market_implied_` prefix rule exists to prevent. Reading it
+        # from the column means the caption cannot drift from what was actually priced.
+        books = sorted({str(b) for b in moved["line_movement_provider_key"].dropna().unique()})
+        book = ", ".join(books) if books else "an unnamed book"
+
+        dropped = []
+        if no_snapshots:
+            dropped.append(f"{no_snapshots} had no line snapshots")
+        if too_few:
+            dropped.append(f"{too_few} had too few to measure a move")
+        tail = f" Of {len(games)} completed games, {' and '.join(dropped)}." if dropped else ""
+
+        st.caption(
+            f"Ranked by the largest distance the spread travelled at any point, not by where "
+            f"it finished — about a third of games end where they opened having moved in "
+            f"between. Prices from {book}.{tail}")
+
+        # mergesort because it is STABLE: games tied on excursion — and ties are common,
+        # since spreads move in half and whole points — keep the query's game_id order
+        # instead of reshuffling between renders of the same week.
+        by_distance = moved["line_spread_largest_excursion"].abs()
+        order = by_distance.sort_values(ascending=False, kind="mergesort").index
+        ranked = moved.reindex(order).head(depth)
+
+        # ⚠️ ON A SINGLE-SNAPSHOT GAME THE EXCURSION EQUALS THE NET MOVE BY CONSTRUCTION.
+        # 2024 and 2025 were backfilled one row per game, so for those rows the two numbers
+        # this panel shows side by side are the same measurement twice — and the caption's
+        # "furthest it travelled, not where it finished" is not true of them. matchup.py's
+        # own panel says this for one game; a ranked list needs to say it too, or the reader
+        # ranks a week of 2025 believing they are looking at round trips that were never
+        # observed. Said only when such a row is actually on screen.
+        single = int((ranked["line_snapshot_count"].fillna(0) <= 1).sum())
+        caveat = (f" {single} of these were priced once, so their furthest and net figures "
+                  f"are the same number by construction rather than by measurement."
+                  if single else "")
+
+        states.render_or_state(
+            ranked,
+            "srv_game",
+            "The week's line movement would be here.",
+            f"No games with enough line snapshots to measure a move for {scope.describe()}.",
+            renderer=lambda d: table.render(d, [
+                Col("matchup", "Game",
+                    render=lambda r: f"{r.away_team_display} at {r.home_team_display}"),
+                Col("line_spread_largest_excursion", "Spread — furthest", kind="signed", dp=1),
+                Col("line_spread_move_from_open", "Spread — net", kind="signed", dp=1),
+                Col("line_total_largest_excursion", "Total — furthest", kind="signed", dp=1),
+                Col("line_market_implied_win_probability_largest_excursion",
+                    "Win prob — furthest (pp)", kind="signed", dp=1),
+                # dp=0 BECAUSE THE FRAME FLOATS IT. line_snapshot_count is a bigint in
+                # serving, but games with no snapshots put NaN in the column and pandas
+                # widens the whole thing to float64 — so the default rendered "94.0" against
+                # real data and "94" against any fixture without a null in it. Measured on
+                # published serving, not reasoned about.
+                Col("line_snapshot_count", "Snapshots", kind="num", dp=0),
+                # ⚠️ PER ROW, NOT A FOOTNOTE. A window that spans a snapshot gap makes THAT
+                # game's excursion a FLOOR rather than a measurement — the line may have gone
+                # further while nobody was looking. 98 of 171 priced games in 2026 wk1 span
+                # one, so a footnote would be describing the majority of the list.
+                Col("line_movement_spans_snapshot_gap", "Window",
+                    # ⚠️ NO APOSTROPHE IN THE TITLE, AND DOUBLE QUOTES AROUND IT. The first
+                    # version wrote title='This game\'s prices…', whose apostrophe CLOSED the
+                    # attribute mid-sentence and spilled the rest into the tag as stray
+                    # attributes. It looked correct in the source and was only visible in
+                    # rendered output against real rows.
+                    render=lambda r: (
+                        '<span title="Prices for this game have a gap in them, so the '
+                        'distance shown is a floor: the line may have travelled further '
+                        'while it was unobserved.">has a gap</span>'
+                        if r.get("line_movement_spans_snapshot_gap") else "complete")),
+            ], caption=f"Spread and total in points; win probability in de-vigged "
+                       f"probability points. Prices from {book}. A row marked "
+                       f"\u201chas a gap\u201d is a floor, not a measurement.{caveat}"))
 
 
 def _leaderboards(scope, depth: int) -> None:
@@ -331,6 +483,7 @@ def body(page) -> None:
             _most_exciting(games, scope)
             _recap_lists(games, scope)
 
+    _movers(scope, depth)
     _leaderboards(scope, depth)
     _bump(scope)
     _looking_forward(scope)
