@@ -3081,6 +3081,42 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 ('drives', '2026-01-01T00-00-59-001Z.json', '{"year": "2024", "seasonType": "regular"}', 200, 2, '2026-01-01T00:00:59Z', now())
 ON CONFLICT DO NOTHING;
 
+-- EVERY LABEL mart_as_of MAPS NEEDS A ROW HERE, FOR THE REASON THE drives NOTE ABOVE GIVES.
+-- A077/R-489.
+--
+-- The drives comment explains the mechanism for one domain; this is the rest of it. Each
+-- domain is reached by a `cross join` on a one-row subquery, so a domain with no manifest row
+-- returns nothing, the cross join yields nothing, and the view builds EMPTY while every model
+-- reports success. CI goes green over a page with no rows on it.
+--
+-- ⚠️ TWO OF THESE WERE ALREADY MISSING BEFORE A077 ADDED A SINGLE DOMAIN, and one of them
+-- matters: 'stats_season' is the ONLY label in the `stats` domain, so `srv_team_stats` has
+-- been building EMPTY in CI — silently, on main, with the build green. 'games_teams' was
+-- masked because `game` also maps games/calendar/records, which are seeded, so the domain
+-- still returned a row and only the max() was wrong.
+--
+-- Neither was found by reading the fixture. Both were found by
+-- assert_every_as_of_endpoint_label_exists_in_the_manifest failing in CI on its first run,
+-- which is the argument for the guard existing at all.
+--
+-- Timestamps are deliberately spread so a max() per domain is a real comparison rather than
+-- a tie, and every row is status 200 because the map joins on that.
+INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
+('games_teams',         '2026-01-01T00-01-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:00Z', now()),
+('stats_season',        '2026-01-01T00-01-01-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:01Z', now()),
+('ratings_sp',          '2026-01-01T00-01-02-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:02Z', now()),
+('ratings_srs',         '2026-01-01T00-01-03-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:03Z', now()),
+('ratings_elo',         '2026-01-01T00-01-04-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:04Z', now()),
+('ratings_fpi',         '2026-01-01T00-01-05-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:05Z', now()),
+('ppa_teams',           '2026-01-01T00-01-06-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:06Z', now()),
+('games_weather',       '2026-01-01T00-01-07-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:07Z', now()),
+('games_players',       '2026-01-01T00-01-08-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:08Z', now()),
+('plays',               '2026-01-01T00-01-09-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:09Z', now()),
+('plays_stats',         '2026-01-01T00-01-10-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:10Z', now()),
+('stats_player_season', '2026-01-01T00-01-11-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:11Z', now()),
+('roster',              '2026-01-01T00-01-12-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:01:12Z', now())
+ON CONFLICT DO NOTHING;
+
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('teams', '2026-01-01T00-00-00-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:00Z', now()),
 ('teams', '2026-01-01T00-00-00-002Z.json', '{"year": "1900"}', 200, 2, '2026-01-01T00:00:00Z', now()),

@@ -49,4 +49,4 @@ select
     s.jersey,
     ao.as_of_ts
 from {{ ref('fct_player_season_stat') }} s
-cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'stats') ao
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'player_stats') ao

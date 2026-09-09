@@ -39,4 +39,4 @@ select
     a.hometown_display,
     ao.as_of_ts
 from {{ ref('dim_athlete') }} a
-cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'team') ao
+cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'roster') ao
