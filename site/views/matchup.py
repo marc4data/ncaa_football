@@ -45,6 +45,131 @@ COLUMNS = """
 """
 
 
+# --- R-501: the split, before the game and after it ----------------------------------------
+
+# ⚠️ THE SPLIT IS STATE, NOT SUBJECT, AND THAT IS MARC'S RULING RATHER THAN A PREFERENCE.
+#
+# 2026-09-08, on the framework question: "There are two main different looks, what the matchup
+# looks prior to the game, then post-game Scoreboard, Box Score, Team Stats etc. That's the
+# major split." The same ruling killed R-444's SUBJECT-based grouping — game / market /
+# context / sequence — and every cut offered alongside it. So there are two tabs named for
+# WHEN, and there is no third tab for a subject.
+#
+# WHY IT EXISTS AT ALL: B074 measured eight panels, all eight populated on 52 of 52 FBS
+# games. "The page has stopped being scannable, and the reason is that it succeeded."
+#
+# ⚠️ ANCHORS, NOT `st.tabs`, AND THE PATTERN IS SCORES' RATHER THAN A SECOND ONE (R-283).
+# scores.py:181-224 solved this after Marc reported it: "Clicking a sort while on Against The
+# Line or Box Score resets the user to the Game Results tab." `st.tabs` keeps its selection
+# client-side and never touches the URL, so every link rebuilt the page at the default tab.
+# `tab` is already a registered parameter (lib/params.py) and `params.link_here` preserves
+# every known one, so a deep link into this page keeps its tab for free.
+#
+# ⚠️ AND ANCHORS ARE LAZY, WHICH MATTERS MORE HERE THAN ON SCORES. `st.tabs` renders every
+# tab eagerly and only switches display, so wrapping these sections in it would multiply a
+# cost the page already pays. Only the selected tab's panels are called below. Measured
+# against live serving: five queries per render before this, two for a completed game after.
+#
+# ⚠️ THE PANELS ARE NAMED, NOT REFERENCED. Holding the function objects in this tuple would
+# bind them at import, and then a test could not prove that the INACTIVE tab's panels were
+# never called — monkeypatching `matchup._drives` would leave the bound original in the
+# tuple and the lazy guarantee would be untestable. It is resolved at call time instead, so
+# the assertion in test_matchup_tabs is real.
+#
+# (slug, label, panel names). THE SLUG IS WHAT GOES IN THE URL.
+BEFORE, AFTER = "before", "after"
+TABS = (
+    (BEFORE, "Before the game",
+     ("_market", "_line_movement", "_model", "_series", "_yardage", "_weather", "_travel")),
+    # ⚠️ ONE PANEL TODAY, AND THAT IS EXPECTED RATHER THAN UNBALANCED. The box score, the
+    # advanced block and the player leaders are B076 — specified in
+    # claude_work/cfdb_matchup_postgame_spec.md §1, all three on relations that already
+    # exist. Nothing is stubbed here: a stub of an unbuilt thing is a promise the page
+    # cannot keep, and it makes the next round impossible to measure.
+    (AFTER, "After the game", ("_drives",)),
+)
+
+# Which argument each panel takes. Named here rather than adapting the panels, because
+# changing three signatures so a lookup table can be uniform would rewrite three test files
+# to serve a data structure.
+_GAME_ID_PANELS = {"_weather", "_travel", "_drives"}
+
+
+def _available_tabs(played: bool) -> tuple:
+    """⚠️ AN UNPLAYED GAME HAS NO AFTER TAB AT ALL — NOT AN EMPTY ONE.
+
+    The post-game spec's own line and it is right: "Empty is a state with a reason; an absent
+    tab for an unplayed game is simply correct." An Empty state answers "why is there nothing
+    here"; for a game that kicks off on Saturday the honest answer is not a state at all, it
+    is that the question does not apply yet.
+
+    A game that HAS been played always keeps the tab, even where cfdb holds nothing for it —
+    drives are collected from 2024 onward, so a 1999 game shows the tab with one Empty block
+    inside it. That is the opposite case and Empty is exactly right for it: the question
+    applies, and the answer is that we do not hold it.
+    """
+    return TABS if played else TABS[:1]
+
+
+def _active_tab(row) -> tuple:
+    """The tab the URL asks for, or the one this game's STATE should open on.
+
+    ⚠️ THE FALLBACK IS THE WHOLE OF "TWO DIFFERENT LOOKS". scores.py falls back to TABS[0]
+    unconditionally; here a completed game opens on the after tab and a scheduled one on the
+    before tab. Without that line this is one look with a tab bar on it, which is what
+    test_a_completed_game_opens_on_the_after_tab was broken on purpose to prove.
+
+    Two ways the URL can ask for something that does not apply, and neither raises:
+
+      1. `?tab=after` on a game that has not been played — a real link someone sends on a
+         Friday and opens on a Sunday, and a hand-edited URL besides.
+      2. An unknown slug. scores.py already treats a hand-edited `?tab=` as noise rather than
+         a request (AC-G.11).
+
+    Both fall back to the tab this game's state would have opened on.
+    """
+    played = bool(row.get("is_completed"))
+    available = _available_tabs(played)
+    wanted = params.get("tab")
+    for entry in available:
+        if entry[0] == wanted:
+            return entry
+    # TABS[1] is the after tab, and `available` guarantees it is only reachable when played.
+    return available[-1] if played else available[0]
+
+
+def _tab_bar(active: str, played: bool) -> None:
+    """R-283. THE TAB LIVES IN THE URL, WHICH IS WHY THESE ARE ANCHORS.
+
+    ⚠️ NO BAR WHERE THERE IS NOTHING TO CHOOSE. A scheduled game has one tab, and a tab bar
+    offering a single destination is a control that does nothing — the defect the rule
+    immediately above this bar's CSS in lib/theme.py was written against. The scheduled game
+    therefore reads exactly as it did before this round, minus the panel that could not have
+    applied to it.
+    """
+    tabs = _available_tabs(played)
+    if len(tabs) < 2:
+        return
+    links = []
+    for slug, label, _panels in tabs:
+        css = "cfdb-tab" + (" cfdb-tab-on" if slug == active else "")
+        links.append(f"<a class='{css}' href='{params.link_here(tab=slug)}' "
+                     f"target='_self'>{label}</a>")
+    st.markdown(f"<div class='cfdb-tabbar'>{''.join(links)}</div>", unsafe_allow_html=True)
+
+
+def _run_tab(entry, row, game_id) -> None:
+    """Call this tab's panels, and ONLY this tab's panels.
+
+    Resolved out of the module by name at call time — see the note on TABS. Each panel keeps
+    the signature it already had; the set below says which of the two it is rather than every
+    panel being rewritten to match its neighbours.
+    """
+    for name in entry[2]:
+        panel = globals()[name]
+        panel(game_id if name in _GAME_ID_PANELS else row)
+
+
 def body(page) -> None:
     with states.section("srv_game"):
         game_id = params.get("game_id")
@@ -72,23 +197,13 @@ def body(page) -> None:
         _scoreline(row)
         table.as_of_caption(df)
 
-        _market(row)
-        _line_movement(row)
-        _model(row)
-        _series(row)
-        # A pre-game block, and it sits with the other pre-game blocks: market,
-        # model, history, then form. Weather and travel are conditions and drives
-        # are the game itself, so both stay below it.
-        _yardage(row)
-        # Its own view and its own section: weather exists for 2024 onward only, and a
-        # nested section means a weather failure degrades one block rather than blanking a
-        # page that is otherwise complete.
-        _weather(game_id)
-        _travel(game_id)
-        # Drives are their own section for the same reason weather is: they exist for
-        # 2024 onward only, so a pre-2024 game shows one Empty block rather than
-        # blanking a page that is otherwise complete.
-        _drives(game_id)
+        # R-501. Which of the two looks this game gets, and the panels that belong to it.
+        # Every panel below still states its own absence and still runs inside its own
+        # states.section, so the split changed WHEN a block is asked for and nothing about
+        # how it fails.
+        active = _active_tab(row)
+        _tab_bar(active[0], bool(row.get("is_completed")))
+        _run_tab(active, row, game_id)
 
 
 def _picker() -> None:

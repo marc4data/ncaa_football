@@ -80,3 +80,10 @@ cfdb_publish_ed25519*
 # notebook that made them, so the notebook is what belongs in git.
 notebooks/figures/
 notebooks/.ipynb_checkpoints/
+
+# ⚠️ THE PER-MACHINE CLAUDE CODE PERMISSIONS, AND THIS REPO IS PUBLIC.
+# `.claude/settings.json` IS tracked and carries no ssh rules and no host literals for
+# exactly that reason. `settings.local.json` is the per-working-copy override — it exists in
+# claude_code/ and wt-b/ separately, it names hosts and commands, and until this line it
+# showed as untracked beside every `git add`. One `git add .` away from being public.
+.claude/settings.local.json
