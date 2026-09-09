@@ -827,9 +827,14 @@ def _comparison(away, home, rows, glossary=None) -> str:
         hint = (glossary or {}).get(field)
         # ⚠️ A METRIC WITH NO DEFINITION DOES NOT RENDER AS A BARE NUMBER. It is named as
         # undefined instead, which is a finding a reader can act on rather than padding.
-        marked = (f"<abbr title=\"{html.escape(str(hint), quote=True)}\" "
-                  f"style='text-decoration:none;border-bottom:1px dotted currentColor'>"
-                  f"{label}</abbr>" if hint else
+        # <span title=…>, NOT <abbr>: schedule.py has been shipping title attributes on
+        # spans since R-085 and they survive Streamlit's sanitiser, which is the only
+        # evidence available without a browser. The quotes are double and the text is
+        # escaped, because a dictionary description containing an apostrophe would close a
+        # single-quoted attribute and spill markup onto the page.
+        marked = (f"<span title=\"{html.escape(str(hint), quote=True)}\" "
+                  f"style='border-bottom:1px dotted currentColor;cursor:help'>"
+                  f"{label}</span>" if hint else
                   f"{label}<span style='opacity:.5' title='Not yet defined in the data "
                   f"dictionary'> (undefined)</span>" if glossary is not None else label)
         lines.append(
