@@ -33,6 +33,13 @@ with mapped as (
     -- mart_as_of has already DONE the join: a label that matched nothing has been dropped by
     -- the time the model produces rows, so a test reading its output cannot see the thing it
     -- is looking for. The literal has to be duplicated for the test to have anything to test.
+    --
+    -- ⚠️ AND THE DUPLICATION IS ITSELF A HAZARD, STATED SO NOBODY DISCOVERS IT THE HARD WAY:
+    -- add a domain to mart_as_of and forget to add it here, and this test still PASSES while
+    -- covering less than it appears to — the same shape as the defect it exists to catch, one
+    -- level up. The clean fix is to lift the map into its own model (dim_as_of_map) that both
+    -- mart_as_of and this test read, so there is one list. That is a bigger change than A077's
+    -- scope and is proposed in the A077 report rather than done in passing.
     select * from (values
         ('games'), ('games_teams'), ('calendar'), ('records'), ('drives'), ('lines'),
         ('rankings'), ('stats_season'), ('teams'), ('conferences'), ('venues'),
