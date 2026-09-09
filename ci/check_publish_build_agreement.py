@@ -23,6 +23,7 @@ ancestors, which is the entire point of the selector syntax; a name test would s
 covered and miss that fct_game_team came with it.
 """
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -55,11 +56,36 @@ def models_for(selector: str) -> set:
     # ten minutes debugging a selector that was fine.
     dbt = Path(sys.executable).with_name("dbt")
     exe = str(dbt) if dbt.exists() else "dbt"
+    # ⚠️ THE PROFILES DIRECTORY IS RESOLVED EXPLICITLY AND ABSOLUTELY, and both halves of
+    # that matter. This check ran green locally and died in CI on its first run.
+    #
+    #   - CI sets DBT_PROFILES_DIR to the RELATIVE path "dbt/profiles_ci", because every other
+    #     ci/ step invokes dbt from the repo root. Running with cwd=dbt/ re-anchors it to
+    #     dbt/dbt/profiles_ci: "Path 'dbt/profiles_ci' does not exist".
+    #   - But running from the ROOT with --project-dir instead does not fix it either: dbt
+    #     1.12 does not search the project directory for profiles.yml, so a laptop with no
+    #     DBT_PROFILES_DIR then fails with "Could not find profile named 'cfdb_profile'".
+    #     The old cwd=dbt/ form only worked because dbt searches the CURRENT directory.
+    #
+    # So neither cwd alone nor --project-dir alone is right. Resolve the directory against the
+    # repo root and pass it, which is correct in both environments and depends on neither.
+    env_profiles = os.environ.get("DBT_PROFILES_DIR")
+    profiles = (Path(env_profiles) if env_profiles else Path("dbt"))
+    if not profiles.is_absolute():
+        profiles = ROOT / profiles
     out = subprocess.run(
-        [exe, "--no-use-colors", "ls", "--select", *args, "--resource-type", "model"],
-        cwd=ROOT / "dbt", capture_output=True, text=True)
+        [exe, "--no-use-colors", "ls", "--project-dir", str(ROOT / "dbt"),
+         "--profiles-dir", str(profiles),
+         "--select", *args, "--resource-type", "model"],
+        cwd=ROOT, capture_output=True, text=True)
     if out.returncode != 0:
-        raise SystemExit(f"::error::dbt ls failed for {selector!r}\n{out.stderr[-2000:]}")
+        # stderr is included deliberately: the first CI failure of this check reported
+        # "dbt ls failed for '--select …'", which points at the selector when the actual
+        # problem was the profiles dir. The selector is almost never the thing that is wrong.
+        raise SystemExit(
+            f"::error::dbt ls failed. The selector is printed for context, but read the "
+            f"error below first — it is usually the environment, not the selector.\n"
+            f"  selector: {selector}\n{out.stderr[-2000:]}{out.stdout[-2000:]}")
     return {line.rsplit(".", 1)[-1].strip()
             for line in out.stdout.splitlines() if line.startswith("cfdb_dbt")}
 
