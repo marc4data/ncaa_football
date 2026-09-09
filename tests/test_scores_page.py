@@ -707,3 +707,123 @@ def test_the_parameter_still_reaches_the_url_which_is_what_ac_g13_asks_for(monke
     params.set_params(season=2025, team="auburn")
     assert qp == {"season": "2025", "team": "auburn"}
     assert qp.writes == 2, "a first write is a real one"
+
+
+# --- the Cols the PAGE builds, not ones a test wrote (R-470) -------------------------------
+
+def _representative_frame() -> pd.DataFrame:
+    """One row carrying every sheet field, with the DTYPES the page will actually meet.
+
+    The dtype is the part that matters. `_kind` branches on
+    `pd.api.types.is_numeric_dtype(series)`, so a frame of strings would send every column
+    down the non-numeric path and exercise none of the formatting rules. Numeric-ness is
+    taken from the sheet's own number format — the same source `_kind` defers to — rather
+    than from a hand-kept list here, which would be the "second answer waiting to disagree"
+    that scores.py's own docstring warns about.
+    """
+    sheet = scores.SCORES_SHEET
+    row = {}
+    for field, _label in workbook.SCORES_COLUMNS:
+        fmt = workbook.number_format(field, sheet.decimals, sheet.integer_fields,
+                                     sheet.site_precision)
+        row[field] = 1234567 if fmt.startswith(("0", "#,##0", "+#")) else "text"
+    # The fields the special branches read, at their real types.
+    row.update({"won": "Yes", "team_rank": 12, "team": "Ohio State",
+                "team_slug": "ohio-state", "team_logo_url": None,
+                "game_date": "2026-09-05", "record_before_display": "1-0"})
+    return pd.DataFrame([row])
+
+
+class _Scope:
+    season, week, season_type, conference, division = 2026, 1, "regular", None, "fbs"
+
+    def describe(self):
+        return "2026 wk1"
+
+    def link(self, page_name, **k):
+        return "#"
+
+
+def test_every_tab_builds_ITS_OWN_columns_and_formats_a_row():
+    """R-470. EXERCISE `_columns`, do not rebuild it.
+
+    B069's harness constructs 171 of 176 Cols across sixteen modules and NAMES the five it
+    cannot reach rather than skipping them quietly. Four of those five are here, at
+    scores.py:328, 339, 360 and 365, because they are built inside `_columns` from values
+    that only exist at runtime — `_kind` reads the dtype off `frame[field]`, and three of
+    the four carry a `render=` lambda that closes over a row. There is no refactor that
+    makes those constructible without a frame: the dependency is real, not accidental.
+
+    ⚠️ AND THE PAGE ALREADY HAS A TEST THAT LOOKS LIKE THIS ONE AND IS NOT.
+    `test_a_numeric_column_carries_a_comma_exactly_when_the_sheet_does` calls the real
+    `_kind` and then builds `Col(field, "x", kind, dp=dp)` ITSELF. That is the second-draft
+    shape A067 documented: it tests a Col the test wrote, so every one of `_columns`'s four
+    constructions could be wrong — a bad keyword, a render lambda that raises — and it would
+    still pass. `Col(..., decimals=1)` shipped through exactly that gap.
+
+    This one calls `_columns` for all six tabs and formats a row through everything it hands
+    back, which is the only way the four are covered.
+    """
+    frame = _representative_frame()
+    row = frame.iloc[0]
+    seen = 0
+    for slug, _label, blocks in scores.TABS:
+        fields = scores.tab_fields(blocks)
+        columns = scores._columns(fields, frame, _Scope())
+        assert columns, f"tab {slug} built no columns"
+        for col in columns:
+            rendered = col.format(row)
+            assert isinstance(rendered, str), \
+                f"tab {slug}, column {col.field}: {type(rendered).__name__}, not str"
+            seen += 1
+    assert seen > 100, f"only {seen} columns exercised — the tabs did not build"
+
+
+def test_the_three_render_lambdas_do_what_their_comments_promise():
+    """The branches at scores.py:328, 339 and 360, at the values they exist FOR.
+
+    Formatting a happy row proves they do not raise. It does not prove the behaviour each
+    was written for, and all three are about an ABSENT value — the case a one-row fixture of
+    populated fields never reaches.
+    """
+    frame = _representative_frame()
+    cols = {c.field: c for c in scores._columns(
+        ["won", "team_rank", "team"], frame, _Scope())}
+
+    # `won`: nothing at all on a loss, not a second glyph meaning "not this one".
+    assert "▸" in cols["won"].format(pd.Series({"won": "Yes"}))
+    assert cols["won"].format(pd.Series({"won": "No"})) == ""
+    assert cols["won"].format(pd.Series({"won": None})) == ""
+
+    # `team_rank`: BLANK, not an em dash — "not in the poll" is a fact, not a gap.
+    assert cols["team_rank"].format(pd.Series({"team_rank": 12})) == "12"
+    assert cols["team_rank"].format(pd.Series({"team_rank": None})) == ""
+    assert cols["team_rank"].format(pd.Series({"team_rank": float("nan")})) == ""
+
+    # `team`: renders through team_cell, and survives the missing slug that pointed 996
+    # anchors at /team with no team.
+    assert cols["team"].format(pd.Series(
+        {"team": "Ohio State", "team_slug": "ohio-state", "team_logo_url": None}))
+    assert isinstance(cols["team"].format(pd.Series(
+        {"team": "Ohio State", "team_slug": None, "team_logo_url": None})), str)
+
+
+def test_the_scores_column_test_can_fail():
+    """Negative proof, in the shape rule 10 asks for. A harness that has never been seen
+    rejecting a broken `_columns` is a harness nobody has tested — and this whole round
+    exists because a test that passed while inert was taken as evidence."""
+    import pytest
+
+    original = scores.Col
+
+    def broken(field, label, kind=None, **kw):
+        # The exact defect A067 shipped: a keyword Col does not take.
+        return original(field, label, kind, decimals=1)
+
+    frame = _representative_frame()
+    scores.Col = broken
+    try:
+        with pytest.raises(TypeError):
+            scores._columns(scores.tab_fields(scores.TABS[0][2]), frame, _Scope())
+    finally:
+        scores.Col = original

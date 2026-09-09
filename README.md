@@ -478,15 +478,49 @@ local end of a forward to the droplet's serving Postgres (`127.0.0.1:5433` there
 different instance from the warehouse):
 
 ```bash
-ssh -N -L 15434:127.0.0.1:5433 $CFDB_DROPLET_HOST   # another terminal
+scripts/serving_tunnel.sh                           # another terminal, leave it running
 SERVING_PG_HOST=127.0.0.1 SERVING_PG_PORT=15434 streamlit run site/app.py
 ```
+
+### The laptop read credential (R-445)
+
+**Marc ruled on 2026-09-08 that laptops may hold `cfdb_read`.** Before that it existed only
+on the droplet, so no local session could read serving at all: B066's four-state render
+check had to be run on the box, and every round paid the same toll. `cfdb_read` holds SELECT
+and nothing else, so a laptop copy widens where the credential is held without widening what
+it can do.
+
+⚠️ **`.env` is gitignored and PER WORKING COPY.** `claude_code/`, `wt-b/` and `cfdb_deploy/`
+each carry their own, none visible to the others, and a `git pull` cannot correct any of
+them. Paste `CFDB_READ_PASSWORD` into **each working copy you actually work in**.
+
+Then prove it, rather than assuming it:
+
+```bash
+scripts/serving_tunnel.sh                    # another terminal
+python scripts/verify_read_credential.py     # prints a fingerprint, never the secret
+```
+
+`verify_read_credential.py` reads the grants out of the catalogue, checks the role's
+attributes and memberships, and **attempts INSERT / UPDATE / DELETE / CREATE / DROP against a
+real serving table**, requiring each to be refused *for insufficient privilege* specifically
+— a write that fails because the table does not exist has proved nothing. It exits non-zero
+if the credential can do anything beyond SELECT on `serving`.
+
+⚠️ **A stale credential fails in a way that does not name itself.** The app shows its generic
+Error state, which reads as "the data is not built" rather than "you did not authenticate" —
+B066 lost time to exactly that. The verifier distinguishes the two; **the app does not yet,
+and that is R-446, a later round.** If a page is unexpectedly empty, run the verifier before
+believing the page.
 
 Two boundaries the code enforces rather than documents:
 
 - **Read-only by role.** The site connects as `cfdb_read`, which has SELECT and nothing
-  else — verified against INSERT/DELETE/CREATE/DROP at creation. A bug in a page cannot
-  write to the warehouse.
+  else. A bug in a page cannot write to the warehouse. ⚠️ This used to read *"verified
+  against INSERT/DELETE/CREATE/DROP at creation"* — verified once, by someone no longer in
+  the room, is an assertion and not a limit: the role can be recreated or granted into a
+  group and nothing would notice. It is now **re-measurable on demand** from any machine
+  holding the credential — `python scripts/verify_read_credential.py`.
 - **Marts only, no computation.** Every query selects from a `mart_*` table. Sorting,
   filtering and formatting are presentation; a new *number* is a new dbt model, requested
   through the demand-driven process. `site/db.py` is the single place queries live, so this
