@@ -493,4 +493,14 @@ def body(page) -> None:
 
 
 def render() -> None:
-    shell.page(body)
+    # R-479. `shell.page` DOES NOT EXIST — the module exports render_page(key, body), and the
+    # other fourteen views all call it that way. This line raised AttributeError on every
+    # open from A067 (c2f5b50, #143, 2026-09-08) until 2026-09-09, and Today is app.py's
+    # DEFAULT page, so it was the first thing every visitor hit.
+    #
+    # Nothing in the repo could see it. test_site_foundation IMPORTS every view module, which
+    # succeeds — the name is only resolved when render() is called. The site-image smoke test
+    # builds st.Page objects and counts them without running one. A074's panel-exercise test
+    # calls the panels directly and never goes through render(). Every check was one layer
+    # away from the only line that mattered. That gap is R-480.
+    shell.render_page("today", body)
