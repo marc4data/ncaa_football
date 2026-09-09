@@ -74,6 +74,24 @@ CSS = """
 .cfdb-dist-empty { opacity:.45; }
 .cfdb-dist-none { font-size:.9rem; opacity:.6; }
 
+/* R-477. The offence/defence scatter. Same approach as the distribution chart above: the
+   marks are currentColor so the whole thing themes for free and needs no light/dark variant,
+   which is also why there is no palette here to validate. One series, one hue, no legend —
+   the chart standard's §7. Nothing encodes a judgement: no colour scale, no threshold line,
+   no quadrant shading. */
+.cfdb-scatter { margin:.2rem 0 .1rem; }
+.cfdb-scatter svg { display:block; width:100%; height:auto; color:inherit; }
+.cfdb-sc-grid { stroke:currentColor; stroke-opacity:.14; stroke-width:1; }
+/* Semi-transparent so overlapping teams read as denser rather than hiding each other —
+   136 points on one chart WILL overlap, and a solid fill would silently drop them. */
+.cfdb-sc-pt { fill:currentColor; fill-opacity:.45; }
+.cfdb-sc-tick { fill:currentColor; fill-opacity:.55; font-size:10px;
+    font-variant-numeric:tabular-nums; }
+.cfdb-sc-axis { fill:currentColor; fill-opacity:.7; font-size:11px; }
+/* The good corner, named on the plot itself — a reader scans the shape before the words. */
+.cfdb-sc-corner { fill:currentColor; fill-opacity:.5; font-size:10px;
+    letter-spacing:.02em; }
+
 .cfdb-dist-panel { border:1px solid rgba(127,127,127,.25); border-radius:6px;
     padding:.6rem .75rem; margin:.4rem 0; }
 .cfdb-dist-head { display:flex; align-items:baseline; gap:.6rem; margin-bottom:.3rem; }

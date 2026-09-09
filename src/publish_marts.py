@@ -150,6 +150,21 @@ DEFAULT_SERVING = [
     # srv_game and srv_game_team here, and the opposite of the player tables, which change
     # when games are played rather than while they are.
     "srv_drive",
+    # Team x week grain, for Looking Back's offence/defence scatter and — R-478 — for the
+    # Matchup pairing session B will build on it. Placed BEFORE srv_data_dictionary on the
+    # same reasoning as srv_drive above: the catalogue should describe a layer that contains
+    # it.
+    #
+    # ⚠️ THAT REASONING IS ALREADY BEING IGNORED FURTHER DOWN. Six entries sit AFTER
+    # srv_data_dictionary — srv_game_weather, the two distribution tables, srv_team_roster,
+    # srv_game_travel and srv_edge_bucket_performance — so "the dictionary stays last" is a
+    # convention this list stopped keeping some time ago. Following the stated intent here
+    # rather than the observed practice, and recording the discrepancy rather than quietly
+    # picking one.
+    #
+    # Small: one row per team per week per season, ~485k rows of narrow numerics, and it
+    # rides the hot publish because it changes whenever a game completes.
+    "srv_team_week",
     "srv_data_dictionary",
     "srv_game_weather",
     # The weekly distributions. Small — one row per week per metric per day, and ten bin rows

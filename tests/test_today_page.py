@@ -216,6 +216,17 @@ PANELS = {
     # three, and none had ever been called by a test. The guard found them on its first run,
     # which is the argument for deriving the set from the module instead of trusting a list.
     "_leaderboards": lambda page, games, scope: page._leaderboards(scope, 10),
+    # R-477. The scatter runs its own query so it can count the teams it dropped, and it
+    # needs a scope with a REAL week: under week=None it renders the "pick a week" Empty and
+    # would never reach a Col, so exercising it with the page's default scope would have
+    # proved nothing — the panel would be in the list and still untested.
+    "_profile": lambda page, games, scope: page._profile(scope),
+    # Found by widening the discovery above from "renders columns" to "announces itself with
+    # a subheader" — a seventh panel that no test had ever called. It is a stub that says
+    # Looking forward is not built yet, so there is little to break; it is exercised anyway,
+    # because "small" is not a reason to be outside the set and the next edit to it would be
+    # unguarded.
+    "_looking_forward": lambda page, games, scope: page._looking_forward(scope),
     "_bump": lambda page, games, scope: page._bump(scope),
 }
 
@@ -223,10 +234,21 @@ PANELS = {
 def _panels_defined_in(source: str) -> set:
     """Every module-level panel in today.py, found by what it DOES rather than by its name.
 
-    A panel is a function that hands columns to the table renderer — directly via
-    `table.render` or through `states.render_or_state`. Discovering them from the source is
-    what makes the exercised list falsifiable: a naming convention would let a panel opt out
-    of coverage by being called something else.
+    A panel is a module-level function that ANNOUNCES ITSELF with `st.subheader` — which is
+    the actual convention every panel on this page follows. Discovering them from the source
+    is what makes the exercised list falsifiable: a naming convention would let a panel opt
+    out of coverage simply by being called something else.
+
+    ⚠️ THIS WAS "HANDS COLUMNS TO THE TABLE RENDERER" UNTIL R-477, AND THAT DEFINITION HAD A
+    HOLE THE SIZE OF A CHART. A074 defined a panel as a function calling `table.render` or
+    `states.render_or_state`. `_profile` draws an inline-SVG scatter through `st.markdown` and
+    hands columns to nobody, so the guard written to catch an unexercised panel could not see
+    it — it reported `_profile` as a name today.py "no longer defines" while the function sat
+    in the file. A guard that is blind to a whole CLASS of panel is the same defect as the
+    inert test A071 repaired: it passes, and what it covers is smaller than it looks.
+
+    `st.subheader` is the honest anchor because it is what makes something a panel to a
+    READER — a titled block on the page — rather than what it happens to render with.
     """
     import ast
 
@@ -234,9 +256,14 @@ def _panels_defined_in(source: str) -> set:
     for node in ast.parse(source).body:
         if not isinstance(node, ast.FunctionDef):
             continue
-        body = ast.dump(node)
-        if "attr='render'" in body or "attr='render_or_state'" in body:
-            found.add(node.name)
+        for sub in ast.walk(node):
+            if (isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == "subheader"
+                    and isinstance(sub.func.value, ast.Name)
+                    and sub.func.value.id == "st"):
+                found.add(node.name)
+                break
     return found
 
 
@@ -368,10 +395,20 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
                "week": 1, "poll_name": "AP Top 25", "team_display": "Home", "rank": 5,
                "opponent": "Away", "total_yards": 400, "rushing_yards": 150,
                "passing_yards": 250, "player_name": "Player One", "team": "Home",
-               "stat_category": "rushing", "stat_value": 120}
+               "stat_category": "rushing", "stat_value": 120,
+               # R-477's columns, at the scales srv_team_week publishes: per-game figures
+               # already divided in the view, and games_counted as the denominator they were
+               # divided by. games_counted > 0 is what makes the row plottable at all.
+               "games_counted": 9,
+               "total_yards_for_per_game": 430.5,
+               "total_yards_allowed_per_game": 312.25,
+               "conference": "Big Ten"}
         games = pd.DataFrame([row])
 
         class Scope:
+            # week is a REAL week, not None: _profile renders a "pick a week" Empty under
+            # week=None and would never build a mark, so a None here would put the panel in
+            # the exercised set without exercising it.
             season, week, season_type, conference, division = 2026, 1, "regular", None, "fbs"
 
             def describe(self):
@@ -386,10 +423,16 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
 
         scope = Scope()
         for name, invoke in PANELS.items():
-            before = len(captured)
+            before_cols, before_calls = len(captured), len(calls)
             invoke(page, games, scope)
-            assert len(captured) > before, \
-                f"panel {name} handed no columns to table.render — it rendered nothing"
+            # ⚠️ "PRODUCED OUTPUT", NOT "PRODUCED COLUMNS". _profile draws an SVG scatter and
+            # hands columns to nobody, so requiring captured columns would have failed a panel
+            # that is working — and, worse, would have pushed the next person to drop chart
+            # panels from the exercised set to keep the suite green. A panel earns its place
+            # by rendering SOMETHING; the Col-construction check below still applies to
+            # whatever columns any of them did build.
+            assert len(captured) > before_cols or len(calls) > before_calls, \
+                f"panel {name} rendered nothing at all — neither columns nor a streamlit call"
 
         assert captured, "no panel handed any columns to table.render"
 
