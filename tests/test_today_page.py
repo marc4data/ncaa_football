@@ -172,8 +172,23 @@ def _stub_streamlit():
     # the real module is not the same test.
     stub.radio = lambda *a, **k: (calls.append(("radio", a[0] if a else None))
                                   or (a[1][0] if len(a) > 1 and a[1] else None))
-    stub.cache_data = lambda *a, **k: (lambda f: f)
-    stub.cache_resource = lambda *a, **k: (lambda f: f)
+    # ⚠️ BOTH DECORATOR FORMS. Streamlit's cache decorators are used bare
+    # (`@st.cache_resource` on lib.query.engine) AND called (`@st.cache_data(ttl=300)` on
+    # lib.db.freshness). A stub that only handles the called form replaces every BARE-
+    # decorated function with `lambda f: f`, so calling it raises
+    #     TypeError: <lambda>() missing 1 required positional argument: 'f'
+    # which names the stub rather than the thing that broke. Found on 2026-09-09 by running
+    # this same stub against the DEPLOYED site container, where the panels reach a real
+    # engine() instead of a patched query — the tests never hit it because they stub
+    # `page.query`, so the defect was invisible here and only appeared off the laptop.
+
+    def _cache(*a, **k):
+        if len(a) == 1 and callable(a[0]) and not k:
+            return a[0]
+        return lambda f: f
+
+    stub.cache_data = _cache
+    stub.cache_resource = _cache
     return stub, calls
 
 
