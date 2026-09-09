@@ -1,22 +1,23 @@
-{{ config(tags=['full_refresh_only']) }}
--- ⚠️ TAGGED `full_refresh_only`: EXCLUDED FROM cfbd_scores_refresh, WHICH REBUILDS ONE SIDE
--- OF THIS COMPARISON AND NOT THE OTHER.
+-- ⚠️ THE `full_refresh_only` TAG WAS REMOVED HERE ON 2026-09-09 (A078/R-493), AND THE
+-- REMOVAL IS THE POINT.
 --
--- The gated DAGs rebuild srv_game, srv_team_game_log, srv_game_weather and the two
--- distribution views, plus their ancestors — which includes fct_game_team and dim_team_week,
--- both read below. It does NOT rebuild fct_team_yardage_week. So after a two-hourly refresh
--- the inputs have moved and the model has not, this test fails for a reason the DAG cannot
--- fix, and publish_to_serving — downstream on all_success — stops updating the site at all.
+-- A075 tagged this test because it straddled the refresh boundary: it compares
+-- fct_team_yardage_week against fct_game_team and dim_team_week, and cfbd_scores_refresh
+-- rebuilt the latter two and not the former. After a two-hourly run the inputs had moved and
+-- the model had not, so the test failed for a reason the DAG could not fix — and
+-- publish_to_serving, downstream on all_success, would have stopped updating the site. That
+-- is R-226's shape, and tagging was correct at the time.
 --
--- That is R-226 exactly: on 2026-09-04 assert_team_series_reconciles failed three consecutive
--- runs and the site was fresh only because a deploy happened to publish by hand. This is the
--- ninth instance of the shape, and it was caught by the guard rather than by an outage —
--- tests/test_dag_structure.py failed the moment this test was written, which is the whole
--- reason that check is a pytest wrapper and not only a CI step.
+-- A078 added +srv_team_week to SCORES_SELECTOR, which pulls fct_team_yardage_week into the
+-- same rebuild as the other two. All three sides now move together, the straddle is gone,
+-- and the tag went from protective to expensive: it was excluding a real correctness check
+-- from the DAG that runs every two hours on a game day, which is precisely when the
+-- off-by-one this test guards would do the most damage.
 --
--- The check is a full-build consistency assertion by nature: it compares a cumulative model
--- against the games it accumulates, which is only a coherent question once both have been
--- built from the same data.
+-- ⚠️ NOBODY NOTICED THIS BY READING. tests/test_dag_structure.py's over-tagging check found
+-- it the moment the selector changed: "these are selected by the scores DAG and do not
+-- straddle the boundary, so the tag costs real coverage". The exclusion list is enforced in
+-- BOTH directions on purpose, and this is the direction that had never fired before.
 
 -- THE OFF-BY-ONE, CHECKED BY ARITHMETIC RATHER THAN BY READING THE SQL. R-476.
 --

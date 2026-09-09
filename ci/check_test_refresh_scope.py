@@ -42,6 +42,15 @@ GATED_SELECTION = (
                    "model.cfdb_dbt.srv_game",
                    "model.cfdb_dbt.srv_team_game_log",
                    "model.cfdb_dbt.srv_game_weather",
+                   # R-492. Added to SCORES_SELECTOR because the hot publish was already
+                   # shipping srv_team_week on every gate-open run without rebuilding it.
+                   # ⚠️ THIS MIRROR IS THE LIST test_dag_structure.py:120 WARNS ABOUT —
+                   # "a list nobody reads is a list nobody maintains", written after
+                   # assert_team_series_reconciles slipped through a two-entry tuple nobody
+                   # had updated. Changing the DAG's selector without changing this line
+                   # leaves the straddle check reasoning about the old selection, which fails
+                   # in the direction that looks fine.
+                   "model.cfdb_dbt.srv_team_week",
                    # cfbd_lines_snapshot — DISTRIBUTION_SELECTOR
                    "model.cfdb_dbt.srv_week_metric_distribution",
                    "model.cfdb_dbt.srv_week_metric_distribution_bin")

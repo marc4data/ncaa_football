@@ -86,6 +86,21 @@ SCORES_SELECTOR = (
     # page showing a forecast up to seven days stale on top of current data — a worse
     # failure than not collecting it, because it would look fresh.
     " +srv_game_weather"
+    # R-492. THE PUBLISH LIST AND THIS SELECTOR DISAGREED, AND THE PUBLISH LIST WON TWELVE
+    # TIMES A GAME DAY.
+    #
+    # srv_team_week is in HOT_SERVING, so publish_to_serving below has been dumping and
+    # shipping it on every gate-open run since A075 — while this selector never rebuilt it.
+    # The site was handed Sunday-built rows arriving alongside srv_game rows that had just
+    # moved, looking exactly as fresh. src/publish_marts.py's own comment already stated the
+    # intent this line now delivers: "it rides the hot publish because it changes whenever a
+    # game completes."
+    #
+    # ⚠️ THE COST IS TWO MODELS, NOT AN ANCESTRY. `+` pulls ancestors, but dim_team_week and
+    # everything above it are ALREADY here — dim_team_week feeds fct_team_record_week, which
+    # feeds srv_game. Measured with `dbt ls`: 38 models before, 40 after. The two are
+    # fct_team_yardage_week and srv_team_week themselves.
+    " +srv_team_week"
 )
 
 # A TEST THIS DAG CANNOT SATISFY IS A TEST THIS DAG MUST NOT RUN.
