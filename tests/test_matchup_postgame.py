@@ -1,0 +1,446 @@
+"""Matchup's post-game panel: the box score and the advanced block (R-507).
+
+⚠️ THE DEFECT THIS FILE EXISTS FOR IS AC-G.6, AND IT IS A TRAP RATHER THAN AN OVERSIGHT.
+
+`srv_game_team` holds a row for EVERY game back to 1869, and every box-score column is NULL
+in all 202,728 of the pre-2024 ones — measured in serving, not inferred. So a 1999 game
+returns two rows of nulls, `df.empty` is FALSE, and the obvious version of this panel — the
+one that follows every other panel's shape on this page — renders a two-column table of em
+dashes for 101,354 games. That is exactly what AC-G.6 forbids: "a page must not show 0, an em
+dash or an empty table where the honest answer is 'nothing matched'."
+
+B075 drafted the opposite claim, checked it, and killed its own sentence. This file is the
+guard that keeps the correction.
+
+⚠️ THE EMPTINESS TEST IS ON THE VALUES, AND THE VIEW SHIPS THEM: `has_box_score`,
+`has_box_advanced`, `has_team_advanced` and `has_havoc`. They are INDEPENDENT — measured on
+2024+ games, 3,543 have a box score, 3,471 of those the advanced block, 2,428 havoc — so a
+game can have a complete box score and no advanced figures, which is that section's own state
+rather than a reason to hide the panel.
+
+The break was staged: swapping the value test for `if df.empty` and pointing it at 62718
+(Toledo at Marshall, 1999 wk 8) renders the grid of dashes, and these tests go red.
+"""
+import html
+import re
+import sys
+import types
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+
+SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
+
+
+def _stub_streamlit():
+    captured = []
+
+    def recorder(kind):
+        def call(*args, **kwargs):
+            captured.append((kind, " ".join(str(a) for a in args)))
+        return call
+
+    stub = types.ModuleType("streamlit")
+    for name in ("subheader", "caption", "markdown", "write", "info", "warning", "error"):
+        setattr(stub, name, recorder(name))
+
+    class _Col:
+        def metric(self, label, value, help=None):
+            captured.append(("metric", f"{label} {value}"))
+
+        def markdown(self, *args, **kwargs):
+            captured.append(("markdown", " ".join(str(a) for a in args)))
+
+    stub.columns = lambda n, **k: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
+    stub.button = lambda *a, **k: False
+    stub.empty = lambda *a, **k: _Col()
+
+    def cache(*args, **kwargs):
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]
+        return lambda fn: fn
+
+    stub.cache_data = stub.cache_resource = cache
+    stub.session_state = {}
+    return stub, captured
+
+
+_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.shell", "views.matchup")
+
+
+def _reload_all():
+    import importlib
+    for name in _RELOAD:
+        importlib.reload(importlib.import_module(name))
+
+
+# The dictionary rows the panel reads. Real text, trimmed — the point of the fixture is that
+# the words come from the DICTIONARY and not from the page, so inventing prose here would
+# defeat it.
+GLOSSARY = pd.DataFrame([
+    {"column_name": f, "is_documented": True,
+     "column_description": f"Authored definition of {f}."}
+    for f in ("offense_ppa", "offense_success_rate", "offense_explosiveness",
+              "offense_standard_downs_success_rate", "offense_passing_downs_success_rate",
+              "offense_rushing_plays_ppa", "offense_passing_plays_ppa",
+              "offense_power_success", "offense_stuff_rate", "offense_line_yards",
+              "defense_havoc_rate", "offense_plays")])
+
+
+@pytest.fixture
+def panel():
+    """`_post_game` with streamlit captured and both queries answered from constructed rows.
+
+    ⚠️ IT PUTS THE MODULES BACK — reloading lib.states against a stub binds the stub inside it
+    for the rest of the session, which cost test_matchup_drives six unrelated failures.
+    """
+    real = sys.modules.get("streamlit")
+    stub, captured = _stub_streamlit()
+    sys.modules["streamlit"] = stub
+    _reload_all()
+    matchup = sys.modules["views.matchup"]
+    seen = []
+
+    def run(sides, glossary=GLOSSARY):
+        captured.clear()
+        seen.clear()
+
+        def fake_query(sql, params=None):
+            seen.append(re.search(r"from\s+(\w+)", sql, re.I).group(1))
+            return glossary if "srv_data_dictionary" in sql else pd.DataFrame(sides)
+
+        matchup.query = fake_query
+        matchup._post_game(401752754)
+        return list(captured), list(seen)
+
+    yield run, matchup
+
+    if real is not None:
+        sys.modules["streamlit"] = real
+    else:
+        sys.modules.pop("streamlit", None)
+    _reload_all()
+
+
+_ADVANCED_VALUES = {
+    "offense_plays": 71, "offense_drives": 12, "offense_ppa": 0.123,
+    "offense_success_rate": 0.451, "offense_explosiveness": 1.234,
+    "offense_standard_downs_success_rate": 0.512,
+    "offense_passing_downs_success_rate": 0.281,
+    "offense_rushing_plays_ppa": 0.061, "offense_passing_plays_ppa": 0.188,
+    "offense_power_success": 0.750, "offense_stuff_rate": 0.192,
+    "offense_line_yards": 2.84, "defense_havoc_rate": 0.172,
+}
+
+
+def _side(team, is_home, **overrides):
+    """One srv_game_team row. Real 2025 wk-10 box-score figures for 401752754.
+
+    Every number differs between the two sides on purpose, so an assertion that a value
+    reached the panel can only be satisfied by the column and the side it came from.
+    """
+    row = {"game_id": 401752754, "team_id": 2 if is_home else 96,
+           "team_display": team, "team_logo_url": None, "is_home": is_home,
+           "has_box_score": True, "has_box_advanced": True,
+           "has_team_advanced": True, "has_havoc": True,
+           "first_downs": 17 if is_home else 16,
+           "total_yards": 241 if is_home else 240,
+           "rushing_yards": 118 if is_home else 79,
+           "passing_yards": 123 if is_home else 161,
+           "rushing_attempts": 40 if is_home else 32,
+           "turnovers": 2, "interceptions": 1 if is_home else 2,
+           "fumbles_lost": 1 if is_home else 0,
+           "third_down_conversions": 6,
+           "third_down_attempts": 16 if is_home else 13,
+           "fourth_down_conversions": 1 if is_home else 0,
+           "fourth_down_attempts": 2 if is_home else 1,
+           "penalties": 4 if is_home else 3,
+           "penalty_yards": 26 if is_home else 20,
+           "as_of_ts": pd.Timestamp("2026-09-09T12:00:00Z")}
+    row.update({k: (v if is_home else round(v / 2, 3))
+                for k, v in _ADVANCED_VALUES.items()})
+    # The denominator is set explicitly rather than halved: 71/2 lands on 35.5, and an
+    # assertion that depends on which way a .5 rounds is testing the formatter.
+    row["offense_plays"] = 71 if is_home else 64
+    row.update(overrides)
+    return row
+
+
+def _both(**over):
+    return [_side("Auburn", True, **over), _side("Kentucky", False, **over)]
+
+
+def _dead(**over):
+    """⚠️ A PRE-2024 GAME: rows present, every value NULL, every flag False. 62718."""
+    row = {"game_id": 62718, "team_id": 276, "team_display": "Marshall",
+           "team_logo_url": None, "is_home": True,
+           "has_box_score": False, "has_box_advanced": False,
+           "has_team_advanced": False, "has_havoc": False,
+           "as_of_ts": pd.Timestamp("2026-09-09T12:00:00Z")}
+    row.update({f: None for f in
+                ("first_downs", "total_yards", "rushing_yards", "passing_yards",
+                 "rushing_attempts", "turnovers", "interceptions", "fumbles_lost",
+                 "third_down_conversions", "third_down_attempts",
+                 "fourth_down_conversions", "fourth_down_attempts",
+                 "penalties", "penalty_yards")})
+    row.update({f: None for f in _ADVANCED_VALUES})
+    row.update(over)
+    other = dict(row, team_id=2649, team_display="Toledo", is_home=False)
+    return [row, other]
+
+
+def _text(entries):
+    return " ".join(
+        re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", body))).strip()
+        for _, body in entries)
+
+
+# --- ⚠️ AC-G.6: the trap ---------------------------------------------------------------------
+
+def test_a_pre_2024_game_renders_empty_not_a_table_of_em_dashes(panel):
+    """THE ASSERTION THIS FILE EXISTS FOR, on `62718` — the real game B074 and B075 both used.
+
+    Staged red first: replacing the `has_box_score` test with `if df.empty` makes the panel
+    draw a full grid of `—` for both sides and fails this test on the dash count.
+    """
+    run, _ = panel
+    entries, _ = run(_dead())
+    body = _text(entries)
+    # ⚠️ THE DASH COUNT IS ASSERTED FIRST, ON PURPOSE. When the break was staged, the
+    # ADVANCED section's own guard still fired, so "would be here" was present while the box
+    # score above it drew a full grid of dashes — the "did it render Empty" assertion passed
+    # for the wrong reason. The count and the absent row label are what actually catch it.
+    assert body.count("—") == 0, \
+        f"the panel drew {body.count('—')} em dashes where the honest answer is Empty"
+    assert "First downs" not in body, "the box score grid rendered over a game with no data"
+    assert "would be here" in body, "the Empty state did not render"
+    assert "2024 onward" in body, "the Empty state did not say why"
+
+
+def test_the_emptiness_test_is_on_the_values_not_the_frame(panel):
+    """The frame is NOT empty for a pre-2024 game — two rows come back. If the panel ever
+    tests `df.empty` again, this is the sentence that failed."""
+    run, _ = panel
+    sides = _dead()
+    assert len(sides) == 2 and not pd.DataFrame(sides).empty, \
+        "the fixture no longer reproduces the trap"
+    assert "would be here" in _text(run(sides)[0])
+
+
+def test_one_side_missing_its_box_score_is_empty_too(panel):
+    """Half a box score is not a box score. Both columns or neither."""
+    run, _ = panel
+    sides = _both()
+    sides[1]["has_box_score"] = False
+    assert "would be here" in _text(run(sides)[0])
+
+
+# --- ⚠️ one read, two renderings -------------------------------------------------------------
+
+def test_the_box_score_and_the_advanced_block_are_one_read(panel):
+    """G-2. srv_game_team carries both, so two queries against it would be two passes over
+    one relation — and it is also what stops the two sections disagreeing about a game."""
+    run, _ = panel
+    _, seen = run(_both())
+    assert seen.count("srv_game_team") == 1, \
+        f"srv_game_team was read {seen.count('srv_game_team')} times, not once"
+
+
+def test_the_glossary_is_one_query_for_all_of_them(panel):
+    """Not one read per metric. `query` caches on the parameter set, so this is one read per
+    TTL window across every game anyone opens."""
+    run, _ = panel
+    _, seen = run(_both())
+    assert seen.count("srv_data_dictionary") == 1
+    assert seen == ["srv_game_team", "srv_data_dictionary"], \
+        f"the panel issued {seen}"
+
+
+def test_a_game_with_no_advanced_block_does_not_read_the_dictionary(panel):
+    """Nothing to define, so nothing to look up — the laziness B075 built, one level down."""
+    run, _ = panel
+    _, seen = run(_both(has_team_advanced=False))
+    assert "srv_data_dictionary" not in seen
+
+
+# --- the box score draws, and on the right sides ---------------------------------------------
+
+def test_a_2024_game_draws_real_figures_for_both_sides(panel):
+    run, _ = panel
+    body = _text(run(_both())[0])
+    assert "Auburn" in body and "Kentucky" in body
+    for figure in ("17", "16", "241", "240", "118", "79", "123", "161"):
+        assert figure in body, f"{figure} is missing from the box score"
+
+
+def test_away_is_on_the_left_and_home_on_the_right(panel):
+    """The scoreline's convention, and the reason that layout reads as a matchup at all."""
+    run, _ = panel
+    blocks = [b for kind, b in run(_both())[0] if kind == "markdown"]
+    heading = next(b for b in blocks if "Kentucky" in b and "Auburn" in b)
+    assert heading.index("Kentucky") < heading.index("Auburn"), \
+        "the home team was drawn on the left"
+
+
+def test_the_ratio_rows_are_fractions_not_percentages(panel):
+    """G-3. The app does not divide — `6/13`, never `46.2%`."""
+    run, _ = panel
+    body = _text(run(_both())[0])
+    assert "6/13" in body and "6/16" in body, "third down did not render as a fraction"
+    assert "%" not in body, "the panel computed a percentage"
+
+
+def test_turnovers_carry_their_split(panel):
+    run, _ = panel
+    body = _text(run(_both())[0])
+    assert "INT" in body and "FUM" in body
+
+
+# --- the advanced block, and the dozen --------------------------------------------------------
+
+def test_exactly_twelve_advanced_rows_are_offered(panel):
+    """⚠️ srv_game_team HAS 223 COLUMNS. A hundred numbers is not a page, it is a data
+    dictionary with a scoreline on top. The cut is editorial and it is stated so a reviewer
+    can disagree with it."""
+    _, matchup = panel
+    assert len(matchup._ADVANCED_ROWS) == 12, \
+        f"the advanced cut is {len(matchup._ADVANCED_ROWS)} rows, not a dozen"
+
+
+def test_the_advanced_rows_come_from_the_broader_family(panel):
+    """⚠️ DECIDED ON COVERAGE, NOT TASTE. has_team_advanced reaches 3,471 games and
+    has_box_advanced 1,849, so the narrower family would blank this section on 48% of the
+    games that HAVE a box score while an equivalent column sat beside it."""
+    _, matchup = panel
+    fields = [f for _l, f, _d in matchup._ADVANCED_ROWS]
+    for narrow in ("ppa_overall_total", "success_rate_overall_total", "explosiveness_total",
+                   "havoc_total", "stuff_rate", "power_success", "line_yards_average"):
+        assert narrow not in fields, \
+            f"{narrow} is behind has_box_advanced, which covers half as many games"
+
+
+def test_the_defensive_mirror_is_not_drawn_twice(panel):
+    """⚠️ defense_ppa for one side EQUALS offense_ppa for the other, to the last decimal —
+    verified on 401752754. Rendering both per side draws the same numbers twice; the
+    defensive reading is the other column, read across."""
+    _, matchup = panel
+    fields = [f for _l, f, _d in matchup._ADVANCED_ROWS]
+    mirrored = [f for f in fields if f.startswith("defense_") and f != "defense_havoc_rate"]
+    assert not mirrored, f"these are the other column restated: {mirrored}"
+
+
+def test_havoc_is_read_from_the_defensive_side(panel):
+    """⚠️ offense_havoc_rate is havoc SUFFERED by that offence, not generated by it —
+    offense_havoc_rate(Auburn) equals defense_havoc_rate(Kentucky), measured. Labelling it as
+    a defensive figure would be exactly wrong."""
+    _, matchup = panel
+    fields = [f for _l, f, _d in matchup._ADVANCED_ROWS]
+    assert "defense_havoc_rate" in fields and "offense_havoc_rate" not in fields
+
+
+def test_the_denominator_is_on_the_panel(panel):
+    """AC-G.33. Every rate above is over that side's own plays and the two sides do not run
+    the same number of them."""
+    run, matchup = panel
+    fields = [f for _l, f, _d in matchup._ADVANCED_ROWS]
+    assert "offense_plays" in fields
+    body = _text(run(_both())[0])
+    assert "71" in body and "64" in body, \
+        "the two sides' play counts are not both on the panel"
+
+
+def test_a_game_with_no_havoc_drops_that_row_and_keeps_the_rest(panel):
+    run, _ = panel
+    body = _text(run(_both(has_havoc=False))[0])
+    assert "Havoc" not in body, "a havoc row rendered for a game with no havoc data"
+    assert "Success rate" in body, "the rest of the advanced block went with it"
+
+
+def test_a_box_score_without_advanced_says_so_rather_than_vanishing(panel):
+    """⚠️ THE FLAGS ARE INDEPENDENT. 72 of the 3,543 games with a box score have no advanced
+    block, and a section that silently disappeared would be indistinguishable from one that
+    had never been written."""
+    run, _ = panel
+    body = _text(run(_both(has_team_advanced=False))[0])
+    assert "First downs" in body, "the box score went with the advanced block"
+    assert "Advanced" in body and "would be here" in body
+
+
+# --- ⚠️ the definitions come from the dictionary, not from the page ---------------------------
+
+def test_every_advanced_metric_carries_its_definition(panel):
+    """PPA, havoc, explosiveness and stuff rate are not common knowledge, and a number a
+    reader cannot interpret is worse than no number — it reads as padding."""
+    run, matchup = panel
+    body = " ".join(b for _k, b in run(_both())[0])
+    for _label, field, _dp in matchup._ADVANCED_ROWS:
+        assert f"Authored definition of {field}" in body, f"{field} rendered undefined"
+
+
+def test_a_metric_with_no_dictionary_entry_is_named_not_quietly_rendered(panel):
+    """A finding a reader can act on, rather than a bare number."""
+    run, _ = panel
+    thin = GLOSSARY[GLOSSARY.column_name != "offense_stuff_rate"]
+    body = _text(run(_both(), glossary=thin)[0])
+    assert "Not yet defined in the data dictionary" in body
+    assert "Stuff rate" in body
+
+
+def test_no_definition_is_written_in_the_page(panel):
+    """⚠️ Prose written here is prose that drifts from the dictionary the export ships."""
+    block = SOURCE[SOURCE.index("_ADVANCED_ROWS = ("):SOURCE.index("_GLOSSARY_FIELDS")]
+    for word in ("expected points", "tackle for loss", "line of scrimmage", "share of plays"):
+        assert word not in block.lower(), \
+            f"a definition was written into the page: {word!r}"
+
+
+# --- what this round did NOT build ------------------------------------------------------------
+
+def test_no_leaders_panel_was_stubbed():
+    """⚠️ R-506 IS BLOCKED, NOT SKIPPED. Nothing in serving ranks players within a game —
+    srv_player_stats ranks at SEASON grain and carries no game_id, and srv_player_game_log
+    carries no rank at all. Deriving it here would be a window function in the page, which is
+    the computation CLAUDE.md puts upstream. B070's rule: no stub either."""
+    for banned in ("srv_player_game_log", "srv_player_stats"):
+        assert banned not in SOURCE, f"{banned} was read to rank players in the page"
+
+
+def test_the_panel_computes_nothing(panel):
+    """G-3, asserted on the SQL the panel actually issued."""
+    block = SOURCE[SOURCE.index("_POSTGAME_COLUMNS = "):SOURCE.index("def _weather(")]
+    sql = block[block.index("select {_POSTGAME_COLUMNS}"):block.index('limit 2')].lower()
+    for banned in ("group by", "sum(", "avg(", "row_number(", "rank(", "over (", "join"):
+        assert banned not in sql, f"the panel's query contains `{banned}`"
+
+
+# --- the weather copy (R-507) ------------------------------------------------------------------
+
+def test_the_weather_game_id_is_cast_before_it_reaches_the_database():
+    """⚠️ THE BUG THIS ROUND SHIPPED AND CAUGHT, AND NOTHING IN THIS SUITE COULD SEE IT.
+
+    Taking the srv_game row instead of a game_id means the value arrives as a numpy.int64 out
+    of the DataFrame rather than as the int params.get() casts, and psycopg2 cannot adapt
+    one — "can't adapt type 'numpy.int64'". Every load of the weather panel raised into
+    states.section and rendered the Error state, on EVERY game, while looking like a handled
+    failure. The unit tests stub `query` and ci/check_page_queries binds its own parameters,
+    so it was found only by rendering the real body() against live serving.
+
+    Asserted on the source because the defect is at the boundary this file's stub replaces.
+    """
+    block = SOURCE[SOURCE.index("def _weather("):SOURCE.index("def _travel(")]
+    assert 'int(row.get("game_id"))' in block, \
+        "an un-cast numpy.int64 reaches psycopg2 and the panel errors on every game"
+
+
+def test_weather_says_forecast_on_a_game_that_has_not_been_played():
+    """⚠️ B075 measured that srv_game_weather is populated about a week before kickoff, so on
+    a scheduled game every figure is a FORECAST — and the panel read "Weather · Conditions at
+    kickoff" either way. Same class as `_model` collapsing "too early to say" into "we have
+    nothing": it renders perfectly and states what the data does not support."""
+    block = SOURCE[SOURCE.index("def _weather("):SOURCE.index("def _travel(")]
+    assert "Weather forecast" in block, "an unplayed game still says the conditions were"
+    assert "is_completed" in block, "the panel cannot tell the two apart"
+    assert "has not been played" in block

@@ -44,7 +44,7 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # reassigned is the defect this round was most likely to ship, and A074 found a whole class
 # of panel that nothing had ever exercised.
 ALL_PANELS = ("_market", "_line_movement", "_model", "_series", "_yardage",
-              "_weather", "_travel", "_drives")
+              "_weather", "_travel", "_post_game", "_drives")
 
 
 def _stub_streamlit():
@@ -171,7 +171,7 @@ def test_a_completed_game_opens_on_the_after_tab(page):
     """
     run, _ = page
     _, called = run({"is_completed": True})
-    assert called == ["_drives"], \
+    assert called == ["_post_game", "_drives"], \
         f"a completed game did not open on the after tab — it ran {called}"
 
 
@@ -202,7 +202,7 @@ def test_a_played_game_keeps_the_after_tab_even_where_cfdb_holds_nothing(page):
     is that we do not hold it."""
     run, _ = page
     entries, called = run({"is_completed": True, "season": 1999, "game_id": 62718})
-    assert called == ["_drives"]
+    assert called == ["_post_game", "_drives"]
     assert "After the game" in _text(entries)
 
 
@@ -221,7 +221,7 @@ def test_an_unknown_tab_slug_falls_back_and_does_not_raise(page):
     """scores.py already treats a hand-edited `?tab=` as noise, not a request (AC-G.11)."""
     run, _ = page
     entries, called = run({"is_completed": True}, tab="box-score-please")
-    assert called == ["_drives"], "an unknown slug did not fall back to this game's own look"
+    assert called == ["_post_game", "_drives"], "an unknown slug did not fall back to this game's own look"
     assert "Something went wrong" not in _text(entries)
 
 
@@ -324,11 +324,24 @@ def test_the_tab_bar_is_not_drawn_when_there_is_nothing_to_choose(page):
 # --- what this round deliberately did NOT build ---------------------------------------------
 
 def test_no_post_game_content_was_stubbed(page):
-    """B070's standing rule: a front-end round behind the data round, and NO STUB either. The
-    box score, advanced block and leaders are B076. A stub would make it impossible to tell
-    which change moved the page."""
-    for name in ("srv_game_team", "srv_player_game_log", "srv_player_stats"):
-        assert name not in SOURCE, f"{name} was read a round early"
+    """B070's standing rule: a front-end round behind the data round, and NO STUB either.
+
+    ⚠️ THIS ASSERTION WAS AMENDED IN B076, NOT WEAKENED, AND THE AMENDMENT IS THE POINT.
+    B075 wrote it as "srv_game_team, srv_player_game_log and srv_player_stats appear nowhere",
+    because in B075 the post-game tab was deliberately empty. B076 built the box score, so
+    the srv_game_team half has been SATISFIED rather than removed — it is now asserted as
+    read exactly once, which is the stronger claim (§1.1: one read, two renderings).
+
+    The other two are still asserted absent, and that is not housekeeping: R-506 was BLOCKED.
+    Nothing in serving ranks players within a game, so a leaders panel cannot be built without
+    a data change, and B070's rule says no stub either. If either name appears here before a
+    serving view carries game-grain ranks, something was computed in the page.
+    """
+    assert SOURCE.count("from srv_game_team") == 1, \
+        "the box score and the advanced block must be ONE read, not two (G-2)"
+    for name in ("srv_player_game_log", "srv_player_stats"):
+        assert name not in SOURCE, \
+            f"{name} was read before a serving view ranks players within a game (R-506)"
     # ⚠️ CODE LINES ONLY. The module explains at length WHY it is not st.tabs, so a bare
     # substring test fails on its own reasoning — which is a test asserting that the comment
     # is absent rather than that the call is.
