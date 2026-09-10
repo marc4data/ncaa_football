@@ -502,7 +502,8 @@ def _today():
 
 def _row(**over):
     import pandas as pd
-    base = dict(VT_VMI); base.update(over)
+    base = dict(VT_VMI)
+    base.update(over)
     return pd.Series(base)
 
 
