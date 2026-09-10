@@ -115,7 +115,24 @@ def main() -> int:
             failures.append(f"holds grants outside serving: {[s for s, _ in other]}")
 
         # ---- 3. SCHEMA-LEVEL REACH ----------------------------------------------------
+        # 🚨 R-566. WHICH SCHEMAS EXIST IS ASKED FIRST, AND THE REASON IS A CRASH.
+        #
+        # `has_schema_privilege` RAISES InvalidSchemaName on a schema that does not exist, and
+        # the serving instance has no `raw` — only the warehouse does. So this loop died on its
+        # first forbidden schema with a traceback, every run, and NEVER REACHED the write
+        # probes below it. R-566 recorded this as "exits non-zero on success"; measured, it is
+        # worse than that — the verification was not completing at all, and the two checks it
+        # never got to are the ones that prove the credential cannot write.
+        #
+        # ⚠️ AN ABSENT SCHEMA IS A PASS, AND IT IS THE STRONGEST FORM OF ONE: a schema that
+        # does not exist on this instance cannot be read from it. Reported as `absent` rather
+        # than silently skipped, so the line still says what was and was not measured.
+        cur.execute("select schema_name from information_schema.schemata")
+        present = {row[0] for row in cur.fetchall()}
         for schema in ("serving",) + FORBIDDEN_SCHEMAS:
+            if schema not in present:
+                print(f"  schema {schema:<9} absent on this instance  <- cannot be read")
+                continue
             cur.execute("select has_schema_privilege(%s, %s, 'USAGE')", (user, schema))
             usable = cur.fetchone()[0]
             cur.execute("select has_schema_privilege(%s, %s, 'CREATE')", (user, schema))

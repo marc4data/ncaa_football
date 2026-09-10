@@ -3262,6 +3262,19 @@ models:
           is real but its timestamp is our fetch time. Measured: only 131 of 1,891 games
           have a genuine pre-kickoff observation, and all 131 are 2026 — snapshotting began
           2026-08-15, so every 2024 and 2025 row is the second kind.
+      - name: is_market_probability_usable
+        description: >
+          Whether the market-implied probabilities beside it come from a price worth trusting.
+          A FLAG, NOT A FILTER (R-391): the row is published either way so a page can say how
+          many it excluded, and the warehouse states fitness rather than deciding what to do
+          about it.
+          False means the two sides' raw implied probabilities sum outside 1.00–1.15 — a band
+          measured from the data's own bimodal distribution, not assumed — or that a moneyline
+          sentinel was present. An overround below 1.00 is an arbitrage, which does not sit
+          unclaimed on a public board and therefore means a broken input.
+          Measured 2026-09-10: 6 of the 1,892 rows carrying a probability are unfit; the worst
+          is priced -100000/-100000, overround 1.9980, and renders as a confident 50.0%.
+          NULL where no probability exists — the absence of a price is not an unfit price.
       - name: home_mascot
         description: >
           The home team's mascot, carried from dim_team. Rendered beside the school name on the

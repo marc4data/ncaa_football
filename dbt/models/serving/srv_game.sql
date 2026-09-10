@@ -41,7 +41,12 @@ latest_market as (
 
     -- De-vigged market probabilities, from srv_matchup. R-094.
     select game_id, market_implied_home_win_probability,
-           market_implied_away_win_probability, overround, devig_method
+           market_implied_away_win_probability, overround, devig_method,
+           -- R-624. THE FITNESS FLAG, CARRIED RATHER THAN RE-DERIVED.
+           -- fct_market_probability computes it from a MEASURED band and a sentinel check;
+           -- a page that reconstructed "overround between 1 and 1.15" would be a second
+           -- definition of a metric, and the one place it lives is that model.
+           is_probability_usable
     from (
         select *, row_number() over (partition by game_id
                                      order by snapshot_ts desc, provider_key) as recency
@@ -609,6 +614,23 @@ select
     l.provider_key,
     l.snapshot_ts                 as line_snapshot_ts,
     l.snapshot_ts,
+    -- 🚨 R-624. WHETHER THE PRICE BESIDE IT IS A REAL MARKET. A FLAG, NOT A FILTER.
+    --
+    -- R-391 made this a flag on purpose and it stays one: "a row dropped inside this model is
+    -- a row nobody can audit and nobody can count; downstream decides whether to exclude, and
+    -- can say how many it excluded." The warehouse says whether a price is fit; the page
+    -- decides what to do about it.
+    --
+    -- ⚠️ MEASURED ON PUBLISHED SERVING, 2026-09-10: of 1,892 rows carrying a probability, SIX
+    -- are unfit — five with an overround above 1.15, topping out at 1.9980, and ONE at 0.7692,
+    -- which is a negative vig and therefore not a market at all. The worst is Kent State at
+    -- South Carolina, 2026 week 1, priced -100000 / -100000 and rendering as a confident
+    -- 50.0%. B083 measured the 67 upcoming games and found them all sound, which was true and
+    -- is not the same statement as this one.
+    --
+    -- ⚠️ NULL where no probability exists, because there is nothing to judge — the absence of
+    -- a price is not an unfit price (AC-G.32).
+    mk.is_probability_usable       as is_market_probability_usable,
     mk.market_implied_home_win_probability,
     mk.market_implied_away_win_probability,
     mk.overround,
