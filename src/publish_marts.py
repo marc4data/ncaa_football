@@ -264,6 +264,24 @@ HEAVY_SERVING = [
     "srv_player_stats",
     "srv_player_game_log",
     "srv_player_play",
+    # A080/R-534. Game-grain player leaders. HEAVY rather than HOT, and the reason is the
+    # FETCH rather than the size.
+    #
+    # ⚠️ Size would have argued the other way: 84 MB over 296,629 rows, SMALLER than
+    # srv_game_team (112 MB) which is already in the hot set, and a third of the smallest
+    # heavy table. A078 put srv_drive in HOT at 40 MB on exactly that comparison.
+    #
+    # But leaders are computed from player box scores, and /games/players is in the
+    # IMMUTABLE_WK bucket — fetched only by cfbd_results_refresh (Sunday) and
+    # cfbd_midweek_results (Thursday). The scores DAG fetches /games and nothing else. So a
+    # two-hourly rebuild would rebuild this from raw that has not moved, twelve times a game
+    # day, to produce identical rows. Hot publishing cannot make a table fresher than its
+    # source endpoint, and pretending otherwise is the failure A078 and A079 spent two rounds
+    # removing — a table that ARRIVES looking as fresh as the rows beside it.
+    #
+    # Weekly is therefore honest for it, and it is the same cadence as srv_player_game_log,
+    # which it is derived from and which B's box score already reads.
+    "srv_game_team_leader",
 ]
 
 # What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,

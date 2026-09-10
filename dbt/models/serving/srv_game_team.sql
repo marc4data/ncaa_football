@@ -178,6 +178,19 @@ select
     t.penalties,
     t.penalty_yards,
     t.possession_seconds,
+    -- R-535. POSSESSION AS A READER SEES IT. `1906` is not a figure to show anyone, and the
+    -- app cannot divide it into "31:46" — that is arithmetic, and lib/fmt.py's own docstring
+    -- says "Formatting only — never arithmetic". B076 left possession off the box score
+    -- rather than compute it in the page, which is why this column exists.
+    --
+    -- The construction is fct_drive.sql:224's, unchanged, including the reason for the int
+    -- cast: "Postgres integer division already truncates and floor() would hand back a
+    -- numeric that renders as '2' on one engine and '2.' on another."
+    case
+        when t.possession_seconds is null then null
+        else cast(cast(t.possession_seconds / 60 as int) as {{ dbt.type_string() }}) || ':'
+             || lpad(cast(mod(t.possession_seconds, 60) as {{ dbt.type_string() }}), 2, '0')
+    end                                                          as possession_display,
     t.has_box_score,
 
     -- Which advanced sources reached this row.
@@ -322,6 +335,40 @@ select
     a.defense_front_seven_havoc_events,
     a.defense_db_havoc_events,
     a.defense_havoc_rate,
+    -- ==================================================================================
+    -- R-536. THE SHARE METRICS, PRE-FORMATTED. A percentage is a multiplication and the app
+    -- does not multiply — same rule as possession_display above.
+    --
+    -- ⚠️ ONLY THE SHARES. This is deliberately NOT "make every rate a percentage", and the
+    -- line is editorial rather than mechanical:
+    --
+    --   percentage : success rate (overall / standard downs / passing downs), power success,
+    --                stuff rate, havoc rate — all of them a share OF something
+    --   decimal    : offense_ppa and its rushing/passing variants, explosiveness, line yards
+    --                — point-value and yardage measures, shares of nothing
+    --
+    -- Showing explosiveness 0.378 as "37.8%" would be WRONG rather than merely unconventional.
+    --
+    -- ⚠️ AND THE DATA SETTLES IT INDEPENDENTLY OF CONVENTION. Measured across published
+    -- serving: the six columns below all run 0.000-1.000, while offense_ppa runs
+    -- -0.644 to 1.110. A NEGATIVE MINIMUM cannot be a share of anything, so PPA is excluded
+    -- on evidence and not only on the way analysts usually print it.
+    --
+    -- One decimal place: 55.2% is the precision a box score carries, and 55.19% implies a
+    -- confidence a single game's play sample does not support.
+    {%- for col in [
+        'offense_success_rate',
+        'offense_standard_downs_success_rate',
+        'offense_passing_downs_success_rate',
+        'offense_power_success',
+        'offense_stuff_rate',
+        'defense_havoc_rate'
+    ] %}
+    case
+        when a.{{ col }} is null then null
+        else to_char(round(cast(a.{{ col }} * 100 as numeric), 1), 'FM990.0') || '%'
+    end                                                          as {{ col }}_display,
+    {%- endfor %}
     a.defense_front_seven_havoc_rate,
     a.defense_db_havoc_rate,
     a.offense_overall,
