@@ -338,8 +338,8 @@ def _market(row) -> None:
     chips.spread_sign_note()
     st.caption(f"Line from {row.get('provider_key') or 'an unnamed book'}, "
                f"snapshot {fmt.local_time(row.get('line_snapshot_ts'))}. "
-               f"Opening spread {fmt.signed(row.get('spread_open'), 'spread')}, "
-               f"opening total {fmt.number(row.get('over_under_open'), 'over_under')}.")
+               f"Opening spread {fmt.signed(row.get('spread_open'), 'spread_open')}, "
+               f"opening total {fmt.number(row.get('over_under_open'), 'over_under_open')}.")
 
 
 def _line_movement(row) -> None:
@@ -388,11 +388,13 @@ def _line_movement(row) -> None:
         # comparable as numbers (-110 to -130 and +200 to +180 are 4.1 and 2.4 points), so the
         # movement is expressed in the units the distribution was measured in.
         cols[0].metric(
-            "Spread move", fmt.signed(row.get("line_spread_move_from_open"), "spread"),
+            "Spread move",
+            fmt.signed(row.get("line_spread_move_from_open"), "line_spread_move_from_open"),
             help="Current spread minus the opening spread. Negative means the home team is "
                  "favoured by more than it was.")
         cols[1].metric(
-            "Total move", fmt.signed(row.get("line_total_move_from_open"), "over_under"))
+            "Total move",
+            fmt.signed(row.get("line_total_move_from_open"), "line_total_move_from_open"))
         cols[2].metric(
             "Home win probability move",
             fmt.signed(row.get("line_market_implied_win_probability_move_from_open"), "", dp=2),
@@ -401,11 +403,13 @@ def _line_movement(row) -> None:
         wide = st.columns(3)
         wide[0].metric(
             "Widest spread excursion",
-            fmt.signed(row.get("line_spread_largest_excursion"), "spread"),
+            fmt.signed(row.get("line_spread_largest_excursion"),
+                       "line_spread_largest_excursion"),
             help="The furthest the spread ever got from its open, keeping the direction.")
         wide[1].metric(
             "Widest total excursion",
-            fmt.signed(row.get("line_total_largest_excursion"), "over_under"))
+            fmt.signed(row.get("line_total_largest_excursion"),
+                       "line_total_largest_excursion"))
         wide[2].metric(
             "Widest probability excursion",
             fmt.signed(row.get("line_market_implied_win_probability_largest_excursion"),
@@ -462,12 +466,15 @@ def _model(row) -> None:
 
     cols = st.columns(4)
     cols[0].metric("Predicted margin (home)",
-                   fmt.signed(row.get("predicted_margin_home_perspective"), "margin"),
+                   fmt.signed(row.get("predicted_margin_home_perspective"),
+                              "predicted_margin_home_perspective"),
                    help="Positive means the model has the home team winning by that many.")
-    cols[1].metric("Predicted total", fmt.number(row.get("predicted_total_points"), "total"))
+    cols[1].metric("Predicted total",
+                   fmt.number(row.get("predicted_total_points"), "predicted_total_points"))
     cols[2].metric("Home win probability",
-                   fmt.number(row.get("home_win_probability"), "probability"))
-    cols[3].metric("Cover edge", fmt.signed(row.get("home_cover_edge"), "edge"))
+                   fmt.number(row.get("home_win_probability"), "home_win_probability"))
+    cols[3].metric("Cover edge",
+                   fmt.signed(row.get("home_cover_edge"), "home_cover_edge"))
 
     if row.get("is_out_of_sample_week"):
         st.markdown(chips.out_of_sample_chip_html(True), unsafe_allow_html=True)
@@ -483,9 +490,10 @@ def _model(row) -> None:
         # Both readings come from the view. The app does not flip the sign: a sign
         # convention is a definition, and definitions live in dbt (G-3).
         st.caption(
-            f"Actual margin {fmt.signed(actual, 'margin')} from the home perspective "
-            f"({fmt.signed(row.get('actual_margin'), 'margin')} as cfdb stores it, away "
-            f"minus home). Same result, read from the two ends.")
+            f"Actual margin "
+            f"{fmt.signed(actual, 'actual_margin_home_perspective')} from the home "
+            f"perspective ({fmt.signed(row.get('actual_margin'), 'actual_margin')} as "
+            f"cfdb stores it, away minus home). Same result, read from the two ends.")
     attribution.model_attribution(pd.DataFrame([row]))
 
 
