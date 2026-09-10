@@ -130,12 +130,38 @@ CSS = """
    descender clear and returns 28px. */
 .cfdb-app h1, [data-testid="stMainBlockContainer"] h1 {
     padding-top:0 !important; padding-bottom:.5rem !important; }
-@media (prefers-color-scheme: dark) {
-  .cfdb-state { --cfdb-border:#333a45; --cfdb-bg:#1b1f27; }
-  .cfdb-skel-row { background:linear-gradient(90deg,#242933 25%,#2b313c 37%,#242933 63%);
-    background-size:400% 100%; }
-  .cfdb-footer { border-top-color:#333a45; }
+/* R-547. THIS BLOCK USED TO BE `@media (prefers-color-scheme: dark)`, AND MARC SAW WHAT
+   THAT COSTS: a dark card sitting in a light page. He was in Light theme, the Empty state
+   under "Offence and defence, per game" rendered dark, and he guessed it was because of the
+   hour. It is not — a Streamlit app does not know the time. His OPERATING SYSTEM is in dark
+   mode, `prefers-color-scheme` answers the operating system, and the app theme never
+   entered into it.
+
+   ⚠️ THIS FILE ALREADY DIAGNOSED THIS EXACT FAILURE AND FIXED IT SOMEWHERE ELSE. See
+   TABLE_CSS below, which says it in as many words: "A reader on a dark system who switches
+   the app to Light gets a light page painted with dark cells — which is what happened."
+   That repair converted the frozen-column tokens to `Canvas`/`CanvasText` and left these
+   three declarations behind, still asking the operating system. The media query is deleted
+   rather than corrected, because there is nothing to correct: the question it asks is the
+   wrong question, and leaving it in place for the two rules Marc had not yet noticed would
+   have banked the same bug twice.
+
+   `Canvas` and `CanvasText` follow the `color-scheme` property Streamlit sets from the
+   ACTIVE theme, so these track the switch in the same frame the rest of the page does, with
+   no Python in the loop and nothing to go stale. `color-mix` derives the rest from the same
+   two so a card is a tint of the page it sits on in either theme, rather than two more
+   hardcoded colours to keep in step. */
+.cfdb-state {
+  --cfdb-border: color-mix(in srgb, CanvasText 18%, Canvas);
+  --cfdb-bg:     color-mix(in srgb, CanvasText 3%,  Canvas);
 }
+.cfdb-skel-row {
+  background:linear-gradient(90deg,
+    color-mix(in srgb, CanvasText 8%,  Canvas) 25%,
+    color-mix(in srgb, CanvasText 4%,  Canvas) 37%,
+    color-mix(in srgb, CanvasText 8%,  Canvas) 63%);
+  background-size:400% 100%; }
+.cfdb-footer { border-top-color: color-mix(in srgb, CanvasText 18%, Canvas); }
 </style>
 """
 

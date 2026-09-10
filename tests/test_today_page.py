@@ -369,7 +369,14 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
 
         row = {"away_team_display": "Away", "home_team_display": "Home",
                "away_points": 21, "home_points": 24, "excitement_index": 8.5,
-               "lead_changes": 4, "actual_margin": 3,
+               # ⚠️ R-544. THIS FIXTURE USED TO SAY `"actual_margin": 3` AND CONTRADICTED ITS
+               # OWN SCOREBOARD. Home 24, away 21, and the column is AWAY MINUS HOME, so it
+               # is -3. The fixture had encoded the home perspective under the away-
+               # perspective name — the same confusion as the page bug it failed to catch,
+               # which is why exercising the panel against it proved nothing about the sign.
+               "lead_changes": 4, "actual_margin": -3,
+               "actual_margin_home_perspective": 3,
+               "attribution": "cfdb model (fixture)",
                "spread_favorite_side": "home", "moneyline_favorite_side": "home",
                "favorite_definitions_disagree": False,
                "spread_at_close": -3.5, "spread_current": -3.5,
@@ -460,3 +467,92 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
         _reload_all()
         if path_added and site_path in sys.path:
             sys.path.remove(site_path)
+
+
+# --- R-544: the favourite's margin, and the sign that inverted three panels -------------
+
+# ⚠️ THE FIXTURE IS MARC'S OWN GAME, and the numbers are the real row from published serving
+# (game_id 401858211, 2026 week 1), not invented for the test:
+#
+#     Virginia Tech 73, VMI 3, at home, favoured by 54.5
+#     actual_margin                    = away - home = -70   (the convention: AWAY MINUS HOME)
+#     actual_margin_home_perspective   = home - away = +70
+#
+# The favourite is home, so its own margin is +70 and it beat the number by 15.5. The page
+# read `actual_margin` for the home branch — the away-perspective column — and reported
+# -70 - 54.5 = -124.5, which is what Marc saw on the landing page.
+#
+# The two branches were each other's: home wants the home-perspective column, and AWAY wants
+# `actual_margin`, which already is away-minus-home. Both were exactly backwards, so the sign
+# inverted on every graded game rather than on some of them.
+VT_VMI = {"actual_margin": -70, "actual_margin_home_perspective": 70,
+          "spread_favorite_side": "home", "spread_at_close": -54.5}
+
+
+def _today():
+    """`site/` is not on sys.path at import time; the panel test adds it per-call and undoes
+    it. `_favorite_margin` is pure, so this needs neither a stub nor a reload."""
+    import sys
+    site_path = str(ROOT / "site")
+    if site_path not in sys.path:
+        sys.path.insert(0, site_path)
+    from views import today
+    return today
+
+
+def _row(**over):
+    import pandas as pd
+    base = dict(VT_VMI); base.update(over)
+    return pd.Series(base)
+
+
+def test_the_favourites_margin_is_its_own_margin_not_the_away_perspective():
+    """Marc's game: favoured by 54.5, won by 70, therefore +15.5 against the number."""
+    today = _today()
+
+    row = _row()
+    margin = today._favorite_margin(row)
+    assert margin == 70, (
+        f"the favourite won by 70; the page computed {margin}. `actual_margin` is AWAY minus "
+        f"home, so a HOME favourite's margin is actual_margin_home_perspective.")
+    ats = margin - abs(row.spread_at_close)
+    assert ats == 15.5, f"expected +15.5 against the spread, got {ats}"
+
+
+def test_an_away_favourite_reads_the_away_perspective_column():
+    """The mirror branch. `actual_margin` IS away-minus-home, so an away favourite takes it."""
+    today = _today()
+
+    # Away team wins 30-10: actual_margin = away - home = +20.
+    row = _row(actual_margin=20, actual_margin_home_perspective=-20,
+               spread_favorite_side="away", spread_at_close=7.0)
+    assert today._favorite_margin(row) == 20
+
+
+def test_favorites_that_lost_outright_contains_only_favorites_that_lost():
+    """R-544's third panel: its caption and its contents said opposite things.
+
+    `lost = graded[graded["fav_margin"] < 0]` under the inverted sign selected favourites who
+    WON. Measured on 2026 week 1 before the fix: 0 of 10 rows held a favourite that lost —
+    the top row was Navy, a 30.5-point favourite that won by 27.
+    """
+    import pandas as pd
+    today = _today()
+
+    # ⚠️ TAGGED BY NAME, NOT BY THE NUMBER UNDER TEST. The first draft of this test asserted
+    # on `fav_margin` values and PASSED against the inverted code, because under the bug the
+    # winner's margin is -70 and "is -70 negative" is true for the wrong reason. A selection
+    # test has to identify the rows it expected by something the bug cannot move.
+    frame = pd.DataFrame([
+        # A favourite that WON big — must never appear in "lost outright".
+        dict(VT_VMI, tag="won_by_70"),
+        # A genuine upset: home favoured by 29, lost by 16.
+        {"actual_margin": 16, "actual_margin_home_perspective": -16,
+         "spread_favorite_side": "home", "spread_at_close": -29.0, "tag": "lost_by_16"},
+    ])
+    frame["fav_margin"] = frame.apply(today._favorite_margin, axis=1)
+    lost = frame[frame["fav_margin"] < 0]
+
+    assert set(lost["tag"]) == {"lost_by_16"}, (
+        f"'favorites that lost outright' selected {sorted(lost['tag'])}. Measured on 2026 "
+        f"week 1 before the fix: 0 of 10 rows held a favourite that lost.")
