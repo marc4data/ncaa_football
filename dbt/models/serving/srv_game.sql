@@ -693,11 +693,36 @@ select
     -- failure this column exists to prevent, so a page showing a record on a game row must
     -- read these two and not those.
     --
+    -- R-620. Mascot, and it is a CARRY rather than a join: `h` and `a` are dim_team, already
+    -- joined for logos, conferences, ranks and records. One string does not earn a new join.
+    h.mascot                      as home_mascot,
+    a.mascot                      as away_mascot,
+
     -- Named home_team_record_display, NOT home_record_display: srv_standings already uses
     -- that name for "record in home games", which is a different statement entirely. The
     -- collision was avoided deliberately.
     rw_home.current_record        as home_team_record_display,
     rw_away.current_record        as away_team_record_display,
+    -- 🚨 R-620. THE SPLIT RECORD, AND EACH SIDE GETS ONLY THE HALF RELEVANT TO IT.
+    --
+    -- Two columns, not four: a preview says what the visitor does ON THE ROAD and what the
+    -- host does AT HOME, which is Marc's "Record, Record Away". B082 built the header for
+    -- exactly these names and left `test_the_header_RENDERS_them_the_day_they_arrive` to
+    -- say so if they arrived different — the handshake worked and these match it.
+    --
+    -- ⚠️ SAME `1 preceding` FRAME AS THE RECORD ABOVE, because it is the same model. A
+    -- preview must not include the game being previewed; reusing fct_team_record_week is what
+    -- makes that true by construction rather than by a second author remembering it.
+    --
+    -- ⚠️ NULL, NOT 0-0, where the side has not played at that venue yet. A team five weeks in
+    -- that has only played at home has a known record and no away record.
+    --
+    -- ⚠️ A NEUTRAL GAME IS NEITHER, and the model carries a third `neutral_record` split so
+    -- that decision is auditable from the data rather than taken on trust — 130 of 2025's
+    -- 3,831 completed games are neutral. It is deliberately NOT surfaced here: the header has
+    -- two slots and a third record would answer a question nobody asked.
+    rw_away.away_record           as away_team_away_record_display,
+    rw_home.home_record           as home_team_home_record_display,
     -- R-140. The record the game LEFT them with. Null for a game not yet played, which is what
     -- lets the page show the leading-into figure before kickoff and this one after.
     case when g.is_completed then rw_home.record_after end as home_team_record_after_display,

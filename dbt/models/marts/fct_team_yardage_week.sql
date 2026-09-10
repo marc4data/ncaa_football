@@ -165,5 +165,26 @@ select
     case when coalesce(games_counted, 0) > 0 then coalesce(rushing_yards_allowed, 0) end
         as rushing_yards_allowed,
     case when coalesce(games_counted, 0) > 0 then coalesce(passing_yards_allowed, 0) end
-        as passing_yards_allowed
+        as passing_yards_allowed,
+    -- 🚨 R-621 MOVED THE PER-GAME DIVISION DOWN HERE, AND THE REASON IS THAT IT NOW HAS TWO
+    -- CONSUMERS. It lived in srv_team_week, which was right while the page was the only
+    -- reader. fct_team_week_metric_distribution computes the axis those same figures are
+    -- plotted against, so a second copy of `x / games_counted` would be two implementations of
+    -- one metric — and the day they disagreed the axis would not match the points on it, which
+    -- is a defect that looks like a rendering bug.
+    --
+    -- ⚠️ THE ROUND TO 1dp IS PART OF THE METRIC, NOT PRESENTATION. The distribution's min and
+    -- max must be the min and max OF THE PLOTTED VALUES; taking them from unrounded figures
+    -- would put a point a tenth outside its own axis.
+    --
+    -- NULL rather than zero where nothing has been counted: at week 1 a team has played
+    -- nothing and 0.0 yards per game is a measurement it did not make. The guard is
+    -- games_counted > 0 rather than a null numerator, because a genuine 0-yard game is a datum.
+    {% for metric in ['total_yards_for', 'rushing_yards_for', 'passing_yards_for',
+                      'total_yards_allowed', 'rushing_yards_allowed', 'passing_yards_allowed'] %}
+    case when coalesce(games_counted, 0) > 0
+         then round(cast(coalesce({{ metric }}, 0) as {{ dbt.type_numeric() }})
+                    / games_counted, 1) end
+        as {{ metric }}_per_game{{ "," if not loop.last }}
+    {% endfor %}
 from running

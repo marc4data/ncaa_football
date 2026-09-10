@@ -165,6 +165,10 @@ DEFAULT_SERVING = [
     # Small: one row per team per week per season, ~485k rows of narrow numerics, and it
     # rides the hot publish because it changes whenever a game completes.
     "srv_team_week",
+    # R-621. The week's shared scatter axis. HOT because it is derived from srv_team_week's own
+    # inputs and moves whenever a game completes; it is in scores_refresh_dag's selector for the
+    # same reason, and ci/check_publish_build_agreement.py holds those two lists to each other.
+    "srv_team_week_metric_distribution",
     "srv_data_dictionary",
     "srv_game_weather",
     # The weekly distributions. Small — one row per week per metric per day, and ten bin rows
