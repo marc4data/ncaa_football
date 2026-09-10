@@ -58,13 +58,29 @@ def _stub_streamlit():
         setattr(stub, name, recorder(name))
 
     class _Col:
+        # R-522 put the two directions in columns, so the panel now uses `with left:` and the
+        # stub has to be enterable. Content written inside goes to the MODULE recorders, which
+        # is what real streamlit does too, so the captured order is unchanged.
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
         def metric(self, label, value, help=None):
             captured.append(("metric", f"{label} {value} {help or ''}"))
 
         def markdown(self, *args, **kwargs):
             captured.append(("markdown", " ".join(str(a) for a in args)))
 
-    stub.columns = lambda n: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
+    stub.columns = lambda n, **k: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
+
+    def altair_chart(chart, **kwargs):
+        # ⚠️ THE OBJECT, NOT ITS REPR. A chart's axis limits are the thing R-590 is about, and
+        # `str(chart)` says nothing about them — the assertions read `chart.to_dict()`.
+        captured.append(("chart", chart))
+
+    stub.altair_chart = altair_chart
     stub.button = lambda *a, **k: False
     stub.empty = lambda *a, **k: _Col()
 
@@ -90,6 +106,38 @@ def _reload_all():
         importlib.reload(importlib.import_module(name))
 
 
+# The week's shared frame, read back from srv_team_week_metric_distribution for 2025 regular
+# week 12 — the axis limits, the medians and the quartiles a real page would draw on.
+_METRICS = {
+    "rushing_yards_for_per_game":     (50.0, 350.0, 126.65, 156.15, 186.00),
+    "passing_yards_for_per_game":     (50.0, 350.0, 194.725, 231.35, 258.575),
+    "total_yards_for_per_game":       (200.0, 550.0, 344.975, 387.90, 428.675),
+    "rushing_yards_allowed_per_game": (60.0, 240.0, 124.625, 146.00, 170.10),
+    "passing_yards_allowed_per_game": (125.0, 300.0, 193.45, 219.80, 241.30),
+    "total_yards_allowed_per_game":   (200.0, 500.0, 325.825, 373.25, 403.475),
+}
+
+
+def _distribution(min_games=9, **overrides):
+    rows = []
+    for metric, (low, high, p25, p50, p75) in _METRICS.items():
+        rows.append({
+            "season": 2025, "season_type": "regular", "week": 12, "metric": metric,
+            "n": 136, "teams_in_week": 136,
+            "min_games_counted": min_games, "max_games_counted": 10,
+            "mean": p50, "stddev": 59.0,
+            "p25": p25, "p50": p50, "p75": p75,
+            "axis_min": low, "axis_max": high, "axis_step": 50.0,
+            "as_of_ts": pd.Timestamp("2026-09-10 12:00:00+00:00"),
+        })
+    for row in rows:
+        row.update(overrides)
+    return rows
+
+
+_DISTRIBUTION = _distribution()
+
+
 @pytest.fixture
 def panel():
     """The panel with streamlit captured and the database replaced by constructed rows.
@@ -106,12 +154,23 @@ def panel():
     matchup = sys.modules["views.matchup"]
     seen = {}
 
-    def run(game, sides):
-        """`sides` is what srv_team_week returns — zero, one or two constructed rows."""
+    def run(game, sides, distribution=_DISTRIBUTION):
+        """`sides` is what srv_team_week returns — zero, one or two constructed rows.
+
+        ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
+        than answering both with the same frame. `seen["sql"]` stays bound to the srv_team_week
+        query, because that is the one every assertion below was written about; the
+        distribution query is recorded separately.
+        """
         captured.clear()
         seen.clear()
+        seen["queries"] = []
 
         def fake_query(sql, params=None):
+            seen["queries"].append(sql)
+            if "srv_team_week_metric_distribution" in sql:
+                seen["axis_sql"], seen["axis_params"] = sql, params or {}
+                return pd.DataFrame(distribution or [])
             seen["sql"], seen["params"] = sql, params or {}
             return pd.DataFrame(sides)
 
@@ -191,7 +250,14 @@ def _plain(markup: str) -> str:
 
 
 def _text(entries):
-    return " ".join(_plain(body) for _, body in entries)
+    """The panel's TEXT. Chart entries carry an altair object, not markup, and are skipped —
+    what a chart asserts is its axis, and that is read from the object in `_charts`."""
+    return " ".join(_plain(body) for kind, body in entries if kind != "chart")
+
+
+def _charts(entries):
+    """The altair charts the panel drew, in the order it drew them."""
+    return [body for kind, body in entries if kind == "chart"]
 
 
 # --- the pairing, which is the whole point -------------------------------------------------
@@ -389,3 +455,175 @@ def test_no_threshold_no_edge_no_ranking(panel):
     for verdict in ("edge", "advantage", "mismatch", "favours", "favors", "stronger",
                     "weaker", "elite", "best", "worst", "rank"):
         assert verdict not in body, f"the panel editorialised: {verdict!r}"
+
+
+# --- 🚨 R-590: the axis belongs to the WEEK, not to the two teams on screen ----------------------
+
+def _domains(chart):
+    """The (x, y) scale domains of one chart, read out of the compiled spec."""
+    spec = chart.to_dict()
+    found = {}
+    for layer in spec.get("layer", [spec]):
+        for channel in ("x", "y"):
+            encoding = layer.get("encoding", {}).get(channel, {})
+            domain = encoding.get("scale", {}).get("domain")
+            if domain:
+                found[channel] = [float(v) for v in domain]
+    return found.get("x"), found.get("y")
+
+
+def test_the_axis_comes_from_the_WEEKS_ROW_and_not_from_the_two_teams(panel):
+    """🚨 THE ASSERTION THIS ROUND EXISTS FOR.
+
+    Marc: "I'd like to standardize axis across all the FBS matchups for the week." The limits
+    come from srv_team_week_metric_distribution, which every matchup in the week reads the same
+    row of.
+
+    ⚠️ THE FIXTURE MAKES THE TWO SOURCES DISAGREE ON PURPOSE. The teams' own values are 154.4
+    and 84.5; the week's rushing axis is 50–350 for `_for` and 60–240 for `_allowed`. A panel
+    that derived its limits from the two teams present could not produce those numbers, and a
+    panel that ignored the row entirely would produce something near the teams' own range —
+    which would look perfectly reasonable on this one game and be wrong across the week.
+    """
+    entries, _ = panel(_game(), _both())
+    charts = _charts(entries)
+    assert charts, "the panel drew no charts"
+    x_domain, y_domain = _domains(charts[0])
+    assert y_domain == [50.0, 350.0], \
+        f"the y axis is not the week's rushing_yards_for frame: {y_domain}"
+    assert x_domain == [60.0, 240.0], \
+        f"the x axis is not the week's rushing_yards_allowed frame: {x_domain}"
+
+
+def test_TWO_DIFFERENT_MATCHUPS_IN_A_WEEK_GET_THE_SAME_FRAME(panel):
+    """⚠️ THE CLAIM IS ABOUT TWO GAMES AND SO IS THE TEST.
+
+    One game cannot demonstrate a shared axis: any limits at all look fine on a single chart.
+    Two different fixtures, the same week, and the frames must be identical — which they are
+    only because both read the week's row rather than their own values.
+    """
+    first, _ = panel(_game(), _both())
+    other = [_side(HOME_ID, "Auburn", rushing_yards_for_per_game=402.0,
+                   rushing_yards_allowed_per_game=31.0),
+             _side(AWAY_ID, "Kentucky", rushing_yards_for_per_game=12.0,
+                   rushing_yards_allowed_per_game=498.0)]
+    second, _ = panel(_game(), other)
+    assert _domains(_charts(first)[0]) == _domains(_charts(second)[0]), \
+        "two matchups in the same week were drawn on different axes"
+
+
+def test_the_distribution_is_keyed_on_season_type_as_well_as_week(panel):
+    """🚨 `week` ALONE IS NOT A KEY. A092's crude check returned 12 rows for `week = 1` and
+    every one was POSTSEASON — bowl games with eleven or twelve played, a real distribution
+    that would draw bowl numbers on a September page and look plausible doing it."""
+    _, seen = panel(_game(week=10), _both())
+    assert seen["axis_params"]["week"] == 10
+    assert seen["axis_params"]["season"] == 2025
+    assert seen["axis_params"]["season_type"] == "regular"
+
+
+def test_the_axis_query_reads_one_relation_and_computes_nothing(panel):
+    """G-1/G-2/G-3 on the second relation this panel now reads."""
+    _, seen = panel(_game(), _both())
+    sql = seen["axis_sql"].lower()
+    assert sql.count(" from ") == 1
+    for banned in ("join", "group by", "sum(", "avg(", "stddev(", "over ("):
+        assert banned not in sql, f"the axis query contains `{banned}`"
+
+
+def test_the_page_does_not_divide_anywhere(panel):
+    """🚨 A092 MOVED THE PER-GAME DIVISION INTO THE MART SO THERE IS EXACTLY ONE OF IT.
+
+    Two copies of `yards / games_counted` would let the axis disagree with the point drawn on
+    it, and that reads to a viewer as a rendering fault rather than a metric one. Asserted on
+    the source of the chart code, because the defect is an operator rather than an output.
+    """
+    block = SOURCE[SOURCE.index("def _week_distribution("):SOURCE.index("def _yardage_column(")]
+    assert "games_counted" not in block, \
+        "the chart code touches games_counted, which is the mart's arithmetic"
+    assert "/" not in block.replace("__", "").replace("# ", ""), \
+        "the chart code contains a division"
+
+
+# --- R-522: away on the left, home on the right -------------------------------------------------
+
+def test_the_AWAY_column_is_drawn_before_the_HOME_column(panel):
+    """⚠️ POSITIONAL, NOT PRESENCE — spec §0 is a page law and both blocks are on the page
+    either way round. B082 proved a presence assertion passes this swap on the game header and
+    B083 proved it again on the win-probability bar.
+
+    The away block is written first, so it is the first markdown the panel emits.
+    """
+    entries, _ = panel(_game(), _both())
+    blocks = [_plain(b) for kind, b in entries
+              if kind == "markdown" and "offence against" in _plain(b)]
+    assert len(blocks) == 2, f"expected two direction blocks, got {len(blocks)}"
+    assert "Kentucky offence" in blocks[0], "the away side is not in the left column"
+    assert "Auburn offence" in blocks[1], "the home side is not in the right column"
+
+
+def test_each_columns_charts_belong_to_that_columns_team(panel):
+    """The three away charts come before the three home charts, and each names its own team.
+
+    ⚠️ A chart titled for the wrong side renders perfectly, which is why the title is read
+    rather than merely counted.
+    """
+    entries, _ = panel(_game(), _both())
+    charts = _charts(entries)
+    assert len(charts) == 6, f"expected three charts per column, got {len(charts)}"
+    away_y = charts[0].to_dict()
+    titles = str(away_y)
+    assert "Kentucky gained" in titles, "the left column's y axis is not the away team's"
+    assert "Auburn allowed" in titles, "the left column's x axis is not the home team's"
+    home = str(charts[3].to_dict())
+    assert "Auburn gained" in home and "Kentucky allowed" in home, \
+        "the right column's axes are not the home team's attack"
+
+
+def test_the_axis_labels_say_GAINED_and_ALLOWED(panel):
+    """⚠️ A chart whose axes both read "yards" explains nothing. Marc's comparison is offense
+    against defense, so one axis is what a side gains and the other is what the other side
+    concedes — and the labels have to carry that or the picture is unreadable."""
+    entries, _ = panel(_game(), _both())
+    spec = str(_charts(entries)[0].to_dict())
+    assert "gained" in spec and "allowed" in spec
+
+
+# --- R-590 §3.4: a thin sample is a property and the page says so ------------------------------
+
+def test_a_THIN_WEEK_says_a_per_game_figure_is_nearly_one_afternoon(panel):
+    """🚨 A092 MEASURED IT AND TOLD COWORK TO TELL ME. At 2026 week 2 the least-played team
+    has ONE counted game, so its "per game" IS that game — stddev 139.2 against 59.0 at 2025
+    week 12. Presenting that as season form is the overclaim B077 removed from the leaders
+    panel by deleting the word "led"."""
+    entries, _ = panel(_game(), _both(), distribution=_distribution(min_games=1))
+    text = _text(entries)
+    assert "1 counted game" in text
+    assert "single afternoon" in text
+
+
+def test_a_SETTLED_WEEK_does_not_carry_the_caveat(panel):
+    """The caveat is a measurement, not decoration: at nine games it is false and absent."""
+    assert "single afternoon" not in _text(panel(_game(), _both())[0])
+
+
+def test_the_shared_frame_is_explained_once_for_both_columns(panel):
+    """The band and the medians are properties of the WEEK, so they are described once rather
+    than implied per chart."""
+    text = _text(panel(_game(), _both())[0])
+    assert "136 FBS teams" in text
+    assert "same axes" in text
+
+
+def test_NO_DISTRIBUTION_draws_no_charts_and_says_WHICH_absence(panel):
+    """⚠️ ABSENT, NOT AN EMPTY FRAME (AC-G.11, B075's rule).
+
+    A092: 136 FBS teams carry a regular-season week-1 row and ZERO carry a value, so the model
+    emits nothing for it. An axis with no points is a chart that looks broken; saying the
+    week has no distribution is a statement.
+    """
+    entries, _ = panel(_game(), _both(), distribution=[])
+    assert _charts(entries) == [], "charts were drawn with no week distribution to draw them on"
+    text = _text(entries)
+    assert "No week-wide distribution" in text
+    assert "154.4" in text, "the panel stopped drawing its figures along with its charts"

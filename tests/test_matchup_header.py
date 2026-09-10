@@ -591,3 +591,69 @@ def test_ties_are_counted_rather_than_folded_into_a_win_column(blurb):
 def test_a_single_meeting_reads_as_one_meeting(blurb):
     text = _plain(blurb(series_games=1, series_away_team_wins=1, series_home_team_wins=0))
     assert "1 meeting" in text and "1 meetings" not in text
+
+
+# --- 🚨 R-591: the columns the header reads must actually be SELECTED ---------------------------
+
+# Every srv_game column `_game_header` and its helpers read off the row. A name here that is
+# missing from `matchup.COLUMNS` is a `row.get()` that returns None on every real page load.
+#
+# ⚠️ SCOPED TO THE HEADER ON PURPOSE, exactly as B083 scoped the card's version. `row.get()` is
+# also used on team-week rows, drive rows and leader rows in this module, so a blanket "every
+# row.get name is in COLUMNS" check would report false positives on four other panels. The
+# site-wide version is R-623 and it is session A's.
+_HEADER_COLUMNS = (
+    "game_id", "is_completed", "start_date_et",
+    "home_team", "away_team", "home_abbreviation", "away_abbreviation",
+    "home_logo_url", "away_logo_url", "home_points", "away_points",
+    "home_rank", "away_rank",
+    "home_team_record_display", "away_team_record_display",
+    "home_mascot", "away_mascot",
+    "home_team_home_record_display", "away_team_away_record_display",
+    "venue_display", "is_neutral_site", "is_indoors",
+    "spread", "over_under",
+    "home_q1", "home_q2", "home_q3", "home_q4",
+    "away_q1", "away_q2", "away_q3", "away_q4",
+    "home_overtime_points", "away_overtime_points",
+    "series_games", "series_away_team_wins", "series_home_team_wins", "series_ties",
+    "series_first_season", "series_last_season",
+)
+
+
+def _selected():
+    from views import matchup
+    return {c.strip() for c in matchup.COLUMNS.replace("\n", " ").split(",")}
+
+
+def test_every_column_the_header_reads_is_actually_SELECTED():
+    """🚨 THE SECOND INSTANCE OF A CLASS THAT HAS NOW BITTEN TWICE.
+
+    B083 found the first: the market card read `favorite_definitions_disagree`, the SELECT
+    never asked for it, and the disagreement caption was dead code on all 70 games it exists
+    for. ⚠️ EVERY UNIT TEST PASSED, because `_row(**overrides)` supplies every key and so the
+    fixture is MORE COMPLETE than the query. `ci/check_page_queries.py` cannot see this class
+    at all — it executes the page's SQL, and a column the SQL never asks for is not in it.
+
+    The header was the second instance and a quieter one: A092 shipped the mascot and the
+    split record with exactly the names B082 predicted, the header has rendered them since
+    B082, and they were invisible because nothing selected them.
+    """
+    missing = [c for c in _HEADER_COLUMNS if c not in _selected()]
+    assert not missing, (
+        f"the header reads these columns and the page does not select them, so they are None "
+        f"on every load: {missing}")
+
+
+def test_the_mascot_and_split_record_names_still_match_what_the_HEADER_asks_for():
+    """⚠️ THE HANDSHAKE, ASSERTED FROM BOTH ENDS.
+
+    `_MASCOT_COLUMN` and `_SPLIT_RECORD_COLUMN` are what the header reads; `COLUMNS` is what
+    the page fetches. B082 could only assert the first half, because the columns did not
+    exist. Now both halves are real and a rename on either side has to break something.
+    """
+    from views import matchup
+    selected = _selected()
+    for mapping in (matchup._MASCOT_COLUMN, matchup._SPLIT_RECORD_COLUMN):
+        for side, column in mapping.items():
+            assert column in selected, \
+                f"the header reads {column!r} for the {side} side and COLUMNS omits it"

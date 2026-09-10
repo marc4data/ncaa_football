@@ -12,6 +12,7 @@ the copy cannot drift from what the model actually did.
 """
 import html
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -21,6 +22,21 @@ from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
 
+# ⚠️ R-591. FOUR OF THE NAMES BELOW ARE A092's, AND THE HEADER COULD RENDER THEM FOR TWO
+# ROUNDS WITHOUT SHOWING ONE.
+#
+# B082 wrote `_MASCOT_COLUMN` and `_SPLIT_RECORD_COLUMN` against columns that did not exist,
+# guessing the names A's round would use. A092 shipped all four with exactly those names —
+# the handshake held across three rounds with no conversation, because the expectation was
+# written as a test rather than as a comment.
+#
+# 🚨 AND THE FEATURE WAS STILL INVISIBLE, because the SELECT did not ask for them. That is
+# R-623's class and this is its second instance: B083 found the first when the market card
+# read `favorite_definitions_disagree`, never selected, leaving the disagreement caption dead
+# on all 70 games it exists for. Neither was visible to a test, because a hand-built fixture
+# supplies every key and is therefore MORE COMPLETE than the query — and
+# `ci/check_page_queries.py` cannot see the class at all, since it executes the page's SQL
+# and a column the SQL never asks for is not in it to be executed.
 COLUMNS = """
     game_id, season, season_type, week, start_date_et, venue_display, attendance,
     home_team_id, away_team_id,
@@ -46,6 +62,8 @@ COLUMNS = """
     line_market_implied_win_probability_move_from_open,
     line_market_implied_win_probability_largest_excursion,
     home_rank, away_rank, home_team_record_display, away_team_record_display,
+    home_mascot, away_mascot,
+    home_team_home_record_display, away_team_away_record_display,
     is_indoors, spread_favorite_side, moneyline_favorite_side,
     favorite_definitions_disagree,
     home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
@@ -1043,6 +1061,128 @@ def _yardage_direction(offence, defence) -> str:
         + "".join(lines) + "</div>")
 
 
+# --- R-590: a shared axis for the whole week -------------------------------------------------
+
+# 🚨 THE AXIS IS A PROPERTY OF THE WEEK, NOT OF THE TWO TEAMS ON SCREEN, AND THAT IS THE WHOLE
+# ROUND. Marc: "I'd like to standardize axis across all the FBS matchups for the week."
+#
+# Every matchup reads the SAME row of srv_team_week_metric_distribution, so every chart in a
+# week shares a frame and two games can be compared by eye. ⚠️ Deriving the limits from the
+# two teams present would look identical on any single game and be wrong across the week —
+# which is exactly the kind of defect that ships because one screen looks right.
+#
+# ⚠️ AND NOTHING HERE DIVIDES. A092 moved the per-game arithmetic down into the mart, so the
+# axis and the points plotted on it come from ONE calculation — verified at 375,440 rows with
+# 0 disagreements. A second `yards / games_counted` in this file would let the frame disagree
+# with the point inside it, and that reads to a viewer as a rendering bug rather than a
+# metric one.
+_DISTRIBUTION_COLUMNS = """
+    season, season_type, week, metric, n, teams_in_week,
+    min_games_counted, max_games_counted, mean, stddev,
+    p25, p50, p75, axis_min, axis_max, axis_step, as_of_ts
+"""
+
+# ⚠️ PERCENTILES, NOT THE STANDARD DEVIATION, AND IT IS AN ARGUMENT RATHER THAN A PREFERENCE.
+#
+# Both are on the row and Cowork explicitly did not choose. The band is a reference for
+# "extreme performers", and a ±1σ band answers that question only if the distribution is
+# roughly normal. This one is not, early in the season and by construction: at 2026 week 2
+# `min_games_counted` is 1, so a team's "per game" IS its one game, stddev is 139.2 against
+# 59.0 at 2025 week 12, and Mississippi State's 762 is a single afternoon. A σ band computed
+# through that outlier is wide, symmetric and in the wrong place; it can also extend below
+# zero, which is not a yardage.
+#
+# p25–p75 is the middle half by count, so it moves where the teams actually are, and p50 is a
+# centre a single 762 cannot drag. The same reasoning is why the site's existing distribution
+# work draws a box-and-whisker rather than error bars.
+_BAND_LOW, _BAND_MID, _BAND_HIGH = "p25", "p50", "p75"
+
+# A thin sample is a property of the week and the page says so rather than letting a reader
+# assume season form. Two games or fewer is where "per game" and "that game" are the same
+# number or nearly so.
+_THIN_SAMPLE = 2
+
+
+def _week_distribution(row):
+    """The week's shared frame: one row per metric, six rows.
+
+    🚨 KEYED ON (season, season_type, week), NOT ON `week` ALONE. A092's own crude check
+    returned 12 rows for `week = 1` and every one was POSTSEASON — bowl games, eleven or
+    twelve played, a real distribution. Keying on the week number alone would draw bowl
+    numbers on a September page and look entirely plausible doing it.
+    """
+    df = query(f"""
+        select {_DISTRIBUTION_COLUMNS}
+        from srv_team_week_metric_distribution
+        where season = :season
+          and season_type = :season_type
+          and week = :week
+        limit 6
+    """, {"season": int(row["season"]), "season_type": row["season_type"],
+          "week": int(row["week"])})
+    return {str(r["metric"]): r for _, r in df.iterrows()}
+
+
+def _scatter(team, opponent, for_column, allowed_column, distribution,
+             team_name: str, opponent_name: str, label: str):
+    """One metric: this side's attack against that side's defence, on the week's frame.
+
+    ⚠️ THE TWO AXES ARE DIFFERENT MEASUREMENTS AND THE LABELS SAY SO. Y is this team's
+    `_for` — yards it gains — and X is the opponent's `_allowed` — yards they concede. A
+    chart whose axes both read "yards" explains nothing, and the pairing running across sides
+    rather than down one is the thing `test_the_pairing_runs_across_sides_not_down_one` was
+    written first to protect.
+    """
+    y_axis, x_axis = distribution.get(for_column), distribution.get(allowed_column)
+    if y_axis is None or x_axis is None:
+        return None
+    value_y, value_x = team.get(for_column), opponent.get(allowed_column)
+    if pd.isna(value_y) or pd.isna(value_x):
+        return None
+
+    def domain(axis):
+        return [float(axis["axis_min"]), float(axis["axis_max"])]
+
+    x_enc = alt.X("x:Q", title=f"{opponent_name} allowed",
+                  scale=alt.Scale(domain=domain(x_axis), nice=False))
+    y_enc = alt.Y("y:Q", title=f"{team_name} gained",
+                  scale=alt.Scale(domain=domain(y_axis), nice=False))
+
+    # The middle half of the week on BOTH axes. Same rectangle on every matchup in the week,
+    # because it comes from the week's row rather than from these two teams.
+    band = alt.Chart(pd.DataFrame([{
+        "x": float(x_axis[_BAND_LOW]), "x2": float(x_axis[_BAND_HIGH]),
+        "y": float(y_axis[_BAND_LOW]), "y2": float(y_axis[_BAND_HIGH]),
+    }])).mark_rect(opacity=0.10).encode(
+        x=x_enc, x2="x2:Q", y=y_enc, y2="y2:Q")
+
+    mid_x = alt.Chart(pd.DataFrame([{"x": float(x_axis[_BAND_MID])}])).mark_rule(
+        opacity=0.35, strokeDash=[3, 3]).encode(x=x_enc)
+    mid_y = alt.Chart(pd.DataFrame([{"y": float(y_axis[_BAND_MID])}])).mark_rule(
+        opacity=0.35, strokeDash=[3, 3]).encode(y=y_enc)
+
+    point = alt.Chart(pd.DataFrame([{
+        "x": float(value_x), "y": float(value_y),
+        "who": f"{team_name} {float(value_y):.1f} gained vs "
+               f"{opponent_name} {float(value_x):.1f} allowed",
+    }])).mark_point(size=140, filled=True, opacity=0.95).encode(
+        x=x_enc, y=y_enc, tooltip=alt.Tooltip("who:N", title=label))
+
+    return (band + mid_x + mid_y + point).properties(height=150, title=label)
+
+
+def _yardage_column(team, opponent, distribution) -> None:
+    """One side of the comparison: the text rows, then a chart per metric."""
+    st.markdown(_yardage_direction(team, opponent), unsafe_allow_html=True)
+    team_name = str(team.get("team_display") or "?")
+    opponent_name = str(opponent.get("team_display") or "?")
+    for label, for_column, allowed_column in _YARDAGE_DIMENSIONS:
+        chart = _scatter(team, opponent, for_column, allowed_column, distribution,
+                         team_name, opponent_name, label)
+        if chart is not None:
+            st.altair_chart(chart, use_container_width=True)
+
+
 def _yardage(row) -> None:
     """Offence against defence, per game, LEADING INTO this game's own week (R-463).
 
@@ -1158,8 +1298,19 @@ def _yardage(row) -> None:
                 "Each side's yardage against the other's defence would be here.", why)
             return
 
-        st.markdown(_yardage_direction(away, home), unsafe_allow_html=True)
-        st.markdown(_yardage_direction(home, away), unsafe_allow_html=True)
+        # R-590. The week's shared frame, fetched once for both columns and all six charts.
+        distribution = _week_distribution(row)
+
+        # ⚠️ R-522 / spec §0: AWAY ON THE LEFT, HOME ON THE RIGHT. Marc made it a page law
+        # rather than this panel's choice — "Data about Away team will be on the left. Same
+        # information for the Home team will be on the right" — and the game header already
+        # obeys it. The two blocks used to be stacked, away above home, which said the same
+        # thing in a different shape on the same page.
+        left, right = st.columns(2)
+        with left:
+            _yardage_column(away, home, distribution)
+        with right:
+            _yardage_column(home, away, distribution)
 
         # AC-G.33. The denominator is not decoration and it is named for each side
         # separately, because a bye or a missing box score makes the two differ.
@@ -1169,6 +1320,30 @@ def _yardage(row) -> None:
             f"{home.get('team_display')} and {counted[1]} for {away.get('team_display')}. "
             f"games_counted is not games played — it counts the completed games both "
             f"sides of whose box score cfdb holds.")
+
+        if distribution:
+            sample = min(int(entry["min_games_counted"]) for entry in distribution.values()
+                         if pd.notna(entry["min_games_counted"]))
+            teams = int(next(iter(distribution.values()))["teams_in_week"])
+            frame = (f"Both columns share one frame: the shaded box is the middle half of all "
+                     f"{teams} FBS teams this week and the dashed lines are the medians, so "
+                     f"every matchup in the week is drawn on the same axes.")
+            if sample <= _THIN_SAMPLE:
+                # 🚨 A092 MEASURED THIS AND SAID TO SAY IT. At 2026 week 2 the thinnest team
+                # has played ONE game, so its "per game" IS that game — the same figure the
+                # yardage board shows for a single result. Presenting that as season form is
+                # the overclaim B077 removed from the leaders panel by deleting the word
+                # "led", one panel along.
+                frame += (f" ⚠️ Early in the season this is thin: the least-played team in "
+                          f"the week has {sample} counted game"
+                          f"{'' if sample == 1 else 's'}, so a per-game figure is close to a "
+                          f"single afternoon rather than a settled average.")
+            st.caption(frame)
+        else:
+            # ABSENT, NOT AN EMPTY FRAME. AC-G.11 and B075's rule: say WHICH absence it is.
+            st.caption(
+                "No week-wide distribution has been built for this week, so the charts that "
+                "put these two sides against the rest of the FBS are not drawn.")
         table.as_of_caption(df)
 
 
