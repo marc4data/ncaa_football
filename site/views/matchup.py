@@ -43,7 +43,11 @@ COLUMNS = """
     line_spread_move_from_open, line_spread_largest_excursion,
     line_total_move_from_open, line_total_largest_excursion,
     line_market_implied_win_probability_move_from_open,
-    line_market_implied_win_probability_largest_excursion
+    line_market_implied_win_probability_largest_excursion,
+    home_rank, away_rank, home_team_record_display, away_team_record_display,
+    is_indoors, spread_favorite_side,
+    home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
+    away_q1, away_q2, away_q3, away_q4, away_overtime_points, away_periods
 """
 
 
@@ -81,8 +85,12 @@ COLUMNS = """
 # (slug, label, panel names). THE SLUG IS WHAT GOES IN THE URL.
 BEFORE, AFTER = "before", "after"
 TABS = (
+    # ⚠️ `_series` LEADS, AND `_weather` IS NOT HERE ANY MORE. R-520: head to head is a blurb
+    # "close to the top" rather than a section, so it renders first. R-527: the weather folded
+    # into the game header, which is why the page's query count did not move — the forecast is
+    # still fetched once, by _conditions, and only before kickoff.
     (BEFORE, "Before the game",
-     ("_market", "_line_movement", "_model", "_series", "_yardage", "_weather", "_travel")),
+     ("_series", "_market", "_line_movement", "_model", "_yardage", "_travel")),
     # ⚠️ ONE PANEL TODAY, AND THAT IS EXPECTED RATHER THAN UNBALANCED. The box score, the
     # advanced block and the player leaders are B076 — specified in
     # claude_work/cfdb_matchup_postgame_spec.md §1, all three on relations that already
@@ -196,7 +204,7 @@ def body(page) -> None:
 
         row = df.iloc[0]
         params.set_params(game_id=game_id, season=int(row["season"]))
-        _scoreline(row)
+        _game_header(row)
         table.as_of_caption(df)
 
         # R-501. Which of the two looks this game gets, and the panels that belong to it.
@@ -271,42 +279,270 @@ def _picker_table(df, scope) -> None:
             link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]))
 
 
-def _scoreline(row) -> None:
-    """Both teams, their colours, and the score if there is one.
+# --- R-518: the game header, nine columns --------------------------------------------------
 
-    A scheduled game shows no score rather than 0–0. Two zeroes is a real result — a
-    scoreless tie — and rendering an unplayed game the same way asserts something false.
+# ⚠️ THE COLUMN ORDER IS MARC'S AND IT IS SYMMETRICAL ABOUT THE DETAILS COLUMN:
+#
+#   away logo | away team | away score | away glyph | DETAILS | home glyph | home score |
+#   home team | home logo
+#
+# The two team columns face INWARD — away is right-aligned, home is left-aligned — so the
+# names meet the scores in the middle rather than drifting to the page edges. That is what
+# makes the row read as one matchup instead of two stacks.
+_HEADER_WEIGHTS = (1.0, 3.6, 1.3, 0.45, 4.6, 0.45, 1.3, 3.6, 1.0)
+
+# 🚨 NEITHER COLUMN EXISTS ON srv_game TODAY — measured against information_schema, not read
+# off the model file. R-577 is session A's round to carry both across. They are named here,
+# once, so the header renders them the day they land and omits them cleanly until then:
+# `row.get()` on an absent column returns None and every use below is guarded.
+#
+# ⚠️ IF A SHIPS DIFFERENT NAMES, THESE TWO DICTS ARE THE ONLY LINES THAT CHANGE. Nothing
+# else in the header refers to a mascot or a split record by name.
+#
+# ⚠️ AND THE PAGE MUST NOT JOIN TO FETCH THE MASCOT (§4.2, R-551). The mascot lives on
+# srv_teams_index; a join added here would be a model change wearing a page change, and it
+# would cost a second query on a page whose query count is a measured value.
+_MASCOT_COLUMN = {"away": "away_mascot", "home": "home_mascot"}
+_SPLIT_RECORD_COLUMN = {"away": "away_team_away_record_display",
+                        "home": "home_team_home_record_display"}
+
+
+def _rank_badge(rank) -> str:
+    """A poll rank, or nothing. 291 of 3,831 games in 2025 have one on either side."""
+    if rank is None or pd.isna(rank):
+        return ""
+    return (f"<span style='opacity:.6;font-size:.8rem;font-weight:600'>"
+            f"#{int(rank)}</span> ")
+
+
+def _team_cell(row, side: str, align: str) -> str:
+    """Rank · team + mascot · record, split record — facing the middle of the header."""
+    team = html.escape(str(row.get(f"{side}_team") or "?"))
+    mascot = row.get(_MASCOT_COLUMN[side])
+    if mascot is not None and pd.notna(mascot) and str(mascot).strip():
+        team += f" <span style='opacity:.7'>{html.escape(str(mascot))}</span>"
+
+    # ⚠️ THE OVERALL RECORD IS THE ONE LEADING INTO THIS GAME, NOT AFTER IT.
+    # srv_game carries both — `*_record_display` and `*_record_after_display` — and on a
+    # completed game they differ by exactly this result. The preview's whole discipline is
+    # point-in-time (spec §5.3), so the header uses the leading-in reading on both tabs
+    # rather than switching convention halfway down the page.
+    records = []
+    overall = row.get(f"{side}_team_record_display")
+    if overall is not None and pd.notna(overall) and str(overall).strip():
+        records.append(html.escape(str(overall)))
+    split = row.get(_SPLIT_RECORD_COLUMN[side])
+    if split is not None and pd.notna(split) and str(split).strip():
+        records.append(f"{html.escape(str(split))} {side}")
+
+    second = (f"<div style='opacity:.65;font-size:.8rem'>{', '.join(records)}</div>"
+              if records else "")
+    return (f"<div style='text-align:{align};line-height:1.25'>"
+            f"<div style='font-weight:600'>{_rank_badge(row.get(f'{side}_rank'))}{team}</div>"
+            f"{second}</div>")
+
+
+def _score_cell(points, played: bool) -> str:
+    """A scheduled game shows NO score rather than 0.
+
+    Two zeroes is a real result — a scoreless tie — and rendering an unplayed game the same
+    way asserts something false.
+    """
+    if not played or points is None or pd.isna(points):
+        return ""
+    return (f"<div style='font-size:2rem;font-weight:600;text-align:center;"
+            f"line-height:1.1'>{int(points)}</div>")
+
+
+def _winner_glyph(row, side: str) -> str:
+    """Points AT that side's score, and ONLY if that side won.
+
+    ⚠️ ABSENT, NOT EMPTY, BEFORE KICKOFF. B075's rule for the after tab is the same rule
+    here: a post-game element on a pre-game page does not render a placeholder. A tie draws
+    nothing on either side, which is why this asks who won rather than who did not lose.
+    """
+    if not bool(row.get("is_completed")):
+        return ""
+    home, away = row.get("home_points"), row.get("away_points")
+    if home is None or away is None or pd.isna(home) or pd.isna(away):
+        return ""
+    won = (side == "home" and home > away) or (side == "away" and away > home)
+    if not won:
+        return ""
+    # The glyph sits BETWEEN the two scores, so it points outward towards the score it
+    # belongs to: the away score is to its left, the home score is to its right.
+    arrow = "\u25c0" if side == "away" else "\u25b6"
+    return (f"<div style='text-align:center;font-size:1.4rem;line-height:1.1;"
+            f"opacity:.75'>{arrow}</div>")
+
+
+def _conditions(row) -> str:
+    """The weather, folded into the header as one line — or NOTHING at all (R-527).
+
+    Marc: "Great data, but should be delivered in a tight/concise element in the game
+    header." The standalone panel is gone from the preview body.
+
+    🚨 IT COLLAPSES TO NOTHING RATHER THAN DRAWING AN EMPTY SLOT, and that is the point
+    rather than a nicety. B075 measured that forecasts exist only about a week out — 253 of
+    the 303 week-2 games, and ZERO for weeks 4 through 8 — so for most of a season this
+    element has nothing to say, and a reserved slot would be dead space on every preview.
+
+    ⚠️ `is_indoors` IS NOT "NO WEATHER", AND IT COSTS NO QUERY. A dome has a known answer —
+    indoors — which is a different statement from "we have no forecast" (AC-G.11). It is a
+    column on srv_game, already on the row the page fetched, so the roof is stated even when
+    no forecast row exists at all.
+
+    ⚠️ EVERY FIGURE HERE IS A FORECAST AND IT SAYS SO. The header draws this only before
+    kickoff, so unlike the old panel there is no observation case to confuse it with — but
+    the word stays, because a temperature with no tense reads as a measurement.
+
+    ⚠️ int(), AND IT IS NOT DEFENSIVE TYPING. The value arrives as a numpy.int64 out of the
+    DataFrame rather than as the int params.get() casts, and psycopg2 cannot adapt one:
+    "can't adapt type 'numpy.int64'". That defect rendered the Error state on EVERY game and
+    nothing in the suite could see it (B076).
+    """
+    indoors = bool(row.get("is_indoors")) if pd.notna(row.get("is_indoors")) else False
+    parts = []
+    df = query("""
+        select game_id, temperature_f, wind_speed_mph, wind_direction_compass,
+               weather_condition
+        from srv_game_weather
+        where game_id = :game_id
+        limit 1
+    """, {"game_id": int(row.get("game_id"))})
+    if not df.empty:
+        reading = df.iloc[0]
+        if pd.notna(reading.get("temperature_f")):
+            parts.append(f"{reading['temperature_f']:g}\u00b0F")
+        if pd.notna(reading.get("wind_speed_mph")):
+            wind = f"{reading['wind_speed_mph']:g} mph"
+            if reading.get("wind_direction_compass"):
+                wind += f" {html.escape(str(reading['wind_direction_compass']))}"
+            parts.append(wind)
+        if reading.get("weather_condition"):
+            parts.append(html.escape(str(reading["weather_condition"])))
+
+    if not parts and not indoors:
+        return ""
+    if indoors:
+        # The roof first, then the outdoor readings labelled as such — CFBD reports the
+        # weather at the venue's LOCATION, not inside it, so a domed game carries ordinary
+        # outdoor numbers and printing them bare would state something false.
+        return ("<div>Indoors"
+                + (f" \u00b7 {' \u00b7 '.join(parts)} outside" if parts else "")
+                + "</div>")
+    return f"<div>Forecast \u00b7 {' \u00b7 '.join(parts)}</div>"
+
+
+def _line_score(row) -> str:
+    """The post-game scoreboard: quarters, overtime if there was any, and the final.
+
+    3,805 of the 3,831 completed 2025 games carry a first quarter, so a completed game
+    without one is rare rather than impossible and renders no table instead of a row of
+    dashes.
+    """
+    quarters = ["q1", "q2", "q3", "q4"]
+    if all(pd.isna(row.get(f"away_{q}")) for q in quarters):
+        return ""
+    headers = ["1", "2", "3", "4"]
+    # OVERTIME IS A COLUMN THAT APPEARS, NOT ONE THAT IS ALWAYS THERE. 109 of 2025's
+    # completed games went to overtime; the rest must not carry an empty OT column.
+    overtime = any(pd.notna(row.get(f"{s}_overtime_points"))
+                   and row.get(f"{s}_overtime_points") for s in ("away", "home"))
+    if overtime:
+        headers.append("OT")
+    headers.append("T")
+
+    def cells(side):
+        values = [row.get(f"{side}_{q}") for q in quarters]
+        if overtime:
+            values.append(row.get(f"{side}_overtime_points"))
+        values.append(row.get(f"{side}_points"))
+        return "".join(
+            f"<td style='padding:.05rem .3rem;text-align:right"
+            f"{';font-weight:600' if i == len(values) - 1 else ''}'>"
+            f"{'' if pd.isna(v) else int(v)}</td>"
+            for i, v in enumerate(values))
+
+    head = "".join(f"<th style='padding:.05rem .3rem;text-align:right;font-weight:500;"
+                   f"opacity:.6'>{h}</th>" for h in headers)
+    rows = ""
+    for side in ("away", "home"):
+        label = html.escape(str(row.get(f"{side}_abbreviation")
+                                or row.get(f"{side}_team") or "?"))
+        rows += (f"<tr><td style='padding:.05rem .4rem .05rem 0;opacity:.7'>{label}</td>"
+                 f"{cells(side)}</tr>")
+    return (f"<table style='margin:0 auto;border-collapse:collapse;font-size:.82rem'>"
+            f"<tr><th></th>{head}</tr>{rows}</table>")
+
+
+def _details_cell(row) -> str:
+    """The centre column: the preview's facts before kickoff, the scoreboard after it."""
+    played = bool(row.get("is_completed"))
+    venue = html.escape(str(row.get("venue_display") or ""))
+    if row.get("is_neutral_site"):
+        venue += " \u00b7 neutral site" if venue else "neutral site"
+
+    if played:
+        return (f"<div style='text-align:center;font-size:.82rem;opacity:.85'>"
+                f"<div style='font-weight:600;margin-bottom:.15rem'>Final</div>"
+                f"{_line_score(row)}"
+                f"<div style='opacity:.75;margin-top:.15rem'>{venue}</div></div>")
+
+    lines = [f"<div style='font-weight:600'>{fmt.local_time(row.get('start_date_et'))}</div>"]
+    # THE SPREAD IS THE HOME PERSPECTIVE AND THE HOME TEAM IS NAMED BESIDE IT. AC-1.4: a
+    # home favorite is a NEGATIVE spread. Naming the side the number belongs to is exact and
+    # needs no arithmetic; the favorite-perspective presentation Marc described belongs to
+    # the market card (spec §3) and is B083's, not this header's.
+    market = []
+    if pd.notna(row.get("spread")):
+        home_label = html.escape(str(row.get("home_abbreviation")
+                                     or row.get("home_team") or "home"))
+        market.append(f"{home_label} {fmt.signed(row.get('spread'), 'spread')}")
+    if pd.notna(row.get("over_under")):
+        market.append(f"O/U {fmt.number(row.get('over_under'), 'over_under')}")
+    if market:
+        lines.append(f"<div>{' \u00b7 '.join(market)}</div>")
+
+    conditions = _conditions(row)
+    if conditions:
+        lines.append(conditions)
+    if venue:
+        lines.append(f"<div style='opacity:.75'>{venue}</div>")
+    return ("<div style='text-align:center;font-size:.82rem;opacity:.9;line-height:1.45'>"
+            + "".join(lines) + "</div>")
+
+
+def _game_header(row) -> None:
+    """R-518. One nine-column row, and the page's first formalised element.
+
+    Marc: "We need to formalize the elements on the page, similar to how we did on
+    Schedule/stacked." Spec §0's layout law — columns, not sections; away on the LEFT —
+    starts here and governs everything placed below it.
+
+    ⚠️ THE WEATHER QUERY MOVED INTO THIS FUNCTION RATHER THAN BEING ADDED TO THE PAGE. The
+    standalone panel left the before tab in the same commit, so the page's query count is
+    unchanged: the header asks for a forecast only before kickoff, which is the only tab
+    state the removed panel ever ran in.
     """
     played = bool(row.get("is_completed"))
-    # AWAY on the LEFT, HOME on the right — the universal convention, and the reason the
-    # previous layout read as unnatural. "Team, venue, team" is not a matchup; "away @ home"
-    # is how every scoreboard in the sport is written.
-    left, middle, right = st.columns([5, 2, 5])
-    for column, side in ((left, "away"), (right, "home")):
+    columns = st.columns(_HEADER_WEIGHTS, vertical_alignment="center")
+    cells = (
+        identity.logo_or_monogram(row.get("away_logo_url"),
+                                  str(row.get("away_team") or "?"), 44),
+        _team_cell(row, "away", "right"),
+        _score_cell(row.get("away_points"), played),
+        _winner_glyph(row, "away"),
+        _details_cell(row),
+        _winner_glyph(row, "home"),
+        _score_cell(row.get("home_points"), played),
+        _team_cell(row, "home", "left"),
+        identity.logo_or_monogram(row.get("home_logo_url"),
+                                  str(row.get("home_team") or "?"), 44),
+    )
+    for column, markup in zip(columns, cells):
         with column:
-            logo = identity.logo_or_monogram(row.get(f"{side}_logo_url"),
-                                             row.get(f"{side}_team") or "?", 40)
-            record = f"{row.get(f'{side}_wins')}–{row.get(f'{side}_losses')}" \
-                if pd.notna(row.get(f"{side}_wins")) else ""
-            points = row.get(f"{side}_points")
-            score = (f"<div style='font-size:2rem;font-weight:600'>{int(points)}</div>"
-                     if played and pd.notna(points) else "")
-            st.markdown(
-                f"<div style='display:flex;align-items:center;gap:.6rem'>{logo}"
-                f"<div><div style='font-weight:600'>{row.get(f'{side}_team')}</div>"
-                f"<div style='opacity:.7;font-size:.85rem'>"
-                f"{row.get(f'{side}_conference') or 'Independent'}"
-                f"{' · ' + record if record else ''}</div></div>{score}</div>",
-                unsafe_allow_html=True)
-    with middle:
-        st.markdown(
-            f"<div style='text-align:center;opacity:.75;font-size:.85rem'>"
-            f"<strong>@</strong><br>"
-            f"{'Final' if played else 'Scheduled'}<br>"
-            f"{fmt.local_time(row.get('start_date_et'))}"
-            f"<br>{row.get('venue_display') or ''}"
-            f"{'<br>neutral site' if row.get('is_neutral_site') else ''}</div>",
-            unsafe_allow_html=True)
+            st.markdown(markup, unsafe_allow_html=True)
 
 
 def _market(row) -> None:
@@ -498,26 +734,41 @@ def _model(row) -> None:
 
 
 def _series(row) -> None:
-    st.subheader("Head to head")
+    """R-520. Head to head as a BLURB, not a section.
+
+    Marc: "Probably doesn't merit a full section, but I do like the content. Probably should
+    just be a text blurb close to the top." So it renders first in the preview and costs one
+    line — no subheader, no card, no Empty state.
+
+    ⚠️ A SERIES OF NO GAMES IS NOT 0-0. Two teams who have never met and two teams who have
+    split evenly are different statements, and the first is a sentence rather than a score.
+
+    ⚠️ THE AWAY SIDE IS READ, NEVER DERIVED. srv_game.sql's own comment warns that taking it
+    as `series_games - series_home_team_wins` is "only correct in a sport" without ties: the
+    subtraction credits every draw to the away team. The model carries
+    `series_away_team_wins` and this reads it.
+
+    ⚠️ AWAY FIRST, matching the header above it and spec §0's layout law. The two names and
+    the two numbers move together or the sentence inverts — which is the R-544 class, and it
+    is asserted positionally rather than by counting names.
+    """
     games = row.get("series_games")
+    away, home = row.get("away_team") or "?", row.get("home_team") or "?"
     if pd.isna(games) or int(games) == 0:
-        states.empty("The series history would be here.",
-                     "These teams have no previous meeting on record.")
+        st.caption(f"{away} and {home} have never met.")
         return
-    home_wins, away_wins = row.get("series_home_team_wins"), row.get("series_away_team_wins")
+    away_wins, home_wins = row.get("series_away_team_wins"), row.get("series_home_team_wins")
     ties = row.get("series_ties")
-    # Ties are counted, not inferred. The view used to derive the away record by
-    # subtraction, which credited every draw to the away team.
-    record = f"{int(home_wins)} – {int(away_wins)}"
+    tie_text = ""
     if pd.notna(ties) and int(ties):
-        record += f" – {int(ties)}"
-    st.markdown(
-        f"**{row.get('home_team')} {record} {row.get('away_team')}** across {int(games)} "
-        f"meeting{'s' if int(games) != 1 else ''}, "
-        f"{int(row.get('series_first_season'))} to {int(row.get('series_last_season'))}.")
-    if pd.notna(ties) and int(ties):
-        st.caption(f"{int(ties)} of those ended in a tie — college football had no "
-                   f"overtime before 1996.")
+        tie_text = f", with {int(ties)} tie{'s' if int(ties) != 1 else ''}"
+    span = ""
+    if pd.notna(row.get("series_first_season")) and pd.notna(row.get("series_last_season")):
+        span = (f", {int(row.get('series_first_season'))} to "
+                f"{int(row.get('series_last_season'))}")
+    st.caption(
+        f"**Head to head** \u2014 {away} {int(away_wins)}, {home} {int(home_wins)} across "
+        f"{int(games)} meeting{'s' if int(games) != 1 else ''}{tie_text}{span}.")
 
 
 # --- R-463: offence against defence -------------------------------------------------------
@@ -1241,91 +1492,6 @@ def _leader_heading(away, home) -> str:
             f"<div style='flex:1;text-align:right;font-weight:600'>{name(away)}</div>"
             f"<div style='min-width:8rem'></div>"
             f"<div style='flex:1;font-weight:600'>{name(home)}</div></div>")
-
-
-def _weather(row) -> None:
-    """Conditions at kickoff, from srv_game_weather.
-
-    THE INDOOR CAVEAT IS NOT DECORATION. CFBD reports the weather at the venue's LOCATION,
-    not inside it, so domed games carry ordinary outdoor readings — 10°F to 98°F, 9 mph
-    average wind, and five with measurable precipitation. Rendering "Rain, 41°F" for a game
-    played under a roof would be stating something false, so the roof is said first and the
-    readings are labelled as outside.
-
-    ⚠️ A FORECAST AND AN OBSERVATION ARE DIFFERENT CLAIMS AND THE HEADING NOW SAYS WHICH.
-    B075 measured that srv_game_weather is populated for unplayed games about a week out —
-    253 of the 303 games kicking off in the following week carry a row, week 3 carries one,
-    week 4 onward carries none — so on a scheduled game every figure below is a FORECAST that
-    has not happened yet, and the panel read "Weather · Conditions at kickoff" either way.
-    That is the same class of defect as `_model` collapsing "too early to say" into "we have
-    nothing": both render perfectly and both state something the data does not support.
-
-    It takes the srv_game row rather than a game_id for exactly this — `is_completed` is the
-    only thing that distinguishes the two, and it is already on the row the page fetched.
-    """
-    played = bool(row.get("is_completed"))
-    # ⚠️ int(), AND IT IS NOT DEFENSIVE TYPING. Taking the row instead of the game_id means
-    # this value now arrives as a numpy.int64 out of the DataFrame rather than as the int
-    # params.get() casts, and psycopg2 cannot adapt one: "can't adapt type 'numpy.int64'".
-    # Every load of this panel raised into states.section and rendered the Error state, on
-    # EVERY game. Nothing in the suite could see it — the unit tests stub `query`, and
-    # ci/check_page_queries binds its own parameters — and it was caught by rendering the
-    # real body() against live serving, which is why that step exists.
-    game_id = int(row.get("game_id"))
-    st.subheader("Weather" if played else "Weather forecast")
-    with states.section("srv_game_weather"):
-        df = query("""
-            select game_id, season, venue, city, state, is_indoors, temperature_f,
-                   humidity_pct, precipitation_in, snowfall_in, wind_speed_mph,
-                   wind_direction_compass, weather_condition, is_precipitating,
-                   elevation_m, as_of_ts
-            from srv_game_weather
-            where game_id = :game_id
-            limit 1
-        """, {"game_id": game_id})
-        if df.empty:
-            states.empty(
-                "Conditions at kickoff would be here." if played else
-                "The forecast for kickoff would be here.",
-                "Weather is collected from 2024 onward, and not every game has a reading."
-                if played else
-                "A forecast appears about a week before kickoff, so a game further out than "
-                "that has none yet.")
-            return
-
-        reading = df.iloc[0]
-        indoors = bool(reading.get("is_indoors"))
-        if indoors:
-            st.caption(
-                f"{reading.get('venue')} is indoors. The readings below are the outdoor "
-                "conditions at the venue's location and "
-                + ("did not affect play." if played else "will not affect play."))
-        if not played:
-            st.caption(
-                "This game has not been played. Every figure below is a forecast for "
-                "kickoff, not a reading taken at it.")
-
-        def show(value, suffix=""):
-            return "—" if value is None or pd.isna(value) else f"{value:g}{suffix}"
-
-        cols = st.columns(4)
-        cols[0].metric("Temperature", show(reading.get("temperature_f"), "°F"))
-        cols[1].metric("Wind", show(reading.get("wind_speed_mph"), " mph")
-                       + (f" {reading.get('wind_direction_compass')}"
-                          if reading.get("wind_direction_compass") else ""))
-        cols[2].metric("Humidity", show(reading.get("humidity_pct"), "%"))
-        cols[3].metric("Conditions", reading.get("weather_condition") or "—")
-
-        notes = []
-        if pd.notna(reading.get("precipitation_in")) and reading.get("precipitation_in"):
-            notes.append(f"{reading['precipitation_in']:g} in precipitation")
-        if pd.notna(reading.get("snowfall_in")) and reading.get("snowfall_in"):
-            notes.append(f"{reading['snowfall_in']:g} in snow")
-        if pd.notna(reading.get("elevation_m")):
-            notes.append(f"venue elevation {reading['elevation_m']:g} m")
-        if notes:
-            st.caption(" · ".join(notes))
-        table.as_of_caption(df)
 
 
 def _travel(game_id) -> None:
