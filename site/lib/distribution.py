@@ -14,11 +14,22 @@ fixed to prevent: two renderers drift, and the day they disagree the reader cann
 is lying. The panel is the thumbnail with more room — same geometry, same code path, more
 pixels — so a bug in the bars is one bug and a fix is one fix.
 
-NO CHART LIBRARY. The site image's dependencies are streamlit, sqlalchemy, psycopg2-binary,
-pandas, python-dotenv and openpyxl — no matplotlib, no altair, no plotly — and that list
-carries a written warning about the cost of adding to it. Ten bars is about a dozen `<rect>`
-elements, and the cards already emit raw HTML on every row, so this is a different string in a
-path that exists.
+NO CHART LIBRARY HERE, AND THAT IS STILL THE RIGHT CALL FOR THIS PICTURE. Ten bars is about
+a dozen `<rect>` elements, and the cards already emit raw HTML on every row, so this is a
+different string in a path that already exists — against a chart library it would be a
+dependency, a spec, and a render pass for a thumbnail 28 pixels tall.
+
+⚠️ R-562 CORRECTED THIS PARAGRAPH. It used to read "the site image's dependencies are
+streamlit, sqlalchemy, psycopg2-binary, pandas, python-dotenv and openpyxl — no matplotlib, no
+altair, no plotly". THE ALTAIR HALF WAS NEVER TRUE: `altair` is a HARD REQUIREMENT of
+streamlit and has been in the image since the first build. `st.line_chart` is documented as
+"syntax-sugar around st.altair_chart", so every chart the site has ever drawn through
+streamlit went through Altair. `today.py` now imports it directly for the poll bump chart —
+the one thing it needs, an inverted rank axis, is `alt.Scale(reverse=True)` and is not
+reachable through `st.line_chart` at all — and it is declared in site/requirements.txt.
+
+Left uncorrected this would have been a fresh instance of the failure this project keeps
+paying for: a justification that stays in the file after it stops being true.
 
 THE GEOMETRY COMES FROM THE ROW. `bin_min`, `bin_incr` and `bin_count` travel on the serving
 row precisely so the renderer needs no lookup table and no knowledge of which metric it is

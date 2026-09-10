@@ -16,6 +16,7 @@ to keep.
 """
 import math
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -53,7 +54,7 @@ def _completed_games(scope) -> pd.DataFrame:
     that calls that function selects the column; Today was the only one that did not. The
     message was right about itself and wrong about the view.
 
-    ⚠️ R-553. `attribution` IS STILL SELECTED THOUGH body() NO LONGER CALLS
+    ⚠️ R-558. `attribution` IS STILL SELECTED THOUGH body() NO LONGER CALLS
     model_attribution() — that is deliberate, not a leftover. See the note at the end of
     body(): attribution attaches to rendered model output, this page renders none yet, and
     keeping the column fetched makes restoring the call a one-line change on the day it does.
@@ -658,6 +659,101 @@ def _leaderboards(scope, depth: int) -> None:
             ], caption="Total tackles. TFL and sacks are separate stat types on the same view."))
 
 
+# ⚠️ R-562. THE ONLY ALTAIR IN THE SITE, AND IT IS NOT A NEW DEPENDENCY.
+# `altair` is a HARD REQUIREMENT of streamlit — `pip show streamlit` lists it first — so it is
+# already in the image and importing it adds no package. It is declared in
+# site/requirements.txt anyway, because a direct import deserves a direct declaration: relying
+# on a transitive pin means the day streamlit drops altair this page raises on import, and
+# that file's own header says the failure mode for a missing site dependency is silent.
+#
+# WHY NOT st.line_chart. It cannot do the one thing a bump chart requires. Measured on the
+# pinned streamlit 1.61.1: the call accepts only
+# `data, x, y, x_label, y_label, color, width, height, use_container_width` — no scale, no
+# domain, no reverse — and the Vega-Lite it generates encodes y as
+# `{"type": "quantitative", "scale": {}}`. An empty scale on a quantitative axis ascends
+# upward, so RANK 1 PLOTTED AT THE BOTTOM. The caption that used to sit under it said "Rank 1
+# at the top of the axis is inverted by convention", which was false in both halves: the axis
+# was not inverted and nothing in that call could invert it.
+#
+# WHY NOT HAND-DRAWN SVG, which this file has a precedent for in _scatter_svg. The only hard
+# requirement here is an inverted ordinal axis, and `alt.Scale(reverse=True)` is that in three
+# words. `st.line_chart`'s own docstring calls itself "syntax-sugar around st.altair_chart",
+# so this removes the sugar rather than adding a layer.
+_BUMP_HEIGHT = 420
+
+
+def _bump_chart(frame: pd.DataFrame, poll: str) -> None:
+    """A bump chart: rank 1 at the top, one line per team, gaps where a team was unranked."""
+    weeks = sorted(int(w) for w in frame["week"].unique())
+    teams = list(frame["team_display"].unique())
+
+    # ⚠️ THE FULL TEAM x WEEK GRID, AND IT IS LOAD-BEARING RATHER THAN TIDINESS.
+    # A team that drops out of the poll and returns has NO ROW for the weeks between, and a
+    # line mark joins whatever consecutive points it is given — so on the raw frame Altair
+    # would draw a straight segment across the gap, saying the team held a rank it did not
+    # hold. Reindexing onto every (team, week) pair puts an explicit null in the gap, and a
+    # line mark breaks at a null. This is the chart honouring the same rule the table beneath
+    # it already honours: `_delta` refuses to render a missing previous rank as "no change",
+    # and the picture must not contradict it.
+    grid = pd.MultiIndex.from_product([teams, weeks],
+                                      names=["team_display", "week"]).to_frame(index=False)
+    data = grid.merge(frame[["team_display", "week", "rank"]],
+                      on=["team_display", "week"], how="left")
+    data["week"] = data["week"].astype(int)
+
+    worst = int(frame["rank"].max())
+    # Endpoint labels sit to the right of each team's last week, so the plotting area stops
+    # short of the full width rather than the labels being clipped.
+    last = (data.dropna(subset=["rank"]).sort_values("week")
+                .groupby("team_display", as_index=False).last())
+
+    hover = alt.selection_point(fields=["team_display"], on="pointerover",
+                                nearest=False, empty=True, clear="pointerout")
+
+    x = alt.X("week:O", title="Week", axis=alt.Axis(labelAngle=0))
+    # 🚨 reverse=True IS THE WHOLE POINT OF THIS PANEL. Rank 1 at the TOP.
+    y = alt.Y("rank:Q", title="Rank",
+              scale=alt.Scale(reverse=True, domain=[0.5, worst + 0.5], nice=False),
+              axis=alt.Axis(values=[v for v in (1, 5, 10, 15, 20, 25) if v <= worst],
+                            tickMinStep=1))
+
+    # ONE NEUTRAL COLOUR RATHER THAN TWENTY-FIVE, AND THIS IS A DELIBERATE CHOICE.
+    # A categorical palette runs out well before 25 and starts recycling, so two teams get the
+    # same colour and the reader has no way to know which. `currentColor` follows the theme,
+    # the hovered team is what gets emphasis, and the endpoint labels are what identify a
+    # line. Team BRAND colours would be the real answer and they are not available here:
+    # srv_rankings carries team_slug and no colour, and adding a join in the page is a model
+    # change wearing a page change. Logged, not built.
+    base = alt.Chart(data).encode(x=x, y=y, detail="team_display:N")
+    # ⚠️ `invalid` IS SET EXPLICITLY AND MUST STAY THAT WAY. Vega-Lite's default for path
+    # marks changed in 5.14 — before it, an invalid value was FILTERED, which joins the two
+    # points either side and draws exactly the straight line across a team's unranked weeks
+    # that the null grid above exists to prevent. v6.4.1 defaults to breaking paths, so this
+    # is currently redundant; it is written down because the whole correctness of the gap
+    # rests on it and a silent default is not something to rest it on.
+    lines = base.mark_line(interpolate="monotone", clip=True,
+                           invalid="break-paths-filter-domains").encode(
+        strokeWidth=alt.condition(hover, alt.value(3.0), alt.value(1.25)),
+        opacity=alt.condition(hover, alt.value(1.0), alt.value(0.35)))
+    points = base.mark_circle(clip=True).encode(
+        size=alt.condition(hover, alt.value(70), alt.value(22)),
+        opacity=alt.condition(hover, alt.value(1.0), alt.value(0.45)),
+        tooltip=[alt.Tooltip("team_display:N", title="Team"),
+                 alt.Tooltip("week:O", title="Week"),
+                 alt.Tooltip("rank:Q", title="Rank", format="d")])
+    labels = alt.Chart(last).mark_text(align="left", dx=8, fontSize=11).encode(
+        x=x, y=y, text="team_display:N",
+        opacity=alt.condition(hover, alt.value(1.0), alt.value(0.75)))
+
+    chart = (lines + points + labels).add_params(hover).properties(
+        height=_BUMP_HEIGHT, padding={"right": 96}).configure_view(stroke=None)
+    st.altair_chart(chart, use_container_width=True)
+    st.caption(
+        f"{poll}, full season. **Rank 1 is at the top.** Every ranked team is drawn; a line "
+        "stops where a team left the poll and restarts where it returned, so a gap is a "
+        "week unranked rather than a rank held. Hover a line to follow one team.")
+
+
 def _bump(scope) -> None:
     st.subheader("Poll movement")
     with states.section("srv_rankings"):
@@ -672,10 +768,7 @@ def _bump(scope) -> None:
             states.empty("The poll chart would be here.", f"No {poll} rows for this season.")
             return
 
-        chart = one.pivot_table(index="week", columns="team_display", values="rank")
-        st.line_chart(chart, height=380)
-        st.caption(f"{poll}, full season. Rank 1 at the top of the axis is inverted by "
-                   "convention; every ranked team is drawn.")
+        _bump_chart(one, poll)
 
         latest_week = int(one["week"].max())
         current = one[one["week"] == latest_week].copy()
@@ -738,7 +831,7 @@ def body(page) -> None:
     _bump(scope)
     _looking_forward(scope)
 
-    # 🚨 R-553. ATTRIBUTION ATTACHES TO RENDERED MODEL OUTPUT, AND THIS PAGE RENDERS NONE.
+    # 🚨 R-558. ATTRIBUTION ATTACHES TO RENDERED MODEL OUTPUT, AND THIS PAGE RENDERS NONE.
     #
     # ⚠️ WHOEVER ADDS A `predicted_*` COLUMN TO THIS PAGE ADDS THE CALL BACK WITH IT:
     #
@@ -752,8 +845,9 @@ def body(page) -> None:
     # This page is EXPECTED to gain model numbers — MODEL_WEEK_FLOOR and _recap_lists'
     # "model-derived framing is withheld before week N" both anticipate it.
     #
-    # WHY IT CAME OUT. A083 fixed a false claim here: `attribution` had been on srv_game all
-    # along and this query was the only one not asking for it, so model_attribution() took
+    # WHY IT CAME OUT (R-558, tracing back to R-545). A083 fixed a false claim here:
+    # `attribution` had been on srv_game all along and this query was the only one not
+    # asking for it, so model_attribution() took
     # its "column missing from this view — this is a defect (AC-G.41)" branch and printed
     # that on the landing page. Correct, and it left a true statement that was still noise —
     # on the current season the page said "attribution is null on every row", a warning about
