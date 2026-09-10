@@ -116,6 +116,31 @@ different states, neither visible to the other. `scripts/preflight_env.py` and t
 ⚠️ **Step 3 is the one that will be skipped.** That is precisely why step 4 exists: if it is
 skipped, step 4 fails loudly and says which working copy and which file.
 
+**The THIRD file git cannot fix for you — the compiled manifest (R-575)**
+
+    A session that rebases onto ANY change under `dbt/` runs `cd dbt && dbt parse`
+    BEFORE trusting a green suite.
+
+⚠️ **`dbt/target/` is gitignored, so a rebase brings the new models and leaves the OLD compiled
+manifest beside them.** Four tests in `test_dag_structure.py` read that manifest and **skip
+themselves** when it is older than the `.sql` files it describes. That skip is correct — asserting
+against a stale artifact would test a project that no longer exists — and it is **silent**.
+
+🚨 **THE FAILURE IS A GREEN RUN THAT TESTS LESS THAN ITS PASS COUNT SUGGESTS.** B081's first full
+run after rebasing onto A088's `srv_game.sql` change showed **7 skipped where it should have been
+3**, and nothing on screen said which four had gone or why. `test_manifest_freshness` (R-462) turns
+that into a failure rather than a skip, and its message is the instruction — but it only fires
+**after** the tests have already stopped covering, so reading it as the fix is reading the alarm as
+the repair.
+
+⚠️ **THIS IS NOT A CI PROBLEM AND MUST NOT BE "FIXED" WITH A CHECK.** CI has never compiled a
+manifest — the `flake8 + pytest` job runs no dbt step and the `dbt build` job runs no pytest — so
+the guard takes its documented absent-manifest skip there and is right to. **It fires only in a
+working copy, which is exactly where the silently-skipping tests are.** The fix is this paragraph.
+
+⚠️ **It applies to A as well as B, and to any rebase, not only the resync above.** A088 edited
+`srv_game.sql`, and A089 saw the same four tests go quiet in its own working copy one round later.
+
 Key commands
 - Reach the warehouse: `scripts/warehouse_tunnel.sh` then `python scripts/preflight_env.py`
 - Run ingestion (example): `python -m src.ingest fetch teams`
