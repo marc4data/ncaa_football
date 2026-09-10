@@ -254,6 +254,17 @@ jobs:
         # in WEEKLY_BY_DESIGN, beside the list, where the next maintainer reads it.
         run: python ci/check_publish_build_agreement.py
 
+      - name: Assert every column a page reads is one it selects
+        # R-623. `row.get("x")` on a column no query selected returns None, and a page that
+        # handles None gracefully renders the ABSENCE state — so the feature is simply
+        # invisible and nothing fails. It shipped twice in two days: B083's disagreement
+        # caption was dead code on all 70 games it exists for, and B084's game header showed
+        # neither mascot nor split record for two rounds after A092 published all four.
+        #
+        # ⚠️ DELIBERATELY NOT PART OF check_page_queries.py, which EXECUTES the SQL: a column
+        # the SQL never asks for is not in the SQL to be executed. Two questions, two tools.
+        run: python ci/check_page_reads.py
+
       - name: Assert the site image's boundary
         # R-225. The image is built with `context: ./site`, so anything above that directory
         # does not exist in the container. Three modules have reached past it — a config at
