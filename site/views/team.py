@@ -88,11 +88,15 @@ def body(page) -> None:
         # That is a page to design, not a blocker to clear, and designing it here would be
         # designing a page nobody has reviewed.
         states.degraded(
-            "weekly rating history",
-            "The data for this is now in the warehouse: fct_team_rating_week carries a "
-            "pregame and postgame Elo per team per week, covering every FBS team from "
-            "2014 and essentially all of them from 2022. What is missing is the chart "
-            "itself, not the ratings behind it.",
+            # R-500. "The data for this is now in the warehouse" — so it is built, and the
+            # default title said the opposite of the sentence beneath it.
+            title="Built, not shown here yet",
+            missing_object="weekly rating history",
+            explanation=(
+                "The data for this is now in the warehouse: fct_team_rating_week carries a "
+                "pregame and postgame Elo per team per week, covering every FBS team from "
+                "2014 and essentially all of them from 2022. What is missing is the chart "
+                "itself, not the ratings behind it."),
             scheduled="the Trends chart, once the Team page is reviewed")
 
 

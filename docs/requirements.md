@@ -1,5 +1,11 @@
 # cfdb — Site requirements
 
+> ⚠️ **DATED SNAPSHOT — 2026-08-21. Stamped 2026-09-09 (A081/R-254).**
+>
+> A copy taken on 21 August 2026 and not refreshed since; the live requirements have drifted.
+> The acceptance criteria numbered here are still the ones the code cites, but the set is
+> incomplete relative to today.
+
 **Version 1.3 · 20 August 2026 · builds to wireframe v0.3**
 
 > **v1.3 `[A 08-20c]` — build order narrowed and split into two tracks.** v1.2's completeness pass

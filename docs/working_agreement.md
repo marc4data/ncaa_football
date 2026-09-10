@@ -1,5 +1,19 @@
 # cfdb — College Football Data Platform
 
+> ⚠️ **DATED SNAPSHOT — 2026-08-21. Stamped 2026-09-09 (A081/R-254). PARTS OF THIS ARE FALSE.**
+>
+> This is a copy of an old `claude_work/CLAUDE.md`. **Its environment section — "Phase 1
+> environment | Everything local via Docker Compose" — has been untrue since the pipeline moved
+> to a DigitalOcean droplet on 27–30 August 2026**, and there is no local warehouse at all: the
+> laptop Postgres was dropped on 2026-09-05.
+>
+> ⚠️ **A build round was lost to this exact sentence.** A session read it, concluded there was
+> no warehouse to build against, wrote twelve models and executed none of them. Nothing was
+> actually blocked.
+>
+> **It is kept rather than corrected because that is what a paper trail is for** — the mistake
+> is part of the record. For what is true now, read the repository's own `CLAUDE.md`.
+
 ## What this project is
 
 A portfolio-grade college football analytics platform built on the CollegeFootballData.com (CFBD) API. It powers a private website (friends and family only) showing model predictions and rich team/matchup dashboards, with drill-down to the drive and play level. The primary audience beyond friends and family is **potential employers**: every architectural decision should be one Marc can demo and defend in an interview.

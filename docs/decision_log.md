@@ -1,5 +1,12 @@
 # cfdb Decision Log
 
+> ⚠️ **DATED SNAPSHOT — 2026-08-21. Stamped 2026-09-09 (A081/R-254).**
+>
+> A copy of the live decision log as it stood on 21 August 2026. **This file is 134 KB; the live
+> one is 403 KB** — roughly a third of it, and it stops before the droplet migration, the
+> environment correction and everything after. Read it as the first month's reasoning, not as
+> the current state.
+
 Decisions made in Cowork (strategy/governance surface). Claude Code implements within these. Newest first.
 
 ## 2026-09-01 — The dead-man's switch is armed, and was tripped on purpose

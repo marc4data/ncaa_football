@@ -646,11 +646,18 @@ def _yardage(row) -> None:
             # dim_team, and dim_team does not list every opponent an FBS side schedules.
             missing = row.get("home_team") if home is None else row.get("away_team")
             states.degraded(
-                "srv_team_week",
-                f"cfdb holds no week-by-week record for {missing} this season, and both "
-                f"directions of this comparison need both sides — so showing the other "
-                f"team's own figures here would read as a matchup while describing one "
-                f"team.")
+                # ⚠️ R-500, and this is the case B074 REPORTED rather than fixed. srv_team_week
+                # is built and published — it is this team's ROW that is absent — so the old
+                # hardcoded "Not built yet" contradicted the sentence directly beneath it.
+                # A081 added the `title` parameter to site/lib/states.py (session A's file)
+                # and this is the one-argument change that consumes it.
+                title="No data for this team",
+                missing_object="srv_team_week",
+                explanation=(
+                    f"cfdb holds no week-by-week record for {missing} this season, and "
+                    f"both directions of this comparison need both sides — so showing the "
+                    f"other team's own figures here would read as a matchup while "
+                    f"describing one team."))
             return
 
         counted = [int(side["games_counted"] or 0) for side in (home, away)]
