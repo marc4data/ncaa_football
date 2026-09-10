@@ -117,6 +117,18 @@ SCORES_SELECTOR = (
     # feeds srv_game. Measured with `dbt ls`: 38 models before, 40 after. The two are
     # fct_team_yardage_week and srv_team_week themselves.
     " +srv_team_week"
+    # R-621. The week's shared scatter axis, and it is HOT for exactly srv_team_week's reason:
+    # it is computed FROM srv_team_week's own inputs, so it moves whenever a game completes.
+    # Publishing it hot without rebuilding it here is the R-492 defect the block above records
+    # — a weekly-built axis shipped twelve times a game day beside points that had just moved,
+    # and an axis that disagrees with the points on it reads as a rendering bug.
+    #
+    # ⚠️ THE COST IS TWO MODELS, NOT AN ANCESTRY, and the number is measured rather than
+    # reasoned — the first draft of this comment said one and `dbt ls` said otherwise. `+` pulls
+    # ancestors and every one of them — fct_team_yardage_week, dim_team, dim_team_week — is
+    # already here via `+srv_team_week`: 27 models before, 29 after. The two added are
+    # fct_team_week_metric_distribution and srv_team_week_metric_distribution themselves.
+    " +srv_team_week_metric_distribution"
     # R-530. srv_game_team, for the same reason and on a bigger table: 222,098 rows, game
     # grain, and it sits beside srv_game in the SAME TABLE on Scores. On a Saturday night a
     # reader was handed srv_game rows that had just moved next to srv_game_team rows built

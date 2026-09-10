@@ -61,24 +61,15 @@ select
     -- yet: at week 1 a team has played nothing, and 0.0 yards per game is a measurement it
     -- did not make. The guard is games_counted > 0 rather than a null check on the numerator,
     -- because a genuine 0-yard game would be a real datum.
-    case when y.games_counted > 0
-         then round(y.total_yards_for::numeric   / y.games_counted, 1) end
-        as total_yards_for_per_game,
-    case when y.games_counted > 0
-         then round(y.rushing_yards_for::numeric / y.games_counted, 1) end
-        as rushing_yards_for_per_game,
-    case when y.games_counted > 0
-         then round(y.passing_yards_for::numeric / y.games_counted, 1) end
-        as passing_yards_for_per_game,
-    case when y.games_counted > 0
-         then round(y.total_yards_allowed::numeric   / y.games_counted, 1) end
-        as total_yards_allowed_per_game,
-    case when y.games_counted > 0
-         then round(y.rushing_yards_allowed::numeric / y.games_counted, 1) end
-        as rushing_yards_allowed_per_game,
-    case when y.games_counted > 0
-         then round(y.passing_yards_allowed::numeric / y.games_counted, 1) end
-        as passing_yards_allowed_per_game,
+    -- ⚠️ R-621. THESE ARE CARRIED, NOT COMPUTED. The division moved into
+    -- fct_team_yardage_week when the week-distribution model became a second consumer of the
+    -- same metric — see the comment there. Same names, same values, one implementation.
+    y.total_yards_for_per_game,
+    y.rushing_yards_for_per_game,
+    y.passing_yards_for_per_game,
+    y.total_yards_allowed_per_game,
+    y.rushing_yards_allowed_per_game,
+    y.passing_yards_allowed_per_game,
 
     ao.as_of_ts
 from {{ ref('fct_team_yardage_week') }} y

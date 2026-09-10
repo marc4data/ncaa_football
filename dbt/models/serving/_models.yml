@@ -3262,6 +3262,33 @@ models:
           is real but its timestamp is our fetch time. Measured: only 131 of 1,891 games
           have a genuine pre-kickoff observation, and all 131 are 2026 — snapshotting began
           2026-08-15, so every 2024 and 2025 row is the second kind.
+      - name: home_mascot
+        description: >
+          The home team's mascot, carried from dim_team. Rendered beside the school name on the
+          Matchup header: "Louisville Cardinals". A carry rather than a join — srv_game already
+          reads dim_team for logos, conferences and ranks.
+      - name: away_mascot
+        description: >
+          The away team's mascot. See home_mascot.
+      - name: home_team_home_record_display
+        description: >
+          The home team's record IN HOME GAMES, as it stood going into this game. W-L, or
+          W-L-T where the running tie count is non-zero.
+          NULL — not 0-0 — where the team has not played at home yet this season: a zero is a
+          measurement and this is the absence of one (AC-G.32).
+          A NEUTRAL-SITE GAME COUNTS AS NEITHER home nor away. fct_team_record_week carries a
+          third `neutral_record` split so home + away + neutral sums to the total and the
+          decision is auditable rather than taken on trust; 130 of 2025's 3,831 completed games
+          are neutral, which is enough that the choice shows.
+          Point-in-time on the same `1 preceding` window as home_team_record_display, so a
+          preview cannot contain the game being previewed.
+      - name: away_team_away_record_display
+        description: >
+          The away team's record IN AWAY GAMES, as it stood going into this game. Same rules as
+          home_team_home_record_display — null where the side has not played away yet, neutral
+          games excluded from both splits.
+          Two columns rather than four: a preview says what the visitor does on the road and
+          what the host does at home.
       - name: pregame_wp_snapshot_ts
         description: >
           When the pregame probability was observed. WEEKLY BY DESIGN, and that is the one
@@ -4122,3 +4149,62 @@ models:
           bites harder at game grain than at season grain because a group is often 2 or 3.
       - name: as_of_ts
         description: "{{ doc('as_of_ts') }}"
+
+  - name: srv_team_week_metric_distribution
+    description: >
+      THE SHAPE OF A WEEK, at team grain, so every FBS matchup preview in that week can be drawn
+      against one axis. One row per (season, season_type, week, metric) over srv_team_week's six
+      per-game yardage figures.
+
+      Marc: "I'd like to standardize axis across all the FBS matchups for the week… We use
+      min/max to set axis limits (using logic to give clean breaks and tickmarks), then use the
+      stdev or percentiles to give a visual reference to extreme performers."
+
+      A SIBLING of srv_week_metric_distribution at a different grain, not an extension of it:
+      that one's metrics are game-grain (one spread, one total per game) and these are team-grain
+      (one figure per team per week).
+
+      NO WEEK 1 ROW. The per-game figures lead INTO the week, so at week 1 every team's is null
+      by design and there is no distribution to describe. NO `span` and NO `as_of_date` — the
+      model header states why for both.
+    columns:
+      - name: metric
+        description: >
+          Which of the six per-game figures this row describes — total/rushing/passing yards
+          for, and the same three allowed.
+      - name: n
+        description: >
+          Teams contributing a value. Compare with teams_in_week: a gap means teams carrying no
+          counted games yet.
+      - name: min_games_counted
+        description: >
+          The smallest games_counted behind any team in this row. WARNING, inherited from
+          srv_team_week's own header: games_counted is NOT "games played" — it is the completed
+          games cfdb holds BOTH sides' box scores for. Carried so a reader can see the
+          denominator the week's figures rest on. Early in a season it is 1, and the spread is
+          correspondingly wide: measured on 2026 week 2, stddev was 139.2 against 59.0 on 2025
+          week 12.
+      - name: axis_min
+        description: >
+          The shared axis lower bound, floored onto axis_step so the scale starts on a labelled
+          tick.
+      - name: axis_max
+        description: >
+          The shared axis upper bound, ceilinged onto axis_step.
+      - name: axis_step
+        description: >
+          The tick interval, chosen by the nice-number rule — aim for about eight intervals,
+          then round the STEP up to the nearest 1/2/2.5/5/10 at the right magnitude and let the
+          tick count fall out. Fixing the step is what makes two weeks comparable; fixing the
+          count would make every week a different shape.
+      - name: whisker_low
+        description: >
+          The most extreme observation still within 1.5*IQR below p25 — Tukey's convention, and
+          NOT the fence itself. A fence drawn as a whisker is longer than the data.
+      - name: whisker_high
+        description: >
+          The same, above p75.
+      - name: outlier_count
+        description: >
+          Teams outside the fences. Values are not carried.
+
