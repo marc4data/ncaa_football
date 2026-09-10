@@ -1876,6 +1876,29 @@ models:
       team stayed on schedule, explosiveness says how BIG the plays that worked were. Reading
       either alone describes half a team.
     columns:
+      - name: possession_display
+        description: >
+          Time of possession as a reader sees it — "31:46". The app cannot divide seconds into
+          minutes: that is arithmetic, and lib/fmt.py is formatting only. Same construction as
+          srv_drive.elapsed_display.
+      - name: offense_success_rate_display
+        description: >
+          offense_success_rate as a percentage to one decimal — "37.5%". A percentage is a
+          multiplication and the app does not multiply.
+      - name: offense_standard_downs_success_rate_display
+        description: offense_standard_downs_success_rate as a percentage to one decimal.
+      - name: offense_passing_downs_success_rate_display
+        description: offense_passing_downs_success_rate as a percentage to one decimal.
+      - name: offense_power_success_display
+        description: offense_power_success as a percentage to one decimal.
+      - name: offense_stuff_rate_display
+        description: offense_stuff_rate as a percentage to one decimal.
+      - name: defense_havoc_rate_display
+        description: >
+          defense_havoc_rate as a percentage to one decimal. ⚠️ Only the SHARE metrics get a
+          percentage form. PPA, explosiveness and line yards are point-value and yardage
+          measures, not shares — offense_ppa runs negative, which no share can — so showing
+          them as percentages would be wrong rather than unconventional.
       - name: game_team_advanced_sk
         description: >
           Surrogate key over (game_id, team_id) — THE GRAIN, declared and tested. R-077 asked
@@ -4001,5 +4024,90 @@ models:
         description: rushing_yards_allowed divided by games_counted, to one decimal.
       - name: passing_yards_allowed_per_game
         description: passing_yards_allowed divided by games_counted, to one decimal.
+      - name: as_of_ts
+        description: "{{ doc('as_of_ts') }}"
+
+  # ⚠️ APPENDED AT THE END, TOUCHING NOTHING ABOVE — both sessions edit this file and the
+  # charter's rule is that the non-owning session appends. A080/R-534.
+  - name: srv_game_team_leader
+    description: >
+      Who led a game, per team, per stat. One row per game x team x stat_category x stat_type
+      — one row per question asked, not one per player.
+      Nothing in serving could answer "who led this game": srv_player_stats ranks the SEASON
+      and carries no game_id, and srv_player_game_log is the right grain with no ordering at
+      all. The ranking is srv_player_stats's, carried across rather than reinvented, because
+      two ranking implementations that agree until they quietly do not is this project's
+      signature defect.
+      The grain is one row per group rather than one per ranked player because no cap makes a
+      per-player version smaller: 48% of groups contain exactly one player and 67% contain
+      three or fewer, so a top-1 cap still keeps 72% of the fact. Moving the grain instead of
+      filtering gives a fifth the rows and a different question.
+    columns:
+      - name: game_team_leader_sk
+        description: Surrogate key over game_id, team_id, stat_category and stat_type — the grain.
+      - name: game_id
+        description: The game these leaders are for.
+      - name: season
+        description: "{{ doc('season') }}"
+      - name: week
+        description: "{{ doc('week') }}"
+      - name: season_type
+        description: "{{ doc('season_type') }}"
+      - name: game_date
+        description: Calendar date of the game.
+      - name: team_id
+        description: The team whose players are being ranked. Ranking is PER TEAM, so a row
+          answers "who led for this side", not "who led the game".
+      - name: team
+        description: That team's display name.
+      - name: conference
+        description: That team's conference in this season.
+      - name: home_away
+        description: Whether this team was home or away in this game.
+      - name: opponent
+        description: The other team's display name.
+      - name: opponent_team_id
+        description: The other team's id.
+      - name: stat_category
+        description: The box-score category, as CFBD groups it — passing, rushing, receiving,
+          defensive and so on.
+      - name: stat_type
+        description: The statistic within the category — YDS, TD, REC, TOT and so on.
+      - name: highest_player_name
+        description: >
+          The player with the HIGHEST value of this stat for this team in this game. For a
+          stat that reads best-high — yards, touchdowns — this is the leader.
+      - name: highest_player_slug
+        description: URL segment for that player's page.
+      - name: highest_player_id
+        description: That player's id.
+      - name: highest_stat_value
+        description: That player's numeric value of the stat.
+      - name: highest_stat_raw
+        description: The same value as CFBD sent it, before numeric coercion.
+      - name: highest_tied_players
+        description: >
+          How many players share that highest value. 1 is an outright leader; more than 1 is a
+          tie, and a page that says "led the team" without checking this can be wrong.
+      - name: lowest_player_name
+        description: >
+          The player with the LOWEST value. Carried because the warehouse does not know which
+          way a given stat reads and the page must not decide with arithmetic — interceptions
+          thrown reads best-low, and its leader is here rather than in highest_player_name.
+      - name: lowest_player_slug
+        description: URL segment for that player's page.
+      - name: lowest_player_id
+        description: That player's id.
+      - name: lowest_stat_value
+        description: That player's numeric value of the stat.
+      - name: lowest_stat_raw
+        description: The same value as CFBD sent it, before numeric coercion.
+      - name: lowest_tied_players
+        description: How many players share that lowest value.
+      - name: rank_population
+        description: >
+          How many players the ranking was computed over. Without it "led the team" is
+          unreadable — leading two players and leading eleven are different statements, and it
+          bites harder at game grain than at season grain because a group is often 2 or 3.
       - name: as_of_ts
         description: "{{ doc('as_of_ts') }}"
