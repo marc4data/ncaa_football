@@ -44,7 +44,7 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # reassigned is the defect this round was most likely to ship, and A074 found a whole class
 # of panel that nothing had ever exercised.
 ALL_PANELS = ("_market", "_line_movement", "_model", "_series", "_yardage",
-              "_weather", "_travel", "_post_game", "_drives")
+              "_weather", "_travel", "_post_game", "_leaders", "_drives")
 
 
 def _stub_streamlit():
@@ -171,7 +171,7 @@ def test_a_completed_game_opens_on_the_after_tab(page):
     """
     run, _ = page
     _, called = run({"is_completed": True})
-    assert called == ["_post_game", "_drives"], \
+    assert called == ["_post_game", "_leaders", "_drives"], \
         f"a completed game did not open on the after tab — it ran {called}"
 
 
@@ -202,7 +202,7 @@ def test_a_played_game_keeps_the_after_tab_even_where_cfdb_holds_nothing(page):
     is that we do not hold it."""
     run, _ = page
     entries, called = run({"is_completed": True, "season": 1999, "game_id": 62718})
-    assert called == ["_post_game", "_drives"]
+    assert called == ["_post_game", "_leaders", "_drives"]
     assert "After the game" in _text(entries)
 
 
@@ -221,7 +221,7 @@ def test_an_unknown_tab_slug_falls_back_and_does_not_raise(page):
     """scores.py already treats a hand-edited `?tab=` as noise, not a request (AC-G.11)."""
     run, _ = page
     entries, called = run({"is_completed": True}, tab="box-score-please")
-    assert called == ["_post_game", "_drives"], "an unknown slug did not fall back to this game's own look"
+    assert called == ["_post_game", "_leaders", "_drives"], "an unknown slug did not fall back to this game's own look"
     assert "Something went wrong" not in _text(entries)
 
 
@@ -337,11 +337,26 @@ def test_no_post_game_content_was_stubbed(page):
     a data change, and B070's rule says no stub either. If either name appears here before a
     serving view carries game-grain ranks, something was computed in the page.
     """
-    assert SOURCE.count("from srv_game_team") == 1, \
+    # ⚠️ COUNTED OVER THE WHOLE SOURCE, COMMENTS INCLUDED, AND THAT IS THE STRICT READING
+    # KEPT ON PURPOSE — a prose mention of `from srv_game_team` fails this, and the one in
+    # _leaders was reworded rather than the assertion being narrowed to code.
+    #
+    # ⚠️ THE WORD BOUNDARY IS A FIX, NOT A LOOSENING, AND B077 FOUND IT THE HARD WAY.
+    # B076 wrote `count("from srv_game_team")`, which also matches `from
+    # srv_game_team_leader` — so the moment A080's ranked object was read, an assertion about
+    # ONE relation started counting two. It read as precise and never was. `\b` makes it
+    # mean what its message always claimed.
+    assert len(re.findall(r"from srv_game_team\b", SOURCE)) == 1, \
         "the box score and the advanced block must be ONE read, not two (G-2)"
-    for name in ("srv_player_game_log", "srv_player_stats"):
-        assert name not in SOURCE, \
-            f"{name} was read before a serving view ranks players within a game (R-506)"
+    assert len(re.findall(r"from srv_game_team_leader\b", SOURCE)) == 1, \
+        "the leaders panel must be one read too (R-511)"
+    # ⚠️ THE srv_player_* BAN USED TO BE REPEATED HERE AND HAS MOVED, NOT GONE. It now lives
+    # ONCE, in test_matchup_postgame.test_the_ranking_is_read_and_never_computed_in_the_page,
+    # where it is strictly STRONGER: that version strips comments and docstrings with ast
+    # before testing, and asserts the positive — that srv_game_team_leader IS read — beside
+    # it. This copy was the plain-substring form, and B077's _leaders docstring names both
+    # views to record WHY neither could answer the question. A ban on a name must be a ban on
+    # reading it, not on explaining it, so the duplicate went and the better one stayed.
     # ⚠️ CODE LINES ONLY. The module explains at length WHY it is not st.tabs, so a bare
     # substring test fails on its own reasoning — which is a test asserting that the comment
     # is absent rather than that the call is.

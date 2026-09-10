@@ -159,6 +159,16 @@ def _side(team, is_home, **overrides):
            "fourth_down_attempts": 2 if is_home else 1,
            "penalties": 4 if is_home else 3,
            "penalty_yards": 26 if is_home else 20,
+           # ⚠️ THE SERVING-SHIPPED DISPLAY STRINGS (A080). Without these the narrowed
+           # percentage assertion below passes for the wrong reason — no `%` can appear if
+           # the fixture never supplies one.
+           "possession_display": "31:46" if is_home else "28:14",
+           "offense_success_rate_display": "45.1%" if is_home else "22.6%",
+           "offense_standard_downs_success_rate_display": "51.2%" if is_home else "25.6%",
+           "offense_passing_downs_success_rate_display": "28.1%" if is_home else "14.1%",
+           "offense_power_success_display": "75.0%" if is_home else "37.5%",
+           "offense_stuff_rate_display": "19.2%" if is_home else "9.6%",
+           "defense_havoc_rate_display": "17.2%" if is_home else "8.6%",
            "as_of_ts": pd.Timestamp("2026-09-09T12:00:00Z")}
     row.update({k: (v if is_home else round(v / 2, 3))
                 for k, v in _ADVANCED_VALUES.items()})
@@ -187,6 +197,12 @@ def _dead(**over):
                  "fourth_down_conversions", "fourth_down_attempts",
                  "penalties", "penalty_yards")})
     row.update({f: None for f in _ADVANCED_VALUES})
+    row.update({f: None for f in
+                ("possession_display", "offense_success_rate_display",
+                 "offense_standard_downs_success_rate_display",
+                 "offense_passing_downs_success_rate_display",
+                 "offense_power_success_display", "offense_stuff_rate_display",
+                 "defense_havoc_rate_display")})
     row.update(over)
     other = dict(row, team_id=2649, team_display="Toledo", is_home=False)
     return [row, other]
@@ -285,12 +301,90 @@ def test_away_is_on_the_left_and_home_on_the_right(panel):
         "the home team was drawn on the left"
 
 
+def _row_markup(entries, label):
+    """The single rendered row carrying this label, so an assertion can be scoped to it."""
+    for _kind, body in entries:
+        for chunk in body.split("<div style='display:flex;align-items:baseline"):
+            if f">{label}<" in chunk:
+                return chunk
+    return ""
+
+
 def test_the_ratio_rows_are_fractions_not_percentages(panel):
-    """G-3. The app does not divide — `6/13`, never `46.2%`."""
+    """G-3. The app does not divide — `8/14`, never `46.2%`.
+
+    ⚠️ THIS ASSERTION WAS NARROWED IN B077, NOT REMOVED, AND THE DIFFERENCE IS THE POINT.
+
+        before:  assert "%" not in body            — no percentage ANYWHERE in the panel
+        after:   assert "%" not in <the third-down row>
+                 assert "%" not in <the fourth-down row>
+                 plus test_the_five_decimal_rows_did_not_gain_a_percent, and
+                 test_the_six_share_rows_render_the_serving_display_string
+
+    What it protected is unchanged and is still protected: a conversion rate is the app doing
+    arithmetic on two columns it was handed separately, and it must never appear. What changed
+    is that A080 published six display strings, so six rows now carry a `%` that the SERVING
+    LAYER computed — a `%` in the panel is no longer evidence that the page divided, but a `%`
+    on these two rows still is. Loosening this to "no % except sometimes" would have been the
+    failure mode; scoping it to the rows it was always about is not.
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    body = _text(entries)
+    assert "6/13" in body and "6/16" in body, "third down did not render as a fraction"
+    for label in ("Third down", "Fourth down"):
+        row = _row_markup(entries, label)
+        assert row, f"the {label} row did not render at all"
+        assert "%" not in row, f"the panel computed a conversion rate on {label}"
+
+
+def test_the_five_decimal_rows_did_not_gain_a_percent(panel):
+    """⚠️ MEASURED, NOT CONVENTIONAL. offense_ppa runs NEGATIVE (−0.644) and
+    offense_explosiveness reaches 2.737 — a share can do neither, so these five have no
+    display column and must keep their decimals."""
+    run, matchup = panel
+    entries = run(_both())[0]
+    for label in ("Predicted points added / play", "PPA, rushing plays",
+                  "PPA, passing plays", "Explosiveness", "Line yards"):
+        row = _row_markup(entries, label)
+        assert row, f"the {label} row did not render"
+        assert "%" not in row, f"{label} was rendered as a percentage"
+    decimal_fields = [f for _l, f, _d in matchup._ADVANCED_ROWS
+                      if f not in matchup._DISPLAY_COLUMN and f != "offense_plays"]
+    assert len(decimal_fields) == 5, f"expected five decimal rows, found {decimal_fields}"
+
+
+def test_the_six_share_rows_render_the_serving_display_string(panel):
+    """⚠️ THE APP CANNOT MULTIPLY. B076 drew 0.451 and said so; A080 published the string.
+    Nothing here computes it — the value on screen is the column."""
+    run, matchup = panel
+    body = _text(run(_both())[0])
+    assert len(matchup._DISPLAY_COLUMN) == 6
+    for shown in ("45.1%", "22.6%", "51.2%", "28.1%", "75.0%", "19.2%", "17.2%"):
+        assert shown in body, f"{shown} did not reach the panel"
+
+
+def test_the_glossary_still_looks_the_metric_up_by_its_real_name(panel):
+    """⚠️ THE TRAP IN PART 0. dim_field_metadata documents `offense_success_rate`, NOT
+    `offense_success_rate_display`. Swapping the field name inside _ADVANCED_ROWS would make
+    six of the twelve tooltips "(undefined)" — which is why the display column is a MAP beside
+    the rows rather than a replacement inside them."""
+    _, matchup = panel
+    for field in matchup._GLOSSARY_FIELDS:
+        assert not field.endswith("_display"), \
+            f"{field} is a display column and the dictionary has never heard of it"
+    for metric, display in matchup._DISPLAY_COLUMN.items():
+        assert metric in matchup._GLOSSARY_FIELDS, f"{metric} fell out of the glossary lookup"
+        assert display == f"{metric}_display"
+
+
+def test_possession_renders_from_the_serving_column(panel):
+    """A080 published possession_display, so the row B076 left off exists and nothing here
+    divides 1,906 into 31:46. Sanity check on 401752665: 29:38 + 30:22 = 60:00."""
     run, _ = panel
     body = _text(run(_both())[0])
-    assert "6/13" in body and "6/16" in body, "third down did not render as a fraction"
-    assert "%" not in body, "the panel computed a percentage"
+    assert "Possession" in body and "31:46" in body and "28:14" in body
+    assert "1906" not in body and "1,906" not in body, "raw seconds reached the reader"
 
 
 def test_turnovers_carry_their_split(panel):
@@ -399,13 +493,47 @@ def test_no_definition_is_written_in_the_page(panel):
 
 # --- what this round did NOT build ------------------------------------------------------------
 
-def test_no_leaders_panel_was_stubbed():
-    """⚠️ R-506 IS BLOCKED, NOT SKIPPED. Nothing in serving ranks players within a game —
-    srv_player_stats ranks at SEASON grain and carries no game_id, and srv_player_game_log
-    carries no rank at all. Deriving it here would be a window function in the page, which is
-    the computation CLAUDE.md puts upstream. B070's rule: no stub either."""
+def _code_only(source: str) -> str:
+    """The module with comments and docstrings removed.
+
+    ⚠️ A BAN ON A NAME MUST BE A BAN ON READING IT, NOT ON EXPLAINING IT. B075 hit the same
+    shape with `st.tabs`: the module documents at length why it is not used, so a bare
+    substring test asserts that the reasoning is absent rather than that the call is. Here the
+    leaders panel's docstring names both banned views to record why neither could answer the
+    question — which is exactly the prose that should survive.
+    """
+    import ast
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            body = node.body
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                body[0].value.value = ""
+    return ast.unparse(tree)
+
+
+def test_the_ranking_is_read_and_never_computed_in_the_page():
+    """⚠️ THE BAN STAYS, AND THE POSITIVE ASSERTION JOINS IT — IT DOES NOT REPLACE IT.
+
+    B076 ended with R-506 blocked: nothing in serving ranked players within a game, so "who
+    led" was a window function, which CLAUDE.md puts upstream. A080 built
+    `srv_game_team_leader` at (game_id, team_id, stat_category, stat_type), so B077 could read
+    it. `srv_game_team_leader` is neither banned view, so the ban did not have to move.
+
+    It must not move. `srv_player_stats` still ranks at SEASON grain with no game_id and
+    `srv_player_game_log` still carries no rank, so either name being READ here would still
+    mean the page derived a ranking — the exact thing A080 was built to prevent.
+    """
+    code = _code_only(SOURCE)
     for banned in ("srv_player_game_log", "srv_player_stats"):
-        assert banned not in SOURCE, f"{banned} was read to rank players in the page"
+        assert banned not in code, f"{banned} was read to rank players in the page"
+    assert "srv_game_team_leader" in code, "the leaders panel does not read the ranked object"
+    block = SOURCE[SOURCE.index("def _leaders("):SOURCE.index("def _leader_heading(")]
+    sql = block[block.index("select team_id"):block.index("limit 8")].lower()
+    for computed in ("order by", "rank(", "row_number(", "over (", "group by", "join"):
+        assert computed not in sql, f"the leaders query contains `{computed}`"
 
 
 def test_the_panel_computes_nothing(panel):
