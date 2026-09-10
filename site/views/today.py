@@ -21,6 +21,7 @@ import pandas as pd
 import streamlit as st
 
 from lib import filters, params, shell, states, table
+from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
 
@@ -37,29 +38,12 @@ POLLS = ("AP Top 25", "Coaches Poll")
 
 # --- data -----------------------------------------------------------------------------
 
-# ⚠️ R-574. THE READER-FACING NAME FOR EACH VIEW THIS PAGE READS, AND NOTHING ELSE.
+# ⚠️ R-583. `DATASETS` MOVED TO `lib/datasets.py` AND IS IMPORTED, NOT DEFINED HERE.
 #
-# This is a LABEL table, not a panel-to-view table, and the distinction is the whole design.
-# Which view a panel reads is declared exactly once, in that panel's own
-# `states.section(...)` call — the place that has always known it, and which until now
-# revealed it only in the Error state. This dict answers a different question: what a reader
-# should be told that view IS.
-#
-# AC-G.7 as amended: front of house says "Team box scores", not `srv_team_game_log`. The
-# identifier still travels — dataset_caption renders the label as a LINK to
-# /dictionary?table=<view> — so the jargon is one click away and off the page.
-#
-# ⚠️ A KEY HERE THAT NO SECTION NAMES, OR A SECTION NAMING A VIEW ABSENT HERE, IS A DEFECT
-# and test_today_tabs.py fails on both. That is deliberate: the page used to carry ONE
-# caption reading "Dataset: Looking Back → srv_game" while reading five views, so four of six
-# sections linked a reader to the wrong table in the dictionary.
-DATASETS = {
-    "srv_game": "Game results and market lines",
-    "srv_team_week": "Team form, by week",
-    "srv_team_game_log": "Team box scores",
-    "srv_player_game_log": "Player box scores",
-    "srv_rankings": "AP and Coaches polls",
-}
+# It was declared in this file by A089 and Matchup needs the same labels. Two tables naming
+# the same views — `srv_game` and `srv_team_week` are read by both pages — would disagree, and
+# preventing exactly that disagreement is what A089's design was for. The labels, the keys and
+# the wording are unchanged by the lift; the module's own header carries the reasoning.
 
 # (slug, label, panel names). THE SLUG IS WHAT GOES IN THE URL.
 #

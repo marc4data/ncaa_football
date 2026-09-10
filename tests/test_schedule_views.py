@@ -896,13 +896,85 @@ def test_the_worked_examples_are_rendered_by_the_strip_itself():
     """R-177. A legend example built from its own markup is a second implementation of the
     strip, and the first thing it does is drift — which is exactly what R-178 was."""
     assert len(schedule.LEGEND_EXAMPLES) == 2
-    first, second = (schedule._result_strip(row) for row, _ in schedule.LEGEND_EXAMPLES)
+    first, second = (schedule._result_strip(row) for row in schedule.LEGEND_EXAMPLES)
     # favorite won · covered · over
     assert "cfdb-ind-quiet" in first and first.count("cfdb-ind-fill") == 2
-    # upset by 7+ · covered · under
+    # the MIDDLE upset band · covered · under. `upset_level: "big"` is level 2 because
+    # srv_game classifies with a strict `>`; the comment here used to say "7+", which is the
+    # string R-582 removed from the caption for being wrong at both boundaries.
     assert "cfdb-u2" in second and "cfdb-ind-open" in second
-    for _, caption in schedule.LEGEND_EXAMPLES:
+
+
+def test_an_example_caption_names_all_three_slots_from_the_legend_itself():
+    """🚨 R-582. THE CAPTION IS A VIEW OF THE LEGEND, NOT A SECOND COPY OF IT.
+
+    The old caption was a literal reading "upset by 7+" while the band labels four lines above
+    it read "Upset by 8–14" — the popover contradicted itself, and the example was the half a
+    reader would believe because it is concrete.
+    """
+    entries = dict(schedule._legend_groups(None))["Against the line"]
+    labels = {e[-1] for e in entries}
+    for row in schedule.LEGEND_EXAMPLES:
+        caption = schedule._example_caption(row, entries)
         assert caption.count("·") == 2, "a caption names all three slots"
+        for part in caption.split(" · "):
+            restored = part[0].upper() + part[1:]
+            assert restored in labels, \
+                f"{part!r} is not one of the legend's own entries — it is a second copy"
+
+
+def test_no_legend_caption_bakes_a_threshold_number():
+    """🚨 R-582. THE THIRD SURFACE, AND THE FIRST TWO WERE ALREADY GUARDED.
+
+    metrics.upset_criteria's own rule is that the page bands and the workbook criteria word it
+    for their own space and "neither is allowed to know 7 or 14". The examples were a third
+    surface that did know them, in a plain literal the per-render substitution never reached.
+
+    ⚠️ IT ASSERTS ON THE SOURCE OF THE CAPTIONS, NOT ON THE RENDERED TEXT. A rendered caption
+    contains the numbers and must — they come from the data. What must not happen is a digit
+    being TYPED here.
+    """
+    import ast
+    import re
+    from pathlib import Path
+    tree = ast.parse(Path(schedule.__file__).read_text())
+    node = next(n for n in tree.body
+                if isinstance(n, ast.Assign)
+                and getattr(n.targets[0], "id", None) == "LEGEND_EXAMPLES")
+    baked = [s.value for s in ast.walk(node)
+             if isinstance(s, ast.Constant) and isinstance(s.value, str)
+             and re.search(r"\d", s.value)]
+    assert not baked, f"LEGEND_EXAMPLES bakes a threshold into a string: {baked}"
+
+
+def test_every_against_the_line_entry_is_claimed_by_exactly_one_subsection():
+    """🚨 R-580. THE ASSIGNMENT GUARD, AND A089 PROVED HOW TO BUILD ONE THAT CAN FAIL.
+
+    A089's first draft derived the expected set BY FILTERING against the very declaration it
+    was checking, so dropping an entry dropped it from the expectation too and the staged break
+    passed green. The expected set here comes from `LEGEND_GROUPS` — the flat inventory — and
+    the claimed set from `LEGEND_SUBSECTIONS`. They are two independent declarations, which is
+    the only reason this can fail.
+    """
+    entries = dict(schedule.LEGEND_GROUPS)["Against the line"]
+    defined = [e[:-1] for e in entries]
+    claimed = [key for _heading, keys in schedule.LEGEND_SUBSECTIONS["Against the line"]
+               for key in keys]
+    assert len(claimed) == len(set(claimed)), f"an entry is in two subsections: {claimed}"
+    assert sorted(map(str, claimed)) == sorted(map(str, defined)), (
+        f"subsections claim {len(claimed)} of {len(defined)} entries; "
+        f"unclaimed: {[d for d in defined if d not in claimed]}")
+
+
+def test_the_subsections_do_not_nest_the_groups():
+    """⚠️ R-580's actual risk. Six tests in this file walk LEGEND_GROUPS two levels deep, and a
+    third level would silently change what they iterate — some raising, some quietly asserting
+    against a different set. R-176 answered this once for the columns; the subsections are the
+    same answer."""
+    for _title, entries in schedule.LEGEND_GROUPS:
+        for entry in entries:
+            assert isinstance(entry, tuple) and isinstance(entry[0], str), \
+                "LEGEND_GROUPS is nested — the completeness tests no longer walk what they think"
 
 
 def test_the_legend_draws_each_state_exactly_as_the_strip_draws_it():
