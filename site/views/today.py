@@ -37,18 +37,34 @@ POLLS = ("AP Top 25", "Coaches Poll")
 # --- data -----------------------------------------------------------------------------
 
 def _completed_games(scope) -> pd.DataFrame:
-    """Every completed game in scope. Feeds Most Exciting and all three recap lists."""
+    """Every completed game in scope. Feeds Most Exciting and all three recap lists.
+
+    ⚠️ NO `--` COMMENTS INSIDE THE STRING. ci/check_page_queries.py and this page's own
+    query test both flatten the SQL to a single line before running it, which turns a line
+    comment into one that swallows every column after it — "syntax error at end of input",
+    on a query that reads fine in the file. Notes about the select list go here.
+
+    R-544. `actual_margin_home_perspective` is selected so the page can read the home side's
+    own margin instead of negating the away one. See _favorite_margin for what that cost.
+
+    R-545. `attribution` HAS BEEN ON srv_game ALL ALONG and this query did not ask for it, so
+    attribution.model_attribution() took its "column missing from this view — this is a
+    defect (AC-G.41)" branch and printed that sentence on the landing page. Every other view
+    that calls that function selects the column; Today was the only one that did not. The
+    message was right about itself and wrong about the view.
+    """
     return query("""
         select game_id, season, week, season_type, game_date,
                home_team_display, away_team_display, home_team_slug, away_team_slug,
                home_logo_url, away_logo_url, home_conference, away_conference,
-               home_points, away_points, actual_margin, excitement_index,
+               home_points, away_points, actual_margin,
+               actual_margin_home_perspective, excitement_index,
                spread_at_close, spread_current, spread_open, spread_move_from_open,
                favorite_covered, spread_favorite_side, moneyline_favorite_side,
                favorite_definitions_disagree,
                market_implied_home_win_probability, market_implied_away_win_probability,
                lead_changes, largest_single_play_swing, home_win_probability_range,
-               as_of_ts
+               attribution, as_of_ts
         from srv_game
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
@@ -197,6 +213,27 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
         ], caption="Ranked by CFBD excitement index."))
 
 
+def _favorite_margin(row):
+    """The favorite's own point margin, read from the column carried for that side.
+
+    ⚠️ R-544. THE TWO BRANCHES USED TO BE EACH OTHER'S, AND IT INVERTED THE SIGN ON EVERY
+    GRADED GAME — three panels, not one. `actual_margin` is AWAY MINUS HOME
+    (srv_game.sql:312, "away minus home, per the convention"), so it is NOT the home side's
+    margin and must not be handed to the home branch. `actual_margin_home_perspective`
+    (srv_game.sql:623) is the home number and already exists beside it.
+
+    Marc found it on the landing page: Virginia Tech, favored by 54.5 at home, won 73-3.
+    `actual_margin` = 3 - 73 = -70, so the page reported -70 - 54.5 = -124.5 "points missed"
+    for a team that beat the number by 15.5.
+
+    ⚠️ VERIFIED AGAINST THE VIEW'S OWN VERDICT, not against reasoning: recomputing
+    `favorite_covered` from this expression agrees on 171 of 171 graded 2026 games. The old
+    expression agreed on 64.
+    """
+    return (row.actual_margin_home_perspective if row.spread_favorite_side == "home"
+            else row.actual_margin)
+
+
 def _recap_lists(df: pd.DataFrame, scope) -> None:
     st.subheader("How the week went against the market")
     if scope.week is not None and scope.week < MODEL_WEEK_FLOOR:
@@ -211,17 +248,31 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
                      f"No graded games with a closing line for {scope.describe()}.")
         return
 
-    # Ranking columns, carried not derived. `favorite_covered` and `actual_margin` come from
-    # the view; all this does is order rows and pick a side's label to show.
+    # ⚠️ THIS COMMENT USED TO CLAIM "carried not derived … all this does is order rows and
+    # pick a side's label to show", AND THAT WAS NOT TRUE (R-544). `ats` on the next line is
+    # metric arithmetic — margin minus the number — computed here, in a page, which is the
+    # rule the serving layer exists to keep. The claim is worth recording because it is
+    # plausibly WHY the inverted sign survived: a reader checking this block was told there
+    # was no derivation in it to check.
+    #
+    # What IS carried: `favorite_covered`, `actual_margin`, `actual_margin_home_perspective`,
+    # and the two market-implied probabilities. What is derived here: `favorite`/`opponent`
+    # (labels), `spread` (an abs), and `ats`.
+    #
+    # ⚠️ `ats` CANNOT SIMPLY BE CARRIED, AND THE REASON IS GRAIN. srv_game_team already has
+    # `ats_margin_final` (srv_game_team.sql:78) with `covered_final` beside it — but that is
+    # game×TEAM grain and these three panels are game grain, one row per fixture showing the
+    # favorite's side. Reading it here would mean a second query at a different grain and a
+    # filter to the favorite's row. That may well be the right shape; it is a serving/query
+    # change rather than a sign fix, so it is logged (R-551) rather than done in a round
+    # whose job was to stop the page publishing false numbers.
     graded["favorite"] = graded.apply(
         lambda r: r.home_team_display if r.spread_favorite_side == "home"
         else r.away_team_display, axis=1)
     graded["opponent"] = graded.apply(
         lambda r: r.away_team_display if r.spread_favorite_side == "home"
         else r.home_team_display, axis=1)
-    graded["fav_margin"] = graded.apply(
-        lambda r: r.actual_margin if r.spread_favorite_side == "home" else -r.actual_margin,
-        axis=1)
+    graded["fav_margin"] = graded.apply(_favorite_margin, axis=1)
     graded["spread"] = graded["spread_at_close"].fillna(graded["spread_current"]).abs()
     graded["ats"] = graded["fav_margin"] - graded["spread"]
     graded["fav_win_prob"] = graded.apply(
