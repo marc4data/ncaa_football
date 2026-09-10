@@ -543,37 +543,7 @@ def test_the_ranking_is_read_and_never_computed_in_the_page():
 
 def test_the_panel_computes_nothing(panel):
     """G-3, asserted on the SQL the panel actually issued."""
-    block = SOURCE[SOURCE.index("_POSTGAME_COLUMNS = "):SOURCE.index("def _weather(")]
+    block = SOURCE[SOURCE.index("_POSTGAME_COLUMNS = "):SOURCE.index("def _leader_note(")]
     sql = block[block.index("select {_POSTGAME_COLUMNS}"):block.index('limit 2')].lower()
     for banned in ("group by", "sum(", "avg(", "row_number(", "rank(", "over (", "join"):
         assert banned not in sql, f"the panel's query contains `{banned}`"
-
-
-# --- the weather copy (R-507) ------------------------------------------------------------------
-
-def test_the_weather_game_id_is_cast_before_it_reaches_the_database():
-    """⚠️ THE BUG THIS ROUND SHIPPED AND CAUGHT, AND NOTHING IN THIS SUITE COULD SEE IT.
-
-    Taking the srv_game row instead of a game_id means the value arrives as a numpy.int64 out
-    of the DataFrame rather than as the int params.get() casts, and psycopg2 cannot adapt
-    one — "can't adapt type 'numpy.int64'". Every load of the weather panel raised into
-    states.section and rendered the Error state, on EVERY game, while looking like a handled
-    failure. The unit tests stub `query` and ci/check_page_queries binds its own parameters,
-    so it was found only by rendering the real body() against live serving.
-
-    Asserted on the source because the defect is at the boundary this file's stub replaces.
-    """
-    block = SOURCE[SOURCE.index("def _weather("):SOURCE.index("def _travel(")]
-    assert 'int(row.get("game_id"))' in block, \
-        "an un-cast numpy.int64 reaches psycopg2 and the panel errors on every game"
-
-
-def test_weather_says_forecast_on_a_game_that_has_not_been_played():
-    """⚠️ B075 measured that srv_game_weather is populated about a week before kickoff, so on
-    a scheduled game every figure is a FORECAST — and the panel read "Weather · Conditions at
-    kickoff" either way. Same class as `_model` collapsing "too early to say" into "we have
-    nothing": it renders perfectly and states what the data does not support."""
-    block = SOURCE[SOURCE.index("def _weather("):SOURCE.index("def _travel(")]
-    assert "Weather forecast" in block, "an unplayed game still says the conditions were"
-    assert "is_completed" in block, "the panel cannot tell the two apart"
-    assert "has not been played" in block

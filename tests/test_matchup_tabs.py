@@ -43,8 +43,13 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # LIST IS THAT NOTHING FELL OFF DURING THE MOVE: a panel silently dropped while being
 # reassigned is the defect this round was most likely to ship, and A074 found a whole class
 # of panel that nothing had ever exercised.
+# ⚠️ `_weather` LEFT THIS LIST IN R-527 AND THAT IS A DELIBERATE REMOVAL, NOT A DROP. Marc
+# asked for the weather "in a tight/concise element in the game header", so the standalone
+# panel is gone and `_conditions` renders it inside `_game_header` — which is ABOVE the tab
+# bar and therefore not a panel at all. tests/test_matchup_header.py holds the two
+# assertions that travelled with it.
 ALL_PANELS = ("_market", "_line_movement", "_model", "_series", "_yardage",
-              "_weather", "_travel", "_post_game", "_leaders", "_drives")
+              "_travel", "_post_game", "_leaders", "_drives")
 
 
 def _stub_streamlit():
@@ -280,9 +285,12 @@ def test_a_completed_game_still_reaches_every_panel_across_the_two_tabs(page):
     assert sorted(reached) == sorted(ALL_PANELS)
 
 
-def test_the_scoreline_stays_above_the_tab_bar(page):
+def test_the_game_header_stays_above_the_tab_bar(page):
     """It is the identity of the page, not a panel — and it already carries Final or
-    Scheduled and the score."""
+    Scheduled and the score.
+
+    ⚠️ Renamed from `_the_scoreline_` in R-518: `_scoreline` became `_game_header` and a test
+    named for a function that no longer exists is the drift this project keeps removing."""
     run, _ = page
     entries, _ = run({"is_completed": True})
     bodies = [b for _, b in entries]

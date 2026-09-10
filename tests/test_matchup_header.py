@@ -1,0 +1,593 @@
+"""The Matchup game header: nine columns, and the things that fold into them (R-518/R-520/R-527).
+
+Marc: "We need to formalize the elements on the page, similar to how we did on
+Schedule/stacked." This is the first element built under the preview spec's §0 layout law —
+columns, not sections; away on the LEFT — and everything placed below it inherits that.
+
+WHAT THIS FILE EXISTS TO CATCH, in the order the risks actually rank:
+
+ 1. 🚨 THE TWO SIDES TRADING PLACES. A header that renders the home team in the away column
+    is the R-544 class: every fact on the page is true and the page is wrong. B081 proved
+    the obvious assertion does not catch it — a sign check passed against inverted code, and
+    "two different names appear somewhere" passes against a swap. So every side assertion
+    here is POSITIONAL: cell 1 is the away team's cell, cell 7 is the home team's, and the
+    test reads the cell rather than the page.
+
+ 2. ⚠️ AN ELEMENT THAT RESERVES SPACE FOR SOMETHING IT DOES NOT HAVE. B075 measured that
+    weather forecasts exist only about a week out — 253 of 303 week-2 games, and ZERO for
+    weeks 4 through 8 — so for most of a season the conditions element has nothing to say.
+    It must collapse to NOTHING, and "nothing" is asserted as the absence of a placeholder,
+    not merely the absence of a temperature.
+
+ 3. ⚠️ A POST-GAME ELEMENT ON A PRE-GAME PAGE. The winner glyph is absent before kickoff,
+    not empty — B075's rule for the after tab, one element smaller.
+
+THE CELLS ARE READ BY INDEX AND THAT IS THE POINT. `_game_header` writes exactly nine
+markdown blocks, one per column, in the order the spec names them. Reading cell 3 and cell 6
+is what makes "the glyph points at the winner's score" a testable claim rather than a hope.
+
+⚠️ THE STUB RAISES ON ANY STREAMLIT METHOD IT DOES NOT PROVIDE — A087's `HarnessGap`
+discipline, and R-480 is open precisely because nothing in the repo does this durably yet.
+A085's scratch harness silently returned a recorder for every attribute, so a missing stub
+method was indistinguishable from a page defect. `HarnessGap` derives from BaseException so
+that `states.section`'s `except Exception` cannot swallow it.
+
+THE FIXTURE IS A REAL ROW, read back from srv_game for game 401754591 (Clemson at
+Louisville, week 12 2025) — a one-point win for the AWAY side over a ranked home side, which
+is what makes the scores, the records and the rank slot all worth asserting positionally. Cases the real row does not
+cover (a rank, overtime, a tie) are overrides on it rather than invented rows. If a rendered
+figure disagrees with a fixture, the fixture is wrong.
+"""
+import html
+import re
+import sys
+import types
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+
+SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
+
+
+class HarnessGap(BaseException):
+    """An un-stubbed `st.*`. BaseException so `except Exception` cannot swallow it.
+
+    A085's harness returned a recorder for any attribute, so a gap in the instrument read
+    exactly like a defect in the page. A measurement is only worth what its instrument is.
+    """
+
+
+# The Streamlit surface this harness provides. Named, per A087, so a reader can see the
+# boundary rather than infer it: anything outside this list raises rather than no-oping.
+_PROVIDED = ("markdown", "caption", "subheader", "write", "columns", "divider",
+             "info", "warning", "error", "button", "session_state",
+             "cache_data", "cache_resource")
+
+
+def _stub_streamlit():
+    captured = []
+
+    def recorder(kind):
+        def call(*args, **kwargs):
+            captured.append((kind, " ".join(str(a) for a in args)))
+        return call
+
+    class _Col:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def markdown(self, *a, **k):
+            captured.append(("markdown", " ".join(str(x) for x in a)))
+
+        def caption(self, *a, **k):
+            captured.append(("caption", " ".join(str(x) for x in a)))
+
+        def metric(self, label, value, help=None):
+            captured.append(("metric", f"{label} {value} {help or ''}"))
+
+        def __getattr__(self, name):
+            # ⚠️ DUNDERS ARE NOT HARNESS GAPS. pytest's own traceback machinery reads
+            # __file__, __name__ and friends WHILE REPORTING A FAILURE, so raising here
+            # turns a red test into an INTERNALERROR and hides the assertion that failed.
+            # Measured: it swallowed the first staged break of R-518.
+            if name.startswith("__") and name.endswith("__"):
+                raise AttributeError(name)
+            raise HarnessGap(f"HARNESS GAP: a column called st.columns(...)[n].{name}(), "
+                             f"which this harness does not provide")
+
+    class _Stub(types.ModuleType):
+        def __getattr__(self, name):
+            # See the note on _Col.__getattr__: a dunder is Python asking a question about
+            # the module, not the page calling a Streamlit method.
+            if name.startswith("__") and name.endswith("__"):
+                raise AttributeError(name)
+            raise HarnessGap(f"HARNESS GAP: the page called st.{name}(), which this harness "
+                             f"does not provide. Provided: {', '.join(_PROVIDED)}")
+
+    stub = _Stub("streamlit")
+    for name in ("markdown", "caption", "subheader", "write", "divider",
+                 "info", "warning", "error"):
+        setattr(stub, name, recorder(name))
+
+    def columns(spec, **kwargs):
+        # `vertical_alignment` is verified present in the pinned streamlit==1.61.1 the site
+        # image builds from, not merely in whatever this laptop has.
+        return [_Col() for _ in range(spec if isinstance(spec, int) else len(spec))]
+
+    stub.columns = columns
+    stub.button = lambda *a, **k: False
+
+    def cache(*a, **k):
+        if len(a) == 1 and callable(a[0]) and not k:
+            return a[0]
+        return lambda fn: fn
+
+    stub.cache_data = stub.cache_resource = cache
+    stub.session_state = {}
+    return stub, captured
+
+
+_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.chips", "views.matchup")
+
+
+def _reload_all():
+    import importlib
+    for name in _RELOAD:
+        importlib.reload(importlib.import_module(name))
+
+
+@pytest.fixture
+def header():
+    """`_game_header` with streamlit captured and the weather query answered from a fixture.
+
+    ⚠️ IT PUTS THE MODULES BACK — test_matchup_drives learned that the hard way and six
+    unrelated tests failed. monkeypatch cannot undo a sys.modules swap made at reload time.
+    """
+    real = sys.modules.get("streamlit")
+    stub, captured = _stub_streamlit()
+    sys.modules["streamlit"] = stub
+    _reload_all()
+    matchup = sys.modules["views.matchup"]
+    seen = {}
+
+    def run(row=None, forecast=None):
+        """`forecast` is what srv_game_weather returns: None for no row at all."""
+        captured.clear()
+        seen.clear()
+        seen["queries"] = []
+
+        def fake_query(sql, params=None):
+            seen["queries"].append((sql, params or {}))
+            return pd.DataFrame([forecast] if forecast else [])
+
+        matchup.query = fake_query
+        matchup._game_header(pd.Series(_row(**(row or {}))))
+        return [body for _, body in captured], dict(seen)
+
+    yield run
+
+    if real is not None:
+        sys.modules["streamlit"] = real
+    else:
+        sys.modules.pop("streamlit", None)
+    _reload_all()
+
+
+@pytest.fixture
+def blurb():
+    """`_series`, the head-to-head one-liner."""
+    real = sys.modules.get("streamlit")
+    stub, captured = _stub_streamlit()
+    sys.modules["streamlit"] = stub
+    _reload_all()
+    matchup = sys.modules["views.matchup"]
+
+    def run(**overrides):
+        captured.clear()
+        matchup._series(pd.Series(_row(**overrides)))
+        return " ".join(body for _, body in captured)
+
+    yield run
+
+    if real is not None:
+        sys.modules["streamlit"] = real
+    else:
+        sys.modules.pop("streamlit", None)
+    _reload_all()
+
+
+def _row(**overrides):
+    """One srv_game row, read back from game 401754591 — Clemson at Louisville, wk12 2025."""
+    row = {
+        "game_id": 401754591,
+        "season": 2025, "week": 12, "season_type": "regular",
+        "is_completed": True,
+        "away_team": "Clemson", "home_team": "Louisville",
+        "away_abbreviation": "CLEM", "home_abbreviation": "LOU",
+        "away_logo_url": None, "home_logo_url": None,
+        # Clemson won 20-19 at Louisville, who were ranked #19; Clemson were unranked.
+        "away_points": 20, "home_points": 19,
+        "away_rank": None, "home_rank": 19,
+        "away_team_record_display": "4-5", "home_team_record_display": "7-2",
+        "start_date_et": pd.Timestamp("2025-11-14 19:30:00"),
+        "venue_display": "L&N Federal Credit Union Stadium",
+        "is_neutral_site": False, "is_indoors": False,
+        "spread": -1.5, "over_under": 51.0, "spread_favorite_side": "home",
+        "away_q1": 3, "away_q2": 7, "away_q3": 3, "away_q4": 7,
+        "home_q1": 3, "home_q2": 6, "home_q3": 10, "home_q4": 0,
+        "away_overtime_points": 0, "home_overtime_points": 0,
+        "away_periods": 4, "home_periods": 4,
+        "series_games": 9, "series_away_team_wins": 8, "series_home_team_wins": 1,
+        "series_ties": 0, "series_first_season": 2014, "series_last_season": 2024,
+    }
+    row.update(overrides)
+    return row
+
+
+FORECAST = {"game_id": 401754591, "temperature_f": 48.0, "wind_speed_mph": 7.0,
+            "wind_direction_compass": "NW", "weather_condition": "Clear"}
+
+# The nine columns, by index, in the order spec §1 names them.
+AWAY_LOGO, AWAY_TEAM, AWAY_SCORE, AWAY_GLYPH = 0, 1, 2, 3
+DETAILS = 4
+HOME_GLYPH, HOME_SCORE, HOME_TEAM, HOME_LOGO = 5, 6, 7, 8
+
+
+def _plain(text):
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text))).strip()
+
+
+# --- the shape ---------------------------------------------------------------------------------
+
+def test_the_header_is_exactly_nine_columns(header):
+    """Spec §1. Nine, in order, every time — a header that drew eight would still look fine."""
+    cells, _ = header()
+    assert len(cells) == 9, f"the header drew {len(cells)} cells, not nine"
+
+
+def test_the_harness_raises_rather_than_no_opping_an_unknown_streamlit_call(header):
+    """⚠️ THE INSTRUMENT IS TESTED BEFORE THE THING IT MEASURES.
+
+    A085's harness returned a recorder for any attribute, so a missing stub method was
+    indistinguishable from a page defect and §6 was satisfied by a broken instrument. This
+    proves the gap is loud, and that `except Exception` cannot swallow it.
+    """
+    stub, _ = _stub_streamlit()
+    try:
+        stub.balloons()
+    except HarnessGap as gap:
+        assert "st.balloons()" in str(gap)
+    else:
+        raise AssertionError("an unknown st.* was silently accepted")
+
+    swallowed = True
+    try:
+        try:
+            stub.balloons()
+        except Exception:                                          # noqa: BLE001
+            swallowed = True
+    except HarnessGap:
+        swallowed = False
+    assert not swallowed, "`except Exception` caught HarnessGap — states.section would too"
+
+
+# --- 🚨 the two sides, positionally -------------------------------------------------------------
+
+def test_the_away_team_is_in_the_AWAY_column_and_the_home_team_in_the_HOME_one(header):
+    """🚨 THE R-544 CLASS, AND B081 PROVED THE OBVIOUS TEST DOES NOT CATCH IT.
+
+    Both team names appear in the header whichever way round they are drawn, so "Clemson is
+    on the page" passes against a swap. This reads the CELL: index 1 is the away column and
+    index 7 is the home column, per spec §1's ordering.
+    """
+    cells, _ = header()
+    assert "Clemson" in cells[AWAY_TEAM], "the away column is not carrying the away team"
+    assert "Louisville" not in cells[AWAY_TEAM], "the home team is in the away column"
+    assert "Louisville" in cells[HOME_TEAM], "the home column is not carrying the home team"
+    assert "Clemson" not in cells[HOME_TEAM], "the away team is in the home column"
+
+
+def test_each_score_sits_beside_its_own_team(header):
+    """The scores are 20 and 19 — one apart, both plausible either way round.
+
+    ⚠️ A swap here is invisible to any assertion that reads the whole header, which is why
+    the away score is read out of cell 2 and the home score out of cell 6.
+    """
+    cells, _ = header()
+    assert "20" in cells[AWAY_SCORE] and "19" not in cells[AWAY_SCORE]
+    assert "19" in cells[HOME_SCORE] and "20" not in cells[HOME_SCORE]
+
+
+def test_the_records_follow_their_own_teams(header):
+    """4-5 and 7-2 are as swappable as the scores, and mean the opposite thing if traded."""
+    cells, _ = header()
+    assert "4-5" in cells[AWAY_TEAM] and "7-2" not in cells[AWAY_TEAM]
+    assert "7-2" in cells[HOME_TEAM] and "4-5" not in cells[HOME_TEAM]
+
+
+# --- the winner glyph --------------------------------------------------------------------------
+
+def test_the_glyph_points_at_the_winner_and_only_the_winner(header):
+    """Clemson won 20-19 on the road, so the AWAY glyph draws and the home one does not.
+
+    ⚠️ The arrow points OUTWARD toward the score it belongs to: the away glyph sits to the
+    right of the away score and points left; the home glyph sits to the left of the home
+    score and points right. A glyph pointing the wrong way credits the wrong team.
+    """
+    cells, _ = header()
+    assert "◀" in cells[AWAY_GLYPH], "the winner drew no glyph, or the wrong one"
+    assert cells[HOME_GLYPH] == "", "the losing side drew a winner glyph"
+
+
+def test_the_glyph_follows_the_result_when_the_HOME_team_wins(header):
+    """The other direction, because a marker exercised one way is half tested."""
+    cells, _ = header(row={"away_points": 3, "home_points": 30})
+    assert "▶" in cells[HOME_GLYPH], "the home winner drew no glyph"
+    assert cells[AWAY_GLYPH] == "", "the losing away side drew a glyph"
+
+
+def test_a_TIE_gives_neither_side_a_glyph(header):
+    """Asking who WON rather than who did not lose is what makes a tie draw nothing."""
+    cells, _ = header(row={"away_points": 17, "home_points": 17})
+    assert cells[AWAY_GLYPH] == "" and cells[HOME_GLYPH] == ""
+
+
+def test_an_unplayed_game_has_NO_glyph_on_either_side(header):
+    """⚠️ ABSENT, NOT EMPTY. B075's rule for the after tab, one element smaller: a post-game
+    marker on a pre-game page does not render a placeholder pointing at nothing.
+
+    🚨 THE SECOND CASE IS THE ONE THAT ASSERTS THE RULE, AND THE FIRST DRAFT OF THIS TEST
+    HAD ONLY THE FIRST. With both scores null the null-guard returns early, so deleting the
+    `is_completed` check entirely left this test GREEN — measured, by staging exactly that
+    break. A row that is not final but already carries a lead is what isolates the check,
+    and it is a real state: srv_game holds 1,609 games that are not completed, six of them
+    carrying points.
+    """
+    for row in ({"is_completed": False, "away_points": None, "home_points": None},
+                {"is_completed": False, "away_points": 21, "home_points": 7}):
+        cells, _ = header(row=row)
+        assert cells[AWAY_GLYPH] == "", f"a winner glyph was drawn for {row}"
+        assert cells[HOME_GLYPH] == "", f"a winner glyph was drawn for {row}"
+
+
+def test_an_unplayed_game_shows_no_score_rather_than_zero(header):
+    """Two zeroes is a real result — a scoreless tie — and drawing one for a game that has
+    not kicked off asserts something false."""
+    cells, _ = header(row={"is_completed": False, "away_points": None, "home_points": None})
+    assert cells[AWAY_SCORE] == "" and cells[HOME_SCORE] == ""
+
+
+# --- the rank slot -----------------------------------------------------------------------------
+
+def test_the_rank_shows_on_the_ranked_side_only(header):
+    """291 of 3,831 games in 2025 carry a rank on either side, so one-sided is the common
+    case rather than the edge one."""
+    cells, _ = header()
+    assert "#19" in cells[HOME_TEAM], "the ranked side lost its rank"
+    assert "#" not in cells[AWAY_TEAM], "an unranked team was given a rank slot"
+
+
+def test_an_unranked_game_carries_no_rank_markup_at_all(header):
+    cells, _ = header(row={"away_rank": None, "home_rank": None})
+    assert "#" not in cells[AWAY_TEAM] and "#" not in cells[HOME_TEAM]
+
+
+# --- the columns that do not exist yet (R-577) ---------------------------------------------------
+
+def test_the_header_omits_the_mascot_and_split_record_CLEANLY_while_they_are_absent(header):
+    """🚨 NEITHER COLUMN IS ON srv_game TODAY — measured against information_schema.
+
+    The header must not render an empty span, a stray comma or a dangling separator where
+    they will go. This is the state every reader sees today, so it is the state most worth
+    asserting.
+    """
+    cells, _ = header()
+    assert _plain(cells[AWAY_TEAM]) == "Clemson 4-5"
+    assert _plain(cells[HOME_TEAM]) == "#19 Louisville 7-2"
+
+
+def test_the_header_RENDERS_them_the_day_they_arrive(header):
+    """⚠️ THE OTHER HALF OF THE SAME PROMISE, and the reason the column names live in one
+    dict. R-577 is session A's round; this proves the page is already waiting for it rather
+    than needing a second round of its own.
+
+    ⚠️ If A ships different column names, THIS TEST FAILS and names the contract — which is
+    the point. It is the cheapest possible handshake between two sessions' rounds.
+    """
+    cells, _ = header(row={"away_mascot": "Tigers", "home_mascot": "Cardinals",
+                           "away_team_away_record_display": "2-3",
+                           "home_team_home_record_display": "5-1"})
+    assert _plain(cells[AWAY_TEAM]) == "Clemson Tigers 4-5, 2-3 away"
+    assert _plain(cells[HOME_TEAM]) == "#19 Louisville Cardinals 7-2, 5-1 home"
+
+
+# --- ⚠️ the weather, and the absence that must cost nothing --------------------------------------
+
+def test_a_game_with_no_forecast_reserves_NO_SPACE_for_one(header):
+    """🚨 THE ASSERTION PART 2 EXISTS FOR. B075: forecasts appear about a week out — 253 of
+    303 week-2 games, and ZERO for weeks 4 through 8 — so on most previews this element has
+    nothing to say and a reserved slot would be dead space on every one of them.
+
+    ⚠️ ASSERTED AS THE ABSENCE OF A PLACEHOLDER, not merely of a temperature. An empty
+    `<div></div>` passes "no degrees sign appears" while still occupying a line.
+    """
+    cells, _ = header(row={"is_completed": False}, forecast=None)
+    details = cells[DETAILS]
+    assert "Forecast" not in details and "°F" not in details
+    assert "<div></div>" not in details, "the header drew an empty slot for the forecast"
+    assert "·  ·" not in _plain(details), "a separator was left with nothing between"
+
+
+def test_a_forecast_renders_inline_and_says_it_is_a_forecast(header):
+    """⚠️ A temperature with no tense reads as a measurement. Every figure here is for a
+    kickoff that has not happened."""
+    cells, _ = header(row={"is_completed": False}, forecast=FORECAST)
+    details = _plain(cells[DETAILS])
+    assert "Forecast" in details
+    assert "48°F" in details and "7 mph NW" in details and "Clear" in details
+
+
+def test_INDOORS_is_stated_even_with_no_forecast_at_all(header):
+    """⚠️ `is_indoors` IS NOT "NO WEATHER" (AC-G.11). A dome has a known answer, and it is a
+    different statement from "we have no forecast".
+
+    It is a column on srv_game, already on the row the page fetched, so the roof costs no
+    query and is stated even when srv_game_weather holds nothing.
+    """
+    cells, _ = header(row={"is_completed": False, "is_indoors": True}, forecast=None)
+    assert "Indoors" in _plain(cells[DETAILS])
+
+
+def test_an_indoor_game_labels_its_readings_as_OUTSIDE(header):
+    """CFBD reports the weather at the venue's LOCATION, not inside it, so a domed game
+    carries ordinary outdoor numbers. Printing them bare would state something false."""
+    cells, _ = header(row={"is_completed": False, "is_indoors": True}, forecast=FORECAST)
+    details = _plain(cells[DETAILS])
+    assert "Indoors" in details and "outside" in details
+
+
+def test_the_weather_game_id_is_cast_before_it_reaches_the_database():
+    """⚠️ RELOCATED FROM test_matchup_postgame.py IN R-527, ASSERTION UNCHANGED, because the
+    element moved into the header and the lesson did not.
+
+    Taking the srv_game row instead of a game_id means the value arrives as a numpy.int64
+    out of the DataFrame rather than as the int params.get() casts, and psycopg2 cannot adapt
+    one — "can't adapt type 'numpy.int64'". Every load raised into states.section and
+    rendered the Error state, on EVERY game, while looking like a handled failure. The unit
+    tests stub `query` and ci/check_page_queries binds its own parameters, so it was found
+    only by rendering the real body() against live serving.
+    """
+    block = SOURCE[SOURCE.index("def _conditions("):SOURCE.index("def _line_score(")]
+    assert 'int(row.get("game_id"))' in block, \
+        "an un-cast numpy.int64 reaches psycopg2 and the header errors on every game"
+
+
+# --- the query budget --------------------------------------------------------------------------
+
+def test_the_header_asks_for_the_forecast_ONCE_before_kickoff(header):
+    """The weather query MOVED into the header; it was not added to the page. The standalone
+    panel left the before tab in the same commit, so the page's count is unchanged."""
+    _, seen = header(row={"is_completed": False}, forecast=FORECAST)
+    assert len(seen["queries"]) == 1
+    assert "srv_game_weather" in seen["queries"][0][0]
+
+
+def test_a_COMPLETED_game_costs_the_header_no_query_at_all(header):
+    """⚠️ THE HALF THAT KEEPS THE MOVE HONEST. The removed panel only ever ran on the before
+    tab, so if the header fetched weather after kickoff too, the after tab would have gained
+    a query that nothing on it had before."""
+    _, seen = header(row={"is_completed": True})
+    assert seen["queries"] == [], "the header queried srv_game_weather on a completed game"
+
+
+def test_the_forecast_query_reads_one_relation_and_computes_nothing(header):
+    """G-1/G-2/G-3, asserted on the SQL the header actually issued."""
+    _, seen = header(row={"is_completed": False}, forecast=FORECAST)
+    sql = seen["queries"][0][0].lower()
+    assert sql.count(" from ") == 1
+    for banned in ("join", "group by", "sum(", "avg(", "rank(", "over ("):
+        assert banned not in sql, f"the header's query contains `{banned}`"
+
+
+# --- the post-game scoreboard ------------------------------------------------------------------
+
+def test_the_scoreboard_carries_the_quarters_and_the_final(header):
+    """Spec §1: the details column becomes the scoreboard after the game."""
+    details = _plain(header()[0][DETAILS])
+    assert "Final" in details
+    # Clemson 3 7 3 7 = 20; Louisville 3 6 10 0 = 19. Read as whole rows, because a
+    # scoreboard that transposed two quarters would still contain every digit.
+    assert "CLEM 3 7 3 7 20" in details, f"the away line score is wrong: {details}"
+    assert "LOU 3 6 10 0 19" in details, f"the home line score is wrong: {details}"
+
+
+def test_the_scoreboard_has_no_OT_column_when_there_was_no_overtime(header):
+    """109 of 2025's completed games went to overtime. The other 3,722 must not carry an
+    empty OT column."""
+    assert "OT" not in _plain(header()[0][DETAILS])
+
+
+def test_the_scoreboard_gains_an_OT_column_when_there_WAS_overtime(header):
+    cells, _ = header(row={"away_overtime_points": 7, "home_overtime_points": 3,
+                           "away_periods": 5, "home_periods": 5})
+    assert "OT" in _plain(cells[DETAILS])
+
+
+def test_a_completed_game_with_no_line_score_draws_no_table_of_dashes(header):
+    """3,805 of 3,831 carry a first quarter, so the absence is rare rather than impossible."""
+    cells, _ = header(row={f"{s}_q{q}": None for s in ("away", "home") for q in (1, 2, 3, 4)})
+    details = _plain(cells[DETAILS])
+    assert "Final" in details, "the scoreboard vanished along with its line score"
+    assert "—" not in details
+
+
+# --- the pre-game details ----------------------------------------------------------------------
+
+def test_the_preview_details_carry_time_line_total_and_venue(header):
+    cells, _ = header(row={"is_completed": False}, forecast=None)
+    details = _plain(cells[DETAILS])
+    assert "LOU -1.5" in details, "the spread is not stated from the home perspective"
+    assert "O/U 51.0" in details
+    assert "L&N Federal Credit Union Stadium" in details
+
+
+def test_a_neutral_site_says_so(header):
+    cells, _ = header(row={"is_completed": False, "is_neutral_site": True}, forecast=None)
+    assert "neutral site" in _plain(cells[DETAILS])
+
+
+def test_a_game_with_no_line_still_draws_its_time_and_venue(header):
+    """Most of 110,634 games were never priced. The details column is not a market panel."""
+    cells, _ = header(row={"is_completed": False, "spread": None, "over_under": None},
+                      forecast=None)
+    details = _plain(cells[DETAILS])
+    assert "L&N Federal Credit Union Stadium" in details
+    assert "O/U" not in details
+
+
+# --- R-520: head to head as a blurb ------------------------------------------------------------
+
+def test_the_series_blurb_puts_each_count_with_its_OWN_team(blurb):
+    """🚨 THE SAME INVERSION RISK AS THE HEADER, in a sentence rather than a layout.
+
+    8 and 1 are both plausible for either side. srv_game.sql's own comment warns that
+    deriving the away side by subtraction credits every tie to the away team — so the model
+    carries `series_away_team_wins` and this reads it. Asserted by ADJACENCY: the number
+    must follow its own team's name.
+    """
+    text = _plain(blurb())
+    assert re.search(r"Clemson 8\b", text), "the away team's series count is not beside it"
+    assert re.search(r"Louisville 1\b", text), "the home team's series count is not beside it"
+
+
+def test_the_blurb_is_one_line_and_not_a_section(blurb):
+    """Marc asked for a text blurb close to the top, not a full section."""
+    text = _plain(blurb())
+    assert "Head to head" in text
+    assert "9 meetings" in text
+    assert "2014 to 2024" in text
+
+
+def test_teams_that_have_NEVER_MET_are_not_reported_as_nil_nil(blurb):
+    """⚠️ A series of no games is not 0-0. Two teams who have never played and two teams who
+    have split evenly are different statements."""
+    text = _plain(blurb(series_games=0))
+    assert "never met" in text
+    assert "0" not in text, "a first meeting was rendered as a scoreline"
+
+
+def test_ties_are_counted_rather_than_folded_into_a_win_column(blurb):
+    """College football had no overtime before 1996, so ties are real and countable."""
+    text = _plain(blurb(series_games=10, series_ties=1))
+    assert "1 tie" in text
+
+
+def test_a_single_meeting_reads_as_one_meeting(blurb):
+    text = _plain(blurb(series_games=1, series_away_team_wins=1, series_home_team_wins=0))
+    assert "1 meeting" in text and "1 meetings" not in text
