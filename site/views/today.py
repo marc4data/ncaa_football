@@ -20,7 +20,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import filters, shell, states, table
+from lib import filters, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -36,6 +36,76 @@ POLLS = ("AP Top 25", "Coaches Poll")
 
 
 # --- data -----------------------------------------------------------------------------
+
+# ⚠️ R-574. THE READER-FACING NAME FOR EACH VIEW THIS PAGE READS, AND NOTHING ELSE.
+#
+# This is a LABEL table, not a panel-to-view table, and the distinction is the whole design.
+# Which view a panel reads is declared exactly once, in that panel's own
+# `states.section(...)` call — the place that has always known it, and which until now
+# revealed it only in the Error state. This dict answers a different question: what a reader
+# should be told that view IS.
+#
+# AC-G.7 as amended: front of house says "Team box scores", not `srv_team_game_log`. The
+# identifier still travels — dataset_caption renders the label as a LINK to
+# /dictionary?table=<view> — so the jargon is one click away and off the page.
+#
+# ⚠️ A KEY HERE THAT NO SECTION NAMES, OR A SECTION NAMING A VIEW ABSENT HERE, IS A DEFECT
+# and test_today_tabs.py fails on both. That is deliberate: the page used to carry ONE
+# caption reading "Dataset: Looking Back → srv_game" while reading five views, so four of six
+# sections linked a reader to the wrong table in the dictionary.
+DATASETS = {
+    "srv_game": "Game results and market lines",
+    "srv_team_week": "Team form, by week",
+    "srv_team_game_log": "Team box scores",
+    "srv_player_game_log": "Player box scores",
+    "srv_rankings": "AP and Coaches polls",
+}
+
+# (slug, label, panel names). THE SLUG IS WHAT GOES IN THE URL.
+#
+# ⚠️ ANCHORS, NOT `st.tabs`, AND R-283 IS WHY. Marc: "Clicking a sort while on Against The
+# Line or Box Score resets the user to the Game Results tab." st.tabs keeps its selection
+# client-side and never touches the URL, so every sort link rebuilds the page at the default
+# tab. scores.py solved this first and B075 reused it for Matchup; this is the third page on
+# the same pattern.
+#
+# ⚠️ AND ANCHORS ARE LAZY, WHICH ON THIS PAGE IS THE POINT RATHER THAN A SIDE EFFECT. Only
+# the active tab's panels are called, so a reader who came to look forward does not pay for
+# five backward panels' queries.
+#
+# Panels are NAMED rather than referenced so the laziness is testable: body() resolves each
+# name out of the module at call time, and test_today_tabs.py asserts every name resolves to
+# the real function rather than to a recorder.
+TABS = (
+    ("back", "Looking Back", ("_recap", "_movers", "_profile", "_leaderboards", "_bump")),
+    ("forward", "Looking Forward", ("_looking_forward",)),
+)
+
+
+def _active_tab() -> tuple:
+    """The tab the URL asks for, or the first. An unknown slug falls back rather than
+    raising — a hand-edited `?tab=` is noise, not a request (AC-G.11)."""
+    wanted = params.get("tab")
+    for entry in TABS:
+        if entry[0] == wanted:
+            return entry
+    return TABS[0]
+
+
+def _tab_bar(active: str) -> None:
+    """The same anchor bar scores.py and matchup.py draw, for the same reason (R-283).
+
+    `params.link_here` preserves every known parameter, `tab` among them, so the week and
+    conference filters survive a tab change and a sort link keeps the tab.
+    """
+    links = []
+    for slug, label, _panels in TABS:
+        css = "cfdb-tab" + (" cfdb-tab-on" if slug == active else "")
+        links.append(f"<a class='{css}' href='{params.link_here(tab=slug)}' "
+                     f"target='_self'>{label}</a>")
+    st.markdown(f"<div class='cfdb-tabbar'>{''.join(links)}</div>",
+                unsafe_allow_html=True)
+
 
 def _completed_games(scope) -> pd.DataFrame:
     """Every completed game in scope. Feeds Most Exciting and all three recap lists.
@@ -346,7 +416,7 @@ def _movers(scope, depth: int) -> None:
     """
     st.subheader("The week's movers")
 
-    with states.section("srv_game"):
+    with states.section("srv_game", dataset=DATASETS["srv_game"]):
         games = _line_movement(scope)
         if games.empty:
             states.empty(
@@ -520,7 +590,7 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380
             f"stronger teams sit toward the top right'>{''.join(parts)}</svg></div>")
 
 
-def _profile(scope) -> None:
+def _profile(scope, depth: int) -> None:
     """R-477. Offence against defence, per game, as the teams stood ENTERING the week in
     scope.
 
@@ -534,7 +604,7 @@ def _profile(scope) -> None:
     """
     st.subheader("Offence and defence, per game")
 
-    with states.section("srv_team_week"):
+    with states.section("srv_team_week", dataset=DATASETS["srv_team_week"]):
         # ⚠️ A SCATTER NEEDS ONE POINT PER TEAM, WHICH NEEDS ONE WEEK. The week filter offers
         # "All", and under it srv_team_week returns every week for every team — sixteen points
         # per team, not one. Aggregating them down here would be the app deriving a figure,
@@ -606,7 +676,7 @@ def _profile(scope) -> None:
 def _leaderboards(scope, depth: int) -> None:
     st.subheader("Leaderboards")
 
-    with states.section("srv_team_game_log"):
+    with states.section("srv_team_game_log", dataset=DATASETS["srv_team_game_log"]):
         teams = _team_yardage(scope, depth)
         st.markdown("**Team yardage**")
         states.render_or_state(
@@ -620,7 +690,7 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("passing_yards", "Pass", kind="num"),
             ], caption="Ranked by total offense."))
 
-    with states.section("srv_player_game_log"):
+    with states.section("srv_player_game_log", dataset=DATASETS["srv_player_game_log"]):
         yards = _player_board(scope, depth, ("passing", "rushing", "receiving"), "YDS")
         st.markdown("**Player yardage**")
         states.render_or_state(
@@ -754,9 +824,9 @@ def _bump_chart(frame: pd.DataFrame, poll: str) -> None:
         "week unranked rather than a rank held. Hover a line to follow one team.")
 
 
-def _bump(scope) -> None:
+def _bump(scope, depth: int) -> None:
     st.subheader("Poll movement")
-    with states.section("srv_rankings"):
+    with states.section("srv_rankings", dataset=DATASETS["srv_rankings"]):
         polls = _rankings(scope)
         if polls.empty:
             states.empty("The poll chart would be here.",
@@ -794,25 +864,14 @@ def _bump(scope) -> None:
                    "are carried separately on the view.")
 
 
-def _looking_forward(scope) -> None:
-    st.subheader("Looking forward")
-    st.caption(
-        "The week preview — matchups to watch, and what the market makes of them — is the "
-        "next round of work on this page. It is not built yet, and an empty frame would "
-        "imply it was.")
-    st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
+def _recap(scope, depth: int) -> None:
+    """The week that happened: Most Exciting and the three market lists.
 
-
-# --- page -----------------------------------------------------------------------------
-
-def body(page) -> None:
-    scope = filters.game_scope()
-    table.dataset_caption("Looking Back", "srv_game")
-
-    depth = st.radio("Leaderboard depth", DEPTHS, index=1, horizontal=True,
-                     key="today_depth", help="How many rows each leaderboard shows.")
-
-    with states.section("srv_game"):
+    Lifted out of body() by R-573 so it can be NAMED in TABS like every other panel. It was
+    the one section written inline, which meant the tab split could not reference it and the
+    assignment test could not see it.
+    """
+    with states.section("srv_game", dataset=DATASETS["srv_game"]):
         games = _completed_games(scope)
         table.as_of_caption(games)
 
@@ -825,11 +884,33 @@ def body(page) -> None:
             _most_exciting(games, scope)
             _recap_lists(games, scope)
 
-    _movers(scope, depth)
-    _profile(scope)
-    _leaderboards(scope, depth)
-    _bump(scope)
-    _looking_forward(scope)
+
+def _looking_forward(scope, depth: int) -> None:
+    st.subheader("Looking forward")
+    st.caption(
+        "The week preview — matchups to watch, and what the market makes of them — is the "
+        "next round of work on this page. It is not built yet, and an empty frame would "
+        "imply it was.")
+    st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
+
+
+# --- page -----------------------------------------------------------------------------
+
+def body(page) -> None:
+    scope = filters.game_scope()
+
+    # ⚠️ R-574. THE PAGE-LEVEL `table.dataset_caption("Looking Back", "srv_game")` THAT USED
+    # TO SIT HERE IS GONE, and it was wrong twice over: "Looking Back" is a TAB, not a
+    # dataset, and `srv_game` is one of the FIVE views this page reads. Each section now
+    # states its own, from its own states.section call.
+    slug, _label, panels = _active_tab()
+
+    depth = st.radio("Leaderboard depth", DEPTHS, index=1, horizontal=True,
+                     key="today_depth", help="How many rows each leaderboard shows.")
+
+    _tab_bar(slug)
+    for name in panels:
+        globals()[name](scope, depth)
 
     # 🚨 R-558. ATTRIBUTION ATTACHES TO RENDERED MODEL OUTPUT, AND THIS PAGE RENDERS NONE.
     #

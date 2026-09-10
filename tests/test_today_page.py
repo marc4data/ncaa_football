@@ -220,14 +220,22 @@ PANELS = {
     # needs a scope with a REAL week: under week=None it renders the "pick a week" Empty and
     # would never reach a Col, so exercising it with the page's default scope would have
     # proved nothing — the panel would be in the list and still untested.
-    "_profile": lambda page, games, scope: page._profile(scope),
+    "_profile": lambda page, games, scope: page._profile(scope, 10),
     # Found by widening the discovery above from "renders columns" to "announces itself with
     # a subheader" — a seventh panel that no test had ever called. It is a stub that says
     # Looking forward is not built yet, so there is little to break; it is exercised anyway,
     # because "small" is not a reason to be outside the set and the next edit to it would be
     # unguarded.
-    "_looking_forward": lambda page, games, scope: page._looking_forward(scope),
-    "_bump": lambda page, games, scope: page._bump(scope),
+    "_looking_forward": lambda page, games, scope: page._looking_forward(scope, 10),
+    "_bump": lambda page, games, scope: page._bump(scope, 10),
+    # ⚠️ R-573 ADDED THIS ONE, AND `_panels_defined_in` CANNOT SEE IT. That helper discovers
+    # panels by `st.subheader`, which is the convention every other panel follows; `_recap`
+    # announces nothing of its own because the two panels it wraps carry their own
+    # subheaders. So the coverage guard would NOT have failed when this was extracted out of
+    # body() by R-573, and the panel would have sat in TABS untested. Listed by hand for
+    # exactly that reason — the discovery rule is good and this is the case it does not
+    # cover, which is worth a line rather than a widening of the rule.
+    "_recap": lambda page, games, scope: page._recap(scope, 10),
 }
 
 
@@ -249,6 +257,25 @@ def _panels_defined_in(source: str) -> set:
 
     `st.subheader` is the honest anchor because it is what makes something a panel to a
     READER — a titled block on the page — rather than what it happens to render with.
+
+    ⚠️ R-573 FOUND THE SECOND HOLE, AND IT IS THE SAME SHAPE AS R-477's. The subheader rule
+    misses a panel that announces nothing of its own: `_recap` wraps `_most_exciting` and
+    `_recap_lists`, which carry their own subheaders, so it has none. It was extracted out of
+    body() so TABS could name it, and under the subheader rule alone this guard would have
+    reported it as a function today.py "no longer defines" — the identical symptom `_profile`
+    produced — while it sat in the file and on a tab.
+
+    So a panel is EITHER of two things now, and the union is deliberate:
+
+      it announces itself   `st.subheader`, the reader's definition
+      body() calls it       a module-level `(scope, depth) -> None`, which is the signature
+                            TABS resolves and invokes, and which excludes the query helpers:
+                            `_team_yardage(scope, depth)` takes the same two arguments and
+                            returns a DataFrame, which is why the annotation is part of the
+                            rule rather than decoration.
+
+    ⚠️ Neither rule is a naming convention, so a panel still cannot opt out of coverage by
+    being called something else — which is the property R-475 built this for.
     """
     import ast
 
@@ -264,6 +291,10 @@ def _panels_defined_in(source: str) -> set:
                     and sub.func.value.id == "st"):
                 found.add(node.name)
                 break
+        args = [a.arg for a in node.args.args]
+        returns_none = isinstance(node.returns, ast.Constant) and node.returns.value is None
+        if args == ["scope", "depth"] and returns_none:
+            found.add(node.name)
     return found
 
 

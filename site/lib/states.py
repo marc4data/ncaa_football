@@ -110,13 +110,41 @@ def error(view: str, retry: Optional[Callable[[], None]] = None) -> None:
 
 @contextmanager
 def section(view: str, degraded_if_missing: Optional[str] = None,
-            explanation: str = "", scheduled: Optional[str] = None):
+            explanation: str = "", scheduled: Optional[str] = None,
+            dataset: Optional[str] = None):
     """Wrap a section so an exception becomes an Error state instead of a broken page.
 
     `degraded_if_missing` distinguishes the two failure modes that look alike from inside a
     try block: a missing relation is Degraded (we have not built it), anything else is Error
     (it exists and something went wrong).
+
+    ⚠️ R-574. `dataset` RENDERS THE READER-FACING CAPTION FROM THE SAME ARGUMENT THAT NAMES
+    THE VIEW, AND THAT IS THE ENTIRE POINT OF PUTTING IT HERE.
+
+    Today carried one `table.dataset_caption("Looking Back", "srv_game")` at the top of the
+    page while reading FIVE views, so the caption was wrong for four of six sections — and
+    because it renders a link to /dictionary?table=..., a reader clicking it from the
+    Leaderboards landed on the wrong table. The right answer was already in the file and only
+    ever visible when something broke: every panel already names its own view HERE, in the
+    error path.
+
+    So the caption is emitted from this argument rather than from a second panel-to-view list
+    beside it. Two lists drift; that is what ci/check_publish_build_agreement.py exists to
+    prevent one layer down, and R-574 is the same shape at page grain. A caption that
+    disagrees with the Error state under the same panel is now impossible to write.
+
+    `view` is the IDENTIFIER and stays the identifier — it is what the Degraded state prints
+    and what the dictionary link filters on. `dataset` is the LABEL and is editorial: front
+    of house says "Team box scores", never `srv_team_game_log` (AC-G.7, as amended).
+
+    Omitting `dataset` renders nothing, so the other nineteen view modules are unaffected.
     """
+    if dataset:
+        # Deferred, matching table.as_of_caption's own import of shell: lib.table imports
+        # four sibling modules and this one imports none, so keeping the edge out of module
+        # scope keeps that asymmetry from becoming a cycle later.
+        from lib import table
+        table.dataset_caption(dataset, view)
     try:
         yield
     except Exception as exc:                                   # noqa: BLE001
