@@ -20,8 +20,16 @@
 # `prefers-color-scheme: dark` was rgb(255,255,255); with this file it is rgb(14,17,23).
 #
 # `[theme.light]` and `[theme.dark]` override only within each mode and leave the choice of
-# mode to the viewer, which is what theme.py's own prefers-color-scheme blocks are written
-# against.
+# mode to the viewer.
+#
+# R-552. THIS COMMENT USED TO END "...which is what theme.py's own prefers-color-scheme blocks
+# are written against." THERE ARE NO SUCH BLOCKS ANY MORE and the sentence was describing the
+# defect rather than the design: `prefers-color-scheme` answers the OPERATING SYSTEM, so a
+# reader on a dark Mac with the app in Light got a light page painted with dark rules. R-547
+# converted three declarations, R-552 converted the last block, and theme.py now derives its
+# neutrals from `Canvas`/`CanvasText` and picks its brand hues with `light-dark()` — both of
+# which follow the `color-scheme` property Streamlit sets from the keys BELOW. So this file is
+# what theme.py is written against; the media query never was.
 [theme.light]
 primaryColor = "#1f6feb"
 

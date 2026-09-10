@@ -215,6 +215,38 @@ TABLE_CSS = """
   --cfdb-hover-bg:  color-mix(in srgb, CanvasText 10%, Canvas);
   --cfdb-muted:     color-mix(in srgb, CanvasText 62%, Canvas);
   --cfdb-rule:      color-mix(in srgb, CanvasText 20%, Canvas);
+
+  /* R-552. THE TOKENS THAT REPLACED THE `prefers-color-scheme` BLOCK AT THE END OF THIS FILE.
+     R-547 converted three declarations and left this one, which is the last live instance in
+     `site/`. Same reasoning, so it is deleted rather than corrected: it asked the OPERATING
+     SYSTEM, Marc's Mac is dark, his Streamlit theme is Light, and every rule the block carried
+     was therefore painting a dark page's colours onto a light one — links and table rules
+     included, on his screen, right now.
+
+     TWO DIFFERENT TOOLS, BECAUSE THE BLOCK CARRIED TWO DIFFERENT KINDS OF COLOUR.
+
+     A NEUTRAL RULE IS A TINT OF THE PAGE, so `color-mix` on Canvas/CanvasText derives it and
+     no second value is needed. The percentages are measured from the two hardcoded values
+     they replace, not guessed — #d7dae0 on white is 14.1% black and #333a45 on #0e1117 is a
+     17.5% lift, so 16% reproduces both within a shade; #eef0f3/#242933 are 5.8%/10.4%, so 8%. */
+  --cfdb-edge:      color-mix(in srgb, CanvasText 16%, Canvas);
+  --cfdb-rule-soft: color-mix(in srgb, CanvasText 8%,  Canvas);
+
+  /* A BRAND HUE IS NOT A TINT, AND `color-mix` IS THE WRONG TOOL FOR IT. Mixing #1f6feb
+     toward CanvasText lifts it on dark (right) and darkens it on light (wrong) — there is no
+     single percentage that leaves the light value alone, because CanvasText points the
+     opposite way in each theme. `LinkText` is wrong too: it is the browser's default link
+     colour, so it would discard the brand blue and differ between browsers.
+
+     `light-dark()` is the tool. It follows the SAME `color-scheme` property Streamlit sets
+     from the ACTIVE theme that Canvas/CanvasText follow, so it switches in the same frame and
+     keeps both deliberately-chosen values. The dark value is not a different colour — R-131
+     measured #1f6feb on #0e1117 at about 3.6:1, below the 4.5:1 a small glyph needs, and
+     #58a6ff is the contrast lift that clears it. Same for the three underperformer tiers. */
+  --cfdb-link: light-dark(#1f6feb, #58a6ff);
+  --cfdb-u1:   light-dark(#d9a406, #e8b931);
+  --cfdb-u2:   light-dark(#e06c1f, #f0803c);
+  --cfdb-u3:   light-dark(#d2333a, #f0555c);
 }
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
     table-layout:fixed; }
@@ -264,7 +296,7 @@ TABLE_CSS = """
 /* Where the frozen block ends. Without it the reader cannot tell which columns are pinned
    and which merely happen to be at the left edge. A box-shadow rather than a border because
    a border would change the column's width and push the sticky offsets out by a pixel each. */
-.cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #d7dae0; }
+.cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 var(--cfdb-edge); }
 /* The row hover is translucent, so it would let the scrolled content through on a frozen
    cell. Opaque equivalents of the same tint, over each theme's own ground. */
 .cfdb-table tbody tr:hover td.cfdb-sticky { background:var(--cfdb-hover-bg); }
@@ -285,8 +317,8 @@ TABLE_CSS = """
 .cfdb-tab:hover { opacity:.9; text-decoration:none; background:var(--cfdb-band-bg); }
 .cfdb-tab-on { opacity:1; border-color:var(--cfdb-rule,#d7dae0);
   background:var(--cfdb-sticky-bg); }
-.cfdb-resetsort { display:inline-block; font-size:.8rem; font-weight:600; color:#1f6feb;
-  text-decoration:none; border:1px solid #d7dae0; border-radius:4px;
+.cfdb-resetsort { display:inline-block; font-size:.8rem; font-weight:600; color:var(--cfdb-link);
+  text-decoration:none; border:1px solid var(--cfdb-edge); border-radius:4px;
   padding:.2rem .55rem; margin-bottom:.4rem; }
 .cfdb-resetsort:hover { text-decoration:underline; }
 .cfdb-resetsort-note { font-size:.75rem; opacity:.55; margin-left:.5rem; }
@@ -297,9 +329,9 @@ TABLE_CSS = """
 .cfdb-table caption { caption-side:top; text-align:left; font-size:.8rem; opacity:.6;
   padding-bottom:.4rem; }
 .cfdb-table th { text-align:left; font-weight:600; font-size:.78rem; letter-spacing:.02em;
-  text-transform:uppercase; opacity:.65; border-bottom:1px solid #d7dae0;
+  text-transform:uppercase; opacity:.65; border-bottom:1px solid var(--cfdb-edge);
   padding:.45rem .55rem; }
-.cfdb-table td { padding:.42rem .55rem; border-bottom:1px solid #eef0f3; }
+.cfdb-table td { padding:.42rem .55rem; border-bottom:1px solid var(--cfdb-rule-soft); }
 .cfdb-table tbody tr:hover { background:rgba(31,111,235,.05); }
 /* Linked rows. The anchor fills the cell so the whole row is a target, while staying a
    real <a href> — which is what makes middle-click and copy-link work (AC-G.13). The row
@@ -307,7 +339,7 @@ TABLE_CSS = """
    link (a team name) is visually distinct, per AC-2.5. */
 .cfdb-table td a.cfdb-cell-link { display:block; color:inherit; text-decoration:none;
     margin:-.42rem -.55rem; padding:.42rem .55rem; }
-.cfdb-table td a.cfdb-cell-link-alt { color:#1f6feb; font-weight:600; }
+.cfdb-table td a.cfdb-cell-link-alt { color:var(--cfdb-link); font-weight:600; }
 .cfdb-table td a.cfdb-cell-link-alt:hover { text-decoration:underline; }
 .cfdb-table tr.cfdb-linked { cursor:pointer; }
 .cfdb-dataset { font-size:.78rem; opacity:.72; margin:-.25rem 0 .6rem; }
@@ -339,7 +371,7 @@ TABLE_CSS = """
    Both carry the same font-size deliberately: if the spacer stops resolving to the glyph's
    width the two scores stop aligning vertically, which is the whole thing R-120 was built to
    prevent and the reason the size is stated twice rather than inherited. */
-.cfdb-winner { color:#1f6feb; font-weight:700; margin-right:.15rem;
+.cfdb-winner { color:var(--cfdb-link); font-weight:700; margin-right:.15rem;
                font-size:1.3rem; line-height:1; vertical-align:-.1em; }
 .cfdb-winner-spacer { display:inline-block; font-size:1.3rem; width:.75em; }
 /* R-135: in the card the marker rides the team cluster, at the team name's size. */
@@ -350,10 +382,10 @@ TABLE_CSS = """
    thickening a stroke that is already the wrong brightness buys very little. Size, opacity
    and — in the dark block below — a lighter blue are what make it legible. The blue also
    says the glyph is a link, which is R-134's ask for the card. */
-.cfdb-details { opacity:.85; font-size:1.3rem; color:#1f6feb; vertical-align:-.12em; }
+.cfdb-details { opacity:.85; font-size:1.3rem; color:var(--cfdb-link); vertical-align:-.12em; }
 /* R-101: the neutral-site glyph now shares a column with the matchup glyph, so it
    needs its own separation from it rather than a column border. */
-.cfdb-neutral { opacity:.85; margin-left:.4rem; font-size:1.15rem; color:#1f6feb;
+.cfdb-neutral { opacity:.85; margin-left:.4rem; font-size:1.15rem; color:var(--cfdb-link);
                 vertical-align:-.06em; }
 /* R-107: a card is not a table cell, so it cannot borrow .cfdb-cell-link — that one
    is display:block to make a whole <td> the target, which inside a flex row would
@@ -414,7 +446,7 @@ TABLE_CSS = """
 .cfdb-cardgrid { display:grid; gap:.7rem .9rem; align-items:stretch;
                  grid-template-columns:repeat(auto-fill, minmax(580px, 1fr)); }
 .cfdb-gamecard { display:flex; flex-direction:column; height:100%;
-                 padding:.55rem .7rem; border:1px solid rgba(0,0,0,.10);
+                 padding:.55rem .7rem; border:1px solid var(--cfdb-edge);
                  border-radius:6px; }
 
 /* R-114: ONE GRID, NOT TWO BLOCKS THAT AGREE.
@@ -491,7 +523,7 @@ TABLE_CSS = """
    there. R-136: the underline takes the LINK colour instead of the anchor's inherited one. */
 .cfdb-teamlink { color:inherit !important; text-decoration:none; display:flex;
                  align-items:center; min-width:0; }
-.cfdb-teamlink .cfdb-team { color:#1f6feb; text-decoration-color:#1f6feb; }
+.cfdb-teamlink .cfdb-team { color:var(--cfdb-link); text-decoration-color:var(--cfdb-link); }
 .cfdb-teamlink:hover .cfdb-team { text-decoration:underline; }
 .cfdb-team-record { text-decoration:none !important; }
 a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
@@ -617,10 +649,10 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 /* A push is neither: half-filled reads as "landed on the number" without a fourth colour. */
 .cfdb-ind-push { background:linear-gradient(90deg, currentColor 50%, transparent 50%);
                  border-color:currentColor; }
-.cfdb-acc { color:#1f6feb; }
-.cfdb-u1  { color:#d9a406; }
-.cfdb-u2  { color:#e06c1f; }
-.cfdb-u3  { color:#d2333a; }
+.cfdb-acc { color:var(--cfdb-link); }
+.cfdb-u1  { color:var(--cfdb-u1); }
+.cfdb-u2  { color:var(--cfdb-u2); }
+.cfdb-u3  { color:var(--cfdb-u3); }
 
 /* R-149. THE LINE BLOCK — one cell of the card grid, three columns of its own, on BOTH card
    variants. The result card fills them label / line / actual; the preview card fills them
@@ -647,29 +679,18 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 .cfdb-gc-mid-actual { text-align:right; }
 .cfdb-gc-mid-head span { opacity:.55; font-size:.72rem; font-weight:600;
                          letter-spacing:.02em; }
-@media (prefers-color-scheme: dark) {
-  .cfdb-table th { border-bottom-color:#333a45; }
-  .cfdb-table td { border-bottom-color:#242933; }
-  /* R-269. The sticky tokens are NOT redefined here any more — they are built from Canvas
-     and follow the active theme on their own. A value here would override the live one with
-     a guess about the operating system, which is the defect this block used to contain. */
-  .cfdb-table .cfdb-sticky-edge { box-shadow:1px 0 0 #333a45; }
+/* R-552. THE `@media (prefers-color-scheme: dark)` BLOCK THAT USED TO BE HERE IS GONE, and
+   its rules now live as tokens in the `:root` above — see the comment there for why each one
+   needed a different tool. Deleted rather than corrected, which is R-547's reasoning applied a
+   second time: the question the media query asks is the wrong question, so correcting its
+   values would only have banked the same bug again.
 
-
-  .cfdb-resetsort { color:#58a6ff; border-color:#333a45; }
-  /* A 10%-black border on a #0e1117 background is invisible, so every card edge
-     disappeared in dark mode and the grid read as one undivided block. */
-  .cfdb-gamecard { border-color:#333a45; }
-  /* R-131. #1f6feb on #0e1117 measures about 3.6:1 — below the 4.5:1 a small glyph needs, and
-     no amount of font-weight changes a luminance. #58a6ff is the standard lift and clears it. */
-  .cfdb-details, .cfdb-neutral, .cfdb-winner { color:#58a6ff; }
-  /* R-141: the accent indicators need the same lift as every other glyph on dark. */
-  .cfdb-acc { color:#58a6ff; }
-  .cfdb-u1 { color:#e8b931; } .cfdb-u2 { color:#f0803c; } .cfdb-u3 { color:#f0555c; }
-  .cfdb-teamlink .cfdb-team { color:#58a6ff; text-decoration-color:#58a6ff; }
-  .cfdb-table a, .cfdb-cell-link, .cfdb-teamlink .cfdb-team {
-      text-decoration-color:#58a6ff !important; }
-}
+   ⚠️ THE ONE RULE THAT LEFT NO TOKEN BEHIND is the pair this block set on `.cfdb-table th`
+   and `.cfdb-table td` — those two ARE the light declarations now, because a derived tint is
+   correct in both themes and there is nothing left to override. If a future round adds a
+   dark-only rule here, it is almost certainly a mistake: there is no supported way to ask
+   "is the APP dark" in CSS other than the `color-scheme` property, and `light-dark()` is how
+   you consume it. */
 </style>
 """
 
