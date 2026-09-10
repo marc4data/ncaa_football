@@ -28,6 +28,13 @@
 # The durable fix is renaming `pages/` so the collision cannot happen at any version. Until
 # that lands, this pin is what holds the site up.
 streamlit==1.61.1
+# R-562. ALREADY IN THE IMAGE — `altair` is a hard requirement of streamlit, and st.line_chart
+# is documented as syntax-sugar around st.altair_chart. Declared anyway because today.py now
+# imports it DIRECTLY for the poll bump chart: an inverted rank axis needs
+# alt.Scale(reverse=True), which st.line_chart cannot express. A direct import deserves a
+# direct declaration — the header above says a missing site dependency fails silently at
+# runtime, and inheriting one through another package's pin is how that happens.
+altair>=5.0
 sqlalchemy>=2.0
 psycopg2-binary>=2.9
 pandas>=2.0
