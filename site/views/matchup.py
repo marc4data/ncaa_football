@@ -1076,6 +1076,37 @@ def _leader_note(row) -> str:
     return f"best of {int(field)}"
 
 
+def _leader_name(row) -> str:
+    """The player's name, linked to their page — or plain text where it cannot be (R-515).
+
+    ⚠️ FOLLOWS team.py's ROSTER LINK RATHER THAN COINING A SECOND ONE. That call site is
+    `params.link("players", q=full_name, player=slug, season=season)`, and all three arguments
+    are load-bearing: the Players page refuses a search term under two characters, `player`
+    picks this athlete out of the matches, and the page is season-scoped. Verified end to end
+    against serving — q="Ty Simpson" matches, slug `ty-simpson-4685522` selects, and
+    srv_player_stats returns 15 rows across 3 categories for it.
+
+    ⚠️ A NULL SLUG RENDERS PLAIN TEXT, NOT A LINK TO NOWHERE — srv_game.sql's own rule.
+    Measured before deciding which of its two cases this is: `highest_player_slug` is null or
+    blank on **0 of 296,629 rows**, so the branch is unreachable against today's data. It is
+    written anyway because it costs one condition, and because the alternative — discovering
+    the object changed by shipping an anchor with an empty destination — is the failure the
+    rule exists to name.
+
+    ⚠️ ESCAPED, AND THAT IS NOT DEFENSIVE TYPING: 6,124 leader names carry an apostrophe
+    (A'Amear Walton), which would close a single-quoted attribute and spill markup onto the
+    page. Double quotes plus html.escape, the same pair B076's tooltips use.
+    """
+    name = str(row.get("highest_player_name") or "?")
+    slug = row.get("highest_player_slug")
+    if not slug or (isinstance(slug, float) and pd.isna(slug)) or not str(slug).strip():
+        return html.escape(name)
+    href = params.link("players", q=name, player=str(slug).strip(),
+                       season=row.get("season"))
+    return (f"<a href=\"{html.escape(href, quote=True)}\" target=\"_self\" "
+            f"style='color:inherit'>{html.escape(name)}</a>")
+
+
 def _leader_cell(row) -> str:
     """One side's leader for one row: who, how much, and out of what."""
     if row is None:
@@ -1086,7 +1117,10 @@ def _leader_cell(row) -> str:
     # measured, but the fallback costs a line and means a later addition cannot render blank.
     figure = (fmt.number(value, dp=0) if pd.notna(value)
               else (row.get("highest_stat_raw") or fmt.EM_DASH))
-    return (f"<div style='font-weight:600'>{row.get('highest_player_name') or '?'}</div>"
+    # ⚠️ NO NESTED ANCHOR. Col's comment records that a row link and a cell link cannot both
+    # apply — but these rows are plain divs with no row-level href, so the name is the only
+    # anchor here and there is nothing to lose a fight with. Checked before writing it.
+    return (f"<div style='font-weight:600'>{_leader_name(row)}</div>"
             f"<div><span style='font-weight:600'>{figure}</span>"
             f"<span style='opacity:.55;font-size:.8rem'> · {_leader_note(row)}</span></div>")
 
@@ -1118,7 +1152,7 @@ def _leaders(game_id) -> None:
         # The composite key is filtered in SQL so no cross product of category and type can
         # come back; eight rows is the ceiling and the grain restated (AC-G.39).
         df = query("""
-            select team_id, team, home_away, stat_category, stat_type,
+            select season, team_id, team, home_away, stat_category, stat_type,
                    highest_player_name, highest_player_slug, highest_player_id,
                    highest_stat_value, highest_stat_raw, highest_tied_players,
                    rank_population, as_of_ts

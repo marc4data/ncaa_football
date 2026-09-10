@@ -114,13 +114,24 @@ def panel():
     _reload_all()
 
 
+# The real slugs serving returns, so an href assertion is about a real destination rather
+# than a shape. Read back from srv_game_team_leader for game 401752665.
+_SLUGS = {"Ty Simpson": "ty-simpson-4685522",
+          "Thomas Castellanos": "thomas-castellanos-4773919"}
+
+
 def _row(side, category, stat, name, value, tied=1, population=8, **over):
     row = {"team_id": 333 if side == "home" else 96,
            "team": "Florida State" if side == "home" else "Alabama",
            "home_away": side, "stat_category": category, "stat_type": stat,
-           "highest_player_name": name, "highest_player_slug": name.lower().replace(" ", "-"),
+           "highest_player_name": name,
+           "highest_player_slug": _SLUGS.get(name, name.lower().replace(" ", "-")),
            "highest_player_id": 1, "highest_stat_value": value, "highest_stat_raw": str(value),
            "highest_tied_players": tied, "rank_population": population,
+           # ⚠️ season IS LOAD-BEARING FOR THE LINK, not decoration. The Players page is
+           # season-scoped, and params.link drops any argument that is None — so without this
+           # the href would silently lose its season and the assertion would still pass.
+           "season": 2025,
            "as_of_ts": pd.Timestamp("2026-09-09T18:00:58Z")}
     row.update(over)
     return row
@@ -333,3 +344,96 @@ def test_the_qualifiers_are_explained_once_not_per_row(panel):
     body = _text(panel[0](_real_game())[0])
     assert "the field the ranking ran over" in body
     assert body.count("the field the ranking ran over") == 1
+
+
+# --- R-515: the names go somewhere ------------------------------------------------------------
+
+def _anchors(entries):
+    """Every rendered anchor, as (href, visible text)."""
+    raw = " ".join(body for _kind, body in entries)
+    return re.findall(r'<a href="([^"]*)"[^>]*>([^<]*)</a>', raw)
+
+
+def test_every_player_name_is_a_link_to_that_player(panel):
+    """R-515. Four names on the panel and every one of them routed nowhere."""
+    run, _ = panel
+    entries, _ = run(_real_game())
+    links = _anchors(entries)
+    assert len(links) == 8, f"expected eight linked names, found {len(links)}"
+    names = {text for _href, text in links}
+    assert "Ty Simpson" in names and "Deontae Lawson" in names
+
+
+def test_the_href_carries_that_players_own_slug(panel):
+    """⚠️ NOT ANY SLUG — HIS. A link that reaches the Players page with the wrong athlete
+    selected is worse than no link, because it looks like it worked."""
+    run, _ = panel
+    links = dict((text, href) for href, text in _anchors(run(_real_game())[0]))
+    assert "ty-simpson-4685522" in links["Ty Simpson"], \
+        f"Ty Simpson's link does not carry his slug: {links['Ty Simpson']}"
+    assert "thomas-castellanos-4773919" in links["Thomas Castellanos"]
+    assert "ty-simpson" not in links["Deontae Lawson"], "two names share one destination"
+
+
+def test_the_link_follows_the_roster_pattern_and_carries_all_three_arguments(panel):
+    """⚠️ team.py's roster link is the existing furniture and this follows it rather than
+    coining a second way. All three arguments are load-bearing: the Players page refuses a
+    search term under two characters, `player` picks this athlete out of the matches, and the
+    page is season-scoped."""
+    run, _ = panel
+    href = dict((text, h) for h, text in _anchors(run(_real_game())[0]))["Ty Simpson"]
+    assert href.startswith("/players?"), f"the link does not route to Players: {href}"
+    for argument in ("q=", "player=ty-simpson-4685522", "season=2025"):
+        assert argument in href, f"{argument} is missing from {href}"
+
+
+def test_a_null_slug_renders_plain_text_and_no_anchor(panel):
+    """⚠️ srv_game.sql's OWN RULE: "a null slug is a link to nowhere while a derived one
+    reaches a page that renders Empty."
+
+    Measured before deciding which of those two this is: highest_player_slug is null or blank
+    on 0 of 296,629 rows, so this branch is unreachable against today's data. Staged red
+    anyway — linking unconditionally emits `<a href="/players?q=Ty+Simpson&season=2025">` with
+    no player at all, which lands on a search rather than on him.
+    """
+    run, _ = panel
+    rows = [dict(r, highest_player_slug=None) if r["highest_player_name"] == "Ty Simpson"
+            else r for r in _real_game()]
+    entries, _ = run(rows)
+    links = dict((text, href) for href, text in _anchors(entries))
+    assert "Ty Simpson" not in links, "a null slug still emitted an anchor"
+    assert "Ty Simpson" in _text(entries), "the name vanished instead of going plain"
+    assert "Deontae Lawson" in links, "one null slug unlinked the whole panel"
+
+
+def test_a_blank_slug_is_treated_as_a_null_one(panel):
+    run, _ = panel
+    rows = [dict(r, highest_player_slug="   ") if r["highest_player_name"] == "Ty Simpson"
+            else r for r in _real_game()]
+    assert "Ty Simpson" not in dict((t, h) for h, t in _anchors(run(rows)[0]))
+
+
+def test_an_apostrophe_in_a_name_cannot_break_out_of_the_markup(panel):
+    """⚠️ 6,124 leader names carry one — A'Amear Walton — and an unescaped apostrophe closes
+    a single-quoted attribute and spills markup onto the page."""
+    run, _ = panel
+    rows = _real_game()
+    rows[0] = dict(rows[0], highest_player_name="A'Amear Walton",
+                   highest_player_slug="a-amear-walton-1")
+    raw = " ".join(b for _k, b in run(rows)[0])
+    assert "A&#x27;Amear Walton" in raw, "the apostrophe was not escaped"
+    assert "A'Amear" not in raw, "a raw apostrophe reached the markup"
+
+
+def test_the_claim_survives_the_link(panel):
+    """⚠️ REQUIREMENT 3. A link change must not disturb what the panel is asserting — the
+    four honesty properties B077 argued, re-checked here rather than assumed from the fact
+    that the other tests still pass."""
+    run, _ = panel
+    entries, _ = run(_real_game())
+    body = _text(entries)
+    assert "only player recorded" in _cell(entries, "Ty Simpson")
+    assert "tied, 3 of 21" in _cell(entries, "Deontae Lawson")
+    assert " led " not in body.lower() and "leader in" not in body.lower()
+    code = SOURCE[SOURCE.index("def _leader_name("):SOURCE.index("def _leaders(")]
+    assert "lowest_" not in code

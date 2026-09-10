@@ -530,8 +530,13 @@ def test_the_ranking_is_read_and_never_computed_in_the_page():
     for banned in ("srv_player_game_log", "srv_player_stats"):
         assert banned not in code, f"{banned} was read to rank players in the page"
     assert "srv_game_team_leader" in code, "the leaders panel does not read the ranked object"
+    # ⚠️ ANCHORED ON THE QUERY LITERAL, NOT ON ITS FIRST COLUMN. B077 wrote
+    # `block.index("select team_id")`, and B078 adding one column to the select — `season`,
+    # for the player link — made that anchor vanish and this test raise ValueError instead of
+    # asserting anything. The assertion is unchanged; only what it grips has moved to
+    # something a column list cannot break.
     block = SOURCE[SOURCE.index("def _leaders("):SOURCE.index("def _leader_heading(")]
-    sql = block[block.index("select team_id"):block.index("limit 8")].lower()
+    sql = block.split('query("""')[1].split('"""')[0].lower()
     for computed in ("order by", "rank(", "row_number(", "over (", "group by", "join"):
         assert computed not in sql, f"the leaders query contains `{computed}`"
 
