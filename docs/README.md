@@ -7,6 +7,33 @@ pre-joined serving views, and predictions from models trained on a licensed feat
 This folder is not documentation *of* the code. It is the record of **how the decisions got
 made** — including the ones that were wrong, and what changed when they were.
 
+> ## ⚠️ THIS FOLDER IS A DATED SNAPSHOT, NOT THE LIVE RECORD
+>
+> **Snapshot date: 2026-08-21. Stamped 2026-09-09 (A081/R-254).**
+>
+> Everything here is a copy of a document that lives and keeps changing elsewhere. The copies
+> were taken on **21 August 2026** and have not been refreshed since. `decision_log.md` below
+> is **134 KB against a live 403 KB**; `prompts/` stops at round 025 while the project is past
+> round 080.
+>
+> **That is deliberate.** The ruling is *stamp rather than refresh* — a paper trail's value is
+> that it shows what was known **at the time**, and continuously rewriting it to match the
+> present destroys exactly the thing it is for. A reversal is only legible if the original
+> claim is still readable.
+>
+> **What this means for you:** read it as a record of the build's first month, not as a
+> description of the system today. Where a document here contradicts the code, **the code is
+> right and this is history.**
+>
+> ⚠️ **One file was RETIRED rather than stamped, on 2026-09-09**: `page_to_mart_matrix_v3.xlsx`
+> was wrong about statuses, grains and Phase 1 scope, and **a stamped wrong file is still
+> wrong**. A date makes a stale document honest; it cannot make an incorrect one honest.
+>
+> ⚠️ **`working_agreement.md` still says the pipeline runs "everything local via Docker
+> Compose".** It has not been true since the droplet migration of 27–30 August, and believing
+> it cost one build round outright. It is kept, stamped, because that mistake is part of the
+> record — see the note at the top of that file.
+
 ## The five worth reading, in order
 
 | | | |

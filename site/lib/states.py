@@ -47,16 +47,43 @@ def empty(what: str, why: str, fix_label: Optional[str] = None,
             fix()
 
 
-def degraded(missing_object: str, explanation: str, scheduled: Optional[str] = None) -> None:
-    """The section's source does not exist yet. Ours, not the user's.
+def degraded(missing_object: str, explanation: str, scheduled: Optional[str] = None,
+             title: str = "Not built yet") -> None:
+    """The section cannot render because something upstream is absent. Ours, not the user's.
 
     Names the object in code font (AC-G.7). The rest of the page renders normally — a
     blocked section must not blank a working page.
+
+    ⚠️ `title` EXISTS BECAUSE "Not built yet" IS FALSE FOR THREE OF THE EIGHT CALLERS, AND IT
+    CONTRADICTS THEIR OWN EXPLANATION ON THE SAME CARD. R-500.
+
+    B074 found it on Matchup: srv_team_week IS built and IS published — it is that team's ROW
+    that is absent — and the body says so while the title says the opposite. B correctly
+    refused to fix it, because this module is imported by every data-bearing section on the
+    site and changing its copy from a session that owns one page changes eighteen.
+
+    Reading all eight call sites first turned up two more of the same shape, which is why
+    this is a parameter rather than a new hardcoded string:
+
+        standings.py:51  "The ratings themselves are built — see any team's Ratings tab —
+                          but they are not yet carried as columns here"
+        team.py:90       "The data for this is now in the warehouse: fct_team_rating_week
+                          carries a pregame and postgame Elo per team per week"
+
+    Both describe something BUILT and not yet surfaced. Titling that "Not built yet" tells a
+    reader the opposite of the sentence directly beneath it.
+
+    ⚠️ THE DEFAULT IS UNCHANGED ON PURPOSE. Five callers are genuinely about an object that
+    does not exist — shell.py's three, team.py:72's dim_athlete, and section()'s automatic
+    path, which fires only on "does not exist" / "undefined table". A single title honest for
+    all eight does not exist, because "we have not built it", "we built it and have not
+    surfaced it here" and "it exists and this row is absent" are three different claims. So
+    the callers that need a different one say so, and nobody else moves.
     """
     sched = (f"<div class='cfdb-state-note'>Scheduled: {scheduled}</div>" if scheduled else "")
     st.markdown(
         f"<div class='cfdb-state cfdb-degraded'>"
-        f"<div class='cfdb-state-title'>Not built yet</div>"
+        f"<div class='cfdb-state-title'>{title}</div>"
         f"<div class='cfdb-state-body'>{explanation}</div>"
         f"<div class='cfdb-state-object'>Waiting on <code>{missing_object}</code></div>"
         f"{sched}</div>",

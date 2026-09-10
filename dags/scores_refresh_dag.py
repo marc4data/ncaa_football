@@ -64,8 +64,24 @@ DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
 SCHEDULE = "0 */2 * * *"
 
 # What this DAG can change, and nothing else. `+` pulls ancestors, so this is the game spine
-# and the views built on it. Deliberately NOT +tag:production — that is 53 models, and a
-# two-request fetch has no business triggering a full transform every two hours.
+# and the views built on it. Deliberately NOT +tag:production.
+#
+# ⚠️ THE CONSTRAINT IS WHAT THE FETCH JUSTIFIES REBUILDING, NOT A MODEL COUNT. The count
+# drifts and the rule must not: this sentence used to read "+tag:production — that is 53
+# models", and A079 measured 100 on 2026-09-09. A constraint stated in a figure nobody
+# re-measures is unfalsifiable. R-540.
+#
+# THE TEST, applied to anything added here: does this DAG's fetch actually change the model's
+# inputs? /games moves scorelines, so what a scoreline feeds belongs here. A model whose
+# SUBJECT is fetched weekly does not, however cheap it is to add — rebuilding it from raw
+# that has not moved buys nothing and grows the step for nobody. (srv_game_team is the
+# instructive case: its scoreline half qualifies and its box-score half does not, and it is
+# here because the two cannot be separated.)
+#
+# AND THE BUDGET IS WALL CLOCK, because that is what a gate-open run actually spends.
+# Measured on the droplet 2026-09-09: 3m24s at 51 models, against a gate that opened 50 times
+# in the preceding seven days (~7/day). Run-to-run variance on this box is ±15s, so treat a
+# single-run delta under about half a minute as UNMEASURED rather than free.
 # R-192. FOUR COPIES OF ONE NAME, AND THE ANSWER IS THAT NOTHING FELL OUT.
 #
 # This read `+srv_game +srv_game +srv_game +srv_team_game_log +srv_game` — a bulk rename

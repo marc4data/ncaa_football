@@ -49,10 +49,14 @@ def body(page) -> None:
         if not df.empty:
             st.divider()
             states.degraded(
-                "sp_plus_rating / elo_rating on srv_standings",
-                "The ratings themselves are built — see any team's Ratings tab — but they "
-                "are not yet carried as columns here, so this table ranks on results "
-                "alone.",
+                # R-500. The ratings ARE built — this card says so two lines down — so the
+                # default "Not built yet" contradicted its own explanation.
+                title="Built, not shown here yet",
+                missing_object="sp_plus_rating / elo_rating on srv_standings",
+                explanation=(
+                    "The ratings themselves are built — see any team's Ratings tab — but they "
+                    "are not yet carried as columns here, so this table ranks on results "
+                    "alone."),
                 scheduled="carrying fct_team_rating across to Standings")
 
 

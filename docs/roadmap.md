@@ -1,5 +1,10 @@
 # cfdb Roadmap
 
+> ⚠️ **DATED SNAPSHOT — 2026-08-21. Stamped 2026-09-09 (A081/R-254).**
+>
+> A copy taken on 21 August 2026. Phases described as upcoming here have since been built,
+> reordered or dropped. Read it as the plan at the time.
+
 **Status: ADOPTED — drafted by Claude Code 2026-08-14; reviewed, amended, and adopted by
 Cowork (Marc) the same day.** Ownership sits with Cowork per the division of labor in
 `CLAUDE.md`. Amendments from review: M0 wording corrected, M3 unserialized from M2,
