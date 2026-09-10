@@ -19,7 +19,7 @@ import math
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, filters, shell, states, table
+from lib import filters, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -52,6 +52,11 @@ def _completed_games(scope) -> pd.DataFrame:
     defect (AC-G.41)" branch and printed that sentence on the landing page. Every other view
     that calls that function selects the column; Today was the only one that did not. The
     message was right about itself and wrong about the view.
+
+    ⚠️ R-553. `attribution` IS STILL SELECTED THOUGH body() NO LONGER CALLS
+    model_attribution() — that is deliberate, not a leftover. See the note at the end of
+    body(): attribution attaches to rendered model output, this page renders none yet, and
+    keeping the column fetched makes restoring the call a one-line change on the day it does.
     """
     return query("""
         select game_id, season, week, season_type, game_date,
@@ -733,8 +738,32 @@ def body(page) -> None:
     _bump(scope)
     _looking_forward(scope)
 
-    if not _completed_games(scope).empty:
-        attribution.model_attribution(_completed_games(scope))
+    # 🚨 R-553. ATTRIBUTION ATTACHES TO RENDERED MODEL OUTPUT, AND THIS PAGE RENDERS NONE.
+    #
+    # ⚠️ WHOEVER ADDS A `predicted_*` COLUMN TO THIS PAGE ADDS THE CALL BACK WITH IT:
+    #
+    #     attribution.model_attribution(_completed_games(scope))
+    #
+    # `attribution` IS STILL SELECTED in _completed_games on purpose, so that is a one-line
+    # change rather than two. §0.9's design is that a page cannot render the model's numbers
+    # without having fetched the string saying whose model it is; keeping the column fetched
+    # keeps that guarantee ready rather than making the next person rediscover it.
+    #
+    # This page is EXPECTED to gain model numbers — MODEL_WEEK_FLOOR and _recap_lists'
+    # "model-derived framing is withheld before week N" both anticipate it.
+    #
+    # WHY IT CAME OUT. A083 fixed a false claim here: `attribution` had been on srv_game all
+    # along and this query was the only one not asking for it, so model_attribution() took
+    # its "column missing from this view — this is a defect (AC-G.41)" branch and printed
+    # that on the landing page. Correct, and it left a true statement that was still noise —
+    # on the current season the page said "attribution is null on every row", a warning about
+    # the absence of provenance for predictions it never showed.
+    #
+    # ⚠️ TODAY DOES RENDER PROBABILITIES, AND THEY ARE NOT OURS. `market_implied_*` is the
+    # BOOK's number and the prefix is itself the provenance (§4.3 — "a licence boundary
+    # wearing a naming convention"). `largest_single_play_swing` and
+    # `home_win_probability_range` are CFBD play-by-play derivatives and are selected but
+    # never rendered. There is no `predicted_*` anywhere in this module.
 
 
 def render() -> None:
