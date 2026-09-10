@@ -58,20 +58,67 @@ def _local(ts):
 PRECISION = (
     ("probability", 3),
     ("epa", 3), ("ppa", 3),
+    # R-555. A Brier score is a mean SQUARED error on a 0–1 probability, so it lives in the
+    # third decimal the way the probabilities it scores do. It reached this table by falling
+    # through to the old default of 1, where .184 and .238 both rendered "0.2" — the column
+    # was published at a precision that could not separate a good model from a poor one.
+    ("brier", 3),
     ("mae", 2), ("error", 2), ("rating", 2),
     ("pct", 1), ("percent", 1), ("rate", 1),
+    # ⚠️ R-555. `total_yards` MUST PRECEDE `total`, and this is the specificity rule in the
+    # note above doing real work rather than describing itself. "total" is here for the
+    # BETTING total — an over/under is 54.5 and needs its half-point. Yardage is a count, and
+    # with the default now 0 the substring match would have been the only thing left holding
+    # `total_yards` at one decimal: today's Team yardage board would have printed Total 412.0
+    # beside Rush 187 and Pass 225. The column is not a total, it is a total OF something.
+    ("total_yards", 0), ("passing_yards", 0), ("rushing_yards", 0),
+    # 🚨 R-555. THIS ENTRY IS A HOLD-HARMLESS FOR THE MATCHUP PAGE, WHICH SESSION A DOES NOT
+    # OWN, AND THE THREE ABOVE ARE WHAT MAKE IT SAFE. `matchup.py` renders per-game yardage
+    # by passing the BARE LITERAL 'yards' rather than the real column
+    # (`rushing_yards_for_per_game` and friends), so the only signal reaching this table is
+    # the word itself — and a per-game average is not a count. Under the new default of 0 it
+    # would have rendered 154.4 as 154 on B's page, which B's own tests assert against.
+    #
+    # ⚠️ CHARTER §3 RULE 3.1: a shared-module change ships the parameter and the default;
+    # call sites in the other session's files are that session's to consume. So this keeps
+    # `'yards'` reading exactly as it does today and the box-score columns above — which are
+    # game totals on Today, not averages — take the integer the round is for. Order is doing
+    # the work: "yards" is not a substring of any of the three, so they match first.
+    #
+    # ⚠️ THE REAL FIX IS AT THE CALL SITE and it belongs to session B: pass the actual column
+    # name, at which point a `per_game` key can decide this honestly for every page at once.
+    # Logged for Cowork to sequence rather than reached across for here.
+    ("yards", 1),
     ("spread", 1), ("margin", 1), ("line", 1), ("edge", 1),
+    # R-555. The bare literal `'move'` that schedule.py passes for line movement. It relied on
+    # the old default and a spread moves in half-points, so the flip would have rounded every
+    # movement glyph to a whole number — "+2.5" reading as "+2".
+    ("move", 1),
     ("total", 1), ("over_under", 1), ("differential", 1),
 )
 
 
 def precision_for(column: str) -> int:
-    """First match wins, in specificity order. See the note on PRECISION."""
+    """First match wins, in specificity order. See the note on PRECISION.
+
+    R-555. THE DEFAULT IS 0, AND A DECIMAL IS THE EXCEPTION. Marc: "numbers default to #.#
+    precision, but most should really be #. Should swap default to #, and make #.# the
+    exception." He was reading the mechanism correctly — `Col(kind="num")` with no `dp=`
+    lands here, and most of what does is a count, a yard, a rank or a score.
+
+    ⚠️ THE FLIP IS ONLY SAFE BECAUSE THE TABLE ABOVE ABSORBED WHAT USED TO RELY ON THE
+    FALLBACK. Fourteen call sites across nine columns reached the old `return 1`; the census
+    is in the A085 report. Two of them NEEDED their decimal and are now keyed explicitly
+    (`move`, and `brier` which needed three rather than one), and one column was being held
+    at a decimal by a substring collision that the flip exposed (`total_yards` matching
+    `total`). The rest — lead changes, ranks, poll points, box-score yardage, tackles — are
+    integers and were only ever showing ".0".
+    """
     name = column.lower()
     for key, dp in PRECISION:
         if key in name:
             return dp
-    return 1
+    return 0
 
 
 def number(value, column: str = "", dp: Optional[int] = None) -> str:
