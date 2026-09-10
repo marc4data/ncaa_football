@@ -72,23 +72,14 @@ PRECISION = (
     # `total_yards` at one decimal: today's Team yardage board would have printed Total 412.0
     # beside Rush 187 and Pass 225. The column is not a total, it is a total OF something.
     ("total_yards", 0), ("passing_yards", 0), ("rushing_yards", 0),
-    # 🚨 R-555. THIS ENTRY IS A HOLD-HARMLESS FOR THE MATCHUP PAGE, WHICH SESSION A DOES NOT
-    # OWN, AND THE THREE ABOVE ARE WHAT MAKE IT SAFE. `matchup.py` renders per-game yardage
-    # by passing the BARE LITERAL 'yards' rather than the real column
-    # (`rushing_yards_for_per_game` and friends), so the only signal reaching this table is
-    # the word itself — and a per-game average is not a count. Under the new default of 0 it
-    # would have rendered 154.4 as 154 on B's page, which B's own tests assert against.
-    #
-    # ⚠️ CHARTER §3 RULE 3.1: a shared-module change ships the parameter and the default;
-    # call sites in the other session's files are that session's to consume. So this keeps
-    # `'yards'` reading exactly as it does today and the box-score columns above — which are
-    # game totals on Today, not averages — take the integer the round is for. Order is doing
-    # the work: "yards" is not a substring of any of the three, so they match first.
-    #
-    # ⚠️ THE REAL FIX IS AT THE CALL SITE and it belongs to session B: pass the actual column
-    # name, at which point a `per_game` key can decide this honestly for every page at once.
-    # Logged for Cowork to sequence rather than reached across for here.
-    ("yards", 1),
+    # ⚠️ R-559. `("yards", 1)` STOOD HERE UNTIL B079 AND IS GONE BECAUSE ITS REASON IS.
+    # A085 flipped the fallback to 0 and matchup.py was passing the BARE LITERAL 'yards' for
+    # per-game averages, so the only signal reaching this table was the word itself and B's
+    # page would have rendered 154.4 as 154. A does not own matchup.py (§3 rule 3.1), so the
+    # shared module held B's page harmless instead of reaching across. B079 passed the real
+    # column at both call sites; nothing in `site/` passes a bare 'yards' any more, verified
+    # before this line came out. The three explicit yard keys above stay: they are Today's
+    # box-score columns and they are genuinely counts.
     ("spread", 1), ("margin", 1), ("line", 1), ("edge", 1),
     # R-555. The bare literal `'move'` that schedule.py passes for line movement. It relied on
     # the old default and a spread moves in half-points, so the flip would have rounded every

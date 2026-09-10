@@ -1134,8 +1134,18 @@ SCORES_LABEL_OVERRIDES = {
 # sheet needs neither, and a 149-column file does not want four more. They ride in the frame
 # and out of the column list — a different thing from R-279's HIDDEN_ON_PAGE, where the
 # column IS printed in the file and merely not shown on the site.
+#
+# ⚠️ R-564 ADDED `as_of_ts`, AND THE TEST THAT READS THIS TUPLE IS WHY THE ADDITION IS SAFE.
+# test_the_select_list_carries_what_the_page_needs_and_the_sheet_does_not_print asserts
+# `selected - printed` is exactly this tuple plus the one renamed column, so a passenger added
+# to the SQL and not declared here fails, and one declared here and dropped from the SQL fails
+# too. That is the same two-lists-must-agree shape as ci/check_publish_build_agreement.py, and
+# it is precisely the guard that `as_of_caption` does NOT have: the page asked for the stamp
+# for as long as Scores has existed, the view carried it the whole time, and the helper's
+# `"as_of_ts" not in df.columns` branch returned quietly instead of saying so.
 SCORES_PASSENGERS = ("team_slug", "opponent_team_slug",
-                     "team_logo_url", "opponent_logo_url", "opponent_rank")
+                     "team_logo_url", "opponent_logo_url", "opponent_rank",
+                     "as_of_ts")
 
 # COLUMNS THAT KEEP THE SITE'S PRECISION RATHER THAN THIS SHEET'S 2dp DEFAULT.
 #
@@ -1500,6 +1510,25 @@ _ALL_SHEETS = [
     # regrouped into contiguous category bands (SCORES_BLOCKS). Keeping the select in his
     # order means the two artefacts can be read against each other line by line; the test
     # asserts they hold the same set.
+    #
+    # 🚨 TWO THINGS A BLOCK COMMENT INSIDE ONE OF THESE SELECT LISTS MUST NOT CONTAIN, both
+    # of which are properties of `Sheet.selected_fields` rather than of SQL, and neither of
+    # which fails loudly:
+    #
+    #   a COMMA           the property splits the body on top-level commas and takes the
+    #                     LAST WORD of each piece; prose punctuated with commas therefore
+    #                     contributes one invented column name per comma. Use semicolons.
+    #                     The passenger comment below has always done this and it is why it
+    #                     is written the way it is.
+    #   the word "from"   the body is matched NON-GREEDILY up to the first delimiter of that
+    #                     name; prose containing it truncates the select there and the
+    #                     property returns prose instead of columns. R-564 hit this: one
+    #                     sentence took the list from 153 real names to 156 fragments.
+    #   a parenthesis     any comma-piece containing one is dropped entirely, so a column
+    #                     sharing its piece with a bracketed aside disappears.
+    #
+    # Both matter because selected_fields is what test fixtures are built from: the query
+    # still runs correctly against Postgres, and only the fixtures go quietly wrong.
     # ======================================================================================
     Sheet(
         "Scores", "srv_game_team", """
@@ -1560,6 +1589,12 @@ _ALL_SHEETS = [
                   because this list was never widened when the view was. */
                team_slug, opponent_team_slug, team_logo_url, opponent_logo_url,
                opponent_rank,
+               /* R-564. as_of_ts is a passenger too. scores.py has always called
+                  table.as_of_caption; that helper returns silently when the column is
+                  missing; so the page asked for a stamp the view had all along and nothing
+                  said so. Deliberately absent in SCORES_BLOCKS; the Excel export is
+                  unchanged. Page-side reasoning sits at the call site in scores.py. */
+               as_of_ts,
                dense_rank() over (order by {SCORES_GAME_ORDER}) as game_no,
                count(*) over () as rows_in_scope
         from srv_game_team

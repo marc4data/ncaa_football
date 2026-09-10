@@ -3264,8 +3264,19 @@ models:
           2026-08-15, so every 2024 and 2025 row is the second kind.
       - name: pregame_wp_snapshot_ts
         description: >
-          When the pregame probability was observed. Nine distinct timestamps exist across
-          the whole table, which is why this is a VALUE and not a movement series.
+          When the pregame probability was observed. WEEKLY BY DESIGN, and that is the one
+          thing to know before reading this column as stale. /metrics/wp/pregame sits in the
+          PREGAME bucket, which only cfbd_pregame_refresh fetches, and that DAG runs
+          `0 12 * * 2` — Tuesdays 12:00 UTC, after the polls publish and before the next
+          slate. srv_game itself is rebuilt hot several times a day, so on any day but
+          Tuesday this column is LEGITIMATELY OLDER THAN THE ROW AROUND IT. Measured
+          2026-09-10, a Thursday: line_snapshot_ts read 12:00 that morning while this read
+          Tuesday 2026-09-08 16:22 — a two-day-old column inside a one-minute-old row, and
+          nothing was wrong with either. There is one timestamp per weekly run plus the
+          2026-08-15 backfill's four, rather than a series per game, which is why this is a
+          VALUE and not a movement series. (That sentence used to claim "nine distinct
+          timestamps"; there were seven on 2026-09-10 and the figure only ever grows, so it
+          was never right. Replaced with the mechanism, which does not rot — R-563.)
       - name: is_indoors
         description: >
           Whether the venue is enclosed, and THE COLUMN THAT QUALIFIES EVERY OTHER WEATHER
