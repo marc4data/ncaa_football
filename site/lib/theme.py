@@ -584,6 +584,10 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    heading lines up with the entries it heads. */
 .cfdb-legend-sub { font-weight:600; opacity:.5; font-size:.72rem; margin-top:.55rem;
                    margin-bottom:.15rem; }
+/* R-622. The nested pair under the spanning "Against the line" title. Its first heading is
+   already directly beneath that title, so the leading margin the sided block normally gives a
+   heading would open a gap the spanned title is supposed to close. */
+.cfdb-legend-nested > :first-child { margin-top:0; }
 .cfdb-legend-side .cfdb-legend-title:not(:first-child) { margin-top:.9rem; }
 .cfdb-legend-title { font-weight:600; opacity:.7; font-size:.78rem; letter-spacing:.03em;
                      text-transform:uppercase; margin-bottom:.5rem; }
