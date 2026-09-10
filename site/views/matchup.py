@@ -546,6 +546,16 @@ def _yardage_direction(offence, defence) -> str:
     logo = identity.logo_or_monogram(
         offence.get("logo_url"), str(offence.get("team_display") or "?"), 20)
     lines = []
+    # R-516. THE SECOND ARGUMENT IS THE COLUMN-NAME SLOT AND IT USED TO HOLD THE BARE WORD
+    # 'yards', so `fmt.precision_for` had never once seen a column from this panel. A085
+    # flipped that fallback to 0 and had to key ('yards', 1) in `fmt.PRECISION` purely to
+    # hold this file harmless — 154.4 would otherwise have rendered 154 here.
+    #
+    # `dp=1` states the panel's precision where the decision is made, the way _ADVANCED_ROWS
+    # already does. A PER-GAME AVERAGE IS NOT A COUNT: 154.4 and 154.0 are different seasons,
+    # and putting two sides beside each other is the whole job of this panel. If that is ever
+    # overturned, the reversal is DELETING `dp=1` — the column name is already correct, so
+    # `fmt` decides from then on.
     for label, for_column, allowed_column in _YARDAGE_DIMENSIONS:
         subdued = " opacity:.75;font-size:.9rem;" if label == "Total" else ""
         lines.append(
@@ -553,11 +563,11 @@ def _yardage_direction(offence, defence) -> str:
             f"padding:.15rem 0'>"
             f"<span style='min-width:4.5rem;opacity:.6;font-size:.8rem'>{label}</span>"
             f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
-            f"{fmt.number(offence.get(for_column), 'yards')}</span>"
+            f"{fmt.number(offence.get(for_column), for_column, dp=1)}</span>"
             f"<span style='opacity:.45;font-size:.8rem'>gained</span>"
             f"<span style='opacity:.35;margin:0 .2rem'>vs</span>"
             f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
-            f"{fmt.number(defence.get(allowed_column), 'yards')}</span>"
+            f"{fmt.number(defence.get(allowed_column), allowed_column, dp=1)}</span>"
             f"<span style='opacity:.45;font-size:.8rem'>allowed</span></div>")
     return (
         f"<div style='border-left:4px solid {accent};padding:.4rem .7rem;"
