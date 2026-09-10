@@ -21,7 +21,7 @@ WHY TABS AT ALL, AND WHY NOT `st.tabs`:
   measured against live serving, a completed game went from five queries per render to two.
 
 ⚠️ THE PANELS ARE RECORDED, NOT RENDERED. This file is about WHICH panels run and WHERE; what
-each one draws is covered by test_matchup_yardage, test_matchup_line_movement and
+each one draws is covered by test_matchup_yardage, test_matchup_market_card and
 test_matchup_drives, which call those panels directly. Recording is also what makes the lazy
 assertion possible at all — a panel that never runs draws nothing, and "drew nothing" is
 indistinguishable from "drew an Empty state" if you only look at the output.
@@ -48,7 +48,10 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # panel is gone and `_conditions` renders it inside `_game_header` — which is ABOVE the tab
 # bar and therefore not a panel at all. tests/test_matchup_header.py holds the two
 # assertions that travelled with it.
-ALL_PANELS = ("_market", "_line_movement", "_model", "_series", "_yardage",
+# ⚠️ `_market` AND `_line_movement` BECAME ONE PANEL IN R-519 — Marc: "Taking up WAY too
+# much space. Develop a card that we can drop in somewhere to cover both." Two names left this
+# list and one arrived; the list's whole purpose is that such a change is visible here.
+ALL_PANELS = ("_market_card", "_model", "_series", "_yardage",
               "_travel", "_post_game", "_leaders", "_drives")
 
 
@@ -184,7 +187,7 @@ def test_a_scheduled_game_opens_on_the_before_tab(page):
     run, _ = page
     _, called = run({"is_completed": False})
     assert "_drives" not in called, "a game that has not kicked off rendered its drives"
-    assert "_market" in called and "_model" in called
+    assert "_market_card" in called and "_model" in called
 
 
 # --- an unplayed game has NO after tab, not an empty one -----------------------------------
@@ -218,7 +221,7 @@ def test_after_tab_requested_on_a_scheduled_game_falls_back_and_does_not_raise(p
     run, _ = page
     entries, called = run({"is_completed": False}, tab="after")
     assert "_drives" not in called, "a scheduled game rendered the post-game tab on request"
-    assert "_market" in called
+    assert "_market_card" in called
     assert "Something went wrong" not in _text(entries)
 
 
@@ -234,7 +237,7 @@ def test_the_url_can_still_ask_for_the_other_tab(page):
     """The fallbacks must not have made the tab bar decorative."""
     run, _ = page
     _, called = run({"is_completed": True}, tab="before")
-    assert "_drives" not in called and "_market" in called
+    assert "_drives" not in called and "_market_card" in called
 
 
 # --- the lazy guarantee, which is the reason for anchors over st.tabs ----------------------

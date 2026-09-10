@@ -17,6 +17,7 @@ import streamlit as st
 
 from lib import (attribution, chips, filters, fmt, identity, params, shell,
                  states, table)
+from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
 
@@ -45,7 +46,8 @@ COLUMNS = """
     line_market_implied_win_probability_move_from_open,
     line_market_implied_win_probability_largest_excursion,
     home_rank, away_rank, home_team_record_display, away_team_record_display,
-    is_indoors, spread_favorite_side,
+    is_indoors, spread_favorite_side, moneyline_favorite_side,
+    favorite_definitions_disagree,
     home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
     away_q1, away_q2, away_q3, away_q4, away_overtime_points, away_periods
 """
@@ -89,8 +91,10 @@ TABS = (
     # "close to the top" rather than a section, so it renders first. R-527: the weather folded
     # into the game header, which is why the page's query count did not move — the forecast is
     # still fetched once, by _conditions, and only before kickoff.
+    # ⚠️ `_market` AND `_line_movement` ARE ONE PANEL NOW (R-519). Marc: "Taking up WAY too
+    # much space. Develop a card that we can drop in somewhere to cover both."
     (BEFORE, "Before the game",
-     ("_series", "_market", "_line_movement", "_model", "_yardage", "_travel")),
+     ("_series", "_market_card", "_model", "_yardage", "_travel")),
     # ⚠️ ONE PANEL TODAY, AND THAT IS EXPECTED RATHER THAN UNBALANCED. The box score, the
     # advanced block and the player leaders are B076 — specified in
     # claude_work/cfdb_matchup_postgame_spec.md §1, all three on relations that already
@@ -205,6 +209,9 @@ def body(page) -> None:
         row = df.iloc[0]
         params.set_params(game_id=game_id, season=int(row["season"]))
         _game_header(row)
+        # Directly under the header and the full width of it, as Marc asked. It draws only
+        # when the book priced a probability, which is 67 of 1,609 upcoming games.
+        _win_probability_bar(row)
         table.as_of_caption(df)
 
         # R-501. Which of the two looks this game gets, and the panels that belong to it.
@@ -476,8 +483,12 @@ def _line_score(row) -> str:
             f"<tr><th></th>{head}</tr>{rows}</table>")
 
 
-def _details_cell(row) -> str:
-    """The centre column: the preview's facts before kickoff, the scoreboard after it."""
+def _details_cell(row, conditions: str = "") -> str:
+    """The centre column: the preview's facts before kickoff, the scoreboard after it.
+
+    ⚠️ `conditions` ARRIVES ALREADY FETCHED, inside its own states.section in `_game_header`,
+    so that a weather failure degrades one line rather than the page. This never queries.
+    """
     played = bool(row.get("is_completed"))
     venue = html.escape(str(row.get("venue_display") or ""))
     if row.get("is_neutral_site"):
@@ -504,7 +515,6 @@ def _details_cell(row) -> str:
     if market:
         lines.append(f"<div>{' \u00b7 '.join(market)}</div>")
 
-    conditions = _conditions(row)
     if conditions:
         lines.append(conditions)
     if venue:
@@ -526,6 +536,21 @@ def _game_header(row) -> None:
     state the removed panel ever ran in.
     """
     played = bool(row.get("is_completed"))
+    # 🚨 ITS OWN SECTION, AND B082 SHIPPED WITHOUT ONE. When the weather panel was standalone
+    # it carried `states.section("srv_game_weather")`, so a weather failure degraded one
+    # block. Folding it into the header left the query bare inside body()'s
+    # `states.section("srv_game")` — which means a missing or broken srv_game_weather would
+    # have rendered the Error state for the WHOLE PAGE, naming srv_game: a confident and
+    # wrong diagnosis of a different view's problem. Restored here — if the fetch fails the
+    # section says so above the header and the header still draws, without conditions.
+    #
+    # ⚠️ NO `dataset=`. The header reads TWO datasets — srv_game and srv_game_weather — and
+    # captioning it with one would be R-574's defect (a caption that disagrees with what the
+    # block actually reads) in a new place. Reported rather than papered over.
+    conditions = ""
+    if not played:
+        with states.section("srv_game_weather"):
+            conditions = _conditions(row)
     columns = st.columns(_HEADER_WEIGHTS, vertical_alignment="center")
     cells = (
         identity.logo_or_monogram(row.get("away_logo_url"),
@@ -533,7 +558,7 @@ def _game_header(row) -> None:
         _team_cell(row, "away", "right"),
         _score_cell(row.get("away_points"), played),
         _winner_glyph(row, "away"),
-        _details_cell(row),
+        _details_cell(row, conditions),
         _winner_glyph(row, "home"),
         _score_cell(row.get("home_points"), played),
         _team_cell(row, "home", "left"),
@@ -545,25 +570,236 @@ def _game_header(row) -> None:
             st.markdown(markup, unsafe_allow_html=True)
 
 
-def _market(row) -> None:
-    st.subheader("Market")
-    if pd.isna(row.get("spread")) and pd.isna(row.get("over_under")):
-        # Most of 110,634 games predate betting data entirely, which is an absence of
-        # market rather than a failure to fetch one, so it renders Empty.
-        states.empty("The betting market would be here.",
-                     "No sportsbook line has been recorded for this game. "
-                     "cfdb holds lines from 2013 onward, and only for games books priced.")
-        return
-    cols = st.columns(4)
-    # AC-1.4 again: a home favorite is a NEGATIVE spread. Stated on the page, because this
-    # is the number a reader is most likely to invert.
-    cols[0].metric("Spread (home)", fmt.signed(row.get("spread"), "spread"),
-                   help="Negative means the home team is favoured.")
-    # R-009, third placement. Same sentence, one source.
-    cols[1].metric("Total", fmt.number(row.get("over_under"), "over_under"))
-    cols[2].metric("Home moneyline", fmt.signed(row.get("home_moneyline"), "", dp=0))
-    cols[3].metric("Away moneyline", fmt.signed(row.get("away_moneyline"), "", dp=0))
+# --- R-526: what the market gives each side ------------------------------------------------
 
+# ⚠️ MARC ASKED FOR THE AWAY SEGMENT IN WHITE AND WHITE FAILS IN LIGHT THEME — a white bar on
+# a near-white page is an invisible segment, and R-547 was exactly that class: a hardcoded
+# colour answering the operating system rather than the app. This is theme.py's own
+# vocabulary, so the neutral side tracks the reader's theme in both directions.
+_NEUTRAL_FILL = "color-mix(in srgb, CanvasText 26%, Canvas)"
+
+
+def _win_probability_bar(row) -> None:
+    """R-526. One stacked bar, away on the left, home on the right.
+
+    🚨 IT IS THE MARKET'S NUMBER AND THE LABEL SAYS SO. §4.3: `market_implied_` names the
+    PROVENANCE, and it is a licence boundary wearing a naming convention. A bar labelled
+    "Win probability" reads as cfdb's own model — it is not, and cfdb's own
+    `home_win_probability` is NULL in all 111,049 rows (R-572), which is why the model panel
+    stops drawing it in this same round. The two must never be mistaken for one number moving.
+
+    ⚠️ IT COLLAPSES TO NOTHING WHEN THE BOOK PRICED NO PROBABILITY, and that is the common
+    case rather than the edge one: measured on the only state this bar renders in — UPCOMING
+    games — it is 67 of 1,609. The weather element one block up had to learn the same lesson.
+
+    ⚠️ THE PROBABILITIES ARE READ, NEVER COMPUTED. Marc sketched "the favorite's implied
+    probability, and 1 − p for the underdog", which assigns the whole vig to one side; the
+    built columns normalise both (multiplicative de-vig, `devig_method` stored beside them).
+    Doing either sum in this file would be metric maths in the app (G-3) as well as wrong.
+
+    ⚠️ NO TEXT SITS ON EITHER FILL. A team colour cannot be trusted to contrast with text —
+    that is what `identity.text_on` exists for — so the labels sit BELOW the bar and the
+    segments carry colour alone. `_drive_bar` on this same page already fills with a team
+    colour and puts nothing on it; this follows that rather than inventing a second rule.
+    """
+    home_p = row.get("market_implied_home_win_probability")
+    away_p = row.get("market_implied_away_win_probability")
+    if pd.isna(home_p) or pd.isna(away_p):
+        return
+    home_pct, away_pct = float(home_p) * 100, float(away_p) * 100
+
+    away_label = html.escape(str(row.get("away_abbreviation")
+                                 or row.get("away_team") or "Away"))
+    home_label = html.escape(str(row.get("home_abbreviation")
+                                 or row.get("home_team") or "Home"))
+    home_fill = identity.text_on(row_for_side(row, "home"))
+
+    st.markdown(
+        f"<div style='margin:.15rem 0 .1rem'>"
+        f"<div style='display:flex;height:10px;border-radius:5px;overflow:hidden'>"
+        f"<div style='width:{away_pct:.4f}%;background:{_NEUTRAL_FILL}'></div>"
+        f"<div style='width:{home_pct:.4f}%;background:{home_fill}'></div></div>"
+        f"<div style='display:flex;justify-content:space-between;font-size:.78rem;"
+        f"opacity:.8;margin-top:.15rem'>"
+        f"<span>{away_label} {away_pct:.1f}%</span>"
+        f"<span>{home_label} {home_pct:.1f}%</span></div>"
+        f"<div style='text-align:center;font-size:.72rem;opacity:.55;margin-top:.05rem'>"
+        f"Market-implied win probability, de-vigged from the moneylines \u2014 the book's "
+        f"number, not cfdb's model</div></div>",
+        unsafe_allow_html=True)
+
+
+def row_for_side(row, side: str):
+    """The colour pair `identity.text_on` expects, for one side of a game row.
+
+    srv_game carries `home_color_on_light` / `away_color_on_dark` and friends; text_on wants
+    a mapping with `color_on_light` / `color_on_dark`. This renames rather than computing —
+    there is no contrast maths here, and a missing colour falls back inside text_on.
+    """
+    return {"color_on_light": row.get(f"{side}_color_on_light"),
+            "color_on_dark": row.get(f"{side}_color_on_dark")}
+
+
+# --- R-519: the market and its movement, in one card ---------------------------------------
+
+# ⚠️ ▲/▼ WITH AN UNSIGNED MAGNITUDE, AND THE CHOICE IS NOT COSMETIC.
+#
+# Marc asked for "a small up/down arrow beside each, with the amount it moved". The Schedule
+# card deliberately went the other way — `schedule.py:167`, MOVE_GLYPH = "Δ", with the reason
+# stated: "Δ rather than ▷: the direction is already carried by the sign, and a directional
+# glyph beside a negative number is two cues that can disagree."
+#
+# That objection is real and this project has the scar: R-544 was a sign convention rendering
+# backwards on every graded game. So the arrow ships as Marc asked, and the objection is
+# ANSWERED rather than overruled — the magnitude beside it is UNSIGNED, so there is exactly
+# one direction cue on the page and nothing for it to disagree with.
+#
+# ⚠️ THE SIGN CONVENTION IS THE COLUMN'S, NOT OURS. `line_spread_move_from_open` is current
+# minus opening, so ▲ means the number went UP: for a spread that is the home team being
+# favored by LESS than it was. The card says so in words rather than assuming it reads.
+MOVE_UP, MOVE_DOWN = "\u25b2", "\u25bc"
+
+
+def _move_chip(value, column: str) -> str:
+    """One movement: a direction glyph and an unsigned amount, or nothing at all.
+
+    Returns "" for a null so the caller can omit the chip rather than draw a dash — a line
+    that never moved and a line with no opening price on record are different statements, and
+    only the second one is an absence.
+    """
+    if value is None or pd.isna(value):
+        return ""
+    if float(value) == 0:
+        return "<span style='opacity:.5'>unmoved</span>"
+    glyph = MOVE_UP if float(value) > 0 else MOVE_DOWN
+    # abs() moves the direction into the glyph. It is a presentation transform on one column,
+    # not a metric: nothing is summed, divided or compared (G-3).
+    return (f"<span style='opacity:.7'>{glyph} "
+            f"{fmt.number(abs(float(value)), column)}</span>")
+
+
+def _favorite(row):
+    """WHICH SIDE THE SPREAD MAKES THE FAVORITE — read, never derived.
+
+    🚨 THERE ARE TWO DEFINITIONS AND THE WAREHOUSE KNOWS THEY DISAGREE. `spread_favorite_side`
+    and `moneyline_favorite_side` answer the same question of different markets, and
+    `favorite_definitions_disagree` flags the games where they differ — 70 rows, and 28 of
+    them in 2025 alone. Deriving a favorite from the sign of `spread` in this file would
+    silently pick a side of a question the model has already recorded as open.
+
+    ⚠️ NULL IS THE COMMON CASE, NOT THE EDGE ONE: 2,234 of 2025's 3,831 games carry no
+    favorite side at all, because most were never priced.
+    """
+    side = row.get("spread_favorite_side")
+    if side not in ("home", "away"):
+        return None, None
+    label = row.get(f"{side}_abbreviation") or row.get(f"{side}_team") or side
+    return side, str(label)
+
+
+def _market_card(row) -> None:
+    """R-519. One card for the market and how it moved.
+
+    Marc: "Taking up WAY too much space. Develop a card that we can drop in somewhere to
+    cover both." This replaces `_market` and `_line_movement`, which between them drew ten
+    st.metric tiles and five captions.
+
+    ⚠️ IT FOLLOWS THE SCHEDULE CARD'S LINE BLOCK RATHER THAN INVENTING A SECOND GRAMMAR:
+    label, line, movement — one row per market, the two moneylines on their own row, and the
+    provenance last. `cfdb_card_vocabulary.md` names those parts and this uses the names.
+
+    NO SECOND QUERY. Every column is already on the srv_game row the page fetched.
+    """
+    st.subheader("Market")
+    # One section for the whole card, as `_line_movement` had: these are columns the rest of
+    # the page does not read, so a failure here degrades the card rather than blanking a
+    # Matchup that is otherwise complete.
+    with states.section("srv_game", dataset=DATASETS["srv_game"]):
+        has_line = pd.notna(row.get("spread")) or pd.notna(row.get("over_under"))
+        has_money = pd.notna(row.get("home_moneyline")) or pd.notna(row.get("away_moneyline"))
+        if not has_line and not has_money:
+            # Most of 110,634 games predate betting data entirely, which is an absence of
+            # market rather than a failure to fetch one.
+            states.empty("The betting market would be here.",
+                         "No sportsbook line has been recorded for this game. "
+                         "cfdb holds lines from 2013 onward, and only for games books priced.")
+            return
+
+        rows = []
+        side, favorite = _favorite(row)
+        if pd.notna(row.get("spread")):
+            if favorite:
+                # THE SPREAD IS SHOWN FROM THE FAVORITE'S SIDE, which is how Marc reads it and
+                # how a book prints it. The magnitude is the same number either way; only the
+                # name in front of it changes, and it comes from the column rather than from
+                # the sign.
+                line = f"{favorite} {fmt.number(-abs(float(row['spread'])), 'spread')}"
+            else:
+                # No favorite side recorded, so the number is stated as the column defines it
+                # — from the home perspective — and labelled that way rather than guessed.
+                home = row.get("home_abbreviation") or row.get("home_team") or "home"
+                line = f"{html.escape(str(home))} {fmt.signed(row.get('spread'), 'spread')}"
+            rows.append(("Spread", line,
+                         _move_chip(row.get("line_spread_move_from_open"),
+                                    "line_spread_move_from_open")))
+        if pd.notna(row.get("over_under")):
+            rows.append(("Over/Under", fmt.number(row.get("over_under"), "over_under"),
+                         _move_chip(row.get("line_total_move_from_open"),
+                                    "line_total_move_from_open")))
+
+        line_rows = "".join(
+            f"<div style='display:flex;align-items:baseline;gap:.6rem;padding:.1rem 0'>"
+            f"<span style='min-width:5.5rem;opacity:.6;font-size:.8rem'>{label}</span>"
+            f"<span style='min-width:7rem;font-weight:600'>{value}</span>"
+            f"<span style='font-size:.85rem'>{move}</span></div>"
+            for label, value, move in rows)
+
+        money = []
+        for money_side in ("away", "home"):
+            price = row.get(f"{money_side}_moneyline")
+            if pd.notna(price):
+                label = (row.get(f"{money_side}_abbreviation")
+                         or row.get(f"{money_side}_team") or money_side)
+                money.append(f"{html.escape(str(label))} "
+                             f"{fmt.signed(price, '', dp=0)}")
+        money_row = (
+            f"<div style='display:flex;align-items:baseline;gap:.6rem;padding:.1rem 0;"
+            f"border-top:1px solid var(--cfdb-rule, rgba(128,128,128,.25));margin-top:.3rem;"
+            f"padding-top:.35rem'>"
+            f"<span style='min-width:5.5rem;opacity:.6;font-size:.8rem'>Moneyline</span>"
+            f"<span>{' \u00b7 '.join(money)}</span></div>") if money else ""
+
+        st.markdown(
+            f"<div style='border:1px solid var(--cfdb-border, rgba(128,128,128,.3));"
+            f"border-radius:6px;padding:.55rem .7rem;margin:.2rem 0'>"
+            f"{line_rows}{money_row}</div>", unsafe_allow_html=True)
+
+        if bool(row.get("favorite_definitions_disagree")):
+            # 🚨 70 GAMES, AND THE CARD SAYS SO RATHER THAN PICKING ONE. The spread and the
+            # moneyline can name different favorites — a near-pick'em priced slightly
+            # differently in the two markets — and the model records the disagreement instead
+            # of resolving it. Presenting one silently would be the page deciding something
+            # the warehouse deliberately left open.
+            other = row.get("moneyline_favorite_side")
+            other_label = (row.get(f"{other}_abbreviation") or row.get(f"{other}_team")
+                           if other in ("home", "away") else None)
+            st.caption(
+                f"The spread makes {favorite or 'one side'} the favorite and the moneyline "
+                f"makes {html.escape(str(other_label)) if other_label else 'the other'} the "
+                f"favorite. cfdb records the disagreement rather than resolving it.")
+
+        chips.spread_sign_note()
+        _market_provenance(row)
+        _excursions(row)
+
+
+def _market_provenance(row) -> None:
+    """Whose prices these are, and the de-vig if the book priced a probability.
+
+    Every figure on the card is ONE book's by construction. A price with no book attached is
+    the provenance defect the `market_implied_` prefix rule exists to prevent, and it renders
+    perfectly while being wrong.
+    """
     implied = row.get("market_implied_home_win_probability")
     if pd.notna(implied):
         st.caption(
@@ -571,111 +807,57 @@ def _market(row) -> None:
             f"(away {float(row.get('market_implied_away_win_probability')) * 100:.1f}%), "
             f"de-vigged by {row.get('devig_method')}; the book's overround was "
             f"{fmt.number(row.get('overround'), '', 4)}. Raw prices above are untouched.")
-    chips.spread_sign_note()
-    st.caption(f"Line from {row.get('provider_key') or 'an unnamed book'}, "
-               f"snapshot {fmt.local_time(row.get('line_snapshot_ts'))}. "
-               f"Opening spread {fmt.signed(row.get('spread_open'), 'spread_open')}, "
-               f"opening total {fmt.number(row.get('over_under_open'), 'over_under_open')}.")
-
-
-def _line_movement(row) -> None:
-    """How far the line travelled between opening and now — the market's history, not its state.
-
-    WHAT THE NET MOVE CANNOT SHOW, AND WHY THERE ARE TWO NUMBERS PER MARKET. A line that goes
-    out three points and comes back reads as no move at all: 16 spreads and 6 probabilities in
-    the built model are exactly that round trip. The excursion is the widest departure from the
-    open, signed so it keeps the direction it departed in, and it is a DIFFERENT measurement
-    from the net move — `assert_line_excursion_is_not_just_the_net_move` fails if the two ever
-    collapse into one.
-
-    ⚠️ READ `line_snapshot_count` BEFORE BELIEVING AN EXCURSION. 1,577 of 1,854 games carry a
-    single snapshot, because 2024 and 2025 were backfilled one row per game, and on those the
-    excursion equals the net move by construction rather than by measurement. The panel says so
-    rather than drawing two numbers that look independent and are not.
-
-    ⚠️ THE BOOK IS NAMED ON THE PANEL. Every measure is one book's, set by the
-    `line_movement_provider` variable, because a move measured against another book's price is
-    not a move. A market figure that does not say whose price it came from is the provenance
-    defect the `market_implied_` prefix rule exists to prevent.
-
-    NO THRESHOLD IS APPLIED. A059 measured the distributions and stopped there — Marc sets what
-    counts as a big move — so nothing here is highlighted, coloured or ranked by a cutoff.
-    """
-    st.subheader("Line movement")
-    # Its own section, like weather and drives: this reads columns the rest of the page does
-    # not, so a movement failure degrades one block rather than blanking a Matchup that is
-    # otherwise complete. No second query — the measures are already on the srv_game row the
-    # page fetched, and re-asking for data in hand is a round trip the display-only contract
-    # does not need.
-    with states.section("srv_game"):
-        snapshots = row.get("line_snapshot_count")
-        if pd.isna(snapshots):
-            # EMPTY, NOT DEGRADED. No snapshot history is the absence of a market to track,
-            # not a fault in tracking it: the movement mart covers the seasons the snapshot
-            # loader runs for, and a game outside them never had a line observed twice.
-            states.empty(
-                "How the line moved would be here.",
-                "No line snapshots have been recorded for this game, so there is no opening "
-                "price to measure a move against.")
-            return
-
-        cols = st.columns(3)
-        # Spread and total in points, probability in PROBABILITY POINTS — moneylines are not
-        # comparable as numbers (-110 to -130 and +200 to +180 are 4.1 and 2.4 points), so the
-        # movement is expressed in the units the distribution was measured in.
-        cols[0].metric(
-            "Spread move",
-            fmt.signed(row.get("line_spread_move_from_open"), "line_spread_move_from_open"),
-            help="Current spread minus the opening spread. Negative means the home team is "
-                 "favoured by more than it was.")
-        cols[1].metric(
-            "Total move",
-            fmt.signed(row.get("line_total_move_from_open"), "line_total_move_from_open"))
-        cols[2].metric(
-            "Home win probability move",
-            fmt.signed(row.get("line_market_implied_win_probability_move_from_open"), "", dp=2),
-            help="De-vigged, in probability points.")
-
-        wide = st.columns(3)
-        wide[0].metric(
-            "Widest spread excursion",
-            fmt.signed(row.get("line_spread_largest_excursion"),
-                       "line_spread_largest_excursion"),
-            help="The furthest the spread ever got from its open, keeping the direction.")
-        wide[1].metric(
-            "Widest total excursion",
-            fmt.signed(row.get("line_total_largest_excursion"),
-                       "line_total_largest_excursion"))
-        wide[2].metric(
-            "Widest probability excursion",
-            fmt.signed(row.get("line_market_implied_win_probability_largest_excursion"),
-                       "", dp=2))
-
+    snapshots = row.get("line_snapshot_count")
+    book = (row.get("line_movement_provider_key") or row.get("provider_key")
+            or "an unnamed book")
+    stamp = f", snapshot {fmt.local_time(row.get('line_snapshot_ts'))}" \
+        if pd.notna(row.get("line_snapshot_ts")) else ""
+    if pd.notna(snapshots):
         observed = int(snapshots)
-        book = row.get("line_movement_provider_key") or "an unnamed book"
         st.caption(
-            f"Measured across {observed} snapshot{'' if observed == 1 else 's'} "
-            f"from {book}. Every figure above is that one book's, because a move measured "
-            f"against a different book's price is not a move.")
+            f"Line from {book}{stamp}. Movement measured across {observed} "
+            f"snapshot{'' if observed == 1 else 's'} — a move measured against a different "
+            f"book's price is not a move.")
+    else:
+        st.caption(f"Line from {book}{stamp}. No snapshot history, so no move to measure.")
 
-        if observed == 1:
-            # DEGRADED, AND IT IS THE COMMON CASE. One observation cannot show a path, so the
-            # excursion is the net move restated rather than a second fact. Said plainly
-            # instead of drawing six numbers of which three are echoes.
-            st.caption(
-                "This game's line was observed once, so the widest excursion is the net move "
-                "restated rather than a separate measurement.")
 
-        if bool(row.get("line_movement_spans_snapshot_gap")):
-            # THE OTHER DEGRADED STATE, and it travels on the row rather than in a footnote
-            # somewhere: three days in 2026 hold no snapshots at all, and a window spanning
-            # them was not observed throughout. The excursion is then a floor — the line may
-            # have gone further while nobody was looking — and a floor presented as a
-            # measurement is the defect the caveat exists to prevent.
-            st.caption(
-                "This game's line was being tracked across the three days that hold no "
-                "snapshots, so the widest excursion above is a floor rather than a "
-                "measurement — the line may have travelled further unobserved.")
+def _excursions(row) -> None:
+    """R-519 §1.3. The widest excursions, as ONE line under the card.
+
+    ⚠️ MARC DID NOT ASK FOR THESE AND DID NOT DROP THEM EITHER, so they keep their content and
+    lose their three metric tiles. Cowork's call, and the height they now cost is one caption.
+
+    ⚠️ B074'S CAVEAT DECIDES WHETHER THE LINE RENDERS AT ALL. On a single-snapshot game the
+    furthest the line got and its net move are THE SAME NUMBER by construction — 1,577 of
+    1,854 rows carry one snapshot — so presenting them as two measurements would be inventing
+    a second fact. On those games the line is not drawn; the caption says why instead.
+    """
+    snapshots = row.get("line_snapshot_count")
+    if pd.isna(snapshots):
+        return
+    if int(snapshots) == 1:
+        st.caption("This game's line was observed once, so its widest excursion is the net "
+                   "move restated rather than a separate measurement.")
+        return
+    parts = []
+    for label, column in (("spread", "line_spread_largest_excursion"),
+                          ("total", "line_total_largest_excursion")):
+        if pd.notna(row.get(column)):
+            parts.append(f"{label} {fmt.signed(row.get(column), column)}")
+    probability = row.get("line_market_implied_win_probability_largest_excursion")
+    if pd.notna(probability):
+        parts.append(f"win probability {fmt.signed(probability, '', dp=2)} points")
+    if not parts:
+        return
+    floor_note = ""
+    if bool(row.get("line_movement_spans_snapshot_gap")):
+        # The line was tracked across the three days in 2026 that hold no snapshots, so the
+        # excursion is a FLOOR — it may have travelled further unobserved — and a floor
+        # presented as a measurement is the defect this caveat exists to prevent.
+        floor_note = (" These are floors rather than measurements: this game's line was "
+                      "tracked across the three days that hold no snapshots.")
+    st.caption(f"Furthest from the open \u2014 {', '.join(parts)}.{floor_note}")
 
 
 def _model(row) -> None:
@@ -700,17 +882,40 @@ def _model(row) -> None:
                 f"{int(floor) if pd.notna(floor) else 5} onward.")
         return
 
-    cols = st.columns(4)
-    cols[0].metric("Predicted margin (home)",
-                   fmt.signed(row.get("predicted_margin_home_perspective"),
-                              "predicted_margin_home_perspective"),
-                   help="Positive means the model has the home team winning by that many.")
-    cols[1].metric("Predicted total",
-                   fmt.number(row.get("predicted_total_points"), "predicted_total_points"))
-    cols[2].metric("Home win probability",
-                   fmt.number(row.get("home_win_probability"), "home_win_probability"))
-    cols[3].metric("Cover edge",
-                   fmt.signed(row.get("home_cover_edge"), "home_cover_edge"))
+    # R-579. THE TILES ARE DATA, AND `omit_when_null` IS THE PARAMETER RATHER THAN A CAPTION.
+    #
+    # 🚨 `home_win_probability` IS NULL IN ALL 111,049 ROWS (R-572), and A090 found why:
+    # srv_game's `latest_prediction` prefers a margin model, and the margin and probability
+    # models are disjoint. So this metric has never once shown a number — it has promised one
+    # and drawn an em dash, on every game since the panel shipped.
+    #
+    # ⚠️ IT IS OMITTED BY THE DATA, NOT BY A HARDCODED EXPLANATION — R-500's lesson. A caption
+    # saying "not available yet" would be a second place to remember on the day R-578
+    # populates the column; a null check needs no maintenance and the tile returns by itself.
+    #
+    # ⚠️ AND THE FLAG IS PER-TILE ON PURPOSE. AC-G.32's em dash is RIGHT for the other three:
+    # a model that scored this game and produced no cover edge is an absence worth showing.
+    # A column that is null for every row ever published is not an absence, it is a promise
+    # the page cannot keep.
+    tiles = [
+        ("Predicted margin (home)",
+         fmt.signed(row.get("predicted_margin_home_perspective"),
+                    "predicted_margin_home_perspective"),
+         "Positive means the model has the home team winning by that many.", False),
+        ("Predicted total",
+         fmt.number(row.get("predicted_total_points"), "predicted_total_points"),
+         None, False),
+        ("Home win probability",
+         fmt.number(row.get("home_win_probability"), "home_win_probability"),
+         "cfdb's own model, not the market-implied bar above the header.",
+         pd.isna(row.get("home_win_probability"))),
+        ("Cover edge",
+         fmt.signed(row.get("home_cover_edge"), "home_cover_edge"), None, False),
+    ]
+    tiles = [tile for tile in tiles if not tile[3]]
+    cols = st.columns(len(tiles))
+    for column, (label, value, hint, _omit) in zip(cols, tiles):
+        column.metric(label, value, help=hint)
 
     if row.get("is_out_of_sample_week"):
         st.markdown(chips.out_of_sample_chip_html(True), unsafe_allow_html=True)
@@ -867,7 +1072,8 @@ def _yardage(row) -> None:
     # Its own section and its own view: this is the only block on the page that reads
     # srv_team_week, so a failure here degrades one panel rather than blanking a Matchup
     # that is otherwise complete.
-    with states.section("srv_team_week", degraded_if_missing="srv_team_week",
+    with states.section("srv_team_week", dataset=DATASETS["srv_team_week"],
+                        degraded_if_missing="srv_team_week",
                         explanation="Week-grain team form has not been built yet."):
         home_id, away_id = row.get("home_team_id"), row.get("away_team_id")
         if pd.isna(home_id) or pd.isna(away_id):
@@ -1202,7 +1408,7 @@ def _post_game(game_id) -> None:
     which is a Degraded state for that section rather than a reason to hide the panel.
     """
     st.subheader("Box score")
-    with states.section("srv_game_team"):
+    with states.section("srv_game_team", dataset=DATASETS["srv_game_team"]):
         # ONE READ. Two rows, because the grain is game × team — the limit is the grain
         # restated rather than a guess at a ceiling (AC-G.39).
         df = query(f"""
@@ -1414,7 +1620,7 @@ def _leaders(game_id) -> None:
     about, so this block says its own.
     """
     st.subheader("Game leaders")
-    with states.section("srv_game_team_leader"):
+    with states.section("srv_game_team_leader", dataset=DATASETS["srv_game_team_leader"]):
         # ONE QUERY FOR BOTH TEAMS AND ALL FOUR ROWS. srv_game_team_leader is a different
         # relation to the box score's, so this is a second read on the tab and that is correct
         # rather than a G-2 violation — G-2 is one relation per query, not one query per tab.
@@ -1503,7 +1709,7 @@ def _travel(game_id) -> None:
     distance renders as an em dash, never as zero — zero means they played at home.
     """
     st.subheader("Travel and rest")
-    with states.section("srv_game_travel"):
+    with states.section("srv_game_travel", dataset=DATASETS["srv_game_travel"]):
         df = query("""
             select team, opponent, is_home, is_neutral_site, game_venue, travel_km,
                    elevation_change_m, rest_days, rest_bucket, previous_game_date, as_of_ts
@@ -1624,7 +1830,7 @@ def _drives(game_id) -> None:
     them on the wrong side of the game.
     """
     st.subheader("Drives")
-    with states.section("srv_drive"):
+    with states.section("srv_drive", dataset=DATASETS["srv_drive"]):
         # Single table, single WHERE, always by game_id — srv_drive is 81,433 rows and the
         # rule that governs srv_matchup governs this.
         #

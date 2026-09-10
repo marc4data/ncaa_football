@@ -210,7 +210,6 @@ def test_each_model_figure_lands_in_its_own_metric(panel):
     entries = panel(_row())
     assert _metric(entries, "Predicted margin (home)") == "+7.4"
     assert _metric(entries, "Predicted total") == "48.5"
-    assert _metric(entries, "Home win probability") == "—"
     assert _metric(entries, "Cover edge") == "+5.9"
 
 
@@ -290,25 +289,37 @@ def test_an_ungraded_game_states_no_actual_margin_at_all(panel):
 
 # --- null versus zero ------------------------------------------------------------------------
 
-def test_home_win_probability_is_an_em_dash_because_it_is_null(panel):
-    """R-572. Null in all 111,049 rows, so this IS the panel as every reader has seen it.
+def test_home_win_probability_is_OMITTED_rather_than_promised_as_an_em_dash(panel):
+    """🚨 R-579 REVERSES WHAT THIS TEST USED TO ASSERT, AND THE REASON IS THE MEASUREMENT.
 
-    AC-G.32: the panel is right to draw an em dash. The defect is upstream and is session
-    A's (A090); what this asserts is that the page tells the truth about the absence rather
-    than inventing a 0.
+    It used to assert an em dash, on the grounds that AC-G.32 makes a null honest. That was
+    right about one game and wrong about the column: A090 established the value is null in
+    ALL 111,049 rows, and why — srv_game's `latest_prediction` prefers a margin model, and the
+    margin and probability models are disjoint. So the tile never showed a number in its life.
+
+    An em dash says "we have no figure for THIS game". A tile that has never once been filled
+    says something else, and the honest rendering is to omit it until R-578 populates the
+    column. ⚠️ Driven by the null, not by a caption — see the note on `tiles` in `_model`.
     """
-    assert _metric(panel(_row()), "Home win probability") == "—"
+    entries = panel(_row())
+    labels = [b for k, b in entries if k == "metric"]
+    assert not any(b.startswith("Home win probability ") for b in labels), \
+        "the panel is still promising a number the column has never carried"
+    assert len(labels) == 3, f"three tiles, not four, while the column is null: {labels}"
 
 
 def test_a_published_home_win_probability_WOULD_render_at_three_decimals(panel):
-    """⚠️ THE TEST THAT KEEPS THE ONE ABOVE HONEST.
+    """⚠️ THE TEST THAT KEEPS THE ONE ABOVE HONEST, AND R-579 MADE IT LOAD-BEARING.
 
-    Every other assertion about this column depends on today's outage. If R-572 is fixed and
-    the column starts being published, a file that only ever asserted "em dash" would go on
-    passing while testing nothing. This one supplies a value and pins the format: a
+    The tile is omitted while the column is null, so without this the file would assert only
+    an absence — and an absence passes just as well when the metric has been deleted by
+    accident. This supplies a value, proves the tile RETURNS, and pins the format: a
     probability lives in the third decimal, because .184 and .238 must not both read 0.2.
     """
-    assert _metric(panel(_row(home_win_probability=0.6182)), "Home win probability") == "0.618"
+    entries = panel(_row(home_win_probability=0.6182))
+    assert _metric(entries, "Home win probability") == "0.618"
+    assert len([b for k, b in entries if k == "metric"]) == 4, \
+        "the omitted tile did not come back when the column carried a value"
 
 
 def test_a_zero_cover_edge_and_a_missing_one_are_different_statements(panel):
