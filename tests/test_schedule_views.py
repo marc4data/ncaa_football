@@ -966,6 +966,64 @@ def test_every_against_the_line_entry_is_claimed_by_exactly_one_subsection():
         f"unclaimed: {[d for d in defined if d not in claimed]}")
 
 
+def test_every_subsection_is_placed_in_exactly_one_column():
+    """🚨 R-622. THE PLACEMENT GUARD, AND IT CHECKS BOTH DIRECTIONS ON PURPOSE.
+
+    A guard that only catches the missing case is half a guard: a subsection listed in two
+    columns renders twice and reads as a duplicate entry, which is as wrong as one that
+    vanishes.
+
+    ⚠️ THE TWO SIDES ARE INDEPENDENT DECLARATIONS. Expected comes from LEGEND_SUBSECTIONS —
+    what the subsections ARE — plus the Examples block name. Claimed comes from
+    LEGEND_SUBSECTION_COLUMNS — where they are DRAWN. A089's Break 1 proved that deriving one
+    from the other produces a test that cannot fail, and A091's own assignment guard was caught
+    doing exactly that only because the break was run.
+    """
+    for title, columns in schedule.LEGEND_SUBSECTION_COLUMNS.items():
+        defined = [heading for heading, _keys in schedule.LEGEND_SUBSECTIONS[title]]
+        defined.append(schedule.LEGEND_EXAMPLES_BLOCK)
+        placed = [name for column in columns for name in column]
+        assert len(placed) == len(set(placed)), \
+            f"{title}: a subsection is placed in two columns: {placed}"
+        assert sorted(placed) == sorted(defined), (
+            f"{title}: columns place {sorted(placed)}; the group defines {sorted(defined)} "
+            f"(unplaced: {[d for d in defined if d not in placed]})")
+
+
+def test_every_placed_name_resolves_to_something_renderable():
+    """⚠️ The cost of placing by NAME rather than by reference: a typo in
+    LEGEND_SUBSECTION_COLUMNS is a KeyError at render, not at import. Naming is what makes the
+    placement declarative, so the typo is caught here instead."""
+    entries = dict(schedule._legend_groups(None))["Against the line"]
+    for title, columns in schedule.LEGEND_SUBSECTION_COLUMNS.items():
+        for column in columns:
+            for name in column:
+                html = schedule._legend_block(name, entries, title)
+                assert html and "cfdb-legend" in html, f"{name!r} rendered nothing"
+
+
+def test_the_examples_block_is_placed_by_NAME_and_not_by_column_position():
+    """🚨 R-622 REMOVED A POSITIONAL COUPLING AND THIS KEEPS IT REMOVED.
+
+    Examples used to find its home with `if title == LEGEND_COLUMNS[-1][0]` — "the first title
+    of the last column" — which was true only by coincidence of the two-column shape. A091 had
+    removed exactly this kind of coupling from the band labels for the same reason: a placement
+    derived from the layout breaks the moment the layout moves, silently.
+    """
+    import ast
+    from pathlib import Path
+    source = Path(schedule.__file__).read_text()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) \
+                and node.left.id == "title":
+            rendered = ast.dump(node)
+            assert "LEGEND_COLUMNS" not in rendered, \
+                "a placement is being derived from LEGEND_COLUMNS again (R-622)"
+    assert schedule.LEGEND_EXAMPLES_BLOCK in [
+        name for cols in schedule.LEGEND_SUBSECTION_COLUMNS.values()
+        for col in cols for name in col], "Examples has no declared home"
+
+
 def test_the_subsections_do_not_nest_the_groups():
     """⚠️ R-580's actual risk. Six tests in this file walk LEGEND_GROUPS two levels deep, and a
     third level would silently change what they iterate — some raising, some quietly asserting

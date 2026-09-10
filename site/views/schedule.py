@@ -588,7 +588,41 @@ LEGEND_GROUPS = [
 
 # R-176: the columns are a declared LAYOUT OVER the groups, so a regroup is a change here and
 # `LEGEND_GROUPS` stays the single inventory the completeness tests read.
+#
+# ⚠️ R-622. THE OUTER COLUMNS ARE NOW TWO, NOT THREE, AND THAT IS HOW THE SPAN IS BUILT.
+# Marc: "Can you make it span 3 columns and have Against the Line span the 2 columns on the
+# right." `st.columns` has NO COLUMN SPAN, so three equal columns cannot carry a heading across
+# two of them. The right-hand outer column emits the "Against the line" title ONCE and then
+# nests its own `st.columns(2)` beneath it — which is what spanning means here, rather than a
+# wide heading sitting in the first of three siblings.
 LEGEND_COLUMNS = [["Game", "Result"], ["Against the line"]]
+
+# The outer ratio. ⚠️ A STARTING POINT, NOT A MEASUREMENT — the left column holds two short
+# groups and the right holds everything else, so the weighting is a judgement Marc makes by
+# looking. Declared here rather than inline so changing it is a data change.
+LEGEND_COLUMN_WEIGHTS = [1, 2]
+
+# 🚨 R-622. WHICH SUBSECTION SITS IN WHICH INNER COLUMN, DECLARED RATHER THAN DERIVED.
+#
+# Marc: "Move Examples and Misc from the 2nd to the 3rd. Place Examples above Misc in the 3rd."
+#
+# ⚠️ "Examples" IS A NAME IN THIS LIST LIKE ANY OTHER, AND THAT IS THE POINT OF THE ROUND.
+# It used to find its place positionally — `if title == LEGEND_COLUMNS[-1][0]`, meaning "the
+# first title of the last column" — which was true only by coincidence of the two-column shape
+# this round changes. A091 removed exactly this kind of coupling from the band labels, keying
+# entries by position rather than by text "because matching on text would break the moment the
+# thresholds changed". A placement derived from the layout is the same defect wearing the other
+# hat. Declared, so moving it later is a data change and not a code change.
+#
+# ⚠️ STILL A LAYOUT, NOT A REGROUPING. LEGEND_GROUPS is untouched and flat; LEGEND_SUBSECTIONS
+# still says what the subsections ARE; this says only where they are drawn.
+LEGEND_EXAMPLES_BLOCK = "Examples"
+LEGEND_SUBSECTION_COLUMNS = {
+    "Against the line": [
+        ["Outcome", "Against the Spread", "Against Over/Under"],
+        [LEGEND_EXAMPLES_BLOCK, "Misc"],
+    ],
+}
 
 # 🚨 R-580. MARC'S FOUR SUBSECTIONS, AND THEY ARE A SECOND LAYOUT OVER THE SAME FLAT GROUPS.
 #
@@ -733,7 +767,7 @@ def _legend_groups(df) -> list:
             for title, entries in LEGEND_GROUPS]
 
 
-def _legend_rows(entries, title: str) -> str:
+def _legend_rows(entries, title: str, only=None) -> str:
     """One group's rows, with R-580's subsection headings layered over them where declared.
 
     ⚠️ THE SUBSECTIONS ARE A LAYOUT, NOT A REGROUPING. `entries` arrives flat — exactly as
@@ -753,13 +787,44 @@ def _legend_rows(entries, title: str) -> str:
     by_key = {entry[:-1]: entry for entry in entries}
     out = []
     for heading, keys in sections:
+        # R-622. `only` lets a COLUMN ask for the subsections it holds. None means all of them,
+        # which is what a group with no column split still gets.
+        if only is not None and heading not in only:
+            continue
         out.append(f"<div class='cfdb-legend-sub'>{heading}</div>")
         out += [row(by_key[key]) for key in keys]
     return "".join(out)
 
 
+def _legend_examples(entries) -> str:
+    """R-581's Examples block, as a named block rather than a position.
+
+    ⚠️ THE STRIP IS STILL `_result_strip`. R-177: "a legend example assembled from its own
+    markup is a second implementation of the strip, and the first thing it does is drift." Only
+    where it sits has ever changed.
+    """
+    return "".join(
+        f"<div class='cfdb-legend-row'>"
+        f"<span class='cfdb-legend-key cfdb-legend-eg'>{_result_strip(row)}</span>"
+        f"<span>{_example_caption(row, entries)}</span></div>"
+        for row in LEGEND_EXAMPLES)
+
+
+def _legend_block(name: str, entries, title: str) -> str:
+    """One named block inside a group — a subsection, or the Examples block.
+
+    R-622. This is what makes `LEGEND_SUBSECTION_COLUMNS` a list of NAMES: every name in it
+    resolves through here, so Examples is placed by the same mechanism as Outcome or Misc and
+    nothing reads the column shape to decide where it goes.
+    """
+    if name == LEGEND_EXAMPLES_BLOCK:
+        return (f"<div class='cfdb-legend-title'>{LEGEND_EXAMPLES_BLOCK}</div>"
+                f"{_legend_examples(entries)}")
+    return _legend_rows(entries, title, only=[name])
+
+
 def _legend(df=None) -> None:
-    """R-159/R-176. The legend, as a popover, in two columns.
+    """R-159/R-176/R-622. The legend, as a popover, in three columns — built from two.
 
     NOT A MODAL, deliberately: a legend is consulted WHILE looking at the thing it explains,
     and a modal covers exactly what the reader is comparing against. `st.popover` opens over
@@ -768,43 +833,43 @@ def _legend(df=None) -> None:
     It also keeps the sidebar for navigation. An earlier version lived under the nav and pushed
     Streamlit's nav past its collapse threshold, hiding eight pages behind "View 8 more".
 
-    EIGHTEEN MARKS, in two columns — Game and Result stacked on the left, the long group on the
-    right. Eighteen in one list is a list nobody reads, and 7 against 11 balances better across
-    two columns than 5/7/6 does across three.
+    🚨 THE THREE COLUMNS ARE AN OUTER TWO WITH A NESTED PAIR, AND THAT IS NOT A WORKAROUND —
+    IT IS THE ONLY WAY THE SPAN IS EXPRESSIBLE. Marc: "make it span 3 columns and have Against
+    the Line span the 2 columns on the right." `st.columns` has no colspan, so under
+    `st.columns(3)` the heading could only sit in the first of three siblings and would read as
+    a heading for that column alone. Emitting the title once, above a nested `st.columns(2)`,
+    is what makes it span both.
+
+    ⚠️ EVERY PLACEMENT IS DECLARED. `LEGEND_COLUMNS` says which groups are in which outer
+    column; `LEGEND_SUBSECTION_COLUMNS` says which subsections are in which inner one; the
+    Examples block is a name in that same list. Nothing here reads the shape of the layout to
+    decide where something goes — which is the coupling this round removed.
     """
     by_title = dict(_legend_groups(df))
     with st.popover("Legend", use_container_width=True,
                     help="What every mark on this page means"):
-        columns = st.columns(len(LEGEND_COLUMNS))
+        columns = st.columns(LEGEND_COLUMN_WEIGHTS)
         for column, titles in zip(columns, LEGEND_COLUMNS):
-            blocks = []
             for title in titles:
-                blocks.append(f"<div class='cfdb-legend-title'>{title}</div>"
-                              f"{_legend_rows(by_title[title], title)}")
-                # 🚨 R-581. EXAMPLES IS A SECTION NOW, WITH THE SAME HEADING AS THE OTHERS, AND
-                # IT SITS UNDER "Against the line" BECAUSE MARC PLACED IT THERE: "Examples
-                # should be its own section with same type of header as Game, Result, and
-                # Against the Line. It really belongs under Against the Line."
-                #
-                # ⚠️ IT USED TO BE ONE ELEMENT DRAWN IN TWO PLACES — the strips right-aligned
-                # against this heading, the captions joined with "·" in a run-on line at the
-                # bottom of the popover — and Marc read them as two things: "the example icons
-                # are way up to the far right of the legend, nowhere close to the description."
-                # Building the two halves in two places is why they sat apart on screen.
-                #
-                # ⚠️ THE STRIP IS STILL `_result_strip`. R-177's warning is exactly the one a
-                # relayout invites: "a legend example assembled from its own markup is a second
-                # implementation of the strip, and the first thing it does is drift." Only the
-                # container changed.
-                if title == LEGEND_COLUMNS[-1][0]:
-                    rows = "".join(
-                        f"<div class='cfdb-legend-row'>"
-                        f"<span class='cfdb-legend-key cfdb-legend-eg'>{_result_strip(row)}"
-                        f"</span><span>{_example_caption(row, by_title[title])}</span></div>"
-                        for row in LEGEND_EXAMPLES)
-                    blocks.append(f"<div class='cfdb-legend-title'>Examples</div>{rows}")
-            column.markdown(f"<div class='cfdb-legend-side'>{''.join(blocks)}</div>",
-                            unsafe_allow_html=True)
+                entries = by_title[title]
+                inner = LEGEND_SUBSECTION_COLUMNS.get(title)
+                if not inner:
+                    column.markdown(
+                        f"<div class='cfdb-legend-side'>"
+                        f"<div class='cfdb-legend-title'>{title}</div>"
+                        f"{_legend_rows(entries, title)}</div>",
+                        unsafe_allow_html=True)
+                    continue
+                # The spanning title, emitted ONCE above the nested pair.
+                column.markdown(
+                    f"<div class='cfdb-legend-side'>"
+                    f"<div class='cfdb-legend-title'>{title}</div></div>",
+                    unsafe_allow_html=True)
+                for sub_column, names in zip(column.columns(len(inner)), inner):
+                    sub_column.markdown(
+                        f"<div class='cfdb-legend-side cfdb-legend-nested'>"
+                        f"{''.join(_legend_block(name, entries, title) for name in names)}"
+                        f"</div>", unsafe_allow_html=True)
         # R-158: the sign convention is a CONVENTION, which is what a legend is for.
         # SPREAD_SIGN_NOTE is markdown and this is an HTML block, so `**bold**` would render as
         # literal asterisks. Converted rather than restated — R-009 made it a shared constant
