@@ -568,12 +568,22 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 .cfdb-dome { width:1.15em; height:1.15em; vertical-align:-.22em; }
 .cfdb-legend-key .cfdb-dome { vertical-align:-.28em; }
 /* R-177: the worked examples ride the long column's heading line. */
-.cfdb-legend-head { display:flex; align-items:baseline; justify-content:space-between;
-                    gap:.8rem; }
-.cfdb-legend-egs { display:inline-flex; gap:.9rem; }
+/* ⚠️ R-581 REMOVED `.cfdb-legend-head`, `.cfdb-legend-egs` and `.cfdb-legend-egcap`.
+   They positioned the worked examples as strips right-aligned against the "Against the line"
+   heading and their captions as a run-on line at the bottom of the popover — one element drawn
+   in two places, which is why Marc read them as two: "the example icons are way up to the far
+   right of the legend, nowhere close to the description." Examples is a section now and its
+   rows use `.cfdb-legend-row` like every other entry, so the three rules had no callers left.
+   Deleted rather than left: dead CSS is a justification that outlives its reason, which is the
+   shape this project keeps paying for. `.cfdb-legend-eg` stays — it is the key span. */
 .cfdb-legend-eg { display:inline-flex; }
-.cfdb-legend-egcap { margin-top:.7rem; font-size:.76rem; opacity:.6; }
-/* The groups stack in the left column, so a second heading needs air above it. */
+/* R-580. Marc's four subsections inside "Against the line". SUBORDINATE to the section title
+   deliberately: `.cfdb-legend-title` is the level Game, Result and Against the line sit at,
+   and a subsection rendered at the same weight would read as a fifth section rather than a
+   division of one. Lighter, smaller, not uppercase, and indented to the swatch column so the
+   heading lines up with the entries it heads. */
+.cfdb-legend-sub { font-weight:600; opacity:.5; font-size:.72rem; margin-top:.55rem;
+                   margin-bottom:.15rem; }
 .cfdb-legend-side .cfdb-legend-title:not(:first-child) { margin-top:.9rem; }
 .cfdb-legend-title { font-weight:600; opacity:.7; font-size:.78rem; letter-spacing:.03em;
                      text-transform:uppercase; margin-bottom:.5rem; }

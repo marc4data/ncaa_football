@@ -590,20 +590,106 @@ LEGEND_GROUPS = [
 # `LEGEND_GROUPS` stays the single inventory the completeness tests read.
 LEGEND_COLUMNS = [["Game", "Result"], ["Against the line"]]
 
+# 🚨 R-580. MARC'S FOUR SUBSECTIONS, AND THEY ARE A SECOND LAYOUT OVER THE SAME FLAT GROUPS.
+#
+# ⚠️ `LEGEND_GROUPS` IS NOT NESTED AND MUST NOT BE. Six tests in test_schedule_views.py walk it
+# two levels deep — `for _, rows in LEGEND_GROUPS for e in rows` — and a third level would
+# silently change what `e` is. Some of those comprehensions would raise; others would build a
+# different set and still pass, which is the failure that costs a round rather than an hour.
+# R-176 already answered this for the columns and its sentence is the rule: the layout is
+# declared over the groups, and the groups stay the single inventory the completeness tests
+# read.
+#
+# Marc, 2026-09-10: "Outcome — the 4 circles, in the same order as they are now. Against the
+# Spread — the 2 squares. Against Over/Under — the 2 diamonds. Misc — the 2 dashes."
+#
+# ⚠️ Δ IS AN INTERPRETATION AND MARC CAN OVERTURN IT BY LOOKING. His four subsections account
+# for 10 of the 11 entries; `MOVE_GLYPH` is the eleventh. It goes in Misc because it is not
+# part of the result strip's vocabulary at all — it renders in the line columns, not the
+# strip — but he described Misc as "the 2 dashes", so this makes it three.
+#
+# Entries are identified by their LABEL POSITION in the group rather than by their text,
+# because three of the labels are substituted per render from the data (R-224) and matching on
+# text would break the moment the thresholds changed — which is the whole defect R-582 fixed
+# four lines above.
+LEGEND_SUBSECTIONS = {
+    "Against the line": [
+        ("Outcome", [("shape", "upset", "quiet", ""),
+                     ("shape", "upset", "fill", "cfdb-u1"),
+                     ("shape", "upset", "fill", "cfdb-u2"),
+                     ("shape", "upset", "fill", "cfdb-u3")]),
+        ("Against the Spread", [("shape", "cover", "fill", "cfdb-acc"),
+                                ("shape", "cover", "open", "cfdb-acc")]),
+        ("Against Over/Under", [("shape", "over", "fill", "cfdb-acc"),
+                                ("shape", "over", "open", "cfdb-acc")]),
+        ("Misc", [("shape", "cover", "nodata", ""),
+                  ("shape", "upset", "nodata", ""),
+                  ("glyph", "cfdb-legend-ch", MOVE_GLYPH)]),
+    ],
+}
+
 # R-177. Two worked examples beside the long column's heading. The strip is read as a unit of
 # three and eleven rows explain it one mark at a time; a complete strip teaches the composition
 # in the space of a heading.
 #
 # BUILT BY `_result_strip` FROM A SYNTHETIC ROW, NOT BY HAND. A legend example assembled from
 # its own markup is a second implementation of the strip, and the first thing it does is drift.
+# 🚨 R-582. THE CAPTIONS ARE NOT WRITTEN HERE ANY MORE, AND THE REASON IS THAT ONE OF THEM WAS
+# WRONG ON THE LIVE PAGE FOR MONTHS WHILE THE BAND LABELS FOUR LINES ABOVE IT WERE RIGHT.
+#
+# The second example read "upset by 7+". `srv_game` classifies with a STRICT `>` — the case at
+# srv_game.sql:402-410 is `> blowout -> blowout`, `> big -> big`, else `upset` — so
+# `upset_level: "big"` is the MIDDLE band and reads "Upset by 8–14". "7+" is not that band and
+# it is not either of the other two; it is the exact string R-141/R-224 removed from the band
+# labels, left behind in a literal that the per-render substitution never reached.
+#
+# ⚠️ R-224 FIXED THE BANDS BY MAKING THEM SENTINELS AND LEFT THIS PLAIN STRING BESIDE THEM. So
+# the popover rendered the corrected labels and the uncorrected one at the same time, four
+# lines apart, and a reader comparing them learned the wrong boundary from the example.
+#
+# ✅ SO AN EXAMPLE NOW QUOTES THE LEGEND IT ILLUSTRATES. `_example_caption` looks each part of
+# the synthetic row up in the SAME resolved entries the popover just drew, so there is no
+# third copy of these words and no copy at all of the numbers. `metrics.upset_criteria`'s own
+# rule — "neither is allowed to know 7 or 14" — is now true of the examples as well as of the
+# bands and the workbook.
 LEGEND_EXAMPLES = [
-    ({"is_completed": True, "upset_level": "none",
-      "winner_covered_close": "yes", "over_met": "yes"},
-     "favorite won · winner covered · over"),
-    ({"is_completed": True, "upset_level": "big",
-      "winner_covered_close": "yes", "over_met": "no"},
-     "upset by 7+ · winner covered · under"),
+    {"is_completed": True, "upset_level": "none",
+     "winner_covered_close": "yes", "over_met": "yes"},
+    {"is_completed": True, "upset_level": "big",
+     "winner_covered_close": "yes", "over_met": "no"},
 ]
+
+# What each field of a synthetic example row means, as a key into the resolved legend entries.
+# `(shape, state, css_class)` — the class is load-bearing for the three upset bands, which
+# share `("upset", "fill")` and are told apart only by `cfdb-u1/u2/u3`.
+_EXAMPLE_KEYS = {
+    "upset_level": {"none": ("upset", "quiet", ""),
+                    "upset": ("upset", "fill", "cfdb-u1"),
+                    "big": ("upset", "fill", "cfdb-u2"),
+                    "blowout": ("upset", "fill", "cfdb-u3")},
+    "winner_covered_close": {"yes": ("cover", "fill", "cfdb-acc"),
+                             "no": ("cover", "open", "cfdb-acc")},
+    "over_met": {"yes": ("over", "fill", "cfdb-acc"),
+                 "no": ("over", "open", "cfdb-acc")},
+}
+
+
+def _example_caption(row: dict, entries) -> str:
+    """One example's words, taken from the legend entries it illustrates.
+
+    ⚠️ RAISES ON A KEY IT CANNOT RESOLVE RATHER THAN RENDERING A GAP. A caption that silently
+    dropped a segment would read as a two-part strip described in two parts and look correct —
+    the silent-absence shape this project has been bitten by repeatedly. A legend that cannot
+    describe its own example is a defect, and `states.section` turns the raise into an Error
+    state rather than a broken page.
+    """
+    by_key = {(e[1], e[2], e[3]): e[4] for e in entries if e[0] == "shape"}
+    parts = []
+    for field, mapping in _EXAMPLE_KEYS.items():
+        key = mapping[row[field]]
+        label = by_key[key]
+        parts.append(label[0].lower() + label[1:])
+    return " · ".join(parts)
 
 
 def _legend_key(kind: str, *args) -> str:
@@ -647,6 +733,31 @@ def _legend_groups(df) -> list:
             for title, entries in LEGEND_GROUPS]
 
 
+def _legend_rows(entries, title: str) -> str:
+    """One group's rows, with R-580's subsection headings layered over them where declared.
+
+    ⚠️ THE SUBSECTIONS ARE A LAYOUT, NOT A REGROUPING. `entries` arrives flat — exactly as
+    `LEGEND_GROUPS` holds it and the completeness tests walk it — and this only decides where
+    a heading goes between two of them. A group with no declaration in `LEGEND_SUBSECTIONS`
+    renders exactly as it did before, which is what keeps Game and Result unchanged.
+    """
+    def row(entry) -> str:
+        return (f"<div class='cfdb-legend-row'>"
+                f"<span class='cfdb-legend-key'>{_legend_key(entry[0], *entry[1:-1])}"
+                f"</span><span>{entry[-1]}</span></div>")
+
+    sections = LEGEND_SUBSECTIONS.get(title)
+    if not sections:
+        return "".join(row(entry) for entry in entries)
+
+    by_key = {entry[:-1]: entry for entry in entries}
+    out = []
+    for heading, keys in sections:
+        out.append(f"<div class='cfdb-legend-sub'>{heading}</div>")
+        out += [row(by_key[key]) for key in keys]
+    return "".join(out)
+
+
 def _legend(df=None) -> None:
     """R-159/R-176. The legend, as a popover, in two columns.
 
@@ -668,29 +779,32 @@ def _legend(df=None) -> None:
         for column, titles in zip(columns, LEGEND_COLUMNS):
             blocks = []
             for title in titles:
-                rows = "".join(
-                    f"<div class='cfdb-legend-row'>"
-                    f"<span class='cfdb-legend-key'>{_legend_key(entry[0], *entry[1:-1])}"
-                    f"</span><span>{entry[-1]}</span></div>"
-                    for entry in by_title[title])
-                head = f"<div class='cfdb-legend-title'>{title}</div>"
+                blocks.append(f"<div class='cfdb-legend-title'>{title}</div>"
+                              f"{_legend_rows(by_title[title], title)}")
+                # 🚨 R-581. EXAMPLES IS A SECTION NOW, WITH THE SAME HEADING AS THE OTHERS, AND
+                # IT SITS UNDER "Against the line" BECAUSE MARC PLACED IT THERE: "Examples
+                # should be its own section with same type of header as Game, Result, and
+                # Against the Line. It really belongs under Against the Line."
+                #
+                # ⚠️ IT USED TO BE ONE ELEMENT DRAWN IN TWO PLACES — the strips right-aligned
+                # against this heading, the captions joined with "·" in a run-on line at the
+                # bottom of the popover — and Marc read them as two things: "the example icons
+                # are way up to the far right of the legend, nowhere close to the description."
+                # Building the two halves in two places is why they sat apart on screen.
+                #
+                # ⚠️ THE STRIP IS STILL `_result_strip`. R-177's warning is exactly the one a
+                # relayout invites: "a legend example assembled from its own markup is a second
+                # implementation of the strip, and the first thing it does is drift." Only the
+                # container changed.
                 if title == LEGEND_COLUMNS[-1][0]:
-                    # R-177: the examples ride the heading's line, right-aligned.
-                    samples = "".join(
-                        f"<span class='cfdb-legend-eg' title='{caption}'>"
-                        f"{_result_strip(row)}</span>"
-                        for row, caption in LEGEND_EXAMPLES)
-                    head = (f"<div class='cfdb-legend-head'>"
-                            f"<span class='cfdb-legend-title'>{title}</span>"
-                            f"<span class='cfdb-legend-egs'>{samples}</span></div>")
-                blocks.append(f"{head}{rows}")
+                    rows = "".join(
+                        f"<div class='cfdb-legend-row'>"
+                        f"<span class='cfdb-legend-key cfdb-legend-eg'>{_result_strip(row)}"
+                        f"</span><span>{_example_caption(row, by_title[title])}</span></div>"
+                        for row in LEGEND_EXAMPLES)
+                    blocks.append(f"<div class='cfdb-legend-title'>Examples</div>{rows}")
             column.markdown(f"<div class='cfdb-legend-side'>{''.join(blocks)}</div>",
                             unsafe_allow_html=True)
-        # R-177's captions, once, below the examples they describe — a tooltip on a strip in a
-        # popover is a tooltip inside a tooltip.
-        captions = " &nbsp;·&nbsp; ".join(caption for _, caption in LEGEND_EXAMPLES)
-        st.markdown(f"<div class='cfdb-legend-egcap'>Examples: {captions}</div>",
-                    unsafe_allow_html=True)
         # R-158: the sign convention is a CONVENTION, which is what a legend is for.
         # SPREAD_SIGN_NOTE is markdown and this is an HTML block, so `**bold**` would render as
         # literal asterisks. Converted rather than restated — R-009 made it a shared constant

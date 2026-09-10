@@ -134,12 +134,25 @@ def test_the_views_named_in_sections_are_exactly_the_views_the_module_reads():
         f"{sorted(_queried_views())}")
 
 
-def test_every_section_states_its_dataset_and_every_label_is_used(today):
-    """Both directions. A view with no label renders no caption — the silent-guard shape this
-    project has been bitten by three times — and a label no section names is dead copy."""
+def test_every_section_states_its_dataset(today):
+    """A view with no label renders no caption — the silent-guard shape this project has been
+    bitten by three times.
+
+    ⚠️ R-583 WEAKENED THIS FROM AN EQUALITY TO A SUBSET, AND THE REASON SHOULD NOT BE LOST.
+    `DATASETS` moved to `lib/datasets.py` so Matchup can consume it instead of declaring a
+    second table naming the same views. It is now a SITE-WIDE table, so "every label is used"
+    stopped being a statement about Today: it holds six keys Today does not read, deliberately,
+    because §3 rule 3.1 says a shared-module change ships the labels and B's round wires B's
+    call sites.
+
+    ⚠️ THE DEAD-COPY DIRECTION IS THEREFORE UNGUARDED RIGHT NOW, and pretending otherwise would
+    be worse than saying so. The honest version — every key in datasets.py is named by a
+    `states.section` somewhere under site/views/ — cannot pass until Matchup's call sites land,
+    and a guard that ships already exempted is not a guard. It belongs with B's round.
+    """
     named = set(_section_views())
-    assert named == set(today.DATASETS), (
-        f"sections name {sorted(named)}; DATASETS has {sorted(today.DATASETS)}")
+    missing = named - set(today.DATASETS)
+    assert not missing, f"sections name views with no label in datasets.py: {sorted(missing)}"
     for view, label in today.DATASETS.items():
         assert label and not label.startswith("srv_"), \
             f"{view} label {label!r} is an identifier, not front-of-house copy (AC-G.7)"
