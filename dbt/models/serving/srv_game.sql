@@ -645,6 +645,13 @@ select
     -- R-079. Pregame win probability, with the provenance of WHEN it was taken. Read
     -- pregame_wp_basis before quoting it: `as_recorded_by_cfbd` means the figure is real but
     -- was fetched after the game, which is not the same claim as a forecast.
+    --
+    -- ⚠️ R-563. pregame_wp_snapshot_ts IS WEEKLY BY DESIGN AND WILL LOOK STALE. This model is
+    -- rebuilt hot several times a day; /metrics/wp/pregame is fetched only by
+    -- cfbd_pregame_refresh, `0 12 * * 2`. So on a Thursday this column is two days older than
+    -- line_snapshot_ts in the same row and BOTH ARE CORRECT. Measured 2026-09-10 and written
+    -- down because a freshness check that does not know this will report a defect that is not
+    -- one. Full reasoning on the column in _models.yml.
     wp.home_win_probability       as pregame_home_win_probability,
     wp.basis                      as pregame_wp_basis,
     wp.snapshot_ts                as pregame_wp_snapshot_ts,
