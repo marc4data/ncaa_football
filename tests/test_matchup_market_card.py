@@ -581,9 +581,18 @@ def test_every_column_the_card_reads_is_actually_SELECTED():
 
     This is the cheap guard for that class: the names the card reads, checked against the
     SELECT the page issues.
+
+    ⚠️ R-669 REPLACED THE PARSE AND THAT WAS THE POINT OF B088. This read
+    `COLUMNS.replace("\n", " ").split(",")`, which a single SQL comment can blind in BOTH
+    directions — A102 hit the loud one (red on a column that IS selected) and the silent one
+    is worse: a comment mentioning a column name between commas puts that name in the
+    "selected" set while the query does not select it, which is precisely the defect below
+    walking back in through the guard written to catch it. `select_list` is validated against
+    the live driver; see its docstring.
     """
     from views import matchup
-    selected = {c.strip() for c in matchup.COLUMNS.replace("\n", " ").split(",")}
+    import select_list
+    selected = select_list.selected_names(matchup.COLUMNS)
     missing = [c for c in _CARD_COLUMNS if c not in selected]
     assert not missing, (
         f"the card reads these columns and the page does not select them, so they are None "
