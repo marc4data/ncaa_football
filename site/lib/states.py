@@ -11,6 +11,9 @@ names the missing object in code font so the blocker can be read off the screen.
 from contextlib import contextmanager
 from typing import Callable, Optional
 
+import os
+import sys
+
 import pandas as pd
 import streamlit as st
 
@@ -108,6 +111,56 @@ def error(view: str, retry: Optional[Callable[[], None]] = None) -> None:
         retry()
 
 
+def render_failed() -> None:
+    """R-630. The data arrived and the page could not draw it.
+
+    ⚠️ IT NAMES NO INTERNAL, AND THAT IS THE POINT. A view name here would be the A086 defect
+    restated: the query succeeded, so the view is not what failed, and printing it sends the
+    next reader — or the next round — to the wrong layer. AC-G.9 still holds absolutely: no
+    traceback, no host, no credential, no exception text.
+
+    ⚠️ IT KEEPS THE PHRASE "Something went wrong", AND THAT IS DELIBERATE RATHER THAN INHERITED.
+    `test_a_broken_row_degrades_this_panel_and_not_the_page` in tests/test_matchup_yardage.py
+    asserts that phrase, and that file is session B's (§3). A shared-module change ships the new
+    behaviour and holds the other session's page harmless — the same call A085 made for
+    fmt.PRECISION rather than reaching into B's file. The sentence is honest either way: what
+    went wrong is the BUILDING, and the clause says so.
+    """
+    st.markdown(
+        "<div class='cfdb-state cfdb-error'>"
+        "<div class='cfdb-state-title'>Could not display this section</div>"
+        "<div class='cfdb-state-body'>Something went wrong building this view after the data "
+        "loaded. This is our problem, not yours.</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _trace(exc: BaseException, view: str) -> None:
+    """⚠️ THE OPERATOR'S HALF OF R-630, AND IT IS OFF BY DEFAULT.
+
+    B084 had to patch `states.section` to a passthrough to discover that its Error state was a
+    dropped SSH tunnel. A session rendering a page needs the real exception WITHOUT editing the
+    page, and four of R-571's five cases would have been a one-line diagnosis with this on.
+
+    🚨 STDERR, NEVER THE PAGE. The reader's screen is not the channel — that is AC-G.9 and it is
+    absolute. Enabled with CFDB_TRACE_STATES=1, which nothing in production sets.
+
+    Type, message and the FAILING LINE — the last frame inside site/, which is the line a
+    session actually needs and is not the line the exception was caught on.
+    """
+    if os.environ.get("CFDB_TRACE_STATES") != "1":
+        return
+    where = ""
+    frame = exc.__traceback__
+    while frame is not None:
+        name = frame.tb_frame.f_code.co_filename
+        if "/site/" in name:
+            where = f"{name.split('/site/')[-1]}:{frame.tb_lineno}"
+        frame = frame.tb_next
+    print(f"[states.section {view}] {type(exc).__name__}: {exc}"
+          + (f"  at {where}" if where else ""), file=sys.stderr)
+
+
 @contextmanager
 def section(view: str, degraded_if_missing: Optional[str] = None,
             explanation: str = "", scheduled: Optional[str] = None,
@@ -145,10 +198,13 @@ def section(view: str, degraded_if_missing: Optional[str] = None,
         # scope keeps that asymmetry from becoming a cycle later.
         from lib import table
         table.dataset_caption(dataset, view)
+    from lib.query import QueryFailed
     try:
         yield
-    except Exception as exc:                                   # noqa: BLE001
-        message = str(exc).lower()
+    except QueryFailed as exc:
+        # 🚨 R-630. THE QUERY RAISED, SO THE VIEW NAME IS HONEST AND `error()` MAY PRINT IT.
+        _trace(exc.original, view)
+        message = str(exc.original).lower()
         missing = ("does not exist" in message or "not found" in message
                    or "undefined table" in message)
         if missing and degraded_if_missing:
@@ -156,6 +212,16 @@ def section(view: str, degraded_if_missing: Optional[str] = None,
                      "This section's data has not been built yet.", scheduled)
         else:
             error(view)
+    except Exception as exc:                                   # noqa: BLE001
+        # 🚨 R-630. ANYTHING ELSE RAISED, WHICH MEANS THE QUERY SUCCEEDED AND THE PAGE FAILED.
+        #
+        # ⚠️ IT MUST NOT NAME THE VIEW. A086: this branch reported "something went wrong reading
+        # srv_rankings" while srv_rankings was returning 101 healthy rows — the fault was an
+        # AttributeError in the renderer, and the message pointed a whole round at the data
+        # layer. The old code could not tell the two apart because it caught one exception type
+        # and named whatever argument it had been given.
+        _trace(exc, view)
+        render_failed()
 
 
 def render_or_state(df: pd.DataFrame, view: str, what: str, why: str,

@@ -125,7 +125,39 @@ def _run(sql: str, params: dict) -> pd.DataFrame:
         return pd.read_sql(text(sql), connection, params=params)
 
 
+class QueryFailed(Exception):
+    """🚨 R-630. THE DATABASE CALL FAILED — as opposed to anything the page did afterwards.
+
+    `states.section` could not tell those two apart, and the cost is measured. A086 spent its
+    whole first phase on a panel reported as *"something went wrong reading srv_rankings"* while
+    srv_rankings was returning 101 healthy rows: the exception was an AttributeError in the
+    RENDERER, three lines further down. Cowork wrote and queue-jumped an entire round on it.
+    B084 (R-627) hit the same shape from the other side — a dropped SSH tunnel rendered as a
+    fault in `srv_game`.
+
+    The state cannot distinguish them by inspecting the exception, because a renderer can raise
+    anything a driver can. The QUERY LAYER is the only place that knows, so it says so here.
+
+    `relation` is the view the query was actually reading, from `check_contract` — so the view
+    name on a reader's screen is a name that was genuinely involved, rather than whatever
+    argument the surrounding `states.section` happened to be given.
+    """
+
+    def __init__(self, relation: str, original: BaseException):
+        self.relation = relation
+        self.original = original
+        super().__init__(f"{type(original).__name__} reading {relation}: {original}")
+
+
 def query(sql: str, params: Optional[dict] = None) -> pd.DataFrame:
-    """Run a contract-checked query, cached on the full parameter set (AC-G.36)."""
-    check_contract(sql)
-    return _run(sql, params or {})
+    """Run a contract-checked query, cached on the full parameter set (AC-G.36).
+
+    ⚠️ A CONTRACT VIOLATION IS NOT WRAPPED. `check_contract` runs before the try below on
+    purpose: a join or a write in a page's SQL is a developer error that should surface as
+    itself, not as "the database had a problem".
+    """
+    relation = check_contract(sql)
+    try:
+        return _run(sql, params or {})
+    except Exception as exc:                                       # noqa: BLE001
+        raise QueryFailed(relation, exc) from exc

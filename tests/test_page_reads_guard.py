@@ -74,3 +74,44 @@ def test_the_check_can_actually_fail():
         assert result.returncode == 1, "the check passed with a column removed"
         assert "home_mascot" in result.stderr and "away_mascot" in result.stderr, \
             f"it failed without naming the column: {result.stderr}"
+
+
+def test_the_as_of_exemption_list_is_empty_and_stays_honest():
+    """R-564's other half. ⚠️ EMPTY TODAY, AND THAT IS THE STRONGEST STATE FOR IT: all sixteen
+    modules calling as_of_caption select as_of_ts, so nothing needs forgiving. If an entry ever
+    appears it carries a reason, the same rule as PROVIDED_BY_THE_PAGE — A088: "without an
+    exemption list carrying a reason per entry, the check gets a blanket skip the first time it
+    is inconvenient and becomes the third silent guard."
+    """
+    import check_page_reads as check
+    for name, reason in check.AS_OF_EXEMPT.items():
+        assert isinstance(reason, str) and len(reason) > 30, \
+            f"{name!r} is exempt from the as-of check with no real reason: {reason!r}"
+    assert len(check.AS_OF_EXEMPT) <= 3, (
+        f"{len(check.AS_OF_EXEMPT)} pages exempt from AC-G.35 — read them and ask whether the "
+        f"check is still checking anything")
+
+
+def test_the_as_of_check_can_actually_fail():
+    """🚨 PART 5's BREAK FOR R-564's OTHER HALF, run against a scratch copy.
+
+    ⚠️ IT REMOVES THE COLUMN FROM EVERY QUERY IN THE MODULE, because the check is a UNION: a
+    module with two queries passes if either selects it. rankings.py has two, and removing one
+    correctly leaves the check green — which was worth discovering by running the break rather
+    than by assuming a single edit was enough.
+    """
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp) / "repo"
+        shutil.copytree(ROOT / "site", scratch / "site")
+        shutil.copytree(ROOT / "ci", scratch / "ci")
+        target = scratch / "site" / "views" / "rankings.py"
+        source = target.read_text()
+        assert source.count("as_of_ts") >= 2, "rankings.py changed — update this test"
+        target.write_text(source.replace("as_of_ts", "as_of_ts_GONE"))
+        result = _REAL_RUN([sys.executable, "ci/check_page_reads.py"],
+                           cwd=scratch, capture_output=True, text=True)
+        assert result.returncode == 1, "the check passed with as_of_ts removed"
+        assert "as_of_caption with no as_of_ts" in result.stderr, \
+            f"it failed without naming the cause: {result.stderr}"

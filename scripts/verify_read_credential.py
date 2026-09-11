@@ -29,7 +29,25 @@ import psycopg2
 ROOT = Path(__file__).resolve().parents[1]
 
 # Schemas the credential must NOT be able to read. serving is the only one it may.
-FORBIDDEN_SCHEMAS = ("raw", "staging", "marts", "public")
+# 🚨 R-629. `marts` AND `public` CAME OUT, AND BOTH ARE COWORK'S RULING RATHER THAN A GUESS.
+#
+# ⚠️ `marts` IS PERMITTED BY DESIGN. src/publish_marts.py sets MARTS_SCHEMA = "marts" and
+# publishes ["marts", "serving"] to the SERVING database — the site reads published marts, and
+# A092 read three of them with this very credential. The script's expectation was stale, not the
+# grant. A094 found this and correctly refused to act on it: "changing a security expectation on
+# my own judgement is not a hygiene item."
+#
+# ⚠️ `public` USAGE IS THE POSTGRES DEFAULT for every role unless revoked, so asserting its
+# absence was asserting that someone had done extra work nobody had asked for. Expected, not a
+# finding.
+#
+# ⚠️ WHAT REMAINS IS WHAT MATTERS: the transform layer. A read credential that can reach `raw`
+# or `staging` can read data the serving contract deliberately does not publish.
+FORBIDDEN_SCHEMAS = ("raw", "staging")
+
+# Schemas this credential MAY use, reported so the line still says what was measured rather than
+# going quiet. CREATE is still a failure in any of them — reading is the grant, writing is not.
+PERMITTED_SCHEMAS = ("serving", "marts", "public")
 
 
 def _load_env() -> None:
@@ -111,8 +129,11 @@ def main() -> int:
         other = cur.fetchall()
         print(f"privileges elsewhere    : "
               f"{', '.join(f'{s}={p}' for s, p in other) if other else '(none)'}")
-        if other:
-            failures.append(f"holds grants outside serving: {[s for s, _ in other]}")
+        # R-629. Same ruling: a grant in a PERMITTED schema is not a finding. `marts` is
+        # published to this database on purpose and the site reads it.
+        unexpected = [schema for schema, _ in other if schema not in PERMITTED_SCHEMAS]
+        if unexpected:
+            failures.append(f"holds grants outside the permitted schemas: {unexpected}")
 
         # ---- 3. SCHEMA-LEVEL REACH ----------------------------------------------------
         # 🚨 R-566. WHICH SCHEMAS EXIST IS ASKED FIRST, AND THE REASON IS A CRASH.
@@ -129,7 +150,7 @@ def main() -> int:
         # than silently skipped, so the line still says what was and was not measured.
         cur.execute("select schema_name from information_schema.schemata")
         present = {row[0] for row in cur.fetchall()}
-        for schema in ("serving",) + FORBIDDEN_SCHEMAS:
+        for schema in PERMITTED_SCHEMAS + FORBIDDEN_SCHEMAS:
             if schema not in present:
                 print(f"  schema {schema:<9} absent on this instance  <- cannot be read")
                 continue
@@ -138,7 +159,7 @@ def main() -> int:
             cur.execute("select has_schema_privilege(%s, %s, 'CREATE')", (user, schema))
             creatable = cur.fetchone()[0]
             print(f"  schema {schema:<9} USAGE={str(usable):<5} CREATE={creatable}")
-            if schema != "serving" and usable:
+            if schema not in PERMITTED_SCHEMAS and usable:
                 failures.append(f"can USAGE schema {schema}")
             if creatable:
                 failures.append(f"can CREATE in schema {schema}")
@@ -178,13 +199,34 @@ def main() -> int:
             failures.append("could not attempt a write against any real serving table")
         else:
             table = target[0]
+            # 🚨 R-629. THE UPDATE PROBE USED `set "{table}" = null` — SETTING A COLUMN NAMED
+            # AFTER THE TABLE, which does not exist. So it was refused by UndefinedColumn rather
+            # than by privilege, reported itself as INCONCLUSIVE, and UPDATE permission was
+            # never proven — which is the one thing this script exists to prove. Postgres checks
+            # the column before the privilege, so a nonexistent column short-circuits the answer.
+            #
+            # ⚠️ A REAL COLUMN, RESOLVED FROM THE CATALOGUE. `where false` still means no row is
+            # touched even if the grant were there, so this is safe to attempt against
+            # production — the point is WHICH error comes back.
+            cur.execute("select column_name from information_schema.columns "
+                        "where table_schema = 'serving' and table_name = %s "
+                        "order by ordinal_position limit 1", (table,))
+            column = cur.fetchone()
+            if not column:
+                print(f"  UPDATE  INCONCLUSIVE — serving.{table} reports no columns")
+                failures.append(f"could not resolve a real column on serving.{table}")
+                update_sql = None
+            else:
+                update_sql = (f'update serving."{table}" '
+                              f'set "{column[0]}" = null where false')
             attempts = {
                 "INSERT": f'insert into serving."{table}" default values',
-                "UPDATE": f'update serving."{table}" set "{table}" = null where false',
                 "DELETE": f'delete from serving."{table}" where false',
                 "CREATE": "create table serving._cfdb_read_probe (x int)",
                 "DROP":   f'drop table serving."{table}"',
             }
+            if update_sql:
+                attempts["UPDATE"] = update_sql
             for label, sql in attempts.items():
                 try:
                     cur.execute(sql)
