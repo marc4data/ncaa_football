@@ -673,19 +673,19 @@
       "high"
     ],
     "startoffensescore": [
-      "Offence's score at the start of the drive.",
+      "Offense's score at the start of the drive.",
       "high"
     ],
     "startdefensescore": [
-      "Defence's score at the start of the drive.",
+      "Defense's score at the start of the drive.",
       "high"
     ],
     "endoffensescore": [
-      "Offence's score at the end of the drive.",
+      "Offense's score at the end of the drive.",
       "high"
     ],
     "enddefensescore": [
-      "Defence's score at the end of the drive.",
+      "Defense's score at the end of the drive.",
       "high"
     ],
     "homelinescores": [
@@ -845,11 +845,11 @@
       "high"
     ],
     "offensetimeouts": [
-      "Timeouts remaining for the team on offence.",
+      "Timeouts remaining for the team on offense.",
       "high"
     ],
     "defensetimeouts": [
-      "Timeouts remaining for the team on defence.",
+      "Timeouts remaining for the team on defense.",
       "high"
     ],
     "minutes": [
@@ -1317,7 +1317,7 @@
       "high"
     ],
     "explosivenessallowed": [
-      "Explosiveness conceded to opponents - the defensive side of the metric. The Glossary defines Explosiveness from the offence's perspective.",
+      "Explosiveness conceded to opponents - the defensive side of the metric. The Glossary defines Explosiveness from the offense's perspective.",
       "high"
     ],
     "totalopportunies": [

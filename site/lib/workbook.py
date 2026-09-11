@@ -2723,7 +2723,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
         for index, (field, label) in enumerate(sheet.columns, start=1):
             cell = tab.cell(row_header, index, label)
             # R-258. One fill per CATEGORY, so a reader scanning 131 headers left to right
-            # can see where offence stops and defence starts without reading a word. A sheet
+            # can see where offense stops and defense starts without reading a word. A sheet
             # with no categories declared gets the single navy, unchanged.
             cell.font = header_font
             cell.fill = PatternFill("solid",

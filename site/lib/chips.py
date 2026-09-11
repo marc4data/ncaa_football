@@ -94,7 +94,7 @@ def week_floor_note(floor=None, season=None, clause: str = "") -> str:
 # ⚠️ R-583/R-521. "favored", NOT "favoured". This string renders in Schedule's legend popover
 # beneath eleven entries that all say "favorite" — "The favorite won", "No line, so no
 # favorite" — so one popover carried two spellings of the same word. Marc asked for American
-# spelling across the site (R-521); that item was scoped to defence/offence and this was not in
+# spelling across the site (R-521); that item was scoped to defense/offense and this was not in
 # it. Reader-facing copy is normalised; internal identifiers are a separate question.
 SPREAD_SIGN_NOTE = (
     "**A negative spread means the home team is favored** — and a negative predicted "

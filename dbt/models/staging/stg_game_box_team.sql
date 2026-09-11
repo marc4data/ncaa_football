@@ -131,7 +131,7 @@ select
     {{ safe_numeric(json_get_string('r.b', 'openFieldYards')) }}          as open_field_yards,
     {{ safe_numeric(json_get_string('r.b', 'openFieldYardsAverage')) }}   as open_field_yards_average,
 
-    -- Whether a team's havoc row describes havoc its defence CAUSED or havoc its offence
+    -- Whether a team's havoc row describes havoc its defense CAUSED or havoc its offense
     -- SUFFERED is not stated by the API and is not asserted here — the endpoint gives a team
     -- and a number. What is established is that this block is ordered opposite to `ppa` in
     -- every landed game, which is why it is joined by name; the semantic direction needs a

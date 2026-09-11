@@ -13,7 +13,7 @@
 -- same statistic at different scales, and the prefix is what keeps a chart from plotting
 -- them on one axis.
 --
--- DEFENSIVE PPA IS NOT INVERTED HERE. A defence allowing 0.19 PPA per play is worse than one
+-- DEFENSIVE PPA IS NOT INVERTED HERE. A defense allowing 0.19 PPA per play is worse than one
 -- allowing 0.10, so lower is better on the defensive columns and higher is better on the
 -- offensive ones. CFBD publishes it that way and staging keeps it that way; flipping the sign
 -- would be an interpretation, and one that silently disagrees with the API's own numbers.

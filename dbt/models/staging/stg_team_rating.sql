@@ -1,8 +1,8 @@
 -- One row per (season, team, rating system). Five systems, unpivoted to a long shape.
 --
 -- LONG RATHER THAN WIDE, and the reason is the grain check that preceded this model. The
--- five systems do not share a shape: SP+ carries offence, defence, special teams and
--- strength of schedule; SRS carries one number; PPA carries offence and defence only. A
+-- five systems do not share a shape: SP+ carries offense, defense, special teams and
+-- strength of schedule; SRS carries one number; PPA carries offense and defense only. A
 -- wide table would be a column per system per component, mostly null, and would need
 -- altering every time CFBD adds a system. Long means a new system is a new branch here and
 -- nothing downstream changes.
@@ -169,7 +169,7 @@ unioned as (
     union all
 
     -- PPA is predicted points added per play: an efficiency measure rather than a team
-    -- strength rating, so it has no overall number of its own. `rating` carries offence,
+    -- strength rating, so it has no overall number of its own. `rating` carries offense,
     -- which is the figure a reader means by "their PPA", and both components are kept.
     select season, 'ppa',
            {{ json_get_string('payload', 'team') }},

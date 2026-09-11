@@ -2565,31 +2565,31 @@ models:
           Plays. The team's offensive side.
       - name: offense_total_havoc_events
         description: >
-          COUNT of disrupted plays the team's offence suffered — tackles for loss, forced
+          COUNT of disrupted plays the team's offense suffered — tackles for loss, forced
           fumbles, interceptions and passes defended against it. A count, not a rate; read
           it against offense_total_havoc_rate.
       - name: offense_front_seven_havoc_events
         description: >
-          Count of plays against this offence disrupted by the opposing front seven.
+          Count of plays against this offense disrupted by the opposing front seven.
       - name: offense_db_havoc_events
         description: >
-          Count of plays against this offence disrupted by the opposing defensive backs.
+          Count of plays against this offense disrupted by the opposing defensive backs.
       - name: offense_havoc_rate
         description: >
           Share of plays ending in a tackle for loss, forced fumble, interception or pass
           defended. The team's offensive side.
       - name: offense_front_seven_havoc_rate
         description: >
-          Share of this offence's plays disrupted by the opposing front seven.
+          Share of this offense's plays disrupted by the opposing front seven.
       - name: offense_db_havoc_rate
         description: >
-          Share of this offence's plays disrupted by the opposing defensive backs.
+          Share of this offense's plays disrupted by the opposing defensive backs.
       - name: defense_total_plays
         description: >
           Plays. The team's defensive side.
       - name: defense_total_havoc_events
         description: >
-          COUNT of plays this defence disrupted. A count, not a rate; read it against
+          COUNT of plays this defense disrupted. A count, not a rate; read it against
           defense_total_havoc_rate, since a high count on a high-play game is a different
           statement from a high rate.
       - name: defense_front_seven_havoc_events
@@ -2611,7 +2611,7 @@ models:
       - name: offense_overall
         description: >
           Offensive predicted points added per play across the whole game, from the per-game
-          PPA feed — the headline efficiency number for this team's offence.
+          PPA feed — the headline efficiency number for this team's offense.
       - name: offense_passing
         description: >
           Offensive predicted points added per play on passing plays only.
@@ -2630,7 +2630,7 @@ models:
       - name: defense_overall
         description: >
           Defensive predicted points added per play allowed across the whole game. LOWER IS
-          BETTER here — this is points the defence gave up, not gained.
+          BETTER here — this is points the defense gave up, not gained.
       - name: defense_passing
         description: >
           Defensive predicted points added allowed per passing play. Lower is better.

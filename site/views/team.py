@@ -212,8 +212,8 @@ def _ratings(season, team_display) -> None:
             Col("rating", "Rating", "num"),
             Col("rank", "Rank", render=_rating_rank),
             Col("rating_percentile", "Percentile", render=_percentile),
-            Col("offense_rating", "Offence", "num"),
-            Col("defense_rating", "Defence", "num"),
+            Col("offense_rating", "Offense", "num"),
+            Col("defense_rating", "Defense", "num"),
             Col("basis", "Basis", render=lambda r: "Projection" if r.get("is_projection")
                 else f"{int(r.get('completed_games_at_rating') or 0)} games"),
         ], caption="srv_team_rating")

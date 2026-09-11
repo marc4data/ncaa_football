@@ -150,7 +150,7 @@ DEFAULT_SERVING = [
     # srv_game and srv_game_team here, and the opposite of the player tables, which change
     # when games are played rather than while they are.
     "srv_drive",
-    # Team x week grain, for Looking Back's offence/defence scatter and — R-478 — for the
+    # Team x week grain, for Looking Back's offense/defense scatter and — R-478 — for the
     # Matchup pairing session B will build on it. Placed BEFORE srv_data_dictionary on the
     # same reasoning as srv_drive above: the catalogue should describe a layer that contains
     # it.

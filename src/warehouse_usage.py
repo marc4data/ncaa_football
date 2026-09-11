@@ -6,7 +6,7 @@ for the rest of the day (and in extreme cases, the rest of the month)". Data sur
 compute does not.
 
 That makes it an availability risk rather than a cost risk — the bill is always $0 — and
-an unusual one, because the threshold is invisible until it is crossed. The only defence
+an unusual one, because the threshold is invisible until it is crossed. The only defense
 is to know our own consumption before a shutdown teaches it to us.
 
 **Why elapsed time, measured here, rather than actual DBUs.** Free Edition documents "no

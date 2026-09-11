@@ -12,7 +12,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
-_REAL_RUN = subprocess.run   # A094: test_heartbeat patches subprocess.run globally and it leaks
 
 import render_harness  # noqa: E402
 
@@ -117,6 +116,6 @@ def test_the_dunder_exemption_can_actually_fail():
             "    print('RAISED_ON_DUNDER')\n"
             "except AttributeError:\n"
             "    print('exempt')\n" % str(scratch.parent))
-        result = _REAL_RUN([sys.executable, str(probe)], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True)
         assert "RAISED_ON_DUNDER" in result.stdout, (
             f"removing the exemption did not make a dunder raise: {result.stdout}{result.stderr}")

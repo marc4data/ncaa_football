@@ -144,7 +144,7 @@ def with_n(value, n, column: str = "") -> str:
     """A rate and its sample size, together.
 
     AC-G.33: a hit rate without an `n` is a defect, not a style choice. 17.9% on n=11 is
-    noise wearing a big number, and the only defence is rendering the two adjacently.
+    noise wearing a big number, and the only defense is rendering the two adjacently.
     """
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return EM_DASH

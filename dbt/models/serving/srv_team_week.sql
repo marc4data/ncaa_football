@@ -17,7 +17,7 @@
 -- srv_scatter_data.
 --
 -- ⚠️ IT IS DELIBERATELY GENERAL ENOUGH FOR A MATCHUP LOOKUP, NOT JUST A SCATTER (R-478).
--- Marc's offence-vs-defence pairing is "how Team A produces passing yards compared to how
+-- Marc's offense-vs-defense pairing is "how Team A produces passing yards compared to how
 -- Team B allows passing yards" — two teams, one game, which is Matchup, which is session B's.
 -- A lookup by (season, season_type, week, team_id) returns exactly one row, so B reads this
 -- twice per game with no aggregation and no window. That is why the key is exposed whole and

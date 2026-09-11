@@ -40,7 +40,7 @@ _BLOCK_START = re.compile(r"^(?P<indent>\s*)(?:- )?[\w.\"']+\s*:\s*(?P<style>[>|
 _TRAILING_HYPHEN = re.compile(r"\w-$")
 
 
-def _offences(path: Path):
+def _offenses(path: Path):
     """Every (line_number, text) inside a block scalar that ends in a word-char + hyphen."""
     out = []
     block_indent = None
@@ -73,7 +73,7 @@ def test_there_are_yaml_files_to_check():
 
 @pytest.mark.parametrize("path", _yaml_files(), ids=lambda p: str(p.relative_to(REPO)))
 def test_no_block_scalar_line_ends_in_a_hyphen(path):
-    found = _offences(path)
+    found = _offenses(path)
     assert not found, (
         "folded/literal block scalar lines ending in a hyphen — these publish as a broken "
         "word with a gap in it. Rewrap so the hyphenated word sits whole on one line; do not "

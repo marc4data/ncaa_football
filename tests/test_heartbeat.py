@@ -298,22 +298,30 @@ def test_the_forced_command_reports_failures_in_the_shape_the_watcher_parses():
     assert "airflow" in code, "failures live in the Airflow metadata database, not the warehouse"
 
 
-def test_the_watcher_and_the_forced_command_agree_on_the_failure_format():
-    """Round-trip: feed the parser exactly what the script's SQL produces."""
+def test_the_watcher_and_the_forced_command_agree_on_the_failure_format(monkeypatch):
+    """Round-trip: feed the parser exactly what the script's SQL produces.
+
+    🚨 R-633. `monkeypatch`, NOT `module.subprocess.run = …`, AND THE DIFFERENCE COST A ROUND.
+    `module.subprocess` IS the global subprocess module — there is one object — so assigning to
+    its `run` mutated it for every test that ran afterwards, and the `del subprocess` that used
+    to sit at the end of this function deleted a LOCAL NAME and undid nothing.
+
+    A094's negative test PASSED ALONE AND FAILED IN THE SUITE, reporting that its check had
+    never been invoked: it had called this stub instead. Two files then defended against the
+    leak by hand. `monkeypatch` makes pytest undo it, which is what lets those defences go.
+    """
     module = _watcher()
     line = "failed|cfbd_scores_refresh.dbt_test|8100"
-    import subprocess
 
     class Done:
         returncode, stdout, stderr = 0, line + "\n", ""
 
-    module.subprocess.run = lambda *a, **k: Done()
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
     _, failures = module.read_ages("host")
     assert failures == {"cfbd_scores_refresh.dbt_test": 8100}
-    del subprocess
 
 
-def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none():
+def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none(monkeypatch):
     """THE DEFECT THIS CHANGE EXISTS TO REMOVE, REINTRODUCED ONE LAYER DOWN.
 
     The first version echoed `failed_query_unavailable|airflow|0` when the query could not
@@ -340,7 +348,8 @@ def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none()
         stdout = "scores_refresh|60\nfailed|MONITOR.cannot_read_airflow_metadata|0\n"
         stderr = ""
 
-    module.subprocess.run = lambda *a, **k: Done()
+    # R-633. monkeypatch, for the reason written at the other patch site in this file.
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
     _, failures = module.read_ages("host")
     assert "MONITOR.cannot_read_airflow_metadata" in failures
 
