@@ -112,7 +112,7 @@ TABS = (
     # ⚠️ `_market` AND `_line_movement` ARE ONE PANEL NOW (R-519). Marc: "Taking up WAY too
     # much space. Develop a card that we can drop in somewhere to cover both."
     (BEFORE, "Before the game",
-     ("_series", "_market_card", "_model", "_yardage", "_travel")),
+     ("_series", "_market_and_model", "_yardage", "_travel")),
     # ⚠️ ONE PANEL TODAY, AND THAT IS EXPECTED RATHER THAN UNBALANCED. The box score, the
     # advanced block and the player leaders are B076 — specified in
     # claude_work/cfdb_matchup_postgame_spec.md §1, all three on relations that already
@@ -401,6 +401,37 @@ def _winner_glyph(row, side: str) -> str:
             f"opacity:.75'>{arrow}</div>")
 
 
+# R-595. CFBD'S OWN VOCABULARY, ENUMERATED FROM THE DATA RATHER THAN GUESSED — all 17 values
+# that appear in srv_game_weather, measured 2026-09-11. Cloudy 2,488 · Clear 2,252 · Fair 1,081
+# · Light Rain 167 · Rain Shower 155 · Rain 136 · Fog 102 · Overcast 97 · Heavy Rain 89 · Heavy
+# Rain Shower 50 · Thunderstorm 10 · Snowfall 9 · Light Snowfall 9 · Heavy Snowfall 2 · Sleet 1
+# · Heavy Sleet 1 · Heavy Sleet Shower 1, plus 458 nulls.
+#
+# 🚨 AN UNMAPPED CONDITION FALLS BACK TO THE WORD, NEVER TO A NEAR-ENOUGH ICON. A wrong icon is
+# a confident false statement about the weather at a game, which is the class this project
+# keeps removing; the word is merely less pretty. CFBD can add a value tomorrow and this map
+# will not know — so it must degrade to text rather than to the closest guess.
+_CONDITION_ICON = {
+    "clear": "\u2600\ufe0f", "fair": "\U0001f324\ufe0f",
+    "cloudy": "\u2601\ufe0f", "overcast": "\u2601\ufe0f",
+    "fog": "\U0001f32b\ufe0f",
+    "light rain": "\U0001f326\ufe0f", "rain shower": "\U0001f326\ufe0f",
+    "rain": "\U0001f327\ufe0f", "heavy rain": "\U0001f327\ufe0f",
+    "heavy rain shower": "\U0001f327\ufe0f",
+    "thunderstorm": "\u26c8\ufe0f",
+    "snowfall": "\U0001f328\ufe0f", "light snowfall": "\U0001f328\ufe0f",
+    "heavy snowfall": "\u2744\ufe0f",
+    "sleet": "\U0001f328\ufe0f", "heavy sleet": "\U0001f328\ufe0f",
+    "heavy sleet shower": "\U0001f328\ufe0f",
+}
+
+# ⚠️ MARC'S THRESHOLD, DECLARED RATHER THAN INLINED — R-524's shape. "Only show wind_mph field
+# value if >10". Measured: 1,873 of 7,108 readings clear it, so the line stays quiet on about
+# three quarters of games, which is the point of having a threshold at all.
+_WIND_FLOOR_MPH = 10
+_WIND_ICON = "\U0001f4a8"
+
+
 def _conditions(row) -> str:
     """The weather, folded into the header as one line — or NOTHING at all (R-527).
 
@@ -439,13 +470,16 @@ def _conditions(row) -> str:
         reading = df.iloc[0]
         if pd.notna(reading.get("temperature_f")):
             parts.append(f"{reading['temperature_f']:g}\u00b0F")
-        if pd.notna(reading.get("wind_speed_mph")):
-            wind = f"{reading['wind_speed_mph']:g} mph"
-            if reading.get("wind_direction_compass"):
-                wind += f" {html.escape(str(reading['wind_direction_compass']))}"
-            parts.append(wind)
-        if reading.get("weather_condition"):
-            parts.append(html.escape(str(reading["weather_condition"])))
+        condition = reading.get("weather_condition")
+        if condition:
+            icon = _CONDITION_ICON.get(str(condition).strip().lower())
+            word = html.escape(str(condition))
+            parts.append(f"{icon} {word}" if icon else word)
+        # ⚠️ WIND ONLY ABOVE MARC'S FLOOR. A 4 mph reading is not weather anyone is planning
+        # around, and printing it on every game is the noise he asked to remove.
+        speed = reading.get("wind_speed_mph")
+        if pd.notna(speed) and float(speed) > _WIND_FLOOR_MPH:
+            parts.append(f"[{speed:g} mph {_WIND_ICON}]")
 
     if not parts and not indoors:
         return ""
@@ -456,7 +490,11 @@ def _conditions(row) -> str:
         return ("<div>Indoors"
                 + (f" \u00b7 {' \u00b7 '.join(parts)} outside" if parts else "")
                 + "</div>")
-    return f"<div>Forecast \u00b7 {' \u00b7 '.join(parts)}</div>"
+    # ⚠️ THE WORD "FORECAST" IS GONE AT MARC'S REQUEST, AND THE TENSE STILL HOLDS: this line
+    # is drawn ONLY before kickoff — a completed game's details column is the scoreboard — so
+    # there is no observation case for a reader to confuse it with. B082 added the word when
+    # the element was new; the surrounding structure now carries the same meaning.
+    return f"<div>{' \u00b7 '.join(parts)}</div>"
 
 
 def _line_score(row) -> str:
@@ -533,10 +571,12 @@ def _details_cell(row, conditions: str = "") -> str:
     if market:
         lines.append(f"<div>{' \u00b7 '.join(market)}</div>")
 
-    if conditions:
-        lines.append(conditions)
+    # ⚠️ R-595: STADIUM ABOVE THE WEATHER, Marc's order. The venue is a fact about the game and
+    # the weather is a fact about the day; he reads them in that order.
     if venue:
         lines.append(f"<div style='opacity:.75'>{venue}</div>")
+    if conditions:
+        lines.append(conditions)
     return ("<div style='text-align:center;font-size:.82rem;opacity:.9;line-height:1.45'>"
             + "".join(lines) + "</div>")
 
@@ -715,6 +755,82 @@ def _favorite(row):
     return side, str(label)
 
 
+# R-597. THE THREE BOOKS CFBD ACTUALLY NAMES, measured: bovada 1,881 games · espn_bet 1,382 ·
+# draftkings 147 on srv_game, and the same three on srv_line_movement with their display names.
+#
+# ⚠️ NO PROVIDER URL EXISTS ANYWHERE IN THE WAREHOUSE, so this map is the page's own and Marc
+# asked for the link explicitly. It stays in this file until a SECOND page wants it — A091's
+# labels earned `site/lib/` because Today and Matchup needed them at the same moment, and one
+# page does not earn a shared module.
+#
+# 🚨 AN UNMAPPED PROVIDER RENDERS ITS NAME, NOT A DEAD LINK. A link that 404s is worse than
+# plain text, and CFBD can add a book tomorrow.
+_PROVIDER_SITE = {
+    "bovada": ("Bovada", "https://www.bovada.lv"),
+    "espn_bet": ("ESPN Bet", "https://espnbet.com"),
+    "draftkings": ("DraftKings", "https://sportsbook.draftkings.com"),
+}
+
+# R-597. Marc: "a little question mark icon (like in the Rest label in the Travel and Rest
+# section)… next to Market/Spread/Over/Under", with the prose moved off the card.
+#
+# ⚠️ THE REST LABEL'S ICON IS `st.metric(help=...)` AND THIS CARD CANNOT USE IT. A metric is a
+# tile, and tiles are what Marc asked to remove from this card in the same review — "shrink
+# horizontal footprint so that it can share the row with another element". So the icon is a
+# `title=` span, which is the same affordance at a fraction of the height. Recorded because it
+# is a deliberate deviation from the precedent he named, not an oversight.
+_HELP = {
+    "Market": "Every figure on this card is one book's price. A move measured against a "
+              "different book's price is not a move.",
+    "Spread": "Points given by the favorite. A home favorite is a NEGATIVE spread. The "
+              "arrow is how far the number has travelled since it opened, and the amount "
+              "beside it carries no sign because the arrow already has the direction.",
+    "Over/Under": "The total points the book expects both teams to score combined.",
+}
+
+
+def _help_icon(key: str) -> str:
+    """The question mark, with its prose in the browser's own tooltip."""
+    text = html.escape(_HELP[key], quote=True)
+    return (f"<span title='{text}' style='cursor:help;opacity:.45;font-size:.7rem;"
+            f"vertical-align:super'>?</span>")
+
+
+def _provider_link(row) -> str:
+    """The book, as a link where we know one — NOT suppressed into the hover.
+
+    Marc: "Should include (don't suppress to the question mark hover) the Provider for the
+    line we are using. Present as the name of Provider as a hyperlink to their site."
+    """
+    key = row.get("line_movement_provider_key") or row.get("provider_key")
+    if not key:
+        return "an unnamed book"
+    name, url = _PROVIDER_SITE.get(str(key), (None, None))
+    if not name:
+        # Unknown book: its key is still a fact, and a name we do not have is not a link.
+        return html.escape(str(key))
+    return (f"<a href='{url}' target='_blank' rel='noopener noreferrer'>"
+            f"{html.escape(name)}</a>")
+
+
+def _market_and_model(row) -> None:
+    """R-596. The market card and the model, sharing one row.
+
+    Marc: the card was "taking up way too much real estate… shrink horizontal footprint so
+    that it can share the row with another element", and "Model — move to the right of Market,
+    so they share the same row."
+
+    ⚠️ THIS IS A LAYOUT CHANGE, NOT A REBUILD. The card shipped one round ago and was right for
+    a full-width slot; `cfdb_card_vocabulary.md` still governs its parts. Both panels keep
+    their own `states.section`, so one failing still degrades one half rather than the row.
+    """
+    left, right = st.columns(2)
+    with left:
+        _market_card(row)
+    with right:
+        _model(row)
+
+
 def _market_card(row) -> None:
     """R-519. One card for the market and how it moved.
 
@@ -728,7 +844,7 @@ def _market_card(row) -> None:
 
     NO SECOND QUERY. Every column is already on the srv_game row the page fetched.
     """
-    st.subheader("Market")
+    st.markdown(f"### Market {_help_icon('Market')}", unsafe_allow_html=True)
     # One section for the whole card, as `_line_movement` had: these are columns the rest of
     # the page does not read, so a failure here degrades the card rather than blanking a
     # Matchup that is otherwise complete.
@@ -767,7 +883,8 @@ def _market_card(row) -> None:
 
         line_rows = "".join(
             f"<div style='display:flex;align-items:baseline;gap:.6rem;padding:.1rem 0'>"
-            f"<span style='min-width:5.5rem;opacity:.6;font-size:.8rem'>{label}</span>"
+            f"<span style='min-width:5.5rem;opacity:.6;font-size:.8rem'>{label}"
+            f"{_help_icon(label) if label in _HELP else ''}</span>"
             f"<span style='min-width:7rem;font-weight:600'>{value}</span>"
             f"<span style='font-size:.85rem'>{move}</span></div>"
             for label, value, move in rows)
@@ -826,18 +943,19 @@ def _market_provenance(row) -> None:
             f"de-vigged by {row.get('devig_method')}; the book's overround was "
             f"{fmt.number(row.get('overround'), '', 4)}. Raw prices above are untouched.")
     snapshots = row.get("line_snapshot_count")
-    book = (row.get("line_movement_provider_key") or row.get("provider_key")
-            or "an unnamed book")
+    book = _provider_link(row)
     stamp = f", snapshot {fmt.local_time(row.get('line_snapshot_ts'))}" \
         if pd.notna(row.get("line_snapshot_ts")) else ""
     if pd.notna(snapshots):
         observed = int(snapshots)
+        # unsafe_allow_html because the book is a LINK (R-597), not because the copy needs it.
         st.caption(
             f"Line from {book}{stamp}. Movement measured across {observed} "
             f"snapshot{'' if observed == 1 else 's'} — a move measured against a different "
-            f"book's price is not a move.")
+            f"book's price is not a move.", unsafe_allow_html=True)
     else:
-        st.caption(f"Line from {book}{stamp}. No snapshot history, so no move to measure.")
+        st.caption(f"Line from {book}{stamp}. No snapshot history, so no move to measure.",
+                   unsafe_allow_html=True)
 
 
 def _excursions(row) -> None:
@@ -994,7 +1112,7 @@ def _series(row) -> None:
         f"{int(games)} meeting{'s' if int(games) != 1 else ''}{tie_text}{span}.")
 
 
-# --- R-463: offence against defence -------------------------------------------------------
+# --- R-463: offense against defense -------------------------------------------------------
 
 # ⚠️ THE PAIRING IS ACROSS SIDES, AND IT IS THE ONE THING HERE THAT IS EASY TO GET
 # BACKWARDS. Marc's comparison, verbatim: "how team A produces passing yards compared to how
@@ -1022,11 +1140,11 @@ _YARDAGE_COLUMNS = """
 """
 
 
-def _yardage_direction(offence, defence) -> str:
-    """One direction of the comparison: this side's attack against that side's defence."""
-    accent = identity.text_on(offence)
+def _yardage_direction(offense, defense) -> str:
+    """One direction of the comparison: this side's attack against that side's defense."""
+    accent = identity.text_on(offense)
     logo = identity.logo_or_monogram(
-        offence.get("logo_url"), str(offence.get("team_display") or "?"), 20)
+        offense.get("logo_url"), str(offense.get("team_display") or "?"), 20)
     lines = []
     # R-516. THE SECOND ARGUMENT IS THE COLUMN-NAME SLOT AND IT USED TO HOLD THE BARE WORD
     # 'yards', so `fmt.precision_for` had never once seen a column from this panel. A085
@@ -1045,19 +1163,19 @@ def _yardage_direction(offence, defence) -> str:
             f"padding:.15rem 0'>"
             f"<span style='min-width:4.5rem;opacity:.6;font-size:.8rem'>{label}</span>"
             f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
-            f"{fmt.number(offence.get(for_column), for_column, dp=1)}</span>"
+            f"{fmt.number(offense.get(for_column), for_column, dp=1)}</span>"
             f"<span style='opacity:.45;font-size:.8rem'>gained</span>"
             f"<span style='opacity:.35;margin:0 .2rem'>vs</span>"
             f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
-            f"{fmt.number(defence.get(allowed_column), allowed_column, dp=1)}</span>"
+            f"{fmt.number(defense.get(allowed_column), allowed_column, dp=1)}</span>"
             f"<span style='opacity:.45;font-size:.8rem'>allowed</span></div>")
     return (
         f"<div style='border-left:4px solid {accent};padding:.4rem .7rem;"
         f"margin-bottom:.5rem'>"
         f"<div style='display:flex;align-items:center;gap:.45rem;margin-bottom:.2rem'>"
-        f"{logo}<span style='font-weight:600'>{offence.get('team_display') or '?'}</span>"
-        f"<span style='opacity:.6;font-size:.85rem'>offence against "
-        f"{defence.get('team_display') or '?'}'s defence</span></div>"
+        f"{logo}<span style='font-weight:600'>{offense.get('team_display') or '?'}</span>"
+        f"<span style='opacity:.6;font-size:.85rem'>offense against "
+        f"{defense.get('team_display') or '?'}'s defense</span></div>"
         + "".join(lines) + "</div>")
 
 
@@ -1125,7 +1243,7 @@ def _week_distribution(row):
 
 def _scatter(team, opponent, for_column, allowed_column, distribution,
              team_name: str, opponent_name: str, label: str):
-    """One metric: this side's attack against that side's defence, on the week's frame.
+    """One metric: this side's attack against that side's defense, on the week's frame.
 
     ⚠️ THE TWO AXES ARE DIFFERENT MEASUREMENTS AND THE LABELS SAY SO. Y is this team's
     `_for` — yards it gains — and X is the opponent's `_allowed` — yards they concede. A
@@ -1184,7 +1302,7 @@ def _yardage_column(team, opponent, distribution) -> None:
 
 
 def _yardage(row) -> None:
-    """Offence against defence, per game, LEADING INTO this game's own week (R-463).
+    """Offense against defense, per game, LEADING INTO this game's own week (R-463).
 
     ⚠️ THE POINT-IN-TIME PROPERTY IS THE VIEW'S, NOT THIS PANEL'S. Marc, 2026-09-09: "Can't
     find ourselves at Week 10 and looking back to the matchups for a team in Week 2 and have
@@ -1208,7 +1326,7 @@ def _yardage(row) -> None:
     NOTHING IS RANKED, COLOURED BY ADVANTAGE OR CALLED AN EDGE. Marc sets the line, not the
     page — the same rule _line_movement carries a test for.
     """
-    st.subheader("Offence against defence")
+    st.subheader("Offense vs Defense")
     # Its own section and its own view: this is the only block on the page that reads
     # srv_team_week, so a failure here degrades one panel rather than blanking a Matchup
     # that is otherwise complete.
@@ -1218,7 +1336,7 @@ def _yardage(row) -> None:
         home_id, away_id = row.get("home_team_id"), row.get("away_team_id")
         if pd.isna(home_id) or pd.isna(away_id):
             states.empty(
-                "Each side's yardage against the other's defence would be here.",
+                "Each side's yardage against the other's defense would be here.",
                 "This game's schedule row does not identify both teams, so there is "
                 "nothing to look the two sides up by.")
             return
@@ -1245,7 +1363,7 @@ def _yardage(row) -> None:
             # EMPTY. Neither side is carried at week grain, which is an absence of data
             # about this fixture rather than a fault in a side of it.
             states.empty(
-                "Each side's yardage against the other's defence would be here.",
+                "Each side's yardage against the other's defense would be here.",
                 f"Neither {row.get('home_team')} nor {row.get('away_team')} is carried in "
                 f"the week-by-week team record for this season.")
             return
@@ -1295,7 +1413,7 @@ def _yardage(row) -> None:
                    + " in the weeks before this game, so there is no per-game figure to "
                      "show — a zero here would be a measurement cfdb did not make.")
             states.empty(
-                "Each side's yardage against the other's defence would be here.", why)
+                "Each side's yardage against the other's defense would be here.", why)
             return
 
         # R-590. The week's shared frame, fetched once for both columns and all six charts.
@@ -1449,7 +1567,7 @@ _BOX_SCORE_ROWS = (
 # offense_ppa for the other, to the last decimal — verified on 401752754. Rendering both per
 # side would draw the same numbers twice; the defensive reading is the other column, read
 # across. The one exception is havoc, which is why defense_havoc_rate appears and
-# offense_havoc_rate does not: offense_havoc_rate is havoc SUFFERED by that offence, not
+# offense_havoc_rate does not: offense_havoc_rate is havoc SUFFERED by that offense, not
 # generated by it, and labelling it as a defensive figure would be exactly wrong.
 _ADVANCED_ROWS = (
     ("Predicted points added / play", "offense_ppa", 3),
@@ -1462,7 +1580,7 @@ _ADVANCED_ROWS = (
     ("Power success", "offense_power_success", 3),
     ("Stuff rate", "offense_stuff_rate", 3),
     ("Line yards", "offense_line_yards", 2),
-    ("Havoc rate forced by this defence", "defense_havoc_rate", 3),
+    ("Havoc rate forced by this defense", "defense_havoc_rate", 3),
     # ⚠️ AC-G.33. The denominator, and it is not decoration: every rate above is over these
     # plays, and the two sides do not run the same number of them.
     ("Offensive plays", "offense_plays", 0),
@@ -1899,28 +2017,39 @@ def _travel(game_id) -> None:
             return
 
         for _, r in df.iterrows():
+            # R-600. ONE LINE PER SIDE, NOT A HEADING AND THREE TILES. Marc: "Too big, not
+            # that important." Six st.metric tiles and two headings became two lines; every
+            # figure and every caveat survives, and the panel costs about a fifth of the
+            # height it did.
+            #
+            # ⚠️ COMPRESSED, NOT DELETED — he said too big, not unwanted. And the conditional
+            # highlight R-524 asks for still waits on a measured threshold: shrinking needed
+            # no distribution, so it happened now; choosing what counts as "significant" by
+            # taste is the thing R-524 exists to prevent.
             side = "Home" if r.get("is_home") else "Away"
             if r.get("is_neutral_site"):
                 side = "Neutral site"
-            st.markdown(f"**{r.get('team')}** · {side}")
-            cols = st.columns(3)
             km = r.get("travel_km")
-            cols[0].metric(
-                "Travel",
-                # Zero is a real answer here and reads as one; null is not.
-                "—" if km is None or pd.isna(km)
-                else ("Home venue" if float(km) < 1 else f"{float(km):,.0f} km"))
+            # Zero is a real answer here and reads as one; null is not.
+            travel = ("—" if km is None or pd.isna(km)
+                      else "home venue" if float(km) < 1 else f"{float(km):,.0f} km")
             rest = r.get("rest_days")
-            cols[1].metric(
-                "Rest",
-                "—" if rest is None or pd.isna(rest) else f"{int(rest)} days",
-                help=str(r.get("rest_bucket") or ""))
+            rest_text = "—" if rest is None or pd.isna(rest) else f"{int(rest)}d rest"
+            bucket = str(r.get("rest_bucket") or "")
+            if bucket:
+                # The Rest label's hover survives the shrink — it is the one piece of prose
+                # here that says what a number MEANS rather than repeating it.
+                rest_text = (f"<span title='{html.escape(bucket, quote=True)}' "
+                             f"style='cursor:help;border-bottom:1px dotted'>{rest_text}</span>")
             change = r.get("elevation_change_m")
-            cols[2].metric(
-                "Elevation change",
-                # Signed on purpose: arriving 1,500 m higher and 1,500 m lower are
-                # different experiences and a magnitude would erase which happened.
-                "—" if change is None or pd.isna(change) else f"{float(change):+,.0f} m")
+            # Signed on purpose: arriving 1,500 m higher and 1,500 m lower are different
+            # experiences and a magnitude would erase which happened.
+            elevation = ("—" if change is None or pd.isna(change)
+                         else f"{float(change):+,.0f} m")
+            st.markdown(
+                f"<div style='padding:.1rem 0'><strong>{html.escape(str(r.get('team')))}"
+                f"</strong> <span style='opacity:.6'>{side}</span> · {travel} · "
+                f"{rest_text} · {elevation}</div>", unsafe_allow_html=True)
         table.as_of_caption(df)
 
 
@@ -2000,7 +2129,7 @@ def _drives(game_id) -> None:
     srv_drive now exist and are published, so this is the thing that reads them.
 
     ⚠️ SCORING IS READ FROM `scoring_side`, NEVER FROM THE RESULT TEXT. A `TD` suffix on a
-    turnover or a kick means the DEFENCE scored — 908 drives across ten drive_result values,
+    turnover or a kick means the DEFENSE scored — 908 drives across ten drive_result values,
     measured. Keying an offensive-touchdown mark off the substring "TD" puts every one of
     them on the wrong side of the game.
     """
@@ -2070,8 +2199,8 @@ def _drives(game_id) -> None:
             # The score AFTER the drive, from the offense's own perspective, so a scoring
             # drive shows what it made the scoreboard say.
             side = row.get("scoring_side")
-            mark = ("<span style='font-weight:600'>▲ offence</span>" if side == "offense"
-                    else "<span style='font-weight:600'>▼ defence</span>" if side == "defense"
+            mark = ("<span style='font-weight:600'>▲ offense</span>" if side == "offense"
+                    else "<span style='font-weight:600'>▼ defense</span>" if side == "defense"
                     else "")
             yards = row.get("yards")
             yards_text = "—" if pd.isna(yards) else f"{int(yards):+d} yd"

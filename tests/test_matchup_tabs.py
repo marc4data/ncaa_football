@@ -51,7 +51,11 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # ⚠️ `_market` AND `_line_movement` BECAME ONE PANEL IN R-519 — Marc: "Taking up WAY too
 # much space. Develop a card that we can drop in somewhere to cover both." Two names left this
 # list and one arrived; the list's whole purpose is that such a change is visible here.
-ALL_PANELS = ("_market_card", "_model", "_series", "_yardage",
+# ⚠️ R-596: `_market_card` AND `_model` SHARE A ROW NOW and are called by `_market_and_model`,
+# so the TAB names one panel where it used to name two. Marc: "Model — move to the right of
+# Market, so they share the same row." Both still exist and both still carry their own
+# states.section; only who calls them changed.
+ALL_PANELS = ("_market_and_model", "_series", "_yardage",
               "_travel", "_post_game", "_leaders", "_drives")
 
 
@@ -187,7 +191,7 @@ def test_a_scheduled_game_opens_on_the_before_tab(page):
     run, _ = page
     _, called = run({"is_completed": False})
     assert "_drives" not in called, "a game that has not kicked off rendered its drives"
-    assert "_market_card" in called and "_model" in called
+    assert "_market_and_model" in called
 
 
 # --- an unplayed game has NO after tab, not an empty one -----------------------------------
@@ -221,7 +225,7 @@ def test_after_tab_requested_on_a_scheduled_game_falls_back_and_does_not_raise(p
     run, _ = page
     entries, called = run({"is_completed": False}, tab="after")
     assert "_drives" not in called, "a scheduled game rendered the post-game tab on request"
-    assert "_market_card" in called
+    assert "_market_and_model" in called
     assert "Something went wrong" not in _text(entries)
 
 
@@ -237,7 +241,7 @@ def test_the_url_can_still_ask_for_the_other_tab(page):
     """The fallbacks must not have made the tab bar decorative."""
     run, _ = page
     _, called = run({"is_completed": True}, tab="before")
-    assert "_drives" not in called and "_market_card" in called
+    assert "_drives" not in called and "_market_and_model" in called
 
 
 # --- the lazy guarantee, which is the reason for anchors over st.tabs ----------------------

@@ -120,7 +120,19 @@ def _stub_streamlit():
     return stub, captured
 
 
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.chips", "views.matchup")
+# ⚠️ `lib.attribution` IS HERE BECAUSE R-596 MADE THIS MODULE CALL `_model`, AND B081 WROTE
+# THIS TRAP DOWN ONE ROUND BEFORE IT BIT.
+#
+# `_model` ends with `attribution.model_attribution(...)`, which holds its own
+# `import streamlit`. Reloading the view without reloading that module leaves the licence
+# caption emitting into the REAL streamlit — invisible to the capture, and in a full-suite run
+# it raises out of streamlit's own bare-mode warning path.
+#
+# 🚨 IT PASSED ALONE AND IN THIS MODULE, AND FAILED ONLY IN THE FULL SUITE. That is the
+# order-dependence A094 found in its own test infrastructure, and the reason the prompt says
+# to run every negative test both ways.
+_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.chips", "lib.attribution",
+           "views.matchup")
 
 
 def _reload_all():
@@ -152,6 +164,18 @@ def card():
     for the rest of the session, and test_matchup_drives learned that the hard way.
     """
     run, real = _make("_market_card")
+    yield run
+    if real is not None:
+        sys.modules["streamlit"] = real
+    else:
+        sys.modules.pop("streamlit", None)
+    _reload_all()
+
+
+@pytest.fixture
+def row_panel():
+    """`_market_and_model` — the two halves sharing one row (R-596)."""
+    run, real = _make("_market_and_model")
     yield run
     if real is not None:
         sys.modules["streamlit"] = real
@@ -350,11 +374,26 @@ def test_a_moneyline_with_no_spread_is_still_a_priced_game(card):
 
 # --- the caveats, which are what the old line-movement file was really for -----------------------
 
-def test_the_book_is_named(card):
+def test_the_book_is_named_AND_LINKED(card):
     """Every figure is ONE book's by construction. A price with no book attached is the
     provenance defect the `market_implied_` prefix rule exists to prevent, and it renders
-    perfectly while being wrong."""
-    assert "draftkings" in _captions(card())
+    perfectly while being wrong.
+
+    R-597: Marc asked for the book by NAME and as a LINK, and explicitly not suppressed into
+    the question-mark hover — so this asserts the display name and the href, not the key.
+    """
+    caption = " ".join(b for k, b in card() if k == "caption")
+    assert "DraftKings" in caption, "the book is not named in its display form"
+    assert "sportsbook.draftkings.com" in caption, "the book is not a link"
+
+
+def test_an_UNKNOWN_book_renders_its_key_and_NOT_a_dead_link(card):
+    """🚨 A LINK THAT 404s IS WORSE THAN PLAIN TEXT. CFBD can add a book tomorrow, and the
+    map is this page's own because no provider URL exists anywhere in the warehouse."""
+    caption = " ".join(b for k, b in card(line_movement_provider_key="newbook",
+                                          provider_key="newbook") if k == "caption")
+    assert "newbook" in caption
+    assert "href" not in caption, "an unmapped book was given a guessed URL"
 
 
 def test_an_unnamed_book_says_so_rather_than_going_quiet(card):
@@ -541,3 +580,41 @@ def test_every_column_the_card_reads_is_actually_SELECTED():
     assert not missing, (
         f"the card reads these columns and the page does not select them, so they are None "
         f"on every load: {missing}")
+
+
+# --- R-596: the market and the model share a row, market on the LEFT ----------------------------
+
+def test_the_MARKET_is_drawn_before_the_MODEL(row_panel):
+    """⚠️ POSITIONAL, NOT PRESENCE. Marc: "Model — move to the right of Market, so they share
+    the same row."
+
+    Both headings are on the page whichever order they are drawn in, so "Market appears"
+    passes the swap. Presence has now passed this class on the game header, the win-probability
+    bar and the yardage columns; this reads the ORDER.
+    """
+    entries = row_panel(predicted_margin=-7.4, predicted_margin_home_perspective=7.4,
+                        predicted_total_points=48.5, home_cover_edge=5.9,
+                        home_win_probability=None, training_week_floor=5, week=12,
+                        season=2026, attribution="cfdb model, licensed pack")
+    text = _text(entries)
+    assert "Market" in text and "Model" in text, "one of the two halves did not draw"
+    assert text.index("Market") < text.index("Model"), \
+        "the model was drawn to the LEFT of the market"
+
+
+def test_both_halves_keep_their_own_section(row_panel):
+    """⚠️ ONE FAILING HALF MUST DEGRADE ONE HALF. They share a row, not a states.section — so
+    a market failure still leaves the model drawing and vice versa."""
+    import ast
+    tree = ast.parse(SOURCE)
+    wrapper = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "_market_and_model")
+    # ⚠️ THE CODE, NOT THE DOCSTRING. The first draft of this test grepped the source slice
+    # and failed on the wrapper's own comment, which SAYS "states.section" while the body
+    # correctly does not call it. A test that cannot tell prose from code is not reading code.
+    body = ast.dump(ast.Module(body=[n for n in wrapper.body
+                                     if not (isinstance(n, ast.Expr)
+                                             and isinstance(n.value, ast.Constant))],
+                               type_ignores=[]))
+    assert "section" not in body, \
+        "the row wrapper took a section of its own, so one failure would blank both halves"
