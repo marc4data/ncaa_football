@@ -28,7 +28,7 @@ CSS = """
 @keyframes cfdb-shimmer { 0%{background-position:100% 50%} 100%{background-position:0 50%} }
 
 /* Fixed width so "Cover" and "DNC" occupy the same box (AC-G.20). Glyph carries the
-   meaning; color is the second signal, so it survives greyscale (AC-G.21/22). */
+   meaning; color is the second signal, so it survives grayscale (AC-G.21/22). */
 .cfdb-chip { display:inline-flex; align-items:center; justify-content:center; gap:.3rem;
   min-width:6.2rem; padding:.14rem .5rem; border-radius:999px; font-size:.8rem;
   font-weight:600; border:1px solid currentColor; }
