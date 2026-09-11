@@ -43,7 +43,7 @@ from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
 from src.dbt_artifacts import load_run_results
-from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
+from src.dbt_selectors import LINES_SNAPSHOT_TEST_EXCLUDE
 from src.lines_cadence import load_config, should_snapshot
 from src.load_raw_to_postgres import load_endpoint
 from src.publish_marts import publish_all
@@ -235,7 +235,7 @@ with DAG(
     dbt_distribution_test = BashOperator(
         task_id="dbt_test_distributions",
         bash_command=(f"dbt test --project-dir {DBT_PROJECT_DIR} "
-                      f"{DISTRIBUTION_SELECTOR} {PARTIAL_REBUILD_TEST_EXCLUDE}"),
+                      f"{DISTRIBUTION_SELECTOR} {LINES_SNAPSHOT_TEST_EXCLUDE}"),
         retries=1,
     )
     # HOT ONLY, for the reason the scores DAG documents at length: the heavy player tables
