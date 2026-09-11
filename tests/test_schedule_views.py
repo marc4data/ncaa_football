@@ -22,7 +22,7 @@ from views import schedule                          # noqa: E402
 def _row(**overrides):
     base = dict(
         game_id=1, season=2025, week=12, season_type="regular",
-        game_date=pd.Timestamp("2025-11-15"), start_date_et=pd.Timestamp("2025-11-15 19:00"),
+        game_date=pd.Timestamp("2025-11-15"), start_date=pd.Timestamp("2025-11-15 19:00", tz="UTC"),
         home_team_slug="alabama", home_team_display="Alabama", home_abbreviation="ALA",
         home_logo_url=None, home_conference="SEC", home_points=31, home_rank=4,
         home_team_record_display="8-2", home_team_record_after_display="9-2",
@@ -229,7 +229,7 @@ def test_matchup_and_neutral_share_one_headed_column():
     # R-146 MOVED THE NEUTRAL GLYPH OUT AGAIN, to the kickoff cell. R-101 merged two columns
     # into one; this is that same column keeping its header and swapping its second occupant
     # for R-147's result strip.
-    kickoff = columns["start_date_et"]
+    kickoff = columns["start_date"]
     assert schedule.NEUTRAL_GLYPH in kickoff.format(_row(is_neutral_site=True))
     assert schedule.NEUTRAL_GLYPH not in kickoff.format(_row(is_neutral_site=False))
     assert schedule.NEUTRAL_GLYPH not in game.format(_row(is_neutral_site=True))
@@ -390,9 +390,9 @@ def test_the_query_sorts_by_date_then_time_then_rank_then_home_name():
     # then passed against. Anchored on the placeholder.
     order = sql[sql.index("order by game_date"):sql.index("limit {ROW_CAP}")]
     assert order, "the ORDER BY slice is empty — the anchor no longer matches"
-    assert "start_date_et" in order
+    assert "start_date" in order
     assert "best_rank_in_game nulls last" in order
-    assert order.index("start_date_et") < order.index("best_rank_in_game")
+    assert order.index("start_date") < order.index("best_rank_in_game")
     assert order.index("best_rank_in_game") < order.index("home_team_display")
 
 

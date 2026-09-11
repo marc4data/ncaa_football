@@ -36,16 +36,51 @@ def display_timezone() -> str:
         return DEFAULT_TIMEZONE
 
 
-def _local(ts):
-    """A timestamp in the display zone, tolerant of naive input.
+class NaiveTimestamp(TypeError):
+    """A timestamp with no offset reached the formatter. R-643.
 
-    Values arrive tz-aware from Postgres; a naive one is treated as UTC rather than
-    rejected, because a naive datetime is what a hand-built test frame produces and
-    crashing the page over it would be the wrong trade.
+    ⚠️ Carries the value so an operator can see WHICH stamp, without the page showing it.
+    """
+
+
+def _local(ts):
+    """A timestamp in the display zone. THE INPUT MUST CARRY ITS OWN OFFSET.
+
+    🚨 THE TOLERANCE THAT USED TO BE HERE MIS-RENDERED EVERY KICKOFF ON THE SITE FOR A
+    SEASON, AND IT WAS ADDED FOR TEST FIXTURES. The old comment said so in as many words:
+    "a naive one is treated as UTC rather than rejected, because a naive datetime is what a
+    hand-built test frame produces and crashing the page over it would be the wrong trade."
+    ⚠️ The fixtures shared the assumption, so nothing caught it — and `srv_game.start_date_et`
+    arrived naive on every page, was assumed UTC, and came out four hours early under EDT.
+
+    ── WHY IT RAISES NOW, RATHER THAN GUESSING QUIETLY OR RENDERING AN ABSENCE ──────────────
+
+    1. ⚠️ A NAIVE VALUE IS NO LONGER POSSIBLE FROM THE DATA. Measured 2026-09-11: serving
+       held 43 timestamp columns and exactly TWO were naive — both `start_date_et`, both
+       removed by R-643. The other 41, `as_of_ts` included, carry their offset. So a naive
+       stamp reaching here now means a caller passed something that is not an instant, which
+       is a defect in the code rather than a gap in the data.
+    2. ⚠️ THE ABSENCE PATH ALREADY EXISTS AND THIS IS NOT IT. Every public caller returns
+       EM_DASH for None/NaT (AC-G.32). Rendering that here as well would say "we have no
+       kickoff for this game" when what happened is "someone handed the formatter the wrong
+       type" — two different facts under one dash.
+    3. 🚨 GUESSING LOUDLY IS STILL A WRONG TIME RENDERED AS A RIGHT ONE. A warning on stderr
+       does not reach the reader, and the reader is the one being misled.
+    4. ✅ A RAISE IS CONTAINED, WHICH IS WHY IT IS AFFORDABLE. `states.section` turns a
+       renderer exception into a state that names no internal (AC-G.9), so one panel degrades
+       honestly instead of the whole page falling over — and `CFDB_TRACE_STATES=1` gives the
+       operator the type and the failing line. A reader never sees a traceback either way.
+
+    ⚠️ A BARE DATE IS NOT AN INSTANT AND MUST NOT REACH HERE. `day()` handles that case above,
+    deliberately, because converting midnight shifts a game back a calendar day — the defect
+    that once cost this project 66,496 games.
     """
     stamp = pd.Timestamp(ts)
     if stamp.tzinfo is None:
-        stamp = stamp.tz_localize("UTC")
+        raise NaiveTimestamp(
+            f"a timestamp with no timezone reached fmt._local: {stamp!r}. Serving publishes "
+            f"instants; a naive value is a caller passing the wrong thing, and guessing a "
+            f"zone for it is what rendered every kickoff four hours early (R-643).")
     return stamp.tz_convert(display_timezone())
 
 
@@ -159,8 +194,10 @@ def local_time(ts) -> str:
     A function whose name asserts something false is the class this project keeps finding —
     fct_team_week_rating asserted a grain no source had, and this asserted a zone.
 
-    The column it reads is still `start_date_et`, a dbt conversion, so the app owns no
-    timezone RULE — only which zone it renders in, which is config.
+    ⚠️ IT READS `start_date`, THE TZ-AWARE INSTANT, AND THE APP NOW OWNS THE WHOLE
+    CONVERSION — one conversion, in one place. It used to read `start_date_et`, which dbt had
+    already localized to Eastern and stripped of its offset, and converting that again is
+    R-643: every kickoff four hours early, all season.
     """
     if ts is None or pd.isna(ts):
         return EM_DASH

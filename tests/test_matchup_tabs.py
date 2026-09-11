@@ -156,7 +156,7 @@ def _game(**overrides):
     row = {"game_id": 401752754, "season": 2025, "season_type": "regular", "week": 10,
            "home_team": "Auburn", "away_team": "Kentucky",
            "home_team_id": 2, "away_team_id": 96,
-           "is_completed": True, "start_date_et": pd.Timestamp("2025-11-01T19:00:00Z"),
+           "is_completed": True, "start_date": pd.Timestamp("2025-11-01T19:00:00Z"),
            "as_of_ts": pd.Timestamp("2026-09-09T12:00:00Z")}
     row.update(overrides)
     return row

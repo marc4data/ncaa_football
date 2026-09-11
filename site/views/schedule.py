@@ -179,7 +179,7 @@ TOTAL_HEADER = "T"   # R-162 REVERSES R-150: Marc checked the major sites; they 
 def _rows(season: int, week, season_type: str, conference,
           division: str = 'fbs') -> pd.DataFrame:
     sql = """
-        select game_id, season, week, season_type, start_date_et, game_date,
+        select game_id, season, week, season_type, start_date, game_date,
                home_team_slug, home_team_display, home_abbreviation, home_logo_url,
                home_conference, home_points, home_rank, home_team_record_display,
                away_team_slug, away_team_display, away_abbreviation, away_logo_url,
@@ -211,7 +211,7 @@ def _rows(season: int, week, season_type: str, conference,
         -- is exactly where a reader wants the ranked matchup first. `nulls last` is the
         -- whole of "unranked last" — without it Postgres sorts NULL high and every unranked
         -- game leads its own time slot.
-        order by game_date, start_date_et, best_rank_in_game nulls last,
+        order by game_date, start_date, best_rank_in_game nulls last,
                  home_team_display, game_id
         limit {ROW_CAP}
     """.replace("{ROW_CAP}", str(ROW_CAP))
@@ -479,8 +479,8 @@ def _columns(scope) -> list:
         # AC-2.5: the row goes to the game, the team NAME goes to the team.
         # R-146. The neutral-site flag rides the kickoff cell, which had spare width and is
         # where a reader already looks for "where and when".
-        Col("start_date_et", "Kickoff", render=lambda r: (
-            f"{fmt.clock(r.get('start_date_et'))}{_neutral_glyph(r)}")),
+        Col("start_date", "Kickoff", render=lambda r: (
+            f"{fmt.clock(r.get('start_date'))}{_neutral_glyph(r)}")),
         Col("away", "Away", render=lambda r: _team_with_record(r, "away"),
             link=lambda r: scope.link("team", team=r.get("away_team_slug"))),
         # R-100. The "Won" chip column is gone; the marker rides the score.
@@ -1293,7 +1293,7 @@ def _card(row, scope, geo: dict) -> str:
         f"<div class='cfdb-gamecard'>"
         f"<div class='cfdb-gc' style='{_grid_style(geo)}'>"
         # R-114: the kickoff shares row 1 with the box-score header.
-        f"<div class='cfdb-gc-time'>{fmt.clock(row.get('start_date_et'))}"
+        f"<div class='cfdb-gc-time'>{fmt.clock(row.get('start_date'))}"
         f"<span class='cfdb-strip-gap'></span>{_result_strip(row)}</div>{header}"
         f"{_team_row(row, 'away', scope)}{away}"
         f"{_team_row(row, 'home', scope)}{home}"

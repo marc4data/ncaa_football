@@ -1158,7 +1158,7 @@ def test_the_default_sort_is_the_order_by_and_it_is_stable():
     builds of the same scope differ — which a diff of two workbooks depends on."""
     schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
     flat = " ".join(schedule.sql.split())
-    assert "order by start_date_et, game_id" in flat
+    assert "order by start_date, game_id" in flat
 
 
 def test_three_sheets_ship_and_the_other_four_are_kept_not_deleted():
@@ -2402,7 +2402,7 @@ def test_the_date_column_width_follows_its_format(built):
     assert kickoff < as_of, (
         f"Kickoff is {kickoff} and As of is {as_of}; the shorter format must take the "
         f"narrower column")
-    assert workbook.rendered_date_width("start_date_et") == len("Sep-05 19:00") + 1
+    assert workbook.rendered_date_width("start_date") == len("Sep-05 19:00") + 1
 
 
 def test_the_push_mark_is_blue_wherever_it_appears(built):

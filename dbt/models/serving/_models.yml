@@ -618,11 +618,12 @@ models:
         description: Week the game belongs to.
       - name: season_type
         description: '`regular` or `postseason`.'
-      - name: start_date_et
+      - name: start_date
         description: >
-          Kickoff converted to US Eastern and stored WITHOUT a timezone, because the board is
-          read as a US football schedule and a reader in any timezone wants the same slate.
-          Do not treat this as UTC.
+          Scheduled kickoff, TIMEZONE-AWARE, as stored. R-643: this view used to publish
+          `start_date_et` instead — Eastern wall-clock with the offset discarded — and the app
+          converted it a second time, rendering every kickoff four hours early under EDT. The
+          instant is published and the display zone is applied once, in the app.
       - name: home_team_id
         description: CFBD team id for the home side.
       - name: home_team_display
@@ -2859,11 +2860,15 @@ models:
           Calendar date of the game.
       - name: start_date
         description: >
-          Scheduled kickoff, timezone-aware, as stored.
-      - name: start_date_et
-        description: >
-          AC-G.34. Kickoff converted to US Eastern and stored WITHOUT a timezone, applied
-          here and never in the app. Do not read this as UTC.
+          Scheduled kickoff, TIMEZONE-AWARE, as stored — the instant, carrying its own offset.
+          AC-G.34's display zone is applied ONCE, in the app, by the single formatter that
+          knows which zone the site renders in.
+          R-643: a `start_date_et` column used to sit beside this one, holding the same moment
+          converted to US Eastern and stripped of its timezone. The app treated that naive
+          value as UTC and converted it again, so every kickoff on every page read four hours
+          early under EDT and five under EST. The column name was the only thing that said the
+          conversion had already happened, and a formatter does not read names — so the column
+          is gone rather than renamed.
       - name: kickoff_time_known
         description: >
           Whether a real kickoff time is known. FALSE means `start_date` carries a

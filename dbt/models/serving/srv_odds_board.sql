@@ -47,7 +47,10 @@ select
     l.season,
     l.week,
     l.season_type,
-    {{ to_local_timestamp('g.start_date') }} as start_date_et,
+    -- R-643: the tz-aware instant, converted once in the app. This view previously carried
+    -- ONLY the pre-localized `start_date_et` and no instant at all, so the odds board had no
+    -- correct value to fall back on. See srv_game.sql for what the double conversion cost.
+    g.start_date,
     g.home_team_id, g.home_team as home_team_display, h.team_slug as home_team_slug,
     h.logo_source_url as home_logo_url, h.color_on_light as home_color_on_light,
     g.away_team_id, g.away_team as away_team_display, a.team_slug as away_team_slug,

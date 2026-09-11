@@ -38,7 +38,7 @@ from lib.table import Col
 # `ci/check_page_queries.py` cannot see the class at all, since it executes the page's SQL
 # and a column the SQL never asks for is not in it to be executed.
 COLUMNS = """
-    game_id, season, season_type, week, start_date_et, venue_display, attendance,
+    game_id, season, season_type, week, start_date, venue_display, attendance,
     home_team_id, away_team_id,
     is_completed, is_conference_game, is_neutral_site,
     home_team, home_abbreviation, home_conference, home_logo_url, home_color_on_light,
@@ -260,7 +260,7 @@ def _picker() -> None:
     search = st.text_input("Find a team", placeholder="Type a team name…")
 
     games = query("""
-        select game_id, season, week, start_date_et, game_date,
+        select game_id, season, week, start_date, game_date,
                home_team, away_team, home_conference, away_conference,
                home_points, away_points, is_completed, venue_display
         from srv_game
@@ -268,7 +268,7 @@ def _picker() -> None:
           and (:week is null or week = :week)
           and (:conference is null or home_conference = :conference
                or away_conference = :conference)
-        order by start_date_et, game_id
+        order by start_date, game_id
         limit 400
     """, {"season": scope.season, "season_type": scope.season_type,
           "week": scope.week, "conference": scope.conference})
@@ -294,7 +294,7 @@ def _picker_table(df, scope) -> None:
         st.markdown(f"<div class='cfdb-daygroup'>{fmt.day(pd.Timestamp(day))}</div>",
                     unsafe_allow_html=True)
         table.render(rows, [
-            Col("start_date_et", "Kickoff", "time"),
+            Col("start_date", "Kickoff", "time"),
             Col("away_team", "Away"),
             Col("away_points", "", "num", dp=0),
             Col("home_team", "Home"),
@@ -556,7 +556,7 @@ def _details_cell(row, conditions: str = "") -> str:
                 f"{_line_score(row)}"
                 f"<div style='opacity:.75;margin-top:.15rem'>{venue}</div></div>")
 
-    lines = [f"<div style='font-weight:600'>{fmt.local_time(row.get('start_date_et'))}</div>"]
+    lines = [f"<div style='font-weight:600'>{fmt.local_time(row.get('start_date'))}</div>"]
     # THE SPREAD IS THE HOME PERSPECTIVE AND THE HOME TEAM IS NAMED BESIDE IT. AC-1.4: a
     # home favorite is a NEGATIVE spread. Naming the side the number belongs to is exact and
     # needs no arithmetic; the favorite-perspective presentation Marc described belongs to

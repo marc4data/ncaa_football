@@ -29,6 +29,7 @@ import os
 import re
 import zipfile
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import quote
 
@@ -599,7 +600,7 @@ DERIVED_COLUMN_DEFINITIONS = {
     ("srv_game", "status"): (
         "text",
         "Computed by the export: Final, In progress, or the kickoff time. Derived from "
-        "`is_completed` and `start_date_et`, not stored."),
+        "`is_completed` and `start_date`, not stored."),
     ("srv_game", "matchup_url"): (
         "text",
         "Built by the export: a link to this game's matchup page on the site, carrying the "
@@ -1351,7 +1352,7 @@ _ALL_SHEETS = [
     #   where a reader goes to see the line.
     # ======================================================================================
     Sheet("Schedule", "srv_game", """
-        select season, season_type, week, is_current_week, start_date_et,
+        select season, season_type, week, is_current_week, start_date,
                best_rank_in_game, is_completed,
                away_rank, away_team_display, away_team_record_display,
                home_rank, home_team_display, home_team_record_display,
@@ -1386,7 +1387,7 @@ _ALL_SHEETS = [
           and (:division = 'all' or is_fbs_game)
           and (:conference is null or home_conference = :conference
                or away_conference = :conference)
-        order by start_date_et, game_id
+        order by start_date, game_id
         limit {ROW_CAP}
     """, [
         # --- scope ----------------------------------------------------------------------
@@ -1395,7 +1396,7 @@ _ALL_SHEETS = [
         ("week", "Wk"),
         ("is_current_week", "Current week"),
         # --- the fixture. Freeze lands after `Home record`, which is column M. ------------
-        ("start_date_et", "Kickoff"),
+        ("start_date", "Kickoff"),
         ("best_rank_in_game", "Best rank"),
         ("status", "Status"),
         ("away_rank", "Away rank"),
@@ -1669,7 +1670,7 @@ _ALL_SHEETS = [
         freeze_before="Pts against"),
 
     Sheet("Odds", "srv_odds_board", """
-        select start_date_et, week, away_team_display, home_team_display,
+        select start_date, week, away_team_display, home_team_display,
                provider_display, spread, spread_open, total, total_open,
                home_moneyline, away_moneyline,
                home_implied_probability, away_implied_probability, devig_method,
@@ -1678,10 +1679,10 @@ _ALL_SHEETS = [
         from srv_odds_board
         where season = :season and is_latest_snapshot
           and (:week is null or week = :week)
-        order by start_date_et, game_id, provider_display
+        order by start_date, game_id, provider_display
         limit {ROW_CAP}
     """, [
-        ("start_date_et", "Kickoff"), ("week", "Wk"),
+        ("start_date", "Kickoff"), ("week", "Wk"),
         ("away_team_display", "Away"), ("home_team_display", "Home"),
         ("provider_display", "Book"),
         ("spread", "Spread"), ("spread_open", "Open"),
@@ -2237,7 +2238,7 @@ def number_format(field: str, decimals: Optional[int] = None,
 #
 # In Excel `mm` means MINUTES after an hour token and MONTH otherwise, which is why the month
 # here is `mmm` and there is no ambiguity to resolve.
-DATE_FORMATS = {"start_date_et": "mmm-dd hh:mm"}
+DATE_FORMATS = {"start_date": "mmm-dd hh:mm"}
 DEFAULT_DATE_FORMAT = "yyyy-mm-dd hh:mm"
 
 
@@ -2389,7 +2390,19 @@ def _clean(value):
     if isinstance(value, pd.Timestamp):
         value = value.to_pydatetime()
     if isinstance(value, datetime) and value.tzinfo is not None:
-        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        # 🚨 THE DISPLAY ZONE, NOT UTC. R-643. Excel cells cannot carry an offset, so an
+        # instant has to be resolved to SOME wall clock before it is written — and it must be
+        # the same wall clock the site shows, or the workbook and the page disagree about when
+        # a game kicks off. Measured before this changed: the page said 5:00 AM (the double
+        # conversion), the workbook said 12:00 (Eastern, because the pre-localized column
+        # passed through this branch untouched — the `tzinfo is not None` guard above meant
+        # `astimezone` was never reached for it), and the true kickoff was 9:00 AM Pacific.
+        # Three surfaces, three answers, one instant.
+        #
+        # ⚠️ The zone is named in the column header rather than in the cell, because a cell
+        # holding a real datetime is what makes Excel sort and filter it as a time; a string
+        # with "PDT" appended would sort alphabetically and stop being a date.
+        value = value.astimezone(ZoneInfo(fmt.display_timezone())).replace(tzinfo=None)
     if hasattr(value, "item"):                       # numpy scalar
         value = value.item()
     from decimal import Decimal

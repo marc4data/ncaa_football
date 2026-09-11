@@ -241,9 +241,20 @@ select
     g.season_type,
     g.week_sk,
     g.game_date,
+    -- 🚨 THE INSTANT, AND ONLY THE INSTANT. R-643.
+    --
+    -- This view used to publish `start_date_et` beside it — `start_date AT TIME ZONE
+    -- 'America/New_York'`, which in Postgres returns a timestamp WITHOUT time zone: Eastern
+    -- wall-clock with the offset thrown away. `fmt._local` then found a naive value, assumed
+    -- UTC, and converted it a second time. ⚠️ EVERY KICKOFF ON EVERY PAGE WAS FOUR HOURS EARLY
+    -- UNDER EDT AND FIVE UNDER EST, ALL SEASON. A noon-Eastern kickoff travelled
+    -- 16:00 UTC -> 12:00 naive -> re-read as 12:00 UTC -> 05:00 PDT.
+    --
+    -- ⚠️ THE COLUMN NAME WAS THE ONLY THING THAT SAID THE CONVERSION HAD ALREADY HAPPENED, AND
+    -- A FORMATTER DOES NOT READ NAMES. Renaming it would have handed the next reader the same
+    -- trap with better signage, so it is gone and the app converts once, in one place, from a
+    -- value that carries its own offset.
     g.start_date,
-    -- AC-G.34: the display zone is applied here, never in the app.
-    {{ to_local_timestamp('g.start_date') }} as start_date_et,
     g.kickoff_time_known,
     g.is_completed,
     g.is_conference_game,
