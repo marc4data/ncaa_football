@@ -83,9 +83,42 @@ def _requests_for_bucket(bucket: str, season: str,
         if not endpoint.include:
             continue
 
-        if bucket in (BUCKET_IMMUTABLE_WK, BUCKET_PREGAME):
-            # Week-scoped: every endpoint in these buckets accepts an optional `week`,
-            # so scope them all to the affected weeks rather than the whole season.
+        # 🚨 THE BUCKET DECIDES CADENCE. IT MUST NOT ALSO DECIDE SCOPE. R-656 / R-658.
+        #
+        # This branch runs BEFORE the strategy branches below, so for these two buckets it
+        # overrides whatever the endpoint declared about how it is scoped. The old comment
+        # here read "every endpoint in these buckets accepts an optional `week`, so scope
+        # them all to the affected weeks" — true about the API and wrong about the intent.
+        # ⚠️ ACCEPTING a `week` parameter is not the same as WANTING to be asked one week at
+        # a time.
+        #
+        # What that cost, measured 2026-09-11: `/games` carries the kickoff time, and it sat
+        # in BUCKET_HISTORICAL where no weekly refresh reaches it at all — 1,293 of the 2,053
+        # games in the 2026 regular season, 63%, held a kickoff last fetched on 2026-08-15.
+        # 🚨 AND THE OBVIOUS FIX WOULD HAVE MADE IT WORSE. Moving `/games` to BUCKET_PREGAME
+        # without this opt-out lands it here, and `pregame_refresh` passes
+        # `include_prior=False`, so `weeks` is THE CURRENT WEEK ALONE — one request, narrower
+        # than the two `scores_refresh` already manages. The round would have shipped, every
+        # DAG would have reported success, and 63% of the season would still be stale.
+        #
+        # ⚠️ R-658: `games/media` WAS ALREADY IN THAT TRAP. Its registry comment says it was
+        # moved out of BUCKET_HISTORICAL because broadcast assignments are "announced roughly
+        # twelve days ahead and change up to game week" — but it landed here, week-scoped to
+        # the current week, so a game twelve days out was never in the request. Measured on
+        # raw_games_media for 2026: fetched for weeks 1 and 2 only, plus a single whole-season
+        # pull on 2026-08-21. The fix moved the endpoint and left the defect.
+        #
+        # ✅ SO THE OPT-OUT IS PER ENDPOINT, NOT PER BUCKET, AND THAT IS THE POINT. The three
+        # other BUCKET_PREGAME endpoints are also declared SEASON_TYPE — `lines` and
+        # `metrics/wp/pregame` among them — so "just respect the declared strategy" would
+        # widen two SNAPSHOT endpoints to a whole season on every run. That is a quota change
+        # nobody asked for, and it would be this change shipping a second decision. The flag
+        # names exactly the endpoints whose freshness is a whole-season question.
+        #
+        # Same shape as `weekly_per_game` above: the registry is where fetch behaviour is
+        # declared, and a marker there is visible in `python -m src.backfill --list`.
+        if (bucket in (BUCKET_IMMUTABLE_WK, BUCKET_PREGAME)
+                and not endpoint.extra.get("weekly_whole_season")):
             for week in weeks:
                 out.append((endpoint.path, dict(week)))
         elif endpoint.strategy == SEASON_TYPE:
