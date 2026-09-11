@@ -424,13 +424,74 @@ def test_a_game_with_no_forecast_reserves_NO_SPACE_for_one(header):
     assert "·  ·" not in _plain(details), "a separator was left with nothing between"
 
 
-def test_a_forecast_renders_inline_and_says_it_is_a_forecast(header):
-    """⚠️ A temperature with no tense reads as a measurement. Every figure here is for a
-    kickoff that has not happened."""
+def test_the_weather_renders_inline_with_an_icon_and_no_label(header):
+    """R-595. Marc: "Forecast, don't need to include the word 'forecast'. Add the icon that
+    matches to Condition."
+
+    ⚠️ B082 ADDED THAT WORD ON PURPOSE — "a temperature with no tense reads as a
+    measurement" — and Marc has overruled it. The tense still holds structurally: this line is
+    drawn ONLY before kickoff, because a completed game's details column is the scoreboard.
+    """
     cells, _ = header(row={"is_completed": False}, forecast=FORECAST)
     details = _plain(cells[DETAILS])
-    assert "Forecast" in details
-    assert "48°F" in details and "7 mph NW" in details and "Clear" in details
+    assert "Forecast" not in details, "the label Marc asked to remove is still there"
+    assert "48°F" in details
+    assert "☀️ Clear" in details, f"the condition icon is missing: {details}"
+
+
+def test_wind_BELOW_the_floor_is_not_shown(header):
+    """⚠️ Marc: "Only show wind_mph field value if >10". The fixture's 7 mph is below
+    it, and 1,873 of 7,108 readings clear the floor — silence is the common case by design."""
+    cells, _ = header(row={"is_completed": False}, forecast=FORECAST)
+    assert "mph" not in _plain(cells[DETAILS])
+
+
+def test_wind_ABOVE_the_floor_is_shown_in_Marcs_bracket_form(header):
+    """His format, literally: `[<wind_mph> mph <wind icon>]`."""
+    gusty = dict(FORECAST, wind_speed_mph=18.0)
+    details = _plain(header(row={"is_completed": False}, forecast=gusty)[0][DETAILS])
+    assert "[18 mph 💨]" in details, f"the wind chip is not in Marc's form: {details}"
+
+
+def test_the_floor_is_exclusive_so_exactly_ten_stays_quiet(header):
+    """"if >10" is strict, and a boundary is where a threshold gets fudged."""
+    ten = dict(FORECAST, wind_speed_mph=10.0)
+    assert "mph" not in _plain(header(row={"is_completed": False}, forecast=ten)[0][DETAILS])
+    over = dict(FORECAST, wind_speed_mph=10.5)
+    assert "mph" in _plain(header(row={"is_completed": False}, forecast=over)[0][DETAILS])
+
+
+def test_an_UNMAPPED_condition_falls_back_to_the_WORD_not_a_near_enough_icon(header):
+    """🚨 A WRONG ICON IS A CONFIDENT FALSE STATEMENT about the weather at a game, and
+    CFBD owns this vocabulary — it can add a value tomorrow this map has never seen. The word
+    is merely less pretty; a sun on a hailstorm is wrong."""
+    odd = dict(FORECAST, weather_condition="Volcanic Ash")
+    details = _plain(header(row={"is_completed": False}, forecast=odd)[0][DETAILS])
+    assert "Volcanic Ash" in details
+    for icon in ("☀️", "☁️", "🌧️"):
+        assert icon not in details, "an unmapped condition was given a guessed icon"
+
+
+def test_every_condition_in_the_data_has_an_icon():
+    """The map was written FROM the data, so it should cover it.
+
+    ⚠️ A statement about today's 17 values, not a promise about tomorrow's — which is
+    why the fallback above exists and is tested separately.
+    """
+    from views import matchup
+    for condition in ("Clear", "Fair", "Cloudy", "Overcast", "Fog", "Light Rain",
+                      "Rain Shower", "Rain", "Heavy Rain", "Heavy Rain Shower",
+                      "Thunderstorm", "Snowfall", "Light Snowfall", "Heavy Snowfall",
+                      "Sleet", "Heavy Sleet", "Heavy Sleet Shower"):
+        assert condition.lower() in matchup._CONDITION_ICON, \
+            f"{condition!r} appears in srv_game_weather and has no icon"
+
+
+def test_the_stadium_sits_ABOVE_the_weather(header):
+    """R-595, Marc's order. Positional: both strings are present either way round."""
+    details = _plain(header(row={"is_completed": False}, forecast=FORECAST)[0][DETAILS])
+    assert details.index("L&N Federal Credit Union Stadium") < details.index("48°F"), \
+        f"the weather was drawn above the stadium: {details}"
 
 
 def test_INDOORS_is_stated_even_with_no_forecast_at_all(header):

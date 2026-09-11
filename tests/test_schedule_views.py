@@ -1281,9 +1281,37 @@ def test_the_page_and_the_workbook_phrase_the_bands_from_one_function():
     assert metrics.upset_bands(9, 21)[1] == "Upset by 10–21"
 
 
+# ⚠️ R-599 ADDS THE SECOND FAMILY. Marc asked for `favorite` once and for
+# `offense`/`defense` TWICE — "wrong spelling of Offense and Defense… Spellings are also wrong
+# in the tables." Extending this guard rather than writing a second one, because two guards
+# scanning the same tree for the same KIND of thing is how they drift apart.
+#
+# 🚨 NO COLUMN NAME IS BRITISH. The warehouse is already American — `offense_ppa`,
+# `defense_havoc_rate`, `total_yards_for` — so every occurrence this catches is prose, a
+# label, a comment or a Python identifier we wrote. A rename that touched a column would be a
+# different and much worse round, and this guard cannot cause one.
+_BRITISH = ("avourite",)
+
+# ⚠️ THE SECOND FAMILY IS SCOPED TO ONE FILE TODAY, AND THE SCOPE IS THE HANDOVER.
+#
+# R-599 is B's half of the rename and it covers `views/matchup.py`. A096 takes the other half
+# — 18 lines across six files: today.py (11), theme.py (2), team.py (2), chips.py, fmt.py and
+# workbook.py (1 each), measured 2026-09-11.
+#
+# 🚨 A GUARD THAT SHIPS ALREADY EXEMPTED IS NOT A GUARD (A091's words, and it refused to ship
+# one). So this is not an exemption list that will quietly outlive the work: it is a single
+# path, and A096's last act is to DELETE this tuple's scope so the family joins `avourite`
+# above and the whole tree is covered. If A096 has landed and this is still here, that is the
+# bug.
+_BRITISH_MATCHUP_ONLY = ("offence", "Offence", "OFFENCE", "defence", "Defence", "DEFENCE")
+_MATCHUP = "matchup.py"
+
+
 def test_no_user_facing_string_uses_british_spelling():
     """Marc: "Use US version of favorite". The site said favourite and the workbook said
-    favorite, in two legends describing the same three marks."""
+    favorite, in two legends describing the same three marks.
+
+    R-599: extended to offence/defence, which Marc has now asked for twice."""
     from pathlib import Path as _Path
     site = _Path(__file__).resolve().parents[1] / "site"
     # ONE exemption, spelled out rather than pattern-matched: CSV_LABEL_OVERRIDES quotes the
@@ -1295,7 +1323,8 @@ def test_no_user_facing_string_uses_british_spelling():
         if "__pycache__" in str(path):
             continue
         for number, line in enumerate(path.read_text().splitlines(), start=1):
-            if "avourite" not in line:
+            words = _BRITISH + (_BRITISH_MATCHUP_ONLY if path.name == _MATCHUP else ())
+            if not any(word in line for word in words):
                 continue
             if exempt in line or "Marc's CSV" in line:
                 continue

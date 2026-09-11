@@ -10,8 +10,8 @@ That check executes this panel's query too, so renamed and dropped columns are a
 covered. What it cannot see is whether the panel still DRAWS the drives, and that is what
 these assertions are for — the frame is stubbed so they test rendering, not the database.
 
-THE ASSERTION THAT MATTERS MOST is the defence-touchdown one. A `TD` suffix on a turnover or
-a kick means the DEFENCE scored — 908 drives across ten drive_result values, measured on the
+THE ASSERTION THAT MATTERS MOST is the defense-touchdown one. A `TD` suffix on a turnover or
+a kick means the DEFENSE scored — 908 drives across ten drive_result values, measured on the
 built model — so a panel that reads the result TEXT rather than `scoring_side` puts every one
 of them on the wrong side of the game, and does it while looking entirely healthy.
 """
@@ -150,8 +150,8 @@ def test_scoring_drives_are_distinguishable_at_a_glance(panel):
     assert "TD" in highlighted[0]
 
 
-def test_a_defence_touchdown_is_not_credited_to_the_offence(panel):
-    """⚠️ THE ONE THAT MATTERS. `INT TD` means the DEFENCE scored.
+def test_a_defense_touchdown_is_not_credited_to_the_offense(panel):
+    """⚠️ THE ONE THAT MATTERS. `INT TD` means the DEFENSE scored.
 
     A panel keying off the substring "TD" marks this as an offensive score and puts ~908
     drives on the wrong side of the game — while looking entirely healthy. `scoring_side` is
@@ -160,8 +160,8 @@ def test_a_defence_touchdown_is_not_credited_to_the_offence(panel):
     frame = pd.DataFrame([_drive(1, "home", "Alpha", "INT TD",
                                  scoring_side="defense", scoring=True)])
     body = _text([e for e in panel(frame) if "border-left" in e[1]])
-    assert "defence" in body, "a defensive score must say so"
-    assert "offence" not in body, "INT TD credited to the offence — read scoring_side, not the text"
+    assert "defense" in body, "a defensive score must say so"
+    assert "offense" not in body, "INT TD credited to the offense — read scoring_side, not the text"
 
 
 def test_each_band_takes_its_own_colour(panel):

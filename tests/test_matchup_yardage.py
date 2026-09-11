@@ -1,4 +1,4 @@
-"""The Matchup offence-against-defence panel: form leading into this game's week (R-465).
+"""The Matchup offense-against-defense panel: form leading into this game's week (R-465).
 
 WHAT THIS EXISTS TO CATCH, AND IT IS ONE THING ABOVE ALL THE OTHERS. The comparison Marc
 asked for runs ACROSS SIDES — "how team A produces passing yards compared to how Team B
@@ -241,8 +241,8 @@ def _both(**home_over):
 def _plain(markup: str) -> str:
     """Tags out, whitespace collapsed.
 
-    The team name and the word "offence" sit in separate spans, so stripping tags leaves a
-    double space between them and a naive substring test for "Kentucky offence" fails on a
+    The team name and the word "offense" sit in separate spans, so stripping tags leaves a
+    double space between them and a naive substring test for "Kentucky offense" fails on a
     panel that is drawing correctly. Collapsing here means the assertions read as the
     sentence a reader sees.
     """
@@ -275,28 +275,28 @@ def test_the_pairing_runs_across_sides_not_down_one(panel):
     """
     entries, _ = panel(_game(), _both())
     blocks = [_plain(body) for kind, body in entries if kind == "markdown"]
-    away_block = " ".join(b for b in blocks if "Kentucky offence" in b)
+    away_block = " ".join(b for b in blocks if "Kentucky offense" in b)
     assert away_block, "the away team's attack was never drawn"
-    assert "154.4" in away_block, "Kentucky's rushing offence is missing"
+    assert "154.4" in away_block, "Kentucky's rushing offense is missing"
     assert "84.5" in away_block, \
-        "Kentucky's attack is not paired with AUBURN's rushing defence"
+        "Kentucky's attack is not paired with AUBURN's rushing defense"
     assert "132.6" not in away_block, \
-        "the panel paired Kentucky's offence with Kentucky's own defence — one team " \
+        "the panel paired Kentucky's offense with Kentucky's own defense — one team " \
         "described as though it were a matchup"
 
-    home_block = " ".join(b for b in blocks if "Auburn offence" in b)
+    home_block = " ".join(b for b in blocks if "Auburn offense" in b)
     assert home_block, "the home team's attack was never drawn"
     assert "170.8" in home_block and "132.6" in home_block, \
-        "Auburn's attack is not paired with Kentucky's rushing defence"
+        "Auburn's attack is not paired with Kentucky's rushing defense"
     assert "84.5" not in home_block, \
-        "the panel paired Auburn's offence with Auburn's own defence"
+        "the panel paired Auburn's offense with Auburn's own defense"
 
 
 def test_both_directions_are_drawn(panel):
     """Marc named a comparison with two directions, and one of them is not the answer."""
     entries, _ = panel(_game(), _both())
     body = _text(entries)
-    assert "Kentucky offence" in body and "Auburn offence" in body, \
+    assert "Kentucky offense" in body and "Auburn offense" in body, \
         "only one direction of the comparison was rendered"
 
 
@@ -383,7 +383,7 @@ def test_one_side_missing_does_not_render_half_a_matchup(panel):
     nobody asked."""
     entries, _ = panel(_game(), [_side(HOME_ID, "Auburn")])
     body = _text(entries)
-    assert "Auburn offence" not in body, \
+    assert "Auburn offense" not in body, \
         "half the comparison was drawn as though it were the whole one"
     assert "111.1" not in body and "444.4" not in body
 
@@ -556,10 +556,10 @@ def test_the_AWAY_column_is_drawn_before_the_HOME_column(panel):
     """
     entries, _ = panel(_game(), _both())
     blocks = [_plain(b) for kind, b in entries
-              if kind == "markdown" and "offence against" in _plain(b)]
+              if kind == "markdown" and "offense against" in _plain(b)]
     assert len(blocks) == 2, f"expected two direction blocks, got {len(blocks)}"
-    assert "Kentucky offence" in blocks[0], "the away side is not in the left column"
-    assert "Auburn offence" in blocks[1], "the home side is not in the right column"
+    assert "Kentucky offense" in blocks[0], "the away side is not in the left column"
+    assert "Auburn offense" in blocks[1], "the home side is not in the right column"
 
 
 def test_each_columns_charts_belong_to_that_columns_team(panel):
@@ -627,3 +627,66 @@ def test_NO_DISTRIBUTION_draws_no_charts_and_says_WHICH_absence(panel):
     text = _text(entries)
     assert "No week-wide distribution" in text
     assert "154.4" in text, "the panel stopped drawing its figures along with its charts"
+
+
+# --- 🚨 R-594: the POINT, which B084 never asserted ---------------------------------------------
+
+def _point(chart):
+    """The plotted coordinate, out of the compiled spec's own datasets."""
+    spec = chart.to_dict()
+    for values in spec.get("datasets", {}).values():
+        if values and "who" in values[0]:
+            return values[0]["x"], values[0]["y"]
+    raise AssertionError("the chart drew no point")
+
+
+def test_the_point_is_the_TEAMS_OWN_VALUE_not_zero(panel):
+    """🚨 THE ASSERTION B084 DID NOT HAVE, AND MARC FOUND ITS ABSENCE BEFORE A TEST DID.
+
+    B084 verified its AXES — identical across two matchups, which was its claim — and never
+    once quoted a plotted value. ⚠️ A round can prove exactly what it set out to prove and
+    ship a defect in the same panel, and the only defence is asserting the thing a reader
+    actually looks at.
+
+    Kentucky gain 154.4 on the ground and Auburn allow 84.5, so the away column's rushing
+    point is (84.5, 154.4) — the opponent's allowed on x, this team's gained on y.
+    """
+    entries, _ = panel(_game(), _both())
+    x, y = _point(_charts(entries)[0])
+    assert y == 154.4, f"the y value is not the away team's rushing figure: {y}"
+    assert x == 84.5, f"the x value is not the home team's rushing allowed: {x}"
+    assert y != 0 and x != 0
+
+
+def test_every_one_of_the_six_charts_plots_a_real_value(panel):
+    """Not one chart — all six. A single correct point would have passed B084's gap too."""
+    entries, _ = panel(_game(), _both())
+    charts = _charts(entries)
+    assert len(charts) == 6
+    for index, chart in enumerate(charts):
+        x, y = _point(chart)
+        assert x not in (0, None) and y not in (0, None), \
+            f"chart {index} plotted at ({x}, {y})"
+
+
+def test_a_GENUINE_zero_still_draws_because_it_is_a_datum(panel):
+    """⚠️ THE OTHER HALF, AND THE PROMPT WAS EXPLICIT: "DO NOT fix it by filtering zeros."
+
+    Measured across every season: 13,728 srv_team_week rows carry a counted game, and exactly
+    TWO have a zero per-game figure — both rushing, both plausible. A team that genuinely
+    gained nothing is a measurement, and suppressing it would trade a visible defect for an
+    invisible one.
+    """
+    sides = [_side(HOME_ID, "Auburn"), _side(AWAY_ID, "Kentucky",
+                                             rushing_yards_for_per_game=0.0)]
+    entries, _ = panel(_game(), sides)
+    x, y = _point(_charts(entries)[0])
+    assert y == 0.0, "a genuine zero was suppressed rather than drawn"
+
+
+def test_a_NULL_per_game_figure_draws_NO_chart_rather_than_a_zero(panel):
+    """Null and zero are different facts. The chart is absent for a null, not plotted at 0."""
+    sides = [_side(HOME_ID, "Auburn"), _side(AWAY_ID, "Kentucky",
+                                             rushing_yards_for_per_game=None)]
+    entries, _ = panel(_game(), sides)
+    assert len(_charts(entries)) == 5, "a null figure was drawn as a point"
