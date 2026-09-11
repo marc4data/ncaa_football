@@ -2168,14 +2168,34 @@ def _travel(game_id) -> None:
 
     TWO MEASURES WITH DIFFERENT COVERAGE, shown separately rather than blended. Rest comes
     from the schedule and exists for every game that is not a season opener; travel needs
-    coordinates for both venues, so it is 2024 onward and about 79% even there. A null
-    distance renders as an em dash, never as zero — zero means they played at home.
+    coordinates for BOTH the game venue and the team's home venue. A null distance renders as
+    an em dash, never as zero — zero means they played at home.
+
+    🚨 THE ABSENT CASE IS THE COMMON ONE AND THAT IS MEASURED, NOT ASSUMED (R-634). Of 3,180
+    upcoming 2026 sides, 659 (20.7%) carry `travel_miles` and 482 (15.2%) carry
+    `elevation_change_ft`. Per GAME it is starker: of 1,590 upcoming games, 287 (18.1%) have
+    both sides' distance, 85 (5.3%) have one, and 1,218 (76.6%) have neither. ⚠️ So the empty
+    state is furniture rather than an edge case — the same thing B083 established for the
+    market card, where the absent favorite was 2,234 of 3,831.
+
+    ⚠️ MILES AND FEET SINCE R-634. Marc, 2026-09-11: "all distance measurements in miles,
+    elevation measurements in feet." The conversion is NOT done here — a multiplication in the
+    page is metric maths and §4.2 puts it in dbt. A097 shipped `travel_miles`,
+    `elevation_change_ft`, `game_elevation_ft` and `home_elevation_ft`, each rounded from the
+    SAME unrounded measurement as its metric twin rather than converted from the rounded one,
+    so the two cannot disagree. Verified against Arizona State → Wembley Stadium: 8,463.6 km =
+    5,259.0 miles, and `elevation_change_ft` is -1,027 where converting the rounded -313.2 m
+    would have given -1,028.
+
+    ⚠️ ONLY THE TWO COLUMNS THIS PANEL RENDERS ARE SWAPPED. `game_elevation_*` and
+    `home_elevation_*` are not read here and adding them would grow a panel Marc asked to
+    shrink (R-600).
     """
     st.subheader("Travel and rest")
     with states.section("srv_game_travel", dataset=DATASETS["srv_game_travel"]):
         df = query("""
-            select team, opponent, is_home, is_neutral_site, game_venue, travel_km,
-                   elevation_change_m, rest_days, rest_bucket, previous_game_date, as_of_ts
+            select team, opponent, is_home, is_neutral_site, game_venue, travel_miles,
+                   elevation_change_ft, rest_days, rest_bucket, previous_game_date, as_of_ts
             from srv_game_travel
             where game_id = :game_id
             order by is_home desc
@@ -2199,10 +2219,14 @@ def _travel(game_id) -> None:
             side = "Home" if r.get("is_home") else "Away"
             if r.get("is_neutral_site"):
                 side = "Neutral site"
-            km = r.get("travel_km")
-            # Zero is a real answer here and reads as one; null is not.
-            travel = ("—" if km is None or pd.isna(km)
-                      else "home venue" if float(km) < 1 else f"{float(km):,.0f} km")
+            miles = r.get("travel_miles")
+            # ⚠️ AC-G.32. Zero is a real answer here and reads as one; null is not, and the
+            # two must never render the same. A home side carries 0.0 — measured, not assumed:
+            # 367 of the upcoming sides are a literal zero rather than a null. "home venue"
+            # says what that zero MEANS, which is why it is preferred to "0.0 mi"; what
+            # matters for the rule is that it is emphatically not the em dash.
+            travel = ("—" if miles is None or pd.isna(miles)
+                      else "home venue" if float(miles) < 1 else f"{float(miles):,.1f} mi")
             rest = r.get("rest_days")
             rest_text = "—" if rest is None or pd.isna(rest) else f"{int(rest)}d rest"
             bucket = str(r.get("rest_bucket") or "")
@@ -2211,11 +2235,13 @@ def _travel(game_id) -> None:
                 # here that says what a number MEANS rather than repeating it.
                 rest_text = (f"<span title='{html.escape(bucket, quote=True)}' "
                              f"style='cursor:help;border-bottom:1px dotted'>{rest_text}</span>")
-            change = r.get("elevation_change_m")
-            # Signed on purpose: arriving 1,500 m higher and 1,500 m lower are different
-            # experiences and a magnitude would erase which happened.
+            change = r.get("elevation_change_ft")
+            # 🚨 SIGNED ON PURPOSE, AND THE SIGN IS THE FACT. Arriving 1,500 ft higher and
+            # 1,500 ft lower are different experiences and a magnitude would erase which
+            # happened — Arizona State drop 1,027 ft going to Wembley, a side going to Laramie
+            # climbs. The leading + or − is what says which, so this must never be abs()ed.
             elevation = ("—" if change is None or pd.isna(change)
-                         else f"{float(change):+,.0f} m")
+                         else f"{float(change):+,.0f} ft")
             st.markdown(
                 f"<div style='padding:.1rem 0'><strong>{html.escape(str(r.get('team')))}"
                 f"</strong> <span style='opacity:.6'>{side}</span> · {travel} · "
