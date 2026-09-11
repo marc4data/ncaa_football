@@ -114,6 +114,23 @@ def _chart(df: pd.DataFrame) -> None:
     if series.empty or len(series) < 2:
         st.caption("Only one snapshot so far — a line needs two points to move.")
         return
+    # ⚠️ R-659: THIS CHART IS SQUEEZED BY STREAMLIT'S AUTOSIZE AND DELIBERATELY NOT "FIXED".
+    #
+    # `_prepare_vega_lite_spec` imposes `autosize: fit` on any spec that declares none, which
+    # makes `height` the OUTER BOX rather than the plot — the defect that collapsed Matchup's
+    # 150px charts (R-603). Measured in a real browser (A100), plot height drawn against the
+    # 240 asked for, as the axis font grows:
+    #
+    #     axis font    10px   13px   16px   20px   24px   28px
+    #     plot drawn     208    204    199    193    187    181
+    #
+    # 🚨 IT LOSES A NEAR-CONSTANT ~30px, NOT A PROPORTION, because its axis labels are short
+    # and horizontal — so it degrades gracefully and cannot reach a collapse at any font a
+    # reader will set. `performance.py`'s calibration curve loses ~6.5px PER pixel of font and
+    # was fixed for exactly that reason; this one would need a 100px axis font to break.
+    #
+    # ⚠️ THE DELIVERABLE HERE IS THE MEASUREMENT, NOT A NEW CHART. If this is ever given a
+    # smaller height, or labels that rotate, re-measure before trusting it.
     st.line_chart(series, height=240)
     st.caption("Spread from the home perspective; a falling line means the home team is "
                "being bet.")
