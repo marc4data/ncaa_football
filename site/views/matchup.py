@@ -1241,6 +1241,38 @@ def _week_distribution(row):
     return {str(r["metric"]): r for _, r in df.iterrows()}
 
 
+def _off_the_frame(value, axis) -> bool:
+    """Is this value outside the week's axis, so Vega-Lite would clip it away?
+
+    🚨 R-601. THE FRAME IS BUILT FROM 138 FBS TEAMS AND THE PANEL PLOTS ANY OF 658. Measured
+    2026-09-11: `srv_team_week_metric_distribution` reports `n` = `teams_in_week` = 138 for
+    every 2026 week, while `srv_team_week` carries 658 teams in each of those weeks — every
+    non-FBS side an FBS school schedules. A team outside the FBS spread therefore plots
+    outside the axis built without it, and **26 distribution rows in 2026 alone have at least
+    one team beyond their own limits.**
+
+    ⚠️ IT IS NOT A THEORETICAL STATE. Game 401868264, Marist at Stetson, week 5: Stetson
+    allow 393.0 rushing yards per game against a `rushing_yards_allowed_per_game` axis of
+    [-50, 350]. Rendered, the point lands OUTSIDE the plotting rectangle — floating in the
+    chart's right-hand margin, past the last tick — because `scale.domain` with `nice=False`
+    bounds the axis and not the mark.
+
+    🚨 SO THE CHART WAS DRAWN AND THE POINT WAS NOT ON IT: a band, two medians, a labelled
+    pair of axes, and nothing plotted. That reads as "this matchup is unremarkable", which is
+    a confident false statement — the class this project keeps removing. ⚠️ The numbers
+    themselves are NOT lost: `_yardage_direction` prints both of them as text immediately
+    above, so skipping the chart drops a misleading picture and no measurement.
+
+    ⚠️ THIS IS A GUARD, NOT THE FIX, AND IT IS DELIBERATELY NOT AN AXIS OVERRIDE. The real
+    repair is in the mart — the frame should be built over the teams it will be asked to
+    hold, or the panel should be told which teams it may plot — and
+    `srv_team_week_metric_distribution` is A092's model, so it is session A's (§3, rule 3).
+    Widening the limits here would put a second axis calculation in the page and let the
+    frame disagree with the one the caption describes.
+    """
+    return not (float(axis["axis_min"]) <= float(value) <= float(axis["axis_max"]))
+
+
 def _scatter(team, opponent, for_column, allowed_column, distribution,
              team_name: str, opponent_name: str, label: str):
     """One metric: this side's attack against that side's defense, on the week's frame.
@@ -1256,6 +1288,8 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
         return None
     value_y, value_x = team.get(for_column), opponent.get(allowed_column)
     if pd.isna(value_y) or pd.isna(value_x):
+        return None
+    if _off_the_frame(value_y, y_axis) or _off_the_frame(value_x, x_axis):
         return None
 
     def domain(axis):
@@ -1289,6 +1323,26 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     return (band + mid_x + mid_y + point).properties(height=150, title=label)
 
 
+def _off_the_frame_metrics(team, opponent, distribution) -> list:
+    """Which metrics this side cannot be drawn on, because the week's frame excludes it.
+
+    ⚠️ ONE PREDICATE, TWO CALLERS. `_scatter` decides whether to draw and this decides what
+    to say about it not drawing; both ask `_off_the_frame`, so the caption cannot come to a
+    different conclusion from the chart it explains.
+    """
+    out = []
+    for label, for_column, allowed_column in _YARDAGE_DIMENSIONS:
+        y_axis, x_axis = distribution.get(for_column), distribution.get(allowed_column)
+        if y_axis is None or x_axis is None:
+            continue
+        value_y, value_x = team.get(for_column), opponent.get(allowed_column)
+        if pd.isna(value_y) or pd.isna(value_x):
+            continue
+        if _off_the_frame(value_y, y_axis) or _off_the_frame(value_x, x_axis):
+            out.append(label)
+    return out
+
+
 def _yardage_column(team, opponent, distribution) -> None:
     """One side of the comparison: the text rows, then a chart per metric."""
     st.markdown(_yardage_direction(team, opponent), unsafe_allow_html=True)
@@ -1299,6 +1353,15 @@ def _yardage_column(team, opponent, distribution) -> None:
                          team_name, opponent_name, label)
         if chart is not None:
             st.altair_chart(chart, use_container_width=True)
+    # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11). A chart silently missing from a
+    # row of three reads as "we hold nothing"; these two hold a figure that is off the scale
+    # the rest of the week is drawn on, and the figures are printed in full just above.
+    off = _off_the_frame_metrics(team, opponent, distribution)
+    if off:
+        st.caption(
+            f"{'  ·  '.join(off)} not plotted — one of these two figures falls outside the "
+            f"range this week's chart is drawn on, so there is no honest place to put the "
+            f"point. The numbers are above.")
 
 
 def _yardage(row) -> None:
