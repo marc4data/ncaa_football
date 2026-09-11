@@ -241,11 +241,11 @@
       "high"
     ],
     "color": [
-      "Team primary colour as a hex string.",
+      "Team primary color as a hex string.",
       "high"
     ],
     "alternatecolor": [
-      "Team secondary colour as a hex string.",
+      "Team secondary color as a hex string.",
       "high"
     ],
     "season": [
@@ -1129,7 +1129,7 @@
       "medium"
     ],
     "spread": [
-      "Point spread. Sign convention is provider-specific — verify which team a negative favours.",
+      "Point spread. Sign convention is provider-specific — verify which team a negative favors.",
       "medium"
     ],
     "spreadopen": [

@@ -113,7 +113,7 @@ models:
       - name: longitude
         description: Decimal degrees.
       - name: elevation_m
-        description: Elevation in metres.
+        description: Elevation in meters.
       - name: capacity
         description: Seating capacity.
       - name: construction_year
@@ -146,7 +146,7 @@ models:
     description: >
       One row per (season, team). SEASON-SCOPED, NOT SCD2 — per-season scoping answers "what
       was true in season X", which is what every page asks, and realignment happens between
-      seasons. Carries contrast-safe colour variants computed in dbt, never in the app.
+      seasons. Carries contrast-safe color variants computed in dbt, never in the app.
     columns:
       - name: team_sk
         description: Surrogate key over (season, team_id).
@@ -185,7 +185,7 @@ models:
       - name: state
         description: Team state.
       - name: color_raw
-        description: Primary colour exactly as landed. CFBD returns the literal string '#null' when absent; that is normalised to NULL in staging.
+        description: Primary color exactly as landed. CFBD returns the literal string '#null' when absent; that is normalised to NULL in staging.
         # Canary for json_get_string, the plain key accessor, on the column the entire
         # contrast ladder is computed from. At 0% every team would fall to the fallback
         # rung and still render — the same invisible failure. Measured 97.0%.
@@ -193,7 +193,7 @@ models:
           - populated_rate:
               arguments: {min_rate: 0.90}
       - name: alt_color_raw
-        description: Alternate colour exactly as landed.
+        description: Alternate color exactly as landed.
       - name: color_on_light
         description: Hex guaranteed to clear 3:1 against the light surface (#fcfcfb).
       - name: color_on_dark
@@ -491,7 +491,7 @@ models:
         description: regular or postseason.
       - name: spread
         description: >
-          Closing point spread. NEGATIVE MEANS THE HOME TEAM WAS FAVOURED — documented by
+          Closing point spread. NEGATIVE MEANS THE HOME TEAM WAS FAVORED — documented by
           the CFB Model Training Pack's Data Info Sheet and verified against its 5,133
           training rows, where home teams win 74.4% of spread<0 games against 31.4% of
           spread>0 games. This resolves a question open since 2026-08-17. The word
@@ -600,13 +600,13 @@ models:
       - name: team_id
         description: >
           CFBD team id, resolved from `team` against dim_team within season. NULLABLE, and
-          null is not a join failure: 321 rows are NAIA and Division II programmes that
+          null is not a join failure: 321 rows are NAIA and Division II programs that
           appear on a roster feed and are legitimately absent from CFBD's /teams response.
           Match rate 99.32% / 99.45% / 100.00% for 2024 / 2025 / 2026.
       - name: is_listed_team
         description: >
           Whether dim_team had a row for this team and season. FALSE marks the 321 non-FBS
-          programmes above, so a consumer can distinguish them from a broken join.
+          programs above, so a consumer can distinguish them from a broken join.
       - name: team_slug
         description: URL-safe team identifier, falling back to a slug of the roster's own
           team name where dim_team has no row.
@@ -619,9 +619,9 @@ models:
       - name: logo_source_url
         description: CFBD logo URL for the team; null for unlisted teams.
       - name: color_on_light
-        description: Contrast-corrected team colour for a light background.
+        description: Contrast-corrected team color for a light background.
       - name: color_on_dark
-        description: Contrast-corrected team colour for a dark background.
+        description: Contrast-corrected team color for a dark background.
       - name: position
         description: Listed position; null on 2,450 rows where the feed omits it.
       - name: jersey
@@ -806,7 +806,7 @@ models:
       - name: team_id
         description: >
           Resolved from dim_team on (season, school). Null on 3,318 rows, all non-FBS
-          programmes absent from /teams.
+          programs absent from /teams.
       - name: conference
         description: Conference as the box score recorded it.
       - name: home_away
@@ -886,7 +886,7 @@ models:
       - name: offense
         description: Team on offense for this play, by name.
       - name: offense_team_id
-        description: Resolved from dim_team within season; null for non-FBS programmes.
+        description: Resolved from dim_team within season; null for non-FBS programs.
       - name: offense_conference
         description: Conference of the team on offense.
       - name: offense_score
@@ -894,7 +894,7 @@ models:
       - name: defense
         description: Team on defense for this play, by name.
       - name: defense_team_id
-        description: Resolved from dim_team within season; null for non-FBS programmes.
+        description: Resolved from dim_team within season; null for non-FBS programs.
       - name: defense_conference
         description: Conference of the team on defense.
       - name: defense_score
@@ -1003,7 +1003,7 @@ models:
       - name: team
         description: Team the athlete was playing for.
       - name: team_id
-        description: Resolved from dim_team within season; null for non-FBS programmes.
+        description: Resolved from dim_team within season; null for non-FBS programs.
       - name: conference
         description: Conference of that team.
       - name: opponent

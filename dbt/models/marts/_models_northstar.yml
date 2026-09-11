@@ -91,10 +91,10 @@ models:
 
   - name: dim_field_metadata
     description: >
-      One row per modelled column — the data dictionary, generated from the warehouse's own
-      catalogue rather than maintained by hand. Descriptions are authored once in
+      One row per modeled column — the data dictionary, generated from the warehouse's own
+      catalog rather than maintained by hand. Descriptions are authored once in
       schema.yml and pushed into the database by persist_docs, so the dictionary cannot
-      drift from the models. Materialized as a view because it reads the catalogue and
+      drift from the models. Materialized as a view because it reads the catalog and
       declares no refs: as a table dbt builds it first and it captures the previous run's
       comments.
     columns:
@@ -145,7 +145,7 @@ models:
       model_version and prediction_ts are cfdb's addition to the pack's grain, and they are
       what make in-season re-scoring append rather than overwrite.
       SIGN CONVENTION: margin = away_points - home_points, so a NEGATIVE margin means the
-      HOME team won, and spread < 0 means the home team was favoured. Preserved verbatim
+      HOME team won, and spread < 0 means the home team was favored. Preserved verbatim
       from raw through staging; home-perspective values exist only in serving, as
       explicitly named derived columns.
     columns:
@@ -171,7 +171,7 @@ models:
           away_points - home_points. NEGATIVE MEANS THE HOME TEAM WON. Pinned by
           assert_prediction_sign_convention and assert_prediction_margin_is_away_minus_home.
       - name: spread
-        description: Point spread. Negative means the home team was favoured.
+        description: Point spread. Negative means the home team was favored.
       - name: home_cover_edge
         description: >
           spread - predicted_margin. Positive means the model prefers the home side against
@@ -189,7 +189,7 @@ models:
     description: >
       One row per model version actually loaded, derived from the exports rather than
       declared — a declared list drifts the moment a notebook is re-run. Carries the
-      attribution string the licence requires, as data, so a page cannot render predictions
+      attribution string the license requires, as data, so a page cannot render predictions
       without it.
     columns:
       - name: model_version_sk
@@ -207,7 +207,7 @@ models:
         description: The pack's default split, recorded so a page states it rather than assumes it.
       - name: attribution
         description: >
-          Licence-required wording. The pack prohibits presenting derived output as official
+          License-required wording. The pack prohibits presenting derived output as official
           CollegeFootballData.com predictions.
         data_tests: [not_null]
 

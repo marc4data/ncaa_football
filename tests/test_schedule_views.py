@@ -1301,66 +1301,15 @@ def test_the_page_and_the_workbook_phrase_the_bands_from_one_function():
 # Spelled as `off` + `ence` so the next blanket replace cannot reach it, and
 # `test_the_british_word_list_is_still_british` asserts it anyway — the mechanism and the guard
 # on the mechanism, because the mechanism is the kind of thing someone tidies.
-_ENCE = "en" + "ce"
-_BRITISH = ("av" + "ourite",) + tuple(
-    prefix + (_ENCE.upper() if prefix.isupper() else _ENCE)
-    for prefix in ("off", "Off", "OFF", "def", "Def", "DEF"))
-
-# ✅ R-632. `_BRITISH_MATCHUP_ONLY` AND `_MATCHUP` ARE GONE, WHICH WAS A096's LAST ACT.
+# ✅ R-639. THE TWO SPELLING TESTS MOVED TO `tests/test_spelling.py`, WHICH IS WHERE THEY LIVE.
 #
-# B085 scoped the offence/defence family to `views/matchup.py` because A's files still carried
-# the spelling, and wrote the handover into the file: "A guard that ships already exempted is not
-# a guard. So this is not an exemption list: it is one path, and A096's last act is to delete the
-# scope so the family joins `avourite` and covers the tree. If A096 has landed and the scope is
-# still there, that is the bug."
+# They had grown to walk all of `site/`, and A103 added four dbt schema files and a JSON to
+# that. A guard covering three trees does not belong in a file named for one page.
 #
-# A096 landed. The scope is gone and the family is in `_BRITISH` above, unscoped.
-
-
-def test_the_british_word_list_is_still_british():
-    """🚨 THE GUARD ON THE GUARD, AND A096 EARNED IT THE HARD WAY.
-
-    A096's blanket rename rewrote `_BRITISH` itself, flipping every word to the American
-    spelling. The guard then flagged every CORRECT line in the site and failed for the opposite
-    of its reason — and had the rename been one word narrower, it would have PASSED while
-    detecting nothing at all.
-
-    ⚠️ That is the week's theme in one commit: an instrument that stops measuring what it claims,
-    in the same change that makes it look unnecessary. The tuple is assembled from halves so a
-    replace cannot reach it; this asserts the result regardless of how it was built.
-    """
-    assert ("f" + _BRITISH[0]) == "fav" + "ourite", \
-        "the favourite fragment is no longer British"
-    for word in _BRITISH[1:]:
-        assert word.lower().endswith("ence"), \
-            f"{word!r} is not a British spelling — the detector has been renamed"
-    assert any(w.lower() == "offence" for w in _BRITISH), "offence is not in the word list"
-    assert any(w.lower() == "defence" for w in _BRITISH), "defence is not in the word list"
-
-
-def test_no_user_facing_string_uses_british_spelling():
-    """Marc: "Use US version of favorite". The site said favourite and the workbook said
-    favorite, in two legends describing the same three marks.
-
-    R-599: extended to offense/defense, which Marc has now asked for twice."""
-    from pathlib import Path as _Path
-    site = _Path(__file__).resolve().parents[1] / "site"
-    # ONE exemption, spelled out rather than pattern-matched: CSV_LABEL_OVERRIDES quotes the
-    # header in Marc's column-order file verbatim, and rewriting the quote would make the
-    # recorded divergence look like a typo instead of a decision.
-    exempt = '"Favourite covered": "Favorite covered"'
-    offenders = []
-    for path in sorted(site.rglob("*.py")):
-        if "__pycache__" in str(path):
-            continue
-        for number, line in enumerate(path.read_text().splitlines(), start=1):
-            words = _BRITISH
-            if not any(word in line for word in words):
-                continue
-            if exempt in line or "Marc's CSV" in line:
-                continue
-            offenders.append(f"{path.name}:{number}: {line.strip()[:70]}")
-    assert not offenders, offenders
+# ⚠️ AND THE MOVE ITSELF WAS THE RISK: a moved test that silently stops being collected is an
+# instrument that stopped measuring. A103 reported the collected count either side of the move
+# and staged its break AFTER it, because a break that goes red in the old location proves
+# nothing about the new one.
 
 
 def test_the_schedule_page_renders_no_distribution_band(counting_markdown):

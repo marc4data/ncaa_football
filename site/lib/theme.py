@@ -28,7 +28,7 @@ CSS = """
 @keyframes cfdb-shimmer { 0%{background-position:100% 50%} 100%{background-position:0 50%} }
 
 /* Fixed width so "Cover" and "DNC" occupy the same box (AC-G.20). Glyph carries the
-   meaning; colour is the second signal, so it survives greyscale (AC-G.21/22). */
+   meaning; color is the second signal, so it survives greyscale (AC-G.21/22). */
 .cfdb-chip { display:inline-flex; align-items:center; justify-content:center; gap:.3rem;
   min-width:6.2rem; padding:.14rem .5rem; border-radius:999px; font-size:.8rem;
   font-weight:600; border:1px solid currentColor; }
@@ -66,7 +66,7 @@ CSS = """
     opacity:.62; white-space:nowrap; }
 .cfdb-dist-median { font-size:.78rem; font-variant-numeric:tabular-nums; opacity:.9;
     white-space:nowrap; }
-/* The SVG carries the colour; the bars are drawn in currentColor so the whole thing themes
+/* The SVG carries the color; the bars are drawn in currentColor so the whole thing themes
    for free and needs no light/dark variant. */
 .cfdb-dist-svg { display:block; color:inherit; }
 /* An absent week reserves the SAME WIDTH as a present one. R-141: an element that appears
@@ -77,7 +77,7 @@ CSS = """
 /* R-477. The offense/defense scatter. Same approach as the distribution chart above: the
    marks are currentColor so the whole thing themes for free and needs no light/dark variant,
    which is also why there is no palette here to validate. One series, one hue, no legend —
-   the chart standard's §7. Nothing encodes a judgement: no colour scale, no threshold line,
+   the chart standard's §7. Nothing encodes a judgement: no color scale, no threshold line,
    no quadrant shading. */
 .cfdb-scatter { margin:.2rem 0 .1rem; }
 .cfdb-scatter svg { display:block; width:100%; height:auto; color:inherit; }
@@ -150,7 +150,7 @@ CSS = """
    ACTIVE theme, so these track the switch in the same frame the rest of the page does, with
    no Python in the loop and nothing to go stale. `color-mix` derives the rest from the same
    two so a card is a tint of the page it sits on in either theme, rather than two more
-   hardcoded colours to keep in step. */
+   hardcoded colors to keep in step. */
 .cfdb-state {
   --cfdb-border: color-mix(in srgb, CanvasText 18%, Canvas);
   --cfdb-bg:     color-mix(in srgb, CanvasText 3%,  Canvas);
@@ -187,7 +187,7 @@ TABLE_CSS = """
 /* THE OPAQUE GROUND A FROZEN COLUMN PAINTS ITSELF WITH, AND THE BAND BEHIND A GAME.
    Tokens, because they need a value in both themes: a hardcoded #fff is a white stripe down
    a dark page, and a TRANSPARENT sticky cell shows the scrolled content sliding underneath —
-   the classic failure, and it reads as a rendering bug rather than a missing colour.
+   the classic failure, and it reads as a rendering bug rather than a missing color.
 
    ⚠ BUILT FROM `Canvas` AND `CanvasText`, WHICH ARE LIVE. Two earlier attempts asked the
    wrong source and both were wrong in a way Marc could see:
@@ -197,18 +197,18 @@ TABLE_CSS = """
                            with dark cells — which is what happened.
      st.context.theme      answers what the app is rendering, but only when Python next
                            runs. Switching the theme repaints immediately and the tokens
-                           lag a rerun, so some frozen cells kept the old colour until a
+                           lag a rerun, so some frozen cells kept the old color until a
                            tab change forced another pass. Marc: "seems like there might be
                            something upstream that isn't getting touched."
 
    Streamlit sets `color-scheme: light|dark` on its own container from the ACTIVE theme
    (verified in its bundle: `colorScheme: isLight ? light : dark`, beside `backgroundColor:
-   colors.bgColor`). CSS system colours follow that property, so `Canvas` IS the page and
+   colors.bgColor`). CSS system colors follow that property, so `Canvas` IS the page and
    `CanvasText` IS the text — with no Python in the loop and nothing to go stale. The theme
    switch repaints these in the same frame it repaints everything else.
 
    `color-mix` derives the rest from the same two, so the band and the rules track the theme
-   instead of being two more colours to keep in step. */
+   instead of being two more colors to keep in step. */
 :root {
   --cfdb-sticky-bg: Canvas;
   --cfdb-band-bg:   color-mix(in srgb, CanvasText 6%,  Canvas);
@@ -220,10 +220,10 @@ TABLE_CSS = """
      R-547 converted three declarations and left this one, which is the last live instance in
      `site/`. Same reasoning, so it is deleted rather than corrected: it asked the OPERATING
      SYSTEM, Marc's Mac is dark, his Streamlit theme is Light, and every rule the block carried
-     was therefore painting a dark page's colours onto a light one — links and table rules
+     was therefore painting a dark page's colors onto a light one — links and table rules
      included, on his screen, right now.
 
-     TWO DIFFERENT TOOLS, BECAUSE THE BLOCK CARRIED TWO DIFFERENT KINDS OF COLOUR.
+     TWO DIFFERENT TOOLS, BECAUSE THE BLOCK CARRIED TWO DIFFERENT KINDS OF COLOR.
 
      A NEUTRAL RULE IS A TINT OF THE PAGE, so `color-mix` on Canvas/CanvasText derives it and
      no second value is needed. The percentages are measured from the two hardcoded values
@@ -236,11 +236,11 @@ TABLE_CSS = """
      toward CanvasText lifts it on dark (right) and darkens it on light (wrong) — there is no
      single percentage that leaves the light value alone, because CanvasText points the
      opposite way in each theme. `LinkText` is wrong too: it is the browser's default link
-     colour, so it would discard the brand blue and differ between browsers.
+     color, so it would discard the brand blue and differ between browsers.
 
      `light-dark()` is the tool. It follows the SAME `color-scheme` property Streamlit sets
      from the ACTIVE theme that Canvas/CanvasText follow, so it switches in the same frame and
-     keeps both deliberately-chosen values. The dark value is not a different colour — R-131
+     keeps both deliberately-chosen values. The dark value is not a different color — R-131
      measured #1f6feb on #0e1117 at about 3.6:1, below the 4.5:1 a small glyph needs, and
      #58a6ff is the contrast lift that clears it. Same for the three underperformer tiers. */
   --cfdb-link: light-dark(#1f6feb, #58a6ff);
@@ -275,7 +275,7 @@ TABLE_CSS = """
        header cannot hide anything sliding under it, so rows scrolled through their own
        column labels and the two sets of text overlapped. Marc: "Can we mute the fields when
        they slide behind. I find that more distracting than informative."
-       The muting the opacity was doing is now done by COLOUR, which does not make the cell
+       The muting the opacity was doing is now done by COLOR, which does not make the cell
        see-through. Same for the frozen body cells below. */
     opacity:1; color:var(--cfdb-muted,#5d6672); }
 .cfdb-scroll .cfdb-table td.cfdb-sticky { opacity:1; }
@@ -335,7 +335,7 @@ TABLE_CSS = """
 .cfdb-table tbody tr:hover { background:rgba(31,111,235,.05); }
 /* Linked rows. The anchor fills the cell so the whole row is a target, while staying a
    real <a href> — which is what makes middle-click and copy-link work (AC-G.13). The row
-   link inherits colour so a table does not turn into a wall of blue; the column-specific
+   link inherits color so a table does not turn into a wall of blue; the column-specific
    link (a team name) is visually distinct, per AC-2.5. */
 .cfdb-table td a.cfdb-cell-link { display:block; color:inherit; text-decoration:none;
     margin:-.42rem -.55rem; padding:.42rem .55rem; }
@@ -441,7 +441,7 @@ TABLE_CSS = """
    auto-FILL, NOT auto-FIT, AND THE DIFFERENCE IS VISIBLE ON EVERY MIDWEEK DAY. `auto-fit`
    COLLAPSES tracks it cannot fill, so a Sunday with one game rendered that card at 1460px
    while every other day rendered 723px — measured, not guessed. `auto-fill` keeps the empty
-   track, so a lone card is the same size as a card with a neighbour and the page stops
+   track, so a lone card is the same size as a card with a neighbor and the page stops
    changing shape according to how many games were played. */
 .cfdb-cardgrid { display:grid; gap:.7rem .9rem; align-items:stretch;
                  grid-template-columns:repeat(auto-fill, minmax(580px, 1fr)); }
@@ -518,23 +518,23 @@ TABLE_CSS = """
 /* R-129 REVERSES R-117, which Marc asked for one round ago and has now seen rendered.
    The record is OUT of the anchor in the card rather than styled to look non-clickable: a
    pointer cursor over dead text is worse than either state, and styling alone cannot remove
-   the cursor. The colour rules stay because the dense table wraps whole CELLS in an anchor,
+   the cursor. The color rules stay because the dense table wraps whole CELLS in an anchor,
    which it did before R-117 too, so the record still needs telling not to look like a link
-   there. R-136: the underline takes the LINK colour instead of the anchor's inherited one. */
+   there. R-136: the underline takes the LINK color instead of the anchor's inherited one. */
 .cfdb-teamlink { color:inherit !important; text-decoration:none; display:flex;
                  align-items:center; min-width:0; }
 .cfdb-teamlink .cfdb-team { color:var(--cfdb-link); text-decoration-color:var(--cfdb-link); }
 .cfdb-teamlink:hover .cfdb-team { text-decoration:underline; }
 .cfdb-team-record { text-decoration:none !important; }
 a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
-/* R-136: Streamlit underlines anchors and draws the line in the ANCHOR's colour, which is the
+/* R-136: Streamlit underlines anchors and draws the line in the ANCHOR's color, which is the
    body text here — a light rule under blue text, which fights on dark.
    `!important` because Streamlit's own `.stMarkdown a` outranks a two-class selector; measured
    without it the decoration stayed rgb(49,51,63) in light and rgb(250,250,250) in dark. */
 .cfdb-table a, .cfdb-cell-link, .cfdb-teamlink .cfdb-team {
     text-decoration-color:#1f6feb !important; }
 /* R-121: the monogram sits BEHIND the image, so a file that goes missing later paints the
-   same grey disc a null gives instead of the browser's broken-image box. Streamlit strips
+   same gray disc a null gives instead of the browser's broken-image box. Streamlit strips
    event handlers, so `onerror` is not available here. */
 .cfdb-logo-box { display:inline-block; flex:0 0 auto; vertical-align:middle;
                  border-radius:50%; background:rgba(127,127,127,.14); margin-right:.4rem; }
@@ -552,11 +552,11 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    R-161: bigger icons, sentence-case labels. */
 /* In a popover, two columns (R-176) rather than one tall list. */
 .cfdb-legend-side { font-size:.84rem; }
-/* R-174. THE KEY BOX CENTRES ITS CONTENTS, AND A POSITIONAL MARGIN DEFEATS THAT.
+/* R-174. THE KEY BOX CENTERS ITS CONTENTS, AND A POSITIONAL MARGIN DEFEATS THAT.
    `.cfdb-neutral` carries `margin-left:.4rem` for the ROW, where the diamond trails the
-   kickoff time and needs a gap (R-146). Inside a 1.6rem centred box that same margin is .4rem
-   of left padding with nothing to balance it, so the glyph sat right of centre — exactly what
-   Marc saw. Cancelled in the legend only; it is still doing its job elsewhere. The other four
+   kickoff time and needs a gap (R-146). Inside a 1.6rem centerd box that same margin is .4rem
+   of left padding with nothing to balance it, so the glyph sat right of center — exactly what
+   Marc saw. Canceled in the legend only; it is still doing its job elsewhere. The other four
    classes are listed pre-emptively because they carry the same shape of margin and the next
    mark added to the legend would otherwise repeat this. */
 .cfdb-legend-key .cfdb-neutral,
@@ -564,7 +564,7 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 .cfdb-legend-key .cfdb-rank,
 .cfdb-legend-key .cfdb-winner,
 .cfdb-legend-key .cfdb-ind { margin-left:0; margin-right:0; }
-/* R-175: the dome inherits colour and sizes with its row, like every other mark. */
+/* R-175: the dome inherits color and sizes with its row, like every other mark. */
 .cfdb-dome { width:1.15em; height:1.15em; vertical-align:-.22em; }
 .cfdb-legend-key .cfdb-dome { vertical-align:-.28em; }
 /* R-177: the worked examples ride the long column's heading line. */
@@ -616,13 +616,13 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    Marc's states mixed emoji-presentation characters with text-presentation ones. Those do not
    share a baseline, do not size together and vary by platform — and he asked the strip to
    match the kickoff time's visual size, which emoji will not do reliably. One rule here
-   controls size, baseline and colour for all six states; the semantics are unchanged. */
+   controls size, baseline and color for all six states; the semantics are unchanged. */
 .cfdb-strip { display:inline-flex; gap:.2rem; align-items:center; vertical-align:-.08em; }
 .cfdb-strip-gap { display:inline-block; width:.45rem; }
 .cfdb-ind { display:inline-block; width:.72em; height:.72em; box-sizing:border-box;
             border:1.5px solid transparent; }
 /* A SHAPE PER POSITION, so a single indicator can be matched to its legend entry without
-   counting its neighbours. All three were circles, which meant position was the only thing
+   counting its neighbors. All three were circles, which meant position was the only thing
    telling them apart — and position is unreadable the moment one of them is invisible. */
 .cfdb-sh-upset { border-radius:50%; }
 .cfdb-sh-cover { border-radius:2px; }
@@ -637,13 +637,13 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
 /* R-160. THE QUIET STATE TAKES THE ACCENT, as Marc asked. The caution stands and is worth
    leaving here: it means "played, nothing remarkable", and an accent border can read as
    active. It is distinguishable from the covered/over indicators by SHAPE — circle against
-   square and diamond — so the colour is not carrying the distinction on its own. */
+   square and diamond — so the color is not carrying the distinction on its own. */
 .cfdb-ind-quiet { background:transparent; border-color:#1f6feb; opacity:.45; }
 /* R-164, Marc's choice of the three offered. `nodata` means WE HOLD NO CLOSING LINE, which
    is a third thing again: not "not played" (nothing drawn) and not "played, unremarkable"
    (the quiet accent). Closing lines exist for roughly 3,200 games in the whole warehouse, so
    on a historical week this is the common case and it deserves to say so rather than leave
-   the reader counting empty slots. Dotted and grey: present, and explicitly not an answer. */
+   the reader counting empty slots. Dotted and gray: present, and explicitly not an answer. */
 /* R-171. A DASH, NOT AN OUTLINE. The dotted version still read as a value being shown —
    with Division on All Divisions, lower-division games carry no spread or total at all and
    the strip came out as three faint outlines with nothing saying why.
@@ -660,7 +660,7 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
                    text-align:center; font-weight:700; }
 .cfdb-ind-open { background:transparent; border-color:currentColor; }
 .cfdb-ind-fill { background:currentColor; border-color:currentColor; }
-/* A push is neither: half-filled reads as "landed on the number" without a fourth colour. */
+/* A push is neither: half-filled reads as "landed on the number" without a fourth color. */
 .cfdb-ind-push { background:linear-gradient(90deg, currentColor 50%, transparent 50%);
                  border-color:currentColor; }
 .cfdb-acc { color:var(--cfdb-link); }

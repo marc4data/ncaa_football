@@ -94,4 +94,4 @@ def color_source_hint(row) -> str:
     source = row.get("color_source") if hasattr(row, "get") else None
     if not source or source in SOURCED_RUNGS:
         return ""
-    return f"<span class='cfdb-hint' title='colour {source} rather than sourced'>◦</span>"
+    return f"<span class='cfdb-hint' title='color {source} rather than sourced'>◦</span>"

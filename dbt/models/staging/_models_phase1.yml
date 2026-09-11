@@ -45,7 +45,7 @@ models:
       - name: longitude
         description: Decimal degrees.
       - name: elevation_m
-        description: Elevation in metres.
+        description: Elevation in meters.
       - name: capacity
         description: Seating capacity.
       - name: construction_year
@@ -1026,7 +1026,7 @@ models:
       IT AS A TABLE — re-inlining a 619k-row unnest per reference is what made fct_game fail
       to finish in 22 minutes when stg_games was still a view.
       Scope is 2024-2026 by the DATA, not a filter: CLAUDE.md limits play-by-play to those
-      seasons and the backfill honoured it, so a predicate here would encode the rule twice.
+      seasons and the backfill honored it, so a predicate here would encode the rule twice.
     columns:
       - name: play_id
         description: >

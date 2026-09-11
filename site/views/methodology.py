@@ -48,9 +48,9 @@ by side, that is a change to a serving view, not a change to a page.
 Margins are stored **away points minus home points**.
 
 - A **negative margin** means the **home team won**.
-- A **negative spread** means the **home team was favoured**.
+- A **negative spread** means the **home team was favored**.
 
-This is inherited from the modelling pack rather than chosen, and it is preserved untouched
+This is inherited from the modeling pack rather than chosen, and it is preserved untouched
 through every layer. Flipping it midway would invert every cover flag, every edge and every
 against-the-spread record while continuing to look entirely plausible — so it travels intact,
 and where a page shows a home-perspective figure it reads a separately named column that dbt

@@ -1619,7 +1619,7 @@ _ALL_SHEETS = [
              column, so it wants every row; the Scores PAGE is a results page and wants
              results. A second query for the page is how Schedule and the export drifted in
              R-184, so the divergence is a bound value rather than a second statement.
-             Defaulted to false — the extract's behaviour is the unchanged one. */
+             Defaulted to false — the extract's behavior is the unchanged one. */
           and (not :completed_only or is_completed)
         order by {SCORES_GAME_ORDER}, is_home
         limit {ROW_CAP}
@@ -3135,9 +3135,9 @@ def _write_index(book, season, week, season_type, conference, division, generate
     # this reason; the bar earns one on the same argument.
     row += 1
     tab.cell(row, 1, "Margin bar").font = header_font
-    tab.cell(row, 2, "Margin (away−home) is drawn as a bar from a centre line. It grows LEFT "
+    tab.cell(row, 2, "Margin (away−home) is drawn as a bar from a center line. It grows LEFT "
                      "in blue when the home team won — 64% of games — and RIGHT in red when "
-                     "the away team did, which is the result worth noticing. The colours are "
+                     "the away team did, which is the result worth noticing. The colors are "
                      "the direction, not a judgement about the game.")
     row += 1
 
