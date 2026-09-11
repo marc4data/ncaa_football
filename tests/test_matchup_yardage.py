@@ -118,9 +118,17 @@ _METRICS = {
 }
 
 
-def _distribution(min_games=9, **overrides):
+def _distribution(min_games=9, axes=None, **overrides):
+    """The week's six rows. `axes` replaces the limits of named metrics only.
+
+    ⚠️ `axes` IS PER-METRIC AND `overrides` IS NOT — R-601 needs one metric's frame moved
+    while the other five stay put, because the defect is a single axis that cannot hold a
+    single value. `**overrides` updates every row and would move all six.
+    """
+    axes = axes or {}
     rows = []
     for metric, (low, high, p25, p50, p75) in _METRICS.items():
+        low, high = axes.get(metric, (low, high))
         rows.append({
             "season": 2025, "season_type": "regular", "week": 12, "metric": metric,
             "n": 136, "teams_in_week": 136,
@@ -204,7 +212,15 @@ def _side(team_id, display, **overrides):
 
     THE NUMBERS ARE NOT ARBITRARY: no two figures across the two sides are equal, so an
     assertion that a particular value reached the panel can only be satisfied by the column
-    it actually came from. Real 2025 week 10 figures for the two teams named.
+    it actually came from. ⚠️ THEY ARE SYNTHETIC AND THIS DOCSTRING USED TO CALL THEM "real
+    2025 week 10 figures" — they are not, and the real ones are in `_both()`. B082's `_row()`
+    made exactly that claim about invented numbers and its tests passed either way.
+
+    🚨 AND THEY NOW SIT INSIDE `_METRICS`'s LIMITS, WHICH THEY DID NOT (R-601). The allowed
+    columns read 444.4, 555.5 and 999.9 against week-12 axes of [60, 240], [125, 300] and
+    [200, 500] — every one of them off the frame the same fixture said the chart was drawn
+    on. Nothing noticed, because until this round no test asked where in the frame a point
+    landed. A fixture that cannot be plotted on its own axis cannot test a chart.
     """
     side = {"team_id": team_id, "team_display": display, "team_slug": display.lower(),
             "logo_url": None, "color_on_light": "#0C2340", "color_on_dark": "#0C2340",
@@ -212,9 +228,9 @@ def _side(team_id, display, **overrides):
             "games_counted": 8,
             "rushing_yards_for_per_game": 111.1, "passing_yards_for_per_game": 222.2,
             "total_yards_for_per_game": 333.3,
-            "rushing_yards_allowed_per_game": 444.4,
-            "passing_yards_allowed_per_game": 555.5,
-            "total_yards_allowed_per_game": 999.9,
+            "rushing_yards_allowed_per_game": 144.4,
+            "passing_yards_allowed_per_game": 255.5,
+            "total_yards_allowed_per_game": 399.9,
             "as_of_ts": pd.Timestamp("2026-09-09T12:00:00Z")}
     side.update(overrides)
     return side
@@ -501,12 +517,20 @@ def test_TWO_DIFFERENT_MATCHUPS_IN_A_WEEK_GET_THE_SAME_FRAME(panel):
     One game cannot demonstrate a shared axis: any limits at all look fine on a single chart.
     Two different fixtures, the same week, and the frames must be identical — which they are
     only because both read the week's row rather than their own values.
+
+    ⚠️ THE SECOND PAIR USED TO READ 402/31/12/498, EVERY ONE OF WHICH IS OUTSIDE WEEK 12's OWN
+    LIMITS ([50, 350] for `_for`, [60, 240] for `_allowed`). R-601 drops a chart whose point
+    the frame cannot hold, so those values stopped producing a rushing chart to compare and
+    this test began reading the PASSING chart's domain against the rushing one. The contrast
+    they existed for is intact: 330 against 60 is still nowhere near `_both()`'s 170.8 and
+    154.4, so a panel deriving its limits from the two teams on screen would still produce a
+    visibly different frame from the week's [50, 350].
     """
     first, _ = panel(_game(), _both())
-    other = [_side(HOME_ID, "Auburn", rushing_yards_for_per_game=402.0,
-                   rushing_yards_allowed_per_game=31.0),
-             _side(AWAY_ID, "Kentucky", rushing_yards_for_per_game=12.0,
-                   rushing_yards_allowed_per_game=498.0)]
+    other = [_side(HOME_ID, "Auburn", rushing_yards_for_per_game=330.0,
+                   rushing_yards_allowed_per_game=65.0),
+             _side(AWAY_ID, "Kentucky", rushing_yards_for_per_game=60.0,
+                   rushing_yards_allowed_per_game=235.0)]
     second, _ = panel(_game(), other)
     assert _domains(_charts(first)[0]) == _domains(_charts(second)[0]), \
         "two matchups in the same week were drawn on different axes"
@@ -645,7 +669,7 @@ def test_the_point_is_the_TEAMS_OWN_VALUE_not_zero(panel):
 
     B084 verified its AXES — identical across two matchups, which was its claim — and never
     once quoted a plotted value. ⚠️ A round can prove exactly what it set out to prove and
-    ship a defect in the same panel, and the only defence is asserting the thing a reader
+    ship a defect in the same panel, and the only defense is asserting the thing a reader
     actually looks at.
 
     Kentucky gain 154.4 on the ground and Auburn allow 84.5, so the away column's rushing
@@ -676,10 +700,20 @@ def test_a_GENUINE_zero_still_draws_because_it_is_a_datum(panel):
     TWO have a zero per-game figure — both rushing, both plausible. A team that genuinely
     gained nothing is a measurement, and suppressing it would trade a visible defect for an
     invisible one.
+
+    ⚠️ THE FRAME HAS TO CONTAIN ZERO FOR THIS TO MEAN ANYTHING, AND R-601 IS WHY THIS TEST
+    NOW SAYS SO. It used to run on week 12's axis of [50, 350], where 0.0 is BELOW the floor
+    — so what it actually asserted was that the panel draws a point outside its own chart,
+    which is the defect this round found. 2026 regular week 2 carries `axis_min` = 0.0 for
+    `rushing_yards_for_per_game`, measured, so a genuine zero is both a datum AND plottable
+    there. On a week whose floor is above zero the chart is dropped and captioned instead,
+    which `test_a_figure_OFF_the_weeks_scale_...` covers.
     """
     sides = [_side(HOME_ID, "Auburn"), _side(AWAY_ID, "Kentucky",
                                              rushing_yards_for_per_game=0.0)]
-    entries, _ = panel(_game(), sides)
+    entries, _ = panel(_game(), sides,
+                       distribution=_distribution(
+                           axes={"rushing_yards_for_per_game": (0.0, 600.0)}))
     x, y = _point(_charts(entries)[0])
     assert y == 0.0, "a genuine zero was suppressed rather than drawn"
 
@@ -690,3 +724,111 @@ def test_a_NULL_per_game_figure_draws_NO_chart_rather_than_a_zero(panel):
                                              rushing_yards_for_per_game=None)]
     entries, _ = panel(_game(), sides)
     assert len(_charts(entries)) == 5, "a null figure was drawn as a point"
+
+
+# --- 🚨 R-601: a frame that cannot hold its own point ------------------------------------------
+#
+# WHAT B084 AND B085 EACH PROVED, AND WHAT NEITHER DID. B084 asserted the AXES and never a
+# plotted value; Marc found that gap before a test did. B085 added the coordinate — "is it
+# zero?" — and answered no on sixty charts. ⚠️ BOTH QUESTIONS CAN PASS WHILE THE POINT IS NOT
+# ON THE CHART, because the third question is WHERE IN THE FRAME the coordinate lands, and
+# nothing asked it.
+#
+# 🚨 MEASURED 2026-09-11, AND IT IS SHIPPED. srv_team_week_metric_distribution reports
+# n = teams_in_week = 138 for every 2026 week; srv_team_week carries 658 teams in each of
+# those weeks. The axis is built from the FBS spread and the panel plots any team an FBS side
+# schedules, so 26 distribution rows in 2026 already hold at least one team beyond their own
+# limits. Game 401868264 — Marist at Stetson, week 5 — renders it: Stetson allow 393.0 rushing
+# yards per game on an axis of [-50, 350], and the point draws in the chart's right margin,
+# outside the plotting rectangle, past the last tick.
+
+
+def _frame_of(chart, channel):
+    """The (min, max) the chart's own spec says that channel is drawn on."""
+    spec = chart.to_dict()
+    for layer in spec.get("layer", [spec]):
+        domain = layer.get("encoding", {}).get(channel, {}).get("scale", {}).get("domain")
+        if domain:
+            return float(domain[0]), float(domain[1])
+    raise AssertionError(f"the chart declares no {channel} domain")
+
+
+def test_every_plotted_point_lands_INSIDE_the_frame_it_is_drawn_on(panel):
+    """🚨 THE QUESTION B084 AND B085 BOTH LEFT: not "is it zero" but "is it ON the chart".
+
+    ⚠️ `alt.Scale(domain=…, nice=False)` BOUNDS THE AXIS, NOT THE MARK. Vega-Lite keeps
+    drawing a point whose coordinate falls outside the domain; it simply lands outside the
+    plotting rectangle. So the failure is not an error, an empty frame or a zero — it is a
+    complete-looking chart with its point somewhere else, which reads as "nothing remarkable
+    here".
+    """
+    entries, _ = panel(_game(), _both())
+    charts = _charts(entries)
+    assert len(charts) == 6
+    for index, chart in enumerate(charts):
+        x, y = _point(chart)
+        x_low, x_high = _frame_of(chart, "x")
+        y_low, y_high = _frame_of(chart, "y")
+        assert x_low <= x <= x_high, \
+            f"chart {index}: x={x} is outside its own frame [{x_low}, {x_high}]"
+        assert y_low <= y <= y_high, \
+            f"chart {index}: y={y} is outside its own frame [{y_low}, {y_high}]"
+
+
+def test_a_figure_OFF_the_weeks_scale_draws_no_chart_rather_than_a_point_beside_one(panel):
+    """⚠️ THE FIXTURE IS THE MEASURED GAME, NOT AN INVENTED ONE (R-594's lesson from B082).
+
+    Stetson's real week-5 figure is 393.0 rushing yards allowed per game and the week's real
+    `rushing_yards_allowed_per_game` axis is [-50, 350] — both read out of live serving on
+    2026-09-11. The away column's rushing chart pairs Marist's `_for` against that `_allowed`,
+    so it is the x value that leaves the frame.
+
+    🚨 SKIPPING IT LOSES NO MEASUREMENT. `_yardage_direction` prints both figures as text
+    directly above, so what is dropped is a picture that could not be honest — not a number.
+    """
+    sides = [_side(HOME_ID, "Stetson", rushing_yards_allowed_per_game=393.0),
+             _side(AWAY_ID, "Marist")]
+    entries, _ = panel(_game(), sides,
+                       distribution=_distribution(
+                           axes={"rushing_yards_allowed_per_game": (-50.0, 350.0)}))
+    charts = _charts(entries)
+    titles = [c.to_dict().get("title") for c in charts]
+    assert titles.count("Rushing") == 1, (
+        f"the away column's rushing chart was drawn with a point off its own frame: {titles}")
+
+
+def test_the_dropped_chart_SAYS_it_was_dropped_rather_than_going_quiet(panel):
+    """AC-G.11. A chart missing from a row of three, with nothing said, reads as "we hold
+    nothing" — and we hold the figure and printed it one line above."""
+    sides = [_side(HOME_ID, "Stetson", rushing_yards_allowed_per_game=393.0),
+             _side(AWAY_ID, "Marist")]
+    entries, _ = panel(_game(), sides,
+                       distribution=_distribution(
+                           axes={"rushing_yards_allowed_per_game": (-50.0, 350.0)}))
+    body = _text(entries)
+    assert "not plotted" in body, "a chart vanished without the page saying so"
+    assert "Rushing" in body
+
+
+def test_the_guard_does_NOT_suppress_a_point_that_merely_sits_low(panel):
+    """🚨 THE OTHER HALF, AND MARC'S TWO GAMES ARE EXACTLY THIS STATE.
+
+    401856679 and 401856782 are both 2026 regular week 2, and Michigan's 106.0 rushing yards
+    per game sits on an axis of [0, 600] — 17.7% up a frame 150px tall, or 26 pixels off the
+    floor. ⚠️ THAT IS LOW, AND IT IS NOT OFF THE FRAME. A guard that removed it would delete
+    the very charts Marc is asking about and call the page fixed.
+    """
+    sides = [_side(HOME_ID, "Michigan", rushing_yards_allowed_per_game=112.0),
+             _side(AWAY_ID, "Oklahoma", rushing_yards_for_per_game=106.0)]
+    entries, _ = panel(_game(), sides,
+                       distribution=_distribution(
+                           axes={"rushing_yards_for_per_game": (0.0, 600.0)}))
+    charts = _charts(entries)
+    assert len(charts) == 6, "a low-but-valid point was suppressed"
+    x, y = _point(charts[0])
+    assert y == 106.0
+    y_low, y_high = _frame_of(charts[0], "y")
+    fraction = (y - y_low) / (y_high - y_low)
+    assert fraction < 0.20, (
+        "this fixture is meant to reproduce the bottom-fifth position Marc reported; "
+        f"it landed at {fraction:.1%}")
