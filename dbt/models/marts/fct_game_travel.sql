@@ -10,11 +10,15 @@
 -- TWO MEASURES WITH DIFFERENT COVERAGE, AND THE MODEL DOES NOT AVERAGE OVER THE DIFFERENCE.
 --
 --   rest_days     computable for every game, from the schedule alone
---   travel_km     needs coordinates for BOTH venues, so 2024+ and only where weather landed
+--   travel_miles  needs coordinates for BOTH venues, so 2024+ and only where weather landed
 --
 -- Reporting travel as 0 where a venue is unknown would be the null-not-zero mistake this
--- project keeps finding: 0 km means "played at home", and it must not also mean "we do not
+-- project keeps finding: 0 miles means "played at home", and it must not also mean "we do not
 -- know". Unknown stays null.
+--
+-- ⚠️ EVERY MEASURE SHIPS IN THE READER'S UNIT AND IN THE SOURCE'S (R-634). Marc asked for miles
+-- and feet; CFBD supplies metres. The conversion is a multiplication, so it is here rather than
+-- in the page — and both units come off ONE unrounded measurement, so they cannot disagree.
 --
 -- HOME VENUE IS DERIVED, NOT DECLARED. CFBD has no "this team's stadium" field, so a team's
 -- home venue for a season is the venue it played most of its non-neutral home games at. That
@@ -110,6 +114,44 @@ located as (
     left join home_venue h
         on h.season = s.season and h.team_id = s.team_id
 
+),
+
+measured as (
+
+    -- ⚠️ EACH DISTANCE IS COMPUTED ONCE HERE AND RENDERED TWICE BELOW. R-634: Marc asked for
+    -- "all distance measurements in miles, elevation measurements in feet", and the tempting
+    -- shortcut is `travel_km * 0.621371` in the select below — which multiplies a figure that
+    -- has ALREADY been rounded to one decimal. That makes the miles column disagree with its
+    -- own kilometres column by up to a tenth of a kilometre's worth of miles, for no reason.
+    -- Round once per unit, from the same unrounded measurement.
+    select l.*,
+           -- Great-circle distance from the team's own home venue to where this game was
+           -- played. Haversine, spelled out rather than taken from an extension so it compiles
+           -- on both engines. 6371 km is the mean Earth radius; the error from treating the
+           -- planet as a sphere is a few tenths of a percent, far below anything a
+           -- rest-and-travel story turns on.
+           --
+           -- NULL when either end is unknown, never 0. Zero here means the team played at home.
+           case when game_latitude is not null and home_latitude is not null
+                then cast(
+                     2 * 6371 * asin(sqrt(
+                         power(sin(radians(cast(game_latitude as {{ dbt.type_numeric() }})
+                                           - cast(home_latitude as {{ dbt.type_numeric() }})) / 2), 2)
+                       + cos(radians(cast(home_latitude as {{ dbt.type_numeric() }})))
+                       * cos(radians(cast(game_latitude as {{ dbt.type_numeric() }})))
+                       * power(sin(radians(cast(game_longitude as {{ dbt.type_numeric() }})
+                                           - cast(home_longitude as {{ dbt.type_numeric() }})) / 2), 2)
+                     )) as {{ dbt.type_numeric() }})
+           end                                            as travel_km_unrounded,
+
+           -- Altitude gained relative to home. Denver is the reason this is signed rather than
+           -- absolute: arriving 1,500 m higher and 1,500 m lower are different experiences, and
+           -- a magnitude would erase which one happened.
+           case when game_elevation_m is not null and home_elevation_m is not null
+                then cast(game_elevation_m - home_elevation_m as {{ dbt.type_numeric() }})
+           end                                            as elevation_change_m_unrounded
+    from located l
+
 )
 
 select
@@ -138,30 +180,37 @@ select
     home_longitude,
     home_elevation_m,
 
-    -- Great-circle distance from the team's own home venue to where this game was played.
-    -- Haversine, spelled out rather than taken from an extension so it compiles on both
-    -- engines. 6371 km is the mean Earth radius; the error from treating the planet as a
-    -- sphere is a few tenths of a percent, far below anything a rest-and-travel story turns on.
+    -- ── R-634: THE READER'S UNITS ARE MILES AND FEET ──────────────────────────────────────
     --
-    -- NULL when either end is unknown, never 0. Zero here means the team played at home.
-    case when game_latitude is not null and home_latitude is not null
-         then round(cast(
-              2 * 6371 * asin(sqrt(
-                  power(sin(radians(cast(game_latitude as {{ dbt.type_numeric() }})
-                                    - cast(home_latitude as {{ dbt.type_numeric() }})) / 2), 2)
-                + cos(radians(cast(home_latitude as {{ dbt.type_numeric() }})))
-                * cos(radians(cast(game_latitude as {{ dbt.type_numeric() }})))
-                * power(sin(radians(cast(game_longitude as {{ dbt.type_numeric() }})
-                                    - cast(home_longitude as {{ dbt.type_numeric() }})) / 2), 2)
-              )) as {{ dbt.type_numeric() }}), 1)
-    end                                                   as travel_km,
+    -- Marc, 2026-09-11: "all distance measurements in miles, elevation measurements in feet."
+    -- 🚨 A UNIT CONVERSION IS A MULTIPLICATION, SO IT BELONGS HERE AND NOT IN THE PAGE. B085
+    -- raised this and correctly refused to do it in Streamlit — the same rule that keeps
+    -- `yards / games_counted` out of matchup.py.
+    --
+    -- ⚠️ THE METRIC COLUMNS STAY FOR NOW, AND THAT IS A HANDOVER RATHER THAN A DUPLICATION.
+    -- §3 rule 3.1: a shared change ships the column and the default; the call site is the
+    -- other session's to consume on its own round. `site/views/matchup.py` reads travel_km
+    -- and elevation_change_m TODAY, so deleting them here would break a live page belonging
+    -- to session B. Once B reads the miles/feet columns, dropping the metric pair is a
+    -- one-line follow-up — and it should happen, because two units of one measurement is a
+    -- column pair that invites a reader to compare them.
+    --
+    -- The factors are exact by definition, not approximations: an international mile is
+    -- 1.609344 km exactly, and an international foot is 0.3048 m exactly. Written as the
+    -- reciprocals used here rather than as divisions so the arithmetic reads in one direction.
+    round(travel_km_unrounded, 1)                         as travel_km,
+    round(travel_km_unrounded / 1.609344, 1)              as travel_miles,
 
-    -- Altitude gained relative to home. Denver is the reason this is signed rather than
-    -- absolute: arriving 1,500 m higher and 1,500 m lower are different experiences, and a
-    -- magnitude would erase which one happened.
-    case when game_elevation_m is not null and home_elevation_m is not null
-         then round(cast(game_elevation_m - home_elevation_m as {{ dbt.type_numeric() }}), 1)
-    end                                                   as elevation_change_m,
+    round(elevation_change_m_unrounded, 1)                as elevation_change_m,
+    -- Feet to the nearest whole foot: a tenth of a foot is below the precision of the source
+    -- elevation and printing it would claim accuracy this does not have.
+    round(elevation_change_m_unrounded / 0.3048, 0)       as elevation_change_ft,
+
+    -- The two absolute elevations the change is derived from, in the reader's unit as well.
+    -- Carried because "3,000 ft higher than home" and "at 7,000 ft" are different facts and a
+    -- reader asking about altitude usually wants the second one.
+    round(cast(game_elevation_m as {{ dbt.type_numeric() }}) / 0.3048, 0) as game_elevation_ft,
+    round(cast(home_elevation_m as {{ dbt.type_numeric() }}) / 0.3048, 0) as home_elevation_ft,
 
     previous_game_date,
     -- Null on a team's first game of a season, which is an absence of a previous game rather
@@ -176,4 +225,4 @@ select
          when {{ days_between('game_date', 'previous_game_date') }} <= 8 then 'normal week'
          when {{ days_between('game_date', 'previous_game_date') }} <= 14 then 'extra rest'
          else 'long layoff' end                           as rest_bucket
-from located
+from measured
