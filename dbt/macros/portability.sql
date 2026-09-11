@@ -217,18 +217,18 @@
 {%- endmacro %}
 
 
-{# --- UTC timestamp rendered in a display zone, keeping it a timestamp -------------------
-  AC-G.34: kickoff times are published Eastern, so the display zone is applied in dbt and
-  the app never converts. Distinct from to_local_date, which drops the time.
+{# --- to_local_timestamp WAS HERE AND IS DELETED. R-643, 2026-09-11. ---------------------
+  It rendered a UTC instant in a display zone AND KEPT IT A TIMESTAMP, which on Postgres
+  means `timestamptz AT TIME ZONE 'zone'` -> `timestamp WITHOUT time zone`. The offset is
+  discarded, so the result is a wall-clock reading that no longer says which wall it is on.
+
+  🚨 Its two call sites — srv_game and srv_odds_board — fed `fmt._local`, which treats a
+  naive timestamp as UTC. Every kickoff on the site was four hours early under EDT and five
+  under EST, on every page, all season. Marc found it on the Schedule page.
+
+  ⚠️ THE MACRO IS NOT REPLACED, BECAUSE THE OPERATION IT NAMES SHOULD NOT HAPPEN IN dbt. An
+  instant is published as an instant and the display zone is applied once, in the app, by
+  the one function that knows what zone the site renders in. `to_local_date` above is a
+  different thing and stays: it produces a DATE — which day a game fell on, in the league's
+  canonical zone — and a date carries no offset to lose.
 #}
-{% macro to_local_timestamp(ts, tz='America/New_York') -%}
-    {{ return(adapter.dispatch('to_local_timestamp', 'cfdb_dbt')(ts, tz)) }}
-{%- endmacro %}
-
-{% macro default__to_local_timestamp(ts, tz) -%}
-    ({{ ts }} at time zone '{{ tz }}')
-{%- endmacro %}
-
-{% macro databricks__to_local_timestamp(ts, tz) -%}
-    from_utc_timestamp({{ ts }}, '{{ tz }}')
-{%- endmacro %}

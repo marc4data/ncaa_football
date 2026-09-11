@@ -215,7 +215,7 @@ def _row(**overrides):
         "away_points": 20, "home_points": 19,
         "away_rank": None, "home_rank": 19,
         "away_team_record_display": "4-5", "home_team_record_display": "7-2",
-        "start_date_et": pd.Timestamp("2025-11-14 19:30:00"),
+        "start_date": pd.Timestamp("2025-11-14 19:30:00", tz="UTC"),
         "venue_display": "L&N Federal Credit Union Stadium",
         "is_neutral_site": False, "is_indoors": False,
         "spread": -1.5, "over_under": 51.0, "spread_favorite_side": "home",
@@ -664,7 +664,7 @@ def test_a_single_meeting_reads_as_one_meeting(blurb):
 # row.get name is in COLUMNS" check would report false positives on four other panels. The
 # site-wide version is R-623 and it is session A's.
 _HEADER_COLUMNS = (
-    "game_id", "is_completed", "start_date_et",
+    "game_id", "is_completed", "start_date",
     "home_team", "away_team", "home_abbreviation", "away_abbreviation",
     "home_logo_url", "away_logo_url", "home_points", "away_points",
     "home_rank", "away_rank",

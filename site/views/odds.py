@@ -49,7 +49,7 @@ def body(page) -> None:
             help="Show only the book offering the most favourable number on each side.")
 
         df = query("""
-            select game_id, season, week, season_type, start_date_et,
+            select game_id, season, week, season_type, start_date,
                    home_team_display, home_team_slug, home_logo_url,
                    away_team_display, away_team_slug, away_logo_url,
                    provider_key, provider_display, spread, spread_open, total, total_open,
@@ -63,7 +63,7 @@ def body(page) -> None:
             where season = :season
               and (:week is null or week = :week)
               and is_latest_snapshot
-            order by start_date_et, game_id, provider_display
+            order by start_date, game_id, provider_display
             limit 900
         """, {"season": season, "week": week})
         table.as_of_caption(df)
@@ -134,7 +134,7 @@ def _board(df: pd.DataFrame) -> None:
         head = rows.iloc[0]
         st.markdown(
             f"<div class='cfdb-daygroup'>{head['away_team_display']} at "
-            f"{head['home_team_display']} · {fmt.local_time(head['start_date_et'])}</div>",
+            f"{head['home_team_display']} · {fmt.local_time(head['start_date'])}</div>",
             unsafe_allow_html=True)
         table.render(rows, columns, caption="srv_odds_board")
         if pd.notna(head.get("predicted_margin")):
