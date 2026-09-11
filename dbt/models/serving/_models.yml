@@ -1715,6 +1715,10 @@ models:
       season opener; `travel_km` needs coordinates for both the game venue and the team's own
       home venue, so it is 2024 onward and about 79% even there.
       NULL means unknown. ZERO means they played at home. Those are different answers.
+      EVERY DISTANCE SHIPS IN TWO UNITS. Marc reads miles and feet; CFBD supplies metres.
+      `travel_miles` and the `*_ft` columns are the reader's units and the metric ones are the
+      source's; both are rounded from ONE unrounded measurement, so they cannot disagree, and
+      assert_travel_is_the_same_distance_in_both_units reconciles them on every build.
     columns:
       - name: game_travel_sk
         description: Surrogate key over (game_id, team_id) — the grain.
@@ -1756,16 +1760,38 @@ models:
           that season. For small programmes with only one or two weather-covered home games
           that mode can land on the wrong venue — 19 rows of 221,758, all non-FBS, tracked by
           assert_a_home_game_is_played_at_home.
+      - name: travel_miles
+        description: >
+          The same great-circle distance as `travel_km`, in statute miles to one decimal
+          place. THIS IS THE COLUMN A PAGE SHOULD RENDER: Marc, 2026-09-11, "all distance
+          measurements in miles, elevation measurements in feet." Converted in the warehouse
+          rather than in the app, because a unit conversion is a multiplication and metric
+          arithmetic does not belong in a page. Rounded from the same unrounded haversine as
+          `travel_km`, not from the rounded kilometres, so the two cannot drift apart.
+          NULL where either venue is unknown, never 0. ZERO means they played at home.
       - name: elevation_change_m
         description: >
           Altitude of the game venue relative to this team's home venue, in metres. SIGNED on
           purpose: arriving 1,500 m higher and 1,500 m lower are different experiences, and a
           magnitude would erase which one happened. Null where either elevation is unknown —
           /venues does not publish it for every venue.
+      - name: elevation_change_ft
+        description: >
+          The same signed altitude change as `elevation_change_m`, in whole feet. THIS IS THE
+          COLUMN A PAGE SHOULD RENDER. Whole feet rather than a decimal because a tenth of a
+          foot is finer than the source elevation and printing one would claim accuracy this
+          does not have. Positive means the game was played HIGHER than the team's home venue.
       - name: game_elevation_m
         description: Elevation of the game venue in metres, where published.
+      - name: game_elevation_ft
+        description: >
+          Elevation of the game venue in whole feet, where published. Carried alongside the
+          change because "at 7,000 ft" and "3,000 ft higher than home" are different facts and
+          a reader asking about altitude usually wants the first.
       - name: home_elevation_m
         description: Elevation of this team's derived home venue in metres, where published.
+      - name: home_elevation_ft
+        description: Elevation of this team's derived home venue in whole feet, where published.
       - name: previous_game_date
         description: >
           Date of this team's previous game IN THE SAME SEASON. Null on a season opener.
@@ -4200,10 +4226,22 @@ models:
       - name: axis_min
         description: >
           The shared axis lower bound, floored onto axis_step so the scale starts on a labelled
-          tick.
+          tick. BUILT OVER whisker_low, FLOORED AT ZERO — not over min_value. Every metric here
+          is a yards-per-game figure, and a frame that started below zero spent an eighth of
+          itself on territory one team occupies: `rushing_yards_allowed_per_game` ran from -50
+          because sacks count against rushing and a team one game in can concede a negative
+          average. That -7.0 is real and it is still in srv_team_week — the AXIS is clamped,
+          never the value.
       - name: axis_max
         description: >
-          The shared axis upper bound, ceilinged onto axis_step.
+          The shared axis upper bound, ceilinged onto axis_step. BUILT OVER whisker_high, NOT
+          over max_value. An axis built over the extremes squashed the league into its own
+          floor: at 2026 regular week 2 `rushing_yards_for_per_game` reached 600 on the
+          strength of four triple-option academies, and 103 of the 282 teams carrying a value
+          — 36.5% — sat in the bottom fifth of the frame. Tukey's whisker tightens it only
+          where something is genuinely detached from the body, so a metric with
+          `outlier_count` = 0 keeps its full range. A team outside the frame is NOT drawn
+          floating in the margin: the page names the metric and prints both figures as text.
       - name: axis_step
         description: >
           The tick interval, chosen by the nice-number rule — aim for about eight intervals,
