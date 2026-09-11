@@ -45,3 +45,20 @@ one thing.
 # weekly DAGs: they rebuild both sides of these assertions, which is what gives the tagged
 # tests somewhere to run. See docstring above before changing either fact.
 PARTIAL_REBUILD_TEST_EXCLUDE = "--exclude tag:full_refresh_only tag:slow_sweep"
+
+# 🚨 R-672. ONE MORE EXCLUSION, AND ONLY THE LINES DAG APPLIES IT.
+#
+# `full_refresh_only` means "neither gated DAG rebuilds both sides". It is too blunt for a
+# test that ONE gated DAG can satisfy: `assert_record_through_week_excludes_the_current_week`
+# compares `fct_team_record_week` against `fct_game`, and `cfbd_scores_refresh` rebuilds both
+# while `cfbd_lines_snapshot`'s DISTRIBUTION_SELECTOR rebuilds only `fct_game`.
+#
+# ⚠️ ON 2026-09-11 THAT COST FOUR HOURS OF PUBLISHING. The test returned 2 rows at 16:02 UTC,
+# failed twice, and `publish_distributions` — which sits directly downstream — did not run
+# until 20:17, on a Friday, with a Saturday slate coming.
+#
+# Tagging it `full_refresh_only` would have removed it from the two-hourly scores run too,
+# where it is meaningful and had been passing all day.
+# `test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags` caught exactly
+# that and refused the blunt fix. This tag is the narrow one.
+LINES_SNAPSHOT_TEST_EXCLUDE = f"{PARTIAL_REBUILD_TEST_EXCLUDE} tag:scores_refresh_only"

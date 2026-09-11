@@ -108,11 +108,63 @@ def _ancestors(manifest: dict, node: str, seen=None) -> set:
     return seen
 
 
-def straddling_tests(manifest: dict) -> list:
+# 🚨 PER DAG, NOT UNIONED — R-672, AND THE UNION IS WHY THE THIRD INSTANCE GOT THROUGH.
+#
+# `GATED_SELECTION` above is every gated DAG's roots in one tuple, and `straddling_tests` used
+# to union their ancestries into a single `refreshed` set. A model rebuilt by ANY gated DAG
+# therefore counted as refreshed for ALL of them.
+#
+# ⚠️ MEASURED 2026-09-11, and it is exactly that shape:
+# `assert_record_through_week_excludes_the_current_week` compares `fct_team_record_week`
+# against `fct_game`. The SCORES DAG rebuilds both, so under the union the test looked safe.
+# The LINES DAG's distribution selector rebuilds `fct_game` and NOT `fct_team_record_week` —
+# so on 2026-09-11 at 16:02 UTC it compared a fresh fct_game against a stale record table,
+# returned 2 rows, failed twice, and `publish_distributions` did not run for four hours.
+#
+# A test can be safe for one gated DAG and straddling for another. The union cannot say that,
+# so the selections are kept apart and each is asked its own question.
+# ⚠️ AND WHAT EACH DAG EXCLUDES, because the exclusions are no longer the same. R-672:
+# `scores_refresh_only` marks a test that ONE gated DAG can satisfy, so only the other one
+# excludes it. A guard that assumed a shared exclusion would report a tagged test as
+# straddling forever.
+DAG_EXEMPT_TAGS = {
+    "cfbd_scores_refresh": (),
+    "cfbd_lines_snapshot": ("scores_refresh_only",),
+}
+
+GATED_DAGS = {
+    # cfbd_scores_refresh — SCORES_SELECTOR
+    "cfbd_scores_refresh": (
+        "model.cfdb_dbt.srv_game",
+        "model.cfdb_dbt.srv_team_game_log",
+        "model.cfdb_dbt.srv_game_weather",
+        "model.cfdb_dbt.srv_team_week",
+        "model.cfdb_dbt.srv_game_team",
+        "model.cfdb_dbt.srv_odds_board",
+        "model.cfdb_dbt.srv_line_movement",
+        "model.cfdb_dbt.srv_standings",
+        "model.cfdb_dbt.srv_team_overview",
+        "model.cfdb_dbt.srv_teams_index",
+        "model.cfdb_dbt.srv_team_week_metric_distribution",
+    ),
+    # cfbd_lines_snapshot — DISTRIBUTION_SELECTOR
+    "cfbd_lines_snapshot": (
+        "model.cfdb_dbt.srv_week_metric_distribution",
+        "model.cfdb_dbt.srv_week_metric_distribution_bin",
+    ),
+}
+
+
+def _refreshed_by(manifest: dict, roots) -> set:
     refreshed = set()
-    for node in GATED_SELECTION:
+    for node in roots:
         refreshed.add(node)
         refreshed |= _ancestors(manifest, node)
+    return refreshed
+
+
+def straddling_tests(manifest: dict) -> list:
+    by_dag = {dag: _refreshed_by(manifest, roots) for dag, roots in GATED_DAGS.items()}
 
     out = []
     for unique_id, node in manifest["nodes"].items():
@@ -127,13 +179,17 @@ def straddling_tests(manifest: dict) -> list:
                 if dep.startswith(("model.", "source."))}
         if not refs:
             continue
-        inside = refs & refreshed
-        outside = refs - refreshed
-        if not (inside and outside):
-            continue
         if len(refs) > MAX_REFS_FOR_A_COMPARISON:
             continue                       # a sweep over many relations, not a comparison
-        out.append((node.get("name", unique_id), sorted(inside), sorted(outside)))
+        for dag, refreshed in sorted(by_dag.items()):
+            if any(tag in tags for tag in DAG_EXEMPT_TAGS.get(dag, ())):
+                continue
+            inside = refs & refreshed
+            outside = refs - refreshed
+            if inside and outside:
+                out.append((node.get("name", unique_id), dag,
+                            sorted(inside), sorted(outside)))
+                break
     return sorted(out)
 
 
@@ -152,15 +208,42 @@ def main() -> int:
         return 1
 
     found = straddling_tests(manifest)
-    for name, inside, outside in found:
+    # Which DAGs can satisfy this test, so the message can name the RIGHT remedy.
+    manifest_nodes = manifest["nodes"]
+    safe_elsewhere = {}
+    by_dag = {d: _refreshed_by(manifest, roots) for d, roots in GATED_DAGS.items()}
+    for node in manifest_nodes.values():
+        if node.get("resource_type") != "test":
+            continue
+        refs = {dep for dep in node.get("depends_on", {}).get("nodes", [])
+                if dep.startswith(("model.", "source."))}
+        safe_elsewhere[node.get("name")] = sorted(
+            d for d, refreshed in by_dag.items()
+            if refs and not (refs - refreshed))
+
+    for name, dag, inside, outside in found:
         short = lambda ids: ", ".join(i.split(".")[-1] for i in ids)   # noqa: E731
-        print(f"::error::{name} straddles the two-hourly refresh boundary: it reads "
-              f"[{short(inside)}], which cfbd_scores_refresh rebuilds, against "
-              f"[{short(outside)}], which it does not. Tag it `{EXEMPT_TAG}` or it will block "
-              f"`publish_to_serving` whenever the two sides are at different refreshes.")
+        # 🚨 THE REMEDY DEPENDS ON WHETHER ANOTHER GATED DAG CAN STILL RUN IT. R-672: the
+        # blunt `full_refresh_only` removes a test from BOTH gated DAGs, and
+        # test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags rejects that
+        # when one of them rebuilds both sides. Naming the wrong tag here sends the next
+        # person straight into that refusal, which is what happened to A105.
+        others = [d for d in safe_elsewhere.get(name, []) if d != dag]
+        if others:
+            remedy = (f"Tag it `scores_refresh_only` — {', '.join(others)} rebuilds both "
+                      f"sides and must keep running it")
+        else:
+            remedy = "Tag it `full_refresh_only` — no gated DAG rebuilds both sides"
+        # ⚠️ THE DAG IS NAMED, because "the two-hourly refresh boundary" is now several
+        # boundaries and they disagree: R-672's instance was safe under cfbd_scores_refresh
+        # and fatal under cfbd_lines_snapshot.
+        print(f"::error::{name} straddles {dag}'s refresh boundary: it reads "
+              f"[{short(inside)}], which {dag} rebuilds, against "
+              f"[{short(outside)}], which it does not. {remedy}, or it will block "
+              f"that DAG's publish whenever the two sides are at different refreshes.")
     if found:
         print(f"\n{len(found)} test(s) would stop the site updating on a game day. This is "
-              f"the seventh occurrence of one pattern; the tag is the remedy the project "
+              f"the eighth occurrence of one pattern; the tag is the remedy the project "
               f"already uses.")
         return 1
 

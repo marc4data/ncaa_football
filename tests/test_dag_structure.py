@@ -195,9 +195,11 @@ def test_every_test_the_scores_dag_cannot_satisfy_is_tagged():
         pytest.skip("no compiled manifest, or it is older than the dbt sources — "
                     "run `dbt compile` so this checks the current project")
     found = module.straddling_tests(_manifest())
+    # R-672: the tuple carries the DAG now, because a test can be safe for one gated DAG and
+    # straddling for another — which is exactly how the third instance got through.
     assert not found, [
-        f"{name}: {[i.split('.')[-1] for i in inside]} refreshed vs "
-        f"{[o.split('.')[-1] for o in outside]} not" for name, inside, outside in found]
+        f"{name} (in {dag}): {[i.split('.')[-1] for i in inside]} refreshed vs "
+        f"{[o.split('.')[-1] for o in outside]} not" for name, dag, inside, outside in found]
 
 
 def test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags():
@@ -303,8 +305,15 @@ def test_every_partial_rebuild_dag_excludes_the_full_refresh_tags():
     # point of R-337, so the literal no longer appears in any DAG and grepping for it would
     # fail every DAG that had correctly adopted the fix — which is exactly what the first
     # draft of this check did.
+    # ⚠️ R-672: THERE ARE TWO CONSTANTS NOW, AND BOTH CARRY THE EXCLUSION.
+    # `LINES_SNAPSHOT_TEST_EXCLUDE` is built as
+    # f"{PARTIAL_REBUILD_TEST_EXCLUDE} tag:scores_refresh_only" — the base exclusion plus one
+    # more that only the lines DAG applies, because a test the scores DAG CAN satisfy must
+    # not be removed from the scores DAG. Named explicitly rather than matched on a prefix:
+    # a substring rule would accept any constant that merely looked related.
+    EXCLUSION_CONSTANTS = ("PARTIAL_REBUILD_TEST_EXCLUDE", "LINES_SNAPSHOT_TEST_EXCLUDE")
     missing = [name for name in partial
-               if "PARTIAL_REBUILD_TEST_EXCLUDE" not in _code(name)]
+               if not any(const in _code(name) for const in EXCLUSION_CONSTANTS)]
     assert not missing, (
         f"these DAGs run `dbt test` over a narrow selector without excluding "
         f"tag:full_refresh_only, so they will assert invariants only a full refresh can "
@@ -655,8 +664,8 @@ def test_no_test_straddles_the_gated_dags_refresh_boundary():
 
     found = module.straddling_tests(data)
     assert not found, [
-        f"{name}: {[i.split('.')[-1] for i in inside]} (refreshed) vs "
-        f"{[o.split('.')[-1] for o in outside]} (not)" for name, inside, outside in found]
+        f"{name} (in {dag}): {[i.split('.')[-1] for i in inside]} (refreshed) vs "
+        f"{[o.split('.')[-1] for o in outside]} (not)" for name, dag, inside, outside in found]
 
 
 def test_the_straddle_check_catches_every_instance_that_has_actually_happened():
@@ -683,7 +692,12 @@ def test_the_straddle_check_catches_every_instance_that_has_actually_happened():
     known = ["assert_team_series_reconciles",
              "assert_derived_record_matches_cfbd_records",
              "assert_games_played_reconciles_to_schedule",
-             "assert_date_only_seasons_are_not_timezone_shifted"]
+             "assert_date_only_seasons_are_not_timezone_shifted",
+             # R-672, 2026-09-11. The instance the UNIONED version could not see: safe under
+             # cfbd_scores_refresh, fatal under cfbd_lines_snapshot. It blocked
+             # publish_distributions for four hours on a Friday, and this replay is what
+             # stops the per-DAG split being quietly undone.
+             "assert_record_through_week_excludes_the_current_week"]
     for target in known:
         data = json.loads(manifest.read_text())
         present = False
@@ -693,13 +707,13 @@ def test_the_straddle_check_catches_every_instance_that_has_actually_happened():
                 present = True
         if not present:
             continue
-        names = [n for n, _, _ in module.straddling_tests(data)]
+        names = [n for n, _dag, _, _ in module.straddling_tests(data)]
         assert target in names, f"{target} would slip through untagged"
 
     # The sweeps must NOT be flagged, or a 4-in-5 false-positive rate gets the check switched
     # off and the class goes unguarded again.
     data = json.loads(manifest.read_text())
-    names = [n for n, _, _ in module.straddling_tests(data)]
+    names = [n for n, _dag, _, _ in module.straddling_tests(data)]
     for sweep in ("assert_facts_are_unique_on_their_natural_key",
                   # R-420: one sweep became two, split by severity. Both must stay excluded.
                   "assert_site_facing_staging_models_are_unique_on_their_grain",

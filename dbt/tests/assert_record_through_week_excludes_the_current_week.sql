@@ -1,3 +1,34 @@
+{{ config(tags=['scores_refresh_only']) }}
+-- 🚨 TAGGED `full_refresh_only` AFTER IT STOPPED THE SITE PUBLISHING. R-672, 2026-09-11.
+--
+-- This compares `fct_team_record_week` against `fct_game`. ⚠️ `cfbd_lines_snapshot`'s
+-- DISTRIBUTION_SELECTOR rebuilds `fct_game` and NOT `fct_team_record_week` — measured with
+-- `dbt ls`: 1 and 0 — so between the two refreshes it reads a fresh game table against a
+-- stale record table. At 16:02 UTC it returned 2 rows, failed twice, and
+-- `publish_distributions` did not run for four hours on a Friday.
+--
+-- ✅ THE ASSERTION IS NOT WRONG AND THE DATA IS NOT BAD. It passes on a full refresh — proven
+-- twice: the droplet's 20:17 UTC run went green immediately after A103's `--rebuild`
+-- recomputed all 104 models, and the same selector passes on a laptop against the same
+-- warehouse. What it cannot survive is being asked the question halfway through a partial
+-- rebuild. ⚠️ Tagging a test whose DATA is wrong would be muting an alarm; this one is the
+-- remedy the project already uses, and the weekly `+tag:production` build keeps full
+-- authority over it.
+--
+-- 🚨 AND THE TAG IS `scores_refresh_only`, NOT `full_refresh_only`, BECAUSE A GUARD SAID SO.
+--
+-- The first fix used `full_refresh_only`, and
+-- `test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags` went red:
+-- "these are selected by the scores DAG and do not straddle the boundary, so the tag costs
+-- real coverage." ⚠️ IT WAS RIGHT. `cfbd_scores_refresh` rebuilds BOTH sides — this test is
+-- meaningful there and runs every two hours — and the blunt tag would have removed it from
+-- that run as well, because PARTIAL_REBUILD_TEST_EXCLUDE is one exclusion shared by both
+-- gated DAGs.
+--
+-- ✅ So the exclusion is per DAG now: `cfbd_lines_snapshot` also excludes
+-- `tag:scores_refresh_only`, `cfbd_scores_refresh` does not, and the weekly build runs
+-- everything. The incident is fixed and no coverage is lost. A guard catching the FIRST fix
+-- is the guard working.
 -- The record for week N must not contain week N's result. R-084.
 --
 -- THE SINGLE MOST LIKELY DEFECT IN THIS MODEL, and the one that looks right on every row
