@@ -9,6 +9,7 @@ accuracy figure can — whether a 70% is worth 70 cents — and it is the sectio
 to be flattering, so it renders the model's own numbers against the realised rate with no
 commentary smoothing the gap.
 """
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -219,6 +220,74 @@ def _segment_table(df: pd.DataFrame, label: str) -> None:
     ], caption="srv_model_performance", max_rows=100)
 
 
+# 🚨 R-659 / R-603: THE CHART DECLARES ITS OWN AUTOSIZE, AND THIS ONE GENUINELY NEEDED IT.
+#
+# `_prepare_vega_lite_spec` sets `autosize = {"type": "fit", "contains": "padding"}` on any
+# spec that declares none, and `fit` makes `height` the OUTER BOX rather than the plot. The
+# title, the axis labels, the axis title, the legend and the padding all come out of that
+# height; the y scale gets what is left.
+#
+# ⚠️ MEASURED IN A REAL BROWSER (A100), plot height actually drawn against the 260 asked for,
+# as the axis font grows — which is what a reader's larger base font changes:
+#
+#     axis font    10px   13px   16px   20px   24px   28px
+#     plot drawn    164    145    126    100     74     48
+#
+# 🚨 IT LOSES ROUGHLY 6.5 PIXELS OF PLOT PER PIXEL OF FONT, because its x labels are the ten
+# rotated band names ("0-10%" … "90-100%") and rotated labels grow vertically. At a 28px axis
+# font the plot is 48px — a calibration curve in 48 pixels cannot show the deviation it exists
+# to show. The other two Streamlit charts on this site lose a near-CONSTANT ~35px over the
+# same range (today.py 388→345, movement.py 208→181) because their labels are short and
+# horizontal; they are squeezed and they do not fall off a cliff. This one does, so this one
+# is fixed and those two carry a comment instead.
+#
+# ⚠️ AND IT IS WHY A SPEC ASSERTION CANNOT SEE IT: `autosize` is added by STREAMLIT, after
+# altair has finished, so it appears in no `chart.to_dict()`.
+#
+# 🚨 R-660 — THE DEPRECATION DOES NOT SAVE US. `use_container_width` is deprecated in favour of
+# `width="stretch"`, and `_prepare_vega_lite_spec` is called UNCONDITIONALLY on both paths.
+# Proven by running it: a spec with no autosize gets `fit` at use_container_width True AND
+# False, and a spec that declares `fit-x` keeps it in both. So moving the pin changes nothing
+# here, in either direction — the declaration below is what holds, not the keyword.
+_AUTOSIZE = {"type": "fit-x", "contains": "padding"}
+
+# The PLOT height, and it is only the plot height while _AUTOSIZE stays `fit-x`.
+_CALIBRATION_HEIGHT = 260
+
+
+def _calibration_chart(wide: pd.DataFrame) -> None:
+    """The calibration curve, drawn explicitly rather than through `st.line_chart`.
+
+    ⚠️ A `st.line_chart` CALLER HAS NO SPEC TO ATTACH AN AUTOSIZE TO — Streamlit builds the
+    spec inside the call. `st.line_chart` is documented as "syntax-sugar around
+    st.altair_chart", so unwrapping it REMOVES a layer rather than adding one; A087 made the
+    same move in today.py for the same reason.
+
+    The shape is Streamlit's own, kept deliberately: a line layer plus an invisible point
+    layer carrying the tooltip, the legend at the bottom with no title, gridlines on the value
+    axis and not on the band axis. Nothing here is a redesign — only the autosize is new.
+    """
+    long = wide.reset_index().melt("segment_value", var_name="series", value_name="value")
+    encoding = {
+        "x": alt.X("segment_value:N", title=None, axis=alt.Axis(grid=False)),
+        "y": alt.Y("value:Q", title=None, axis=alt.Axis(grid=True)),
+        "color": alt.Color("series:N", title=None,
+                           legend=alt.Legend(orient="bottom", offset=5, titlePadding=5)),
+        "tooltip": [alt.Tooltip("segment_value:N", title="Predicted band"),
+                    alt.Tooltip("series:N", title=" "),
+                    alt.Tooltip("value:Q", title="Value", format=".3f")],
+    }
+    base = alt.Chart(long)
+    drawn = base.mark_line().encode(**encoding) + base.mark_point(opacity=0).encode(**encoding)
+    # `symbolType="stroke"` is Streamlit's own legend config for a line chart — a short line
+    # rather than a hollow circle. Kept so unwrapping the sugar changes the autosize and
+    # nothing a reader can see.
+    st.altair_chart(
+        drawn.properties(height=_CALIBRATION_HEIGHT, autosize=_AUTOSIZE)
+             .configure_legend(symbolType="stroke"),
+        use_container_width=True)
+
+
 def _calibration(model: str) -> None:
     """Predicted probability against realised rate. The question accuracy cannot answer.
 
@@ -241,7 +310,7 @@ def _calibration(model: str) -> None:
     chart = df.set_index("segment_value")[
         ["mean_predicted_home_win_probability", "actual_home_win_rate"]].astype(float)
     chart.columns = ["Model says", "Actually happened"]
-    st.line_chart(chart, height=260)
+    _calibration_chart(chart)
 
     table.render(df, [
         Col("segment_value", "Predicted band"),
