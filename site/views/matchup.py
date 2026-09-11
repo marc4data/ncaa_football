@@ -1241,6 +1241,56 @@ def _week_distribution(row):
     return {str(r["metric"]): r for _, r in df.iterrows()}
 
 
+# 🚨 R-603: THE CHART DECLARES ITS OWN AUTOSIZE, AND WITHOUT THIS LINE THE Y AXIS COLLAPSES.
+#
+# `st.altair_chart(chart, use_container_width=True)` runs Streamlit's `_prepare_vega_lite_spec`,
+# which does exactly this:
+#
+#     if "autosize" not in spec:
+#         ...
+#         spec["autosize"] = {"type": "fit", "contains": "padding"}
+#
+# ⚠️ `fit` MAKES `height` THE OUTER BOX RATHER THAN THE PLOT. Vega-Lite then subtracts the
+# title, the x-axis labels, the x-axis title and the padding from those 150 pixels and gives
+# the y scale whatever is left. Streamlit's own comment beside that branch says `fit` "does
+# not work for many chart types" and that "fit-x fits the width and height can be adjusted" —
+# it simply does not take its own advice outside the `vconcat` case.
+#
+# 🚨 WHAT MARC SAW, REPRODUCED BY RASTERISING THIS SPEC WITH `fit` AND A LARGER BASE FONT: the
+# y axis title clipped to "lahoma gain", a single stray y tick, the middle-half band flattened
+# to a sliver, the point sitting exactly on the median rule whatever its value, the chart title
+# gone off the top — and a PERFECT x axis, because width was never the constraint. Every
+# symptom is one symptom: the plot area had almost no height left.
+#
+# ⚠️ AND IT IS WHY FOUR ROUNDS OF ASSERTIONS PASSED. B084 checked the shared axes, B085 the
+# coordinate, B086 and A097 the point's position in the declared domain. **`autosize` is added
+# by STREAMLIT, after altair has finished**, so it appears in no `chart.to_dict()` any of them
+# read. The numbers going in were right every time; the scale drawing them was not.
+#
+# `fit-x` fits the WIDTH to the column — which is all `use_container_width=True` was ever
+# wanted for — and leaves `height` meaning the plot height again. The key is that Streamlit
+# only fills `autosize` in when the spec has none, so declaring it here wins.
+_AUTOSIZE = {"type": "fit-x", "contains": "padding"}
+
+# The PLOT height, and it is only the plot height while _AUTOSIZE stays `fit-x`.
+_CHART_HEIGHT = 150
+
+
+def _degenerate(axis) -> bool:
+    """An axis whose two limits are the same number cannot carry a position.
+
+    ⚠️ IT IS A REACHABLE STATE, NOT A HYPOTHETICAL. `axis_min` and `axis_max` are derived per
+    (season, season_type, week, metric); a week in which every counted team returns the same
+    figure — one game, one shared opponent, or a metric the source fills with a constant —
+    produces min == max, and `alt.Scale(domain=[v, v])` is a scale with no extent.
+
+    🚨 VEGA-LITE DOES NOT ERROR ON IT. It draws every mark at the same height, which is
+    precisely the picture R-603 was reported as: a confident flat chart. The panel refuses it
+    for the same reason it refuses an off-frame point — there is no honest position to draw.
+    """
+    return float(axis["axis_max"]) <= float(axis["axis_min"])
+
+
 def _off_the_frame(value, axis) -> bool:
     """Is this value outside the week's axis, so Vega-Lite would clip it away?
 
@@ -1289,6 +1339,8 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     value_y, value_x = team.get(for_column), opponent.get(allowed_column)
     if pd.isna(value_y) or pd.isna(value_x):
         return None
+    if _degenerate(y_axis) or _degenerate(x_axis):
+        return None
     if _off_the_frame(value_y, y_axis) or _off_the_frame(value_x, x_axis):
         return None
 
@@ -1320,7 +1372,8 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     }])).mark_point(size=140, filled=True, opacity=0.95).encode(
         x=x_enc, y=y_enc, tooltip=alt.Tooltip("who:N", title=label))
 
-    return (band + mid_x + mid_y + point).properties(height=150, title=label)
+    return (band + mid_x + mid_y + point).properties(
+        height=_CHART_HEIGHT, title=label, autosize=_AUTOSIZE)
 
 
 def _off_the_frame_metrics(team, opponent, distribution) -> list:

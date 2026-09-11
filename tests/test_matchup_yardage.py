@@ -832,3 +832,142 @@ def test_the_guard_does_NOT_suppress_a_point_that_merely_sits_low(panel):
     assert fraction < 0.20, (
         "this fixture is meant to reproduce the bottom-fifth position Marc reported; "
         f"it landed at {fraction:.1%}")
+
+
+# --- 🚨 R-603: the scale that is DRAWN, not the numbers that went into it -----------------------
+#
+# 🚨 FOUR ROUNDS ASSERTED SOMETHING TRUE ABOUT THIS PANEL AND SHIPPED IT BROKEN.
+#
+#   B084  the axes are shared across a week      never quoted a plotted value
+#   B085  the coordinate is not zero, 60 charts  never asked where the coordinate lands
+#   B086  the position in the frame, 17.7%       computed from the DECLARED domain
+#   A097  the position moved to 26.5%            same measurement, same blindness
+#
+# ⚠️ EVERY ONE OF THOSE PASSES ON THE CHART IN MARC'S SCREENSHOT, because all four read
+# `chart.to_dict()` — and the property that broke the scale is added AFTER altair is finished,
+# by Streamlit, on the way to the browser:
+#
+#     _prepare_vega_lite_spec:  if "autosize" not in spec:  spec["autosize"] = {"type": "fit"}
+#
+# `fit` makes `height` the OUTER box. Vega-Lite subtracts the title, the x-axis labels, the
+# x-axis title and the padding from 150px and gives the y scale the remainder — which on a
+# reader whose text renders larger is nearly nothing. Rasterised at a larger base font, that
+# spec reproduces the screenshot exactly: y title clipped to "lahoma gain", one stray y tick,
+# the band flattened to a sliver, the point sitting on the median rule whatever its value, the
+# chart title gone off the top, and a perfect x axis.
+#
+# ⚠️ SO THESE TESTS GO THROUGH STREAMLIT'S OWN FUNCTION rather than reading the altair spec.
+# It is a private function and that is a real coupling; it is also the only thing that answers
+# "what does the browser receive". If Streamlit moves it these tests fail loudly rather than
+# skipping, which is correct — the fix's premise would have changed.
+
+def _shipped(chart):
+    """The spec Streamlit actually sends for `st.altair_chart(chart, use_container_width=True)`."""
+    from streamlit.elements.vega_charts import _prepare_vega_lite_spec
+    return _prepare_vega_lite_spec(chart.to_dict(), True)
+
+
+def _plot_height(spec):
+    """The height the Y SCALE actually gets, under this spec's own autosize semantics.
+
+    🚨 THIS IS THE WHOLE DISTINCTION THE ROUND IS ABOUT. With `fit`, `height` is the outer box
+    and the plot gets whatever the chrome leaves — unknowable here and demonstrably near zero
+    in the wild. With `fit-x`, `pad` or `none`, `height` is the plot and the chrome is added
+    outside it.
+    """
+    kind = (spec.get("autosize") or {}).get("type")
+    if kind == "fit":
+        return None
+    return float(spec["height"])
+
+
+def test_the_spec_STREAMLIT_SHIPS_does_not_make_height_the_outer_box(panel):
+    """🚨 THE ONE ASSERTION THAT WOULD HAVE CAUGHT MARC'S SCREENSHOT.
+
+    Streamlit fills `autosize` in only when the spec does not declare one, so the panel
+    declaring `fit-x` is what keeps `height=150` meaning the plot. Streamlit's own comment
+    beside that branch says `fit` "does not work for many chart types" and that "fit-x fits the
+    width and height can be adjusted".
+    """
+    entries, _ = panel(_game(), _both())
+    charts = _charts(entries)
+    assert charts
+    for index, chart in enumerate(charts):
+        shipped = _shipped(chart)
+        kind = (shipped.get("autosize") or {}).get("type")
+        assert kind != "fit", (
+            f"chart {index} ships autosize 'fit', so height={shipped.get('height')} is the "
+            f"OUTER box and the y scale gets only what the title and x axis leave over")
+        assert kind == "fit-x", f"chart {index} ships autosize {kind!r}, expected 'fit-x'"
+
+
+def test_TWO_DIFFERENT_Y_VALUES_RENDER_AT_DIFFERENT_HEIGHTS(panel):
+    """🚨 THE HEART OF IT — Oklahoma's 170.0 and Michigan's 106.0 were on the same line.
+
+    ⚠️ THIS ASKS THE SCALE, NOT THE ROW. The two values are read back out of the shipped spec's
+    own point datasets and converted through the shipped domain and the shipped plot height, so
+    the test can only pass if the chart has a height to draw them in. On the defect
+    `_plot_height` is unknowable and this fails rather than quietly comparing inputs.
+    """
+    entries, _ = panel(_game(), _both())
+    charts = _charts(entries)
+    # chart 0 is the away column's rushing, chart 3 the home column's — same metric, same frame.
+    away, home = charts[0], charts[3]
+    heights = []
+    for chart in (away, home):
+        shipped = _shipped(chart)
+        plot = _plot_height(shipped)
+        assert plot is not None, (
+            "the shipped spec makes height the outer box, so no y position can be computed — "
+            "which is exactly how two different values came to sit on one line")
+        assert plot > 0
+        _x, y = _point(chart)
+        low, high = _frame_of(chart, "y")
+        heights.append((y - low) / (high - low) * plot)
+    assert heights[0] != heights[1], (
+        f"Kentucky and Auburn rendered at the same height: {heights}")
+    assert abs(heights[0] - heights[1]) > 1.0, (
+        f"two values a whole metric apart rendered within a pixel: {heights}")
+
+
+def test_the_middle_half_BAND_has_a_drawn_height(panel):
+    """The shaded rectangle was missing from Marc's screenshot, and a rect with no height is
+    not an absent band — it is a band drawn as a line, which reads as another rule."""
+    entries, _ = panel(_game(), _both())
+    for index, chart in enumerate(_charts(entries)):
+        shipped = _shipped(chart)
+        plot = _plot_height(shipped)
+        assert plot, f"chart {index} has no computable plot height"
+        band = None
+        for values in chart.to_dict().get("datasets", {}).values():
+            if values and "y2" in values[0]:
+                band = values[0]
+        assert band, f"chart {index} drew no band"
+        low, high = _frame_of(chart, "y")
+        drawn = (float(band["y2"]) - float(band["y"])) / (high - low) * plot
+        assert drawn > 1.0, (
+            f"chart {index}: the middle-half band is {drawn:.2f}px tall and is not a rectangle")
+
+
+def test_a_DEGENERATE_y_domain_draws_nothing_rather_than_a_confident_flat_chart(panel):
+    """⚠️ `alt.Scale(domain=[v, v])` IS A SCALE WITH NO EXTENT AND VEGA-LITE DOES NOT COMPLAIN.
+
+    It draws every mark at the same height — the picture this round was reported as. A week
+    whose counted teams all return one figure produces exactly that row, so the panel refuses
+    it the way it refuses an off-frame point.
+
+    🚨 THE VALUE IS 200.0 ON PURPOSE AND THE FIRST VERSION OF THIS TEST WAS NOT A TEST. It left
+    Kentucky on 154.4 against a domain of [200, 200], so `_off_the_frame` refused the chart
+    before `_degenerate` was ever consulted — and the staged break that deletes the degenerate
+    guard PASSED GREEN. Putting the team exactly on the single point of the domain makes
+    `_off_the_frame` false (200 <= 200 <= 200) and leaves `_degenerate` as the only thing that
+    can refuse it, which is what this test is for.
+    """
+    sides = [_side(HOME_ID, "Auburn", rushing_yards_allowed_per_game=84.5),
+             _side(AWAY_ID, "Kentucky", rushing_yards_for_per_game=200.0)]
+    entries, _ = panel(_game(), sides,
+                       distribution=_distribution(
+                           axes={"rushing_yards_for_per_game": (200.0, 200.0)}))
+    titles = [c.to_dict().get("title") for c in _charts(entries)]
+    assert titles.count("Rushing") == 0, (
+        f"a scale with no extent was drawn as a chart: {titles}")
