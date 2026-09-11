@@ -218,6 +218,13 @@ def _row(**overrides):
         "line_movement_provider_key": "draftkings",
         "line_snapshot_count": 17,
         "line_movement_spans_snapshot_gap": False,
+        # R-645: the card reads the UNPREFIXED family, which is the same row as `spread` and
+        # `over_under` above and the same one the Excel export has always read. The `line_`
+        # entries below stay because the EXCURSION caption is still one book's series — and
+        # this fixture deliberately gives the two families different books, which is the case
+        # that was rendering a Bovada price beside a DraftKings move.
+        "spread_move_from_open": 2.0,
+        "total_move_from_open": -2.0,
         "line_spread_move_from_open": 2.0,
         "line_spread_largest_excursion": 3.0,
         "line_total_move_from_open": -2.0,
@@ -329,14 +336,14 @@ def test_a_downward_move_points_down(card):
 
 def test_a_line_that_never_moved_says_UNMOVED_rather_than_drawing_an_arrow(card):
     """Zero has no direction, and an arrow pointing at nothing is a claim about nothing."""
-    markup = _plain(_card_markup(card(line_spread_move_from_open=0.0)))
+    markup = _plain(_card_markup(card(spread_move_from_open=0.0)))
     assert "unmoved" in markup
 
 
 def test_a_line_with_no_opening_price_draws_NO_chip_at_all(card):
     """⚠️ A line that did not move and a line with no opening price on record are different
     statements, and only the second one is an absence."""
-    markup = _plain(_card_markup(card(line_spread_move_from_open=None)))
+    markup = _plain(_card_markup(card(spread_move_from_open=None)))
     assert "unmoved" not in markup.split("Over/Under")[0]
     assert "▲" not in markup.split("Over/Under")[0]
 
@@ -549,6 +556,7 @@ _CARD_COLUMNS = (
     "spread_favorite_side", "moneyline_favorite_side", "favorite_definitions_disagree",
     "market_implied_home_win_probability", "market_implied_away_win_probability",
     "overround", "devig_method", "provider_key", "line_snapshot_ts",
+    "spread_move_from_open", "total_move_from_open",
     "line_movement_provider_key", "line_snapshot_count",
     "line_movement_spans_snapshot_gap",
     "line_spread_move_from_open", "line_spread_largest_excursion",

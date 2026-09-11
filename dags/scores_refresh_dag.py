@@ -22,7 +22,7 @@ the one door the kickoff clock does not watch. Bounded at 36 hours so a postpone
 which is `completed = false` with a past kickoff forever, cannot hold the gate open.
 
 WHAT IT DELIBERATELY DOES NOT DO. It fetches /games and nothing else — two requests, for the
-week in play and the one before it. A full results_refresh is 31 requests covering plays,
+week in play and the one before it. A full results_refresh is 39 requests covering plays,
 drives, box scores, PPA and ratings, and running that on this cadence would spend roughly
 half the monthly quota re-fetching data that does not change between Saturday night and
 Sunday morning. Cheap is what makes it frequent. The heavy refresh stays weekly and this
