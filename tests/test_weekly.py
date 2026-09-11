@@ -22,6 +22,34 @@ def stub_calendar(monkeypatch):
     monkeypatch.setattr("src.snapshot._calendar", lambda season: CALENDAR)
 
 
+@pytest.fixture(autouse=True)
+def stub_completed_games(monkeypatch):
+    """🚨 R-662: THREE TESTS IN THIS FILE READ THE LIVE WAREHOUSE, AND NOBODY KNEW.
+
+    `_requests_for_bucket` fans PER_GAME endpoints out over `completed_game_ids`, which reads
+    already-landed /games responses out of `raw.raw_games`. So the request list this file
+    asserts on depended on what was in a database — and on whether one was reachable at all.
+
+    ⚠️ A099 FOUND THAT THE HARD WAY. `test_week_scoped_buckets_expand_over_the_window` had been
+    passing only because no week-2 game had finished yet; the moment A099 landed a fresh
+    whole-season fetch, real game ids appeared, `plays/stats` started contributing
+    `{gameId: ...}` requests with no `week` in them, and the assertion broke on DATA rather
+    than on code. It would have broken by itself on the next Saturday.
+
+    ✅ Measured by A101 with `completed_game_ids` made to raise: THREE tests reach the
+    warehouse — that one, `test_results_refresh_reports_touched_endpoints` and
+    `test_a_partial_refresh_raises_rather_than_reporting_success`. All three assert invariants
+    that do not depend on HOW MANY games come back (a week is scoped or it is not; fetched
+    equals requested or it does not), so a fixed pair of ids makes them deterministic without
+    weakening a single assertion.
+
+    ⚠️ A unit test whose outcome depends on whether a database is reachable is a test that
+    reports on the world rather than on the code.
+    """
+    monkeypatch.setattr("src.backfill.completed_game_ids",
+                        lambda season, weeks=None: ["401000001", "401000002"])
+
+
 def test_week_window_includes_the_prior_week():
     """Stat corrections land late, so the week before the one in play is refreshed too."""
     window = weekly.week_window("2026", datetime(2026, 9, 20, tzinfo=timezone.utc))

@@ -174,21 +174,70 @@ RELOAD = ("lib.query", "lib.fmt", "lib.table", "lib.states", "lib.shell", "lib.i
 
 @contextlib.contextmanager
 def streamlit_stubbed(query_params=None, theme="light"):
-    """Swap in the stub, reload what binds streamlit, and PUT IT ALL BACK.
+    """Swap in the stub, and PUT IT ALL BACK — two populations, two opposite methods.
 
     ⚠️ THE RESTORE IS BY HAND AND MUST STAY THAT WAY. monkeypatch's sys.modules undo runs after
     fixture teardown, so a module reloaded against the stub stays bound to it for the rest of
     the session — B066 failed six unrelated tests that way.
+
+    🚨 BUT THE RESTORE USED TO BE `importlib.reload`, AND THAT FIXED B066 BY CAUSING R-665.
+    **`reload` REBINDS A MODULE'S GLOBALS IN PLACE; IT DOES NOT RESTORE THEM.** Every class the
+    module defines becomes a NEW object with the same name, so a file that did
+    `from lib.query import QueryContractError` at collection time is left holding a class that
+    nothing raises any more. A101 reproduced it on `a68893e`: a third harness caller and five
+    `test_site_foundation::test_contract_violations_raise` cases go red —
+
+        with pytest.raises(QueryContractError):
+            check_contract(sql)          # raises a DIFFERENT QueryContractError
+
+    ⚠️ AND IT IS ORDER-DEPENDENT, WHICH IS WHY THE SUITE STAYED GREEN. With pytest-randomly the
+    five fire only when a harness caller happens to run BEFORE the victim; in file order the
+    third caller sorted last and nothing showed. That is a coin flip, not a pass.
+
+    ── THE TWO POPULATIONS, AND WHY THEY NEED OPPOSITE TREATMENT ────────────────────────────
+
+    `lib.*` (RELOAD)  — other files import NAMES out of these: `query`, `Col`,
+                        `QueryContractError`, `GameScope`. Measured: 24 name-imports from
+                        lib.query, 18 from lib.table, 2 from lib.filters.
+                        ✅ SWAPPED. The original module object is set aside untouched and put
+                        back on exit, so every identity anyone holds survives. Reloading these
+                        is the defect.
+
+    `views.*`         — nothing imports a name OUT of a view. The 13 files that touch them do
+                        `from views import schedule`, which binds the MODULE OBJECT.
+                        ✅ RELOADED. Reload mutates in place, which is exactly what a held
+                        module object needs: `views.schedule.st` goes back to real streamlit
+                        without the holder's reference changing. Swapping these would leave
+                        those 13 files pointing at a discarded stub-bound module.
+
+    🚨 THE VIEWS HALF WAS NEVER RESTORED AT ALL BEFORE THIS. Measured on `a68893e`:
+
+        before:  lib.query.st=REAL   views.performance.st=REAL
+        inside:  lib.query.st=stub   views.performance.st=stub
+        after:   lib.query.st=REAL   views.performance.st=stub     <-- still the stub
+
+    ⚠️ So B066's failure mode was live the whole time for any view a test had rendered. It went
+    unnoticed because a view module is normally only read through the harness again.
+
+    ⚠️ ONE MORE THING THE SWAP BUYS, AND IT WAS NOT THE GOAL. `lib.query` carries
+    `st.cache_resource` on its engine (A095 found that the hard way). The old restore re-ran
+    that decorator on every exit, throwing the cached engine away each time; putting the
+    original module back leaves it intact.
     """
     if str(SITE) not in sys.path:
         sys.path.insert(0, str(SITE))
     real = sys.modules.get("streamlit")
+    # The originals, set aside rather than mutated. This is the whole fix.
+    originals = {name: sys.modules.get(name) for name in RELOAD}
     st, captured, charts = build(query_params, theme)
     sys.modules["streamlit"] = st
     try:
         for name in RELOAD:
+            # Dropped and imported fresh, so the stub-bound copy is a NEW object and the
+            # original is never touched.
+            sys.modules.pop(name, None)
             try:
-                importlib.reload(importlib.import_module(name))
+                importlib.import_module(name)
             except Exception:                                      # noqa: BLE001
                 pass
         yield st, captured, charts
@@ -197,11 +246,39 @@ def streamlit_stubbed(query_params=None, theme="light"):
             sys.modules["streamlit"] = real
         else:
             sys.modules.pop("streamlit", None)
-        for name in RELOAD:
-            try:
-                importlib.reload(importlib.import_module(name))
-            except Exception:                                      # noqa: BLE001
-                pass
+        for name, module in originals.items():
+            # 🚨 BOTH PLACES, AND THE SECOND ONE IS NOT OPTIONAL. `sys.modules` is not the only
+            # handle on a submodule: importing `lib.states` also sets `states` as an ATTRIBUTE
+            # of the `lib` package, and `from lib import states` reads that attribute rather
+            # than sys.modules. A101's first draft restored sys.modules alone, and
+            # `test_error_state_never_leaks_internals` went red with an empty capture — it had
+            # been handed the stub-bound module by the package while sys.modules said
+            # otherwise. Two failures, both new, both caused by the fix.
+            parent_name, _, child = name.rpartition(".")
+            parent = sys.modules.get(parent_name) if parent_name else None
+            if module is not None:
+                sys.modules[name] = module
+                if parent is not None:
+                    setattr(parent, child, module)
+            else:
+                sys.modules.pop(name, None)
+                if parent is not None and hasattr(parent, child):
+                    delattr(parent, child)
+        # The views half: reload in place so the module objects other files hold rebind to the
+        # real streamlit that has just been put back.
+        #
+        # ⚠️ ONLY THE ONES ACTUALLY BOUND TO THE STUB. Reloading every loaded view on every
+        # exit cost the suite about five seconds — measured 28s before this round and 33s with
+        # the blanket version — and reloading a view that was never touched is pure waste.
+        # `st is stub` is exact: it is true for precisely the modules imported or reloaded
+        # while the stub was installed.
+        for name in [n for n in list(sys.modules) if n.startswith("views.")]:
+            module = sys.modules.get(name)
+            if module is not None and getattr(module, "st", None) is st:
+                try:
+                    importlib.reload(module)
+                except Exception:                                  # noqa: BLE001
+                    pass
 
 
 def render(view, query_params=None, theme="light"):
