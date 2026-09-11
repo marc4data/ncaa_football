@@ -6,7 +6,7 @@ per game with a column per book would need the app to reshape, and it would brea
 time a fourth book appeared.
 
 `is_best_home_spread` / `is_best_away_spread` are computed in dbt and read here as flags.
-"Best" is a definition — most favourable number available to a bettor taking that side —
+"Best" is a definition — most favorable number available to a bettor taking that side —
 and a definition belongs in the warehouse where it can be tested, not in a page.
 """
 import pandas as pd
@@ -46,7 +46,7 @@ def body(page) -> None:
         season, week = scope.season, scope.week
         best_only = st.toggle(
             "Best price only", value=False,
-            help="Show only the book offering the most favourable number on each side.")
+            help="Show only the book offering the most favorable number on each side.")
 
         df = query("""
             select game_id, season, week, season_type, start_date,

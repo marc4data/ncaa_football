@@ -57,7 +57,7 @@ models:
       - name: observed_at
         description: >
           When the underlying signal was measured. Null for documentation rows, which are
-          computed from the live catalogue at build time and so have no observation instant
+          computed from the live catalog at build time and so have no observation instant
           distinct from the build itself.
       - name: as_of_ts
         description: >
@@ -109,10 +109,10 @@ models:
   # ---------------------------------------------------------------------------------------
   - name: srv_data_dictionary
     description: >
-      Data Dictionary page and the Excel export. One row per modelled column across every
+      Data Dictionary page and the Excel export. One row per modeled column across every
       warehouse layer. Deliberately the only serving model with a single upstream, so the
       page and the download cannot disagree about what a column means.
-      ORDERING CONSTRAINT: it catalogues the serving layer but declares no ref on any of it,
+      ORDERING CONSTRAINT: it catalogs the serving layer but declares no ref on any of it,
       so dbt is free to build it first — and did, producing a dictionary that described the
       layer as it stood before the run. The production DAG builds serving last, which is
       what makes this correct; dbt cannot enforce it.
@@ -198,7 +198,7 @@ models:
         description: >
           `raw` on every row today, and the column exists so that stays visible rather than
           assumed. /stats/season returns unadjusted totals; opponent-adjusted figures come
-          from /stats/season/advanced and are not modelled here, so charting one against the
+          from /stats/season/advanced and are not modeled here, so charting one against the
           other would compare two different things.
       - name: stat_value
         description: >
@@ -211,12 +211,12 @@ models:
       - name: classification
         description: Division as of that season — `fbs`, `fcs` and so on. From dim_team.
       - name: color_primary
-        description: The school's primary colour as CFBD publishes it, unmodified.
+        description: The school's primary color as CFBD publishes it, unmodified.
       - name: color_on_light
         description: >
-          A contrast-corrected variant of the primary colour, safe to render as text or a
+          A contrast-corrected variant of the primary color, safe to render as text or a
           fill on the site's light background. Differs from `color_primary` only where the
-          published colour would fail contrast.
+          published color would fail contrast.
       - name: logo_path
         description: Path to the locally-held logo asset; null where no asset was retrieved.
       - name: logo_url
@@ -310,7 +310,7 @@ models:
       - name: mean_margin_error
         description: >
           Mean signed margin error, in points. Direction of bias — a non-zero value means
-          the model systematically favours one side, which absolute error cannot reveal.
+          the model systematically favors one side, which absolute error cannot reveal.
       - name: brier_score
         description: >
           Mean squared error of the predicted win probability, to 5 decimal places. Lower is
@@ -351,7 +351,7 @@ models:
           gap between them is the size and direction of its over- or under-confidence.
       - name: attribution
         description: >
-          Licence-required attribution text, carried as data so no page can render these
+          License-required attribution text, carried as data so no page can render these
           numbers without it. States that this is cfdb's own model built on a licensed CFB
           Model Training Pack, and not an official CollegeFootballData.com prediction.
       - name: as_of_ts
@@ -411,7 +411,7 @@ models:
           Whether the team received votes without earning a numbered position. These rows
           carry a null `rank`, so filtering on `rank is not null` drops them.
       - name: color_primary
-        description: The school's primary colour as CFBD publishes it, unmodified.
+        description: The school's primary color as CFBD publishes it, unmodified.
       - name: color_on_light
         description: Contrast-corrected variant safe to render on the site's light background.
       - name: color_on_dark
@@ -427,7 +427,7 @@ models:
           The team's display name, preferred over `school` for rendering. Falls back to
           `school` where dim_team has no row for that season.
       - name: conference
-        description: Conference from dim_team for that season, which is the modelled value;
+        description: Conference from dim_team for that season, which is the modeled value;
           `conference_name` is what the poll itself said at the time.
       - name: as_of_ts
         description: AC-G.35. Last load of the `rankings` domain, rendered instead of now().
@@ -464,7 +464,7 @@ models:
       - name: spread
         description: >
           Spread at this snapshot, from the home team's perspective — negative means the
-          home team is favoured.
+          home team is favored.
       - name: formatted_spread
         description: The spread as CFBD renders it for display, e.g. "Alabama -7.5".
       - name: spread_open
@@ -537,7 +537,7 @@ models:
       - name: logo_url
         description: CFBD's logo URL for the team.
       - name: color_on_light
-        description: Contrast-corrected team colour safe to render on a light background.
+        description: Contrast-corrected team color safe to render on a light background.
       - name: conference
         description: Conference affiliation for that season.
       - name: classification
@@ -633,7 +633,7 @@ models:
       - name: home_logo_url
         description: CFBD logo URL for the home team.
       - name: home_color_on_light
-        description: Contrast-corrected home team colour for a light background.
+        description: Contrast-corrected home team color for a light background.
       - name: away_team_id
         description: CFBD team id for the away side.
       - name: away_team_display
@@ -643,7 +643,7 @@ models:
       - name: away_logo_url
         description: CFBD logo URL for the away team.
       - name: away_color_on_light
-        description: Contrast-corrected away team colour for a light background.
+        description: Contrast-corrected away team color for a light background.
       - name: provider_key
         description: Normalised sportsbook identifier — half the grain.
       - name: provider_display
@@ -651,7 +651,7 @@ models:
       - name: spread
         description: >
           Latest spread from this provider, from the home team's perspective — negative means
-          the home team is favoured.
+          the home team is favored.
       - name: spread_open
         description: This provider's opening spread for the game.
       - name: total
@@ -697,7 +697,7 @@ models:
           rename is a breaking change for anything querying the warehouse directly.
       - name: attribution
         description: >
-          Licence-required attribution for the model columns, from dim_model_version, carried
+          License-required attribution for the model columns, from dim_model_version, carried
           as data so a page cannot render `predicted_margin` without it.
       - name: is_best_home_spread
         description: >
@@ -744,13 +744,13 @@ models:
       - name: state
         description: State or territory the team is based in.
       - name: color_on_light
-        description: Contrast-corrected team colour safe on a light background.
+        description: Contrast-corrected team color safe on a light background.
       - name: color_on_dark
-        description: Contrast-corrected team colour safe on a dark background.
+        description: Contrast-corrected team color safe on a dark background.
       - name: color_source_light
         description: >
-          Where `color_on_light` came from — the published colour, or a corrected substitute
-          where the published one failed contrast. The audit trail for a changed colour.
+          Where `color_on_light` came from — the published color, or a corrected substitute
+          where the published one failed contrast. The audit trail for a changed color.
       - name: color_source_dark
         description: The same provenance for `color_on_dark`.
       - name: logo_source_url
@@ -872,7 +872,7 @@ models:
         description: Reported attendance; null where not published.
       - name: is_completed
         description: >
-          Whether the game has finished. THE COMPLETION TEST — a cancelled game reads 0-0
+          Whether the game has finished. THE COMPLETION TEST — a canceled game reads 0-0
           with this false, so "points are not null" is not a substitute and has produced a
           wrong test in this repo before.
       - name: points_for
@@ -906,9 +906,9 @@ models:
           Whether box-score columns are populated for this row. The honest denominator flag:
           null stats mean "not recorded", and this distinguishes that from a genuine zero.
       - name: color_on_light
-        description: Contrast-corrected team colour safe on a light background.
+        description: Contrast-corrected team color safe on a light background.
       - name: color_on_dark
-        description: Contrast-corrected team colour safe on a dark background.
+        description: Contrast-corrected team color safe on a dark background.
       - name: logo_source_url
         description: CFBD logo URL for this team.
       - name: team_slug
@@ -973,7 +973,7 @@ models:
           Carried because the two are NOT comparable and must never be sorted together.
       - name: edge_value
         description: >
-          The edge itself, signed, in `edge_unit`. Positive favours the home side. Sourced
+          The edge itself, signed, in `edge_unit`. Positive favors the home side. Sourced
           from `home_win_probability_edge` or `home_cover_edge` depending on `market`.
       - name: edge_magnitude
         description: >
@@ -999,7 +999,7 @@ models:
         description: Model's predicted margin, also in the away-minus-home convention.
       - name: predicted_margin_home_perspective
         description: >
-          `predicted_margin` negated, so a positive number reads as "home favoured by". The
+          `predicted_margin` negated, so a positive number reads as "home favored by". The
           only place a home-perspective sign is introduced, and named so it is obvious.
       - name: spread_home_perspective
         description: '`spread` negated, to the same convention as the column above.'
@@ -1047,7 +1047,7 @@ models:
           named column on srv_odds_board and srv_game, which carry the model NAME.
       - name: attribution
         description: >
-          AC-G.41. Licence-required attribution travelling as data, so a page physically
+          AC-G.41. License-required attribution traveling as data, so a page physically
           cannot draw the model's numbers without it.
       - name: home_win_probability_edge
         description: >
@@ -1155,15 +1155,15 @@ models:
           graded — so an ungraded season is visibly absent rather than looking like a team
           that went 0-0-0.
       - name: ats_as_favorite_display
-        description: Pre-formatted ATS record in games where this team was favoured.
+        description: Pre-formatted ATS record in games where this team was favored.
       - name: ats_as_underdog_display
         description: Pre-formatted ATS record in games where this team was the underdog.
       - name: abbreviation
         description: Short form for compact rendering.
       - name: color_on_light
-        description: Contrast-corrected team colour safe on a light background.
+        description: Contrast-corrected team color safe on a light background.
       - name: color_on_dark
-        description: Contrast-corrected team colour safe on a dark background.
+        description: Contrast-corrected team color safe on a dark background.
       - name: logo_source_url
         description: CFBD logo URL for the team.
       - name: logo_url
@@ -1206,15 +1206,15 @@ models:
       - name: logo_url
         description: CFBD logo URL for the team.
       - name: color_primary
-        description: The school's primary colour as CFBD publishes it, unmodified.
+        description: The school's primary color as CFBD publishes it, unmodified.
       - name: color_on_light
-        description: Contrast-corrected colour safe on a light background.
+        description: Contrast-corrected color safe on a light background.
       - name: color_on_dark
-        description: Contrast-corrected colour safe on a dark background.
+        description: Contrast-corrected color safe on a dark background.
       - name: color_source
         description: >
-          Where the corrected colours came from — the published colour, or a substitute where
-          it failed contrast. The audit trail for a colour the site changed.
+          Where the corrected colors came from — the published color, or a substitute where
+          it failed contrast. The audit trail for a color the site changed.
       - name: conference
         description: Conference affiliation for that season.
       - name: division
@@ -1297,8 +1297,8 @@ models:
           the page render an em dash per AC-G.32.
       - name: ats_as_favorite_display
         description: >
-          Pre-formatted ATS record in games where this team was favoured. Null where the team
-          was never a favourite — 34 team-seasons changed from "0-0" to absent when this was
+          Pre-formatted ATS record in games where this team was favored. Null where the team
+          was never a favorite — 34 team-seasons changed from "0-0" to absent when this was
           corrected.
       - name: ats_as_underdog_display
         description: Pre-formatted ATS record in games where this team was the underdog.
@@ -1417,7 +1417,7 @@ models:
         description: Team the athlete played for in this game.
       - name: team_id
         description: >
-          Resolved from dim_team within season; null for non-FBS programmes absent from
+          Resolved from dim_team within season; null for non-FBS programs absent from
           /teams.
       - name: conference
         description: Conference of that team.
@@ -1585,7 +1585,7 @@ models:
         description: Venue longitude, with the same single exception as latitude.
       - name: elevation_m
         description: >
-          Venue elevation in metres. Populated on 3,847 of 6,847 rows — /venues does not
+          Venue elevation in meters. Populated on 3,847 of 6,847 rows — /venues does not
           publish it for every venue, so an elevation feature would be partial and should say
           so rather than treating absence as sea level.
       - name: capacity
@@ -1662,7 +1662,7 @@ models:
         description: Team name as the roster feed gave it.
       - name: team_id
         description: >
-          CFBD team id; null for the 321 NAIA and Division II programmes absent from /teams.
+          CFBD team id; null for the 321 NAIA and Division II programs absent from /teams.
       - name: team_slug
         description: >
           URL-safe team identifier, and what the Team page filters on. Falls back to a slug
@@ -1675,7 +1675,7 @@ models:
         description: Division for that season; null for unlisted teams.
       - name: is_listed_team
         description: >
-          Whether dim_team had a row. FALSE marks a non-FBS programme rather than a broken
+          Whether dim_team had a row. FALSE marks a non-FBS program rather than a broken
           join.
       - name: position
         description: Listed position; null on 2,450 rows where the feed omits it.
@@ -1716,7 +1716,7 @@ models:
       season opener; `travel_km` needs coordinates for both the game venue and the team's own
       home venue, so it is 2024 onward and about 79% even there.
       NULL means unknown. ZERO means they played at home. Those are different answers.
-      EVERY DISTANCE SHIPS IN TWO UNITS. Marc reads miles and feet; CFBD supplies metres.
+      EVERY DISTANCE SHIPS IN TWO UNITS. Marc reads miles and feet; CFBD supplies meters.
       `travel_miles` and the `*_ft` columns are the reader's units and the metric ones are the
       source's; both are rounded from ONE unrounded measurement, so they cannot disagree, and
       assert_travel_is_the_same_distance_in_both_units reconciles them on every build.
@@ -1758,7 +1758,7 @@ models:
           NULL where either venue is unknown, never 0. ZERO means they played at home.
           The home venue is DERIVED, not declared: CFBD publishes no "this team's stadium"
           field, so it is the venue the team played most of its non-neutral home games at
-          that season. For small programmes with only one or two weather-covered home games
+          that season. For small programs with only one or two weather-covered home games
           that mode can land on the wrong venue — 19 rows of 221,758, all non-FBS, tracked by
           assert_a_home_game_is_played_at_home.
       - name: travel_miles
@@ -1772,7 +1772,7 @@ models:
           NULL where either venue is unknown, never 0. ZERO means they played at home.
       - name: elevation_change_m
         description: >
-          Altitude of the game venue relative to this team's home venue, in metres. SIGNED on
+          Altitude of the game venue relative to this team's home venue, in meters. SIGNED on
           purpose: arriving 1,500 m higher and 1,500 m lower are different experiences, and a
           magnitude would erase which one happened. Null where either elevation is unknown —
           /venues does not publish it for every venue.
@@ -1783,14 +1783,14 @@ models:
           foot is finer than the source elevation and printing one would claim accuracy this
           does not have. Positive means the game was played HIGHER than the team's home venue.
       - name: game_elevation_m
-        description: Elevation of the game venue in metres, where published.
+        description: Elevation of the game venue in meters, where published.
       - name: game_elevation_ft
         description: >
           Elevation of the game venue in whole feet, where published. Carried alongside the
           change because "at 7,000 ft" and "3,000 ft higher than home" are different facts and
           a reader asking about altitude usually wants the first.
       - name: home_elevation_m
-        description: Elevation of this team's derived home venue in metres, where published.
+        description: Elevation of this team's derived home venue in meters, where published.
       - name: home_elevation_ft
         description: Elevation of this team's derived home venue in whole feet, where published.
       - name: previous_game_date
@@ -1863,7 +1863,7 @@ models:
         description: >
           Hit rate minus 52.38%, the break-even against a standard -110 spread price.
           NULL FOR MONEYLINE ON PURPOSE: those bets are priced per game, so a 77% hit rate on
-          heavy favourites can lose money and subtracting a fixed threshold from it would be
+          heavy favorites can lose money and subtracting a fixed threshold from it would be
           a confident, meaningless number.
       - name: mean_edge_magnitude
         description: Average absolute edge within the band, in the market's own unit.
@@ -1880,7 +1880,7 @@ models:
           largely of extrapolated predictions is weaker evidence than its n suggests.
       - name: attribution
         description: >
-          Licence-required attribution from dim_model_version, carried as data so a page
+          License-required attribution from dim_model_version, carried as data so a page
           cannot render these rates without it.
       - name: as_of_ts
         description: AC-G.35. Last load of the `prediction` domain, rendered instead of now().
@@ -1983,7 +1983,7 @@ models:
           Whether the game was played at a neutral venue.
       - name: is_completed
         description: >
-          Whether the game has finished. A cancelled game reads 0-0 with this false, so
+          Whether the game has finished. A canceled game reads 0-0 with this false, so
           "points are not null" is not a substitute.
       - name: points_for
         description: >
@@ -2675,7 +2675,7 @@ models:
           Defensive predicted points added allowed per third-down play. Lower is better.
       - name: spread_final
         description: >
-          The spread FROM THIS TEAM'S SIDE — negative means this team was favoured. The
+          The spread FROM THIS TEAM'S SIDE — negative means this team was favored. The
           home-perspective number negated on the away row, which is what lets every derived
           column below be one expression with no branch. "Final" is srv_game's lock rule:
           the closing number once it exists, the live one before that.
@@ -2688,7 +2688,7 @@ models:
           always sum to the total, and the larger of the pair is always
           `(total + abs(spread)) / 2`.
           NOT "expected points". These come from the market, not from cfdb's model, and
-          "expected" reads as a prediction — the one framing the training-pack licence cares
+          "expected" reads as a prediction — the one framing the training-pack license cares
           about (R-201 section 2.1). Called line-implied everywhere, Excel header included.
       - name: points_vs_line_implied_final
         description: >
@@ -2876,7 +2876,7 @@ models:
           hour for it.
       - name: is_completed
         description: >
-          Whether the game has finished. A cancelled game reads 0-0 with this false, so
+          Whether the game has finished. A canceled game reads 0-0 with this false, so
           "points are not null" is not a substitute for it.
       - name: is_conference_game
         description: >
@@ -2923,15 +2923,15 @@ models:
       - name: is_upset
         description: >
           Whether a RANKED side lost to a side ranked worse or unranked. AP poll only, at the
-          time of the game. NULL where neither team was ranked — there is no favourite to be
+          time of the game. NULL where neither team was ranked — there is no favorite to be
           upset, and saying `false` there was a claim with no basis behind it on 83% of
-          completed games. A market favourite is a different basis and a different question;
+          completed games. A market favorite is a different basis and a different question;
           `winner_covered_close` answers that one.
       - name: is_upset_by_line
         description: >
-          Whether the side favoured by the closing spread lost outright, and the ONLY basis for
+          Whether the side favored by the closing spread lost outright, and the ONLY basis for
           an upset here — R-181. Null where no closing line was held or the game was a pick'em,
-          which names no favourite; the page renders that null as a dash rather than as a
+          which names no favorite; the page renders that null as a dash rather than as a
           verdict of "no upset". Poll rank is deliberately not a fallback: roughly 25 teams are
           ranked in a given week while 100% of completed FBS games in 2025 carry a closing
           line, so the rank basis added verdicts only where they were least meaningful.
@@ -2962,10 +2962,10 @@ models:
           Home team's conference for that season.
       - name: home_color_on_light
         description: >
-          Contrast-corrected home colour for a light background.
+          Contrast-corrected home color for a light background.
       - name: home_color_on_dark
         description: >
-          Contrast-corrected home colour for a dark background.
+          Contrast-corrected home color for a dark background.
       - name: home_logo_url
         description: >
           CFBD logo URL for the home team.
@@ -2995,10 +2995,10 @@ models:
           Away team's conference for that season.
       - name: away_color_on_light
         description: >
-          Contrast-corrected away colour for a light background.
+          Contrast-corrected away color for a light background.
       - name: away_color_on_dark
         description: >
-          Contrast-corrected away colour for a dark background.
+          Contrast-corrected away color for a dark background.
       - name: away_logo_url
         description: >
           CFBD logo URL for the away team.
@@ -3083,12 +3083,12 @@ models:
           conflate a line we watched with a line we were told about.
       - name: favorite_covered
         description: >
-          R-008. Whether the FAVOURITE covered — distinct from which side covered. Four
+          R-008. Whether the FAVORITE covered — distinct from which side covered. Four
           states, and pending is not push: `pending` (no result yet), `push` (landed exactly
           on the number), `no_favorite` (a pick'em, spread exactly 0 — the not-applicable
           third state of AC-G.32 and a real case in the data), `yes` or `no`. Null when no
           spread is held. Follows the away-minus-home convention, so a NEGATIVE spread means
-          the home team was favoured.
+          the home team was favored.
       - name: predicted_margin
         description: >
           Model's predicted margin in the away-minus-home convention. Model selection
@@ -3097,7 +3097,7 @@ models:
           time.
       - name: predicted_margin_home_perspective
         description: >
-          `predicted_margin` negated, so positive reads as "home favoured by". Explicitly
+          `predicted_margin` negated, so positive reads as "home favored by". Explicitly
           named because the pack's own sign is preserved on the column above.
       - name: home_win_probability
         description: >
@@ -3154,7 +3154,7 @@ models:
           IS that change, so it was fixed here.
       - name: attribution
         description: >
-          AC-G.41. Licence-required attribution travelling as data.
+          AC-G.41. License-required attribution traveling as data.
       - name: spread
         description: >
           Spread at the most recent snapshot, away-minus-home convention.
@@ -3163,18 +3163,18 @@ models:
           Opening spread for the game from that provider.
       - name: spread_favorite_side
         description: >
-          Which side the CLOSING SPREAD made the favourite — 'home', 'away', or null for a
+          Which side the CLOSING SPREAD made the favorite — 'home', 'away', or null for a
           pick'em or a game with no line. Carried from fct_game_market rather than derived in
           the page: two of the three Looking Back recap lists rank on this axis and the app
           does no metric maths.
       - name: moneyline_favorite_side
         description: >
-          Which side the MONEYLINE made the favourite — the shorter price. Null when either
+          Which side the MONEYLINE made the favorite — the shorter price. Null when either
           price is missing or the two are equal. A different question from
           spread_favorite_side and not always the same answer.
       - name: favorite_definitions_disagree
         description: >
-          True where the spread and the moneyline name different favourites; NULL — not false
+          True where the spread and the moneyline name different favorites; NULL — not false
           — when either derivation is unavailable, because "they agree" and "we cannot tell"
           are different answers. Of 114 completed 2026 games carrying both, 2 disagree.
       - name: over_under
@@ -3189,7 +3189,7 @@ models:
           srv_line_movement ALREADY CALLS IT — coining "change" here would be the
           Total-versus-O/U mistake committed twice. SIGN: spread is home-perspective and
           negative
-          favours the home team, so -1.5 means the market moved TOWARD the home side, the
+          favors the home team, so -1.5 means the market moved TOWARD the home side, the
           same reading as the spread and the predicted margin beside it. NULL, not zero,
           when it has not moved, and null again when no opening number was recorded — those
           are different facts, and spread_open beside it tells them apart. 1,608 games have
@@ -3465,11 +3465,11 @@ models:
           `(total - spread) / 2` — what the market's own two numbers imply the home team
           scores. `market_implied_`, not `expected_`: the prefix names the PROVENANCE, and
           these are arithmetic on published numbers, so they carry CFBD attribution and NOT
-          the model disclaimer. The prefix is a licence boundary wearing a naming convention.
+          the model disclaimer. The prefix is a license boundary wearing a naming convention.
       - name: market_implied_away_points
         description: >
           `(total + spread) / 2`. The sign does the work — the spread is home-perspective, so
-          no branch and no "who is favoured" lookup. Verified on 1,930 games: the pair sums
+          no branch and no "who is favored" lookup. Verified on 1,930 games: the pair sums
           to the total on every row.
       - name: market_implied_favorite_points
         description: The larger of the implied pair, which is `(total + abs(spread)) / 2`.
@@ -3558,7 +3558,7 @@ models:
 
       Every label and filter the chart needs is a column here (G-2, G-3): one relation, a WHERE
       on game_id, no joins and no arithmetic in the app. That includes the mm:ss duration, the
-      band a drive belongs to, and the endzone team's logo, mascot and contrast-safe colour.
+      band a drive belongs to, and the endzone team's logo, mascot and contrast-safe color.
 
       The scope boundary rides on every row as drives_min_season / drives_max_season, so a game
       outside the window — which returns no rows at all — can still be explained by a single
@@ -3593,15 +3593,15 @@ models:
         data_tests: [not_null]
       - name: opponent_color_on_light
         description: >
-          The endzone colour on a light surface, contrast-checked upstream by dim_team and
-          coalesced to neutral grey where the team has no row at all. Never null — an endzone
-          in fallback grey is correct, one in an unreadable team colour is not, and one in NULL
+          The endzone color on a light surface, contrast-checked upstream by dim_team and
+          coalesced to neutral gray where the team has no row at all. Never null — an endzone
+          in fallback gray is correct, one in an unreadable team color is not, and one in NULL
           is a crash.
         data_tests: [not_null]
       - name: opponent_color_source
         description: >
-          Which rung of dim_team's contrast ladder produced the colour — `primary`, `alternate`,
-          `adjusted` or `fallback`. It is how the page knows to say the colour is not the team's
+          Which rung of dim_team's contrast ladder produced the color — `primary`, `alternate`,
+          `adjusted` or `fallback`. It is how the page knows to say the color is not the team's
           own.
         data_tests: [not_null]
       - name: start_yards_from_own_goal
@@ -3724,24 +3724,24 @@ models:
           Mascot of the offense. Identity chrome, not data encoding.
       - name: offense_color_on_light
         description: >
-          The rail colour for the band that has the ball, on a light surface —
-          contrast-checked upstream by dim_team and coalesced to neutral grey where the team
-          has no row at all. Never null, on the same reasoning as the endzone trio: grey is
-          correct, an unreadable team colour is not, and NULL is a crash.
+          The rail color for the band that has the ball, on a light surface —
+          contrast-checked upstream by dim_team and coalesced to neutral gray where the team
+          has no row at all. Never null, on the same reasoning as the endzone trio: gray is
+          correct, an unreadable team color is not, and NULL is a crash.
 
           Added in R-442. Until then the identity pair was asymmetric — opponent_* carried
           the contrast trio and offense_* carried none — so the drive chart recovered each
-          band's colour from the other band's opponent_color_*. That worked because
+          band's color from the other band's opponent_color_*. That worked because
           possession alternates, and it was a workaround; this is the column it stood in for.
         data_tests: [not_null]
       - name: offense_color_on_dark
         description: >
-          The same rail colour on a dark surface. Both variants ride the row so the page
+          The same rail color on a dark surface. Both variants ride the row so the page
           chooses rather than computes — there is no contrast maths in the app.
         data_tests: [not_null]
       - name: offense_color_source
         description: >
-          Which rung of the colour ladder the rail colour came from: primary or alternate are
+          Which rung of the color ladder the rail color came from: primary or alternate are
           the team's own, adjusted and fallback are cfdb's. Only the last two are debt worth
           flagging, and a page renders them as a Degraded state rather than a failure.
         data_tests: [not_null]
@@ -3769,8 +3769,8 @@ models:
           Logo for the opponent. May be null — render the degraded state.
       - name: opponent_color_on_dark
         description: >
-          Opponent colour, contrast-checked for a dark background. Falls back to grey rather
-          than to an unreadable team colour or to null; `opponent_color_source` says which
+          Opponent color, contrast-checked for a dark background. Falls back to gray rather
+          than to an unreadable team color or to null; `opponent_color_source` says which
           was used.
       - name: defense
         description: >
@@ -3825,7 +3825,7 @@ models:
       - name: is_scoring_drive
         description: >
           True when the drive produced points. ⚠️ Says nothing about WHICH side scored —
-          read `scoring_side` before choosing a colour or an icon.
+          read `scoring_side` before choosing a color or an icon.
       - name: plays
         description: >
           Number of plays in the drive, as the source reports it.
@@ -4058,9 +4058,9 @@ models:
       - name: logo_url
         description: Source URL of the team's logo, or null where none is held.
       - name: color_on_light
-        description: The team's colour, adjusted for legibility on a light background.
+        description: The team's color, adjusted for legibility on a light background.
       - name: color_on_dark
-        description: The team's colour, adjusted for legibility on a dark background.
+        description: The team's color, adjusted for legibility on a dark background.
       - name: conference
         description: The conference this team played in during this season.
       - name: classification
@@ -4230,7 +4230,7 @@ models:
           week 12.
       - name: axis_min
         description: >
-          The shared axis lower bound, floored onto axis_step so the scale starts on a labelled
+          The shared axis lower bound, floored onto axis_step so the scale starts on a labeled
           tick. BUILT OVER whisker_low, FLOORED AT ZERO — not over min_value. Every metric here
           is a yards-per-game figure, and a frame that started below zero spent an eighth of
           itself on territory one team occupies: `rushing_yards_allowed_per_game` ran from -50

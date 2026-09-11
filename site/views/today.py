@@ -430,7 +430,7 @@ def _movers(scope, depth: int) -> None:
         tail = f" Of {len(games)} completed games, {' and '.join(dropped)}." if dropped else ""
 
         st.caption(
-            f"Ranked by the largest distance the spread travelled at any point, not by where "
+            f"Ranked by the largest distance the spread traveled at any point, not by where "
             f"it finished — about a third of games end where they opened having moved in "
             f"between. Prices from {book}.{tail}")
 
@@ -484,7 +484,7 @@ def _movers(scope, depth: int) -> None:
                     # rendered output against real rows.
                     render=lambda r: (
                         '<span title="Prices for this game have a gap in them, so the '
-                        'distance shown is a floor: the line may have travelled further '
+                        'distance shown is a floor: the line may have traveled further '
                         'while it was unobserved.">has a gap</span>'
                         if r.get("line_movement_spans_snapshot_gap") else "complete")),
             ], caption=f"Spread and total in points; win probability in de-vigged "

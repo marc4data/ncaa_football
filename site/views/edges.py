@@ -164,7 +164,7 @@ def _result(row) -> str:
 def _edges(df: pd.DataFrame, market: str) -> None:
     unit = df["edge_unit"].iloc[0] if "edge_unit" in df.columns and not df.empty else ""
     st.caption(f"Ranked by absolute edge, measured in {unit}. "
-               f"Positive favours the home side.")
+               f"Positive favors the home side.")
     columns = [
         Col("week", "Wk", "num", dp=0),
         Col("away_team", "Away"),

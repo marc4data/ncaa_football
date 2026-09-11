@@ -797,7 +797,7 @@ _HELP = {
     "Market": "Every figure on this card is one book's price. A move measured against a "
               "different book's price is not a move.",
     "Spread": "Points given by the favorite. A home favorite is a NEGATIVE spread. The "
-              "arrow is how far the number has travelled since it opened, and the amount "
+              "arrow is how far the number has traveled since it opened, and the amount "
               "beside it carries no sign because the arrow already has the direction.",
     "Over/Under": "The total points the book expects both teams to score combined.",
 }
@@ -2202,7 +2202,7 @@ def _travel(game_id) -> None:
             limit 2
         """, {"game_id": game_id})
         if df.empty:
-            states.empty("How far each side travelled would be here.",
+            states.empty("How far each side traveled would be here.",
                          "No travel or rest figures for this game.")
             return
 
@@ -2378,7 +2378,7 @@ def _drives(game_id) -> None:
             and row["opponent_color_source"] not in _SOURCED_COLOR_RUNGS})
         if fell_back:
             st.caption(
-                "Colour for " + ", ".join(fell_back) + " is cfdb's rather than the team's, "
+                "Color for " + ", ".join(fell_back) + " is cfdb's rather than the team's, "
                 "so that side is banded in a neutral tone. Every drive below is present.")
 
         scored = int(df["is_scoring_drive"].fillna(False).astype(bool).sum())

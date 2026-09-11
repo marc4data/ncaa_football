@@ -228,7 +228,7 @@ models:
 
   - name: fct_game_line_movement
     description: >
-      How far the line travelled, at game grain — one row per game, one book. The derived
+      How far the line traveled, at game grain — one row per game, one book. The derived
       summary the grain rule calls for: srv_line_movement is snapshot grain, a panel wants a
       row per game, and Streamlit cannot aggregate.
     columns:
