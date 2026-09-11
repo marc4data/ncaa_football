@@ -74,7 +74,7 @@ CSS = """
 .cfdb-dist-empty { opacity:.45; }
 .cfdb-dist-none { font-size:.9rem; opacity:.6; }
 
-/* R-477. The offence/defence scatter. Same approach as the distribution chart above: the
+/* R-477. The offense/defense scatter. Same approach as the distribution chart above: the
    marks are currentColor so the whole thing themes for free and needs no light/dark variant,
    which is also why there is no palette here to validate. One series, one hue, no legend —
    the chart standard's §7. Nothing encodes a judgement: no colour scale, no threshold line,
@@ -132,7 +132,7 @@ CSS = """
     padding-top:0 !important; padding-bottom:.5rem !important; }
 /* R-547. THIS BLOCK USED TO BE `@media (prefers-color-scheme: dark)`, AND MARC SAW WHAT
    THAT COSTS: a dark card sitting in a light page. He was in Light theme, the Empty state
-   under "Offence and defence, per game" rendered dark, and he guessed it was because of the
+   under "Offense and defense, per game" rendered dark, and he guessed it was because of the
    hour. It is not — a Streamlit app does not know the time. His OPERATING SYSTEM is in dark
    mode, `prefers-color-scheme` answers the operating system, and the app theme never
    entered into it.

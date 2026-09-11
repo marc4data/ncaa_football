@@ -2,7 +2,7 @@
 
 -- THE SHAPE OF A WEEK, AT TEAM GRAIN. One row per (season, season_type, week, metric).
 --
--- Marc, 2026-09-10, on the offence-against-defence scatterplots: "I'd like to standardize axis
+-- Marc, 2026-09-10, on the offense-against-defense scatterplots: "I'd like to standardize axis
 -- across all the FBS matchups for the week… With the accumulated yardage data points, we can
 -- calculate averages, min, max, median, and stdev, and percentiles. We use min/max to set axis
 -- limits (using logic to give clean breaks and tickmarks), then use the stdev or percentiles to

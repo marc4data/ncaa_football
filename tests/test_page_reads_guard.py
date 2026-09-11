@@ -13,19 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ci"))
 
-# 🚨 BOUND AT IMPORT, BEFORE ANY TEST CAN MONKEYPATCH IT — AND THIS IS NOT HYPOTHETICAL.
-# test_heartbeat.py replaces `subprocess.run` with a stub returning returncode 0, and the
-# patch leaks into this file in a full run: `test_the_check_can_actually_fail` passed alone
-# and failed in the suite, reporting "the check passed with a column removed" when the check
-# had never been invoked at all. ⚠️ THE NEGATIVE TEST WAS ITSELF DEFEATED BY A STUB — the same
-# shape as A085's harness failing AS the page, one layer up, and it is the reason this line
-# exists rather than a plain `subprocess.run` call below.
-_REAL_RUN = subprocess.run
-
 
 def test_the_check_passes_on_this_tree():
-    result = _REAL_RUN([sys.executable, "ci/check_page_reads.py"],
-                       cwd=ROOT, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "ci/check_page_reads.py"],
+                            cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -69,8 +60,8 @@ def test_the_check_can_actually_fail():
         broken = source.replace("    home_mascot, away_mascot,\n", "", 1)
         assert broken != source, "the fixture no longer matches matchup.py — update this test"
         target.write_text(broken)
-        result = _REAL_RUN([sys.executable, "ci/check_page_reads.py"],
-                           cwd=scratch, capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "ci/check_page_reads.py"],
+                                cwd=scratch, capture_output=True, text=True)
         assert result.returncode == 1, "the check passed with a column removed"
         assert "home_mascot" in result.stderr and "away_mascot" in result.stderr, \
             f"it failed without naming the column: {result.stderr}"
@@ -110,8 +101,8 @@ def test_the_as_of_check_can_actually_fail():
         source = target.read_text()
         assert source.count("as_of_ts") >= 2, "rankings.py changed — update this test"
         target.write_text(source.replace("as_of_ts", "as_of_ts_GONE"))
-        result = _REAL_RUN([sys.executable, "ci/check_page_reads.py"],
-                           cwd=scratch, capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "ci/check_page_reads.py"],
+                                cwd=scratch, capture_output=True, text=True)
         assert result.returncode == 1, "the check passed with as_of_ts removed"
         assert "as_of_caption with no as_of_ts" in result.stderr, \
             f"it failed without naming the cause: {result.stderr}"

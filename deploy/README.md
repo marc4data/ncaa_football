@@ -149,7 +149,7 @@ suspiciously small dump** rather than rotating good backups out in favour of an 
 which is exactly what it did on first run against an empty database.
 
 The serving database is derived data: a full rebuild is a publish away, so these dumps are
-convenience rather than the last line of defence. Restoring is minutes; rebuilding is a
+convenience rather than the last line of defense. Restoring is minutes; rebuilding is a
 pipeline cycle.
 
 ## Remaining manual steps (Cloudflare)

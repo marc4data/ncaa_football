@@ -435,7 +435,7 @@ def failure_callback(context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
               f"{event.get('task_id')} attempt {event.get('try_number')}")
         return {"logged": logged, "emailed": False, "duplicate": True}
 
-    # Defence in depth. `triage` already promises never to raise, but that promise lives in
+    # Defense in depth. `triage` already promises never to raise, but that promise lives in
     # another module and one careless edit there would silently cost us the email — the
     # exact failure this module exists to prevent. The guarantee is cheap to enforce here
     # too, so it is enforced here too.

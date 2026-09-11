@@ -394,7 +394,7 @@ sources:
           - name: filename
             data_tests: [unique, not_null]
       - name: raw_ppa_teams
-        description: Predicted points added per play, offence and defence. Results-derived.
+        description: Predicted points added per play, offense and defense. Results-derived.
       - name: raw_ppa_games
         description: >
           CFBD /ppa/games. Team PPA per game, offense and defense, six splits each. Two rows

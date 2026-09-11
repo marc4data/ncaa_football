@@ -884,21 +884,21 @@ models:
       - name: venue
         description: Venue name.
       - name: offense
-        description: Team on offence for this play, by name.
+        description: Team on offense for this play, by name.
       - name: offense_team_id
         description: Resolved from dim_team within season; null for non-FBS programmes.
       - name: offense_conference
-        description: Conference of the team on offence.
+        description: Conference of the team on offense.
       - name: offense_score
-        description: Offence's score at the time of the play.
+        description: Offense's score at the time of the play.
       - name: defense
-        description: Team on defence for this play, by name.
+        description: Team on defense for this play, by name.
       - name: defense_team_id
         description: Resolved from dim_team within season; null for non-FBS programmes.
       - name: defense_conference
-        description: Conference of the team on defence.
+        description: Conference of the team on defense.
       - name: defense_score
-        description: Defence's score at the time of the play.
+        description: Defense's score at the time of the play.
       - name: home_team
         description: Home team of the game, regardless of who has the ball.
       - name: away_team
@@ -914,9 +914,9 @@ models:
       - name: clock_seconds
         description: The clock expressed as total seconds, for arithmetic and sorting.
       - name: offense_timeouts
-        description: Timeouts the offence had remaining.
+        description: Timeouts the offense had remaining.
       - name: defense_timeouts
-        description: Timeouts the defence had remaining.
+        description: Timeouts the defense had remaining.
       - name: yardline
         description: Field position as CFBD reports it, on the 0-100 field.
       - name: yards_to_goal
@@ -1055,6 +1055,6 @@ models:
       - name: ppa
         description: Predicted points added for the play, from fct_play.
       - name: offense_team_id
-        description: Team on offence for the play, from fct_play.
+        description: Team on offense for the play, from fct_play.
       - name: defense_team_id
-        description: Team on defence for the play, from fct_play.
+        description: Team on defense for the play, from fct_play.

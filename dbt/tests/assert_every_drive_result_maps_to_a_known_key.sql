@@ -3,7 +3,7 @@
 --
 -- THE PRECEDENT IS THE PROVIDER MAPPING (2026-08-17): the line feed turned out to carry both
 -- "DraftKings" and "Draft Kings", two spellings that would have silently split a comparison.
--- Free text from an upstream feed grows new values without warning, and the only defence is a
+-- Free text from an upstream feed grows new values without warning, and the only defense is a
 -- test that fails on the new one.
 --
 -- The measured vocabulary is 25 values over 78,502 drives. This fires on the 26th.

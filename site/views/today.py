@@ -496,13 +496,13 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380
     """The scatter itself. Inline SVG in currentColor, following lib/distribution.py's
     precedent — one series, one hue, no legend, hairline axes (the chart standard's §7).
 
-    ⚠️ THE DEFENCE AXIS RUNS THE OTHER WAY, AND THAT IS THE WHOLE DESIGN DECISION.
+    ⚠️ THE DEFENSE AXIS RUNS THE OTHER WAY, AND THAT IS THE WHOLE DESIGN DECISION.
     Low yards allowed is GOOD. Plotted the obvious way — value increasing upward, as a reader
-    trained on cartesian axes expects — the best defences land at the bottom and the chart
+    trained on cartesian axes expects — the best defenses land at the bottom and the chart
     reads backwards to anyone scanning for "up and right is good", which is how everyone scans
     a scatter before reading a word of it.
-    So yards allowed increases DOWNWARD: the strongest defences are at the TOP, the strongest
-    offences at the RIGHT, and the top-right corner is unambiguously the good one. In SVG this
+    So yards allowed increases DOWNWARD: the strongest defenses are at the TOP, the strongest
+    offenses at the RIGHT, and the top-right corner is unambiguously the good one. In SVG this
     needs no flip — y already grows downward — which is precisely why it is easy to ship the
     wrong orientation without noticing you chose one.
 
@@ -575,7 +575,7 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380
 
 
 def _profile(scope, depth: int) -> None:
-    """R-477. Offence against defence, per game, as the teams stood ENTERING the week in
+    """R-477. Offense against defense, per game, as the teams stood ENTERING the week in
     scope.
 
     ⚠️ THE COPY SAYS "the week in scope" OR "the selected week", never the present-tense
@@ -586,7 +586,7 @@ def _profile(scope, depth: int) -> None:
     comment discussing page copy — which is why this note describes the banned phrasing
     instead of quoting it. Weakening the test to allow the quote would be the wrong trade.
     """
-    st.subheader("Offence and defence, per game")
+    st.subheader("Offense and defense, per game")
 
     with states.section("srv_team_week", dataset=DATASETS["srv_team_week"]):
         # ⚠️ A SCATTER NEEDS ONE POINT PER TEAM, WHICH NEEDS ONE WEEK. The week filter offers
@@ -596,7 +596,7 @@ def _profile(scope, depth: int) -> None:
         # for a week rather than to quietly draw the wrong chart.
         if scope.week is None:
             states.empty(
-                "The offence-and-defence chart would be here.",
+                "The offense-and-defense chart would be here.",
                 "This chart shows each team as it stood entering ONE week, so it needs a "
                 "week rather than the whole season. Pick a week above.")
             return
@@ -604,7 +604,7 @@ def _profile(scope, depth: int) -> None:
         teams = _yardage_profile(scope)
         if teams.empty:
             states.empty(
-                "The offence-and-defence chart would be here.",
+                "The offense-and-defense chart would be here.",
                 f"No teams in scope for {scope.describe()}.")
             return
 
@@ -619,7 +619,7 @@ def _profile(scope, depth: int) -> None:
         # chart says "we drew this and there was nothing", which reads as a fault.
         if playable.empty:
             states.empty(
-                "The offence-and-defence chart would be here.",
+                "The offense-and-defense chart would be here.",
                 f"No team has played a completed game before {scope.describe()}, so there is "
                 f"nothing to plot yet. Week 1 is always empty here — the figures are what a "
                 f"team carries INTO the week.")
@@ -701,9 +701,9 @@ def _leaderboards(scope, depth: int) -> None:
             ], caption="Passing, rushing and receiving touchdowns."))
 
         st.markdown("**Defensive leaders**")
-        defence = _player_board(scope, depth, ("defensive",), "TOT")
+        defense = _player_board(scope, depth, ("defensive",), "TOT")
         states.render_or_state(
-            defence, "srv_player_game_log",
+            defense, "srv_player_game_log",
             "The defensive board would be here.",
             f"No defensive box scores for {scope.describe()}.",
             renderer=lambda d: table.render(d, [

@@ -554,7 +554,7 @@ models:
         description: Opponent-adjusted EPA per play generated.
       - name: epa_allowed_total
         description: >
-          EPA per play conceded. NOT inverted — a high value here is a bad defence, matching
+          EPA per play conceded. NOT inverted — a high value here is a bad defense, matching
           how CFBD publishes it.
       - name: explosiveness_allowed
         description: Explosiveness conceded.
@@ -1155,7 +1155,7 @@ models:
         description: >
           The `havoc` block is ordered OPPOSITE to `ppa` in 104 of 104 landed games, which is
           why the blocks are joined by name rather than position. Whether the number is havoc
-          this team's defence caused or havoc its offence suffered is not stated by the API
+          this team's defense caused or havoc its offense suffered is not stated by the API
           and is not asserted here — it needs a reconciliation against stg_game_team_havoc
           before anything downstream relies on the direction.
 

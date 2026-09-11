@@ -12,7 +12,7 @@
 -- in the adjusted-metrics family where a name-keyed join is not forced on the caller.
 --
 -- `epa` AND `epaAllowed` ARE BOTH "HIGHER IS MORE EPA". Neither is inverted: a team with
--- high `epa_allowed_total` has a bad defence. Same convention as the ppa models, and for the
+-- high `epa_allowed_total` has a bad defense. Same convention as the ppa models, and for the
 -- same reason — flipping the sign would silently disagree with the API's own numbers.
 
 {% set blocks = {

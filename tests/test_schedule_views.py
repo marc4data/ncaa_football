@@ -1290,28 +1290,59 @@ def test_the_page_and_the_workbook_phrase_the_bands_from_one_function():
 # `defense_havoc_rate`, `total_yards_for` — so every occurrence this catches is prose, a
 # label, a comment or a Python identifier we wrote. A rename that touched a column would be a
 # different and much worse round, and this guard cannot cause one.
-_BRITISH = ("avourite",)
+# 🚨 ASSEMBLED FROM HALVES, AND THAT IS NOT CLEVERNESS — IT IS THE ROUND'S OWN SCAR.
+#
+# A096 ran the rename as a blanket replace over the tree and it rewrote THIS TUPLE, flipping
+# every word to the American spelling. The guard then flagged every CORRECT line in the site and
+# failed for the exact opposite of its reason. ⚠️ A search-and-replace that edits the detector
+# for the thing it is replacing is the purest form of the week's theme: an instrument that stops
+# measuring what it claims, silently, in the same commit that makes it look unnecessary.
+#
+# Spelled as `off` + `ence` so the next blanket replace cannot reach it, and
+# `test_the_british_word_list_is_still_british` asserts it anyway — the mechanism and the guard
+# on the mechanism, because the mechanism is the kind of thing someone tidies.
+_ENCE = "en" + "ce"
+_BRITISH = ("av" + "ourite",) + tuple(
+    prefix + (_ENCE.upper() if prefix.isupper() else _ENCE)
+    for prefix in ("off", "Off", "OFF", "def", "Def", "DEF"))
 
-# ⚠️ THE SECOND FAMILY IS SCOPED TO ONE FILE TODAY, AND THE SCOPE IS THE HANDOVER.
+# ✅ R-632. `_BRITISH_MATCHUP_ONLY` AND `_MATCHUP` ARE GONE, WHICH WAS A096's LAST ACT.
 #
-# R-599 is B's half of the rename and it covers `views/matchup.py`. A096 takes the other half
-# — 18 lines across six files: today.py (11), theme.py (2), team.py (2), chips.py, fmt.py and
-# workbook.py (1 each), measured 2026-09-11.
+# B085 scoped the offence/defence family to `views/matchup.py` because A's files still carried
+# the spelling, and wrote the handover into the file: "A guard that ships already exempted is not
+# a guard. So this is not an exemption list: it is one path, and A096's last act is to delete the
+# scope so the family joins `avourite` and covers the tree. If A096 has landed and the scope is
+# still there, that is the bug."
 #
-# 🚨 A GUARD THAT SHIPS ALREADY EXEMPTED IS NOT A GUARD (A091's words, and it refused to ship
-# one). So this is not an exemption list that will quietly outlive the work: it is a single
-# path, and A096's last act is to DELETE this tuple's scope so the family joins `avourite`
-# above and the whole tree is covered. If A096 has landed and this is still here, that is the
-# bug.
-_BRITISH_MATCHUP_ONLY = ("offence", "Offence", "OFFENCE", "defence", "Defence", "DEFENCE")
-_MATCHUP = "matchup.py"
+# A096 landed. The scope is gone and the family is in `_BRITISH` above, unscoped.
+
+
+def test_the_british_word_list_is_still_british():
+    """🚨 THE GUARD ON THE GUARD, AND A096 EARNED IT THE HARD WAY.
+
+    A096's blanket rename rewrote `_BRITISH` itself, flipping every word to the American
+    spelling. The guard then flagged every CORRECT line in the site and failed for the opposite
+    of its reason — and had the rename been one word narrower, it would have PASSED while
+    detecting nothing at all.
+
+    ⚠️ That is the week's theme in one commit: an instrument that stops measuring what it claims,
+    in the same change that makes it look unnecessary. The tuple is assembled from halves so a
+    replace cannot reach it; this asserts the result regardless of how it was built.
+    """
+    assert ("f" + _BRITISH[0]) == "fav" + "ourite", \
+        "the favourite fragment is no longer British"
+    for word in _BRITISH[1:]:
+        assert word.lower().endswith("ence"), \
+            f"{word!r} is not a British spelling — the detector has been renamed"
+    assert any(w.lower() == "offence" for w in _BRITISH), "offence is not in the word list"
+    assert any(w.lower() == "defence" for w in _BRITISH), "defence is not in the word list"
 
 
 def test_no_user_facing_string_uses_british_spelling():
     """Marc: "Use US version of favorite". The site said favourite and the workbook said
     favorite, in two legends describing the same three marks.
 
-    R-599: extended to offence/defence, which Marc has now asked for twice."""
+    R-599: extended to offense/defense, which Marc has now asked for twice."""
     from pathlib import Path as _Path
     site = _Path(__file__).resolve().parents[1] / "site"
     # ONE exemption, spelled out rather than pattern-matched: CSV_LABEL_OVERRIDES quotes the
@@ -1323,7 +1354,7 @@ def test_no_user_facing_string_uses_british_spelling():
         if "__pycache__" in str(path):
             continue
         for number, line in enumerate(path.read_text().splitlines(), start=1):
-            words = _BRITISH + (_BRITISH_MATCHUP_ONLY if path.name == _MATCHUP else ())
+            words = _BRITISH
             if not any(word in line for word in words):
                 continue
             if exempt in line or "Marc's CSV" in line:
