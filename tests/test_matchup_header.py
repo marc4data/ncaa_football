@@ -682,8 +682,17 @@ _HEADER_COLUMNS = (
 
 
 def _selected():
+    """The names `COLUMNS` actually produces.
+
+    ⚠️ THIS WAS THE SECOND COPY OF A PARSE THAT COULD BE BLINDED BY A COMMENT (R-669). It read
+    `COLUMNS.replace("\n", " ").split(",")`, byte-identical to the market card's, and the two
+    would have had to be fixed twice. `tests/select_list.py` is the one implementation, the way
+    `tests/render_harness.py` is for the Streamlit stub — and for the same reason: this project
+    has re-implemented shared test machinery five times and paid for it each time.
+    """
     from views import matchup
-    return {c.strip() for c in matchup.COLUMNS.replace("\n", " ").split(",")}
+    import select_list
+    return select_list.selected_names(matchup.COLUMNS)
 
 
 def test_every_column_the_header_reads_is_actually_SELECTED():
