@@ -60,8 +60,23 @@ SITE = ROOT / "site"
 #
 # ⚠️ The stems are deliberately the longest unambiguous prefix. `fav` not `f`, so `four` and
 # `hour` and `your` cannot match; `trave` not `tra`, so `traveled` (American) cannot.
-_ENDINGS = ("", "s", "d", "ed", "es", "ing", "r", "rs", "ite", "ites",
-            "able", "ably", "ful", "fully", "less", "ism", "ist", "ists")
+# 🚨 AN OPEN SUFFIX, AND A103's OWN VERIFICATION IS WHY.
+#
+# The first draft enumerated endings — "", s, d, ed, ing, ite, able, ism … — and the published
+# dictionary still carried one British word: `favouritism`, which is `favour` + `itism`. An
+# ending nobody thought of, which is the SAME failure as a word nobody thought of, one level
+# down. Enumerating endings is still enumerating.
+#
+# ⚠️ SO THE SUFFIX IS OPEN, and it is safe because these stems+shapes have no American
+# counterpart that shares the prefix: nothing American begins `colour`, `defence`, `travelled`,
+# `centre`, `catalogue`, `practise` or `programme`. `favouritism`, `defenceless` and
+# `centrepiece` now all match without being listed.
+_OPEN = r"\w*"
+
+# ⚠️ `grey` IS THE EXCEPTION AND KEEPS A CLOSED LIST. An open suffix would flag `greyhound`,
+# which is the standard spelling in American English too — a false positive is how a guard
+# earns its first blanket exemption.
+_GREY_ENDINGS = ("", "s", "ed", "ing", "ish", "scale", "ness")
 
 FAMILIES = {
     # British keeps the `u`: colour / favour / behaviour …
@@ -83,14 +98,17 @@ FAMILIES = {
 }
 
 
-def _family_pattern(stems, shapes):
+def _family_pattern(stems, shapes, endings=None):
     stem = "|".join(sorted(stems, key=len, reverse=True))
     shape = "|".join(sorted(shapes, key=len, reverse=True))
-    ending = "|".join(sorted(_ENDINGS, key=len, reverse=True))
-    return re.compile(rf"\b(?:{stem})(?:{shape})(?:{ending})?\b", re.IGNORECASE)
+    if endings is None:
+        return re.compile(rf"\b(?:{stem})(?:{shape}){_OPEN}\b", re.IGNORECASE)
+    tail = "|".join(sorted(endings, key=len, reverse=True))
+    return re.compile(rf"\b(?:{stem})(?:{shape})(?:{tail})?\b", re.IGNORECASE)
 
 
-PATTERNS = {name: _family_pattern(stems, shapes)
+PATTERNS = {name: _family_pattern(stems, shapes,
+                                  _GREY_ENDINGS if name == "grey" else None)
             for name, (stems, shapes) in FAMILIES.items()}
 
 
@@ -172,6 +190,8 @@ BRITISH_FIXTURE = {
     "-ogue": "a catalogue of every column",
     "programme": "the modelling programme",
     "case": "COLOUR, Favoured, DEFENCE",
+    # ⚠️ The ending A103's own verification found in the published dictionary.
+    "-our/open-suffix": "POSSESSION, not favouritism.",
 }
 
 AMERICAN_FIXTURE = (
@@ -186,6 +206,7 @@ AMERICAN_FIXTURE = (
     "COLOR, Favored, DEFENSE",
     # ⚠️ Words that merely LOOK like the families and must never be flagged.
     "an hour later, four of them, on tour, pour it out, your call",
+    "a greyhound is spelled that way in American English too",
     "the literal centerpiece of the meter reading",
     "he called, filled, spelled and killed it",
 )
