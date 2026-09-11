@@ -44,14 +44,29 @@ def test_week_window_is_empty_after_the_season():
 
 
 def test_week_scoped_buckets_expand_over_the_window():
+    """The BULK C2 endpoints are week-scoped.
+
+    ⚠️ PER_GAME ENDPOINTS ARE EXCLUDED, AND THEY ALWAYS SHOULD HAVE BEEN. `plays/stats` opts
+    into the weekly sweep via `weekly_per_game` and fans out as `{gameId: ...}` — game-scoped,
+    which is a different axis from week-versus-season and carries no `week` key at all.
+
+    🚨 THIS TEST HAS A HIDDEN DEPENDENCY ON LIVE WAREHOUSE DATA, found by A099 rather than
+    designed. `_requests_for_bucket` calls `completed_game_ids`, which reads already-landed
+    /games responses out of `raw.raw_games`. While no week-2 game had finished, that returned
+    nothing, `plays/stats` contributed no requests, and the blanket `all("week" in params)`
+    held by accident. A099 landed a fresh whole-season /games fetch, week-2 completions
+    appeared, and the assertion broke on data rather than on code. It would have broken by
+    itself on the next Saturday.
+    """
     weeks = [{"year": "2026", "week": "2", "seasonType": "regular"},
              {"year": "2026", "week": "3", "seasonType": "regular"}]
     requests = weekly._requests_for_bucket(BUCKET_IMMUTABLE_WK, "2026", weeks)
 
     assert requests, "bucket C2 should have members"
-    assert all("week" in params for _, params in requests), \
+    bulk = [(path, params) for path, params in requests if path != "plays/stats"]
+    assert all("week" in params for _, params in bulk), \
         "C2 endpoints must be week-scoped, not season-scoped"
-    assert {params["week"] for _, params in requests} == {"2", "3"}
+    assert {params["week"] for _, params in bulk} == {"2", "3"}
 
 
 def test_revisionist_bucket_is_season_scoped():
@@ -63,12 +78,26 @@ def test_revisionist_bucket_is_season_scoped():
     assert all("week" not in params for _, params in requests)
 
 
-def test_pregame_bucket_targets_the_upcoming_week_only():
+def test_pregame_snapshot_endpoints_target_the_upcoming_week_only():
+    """The SNAPSHOT endpoints stay week-scoped, and that is a quota guard.
+
+    ⚠️ THIS TEST USED TO ASSERT IT OF THE WHOLE BUCKET, and that assumption is what R-656
+    and R-658 were. Week-scoping is right for a line that moves through the week in play; it
+    is wrong for a kickoff time three weeks out. The split is now per endpoint
+    (`weekly_whole_season`), so the guard splits with it rather than being deleted.
+
+    🚨 Widening `lines` or `metrics/wp/pregame` to a whole season on every run would be a
+    quota change nobody asked for. If this goes red because one of them lost its week, that
+    is the finding, not an inconvenience.
+    """
     weeks = [{"year": "2026", "week": "3", "seasonType": "regular"}]
     requests = weekly._requests_for_bucket(BUCKET_PREGAME, "2026", weeks)
 
-    assert requests
-    assert all(params["week"] == "3" for _, params in requests)
+    week_scoped = {path for path, params in requests if "week" in params}
+    assert week_scoped == {"lines", "metrics/wp/pregame"}, (
+        f"the week-scoped pregame endpoints changed: {week_scoped}")
+    assert all(params["week"] == "3"
+               for _, params in requests if "week" in params)
 
 
 def test_results_refresh_reports_touched_endpoints(monkeypatch):

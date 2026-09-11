@@ -105,7 +105,24 @@ REGISTRY: List[Endpoint] = [
              note="requires coachId or team"),
 
     # ---- Game results and detail (bucket B / C2) ----------------------------------
-    Endpoint("games", SEASON_TYPE, BUCKET_HISTORICAL, history=HISTORY_FULL, min_season=1869),
+    # 🚨 PREGAME AND WHOLE-SEASON, AND BOTH HALVES ARE LOAD-BEARING. R-656.
+    #
+    # /games carries the KICKOFF TIME, which networks move weeks out. It sat in
+    # BUCKET_HISTORICAL — "immutable once the season completes" — which no weekly refresh
+    # expands, so the only thing re-fetching it was scores_refresh, for the week in play and
+    # the one before. Measured 2026-09-11: 1,293 of the 2,053 games in the 2026 regular
+    # season (63%) carried a kickoff last fetched on 2026-08-15, and the whole-season pull had
+    # happened exactly three times, all on that one day.
+    #
+    # ⚠️ `weekly_whole_season` IS NOT DECORATION. BUCKET_PREGAME is week-scoped in
+    # weekly.py's sweep, and pregame_refresh asks for the CURRENT WEEK ONLY — so the bucket
+    # move alone would have fetched one week and left the defect in place while every DAG
+    # reported success. See the comment at that branch for the measurement.
+    #
+    # Marc authorised the quota cost on 2026-09-11, verbatim: "you take it." It is two extra
+    # requests per weekly pregame run.
+    Endpoint("games", SEASON_TYPE, BUCKET_PREGAME, history=HISTORY_FULL, min_season=1869,
+             extra={"weekly_whole_season": True}),
     # PREGAME, not HISTORICAL. Broadcast assignments are announced roughly twelve days
     # ahead and change up to game week — they are the definition of time-sensitive
     # pre-game data. Sitting in BUCKET_HISTORICAL meant no weekly refresh fetched it, so
@@ -113,7 +130,13 @@ REGISTRY: List[Endpoint] = [
     # all season while every DAG reported success. A backfill had populated 2024 and 2025,
     # which is why it looked like a working column with a gap rather than a column with no
     # source of new rows.
-    Endpoint("games/media", SEASON_TYPE, BUCKET_PREGAME),
+    # ⚠️ R-658: THE BUCKET MOVE BELOW WAS RIGHT AND IT WAS NOT ENOUGH. The comment above is
+    # accurate about why this left BUCKET_HISTORICAL, and the endpoint still only ever got
+    # asked about the current week — so a game "twelve days ahead" was never in the request.
+    # Measured on raw.raw_games_media for 2026: weeks 1 and 2 only, plus one whole-season pull
+    # on 2026-08-21. `weekly_whole_season` is what makes the original fix actually work.
+    Endpoint("games/media", SEASON_TYPE, BUCKET_PREGAME,
+             extra={"weekly_whole_season": True}),
     Endpoint("games/weather", SEASON_TYPE, BUCKET_HISTORICAL, note="Tier 3 feature"),
     Endpoint("games/teams", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="team box scores"),
     Endpoint("games/players", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="player box scores"),
