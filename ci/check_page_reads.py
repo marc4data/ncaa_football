@@ -235,6 +235,41 @@ def selected_columns(sql):
     return names
 
 
+# ⚠️ R-564's OTHER HALF, AND IT IS EXTENDED HERE RATHER THAN BUILT BESIDE.
+#
+# A088 found Scores calling `table.as_of_caption(raw)` while its query never selected
+# `as_of_ts`. The helper returns SILENTLY when the column is absent, so the page asked for a
+# stamp, srv_game_team had carried it all along, and a guard clause forgave the one line between
+# them — for as long as the page had existed. AC-G.35 says every page states when its own data
+# was loaded; Scores opted out in silence.
+#
+# 🚨 A `raise` INSIDE `as_of_caption` IS THE WRONG FIX, and A088 named the reason in advance: the
+# `df.empty` branch must stay silent, so making the column branch raise would break EIGHTEEN
+# pages' Empty paths to catch a nineteenth page's omission.
+#
+# ⚠️ EXTENDED RATHER THAN A NEW SCRIPT, DELIBERATELY. This file already parses, per module, every
+# column any of its queries selects — which is the expensive half of the question — and the
+# prompt for R-571 forbids a third source-parser. It is also the same SHAPE of question: a page
+# asking for something its own query does not provide.
+#
+# ⚠️ WHAT THIS DOES NOT CHECK, said rather than left to be found: that the VIEW carries
+# `as_of_ts`. That needs a database and this script is static. check_page_queries.py executes
+# every page's SQL against CI's fixture, so a page selecting a column its view lacks already
+# fails there — the two halves are covered by the two tools that can each see one.
+AS_OF_EXEMPT = {}
+
+
+def as_of_audit(path, selected):
+    """Does this module call as_of_caption without selecting the column it needs?"""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    calls = [node.lineno for node in ast.walk(tree)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and node.func.attr == "as_of_caption"]
+    if not calls or "as_of_ts" in selected or path.name in AS_OF_EXEMPT:
+        return None
+    return calls[0]
+
+
 def audit(path, sheets):
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -277,12 +312,15 @@ def audit(path, sheets):
 def main() -> int:
     sheets = _sheet_sql()
     files = sorted(VIEWS.glob("*.py"))
-    total_reads, problems = 0, []
+    total_reads, problems, stamps = 0, [], []
     for path in files:
         selected, reads, missing = audit(path, sheets)
         total_reads += len(reads)
         for name, line in sorted(missing.items()):
             problems.append((path, line, name))
+        line = as_of_audit(path, selected)
+        if line is not None:
+            stamps.append((path, line))
 
     # An empty scan is the failure check_page_queries spent months not reporting.
     if total_reads < 50:
@@ -291,9 +329,22 @@ def main() -> int:
         return 1
 
     print(f"Scanned {len(files)} view modules, {total_reads} row reads.")
-    if not problems:
+    if stamps:
+        print(f"\n::error::{len(stamps)} page(s) call table.as_of_caption() and never select "
+              f"`as_of_ts`. The helper returns SILENTLY when the column is absent, so the page "
+              f"asks for a stamp and renders none — AC-G.35, opted out of without saying so:",
+              file=sys.stderr)
+        for path, line in stamps:
+            print(f"  {path.relative_to(ROOT)}:{line}  as_of_caption with no as_of_ts selected",
+                  file=sys.stderr)
+        print("\n  Add `as_of_ts` to that page's SELECT. If the page genuinely cannot have "
+              "one, add it to AS_OF_EXEMPT in this file WITH A REASON.", file=sys.stderr)
+    if not problems and not stamps:
         print("Every column a page reads is selected by one of its own queries.")
+        print("Every page that asks for an as-of stamp selects the column it needs.")
         return 0
+    if not problems:
+        return 1
 
     print(f"\n::error::{len(problems)} column(s) are READ by a page and SELECTED by none of "
           f"its queries. `row.get()` returns None for these on every real page load, and the "
