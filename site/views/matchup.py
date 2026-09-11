@@ -37,6 +37,19 @@ from lib.table import Col
 # supplies every key and is therefore MORE COMPLETE than the query — and
 # `ci/check_page_queries.py` cannot see the class at all, since it executes the page's SQL
 # and a column the SQL never asks for is not in it to be executed.
+# ⚠️ R-645: `spread_move_from_open` and `total_move_from_open` ARE HERE ON PURPOSE. They are
+# the move that belongs to the `spread` and `over_under` on the same row — the unprefixed
+# family, the one the Excel export has always read — so the card reconciles and the two
+# surfaces answer with the same number. The `line_` family below is the excursion's, which is
+# one book's snapshot series and names its own book in the caption.
+#
+# 🚨 AND THE EXPLANATION LIVES OUT HERE RATHER THAN INSIDE THE STRING. A102 put it inside as
+# an SQL `--` comment first, and `test_every_column_the_card_reads_is_actually_SELECTED`
+# went red: that guard does `COLUMNS.replace("\n", " ").split(",")`, so a comment
+# glues itself to the next column name and the column reads as unselected. These were the
+# first `--` comments this block had ever carried, so the limitation had never been hit.
+# ci/check_page_reads.py parses properly and saw the column fine; the panel-scoped guard is
+# the one to keep SQL comments out of.
 COLUMNS = """
     game_id, season, season_type, week, start_date, venue_display, attendance,
     home_team_id, away_team_id,
@@ -46,6 +59,7 @@ COLUMNS = """
     away_team, away_abbreviation, away_conference, away_logo_url, away_color_on_light,
     away_color_on_dark, away_points, away_wins, away_losses,
     spread, spread_open, over_under, over_under_open, home_moneyline, away_moneyline,
+    spread_move_from_open, total_move_from_open,
     provider_key, line_snapshot_ts, market_implied_home_win_probability,
     market_implied_away_win_probability, overround, devig_method,
     model_name, model_family, predicted_margin, predicted_margin_home_perspective,
@@ -796,13 +810,19 @@ def _help_icon(key: str) -> str:
             f"vertical-align:super'>?</span>")
 
 
-def _provider_link(row) -> str:
+def _provider_link(row, key_column: str = "provider_key") -> str:
     """The book, as a link where we know one — NOT suppressed into the hover.
 
     Marc: "Should include (don't suppress to the question mark hover) the Provider for the
     line we are using. Present as the name of Provider as a hyperlink to their site."
+
+    🚨 R-645: WHICH KEY IS THE CALLER'S TO SAY, AND IT USED TO GUESS. This preferred
+    `line_movement_provider_key` whatever the number beside it came from, so the market card
+    named DraftKings while displaying Bovada's price. The two keys differ on 1,739 of the
+    1,886 games that carry both — 92% — so the guess was wrong far more often than it was
+    right. The default is the family the card displays; the excursion caption passes its own.
     """
-    key = row.get("line_movement_provider_key") or row.get("provider_key")
+    key = row.get(key_column) or row.get("provider_key")
     if not key:
         return "an unnamed book"
     name, url = _PROVIDER_SITE.get(str(key), (None, None))
@@ -873,13 +893,30 @@ def _market_card(row) -> None:
                 # — from the home perspective — and labelled that way rather than guessed.
                 home = row.get("home_abbreviation") or row.get("home_team") or "home"
                 line = f"{html.escape(str(home))} {fmt.signed(row.get('spread'), 'spread')}"
+            # 🚨 R-645: THE MOVE COMES FROM THE SAME ROW AS THE PRICE ABOVE IT.
+            #
+            # This chip used to read `line_spread_move_from_open` while the number beside it
+            # came from `spread` — two different books, in one row, and the row did not even
+            # add up: Marc's 401856679 showed Bovada's 5 next to DraftKings' 7.0, when
+            # 5 − (−1.5) is 6.5. Excel read the unprefixed column and showed 6.5, so the two
+            # surfaces disagreed about a fact on a betting page.
+            #
+            # ⚠️ AND THE CAPTION BELOW ALREADY STATED THE RULE THIS BROKE: "a move measured
+            # against a different book's price is not a move."
+            #
+            # Measured 2026-09-11: the two families disagree on 1,107 of the 1,332 games that
+            # carry both — 83% — and name a different book on 1,739 of 1,886 — 92%. The
+            # unprefixed family wins because it is what `spread` and `over_under` above
+            # already are, so the row reconciles; because the Excel export already reads it
+            # and already labels it `Book`; and because it covers 330 games the `line_`
+            # family does not, which would otherwise lose their chip entirely.
             rows.append(("Spread", line,
-                         _move_chip(row.get("line_spread_move_from_open"),
-                                    "line_spread_move_from_open")))
+                         _move_chip(row.get("spread_move_from_open"),
+                                    "spread_move_from_open")))
         if pd.notna(row.get("over_under")):
             rows.append(("Over/Under", fmt.number(row.get("over_under"), "over_under"),
-                         _move_chip(row.get("line_total_move_from_open"),
-                                    "line_total_move_from_open")))
+                         _move_chip(row.get("total_move_from_open"),
+                                    "total_move_from_open")))
 
         line_rows = "".join(
             f"<div style='display:flex;align-items:baseline;gap:.6rem;padding:.1rem 0'>"
@@ -993,7 +1030,24 @@ def _excursions(row) -> None:
         # presented as a measurement is the defect this caveat exists to prevent.
         floor_note = (" These are floors rather than measurements: this game's line was "
                       "tracked across the three days that hold no snapshots.")
-    st.caption(f"Furthest from the open \u2014 {', '.join(parts)}.{floor_note}")
+    # 🚨 R-645: THIS BLOCK IS THE OTHER BOOK'S, AND IT NOW SAYS SO.
+    #
+    # The excursion set is deliberately one book's snapshot series — srv_game.sql prefixes it
+    # `line_` for exactly that reason, because pairing an excursion with a different book's
+    # price "would be partly the spread between books rather than anything the market did".
+    # ⚠️ THAT ARGUMENT IS SOUND AND IT IS WHY THIS STAYS ON THE `line_` FAMILY. What was
+    # missing is that the card above now reads the unprefixed family, and the two name a
+    # DIFFERENT BOOK on 1,739 of the 1,886 games that carry both — 92%. A panel that quietly
+    # switches books between one caption and the next is the defect this round removes, so
+    # the book is named here whenever it is not the one the card already named.
+    movement_book = row.get("line_movement_provider_key")
+    card_book = row.get("provider_key")
+    whose = ""
+    if movement_book and movement_book != card_book:
+        whose = (f" Measured on {_provider_link(row, 'line_movement_provider_key')}, "
+                 f"whose snapshot series this is.")
+    st.caption(f"Furthest from the open \u2014 {', '.join(parts)}.{floor_note}{whose}",
+               unsafe_allow_html=bool(whose))
 
 
 def _model(row) -> None:
