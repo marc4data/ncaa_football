@@ -4264,3 +4264,93 @@ models:
         description: >
           Teams outside the fences. Values are not carried.
 
+
+  - name: srv_game_team_leader_through_prior_week
+    description: >
+      The three players leading this team in a metric GOING INTO this game. One row per
+      game x team x panel x leader_rank, top three only.
+      This is NOT srv_game_team_leader, and the long name is deliberate. That view answers
+      "who led IN this game", from the game's own box score. This one answers "who leads the
+      team COMING INTO this game" and contains nothing from the game it is attached to. A102
+      spent a round on two near-identically named movement columns measuring different windows,
+      which two reader-facing surfaces each picked a different one of and which disagreed on
+      83% of games — so the window is in the name rather than only in a comment.
+      Point-in-time BY CONSTRUCTION, not by a filter: fct_player_leader_week accumulates with a
+      window frame ending at `1 preceding`, so there is no predicate a later join could remove.
+      Marc's rule is "can only include data through Week 4 in a Week 5 game".
+      Box scores are 2024+, so an earlier game returns no leaders, and a week-1 game returns
+      none either because nobody has yards through week zero.
+    columns:
+      - name: game_team_leader_through_prior_week_sk
+        description: Surrogate key over game_id, team_id, panel and player_id — the grain.
+      - name: game_id
+        description: The game these leaders are shown beside. Their yards EXCLUDE it.
+      - name: season
+        description: Season of the game.
+      - name: season_type
+        description: regular, postseason and the rest — never compared on week alone.
+      - name: week
+        description: >
+          The week of the GAME. The yards are the player's total through weeks strictly before
+          it, ordered by season type then week so a bowl game is not accumulated into October.
+      - name: team_id
+        description: The team whose leaders these are.
+      - name: team_display
+        description: That team's display name.
+      - name: team_slug
+        description: That team's slug.
+      - name: opponent_team_id
+        description: The other side of the fixture.
+      - name: home_away
+        description: Which side of the fixture this team is.
+      - name: panel
+        description: >
+          Which of Matchup's three panels this leader accompanies — passing, rushing or total.
+          Deliberately NOT the same thing as leader_metric.
+      - name: leader_metric
+        description: >
+          What is actually being ranked, and it deliberately DISAGREES with panel: the PASSING
+          panel carries receiving_yards, because Marc asked for the top 3 RECEIVERS beside it.
+          rushing carries rushing_yards; total carries quarterback_total_yards, which is passing
+          plus rushing yards for players dim_athlete lists at QB. Two columns rather than one so
+          the crossing is a fact a test can assert rather than a sentence a later round
+          "corrects".
+      - name: leader_rank
+        description: >
+          1, 2 or 3. Ties SHARE a rank, so a three-way tie for third returns more than three
+          rows — the honest shape rather than a silent truncation.
+      - name: tied_players
+        description: >
+          How many players hold this exact total. Greater than 1 means the page should write
+          "T-2nd" rather than picking one name by accident of planner order.
+      - name: qualified_players
+        description: >
+          How many players have any yards in this panel through the prior week. Fewer than three
+          is common early in a season and is why a panel may show one or two names.
+      - name: player_id
+        description: CFBD athlete id.
+      - name: player_name
+        description: The player's name, from the box score, which always carries it.
+      - name: player_slug
+        description: URL-safe form of the name.
+      - name: yards_through_prior_week
+        description: >
+          Yards in this metric over every earlier week of the season, EXCLUDING this game's week.
+          Always greater than zero — a player on nothing is not a leader.
+      - name: jersey
+        description: >
+          Squad number, from dim_athlete. NULLABLE, and measured: FBS teams resolve 97.5% of
+          leader rows to a roster row and non-FBS 0%, because the 2026 roster load covers 138 of
+          305 teams. A leader with no roster row still appears, with his name and his yards.
+      - name: position
+        description: >
+          Listed position, from dim_athlete. Nullable on the same 2.5% of FBS rows as jersey.
+          This is also how the total panel establishes who is a quarterback, so a missing roster
+          row is the one case that costs a player his place there.
+      - name: class_year_display
+        description: >
+          FR, SO, JR or SR. READ from dim_athlete, not rebuilt — that model already maps 1-4 and
+          already treats anything outside the range as unknown because CFBD sometimes sends the
+          season instead. A103 spent a round on the cost of a second definition of one string.
+      - name: as_of_ts
+        description: When the player_game domain was last refreshed.
