@@ -40,6 +40,9 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import render_harness  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
@@ -220,7 +223,7 @@ def panel():
     seen = {}
 
     def run(game, sides, distribution=_DISTRIBUTION, deltas=None,
-            leaders=None):
+            leaders=None, allow_error_state=False):
         """`sides` is what srv_team_week returns — zero, one or two constructed rows.
 
         ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
@@ -251,6 +254,16 @@ def panel():
 
         matchup.query = fake_query
         matchup._yardage(pd.Series(game))
+        # 🚨 R-610, AND THIS IS THE FILE THAT MAKES THE CASE. B091 shipped `deltas or {}` into
+        # `_delta_for`; `Series.__bool__` RAISES; `states.section` caught it and drew an Error
+        # card — and every assertion in this file passed, because they all read the entries a
+        # panel EMITS and a dead panel emits exactly one card. The LIVE RENDER found it.
+        #
+        # ⚠️ THE GUARD READS WHAT WAS DRAWN rather than how the stub was built, because seven
+        # of the nine matchup files roll their own and a harness-only check would have covered
+        # two of them — missing the one bug it is named for.
+        render_harness.assert_no_error_card(captured, "the yardage panel",
+                                            allow_error_state)
         return list(captured), dict(seen)
 
     yield run
@@ -479,8 +492,14 @@ def test_neither_side_carried_is_empty_and_the_page_survives(panel):
 
 
 def test_a_broken_row_degrades_this_panel_and_not_the_page(panel):
-    """states.section is the blast wall. The panel must not take Matchup down with it."""
-    entries, _ = panel(_game(week="not a week"), _both())
+    """states.section is the blast wall. The panel must not take Matchup down with it.
+
+    ✅ `allow_error_state=True` BECAUSE PROVING THE ERROR CARD FIRES IS THIS TEST'S ENTIRE JOB.
+    R-610 makes an Error state fatal by default precisely so a panel cannot die unnoticed; the
+    one test that renders one on purpose says so in the call, which is the difference between
+    an exemption and a blind spot.
+    """
+    entries, _ = panel(_game(week="not a week"), _both(), allow_error_state=True)
     body = _text(entries)
     assert "Something went wrong" in body or "srv_team_week" in body, \
         "the panel raised out of its own section instead of degrading"
@@ -622,8 +641,19 @@ def test_the_axis_query_reads_one_relation_and_computes_nothing(panel):
         assert banned not in sql, f"the axis query contains `{banned}`"
 
 
-def test_the_page_does_not_divide_anywhere(panel):
+def test_the_CHART_CODE_does_not_divide(panel):
     """🚨 A092 MOVED THE PER-GAME DIVISION INTO THE MART SO THERE IS EXACTLY ONE OF IT.
+
+    ⚠️ RENAMED IN B092 (R-611), AND THE OLD NAME WAS A CLAIM THE TEST NEVER MADE. It was
+    `test_the_page_does_not_divide_anywhere`, and it is scoped to the source between
+    `def _week_distribution(` and `def _yardage_column(` — the chart code, nothing else. The
+    docstring was always honest; the NAME was not, and B091's own report cited it three times
+    as though it guarded the page.
+
+    🚨 THE PAGE DOES DIVIDE: `site/views/players.py:202` renders
+    `f"{int(made)}/{int(attempted)} ({made / attempted * 100:.0f}%)"` — a ratio of TWO COLUMNS
+    computed in the page. That is session A's file and B092 reported it rather than touching it.
+
 
     Two copies of `yards / games_counted` would let the axis disagree with the point drawn on
     it, and that reads to a viewer as a rendering fault rather than a metric one. Asserted on

@@ -1584,7 +1584,7 @@ def _week_distribution(row):
 # the title and axes are added OUTSIDE them, which is the property B087 fought for and keeps.
 #
 # ⚠️ STREAMLIT'S OWN PHRASING USES A SOLIDUS AND IT IS PARAPHRASED AWAY ON PURPOSE:
-# `test_the_page_does_not_divide_anywhere` bans that character across this region to catch a
+# `test_the_CHART_CODE_does_not_divide` bans that character across this region to catch a
 # division, and it caught the quotation. The guard is blunt and cheap and the comment was easy
 # to reword — the same call B090 made when "edges" tripped the editorialising ban.
 #
@@ -1815,7 +1815,7 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None) -> 
 
 
 # ⚠️ THE LEADER BLOCK LIVES BELOW `_yardage_column` ON PURPOSE.
-# `test_the_page_does_not_divide_anywhere` reads the source between `_week_distribution`
+# `test_the_CHART_CODE_does_not_divide` reads the source between `_week_distribution`
 # and `_yardage_column` and bans a solidus there to catch a division. These functions are
 # markup — every closing HTML tag carries one — so putting them inside that window would
 # have meant widening a guard to fit code it was never about. Moving the code was free.

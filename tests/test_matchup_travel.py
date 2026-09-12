@@ -77,6 +77,11 @@ def travel():
 
             matchup.query = fake_query
             matchup._travel(401856679)
+            # 🚨 R-610. `streamlit_stubbed` deliberately does not enforce on exit — it is the
+            # raw instrument and A's failure-state tests use it — so the panel-level fixtures
+            # call the guard themselves. Strict by default; no opt-in here because a travel
+            # panel has no legitimate reason to render an Error card.
+            render_harness.assert_no_error_card(captured, "the travel panel")
             seen["raw"] = list(captured)
             return render_harness.plain(" ".join(str(t) for t in captured)), seen
     return run
