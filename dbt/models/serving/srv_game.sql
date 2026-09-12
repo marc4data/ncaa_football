@@ -698,6 +698,26 @@ select
     w.is_indoors,
     w.temperature_f,
     w.wind_speed_mph,
+    -- R-684: THE DIRECTION HAS BEEN LANDING ALL SEASON AND STOPPING ONE LAYER SHORT.
+    --
+    -- `stg_game_weather` parses `windDirection` and `fct_game_weather` has carried BOTH the
+    -- bearing and an eight-point compass since it was built — only this view did not select
+    -- them, so the page could show a wind speed and never a direction.
+    --
+    -- ⚠️ COVERAGE IS COMPLETE, MEASURED: 7,358 of 7,358 weather rows carry a direction, 0
+    -- carry a speed without one, and all 508 upcoming 2026 games have both. So a page need
+    -- not design an absence for this.
+    --
+    -- 🚨 THE COMPASS IS REUSED, NOT REDEFINED. `fct_game_weather` already buckets it and says
+    -- why eight points rather than sixteen: "enough to be useful and coarse enough to stay
+    -- honest about a single instantaneous reading." A second bucketing here — or in the page —
+    -- would be a second definition of north, which is what A103 spent a round undoing.
+    --
+    -- ⚠️ AND THE >10 MPH RULE IS THE PAGE'S, NOT THIS VIEW'S. Marc: "Do include Direction if
+    -- it's >10 mph." The model carries the direction on every row; the page decides when it is
+    -- worth showing. Filtering here would make that decision unreadable and unchangeable.
+    w.wind_direction_deg,
+    w.wind_direction_compass,
     w.precipitation_in,
     w.weather_condition_code,
     w.weather_condition,

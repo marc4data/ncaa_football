@@ -492,6 +492,30 @@ select
     -- domain would silently double every row of this view, and a scalar subquery raises
     -- instead. srv_game cross joins it; this is the safer of the two spellings.
     (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'game') as as_of_ts,
+    -- ── R-686: WHAT THIS SIDE GAINS AGAINST WHAT THE OTHER SIDE CONCEDES ────────────────────
+    --
+    -- Marc: "Add a column that shows the delta. If the Team gained > allowed, then delta value
+    -- is positive." Positive means this team's offense averages more than the opponent's
+    -- defense has been giving up.
+    --
+    -- 🚨 NAMED FOR THE SUBTRACTION, NOT FOR A VERDICT. `_advantage` and `_edge` are the words
+    -- this project does not use — matchup.py's own rule is "NOTHING IS RANKED, COLOURED BY
+    -- ADVANTAGE OR CALLED AN EDGE. Marc sets the line, not the page." The name says exactly
+    -- which two numbers were subtracted and in which order, so the sign is unambiguous from
+    -- the name alone and no reader has to infer a direction.
+    --
+    -- ⚠️ AND IT LIVES AT THIS GRAIN BECAUSE OF MARC'S OWN RULE, ratified 2026-09-02: "Can't add
+    -- game.team grain to a table that is at game grain." On srv_game this would be six columns
+    -- with `home_`/`away_` prefixes; here it is three, and the row says whose they are.
+    --
+    -- Null when either side has no figure yet — week 1, or a team with no completed games —
+    -- which is an absence rather than a zero.
+    round(ty.rushing_yards_for_per_game - oy.rushing_yards_allowed_per_game, 1)
+        as rushing_yards_for_minus_opponent_allowed_per_game,
+    round(ty.passing_yards_for_per_game - oy.passing_yards_allowed_per_game, 1)
+        as passing_yards_for_minus_opponent_allowed_per_game,
+    round(ty.total_yards_for_per_game   - oy.total_yards_allowed_per_game, 1)
+        as total_yards_for_minus_opponent_allowed_per_game,
     -- NO MODEL PREDICTION TRAVELS ON THIS VIEW, so this is CFBD credit and says so rather
     -- than borrowing dim_model_version's disclaimer, which would imply predictions that are
     -- not here. Box scores, advanced stats and arithmetic on published market numbers.
@@ -517,3 +541,27 @@ left join {{ ref('fct_team_record_week') }} rw
       and rw.season_type = t.season_type
       and rw.week        = t.week
       and rw.team_id     = t.team_id
+
+-- R-686. THE SAME FOUR KEYS, TWICE — once for this team and once for its OPPONENT.
+--
+-- 🚨 THE WHOLE POINT IS THAT THE TWO FIGURES ARE ON DIFFERENT ROWS. Marc asked for "a column
+-- that shows the delta… if the Team gained > allowed, then delta value is positive", and the
+-- panel pairs THIS team's `_for` against the OPPONENT's `_allowed` — the pairing B's
+-- `test_the_pairing_runs_across_sides_not_down_one` was written first to protect. Subtracting
+-- two columns of one row would be a different quantity that looks right whenever the two
+-- teams are similar, which is most of them.
+--
+-- ⚠️ POINT-IN-TIME BY CONSTRUCTION, NOT BY A `where`. fct_team_yardage_week's per-game figures
+-- are computed over games completed in weeks STRICTLY BEFORE their own week, so reading the
+-- row for THIS game's week is already leakage-safe. Nothing here filters, and nothing has to
+-- remember to.
+left join {{ ref('fct_team_yardage_week') }} ty
+       on ty.season      = t.season
+      and ty.season_type = t.season_type
+      and ty.week        = t.week
+      and ty.team_id     = t.team_id
+left join {{ ref('fct_team_yardage_week') }} oy
+       on oy.season      = t.season
+      and oy.season_type = t.season_type
+      and oy.week        = t.week
+      and oy.team_id     = t.opponent_team_id

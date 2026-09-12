@@ -286,6 +286,20 @@ HEAVY_SERVING = [
     # Weekly is therefore honest for it, and it is the same cadence as srv_player_game_log,
     # which it is derived from and which B's box score already reads.
     "srv_game_team_leader",
+    # A106/R-687. The POINT-IN-TIME leaders — the three players leading a team going INTO a
+    # game, as opposed to srv_game_team_leader above, which answers who led IN one.
+    #
+    # HEAVY for the same reason as its sibling, and the reason is the FETCH rather than the
+    # size: it is computed from player box scores, and /games/players is in the IMMUTABLE_WK
+    # bucket, fetched only by cfbd_results_refresh (Sunday) and cfbd_midweek_results
+    # (Thursday). The scores DAG fetches /games and nothing else, so a two-hourly rebuild
+    # would rebuild this from raw that has not moved and produce identical rows. Hot
+    # publishing cannot make a table fresher than its source endpoint.
+    #
+    # Size would have argued the same way rather than against it this time: 74,282 rows, a
+    # quarter of srv_game_team_leader's 296,629, because the grain is capped at three players
+    # per team per panel per game instead of one row per category/type pair.
+    "srv_game_team_leader_through_prior_week",
 ]
 
 # What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,
