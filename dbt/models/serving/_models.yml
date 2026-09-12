@@ -4354,3 +4354,88 @@ models:
           season instead. A103 spent a round on the cost of a second definition of one string.
       - name: as_of_ts
         description: When the player_game domain was last refreshed.
+
+  - name: srv_game_team_leader_usage
+    description: >
+      Each leader's participation share in the games he had played BEFORE this one. One row per
+      game x team x panel x player x EARLIER GAME — a series, not a number, so a page can draw one
+      mark per game already played.
+      usage_total is a SHARE of the team's plays, not a rate and not a count: 0.042 means the
+      player was on the field for 4.2% of them.
+      Point-in-time by construction: the leader rows come from fct_player_leader_week, whose totals
+      use a window frame ending at `1 preceding`, and the marks attached here are the games strictly
+      before the leader row's own week, ordered on season type then week because postseason week
+      numbers restart at 1.
+      THE PAGE MUST NOT DIVIDE, so the denominator travels with the number. Usage is strongly
+      positional — median QB 0.551, RB 0.134, WR 0.058, TE 0.041 — so a circle filled against a 0-1
+      scale leaves every receiver about 6% full, which is indistinguishable from "did not play", the
+      one thing the marks exist to show. The fill is relative to that player's own maximum in the
+      window; the absolute share is there for the hover.
+      COVERAGE IS THE THING TO READ FIRST. It is sourced from game/box/advanced, which is registered
+      include=False ("per-game fan-out: opt-in only", one API call per game), so no DAG fetches it
+      and every row came from one backfill on 2026-09-01. FBS-vs-FBS completed coverage is 2024
+      99.2%, 2025 100.0% and 2026 0.0% — this object is correct and empty for the current season.
+    columns:
+      - name: game_team_leader_usage_sk
+        description: Surrogate key over game_id, team_id, panel, player_id and usage_game_id.
+      - name: game_id
+        description: The fixture these marks are shown beside. Their usage EXCLUDES it.
+      - name: season
+        description: Season of the fixture.
+      - name: season_type
+        description: regular, postseason and the rest.
+      - name: season_type_ordinal
+        description: >
+          Chronological rank of the season type. Carried so a page never has to sort on week alone,
+          which would put a bowl game in the middle of October.
+      - name: week
+        description: Week of the fixture.
+      - name: team_id
+        description: The team whose leader this is.
+      - name: team_display
+        description: That team's display name.
+      - name: panel
+        description: Which of Matchup's panels the leader belongs to — passing, rushing or total.
+      - name: leader_metric
+        description: >
+          What that panel ranks, which deliberately disagrees with panel — the passing panel carries
+          receiving_yards. See srv_game_team_leader_through_prior_week.
+      - name: leader_rank
+        description: 1, 2 or 3 within the panel. Ties share a rank.
+      - name: player_id
+        description: CFBD athlete id, resolved from a name — see below.
+      - name: player_name
+        description: >
+          The player's name. The advanced box score has NO athlete id, so the name is resolved to a
+          real id through fct_player_game_stat, and a name matching two athletes resolves to NEITHER
+          rather than to the first one. Measured: 4 of 185,427 keys are genuinely ambiguous.
+      - name: box_position
+        description: >
+          Position as the advanced box score lists it, which need not match dim_athlete. Carried
+          because usage is strongly positional, so any comparison needs to know it is like for like.
+      - name: usage_game_id
+        description: The earlier game this mark represents.
+      - name: usage_season_type
+        description: Season type of that earlier game.
+      - name: usage_season_type_ordinal
+        description: Its chronological rank, so the marks sort correctly across season types.
+      - name: usage_week
+        description: Week of that earlier game. Always strictly before this fixture's week.
+      - name: usage_total
+        description: >
+          The player's share of his team's plays in that game — the absolute number, for the hover.
+      - name: usage_rushing
+        description: The same share restricted to rushing plays.
+      - name: usage_passing
+        description: The same share restricted to passing plays.
+      - name: usage_total_max_in_window
+        description: >
+          The largest usage_total this player recorded in the window. THE DENOMINATOR — the page
+          fills the mark as usage_total over this, and divides nothing itself.
+      - name: usage_games_in_window
+        description: >
+          How many earlier games the maximum is drawn from. 1 means a full circle resting on a single
+          observation, which reads as "fully involved" and means "we have one data point" — B085's
+          shape, and the page can only say so if it is told.
+      - name: as_of_ts
+        description: When the player_game domain was last refreshed.

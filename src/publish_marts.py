@@ -300,6 +300,16 @@ HEAVY_SERVING = [
     # quarter of srv_game_team_leader's 296,629, because the grain is capped at three players
     # per team per panel per game instead of one row per category/type pair.
     "srv_game_team_leader_through_prior_week",
+    # A107/R-694. Each leader's participation share in the games he had already played — the
+    # series behind B092's circles.
+    #
+    # HEAVY for the same reason as the two leader tables above, and then some. It is computed from
+    # `game/box/advanced`, which is registered `include=False` under "Per-game fan-out: opt-in
+    # only" — ONE API CALL PER GAME — so no DAG fetches it at all. Every row came from a single
+    # backfill on 2026-09-01. A two-hourly rebuild could not make it fresher than a source nothing
+    # is pulling, which is the "arrives looking as fresh as the rows beside it" failure A078 and
+    # A079 spent two rounds removing.
+    "srv_game_team_leader_usage",
 ]
 
 # What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,
