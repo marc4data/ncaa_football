@@ -69,6 +69,50 @@ _FALSE_WIDGETS = ("button form_submit_button link_button download_button "
 _CONTAINERS = "container expander spinner form empty status popover".split()
 
 
+class Capture(list):
+    """The rendered strings, which ALSO remember which `st.*` call produced each one.
+
+    🚨 R-613. IT IS A `list` SUBCLASS ON PURPOSE, AND THAT IS WHAT MAKES THE CONSOLIDATION
+    SAFE. Every existing caller — `assert_captured`, `plain`, `"\n".join(captured)`, A's two
+    files and A's `test_states_failure_modes` — sees exactly what it saw before: a list of
+    strings. Nothing of A's changes, which is §3 rule 3.1 for an addition.
+
+    ⚠️ AND WITHOUT IT THE SEVEN FILES COULD NOT MOVE. They roll their own stub because they
+    capture `(kind, body)` PAIRS and assert on the kind — 28 sites across the seven, things
+    like "the panel emits exactly two markdown blocks" and "this sentence is a caption, not a
+    heading". The shared harness captured flat strings, so moving them would have meant
+    deleting 28 real claims. `.events` keeps them.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.events = []
+
+    def record(self, kind, body):
+        self.events.append((kind, body))
+        self.append(body)
+        return body
+
+    def record_object(self, kind, obj, text):
+        """An event whose payload is an OBJECT, with a string standing in for it in the list.
+
+        ⚠️ THE FLAT LIST MUST STAY STRINGS — `render()` does `"\n".join(captured)` and
+        `plain()` runs regexes over it — so the object goes only into `.events`.
+
+        🚨 IT EXISTS BECAUSE A CHART IS NOT ITS REPR. The bespoke stubs captured the altair
+        OBJECT and the yardage tests read `chart.to_dict()` off it — axis domains, plotted
+        coordinates, stroke widths, the spec Streamlit ships. `str(chart)` says nothing about
+        any of that, which is the same reason B084's own stub kept the object.
+        """
+        self.events.append((kind, obj))
+        self.append(text)
+        return obj
+
+    def clear(self):
+        super().clear()
+        self.events.clear()
+
+
 class Recorder:
     """A container that captures what is drawn into it, and can make more containers."""
 
@@ -93,7 +137,15 @@ class Recorder:
         return Recorder(self._captured)
 
     def metric(self, label, value, help=None, **kwargs):
-        self._captured.append(f"{label} :: {value}")
+        # ⚠️ ROUTED THROUGH `record` LIKE EVERYTHING ELSE. An explicit method that appended
+        # directly put metrics in the flat list and NOT in `.events`, so a consolidated file
+        # asserting "a metric labelled X was drawn" saw an empty list — found by moving
+        # test_matchup_model onto the harness, not by reading this.
+        body = f"{label} :: {value} {help or ''}".rstrip()
+        if isinstance(self._captured, Capture):
+            self._captured.record("metric", body)
+        else:
+            self._captured.append(body)
 
     def __getattr__(self, name):
         # Requirement 2: dunders are Python's business, not the page's.
@@ -103,18 +155,22 @@ class Recorder:
             raise AttributeError(name)
 
         def record(*args, **kwargs):
-            self._captured.append(" ".join(str(a) for a in args))
+            body = " ".join(str(a) for a in args)
+            if isinstance(self._captured, Capture):
+                self._captured.record(name, body)
+            else:
+                self._captured.append(body)
         return record
 
 
 def build(query_params=None, theme="light"):
     """A streamlit stub. Returns (module, captured_list, charts_list)."""
-    captured, charts = [], []
+    captured, charts = Capture(), []
     st = types.ModuleType("streamlit")
 
     def recorder(_name):
         def call(*args, **kwargs):
-            captured.append(" ".join(str(a) for a in args))
+            captured.record(_name, " ".join(str(a) for a in args))
         return call
 
     for name in PROVIDED:
@@ -125,9 +181,10 @@ def build(query_params=None, theme="light"):
             charts.append(json.loads(chart.to_json()))
         except Exception as exc:                                   # noqa: BLE001
             charts.append({"__unreadable__": str(exc)})
-        captured.append("[altair_chart]")
+        captured.record_object("chart", chart, "[altair_chart]")
     st.altair_chart = altair_chart
-    st.metric = lambda label, value, help=None, **k: captured.append(f"{label} :: {value}")
+    st.metric = lambda label, value, help=None, **k: captured.record(
+        "metric", f"{label} :: {value} {help or ''}")
     st.columns = lambda spec, **k: [
         Recorder(captured) for _ in range(spec if isinstance(spec, int) else len(spec))]
     st.tabs = lambda labels, **k: [Recorder(captured) for _ in labels]

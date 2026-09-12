@@ -119,3 +119,76 @@ def test_the_dunder_exemption_can_actually_fail():
         result = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True)
         assert "RAISED_ON_DUNDER" in result.stdout, (
             f"removing the exemption did not make a dunder raise: {result.stdout}{result.stderr}")
+
+
+# --- 🚨 R-612: the detector is a STRING, and a string nobody pinned is a guard that can go blind
+
+_STATES = ROOT / "site" / "lib" / "states.py"
+_THEME = ROOT / "site" / "lib" / "theme.py"
+
+
+def _function_source(path, name):
+    """One function's source, by AST, so a comment mentioning the class cannot satisfy this."""
+    import ast
+    tree = ast.parse(path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return ast.get_source_segment(path.read_text(), node) or ""
+    raise AssertionError(f"{path.name} has no function named {name!r} — "
+                         f"the harness's detector is pinned to a function that no longer exists")
+
+
+def test_the_ERROR_detector_matches_what_states_py_ACTUALLY_DRAWS():
+    """🚨 B092's GUARD RESTS ON `ERROR_CARD = "cfdb-error"` AND NOTHING ASSERTED THE JOIN.
+
+    `assert_no_error_card` decides whether a panel died by looking for that class in the drawn
+    markup. ⚠️ RENAME THE CSS CLASS IN `states.py` — a cosmetic change nobody would stop in
+    review — AND THE GUARD PASSES FOREVER, SILENTLY, ON EVERY PANEL IN THE SUITE. It cannot
+    tell that it has stopped measuring, which is the precise property it was built to remove.
+
+    ✅ THE COUPLING GOES INTO THE TEST, which is B087's precedent: assert the join so a move
+    FAILS LOUDLY rather than going quiet.
+
+    ⚠️ BOTH RENDER PATHS, NOT ONE. `error()` is a query that failed and `render_failed()` is a
+    renderer that failed — R-630 split them deliberately — so a change could keep the class on
+    one and take it off the other, and half the guard would go blind with the suite green.
+    """
+    for name in ("error", "render_failed"):
+        body = _function_source(_STATES, name)
+        assert render_harness.ERROR_CARD in body, (
+            f"THE GUARD'S DETECTOR NO LONGER MATCHES WHAT THE SITE DRAWS. "
+            f"`render_harness.ERROR_CARD` is {render_harness.ERROR_CARD!r} and "
+            f"`states.{name}()` does not emit it any more — so "
+            f"`assert_no_error_card` now returns clean on EVERY panel, including one that "
+            f"died on its first line, and every panel test in this suite is blind. "
+            f"Update ERROR_CARD to whatever {name}() emits; do not delete this assertion.")
+
+
+def test_the_DEGRADED_detector_matches_too_because_telling_them_apart_is_the_point():
+    """⚠️ THE RECORDER'S ABILITY TO TELL DEGRADED FROM ERROR IS WHAT KEEPS IT FROM BEING BLUNT.
+
+    A Degraded panel is an honest state a test may legitimately render — "srv_x has not been
+    built yet" — and B092 made only the error card fatal for exactly that reason. That
+    distinction rests on the same unpinned string.
+    """
+    body = _function_source(_STATES, "degraded")
+    assert render_harness.DEGRADED_CARD in body, (
+        f"`render_harness.DEGRADED_CARD` is {render_harness.DEGRADED_CARD!r} and "
+        f"`states.degraded()` no longer emits it — so the guard can no longer tell an honest "
+        f"Degraded panel from a panel that raised, and it will either start failing tests "
+        f"that are correct or stop failing ones that are not.")
+
+
+def test_both_cards_are_actually_STYLED_so_neither_is_an_unstyled_div():
+    """⚠️ A CLASS EMITTED AND NEVER STYLED IS A THIRD FAILURE THIS PINS CHEAPLY.
+
+    `theme.py` carries the stylesheet, so a rename that updated `states.py` and not the CSS
+    would leave the guard working and the card looking like body text. Cowork's census of this
+    string said three occurrences in the tree; there are six — `theme.py` styles both classes
+    and `views/performance.py` emits the degraded one directly.
+    """
+    css = _THEME.read_text()
+    for token in (render_harness.ERROR_CARD, render_harness.DEGRADED_CARD):
+        assert f".{token}" in css, (
+            f"`{token}` is emitted by states.py and has no rule in theme.py, so the card "
+            f"renders unstyled")

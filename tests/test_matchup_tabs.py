@@ -30,7 +30,6 @@ import html
 import ast
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
@@ -63,60 +62,6 @@ ALL_PANELS = ("_market_and_model", "_series", "_yardage",
               "_travel", "_post_game", "_leaders", "_drives")
 
 
-def _stub_streamlit():
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    stub = types.ModuleType("streamlit")
-    for name in ("subheader", "caption", "markdown", "write", "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-
-    class _Col:
-        def metric(self, label, value, help=None):
-            captured.append(("metric", f"{label} {value}"))
-
-        def markdown(self, *args, **kwargs):
-            captured.append(("markdown", " ".join(str(a) for a in args)))
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    stub.columns = lambda n, **k: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
-    stub.button = lambda *a, **k: False
-    stub.empty = lambda *a, **k: _Col()
-    stub.text_input = lambda *a, **k: ""
-    stub.query_params = {}
-
-    def cache(*args, **kwargs):
-        if len(args) == 1 and callable(args[0]) and not kwargs:
-            return args[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-# lib.params is here and it is not optional: it holds its own `import streamlit`, so without
-# reloading it `params.get("tab")` reads the REAL streamlit's query params and every URL case
-# below silently tests the default instead.
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.shell", "lib.params",
-           "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
-
-
 @pytest.fixture
 def page():
     """`body()` with streamlit captured, the database replaced and every panel recorded.
@@ -125,37 +70,32 @@ def page():
     for the rest of the session — test_matchup_drives learned that the hard way and six
     unrelated tests failed. monkeypatch cannot undo it either: its sys.modules restore runs
     after this teardown, so the swap and the restore are both done by hand.
+
+    ⚠️ ON THE SHARED HARNESS SINCE R-613, and the restore this docstring describes by hand is
+    `streamlit_stubbed`'s whole job — including the parent-package attribute A101 found.
     """
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
-    called = []
+    import importlib
+    with render_harness.streamlit_stubbed() as (stub, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+        called = []
 
-    def run(game=None, **url):
-        """Render `body()` for one game with the given `?` parameters."""
-        captured.clear()
-        called.clear()
-        row = _game(**(game or {}))
-        stub.query_params = dict({"game_id": str(row["game_id"])},
-                                 **{k: str(v) for k, v in url.items()})
-        matchup.query = lambda sql, params=None: pd.DataFrame([row])
-        for name in ALL_PANELS:
-            setattr(matchup, name, (lambda n: lambda *a, **k: called.append(n))(name))
-        matchup.body(None)
-        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE — B091's `deltas or {}` raised,
-        # `states.section` drew a card, and this suite stayed green on a dead panel.
-        render_harness.assert_no_error_card(captured, "the page body")
-        return list(captured), list(called)
+        def run(game=None, **url):
+            """Render `body()` for one game with the given `?` parameters."""
+            captured.clear()
+            called.clear()
+            row = _game(**(game or {}))
+            stub.query_params = dict({"game_id": str(row["game_id"])},
+                                     **{k: str(v) for k, v in url.items()})
+            matchup.query = lambda sql, params=None: pd.DataFrame([row])
+            for name in ALL_PANELS:
+                setattr(matchup, name,
+                        (lambda n: lambda *a, **k: called.append(n))(name))
+            matchup.body(None)
+            # 🚨 R-610. An Error state is not a passing state.
+            render_harness.assert_no_error_card(captured, "the page body")
+            return list(captured.events), list(called)
 
-    yield run, matchup
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run, matchup
 
 
 def _game(**overrides):
