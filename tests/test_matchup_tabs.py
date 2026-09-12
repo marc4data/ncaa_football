@@ -37,6 +37,9 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import render_harness  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
@@ -141,6 +144,9 @@ def page():
         for name in ALL_PANELS:
             setattr(matchup, name, (lambda n: lambda *a, **k: called.append(n))(name))
         matchup.body(None)
+        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE — B091's `deltas or {}` raised,
+        # `states.section` drew a card, and this suite stayed green on a dead panel.
+        render_harness.assert_no_error_card(captured, "the page body")
         return list(captured), list(called)
 
     yield run, matchup

@@ -31,6 +31,9 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import render_harness  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
@@ -114,6 +117,9 @@ def panel():
 
         matchup.query = fake_query
         matchup._post_game(401752754)
+        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE — B091's `deltas or {}` raised,
+        # `states.section` drew a card, and this suite stayed green on a dead panel.
+        render_harness.assert_no_error_card(captured, "the post-game panel")
         return list(captured), list(seen)
 
     yield run, matchup

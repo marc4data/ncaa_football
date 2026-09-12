@@ -43,6 +43,9 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import render_harness  # noqa: E402
 
 
 def _stub_streamlit():
@@ -109,6 +112,12 @@ def panel():
     def run(row):
         captured.clear()
         matchup._model(pd.Series(row))
+        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE. B091 shipped `deltas or {}` —
+        # `Series.__bool__` raises — and `states.section` caught it and drew a card, so this
+        # whole file stayed green on a panel that had died on its first line. The live render
+        # found it. `assert_no_error_card` reads what was DRAWN, so it works for a fixture
+        # that rolls its own stub, which seven of the nine matchup files do.
+        render_harness.assert_no_error_card(captured, "the model panel")
         return list(captured)
 
     yield run

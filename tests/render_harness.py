@@ -172,8 +172,117 @@ RELOAD = ("lib.query", "lib.fmt", "lib.table", "lib.states", "lib.shell", "lib.i
           "lib.chips", "lib.metrics", "lib.distribution", "lib.workbook")
 
 
+# 🚨 R-610. AN ERROR STATE IS A PASSING STATE, AND THAT IS WHAT THIS EXISTS TO END.
+#
+# `states.section` catches `Exception` and draws an Error card. That is right for a reader and
+# catastrophic for a test: a panel that raises on its FIRST LINE emits one card and nothing
+# else, so every "the page does not show X" assertion in this suite passes on a panel that
+# died. B091 shipped `deltas or {}` — `Series.__bool__` raises — and the whole Matchup suite
+# stayed green. The LIVE RENDER found it, for the second time in one round.
+#
+# ⚠️ THIS IS THE THIRD WRITING-DOWN OF THE SAME FACT AND THE FIRST CONTROL. Line 17 of this
+# file already said a harness gap was "INDISTINGUISHABLE FROM A PAGE DEFECT"; R-627 recorded a
+# dropped tunnel reading as a page fault. Both were notes. A note that describes a failure is
+# not a control that prevents one.
+#
+# ⚠️ `degraded` IS NOT `error`, AND THEY ARE SEPARATED FROM THE FIRST LINE. A Degraded panel is
+# an HONEST state a test may legitimately render — "srv_x has not been built yet" — so it is
+# recorded and never enforced. Only `error` and `render_failed` mean something raised.
+_FATAL_STATES = ("error", "render_failed")
+
+
+class ErrorStateRendered(AssertionError):
+    """A panel raised and `states.section` drew an Error card instead of propagating."""
+
+
+def _watch_states(seen):
+    """Wrap `lib.states` so the three failure states record themselves.
+
+    ⚠️ WRAPPED AFTER THE RELOAD, ON THE STUB-BOUND COPY. `streamlit_stubbed` re-imports every
+    module in RELOAD against the stub and puts the originals back on exit, so these wrappers go
+    with it — there is nothing to unwind and no way for them to leak into a later test.
+    """
+    states = sys.modules.get("lib.states")
+    if states is None:
+        return
+    for name in ("error", "render_failed", "degraded"):
+        original = getattr(states, name, None)
+        if original is None or getattr(original, "_cfdb_watched", False):
+            continue
+
+        def make(fn, label):
+            def watched(*args, **kwargs):
+                seen.append((label, args[0] if args else None))
+                return fn(*args, **kwargs)
+            watched._cfdb_watched = True
+            return watched
+
+        setattr(states, name, make(original, name))
+
+
+ERROR_CARD = "cfdb-error"
+DEGRADED_CARD = "cfdb-degraded"
+
+
+def assert_no_error_card(entries, what="the panel", allow_error_state=False):
+    """🚨 THE SAME GUARD FOR THE SEVEN FIXTURES THAT DO NOT USE THIS HARNESS.
+
+    ⚠️ MEASURED IN B092 AND IT IS THE REASON THIS FUNCTION EXISTS: of the nine
+    `tests/test_matchup_*.py` files, **SEVEN roll their own streamlit stub** — including
+    `test_matchup_yardage.py`, which is where B091's `deltas or {}` actually hid. A guard that
+    lived only in `streamlit_stubbed` would have covered two of nine and missed the very bug
+    this round is named for.
+
+    ✅ SO THIS READS WHAT WAS DRAWN, NOT HOW IT WAS STUBBED. `states.error` and
+    `render_failed` both emit `class='cfdb-state cfdb-error'`; nothing else does. It works for
+    any fixture that collects markup, which is all of them.
+
+    ⚠️ `cfdb-degraded` AND `cfdb-empty` ARE NOT THIS. A Degraded panel is an honest state a
+    test may legitimately render — AC-G.11 applies to the instrument too — so only the error
+    card is fatal.
+
+    `entries` may be a list of strings or of (kind, body) pairs; both shapes exist in this
+    suite and the difference is not worth a second helper.
+    """
+    if allow_error_state:
+        return
+    blob = []
+    for entry in entries:
+        if isinstance(entry, (tuple, list)):
+            blob.extend(str(part) for part in entry)
+        else:
+            blob.append(str(entry))
+    if any(ERROR_CARD in part for part in blob):
+        raise ErrorStateRendered(
+            f"{what} RENDERED AN ERROR STATE. Something raised inside `states.section`, which "
+            f"caught it and drew a card — so this render emitted a failure card and nothing "
+            f"else, and any assertion about what the page does NOT show would pass on it. "
+            f"Find the exception; do not adjust the assertion. If this test legitimately "
+            f"renders a failed panel, pass allow_error_state=True and say why in the call.")
+
+
+def assert_no_error_state(seen, allow_error_state=False):
+    """The enforcement. Strict by default — an Error state fails the test.
+
+    🚨 THE MESSAGE IS THE POINT (A098's rule). "No entries found" sent B091 looking at an
+    assertion; "the panel rendered an Error state" sends the next round at the traceback that
+    caused it.
+    """
+    fatal = [(label, view) for label, view in seen if label in _FATAL_STATES]
+    if fatal and not allow_error_state:
+        where = ", ".join(f"{label}({view})" if view else label for label, view in fatal)
+        raise ErrorStateRendered(
+            f"THE PANEL RENDERED AN ERROR STATE: {where}. Something raised inside "
+            f"`states.section`, which caught it and drew a card — so this render emitted a "
+            f"failure card and nothing else, and any assertion about what the page does NOT "
+            f"show would pass on it. Find the exception; do not adjust the assertion. If this "
+            f"test legitimately renders a failed panel, pass allow_error_state=True and say "
+            f"why in the call.")
+
+
 @contextlib.contextmanager
-def streamlit_stubbed(query_params=None, theme="light"):
+def streamlit_stubbed(query_params=None, theme="light", allow_error_state=False,
+                      states_seen=None):
     """Swap in the stub, and PUT IT ALL BACK — two populations, two opposite methods.
 
     ⚠️ THE RESTORE IS BY HAND AND MUST STAY THAT WAY. monkeypatch's sys.modules undo runs after
@@ -230,6 +339,7 @@ def streamlit_stubbed(query_params=None, theme="light"):
     # The originals, set aside rather than mutated. This is the whole fix.
     originals = {name: sys.modules.get(name) for name in RELOAD}
     st, captured, charts = build(query_params, theme)
+    states_seen = [] if states_seen is None else states_seen
     sys.modules["streamlit"] = st
     try:
         for name in RELOAD:
@@ -240,7 +350,19 @@ def streamlit_stubbed(query_params=None, theme="light"):
                 importlib.import_module(name)
             except Exception:                                      # noqa: BLE001
                 pass
+        _watch_states(states_seen)
         yield st, captured, charts
+        # ⚠️ NO ENFORCEMENT HERE, AND §3 RULE 3.1 IS WHY. `streamlit_stubbed` is the RAW
+        # instrument, and A095's `tests/test_states_failure_modes.py` uses it to exercise the
+        # failure states themselves — five call sites whose whole job is to render one. A
+        # shared-module change "ships the parameter and the default" and leaves the other
+        # session's call sites to that session; enforcing on exit here would have reached
+        # across and broken A's file to make B's guard convenient.
+        #
+        # ✅ THE DEFAULT IS STILL STRICT WHERE IT COUNTS: `render()` below draws a real page
+        # and refuses an Error card, and `assert_no_error_card` is strict for every fixture
+        # that calls it. Nothing is opt-in; the enforcement simply sits where it does not
+        # reach into A's tests. B092 reports the one line A needs to extend it here.
     finally:
         if real is not None:
             sys.modules["streamlit"] = real
@@ -281,11 +403,18 @@ def streamlit_stubbed(query_params=None, theme="light"):
                     pass
 
 
-def render(view, query_params=None, theme="light"):
-    """Call a view module's real `body()`. Returns (text, charts)."""
+def render(view, query_params=None, theme="light", allow_error_state=False):
+    """Call a view module's real `body()`. Returns (text, charts).
+
+    🚨 STRICT BY DEFAULT (R-610). This draws a REAL PAGE, and a real page that renders an Error
+    card has a defect — there is no legitimate reason for `render()` to return one quietly.
+    B091's `deltas or {}` proved the cost: `states.section` caught the raise, drew a card, and
+    every assertion about what the page does NOT show passed on a panel that had died.
+    """
     with streamlit_stubbed(query_params, theme) as (_st, captured, charts):
         module = importlib.reload(importlib.import_module(f"views.{view}"))
         module.body(Recorder(captured))
+        assert_no_error_card(captured, f"the {view} page", allow_error_state)
         return "\n".join(captured), list(charts)
 
 
