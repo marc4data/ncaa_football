@@ -25,7 +25,6 @@ panel reads it with a WHERE and nothing else.
 import html
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
@@ -39,85 +38,39 @@ import render_harness  # noqa: E402
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
 
-def _stub_streamlit():
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    stub = types.ModuleType("streamlit")
-    for name in ("subheader", "caption", "markdown", "write", "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-
-    class _Col:
-        def metric(self, label, value, help=None):
-            captured.append(("metric", f"{label} {value}"))
-
-        def markdown(self, *args, **kwargs):
-            captured.append(("markdown", " ".join(str(a) for a in args)))
-
-    stub.columns = lambda n, **k: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
-    stub.button = lambda *a, **k: False
-    stub.empty = lambda *a, **k: _Col()
-
-    def cache(*args, **kwargs):
-        if len(args) == 1 and callable(args[0]) and not kwargs:
-            return args[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.shell", "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
-
-
 @pytest.fixture
 def panel():
     """`_leaders` with streamlit captured and the query answered from constructed rows.
 
     ⚠️ IT PUTS THE MODULES BACK — reloading lib.states against a stub binds the stub inside it
     for the rest of the session, which cost test_matchup_drives six unrelated failures.
+
+    ⚠️ ON THE SHARED HARNESS SINCE R-613. This file rolled its own stub, as seven of the nine
+    matchup files did; `tests/render_harness.py` exists so it would not have to, and B092 had
+    to detect a dead panel through drawn markup because a harness-level guard reached two of
+    nine. `captured.events` carries the same `(kind, body)` pairs the bespoke stub produced.
     """
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
-    seen = {}
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+        seen = {}
 
-    def run(rows):
-        captured.clear()
-        seen.clear()
+        def run(rows):
+            captured.clear()
+            seen.clear()
 
-        def fake_query(sql, params=None):
-            seen["sql"], seen["params"] = sql, params or {}
-            seen["calls"] = seen.get("calls", 0) + 1
-            return pd.DataFrame(rows)
+            def fake_query(sql, params=None):
+                seen["sql"], seen["params"] = sql, params or {}
+                seen["calls"] = seen.get("calls", 0) + 1
+                return pd.DataFrame(rows)
 
-        matchup.query = fake_query
-        matchup._leaders(401752665)
-        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE — B091's `deltas or {}` raised,
-        # `states.section` drew a card, and this suite stayed green on a dead panel.
-        render_harness.assert_no_error_card(captured, "the leaders panel")
-        return list(captured), dict(seen)
+            matchup.query = fake_query
+            matchup._leaders(401752665)
+            # 🚨 R-610. An Error state is not a passing state.
+            render_harness.assert_no_error_card(captured, "the leaders panel")
+            return list(captured.events), dict(seen)
 
-    yield run, matchup
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run, matchup
 
 
 # The real slugs serving returns, so an href assertion is about a real destination rather

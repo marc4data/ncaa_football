@@ -33,7 +33,6 @@ collapse them:
 import html
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
@@ -45,68 +44,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import render_harness  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
-
-
-def _stub_streamlit():
-    """Capture what the panel emits instead of rendering it."""
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    stub = types.ModuleType("streamlit")
-    for name in ("subheader", "caption", "markdown", "write", "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-
-    class _Col:
-        # R-522 put the two directions in columns, so the panel now uses `with left:` and the
-        # stub has to be enterable. Content written inside goes to the MODULE recorders, which
-        # is what real streamlit does too, so the captured order is unchanged.
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def metric(self, label, value, help=None):
-            captured.append(("metric", f"{label} {value} {help or ''}"))
-
-        def markdown(self, *args, **kwargs):
-            captured.append(("markdown", " ".join(str(a) for a in args)))
-
-    stub.columns = lambda n, **k: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
-
-    def altair_chart(chart, **kwargs):
-        # ⚠️ THE OBJECT, NOT ITS REPR. A chart's axis limits are the thing R-590 is about, and
-        # `str(chart)` says nothing about them — the assertions read `chart.to_dict()`.
-        captured.append(("chart", chart))
-
-    stub.altair_chart = altair_chart
-    stub.button = lambda *a, **k: False
-    stub.empty = lambda *a, **k: _Col()
-
-    def cache(*args, **kwargs):
-        if len(args) == 1 and callable(args[0]) and not kwargs:
-            return args[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-# The modules that hold their own `import streamlit`. Reloading the view alone leaves
-# lib.states emitting into the REAL streamlit, so the Degraded state renders somewhere the
-# capture cannot see it. lib.shell is here because table.as_of_caption asks it for a slot.
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.shell", "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
 
 
 # The week's shared frame, read back from srv_team_week_metric_distribution for 2025 regular
@@ -214,65 +151,65 @@ def panel():
     for the REST OF THE SESSION — test_matchup_drives learned that the hard way and six
     unrelated tests failed. `monkeypatch` cannot undo it either: its sys.modules restore runs
     after this teardown, so the swap and the restore are both done by hand here.
+
+    🚨 ON THE SHARED HARNESS SINCE R-613, AND THIS FILE IS THE REASON THE ROUND EXISTS. It
+    rolled its own stub, which is why B092's guard had to read DRAWN MARKUP rather than hook
+    the harness: a harness-level check would have covered two files of nine and missed this
+    one — the file where B091's `deltas or {}` actually hid.
+
+    ⚠️ THE RESTORE THIS DOCSTRING DESCRIBES BY HAND IS `streamlit_stubbed`'s JOB, and it does
+    both halves — sys.modules and the parent-package attribute (A101).
     """
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
-    seen = {}
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+        seen = {}
 
-    def run(game, sides, distribution=_DISTRIBUTION, deltas=None,
-            leaders=None, allow_error_state=False):
-        """`sides` is what srv_team_week returns — zero, one or two constructed rows.
+        def run(game, sides, distribution=_DISTRIBUTION, deltas=None,
+                leaders=None, allow_error_state=False):
+            """`sides` is what srv_team_week returns — zero, one or two constructed rows.
 
-        ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
-        than answering both with the same frame. `seen["sql"]` stays bound to the srv_team_week
-        query, because that is the one every assertion below was written about; the
-        distribution query is recorded separately.
-        """
-        captured.clear()
-        seen.clear()
-        seen["queries"] = []
+            ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
+            than answering both with the same frame. `seen["sql"]` stays bound to the srv_team_week
+            query, because that is the one every assertion below was written about; the
+            distribution query is recorded separately.
+            """
+            captured.clear()
+            seen.clear()
+            seen["queries"] = []
 
-        def fake_query(sql, params=None):
-            seen["queries"].append(sql)
-            if "srv_team_week_metric_distribution" in sql:
-                seen["axis_sql"], seen["axis_params"] = sql, params or {}
-                return pd.DataFrame(distribution or [])
-            # ⚠️ R-686 MADE THIS PANEL READ A THIRD RELATION, and the stub dispatches on the
-            # SQL rather than answering everything with the same frame. `srv_game_team` is
-            # game × team grain; the figures beside it are week grain on `srv_team_week`.
-            if "srv_game_team_leader_through_prior_week" in sql:
-                seen["leader_sql"] = sql
-                return pd.DataFrame(leaders if leaders is not None else _leaders())
-            if "srv_game_team" in sql:
-                seen["delta_sql"], seen["delta_params"] = sql, params or {}
-                return pd.DataFrame(deltas if deltas is not None else _deltas())
-            seen["sql"], seen["params"] = sql, params or {}
-            return pd.DataFrame(sides)
+            def fake_query(sql, params=None):
+                seen["queries"].append(sql)
+                if "srv_team_week_metric_distribution" in sql:
+                    seen["axis_sql"], seen["axis_params"] = sql, params or {}
+                    return pd.DataFrame(distribution or [])
+                # ⚠️ R-686 MADE THIS PANEL READ A THIRD RELATION, and the stub dispatches on the
+                # SQL rather than answering everything with the same frame. `srv_game_team` is
+                # game × team grain; the figures beside it are week grain on `srv_team_week`.
+                if "srv_game_team_leader_through_prior_week" in sql:
+                    seen["leader_sql"] = sql
+                    return pd.DataFrame(leaders if leaders is not None else _leaders())
+                if "srv_game_team" in sql:
+                    seen["delta_sql"], seen["delta_params"] = sql, params or {}
+                    return pd.DataFrame(deltas if deltas is not None else _deltas())
+                seen["sql"], seen["params"] = sql, params or {}
+                return pd.DataFrame(sides)
 
-        matchup.query = fake_query
-        matchup._yardage(pd.Series(game))
-        # 🚨 R-610, AND THIS IS THE FILE THAT MAKES THE CASE. B091 shipped `deltas or {}` into
-        # `_delta_for`; `Series.__bool__` RAISES; `states.section` caught it and drew an Error
-        # card — and every assertion in this file passed, because they all read the entries a
-        # panel EMITS and a dead panel emits exactly one card. The LIVE RENDER found it.
-        #
-        # ⚠️ THE GUARD READS WHAT WAS DRAWN rather than how the stub was built, because seven
-        # of the nine matchup files roll their own and a harness-only check would have covered
-        # two of them — missing the one bug it is named for.
-        render_harness.assert_no_error_card(captured, "the yardage panel",
-                                            allow_error_state)
-        return list(captured), dict(seen)
+            matchup.query = fake_query
+            matchup._yardage(pd.Series(game))
+            # 🚨 R-610, AND THIS IS THE FILE THAT MAKES THE CASE. B091 shipped `deltas or {}` into
+            # `_delta_for`; `Series.__bool__` RAISES; `states.section` caught it and drew an Error
+            # card — and every assertion in this file passed, because they all read the entries a
+            # panel EMITS and a dead panel emits exactly one card. The LIVE RENDER found it.
+            #
+            # ⚠️ THE GUARD READS WHAT WAS DRAWN rather than how the stub was built, because seven
+            # of the nine matchup files roll their own and a harness-only check would have covered
+            # two of them — missing the one bug it is named for.
+            render_harness.assert_no_error_card(captured, "the yardage panel",
+                                                allow_error_state)
+            return list(captured.events), dict(seen)
 
-    yield run
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run
 
 
 HOME_ID, AWAY_ID = 2, 96

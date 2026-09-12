@@ -24,7 +24,6 @@ The break was staged: swapping the value test for `if df.empty` and pointing it 
 import html
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
@@ -38,51 +37,6 @@ import render_harness  # noqa: E402
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
 
-def _stub_streamlit():
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    stub = types.ModuleType("streamlit")
-    for name in ("subheader", "caption", "markdown", "write", "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-
-    class _Col:
-        def metric(self, label, value, help=None):
-            captured.append(("metric", f"{label} {value}"))
-
-        def markdown(self, *args, **kwargs):
-            captured.append(("markdown", " ".join(str(a) for a in args)))
-
-    stub.columns = lambda n, **k: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
-    stub.button = lambda *a, **k: False
-    stub.empty = lambda *a, **k: _Col()
-
-    def cache(*args, **kwargs):
-        if len(args) == 1 and callable(args[0]) and not kwargs:
-            return args[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.shell", "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
-
-
-# The dictionary rows the panel reads. Real text, trimmed — the point of the fixture is that
-# the words come from the DICTIONARY and not from the page, so inventing prose here would
-# defeat it.
 GLOSSARY = pd.DataFrame([
     {"column_name": f, "is_documented": True,
      "column_description": f"Authored definition of {f}."}
@@ -99,36 +53,30 @@ def panel():
 
     ⚠️ IT PUTS THE MODULES BACK — reloading lib.states against a stub binds the stub inside it
     for the rest of the session, which cost test_matchup_drives six unrelated failures.
+
+    ⚠️ ON THE SHARED HARNESS SINCE R-613. `captured.events` carries the same `(kind, body)`
+    pairs the bespoke stub produced, so nothing below changed.
     """
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
-    seen = []
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+        seen = []
 
-    def run(sides, glossary=GLOSSARY):
-        captured.clear()
-        seen.clear()
+        def run(sides, glossary=GLOSSARY):
+            captured.clear()
+            seen.clear()
 
-        def fake_query(sql, params=None):
-            seen.append(re.search(r"from\s+(\w+)", sql, re.I).group(1))
-            return glossary if "srv_data_dictionary" in sql else pd.DataFrame(sides)
+            def fake_query(sql, params=None):
+                seen.append(re.search(r"from\s+(\w+)", sql, re.I).group(1))
+                return glossary if "srv_data_dictionary" in sql else pd.DataFrame(sides)
 
-        matchup.query = fake_query
-        matchup._post_game(401752754)
-        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE — B091's `deltas or {}` raised,
-        # `states.section` drew a card, and this suite stayed green on a dead panel.
-        render_harness.assert_no_error_card(captured, "the post-game panel")
-        return list(captured), list(seen)
+            matchup.query = fake_query
+            matchup._post_game(401752754)
+            # 🚨 R-610. An Error state is not a passing state.
+            render_harness.assert_no_error_card(captured, "the post-game panel")
+            return list(captured.events), list(seen)
 
-    yield run, matchup
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run, matchup
 
 
 _ADVANCED_VALUES = {

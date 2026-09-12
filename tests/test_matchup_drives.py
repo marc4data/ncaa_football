@@ -18,7 +18,6 @@ of them on the wrong side of the game, and does it while looking entirely health
 import html
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
@@ -28,42 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import render_harness  # noqa: E402
-
-
-def _stub_streamlit():
-    """Capture what the panel emits instead of rendering it."""
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    stub = types.ModuleType("streamlit")
-    for name in ("subheader", "caption", "markdown", "write", "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-
-    def cache(*args, **kwargs):
-        # Used both bare (@st.cache_resource) and called (@st.cache_data(ttl=600)).
-        if len(args) == 1 and callable(args[0]) and not kwargs:
-            return args[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-# The modules that hold their own `import streamlit`. Reloading the view alone leaves
-# lib.states emitting into the REAL streamlit, so the Empty state renders somewhere the
-# capture cannot see it.
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
 
 
 @pytest.fixture
@@ -76,36 +39,28 @@ def panel():
     file that breaks other test files is worse than the regression it was written to catch.
     monkeypatch cannot undo it either: its sys.modules restore runs after this teardown, so
     the swap and the restore are both done by hand here.
+
+    ⚠️ ON THE SHARED HARNESS SINCE R-613, which is what this docstring was always arguing for:
+    the restore it describes by hand is `streamlit_stubbed`'s whole job, and it does both
+    halves — sys.modules AND the parent package attribute, which A101 found the hard way.
     """
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
 
-    def run(frame):
-        captured.clear()
-        original = matchup.query
-        matchup.query = lambda *a, **k: frame
-        try:
-            matchup._drives(9001)
-        finally:
-            matchup.query = original
-        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE. B091 shipped `deltas or {}` —
-        # `Series.__bool__` raises — and `states.section` caught it and drew a card, so this
-        # whole file stayed green on a panel that had died on its first line. The live render
-        # found it. `assert_no_error_card` reads what was DRAWN, so it works for a fixture
-        # that rolls its own stub, which seven of the nine matchup files do.
-        render_harness.assert_no_error_card(captured, "the drives panel")
-        return list(captured)
+        def run(frame):
+            captured.clear()
+            original = matchup.query
+            matchup.query = lambda *a, **k: frame
+            try:
+                matchup._drives(9001)
+            finally:
+                matchup.query = original
+            # 🚨 R-610. An Error state is not a passing state.
+            render_harness.assert_no_error_card(captured, "the drives panel")
+            return list(captured.events)
 
-    yield run
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run
 
 
 def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,

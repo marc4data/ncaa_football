@@ -41,7 +41,6 @@ Temple game.
 import html
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
@@ -53,95 +52,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import render_harness  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
-
-
-class HarnessGap(BaseException):
-    """An un-stubbed `st.*`. BaseException so `except Exception` cannot swallow it.
-
-    ⚠️ DUNDERS ARE EXEMPT. B082 raised on every unknown attribute and hit
-    `INTERNALERROR> HarnessGap: the page called st.__file__()` — pytest reads __file__ while
-    FORMATTING a failure, so the staged break worked and its evidence vanished.
-    """
-
-
-_PROVIDED = ("markdown", "caption", "subheader", "write", "columns", "divider",
-             "info", "warning", "error", "button", "session_state",
-             "cache_data", "cache_resource")
-
-
-def _stub_streamlit():
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    class _Col:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def markdown(self, *a, **k):
-            captured.append(("markdown", " ".join(str(x) for x in a)))
-
-        def caption(self, *a, **k):
-            captured.append(("caption", " ".join(str(x) for x in a)))
-
-        def metric(self, label, value, help=None):
-            captured.append(("metric", f"{label} {value} {help or ''}"))
-
-        def __getattr__(self, name):
-            if name.startswith("__") and name.endswith("__"):
-                raise AttributeError(name)
-            raise HarnessGap(f"HARNESS GAP: a column called .{name}()")
-
-    class _Stub(types.ModuleType):
-        def __getattr__(self, name):
-            if name.startswith("__") and name.endswith("__"):
-                raise AttributeError(name)
-            raise HarnessGap(f"HARNESS GAP: the page called st.{name}(), which this harness "
-                             f"does not provide. Provided: {', '.join(_PROVIDED)}")
-
-    stub = _Stub("streamlit")
-    for name in ("markdown", "caption", "subheader", "write", "divider",
-                 "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-    stub.columns = lambda spec, **k: [
-        _Col() for _ in range(spec if isinstance(spec, int) else len(spec))]
-    stub.button = lambda *a, **k: False
-
-    def cache(*a, **k):
-        if len(a) == 1 and callable(a[0]) and not k:
-            return a[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-# ⚠️ `lib.attribution` IS HERE BECAUSE R-596 MADE THIS MODULE CALL `_model`, AND B081 WROTE
-# THIS TRAP DOWN ONE ROUND BEFORE IT BIT.
-#
-# `_model` ends with `attribution.model_attribution(...)`, which holds its own
-# `import streamlit`. Reloading the view without reloading that module leaves the licence
-# caption emitting into the REAL streamlit — invisible to the capture, and in a full-suite run
-# it raises out of streamlit's own bare-mode warning path.
-#
-# 🚨 IT PASSED ALONE AND IN THIS MODULE, AND FAILED ONLY IN THE FULL SUITE. That is the
-# order-dependence A094 found in its own test infrastructure, and the reason the prompt says
-# to run every negative test both ways.
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.chips", "lib.attribution",
-           "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
 
 
 # 🚨 R-605's BOARD READS srv_game_team, SO THE FIXTURE MUST TOO — OR THE SUITE GOES ONLINE.
@@ -177,68 +87,52 @@ def _game_team_rows_for(overrides):
     return {k: pd.Series(v) for k, v in rows.items()}
 
 
-def _make(target):
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
+def _panel(target):
+    """One panel on the SHARED harness (R-613). A generator, so the three fixtures below are
+    one line each and the enter/exit lives in exactly one place.
 
-    def run(**overrides):
-        captured.clear()
-        matchup._game_team_rows = lambda _g, _o=overrides: _game_team_rows_for(_o)
-        row_overrides = {k: v for k, v in overrides.items()
-                         if not k.endswith("_spread_final")}
-        getattr(matchup, target)(pd.Series(_row(**row_overrides)))
-        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE. B091 shipped `deltas or {}` —
-        # `Series.__bool__` raises — and `states.section` caught it and drew a card, so this
-        # whole file stayed green on a panel that had died on its first line. The live render
-        # found it. `assert_no_error_card` reads what was DRAWN, so it works for a fixture
-        # that rolls its own stub, which seven of the nine matchup files do.
-        render_harness.assert_no_error_card(captured, f"the {target} panel")
-        return list(captured)
+    🚨 THIS FILE CARRIED ITS OWN `HarnessGap`, its own `_PROVIDED` list and its own stub — the
+    fifth re-implementation on one page, after R-631 built the harness "because five rounds
+    rebuilt one". ⚠️ THE RESTORE THE THREE FIXTURES DID BY HAND IS `streamlit_stubbed`'s job,
+    and it does both halves: sys.modules AND the parent-package attribute, which A101 found
+    the hard way when restoring only the first left a stub-bound module in place.
 
-    return run, real
+    ⚠️ `captured.events` CARRIES THE SAME `(kind, body)` PAIRS the bespoke stub produced, so
+    the assertions below did not move.
+    """
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+
+        def run(**overrides):
+            captured.clear()
+            matchup._game_team_rows = lambda _g, _o=overrides: _game_team_rows_for(_o)
+            row_overrides = {k: v for k, v in overrides.items()
+                             if not k.endswith("_spread_final")}
+            getattr(matchup, target)(pd.Series(_row(**row_overrides)))
+            # 🚨 R-610. An Error state is not a passing state.
+            render_harness.assert_no_error_card(captured, f"the {target} panel")
+            return list(captured.events)
+
+        yield run
 
 
 @pytest.fixture
 def card():
-    """`_market_card`, with streamlit captured.
-
-    ⚠️ IT PUTS THE MODULES BACK — reloading lib.states against a stub binds the stub inside it
-    for the rest of the session, and test_matchup_drives learned that the hard way.
-    """
-    run, real = _make("_market_card")
-    yield run
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+    """`_market_card`, with streamlit captured."""
+    yield from _panel("_market_card")
 
 
 @pytest.fixture
 def row_panel():
     """`_market_and_model` — the two halves sharing one row (R-596)."""
-    run, real = _make("_market_and_model")
-    yield run
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+    yield from _panel("_market_and_model")
 
 
 @pytest.fixture
 def bar():
     """`_win_probability_bar`."""
-    run, real = _make("_win_probability_bar")
-    yield run
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+    yield from _panel("_win_probability_bar")
 
 
 def _row(**overrides):

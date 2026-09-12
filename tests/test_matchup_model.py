@@ -36,7 +36,6 @@ anyway, so that this file keeps testing the metric rather than the outage.
 import html
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
@@ -48,85 +47,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import render_harness  # noqa: E402
 
 
-def _stub_streamlit():
-    """Capture what the panel emits instead of rendering it."""
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    stub = types.ModuleType("streamlit")
-    for name in ("subheader", "caption", "markdown", "write", "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-
-    class _Col:
-        def metric(self, label, value, help=None):
-            captured.append(("metric", f"{label} {value} {help or ''}"))
-
-    stub.columns = lambda n: [_Col() for _ in range(n if isinstance(n, int) else len(n))]
-    stub.button = lambda *a, **k: False
-
-    def cache(*args, **kwargs):
-        if len(args) == 1 and callable(args[0]) and not kwargs:
-            return args[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-# The modules that hold their own `import streamlit`. ⚠️ lib.attribution and lib.chips are
-# here and are NOT in the line-movement file's list: `_model` ends by calling
-# `attribution.model_attribution`, and its two Empty branches are built by `lib.chips`.
-# Without them the licence caption renders into the REAL streamlit, where the capture cannot
-# see it — and the assertion that the attribution travels with the numbers would be testing
-# nothing at all.
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.chips", "lib.attribution",
-           "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
-
-
 @pytest.fixture
 def panel():
-    """The panel with streamlit captured, ready to be handed a row.
+    """The panel on the SHARED harness (R-613).
 
-    ⚠️ IT PUTS THE MODULES BACK. Reloading lib.states against a stub binds the stub inside
-    it for the REST OF THE SESSION, and test_matchup_drives learned that the hard way — six
-    unrelated tests failed. `monkeypatch` cannot undo it either: its sys.modules restore
-    runs after this teardown, so the swap and the restore are both done by hand here.
+    🚨 THIS FILE USED TO ROLL ITS OWN STREAMLIT STUB, AND SEVEN OF THE NINE MATCHUP FILES DID.
+    R-631 built `tests/render_harness.py` "after five rounds rebuilt one"; this page then did
+    it five more times. B092 had to detect a dead panel through DRAWN MARKUP rather than
+    through the harness precisely because a harness-level guard would have reached two files
+    of nine.
+
+    ⚠️ THE ASSERTIONS BELOW ARE UNCHANGED because `captured.events` carries the same
+    `(kind, body)` pairs the bespoke stub produced. `Capture` is a `list` subclass, so the
+    harness's own callers still see a list of strings — the addition is inert for session A.
+
+    ⚠️ `views.matchup` IS IMPORTED INSIDE THE STUB. It is not in the harness's RELOAD list, so
+    a copy imported before the swap would bind the real streamlit and the capture would be
+    empty. The harness reloads every `views.*` bound to the stub on the way out.
     """
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
 
-    def run(row):
-        captured.clear()
-        matchup._model(pd.Series(row))
-        # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE. B091 shipped `deltas or {}` —
-        # `Series.__bool__` raises — and `states.section` caught it and drew a card, so this
-        # whole file stayed green on a panel that had died on its first line. The live render
-        # found it. `assert_no_error_card` reads what was DRAWN, so it works for a fixture
-        # that rolls its own stub, which seven of the nine matchup files do.
-        render_harness.assert_no_error_card(captured, "the model panel")
-        return list(captured)
+        def run(row):
+            captured.clear()
+            matchup._model(pd.Series(row))
+            # 🚨 R-610. AN ERROR STATE IS NOT A PASSING STATE. B091's `deltas or {}` raised,
+            # `states.section` drew a card, and this file stayed green on a dead panel.
+            render_harness.assert_no_error_card(captured, "the model panel")
+            return list(captured.events)
 
-    yield run
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run
 
 
 ATTRIBUTION = ("cfdb model, built on a licensed CFB Model Training Pack (2026 Edition). "
@@ -174,7 +125,11 @@ def _metric(entries, label):
     Reading a figure out of the block that carries its label is what makes these assertions
     survive a transposition — `"+7.4" in body` passes when two metrics are swapped.
     """
-    hits = [b for k, b in entries if k == "metric" and b.startswith(label + " ")]
+    # ⚠️ R-613: THE SHARED HARNESS SEPARATES A METRIC'S LABEL FROM ITS VALUE WITH ` :: `,
+    # where this file's own stub used a space. The separator is the harness's and it is the
+    # better one — unambiguous when a value itself contains spaces — so the parser moved
+    # rather than the format.
+    hits = [b for k, b in entries if k == "metric" and b.startswith(label + " :: ")]
     if not hits:
         raise AssertionError(f"no metric labelled {label!r} was drawn; "
                              f"drew {[b for k, b in entries if k == 'metric']}")
@@ -185,7 +140,7 @@ def _metric(entries, label):
     if len(hits) > 1:
         raise AssertionError(f"{label!r} matched {len(hits)} metrics, so the figure read back "
                              f"is ambiguous: {hits}")
-    return hits[0][len(label):].strip().split(" ")[0]
+    return hits[0][len(label) + len(" :: "):].strip().split(" ")[0]
 
 
 def _captions(entries):
