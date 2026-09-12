@@ -30,6 +30,24 @@ select
     g.stat_value,
     g.stat_made,
     g.stat_attempted,
+    -- 🚨 THE RATE IS COMPUTED HERE BECAUSE §4.2 SAYS THE PAGE MAY NOT. R-611.
+    --
+    -- `players.py:_value` rendered `f"{int(made)}/{int(attempted)} ({made / attempted * 100:.0f}%)"`
+    -- — arithmetic BETWEEN TWO COLUMNS, done in the app. Cowork's ruling, which B accepted without
+    -- re-litigating: scaling ONE column by a constant for display is rendering; dividing one
+    -- column by another is a metric, and metrics live upstream.
+    --
+    -- ⚠️ CARRIED AS A FRACTION RATHER THAN A PERCENTAGE, so the page's remaining `* 100` is the
+    -- permitted kind of arithmetic — one column, one constant, for display. It also matches every
+    -- other share in this warehouse (`usage_total` of 0.042 is 4.2%), so nobody has to remember
+    -- which of two conventions a given column follows.
+    --
+    -- ⚠️ NULL WHEN `stat_attempted` IS 0 OR ABSENT, never zero. A player who attempted nothing has
+    -- no rate; reporting 0% would be a measurement he did not earn — the same rule that makes
+    -- total_points null rather than zero for an unplayed game.
+    case when g.stat_attempted is not null and g.stat_attempted <> 0
+         then cast(g.stat_made as {{ dbt.type_float() }}) / g.stat_attempted
+    end                                                        as stat_made_rate,
     ao.as_of_ts
 from {{ ref('fct_player_game_stat') }} g
 cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'player_game') ao

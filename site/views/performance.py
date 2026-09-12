@@ -143,16 +143,23 @@ def _missing_models(df: pd.DataFrame) -> None:
     missing = sorted(m for m in EXPECTED_MODELS if m not in loaded)
     if not missing:
         return
+    # 🚨 ROUTED THROUGH states.degraded RATHER THAN HAND-DRAWN. R-616.
+    #
+    # This built the same `cfdb-state cfdb-degraded` markup inline, and the HTML it produced was
+    # identical — which is exactly why it survived review. What it was NOT was visible to the
+    # instrument: `render_harness._watch_states` wraps `states.error`, `states.render_failed` and
+    # `states.degraded` BY NAME, so a panel that writes the markup itself records no Degraded
+    # state at all. B092's recorder would report this page as having none.
+    #
+    # ⚠️ THE COPY IS UNCHANGED, INCLUDING THE TITLE. `degraded()`'s default is "Not built yet",
+    # which is false here — the model exists and its export was never written — so the title is
+    # passed explicitly. That is the parameter A081 added for exactly this case (R-500).
     for name in missing:
-        st.markdown(
-            f"<div class='cfdb-state cfdb-degraded'>"
-            f"<div class='cfdb-state-title'>{name} — not loaded</div>"
-            f"<div class='cfdb-state-body'>This model's export was never written, so it has "
-            f"no rows. It is listed rather than omitted: a shorter table would hide the "
-            f"absence.</div>"
-            f"<div class='cfdb-state-object'>Waiting on "
-            f"<code>fastai_wp_predictions.csv</code></div></div>",
-            unsafe_allow_html=True)
+        states.degraded(
+            missing_object="fastai_wp_predictions.csv",
+            explanation="This model's export was never written, so it has no rows. It is "
+                        "listed rather than omitted: a shorter table would hide the absence.",
+            title=f"{name} — not loaded")
 
 
 def _segment(model: str, segment_type: str) -> pd.DataFrame:

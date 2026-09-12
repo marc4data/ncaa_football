@@ -204,18 +204,50 @@ def test_every_column_a_view_builds_can_format_a_row(path, loaded):
         f"{path.name} does not import: {failed.get(path.stem)}")
     module = modules[path.stem]
 
-    columns, extra_fields = [], set()
-    for node, _lineno, _func, referenced in _col_calls(path):
+    # 🚨 TWO DIFFERENT OUTCOMES USED TO SHARE ONE SKIP, AND ONE OF THEM WAS A FAILURE. R-700.
+    #
+    # This counted nothing: a bare `except Exception: continue` swallowed every construction
+    # error, and `if not columns: pytest.skip(...)` then reported BOTH "this module declares no
+    # Col() calls" and "this module declares columns and every single one raised" as SKIPPED.
+    # The second is a view whose entire column set is broken, reported as nothing to check.
+    #
+    # ⚠️ THE INSTRUMENT MATTERED BEFORE THE BUG DID. A108 measured the suite reading 1,159 passed
+    # against 1,177 collected — eighteen not running where the rule says three — and could not say
+    # which, because a skip with a shared reason cannot be attributed.
+    #
+    # `attempted` is the whole fix. Zero means there is nothing here to test; non-zero with no
+    # survivors means the module is broken and must fail.
+    columns, extra_fields, errors = [], set(), []
+    attempted = 0
+    for node, lineno, _func, referenced in _col_calls(path):
+        attempted += 1
         expr = ast.Expression(body=node)
         ast.fix_missing_locations(expr)
         try:
             columns.append(eval(compile(expr, str(path), "eval"),   # noqa: S307
                                 vars(module), {}))
             extra_fields |= referenced
-        except Exception:                                          # noqa: BLE001
+        except Exception as exc:                                   # noqa: BLE001
+            errors.append(f"line {lineno}: {type(exc).__name__}: {exc}")
             continue
+
+    if attempted == 0:
+        pytest.skip(f"{path.name} declares no Col() calls")
     if not columns:
-        pytest.skip(f"{path.name} builds no constructible columns")
+        # ⚠️ A SKIP, NOT A FAILURE, AND I GOT THIS WRONG FIRST. Failing here looked right and
+        # immediately accused `scores.py`, which is healthy: it builds its Cols inside
+        # `_columns(fields, frame, scope)` in a `for field in fields:` loop, so `field` is a loop
+        # variable and the Col cannot be constructed by eval'ing the call in isolation. That is a
+        # limit of this test's approach, not a defect in the view — the sibling test above prints
+        # the same thing as information for exactly that reason.
+        #
+        # 🚨 WHAT R-700 ACTUALLY BUYS IS ATTRIBUTION. The reason now names the case AND the
+        # errors, so "nothing here to test" and "everything here raised" are different lines in
+        # `pytest -rs` instead of one indistinguishable skip.
+        pytest.skip(
+            f"{path.name} declares {attempted} Col() call(s) and none is constructible in "
+            f"isolation (likely built inside a function from local names): "
+            + "; ".join(errors))
 
     # A VALUE PER KIND, because a placeholder that is wrong for the column's type produces a
     # failure about the placeholder rather than about the column — "could not convert 'x' to

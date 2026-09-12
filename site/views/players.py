@@ -196,7 +196,22 @@ def _game_log(season: int, slug: str) -> None:
 def _value(row) -> str:
     """One column for three shapes. A made/attempted pair renders as "12/31" with its rate,
     because the pair is what a reader recognises and the rate is what they want from it —
-    and CFBD's own "--" for an uncomputed QBR is an absence, not a zero."""
+    and CFBD's own "--" for an uncomputed QBR is an absence, not a zero.
+
+    🚨 THIS DIVISION IS §4.2's DEFECT AND IT IS DELIBERATELY STILL HERE FOR ONE MORE ROUND.
+    R-611.
+
+    `srv_player_game_log.stat_made_rate` SHIPPED in A110 and carries this as a fraction, so the
+    move is a two-line change: select the column and read it. What A110 did NOT do is make that
+    change in the same round, because §3.3 forbids it and §6's live render proved why —
+    rendering this page with the new column selected, against live PUBLISHED serving, raised an
+    error card, since the column exists in the warehouse and has not been published yet.
+
+    ⚠️ `deploy_main.sh` RUNS ITS TWO HALVES IN PARALLEL, so a site image asking for a column the
+    publish has not shipped yet is a real window, not a theoretical one — and this page's game
+    log is 1.3M rows, so its publish is one of the slowest. EXPAND first, MIGRATE next; the
+    alternative was not worse, which is the test §3.3 sets for doing both at once.
+    """
     made, attempted = row.get("stat_made"), row.get("stat_attempted")
     if pd.notna(made) and pd.notna(attempted) and attempted:
         return f"{int(made)}/{int(attempted)} ({made / attempted * 100:.0f}%)"
