@@ -30,9 +30,31 @@ tests as (
     select
         'data_quality'                                     as signal_type,
         test_name                                          as subject,
-        case when is_passing then 'ok' else 'error' end    as severity,
-        case when is_passing then 'Passing'
-             else cast(failures as {{ dbt.type_string() }}) || ' failing row(s)' end as detail,
+        -- 🚨 THREE OUTCOMES, NOT TWO. R-701's census.
+        --
+        -- This read `case when is_passing then 'ok' else 'error' end`, and `is_passing` is
+        -- `status in ('pass','success')` — so a dbt test with `severity='warn'` that returned rows
+        -- was rendered on the status board as an ERROR. Measured: 66 such rows, including
+        -- `assert_line_scores_reconcile_to_the_final_score`, which warns on nearly every scores
+        -- run and was doing so again today with 53 rows.
+        --
+        -- ⚠️ A `warn` IS NOT A FAILURE BY CONSTRUCTION — dbt was told not to fail the build on it,
+        -- so calling it an error on the board is the same class of defect R-412 was: the signal
+        -- reaches a reader that cannot tell two things apart. `KNOWN_SEVERITIES` in
+        -- ci/check_health_signals.py has carried a `warn` level all along and this signal never
+        -- emitted one.
+        --
+        -- ⚠️ AND `skipped` IS NEITHER. A test that did not run has published no result, which is
+        -- what 'unknown' means here — the same reading the quota signal gives an absent threshold.
+        case when status in ('pass', 'success') then 'ok'
+             when status = 'warn'              then 'warn'
+             when status = 'skipped'           then 'unknown'
+             else 'error' end                              as severity,
+        case when status in ('pass', 'success') then 'Passing'
+             when status = 'skipped'           then 'Did not run in the last invocation'
+             else cast(failures as {{ dbt.type_string() }}) || ' row(s)'
+                  || case when status = 'warn' then ' (warning only)' else ' failing' end
+             end                                           as detail,
         generated_at                                       as observed_at
     from {{ ref('fct_dq_test_result') }}
     -- Latest invocation only. History is what the fact is for; the page is a status board.
@@ -84,6 +106,43 @@ deployment as (
         observed_at
     from {{ ref('fct_deploy_status') }}
     where recency_rank = 1
+),
+
+-- 🚨 BETTING LINES FOR GAMES THE SCHEDULE DOES NOT CONTAIN. R-701.
+--
+-- A109 made srv_odds_board's join to fct_game an INNER join, because a board line with no teams
+-- on either side is unrenderable and it had stopped the scores publish for nineteen and a half
+-- hours. That fix was right AND IT CONVERTED A LOUD FAILURE INTO A SILENT ABSENCE: before, a
+-- withdrawn fixture produced a visibly broken row and a red test; now it produces no row at all
+-- and a green suite. Nothing in dbt/tests/ counts what that join removes —
+-- `assert_every_serving_row_names_its_team` can only see the rows that are there.
+--
+-- ⚠️ A NUMBER SOMEBODY READS, NOT A GUARD THAT FAILS THE BUILD. The cause is CFBD withdrawing a
+-- game it had already published — measured on 401866625, Campbell vs Western Carolina, where 82 of
+-- 93 landed week-1 responses carry the game and the newest does not. That is not ours to fix and
+-- it must not stop a publish a second time, so this is `warn` at worst and never `error`.
+--
+-- ⚠️ AC-G.32: ZERO IS A REAL ANSWER. This block always emits exactly one row, so the count renders
+-- as `0` rather than vanishing when it is fine. A health metric that disappears when healthy is
+-- the same defect one level up.
+orphan_market as (
+    select
+        'market_integrity'                                 as signal_type,
+        'lines with no scheduled game'                     as subject,
+        case when orphans = 0 then 'ok' else 'warn' end    as severity,
+        cast(orphans as {{ dbt.type_string() }})
+            || ' betting line(s) name a game_id absent from fct_game'
+            || case when orphans = 0 then ''
+                    else ' — withdrawn upstream; srv_odds_board omits them' end
+                                                           as detail,
+        cast(null as {{ type_timestamp_tz() }})            as observed_at
+    from (
+        select count(*) as orphans
+        from {{ ref('fct_betting_line') }} b
+        where not exists (
+            select 1 from {{ ref('fct_game') }} g where g.game_id = b.game_id
+        )
+    ) counted
 )
 
 select
@@ -96,6 +155,7 @@ from (
     union all select * from quota
     union all select * from documentation
     union all select * from deployment
+    union all select * from orphan_market
 ) combined
 -- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
 -- underlying data was last loaded, never from now() in the app. Per-domain rather than

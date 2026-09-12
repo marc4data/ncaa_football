@@ -3884,6 +3884,51 @@ INSERT INTO raw.raw_lines (filename, content, status_code, params, fetched_at, a
 }', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
   '2026-01-01T00:00:14Z', now());
 
+-- 🚨 A BETTING LINE FOR A GAME THE SCHEDULE DOES NOT CONTAIN. R-701.
+--
+-- Game 9099 appears in NO games fixture, on purpose. This is the shape that stopped the scores
+-- publish for nineteen and a half hours on 2026-09-11: CFBD published game 401866625, withdrew it
+-- from /games, and left 22 betting lines behind. A109 made srv_odds_board's join to fct_game an
+-- inner join so an unrenderable row is no longer emitted, and R-701 added the `market_integrity`
+-- health signal to count what that join removes.
+--
+-- ⚠️ THIS ROW IS WHAT MAKES THAT SIGNAL ESCALATE IN CI. ci/check_health_signals.py fails any
+-- declared signal type that emits rows but never reaches warn or error — so without an orphan here
+-- the counter would be permanently `ok` in the fixture and its alarm branch would never be
+-- exercised. That is the same "green because nothing tripped it" gap the checker exists to close.
+INSERT INTO raw.raw_lines (filename, content, status_code, params, fetched_at, added_at) VALUES
+('2026-01-01T00-00-10-001Z.json', '{
+ "status_code": 200,
+ "params": {
+  "year": "2024",
+  "week": "1",
+  "seasonType": "regular"
+ },
+ "data": [
+  {
+   "id": 9099,
+   "season": 2024,
+   "week": 1,
+   "seasonType": "regular",
+   "homeTeam": "Withdrawn Home",
+   "awayTeam": "Withdrawn Away",
+   "lines": [
+    {
+     "provider": "DraftKings",
+     "spread": -3.0,
+     "formattedSpread": "Withdrawn Home -3",
+     "spreadOpen": -3.0,
+     "overUnder": 44.0,
+     "overUnderOpen": 44.0,
+     "homeMoneyline": -150,
+     "awayMoneyline": 130
+    }
+   ]
+  }
+ ]
+}', 200, '{"year": "2024", "week": "1", "seasonType": "regular"}',
+  '2026-01-01T00:00:15Z', now());
+
 -- Manifest rows for the new endpoints. `stg_lines` takes its snapshot timestamp from
 -- `fetched_at` here, not from the file, so a lines file with no manifest row is invisible.
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
@@ -3895,7 +3940,9 @@ INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count
 ('games/teams', '2026-01-01T00-00-06-001Z.json', '{"year": "2024", "week": "1", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:08Z', now()),
 ('records',     '2026-01-01T00-00-07-001Z.json', '{"year": "2024"}', 200, 2, '2026-01-01T00:00:09Z', now()),
 ('lines',       '2026-01-01T00-00-08-001Z.json', '{"year": "2024", "week": "1", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:10Z', now()),
-('lines',       '2026-01-01T00-00-09-001Z.json', '{"year": "2024", "week": "1", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:14Z', now());
+('lines',       '2026-01-01T00-00-09-001Z.json', '{"year": "2024", "week": "1", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:14Z', now()),
+-- R-701's orphan line. Without this manifest row stg_lines cannot see the file at all.
+('lines',       '2026-01-01T00-00-10-001Z.json', '{"year": "2024", "week": "1", "seasonType": "regular"}', 200, 1, '2026-01-01T00:00:15Z', now());
 
 -- Quota telemetry. Two snapshots so the series has a delta rather than a single point —
 -- one row answers "where are we", only a series answers "where are we heading".
