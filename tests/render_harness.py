@@ -182,10 +182,47 @@ class Capture(list):
 
 
 class Recorder:
-    """A container that captures what is drawn into it, and can make more containers."""
+    """A container that captures what is drawn into it, and can make more containers.
 
-    def __init__(self, captured):
+    🚨 R-617. IT DELEGATES TO THE MODULE-LEVEL STUB, AND THE REASON IS A ROUND THAT WAS SPENT
+    ON IT. A `Recorder` is what `st.columns()` returns, and every name it did not define fell
+    through `__getattr__` to a function that recorded and returned `None`. Measured on
+    `bf3500c`, five methods disagreed with the stub they were standing in for:
+
+        st.selectbox("Down", [...])   -> 'Any'        left.selectbox("Down", [...])  -> None
+        st.multiselect(…, default=…)  -> ['a']        left.multiselect(…)            -> None
+        st.slider("S", value=3)       -> 3            left.slider("S", value=3)      -> None
+        st.expander("t")              -> Recorder     left.expander("t")             -> None
+        st.button("Go")               -> False        left.button("Go")              -> None
+
+    **`views/players.py:275` does `None if down == "Any" else int(down)`.** `int(None)` raises,
+    `states.section` catches it, and the page draws an Error card. ⚠️ **A110 reported that as a
+    page defect, Cowork wrote it into the register as one, and A111 spent its round disproving
+    it** — the fifth time a harness gap has been read as a page fault on this project.
+
+    ⚠️ AND THE OTHER FOUR ARE WORSE THAN THE ONE THAT WAS FOUND. `with left.expander("x"):`
+    cannot work at all against `None`, and a column's `button` was merely FALSEY rather than
+    `False` — so `_FALSE_WIDGETS` looked like it covered columns and did not.
+
+    ✅ SO THERE IS ONE DEFINITION PER METHOD AND THE SPLIT CANNOT DISAGREE. `__getattr__` looks
+    the name up on the stub module and calls THAT, rather than keeping a second list of what
+    each widget returns. Cowork's ruling, and R-574's lesson: two statements of one rule drift,
+    and the drift is invisible until it costs a round. ⚠️ There was already one here —
+    `Recorder.metric` rstripped its body and `st.metric` did not.
+
+    ⚠️ THE RECORDING IS KEPT, NOT TRADED FOR THE ANSWER. A column's `selectbox` records into
+    the flat list AND `.events` (B094's `Capture` contract) *and* returns the stub's value. The
+    stub's own drawing methods already record, so the wrapper records only when the delegate
+    did not — no list says which ones those are, it is observed per call.
+    """
+
+    def __init__(self, captured, st=None):
         self._captured = captured
+        # ⚠️ OPTIONAL, WITH THE OLD BEHAVIOUR AS THE DEFAULT — §3 rule 3.1. `Recorder([])` is a
+        # live call site in `test_render_harness.py` and A's `test_export_page.py` rolls its
+        # own recorder entirely; a Recorder built without a stub keeps recording and returning
+        # `None`, exactly as before.
+        self._st = st
 
     def __enter__(self):
         return self
@@ -196,22 +233,23 @@ class Recorder:
     # Requirement 3: a column can make columns.
     def columns(self, spec, **kwargs):
         count = spec if isinstance(spec, int) else len(spec)
-        return [Recorder(self._captured) for _ in range(count)]
+        return [Recorder(self._captured, self._st) for _ in range(count)]
 
     def tabs(self, labels, **kwargs):
-        return [Recorder(self._captured) for _ in labels]
+        return [Recorder(self._captured, self._st) for _ in labels]
 
     def container(self, *a, **k):
-        return Recorder(self._captured)
+        return Recorder(self._captured, self._st)
 
-    def metric(self, label, value, help=None, **kwargs):
-        # ⚠️ ROUTED THROUGH `record` LIKE EVERYTHING ELSE. An explicit method that appended
-        # directly put metrics in the flat list and NOT in `.events`, so a consolidated file
-        # asserting "a metric labelled X was drawn" saw an empty list — found by moving
-        # test_matchup_model onto the harness, not by reading this.
-        body = f"{label} :: {value} {help or ''}".rstrip()
+    # ⚠️ `metric` USED TO BE DEFINED HERE TOO, AND THE TWO DEFINITIONS HAD ALREADY DRIFTED:
+    # this one rstripped the body and `st.metric` did not. It is gone — the stub's `metric`
+    # records through `Capture.record` exactly as this did, so a consolidated file asserting
+    # "a metric labelled X was drawn" still reads it out of `.events`. That drift is the
+    # measured case for delegating rather than listing.
+
+    def _record(self, name, body):
         if isinstance(self._captured, Capture):
-            self._captured.record("metric", body)
+            self._captured.record(name, body)
         else:
             self._captured.append(body)
 
@@ -222,13 +260,32 @@ class Recorder:
         if name.startswith("_"):
             raise AttributeError(name)
 
-        def record(*args, **kwargs):
-            body = " ".join(str(a) for a in args)
-            if isinstance(self._captured, Capture):
-                self._captured.record(name, body)
-            else:
-                self._captured.append(body)
-        return record
+        if self._st is None:
+            def record(*args, **kwargs):
+                self._record(name, " ".join(str(a) for a in args))
+            return record
+
+        # 🚨 THE ONE DEFINITION. `getattr` on the stub, so an unprovided name raises
+        # `HarnessGap` from a column exactly as it does from `st` — requirement 1 covered
+        # absence at module level only, and a column swallowed it.
+        target = getattr(self._st, name)
+        if not callable(target):
+            # `st.sidebar`, `st.session_state`, `st.query_params`, `st.context` — the same
+            # object, not a copy, so a page that writes session state through a column and
+            # reads it off `st` sees its own write.
+            return target
+
+        def call(*args, **kwargs):
+            before = len(self._captured)
+            value = target(*args, **kwargs)
+            # ⚠️ OBSERVED, NOT LISTED. The stub's drawing methods record themselves; its
+            # widgets and containers do not. Asking the capture whether it grew needs no
+            # second list of which is which, so nothing here can fall out of step with the
+            # stub the way `metric` did.
+            if len(self._captured) == before:
+                self._record(name, " ".join(str(a) for a in args))
+            return value
+        return call
 
 
 def build(query_params=None, theme="light"):
@@ -250,14 +307,17 @@ def build(query_params=None, theme="light"):
         charts.add(chart)
         captured.record_object("chart", chart, "[altair_chart]")
     st.altair_chart = altair_chart
+    # ⚠️ THE `.rstrip()` IS THE ONE `Recorder.metric` USED TO CARRY AND THIS ONE DID NOT.
+    # Collapsing the two definitions into one meant choosing, and the column's was the one
+    # eight files' assertions were written against.
     st.metric = lambda label, value, help=None, **k: captured.record(
-        "metric", f"{label} :: {value} {help or ''}")
+        "metric", f"{label} :: {value} {help or ''}".rstrip())
     st.columns = lambda spec, **k: [
-        Recorder(captured) for _ in range(spec if isinstance(spec, int) else len(spec))]
-    st.tabs = lambda labels, **k: [Recorder(captured) for _ in labels]
+        Recorder(captured, st) for _ in range(spec if isinstance(spec, int) else len(spec))]
+    st.tabs = lambda labels, **k: [Recorder(captured, st) for _ in labels]
     for name in _CONTAINERS:
-        setattr(st, name, lambda *a, **k: Recorder(captured))
-    st.sidebar = Recorder(captured)
+        setattr(st, name, lambda *a, **k: Recorder(captured, st))
+    st.sidebar = Recorder(captured, st)
     for name in _FALSE_WIDGETS:
         setattr(st, name, lambda *a, **k: False)
     st.radio = lambda label, options, index=0, **k: (
@@ -535,9 +595,11 @@ def render(view, query_params=None, theme="light", allow_error_state=False):
     B091's `deltas or {}` proved the cost: `states.section` caught the raise, drew a card, and
     every assertion about what the page does NOT show passed on a panel that had died.
     """
-    with streamlit_stubbed(query_params, theme) as (_st, captured, charts):
+    with streamlit_stubbed(query_params, theme) as (st, captured, charts):
         module = importlib.reload(importlib.import_module(f"views.{view}"))
-        module.body(Recorder(captured))
+        # ⚠️ THE STUB GOES IN WITH IT (R-617). Without it the page's `page` argument is a
+        # Recorder that answers `None` to every control it builds, which is the whole defect.
+        module.body(Recorder(captured, st))
         assert_no_error_card(captured, f"the {view} page", allow_error_state)
         return "\n".join(captured), list(charts)
 
