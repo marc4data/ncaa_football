@@ -41,165 +41,71 @@ figure disagrees with a fixture, the fixture is wrong.
 import html
 import re
 import sys
-import types
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import render_harness  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
-
-
-class HarnessGap(BaseException):
-    """An un-stubbed `st.*`. BaseException so `except Exception` cannot swallow it.
-
-    A085's harness returned a recorder for any attribute, so a gap in the instrument read
-    exactly like a defect in the page. A measurement is only worth what its instrument is.
-    """
-
-
-# The Streamlit surface this harness provides. Named, per A087, so a reader can see the
-# boundary rather than infer it: anything outside this list raises rather than no-oping.
-_PROVIDED = ("markdown", "caption", "subheader", "write", "columns", "divider",
-             "info", "warning", "error", "button", "session_state",
-             "cache_data", "cache_resource")
-
-
-def _stub_streamlit():
-    captured = []
-
-    def recorder(kind):
-        def call(*args, **kwargs):
-            captured.append((kind, " ".join(str(a) for a in args)))
-        return call
-
-    class _Col:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def markdown(self, *a, **k):
-            captured.append(("markdown", " ".join(str(x) for x in a)))
-
-        def caption(self, *a, **k):
-            captured.append(("caption", " ".join(str(x) for x in a)))
-
-        def metric(self, label, value, help=None):
-            captured.append(("metric", f"{label} {value} {help or ''}"))
-
-        def __getattr__(self, name):
-            # ⚠️ DUNDERS ARE NOT HARNESS GAPS. pytest's own traceback machinery reads
-            # __file__, __name__ and friends WHILE REPORTING A FAILURE, so raising here
-            # turns a red test into an INTERNALERROR and hides the assertion that failed.
-            # Measured: it swallowed the first staged break of R-518.
-            if name.startswith("__") and name.endswith("__"):
-                raise AttributeError(name)
-            raise HarnessGap(f"HARNESS GAP: a column called st.columns(...)[n].{name}(), "
-                             f"which this harness does not provide")
-
-    class _Stub(types.ModuleType):
-        def __getattr__(self, name):
-            # See the note on _Col.__getattr__: a dunder is Python asking a question about
-            # the module, not the page calling a Streamlit method.
-            if name.startswith("__") and name.endswith("__"):
-                raise AttributeError(name)
-            raise HarnessGap(f"HARNESS GAP: the page called st.{name}(), which this harness "
-                             f"does not provide. Provided: {', '.join(_PROVIDED)}")
-
-    stub = _Stub("streamlit")
-    for name in ("markdown", "caption", "subheader", "write", "divider",
-                 "info", "warning", "error"):
-        setattr(stub, name, recorder(name))
-
-    def columns(spec, **kwargs):
-        # `vertical_alignment` is verified present in the pinned streamlit==1.61.1 the site
-        # image builds from, not merely in whatever this laptop has.
-        return [_Col() for _ in range(spec if isinstance(spec, int) else len(spec))]
-
-    stub.columns = columns
-    stub.button = lambda *a, **k: False
-
-    def cache(*a, **k):
-        if len(a) == 1 and callable(a[0]) and not k:
-            return a[0]
-        return lambda fn: fn
-
-    stub.cache_data = stub.cache_resource = cache
-    stub.session_state = {}
-    return stub, captured
-
-
-_RELOAD = ("lib.states", "lib.table", "lib.identity", "lib.chips", "views.matchup")
-
-
-def _reload_all():
-    import importlib
-    for name in _RELOAD:
-        importlib.reload(importlib.import_module(name))
 
 
 @pytest.fixture
 def header():
     """`_game_header` with streamlit captured and the weather query answered from a fixture.
 
-    ⚠️ IT PUTS THE MODULES BACK — test_matchup_drives learned that the hard way and six
-    unrelated tests failed. monkeypatch cannot undo a sys.modules swap made at reload time.
+    🚨 THE EIGHTH FILE (R-615), AND B092's CENSUS WAS WRONG ABOUT IT TWICE. It reported this
+    file as a harness user; `render_harness` appeared only inside a DOCSTRING at the bottom —
+    it was never imported. And B092 claimed "all eight of B's panel fixtures" call
+    `assert_no_error_card`: this file had ZERO, so the game header has had no R-610 guard at
+    all. The move adds it.
+
+    ⚠️ THE RESTORE THIS DOCSTRING DESCRIBES BY HAND IS `streamlit_stubbed`'s JOB, and it does
+    both halves — sys.modules AND the parent-package attribute (A101).
     """
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
-    seen = {}
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+        seen = {}
 
-    def run(row=None, forecast=None):
-        """`forecast` is what srv_game_weather returns: None for no row at all."""
-        captured.clear()
-        seen.clear()
-        seen["queries"] = []
+        def run(row=None, forecast=None):
+            """`forecast` is what srv_game_weather returns: None for no row at all."""
+            captured.clear()
+            seen.clear()
+            seen["queries"] = []
 
-        def fake_query(sql, params=None):
-            seen["queries"].append((sql, params or {}))
-            return pd.DataFrame([forecast] if forecast else [])
+            def fake_query(sql, params=None):
+                seen["queries"].append((sql, params or {}))
+                return pd.DataFrame([forecast] if forecast else [])
 
-        matchup.query = fake_query
-        matchup._game_header(pd.Series(_row(**(row or {}))))
-        return [body for _, body in captured], dict(seen)
+            matchup.query = fake_query
+            matchup._game_header(pd.Series(_row(**(row or {}))))
+            # 🚨 R-610. An Error state is not a passing state — and this file never had the
+            # call, so the header could have died on its first line with 45 tests green.
+            render_harness.assert_no_error_card(captured, "the game header")
+            return list(captured), dict(seen)
 
-    yield run
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run
 
 
 @pytest.fixture
 def blurb():
-    """`_series`, the head-to-head one-liner."""
-    real = sys.modules.get("streamlit")
-    stub, captured = _stub_streamlit()
-    sys.modules["streamlit"] = stub
-    _reload_all()
-    matchup = sys.modules["views.matchup"]
+    """`_series`, the head-to-head one-liner. On the shared harness since R-615."""
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
 
-    def run(**overrides):
-        captured.clear()
-        matchup._series(pd.Series(_row(**overrides)))
-        return " ".join(body for _, body in captured)
+        def run(**overrides):
+            captured.clear()
+            matchup._series(pd.Series(_row(**overrides)))
+            render_harness.assert_no_error_card(captured, "the series blurb")
+            return " ".join(captured)
 
-    yield run
-
-    if real is not None:
-        sys.modules["streamlit"] = real
-    else:
-        sys.modules.pop("streamlit", None)
-    _reload_all()
+        yield run
 
 
 def _row(**overrides):
@@ -251,30 +157,29 @@ def test_the_header_is_exactly_nine_columns(header):
     assert len(cells) == 9, f"the header drew {len(cells)} cells, not nine"
 
 
-def test_the_harness_raises_rather_than_no_opping_an_unknown_streamlit_call(header):
+def test_the_harness_raises_rather_than_no_opping_an_unknown_streamlit_call():
     """⚠️ THE INSTRUMENT IS TESTED BEFORE THE THING IT MEASURES.
 
     A085's harness returned a recorder for any attribute, so a missing stub method was
-    indistinguishable from a page defect and §6 was satisfied by a broken instrument. This
-    proves the gap is loud, and that `except Exception` cannot swallow it.
-    """
-    stub, _ = _stub_streamlit()
-    try:
-        stub.balloons()
-    except HarnessGap as gap:
-        assert "st.balloons()" in str(gap)
-    else:
-        raise AssertionError("an unknown st.* was silently accepted")
+    indistinguishable from a page defect and §6 was satisfied by a broken instrument.
 
-    swallowed = True
-    try:
-        try:
-            stub.balloons()
-        except Exception:                                          # noqa: BLE001
-            swallowed = True
-    except HarnessGap:
-        swallowed = False
-    assert not swallowed, "`except Exception` caught HarnessGap — states.section would too"
+    ✅ R-615 POINTED THIS AT THE SHARED HARNESS RATHER THAN DELETING IT. It used to build this
+    file's own stub and assert against this file's own `HarnessGap`; both are gone, and
+    `tests/test_render_harness.py` already owns the two assertions in full —
+    `test_an_unknown_streamlit_method_raises_LOUDLY` and
+    `test_except_Exception_CANNOT_swallow_a_harness_gap`.
+
+    🚨 SO WHY KEEP IT: the claim this file needs is that the stub IT uses is loud, and after
+    the move that is the shared one. Deleting the test would have dropped the only line in
+    this file saying so, and R-639's rule is that a test which stops being collected is an
+    instrument that stopped measuring. This is two lines and it is the join.
+    """
+    stub, _captured, _charts = render_harness.build()
+    with pytest.raises(render_harness.HarnessGap) as caught:
+        stub.balloons()
+    assert "st.balloons()" in str(caught.value)
+    assert not issubclass(render_harness.HarnessGap, Exception), \
+        "HarnessGap derives from Exception, so `states.section` would swallow it"
 
 
 # --- 🚨 the two sides, positionally -------------------------------------------------------------

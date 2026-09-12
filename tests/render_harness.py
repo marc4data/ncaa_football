@@ -69,6 +69,74 @@ _FALSE_WIDGETS = ("button form_submit_button link_button download_button "
 _CONTAINERS = "container expander spinner form empty status popover".split()
 
 
+class Charts:
+    """The chart specs a render produced — SERIALISED ON FIRST READ, not at draw time.
+
+    🚨 R-614's REAL COST, MEASURED, AND IT IS NOT WHAT THE PROMPT EXPECTED. B094 moved seven
+    files onto this harness and the nine matchup files went 9.9s -> 16.3s. Cowork's premise was
+    that reloading fifteen modules in `RELOAD` was the expense. It is not:
+
+        a full fixture enter+exit          5.1 ms  -> ~1.2 s across all 236 harness tests
+        cutting RELOAD to six modules      saves 3.8 ms an enter, so ~0.9 s at best
+                                           AND BREAKS 13 TESTS: lib.query and lib.params are
+                                           load-bearing, and without lib.query the stub's
+                                           cache_resource is gone and the suite reaches a real
+                                           database
+
+    ⚠️ LOCALISED PER FILE, INTERLEAVED THREE TIMES, THE WHOLE REGRESSION IS ONE FILE —
+    `test_matchup_yardage.py`, 8.1s -> 13.7s. Every other file moved by less than 0.3s. The
+    mechanism:
+
+        chart.to_json() + json.loads()    19.0 ms per chart
+        yardage: 6 charts x 52 tests      312 charts -> 5.9 s
+
+    🚨 AND YARDAGE NEVER READS THE JSON. It reads the altair OBJECT out of `Capture.events`,
+    because its assertions are about axis domains, plotted coordinates and stroke widths. The
+    harness was paying 19 ms a chart to build something nobody asked for.
+
+    ✅ SO THE SPECS ARE BUILT ON ACCESS. A caller that reads them gets exactly what it got
+    before; a caller that never touches them pays nothing. `len()` and truthiness answer from
+    the object list, so even counting charts is free.
+    """
+
+    def __init__(self):
+        self._objects = []
+        self._specs = None
+
+    def add(self, chart):
+        self._objects.append(chart)
+        self._specs = None
+
+    def _materialise(self):
+        if self._specs is None:
+            specs = []
+            for chart in self._objects:
+                try:
+                    specs.append(json.loads(chart.to_json()))
+                except Exception as exc:                           # noqa: BLE001
+                    specs.append({"__unreadable__": str(exc)})
+            self._specs = specs
+        return self._specs
+
+    def __len__(self):
+        return len(self._objects)
+
+    def __bool__(self):
+        return bool(self._objects)
+
+    def __getitem__(self, index):
+        return self._materialise()[index]
+
+    def __iter__(self):
+        return iter(self._materialise())
+
+    def __eq__(self, other):
+        return self._materialise() == other
+
+    def __repr__(self):
+        return repr(self._materialise())
+
+
 class Capture(list):
     """The rendered strings, which ALSO remember which `st.*` call produced each one.
 
@@ -165,7 +233,7 @@ class Recorder:
 
 def build(query_params=None, theme="light"):
     """A streamlit stub. Returns (module, captured_list, charts_list)."""
-    captured, charts = Capture(), []
+    captured, charts = Capture(), Charts()
     st = types.ModuleType("streamlit")
 
     def recorder(_name):
@@ -177,10 +245,9 @@ def build(query_params=None, theme="light"):
         setattr(st, name, recorder(name))
 
     def altair_chart(chart, **kwargs):
-        try:
-            charts.append(json.loads(chart.to_json()))
-        except Exception as exc:                                   # noqa: BLE001
-            charts.append({"__unreadable__": str(exc)})
+        # ⚠️ NO to_json() HERE. `Charts` builds the spec on first read — see its docstring for
+        # the 19 ms a chart this was costing, and the one file that paid all of it.
+        charts.add(chart)
         captured.record_object("chart", chart, "[altair_chart]")
     st.altair_chart = altair_chart
     st.metric = lambda label, value, help=None, **k: captured.record(
