@@ -180,7 +180,7 @@ def _game_log(season: int, slug: str) -> None:
         df = query("""
             select game_id, season, week, game_date, player_slug, team, opponent, home_away,
                    team_points, stat_category, stat_type, stat_raw, stat_value,
-                   stat_made, stat_attempted, as_of_ts
+                   stat_made, stat_attempted, stat_made_rate, as_of_ts
             from srv_player_game_log
             where season = :season and player_slug = :slug
             order by week, stat_category, stat_type
@@ -198,23 +198,28 @@ def _value(row) -> str:
     because the pair is what a reader recognises and the rate is what they want from it —
     and CFBD's own "--" for an uncomputed QBR is an absence, not a zero.
 
-    🚨 THIS DIVISION IS §4.2's DEFECT AND IT IS DELIBERATELY STILL HERE FOR ONE MORE ROUND.
-    R-611.
+    ⚠️ THE RATE IS READ, NOT COMPUTED. R-611, migrated in A111.
 
-    `srv_player_game_log.stat_made_rate` SHIPPED in A110 and carries this as a fraction, so the
-    move is a two-line change: select the column and read it. What A110 did NOT do is make that
-    change in the same round, because §3.3 forbids it and §6's live render proved why —
-    rendering this page with the new column selected, against live PUBLISHED serving, raised an
-    error card, since the column exists in the warehouse and has not been published yet.
+    This divided `stat_made` by `stat_attempted` here, which is arithmetic between two columns
+    and belongs upstream (§4.2). `srv_player_game_log.stat_made_rate` carries it as a fraction.
+    The `* 100` stays and is correct: one column scaled by a constant is rendering, which is
+    the line Cowork drew.
 
-    ⚠️ `deploy_main.sh` RUNS ITS TWO HALVES IN PARALLEL, so a site image asking for a column the
-    publish has not shipped yet is a real window, not a theoretical one — and this page's game
-    log is 1.3M rows, so its publish is one of the slowest. EXPAND first, MIGRATE next; the
-    alternative was not worse, which is the test §3.3 sets for doing both at once.
+    ⚠️ THE TWO-ROUND SPLIT WAS §3.3's CONTRACT STEP, NOT CAUTION FOR ITS OWN SAKE. A110 shipped
+    the column and left this division in place, because `deploy_main.sh` runs its two halves in
+    parallel and a site image asking for an unpublished column is a real window — §6's live
+    render drew an error card proving it. The column is published now, so this is safe.
+
+    ⚠️ AC-G.32: `stat_made_rate` IS NULL WHEN `stat_attempted` IS 0 OR ABSENT, and the pair is
+    still shown without a percentage in that case. "0 for 0" and "no attempts recorded" are
+    different facts and a `0%` would conflate them.
     """
     made, attempted = row.get("stat_made"), row.get("stat_attempted")
+    rate = row.get("stat_made_rate")
     if pd.notna(made) and pd.notna(attempted) and attempted:
-        return f"{int(made)}/{int(attempted)} ({made / attempted * 100:.0f}%)"
+        if pd.notna(rate):
+            return f"{int(made)}/{int(attempted)} ({rate * 100:.0f}%)"
+        return f"{int(made)}/{int(attempted)}"
     value = row.get("stat_value")
     if pd.notna(value):
         return f"{value:g}"
