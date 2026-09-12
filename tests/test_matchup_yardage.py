@@ -971,3 +971,69 @@ def test_a_DEGENERATE_y_domain_draws_nothing_rather_than_a_confident_flat_chart(
     titles = [c.to_dict().get("title") for c in _charts(entries)]
     assert titles.count("Rushing") == 0, (
         f"a scale with no extent was drawn as a chart: {titles}")
+
+
+# --- 🚨 R-608: the box's sides carry which percentile they are ---------------------------------
+
+def _edge_weights(chart):
+    """Each box-edge rule's (percentile value, strokeWidth), from the compiled spec.
+
+    The edges are the `rule` layers that carry a strokeWidth — the two medians are dashed and
+    set none, and the shaded box is a `rect`.
+    """
+    spec = chart.to_dict()
+    datasets = spec.get("datasets", {})
+    out = []
+    for layer in spec.get("layer", []):
+        mark = layer.get("mark", {})
+        if mark.get("type") != "rule" or mark.get("strokeWidth") is None:
+            continue
+        name = layer.get("data", {}).get("name")
+        values = (datasets.get(name) or [{}])[0]
+        # A vertical edge is pinned by x and spans y2; a horizontal one is the reverse.
+        value = values.get("x") if "y2" in values else values.get("y")
+        out.append((value, float(mark["strokeWidth"])))
+    return out
+
+
+def test_the_bands_p25_and_p75_sides_have_DIFFERENT_line_weights(panel):
+    """🚨 THIS TEST EXISTS BECAUSE ITS STAGED BREAK WENT GREEN WITHOUT IT.
+
+    Marc: "Use a thinner line for the sides that represent 25th percentile, thicker (maybe
+    double line) for the 75th percentile." Giving both sides one weight renders a perfectly
+    tidy box that says nothing — and nothing in the suite noticed until the break was run.
+
+    ⚠️ WEIGHT IS THE CARRIER, NOT COLOUR, and that is AC-G.22: a line weight survives
+    greyscale and colour-blindness. So the assertion is on `strokeWidth`, which is the
+    property doing the work.
+    """
+    entries, _ = panel(_game(), _both())
+    weights = _edge_weights(_charts(entries)[0])
+    assert len(weights) == 4, f"the box does not have four drawn sides: {weights}"
+
+    low, high = _METRICS["rushing_yards_for_per_game"][2], \
+        _METRICS["rushing_yards_for_per_game"][4]
+    x_low, x_high = _METRICS["rushing_yards_allowed_per_game"][2], \
+        _METRICS["rushing_yards_allowed_per_game"][4]
+    thin = {w for value, w in weights if value in (low, x_low)}
+    thick = {w for value, w in weights if value in (high, x_high)}
+    assert thin and thick, f"could not match sides to percentiles: {weights}"
+    assert thin != thick, (
+        f"the 25th and 75th percentile sides are drawn at the same weight, so the box says "
+        f"nothing about which side is which: {weights}")
+    assert max(thick) > max(thin), (
+        f"the 75th percentile side is not the THICKER one: thin={thin} thick={thick}")
+
+
+def test_the_caption_SAYS_which_side_is_which(panel):
+    """⚠️ A THIN LINE AND A THICK LINE ARE ONLY SELF-DESCRIBING IF SOMETHING SAYS SO.
+
+    The weights are meaningless to a reader who has not been told the convention, so the
+    sentence that already explains the shaded box explains its sides too.
+    """
+    entries, _ = panel(_game(), _both())
+    body = _text(entries)
+    assert "thin" in body and "thick" in body, \
+        f"the caption does not explain the two line weights: {body}"
+    assert "25th percentile" in body and "75th" in body, \
+        f"the caption does not name the percentiles: {body}"
