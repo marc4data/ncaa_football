@@ -27,6 +27,7 @@ assertion possible at all — a panel that never runs draws nothing, and "drew n
 indistinguishable from "drew an Empty state" if you only look at the output.
 """
 import html
+import ast
 import re
 import sys
 import types
@@ -361,8 +362,27 @@ def test_no_post_game_content_was_stubbed(page):
     # srv_game_team_leader` — so the moment A080's ranked object was read, an assertion about
     # ONE relation started counting two. It read as precise and never was. `\b` makes it
     # mean what its message always claimed.
-    assert len(re.findall(r"from srv_game_team\b", SOURCE)) == 1, \
-        "the box score and the advanced block must be ONE read, not two (G-2)"
+    # ⚠️ AMENDED IN B091, AND LIKE B076's AMENDMENT IT IS STRICTER RATHER THAN LOOSER.
+    #
+    # B076 turned "appears nowhere" into "read exactly once" when it built the box score.
+    # R-686 then gave the yardage panel a SECOND, legitimate reader: A106's three deltas live
+    # on srv_game_team at game x team grain, the figures beside them are week grain on
+    # srv_team_week, and the two panels sit on DIFFERENT TABS. Folding them into one read
+    # would couple the before tab to the after tab to satisfy a count.
+    #
+    # 🚨 SO THE COUNT BECAME A MAP. "Exactly one read in the file" said nothing about WHERE;
+    # this says which function may read it and how many times each — so a third reader, or the
+    # box score quietly splitting back into two, both fail, and neither could before.
+    reads = {}
+    for node in ast.walk(ast.parse(SOURCE)):
+        if isinstance(node, ast.FunctionDef):
+            body = ast.get_source_segment(SOURCE, node) or ""
+            found = len(re.findall(r"from srv_game_team\b", body))
+            if found:
+                reads[node.name] = found
+    assert reads == {"_post_game": 1, "_game_team_rows": 1}, (
+        f"srv_game_team is read somewhere new, or the box score split back into two reads "
+        f"(G-2, one read two renderings): {reads}")
     assert len(re.findall(r"from srv_game_team_leader\b", SOURCE)) == 1, \
         "the leaders panel must be one read too (R-511)"
     # ⚠️ THE srv_player_* BAN USED TO BE REPEATED HERE AND HAS MOVED, NOT GONE. It now lives

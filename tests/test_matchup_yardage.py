@@ -143,6 +143,63 @@ def _distribution(min_games=9, axes=None, **overrides):
     return rows
 
 
+def _deltas(**overrides):
+    """R-686's three deltas for both sides, at game x team grain.
+
+    ⚠️ MEASURED, NOT INVENTED — srv_game_team for 401856679 on 2026-09-12. Oklahoma's offense
+    runs ahead of Michigan's defense on all three; Michigan's rushing is NEGATIVE, which is the
+    case the sign and the colour both have to carry.
+    """
+    rows = [
+        {"team_id": AWAY_ID,
+         "rushing_yards_for_minus_opponent_allowed_per_game": 38.0,
+         "passing_yards_for_minus_opponent_allowed_per_game": 142.0,
+         "total_yards_for_minus_opponent_allowed_per_game": 180.0},
+        {"team_id": HOME_ID,
+         "rushing_yards_for_minus_opponent_allowed_per_game": -6.0,
+         "passing_yards_for_minus_opponent_allowed_per_game": 84.0,
+         "total_yards_for_minus_opponent_allowed_per_game": 78.0},
+    ]
+    for row in rows:
+        row.update(overrides)
+    return rows
+
+
+def _leaders(**overrides):
+    """R-687's leaders through the prior week, measured from 401856679 on 2026-09-12.
+
+    ⚠️ MICHIGAN'S `total` PANEL IS ONE NAME AND THAT IS CORRECT — one quarterback has thrown,
+    `qualified_players` is 1, and a card that padded it to three would invent players.
+    """
+    rows = []
+    for team_id, panel, metric, names in (
+        (AWAY_ID, "rushing", "rushing_yards",
+         [("Lloyd Avant", 79, 9, "RB", "JR"), ("Ben McCreary", 40, 23, "RB", "SR"),
+          ("Xavier Robinson", 30, 21, "RB", "JR")]),
+        (AWAY_ID, "passing", "receiving_yards",
+         [("Isaiah Sategna", 76, 1, "WR", "SR"), ("Trell Harris", 61, 11, "WR", "SR"),
+          ("Rocky Beers", 43, 81, "TE", "SR")]),
+        (AWAY_ID, "total", "quarterback_total_yards",
+         [("John Mateer", 232, 10, "QB", "SR")]),
+        (HOME_ID, "rushing", "rushing_yards",
+         [("Bryce Underwood", 47, 19, "QB", "SO")]),
+        (HOME_ID, "passing", "receiving_yards",
+         [("JJ Buchanan", 126, 6, "WR", "SO")]),
+        (HOME_ID, "total", "quarterback_total_yards",
+         [("Bryce Underwood", 217, 19, "QB", "SO")]),
+    ):
+        for rank, (name, yards, jersey, position, year) in enumerate(names, start=1):
+            rows.append({
+                "team_id": team_id, "panel": panel, "leader_metric": metric,
+                "leader_rank": rank, "tied_players": 1, "qualified_players": len(names),
+                "player_name": name, "player_slug": name.lower().replace(" ", "-"),
+                "yards_through_prior_week": float(yards), "jersey": jersey,
+                "position": position, "class_year_display": year})
+    for row in rows:
+        row.update(overrides)
+    return rows
+
+
 _DISTRIBUTION = _distribution()
 
 
@@ -162,7 +219,8 @@ def panel():
     matchup = sys.modules["views.matchup"]
     seen = {}
 
-    def run(game, sides, distribution=_DISTRIBUTION):
+    def run(game, sides, distribution=_DISTRIBUTION, deltas=None,
+            leaders=None):
         """`sides` is what srv_team_week returns — zero, one or two constructed rows.
 
         ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
@@ -179,6 +237,15 @@ def panel():
             if "srv_team_week_metric_distribution" in sql:
                 seen["axis_sql"], seen["axis_params"] = sql, params or {}
                 return pd.DataFrame(distribution or [])
+            # ⚠️ R-686 MADE THIS PANEL READ A THIRD RELATION, and the stub dispatches on the
+            # SQL rather than answering everything with the same frame. `srv_game_team` is
+            # game × team grain; the figures beside it are week grain on `srv_team_week`.
+            if "srv_game_team_leader_through_prior_week" in sql:
+                seen["leader_sql"] = sql
+                return pd.DataFrame(leaders if leaders is not None else _leaders())
+            if "srv_game_team" in sql:
+                seen["delta_sql"], seen["delta_params"] = sql, params or {}
+                return pd.DataFrame(deltas if deltas is not None else _deltas())
             seen["sql"], seen["params"] = sql, params or {}
             return pd.DataFrame(sides)
 
@@ -898,7 +965,14 @@ def test_the_spec_STREAMLIT_SHIPS_does_not_make_height_the_outer_box(panel):
         assert kind != "fit", (
             f"chart {index} ships autosize 'fit', so height={shipped.get('height')} is the "
             f"OUTER box and the y scale gets only what the title and x axis leave over")
-        assert kind == "fit-x", f"chart {index} ships autosize {kind!r}, expected 'fit-x'"
+        # ⚠️ THE ASSERTION IS THE DANGER, NOT ONE PARTICULAR SAFE ANSWER. B087 wrote this as
+        # `== "fit-x"` when that was the only safe value in play; R-609 needs `pad`, because a
+        # 1:1 chart has to pin BOTH dimensions and `fit-x` gives the width to the container by
+        # construction. Both leave `height` meaning the plot, which is the whole claim — so
+        # the safe set is named rather than the one member that happened to be in use.
+        assert kind in ("fit-x", "pad"), (
+            f"chart {index} ships autosize {kind!r}; the safe values are 'fit-x' (width "
+            f"follows the column) and 'pad' (both dimensions pinned, which 1:1 requires)")
 
 
 def test_TWO_DIFFERENT_Y_VALUES_RENDER_AT_DIFFERENT_HEIGHTS(panel):
@@ -1037,3 +1111,182 @@ def test_the_caption_SAYS_which_side_is_which(panel):
         f"the caption does not explain the two line weights: {body}"
     assert "25th percentile" in body and "75th" in body, \
         f"the caption does not name the percentiles: {body}"
+
+
+# --- 🚨 R-687: the player cards, and the four states A106 measured ------------------------------
+
+def test_the_leaders_come_from_the_THROUGH_PRIOR_WEEK_view(panel):
+    """🚨 TWO VIEWS, TWO WINDOWS, AND NOTHING BUT THIS STANDS BETWEEN THEM.
+
+    `srv_game_team_leader` answers who led IN this game, from its own box score.
+    `srv_game_team_leader_through_prior_week` answers who leads GOING IN. On a preview the
+    first does not exist yet, and on a completed game the two are different facts about
+    different windows — so reading the short name here would put post-game numbers on a
+    pre-game card and look entirely reasonable doing it.
+
+    ⚠️ A102 SPENT A WHOLE ROUND on two near-identically-named COLUMNS that disagreed on 83% of
+    games. These are two VIEWS whose names differ by a suffix.
+    """
+    _entries, seen = panel(_game(), _both())
+    sql = seen.get("leader_sql", "")
+    assert "srv_game_team_leader_through_prior_week" in sql, \
+        f"the leaders panel does not read the prior-week view: {sql}"
+    assert not re.search(r"from\s+srv_game_team_leader\s", sql), \
+        "the panel read the SHORT view, which answers the other window"
+
+
+def test_the_PASSING_panel_shows_RECEIVERS_because_that_is_the_data(panel):
+    """🚨 MARC'S PAIRING, CARRIED AS DATA RATHER THAN PROSE. The view's `leader_metric` says
+    `receiving_yards` for the passing panel, and the page reads it rather than choosing. A
+    round that "corrected" this to passers would be overruling him with a plausible tidy-up."""
+    entries, _ = panel(_game(), _both())
+    body = _text(entries)
+    # Isaiah Sategna is a WR and leads Oklahoma's receiving through the prior week.
+    assert "Isaiah Sategna" in body, f"the passing panel drew no receiver: {body[:400]}"
+    assert "WR" in body
+
+
+def test_a_WEEK_ONE_game_says_nobody_has_yards_yet_rather_than_going_blank(panel):
+    """⚠️ STATE ONE, AND IT IS NOT A FAILURE. A106: a week-1 game returns ZERO rows, because
+    nobody has yards through week zero. AC-G.11 — the absence says which absence it is."""
+    entries, _ = panel(_game(), _both(), leaders=[])
+    body = _text(entries)
+    assert "No yards recorded before this week." in body, \
+        f"a week-1 game rendered nothing at all: {body[:300]}"
+
+
+def test_FEWER_THAN_THREE_is_drawn_as_what_exists_and_never_padded(panel):
+    """⚠️ STATE TWO. Michigan's `total` panel is ONE name on 401856679 — one quarterback has
+    thrown — and `qualified_players` says so. Padding to three would invent players."""
+    entries, _ = panel(_game(), _both())
+    body = _text(entries)
+    assert body.count("Bryce Underwood") >= 1
+    # One name in that panel, so no 2nd or 3rd place label can follow it there.
+    assert "John Mateer" in body, "the away QB is missing"
+
+
+def test_a_TIE_shares_its_rank_and_is_NOT_truncated_to_three(panel):
+    """🚨 STATE THREE, AND TRUNCATION WOULD INVENT A WINNER. Ranks are shared, so a three-way
+    tie for third returns MORE than three rows. `tied_players` is what makes "T-3rd" honest.
+
+    🚨 THE FIXTURE CARRIES **FOUR** ROWS AND THE FIRST VERSION CARRIED THREE, WHICH IS WHY THE
+    STAGED BREAK PASSED. Truncating to three cannot be detected by a three-row tie — the eighth
+    time on this page that a fixture could not distinguish what it claimed to test, and the
+    prompt named it in advance.
+    """
+    tied = [r for r in _leaders() if r["panel"] == "rushing" and r["team_id"] == AWAY_ID]
+    tied.append(dict(tied[0], player_name="Tory Blaylock", jersey=4,
+                     yards_through_prior_week=30.0))
+    for r in tied:
+        r["leader_rank"] = 2
+        r["tied_players"] = 4
+        r["qualified_players"] = 4
+    entries, _ = panel(_game(), _both(), leaders=tied)
+    body = _text(entries)
+    assert "T-2nd" in body, f"a shared rank was not marked as tied: {body[:400]}"
+    for name in ("Lloyd Avant", "Ben McCreary", "Xavier Robinson", "Tory Blaylock"):
+        assert name in body, f"{name} was truncated out of a four-way tie"
+
+
+def test_a_MISSING_JERSEY_is_an_absence_and_never_a_zero(panel):
+    """🚨 STATE FOUR. 0 of 8,447 non-FBS leader rows carry a jersey — the roster load covers
+    138 of 305 teams (R-693) — and they still appear on the card.
+
+    ⚠️ AC-G.32: `#0` would be a false fact about a real player and a blank reads as one too.
+    The slot holds an em dash, which says "we do not hold this" and keeps the cards aligned.
+    """
+    no_jersey = [dict(r, jersey=None) for r in _leaders()]
+    entries, _ = panel(_game(), _both(), leaders=no_jersey)
+    body = _text(entries)
+    assert "#0" not in body, "a missing jersey rendered as number zero"
+    assert "—" in body, "a missing jersey rendered as a blank rather than an absence"
+    assert "Isaiah Sategna" in body, "the player vanished with his jersey"
+
+
+# --- 🚨 R-686: the delta is READ, and the fixture proves which ---------------------------------
+
+def test_the_delta_is_READ_from_the_column_and_never_subtracted_in_the_page(panel):
+    """🚨 THIS TEST EXISTS BECAUSE ITS STAGED BREAK WENT GREEN. Computing
+    `offense[for] - defense[allowed]` right there in the markup passed the entire suite.
+
+    ⚠️ THE FIXTURE IS WHAT MAKES THIS DECIDABLE, AND IT DISAGREES ON PURPOSE. Kentucky gain
+    154.4 on the ground and Auburn concede 84.5, so a page that subtracted would print +69.9.
+    A106's column says **38.0** — a real srv_game_team figure, computed over a different and
+    correct set of games — so the two numbers cannot both appear and only the read produces
+    the column's.
+
+    🚨 WHY IT MATTERS BEYOND THE RULE: the Excel export reads the same column. A subtraction
+    here would make the page and the workbook disagree about one fact, which is R-645 exactly —
+    the defect Marc found himself on a betting page.
+    """
+    entries, _ = panel(_game(), _both())
+    body = _text(entries)
+    assert "+38.0" in body, (
+        f"the rushing delta is not A106's column value: {body[:400]}")
+    assert "+69.9" not in body, (
+        "the page SUBTRACTED 154.4 - 84.5 instead of reading the column (§4.2)")
+
+
+def test_a_NEGATIVE_delta_carries_its_sign_without_relying_on_colour(panel):
+    """⚠️ AC-G.22. Marc asked for negatives in red; the leading minus is what a reader in
+    greyscale, or with a colour vision deficiency, gets instead. Michigan's rushing delta is
+    -6.0 — measured — so the sign is on the page whether or not the colour renders."""
+    entries, _ = panel(_game(), _both())
+    body = _text(entries)
+    assert "-6.0" in body, f"the negative delta lost its sign: {body[:400]}"
+
+
+# --- 🚨 R-609: the charts are square, asserted on what Streamlit ships --------------------------
+
+def test_the_charts_are_SQUARE_in_the_spec_the_browser_receives(panel):
+    """🚨 THIS TEST EXISTS BECAUSE ITS STAGED BREAK WENT GREEN. Making the height 0.6 of the
+    width passed the whole suite — nothing in the project asserted the ratio Marc asked for.
+
+    ⚠️ IT READS `_prepare_vega_lite_spec`, NOT `chart.to_dict()`, AND THAT IS THE LESSON OF
+    B087. Streamlit fills `autosize` in after altair has finished, and `fit`/`fit-x` both hand
+    a dimension to the container — so a spec that looks square can still be drawn oblong. The
+    only honest question is what the browser receives.
+
+    🚨 AND THE RATIO NEEDS BOTH PINNED. `fit-x` gives the width to the column by construction,
+    so a 1:1 chart cannot use it; `pad` leaves both dimensions the plot's, which is why R-609
+    changed the constant B087 introduced.
+    """
+    entries, _ = panel(_game(), _both())
+    charts = _charts(entries)
+    assert charts, "no charts drawn"
+    for index, chart in enumerate(charts):
+        shipped = _shipped(chart)
+        width, height = shipped.get("width"), shipped.get("height")
+        assert isinstance(width, (int, float)), (
+            f"chart {index} ships width={width!r} — a container-sized width cannot be square")
+        assert isinstance(height, (int, float)), f"chart {index} ships height={height!r}"
+        assert width == height, (
+            f"chart {index} is {width}x{height}, not 1:1 — Marc asked for square charts "
+            f"(R-609) and the aspect is what he will see")
+        kind = (shipped.get("autosize") or {}).get("type")
+        assert kind != "fit-x", (
+            "autosize 'fit-x' hands the WIDTH to the column, so the ratio depends on the "
+            "browser width and 1:1 cannot hold")
+
+
+def test_one_constant_drives_BOTH_sides_of_the_square():
+    """⚠️ TWO CONSTANTS COULD DRIFT APART and the chart would stop being square with nothing
+    failing. `_CHART_HEIGHT` is `_CHART_SIDE`, and this says so where a reader looks."""
+    from views import matchup
+    assert matchup._CHART_HEIGHT == matchup._CHART_SIDE
+
+
+def test_the_leaders_are_drawn_in_RANK_ORDER(panel):
+    """🚨 THE LIVE RENDER CAUGHT THIS AND NO UNIT TEST WOULD HAVE. Oklahoma's receivers came
+    back from serving as 2nd, 1st, 3rd — the query carries no `order by` and a DataFrame keeps
+    whatever order the driver gave it, so the card listed the second-best receiver first.
+
+    ⚠️ SORTING ON `leader_rank` IS READING, NOT RANKING. A106 computed the rank upstream so the
+    page would not; putting rows in the order a column already states is presentation.
+    """
+    entries, _ = panel(_game(), _both())
+    body = _text(entries)
+    first, second = body.index("Isaiah Sategna"), body.index("Trell Harris")
+    assert first < second, (
+        "the leaders are not in rank order — Sategna is 1st and Harris 2nd, and the card "
+        "listed them the other way round")

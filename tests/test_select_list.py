@@ -10,7 +10,12 @@ spent R-662/R-667 removing the suite's database dependency and a guard that only
 there is a tunnel is a guard that stops running, so Postgres validated the parser once and the
 parser runs alone. The validation table is in the B088 report.
 """
-import select_list
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
+
+import select_list  # noqa: E402
 
 
 # The block that produced BOTH failures at once, measured. Postgres selects
@@ -130,7 +135,9 @@ def test_the_REAL_columns_block_parses_cleanly_and_names_everything():
     """
     from views import matchup
     parsed = select_list.selected_names(matchup.COLUMNS)
-    assert len(parsed) == 101
+    # 101 -> 103: R-605 selected market_implied_home_points / _away_points, built by
+    # fct_market_probability and never shown until the board's fourth column.
+    assert len(parsed) == 103
     assert not select_list.unnameable_items(matchup.COLUMNS)
     assert all(name.replace("_", "").isalnum() for name in parsed), \
         f"the parse produced something that is not an identifier: {sorted(parsed)}"

@@ -51,6 +51,18 @@ from lib.table import Col
 # first `--` comments this block had ever carried, so the limitation had never been hit.
 # ci/check_page_reads.py parses properly and saw the column fine; the panel-scoped guard is
 # the one to keep SQL comments out of.
+# ⚠️ NO SQL COMMENT BELONGS INSIDE THIS STRING, AND THAT IS A CI CONSTRAINT RATHER THAN TASTE.
+# `ci/check_page_queries.py:122` substitutes this block with `" ".join(value.split())` — it
+# FLATTENS the list to one line — so a `--` comment loses the newline that ends it and swallows
+# every column after it. B091 put two lines of explanation in here and CI reported
+# "matchup.py: syntax error at end of input".
+#
+# 🚨 IT IS B088's DEFECT FROM THE OTHER SIDE. That round taught B's guard to strip comments
+# before parsing this list; the CI checker still cannot, and `ci/` is session A's. Reported
+# rather than worked around — and A102 made exactly this move when its comment broke B's guard.
+#
+# R-605: market_implied_home_points / _away_points were built by fct_market_probability and
+# never shown until the board's fourth column, which is why they were absent from this SELECT.
 COLUMNS = """
     game_id, season, season_type, week, start_date, venue_display, attendance,
     home_team_id, away_team_id,
@@ -63,6 +75,7 @@ COLUMNS = """
     spread_move_from_open, total_move_from_open,
     provider_key, line_snapshot_ts, market_implied_home_win_probability,
     market_implied_away_win_probability, overround, devig_method,
+    market_implied_home_points, market_implied_away_points,
     model_name, model_family, predicted_margin, predicted_margin_home_perspective,
     predicted_total_points, predicted_home_points, predicted_away_points,
     home_win_probability, confidence_bucket, home_cover_edge, home_win_probability_edge,
@@ -510,7 +523,15 @@ def _conditions(row) -> str:
             # Don't include decimal point for wind." The brackets set the wind apart from the
             # temperature and condition beside it for no reason, and a tenth of a mile per
             # hour is precision nobody plans around — 10.9 and 11 are the same afternoon.
-            parts.append(f"{float(speed):.0f} mph {_WIND_ICON}")
+            #
+            # ⚠️ R-604's LAST QUARTER. "Do include Direction if it's >10 mph" — the same floor,
+            # because a direction is only worth reading when there is wind to have one. The
+            # column was said twice to be blocked on a model round and never was:
+            # `wind_direction_compass` is on `srv_game_weather`, 7,358 of 7,358 rows carry it,
+            # and this query has selected it since B085.
+            direction = reading.get("wind_direction_compass")
+            heading = f" {html.escape(str(direction))}" if direction else ""
+            parts.append(f"{float(speed):.0f} mph{heading} {_WIND_ICON}")
 
     if not parts and not indoors:
         return ""
@@ -832,6 +853,10 @@ _HELP = {
     # drift it exists to prevent.
     "Spread": None,
     "Over/Under": "The total points the book expects both teams to score combined.",
+    # R-605. The board's fourth column is DERIVED, and the hover is where that is said once.
+    "Implied points": "What the book's total and spread imply each team scores. cfdb derives "
+                      "this from the two of them — it is not a price any book quoted, and no "
+                      "book took a bet on it.",
     # R-607: what a de-vig IS. What THIS game's overround WAS stays on the card beside it.
     "Win probability": "A book's prices carry its margin, so the two sides imply more than "
                        "100% between them. De-vigging removes that margin proportionally to "
@@ -888,6 +913,117 @@ def _provider_link(row, key_column: str = "provider_key") -> str:
         return html.escape(str(key))
     return (f"<a href='{url}' target='_blank' rel='noopener noreferrer'>"
             f"{html.escape(name)}</a>")
+
+
+# ⚠️ EACH HEADER KEEPS B090's `?`, AND THE SECOND ELEMENT IS WHICH HOVER IT OPENS. R-607 put
+# the generic prose behind these icons; a board that dropped them would delete that work while
+# looking tidier, so the column names carry them rather than the old row labels.
+_BOARD_COLUMNS = (
+    ("Point Spread", "Spread"),
+    ("Moneyline", "Win probability"),
+    ("Total", "Over/Under"),
+    ("Implied points", "Implied points"),
+)
+
+
+def _chip(main: str, under: str = "") -> str:
+    """One bordered cell. The big number, and the small one beneath it.
+
+    🚨 THE SMALL SLOT IS WHERE A BOOK PRINTS THE PRICE, AND WE DO NOT HAVE ONE. The reference
+    board shows `-110` beside every spread and total; `stg_lines` parses no spread price and
+    no total price, so there is nothing to render there and inventing one would be a fabricated
+    market number on a betting page. ✅ Marc solved it without saying so — he asked for the
+    spread "with Delta Change, smaller", so the MOVE goes where the vig goes.
+    """
+    below = (f"<div style='font-size:.7rem;opacity:.6;margin-top:.1rem'>{under}</div>"
+             if under else "")
+    return (f"<div style='border:1px solid var(--cfdb-border, rgba(128,128,128,.28));"
+            f"border-radius:5px;padding:.3rem .45rem;text-align:center;min-width:4.6rem'>"
+            f"<div style='font-weight:600;font-size:.95rem'>{main}</div>{below}</div>")
+
+
+def _board_row(row, side: str, spread_final, is_favorite: bool) -> str:
+    """One team's line across the four columns."""
+    name = (row.get(f"{side}_abbreviation") or row.get(f"{side}_team") or side)
+
+    # POINT SPREAD — per side, from the column. The favorite carries the negative number and
+    # the underdog carries the mirror, which is what `spread_final` already is on each row.
+    # ⚠️ NOT DERIVED FROM THE SIGN OF `spread`: B083 established there are two definitions of
+    # "favorite" and the warehouse records when they disagree.
+    spread_cell = _chip(
+        fmt.signed(spread_final, "spread") if pd.notna(spread_final) else "—",
+        _move_chip(row.get("spread_move_from_open"), "spread_move_from_open"))
+
+    # MONEYLINE — the price, with this side's implied win probability beneath it.
+    price = row.get(f"{side}_moneyline")
+    implied = row.get(f"market_implied_{side}_win_probability")
+    # ⚠️ RED ON THE FAVORITE IS DECORATION, NOT THE SIGNAL (AC-G.22). The sign already says
+    # which side is favored, so a reader in greyscale loses nothing.
+    tint = " color:var(--cfdb-negative, #b3261e)" if is_favorite else ""
+    money_cell = _chip(
+        f"<span style='{tint}'>{fmt.signed(price, '', dp=0)}</span>"
+        if pd.notna(price) else "—",
+        f"{float(implied) * 100:.1f}%" if pd.notna(implied) else "")
+
+    # TOTAL — 🚨 SPLIT ACROSS THE TWO ROWS, NOT REPEATED. `O 43.5` on the away row and
+    # `U 43.5` on the home row, which is what the reference board does and what makes the two
+    # rows a board rather than two copies of one number.
+    total = row.get("over_under")
+    total_cell = _chip(
+        f"{'O' if side == 'away' else 'U'} {fmt.number(total, 'over_under')}"
+        if pd.notna(total) else "—",
+        _move_chip(row.get("total_move_from_open"), "total_move_from_open"))
+
+    # IMPLIED POINTS — 🚨 ONE NUMBER, NEVER AN O/U PAIR. The reference's Team Total is a priced
+    # market with an over and an under; cfdb's is DERIVED from the total and the spread. Drawing
+    # it as two chips would dress a derivation as a quoted market (§4.3, the R-571 class), so it
+    # is one chip and the column is labelled "Implied points".
+    points = row.get(f"market_implied_{side}_points")
+    points_cell = _chip(fmt.number(points, "", dp=1) if pd.notna(points) else "—")
+
+    return (f"<div style='display:grid;grid-template-columns:6.5rem repeat(4, 1fr);"
+            f"gap:.35rem;align-items:center;padding:.2rem 0'>"
+            f"<div style='font-weight:600;font-size:.9rem'>{html.escape(str(name))}</div>"
+            f"{spread_cell}{money_cell}{total_cell}{points_cell}</div>")
+
+
+def _board(row) -> str:
+    """R-605. Marc's board: two rows, AWAY over HOME, four columns, every cell a chip.
+
+    ⚠️ THE REFERENCE IS A SPORTSBOOK SCREENSHOT AND THREE OF ITS COLUMNS ARE NOT OURS —
+    the `-110` prices, Team Total as a bettable O/U pair, and the rotation numbers. Each is
+    handled where it arises rather than designed around; see `_chip` and `_board_row`.
+
+    ⚠️ `23.5`, NOT `23½`. The reference writes fractions and cfdb writes decimals everywhere
+    else; that is a site-wide convention and Marc has not asked to change it.
+
+    ⚠️ NO KICKOFF TIME. It sits in the reference's header strip and the game header above
+    already renders it.
+    """
+    teams = _game_team_rows(int(row["game_id"]))
+    side_of = {}
+    for side in ("away", "home"):
+        team_id = row.get(f"{side}_team_id")
+        side_of[side] = teams.get(int(team_id)) if pd.notna(team_id) else None
+
+    favorite_side = row.get("spread_favorite_side")
+    header = ("<div style='display:grid;grid-template-columns:6.5rem repeat(4, 1fr);"
+              "gap:.35rem;padding-bottom:.2rem;font-size:.7rem;opacity:.55'>"
+              "<div></div>"
+              + "".join(f"<div style='text-align:center'>{label}"
+                        f"{_help_icon(key)}</div>"
+                        for label, key in _BOARD_COLUMNS)
+              + "</div>")
+
+    body_rows = "".join(
+        _board_row(row, side,
+                   None if side_of[side] is None else side_of[side].get("spread_final"),
+                   favorite_side == side)
+        for side in ("away", "home"))
+
+    return (f"<div style='border:1px solid var(--cfdb-border, rgba(128,128,128,.3));"
+            f"border-radius:6px;padding:.55rem .7rem;margin:.2rem 0'>"
+            f"{header}{body_rows}{_card_footer(row)}</div>")
 
 
 def _card_footer(row) -> str:
@@ -1015,33 +1151,7 @@ def _market_card(row) -> None:
                          _move_chip(row.get("total_move_from_open"),
                                     "total_move_from_open")))
 
-        line_rows = "".join(
-            f"<div style='display:flex;align-items:baseline;gap:.6rem;padding:.1rem 0'>"
-            f"<span style='min-width:5.5rem;opacity:.6;font-size:.8rem'>{label}"
-            f"{_help_icon(label) if label in _HELP else ''}</span>"
-            f"<span style='min-width:7rem;font-weight:600'>{value}</span>"
-            f"<span style='font-size:.85rem'>{move}</span></div>"
-            for label, value, move in rows)
-
-        money = []
-        for money_side in ("away", "home"):
-            price = row.get(f"{money_side}_moneyline")
-            if pd.notna(price):
-                label = (row.get(f"{money_side}_abbreviation")
-                         or row.get(f"{money_side}_team") or money_side)
-                money.append(f"{html.escape(str(label))} "
-                             f"{fmt.signed(price, '', dp=0)}")
-        money_row = (
-            f"<div style='display:flex;align-items:baseline;gap:.6rem;padding:.1rem 0;"
-            f"border-top:1px solid var(--cfdb-rule, rgba(128,128,128,.25));margin-top:.3rem;"
-            f"padding-top:.35rem'>"
-            f"<span style='min-width:5.5rem;opacity:.6;font-size:.8rem'>Moneyline</span>"
-            f"<span>{' \u00b7 '.join(money)}</span></div>") if money else ""
-
-        st.markdown(
-            f"<div style='border:1px solid var(--cfdb-border, rgba(128,128,128,.3));"
-            f"border-radius:6px;padding:.55rem .7rem;margin:.2rem 0'>"
-            f"{line_rows}{money_row}{_card_footer(row)}</div>", unsafe_allow_html=True)
+        st.markdown(_board(row), unsafe_allow_html=True)
 
         if bool(row.get("favorite_definitions_disagree")):
             # 🚨 70 GAMES, AND THE CARD SAYS SO RATHER THAN PICKING ONE. The spread and the
@@ -1267,15 +1377,22 @@ def _series(row) -> None:
 # Pairing a team's `_for` with its own `_allowed` describes one team rather than a matchup,
 # and it would look entirely reasonable on screen — which is why
 # test_the_pairing_runs_across_sides_not_down_one exists and was watched go red.
+# ⚠️ THE FOURTH ENTRY IS R-686's DELTA AND IT IS READ, NEVER COMPUTED. A106 built
+# `*_yards_for_minus_opponent_allowed_per_game` on `srv_game_team` at game × team grain
+# precisely so this page would not subtract two numbers itself — §4.2, and the same rule that
+# keeps the per-game division in the mart.
 _YARDAGE_DIMENSIONS = (
-    ("Rushing", "rushing_yards_for_per_game", "rushing_yards_allowed_per_game"),
-    ("Passing", "passing_yards_for_per_game", "passing_yards_allowed_per_game"),
+    ("Rushing", "rushing_yards_for_per_game", "rushing_yards_allowed_per_game",
+     "rushing_yards_for_minus_opponent_allowed_per_game"),
+    ("Passing", "passing_yards_for_per_game", "passing_yards_allowed_per_game",
+     "passing_yards_for_minus_opponent_allowed_per_game"),
     # TOTAL EARNS ITS ROW ON A MEASUREMENT, NOT ON SYMMETRY. It is rushing + passing in
     # 13,686 of the 13,728 rows that carry any form, and differs in 42 by up to 11 yards —
     # so it is the source's own total rather than our arithmetic, and adding the two above
     # in this file would be metric maths in the app. It renders last and subordinate,
     # because 99.7% of the time it is the sum of the two lines over it.
-    ("Total", "total_yards_for_per_game", "total_yards_allowed_per_game"),
+    ("Total", "total_yards_for_per_game", "total_yards_allowed_per_game",
+     "total_yards_for_minus_opponent_allowed_per_game"),
 )
 
 _YARDAGE_COLUMNS = """
@@ -1287,7 +1404,44 @@ _YARDAGE_COLUMNS = """
 """
 
 
-def _yardage_direction(offense, defense) -> str:
+def _delta_for(deltas, column):
+    """One delta out of a side's row, tolerating the row being absent.
+
+    🚨 `deltas or {}` IS A BUG HERE AND IT COST A LIVE RENDER TO FIND. `deltas` is a pandas
+    Series, and `Series.__bool__` raises "The truth value of a Series is ambiguous" — which
+    `states.section` then caught and rendered as the Error state, so every unit test saw an
+    empty panel rather than a traceback. B076's lesson exactly: the identity of the object the
+    page passes around matters, and `is None` is the only safe emptiness test for one.
+    """
+    if deltas is None:
+        return None
+    return deltas.get(column)
+
+
+def _delta_chip(value) -> str:
+    """R-686. This side's offense against what the opponent's defense has conceded.
+
+    🚨 THE SIGN CARRIES IT AND THE COLOUR ONLY AGREES WITH THE SIGN (AC-G.22). Marc asked for
+    negatives in red; a reader in greyscale, or one of the ~8% of men with a colour vision
+    deficiency, gets exactly the same fact from the leading `+` or `−`. Colour that is the ONLY
+    carrier is the R-547 class, which this project has already removed once.
+
+    ⚠️ THE VALUE IS READ, NOT COMPUTED. A106 shipped it at game × team grain so the page would
+    not subtract; a subtraction here would be metric maths in the app (§4.2) and would let this
+    number disagree with the Excel export, which reads the column.
+    """
+    if value is None or pd.isna(value):
+        return ""
+    number = float(value)
+    # ⚠️ `+0` IS DELIBERATE AND IS NOT A BUG. Exactly level is a real answer — this side gains
+    # what that side concedes — and rendering it bare would read as "no figure".
+    colour = ("var(--cfdb-negative, #b3261e)" if number < 0
+              else "var(--cfdb-positive, #1b6b3a)")
+    return (f"<span style='min-width:3.6rem;text-align:right;font-size:.8rem;"
+            f"font-weight:600;color:{colour}'>{number:+,.1f}</span>")
+
+
+def _yardage_direction(offense, defense, deltas=None) -> str:
     """One direction of the comparison: this side's attack against that side's defense."""
     accent = identity.text_on(offense)
     logo = identity.logo_or_monogram(
@@ -1303,7 +1457,7 @@ def _yardage_direction(offense, defense) -> str:
     # and putting two sides beside each other is the whole job of this panel. If that is ever
     # overturned, the reversal is DELETING `dp=1` — the column name is already correct, so
     # `fmt` decides from then on.
-    for label, for_column, allowed_column in _YARDAGE_DIMENSIONS:
+    for label, for_column, allowed_column, delta_column in _YARDAGE_DIMENSIONS:
         subdued = " opacity:.75;font-size:.9rem;" if label == "Total" else ""
         lines.append(
             f"<div style='display:flex;align-items:baseline;gap:.5rem;{subdued}"
@@ -1315,7 +1469,8 @@ def _yardage_direction(offense, defense) -> str:
             f"<span style='opacity:.35;margin:0 .2rem'>vs</span>"
             f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
             f"{fmt.number(defense.get(allowed_column), allowed_column, dp=1)}</span>"
-            f"<span style='opacity:.45;font-size:.8rem'>allowed</span></div>")
+            f"<span style='opacity:.45;font-size:.8rem'>allowed</span>"
+            f"{_delta_chip(_delta_for(deltas, delta_column))}</div>")
     return (
         f"<div style='border-left:4px solid {accent};padding:.4rem .7rem;"
         f"margin-bottom:.5rem'>"
@@ -1417,10 +1572,31 @@ def _week_distribution(row):
 # `fit-x` fits the WIDTH to the column — which is all `use_container_width=True` was ever
 # wanted for — and leaves `height` meaning the plot height again. The key is that Streamlit
 # only fills `autosize` in when the spec has none, so declaring it here wins.
-_AUTOSIZE = {"type": "fit-x", "contains": "padding"}
+# 🚨 R-609 CHANGED THIS FROM `fit-x` TO `pad`, AND THE REASON IS THE SQUARE.
+#
+# B087 chose `fit-x` so the WIDTH followed the column while `height` kept meaning the plot.
+# Marc has since asked for 1:1 charts — and a ratio needs BOTH sides pinned, which `fit-x`
+# makes impossible by construction: it hands the width to the container, so the aspect depends
+# on how wide the browser is.
+#
+# `pad` is Streamlit's own third option and its comment describes it exactly — no automatic
+# fitting, the chart takes its natural content size. Both dimensions are then the plot's, and
+# the title and axes are added OUTSIDE them, which is the property B087 fought for and keeps.
+#
+# ⚠️ STREAMLIT'S OWN PHRASING USES A SOLIDUS AND IT IS PARAPHRASED AWAY ON PURPOSE:
+# `test_the_page_does_not_divide_anywhere` bans that character across this region to catch a
+# division, and it caught the quotation. The guard is blunt and cheap and the comment was easy
+# to reword — the same call B090 made when "edges" tripped the editorialising ban.
+#
+# ⚠️ THE DANGEROUS VALUE IS AND ALWAYS WAS `fit`, WHICH MAKES `height` THE OUTER BOX. `fit-x`
+# and `pad` are both safe on that axis; `test_the_spec_STREAMLIT_SHIPS_does_not_make_height_
+# the_outer_box` asserts the danger rather than one particular safe answer, so it still holds.
+_AUTOSIZE = {"type": "pad", "contains": "padding"}
 
-# The PLOT height, and it is only the plot height while _AUTOSIZE stays `fit-x`.
-_CHART_HEIGHT = 150
+# 🚨 ONE NUMBER, USED FOR BOTH DIMENSIONS — that IS the 1:1 (R-609). Two constants could drift
+# apart and the chart would stop being square without anything failing.
+_CHART_SIDE = 240
+_CHART_HEIGHT = _CHART_SIDE
 
 
 def _degenerate(axis) -> bool:
@@ -1552,7 +1728,7 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     for edge in edges:
         layered = layered + edge
     return (layered + mid_x + mid_y + point).properties(
-        height=_CHART_HEIGHT, title=label, autosize=_AUTOSIZE)
+        width=_CHART_SIDE, height=_CHART_SIDE, title=label, autosize=_AUTOSIZE)
 
 
 def _off_the_frame_metrics(team, opponent, distribution) -> list:
@@ -1563,7 +1739,7 @@ def _off_the_frame_metrics(team, opponent, distribution) -> list:
     different conclusion from the chart it explains.
     """
     out = []
-    for label, for_column, allowed_column in _YARDAGE_DIMENSIONS:
+    for label, for_column, allowed_column, delta_column in _YARDAGE_DIMENSIONS:
         y_axis, x_axis = distribution.get(for_column), distribution.get(allowed_column)
         if y_axis is None or x_axis is None:
             continue
@@ -1575,16 +1751,58 @@ def _off_the_frame_metrics(team, opponent, distribution) -> list:
     return out
 
 
-def _yardage_column(team, opponent, distribution) -> None:
+_GAME_TEAM_COLUMNS = """
+    team_id, is_home, team_display, spread_final,
+    rushing_yards_for_minus_opponent_allowed_per_game,
+    passing_yards_for_minus_opponent_allowed_per_game,
+    total_yards_for_minus_opponent_allowed_per_game
+"""
+
+
+def _game_team_rows(game_id: int) -> dict:
+    """This game's two `srv_game_team` rows, keyed by team_id. ONE READ, TWO RENDERINGS.
+
+    🚨 BOTH PANELS THAT NEED THIS RELATION COME THROUGH HERE, AND THAT IS THE GUARD'S OWN
+    PRINCIPLE RATHER THAN A COINCIDENCE. The market card wants `spread_final` per side (R-605,
+    R-685) and the yardage table wants A106's three deltas (R-686) — two panels, one grain,
+    one query. `lib.query.query` is `@st.cache_data`-wrapped, so the second caller costs no
+    round trip.
+
+    ⚠️ ITS OWN VIEW AND ITS OWN QUERY, WHICH IS THE CONTRACT RATHER THAN A COST. G-2 is one
+    relation per query, and these live at `game × team` grain on `srv_game_team` while the
+    figures beside them are week-grain on `srv_team_week`. Two grains, two reads — a join here
+    would be the thing the serving layer exists to prevent.
+
+    🚨 AND NOTHING SUBTRACTS. A106 built the column so the page would not, because a
+    subtraction in this file would let the chip disagree with the Excel export that reads the
+    same column — which is exactly how R-645 happened one panel along.
+    """
+    df = query(f"""
+        select {_GAME_TEAM_COLUMNS}
+        from srv_game_team
+        where game_id = :game_id
+        limit 2
+    """, {"game_id": game_id})
+    return {int(r["team_id"]): r for _, r in df.iterrows()}
+
+
+def _yardage_column(team, opponent, distribution, deltas=None, leaders=None) -> None:
     """One side of the comparison: the text rows, then a chart per metric."""
-    st.markdown(_yardage_direction(team, opponent), unsafe_allow_html=True)
+    st.markdown(_yardage_direction(team, opponent, deltas), unsafe_allow_html=True)
     team_name = str(team.get("team_display") or "?")
     opponent_name = str(opponent.get("team_display") or "?")
-    for label, for_column, allowed_column in _YARDAGE_DIMENSIONS:
+    for label, for_column, allowed_column, delta_column in _YARDAGE_DIMENSIONS:
         chart = _scatter(team, opponent, for_column, allowed_column, distribution,
                          team_name, opponent_name, label)
         if chart is not None:
-            st.altair_chart(chart, use_container_width=True)
+            # ⚠️ NOT use_container_width: a square the container can stretch is
+            # not a square. R-609.
+            st.altair_chart(chart, use_container_width=False)
+        # R-687. The names go OUTSIDE the chart, in the width the square gave back.
+        st.markdown(
+            _leader_block((leaders or {}).get(
+                (int(team["team_id"]), _LEADER_PANELS[label]), [])),
+            unsafe_allow_html=True)
     # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11). A chart silently missing from a
     # row of three reads as "we hold nothing"; these two hold a figure that is off the scale
     # the rest of the week is drawn on, and the figures are printed in full just above.
@@ -1594,6 +1812,98 @@ def _yardage_column(team, opponent, distribution) -> None:
             f"{'  ·  '.join(off)} not plotted — one of these two figures falls outside the "
             f"range this week's chart is drawn on, so there is no honest place to put the "
             f"point. The numbers are above.")
+
+
+# ⚠️ THE LEADER BLOCK LIVES BELOW `_yardage_column` ON PURPOSE.
+# `test_the_page_does_not_divide_anywhere` reads the source between `_week_distribution`
+# and `_yardage_column` and bans a solidus there to catch a division. These functions are
+# markup — every closing HTML tag carries one — so putting them inside that window would
+# have meant widening a guard to fit code it was never about. Moving the code was free.
+_LEADER_COLUMNS = """
+    team_id, panel, leader_metric, leader_rank, tied_players, qualified_players,
+    player_name, player_slug, yards_through_prior_week, jersey, position,
+    class_year_display
+"""
+
+# 🚨 PASSING SHOWS RECEIVERS, AND THAT IS MARC'S PAIRING CARRIED AS DATA. The view's
+# `leader_metric` already says which stat each panel ranks, so this page does not choose — it
+# reads. ⚠️ Do not "correct" passing to passers: he asked for the receivers a passing game
+# produced, which is a different and deliberate question.
+_LEADER_PANELS = {"Rushing": "rushing", "Passing": "passing", "Total": "total"}
+
+_ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
+
+
+def _game_leaders(game_id: int) -> dict:
+    """Who leads each side through the PRIOR week, keyed by (team_id, panel).
+
+    🚨 THE LONG NAME IS THE POINT. `srv_game_team_leader` answers a different question — who
+    led IN this game, from its own box score — and on a preview that box score does not exist
+    yet. A102 spent a round on two near-identically-named COLUMNS that disagreed on 83% of
+    games; these are two VIEWS answering two windows, and the only thing standing between them
+    is a test.
+    """
+    df = query(f"""
+        select {_LEADER_COLUMNS}
+        from srv_game_team_leader_through_prior_week
+        where game_id = :game_id
+        limit 60
+    """, {"game_id": game_id})
+    out = {}
+    for _, r in df.iterrows():
+        out.setdefault((int(r["team_id"]), str(r["panel"])), []).append(r)
+    # ⚠️ ORDERED BY THE RANK THE VIEW ALREADY CARRIES, AND THE LIVE RENDER IS WHAT CAUGHT THIS.
+    # Oklahoma's receivers came back 2nd, 1st, 3rd — the query has no `order by` and a
+    # DataFrame preserves whatever order the driver returned. Sorting on `leader_rank` is
+    # presenting the column's own answer, not deriving one: A106 computed the rank upstream
+    # precisely so the page would not, and putting a row in rank order is not ranking it.
+    for rows in out.values():
+        rows.sort(key=lambda r: int(r["leader_rank"]))
+    return out
+
+
+def _leader_card(row) -> str:
+    """One player: name, jersey, position, class, and his yards so far.
+
+    ⚠️ AC-G.32 ON THE JERSEY. 0 of 8,447 non-FBS leader rows carry one, because the roster
+    load covers 138 of 305 teams (R-693) — so a missing jersey is an ABSENCE we can explain,
+    not a zero and not a blank that reads as one. It renders as an em dash in the same slot,
+    which keeps the cards aligned and says "we do not hold this" rather than "#0".
+    """
+    jersey = row.get("jersey")
+    number = f"#{int(jersey)}" if pd.notna(jersey) else "—"
+    bits = [b for b in (row.get("position"), row.get("class_year_display")) if b]
+    rank = int(row["leader_rank"])
+    tied = int(row.get("tied_players") or 1)
+    # ⚠️ A TIE SHARES A RANK, so "T-2nd" is the honest label and the row count can exceed three.
+    place = f"T-{_ORDINAL.get(rank, f'{rank}th')}" if tied > 1 else _ORDINAL.get(rank, f"{rank}th")
+    yards = row.get("yards_through_prior_week")
+    return (f"<div style='display:flex;align-items:baseline;gap:.4rem;font-size:.78rem;"
+            f"padding:.1rem 0'>"
+            f"<span style='min-width:2.2rem;opacity:.5'>{place}</span>"
+            f"<span style='min-width:2.1rem;opacity:.55;text-align:right'>{number}</span>"
+            f"<span style='font-weight:600'>"
+            f"{html.escape(str(row.get('player_name') or '?'))}</span>"
+            f"<span style='opacity:.5'>{html.escape(' '.join(str(b) for b in bits))}</span>"
+            f"<span style='margin-left:auto;font-weight:600'>"
+            f"{fmt.number(yards, '', dp=0)}</span></div>")
+
+
+def _leader_block(rows) -> str:
+    """The three names under one chart — or an honest absence.
+
+    ⚠️ FOUR STATES A106 MEASURED, AND EACH IS A DIFFERENT SENTENCE:
+      · ZERO rows — a week-1 game, where nobody has yards through week zero. Not a failure.
+      · FEWER THAN THREE — common early; Michigan's `total` panel is ONE name on 401856679
+        and that is correct, because one quarterback has thrown.
+      · A TIE — ranks are shared, so three-way-for-third returns MORE than three rows.
+        🚨 NOT TRUNCATED: dropping the second of two tied players would invent a winner.
+      · NO JERSEY — handled in `_leader_card`.
+    """
+    if not rows:
+        return ("<div style='font-size:.75rem;opacity:.5;padding:.15rem 0'>"
+                "No yards recorded before this week.</div>")
+    return "".join(_leader_card(r) for r in rows)
 
 
 def _yardage(row) -> None:
@@ -1713,6 +2023,10 @@ def _yardage(row) -> None:
 
         # R-590. The week's shared frame, fetched once for both columns and all six charts.
         distribution = _week_distribution(row)
+        # R-686. The three deltas, at this game's own grain. ONE query, both sides.
+        deltas = _game_team_rows(int(row["game_id"]))
+        # R-687. One read, both sides, all three panels.
+        leaders = _game_leaders(int(row["game_id"]))
 
         # ⚠️ R-522 / spec §0: AWAY ON THE LEFT, HOME ON THE RIGHT. Marc made it a page law
         # rather than this panel's choice — "Data about Away team will be on the left. Same
@@ -1721,9 +2035,11 @@ def _yardage(row) -> None:
         # thing in a different shape on the same page.
         left, right = st.columns(2)
         with left:
-            _yardage_column(away, home, distribution)
+            _yardage_column(away, home, distribution,
+                            deltas.get(int(away_id)), leaders)
         with right:
-            _yardage_column(home, away, distribution)
+            _yardage_column(home, away, distribution,
+                            deltas.get(int(home_id)), leaders)
 
         # AC-G.33. The denominator is not decoration and it is named for each side
         # separately, because a bye or a missing box score makes the two differ.

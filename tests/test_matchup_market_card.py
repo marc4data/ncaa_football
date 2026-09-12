@@ -141,6 +141,39 @@ def _reload_all():
         importlib.reload(importlib.import_module(name))
 
 
+# 🚨 R-605's BOARD READS srv_game_team, SO THE FIXTURE MUST TOO — OR THE SUITE GOES ONLINE.
+# `_board` calls `_game_team_rows`, which calls `query`. Left unstubbed these tests opened a
+# real connection and took 19 seconds instead of one, which is the ambient-credential failure
+# conftest.py exists to prevent, wearing a different hat.
+#
+# ⚠️ MEASURED FROM srv_game_team FOR 401858442, the module's primary fixture: Penn State away
+# at -24, Temple home at +24. The two are MIRRORS and that is the whole point of R-685 — a
+# board that read `spread` for both rows would print +24 twice and look entirely reasonable.
+_GAME_TEAM = {
+    213: {"team_id": 213, "is_home": False, "team_display": "Penn State",
+          "spread_final": -24.0},
+    218: {"team_id": 218, "is_home": True, "team_display": "Temple",
+          "spread_final": 24.0},
+}
+
+
+def _game_team_rows_for(overrides):
+    """The stub, honouring `away_spread_final` / `home_spread_final` overrides.
+
+    🚨 WITHOUT THIS A TEST THAT MOVES THE SPREAD MOVES NOTHING. R-605 took the per-side number
+    off `srv_game` and onto `srv_game_team`, so `card(spread=-7.5, ...)` no longer touches what
+    the board prints — and `test_a_HOME_favorite_is_named_correctly_too` would have passed or
+    failed for reasons unrelated to its name. Seven rounds of this page's fixtures have failed
+    to distinguish what they claimed to test; this is the eighth caught before it shipped.
+    """
+    rows = {k: dict(v) for k, v in _GAME_TEAM.items()}
+    if "away_spread_final" in overrides:
+        rows[213]["spread_final"] = overrides["away_spread_final"]
+    if "home_spread_final" in overrides:
+        rows[218]["spread_final"] = overrides["home_spread_final"]
+    return {k: pd.Series(v) for k, v in rows.items()}
+
+
 def _make(target):
     real = sys.modules.get("streamlit")
     stub, captured = _stub_streamlit()
@@ -150,7 +183,10 @@ def _make(target):
 
     def run(**overrides):
         captured.clear()
-        getattr(matchup, target)(pd.Series(_row(**overrides)))
+        matchup._game_team_rows = lambda _g, _o=overrides: _game_team_rows_for(_o)
+        row_overrides = {k: v for k, v in overrides.items()
+                         if not k.endswith("_spread_final")}
+        getattr(matchup, target)(pd.Series(_row(**row_overrides)))
         return list(captured)
 
     return run, real
@@ -212,6 +248,12 @@ def _row(**overrides):
         "favorite_definitions_disagree": False,
         "market_implied_home_win_probability": 0.07907,
         "market_implied_away_win_probability": 0.92093,
+        # R-605's fourth column, measured from srv_game for this game. ⚠️ THE FIXTURE HAD
+        # NEITHER THESE NOR THE TEAM IDS, which is why the board rendered em dashes in both
+        # the spread and the implied-points cells — the B083 class exactly: a fixture LESS
+        # complete than the query, so the page reads a key nothing supplies.
+        "market_implied_home_points": 13.5, "market_implied_away_points": 37.5,
+        "home_team_id": 218, "away_team_id": 213,
         "overround": 1.053922, "devig_method": "multiplicative",
         "provider_key": "bovada",
         "line_snapshot_ts": pd.Timestamp("2026-09-10 12:00:25.567931+00:00"),
@@ -279,9 +321,11 @@ def test_the_favorite_comes_from_spread_favorite_side(card):
 
 def test_a_HOME_favorite_is_named_correctly_too(card):
     """The other direction, because a side read one way is half tested."""
-    markup = _plain(_card_markup(card(spread=-7.5, spread_favorite_side="home")))
-    assert "TEM -7.5" in markup
+    markup = _plain(_card_markup(card(spread=-7.5, spread_favorite_side="home",
+                                      home_spread_final=-7.5, away_spread_final=7.5)))
+    assert "TEM -7.5" in markup, f"the home favorite's line is wrong: {markup}"
     assert "PSU -7.5" not in markup
+    assert "PSU +7.5" in markup, "the underdog did not get the mirror"
 
 
 def test_no_favorite_side_falls_back_to_the_HOME_PERSPECTIVE_and_says_so(card):
@@ -350,11 +394,26 @@ def test_a_line_with_no_opening_price_draws_NO_chip_at_all(card):
 
 # --- the moneylines -----------------------------------------------------------------------------
 
+def _board_rows(markup):
+    """The board's two team rows, split on the names, away first.
+
+    ⚠️ R-605 PUT FOUR CELLS BETWEEN THE TEAM NAME AND ITS PRICE, so "PSU -3300" is no longer
+    contiguous text and a substring test stopped meaning anything. Splitting on the names is
+    the structural form of the same claim — and it is STRONGER, because it says the price is
+    in that team's ROW rather than merely somewhere after its name.
+    """
+    away = markup.split("PSU", 1)[1].split("TEM", 1)[0]
+    home = markup.split("TEM", 1)[1]
+    return away, home
+
+
 def test_each_moneyline_sits_beside_its_own_team(card):
     """+1100 and -3300 mean opposite things and a swap renders perfectly."""
-    markup = _plain(_card_markup(card()))
-    assert re.search(r"PSU -3,?300", markup), f"the away moneyline is wrong: {markup}"
-    assert re.search(r"TEM \+1,?100", markup), f"the home moneyline is wrong: {markup}"
+    away, home = _board_rows(_plain(_card_markup(card())))
+    assert re.search(r"-3,?300", away), f"the away moneyline is not in the away row: {away}"
+    assert re.search(r"\+1,?100", home), f"the home moneyline is not in the home row: {home}"
+    assert "-3,300" not in home and "-3300" not in home, \
+        "the away price leaked into the home row"
 
 
 # --- absence --------------------------------------------------------------------------------------
@@ -375,8 +434,8 @@ def test_a_game_the_books_never_priced_renders_EMPTY_and_draws_no_card(card):
 
 def test_a_moneyline_with_no_spread_is_still_a_priced_game(card):
     """The card requires BOTH kinds of price to be absent before it gives up."""
-    markup = _plain(_card_markup(card(spread=None, over_under=None)))
-    assert "PSU -3,300" in markup or "PSU -3300" in markup
+    away, _home = _board_rows(_plain(_card_markup(card(spread=None, over_under=None))))
+    assert "-3,300" in away or "-3300" in away
 
 
 # --- the caveats, which are what the old line-movement file was really for -----------------------
@@ -589,6 +648,7 @@ _CARD_COLUMNS = (
     "spread", "over_under", "home_moneyline", "away_moneyline",
     "spread_favorite_side", "moneyline_favorite_side", "favorite_definitions_disagree",
     "market_implied_home_win_probability", "market_implied_away_win_probability",
+    "market_implied_home_points", "market_implied_away_points",
     "overround", "devig_method", "provider_key", "line_snapshot_ts",
     "spread_move_from_open", "total_move_from_open",
     "line_movement_provider_key", "line_snapshot_count",
@@ -732,3 +792,37 @@ def test_a_ROW_SPECIFIC_caption_still_renders_and_was_not_tidied_away(card):
     hovers = " ".join(_titles(blocks))
     for leaked in ("overround 1.0", "Furthest from the open", "records the disagreement"):
         assert leaked not in hovers, f"a row-specific statement leaked into a `?`: {leaked!r}"
+
+
+# --- 🚨 R-605: a derivation must not be dressed as a market ------------------------------------
+
+def test_IMPLIED_POINTS_is_ONE_number_and_never_an_over_under_pair(card):
+    """🚨 THIS TEST EXISTS BECAUSE ITS STAGED BREAK WENT GREEN.
+
+    The reference board's fourth column is **Team Total**, a BETTABLE market with an over and
+    an under, each separately priced. cfdb's equivalent is DERIVED — `market_implied_*_points`
+    is computed from the total and the spread, and no book ever quoted it or took a bet on it.
+
+    ⚠️ RENDERING IT AS `O 37.5 / U 37.5` WOULD LOOK RIGHT AND BE A LIE ABOUT PROVENANCE — the
+    R-571 class, and §4.3's rule that `market_implied_` names where a number came from. Nothing
+    in the suite caught it until the break was run.
+
+    🚨 THE TOTAL COLUMN BESIDE IT IS LEGITIMATELY SPLIT `O` / `U`, so this is scoped to the
+    away row's O-markers: exactly one, the real total. A blanket "no O in the card" would fail
+    on the thing that is supposed to be there.
+    """
+    away, _home = _board_rows(_plain(_card_markup(card())))
+    assert "37.5" in away, f"the away implied points are missing: {away}"
+    assert len(re.findall(r"\bO\s", away)) == 1, (
+        f"the away row carries more than one over-marker, so something other than the total "
+        f"is being drawn as a two-sided market: {away}")
+    assert not re.search(r"[OU]\s*37\.5", away), (
+        "implied points were drawn with an over/under marker — that dresses a derivation as a "
+        "quoted market (R-571, §4.3)")
+
+
+def test_the_IMPLIED_POINTS_column_says_implied(card):
+    """The label is the other half of the same guarantee: the column name carries the
+    provenance, so a reader is never told this is a price."""
+    markup = _plain(_card_markup(card()))
+    assert "Implied points" in markup, f"the fourth column is not labelled implied: {markup}"
