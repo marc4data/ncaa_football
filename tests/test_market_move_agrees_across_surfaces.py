@@ -129,11 +129,15 @@ def test_the_card_names_the_book_its_number_came_from():
     The card's numbers are `provider_key`'s — Bovada on this row — so Bovada is the book the
     caption must name. It used to prefer `line_movement_provider_key` whatever it displayed,
     which named DraftKings beside a Bovada price on 92% of the games carrying both.
+
+    🚨 IT GOES THROUGH `_rendered_card()` RATHER THAN BUILDING ITS OWN. This test had a second,
+    near-identical render that forgot to stub `_game_team_rows` — so once R-605 made the board
+    read `srv_game_team`, it opened a REAL DATABASE CONNECTION. It passed on a laptop with a
+    tunnel up and failed in CI, which is the one place that could see it.
+
+    ⚠️ conftest.py exists to keep this suite offline and free; two copies of a render helper is
+    how a test slips past it.
     """
-    with H.streamlit_stubbed() as (_st, captured, _charts):
-        import importlib
-        matchup = importlib.reload(importlib.import_module("views.matchup"))
-        matchup._market_card(dict(ROW))
-    blob = H.plain(" ".join(captured))
+    blob = _rendered_card()
     assert "Bovada" in blob, (
         f"the card does not name the book its numbers came from. Captured: {blob[:300]}")

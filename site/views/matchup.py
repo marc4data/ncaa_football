@@ -51,6 +51,18 @@ from lib.table import Col
 # first `--` comments this block had ever carried, so the limitation had never been hit.
 # ci/check_page_reads.py parses properly and saw the column fine; the panel-scoped guard is
 # the one to keep SQL comments out of.
+# ⚠️ NO SQL COMMENT BELONGS INSIDE THIS STRING, AND THAT IS A CI CONSTRAINT RATHER THAN TASTE.
+# `ci/check_page_queries.py:122` substitutes this block with `" ".join(value.split())` — it
+# FLATTENS the list to one line — so a `--` comment loses the newline that ends it and swallows
+# every column after it. B091 put two lines of explanation in here and CI reported
+# "matchup.py: syntax error at end of input".
+#
+# 🚨 IT IS B088's DEFECT FROM THE OTHER SIDE. That round taught B's guard to strip comments
+# before parsing this list; the CI checker still cannot, and `ci/` is session A's. Reported
+# rather than worked around — and A102 made exactly this move when its comment broke B's guard.
+#
+# R-605: market_implied_home_points / _away_points were built by fct_market_probability and
+# never shown until the board's fourth column, which is why they were absent from this SELECT.
 COLUMNS = """
     game_id, season, season_type, week, start_date, venue_display, attendance,
     home_team_id, away_team_id,
@@ -63,8 +75,6 @@ COLUMNS = """
     spread_move_from_open, total_move_from_open,
     provider_key, line_snapshot_ts, market_implied_home_win_probability,
     market_implied_away_win_probability, overround, devig_method,
-    -- R-605. The board's fourth column. Built by fct_market_probability and never shown
-    -- until now, which is why they were not in this SELECT.
     market_implied_home_points, market_implied_away_points,
     model_name, model_family, predicted_margin, predicted_margin_home_perspective,
     predicted_total_points, predicted_home_points, predicted_away_points,
