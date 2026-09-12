@@ -1,34 +1,34 @@
-"""The Players page, under the strict render guard. R-702 / R-611.
+"""The Players page, under the strict render guard. R-702 / R-611 / R-618.
 
 B092 and B094 built a guard that refuses an Error card and pointed it at nine Matchup test files
 and nowhere else. This brings the Players page under it.
 
-🚨 WHAT THIS FILE DELIBERATELY DOES NOT COVER, AND WHY — read before adding to it.
-
-A111 was asked to render this page with a player whose plays come back EMPTY and assert the Empty
-state. **That cannot be written against the harness as it stands, and the reason is the harness
-rather than the page.** `site/views/players.py` builds its play filters in columns:
+⚠️ THE PLAYS SECTION COULD NOT BE TESTED HERE UNTIL B096, AND THE HISTORY IS WORTH KEEPING.
+`site/views/players.py` builds its play filters in columns:
 
     left, middle, right = st.columns(3)
     down = left.selectbox("Down", ["Any", "1", "2", "3", "4"])
 
-Measured, both ways, in A111:
+Measured, both ways, in A111 against the OLD harness:
 
     st.selectbox("Down", ["Any", ...])    -> 'Any'      <- module level, stubbed
     left.selectbox("Down", ["Any", ...])  -> None       <- COLUMN level, generic recorder
 
-`Recorder.__getattr__` returns a recorder that records and returns None, so the page then runs
-`None if down == "Any" else int(down)` and raises `TypeError: int() argument must be ... not
-'NoneType'` — which `states.section` catches and draws as an Error card. Real Streamlit returns the
-selected value from a column exactly as it does from `st`, so **this cannot happen on the site.**
+`Recorder.__getattr__` returned a recorder that recorded and returned None, so the page ran
+`None if down == "Any" else int(down)`, raised `TypeError`, and `states.section` drew an Error card
+— on a page with no defect in it. A110 filed it as a page defect, A111 disproved it by rendering a
+player with 689 plays and one with zero and getting the identical card, and B096 fixed the harness:
+a column now answers exactly as `st` does.
 
-⚠️ THE HARNESS'S OWN HEADER PREDICTED THIS CLASS at point 3: "NESTED COLUMNS ARE MODELLED, NOT
-RECORDED. A generic recorder returns None ... and the page looks broken for a reason that is the
-harness's." Columns making columns was modelled; columns returning WIDGET VALUES was not.
+✅ SO IT CAN BE WRITTEN NOW, AND B096 WROTE IT — `test_render_harness.py`'s
+`test_a_SECTION_THAT_BUILDS_CONTROLS_IN_COLUMNS_reaches_its_own_empty_state` drives this very
+section and asserts the Empty state is reached.
 
-✅ `tests/render_harness.py` IS SHARED AND B094 JUST REWORKED IT, so §3 rule 3.1 applies: A111 did
-not change it, and the change it needs is named in the report for Cowork to route. Once a Recorder
-returns widget values the way the module-level stubs do, the empty-plays test is three lines.
+🚨 WHICH IS WHY THIS FILE DOES NOT ASSERT THE SAME THING AGAIN. That test's claim is about the
+HARNESS — that a section building controls in columns can be driven at all. The claim that belongs
+HERE is about the PAGE: that the empty state, once reached, says WHICH absence it is (AC-G.11).
+Two guards over one rule is the drift A111 deleted a duplicate for; a second guard over a
+different rule is not.
 """
 import sys
 from pathlib import Path
@@ -118,3 +118,40 @@ def test_the_page_does_not_divide_two_columns():
 # 🚨 SO THE SECOND ONE WAS DELETED RATHER THAN KEPT. Two guards over one rule is the shape this
 # project calls drift — the same reasoning that put the dataset caption in `states.section`
 # instead of a second panel-to-view list beside it (R-574).
+
+
+def _drive_plays(rows):
+    """Drive `_drill_down` — the section that builds its filters in columns.
+
+    ⚠️ POSSIBLE ONLY SINCE B096. Before it, a column answered None and the page raised
+    `int(None)` before reaching any state of its own. See this module's docstring.
+    """
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        players = importlib.reload(importlib.import_module("views.players"))
+        players.query = lambda sql, params=None: pd.DataFrame(rows)
+        players._drill_down(2026, "a-player-1")
+        render_harness.assert_no_error_card(captured, "the players plays section")
+        return "\n".join(captured)
+
+
+def test_the_plays_empty_state_says_which_absence_it_is():
+    """🚨 AC-G.11: an absence must say WHICH absence it is, and this one is not "no plays".
+
+    `srv_player_play`'s own header is the sentence that matters — "absence here means cfdb did not
+    ask about that game, never that the player did nothing." Play attribution is collected per
+    game and does not cover every game, so a page that said "this player made no plays" would be
+    claiming something the data cannot support.
+
+    ⚠️ THIS IS NOT B096's TEST RESTATED. That one asserts the Empty state is REACHED, which is a
+    claim about the harness. This asserts what it SAYS, which is a claim about the page — and the
+    copy is the part a reader actually gets.
+    """
+    text = _drive_plays([])
+    assert "cfdb-empty" in text, "the section must reach its own Empty state"
+    flat = render_harness.plain(text)
+    assert "does not yet cover every game" in flat, (
+        "the empty state must say the COVERAGE is partial. Without that sentence a reader reads "
+        "'no plays' as 'this player did nothing', which srv_player_play's own header forbids.")
+    assert "no plays" not in flat.lower() or "No plays match those filters" in flat, (
+        "an unfiltered empty must not claim the player made no plays")

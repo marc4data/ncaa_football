@@ -29,7 +29,17 @@ def states():
     act of testing R-571's fix, and it is the argument for R-631's harness in one paragraph.
     """
     import render_harness
-    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+    # 🚨 THE ONE EXEMPTION IN THE SUITE, AND IT IS DECLARED RATHER THAN IMPLICIT. R-705(2).
+    #
+    # Every test in this file renders a failure state ON PURPOSE — that is what it is for. So
+    # `streamlit_stubbed` cannot enforce "no Error card" on exit while this call site is silent
+    # about it, and B092/B096 correctly shipped the parameter and left A's call site to A rather
+    # than reaching across (§3 rule 3.1).
+    #
+    # ⚠️ IT IS A NO-OP TODAY: the raw instrument accepts the argument and does not yet act on it.
+    # The point is that when it does, NOTHING IS EXEMPT BY ACCIDENT — this file says out loud that
+    # it draws error cards, and every other caller is enforced without anyone auditing them.
+    with render_harness.streamlit_stubbed(allow_error_state=True) as (_st, captured, _charts):
         import importlib
         yield importlib.import_module("lib.states"), captured
 
