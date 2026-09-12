@@ -192,3 +192,249 @@ def test_both_cards_are_actually_STYLED_so_neither_is_an_unstyled_div():
         assert f".{token}" in css, (
             f"`{token}` is emitted by states.py and has no rule in theme.py, so the card "
             f"renders unstyled")
+
+
+# --- 🚨 R-617: THE ASSERTION NOBODY HAD — a method the harness HAS and answers WRONGLY
+#
+# Requirement 1 covers ABSENCE: `st.balloons()` raises `HarnessGap` and says NOT A PAGE DEFECT.
+# ⚠️ NOTHING ASKED WHETHER A METHOD THE HARNESS PROVIDES GIVES BACK WHAT STREAMLIT WOULD, and
+# the answer was no in five places at once — every one of them reachable only through a column:
+#
+#     st.selectbox("Down", [...])  -> 'Any'      left.selectbox("Down", [...]) -> None
+#     st.multiselect(…, default=…) -> ['a']      left.multiselect(…)           -> None
+#     st.slider("S", value=3)      -> 3          left.slider("S", value=3)     -> None
+#     st.expander("t")             -> Recorder   left.expander("t")            -> None
+#     st.button("Go")              -> False      left.button("Go")             -> None
+#
+# `views/players.py:275` then runs `int(None)`, `states.section` catches it, and the page draws an
+# Error card. A110 reported it as a page defect and A111 spent its round disproving it — the
+# FOURTEENTH instance of R-571 and the fifth framing of "a harness gap looks like a page defect".
+#
+# ⚠️ THE NAMES ARE PARSED OUT OF THE STUB'S OWN SOURCE, never hand-written. `ci/check_health_
+# signals.py` reads the emitter's valid values out of the model rather than restating them, for
+# the reason this needs: a hand-written list covers the widgets somebody thought of, and the one
+# that costs the next round is the one added after the list was written.
+
+_HARNESS = ROOT / "tests" / "render_harness.py"
+
+# The first probe the method accepts, tried in this order. Chosen against the MODULE stub and
+# then replayed verbatim on the column, so a column that cannot take the same call fails here
+# rather than being quietly probed with something easier.
+_PROBES = (("Down", ["Any", "1", "2"]), (["Any", "1", "2"],), ("Down",), ())
+
+
+def _names_the_stub_defines():
+    """Every attribute `build()` sets on the stub, read out of `render_harness.py` by AST."""
+    import ast
+    source = _HARNESS.read_text()
+    tree = ast.parse(source)
+    build = next((node for node in tree.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "build"), None)
+    assert build is not None, (
+        "render_harness.build() no longer exists and this test is pinned to it by name")
+    names = set()
+    for node in ast.walk(build):
+        # st.selectbox = lambda …
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (isinstance(target, ast.Attribute)
+                        and isinstance(target.value, ast.Name)
+                        and target.value.id == "st"):
+                    names.add(target.attr)
+        # for name in _CONTAINERS: setattr(st, name, …)  — the list is read off the module, so
+        # the three populations (PROVIDED, _FALSE_WIDGETS, _CONTAINERS) need no naming here.
+        elif isinstance(node, ast.For) and isinstance(node.iter, ast.Name):
+            sets_on_st = any(isinstance(inner, ast.Call)
+                             and isinstance(inner.func, ast.Name)
+                             and inner.func.id == "setattr"
+                             for inner in ast.walk(node))
+            listed = getattr(render_harness, node.iter.id, None)
+            if sets_on_st and listed:
+                names |= set(listed)
+    return sorted(name for name in names if not name.startswith("__"))
+
+
+def _shape(value):
+    """What kind of answer this is, at the granularity two independent calls can agree on."""
+    if isinstance(value, render_harness.Recorder):
+        return "<Recorder>"
+    if isinstance(value, (list, tuple)):
+        return [_shape(item) for item in value]
+    if callable(value):
+        return "<callable>"
+    return value
+
+
+def test_the_ENUMERATION_of_stub_methods_cannot_go_blind():
+    """🚨 A PARSER THAT RETURNS NOTHING PASSES EVERY ASSERTION BELOW IT.
+
+    ⚠️ So the parsed list is checked against the stub OBJECT, not against a number. A widget
+    added to `build()` in a shape this AST walk does not recognise fails HERE, on the commit that
+    adds it, rather than silently dropping out of the delegation test — which is R-639's rule
+    that a test which stops covering looks exactly like a test that passes.
+    """
+    st, _captured, _charts = render_harness.build()
+    live = {name for name in vars(st) if not name.startswith("__")}
+    parsed = set(_names_the_stub_defines())
+    assert parsed == live, (
+        f"the AST walk over `build()` and the stub it describes disagree. "
+        f"Only in the source: {sorted(parsed - live)}. Only on the object: {sorted(live - parsed)}. "
+        f"Whichever way round, the delegation test below has stopped covering those names.")
+    for expected in ("selectbox", "radio", "multiselect", "button", "expander", "slider"):
+        assert expected in parsed, f"{expected} is not in the enumeration and it is the defect class"
+
+
+def test_a_COLUMN_answers_every_stub_METHOD_the_way_st_DOES():
+    """🚨 THE ONE NOBODY WROTE. For every name the module-level stub defines, `st.columns()[0]`
+    must give back what `st` gives back.
+
+    ⚠️ IT IS NOT A TEST OF THE WIDGET LIST, IT IS A TEST OF THE SPLIT. `Recorder` delegates, so
+    there is one definition per method and this asserts the delegation is actually wired — add a
+    second definition to `Recorder` that drifts, or let one name fall back through
+    `__getattr__`, and this goes red.
+    """
+    st, _captured, _charts = render_harness.build()
+    column = st.columns(2)[0]
+    for name in _names_the_stub_defines():
+        target = getattr(st, name)
+        if not callable(target):
+            assert getattr(column, name) is target, (
+                f"st.{name} is not callable, so a column must hand back THE SAME OBJECT — a "
+                f"page that writes `st.session_state` through a column and reads it off `st` "
+                f"otherwise loses the write. Got a different object.")
+            continue
+        probe = expected = None
+        for candidate in _PROBES:
+            try:
+                expected = target(*candidate)
+            except TypeError:
+                continue
+            probe = candidate
+            break
+        assert probe is not None, (
+            f"no probe in {_PROBES!r} matches st.{name}'s signature — extend _PROBES rather "
+            f"than skipping the name, because a name this test cannot call is a name it is not "
+            f"covering")
+        actual = getattr(column, name)(*probe)
+        assert _shape(actual) == _shape(expected), (
+            f"🚨 THE COLUMN AND THE MODULE STUB DISAGREE ABOUT st.{name}(). "
+            f"st.{name}{probe!r} answered {expected!r} and a column answered {actual!r}. "
+            f"A page that builds this control inside st.columns() gets the COLUMN's answer, and "
+            f"a wrong answer arrives in the page as an exception inside `states.section`, which "
+            f"catches it and draws an Error card — INDISTINGUISHABLE FROM A PAGE DEFECT. That is "
+            f"R-617: it cost A110 a false finding and A111 a whole round. Fix it by making "
+            f"`Recorder.__getattr__` delegate to the stub; do NOT add a second definition of "
+            f"{name} to `Recorder`, because two definitions of one widget is what drifted.")
+
+
+def test_a_COLUMN_records_the_control_AND_returns_its_value_both_not_either():
+    """⚠️ BOTH, NOT EITHER. The delegation must not buy the right answer by dropping the record.
+
+    Eight files assert on `.events` — "this sentence is a caption, not a heading", "the panel
+    drew exactly two markdown blocks" — and a column whose `selectbox` returned `'Any'` and
+    recorded nothing would take the guard off every control drawn in a column while leaving the
+    suite green.
+    """
+    st, captured, _charts = render_harness.build()
+    left, right = st.columns(2)
+    value = left.selectbox("Down", ["Any", "1", "2"])
+    assert value == "Any", "the answer"
+    assert ("selectbox", "Down ['Any', '1', '2']") in captured.events, (
+        f"the control returned its value and did not record that it was drawn: {captured.events}")
+    assert any("Down" in entry for entry in captured), (
+        "the flat list is what `render()` joins and `plain()` regexes — it must carry the draw too")
+    # And the stub's own drawing methods must not be recorded TWICE by the delegation.
+    right.markdown("one block")
+    assert [body for kind, body in captured.events if kind == "markdown"] == ["one block"], (
+        f"markdown was recorded more than once through a column: {captured.events}")
+
+
+def test_an_UNPROVIDED_method_raises_LOUDLY_FROM_A_COLUMN_TOO():
+    """⚠️ REQUIREMENT 1 COVERED `st`, AND A COLUMN SWALLOWED IT.
+
+    `st.balloons()` has said NOT A PAGE DEFECT since A095; `left.balloons()` recorded the call
+    and returned None, so the same absence was silent as soon as it happened inside a column —
+    the same asymmetry as the wrong-answer defect, one layer along.
+    """
+    st, _captured, _charts = render_harness.build()
+    column = st.columns(2)[0]
+    with pytest.raises(render_harness.HarnessGap) as caught:
+        column.balloons()
+    assert "NOT A PAGE DEFECT" in str(caught.value)
+
+
+def test_a_Recorder_built_WITHOUT_a_stub_keeps_the_old_behaviour():
+    """§3 rule 3.1: the stub is an optional second argument and the default is what was there.
+
+    `Recorder([])` is a live call site in this file and A's `test_export_page.py` rolls its own
+    recorder entirely. A shared-module change ships the parameter and the default; it does not
+    make the other session's call sites raise.
+    """
+    captured = []
+    container = render_harness.Recorder(captured)
+    assert container.balloons("anything") is None
+    assert captured == ["anything"]
+
+
+# --- ✅ R-617, PART 3: the test that could not be written before this round
+
+def _drive_a_section_that_builds_controls_in_columns(rows):
+    """Call `views.players._drill_down` — the real section, with a stubbed query.
+
+    ⚠️ NOT `render_harness.render()`. That draws a whole page against LIVE serving, and the
+    `flake8 + pytest` job has no database — A111 turned CI red once by calling it in a pytest and
+    the convention it broke is the one every panel test in this suite already follows. `render()`
+    is the session-level live tool §6 asks for in a report.
+
+    ⚠️ AND IT IS A'S PAGE, READ AND NOT EDITED. `site/views/players.py` and
+    `tests/test_players_page.py` are session A's; this drives A's section from B's file to prove
+    what the harness can now do, and changes neither.
+    """
+    import importlib
+    import pandas as pd
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        players = importlib.reload(importlib.import_module("views.players"))
+        players.query = lambda sql, params=None: pd.DataFrame(rows)
+        players._drill_down(2026, "a-player-1")
+        render_harness.assert_no_error_card(captured, "the players plays section")
+        return "\n".join(captured)
+
+
+def test_a_SECTION_THAT_BUILDS_CONTROLS_IN_COLUMNS_reaches_its_own_empty_state():
+    """🚨 THE POINT OF THE WHOLE ROUND, AND IT IS A'S SECTION BECAUSE A'S SECTION IS WHAT BROKE.
+
+    `views/players.py:254-258` builds three selectboxes on three columns and then runs
+    `None if down == "Any" else int(down)`. Against the old Recorder that was `int(None)`, caught
+    by `states.section`, drawn as an Error card — **on a page with no defect in it**. A110 filed
+    it, Cowork registered it, A111 disproved it, and A's own test file carries a docstring saying
+    the empty-plays assertion "cannot be written against the harness as it stands".
+
+    ✅ IT CAN NOW, AND THIS IS IT: an empty frame reaches the section's OWN Empty state instead of
+    a failure card. ⚠️ The claim is about the harness, not about the page — the page was always
+    right, which is exactly what made the artifact expensive.
+    """
+    text = _drive_a_section_that_builds_controls_in_columns([])
+    assert "cfdb-empty" in text, (
+        "the section did not reach its Empty state. Before R-617 it could not: the filters it "
+        "builds in columns answered None and the page raised int(None) first.")
+    assert render_harness.ERROR_CARD not in text
+
+
+def test_the_SAME_SECTION_renders_its_table_when_there_are_plays():
+    """⚠️ AN EMPTY STATE ALONE DOES NOT PROVE THE CONTROLS ANSWERED.
+
+    A section that raised and drew a card would fail the test above; a section whose filters
+    answered `None` in some new way could still reach an Empty state by accident. So the
+    populated path is asserted too — the play has to appear, which means all three filters
+    resolved to 'Any' and the query ran unfiltered.
+    """
+    text = _drive_a_section_that_builds_controls_in_columns([{
+        "play_id": 1, "season": 2026, "week": 3, "game_date": "2026-09-12",
+        "player_slug": "a-player-1", "team": "Arizona State", "opponent": "Michigan",
+        "stat_type": "rushing", "stat": "yards", "period": 2, "down": 2, "distance": 7,
+        "down_distance_display": "2nd & 7", "distance_bucket": "medium",
+        "field_zone": "own territory", "play_type": "Rush", "play_text": "run for 9 yards",
+        "yards_gained": 9, "is_scoring_play": False, "ppa": 0.4, "as_of_ts": "2026-09-12",
+    }])
+    assert "2nd & 7" in text, f"the plays table did not render: {text[:400]}"
+    assert render_harness.ERROR_CARD not in text
