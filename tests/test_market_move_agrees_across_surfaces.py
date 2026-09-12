@@ -52,15 +52,31 @@ ROW = {
     "home_team": "Michigan", "away_team": "Oklahoma",
     "home_abbreviation": "MICH", "away_abbreviation": "OU",
     "home_moneyline": 175, "away_moneyline": -210,
+    # ⚠️ R-605's BOARD READS PER-SIDE COLUMNS AND A GAME ID. Without these the card raised into
+    # states.section and this file asserted against an Error state — which is exactly the
+    # B076 shape, a defect that renders as a handled failure.
+    "game_id": 401856679, "home_team_id": 130, "away_team_id": 201,
+    "market_implied_home_points": 19.5, "market_implied_away_points": 24.0,
+    "market_implied_home_win_probability": 0.3493,
+    "market_implied_away_win_probability": 0.6507,
 }
+
+# Oklahoma away at -4.5, Michigan home at +4.5 — the mirror, from srv_game_team.
+_GAME_TEAM = {201: {"team_id": 201, "spread_final": -4.5},
+              130: {"team_id": 130, "spread_final": 4.5}}
 
 
 def _rendered_card():
     with H.streamlit_stubbed() as (_st, captured, _charts):
         import importlib
         matchup = importlib.reload(importlib.import_module("views.matchup"))
+        matchup._game_team_rows = lambda _g: {k: pd.Series(v)
+                                              for k, v in _GAME_TEAM.items()}
         matchup._market_card(dict(ROW))
-    card = [block for block in captured if "Spread" in block and "Over/Under" in block]
+    # ⚠️ R-605 RENAMED THE COLUMNS: "Spread"/"Over/Under" became "Point Spread"/"Total" on the
+    # board's header. The block is still the one carrying both, which is what this looks for.
+    card = [block for block in captured
+            if "Point Spread" in block and "Total" in block]
     assert card, f"the market card did not render; captured {len(captured)} blocks"
     return H.plain(card[0])
 
@@ -74,11 +90,16 @@ def _exported(label):
     raise AssertionError(f"no Excel column headed {label!r}")
 
 
-@pytest.mark.parametrize("card_label,excel_label,line_family_value", [
-    ("Spread", "Δ Spread", SPREAD_LINE_FAMILY),
-    ("Over/Under", "Δ O/U", TOTAL_LINE_FAMILY),
+# ⚠️ R-605 MOVED THE LABELS INTO A HEADER ROW, so "the arrow after the word Spread" now finds
+# the header and then the FIRST arrow on the board, whichever cell it belongs to. The anchor is
+# the value the chip sits under instead — the away row's own spread and its own O-side total —
+# which is what "beside its number" always meant.
+@pytest.mark.parametrize("card_label,anchor,excel_label,line_family_value", [
+    ("Spread", r"-4\.5", "Δ Spread", SPREAD_LINE_FAMILY),
+    ("Over/Under", r"O 43\.5", "Δ O/U", TOTAL_LINE_FAMILY),
 ])
-def test_the_two_surfaces_report_the_same_move(card_label, excel_label, line_family_value):
+def test_the_two_surfaces_report_the_same_move(card_label, anchor, excel_label,
+                                               line_family_value):
     """🚨 THE ASSERTION IS THAT THEY AGREE — not that each reads its own column.
 
     A test that checked "Matchup reads X" and "Excel reads Y" would have passed happily
@@ -89,7 +110,7 @@ def test_the_two_surfaces_report_the_same_move(card_label, excel_label, line_fam
     field, exported = _exported(excel_label)
 
     # The chip is a glyph and an UNSIGNED amount, so compare magnitudes against the export.
-    match = re.search(rf"{card_label}\b.*?[▲▼]\s*([0-9.]+)", plain)
+    match = re.search(rf"{anchor}\s*[▲▼]\s*([0-9.]+)", plain)
     assert match, (
         f"no movement chip rendered beside {card_label!r}; the card drew: {plain[:200]}")
     shown = float(match.group(1))

@@ -460,7 +460,8 @@ def test_wind_ABOVE_the_floor_is_shown_in_Marcs_form(header):
     """
     gusty = dict(FORECAST, wind_speed_mph=18.0)
     details = _plain(header(row={"is_completed": False}, forecast=gusty)[0][DETAILS])
-    assert "18 mph \U0001f32c" in details, f"the wind chip is not in Marc's form: {details}"
+    assert "18 mph NW \U0001f32c" in details, \
+        f"the wind chip is not in Marc's form: {details}"
     assert "[" not in details and "]" not in details, \
         f"the wind kept its brackets: {details}"
     assert "\U0001f4a8" not in details, "the gust/tornado glyph is still being drawn"
@@ -749,3 +750,25 @@ def test_the_mascot_and_split_record_names_still_match_what_the_HEADER_asks_for(
         for side, column in mapping.items():
             assert column in selected, \
                 f"the header reads {column!r} for the {side} side and COLUMNS omits it"
+
+
+def test_wind_DIRECTION_is_shown_above_the_floor(header):
+    """R-604's last quarter. Marc: "Do include Direction if it's >10 mph."
+
+    ⚠️ COWORK SAID TWICE THAT THIS WAS BLOCKED ON A MODEL ROUND AND IT NEVER WAS.
+    `wind_direction_compass` is on `srv_game_weather`, 7,358 of 7,358 rows carry it, and the
+    header's query has selected it since B085 — the page simply never rendered it.
+    """
+    gusty = dict(FORECAST, wind_speed_mph=18.0, wind_direction_compass="SSW")
+    details = _plain(header(row={"is_completed": False}, forecast=gusty)[0][DETAILS])
+    assert "18 mph SSW" in details, f"the wind direction is missing: {details}"
+
+
+def test_wind_direction_is_SILENT_below_the_floor_like_the_speed(header):
+    """🚨 THE SAME FLOOR, AND THAT IS THE POINT RATHER THAN A CONVENIENCE. A direction with no
+    wind behind it is noise on 5,435 of 7,358 readings — the floor exists because Marc asked
+    for one, and a direction leaking out below it would reintroduce the clutter he removed."""
+    calm = dict(FORECAST, wind_speed_mph=4.0, wind_direction_compass="NNE")
+    details = _plain(header(row={"is_completed": False}, forecast=calm)[0][DETAILS])
+    assert "NNE" not in details, f"the direction rendered below the floor: {details}"
+    assert "mph" not in details, f"the speed rendered below the floor: {details}"
