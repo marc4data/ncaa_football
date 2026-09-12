@@ -446,11 +446,33 @@ def test_wind_BELOW_the_floor_is_not_shown(header):
     assert "mph" not in _plain(cells[DETAILS])
 
 
-def test_wind_ABOVE_the_floor_is_shown_in_Marcs_bracket_form(header):
-    """His format, literally: `[<wind_mph> mph <wind icon>]`."""
+def test_wind_ABOVE_the_floor_is_shown_in_Marcs_form(header):
+    """His format, and R-604 CHANGED IT — he wrote the first version and then saw it.
+
+    B085 built `[<wind_mph> mph <wind icon>]` from his words. Looking at it he said: "the wind
+    glyph should just be wind blowing sideways. The tornado glyph means something different to
+    Midwest folks. Don't put brackets around the wind. Don't include decimal point for wind."
+
+    \U0001f4a8 DASH SYMBOL is drawn as a curled gust on several platforms; \U0001f32c WIND FACE
+    is literally wind blowing sideways and belongs to no weather-warning vocabulary. 🚨 That
+    half is a CORRECTNESS point, not a preference — a tornado on a football preview in the
+    Midwest is a confident false statement.
+    """
     gusty = dict(FORECAST, wind_speed_mph=18.0)
     details = _plain(header(row={"is_completed": False}, forecast=gusty)[0][DETAILS])
-    assert "[18 mph 💨]" in details, f"the wind chip is not in Marc's form: {details}"
+    assert "18 mph \U0001f32c" in details, f"the wind chip is not in Marc's form: {details}"
+    assert "[" not in details and "]" not in details, \
+        f"the wind kept its brackets: {details}"
+    assert "\U0001f4a8" not in details, "the gust/tornado glyph is still being drawn"
+
+
+def test_wind_carries_NO_decimal_even_when_the_reading_has_one(header):
+    """"Don't include decimal point for wind." 10.9 and 11 are the same afternoon, and the
+    reading is a decimal in the column — 1,923 of them clear the floor."""
+    gusty = dict(FORECAST, wind_speed_mph=10.9)
+    details = _plain(header(row={"is_completed": False}, forecast=gusty)[0][DETAILS])
+    assert "11 mph" in details, f"the wind was not rounded to whole mph: {details}"
+    assert "10.9" not in details, f"the wind kept its decimal: {details}"
 
 
 def test_the_floor_is_exclusive_so_exactly_ten_stays_quiet(header):

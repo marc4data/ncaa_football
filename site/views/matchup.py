@@ -11,6 +11,7 @@ constant in this file: the floor is the model's property and it travels with the
 the copy cannot drift from what the model actually did.
 """
 import html
+import re
 
 import altair as alt
 import pandas as pd
@@ -443,7 +444,19 @@ _CONDITION_ICON = {
 # value if >10". Measured: 1,873 of 7,108 readings clear it, so the line stays quiet on about
 # three quarters of games, which is the point of having a threshold at all.
 _WIND_FLOOR_MPH = 10
-_WIND_ICON = "\U0001f4a8"
+
+# 🚨 R-604. WIND BLOWING SIDEWAYS, AND THE GLYPH IS A CORRECTNESS POINT RATHER THAN A TASTE ONE.
+#
+# This was U+1F4A8 DASH SYMBOL (💨), which several platforms draw as a curled gust. Marc, from
+# the Midwest: "the wind glyph should just be wind blowing sideways. The tornado glyph means
+# something different to Midwest folks." ⚠️ A weather line that reads as a TORNADO WARNING on a
+# football preview is a confident false statement, which is the class this project keeps
+# removing — the same reason an unmapped condition falls back to the word rather than to a
+# nearly-right icon.
+#
+# U+1F32C WIND FACE (🌬️) is the Unicode character whose name and depiction are both literally
+# wind blowing sideways, and it is in no weather-warning vocabulary.
+_WIND_ICON = "\U0001f32c️"
 
 
 def _conditions(row) -> str:
@@ -493,7 +506,11 @@ def _conditions(row) -> str:
         # around, and printing it on every game is the noise he asked to remove.
         speed = reading.get("wind_speed_mph")
         if pd.notna(speed) and float(speed) > _WIND_FLOOR_MPH:
-            parts.append(f"[{speed:g} mph {_WIND_ICON}]")
+            # ⚠️ R-604: NO BRACKETS, NO DECIMAL. Marc: "Don't put brackets around the wind.
+            # Don't include decimal point for wind." The brackets set the wind apart from the
+            # temperature and condition beside it for no reason, and a tenth of a mile per
+            # hour is precision nobody plans around — 10.9 and 11 are the same afternoon.
+            parts.append(f"{float(speed):.0f} mph {_WIND_ICON}")
 
     if not parts and not indoors:
         return ""
@@ -793,19 +810,59 @@ _PROVIDER_SITE = {
 # horizontal footprint so that it can share the row with another element". So the icon is a
 # `title=` span, which is the same affordance at a fraction of the height. Recorded because it
 # is a deliberate deviation from the precedent he named, not an oversight.
+#
+# 🚨 R-607 DECIDED WHAT BELONGS HERE, AND THE TEST IS GENERIC VERSUS THIS GAME. Marc: "It should
+# be generic info about what the metrics mean, not specific info about the lines for the Matchup.
+# That will gain back a lot of vertical real estate b/c I think there is way too much text about
+# Market."
+#
+# ⚠️ SO THE RULE IS A PROPERTY OF THE SENTENCE, NOT OF ITS LENGTH. A sentence that would read
+# identically on every game in the database is generic and belongs in a hover; a sentence that
+# names THIS row's overround, THIS row's disagreeing books or THIS row's unusable price is a
+# statement of fact about the game on screen and STAYS ON THE CARD. Deleting one of those would
+# be a regression wearing the costume of a tidy-up — B083's disagreement caption exists because
+# the spread and the moneyline name different sides on 70 games, and A094 found a game priced
+# −100000/−100000 rendering as a confident 50.0%.
 _HELP = {
     "Market": "Every figure on this card is one book's price. A move measured against a "
               "different book's price is not a move.",
-    "Spread": "Points given by the favorite. A home favorite is a NEGATIVE spread. The "
-              "arrow is how far the number has traveled since it opened, and the amount "
-              "beside it carries no sign because the arrow already has the direction.",
+    # R-607: the card no longer CALLS `chips.spread_sign_note`, it consumes the same constant
+    # in a hover instead — see `_spread_help`. Composed rather than copied, because R-009's
+    # whole point is one sentence in one place and retyping it here would have recreated the
+    # drift it exists to prevent.
+    "Spread": None,
     "Over/Under": "The total points the book expects both teams to score combined.",
+    # R-607: what a de-vig IS. What THIS game's overround WAS stays on the card beside it.
+    "Win probability": "A book's prices carry its margin, so the two sides imply more than "
+                       "100% between them. De-vigging removes that margin proportionally to "
+                       "recover what the price says about the game. The overround is how much "
+                       "margin there was — 1.0000 would be a book taking none. These are the "
+                       "book's numbers, not cfdb's model.",
 }
+
+
+def _spread_help() -> str:
+    """The spread's hover: the SHARED sign note, plus what the arrow beside it means.
+
+    🚨 COMPOSED FROM `chips.SPREAD_SIGN_NOTE`, NEVER RETYPED. R-009 put that sentence in one
+    place because the same sign appears on Schedule, Scores and Matchup and three copies are
+    three chances to drift. R-607 moved Matchup's rendering of it from a caption into this
+    hover — which changes WHERE it is shown, and must not change the fact that there is one
+    of it.
+
+    ⚠️ THE `**` COMES OUT because a `title=` attribute is plain text, not markdown, and would
+    otherwise show the asterisks. `schedule.py` does the same thing for the same reason when
+    it puts the note inside an HTML block.
+    """
+    note = re.sub(r"\*\*(.+?)\*\*", r"\1", chips.SPREAD_SIGN_NOTE)
+    return (f"Points given by the favorite. {note} The arrow is how far the number has "
+            f"traveled since it opened, and the amount beside it carries no sign because the "
+            f"arrow already has the direction.")
 
 
 def _help_icon(key: str) -> str:
     """The question mark, with its prose in the browser's own tooltip."""
-    text = html.escape(_HELP[key], quote=True)
+    text = html.escape(_HELP[key] or _spread_help(), quote=True)
     return (f"<span title='{text}' style='cursor:help;opacity:.45;font-size:.7rem;"
             f"vertical-align:super'>?</span>")
 
@@ -831,6 +888,46 @@ def _provider_link(row, key_column: str = "provider_key") -> str:
         return html.escape(str(key))
     return (f"<a href='{url}' target='_blank' rel='noopener noreferrer'>"
             f"{html.escape(name)}</a>")
+
+
+def _card_footer(row) -> str:
+    """R-606. Whose prices these are and when they were gathered, as the card's own footer.
+
+    Marc: "Footer underneath the card should indicate Provider and when the last metric
+    snapshot was gathered." ✅ A102 already made the card name its book; this turns a caption
+    into furniture, which is the direction that buys the vertical space R-607 is about.
+
+    ⚠️ AC-G.35 — THE *AS OF* IS A COLUMN, NEVER `now()`. `line_snapshot_ts` is when the book's
+    price was observed, and it travels with the price rather than with the render.
+
+    🚨 AND IT IS THE CARD'S OWN BOOK, WHICH IS NOT OBVIOUS FROM THE COLUMN NAME. `srv_game`
+    exposes ONE timestamp under TWO names — `l.snapshot_ts as line_snapshot_ts, l.snapshot_ts`
+    — and both come from `latest_line`, the same CTE as `provider_key`. Verified rather than
+    assumed: the two columns are identical in all 112,675 rows, so despite the `line_` prefix
+    this is the displayed price's own snapshot and not the movement series'. ⚠️ That mattered
+    because `line_movement_provider_key` names a DIFFERENT book on 1,739 of 1,920 games, and
+    pairing this stamp with the card's book would have been R-645 all over again if the prefix
+    had meant what it looks like.
+    """
+    book = _provider_link(row)
+    stamp = row.get("line_snapshot_ts")
+    when = (f" · snapshot {html.escape(fmt.local_time(stamp))}"
+            if pd.notna(stamp) else "")
+    # ⚠️ THE COUNT RIDES ALONG BECAUSE IT IS A FACT ABOUT THIS ROW AND IT HAD NOWHERE ELSE TO
+    # GO. The caption this footer replaces carried it, and `_excursions` is SILENT when there
+    # is no history at all — so dropping it would have quietly deleted "we have one look at
+    # this line", which is the difference between a line that has not moved and a line nobody
+    # watched. It costs no extra height here.
+    snapshots = row.get("line_snapshot_count")
+    seen = ""
+    if pd.notna(snapshots):
+        observed = int(snapshots)
+        seen = f" · {observed} snapshot{'' if observed == 1 else 's'}"
+    else:
+        seen = " · no snapshot history"
+    return (f"<div style='border-top:1px solid var(--cfdb-rule, rgba(128,128,128,.25));"
+            f"margin-top:.35rem;padding-top:.3rem;font-size:.75rem;opacity:.6'>"
+            f"Line from {book}{when}{seen}</div>")
 
 
 def _market_and_model(row) -> None:
@@ -944,7 +1041,7 @@ def _market_card(row) -> None:
         st.markdown(
             f"<div style='border:1px solid var(--cfdb-border, rgba(128,128,128,.3));"
             f"border-radius:6px;padding:.55rem .7rem;margin:.2rem 0'>"
-            f"{line_rows}{money_row}</div>", unsafe_allow_html=True)
+            f"{line_rows}{money_row}{_card_footer(row)}</div>", unsafe_allow_html=True)
 
         if bool(row.get("favorite_definitions_disagree")):
             # 🚨 70 GAMES, AND THE CARD SAYS SO RATHER THAN PICKING ONE. The spread and the
@@ -960,7 +1057,13 @@ def _market_card(row) -> None:
                 f"makes {html.escape(str(other_label)) if other_label else 'the other'} the "
                 f"favorite. cfdb records the disagreement rather than resolving it.")
 
-        chips.spread_sign_note()
+        # 🚨 R-607: `chips.spread_sign_note()` USED TO RENDER HERE AND ITS TEXT IS NOW IN THE
+        # SPREAD `?`. It is true of every spread ever printed, which is the definition of
+        # generic, and it sat under a card that already carried a question mark for exactly
+        # that sentence.
+        #
+        # ⚠️ THE SHARED COMPONENT IS UNTOUCHED. `lib/chips.py` is session A's (§3 rule 3) and
+        # Schedule and Scores still call it; what changed is this call site, which is mine.
         _market_provenance(row)
         _excursions(row)
 
@@ -974,25 +1077,15 @@ def _market_provenance(row) -> None:
     """
     implied = row.get("market_implied_home_win_probability")
     if pd.notna(implied):
+        # 🚨 R-607: THE NUMBERS, NOT THE LECTURE. What a de-vig IS moved into the
+        # "Win probability" help; what THIS row's overround WAS is a fact about this game and
+        # cannot go into generic copy without ceasing to be true of it.
         st.caption(
             f"Implied home win probability {float(implied) * 100:.1f}% "
-            f"(away {float(row.get('market_implied_away_win_probability')) * 100:.1f}%), "
-            f"de-vigged by {row.get('devig_method')}; the book's overround was "
-            f"{fmt.number(row.get('overround'), '', 4)}. Raw prices above are untouched.")
-    snapshots = row.get("line_snapshot_count")
-    book = _provider_link(row)
-    stamp = f", snapshot {fmt.local_time(row.get('line_snapshot_ts'))}" \
-        if pd.notna(row.get("line_snapshot_ts")) else ""
-    if pd.notna(snapshots):
-        observed = int(snapshots)
-        # unsafe_allow_html because the book is a LINK (R-597), not because the copy needs it.
-        st.caption(
-            f"Line from {book}{stamp}. Movement measured across {observed} "
-            f"snapshot{'' if observed == 1 else 's'} — a move measured against a different "
-            f"book's price is not a move.", unsafe_allow_html=True)
-    else:
-        st.caption(f"Line from {book}{stamp}. No snapshot history, so no move to measure.",
-                   unsafe_allow_html=True)
+            f"(away {float(row.get('market_implied_away_win_probability')) * 100:.1f}%) "
+            f"{_help_icon('Win probability')} · overround "
+            f"{fmt.number(row.get('overround'), '', 4)}, de-vigged by "
+            f"{row.get('devig_method')}.", unsafe_allow_html=True)
 
 
 def _excursions(row) -> None:
@@ -1414,6 +1507,33 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     }])).mark_rect(opacity=0.10).encode(
         x=x_enc, x2="x2:Q", y=y_enc, y2="y2:Q")
 
+    # 🚨 R-608: THE BOX'S EDGES CARRY WHICH PERCENTILE THEY ARE, IN LINE WEIGHT.
+    #
+    # Marc: "Use a thinner line for the sides that represent 25th percentile, thicker (maybe
+    # double line) for the 75th percentile."
+    #
+    # ⚠️ A `rect` HAS ONE STROKE FOR ALL FOUR EDGES, so the two weights cannot come from the
+    # shaded box itself — each edge is its own `rule` segment, bounded to the box rather than
+    # spanning the chart the way the medians do.
+    #
+    # ✅ WEIGHT RATHER THAN COLOUR, AND THAT IS AC-G.22 RATHER THAN TASTE. A line weight
+    # survives greyscale and colour-blindness; two hues do not, and this project has already
+    # removed one colour-carries-meaning defect (R-547).
+    edges = []
+    for axis_low_high, thickness in ((_BAND_LOW, 1), (_BAND_HIGH, 2.5)):
+        # The vertical edge: one x, spanning the box's y extent.
+        edges.append(alt.Chart(pd.DataFrame([{
+            "x": float(x_axis[axis_low_high]),
+            "y": float(y_axis[_BAND_LOW]), "y2": float(y_axis[_BAND_HIGH]),
+        }])).mark_rule(opacity=0.45, strokeWidth=thickness).encode(
+            x=x_enc, y=y_enc, y2="y2:Q"))
+        # The horizontal edge: one y, spanning the box's x extent.
+        edges.append(alt.Chart(pd.DataFrame([{
+            "y": float(y_axis[axis_low_high]),
+            "x": float(x_axis[_BAND_LOW]), "x2": float(x_axis[_BAND_HIGH]),
+        }])).mark_rule(opacity=0.45, strokeWidth=thickness).encode(
+            y=y_enc, x=x_enc, x2="x2:Q"))
+
     mid_x = alt.Chart(pd.DataFrame([{"x": float(x_axis[_BAND_MID])}])).mark_rule(
         opacity=0.35, strokeDash=[3, 3]).encode(x=x_enc)
     mid_y = alt.Chart(pd.DataFrame([{"y": float(y_axis[_BAND_MID])}])).mark_rule(
@@ -1426,7 +1546,12 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     }])).mark_point(size=140, filled=True, opacity=0.95).encode(
         x=x_enc, y=y_enc, tooltip=alt.Tooltip("who:N", title=label))
 
-    return (band + mid_x + mid_y + point).properties(
+    # ⚠️ THE POINT IS DRAWN LAST so the box's edges cannot sit on top of the one mark a reader
+    # is actually looking for.
+    layered = band
+    for edge in edges:
+        layered = layered + edge
+    return (layered + mid_x + mid_y + point).properties(
         height=_CHART_HEIGHT, title=label, autosize=_AUTOSIZE)
 
 
@@ -1613,9 +1738,14 @@ def _yardage(row) -> None:
             sample = min(int(entry["min_games_counted"]) for entry in distribution.values()
                          if pd.notna(entry["min_games_counted"]))
             teams = int(next(iter(distribution.values()))["teams_in_week"])
+            # 🚨 R-608: A THIN LINE AND A THICK LINE ARE ONLY SELF-DESCRIBING IF SOMETHING SAYS
+            # SO. The weights carry which percentile each edge is, and a reader cannot deduce
+            # that from the picture — so the sentence that explains the box explains its sides
+            # too, in the one place that already had to exist.
             frame = (f"Both columns share one frame: the shaded box is the middle half of all "
                      f"{teams} FBS teams this week and the dashed lines are the medians, so "
-                     f"every matchup in the week is drawn on the same axes.")
+                     f"every matchup in the week is drawn on the same axes. The box's thin "
+                     f"sides are the 25th percentile and its thick sides the 75th.")
             if sample <= _THIN_SAMPLE:
                 # 🚨 A092 MEASURED THIS AND SAID TO SAY IT. At 2026 week 2 the thinnest team
                 # has played ONE game, so its "per game" IS that game — the same figure the

@@ -388,24 +388,37 @@ def test_the_book_is_named_AND_LINKED(card):
 
     R-597: Marc asked for the book by NAME and as a LINK, and explicitly not suppressed into
     the question-mark hover — so this asserts the display name and the href, not the key.
+
+    ⚠️ R-606 MOVED IT FROM A CAPTION INTO THE CARD'S FOOTER. Marc: "Footer underneath the
+    card should indicate Provider and when the last metric snapshot was gathered." The book is
+    the same book, named the same way and linked the same way — it is furniture now rather
+    than prose, so this reads the markup instead of the captions.
     """
-    caption = " ".join(b for k, b in card() if k == "caption")
-    assert "DraftKings" in caption, "the book is not named in its display form"
-    assert "sportsbook.draftkings.com" in caption, "the book is not a link"
+    markup = " ".join(b for _k, b in card())
+    assert "DraftKings" in markup, "the book is not named in its display form"
+    assert "sportsbook.draftkings.com" in markup, "the book is not a link"
 
 
 def test_an_UNKNOWN_book_renders_its_key_and_NOT_a_dead_link(card):
     """🚨 A LINK THAT 404s IS WORSE THAN PLAIN TEXT. CFBD can add a book tomorrow, and the
-    map is this page's own because no provider URL exists anywhere in the warehouse."""
-    caption = " ".join(b for k, b in card(line_movement_provider_key="newbook",
-                                          provider_key="newbook") if k == "caption")
-    assert "newbook" in caption
-    assert "href" not in caption, "an unmapped book was given a guessed URL"
+    map is this page's own because no provider URL exists anywhere in the warehouse.
+
+    ⚠️ SCOPED TO THE FOOTER, NOT THE WHOLE CARD. The dataset caption carries a legitimate
+    link to /dictionary, so "no href anywhere" would fail on a link that is supposed to be
+    there — the assertion is about the BOOK, so it reads the block the book lives in.
+    """
+    markup = " ".join(b for _k, b in card(line_movement_provider_key="newbook",
+                                          provider_key="newbook"))
+    footer = markup.split("Line from", 1)[1] if "Line from" in markup else ""
+    assert "newbook" in footer, f"the unmapped key is not in the footer: {footer[:200]}"
+    assert "href" not in footer.split("</div>", 1)[0], \
+        "an unmapped book was given a guessed URL"
 
 
 def test_an_unnamed_book_says_so_rather_than_going_quiet(card):
-    text = _captions(card(line_movement_provider_key=None, provider_key=None))
-    assert "an unnamed book" in text
+    markup = " ".join(b for _k, b in card(line_movement_provider_key=None,
+                                          provider_key=None))
+    assert "an unnamed book" in markup
 
 
 def test_the_devig_method_and_the_overround_travel_with_the_probabilities(card):
@@ -460,9 +473,30 @@ def test_the_card_does_not_editorialise(card):
 
 def test_the_shared_spread_sign_note_is_the_SHARED_one(card):
     """R-009. Compared against `chips.SPREAD_SIGN_NOTE` rather than a copy of its words, so a
-    card that inlined its own sentence fails rather than passing a hardcoded string."""
+    card that inlined its own sentence fails rather than passing a hardcoded string.
+
+    ⚠️ R-607 MOVED WHERE IT IS SHOWN, NOT WHETHER THERE IS ONE OF IT. Marc asked for the
+    generic prose to come off the card and into the `?` icons, so this sentence is now the
+    Spread hover instead of a caption under the card. The guard is unchanged in substance and
+    is the reason `_spread_help()` composes the shared constant rather than retyping it — a
+    second copy of one sentence is exactly what R-009 exists to prevent, and moving it into a
+    tooltip would have been the easiest possible way to create one.
+
+    🚨 THE `**` IS STRIPPED because a `title=` attribute is plain text; the words are compared,
+    the markdown markers are not.
+    """
+    import re
+
     from lib import chips
-    assert _plain(chips.SPREAD_SIGN_NOTE) in _captions(card())
+    from views import matchup
+    plain_note = re.sub(r"\*\*(.+?)\*\*", r"\1", chips.SPREAD_SIGN_NOTE)
+    assert plain_note in matchup._spread_help(), (
+        "the Spread hover does not carry the SHARED sign note — if it was retyped, R-009's "
+        "one-sentence-one-place rule is already broken")
+    # And it reaches the card: the icon renders the hover into the markup.
+    markup = " ".join(b for _k, b in card())
+    assert html.escape(plain_note, quote=True) in markup, \
+        "the sign note is composed but never rendered"
 
 
 # --- 🚨 R-526: the win probability bar ------------------------------------------------------------
@@ -635,3 +669,66 @@ def test_both_halves_keep_their_own_section(row_panel):
                                type_ignores=[]))
     assert "section" not in body, \
         "the row wrapper took a section of its own, so one failure would blank both halves"
+
+
+# --- 🚨 R-607: generic goes in the hover, THIS GAME stays on the card --------------------------
+#
+# Marc: "Use the ? icons to provide any supporting information about what the data means. It
+# should be generic info about what the metrics mean, not specific info about the lines for the
+# Matchup."
+#
+# 🚨 THE DANGEROUS DIRECTION IS THE ONE THAT LOOKS LIKE TIDYING. Several captions on this card
+# are STATEMENTS ABOUT THIS ROW and they exist because the data is genuinely ambiguous:
+# `favorite_definitions_disagree` is true on 70 games where the spread and the moneyline name
+# different sides; A094 found a game priced −100000/−100000 rendering as a confident 50.0%. A
+# future round tidying "too much text about Market" could move one of those into a `?` and it
+# would look like progress. These two tests are what makes that fail.
+
+
+def _titles(blocks):
+    """Every `title=` tooltip in the card's markup — i.e. everything the `?` icons say."""
+    markup = " ".join(b for _k, b in blocks)
+    return re.findall(r"title='([^']*)'", markup)
+
+
+def test_the_HELP_text_is_IDENTICAL_on_two_different_games(card):
+    """🚨 THE STRUCTURAL TEST FOR "GENERIC", AND IT NEEDS NO JUDGEMENT.
+
+    A sentence that is generic reads the same on every game in the database. A sentence about
+    THIS row does not. So render two games whose market numbers differ in every field that has
+    a caption — the spread, the total, the overround, the snapshot count, the book — and demand
+    the hovers come back byte-identical.
+
+    ⚠️ A ROW-SPECIFIC STATEMENT MOVED INTO A `?` FAILS HERE AUTOMATICALLY, because the thing
+    that makes it row-specific is the thing that makes it differ between these two renders.
+    """
+    first = _titles(card())
+    second = _titles(card(spread=-12.5, over_under=61.5, overround=1.0102,
+                          line_snapshot_count=3, provider_key="espn_bet",
+                          market_implied_home_win_probability=0.74,
+                          market_implied_away_win_probability=0.26))
+    assert first, "the card rendered no help at all"
+    assert first == second, (
+        "a `?` hover changed between two games, so it is not generic info about what the "
+        f"metric means — it is a statement about one row:\n  {first}\n  {second}")
+
+
+def test_a_ROW_SPECIFIC_caption_still_renders_and_was_not_tidied_away(card):
+    """⚠️ THE OTHER HALF. The round removed generic prose; removing these would be a
+    regression wearing the same costume.
+
+    Each one is a fact about the game on screen that the warehouse deliberately recorded:
+      · the two markets naming different favorites (70 games)
+      · this row's overround, which is what the de-vig actually removed
+      · the widest the line got, which is not the net move
+    """
+    blocks = card(favorite_definitions_disagree=True, moneyline_favorite_side="home")
+    text = _captions(blocks)
+    assert "cfdb records the disagreement rather than resolving it" in text, \
+        "B083's favorite-disagreement caption is gone"
+    assert "overround" in text, "this row's overround is gone"
+    assert "Furthest from the open" in text, "the excursion line is gone"
+    # And none of those three moved into a hover, where they would stop being about this game.
+    hovers = " ".join(_titles(blocks))
+    for leaked in ("overround 1.0", "Furthest from the open", "records the disagreement"):
+        assert leaked not in hovers, f"a row-specific statement leaked into a `?`: {leaked!r}"
