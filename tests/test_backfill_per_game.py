@@ -218,18 +218,27 @@ def test_plays_stats_fans_out_per_game_because_a_week_is_always_truncated():
     assert endpoint.extra.get("id_param") == "gameId"
 
 
-def test_only_plays_stats_joins_the_weekly_refresh():
+def test_the_weekly_per_game_set_is_exactly_these_two():
     """The weekly marker is opt-in per endpoint rather than blanket for PER_GAME.
 
-    game/box/advanced and metrics/wp fan out because a season-scoped call would be huge —
-    a volume decision, and they stay backfill-only. /plays/stats fans out because anything
-    wider is WRONG. Quietly enabling all three in the weekly path would triple the weekly
-    call count as a side effect of fixing something else.
+    /plays/stats fans out because anything wider is WRONG — a season-scoped call is truncated
+    at 2,000 records.
+
+    game/box/advanced fans out for VOLUME, and was backfill-only on that reasoning until
+    R-697. What changed is not the volume but what it buys: it is the only per-game
+    participation share in the warehouse, A107 built serving objects on it, and the one-off
+    backfill that fed it never asked about the current season — so the live season read 0.0%
+    coverage against 99.2% and 100% for the two finished ones. A108 asked CFBD directly for a
+    completed 2026 game and got 200 with 21 players, so the gap was ours.
+
+    🚨 metrics/wp IS STILL OUT, and this test is the thing that keeps it out. It has no reader
+    and no request behind it. The set is asserted EXACTLY rather than by membership so that
+    adding a third endpoint has to be a decision somebody makes on purpose.
     """
     weekly_per_game = {e.path for e in backfill.REGISTRY
                        if e.strategy == backfill.PER_GAME
                        and e.extra.get("weekly_per_game")}
-    assert weekly_per_game == {"plays/stats"}
+    assert weekly_per_game == {"plays/stats", "game/box/advanced"}
 
 
 def test_completed_game_ids_can_narrow_to_the_weeks_in_play(monkeypatch):

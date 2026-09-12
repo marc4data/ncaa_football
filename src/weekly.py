@@ -64,10 +64,21 @@ def _requests_for_bucket(bucket: str, season: str,
         # one game is truncated at 2,000 records, so a week-scoped weekly refresh would keep
         # landing an arbitrary 11% sample forever.
         #
-        # The marker is opt-in per endpoint rather than blanket for PER_GAME, deliberately.
-        # game/box/advanced and metrics/wp fan out for volume reasons and stay backfill-only;
-        # quietly adding them here would triple the weekly call count as a side effect of
-        # fixing something else.
+        # The marker is opt-in per endpoint rather than blanket for PER_GAME, deliberately,
+        # and the two PER_GAME endpoints now sit on opposite sides of it.
+        #
+        # game/box/advanced IS IN, as of R-697. It was named here as backfill-only on volume
+        # grounds, and that reasoning was sound until the volume was measured against what it
+        # buys: it is the ONLY per-game participation share in the warehouse, A107 built
+        # serving objects on it, and the one-off backfill that fed it never asked about the
+        # current season — so the live season read 0.0% coverage while the two finished ones
+        # read 99.2% and 100%. Measured on a two-week window, opting it in takes
+        # results_refresh from 139 requests to 239: it DOUBLES this refresh rather than
+        # tripling it, because plays/stats already fans out over the same games.
+        #
+        # metrics/wp STAYS OUT. It has no reader, no request behind it, and taking it along
+        # would be exactly the "side effect of fixing something else" this note was written
+        # to prevent. The note is kept, pointed at the endpoint it still applies to.
         #
         # Scoped to the weeks in play, so a Sunday refresh asks about ~60 games rather than
         # re-fetching the whole season.

@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 import pytest
 
 from src import weekly
-from src.endpoints import BUCKET_IMMUTABLE_WK, BUCKET_PREGAME, BUCKET_REVISIONIST
+from src.endpoints import (BUCKET_IMMUTABLE_WK, BUCKET_PREGAME, BUCKET_REVISIONIST,
+                           PER_GAME, REGISTRY)
 
 CALENDAR = [
     {"season": 2026, "week": 1, "seasonType": "regular",
@@ -91,7 +92,12 @@ def test_week_scoped_buckets_expand_over_the_window():
     requests = weekly._requests_for_bucket(BUCKET_IMMUTABLE_WK, "2026", weeks)
 
     assert requests, "bucket C2 should have members"
-    bulk = [(path, params) for path, params in requests if path != "plays/stats"]
+    # ⚠️ EXCLUDED BY STRATEGY, NOT BY NAME. This read `path != "plays/stats"` until R-697 added
+    # a second weekly per-game endpoint and the hardcoded name stopped covering the case the
+    # docstring above already described. Deriving it from the registry means the next opt-in
+    # does not silently break an assertion about a different axis.
+    per_game_paths = {e.path for e in REGISTRY if e.strategy == PER_GAME}
+    bulk = [(path, params) for path, params in requests if path not in per_game_paths]
     assert all("week" in params for _, params in bulk), \
         "C2 endpoints must be week-scoped, not season-scoped"
     assert {params["week"] for _, params in bulk} == {"2", "3"}
@@ -209,13 +215,25 @@ def test_the_weekly_refresh_fans_plays_stats_out_per_game(monkeypatch):
         "the weekly refresh must fan /plays/stats out per game, scoped to the weeks in play")
 
 
-def test_the_expensive_per_game_endpoints_stay_out_of_the_weekly_refresh(monkeypatch):
-    """game/box/advanced and metrics/wp fan out for volume, not correctness, and remain
-    backfill-only. Adding them here would triple the weekly call count as a side effect."""
+def test_metrics_wp_stays_out_of_the_weekly_refresh_and_box_advanced_is_in(monkeypatch):
+    """The two PER_GAME volume endpoints now sit on opposite sides of the weekly marker.
+
+    game/box/advanced joined the weekly refresh in R-697 — it carries the only per-game
+    participation share in the warehouse, and the backfill that fed it never asked about the
+    current season.
+
+    🚨 metrics/wp DID NOT, and that is the half worth guarding. It has no reader and no request
+    behind it, and taking it along would be exactly the "side effect of fixing something else"
+    the note in weekly.py was written to prevent. Measured on a two-week window, opting one in
+    took results_refresh from 139 requests to 239; opting both in would have been worse for
+    nothing.
+    """
     monkeypatch.setattr("src.backfill.completed_game_ids",
                         lambda season, weeks=None: ["111"])
     weeks = [{"year": "2026", "week": "2", "seasonType": "regular"}]
-    paths = {path for path, _ in
-             weekly._requests_for_bucket(BUCKET_IMMUTABLE_WK, "2026", weeks)}
-    assert "game/box/advanced" not in paths
+    requests = weekly._requests_for_bucket(BUCKET_IMMUTABLE_WK, "2026", weeks)
+    paths = {path for path, _ in requests}
+
     assert "metrics/wp" not in paths
+    assert ("game/box/advanced", {"id": "111"}) in requests, (
+        "box/advanced must fan out per game, scoped to the weeks in play")

@@ -253,8 +253,17 @@ REGISTRY: List[Endpoint] = [
              min_season=2025, note="enriched pass attempts; 7,396 rows/week"),
 
     # ---- Per-game fan-out: opt-in only ---------------------------------------------
+    # R-697. OPTED INTO THE WEEKLY REFRESH, reversing a documented decision deliberately —
+    # see the note in weekly.py, which used to name this endpoint as one that stays
+    # backfill-only. The player usage this lands is the only per-game participation share in
+    # the warehouse, and A107 built the serving objects on it before anyone noticed nothing
+    # was fetching it: the 2026-09-01 backfill asked about 2024 and 2025 and never about
+    # 2026, so the live season read 0.0% coverage while 2024 and 2025 read 99.2% and 100%.
+    # A108 asked the endpoint directly for a completed 2026 game and it answered 200 with 21
+    # players, so the gap was ours and not CFBD's.
     Endpoint("game/box/advanced", PER_GAME, BUCKET_IMMUTABLE_WK, include=False,
-             extra={"id_param": "id"}, note="one call per game"),
+             extra={"id_param": "id", "weekly_per_game": True},
+             note="one call per game; weekly for player usage (R-697)"),
     Endpoint("metrics/wp", PER_GAME, BUCKET_IMMUTABLE_WK, include=False,
              extra={"id_param": "gameId"}, note="in-game win probability, one call per game"),
 
