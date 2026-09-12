@@ -78,7 +78,29 @@ select
     l.spread = b.best_away_spread as is_best_away_spread,
     ao.as_of_ts
 from latest l
-left join {{ ref('fct_game') }} g on g.game_id = l.game_id
+-- 🚨 AN INNER JOIN, AND IT STOPPED A GAME-DAY PUBLISH FOR TWELVE HOURS. R-698.
+--
+-- This was a LEFT join, so a betting line for a game the schedule does not contain produced a
+-- board row with null teams on both sides — and `assert_every_serving_row_names_its_team` failed
+-- on it, correctly. `publish` sits downstream of `dbt_test` on the scores chain, so the scores
+-- publish stopped: last green 2026-09-11 05:11 PDT, first red 17:36 the same day, and it was still
+-- red twelve hours and six runs later on a Saturday with a slate starting.
+--
+-- ⚠️ THE DATA IS NOT OURS AND THE DEDUP IS NOT WRONG. Measured on game 401866625, Campbell vs
+-- Western Carolina: `/lines` carries 22 rows for it, and `/games` USED to carry it — 82 of the 93
+-- landed week-1 responses mention it — but THE NEWEST ONE DOES NOT. CFBD withdrew it from the
+-- schedule and left the lines behind. stg_games keeps the newest file per params on purpose, so
+-- "a refetch supersedes rather than races"; it did exactly that, and it was right to.
+--
+-- ✅ SO THE FIX IS NEITHER A TAG NOR A CHANGE UPSTREAM. A106 found this row and reported it as
+-- pre-existing and independent, which was true, and did not connect it to the publish chain, which
+-- was the miss. The honest repair is that THIS VIEW STOPS EMITTING A ROW IT CANNOT NAME: an odds
+-- board line with no teams on either side is unrenderable by any page, so it is not a row.
+--
+-- ⚠️ IT DROPS EXACTLY ONE ROW OF 6,929, MEASURED. It also means a line that arrives BEFORE its
+-- schedule row waits for the schedule rather than appearing blank — which is the same behaviour a
+-- reader would want and the opposite of what the left join gave them.
+join {{ ref('fct_game') }} g on g.game_id = l.game_id
 left join {{ ref('dim_team') }} h on h.season = g.season and h.team_id = g.home_team_id
 left join {{ ref('dim_team') }} a on a.season = g.season and a.team_id = g.away_team_id
 left join {{ ref('dim_provider') }} p on p.provider_key = l.provider_key

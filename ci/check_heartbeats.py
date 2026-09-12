@@ -55,12 +55,30 @@ def read_ages(host: str) -> dict:
         raise RuntimeError(
             f"could not read heartbeats from {host} (exit {result.returncode}): "
             f"{result.stderr.strip()[:400]}")
-    ages, failures = {}, {}
+    ages, failures, failed_tests = {}, {}, {}
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line or "|" not in line:
             continue
         head, _, rest = line.partition("|")
+        # 🚨 `failed_test|<name>|<failures>|<seconds ago>` — R-412's payload, WHICH NOTHING READ
+        # UNTIL R-698. cfdb_heartbeat.sh has emitted this line since R-412 so that an alert could
+        # name the ASSERTION instead of only the task. This parser knew two shapes and not this
+        # one, so `head` fell through to the heartbeat branch below, `int("assert_...|1|6583")`
+        # raised ValueError, and the line was silently discarded.
+        #
+        # ⚠️ THE COST, MEASURED: on 2026-09-11 `assert_every_serving_row_names_its_team` began
+        # failing at 17:36 PDT and the scores publish stopped with it. The switch fired at 23:28
+        # with four error lines and NOT ONE named the test — the name was in the payload the whole
+        # time. A109 read it out of raw.raw_dbt_test_result by hand instead.
+        if head.strip() == "failed_test":
+            name, _, tail = rest.partition("|")
+            count, _, age = tail.partition("|")
+            try:
+                failed_tests[name.strip()] = (int(count), int(age))
+            except ValueError:
+                continue
+            continue
         # `failed|<dag>.<task>|<seconds ago>` — a different shape from a heartbeat line, and
         # deliberately so: a monitor running against an older forced command sees a name it
         # has no budget for and says so, rather than mis-reading a failure as a cadence.
@@ -75,7 +93,7 @@ def read_ages(host: str) -> dict:
             ages[head.strip()] = int(rest)
         except ValueError:
             continue
-    return ages, failures
+    return ages, failures, failed_tests
 
 
 def describe(seconds: int) -> str:
@@ -90,7 +108,7 @@ def main(argv=None) -> int:
     host = (argv or sys.argv[1:] or ["cfdb_monitor@localhost"])[0]
 
     try:
-        ages, failures = read_ages(host)
+        ages, failures, failed_tests = read_ages(host)
     except Exception as error:                                           # noqa: BLE001
         # THE DROPLET BEING UNREACHABLE IS THE ALARM, not a reason to exit quietly.
         print(f"::error::the pipeline host is unreachable — {error}")
@@ -125,13 +143,18 @@ def main(argv=None) -> int:
     for task, age in sorted(failures.items()):
         print(f"  FAILED  {task}: last failed {describe(age)} ago")
 
+    # WHICH ASSERTION, NOT JUST WHICH TASK. `dbt_test` runs a selector, so the task name cannot
+    # say what broke — that is the whole reason cfdb_heartbeat.sh sends the test name.
+    for name, (count, age) in sorted(failed_tests.items()):
+        print(f"  FAILED  {name}: {count} row(s), last failed {describe(age)} ago")
+
     unknown = sorted(set(ages) - set(CADENCES))
     if unknown:
         # Not a failure: a new DAG that beats before anyone adds it here is better than one
         # that does not beat at all. Worth saying so it gets a budget.
         print(f"\n  note: beating but unmonitored — {', '.join(unknown)}")
 
-    if stale or missing or failures:
+    if stale or missing or failures or failed_tests:
         print()
         for line in stale + missing:
             print(f"::error::heartbeat absent — {line}")
@@ -139,12 +162,16 @@ def main(argv=None) -> int:
             print(f"::error::task failed — {task}, {describe(age)} ago. A gated DAG has "
                   f"exhausted its retries; anything downstream of it, including the publish, "
                   f"did not run.")
+        for name, (count, age) in sorted(failed_tests.items()):
+            print(f"::error::dbt test failed — {name}, {count} row(s), {describe(age)} ago. "
+                  f"This is the ASSERTION rather than the task: anything downstream of the "
+                  f"test, including the publish, did not run.")
         if stale or missing:
             print("::error::the pipeline has stopped emitting on at least one cadence. "
                   "Silence is not success.")
         return 1
 
-    print(f"\nAll {len(ok)} cadences beating within budget, no failed tasks in the window.")
+    print(f"\nAll {len(ok)} cadences beating within budget, no failed tasks or assertions in the window.")
     return 0
 
 

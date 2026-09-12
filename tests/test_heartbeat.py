@@ -102,7 +102,7 @@ def test_an_unreachable_host_is_the_alarm_not_an_error(monkeypatch, capsys):
 def test_a_stale_cadence_fails_and_names_itself(monkeypatch, capsys):
     fresh = {name: 60 for name in chk.CADENCES}
     fresh["scores_refresh"] = 7 * 3600            # budget is 5h
-    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}))
+    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}, {}))
     assert chk.main(["host"]) == 1
     out = capsys.readouterr().out
     assert "STALE" in out and "scores_refresh" in out
@@ -113,13 +113,13 @@ def test_a_cadence_that_never_beat_is_not_silently_ok(monkeypatch, capsys):
     """A missing key reads as "no news". It is the opposite."""
     monkeypatch.setattr(
         chk, "read_ages",
-        lambda _h: ({n: 60 for n in chk.CADENCES if n != "weekly_results"}, {}))
+        lambda _h: ({n: 60 for n in chk.CADENCES if n != "weekly_results"}, {}, {}))
     assert chk.main(["host"]) == 1
     assert "NEVER BEAT" in capsys.readouterr().out
 
 
 def test_all_fresh_passes(monkeypatch, capsys):
-    monkeypatch.setattr(chk, "read_ages", lambda _h: ({n: 60 for n in chk.CADENCES}, {}))
+    monkeypatch.setattr(chk, "read_ages", lambda _h: ({n: 60 for n in chk.CADENCES}, {}, {}))
     assert chk.main(["host"]) == 0
     assert "beating within budget" in capsys.readouterr().out
 
@@ -204,7 +204,7 @@ def test_the_watcher_reads_failed_tasks_as_well_as_missing_beats(monkeypatch):
     _fake_ssh(monkeypatch, module,
               "scores_refresh|600\nlines_snapshot|900\n"
               "failed|cfbd_scores_refresh.dbt_test|1200\n")
-    ages, failures = module.read_ages("host")
+    ages, failures, failed_tests = module.read_ages("host")
     assert ages == {"scores_refresh": 600, "lines_snapshot": 900}
     assert failures == {"cfbd_scores_refresh.dbt_test": 1200}
 
@@ -232,7 +232,7 @@ def test_an_older_forced_command_does_not_break_the_watcher(monkeypatch):
     monitor that crashes on output it does not recognise is a monitor that is off."""
     module = _watcher()
     _fake_ssh(monkeypatch, module, "\n".join(f"{n}|60" for n in module.CADENCES))
-    ages, failures = module.read_ages("host")
+    ages, failures, failed_tests = module.read_ages("host")
     assert failures == {} and len(ages) == len(module.CADENCES)
     assert module.main(["host"]) == 0
 
@@ -317,7 +317,7 @@ def test_the_watcher_and_the_forced_command_agree_on_the_failure_format(monkeypa
         returncode, stdout, stderr = 0, line + "\n", ""
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
-    _, failures = module.read_ages("host")
+    _, failures, _ = module.read_ages("host")
     assert failures == {"cfbd_scores_refresh.dbt_test": 8100}
 
 
@@ -350,7 +350,7 @@ def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none(m
 
     # R-633. monkeypatch, for the reason written at the other patch site in this file.
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
-    _, failures = module.read_ages("host")
+    _, failures, _ = module.read_ages("host")
     assert "MONITOR.cannot_read_airflow_metadata" in failures
 
 
@@ -449,3 +449,69 @@ def test_a_failure_outside_the_window_is_not_reported():
     assert _run_failure_sql([("old", "task", "failed", 400)]) == []
     assert _run_failure_sql([("recent", "task", "failed", 359)]) == \
         ["failed|recent.task|21540"]
+
+
+# === the ASSERTION, not just the task — R-698 ==============================================
+
+def test_the_watcher_parses_the_failed_test_line(monkeypatch):
+    """R-412 BUILT THIS PAYLOAD AND NOTHING EVER READ IT. R-698.
+
+    `cfdb_heartbeat.sh` has emitted `failed_test|<name>|<failures>|<age>` since R-412, whose
+    entire purpose was that an alert could name the ASSERTION rather than only the task —
+    `dbt_test` runs a selector, so the task name structurally cannot say what broke.
+
+    The watcher knew two shapes and not this one. `head` was `failed_test`, which is not
+    `failed`, so it fell through to the heartbeat branch, `int("assert_...|1|6583")` raised
+    ValueError, and the line was silently discarded.
+
+    MEASURED COST: on 2026-09-11 `assert_every_serving_row_names_its_team` began failing at
+    17:36 PDT and the scores publish stopped with it. The switch fired at 23:28 with four
+    error lines and not one named the test. A109 read it out of the warehouse by hand.
+    """
+    module = _watcher()
+    _fake_ssh(monkeypatch, module,
+              "scores_refresh|600\n"
+              "failed_test|assert_every_serving_row_names_its_team|1|6583\n")
+    ages, failures, failed_tests = module.read_ages("host")
+    assert ages == {"scores_refresh": 600}
+    assert failures == {}
+    assert failed_tests == {"assert_every_serving_row_names_its_team": (1, 6583)}
+
+
+def test_a_failed_assertion_fails_the_watcher_and_names_itself(monkeypatch, capsys):
+    """Every beat fresh and the publish dead — the exact shape of 2026-09-11 evening."""
+    module = _watcher()
+    fresh = "\n".join(f"{name}|60" for name in module.CADENCES)
+    _fake_ssh(monkeypatch, module,
+              fresh + "\nfailed_test|assert_every_serving_row_names_its_team|1|6583\n")
+    assert module.main(["host"]) == 1
+    printed = capsys.readouterr().out
+    assert "assert_every_serving_row_names_its_team" in printed, (
+        "the alert must name the assertion; naming the task is what R-412 set out to fix")
+    assert "1 row(s)" in printed, "how many rows failed is the difference between a typo and a gap"
+    assert "did not run" in printed, "it must say what the failure COST"
+
+
+def test_the_forced_command_and_the_watcher_agree_on_the_failed_test_shape():
+    """THE GUARD THAT WAS MISSING, AND ITS ABSENCE IS WHY THIS SURVIVED TO PRODUCTION.
+
+    `test_the_forced_command_reports_failures_in_the_shape_the_watcher_parses` already pins the
+    `failed|` contract — and stopped there. R-412 added a SECOND payload with a different
+    prefix and no test tied the two ends of it together, so the script emitted a line the
+    watcher threw away and everything looked green.
+
+    The script and the checker deploy separately — shell to the droplet by scp, checker on
+    GitHub — so the shapes can only be held together by a test.
+    """
+    from pathlib import Path as _Path
+    root = _Path(__file__).resolve().parents[1]
+    script = (root / "deploy" / "cfdb_heartbeat.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+    assert "'failed_test|'" in code, (
+        "the forced command no longer emits the per-test payload; the alert would go back to "
+        "naming only the task, which is what R-412 existed to fix")
+
+    watcher = (root / "ci" / "check_heartbeats.py").read_text()
+    assert '"failed_test"' in watcher, (
+        "the watcher does not parse the payload the script sends; this is exactly the gap "
+        "R-698 closed, and it cost a twelve-hour game-day publish outage")
