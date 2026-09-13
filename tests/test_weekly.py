@@ -215,25 +215,27 @@ def test_the_weekly_refresh_fans_plays_stats_out_per_game(monkeypatch):
         "the weekly refresh must fan /plays/stats out per game, scoped to the weeks in play")
 
 
-def test_metrics_wp_stays_out_of_the_weekly_refresh_and_box_advanced_is_in(monkeypatch):
-    """The two PER_GAME volume endpoints now sit on opposite sides of the weekly marker.
+def test_every_weekly_per_game_endpoint_fans_out_under_its_own_id_param(monkeypatch):
+    """🚨 THE ASSERTION THAT REPLACED "metrics/wp STAYS OUT", AND IT IS NOT A WEAKER ONE.
 
-    game/box/advanced joined the weekly refresh in R-697 — it carries the only per-game
-    participation share in the warehouse, and the backfill that fed it never asked about the
-    current season.
+    A108 wrote the old test to keep metrics/wp out of the weekly refresh. R-716 put it in, on a
+    measured request — so the old claim is simply no longer true, and the membership pin now lives
+    in test_the_weekly_per_game_set_is_exactly_these_three, where it belongs.
 
-    🚨 metrics/wp DID NOT, and that is the half worth guarding. It has no reader and no request
-    behind it, and taking it along would be exactly the "side effect of fixing something else"
-    the note in weekly.py was written to prevent. Measured on a two-week window, opting one in
-    took results_refresh from 139 requests to 239; opting both in would have been worse for
-    nothing.
+    ⚠️ WHAT IS WORTH GUARDING HERE INSTEAD IS THE PARAMETER NAME, because the three endpoints DO
+    NOT AGREE ON IT: /plays/stats and /metrics/wp take `gameId`, /game/box/advanced takes `id`.
+    A wrong key is not an error — the request goes out, CFBD ignores it, and the fan-out silently
+    asks about nothing. That is R-709's failure shape one layer down: a call that succeeds while
+    returning the wrong thing.
     """
     monkeypatch.setattr("src.backfill.completed_game_ids",
                         lambda season, weeks=None: ["111"])
     weeks = [{"year": "2026", "week": "2", "seasonType": "regular"}]
     requests = weekly._requests_for_bucket(BUCKET_IMMUTABLE_WK, "2026", weeks)
-    paths = {path for path, _ in requests}
 
-    assert "metrics/wp" not in paths
-    assert ("game/box/advanced", {"id": "111"}) in requests, (
-        "box/advanced must fan out per game, scoped to the weeks in play")
+    for path, id_param in (("plays/stats", "gameId"),
+                           ("game/box/advanced", "id"),
+                           ("metrics/wp", "gameId")):
+        assert (path, {id_param: "111"}) in requests, (
+            f"{path} must fan out per game under {id_param!r}; a wrong key asks CFBD about "
+            f"nothing and succeeds while doing it")

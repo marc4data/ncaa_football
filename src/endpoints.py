@@ -264,8 +264,17 @@ REGISTRY: List[Endpoint] = [
     Endpoint("game/box/advanced", PER_GAME, BUCKET_IMMUTABLE_WK, include=False,
              extra={"id_param": "id", "weekly_per_game": True},
              note="one call per game; weekly for player usage (R-697)"),
+    # R-716. OPTED INTO THE WEEKLY REFRESH, and A108 left it out on purpose one round earlier —
+    # "it has no reader, no request behind it". THAT CHANGED: Marc asked for lead changes and win
+    # probability swings to rank his games (R-709), and A114 measured that every measure he named
+    # was NULL for all seven, because the 2026-09-01 backfill asked about 2024 and 2025 and never
+    # about 2026 — zero requests, measured.
+    #
+    # A115 asked the endpoint directly for one of his games and it answered 200 with 151 plays, so
+    # the gap was ours. The request behind it now exists and the reader is Today's ranking.
     Endpoint("metrics/wp", PER_GAME, BUCKET_IMMUTABLE_WK, include=False,
-             extra={"id_param": "gameId"}, note="in-game win probability, one call per game"),
+             extra={"id_param": "gameId", "weekly_per_game": True},
+             note="in-game win probability; weekly for lead changes and WP swings (R-716)"),
 
     # ---- Needs an argument a sweep can't invent ------------------------------------
     Endpoint("player/search", MANUAL, BUCKET_REFERENCE, include=False, note="requires searchTerm"),
