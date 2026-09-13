@@ -12,6 +12,7 @@ the copy cannot drift from what the model actually did.
 """
 import html
 import re
+from collections import namedtuple
 
 import altair as alt
 import pandas as pd
@@ -1802,7 +1803,8 @@ def _game_team_rows(game_id: int) -> dict:
     return {int(r["team_id"]): r for _, r in df.iterrows()}
 
 
-def _yardage_column(team, opponent, distribution, deltas=None, leaders=None) -> None:
+def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
+                    usage=None) -> None:
     """One side of the comparison: the text rows, then a chart per metric with its cards BESIDE.
 
     🚨 R-731, AND THE LAYOUT IS A MIRROR. Marc: *"There should be a round for B to get the
@@ -1841,8 +1843,9 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None) -> 
         chart = _scatter(team, opponent, for_column, allowed_column, distribution,
                          team_name, opponent_name, label)
         # R-687. The names go OUTSIDE the chart; R-731 puts them BESIDE it rather than below.
-        cards = _leader_block((leaders or {}).get(
-            (int(team["team_id"]), _LEADER_PANELS[label]), []))
+        panel_key = (int(team["team_id"]), _LEADER_PANELS[label])
+        cards = _leader_block((leaders or {}).get(panel_key, []),
+                              (usage or {}).get(panel_key))
         for slot, column in zip(order, st.columns(widths)):
             if slot == "chart":
                 if chart is not None:
@@ -1869,8 +1872,10 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None) -> 
 # have meant widening a guard to fit code it was never about. Moving the code was free.
 _LEADER_COLUMNS = """
     team_id, panel, leader_metric, leader_rank, tied_players, qualified_players,
-    player_name, player_slug, yards_through_prior_week, jersey, position,
-    class_year_display
+    player_id, player_name, player_slug, jersey, position, class_year_display,
+    stat_1_label, stat_1_value, stat_1_value_secondary, stat_1_format,
+    stat_2_label, stat_2_value, stat_2_value_secondary, stat_2_format,
+    stat_3_label, stat_3_value, stat_3_value_secondary, stat_3_format
 """
 
 # 🚨 PASSING SHOWS RECEIVERS, AND THAT IS MARC'S PAIRING CARRIED AS DATA. The view's
@@ -1892,14 +1897,52 @@ _SLOT_WIDTHS = {"cards": 1.0, "chart": 1.2}
 # because the grid below is sized by `_CARD_KPI_SLOTS` rather than by how many there are.
 _CARD_KPI_SLOTS = 3
 
-# (label, column, decimal places). ⚠️ THE LABEL IS OURS RATHER THAN READ, and the reason is
-# that `leader_metric` names the measure the view RANKED on, which is not the same thing as a
-# KPI's name — the other two slots will be different stats on the same player.
+# 🚨 R-733. THE LABELS ARE DATA NOW, AND B098 SAID WHY IT HAD TO CHANGE. That round shipped
+# `_CARD_KPIS` — a static tuple of (label, column) — which was the right shape for ONE measure
+# whose name the view did not carry. A116 then shipped three per row, and their names vary by
+# panel:
 #
-# ⚠️ "SO FAR" IS NOT DECORATION. The charts beside these cards are PER GAME and this figure is
-# cumulative through the prior week, so a label reading "Yards" beside them would invite the
-# reader to compare two different measurements.
-_CARD_KPIS = (("Yards so far", "yards_through_prior_week", 0),)
+#     passing   Receptions · Yards · TD
+#     rushing   Carries · Yards · Yds/Carry
+#     total     Comp-Att · Yards · TD
+#
+# ⚠️ A STATIC TUPLE BESIDE PER-ROW LABELS IS THE R-574 DRIFT A116 CHOSE THE VIEW TO AVOID, and
+# the trio is explicitly still moving. So the tuple is gone and the label is read.
+#
+# ⚠️ `yards_through_prior_week` LEFT THE SELECT LIST WITH IT. It was that tuple's only reader and
+# `stat_2_value` is the same number; a column selected for a reader that no longer exists is
+# the drift this note is about, one layer down.
+
+# The renderings the view names, parsed from its own source by the test rather than trusted
+# here — see `test_the_page_knows_every_FORMAT_the_view_can_emit`.
+_KPI_INTEGER = "integer"
+_KPI_DECIMAL_1 = "decimal_1"
+_KPI_PAIR = "pair"
+
+
+def _kpi_value(value, secondary, format_name: str):
+    """One KPI's number, rendered the way the VIEW says — or `None` if it does not say.
+
+    ⚠️ `pair` COMPOSES `51-75` FROM TWO COLUMNS AND THAT IS FORMATTING, NOT ARITHMETIC (§4.2).
+    A116 shipped two numbers rather than a finished string precisely so the page does the
+    display and the warehouse does the measuring; joining them with a hyphen creates no new
+    quantity, which is the line `players.py:202` crossed and R-611 spent two rounds removing.
+
+    🚨 AN UNKNOWN FORMAT DRAWS NOTHING RATHER THAN SOMETHING PLAUSIBLE. A fourth rendering
+    arriving from a later A round is a LAYOUT decision, and guessing at it — printing the raw
+    float, or falling back to `integer` — would put a number on the card that nobody designed
+    and that a reader cannot tell from a designed one.
+    ⚠️ Drawing nothing is the safe half; the LOUD half is a test that reads the model's own
+    source for its format literals, so a fourth one fails in CI on the commit that adds it
+    rather than going quiet on the page.
+    """
+    if format_name == _KPI_INTEGER:
+        return fmt.number(value, "", dp=0)
+    if format_name == _KPI_DECIMAL_1:
+        return fmt.number(value, "", dp=1)
+    if format_name == _KPI_PAIR:
+        return f"{fmt.number(value, '', dp=0)}-{fmt.number(secondary, '', dp=0)}"
+    return None
 
 
 def _is_home_side(deltas) -> bool:
@@ -1960,7 +2003,118 @@ def _game_leaders(game_id: int) -> dict:
     return out
 
 
-def _leader_card(row) -> str:
+# ⚠️ NAMED FIELDS RATHER THAN A DICT, AND `ci/check_page_reads.py` IS THE REASON. That guard
+# reads `something.get("name")` as a COLUMN read and asks which query selects it; `timeline` is
+# a key this page builds, not a column, so the dict form made a real guard report a false
+# positive. The guard has a `PROVIDED_BY_THE_PAGE` escape hatch and using it would have meant
+# editing session A's file to describe session B's data structure — so the structure changed
+# instead. It reads better too: the shape is now stated once, here.
+_Usage = namedtuple("_Usage", "timeline players")
+
+_USAGE_COLUMNS = """
+    team_id, panel, player_id, usage_game_id,
+    usage_season_type_ordinal, usage_week,
+    usage_total, usage_total_max_in_window, usage_games_in_window
+"""
+
+
+def _game_usage(game_id: int) -> dict:
+    """Marc's game dots, read as ONE frame for the whole panel (R-694).
+
+    **Marc, 2026-09-12:** *"a small block of circles that run horizontal under the player. One
+    circle for each game the team played and fill it if the player played the game, or to the
+    proportion of the game the player played."*
+
+    ⚠️ ONE QUERY FOR SIX CARDS' WORTH OF DOTS, not one per card. `_yardage` already reads four
+    relations; a per-card read would be eighteen on a busy game.
+
+    🚨 THE ORDER IS (season_type_ordinal, week) AND NEVER week ALONE. Postseason weeks restart
+    at 1, so a bowl game sorts into October on the second key by itself. Sorted HERE rather than
+    in SQL for the reason B091 gave about `leader_rank`: putting rows in the order a column
+    already states is presenting that column's answer, not deriving one — and it is testable
+    without a database, which an `order by` is not.
+
+    ⚠️ THE TIMELINE IS THE TEAM's, THE FILLS ARE THE PLAYER's. Marc asked for one circle per
+    game the TEAM played, so the timeline is the union of the games any of that side's leaders
+    appear in; a player missing from one of them gets an empty circle rather than a shorter row.
+    """
+    df = query(f"""
+        select {_USAGE_COLUMNS}
+        from srv_game_team_leader_usage
+        where game_id = :game_id
+        limit 900
+    """, {"game_id": game_id})
+    rows = [r for _, r in df.iterrows()]
+    rows.sort(key=lambda r: (int(r["usage_season_type_ordinal"]), int(r["usage_week"]),
+                             int(r["usage_game_id"])))
+    out = {}
+    for r in rows:
+        entry = out.setdefault((int(r["team_id"]), str(r["panel"])), _Usage([], {}))
+        earlier = int(r["usage_game_id"])
+        if earlier not in entry.timeline:
+            entry.timeline.append(earlier)
+        entry.players.setdefault(str(r["player_id"]), {})[earlier] = r
+    return out
+
+
+_DOT = 9
+
+
+def _usage_dots(entry, player_id) -> str:
+    """One circle per game the team played, filled to this player's share of his own maximum.
+
+    🚨 THE FILL IS RELATIVE TO THE PLAYER'S OWN MAXIMUM, AND THE REASON IS MEASURED. Usage is
+    strongly positional — medians QB 0.551, RB 0.134, WR 0.058, TE 0.041 — so a circle filled
+    against a flat 0–1 scale leaves every receiver about 6% full. ⚠️ That is visually empty, and
+    INDISTINGUISHABLE FROM "did not play", which is the one thing these circles exist to show.
+    A107 proved it on Sedrick Alexander: 0.229 absolute is a nearly-empty circle and 93%
+    against his own maximum.
+
+    ✅ THE DENOMINATOR IS READ, NOT DERIVED. `usage_total_max_in_window` is a published column
+    precisely so the page never takes a maximum over rows — that window function is the thing
+    CLAUDE.md puts upstream, and computing it here would be the defect this design prevents.
+    Scaling one published number by another published one to size a shape is rendering.
+
+    ⚠️ AC-G.22 — THE FILL IS A SHAPE, NOT A COLOUR. Every circle uses one ink; only the filled
+    HEIGHT carries the meaning, so the row reads identically in greyscale and to a colour-blind
+    reader. B091's delta chips made the sign carry it and the colour only agree; this carries it
+    in geometry and uses no second colour at all.
+    """
+    timeline = entry.timeline
+    played = entry.players.get(str(player_id)) or {}
+    dots = []
+    for earlier in timeline:
+        row = played.get(earlier)
+        if row is None:
+            # ⚠️ THE FIRST OF THE TWO ABSENCES: the team played, this player has no row for it.
+            dots.append(
+                f"<span title='Did not appear' style='width:{_DOT}px;height:{_DOT}px;"
+                f"border-radius:50%;border:1px solid currentColor;opacity:.35;"
+                f"display:inline-block'></span>")
+            continue
+        share = row.get("usage_total")
+        ceiling = row.get("usage_total_max_in_window")
+        window = int(row.get("usage_games_in_window") or 0)
+        try:
+            fill = max(0.0, min(1.0, float(share) / float(ceiling))) if ceiling else 0.0
+        except (TypeError, ValueError, ZeroDivisionError):
+            fill = 0.0
+        # ⚠️ THE SECOND ABSENCE IS A CAVEAT RATHER THAN A GAP, AND THE HOVER CARRIES IT. With one
+        # observation the maximum IS that game, so the circle is full by construction and means
+        # "we have seen him once" rather than "fully involved" — B085's single-snapshot shape.
+        note = (" · only 1 game observed, so this is his own maximum by construction"
+                if window == 1 else f" · {window} games observed")
+        dots.append(
+            f"<span title='{float(share):.1%} of the team{note}' "
+            f"style='width:{_DOT}px;height:{_DOT}px;border-radius:50%;"
+            f"border:1px solid currentColor;display:inline-block;"
+            f"background:linear-gradient(to top, currentColor {fill:.0%}, "
+            f"transparent {fill:.0%})'></span>")
+    return (f"<div style='display:flex;gap:3px;align-items:center;margin-top:.3rem;"
+            f"flex-wrap:wrap'>{''.join(dots)}</div>")
+
+
+def _leader_card(row, usage=None) -> str:
     """One player: name, jersey, position, class, and his yards so far.
 
     ⚠️ AC-G.32 ON THE JERSEY. 0 of 8,447 non-FBS leader rows carry one, because the roster
@@ -1986,24 +2140,55 @@ def _leader_card(row) -> str:
         if value:
             top.append(f"<span style='opacity:.5'>{html.escape(str(value))}</span>")
     # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
-    # AC-G.32 puts a dash where a value is missing; here the MEASURE is missing, which is a
-    # different statement (AC-G.11). Two dashes would tell a reader we hold no figure for this
-    # player when the truth is that nobody has defined the stat yet — and the grid keeps the
-    # shape visible without saying anything untrue.
-    cells = [f"<div><div style='font-size:.6rem;letter-spacing:.03em;text-transform:uppercase;"
-             f"opacity:.5;white-space:nowrap'>{label}</div>"
-             f"<div style='font-size:.92rem;font-weight:600'>"
-             f"{fmt.number(row.get(column), '', dp=dp)}</div></div>"
-             for label, column, dp in _CARD_KPIS]
+    # AC-G.32 puts a dash where a VALUE is missing; a slot with no label is a MEASURE that does
+    # not exist, which is a different statement (AC-G.11). B098 argued this when two of three
+    # were empty; it still holds for a slot the view leaves unnamed.
+    cells = []
+    for slot in range(1, _CARD_KPI_SLOTS + 1):
+        label = row.get(f"stat_{slot}_label")
+        if label is None or (not isinstance(label, str) and pd.isna(label)) or not str(label):
+            continue
+        shown = _kpi_value(row.get(f"stat_{slot}_value"),
+                           row.get(f"stat_{slot}_value_secondary"),
+                           str(row.get(f"stat_{slot}_format") or ""))
+        if shown is None:
+            continue
+        cells.append(
+            f"<div><div style='font-size:.6rem;letter-spacing:.03em;text-transform:uppercase;"
+            f"opacity:.5;white-space:nowrap'>{html.escape(str(label))}</div>"
+            f"<div style='font-size:.92rem;font-weight:600'>{shown}</div></div>")
     return (f"<div style='border:1px solid rgba(128,128,128,.22);border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem'>"
             f"<div style='display:flex;align-items:baseline;gap:.35rem;font-size:.78rem;"
             f"white-space:nowrap;overflow:hidden'>{''.join(top)}</div>"
             f"<div style='display:grid;grid-template-columns:repeat({_CARD_KPI_SLOTS},1fr);"
-            f"gap:.3rem;margin-top:.25rem'>{''.join(cells)}</div></div>")
+            f"gap:.3rem;margin-top:.25rem'>{''.join(cells)}</div>"
+            f"{_card_dots(row, usage)}</div>")
 
 
-def _leader_block(rows) -> str:
+def _card_dots(row, usage) -> str:
+    """The dots under one player — or the absence, and they are DIFFERENT absences (AC-G.11).
+
+    🚨 NO USAGE ROWS AT ALL IS NOT "PLAYED NO GAMES", AND THE DATA PROVES IT. On 401856679 Ben
+    McCreary is Oklahoma's SECOND-ranked rusher through the prior week — he has yards, so he
+    played — and `srv_game_team_leader_usage` holds not one row for him. Drawing his team's
+    games as a row of empty circles would say he appeared in none of them, which is false.
+    ⚠️ So a player we hold nothing for gets a sentence, and a player we hold SOMETHING for gets
+    the full timeline with empty circles where he is missing.
+
+    ⚠️ 2026 COVERAGE IS STILL PARTIAL — A113 measured 12,955 rows over 1,162 games and A115
+    found every per-game endpoint under-fetching the newest week (R-718). So this absence is
+    common right now rather than exotic, which is exactly why it gets its own words.
+    """
+    if usage is None or not usage.timeline:
+        return ""
+    if not (usage.players.get(str(row.get("player_id"))) or {}):
+        return ("<div style='font-size:.62rem;opacity:.45;margin-top:.3rem'>"
+                "No game-by-game usage held for this player.</div>")
+    return _usage_dots(usage, row.get("player_id"))
+
+
+def _leader_block(rows, usage=None) -> str:
     """The three names under one chart — or an honest absence.
 
     ⚠️ FOUR STATES A106 MEASURED, AND EACH IS A DIFFERENT SENTENCE:
@@ -2017,7 +2202,7 @@ def _leader_block(rows) -> str:
     if not rows:
         return ("<div style='font-size:.75rem;opacity:.5;padding:.15rem 0'>"
                 "No yards recorded before this week.</div>")
-    return "".join(_leader_card(r) for r in rows)
+    return "".join(_leader_card(r, usage) for r in rows)
 
 
 def _yardage(row) -> None:
@@ -2141,6 +2326,8 @@ def _yardage(row) -> None:
         deltas = _game_team_rows(int(row["game_id"]))
         # R-687. One read, both sides, all three panels.
         leaders = _game_leaders(int(row["game_id"]))
+        # R-694. Marc's game dots, and the same rule: ONE read for six cards' worth.
+        usage = _game_usage(int(row["game_id"]))
 
         # ⚠️ R-522 / spec §0: AWAY ON THE LEFT, HOME ON THE RIGHT. Marc made it a page law
         # rather than this panel's choice — "Data about Away team will be on the left. Same
@@ -2150,10 +2337,10 @@ def _yardage(row) -> None:
         left, right = st.columns(2)
         with left:
             _yardage_column(away, home, distribution,
-                            deltas.get(int(away_id)), leaders)
+                            deltas.get(int(away_id)), leaders, usage)
         with right:
             _yardage_column(home, away, distribution,
-                            deltas.get(int(home_id)), leaders)
+                            deltas.get(int(home_id)), leaders, usage)
 
         # AC-G.33. The denominator is not decoration and it is named for each side
         # separately, because a bye or a missing box score makes the two differ.

@@ -115,6 +115,45 @@ def _deltas(**overrides):
     return rows
 
 
+# The label/format trio each panel carries, measured live from
+# `srv_game_team_leader_through_prior_week` on 2026-09-13. ⚠️ THE FORMATS ARE THE VIEW'S OWN
+# WORDS — `integer`, `decimal_1`, `pair` — and a test below reads them out of the model source
+# rather than trusting this copy.
+_PANEL_STATS = {
+    "rushing": (("Carries", "integer"), ("Yards", "integer"), ("Yds/Carry", "decimal_1")),
+    "passing": (("Receptions", "integer"), ("Yards", "integer"), ("TD", "integer")),
+    "total": (("Comp-Att", "pair"), ("Yards", "integer"), ("TD", "integer")),
+}
+
+
+def _usage(players=None, games=3, window=None, skip=()):
+    """R-694's game dots: one row per (team, panel, player, EARLIER game).
+
+    ⚠️ BUILT FROM THE LEADERS SO THE TWO FRAMES AGREE ON `player_id`, which is the key the card
+    joins them on. `skip` drops a player from the usage frame entirely — the "we hold nothing
+    for him" absence that Ben McCreary is on the live game.
+    """
+    rows = []
+    for leader in (players if players is not None else _leaders()):
+        if leader["player_id"] in skip:
+            continue
+        observed = window if window is not None else games
+        for index in range(games):
+            if index >= observed:
+                continue
+            rows.append({
+                "team_id": leader["team_id"], "panel": leader["panel"],
+                "player_id": leader["player_id"],
+                "usage_game_id": 900 + index,
+                # ⚠️ THE REGULAR SEASON IS ORDINAL 1; the postseason row below is 2, and a sort
+                # on `usage_week` alone would put it first because bowl weeks restart at 1.
+                "usage_season_type_ordinal": 1, "usage_week": index + 1,
+                "usage_total": 0.10 + 0.05 * index,
+                "usage_total_max_in_window": 0.10 + 0.05 * (observed - 1),
+                "usage_games_in_window": observed})
+    return rows
+
+
 def _leaders(**overrides):
     """R-687's leaders through the prior week, measured from 401856679 on 2026-09-12.
 
@@ -139,12 +178,25 @@ def _leaders(**overrides):
          [("Bryce Underwood", 217, 19, "QB", "SO")]),
     ):
         for rank, (name, yards, jersey, position, year) in enumerate(names, start=1):
+            # 🚨 R-733: THE THREE KPIs COME OFF THE ROW NOW, and their LABELS vary by panel —
+            # A116's shape, measured live. `yards` stays in slot 2 because that is where the
+            # view puts it, so every assertion written against the old single KPI still means
+            # the same thing.
+            (l1, f1), (l2, f2), (l3, f3) = _PANEL_STATS[panel]
             rows.append({
                 "team_id": team_id, "panel": panel, "leader_metric": metric,
                 "leader_rank": rank, "tied_players": 1, "qualified_players": len(names),
+                "player_id": f"p{team_id}{rank}{panel[:2]}",
                 "player_name": name, "player_slug": name.lower().replace(" ", "-"),
-                "yards_through_prior_week": float(yards), "jersey": jersey,
-                "position": position, "class_year_display": year})
+                "jersey": jersey, "position": position, "class_year_display": year,
+                "stat_1_label": l1, "stat_1_format": f1,
+                "stat_1_value": 51.0 if f1 == "pair" else 9.0,
+                "stat_1_value_secondary": 75.0 if f1 == "pair" else None,
+                "stat_2_label": l2, "stat_2_format": f2,
+                "stat_2_value": float(yards), "stat_2_value_secondary": None,
+                "stat_3_label": l3, "stat_3_format": f3,
+                "stat_3_value": 5.2 if f3 == "decimal_1" else 2.0,
+                "stat_3_value_secondary": None})
     for row in rows:
         row.update(overrides)
     return rows
@@ -188,7 +240,7 @@ def panel(request):
         seen = {}
 
         def run(game, sides, distribution=_DISTRIBUTION, deltas=None,
-                leaders=None, allow_error_state=allow_error_state):
+                leaders=None, usage=None, allow_error_state=allow_error_state):
             """`sides` is what srv_team_week returns — zero, one or two constructed rows.
 
             ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
@@ -208,6 +260,13 @@ def panel(request):
                 # ⚠️ R-686 MADE THIS PANEL READ A THIRD RELATION, and the stub dispatches on the
                 # SQL rather than answering everything with the same frame. `srv_game_team` is
                 # game × team grain; the figures beside it are week grain on `srv_team_week`.
+                # 🚨 R-694 DISPATCHES FIRST AND THE ORDER IS NOT COSMETIC.
+                # "srv_game_team_leader_usage" CONTAINS "srv_game_team", so a later branch
+                # would answer the dots query with the DELTAS frame — which is how this stub
+                # first reported the panel as raising rather than as mis-stubbed.
+                if "srv_game_team_leader_usage" in sql:
+                    seen["usage_sql"], seen["usage_params"] = sql, params or {}
+                    return pd.DataFrame(usage if usage is not None else _usage())
                 if "srv_game_team_leader_through_prior_week" in sql:
                     seen["leader_sql"] = sql
                     return pd.DataFrame(leaders if leaders is not None else _leaders())
@@ -1314,6 +1373,12 @@ def test_the_leaders_are_drawn_in_RANK_ORDER(panel):
 # ✅ SO THE ASSERTIONS ARE POSITIONAL, PER SIDE, AND OPPOSITE — neither is satisfied by the
 # other, and the staged break turns exactly ONE of them red.
 
+# ⚠️ THE CARD'S OWN KPI GRID, USED AS THE MARKER SINCE R-733. It used to be the literal
+# "Yards so far", and that stopped working the moment the labels became DATA — which is the
+# point of the round. The grid is structural: every card has one and nothing else does.
+_CARD_GRID = "repeat(3,1fr)"
+
+
 def _slots(entries):
     """The order of card blocks and charts inside each side's column, in emission order.
 
@@ -1332,7 +1397,7 @@ def _slots(entries):
         for kind, body in entries[lo + 1:hi]:
             if kind == "chart":
                 sequence.append("chart")
-            elif kind == "markdown" and ("Yards so far" in str(body)
+            elif kind == "markdown" and (_CARD_GRID in str(body)
                                          or "No yards recorded" in str(body)):
                 sequence.append("cards")
         out.append(sequence)
@@ -1432,7 +1497,7 @@ def test_the_KPI_row_puts_the_MEASURE_NAME_ABOVE_the_number(panel):
     below the number contains exactly the same two strings.
     """
     card = _lone_card(panel(_game(), _both(), deltas=_deltas())[0])
-    assert card.index("Yards so far") < card.index("217"), \
+    assert card.index("Yards") < card.index("217"), \
         "the measure name must sit ABOVE its number, not below it"
 
 
@@ -1443,9 +1508,11 @@ def test_the_KPI_ROW_IS_BUILT_FOR_THREE_even_though_one_is_filled(panel):
     card = _lone_card(panel(_game(), _both(), deltas=_deltas())[0])
     assert slots == 3, "Marc asked for three KPI slots"
     assert f"repeat({slots},1fr)" in card, "the KPI row is not a grid built for three slots"
-    assert len(_module_constant("_CARD_KPIS")) <= slots, (
-        "more KPIs than slots — adding a fourth measure is a layout decision, not a constant "
-        "change, and this is where it has to be made deliberately")
+    # ✅ R-733: THE GRID B098 BUILT FOR THREE IS NOW FILLED WITH THREE, and they came off the
+    # row rather than out of a constant. The `total` panel's trio, measured live.
+    for label in ("Comp-Att", "Yards", "TD"):
+        assert label in card, f"the card is missing the {label!r} slot"
+    assert "51-75" in card, "the `pair` format did not compose its two columns"
 
 
 def test_an_UNFILLED_slot_is_NOT_an_em_dash(panel):
@@ -1456,10 +1523,14 @@ def test_an_UNFILLED_slot_is_NOT_an_em_dash(panel):
     the truth is nobody has defined the stat. So only the filled slots are drawn, and the grid
     keeps the shape visible without saying anything untrue.
     """
-    card = _lone_card(panel(_game(), _both(), deltas=_deltas())[0])
-    assert card.count("Yards so far") == len(_module_constant("_CARD_KPIS")) == 1
+    # A view that names only two measures for this panel must draw two cells, not three with
+    # a dash in the third.
+    rows = [dict(r, stat_3_label=None, stat_3_value=None) for r in _leaders()]
+    card = _lone_card(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0])
+    assert "TD" not in card, "an unnamed slot drew a label anyway"
     # This player HAS a jersey, so a dash anywhere on his card would be an invented absence.
     assert "—" not in card, f"an unfilled KPI slot rendered an em dash: {card}"
+    assert "Yards" in card, "the slots that ARE named must still draw"
 
 
 def test_the_JERSEY_em_dash_SURVIVES_the_card_rewrite(panel):
@@ -1481,3 +1552,226 @@ def test_the_TIE_BADGE_SURVIVES_the_card_rewrite(panel):
     text = _text(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0])
     assert "T-2nd" in text, "the tie badge did not survive"
     assert "T-1st" not in text, "an untied leader was labelled as tied"
+
+
+# --- 🚨 R-733: the labels are DATA, and the page must not guess at a format it does not know
+
+_MODEL = (Path(__file__).resolve().parents[1] / "dbt" / "models" / "serving"
+          / "srv_game_team_leader_through_prior_week.sql")
+
+
+def test_the_page_knows_every_FORMAT_the_view_can_emit():
+    """🚨 THE LOUD HALF OF "AN UNKNOWN FORMAT DRAWS NOTHING".
+
+    `_kpi_value` returns None for a rendering it does not recognise, so a fourth format would
+    quietly delete a KPI from every card rather than printing a number nobody designed. That is
+    the right behaviour ON THE PAGE and a terrible way to find out, so the formats are read out
+    of the MODEL'S OWN SOURCE and checked against the page here — the shape
+    `ci/check_health_signals.py` uses for the same reason, and the one A110 named as the model.
+
+    ⚠️ A fourth format then fails in CI on the commit that adds it, which is the only moment it
+    is cheap to design a rendering for.
+    """
+    assert _MODEL.exists(), f"{_MODEL.name} moved — this guard is pinned to it by name"
+    # ⚠️ SCOPED TO THE EXPRESSION THAT PRODUCES EACH COLUMN, not to the whole file. A global
+    # `then '...'` sweep would read a future CASE for an unrelated column as a format and fail
+    # this test for a reason that has nothing to do with the card.
+    text = _MODEL.read_text()
+    declared = set()
+    for match in re.finditer(r"as stat_\d_format", text):
+        window = text[max(0, match.start() - 250):match.start()]
+        declared |= set(re.findall(r"(?:then|else)\s+'([a-z_0-9]+)'", window))
+        declared |= set(re.findall(r"'([a-z_0-9]+)'\s*$", window.rstrip()))
+    assert declared, "no format literals found in the model — the parse has gone blind"
+    assert len(declared) >= 3, f"the parse found only {sorted(declared)} — it has gone partly blind"
+    known = {_module_constant(n) for n in ("_KPI_INTEGER", "_KPI_DECIMAL_1", "_KPI_PAIR")}
+    assert declared <= known, (
+        f"the view emits {sorted(declared - known)} and matchup.py has no rendering for it, so "
+        f"that KPI would silently vanish from every card. Adding a format is a LAYOUT decision "
+        f"— design the cell, do not widen this assertion.")
+
+
+def test_an_UNKNOWN_format_draws_NOTHING_rather_than_something_plausible(panel):
+    """⚠️ NOT a raw float, and not a fallback to `integer`. A number nobody designed is
+    indistinguishable on the card from one somebody did."""
+    rows = [dict(r, stat_3_label="Mystery", stat_3_format="furlongs", stat_3_value=7.0)
+            for r in _leaders()]
+    card = _lone_card(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0])
+    assert "Mystery" not in card, "an unknown format drew its label"
+    # ⚠️ COUNTED, NOT SEARCHED FOR THE DIGIT. "7" appears inside `51-75`, `217` and `9px`, so a
+    # substring test here passes or fails for reasons that have nothing to do with the slot.
+    assert card.count("text-transform:uppercase") == 2, (
+        "the unknown format left a third cell on the card rather than drawing nothing")
+
+
+def test_the_PAIR_format_composes_two_columns_and_invents_no_number(panel):
+    """⚠️ FORMATTING, NOT ARITHMETIC (§4.2). A116 shipped `51` and `75` rather than the string
+    so the page joins them; joining creates no quantity, which is the line `players.py:202`
+    crossed and R-611 removed."""
+    card = _lone_card(panel(_game(), _both(), deltas=_deltas())[0])
+    assert "51-75" in card
+    # 51/75 would be 0.68 — the composed pair must not have become a ratio anywhere.
+    assert "0.68" not in card and "68%" not in card
+
+
+# --- 🚨 R-694: Marc's game dots ------------------------------------------------------------
+
+def _dots(entries, name):
+    """The dot row for one player, as (title, fill-percentage) pairs in drawn order."""
+    block = next(str(b) for k, b in entries if k == "markdown" and name in str(b))
+    card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
+                if name in piece)
+    out = []
+    for span in re.findall(r"<span title='([^']*)'[^>]*>", card):
+        out.append(span)
+    fills = re.findall(r"currentColor (\d+)%", card)
+    return out, fills
+
+
+def test_one_circle_per_game_the_TEAM_played_not_per_game_the_PLAYER_played(panel):
+    """🚨 MARC'S WORDS: "One circle for each game the team played and fill it if the player
+    played the game". A player missing a game gets an EMPTY circle, not a shorter row — a row
+    that shrinks says nothing about what he missed.
+    """
+    leaders = _leaders()
+    thin = [r for r in _usage() if not (r["player_id"] == leaders[1]["player_id"]
+                                        and r["usage_game_id"] == 901)]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=leaders, usage=thin)
+    full, _fills = _dots(entries, leaders[0]["player_name"])
+    partial, _f = _dots(entries, leaders[1]["player_name"])
+    assert len(full) == len(partial) == 3, (
+        f"the two rows are different lengths — {len(full)} vs {len(partial)} — so the timeline "
+        f"is the PLAYER's rather than the TEAM's")
+    assert any("Did not appear" in t for t in partial), \
+        "the missed game did not draw the empty-circle absence"
+    assert not any("Did not appear" in t for t in full)
+
+
+def test_the_FILL_is_relative_to_the_players_OWN_MAXIMUM(panel):
+    """🚨 THE DESIGN, AND IT IS MEASURED. Usage is positional — medians QB 0.551, RB 0.134,
+    WR 0.058, TE 0.041 — so a circle filled against a flat 0–1 scale leaves every receiver
+    about 6% full, which is visually EMPTY and indistinguishable from "did not play".
+
+    A107 proved it on Sedrick Alexander: 0.229 absolute, 93% of his own maximum.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=_leaders(), usage=_usage())
+    _titles, fills = _dots(entries, _leaders()[0]["player_name"])
+    assert fills, "no fill was drawn at all"
+    assert fills[-1] == "100", (
+        f"the player's best game is not full, so the fill is not relative to his own maximum: "
+        f"{fills}")
+    assert fills[0] != "100" and int(fills[0]) > 0, (
+        f"an earlier, smaller game should be partly filled: {fills}")
+
+
+def test_the_absolute_share_is_in_the_HOVER_because_the_fill_is_relative(panel):
+    """⚠️ THE RELATIVE FILL IS THE ONLY READABLE ONE AND IT IS ALSO A CLAIM THE READER CANNOT
+    CHECK. `usage_total` — the share of the actual team — is carried in the title so the
+    absolute number is never lost, only moved."""
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=_leaders(), usage=_usage())
+    titles, _f = _dots(entries, _leaders()[0]["player_name"])
+    assert any("%" in t and "of the team" in t for t in titles), \
+        f"the absolute share is not in the hover: {titles}"
+
+
+def test_a_SINGLE_OBSERVATION_says_so_rather_than_reading_as_fully_involved(panel):
+    """🚨 THE SECOND ABSENCE, AND IT IS A CAVEAT RATHER THAN A GAP (AC-G.11).
+
+    With one observation the maximum IS that game, so the circle is full BY CONSTRUCTION. Full
+    means "we have seen him once", not "he was fully involved" — B085's single-snapshot shape.
+
+    ⚠️ IT IS NOT RARE RIGHT NOW: measured on 401856679, EVERY leader on the game has
+    `usage_games_in_window = 1`, because it is week 2 and one earlier game exists. Drawing no
+    fill at all on a single observation — the other option — would have shown that whole game
+    as empty circles, which reads as "nobody played".
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=_leaders(),
+                       usage=_usage(games=1, window=1))
+    titles, fills = _dots(entries, _leaders()[0]["player_name"])
+    assert fills == ["100"], f"a single observation should still show he played: {fills}"
+    assert any("only 1 game observed" in t for t in titles), (
+        f"a full circle drawn from ONE observation must say so, or it reads as fully "
+        f"involved: {titles}")
+
+
+def test_NO_usage_rows_at_all_is_a_SENTENCE_not_a_row_of_empty_circles(panel):
+    """🚨 THE TWO ABSENCES ARE DIFFERENT AND THE DATA PROVES IT (AC-G.11).
+
+    On 401856679 Ben McCreary is Oklahoma's SECOND-ranked rusher through the prior week — he
+    has yards, so he played — and `srv_game_team_leader_usage` holds NOT ONE ROW for him.
+    Drawing his team's games as empty circles would say he appeared in none of them, which is
+    false: we simply hold no usage for him.
+
+    ⚠️ 2026 coverage is partial (R-718), so this is common rather than exotic.
+    """
+    leaders = _leaders()
+    missing = leaders[1]["player_id"]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=leaders,
+                       usage=_usage(skip=(missing,)))
+    block = next(str(b) for k, b in entries
+                 if k == "markdown" and leaders[1]["player_name"] in str(b))
+    card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
+                if leaders[1]["player_name"] in piece)
+    assert "No game-by-game usage held" in card, (
+        "a player we hold nothing for drew circles instead of saying so")
+    assert "Did not appear" not in card, (
+        "we told the reader he missed games we cannot actually say he missed")
+
+
+def test_the_dots_are_ordered_by_SEASON_TYPE_then_week_never_week_alone(panel):
+    """🚨 POSTSEASON WEEKS RESTART AT 1, so a bowl game sorts into October on `usage_week`
+    alone. The ordinal is the first key and this is the assertion that says so.
+
+    ⚠️ The rows are handed to the panel in the WRONG order on purpose — a test that supplies
+    them already sorted cannot tell a sort from a passthrough.
+    """
+    leaders = _leaders()
+    first = leaders[0]
+
+    def game(game_id, ordinal, week, total):
+        return dict(usage_game_id=game_id, usage_season_type_ordinal=ordinal,
+                    usage_week=week, usage_total=total,
+                    # ⚠️ ONE CEILING FOR ALL FOUR, because the window maximum is a property of
+                    # the PLAYER rather than of a game — and it makes every fill distinct, which
+                    # is what lets the order be read off the render at all.
+                    usage_total_max_in_window=0.30, usage_games_in_window=4,
+                    team_id=first["team_id"], panel=first["panel"],
+                    player_id=first["player_id"])
+
+    # 🚨 THE FILLS ARE DELIBERATELY ALL DIFFERENT — 33 · 50 · 67 · 100. My first version gave
+    # the bowl and the last regular game the same fill and the staged break stayed GREEN: the
+    # assertion could not tell the two orders apart. A fixture that cannot fail for the reason
+    # it claims is the thing this project keeps finding, and it found it here.
+    rows = [game(950, 2, 1, 0.30),        # the POSTSEASON game, first in the frame
+            game(901, 1, 1, 0.10), game(902, 1, 2, 0.15), game(903, 1, 3, 0.20)]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=leaders, usage=rows)
+    _titles, fills = _dots(entries, first["player_name"])
+    assert fills == ["33", "50", "67", "100"], (
+        f"the dots are not in (season_type, week) order. A sort on usage_week ALONE puts the "
+        f"bowl first, because postseason weeks restart at 1 — which draws a January game in "
+        f"among September's: {fills}")
+
+
+def test_the_DENOMINATOR_is_READ_not_derived_from_the_rows_on_the_page(panel):
+    """🚨 THE ASSERTION MY FIRST STAGED BREAK COULD NOT MAKE, AND THAT IS WHY IT IS HERE.
+
+    `usage_total_max_in_window` is a published column so the page never takes a maximum over
+    rows — that window function is what CLAUDE.md puts upstream, and A107 shipped the column
+    precisely to keep it there.
+
+    ⚠️ A FIXTURE WHOSE PUBLISHED MAX EQUALS THE MAX OF ITS OWN VALUES CANNOT TELL THE TWO
+    APART. I staged the break — the page deriving `max(...)` over the rows it holds — and every
+    dots test stayed green, because the two numbers agreed by construction. So this fixture sets
+    them APART: the published ceiling is higher than anything in the frame, which is what a real
+    window max does whenever the page holds a subset of it.
+
+    A page that derives would show the best row as 100%. A page that reads shows it below.
+    """
+    rows = [dict(r, usage_total_max_in_window=0.40) for r in _usage()]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=_leaders(), usage=rows)
+    _titles, fills = _dots(entries, _leaders()[0]["player_name"])
+    assert fills, "no fill was drawn"
+    assert fills[-1] != "100", (
+        f"the best row filled the circle completely, so the denominator came from the page's "
+        f"own rows rather than from `usage_total_max_in_window`: {fills}")
+    assert fills[-1] == "50", f"0.20 of a published 0.40 ceiling is half a circle: {fills}"
