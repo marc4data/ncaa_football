@@ -1449,13 +1449,102 @@ def _delta_chip(value) -> str:
     """
     if value is None or pd.isna(value):
         return ""
-    number = float(value)
-    # ⚠️ `+0` IS DELIBERATE AND IS NOT A BUG. Exactly level is a real answer — this side gains
-    # what that side concedes — and rendering it bare would read as "no figure".
-    colour = ("var(--cfdb-negative, #b3261e)" if number < 0
-              else "var(--cfdb-positive, #1b6b3a)")
     return (f"<span style='min-width:3.6rem;text-align:right;font-size:.8rem;"
-            f"font-weight:600;color:{colour}'>{number:+,.1f}</span>")
+            f"font-weight:600'>{_signed_delta(value)}</span>")
+
+
+def _signed_delta(value) -> str:
+    """The delta as a number, ONE definition for the chip and the mark label (R-736).
+
+    ⚠️ `+0` IS DELIBERATE AND IS NOT A BUG. Exactly level is a real answer — this side gains
+    what that side concedes — and rendering it bare would read as "no figure". AC-G.32 asks
+    that a null show `—` and a zero show a number, and `+0.0` is a number.
+
+    🚨 IT IS SHARED BECAUSE THE CHIP AND THE LABEL ARE THE SAME FIGURE ON THE SAME ROW. Two
+    renderers for one number is the R-574 drift this panel has already paid for twice — B098's
+    `metric` and B099's `_CARD_KPIS` — and here they would sit within an inch of each other.
+    """
+    if value is None or pd.isna(value):
+        return fmt.EM_DASH
+    return f"{float(value):+,.1f}"
+
+
+# What `identity.logo_or_monogram` emits when it has no logo to draw. ⚠️ READ, NOT REDEFINED:
+# this page must not carry a second copy of "is this logo missing", and `identity.py` is A's.
+_LOGO_FELL_BACK = "cfdb-monogram-empty"
+
+
+def _mark_label(team, opponent, label, for_column, allowed_column, delta) -> str:
+    """R-736. Marc's label for the mark, laid out as a subtraction a reader can check.
+
+    **Marc:** *"Label the mark on the scatterplot. Use the Logo with appropriate metric
+    (Rushing, Passing, or Total yards), below that opponent team logo and the allowed metric,
+    add a line below the Opponent metric (like a math problem), third row should the result of
+    the math prefixed with a +/- then the delta."*
+
+        [team logo]   Rushing   170.0
+        [opp  logo]   Allowed   132.0
+        ─────────────────────────────
+                                +38.0
+
+    🚨 BESIDE THE CHART, NOT ON IT, AND THE REASON IS THAT IT CANNOT THEN COLLIDE. The spec
+    offered both. An Altair annotation has to be placed at a coordinate, and the mark it labels
+    sits anywhere in the frame — over the shaded interquartile band, on a median rule, or hard
+    against an edge — so an on-chart version needs collision logic, which is page logic about
+    data. ⚠️ THE SQUARE IS ALSO LOAD-BEARING: B091 spent four rounds making `height` mean the
+    plot (R-609, `autosize: pad`), and `_shipped()` asserts the 1:1 through Streamlit's own
+    function. Marks inside the spec can change that box; markup under it cannot.
+    ✅ And R-735 has just given the chart slot 80% of the pair, which is where the room came
+    from.
+
+    ⚠️ NO SUBTRACTION HERE. NONE. The third row reads A106's
+    `*_yards_for_minus_opponent_allowed_per_game`, which exists at game x team grain precisely
+    so this page does not compute it (§4.2). Subtracting the two figures above would let this
+    number disagree with the Excel export, which reads the column — R-645, one panel along.
+
+    🚨 A MISSING LOGO PUTS THE TEAM'S NAME IN THE ROW, AND THE LIVE RENDER IS WHY.
+    `identity.logo_or_monogram` returns a DELIBERATELY EMPTY box when there is no logo, and its
+    own comment gives the reason: *"NO INITIALS … the box stays so a missing logo does not shift
+    the row (AC-G.28 is about FOOTPRINT), but it is empty: THE NAME IS RIGHT THERE."* Marc
+    flagged "OD" beside "Ohio Dominican" as reading the name twice.
+
+    ⚠️ THAT PREMISE IS TRUE EVERYWHERE ELSE ON THIS PAGE AND FALSE HERE. This row reads
+    `[logo] Rushing 170.0` — the team is named nowhere in it. Rendered live on game 401891330,
+    Chicago State has no logo and its row came out as an empty circle, a metric and a number,
+    identifying nobody.
+
+    ✅ SO THE NAME IS RENDERED IN PLACE OF THE ABSENT LOGO, which satisfies the helper's own
+    condition rather than working around it. ⚠️ THE FALLBACK IS DETECTED BY ASKING THE HELPER
+    WHAT IT RETURNED, not by re-testing the URL — a second copy of "is this logo missing" is the
+    R-574 drift, and `identity.py` is session A's file. `test_the_MONOGRAM_MARKER_this_label_
+    keys_on_is_the_one_identity_emits` pins the coupling so a rename fails loudly.
+
+    Measured: 14,619 of 375,594 `srv_team_week` rows carry no logo, and 116 of them are 2026
+    rows with counted games — a real branch rather than a defensive one.
+    """
+    rows = []
+    for side, caption, column in ((team, label, for_column),
+                                  (opponent, "Allowed", allowed_column)):
+        name = str(side.get("team_display") or "?")
+        mark = identity.logo_or_monogram(side.get("logo_url"), name, 16)
+        named = (f"<span style='opacity:.75;font-size:.72rem;max-width:6rem;overflow:hidden;"
+                 f"text-overflow:ellipsis;white-space:nowrap'>{html.escape(name)}</span>"
+                 if _LOGO_FELL_BACK in mark else "")
+        rows.append(
+            f"<div style='display:flex;align-items:center;gap:.4rem;padding:.08rem 0'>"
+            f"<span title='{html.escape(name)}' style='display:flex;align-items:center'>"
+            f"{mark}</span>{named}"
+            f"<span style='flex:1;opacity:.55;font-size:.72rem'>{html.escape(str(caption))}"
+            f"</span>"
+            f"<span style='font-weight:600;font-size:.8rem;text-align:right'>"
+            f"{fmt.number(side.get(column), column, dp=1)}</span></div>")
+    return (
+        f"<div style='max-width:15rem;margin:.15rem 0 .6rem .2rem'>"
+        f"{''.join(rows)}"
+        # The rule a written subtraction has, above its result and nowhere else.
+        f"<div style='border-top:1px solid currentColor;opacity:.3;margin:.15rem 0'></div>"
+        f"<div style='display:flex;justify-content:flex-end;font-weight:600;font-size:.85rem'>"
+        f"{_signed_delta(delta)}</div></div>")
 
 
 def _yardage_direction(offense, defense, deltas=None) -> str:
@@ -1852,6 +1941,11 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
                     # ⚠️ NOT use_container_width: a square the container can stretch is
                     # not a square. R-609, and a narrower column does not change that.
                     column.altair_chart(chart, use_container_width=False)
+                # R-736. The label goes with the chart, under the mark it describes.
+                column.markdown(
+                    _mark_label(team, opponent, label, for_column, allowed_column,
+                                _delta_for(deltas, delta_column)),
+                    unsafe_allow_html=True)
             else:
                 column.markdown(cards, unsafe_allow_html=True)
     # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11). A chart silently missing from a
@@ -1886,11 +1980,19 @@ _LEADER_PANELS = {"Rushing": "rushing", "Passing": "passing", "Total": "total"}
 
 _ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
 
-# ⚠️ THE CHART SLOT IS WIDER THAN THE CARD SLOT, AND THE LIVE RENDER IS WHAT SET THESE.
-# `autosize: pad` (R-609) makes the shipped box the 240px square PLUS its axis labels, so an
-# even split clipped the away side's x axis at "300 :" where the home side read "300 350".
-# ⚠️ Read out of `order` rather than written as a second mirrored tuple — see `_yardage_column`.
-_SLOT_WIDTHS = {"cards": 1.0, "chart": 1.2}
+# 🚨 R-735. MARC: "Reduce Player Card width by 50%. The Player Card and Yard scatterplot
+# should share the horizontal space at 1:4." ⚠️ THOSE ARE ONE INSTRUCTION AND THE RATIO
+# GOVERNS: at the previous 1:1.2 the card was 45% of the pair and at 1:4 it is 20%, which is
+# the "50%" reduction he asked for.
+#
+# ⚠️ THE FAILURE MODE HAS CHANGED SIDES AND ONLY A RENDER SEES IT. B098 measured that a 50/50
+# split CLIPPED THE AWAY AXIS — it read "300 :" where home read "300 350" — because
+# `autosize: pad` (R-609) ships the 240px square PLUS its labels. 1:4 gives the chart MORE
+# room, so that cannot recur; the CARD is now the side with 20% and the side that can clip.
+#
+# ⚠️ Read out of `order` rather than written as a second mirrored tuple — see `_yardage_column`,
+# which is why this is one literal rather than a layout round.
+_SLOT_WIDTHS = {"cards": 1.0, "chart": 4.0}
 
 # 🚨 R-731. THE CARD IS BUILT FOR THREE KPIs AND FILLED WITH WHAT EXISTS. A116 is widening
 # `fct_player_leader_week`; the next two measures are added to `_CARD_KPIS` and nowhere else,

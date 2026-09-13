@@ -335,14 +335,23 @@ def _side(team_id, display, **overrides):
 
 
 def _both(**home_over):
-    """Auburn at home, Kentucky away, with the real week-10 figures for game 401752754."""
+    """Auburn at home, Kentucky away, with the real week-10 figures for game 401752754.
+
+    🚨 THE LOGOS ARE SET HERE SINCE R-736, AND `_side` DEFAULTING THEM TO `None` MEANT EVERY
+    TEST IN THIS FILE RENDERED THE MISSING-LOGO PATH. Measured against live serving, only
+    14,619 of 375,594 `srv_team_week` rows have no logo — 3.9% — so the fixture was modelling
+    the exception for 100% of its assertions, and a defect in the COMMON path could not fail
+    here. The two URLs are the real ones for team ids 2 and 96.
+    """
     home = _side(HOME_ID, "Auburn", games_counted=8,
+                 logo_url="https://cdn.collegefootballdata.com/logos/500/2.png",
                  rushing_yards_for_per_game=170.8, passing_yards_for_per_game=170.0,
                  total_yards_for_per_game=340.8,
                  rushing_yards_allowed_per_game=84.5,
                  passing_yards_allowed_per_game=234.4,
                  total_yards_allowed_per_game=318.9)
     away = _side(AWAY_ID, "Kentucky", games_counted=7,
+                 logo_url="https://cdn.collegefootballdata.com/logos/500/96.png",
                  rushing_yards_for_per_game=154.4, passing_yards_for_per_game=207.0,
                  total_yards_for_per_game=361.4,
                  rushing_yards_allowed_per_game=132.6,
@@ -1775,3 +1784,182 @@ def test_the_DENOMINATOR_is_READ_not_derived_from_the_rows_on_the_page(panel):
         f"the best row filled the circle completely, so the denominator came from the page's "
         f"own rows rather than from `usage_total_max_in_window`: {fills}")
     assert fills[-1] == "50", f"0.20 of a published 0.40 ceiling is half a circle: {fills}"
+
+
+# --- 🚨 R-735: the card and the chart share the row at 1:4 ---------------------------------
+
+def test_the_card_and_the_chart_share_the_row_at_ONE_TO_FOUR():
+    """Marc: "The Player Card and Yard scatterplot should share the horizontal space at 1:4."
+
+    ⚠️ READ OFF THE CONSTANT rather than off a rendered width, because Streamlit's columns are
+    laid out in the browser and nothing in this suite can measure a pixel. The ratio is the
+    instruction; whether the CARD survives it is a question only a raster answers, and B100's
+    report carries that picture.
+    """
+    widths = _module_constant("_SLOT_WIDTHS")
+    assert widths["chart"] / widths["cards"] == 4.0, (
+        f"the split is not 1:4 — the card takes "
+        f"{widths['cards'] / sum(widths.values()):.0%} of the pair: {widths}")
+
+
+def test_the_WIDTHS_are_pinned_to_the_SLOT_and_not_to_the_column_index(panel):
+    """🚨 B082 AND B083 BOTH PROVED A PRESENCE ASSERTION CANNOT SEE A LEFT/RIGHT SWAP, and a
+    width is the same shape of claim.
+
+    B098 made one ordered tuple drive the order, the column AND the width, so the away side
+    reads [cards, chart] and the home side [chart, cards] — which means the WIDTH LIST IS
+    REVERSED BETWEEN THE SIDES TOO. If the weights were keyed by position rather than by slot,
+    the home chart would get the card's width while every positional assertion still passed.
+    """
+    widths = _module_constant("_SLOT_WIDTHS")
+    away, home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
+    assert away[0] == "cards" and home[0] == "chart"
+    # The card is the NARROW one on both sides, whichever end of the row it sits at.
+    assert widths["cards"] < widths["chart"], (
+        "the card is not the narrow slot, so the 1:4 split is applied the wrong way round")
+
+
+# --- 🚨 R-736: the mark's label, as a worked subtraction ------------------------------------
+
+def _labels(entries):
+    """The mark-label blocks, in drawn order. Identified by the rule a subtraction has."""
+    return [str(b) for k, b in entries
+            if k == "markdown" and "border-top:1px solid currentColor" in str(b)]
+
+
+def test_the_mark_label_is_a_worked_SUBTRACTION_in_three_rows(panel):
+    """Marc: "Use the Logo with appropriate metric … below that opponent team logo and the
+    allowed metric, add a line below the Opponent metric (like a math problem), third row
+    should the result of the math prefixed with a +/- then the delta."
+
+    ⚠️ ASSERTED IN ORDER, not on presence. All three numbers appear elsewhere on the panel
+    already; what this round added is that they are stacked as a subtraction a reader can
+    check, which only an ordering assertion can see.
+    """
+    labels = _labels(panel(_game(), _both(), deltas=_deltas())[0])
+    assert len(labels) == 6, f"expected one label per chart on both sides, got {len(labels)}"
+    first = _plain(labels[0])
+    assert first.index("Rushing") < first.index("Allowed"), \
+        "the opponent's row must sit BELOW this team's"
+    assert first.index("154.4") < first.index("84.5") < first.index("+38.0"), (
+        f"the three rows are not gained, allowed, then the delta: {first!r}")
+
+
+def test_the_label_carries_BOTH_logos_and_names_the_team_behind_each(panel):
+    """Two logos, and the team each belongs to is in the title so a reader can tell them
+    apart — the row itself says only "Rushing" and "Allowed"."""
+    label = _labels(panel(_game(), _both(), deltas=_deltas())[0])[0]
+    assert label.count("<img") + label.count("cfdb-monogram") >= 2, \
+        f"the label does not carry two logos: {label}"
+    for team in ("Kentucky", "Auburn"):
+        assert f"title='{team}'" in label, f"{team} is not named behind its logo"
+
+
+def test_a_NULL_logo_puts_the_TEAM_NAME_in_the_row(panel):
+    """🚨 AC-G.11, AND THE LIVE RENDER IS WHAT FOUND IT.
+
+    `identity.logo_or_monogram` returns a DELIBERATELY EMPTY box for a missing logo — Marc
+    flagged "OD" beside "Ohio Dominican" as reading the name twice — and its comment states the
+    condition that makes that safe: *"the name is right there"*.
+
+    ⚠️ IN THIS ROW IT IS NOT. The label reads `[logo] Rushing 170.0` and names no team, so on
+    game 401891330 Chicago State rendered as an empty circle, a metric and a number.
+
+    Measured: 14,619 of 375,594 `srv_team_week` rows carry no logo, and 116 are 2026 rows with
+    counted games — this is reachable today, not a defensive branch.
+    """
+    sides = _both()
+    sides[0]["logo_url"] = None
+    sides[1]["logo_url"] = None
+    label = _labels(panel(_game(), sides, deltas=_deltas())[0])[0]
+    assert "<img" not in label, "a null logo still emitted an image element"
+    plain = _plain(label)
+    assert "Auburn" in plain and "Kentucky" in plain, (
+        f"a row with no logo must NAME its team in the row itself — the title attribute is not "
+        f"visible and this row names no team otherwise: {plain!r}")
+
+
+def test_a_PRESENT_logo_does_NOT_repeat_the_team_name(panel):
+    """⚠️ THE OTHER HALF, AND IT IS MARC'S OWN COMPLAINT. He flagged the name appearing twice;
+    the name is a FALLBACK for the absent logo, not a second label beside a present one."""
+    plain = _plain(_labels(panel(_game(), _both(), deltas=_deltas())[0])[0])
+    assert "Kentucky" not in plain and "Auburn" not in plain, (
+        f"the team name is rendered beside a logo that is present: {plain!r}")
+
+
+def test_the_MONOGRAM_MARKER_this_label_keys_on_is_the_one_identity_emits():
+    """🚨 THE COUPLING IS PINNED, because the alternative is a silent regression.
+
+    `_mark_label` decides whether to print the team name by asking what
+    `identity.logo_or_monogram` RETURNED, rather than re-testing the URL itself — a second copy
+    of "is this logo missing" is the R-574 drift, and `site/lib/identity.py` is session A's file.
+
+    ⚠️ RENAME THAT CLASS AND THE LABEL GOES QUIETLY BACK TO AN UNIDENTIFIABLE ROW. B096 pinned
+    `ERROR_CARD` to `states.py` for exactly this reason; this is the same join.
+    """
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, _c, _ch):
+        identity = importlib.import_module("lib.identity")
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+        marker = matchup._LOGO_FELL_BACK
+        fell_back = identity.logo_or_monogram(None, "Anytown State", 16)
+        drawn = identity.logo_or_monogram("https://example.invalid/x.png", "Anytown State", 16)
+    assert marker in fell_back, (
+        f"`identity.logo_or_monogram` no longer emits {marker!r} when it has no logo, so the "
+        f"mark label will stop naming the team and nothing else will say so")
+    assert marker not in drawn, (
+        f"{marker!r} appears even when a logo IS drawn, so the label would print the team name "
+        f"beside every logo — the duplication Marc flagged")
+
+
+def test_the_label_reads_A106s_COLUMN_and_subtracts_nothing(panel):
+    """🚨 §4.2. The delta is a published column at game x team grain precisely so this page does
+    not compute it; a subtraction here would let the label disagree with the Excel export,
+    which reads the same column — R-645, one panel along.
+
+    ⚠️ PROVED BY MAKING THE COLUMN DISAGREE WITH ITS OWN INPUTS. A page that subtracts would
+    print 69.9; a page that reads prints the column. A fixture whose delta happens to equal
+    `gained - allowed` cannot tell the two apart, which is the trap B099 fell into twice.
+    """
+    deltas = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=-12.5)
+              for r in _deltas()]
+    first = _plain(_labels(panel(_game(), _both(), deltas=deltas)[0])[0])
+    assert "-12.5" in first or "−12.5" in first, \
+        f"the label did not print the column's value: {first!r}"
+    assert "69.9" not in first, "the page subtracted the two figures instead of reading A106's column"
+
+
+def test_a_NULL_delta_renders_an_em_dash_and_a_ZERO_renders_a_number(panel):
+    """AC-G.32, on the result row. A null is the absence of a measurement; a zero is one."""
+    nulls = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=None)
+             for r in _deltas()]
+    assert "—" in _plain(_labels(panel(_game(), _both(), deltas=nulls)[0])[0])
+    zeros = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=0.0)
+             for r in _deltas()]
+    drawn = _plain(_labels(panel(_game(), _both(), deltas=zeros)[0])[0])
+    assert "—" not in drawn, "a measured zero rendered as an absence"
+    assert "+0.0" in drawn, (
+        "exactly level is a real answer and rendering it bare reads as 'no figure' — the chip "
+        "has said so since R-686, and the label shares that renderer")
+
+
+# --- ⚠️ R-737: red now means ONE thing in this panel ---------------------------------------
+
+def test_the_delta_CHIP_no_longer_carries_a_COLOUR(panel):
+    """✅ COWORK'S RULING, and Marc can reverse it in one line.
+
+    The chip is `gained − allowed`, red when negative. The mark v02.3 introduces paints that
+    SAME comparison GREEN, because a defence conceding more than this offence gains is a
+    FAVOURABLE matchup. Red would then point two ways within an inch of itself.
+
+    ⚠️ AND IT COSTS NOTHING A GREYSCALE READER HAD: B091 established on this very delta that
+    the SIGN carries it and the colour only agrees (AC-G.22).
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    chips = [str(b) for k, b in entries if k == "markdown" and "gained" in str(b)]
+    assert chips, "the direction block did not render"
+    for markup in chips:
+        assert "cfdb-negative" not in markup and "cfdb-positive" not in markup, \
+            "the delta chip is still tinted, so red points two ways in one panel"
+    # The sign is what carries it, and it must still be there.
+    assert "-6.0" in _plain(chips[-1]) or "−6.0" in _plain(chips[-1])
