@@ -20,7 +20,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import filters, params, shell, states, table
+from lib import filters, fmt, params, shell, states, table
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -34,6 +34,44 @@ MODEL_WEEK_FLOOR = 5
 DEPTHS = (10, 25, 50)
 
 POLLS = ("AP Top 25", "Coaches Poll")
+
+
+# 🚨 WHAT "MOST EXCITING" ORDERS BY — R-709. ONE PLACE, NAMED, SO IT IS ONE LINE TO CHANGE.
+#
+# Marc, 2026-09-13, having looked at the old ordering: "Excitement index isn't going to cover it.
+# OSU and Texas games are in the 6 range even. Need to factor in lead changes in the 4th qtr and
+# swings in win probability."
+#
+# ⚠️ AND THE OLD ORDERING WAS NOT BAD AT THE TOP — IT WAS BAD IN THE TAIL, which is a different
+# defect from the one the complaint sounds like. Measured on the 86 week-2 games that carry win
+# probability, against the seven games Marc named as the acceptance test:
+#
+#     ordering                                          his 7 in top-10   worst rank
+#     excitement_index desc            (what shipped)         4              31
+#     lead_changes_fourth_quarter, then mean distance         4              21   <- this
+#     mean distance late, then lead changes                   4              24
+#     fourth-quarter WP range, then lead changes               3              21
+#
+# So every candidate puts four of his seven in the top ten and the choice is decided by the TAIL.
+# Excitement buried Oklahoma @ Michigan at 31 of 86; this ordering has it 3rd. A117 measured the
+# same game going from 17th to joint 1st on fourth-quarter lead changes alone.
+#
+# ✅ TWO COLUMNS WITH AN EXPLICIT TIE-BREAK, and the tie-break does real work rather than being
+# decoration: fourth-quarter lead changes is a small integer (0 to 6 across the whole week), so
+# ties are the common case and without a second key the order inside a tie is planner accident.
+# `mean_distance_from_even_fourth_quarter_onward` breaks them by how close the game stayed, late —
+# lower is closer.
+#
+# 🚨 NOT A COMPOSITE INDEX. A114, A115 and A117 all refused to build one and so does this: no
+# weights, no scaling, no arithmetic. Two published columns and a documented precedence. The
+# weighting is Marc's call and he has not made it — he will answer faster looking at this list
+# than at another table.
+#
+# ⚠️ `nulls last` ON BOTH, because a game whose win-probability feed never reached the fourth
+# quarter must not sort as if it were a dull one. Three games of 1,898 are in that state (A117).
+MOST_EXCITING_ORDER = ("lead_changes_fourth_quarter desc nulls last, "
+                       "mean_distance_from_even_fourth_quarter_onward asc nulls last, "
+                       "game_id")
 
 
 # --- data -----------------------------------------------------------------------------
@@ -113,7 +151,7 @@ def _completed_games(scope) -> pd.DataFrame:
     body(): attribution attaches to rendered model output, this page renders none yet, and
     keeping the column fetched makes restoring the call a one-line change on the day it does.
     """
-    return query("""
+    return query(f"""
         select game_id, season, week, season_type, game_date,
                home_team_display, away_team_display, home_team_slug, away_team_slug,
                home_logo_url, away_logo_url, home_conference, away_conference,
@@ -124,6 +162,12 @@ def _completed_games(scope) -> pd.DataFrame:
                favorite_definitions_disagree,
                market_implied_home_win_probability, market_implied_away_win_probability,
                lead_changes, largest_single_play_swing, home_win_probability_range,
+               lead_changes_fourth_quarter, largest_single_play_swing_fourth_quarter,
+               home_win_probability_range_fourth_quarter,
+               lead_changes_overtime, plays_with_win_probability_fourth_quarter,
+               mean_distance_from_even_fourth_quarter_onward,
+               home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
+               away_q1, away_q2, away_q3, away_q4, away_overtime_points, away_periods,
                attribution, as_of_ts
         from srv_game
         where season = :season and season_type = :season_type
@@ -131,7 +175,7 @@ def _completed_games(scope) -> pd.DataFrame:
           and is_completed
           and (:division = 'all' or is_fbs_game)
           and (:conf is null or home_conference = :conf or away_conference = :conf)
-        order by excitement_index desc nulls last, game_id
+        order by {MOST_EXCITING_ORDER}
         limit 400
     """, {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
           "conf": scope.conference, "division": scope.division})
@@ -254,23 +298,126 @@ def _rankings(scope) -> pd.DataFrame:
 
 # --- panels ---------------------------------------------------------------------------
 
+def _quarter_line(row, side: str) -> str:
+    """One team's score by quarter, as a scoreboard reads it.
+
+    🚨 AC-G.32 IS THE WHOLE JOB HERE, AND THE TWO CASES LOOK IDENTICAL IF YOU ARE NOT CAREFUL:
+
+        a quarter that was PLAYED and scoreless     0
+        a quarter that was NEVER PLAYED             absent from the line entirely
+        a quarter whose score we do not HAVE        an em dash in that position
+
+    A line reading `7 0 3 0` says the team was shut out in two quarters. A line reading
+    `7 0 3` says the game had three quarters, which happens to no completed game — so
+    printing four values with zeroes for the missing ones would invent two shut-out quarters.
+
+    ⚠️ `home_periods` / `away_periods` IS WHAT TELLS THEM APART, and it is the reason this
+    function takes a side rather than assuming four. A game with 4 periods has no fifth
+    column; a game with 5 or more has overtime, with a real number in it.
+
+    🚨 AND OVERTIME IS LABELLED, NEVER FOLDED INTO THE FOURTH QUARTER — A117's lesson applied
+    to the display. Jacksonville State @ Ohio had TWO fourth-quarter lead changes and ELEVEN
+    in overtime. A scoreboard that added the overtime points onto Q4 would tell the reader the
+    drama happened in a quarter where it did not, and every number on the line would still be
+    a real number.
+    """
+    periods = row.get(f"{side}_periods")
+    if periods is None or pd.isna(periods):
+        return fmt.EM_DASH
+    periods = int(periods)
+
+    parts = []
+    for quarter in range(1, min(periods, 4) + 1):
+        value = row.get(f"{side}_q{quarter}")
+        parts.append(fmt.EM_DASH if value is None or pd.isna(value) else f"{int(value)}")
+
+    if periods >= 5:
+        overtime = row.get(f"{side}_overtime_points")
+        # Labelled, so it cannot be mistaken for a fifth quarter. A game that went to
+        # overtime and scored nothing there is still "OT 0" rather than absent.
+        #
+        # ⚠️ NON-BREAKING SPACE INSIDE THE LABEL ONLY. "OT" and its number are one token to a
+        # reader and must be one to the browser.
+        parts.append("OT&nbsp;" + (fmt.EM_DASH if overtime is None or pd.isna(overtime)
+                                   else f"{int(overtime)}"))
+    # 🚨 THE SEPARATORS ARE BREAKABLE AND THE FIRST VERSION'S WERE NOT, WHICH IS WHAT BROKE IT.
+    # Written as `&nbsp;&middot;&nbsp;`, a five-period line becomes ONE unbreakable run; it does
+    # not fit the column, and a browser with nowhere legal to break breaks mid-word instead.
+    # Wake Forest at Purdue rendered as `7 · 10 · 3 · 3 · O` / `T 15` — the wrap landed inside
+    # the word "OT", which no amount of non-breaking space between "OT" and "15" can prevent.
+    # Ordinary spaces let it wrap between quarters, where a reader expects it.
+    return " &middot; ".join(parts)
+
+
+def _espn_link(row) -> str:
+    """A link out to ESPN's commentary for this game.
+
+    ✅ THE KEY WAS VERIFIED BY HAND BEFORE THIS SHIPPED, ON THREE GAMES, AND IT IS WORTH
+    SAYING WHY THREE. CFBD's `game_id` being ESPN's event id is widely believed and had never
+    been established here. A wrong id does not fail — it serves a DIFFERENT GAME, which on a
+    page Marc is making presentable is worse than no link at all. One match could be
+    coincidence; three of three with the scores agreeing is not.
+
+        401856679  ->  Oklahoma Sooners 10 at Michigan Wolverines 17      (ours: 10 at 17)
+        401856682  ->  Ohio State Buckeyes 23 at Texas Longhorns 24       (ours: 23 at 24)
+        401866418  ->  Jacksonville State Gamecocks 27 at Ohio Bobcats 29 (ours: 27 at 29)
+
+    Teams, home/away sides AND final scores matched on all three, and all three gamecast URLs
+    returned HTTP 200.
+
+    ⚠️ EXTERNAL, AND IT HAS TO READ AS EXTERNAL. `target="_blank"` plus the arrow, because a
+    reader who clicks this is leaving the site and should know before they click.
+    `rel="noopener noreferrer"` because a new tab opened from our page would otherwise get a
+    handle back to it.
+
+    ⚠️ AND THIS COLUMN CANNOT COEXIST WITH A ROW LINK ON THIS TABLE. `table.render` wraps a
+    cell's content in the row's anchor when there is one, and nested anchors are invalid HTML
+    with the outer one winning — the reader would click "ESPN" and stay on the site. That is
+    the same trap `Col.link`'s own comment names. This table deliberately passes no
+    `link_builder`.
+    """
+    game_id = row.get("game_id")
+    if game_id is None or pd.isna(game_id):
+        return fmt.EM_DASH
+    return (f"<a href='https://www.espn.com/college-football/game/_/gameId/{int(game_id)}' "
+            "target='_blank' rel='noopener noreferrer'>ESPN &nearr;</a>")
+
+
 def _most_exciting(df: pd.DataFrame, scope) -> None:
     st.subheader("Most exciting")
     st.caption(
-        "CFBD's excitement index, shown as published — not re-scaled. "
-        "Source: [CollegeFootballData.com](https://collegefootballdata.com).")
-    top = df[df["excitement_index"].notna()].head(10)
+        "Ranked by **lead changes in the fourth quarter**, then by how close the game stayed "
+        "after it — not by CFBD's excitement index, which ranked the week's best "
+        "fourth quarter 31st of 86. Quarter scores read left to right, overtime shown "
+        "separately. "
+        "Source: [CollegeFootballData.com](https://collegefootballdata.com); commentary links "
+        "go to ESPN.")
+    # ⚠️ THE ROWS ARRIVE IN ORDER. `_completed_games` orders by MOST_EXCITING_ORDER, so the
+    # page does not sort and does not compute — §4.2. Changing what "most exciting" means is
+    # one edit to that constant and nothing here moves.
+    #
+    # ⚠️ FILTERED ON THE COLUMN IT RANKS ON, not on excitement_index. A game whose
+    # win-probability feed never reached the fourth quarter cannot be placed in this ordering
+    # at all, and showing it at the bottom would say it was dull rather than unmeasured.
+    top = df[df["lead_changes_fourth_quarter"].notna()].head(10)
     states.render_or_state(
         top, "srv_game",
         "The week's most exciting games would be here.",
-        f"No completed games with an excitement index for {scope.describe()}.",
+        f"No completed games with fourth-quarter win probability for {scope.describe()}.",
         renderer=lambda d: table.render(d, [
             Col("matchup", "Game", render=lambda r: f"{r.away_team_display} at {r.home_team_display}"),
             Col("score", "Score", render=lambda r: f"{int(r.away_points)}–{int(r.home_points)}"
-                if pd.notna(r.away_points) else "—"),
+                if pd.notna(r.away_points) else fmt.EM_DASH),
+            Col("away_line", "Away by quarter", render=lambda r: _quarter_line(r, "away")),
+            Col("home_line", "Home by quarter", render=lambda r: _quarter_line(r, "home")),
+            Col("lead_changes_fourth_quarter", "4th-qtr lead changes", kind="num"),
+            Col("lead_changes_overtime", "OT lead changes", kind="num"),
+            Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
+            Col("lead_changes", "Lead changes, game", kind="num"),
             Col("excitement_index", "Excitement", kind="num", dp=1),
-            Col("lead_changes", "Lead changes", kind="num"),
-        ], caption="Ranked by CFBD excitement index."))
+            Col("espn", "Commentary", render=_espn_link),
+        ], caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
+                   "even win probability from the fourth quarter onward (lower is closer)."))
 
 
 def _favorite_margin(row):

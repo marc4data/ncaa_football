@@ -407,6 +407,20 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
                # which is why exercising the panel against it proved nothing about the sign.
                "lead_changes": 4, "actual_margin": -3,
                "actual_margin_home_perspective": 3,
+               # A118. Most Exciting's own columns. ⚠️ THE FIXTURE CARRIES A GAME THAT WENT
+               # TO OVERTIME, deliberately: a 4-period row would exercise the scoreboard's
+               # easy branch only, and the overtime branch is the one carrying A117's lesson
+               # that overtime must never be folded into the fourth quarter.
+               # (`game_id`, which the ESPN link reads, is already set further down.)
+               "lead_changes_fourth_quarter": 6, "lead_changes_overtime": 3,
+               "largest_single_play_swing_fourth_quarter": 0.425,
+               "home_win_probability_range_fourth_quarter": 0.60,
+               "plays_with_win_probability_fourth_quarter": 39,
+               "mean_distance_from_even_fourth_quarter_onward": 0.222,
+               "home_periods": 5, "away_periods": 5,
+               "home_q1": 7, "home_q2": 3, "home_q3": 3, "home_q4": 10,
+               "away_q1": 7, "away_q2": 10, "away_q3": 3, "away_q4": 3,
+               "home_overtime_points": 13, "away_overtime_points": 15,
                "attribution": "cfdb model (fixture)",
                "spread_favorite_side": "home", "moneyline_favorite_side": "home",
                "favorite_definitions_disagree": False,
@@ -588,3 +602,137 @@ def test_favorites_that_lost_outright_contains_only_favorites_that_lost():
     assert set(lost["tag"]) == {"lost_by_16"}, (
         f"'favorites that lost outright' selected {sorted(lost['tag'])}. Measured on 2026 "
         f"week 1 before the fix: 0 of 10 rows held a favourite that lost.")
+
+
+# --- the quarter scoreboard, and the two absences it must not confuse -------------------
+
+def _scoreline(**over):
+    """One srv_game row's worth of scoreboard columns, as a Series."""
+    import pandas as pd
+    base = {"home_periods": 4, "away_periods": 4,
+            "home_q1": 7, "home_q2": 3, "home_q3": 0, "home_q4": 7,
+            "away_q1": 0, "away_q2": 10, "away_q3": 3, "away_q4": 0,
+            "home_overtime_points": None, "away_overtime_points": None}
+    base.update(over)
+    return pd.Series(base)
+
+
+def test_a_scoreless_quarter_is_a_zero_and_an_unplayed_one_is_absent():
+    """🚨 AC-G.32, and the two cases are one character apart in the output.
+
+    A line reading `7 · 0 · 3 · 0` says the team was shut out in two quarters — a fact about
+    the game. A line reading `7 · 0 · 3` says the game had three quarters, which happens to no
+    completed game. So printing a fixed four values and filling the gaps with zeroes would
+    invent shut-out quarters, and printing only the non-zero ones would delete real ones.
+
+    Both directions are asserted, because a fix for either one alone produces the other.
+    """
+    today = _today()
+    played = today._quarter_line(_scoreline(), "home")
+    assert played.split(" &middot; ") == ["7", "3", "0", "7"], (
+        f"a played, scoreless quarter must render 0, got {played!r}")
+
+    # A game whose feed carries only three periods must not grow a fourth.
+    short = today._quarter_line(_scoreline(home_periods=3, home_q4=None), "home")
+    assert short.split(" &middot; ") == ["7", "3", "0"], (
+        f"an unplayed quarter must be absent, not zero — got {short!r}")
+
+
+def test_overtime_is_labelled_and_never_folded_into_the_fourth_quarter():
+    """🚨 A117's lesson, applied to the display rather than to the model.
+
+    Jacksonville State @ Ohio had 19 lead changes: TWO in the fourth quarter and ELEVEN in
+    overtime. A scoreboard that added overtime points onto Q4 would tell a reader the drama
+    happened in a quarter where it did not — and every number on the line would still be a
+    real number, which is what makes it worth a test rather than a comment.
+    """
+    today = _today()
+    line = today._quarter_line(
+        _scoreline(home_periods=5, home_overtime_points=13), "home")
+    parts = line.split(" &middot; ")
+
+    assert len(parts) == 5, f"a 5-period game shows five columns, got {parts}"
+    assert parts[:4] == ["7", "3", "0", "7"], "the four quarters are unchanged by overtime"
+    assert parts[4] == "OT&nbsp;13", f"overtime must be LABELLED, got {parts[4]!r}"
+    assert "20" not in parts[3], "overtime points must not be added onto the fourth quarter"
+
+
+def test_the_overtime_label_cannot_be_broken_across_two_lines():
+    """⚠️ A REAL DEFECT THIS ROUND SHIPPED AND THEN FIXED, so it stays pinned.
+
+    The first version joined with `&nbsp;&middot;&nbsp;`, which makes a five-period line ONE
+    unbreakable run. It does not fit the column, and a browser with nowhere legal to break
+    breaks mid-word instead: Wake Forest at Purdue rendered as `7 · 10 · 3 · 3 · O` / `T 15`,
+    with the wrap inside the word "OT".
+
+    So both halves matter and they pull in opposite directions: the SEPARATORS must be
+    breakable so the line can wrap somewhere sensible, and the LABEL must not be.
+    """
+    today = _today()
+    line = today._quarter_line(_scoreline(home_periods=5, home_overtime_points=15), "home")
+    assert "OT&nbsp;" in line, "the label and its number must be one token to the browser"
+    assert "&nbsp;&middot;" not in line, (
+        "the separators must stay breakable, or the whole line becomes one unbreakable run "
+        "and the browser wraps inside a word")
+
+
+def test_a_game_with_no_period_data_reads_as_a_dash():
+    """An absence that says which absence it is: no periods means no scoreboard, not 0-0-0-0."""
+    today = _today()
+    assert today._quarter_line(_scoreline(home_periods=None), "home") == "—"
+
+
+# --- the ESPN link ----------------------------------------------------------------------
+
+def test_the_espn_link_uses_the_game_id_and_leaves_the_site_visibly():
+    """✅ THE KEY WAS VERIFIED BY HAND ON THREE GAMES BEFORE THIS SHIPPED.
+
+    CFBD's game_id being ESPN's event id is widely believed and had never been established
+    here. A wrong id does not fail — it serves a DIFFERENT GAME, which is worse than no link.
+    Checked against ESPN's own summary endpoint: 401856679 -> Oklahoma 10 at Michigan 17,
+    401856682 -> Ohio State 23 at Texas 24, 401866418 -> Jacksonville State 27 at Ohio 29.
+    Teams, sides and final scores all matched, and all three gamecast URLs returned HTTP 200.
+
+    ⚠️ EXTERNAL, AND IT MUST READ AS EXTERNAL — a reader should know before they click that
+    they are leaving. `rel` is asserted too: a new tab opened from our page would otherwise
+    hold a handle back to it.
+    """
+    import pandas as pd
+    today = _today()
+    html = today._espn_link(pd.Series({"game_id": 401856679}))
+
+    assert "gameId/401856679" in html, f"the link must carry the game id, got {html!r}"
+    assert 'target="_blank"' in html or "target='_blank'" in html, "external links open away"
+    assert "noopener" in html and "noreferrer" in html, "a new tab must not keep a handle back"
+    assert "&nearr;" in html or "↗" in html, "the reader should see that it leaves the site"
+
+
+def test_a_row_with_no_game_id_gets_no_link_rather_than_a_broken_one():
+    """A link to gameId/None is a 404 dressed as a feature."""
+    import pandas as pd
+    today = _today()
+    assert today._espn_link(pd.Series({"game_id": None})) == "—"
+
+
+# --- the ordering decision lives in exactly one place ------------------------------------
+
+def test_most_exciting_orders_on_published_columns_and_does_no_arithmetic():
+    """🚨 §4.2, and R-709's whole point: the page must not compute the ranking.
+
+    Marc asked for a ranking that reflects fourth-quarter drama. The temptation is a weighted
+    score in the page; A114, A115 and A117 all refused to build one and so does this. The
+    ordering is an `order by` on two PUBLISHED columns with an explicit tie-break, held in a
+    single named constant so changing what "most exciting" means is one line.
+    """
+    assert "MOST_EXCITING_ORDER" in SOURCE, "the ordering decision must be named, not inline"
+    order = re.search(r'MOST_EXCITING_ORDER = \((.*?)\)\n', SOURCE, re.S).group(1)
+    assert "lead_changes_fourth_quarter desc" in order
+    assert "mean_distance_from_even_fourth_quarter_onward asc" in order, (
+        "the tie-break must be explicit — fourth-quarter lead changes is a small integer and "
+        "ties are the common case, so without it the order inside a tie is planner accident")
+    assert order.count("nulls last") >= 2, (
+        "a game whose feed never reached the fourth quarter must not sort as a dull one")
+    assert "order by {MOST_EXCITING_ORDER}" in SOURCE, "the query must use the named constant"
+    # No weighting, no scaling, no composite — the line this project has held three times.
+    for banned in ("* 0.", "weight", "z_score", "normali"):
+        assert banned not in order, f"no composite index: found {banned!r} in the ordering"
