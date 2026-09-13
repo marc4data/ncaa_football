@@ -78,6 +78,7 @@ def page():
     with render_harness.streamlit_stubbed() as (stub, captured, _charts):
         matchup = importlib.reload(importlib.import_module("views.matchup"))
         called = []
+        seen_args = {}
 
         def run(game=None, **url):
             """Render `body()` for one game with the given `?` parameters."""
@@ -87,14 +88,21 @@ def page():
             stub.query_params = dict({"game_id": str(row["game_id"])},
                                      **{k: str(v) for k, v in url.items()})
             matchup.query = lambda sql, params=None: pd.DataFrame([row])
+            seen_args.clear()
             for name in ALL_PANELS:
+                # ⚠️ THE ARGUMENTS ARE RECORDED TOO SINCE R-730, because the dispatch now
+                # hands two of the three shapes a different number of them and nothing
+                # asserted the season arrives. `called` keeps its old shape so every
+                # assertion above is untouched.
                 setattr(matchup, name,
-                        (lambda n: lambda *a, **k: called.append(n))(name))
+                        (lambda n: lambda *a, **k: (called.append(n),
+                                                    seen_args.__setitem__(n, a)))(name))
             matchup.body(None)
             # 🚨 R-610. An Error state is not a passing state.
             render_harness.assert_no_error_card(captured, "the page body")
             return list(captured.events), list(called)
 
+        run.args = seen_args
         yield run, matchup
 
 
@@ -353,3 +361,51 @@ def test_the_split_is_two_tabs_named_for_when_not_what(page):
     labels = " ".join(label for _s, label, _p in matchup.TABS).lower()
     for subject in ("overview", "conditions", "market", "context", "sequence", "stats"):
         assert subject not in labels, f"tab named for a subject, not a state: {subject!r}"
+
+
+# --- 🚨 R-730: the three after-tab panels need the SEASON, and this is where it comes from ---
+
+def test_the_after_tab_panels_are_handed_the_games_season(page):
+    """Each of the three states an absence whose REASON depends on the season, and neither the
+    game_id nor the returned frame can supply it — `_drives` and `_leaders` get a genuinely
+    empty frame and `_post_game`'s columns carry no season. It comes off the row `body()`
+    already holds, so this needs no query and no new column.
+    """
+    run, matchup = page
+    run({"is_completed": True, "season": 2026, "game_id": 401856679})
+    for name in sorted(matchup._SEASON_PANELS):
+        assert run.args[name] == (401856679, 2026), (
+            f"{name} was called with {run.args[name]!r} rather than (game_id, season) — the "
+            f"Empty state cannot tell scope from latency without it")
+    # ⚠️ ON THE OTHER TAB, because a completed game opens on the after one and `_travel`
+    # never runs there — which is the lazy guarantee this file is largely about.
+    run({"is_completed": True, "season": 2026, "game_id": 401856679}, tab="before")
+    assert run.args["_travel"] == (401856679,), \
+        "_travel has one absence and must keep its single argument"
+
+
+def test_the_season_arrives_as_an_int_not_a_numpy_int64(page):
+    """⚠️ B076's CLASS, AND THE HABIT IS THE POINT. A value taken off a DataFrame row is a
+    numpy.int64; that round shipped one into psycopg2, which cannot adapt it, and every load
+    of the weather panel rendered an Error state while looking like a handled failure. This
+    one reaches a comparison rather than a driver, so it would not have raised — which is
+    exactly why the cast is asserted rather than assumed.
+    """
+    run, matchup = page
+    run({"is_completed": True, "season": 2026, "game_id": 401856679})
+    season = run.args["_drives"][1]
+    assert type(season) is int, f"the season arrived as {type(season).__name__}"
+
+
+def test_an_unplayed_game_reaches_none_of_the_three(page):
+    """🚨 THE THIRD STATE IS UNREACHABLE, WHICH IS WHY THERE ARE TWO SENTENCES AND NOT THREE.
+
+    The old drives copy said "a game that has not kicked off yet has none". A game that has
+    not kicked off has no after tab at all, so no reader has ever been able to see that
+    sentence for the reason it gave — and every reader who DID see it was looking at a
+    finished game being told it had not started. Asserted here rather than argued.
+    """
+    run, matchup = page
+    _entries, called = run({"is_completed": False})
+    for name in sorted(matchup._SEASON_PANELS):
+        assert name not in called, f"{name} ran for a game that has not kicked off"

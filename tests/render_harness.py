@@ -536,17 +536,26 @@ def streamlit_stubbed(query_params=None, theme="light", allow_error_state=False,
                 pass
         _watch_states(states_seen)
         yield st, captured, charts
-        # ⚠️ NO ENFORCEMENT HERE, AND §3 RULE 3.1 IS WHY. `streamlit_stubbed` is the RAW
-        # instrument, and A095's `tests/test_states_failure_modes.py` uses it to exercise the
-        # failure states themselves — five call sites whose whole job is to render one. A
-        # shared-module change "ships the parameter and the default" and leaves the other
-        # session's call sites to that session; enforcing on exit here would have reached
-        # across and broken A's file to make B's guard convenient.
+        # 🚨 R-705(2). THE RAW INSTRUMENT IS STRICT NOW, AND IT TOOK TWO ROUNDS AND BOTH
+        # SESSIONS TO GET HERE — which is the rule working rather than the rule being slow.
         #
-        # ✅ THE DEFAULT IS STILL STRICT WHERE IT COUNTS: `render()` below draws a real page
-        # and refuses an Error card, and `assert_no_error_card` is strict for every fixture
-        # that calls it. Nothing is opt-in; the enforcement simply sits where it does not
-        # reach into A's tests. B092 reports the one line A needs to extend it here.
+        # B092 left this unenforced on purpose and said so: `streamlit_stubbed` is the raw
+        # instrument, and A095's `tests/test_states_failure_modes.py` uses it to exercise the
+        # failure states THEMSELVES — five call sites whose whole job is to render one.
+        # Enforcing then would have reached across and broken A's file to make B's guard
+        # convenient, which is exactly what §3 rule 3.1 forbids.
+        #
+        # ✅ A112 DECLARED A'S FIVE, ran the full suite with this line in, and found exactly
+        # ONE test left undeclared — B's `test_a_broken_row_degrades_this_panel_and_not_the
+        # _page`, which renders a card on purpose too. ⚠️ It then REVERTED this file
+        # byte-identically rather than landing the line, because turning the other session's
+        # suite red for something that is not a defect is the same breakage seen from the
+        # other side. B097 declared that one and landed it.
+        #
+        # ⚠️ SO THE EXEMPTIONS ARE A CLOSED SET OF TWO CALL SITES, both of which say why in
+        # the call. Anything else that draws an Error card inside this context is a panel that
+        # died, and it now fails instead of passing quietly.
+        assert_no_error_card(captured, "a streamlit_stubbed section", allow_error_state)
     finally:
         if real is not None:
             sys.modules["streamlit"] = real

@@ -154,6 +154,14 @@ TABS = (
 # to serve a data structure.
 _GAME_ID_PANELS = {"_travel", "_drives", "_post_game", "_leaders"}
 
+# ⚠️ AND WHICH ALSO NEED THE SEASON (R-730). These three state an absence whose REASON
+# depends on it — before 2024 the data was never collected, from 2024 on it lands after the
+# game — and NEITHER the game_id NOR the returned frame can tell those apart: `_drives` and
+# `_leaders` get a genuinely empty frame, and `_post_game`'s columns carry no season. The
+# season is on the row `_run_tab` already holds, so this needs no query and no new column.
+# `_travel` has one absence and needs no season.
+_SEASON_PANELS = {"_post_game", "_leaders", "_drives"}
+
 
 def _available_tabs(played: bool) -> tuple:
     """⚠️ AN UNPLAYED GAME HAS NO AFTER TAB AT ALL — NOT AN EMPTY ONE.
@@ -227,7 +235,15 @@ def _run_tab(entry, row, game_id) -> None:
     """
     for name in entry[2]:
         panel = globals()[name]
-        panel(game_id if name in _GAME_ID_PANELS else row)
+        if name in _SEASON_PANELS:
+            # ⚠️ `int()`, AND B076 IS WHY IT IS NOT DECORATION. A value taken off a DataFrame
+            # row arrives as numpy.int64 rather than the int `params.get()` casts. It reaches
+            # no driver here, but the cast is the habit that round paid for.
+            panel(game_id, int(row["season"]))
+        elif name in _GAME_ID_PANELS:
+            panel(game_id)
+        else:
+            panel(row)
 
 
 def body(page) -> None:
@@ -2300,7 +2316,43 @@ def _side_heading(away, home) -> str:
             + parts[0] + parts[1] + "</div>")
 
 
-def _post_game(game_id) -> None:
+# The first season any of the three after-tab subjects exists at all. Drives, box scores and
+# player box scores all start here: claude_code/CLAUDE.md puts play-by-play scope at "2024,
+# 2025, 2026 only", and srv_game_team carries an all-NULL box-score row for every game before
+# it. One constant because one change of scope moves all three.
+_COLLECTED_FROM = 2024
+
+
+def _absence_note(season, not_yet: str, out_of_scope: str) -> str:
+    """WHICH absence this is (AC-G.11), and until R-730 the page could not tell.
+
+    🚨 THE SENTENCE ON THE DRIVES PANEL WAS FLATLY FALSE AND A112 RENDERED IT. Michigan vs
+    Oklahoma, `is_completed = True`, kicked off at 9:00 AM and read six hours later:
+
+        "Drives are collected from 2024 onward, and a game that has not kicked off yet
+         has none."
+
+    ⚠️ The game had kicked off, and finished. The other two sections said something TRUE for
+    the wrong REASON — "we hold this from 2024 onward, and this game's is not among it"
+    invites SCOPE as the explanation when for a 2026 game the reason is LATENCY.
+
+    ⚠️ AND THE WINDOW IS THE POINT. It opens when the game ends and closes when the next
+    collection lands, which is exactly when a reader opens the page to see what happened.
+
+    **Two states reach here, not three.** `_available_tabs` gives an unplayed game no after
+    tab at all, so every caller of this is already past `is_completed` — see its docstring,
+    which argues that an absent tab beats an empty one. The "not kicked off yet" case the old
+    copy described is unreachable from these three panels by construction.
+
+    ⚠️ SAY WHEN, NOT WHICH JOB (AC-G.7). "Collected after the game finishes" tells a reader to
+    come back; naming the run that has not happened names an internal they cannot act on.
+    """
+    if season is not None and int(season) < _COLLECTED_FROM:
+        return out_of_scope
+    return not_yet
+
+
+def _post_game(game_id, season) -> None:
     """The box score and the advanced block — what happened, once it has happened (R-505).
 
     ⚠️ THE EMPTINESS TEST IS ON THE VALUES, NOT ON THE FRAME, AND THIS IS THE WHOLE TRAP.
@@ -2332,9 +2384,17 @@ def _post_game(game_id) -> None:
             # EMPTY, ON THE VALUES. Box scores are held from 2024 onward, so a game before
             # that has two rows of nulls rather than no rows, and the honest answer is that
             # we do not hold it rather than a grid of dashes.
+            #
+            # ⚠️ AND WHICH ABSENCE IT IS DEPENDS ON THE SEASON, NOT ON THE FRAME. The
+            # pre-2024 sentence is unchanged — it was already right for that case.
             states.empty(
                 "The box score would be here.",
-                "cfdb holds box scores from 2024 onward, and this game's is not among them.")
+                _absence_note(
+                    season,
+                    not_yet="Box scores are collected after the game finishes, and this "
+                            "game's has not arrived yet.",
+                    out_of_scope="cfdb holds box scores from 2024 onward, and this game's "
+                                 "is not among them."))
             return
 
         away = next((r for r in played if not bool(r.get("is_home"))), played[0])
@@ -2509,7 +2569,7 @@ def _leader_cell(row) -> str:
             f"<span style='opacity:.55;font-size:.8rem'> · {_leader_note(row)}</span></div>")
 
 
-def _leaders(game_id) -> None:
+def _leaders(game_id, season) -> None:
     """Who led each side, read rather than computed (R-511).
 
     ⚠️ THE RANKING IS NOT DONE HERE AND COULD NOT BE. B076 ended with this item blocked:
@@ -2556,8 +2616,12 @@ def _leaders(game_id) -> None:
             # with no leader on it is the failure the frame check would miss.
             states.empty(
                 "Who led each side would be here.",
-                "Player-level box scores are collected from 2024 onward, and this game's are "
-                "not among them.")
+                _absence_note(
+                    season,
+                    not_yet="Player-level box scores are collected after the game finishes, "
+                            "and this game's have not arrived yet.",
+                    out_of_scope="Player-level box scores are collected from 2024 onward, "
+                                 "and this game's are not among them."))
             return
 
         by_side = {}
@@ -2763,7 +2827,7 @@ def _drive_bar(row) -> str:
         f"height:8px;background:{fill};border-radius:4px'></div></div>")
 
 
-def _drives(game_id) -> None:
+def _drives(game_id, season) -> None:
     """The alternating possession sequence — how the game actually went.
 
     THE SINGLE MOST LEGIBLE "how did this game go" ARTEFACT (matchup post-game spec §1.4),
@@ -2806,10 +2870,19 @@ def _drives(game_id) -> None:
         if df.empty:
             # EMPTY, NOT DEGRADED. Drives are collected from 2024 onward, so a 2023 game has
             # none and never will — that is the scope of the data, not a fault in it.
+            #
+            # 🚨 THE SECOND CLAUSE USED TO READ "and a game that has not kicked off yet has
+            # none", WHICH IS FALSE HERE IN EVERY CASE: this panel is only reachable from the
+            # after tab, which an unplayed game does not have. A112 rendered it on a game
+            # that had finished six hours earlier.
             states.empty(
                 "The drive-by-drive sequence would be here.",
-                "Drives are collected from 2024 onward, and a game that has not kicked off "
-                "yet has none.")
+                _absence_note(
+                    season,
+                    not_yet="Drives are collected after the game finishes, and this game's "
+                            "have not arrived yet.",
+                    out_of_scope="Drives are collected from 2024 onward, and this game's are "
+                                 "not among them."))
             return
 
         colors = _drive_colors(df)
