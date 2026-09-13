@@ -2939,6 +2939,53 @@ models:
           Highest minus lowest home win probability across the game, in probability points.
           A game that never left 60-70% ran flat; one spanning 5-95% did not. Null for games
           with no play data.
+      - name: lead_changes_fourth_quarter
+        description: >
+          Win-probability crossings of 0.5 in the FOURTH QUARTER ONLY (period 4 exactly; overtime
+          is a separate column). The period comes from stg_play joined on play_id, because the
+          win-probability feed carries no period at all. NULL — never zero — for the three games
+          of 1,898 whose feed stops before the fourth quarter begins: we did not count none, we
+          had nothing to count.
+      - name: largest_single_play_swing_fourth_quarter
+        description: >
+          The biggest single-play change in home win probability within the fourth quarter
+          (period 4 exactly). Null where the feed never reached it.
+      - name: home_win_probability_range_fourth_quarter
+        description: >
+          Highest minus lowest home win probability within the fourth quarter (period 4 exactly).
+          Of Marc's seven week-2 games this is the measure that best catches Ohio State @ Texas,
+          which ranks 2nd of 86 here and 18th or worse on every other new measure.
+      - name: plays_with_win_probability_fourth_quarter
+        description: >
+          How many fourth-quarter plays carry a win probability. Zero means the feed stopped
+          before the fourth quarter, which is why the other period-scoped counts are null there —
+          this column is the evidence that distinguishes "no data" from "nothing happened".
+      - name: lead_changes_overtime
+        description: >
+          Win-probability crossings of 0.5 in overtime (period 5 and beyond), carried SEPARATELY
+          from the fourth quarter rather than folded into it. Jacksonville State @ Ohio is why:
+          19 lead changes whole-game, 2 in the fourth quarter, 11 in overtime. Zero is a fact for
+          a game that ended in regulation; NULL where the feed never reached the fourth quarter
+          and so cannot say whether overtime happened.
+      - name: plays_with_win_probability_overtime
+        description: Overtime plays carrying a win probability. Zero for a game decided in regulation.
+      - name: mean_distance_from_even
+        description: >
+          Average absolute distance of the home win probability from 0.5 across the whole game.
+          Lower is closer. THRESHOLD-FREE on purpose: a "share of plays within 0.10 of even" answers
+          the same question but bakes in a cutoff nobody measured.
+      - name: mean_distance_from_even_fourth_quarter_onward
+        description: >
+          The same measure scoped to period 4 and beyond, so a game decided in double overtime is
+          not judged on its fourth quarter alone. This is what separates a genuine thriller from one
+          play moving a near-certain probability: Central Connecticut @ Toledo ranks 3rd of 86 on
+          whole-game largest swing and 59th here. Null where the feed never reached the fourth
+          quarter.
+      - name: closest_to_even_fourth_quarter_onward
+        description: >
+          The closest the home win probability ever got to 0.5 from period 4 onward — the single
+          most level moment late in the game. Pairs with the mean: the mean says how close it was
+          for how long, this says how close it ever got.
       - name: is_upset
         description: >
           Whether a RANKED side lost to a side ranked worse or unranked. AP poll only, at the

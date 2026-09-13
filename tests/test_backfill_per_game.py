@@ -5,6 +5,8 @@ Two endpoints at one call per game. Over every completed game in CFBD's universe
 error against a 75,000/month quota that normally sits near 2,300, so the scope rule is worth
 holding in a test rather than in a comment.
 """
+import pytest
+
 from src import backfill
 from src.endpoints import BY_PATH
 
@@ -245,24 +247,92 @@ def test_the_weekly_per_game_set_is_exactly_these_three():
     assert weekly_per_game == {"plays/stats", "game/box/advanced", "metrics/wp"}
 
 
-def test_completed_game_ids_can_narrow_to_the_weeks_in_play(monkeypatch):
-    """The weekly refresh must not re-fetch a whole season every Sunday.
+def test_the_weekly_path_reads_the_week_scoped_games_payload(monkeypatch):
+    """R-718. This is the defect, and it is the whole reason the fan-out under-covered.
 
-    Without the week filter, a per-game endpoint in the weekly path would fan out over every
-    completed game in the season — hundreds of games that finished months ago, every week,
-    growing all season.
+    `completed_game_ids` used to read the SEASON-scoped /games payload for both paths, and
+    nothing refreshes that one in season — it was two days stale against a live slate, knowing
+    461 completed games where fct_game knew 755. Every request still returned HTTP 200, so the
+    fetch reported complete success while asking about 100 of 185 FBS-involving games.
+
+    So this test does not check that a filter narrows. It checks WHICH PAYLOAD IS READ, because
+    that is the thing that was wrong and a filter over the wrong payload is still wrong.
     """
-    payload = [
-        {"id": 1, "completed": True, "week": 3, "homeClassification": "fbs",
-         "awayClassification": "fbs"},
-        {"id": 2, "completed": True, "week": 4, "homeClassification": "fbs",
-         "awayClassification": "fbs"},
-    ]
+    asked = []
+
+    def fake_load(endpoint, params):
+        asked.append(params)
+        if "week" not in params:
+            # The season-scoped payload: stale, and the weekly path must not touch it.
+            return _games((99, True, "fbs", "fbs"))
+        return [{"id": int(params["week"]) * 10, "completed": True, "week": params["week"],
+                 "homeClassification": "fbs", "awayClassification": "fbs"}]
+
+    monkeypatch.setattr(backfill, "load_latest_raw", fake_load)
+    ids = backfill.completed_game_ids(
+        "2026", weeks=[{"year": "2026", "week": "4", "seasonType": "regular"},
+                       {"year": "2026", "week": "5", "seasonType": "regular"}])
+
+    assert ids == ["40", "50"], "the week-scoped payloads are what the fan-out enumerates"
+    assert all("week" in p for p in asked), \
+        "the weekly path must never read the season-scoped payload — it is not refreshed"
+    assert {p["week"] for p in asked} == {"4", "5"}
+    assert "99" not in ids, "the stale season payload's game must not appear"
+
+
+def test_a_missing_week_payload_raises_rather_than_fanning_out_over_a_short_list(monkeypatch):
+    """🚨 A FETCH THAT SILENTLY FETCHES NOTHING IS R-718 ALL OVER AGAIN.
+
+    The old code's `if not payload: continue` is precisely how a per-game fan-out comes to
+    cover half a week and tell nobody. There is no honest short list here: the caller is about
+    to spend one API call per game, and a truncated set costs silent coverage rather than an
+    error somebody can see. `scores_refresh` lands exactly this payload every two hours.
+    """
+    monkeypatch.setattr(backfill, "load_latest_raw", lambda ep, params: None)
+    with pytest.raises(RuntimeError, match="no landed /games response"):
+        backfill.completed_game_ids(
+            "2026", weeks=[{"year": "2026", "week": "9", "seasonType": "regular"}])
+
+
+def test_an_empty_week_is_not_a_missing_week(monkeypatch):
+    """AC-G.11: an absence must say which absence it is.
+
+    A week whose payload exists and contains no completed FBS game is a real answer — a bye
+    week, or a Tuesday before anyone has played. A week whose payload was never landed is a
+    broken precondition. Returning [] for the first and raising for the second is the whole
+    distinction, and collapsing them is the bug this round fixed.
+    """
+    monkeypatch.setattr(backfill, "load_latest_raw", lambda ep, params: [])
+    assert backfill.completed_game_ids(
+        "2026", weeks=[{"year": "2026", "week": "9", "seasonType": "regular"}]) == []
+
+
+def test_the_full_season_path_still_reads_the_season_scoped_payload(monkeypatch):
+    """The backfill path is unchanged, deliberately.
+
+    Its purpose is finished seasons, whose game list never changes again, and it has no week
+    window to enumerate. It also keeps the tolerant skip, because a season with no landed
+    /games is a season not yet swept rather than a defect.
+    """
+    monkeypatch.setattr(backfill, "SEASON_TYPES", ["regular"])
     monkeypatch.setattr(backfill, "load_latest_raw",
-                        lambda ep, params: payload if params.get("seasonType") == "regular"
-                        else None)
-    every = backfill.completed_game_ids("2026")
-    assert every == ["1", "2"], "no filter means the whole season"
-    narrowed = backfill.completed_game_ids(
-        "2026", weeks=[{"year": "2026", "week": "4", "seasonType": "regular"}])
-    assert narrowed == ["2"], "the week filter must actually narrow"
+                        lambda ep, params: _games((1, True, "fbs", "fbs"),
+                                                  (2, True, "fbs", "fcs"))
+                        if "week" not in params else None)
+    assert backfill.completed_game_ids("2024") == ["1", "2"]
+
+
+def test_a_game_appearing_in_two_week_payloads_is_asked_about_once(monkeypatch):
+    """CFBD has moved a game between weeks before, and the window overlaps by design —
+    `week_window` returns the week in play AND the one before it. Two payloads can therefore
+    name the same game, and fanning out twice would spend a call to be told the same thing.
+    """
+    monkeypatch.setattr(backfill, "load_latest_raw",
+                        lambda ep, params: [{"id": 7, "completed": True,
+                                             "week": params.get("week"),
+                                             "homeClassification": "fbs",
+                                             "awayClassification": "fbs"}])
+    ids = backfill.completed_game_ids(
+        "2026", weeks=[{"year": "2026", "week": "4", "seasonType": "regular"},
+                       {"year": "2026", "week": "5", "seasonType": "regular"}])
+    assert ids == ["7"], "one call per game, not one per payload it appears in"

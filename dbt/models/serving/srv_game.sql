@@ -282,6 +282,30 @@ select
     wps.lead_changes,
     wps.largest_single_play_swing,
     wps.home_win_probability_range,
+    -- A117, R-709. THE PERIOD-SCOPED MEASURES, and they are an ADDITION rather than a
+    -- replacement — every whole-game column above keeps its meaning and its name. §3.3's EXPAND:
+    -- nothing consumes these yet, so there is no window in either direction and no consumer to
+    -- migrate. Marc asked to rank on "lead changes in the 4th qtr and swings in win probability".
+    --
+    -- ⚠️ `_fourth_quarter` IS period 4 EXACTLY and `_fourth_quarter_onward` INCLUDES OVERTIME. The
+    -- two suffixes are not interchangeable and A102 is the round that paid for learning that a
+    -- page will happily pick whichever name it reads first. Overtime is carried separately again
+    -- here for the same reason: Jacksonville State @ Ohio had 19 lead changes, TWO of them in the
+    -- fourth quarter and ELEVEN in overtime, so folding them together would say the drama happened
+    -- somewhere it did not.
+    wps.lead_changes_fourth_quarter,
+    wps.largest_single_play_swing_fourth_quarter,
+    wps.home_win_probability_range_fourth_quarter,
+    wps.plays_with_win_probability_fourth_quarter,
+    wps.lead_changes_overtime,
+    wps.plays_with_win_probability_overtime,
+    -- HOW CLOSE IT WAS, AND FOR HOW LONG — threshold-free, so no cutoff nobody measured gets
+    -- baked into a published column. Lower is closer. This is what separates a genuine thriller
+    -- from one play moving a probability that was already near certain: Central Connecticut @
+    -- Toledo ranks 3rd of 86 on whole-game swing and 59th on this.
+    wps.mean_distance_from_even,
+    wps.mean_distance_from_even_fourth_quarter_onward,
+    wps.closest_to_even_fourth_quarter_onward,
     g.is_upset,
 
     -- FBS SPINE. EITHER team, not both: a Division II visitor's trip to an FBS stadium is an
