@@ -1457,6 +1457,13 @@ models:
         description: AC-G.35. Last load of the `game` domain, rendered instead of now().
 
   # ---------------------------------------------------------------------------------------
+      - name: stat_made_rate
+        description: >
+          stat_made divided by stat_attempted, as a FRACTION — 0.659 renders as 66%. Carried here
+          because dividing one column by another is a metric and §4.2 puts metrics upstream; the
+          page scales it by 100, which is rendering. NULL when nothing was attempted, never zero:
+          "0 for 0" and "no attempts recorded" are different facts.
+
   - name: srv_player_play
     description: >
       Players page, the play-level drill-down — one row per play a player is credited on, and
@@ -2820,6 +2827,18 @@ models:
           never spot which they were looking at.
 
   # ---------------------------------------------------------------------------------------
+      - name: rushing_yards_for_minus_opponent_allowed_per_game
+        description: >
+          This team's rushing yards per game MINUS the opponent's rushing yards allowed per game.
+          Positive means this team's offense averages more than the opponent's defense has been
+          conceding. Named for the subtraction rather than a verdict, because the two figures sit
+          on DIFFERENT ROWS and a same-row subtraction is a different quantity that looks right
+          whenever the two teams are similar. Null when either side has no figure yet.
+      - name: passing_yards_for_minus_opponent_allowed_per_game
+        description: The same pairing for passing yards. See the rushing column for the sign.
+      - name: total_yards_for_minus_opponent_allowed_per_game
+        description: The same pairing for total yards. See the rushing column for the sign.
+
   - name: srv_game
     description: >
       THE game-grain serving view: one row per game, 130 columns. R-076 and R-094.
@@ -3550,6 +3569,18 @@ models:
   # APPENDED BY PROMPT B046 (session B). Session A is editing the srv_game_team block above;
   # this is at the end of the file so the two edits cannot touch the same lines.
   # ==========================================================================================
+      - name: wind_direction_deg
+        description: >
+          Wind bearing in degrees, 0-360, as CFBD reports it. Carried on every row that has a
+          reading; the page decides when a direction is worth showing, which Marc set at above
+          10 mph.
+      - name: wind_direction_compass
+        description: >
+          The same bearing as one of eight compass points. Bucketed in fct_game_weather and only
+          carried here — eight rather than sixteen because a single instantaneous reading does
+          not support more precision, and a second bucketing in the page would be a second
+          definition of north.
+
   - name: srv_drive
     description: >
       One row per drive — what the Matchup post-game Drives chart reads, and nothing else.
@@ -4263,7 +4294,51 @@ models:
       - name: outlier_count
         description: >
           Teams outside the fences. Values are not carried.
-
+      - name: season
+        description: Season the week belongs to.
+      - name: season_type
+        description: regular, postseason and the rest. Postseason week numbers restart at 1.
+      - name: week
+        description: >
+          The week this distribution describes. The per-game figures lead INTO the week, so there
+          is no week 1 row — every team's figure is null before a game has been played.
+      - name: teams_in_week
+        description: >
+          How many teams contributed a figure. Distinct from `n` only if a team could appear
+          twice; it is the denominator a reader needs to know how broad the shape is.
+      - name: max_games_counted
+        description: >
+          The most games behind any one team's per-game figure this week. With
+          min_games_counted it says how uneven the sample is — a week where one team has played
+          three and another one is a wider comparison than the axis suggests.
+      - name: mean
+        description: Arithmetic mean across the teams in the week.
+      - name: stddev
+        description: >
+          Sample standard deviation, which is what Marc asked for to "give a visual reference to
+          extreme performers" alongside the percentiles.
+      - name: min_value
+        description: The lowest team figure observed. The OBSERVATION, not the drawn axis floor.
+      - name: max_value
+        description: The highest team figure observed. Again the observation, not axis_max.
+      - name: p02
+        description: 2nd percentile.
+      - name: p05
+        description: 5th percentile.
+      - name: p25
+        description: 25th percentile — the lower quartile, and the bottom of the box.
+      - name: p50
+        description: Median.
+      - name: p75
+        description: 75th percentile — the upper quartile, and the top of the box.
+      - name: p95
+        description: 95th percentile.
+      - name: p98
+        description: 98th percentile.
+      - name: iqr
+        description: p75 minus p25. The box height, and what the 1.5x whisker fences are built from.
+      - name: as_of_ts
+        description: When this view's underlying data was last loaded.
 
   - name: srv_game_team_leader_through_prior_week
     description: >
