@@ -143,15 +143,66 @@ def completed_game_ids(season: str, weeks: Optional[List[Dict[str, str]]] = None
 
     A game with NEITHER side FBS is skipped outright: two Division III teams playing each
     other is not part of this warehouse at any grain.
+
+    🚨 WHEN `weeks` IS GIVEN THIS READS THE **WEEK-SCOPED** /games PAYLOAD, AND THAT IS R-718.
+    IT USED TO READ THE SEASON-SCOPED ONE FOR BOTH PATHS, AND NOTHING REFRESHES THAT.
+
+    A115 measured the consequence by running CLAUDE.md 2.5's check on its own successful
+    fetch: 100 requests, 100 x HTTP 200, and only 2 of the 7 games Marc had named came back
+    with data. The fetch was not failing. It was asking about the wrong games.
+
+        the season-scoped payload, when A115 looked        two days stale
+        completed games it knew about                      461
+        completed games fct_game knew about                755
+        FBS-involving completed games, weeks 1-2: it saw   100
+        ... against the real                              185
+
+    `scores_refresh` fetches ("games", {"year", "week", "seasonType"}) every two hours for the
+    weeks in play, so the week-scoped payload is minutes-to-hours old. NOTHING refreshes the
+    season-scoped one in season: it was last landed 2026-09-11 against a 2026-09-13 slate.
+
+    ⚠️ SO ALL THREE PER_GAME ENDPOINTS HAD BEEN COVERING ~54% OF THE NEWEST WEEK, ALL SEASON,
+    while reporting every request a success. That is the shape CLAUDE.md 2.5 exists to name: a
+    fetch that returns 200 for everything it asks about, and asks about half of what exists.
+
+    ⚠️ AND READING THE WEEK PAYLOAD REMOVES THE WEEK FILTER RATHER THAN MOVING IT. Every game
+    in a week-scoped response IS that week, so there is no (week, seasonType) comparison left
+    to get wrong — and a string-vs-int mismatch in that comparison would have produced this
+    same silent shortfall.
+
+    🚨 A MISSING WEEK PAYLOAD RAISES. IT DOES NOT SKIP.
+    The old code's `if not payload: continue` is how a fetch comes to fetch nothing and say so
+    to nobody, and the prompt for this round put it exactly that way: a fetch that silently
+    fetches nothing is this bug again. There is no honest short list here — the caller is about
+    to spend one API call per game and a truncated set costs coverage rather than an error.
+    `scores_refresh` lands precisely this payload, and the per-game fan-out already documents
+    that it depends on the bulk sweep having run first.
+
+    ⚠️ WHY NOT `fct_game`, WHICH IS COMPLETE AND IS ALREADY THIS PROJECT'S ANSWER TO "WHAT GAMES
+    EXIST": it is a dbt MODEL, and putting it here makes the FETCH depend on the TRANSFORM having
+    run. Ingestion would then need a warehouse connection and a successful dbt build to know
+    what to ask for, so a failed build would stop data arriving rather than stopping it being
+    modelled — the pipeline inverted, to fix a staleness problem that the raw layer already
+    solves. The week-scoped payload is raw, it is what the cheap two-hourly DAG already
+    maintains, and `week_window` already enumerates exactly the weeks wanted.
+
+    ⚠️ WHAT IT COSTS WHEN THE THING IT DEPENDS ON IS STALE: requests are planned before any of
+    them run, so this reads the PREVIOUS refresh's payload — at most one scores-DAG interval
+    behind, against two days today. A game completing inside that interval is missed on this
+    run and picked up on the next, because the fan-out is scoped to the week in play AND the
+    one before it. Bounded, and self-healing inside the window, which is exactly what the
+    season-scoped read was not.
+
+    ⚠️ THE FULL-SEASON PATH (`weeks is None`) STILL READS THE SEASON-SCOPED PAYLOAD, deliberately.
+    Its purpose is a backfill of finished seasons, whose game list never changes again, and it
+    has no week window to enumerate. It keeps the tolerant `if not payload: continue` because a
+    season with no landed /games is a season not yet swept, not a defect.
     """
-    ids: List[str] = []
-    for season_type in SEASON_TYPES:
-        payload = load_latest_raw("games", {"year": season, "seasonType": season_type})
-        if not payload:
-            continue
-        wanted = None
-        if weeks is not None:
-            wanted = {(str(w["week"]), w.get("seasonType", "regular")) for w in weeks}
+    ids: Dict[str, None] = {}   # ordered set: a game can appear in more than one payload
+
+    def harvest(payload: List[Dict[str, Any]],
+                season_type: str,
+                wanted: Optional[set]) -> None:
         for game in payload:
             if not game.get("completed"):
                 continue
@@ -159,8 +210,31 @@ def completed_game_ids(season: str, weeks: Optional[List[Dict[str, str]]] = None
                 continue
             if wanted is not None and (str(game.get("week")), season_type) not in wanted:
                 continue
-            ids.append(str(game["id"]))
-    return ids
+            ids[str(game["id"])] = None
+
+    if weeks is not None:
+        for week in weeks:
+            season_type = week.get("seasonType", "regular")
+            params = {"year": season, "week": str(week["week"]),
+                      "seasonType": season_type}
+            payload = load_latest_raw("games", params)
+            if payload is None:
+                raise RuntimeError(
+                    f"no landed /games response for {params}, so the per-game fan-out "
+                    "cannot enumerate that week's completed games. Run the scores refresh "
+                    "first — it lands exactly this payload. Refusing rather than fanning "
+                    "out over a short list (R-718)."
+                )
+            # The payload IS the week, so no (week, seasonType) filter is needed or wanted.
+            harvest(payload, season_type, None)
+        return list(ids)
+
+    for season_type in SEASON_TYPES:
+        payload = load_latest_raw("games", {"year": season, "seasonType": season_type})
+        if not payload:
+            continue
+        harvest(payload, season_type, None)
+    return list(ids)
 
 
 def seasons_for(endpoint: Endpoint, seasons: List[str], full_history: bool,
