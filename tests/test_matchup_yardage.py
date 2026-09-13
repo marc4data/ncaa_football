@@ -144,7 +144,7 @@ _DISTRIBUTION = _distribution()
 
 
 @pytest.fixture
-def panel():
+def panel(request):
     """The panel with streamlit captured and the database replaced by constructed rows.
 
     ⚠️ IT PUTS THE MODULES BACK. Reloading lib.states against a stub binds the stub inside it
@@ -161,12 +161,24 @@ def panel():
     both halves — sys.modules and the parent-package attribute (A101).
     """
     import importlib
-    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+    # 🚨 R-705(2). `streamlit_stubbed` ENFORCES ON EXIT NOW, and the exemption is declared
+    # here rather than granted to the file. A112 added that enforcement temporarily, ran the
+    # full suite, and exactly one test failed — the one below that renders a card ON PURPOSE.
+    # A reverted the harness byte-identically rather than landing it, because turning another
+    # session's suite red for something that is not a defect is what §3 rule 3.1 prevents.
+    #
+    # ⚠️ IT IS PER-TEST, NOT PER-FILE. Exempting the fixture outright would take the guard off
+    # all fifty-two tests in here to serve one, which is a blind spot wearing an exemption's
+    # clothes. `indirect=True` hands the flag to the ONE test that needs it, and that test
+    # says why in its own decorator.
+    allow_error_state = getattr(request, "param", False)
+    with render_harness.streamlit_stubbed(
+            allow_error_state=allow_error_state) as (_st, captured, _charts):
         matchup = importlib.reload(importlib.import_module("views.matchup"))
         seen = {}
 
         def run(game, sides, distribution=_DISTRIBUTION, deltas=None,
-                leaders=None, allow_error_state=False):
+                leaders=None, allow_error_state=allow_error_state):
             """`sides` is what srv_team_week returns — zero, one or two constructed rows.
 
             ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
@@ -428,15 +440,20 @@ def test_neither_side_carried_is_empty_and_the_page_survives(panel):
     assert "Auburn" in body and "Kentucky" in body
 
 
+@pytest.mark.parametrize("panel", [True], indirect=True)
 def test_a_broken_row_degrades_this_panel_and_not_the_page(panel):
     """states.section is the blast wall. The panel must not take Matchup down with it.
 
-    ✅ `allow_error_state=True` BECAUSE PROVING THE ERROR CARD FIRES IS THIS TEST'S ENTIRE JOB.
-    R-610 makes an Error state fatal by default precisely so a panel cannot die unnoticed; the
-    one test that renders one on purpose says so in the call, which is the difference between
-    an exemption and a blind spot.
+    ✅ THE EXEMPTION IS DECLARED BECAUSE PROVING THE ERROR CARD FIRES IS THIS TEST'S ENTIRE
+    JOB. R-610 makes an Error state fatal by default precisely so a panel cannot die
+    unnoticed; the one test that renders one on purpose says so, which is the difference
+    between an exemption and a blind spot.
+
+    ⚠️ THE `indirect=True` PARAMETER IS THE DECLARATION SINCE R-705(2), and it reaches BOTH
+    guards — `assert_no_error_card` inside the run and `streamlit_stubbed`'s new check on
+    exit. One statement, so the two cannot disagree about whether this test is exempt.
     """
-    entries, _ = panel(_game(week="not a week"), _both(), allow_error_state=True)
+    entries, _ = panel(_game(week="not a week"), _both())
     body = _text(entries)
     assert "Something went wrong" in body or "srv_team_week" in body, \
         "the panel raised out of its own section instead of degrading"

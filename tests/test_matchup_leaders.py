@@ -55,7 +55,10 @@ def panel():
         matchup = importlib.reload(importlib.import_module("views.matchup"))
         seen = {}
 
-        def run(rows):
+        def run(rows, season=2026):
+            # R-730. The season decides WHICH absence the Empty state states, so the
+            # fixture has to carry one. 2026 is a completed modern game — the case
+            # nearly every test here means; the scope tests pass a pre-2024 season.
             captured.clear()
             seen.clear()
 
@@ -65,7 +68,7 @@ def panel():
                 return pd.DataFrame(rows)
 
             matchup.query = fake_query
-            matchup._leaders(401752665)
+            matchup._leaders(401752665, season)
             # 🚨 R-610. An Error state is not a passing state.
             render_harness.assert_no_error_card(captured, "the leaders panel")
             return list(captured.events), dict(seen)
@@ -251,7 +254,7 @@ def test_a_pre_2024_game_renders_empty_not_a_row_of_blanks(panel):
     the failure a frame check would miss.
     """
     run, _ = panel
-    entries, _ = run([])
+    entries, _ = run([], season=2023)
     body = _text(entries)
     assert "would be here" in body, "the Empty state did not render"
     assert "2024 onward" in body
@@ -396,3 +399,41 @@ def test_the_claim_survives_the_link(panel):
     assert " led " not in body.lower() and "leader in" not in body.lower()
     code = SOURCE[SOURCE.index("def _leader_name("):SOURCE.index("def _leaders(")]
     assert "lowest_" not in code
+
+
+# --- 🚨 R-730: WHICH absence is this? ------------------------------------------------------
+#
+# "Player-level box scores are collected from 2024 onward, and this game's are not among
+# them." A TRUE sentence with the WRONG REASON for a 2026 game: it invites scope as the
+# explanation when the reason is latency. A112 cleared this one as fine; Cowork corrected it.
+#
+# ⚠️ AND THIS PANEL'S CADENCE IS NOT THE BOX SCORE'S — see `_leaders`' own docstring: the
+# source is in the IMMUTABLE_WK bucket and rebuilds twice a week rather than two-hourly. So
+# the copy says "after the game finishes" and promises no hour, because promising one here
+# would be a different wrong reason.
+
+def test_the_two_absences_do_not_share_a_sentence(panel):
+    """Both branches through the same empty frame; the sentences must differ."""
+    run, _ = panel
+    out_of_scope = _text(run([], season=2023)[0])
+    not_yet = _text(run([], season=2026)[0])
+    assert out_of_scope != not_yet, (
+        "a 2023 game and a 2026 game were told the same thing about why there are no leaders")
+
+
+def test_a_completed_modern_game_is_told_the_data_has_not_LANDED(panel):
+    run, _ = panel
+    body = _text(run([], season=2026)[0])
+    assert "2024 onward" not in body, (
+        "scope is the wrong reason for a 2026 game whose players simply have not landed")
+    assert "kicked off" not in body
+    assert "not arrived yet" in body and "after the game" in body, (
+        f"the reader was not told when to come back: {body!r}")
+
+
+def test_a_pre_2024_game_is_still_told_it_is_out_of_SCOPE(panel):
+    run, _ = panel
+    body = _text(run([], season=1999)[0])
+    assert "2024 onward" in body
+    assert "not arrived yet" not in body, (
+        "a 1999 game was promised player box scores that will never exist")

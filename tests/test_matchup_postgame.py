@@ -62,7 +62,10 @@ def panel():
         matchup = importlib.reload(importlib.import_module("views.matchup"))
         seen = []
 
-        def run(sides, glossary=GLOSSARY):
+        def run(sides, glossary=GLOSSARY, season=2026):
+            # R-730. The season decides WHICH absence the Empty state states, so the
+            # fixture has to carry one. 2026 is a completed modern game — the case
+            # nearly every test here means; the scope tests pass a pre-2024 season.
             captured.clear()
             seen.clear()
 
@@ -71,7 +74,7 @@ def panel():
                 return glossary if "srv_data_dictionary" in sql else pd.DataFrame(sides)
 
             matchup.query = fake_query
-            matchup._post_game(401752754)
+            matchup._post_game(401752754, season)
             # 🚨 R-610. An Error state is not a passing state.
             render_harness.assert_no_error_card(captured, "the post-game panel")
             return list(captured.events), list(seen)
@@ -177,7 +180,7 @@ def test_a_pre_2024_game_renders_empty_not_a_table_of_em_dashes(panel):
     draw a full grid of `—` for both sides and fails this test on the dash count.
     """
     run, _ = panel
-    entries, _ = run(_dead())
+    entries, _ = run(_dead(), season=2023)
     body = _text(entries)
     # ⚠️ THE DASH COUNT IS ASSERTED FIRST, ON PURPOSE. When the break was staged, the
     # ADVANCED section's own guard still fired, so "would be here" was present while the box
@@ -501,3 +504,40 @@ def test_the_panel_computes_nothing(panel):
     sql = block[block.index("select {_POSTGAME_COLUMNS}"):block.index('limit 2')].lower()
     for banned in ("group by", "sum(", "avg(", "row_number(", "rank(", "over (", "join"):
         assert banned not in sql, f"the panel's query contains `{banned}`"
+
+
+# --- 🚨 R-730: WHICH absence is this? ------------------------------------------------------
+#
+# "cfdb holds box scores from 2024 onward, and this game's is not among them." True, and the
+# wrong reason for a 2026 game — the box score lands after the game rather than never.
+#
+# ⚠️ THE FIXTURE IS `_dead()` IN BOTH CASES ON PURPOSE. srv_game_team holds an all-NULL row
+# for every game back to 1869 AND for a modern game whose box score has not landed, so the
+# FRAME cannot tell the two apart. That is precisely why the season had to be passed in, and
+# a test that used a different frame per branch would be proving something easier.
+
+def test_the_two_absences_do_not_share_a_sentence(panel):
+    run, _ = panel
+    out_of_scope = _text(run(_dead(), season=2023)[0])
+    not_yet = _text(run(_dead(), season=2026)[0])
+    assert out_of_scope != not_yet, (
+        "a 2023 game and a 2026 game were told the same thing about why there is no box score")
+
+
+def test_a_completed_modern_game_is_told_the_data_has_not_LANDED(panel):
+    run, _ = panel
+    body = _text(run(_dead(), season=2026)[0])
+    assert "2024 onward" not in body, (
+        "scope is the wrong reason for a 2026 game whose box score simply has not landed")
+    assert "kicked off" not in body
+    assert "not arrived yet" in body and "after the game" in body, (
+        f"the reader was not told when to come back: {body!r}")
+    assert body.count("—") == 0, "still Empty, not a grid of dashes"
+
+
+def test_a_pre_2024_game_is_still_told_it_is_out_of_SCOPE(panel):
+    run, _ = panel
+    body = _text(run(_dead(), season=1999)[0])
+    assert "2024 onward" in body
+    assert "not arrived yet" not in body, (
+        "a 1999 game was promised a box score that will never exist")
