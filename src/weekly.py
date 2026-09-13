@@ -64,21 +64,34 @@ def _requests_for_bucket(bucket: str, season: str,
         # one game is truncated at 2,000 records, so a week-scoped weekly refresh would keep
         # landing an arbitrary 11% sample forever.
         #
-        # The marker is opt-in per endpoint rather than blanket for PER_GAME, deliberately,
-        # and the two PER_GAME endpoints now sit on opposite sides of it.
+        # The marker is opt-in per endpoint rather than blanket for PER_GAME, deliberately —
+        # and ALL THREE PER_GAME ENDPOINTS ARE NOW IN, each for its own measured reason rather
+        # than by relaxing the rule.
         #
-        # game/box/advanced IS IN, as of R-697. It was named here as backfill-only on volume
-        # grounds, and that reasoning was sound until the volume was measured against what it
-        # buys: it is the ONLY per-game participation share in the warehouse, A107 built
-        # serving objects on it, and the one-off backfill that fed it never asked about the
-        # current season — so the live season read 0.0% coverage while the two finished ones
-        # read 99.2% and 100%. Measured on a two-week window, opting it in takes
-        # results_refresh from 139 requests to 239: it DOUBLES this refresh rather than
-        # tripling it, because plays/stats already fans out over the same games.
+        # plays/stats is in because anything wider is WRONG: a scope broader than one game is
+        # truncated at 2,000 records, so a week-scoped refresh would land an arbitrary 11%
+        # sample forever.
         #
-        # metrics/wp STAYS OUT. It has no reader, no request behind it, and taking it along
-        # would be exactly the "side effect of fixing something else" this note was written
-        # to prevent. The note is kept, pointed at the endpoint it still applies to.
+        # game/box/advanced is in as of R-697. It was backfill-only on volume grounds until the
+        # volume was measured against what it buys: it is the ONLY per-game participation share
+        # in the warehouse, A107 built serving objects on it, and the one-off backfill never
+        # asked about the current season — 0.0% coverage against 99.2% and 100% for the two
+        # finished ones.
+        #
+        # metrics/wp is in as of R-716, AND A108 DELIBERATELY LEFT IT OUT ONE ROUND EARLIER, on
+        # the grounds that it had "no reader and no request behind it". Both halves of that were
+        # true and both stopped being true: Marc asked to rank games on lead changes and win
+        # probability swings (R-709), and A114 measured every one of those columns NULL for all
+        # seven games he named. The condition A108 named as the thing that would change the
+        # answer is exactly the condition that arrived.
+        #
+        # ⚠️ SO THE NOTE NO LONGER GUARDS A LIST, IT EXPLAINS ONE. What keeps a fourth endpoint
+        # from arriving by accident is test_the_weekly_per_game_set_is_exactly_these_three,
+        # which pins the membership exactly and has to be edited on purpose.
+        #
+        # Measured on a two-week window, each addition costs one call per completed game:
+        # 139 -> 239 for game/box/advanced, and 239 -> 339 for metrics/wp. Each DOUBLES nothing
+        # and adds a flat ~100, because all three fan out over the same completed games.
         #
         # Scoped to the weeks in play, so a Sunday refresh asks about ~60 games rather than
         # re-fetching the whole season.
