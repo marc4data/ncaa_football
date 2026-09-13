@@ -1458,6 +1458,11 @@ models:
 
   # ---------------------------------------------------------------------------------------
       - name: stat_made_rate
+        description: >
+          stat_made divided by stat_attempted, as a FRACTION — 0.659 renders as 66%. Carried here
+          because dividing one column by another is a metric and §4.2 puts metrics upstream; the
+          page scales it by 100, which is rendering. NULL when nothing was attempted, never zero:
+          "0 for 0" and "no attempts recorded" are different facts.
 
   - name: srv_player_play
     description: >
