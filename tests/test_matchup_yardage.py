@@ -43,6 +43,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import render_harness  # noqa: E402
 
+# ⚠️ IMPORTED HERE, BEFORE ANY STUB IS INSTALLED, AND `_shipped` SAYS WHY. Inside
+# `streamlit_stubbed` the name `streamlit` is a plain module and this import cannot resolve.
+from streamlit.elements.vega_charts import _prepare_vega_lite_spec  # noqa: E402
+
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
 
@@ -90,12 +94,18 @@ def _deltas(**overrides):
     runs ahead of Michigan's defense on all three; Michigan's rushing is NEGATIVE, which is the
     case the sign and the colour both have to carry.
     """
+    # 🚨 `is_home` IS IN THIS FIXTURE SINCE R-731 AND WITHOUT IT THE MIRROR IS NOT TESTED AT
+    # ALL. `_GAME_TEAM_COLUMNS` has always selected it, so the real frame carries it; the
+    # fixture did not, and `_is_home_side` therefore read False for BOTH sides — which made
+    # both columns take the away order while all 52 tests here still passed.
+    # ⚠️ THAT IS THE FIXTURE FAILURE THIS PROJECT KEEPS FINDING, caught this time by asking
+    # what the fixture could NOT distinguish rather than by a red test.
     rows = [
-        {"team_id": AWAY_ID,
+        {"team_id": AWAY_ID, "is_home": False,
          "rushing_yards_for_minus_opponent_allowed_per_game": 38.0,
          "passing_yards_for_minus_opponent_allowed_per_game": 142.0,
          "total_yards_for_minus_opponent_allowed_per_game": 180.0},
-        {"team_id": HOME_ID,
+        {"team_id": HOME_ID, "is_home": True,
          "rushing_yards_for_minus_opponent_allowed_per_game": -6.0,
          "passing_yards_for_minus_opponent_allowed_per_game": 84.0,
          "total_yards_for_minus_opponent_allowed_per_game": 78.0},
@@ -913,8 +923,19 @@ def test_the_guard_does_NOT_suppress_a_point_that_merely_sits_low(panel):
 # skipping, which is correct — the fix's premise would have changed.
 
 def _shipped(chart):
-    """The spec Streamlit actually sends for `st.altair_chart(chart, use_container_width=True)`."""
-    from streamlit.elements.vega_charts import _prepare_vega_lite_spec
+    """The spec Streamlit actually sends for `st.altair_chart(chart, use_container_width=True)`.
+
+    🚨 THE IMPORT IS AT THE TOP OF THIS FILE AND THAT IS THE FIX, NOT A TIDY-UP. It used to sit
+    HERE, inside the function, and the function only ever runs inside `streamlit_stubbed` —
+    where `sys.modules["streamlit"]` is a plain module rather than a package, so
+    `streamlit.elements.vega_charts` cannot be imported through it.
+
+    ⚠️ IT PASSED ANYWAY, because some earlier test in this file had already cached the real
+    submodule. Measured on `origin/main`: run this test ALONE and it fails with
+    `ModuleNotFoundError: 'streamlit' is not a package`. **The 1:1 guarantee B091 fought four
+    rounds for was one test-selection away from not being asserted at all** — R-639's class, and
+    it was pre-existing rather than introduced by this round.
+    """
     return _prepare_vega_lite_spec(chart.to_dict(), True)
 
 
@@ -1274,3 +1295,189 @@ def test_the_leaders_are_drawn_in_RANK_ORDER(panel):
     assert first < second, (
         "the leaders are not in rank order — Sategna is 1st and Harris 2nd, and the card "
         "listed them the other way round")
+
+
+# --- 🚨 R-731: the cards are on the OUTSIDE, and the layout is a MIRROR --------------------
+#
+# Marc: "There should be a round for B to get the layout correct with the Player Cards on the
+# OUTSIDE of the charts in the Offense vs Defense section." So the two charts sit together in
+# the middle and the cards are pushed to the outer edges:
+#
+#     away (left column)     cards | chart
+#     home (right column)    chart | cards
+#
+# 🚨 A PRESENCE ASSERTION PASSES A LEFT/RIGHT SWAP, AND THIS PROJECT HAS PROVED THAT TWICE —
+# B082 on the game header, B083 on the win-probability bar. A mirror is worse: a test that
+# cannot tell the sides apart also passes when BOTH sides are wrong in the same direction,
+# which is exactly the state this file was in before `is_home` reached `_deltas()`.
+#
+# ✅ SO THE ASSERTIONS ARE POSITIONAL, PER SIDE, AND OPPOSITE — neither is satisfied by the
+# other, and the staged break turns exactly ONE of them red.
+
+def _slots(entries):
+    """The order of card blocks and charts inside each side's column, in emission order.
+
+    ⚠️ WHY EMISSION ORDER IS THE LAYOUT HERE, rather than a proxy for it: `_yardage_column`
+    zips ONE ordered tuple against `st.columns(2)`, which returns left-to-right. So the nth
+    thing emitted goes into the nth column from the left, and reversing the tuple moves the
+    block and its emission together. There is no way to change the picture without changing
+    this sequence, which is what makes reading it honest.
+    """
+    starts = [i for i, (kind, body) in enumerate(entries)
+              if kind == "markdown" and "offense against" in _plain(str(body))]
+    assert len(starts) == 2, f"expected two direction blocks, got {len(starts)}"
+    out = []
+    for lo, hi in zip(starts, starts[1:] + [len(entries)]):
+        sequence = []
+        for kind, body in entries[lo + 1:hi]:
+            if kind == "chart":
+                sequence.append("chart")
+            elif kind == "markdown" and ("Yards so far" in str(body)
+                                         or "No yards recorded" in str(body)):
+                sequence.append("cards")
+        out.append(sequence)
+    return out
+
+
+def test_the_AWAY_side_draws_its_CARDS_BEFORE_its_chart(panel):
+    """The left column's outer edge is the page's left, so the cards come first."""
+    away, _home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
+    assert away == ["cards", "chart"] * 3, (
+        f"the away column is not cards-then-chart for all three metrics: {away}")
+
+
+def test_the_HOME_side_draws_its_CARDS_AFTER_its_chart(panel):
+    """🚨 THE OPPOSITE ASSERTION, AND THE ONE THE BREAK IS AIMED AT.
+
+    The right column's outer edge is the page's right, so the chart comes first and the cards
+    sit beyond it. ⚠️ This is the assertion a non-positional test cannot make, and the one that
+    fails when both sides are built the same way round.
+    """
+    _away, home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
+    assert home == ["chart", "cards"] * 3, (
+        f"the home column is not chart-then-cards for all three metrics: {home}")
+
+
+def test_the_TWO_SIDES_ARE_OPPOSITE_which_is_the_requirement(panel):
+    """⚠️ STATED AS ITS OWN CLAIM so that "both sides identical" fails even if some future
+    change makes both of the two assertions above agree on one order."""
+    away, home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
+    assert away != home, (
+        "both columns drew the same inner order, so the cards are not on the OUTSIDE of the "
+        "charts — they are on the same side of both, which is what the layout replaced")
+    assert away[0] == "cards" and home[0] == "chart"
+
+
+def test_the_side_is_READ_from_is_home_rather_than_assumed(panel):
+    """⚠️ AND IT IS READ FROM THE FRAME THE PANEL ALREADY HOLDS.
+
+    `srv_game_team.is_home` — measured live at 225,350 rows, set on every one, exactly two per
+    game and exactly one home. Flipping the fixture's flags must flip the layout, which is what
+    proves the column is being read rather than the call order being relied on.
+    """
+    flipped = [dict(r, is_home=not r["is_home"]) for r in _deltas()]
+    away, home = _slots(panel(_game(), _both(), deltas=flipped)[0])
+    assert away == ["chart", "cards"] * 3, \
+        "flipping is_home did not flip the away column, so the flag is not being read"
+    assert home == ["cards", "chart"] * 3
+
+
+def test_an_ABSENT_game_team_row_falls_back_rather_than_guessing(panel):
+    """A game with no `srv_game_team` row draws no delta chips either, so it is already a
+    degraded render. The mirror is then unmirrored — visible — rather than silently reversed."""
+    away, home = _slots(panel(_game(), _both(), deltas=[])[0])
+    assert away == home == ["cards", "chart"] * 3
+
+
+# --- R-731: the card is two rows ----------------------------------------------------------
+
+def test_the_card_top_row_carries_all_four_of_MARCS_FIELDS(panel):
+    """Marc: "Top Row: Jersey #, Name, Position, Year in school." All four are on the view."""
+    text = _text(panel(_game(), _both(), deltas=_deltas())[0])
+    for field in ("#9", "Lloyd Avant", "RB", "JR"):
+        assert field in text, f"the card top row is missing {field!r}"
+
+
+def _lone_card(entries):
+    """The ONE-card block: Michigan's `total` panel.
+
+    ⚠️ A SINGLE-CARD BLOCK IS THE RIGHT INSTRUMENT FOR A PER-CARD CLAIM, and reaching for the
+    three-card block is the mistake this helper exists to stop — a block of three contains three
+    of everything, so "the card has one KPI" reads as three and "no em dash" is a claim about
+    three players at once. The fixture's own docstring already names this panel: one quarterback
+    has thrown, `qualified_players` is 1, and padding it to three would invent players.
+    """
+    return next(str(b) for k, b in entries
+                if k == "markdown" and "Bryce Underwood" in str(b) and "217" in str(b))
+
+
+def _module_constant(name):
+    """One of matchup.py's module-level constants, by AST, without importing the page.
+
+    Importing the view outside `streamlit_stubbed` would bind the real streamlit into it for
+    the rest of the session, which is R-665's shape. Reading the source cannot.
+    """
+    import ast
+    for node in ast.parse(SOURCE).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"matchup.py has no module-level {name}")
+
+
+def test_the_KPI_row_puts_the_MEASURE_NAME_ABOVE_the_number(panel):
+    """Marc: "Bottom Row: 3 stats KPI w/name of the measure above the metric."
+
+    ⚠️ ASSERTED ON ORDER WITHIN THE MARKUP, not on both being present. A card with the label
+    below the number contains exactly the same two strings.
+    """
+    card = _lone_card(panel(_game(), _both(), deltas=_deltas())[0])
+    assert card.index("Yards so far") < card.index("217"), \
+        "the measure name must sit ABOVE its number, not below it"
+
+
+def test_the_KPI_ROW_IS_BUILT_FOR_THREE_even_though_one_is_filled(panel):
+    """✅ A116 widens `fct_player_leader_week`; the next two measures must not need another
+    layout round. The grid is sized by `_CARD_KPI_SLOTS`, so it already has room."""
+    slots = _module_constant("_CARD_KPI_SLOTS")
+    card = _lone_card(panel(_game(), _both(), deltas=_deltas())[0])
+    assert slots == 3, "Marc asked for three KPI slots"
+    assert f"repeat({slots},1fr)" in card, "the KPI row is not a grid built for three slots"
+    assert len(_module_constant("_CARD_KPIS")) <= slots, (
+        "more KPIs than slots — adding a fourth measure is a layout decision, not a constant "
+        "change, and this is where it has to be made deliberately")
+
+
+def test_an_UNFILLED_slot_is_NOT_an_em_dash(panel):
+    """🚨 THE DECISION, AND IT IS AN AC-G.11 ONE RATHER THAN AC-G.32.
+
+    An em dash means "we hold no VALUE for this". Here the MEASURE does not exist yet, which is
+    a different statement — two dashes would tell a reader we have nothing for this player when
+    the truth is nobody has defined the stat. So only the filled slots are drawn, and the grid
+    keeps the shape visible without saying anything untrue.
+    """
+    card = _lone_card(panel(_game(), _both(), deltas=_deltas())[0])
+    assert card.count("Yards so far") == len(_module_constant("_CARD_KPIS")) == 1
+    # This player HAS a jersey, so a dash anywhere on his card would be an invented absence.
+    assert "—" not in card, f"an unfilled KPI slot rendered an em dash: {card}"
+
+
+def test_the_JERSEY_em_dash_SURVIVES_the_card_rewrite(panel):
+    """⚠️ AC-G.32, ALREADY LIVE AND EASY TO LOSE IN A REWRITE. 0 of 8,447 non-FBS leader rows
+    carry a jersey (R-693), so a missing one is an absence we can explain — an em dash in the
+    same slot, not "#0" and not a blank that reads as one."""
+    rows = [dict(r, jersey=None) if r["player_name"] == "Lloyd Avant" else r
+            for r in _leaders()]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=rows)
+    card = next(str(b) for k, b in entries if k == "markdown" and "Lloyd Avant" in str(b))
+    assert "—" in card, "a missing jersey must render an em dash in the same slot"
+    assert "#0" not in card and "#nan" not in card.lower()
+
+
+def test_the_TIE_BADGE_SURVIVES_the_card_rewrite(panel):
+    """⚠️ A TIE SHARES A RANK, so "T-2nd" is the honest label and the row count can exceed
+    three. Dropping the badge would turn shared places into an invented order."""
+    rows = [dict(r, tied_players=2) if r["leader_rank"] == 2 else r for r in _leaders()]
+    text = _text(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0])
+    assert "T-2nd" in text, "the tie badge did not survive"
+    assert "T-1st" not in text, "an untied leader was labelled as tied"

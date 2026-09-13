@@ -1803,22 +1803,54 @@ def _game_team_rows(game_id: int) -> dict:
 
 
 def _yardage_column(team, opponent, distribution, deltas=None, leaders=None) -> None:
-    """One side of the comparison: the text rows, then a chart per metric."""
+    """One side of the comparison: the text rows, then a chart per metric with its cards BESIDE.
+
+    🚨 R-731, AND THE LAYOUT IS A MIRROR. Marc: *"There should be a round for B to get the
+    layout correct with the Player Cards on the OUTSIDE of the charts in the Offense vs Defense
+    section."* So the two charts sit together in the middle of the page and the cards are
+    pushed to the outer edges:
+
+        away (left column)     cards | chart
+        home (right column)    chart | cards
+
+    ⚠️ WHICH MEANS THIS FUNCTION HAS TO KNOW WHICH SIDE IT IS, and it is called twice with the
+    same signature. It reads `is_home` off the `srv_game_team` row it is ALREADY handed — see
+    `_is_home_side` for what was measured and what the alternatives were.
+
+    🚨 ONE LIST DECIDES BOTH THE ORDER AND THE COLUMN, which is the whole reason the test can
+    be trusted. `order` is in left-to-right order and `st.columns` returns left-to-right, so
+    zipping them makes the emission order and the visual position the SAME FACT. Reversing the
+    list moves the card block and its emission together; there is no way to change one and
+    leave the other, and therefore no way for a passing test to describe a layout that is not
+    on the screen.
+
+    ⚠️ THE WIDTHS COME OFF THE SAME LIST, WHICH IS WHY AN ASYMMETRIC RATIO IS SAFE HERE. The
+    first version split the side 50/50 and the LIVE RENDER showed the away charts clipped on
+    their right edge — the axis read "300 :" where the home side read "300 350". `autosize:
+    pad` makes the spec's outer box the plot PLUS its axis labels, so 240px of square needs
+    more than 240px of column. Weighting the chart slot fixes it, and because the weights are
+    read out of `order` rather than written as a second tuple, a ratio cannot end up applied
+    the wrong way round while the positional assertions still pass.
+    """
     st.markdown(_yardage_direction(team, opponent, deltas), unsafe_allow_html=True)
     team_name = str(team.get("team_display") or "?")
     opponent_name = str(opponent.get("team_display") or "?")
+    order = ("chart", "cards") if _is_home_side(deltas) else ("cards", "chart")
+    widths = [_SLOT_WIDTHS[slot] for slot in order]
     for label, for_column, allowed_column, delta_column in _YARDAGE_DIMENSIONS:
         chart = _scatter(team, opponent, for_column, allowed_column, distribution,
                          team_name, opponent_name, label)
-        if chart is not None:
-            # ⚠️ NOT use_container_width: a square the container can stretch is
-            # not a square. R-609.
-            st.altair_chart(chart, use_container_width=False)
-        # R-687. The names go OUTSIDE the chart, in the width the square gave back.
-        st.markdown(
-            _leader_block((leaders or {}).get(
-                (int(team["team_id"]), _LEADER_PANELS[label]), [])),
-            unsafe_allow_html=True)
+        # R-687. The names go OUTSIDE the chart; R-731 puts them BESIDE it rather than below.
+        cards = _leader_block((leaders or {}).get(
+            (int(team["team_id"]), _LEADER_PANELS[label]), []))
+        for slot, column in zip(order, st.columns(widths)):
+            if slot == "chart":
+                if chart is not None:
+                    # ⚠️ NOT use_container_width: a square the container can stretch is
+                    # not a square. R-609, and a narrower column does not change that.
+                    column.altair_chart(chart, use_container_width=False)
+            else:
+                column.markdown(cards, unsafe_allow_html=True)
     # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11). A chart silently missing from a
     # row of three reads as "we hold nothing"; these two hold a figure that is off the scale
     # the rest of the week is drawn on, and the figures are printed in full just above.
@@ -1848,6 +1880,56 @@ _LEADER_COLUMNS = """
 _LEADER_PANELS = {"Rushing": "rushing", "Passing": "passing", "Total": "total"}
 
 _ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
+
+# ⚠️ THE CHART SLOT IS WIDER THAN THE CARD SLOT, AND THE LIVE RENDER IS WHAT SET THESE.
+# `autosize: pad` (R-609) makes the shipped box the 240px square PLUS its axis labels, so an
+# even split clipped the away side's x axis at "300 :" where the home side read "300 350".
+# ⚠️ Read out of `order` rather than written as a second mirrored tuple — see `_yardage_column`.
+_SLOT_WIDTHS = {"cards": 1.0, "chart": 1.2}
+
+# 🚨 R-731. THE CARD IS BUILT FOR THREE KPIs AND FILLED WITH WHAT EXISTS. A116 is widening
+# `fct_player_leader_week`; the next two measures are added to `_CARD_KPIS` and nowhere else,
+# because the grid below is sized by `_CARD_KPI_SLOTS` rather than by how many there are.
+_CARD_KPI_SLOTS = 3
+
+# (label, column, decimal places). ⚠️ THE LABEL IS OURS RATHER THAN READ, and the reason is
+# that `leader_metric` names the measure the view RANKED on, which is not the same thing as a
+# KPI's name — the other two slots will be different stats on the same player.
+#
+# ⚠️ "SO FAR" IS NOT DECORATION. The charts beside these cards are PER GAME and this figure is
+# cumulative through the prior week, so a label reading "Yards" beside them would invite the
+# reader to compare two different measurements.
+_CARD_KPIS = (("Yards so far", "yards_through_prior_week", 0),)
+
+
+def _is_home_side(deltas) -> bool:
+    """Which side of the mirror this column is — READ, not passed (R-731).
+
+    ✅ `is_home` IS ALREADY IN THE FRAME THIS PANEL HOLDS. `_GAME_TEAM_COLUMNS` selects it and
+    `_yardage` hands each column its own `srv_game_team` row, so this costs no query and no new
+    column. Measured against live serving: 225,350 rows, `is_home` set on every one, exactly
+    two rows per game and exactly one of them home.
+
+    ⚠️ THE TWO SOURCES THE PROMPT NAMED WERE MEASURED FIRST AND NEITHER IS USABLE HERE:
+
+        srv_team_week                              has NEITHER is_home nor home_away — and it
+                                                   should not: a team is not home or away in
+                                                   a WEEK, only in a game
+        srv_game_team_leader_through_prior_week     HAS home_away, but `_LEADER_COLUMNS` does
+                                                   not select it, so reading it would mean
+                                                   adding a column to a query to learn
+                                                   something another frame already carries
+
+    ⚠️ AND AN ABSENT ROW FALLS BACK TO THE AWAY ORDER RATHER THAN GUESSING. A game with no
+    `srv_game_team` row draws no delta chips either, so it is already a degraded render; the
+    mirror is then unmirrored, which is visible, rather than silently reversed on one side.
+    """
+    if deltas is None:
+        return False
+    value = deltas.get("is_home")
+    if value is None or (not isinstance(value, bool) and pd.isna(value)):
+        return False
+    return bool(value)
 
 
 def _game_leaders(game_id: int) -> dict:
@@ -1888,21 +1970,37 @@ def _leader_card(row) -> str:
     """
     jersey = row.get("jersey")
     number = f"#{int(jersey)}" if pd.notna(jersey) else "—"
-    bits = [b for b in (row.get("position"), row.get("class_year_display")) if b]
     rank = int(row["leader_rank"])
     tied = int(row.get("tied_players") or 1)
     # ⚠️ A TIE SHARES A RANK, so "T-2nd" is the honest label and the row count can exceed three.
     place = f"T-{_ORDINAL.get(rank, f'{rank}th')}" if tied > 1 else _ORDINAL.get(rank, f"{rank}th")
-    yards = row.get("yards_through_prior_week")
-    return (f"<div style='display:flex;align-items:baseline;gap:.4rem;font-size:.78rem;"
-            f"padding:.1rem 0'>"
-            f"<span style='min-width:2.2rem;opacity:.5'>{place}</span>"
-            f"<span style='min-width:2.1rem;opacity:.55;text-align:right'>{number}</span>"
-            f"<span style='font-weight:600'>"
-            f"{html.escape(str(row.get('player_name') or '?'))}</span>"
-            f"<span style='opacity:.5'>{html.escape(' '.join(str(b) for b in bits))}</span>"
-            f"<span style='margin-left:auto;font-weight:600'>"
-            f"{fmt.number(yards, '', dp=0)}</span></div>")
+    # ⚠️ THE RANK STAYS, AND MARC'S LIST DID NOT NAME IT. It is kept because it is the only
+    # thing on the card that carries a TIE: three cards where two share second place is a fact
+    # about the week, and dropping the badge would silently turn shared places into an order.
+    top = [f"<span style='opacity:.45;min-width:2.3rem'>{place}</span>",
+           f"<span style='font-weight:600;min-width:2rem;text-align:right'>{number}</span>",
+           f"<span style='font-weight:600'>"
+           f"{html.escape(str(row.get('player_name') or '?'))}</span>"]
+    for field in ("position", "class_year_display"):
+        value = row.get(field)
+        if value:
+            top.append(f"<span style='opacity:.5'>{html.escape(str(value))}</span>")
+    # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
+    # AC-G.32 puts a dash where a value is missing; here the MEASURE is missing, which is a
+    # different statement (AC-G.11). Two dashes would tell a reader we hold no figure for this
+    # player when the truth is that nobody has defined the stat yet — and the grid keeps the
+    # shape visible without saying anything untrue.
+    cells = [f"<div><div style='font-size:.6rem;letter-spacing:.03em;text-transform:uppercase;"
+             f"opacity:.5;white-space:nowrap'>{label}</div>"
+             f"<div style='font-size:.92rem;font-weight:600'>"
+             f"{fmt.number(row.get(column), '', dp=dp)}</div></div>"
+             for label, column, dp in _CARD_KPIS]
+    return (f"<div style='border:1px solid rgba(128,128,128,.22);border-radius:6px;"
+            f"padding:.28rem .45rem;margin-bottom:.3rem'>"
+            f"<div style='display:flex;align-items:baseline;gap:.35rem;font-size:.78rem;"
+            f"white-space:nowrap;overflow:hidden'>{''.join(top)}</div>"
+            f"<div style='display:grid;grid-template-columns:repeat({_CARD_KPI_SLOTS},1fr);"
+            f"gap:.3rem;margin-top:.25rem'>{''.join(cells)}</div></div>")
 
 
 def _leader_block(rows) -> str:
