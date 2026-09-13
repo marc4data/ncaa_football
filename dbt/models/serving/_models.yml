@@ -2838,6 +2838,22 @@ models:
         description: The same pairing for passing yards. See the rushing column for the sign.
       - name: total_yards_for_minus_opponent_allowed_per_game
         description: The same pairing for total yards. See the rushing column for the sign.
+      - name: rushing_matchup_outlook
+        description: >
+          How hard this rushing matchup looks for THIS team's offense, as one of three values:
+          favorable, contested or challenging. Compares what this offense gains per game against
+          what the opponent's defense has been conceding per game — the same two figures as the
+          delta column above, classified rather than subtracted. favorable means the defense
+          concedes more than this offense gains. challenging means it concedes at least 20% less,
+          which is Marc's threshold and indicates a strong defense. contested is everything else
+          the offense out-gains, and it also holds the exact-equality case deliberately, so that
+          favorable keeps meaning strictly better. NULL where either figure is absent - week 1, or
+          a team with no completed games - which is the same 4,614 rows of 7,358 the delta column
+          is null on for 2026. Carries no color and no shape: the page maps the value.
+      - name: passing_matchup_outlook
+        description: The same classification for passing yards. See rushing_matchup_outlook.
+      - name: total_matchup_outlook
+        description: The same classification for total yards. See rushing_matchup_outlook.
 
   - name: srv_game
     description: >

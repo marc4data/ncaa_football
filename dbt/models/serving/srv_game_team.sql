@@ -516,6 +516,63 @@ select
         as passing_yards_for_minus_opponent_allowed_per_game,
     round(ty.total_yards_for_per_game   - oy.total_yards_allowed_per_game, 1)
         as total_yards_for_minus_opponent_allowed_per_game,
+
+    -- ── R-722: HOW HARD IS THIS MATCHUP FOR THIS TEAM'S OFFENSE ─────────────────────────────
+    --
+    -- Marc, as written:
+    --
+    --     Green Circle:  Gained < Allowed
+    --     Red Diamond:   Gained > Allowed and (Gained - Allowed) / Gained > .2
+    --     Yellow Circle: Gained > Allowed
+    --
+    -- and then, asked about the color direction:
+    --
+    --     "Red Diamond: Gained > Allowed and (Allowed - Gained) / Gained > .2, which indicates
+    --      the opposing team has strong defense and will be challenging"
+    --
+    -- 🚨 THE SECOND NUMERATOR CAN NEVER FIRE, AND BOTH OF HIS FORMULATIONS ARE RECORDED ABOVE SO
+    -- A LATER ROUND DOES NOT "FIX" THIS BACK. If `Gained > Allowed` then `Allowed - Gained` is
+    -- negative, so that ratio is negative and never exceeds 0.2 — the branch would be dead and
+    -- every game would fall through to the third bucket.
+    --
+    -- ✅ `(Gained - Allowed) / Gained` IS THE ONE THAT MAKES HIS SENTENCE TRUE. It is positive
+    -- exactly when his own first clause holds, and "> .2" then reads: the opponent's defense
+    -- concedes at least 20% less than this offense usually gains — a strong defense, which is
+    -- precisely what he said the mark indicates.
+    --
+    -- 🚨 THE RULES OVERLAP AND ARE THEREFORE ORDERED, NOT AMBIGUOUS. Every `challenging` case
+    -- also satisfies the `contested` condition, so `challenging` is evaluated FIRST and
+    -- `contested` catches the remainder. Cowork's ruling; a `case` evaluates top-down and that
+    -- is the whole mechanism.
+    --
+    -- ⚠️ `Gained = Allowed` EXACTLY IS IN NONE OF MARC'S THREE BRANCHES, and a `case` with no
+    -- `else` would silently return null — a fourth state arriving on the page as an absent mark.
+    -- ✅ IT IS CLASSIFIED `contested`, deliberately: "contested" is the word for an even matchup,
+    -- and `favorable` has to keep meaning STRICTLY better or the green mark overstates a coin
+    -- flip. It is the residual branch, so it is also where an unforeseen case would land.
+    --
+    -- ⚠️ AC-G.32 AND THE DIVISION: `Gained = 0` makes the ratio undefined, and THE DIVISION NEVER
+    -- RUNS ON IT rather than being guarded against it. `Gained = 0` with `Allowed > 0` satisfies
+    -- `Gained < Allowed` and is caught by the first branch; `Gained = 0` with `Allowed = 0` is the
+    -- equality above. So by the time the ratio is evaluated, `Gained > Allowed >= 0` and therefore
+    -- `Gained > 0`. The null below is for a genuinely ABSENT figure — week 1, or a team with no
+    -- completed games — which is a different fact from a zero.
+    --
+    -- 🚨 NO COLOR AND NO SHAPE IN THE WAREHOUSE. A column holding `red` would put a LOOK decision
+    -- in the database, and Marc changes looks; §4.3 says the name carries what it MEANS. The page
+    -- maps outlook -> color and shape and computes neither the ratio nor the bucket (§4.2).
+    --
+    -- ⚠️ AMERICAN SPELLING ON THE VALUE — `favorable`, not `favourable` as the prompt wrote it.
+    -- The site speaks American English (A096, R-636, R-644) and `test_no_dbt_description_uses_
+    -- british_spelling` parses the descriptions these values are documented in, because a
+    -- description is one selectbox away from a reader in srv_data_dictionary. The meaning is
+    -- unchanged; only the orthography is, and the guard would have failed the build otherwise.
+    {{ matchup_outlook('ty.rushing_yards_for_per_game',
+                       'oy.rushing_yards_allowed_per_game') }} as rushing_matchup_outlook,
+    {{ matchup_outlook('ty.passing_yards_for_per_game',
+                       'oy.passing_yards_allowed_per_game') }} as passing_matchup_outlook,
+    {{ matchup_outlook('ty.total_yards_for_per_game',
+                       'oy.total_yards_allowed_per_game') }}   as total_matchup_outlook,
     -- NO MODEL PREDICTION TRAVELS ON THIS VIEW, so this is CFBD credit and says so rather
     -- than borrowing dim_model_version's disclaimer, which would imply predictions that are
     -- not here. Box scores, advanced stats and arithmetic on published market numbers.
