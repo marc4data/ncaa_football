@@ -33,6 +33,31 @@
 -- already treats anything outside that range as unknown, because "CFBD sometimes sends the
 -- season instead". A103 spent a whole round on the cost of a second definition of one string;
 -- this is not the round to add another.
+-- 🚨 THE THREE KPI SLOTS ARE CARRIED AS DATA, LABEL INCLUDED — A116, R-717. Marc asked for "3
+-- stats KPI w/name of the measure above the metric", and the panel already decides WHICH stats
+-- apply, so the panel decides what they are CALLED. B091's precedent in as many words: "that
+-- pairing is Marc's and it is carried as DATA, not prose — the page reads the column rather than
+-- choosing."
+--
+-- ⚠️ THE ALTERNATIVE WAS A panel -> labels MAP IN THE PAGE, and it was rejected for the reason
+-- `ci/check_publish_build_agreement.py` exists one layer down: a second list, in a second
+-- language, that can silently disagree with the columns it describes. A page that hardcodes
+-- "Receptions" for slot 1 of the passing panel is correct until the day the trio changes, and then
+-- it is confidently wrong. Here, changing a trio is one `case` branch and the page does not move.
+--
+-- ⚠️ AND THE PAGE STILL DOES NOT COMPUTE (§4.2). It reads a label, a number and a format name.
+-- `stat_n_format` names the RENDERING rather than the arithmetic — the volatile half (which stats,
+-- what they are called) is data, the stable half (how an integer differs from a one-decimal
+-- average) is three branches of display code that do not change when the trio does.
+--
+--     format       slots that use it                     the page renders
+--     integer      receptions, yards, touchdowns         1,284
+--     decimal_1    yards per carry                       4.8
+--     pair         completions / attempts                22-31   (secondary is the denominator)
+--
+-- 🚨 EVERY SLOT'S VALUE IS `_through_prior_week`, WHICH IS WHY THERE IS NO CURRENT-WEEK COLUMN HERE
+-- TO PICK BY MISTAKE. A102's whole lesson: the window belongs in the name, and a page cannot
+-- choose the wrong window from a view that only carries one.
 select
     {{ surrogate_key(['gs.game_id', 'l.team_id', 'l.panel', 'l.player_id']) }}
         as game_team_leader_through_prior_week_sk,
@@ -54,6 +79,42 @@ select
     l.player_name,
     l.player_slug,
     l.yards_through_prior_week,
+    l.receptions_through_prior_week,
+    l.carries_through_prior_week,
+    l.touchdowns_through_prior_week,
+    l.completions_through_prior_week,
+    l.attempts_through_prior_week,
+    l.yards_per_carry_through_prior_week,
+    -- SLOT 1
+    case l.panel when 'passing' then 'Receptions'
+                 when 'rushing' then 'Carries'
+                 when 'total'   then 'Comp-Att'
+    end as stat_1_label,
+    case l.panel when 'passing' then l.receptions_through_prior_week
+                 when 'rushing' then l.carries_through_prior_week
+                 when 'total'   then l.completions_through_prior_week
+    end as stat_1_value,
+    case l.panel when 'total'   then l.attempts_through_prior_week
+    end as stat_1_value_secondary,
+    case l.panel when 'total'   then 'pair' else 'integer'
+    end as stat_1_format,
+    -- SLOT 2 — the yards every panel ranks on, in the middle, so the number the ordering comes
+    -- from sits where a reader looks first.
+    'Yards'                       as stat_2_label,
+    l.yards_through_prior_week    as stat_2_value,
+    null::numeric                 as stat_2_value_secondary,
+    'integer'                     as stat_2_format,
+    -- SLOT 3
+    case l.panel when 'passing' then 'TD'
+                 when 'rushing' then 'Yds/Carry'
+                 when 'total'   then 'TD'
+    end as stat_3_label,
+    case l.panel when 'rushing' then l.yards_per_carry_through_prior_week
+                 else l.touchdowns_through_prior_week
+    end as stat_3_value,
+    null::numeric as stat_3_value_secondary,
+    case l.panel when 'rushing' then 'decimal_1' else 'integer'
+    end as stat_3_format,
     a.jersey,
     a.position,
     a.class_year_display,

@@ -46,6 +46,25 @@
 -- therefore returns more than three rows, which is the honest shape rather than a silent
 -- truncation.
 --
+-- ⚠️ A116 (R-717) ADDED FIVE MORE ACCUMULATORS AND THEY ALL SHARE ONE `over` CLAUSE, WHICH IS THE
+-- WHOLE POINT. Marc asked for three KPI slots per player card. Every slot accumulates in the SAME
+-- FRAME as the yards it sits beside — `rows between unbounded preceding and 1 preceding` — because
+-- a card showing yards through week 4 next to receptions through week 5 would be wrong in a way no
+-- reader could see. The frame is written once, in a named window, so a future column cannot get its
+-- own frame by accident: that is enforcement by construction, not by review.
+--
+-- 🚨 AND `assert_player_leaders_exclude_the_current_week` WAS EXTENDED IN THE SAME COMMIT to
+-- recompute EVERY accumulated column rather than only the yards. Before A116 it checked one of six,
+-- so five new columns could have leaked a current week and the suite would have stayed green. A
+-- guard that covers one of six columns is a guard that reports on one of six columns.
+--
+-- ⚠️ COALESCE IS PANEL-SCOPED, AND THAT IS DELIBERATE. `week_receptions` is null on every rushing
+-- row, so summing it there must stay NULL — "a running back has no receptions in this panel" — while
+-- a quarterback who has not thrown must read ZERO completions, because he played and did not throw.
+-- Those are different facts and AC-G.32 is the rule that says so. The `case when panel =` wrapper
+-- is what keeps them apart; a blanket coalesce would turn every inapplicable measure into a
+-- confident zero.
+--
 -- ⚠️ EVERY CTE BELOW READS A REAL TABLE, WHICH IS A PERFORMANCE DECISION WITH A MEASUREMENT
 -- BEHIND IT. fct_player_yardage_week exists because the union that feeds it, written inline here,
 -- either lost its statistics (materialised, `rows=1` estimates, nested loops, killed at ten
@@ -103,12 +122,25 @@ running as (
         ps.season, ps.season_type, ps.season_type_ordinal, ps.week, ps.team_id,
         ps.player_id, ps.panel,
         -- `1 preceding`, NOT `current row`. See the header: this is the leakage rule, and the
-        -- staged break flips exactly this word.
-        sum(coalesce(y.week_yards, 0)) over (
-            partition by ps.season, ps.team_id, ps.player_id, ps.panel
-            order by ps.season_type_ordinal, ps.week
-            rows between unbounded preceding and 1 preceding)
-            as yards_through_prior_week
+        -- staged break flips exactly this word. EVERY measure below shares this one frame.
+        sum(coalesce(y.week_yards, 0)) over prior_weeks
+            as yards_through_prior_week,
+        -- Panel-scoped: null where the measure does not apply, zero where it applies and the
+        -- player has none. See the header — AC-G.32.
+        case when ps.panel = 'passing'
+             then coalesce(sum(coalesce(y.week_receptions, 0)) over prior_weeks, 0) end
+            as receptions_through_prior_week,
+        case when ps.panel = 'rushing'
+             then coalesce(sum(coalesce(y.week_carries, 0)) over prior_weeks, 0) end
+            as carries_through_prior_week,
+        coalesce(sum(coalesce(y.week_touchdowns, 0)) over prior_weeks, 0)
+            as touchdowns_through_prior_week,
+        case when ps.panel = 'total'
+             then coalesce(sum(coalesce(y.week_completions, 0)) over prior_weeks, 0) end
+            as completions_through_prior_week,
+        case when ps.panel = 'total'
+             then coalesce(sum(coalesce(y.week_attempts, 0)) over prior_weeks, 0) end
+            as attempts_through_prior_week
     from player_spine ps
     left join {{ ref('fct_player_yardage_week') }} y
       on  y.season      = ps.season
@@ -117,6 +149,14 @@ running as (
       and y.team_id     = ps.team_id
       and y.player_id   = ps.player_id
       and y.panel       = ps.panel
+    -- 🚨 ONE NAMED WINDOW, SO SIX ACCUMULATORS CANNOT DISAGREE ABOUT THE LEAKAGE FRAME. Repeating
+    -- the `over (...)` six times would let a later edit change one of them, and the resulting card
+    -- would mix two windows while every number in it stayed real. This is the same reasoning as
+    -- carrying the pairing as a column instead of a comment.
+    window prior_weeks as (
+        partition by ps.season, ps.team_id, ps.player_id, ps.panel
+        order by ps.season_type_ordinal, ps.week
+        rows between unbounded preceding and 1 preceding)
 
 ),
 
@@ -127,7 +167,13 @@ ranked as (
 
     select
         r.season, r.season_type, r.season_type_ordinal, r.week, r.team_id,
-        r.player_id, r.panel, r.yards_through_prior_week,
+        r.player_id, r.panel,
+        r.yards_through_prior_week,
+        r.receptions_through_prior_week,
+        r.carries_through_prior_week,
+        r.touchdowns_through_prior_week,
+        r.completions_through_prior_week,
+        r.attempts_through_prior_week,
         rank() over (partition by r.season, r.team_id, r.panel,
                                   r.season_type_ordinal, r.week
                      order by r.yards_through_prior_week desc)
@@ -181,7 +227,23 @@ select
     pi.player_name,
     pi.player_slug,
     pi.athlete_sk,
-    rk.yards_through_prior_week
+    rk.yards_through_prior_week,
+    rk.receptions_through_prior_week,
+    rk.carries_through_prior_week,
+    rk.touchdowns_through_prior_week,
+    rk.completions_through_prior_week,
+    rk.attempts_through_prior_week,
+    -- 🚨 THE DIVISION HAPPENS HERE AND NOT IN THE PAGE. §4.2, and the division is over the
+    -- ACCUMULATED totals rather than an average of weekly averages: a player with 1 carry for 40
+    -- yards one week and 20 for 40 the next has 3.8 yards per carry, not 22.0. CFBD ships a
+    -- per-game `AVG` and averaging it across weeks would produce the second number.
+    --
+    -- ⚠️ NULL WHEN THERE ARE NO CARRIES, never zero. AC-G.32: "no carries" and "zero yards per
+    -- carry" are different facts, and a card that prints 0.0 for a receiver who never ran has
+    -- invented a measurement.
+    case when rk.carries_through_prior_week > 0
+         then round(rk.yards_through_prior_week / rk.carries_through_prior_week, 1)
+    end as yards_per_carry_through_prior_week
 from ranked rk
 join player_identity pi
   on  pi.season    = rk.season

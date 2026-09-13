@@ -26,6 +26,23 @@
 -- as real in the test as in the model, and it is the reason the ordinal is joined in below rather
 -- than assumed.
 --
+-- 🚨 EXTENDED BY A116 (R-717) FROM ONE ACCUMULATOR TO ALL SIX, AND THE GAP WAS REAL RATHER THAN
+-- THEORETICAL. This test recomputed `yards_through_prior_week` only. A116 added receptions,
+-- carries, touchdowns, completions and attempts to the same model, all sharing the same frame —
+-- and had this test not been extended, any one of them could have been written with `current row`
+-- and the suite would have stayed green. §3.6's shape, one layer over: a guard that checks one of
+-- six columns reports on one of six columns, and nobody reading a green run can tell which.
+--
+-- ⚠️ `yards_per_carry_through_prior_week` IS NOT RECOMPUTED HERE AND MUST NOT BE. It is a division
+-- of two columns this test already checks, so it inherits their window by construction; asserting
+-- it again would test Postgres division. `assert_leader_yards_per_carry_divides_its_own_columns`
+-- is the test that owns it, and it is a different claim.
+--
+-- ⚠️ THE COMPARISON IS `is distinct from` ON EVERY COLUMN, so a null on one side and a number on
+-- the other is a failure rather than an unknown. That matters more after A116 than before it: five
+-- of the six columns are deliberately NULL outside their own panel, and a test using `<>` would
+-- have silently passed every one of those rows.
+--
 -- ⚠️ ONE GROUPED PASS, NOT A CORRELATED SUBQUERY PER ROW. The first version of this test ran a
 -- join-plus-aggregate for each of 74,065 leader rows and had not finished in ten minutes. A097
 -- rewrote three correlated subqueries into one grouped pass for the same reason and took a
@@ -41,7 +58,9 @@ with season_type_order as (
 
 yardage as (
 
-    select y.season, y.team_id, y.player_id, y.panel, y.week, y.week_yards,
+    select y.season, y.team_id, y.player_id, y.panel, y.week,
+           y.week_yards, y.week_receptions, y.week_carries,
+           y.week_touchdowns, y.week_completions, y.week_attempts,
            o.season_type_ordinal
     from {{ ref('fct_player_yardage_week') }} y
     join season_type_order o
@@ -55,7 +74,27 @@ recomputed as (
     select
         l.season, l.season_type, l.week, l.team_id, l.panel, l.player_id, l.player_name,
         l.yards_through_prior_week                as model_says,
-        coalesce(sum(ya.week_yards), 0)           as sum_of_strictly_earlier_weeks
+        coalesce(sum(ya.week_yards), 0)           as sum_of_strictly_earlier_weeks,
+        -- The five A116 added. Each recomputation mirrors the model's own panel scoping: the
+        -- column is null outside its panel, so the expected value must be too.
+        l.receptions_through_prior_week           as receptions_model_says,
+        case when l.panel = 'passing'
+             then coalesce(sum(ya.week_receptions), 0) end
+                                                  as receptions_expected,
+        l.carries_through_prior_week              as carries_model_says,
+        case when l.panel = 'rushing'
+             then coalesce(sum(ya.week_carries), 0) end
+                                                  as carries_expected,
+        l.touchdowns_through_prior_week           as touchdowns_model_says,
+        coalesce(sum(ya.week_touchdowns), 0)      as touchdowns_expected,
+        l.completions_through_prior_week          as completions_model_says,
+        case when l.panel = 'total'
+             then coalesce(sum(ya.week_completions), 0) end
+                                                  as completions_expected,
+        l.attempts_through_prior_week             as attempts_model_says,
+        case when l.panel = 'total'
+             then coalesce(sum(ya.week_attempts), 0) end
+                                                  as attempts_expected
     from {{ ref('fct_player_leader_week') }} l
     left join yardage ya
       on  ya.season    = l.season
@@ -64,12 +103,29 @@ recomputed as (
       and ya.panel     = l.panel
       and (ya.season_type_ordinal, ya.week) < (l.season_type_ordinal, l.week)
     group by l.season, l.season_type, l.week, l.team_id, l.panel, l.player_id,
-             l.player_name, l.yards_through_prior_week
+             l.player_name, l.yards_through_prior_week,
+             l.receptions_through_prior_week, l.carries_through_prior_week,
+             l.touchdowns_through_prior_week, l.completions_through_prior_week,
+             l.attempts_through_prior_week
 
 )
 
 select season, season_type, week, team_id, panel, player_id, player_name,
        model_says, sum_of_strictly_earlier_weeks,
+       -- WHICH column disagreed, so a failure names the leak rather than only reporting one.
+       case
+         when model_says is distinct from sum_of_strictly_earlier_weeks             then 'yards'
+         when receptions_model_says is distinct from receptions_expected            then 'receptions'
+         when carries_model_says is distinct from carries_expected                  then 'carries'
+         when touchdowns_model_says is distinct from touchdowns_expected            then 'touchdowns'
+         when completions_model_says is distinct from completions_expected          then 'completions'
+         when attempts_model_says is distinct from attempts_expected                then 'attempts'
+       end as leaking_column,
        'a week-N leaderboard must not contain week N' as rule
 from recomputed
-where model_says is distinct from sum_of_strictly_earlier_weeks
+where model_says            is distinct from sum_of_strictly_earlier_weeks
+   or receptions_model_says is distinct from receptions_expected
+   or carries_model_says    is distinct from carries_expected
+   or touchdowns_model_says is distinct from touchdowns_expected
+   or completions_model_says is distinct from completions_expected
+   or attempts_model_says   is distinct from attempts_expected

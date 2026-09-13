@@ -4412,6 +4412,76 @@ models:
         description: >
           Yards in this metric over every earlier week of the season, EXCLUDING this game's week.
           Always greater than zero — a player on nothing is not a leader.
+      - name: receptions_through_prior_week
+        description: >
+          Catches over every earlier week of the season, EXCLUDING this game's week. Populated on
+          the passing panel only and NULL on the other two, because a running back has no
+          receptions in a panel that ranks rushing — null here means "does not apply", not
+          "unknown".
+      - name: carries_through_prior_week
+        description: >
+          Rushing attempts over every earlier week, EXCLUDING this game's week. Rushing panel only;
+          NULL elsewhere for the same reason as receptions.
+      - name: touchdowns_through_prior_week
+        description: >
+          Touchdowns over every earlier week, EXCLUDING this game's week. Populated on all three
+          panels, and the DEFINITION DIFFERS BY PANEL because the metric does: receiving
+          touchdowns on the passing panel, rushing touchdowns on the rushing panel, and passing
+          PLUS rushing on the total panel, which ranks total yards. Never null.
+      - name: completions_through_prior_week
+        description: >
+          Completed passes over every earlier week, EXCLUDING this game's week. Total panel only.
+          Reads ZERO rather than null for a quarterback who has carried the ball and never thrown
+          it — 17 of 288 of 2026's total-panel leaders are that case, and zero completions is a
+          fact about him rather than a gap in the data.
+      - name: attempts_through_prior_week
+        description: >
+          Pass attempts over every earlier week, EXCLUDING this game's week. Total panel only. The
+          denominator of the Comp-Att pair; see completions_through_prior_week for the zero case.
+      - name: yards_per_carry_through_prior_week
+        description: >
+          Accumulated rushing yards divided by accumulated carries, rounded to one decimal, over
+          every earlier week and EXCLUDING this game's week. Rushing panel only. NOT the average of
+          the weekly averages, which is a different and wrong number — 1 carry for 40 yards then 20
+          for 40 is 3.8, and averaging the per-game figures gives 22.0. NULL when there are no
+          carries, never zero (AC-G.32).
+      - name: stat_1_label
+        description: >
+          What the first KPI slot on the player card is called. Carried as DATA rather than mapped
+          in the page, so changing a panel's trio is one model edit and the page does not move.
+          Receptions, Carries or Comp-Att depending on the panel.
+      - name: stat_1_value
+        description: First KPI slot's number, for the panel named in panel.
+      - name: stat_1_value_secondary
+        description: >
+          The second half of a PAIRED slot — the attempts in Comp-Att. Populated on the total panel
+          only and NULL everywhere else, which is how the page knows to render one number rather
+          than two.
+      - name: stat_1_format
+        description: >
+          How to render the first slot — integer, decimal_1 or pair. Names the RENDERING, never the
+          arithmetic: the page composes 22-31 from two numbers and does not compute either of them.
+      - name: stat_2_label
+        description: >
+          What the second KPI slot is called. Always Yards, on every panel, because the yards are
+          what every panel ranks on; the slot is in the middle so the number the ordering comes
+          from sits where a reader looks first.
+      - name: stat_2_value
+        description: Second KPI slot's number — the same value as yards_through_prior_week.
+      - name: stat_2_value_secondary
+        description: Always NULL. The yards slot is never a pair; the column exists so all three slots have one shape.
+      - name: stat_2_format
+        description: Always integer.
+      - name: stat_3_label
+        description: What the third KPI slot is called — TD on the passing and total panels, Yds/Carry on the rushing panel.
+      - name: stat_3_value
+        description: >
+          Third KPI slot's number — touchdowns, or yards per carry on the rushing panel. The only
+          slot whose value can be null, when a rushing leader has no carries.
+      - name: stat_3_value_secondary
+        description: Always NULL. The third slot is never a pair.
+      - name: stat_3_format
+        description: integer, or decimal_1 on the rushing panel where the value is yards per carry.
       - name: jersey
         description: >
           Squad number, from dim_athlete. NULLABLE, and measured: FBS teams resolve 97.5% of
