@@ -3625,9 +3625,20 @@ def _post_game_identity(game_id: int) -> dict:
     count. **`srv_game.away_abbreviation` / `home_abbreviation` exist**, so this is two columns
     on an existing bounded `limit 1` rather than a second query, and G-2 is untouched.
 
+    ✅ AND IT IS THIS FILE'S OWN ESTABLISHED PATTERN RATHER THAN A NEW ONE — CHECKED, NOT
+    ASSUMED. `_GAME_COLUMNS` has selected both columns all along and **nine call sites already
+    read them**, every one with the same fallback — the abbreviation, then the full team name.
+    This header was the odd one out. ⚠️ R-855 says a precedent is
+    evidence of what was done rather than of what is correct, so it was TESTED in the case it
+    is used for here — rendered at 1300px and 1700px, `UNA` and `ARK`, neither truncated.
+
     📊 AND THE ANSWER IS THE SAME ONE A130 NEEDS, WHICH IS WHY IT IS WORTH STATING FLAT: the
-    column EXISTS, so the browser tab and this header should read the same object rather than
-    inventing two page-level abbreviations. ⚠️ Coverage is not total and the gap is ancient
+    column EXISTS, so the browser tab and this header read the same object rather than
+    inventing two page-level abbreviations. **A130 landed while this round was in flight and
+    reached the same conclusion independently** — `site/lib/tab.py`'s `teams_suffix` reads
+    `srv_game.{home,away}_abbreviation` with this file's fallback chain, and says so.
+
+    ⚠️ Coverage is not total and the gap is ancient
     rather than current — across all 112,675 games, 12,018 away and 5,560 home are null; **on
     the 3,674 games that actually have a box score, 39 away and 2 home.** Max length is 9
     characters, so it cannot itself truncate. **A null falls back to the full name**, which is
