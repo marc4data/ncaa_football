@@ -2293,11 +2293,49 @@ _CARD_KPI_SLOTS = 3
 #
 #     names as `Last, First`:  median 14 · p90 17 · max 28 ("Abdul-Rahim Gladding, Na'eem")
 #
-# 🚨 SO THE JERSEY'S SIZE DOES NOT FIT THE MEDIAN NAME, LET ALONE THE LONG ONES. `1.25rem`
-# clears the median and nothing more; only `1.0rem` clears the p90. ✅ **Said rather than
-# quietly shrunk** — B106's report carries all four side by side so the next value is Marc's
-# choice rather than a fourth guess, and this constant moves when he picks.
-_CARD_JERSEY_SIZE, _CARD_NAME_SIZE = 1.5, 1.25
+# 🚨 SO THE JERSEY'S SIZE DOES NOT FIT THE MEDIAN NAME, LET ALONE THE LONG ONES.
+#
+# 🚨 R-835. MARC DID NOT PICK ONE OF THOSE FOUR SIZES — HE CHANGED THE SHAPE, AND THAT REMOVES
+# THE CONSTRAINT INSTEAD OF TRADING AGAINST IT. 2026-09-14, verbatim: *"Font of the jersey
+# number and last name are too big. First name should be above the last name in a small font.
+# Jersey # Font can be bigger than Last Name b/c it has the vertical space of First Name <br>
+# Last Name."*
+#
+# ⚠️ SO B106's *the name gets its own full-width row* IS REVERTED, AND NOTHING WAS BROKEN. It
+# was the right call for the premise it had — `Last, First` on ONE line, where the longest
+# string is the WHOLE name — and Marc removed that premise by putting the name back on two
+# lines. **`Robinson, Steven` is 16 characters; `Robinson` is 8.** Splitting the name roughly
+# halves the longest string the column has to hold, which is why this shape fits where four
+# sizes of the other one did not.
+#
+#     ┌───────────────────────────────┐
+#     │  #14    Steven      JR        │   first name — small, not bold
+#     │         Robinson    RB        │   last name  — bold
+#     └───────────────────────────────┘
+#        jersey  name        year/pos
+#
+# ⚠️ THE ORDERING IS A RULE, NOT A PREFERENCE, AND IT IS ASSERTED: **jersey > last > first.**
+# It is Marc's own reason the jersey may be the largest — it spans the two-line block, so it
+# has height the name lines do not.
+# ⚠️ AND BOTH CAME DOWN, because he said *too big* about the jersey's 1.5 AND the name's 1.25.
+#
+# 🚨 THE SET IS MEASURED, NOT OFFERED. Three complete sets were rendered from this very function
+# at the card's real 150px and the truncations COUNTED — `claude_work/renders/
+# B107_card_header_sets.png`, and the numbers are the reason this one shipped:
+#
+#     set                                     name lines truncated, of 10
+#     A   jersey 1.25 · last 1.0  · first .75          2   (Singleton, Sanders II)
+#     B   jersey 1.4  · last 1.05 · first .78          3
+#     C   jersey 1.15 · last .92  · first .7           0   ← shipped
+#
+# ⚠️ `.92` IS NEAR THE CEILING RATHER THAN A ROUND NUMBER, AND THAT IS DELIBERATE: `Sanders II`
+# is the longest surname the game holds at 10 characters and needs 70.8px of a 72px column at
+# this size. At `.95` it truncates again. **The constant is the measurement.**
+#
+# 🚨 THE BAR THIS HAD TO BEAT: 7 of 18 rendered names truncated at B106's one-line `Last, First`.
+_CARD_JERSEY_SIZE = 1.15
+_CARD_LAST_SIZE = 0.92
+_CARD_FIRST_SIZE = 0.7
 
 
 def _card_text(value) -> str:
@@ -2310,17 +2348,6 @@ def _card_text(value) -> str:
     if value is None or (not isinstance(value, str) and pd.isna(value)):
         return ""
     return str(value).strip()
-
-
-def _last_first(first: str, last: str) -> str:
-    """`Last, First` — and a single-token name has no comma and no second part.
-
-    ⚠️ STILL THE R-753 ASSUMPTION: first token, remainder. So *Emmett Mosley V* renders
-    *Mosley V, Emmett*, which keeps the suffix with the surname where a reader expects it.
-    B103 measured ZERO single-token names in 75,283 rows, so that branch is defensive — and it
-    stays asserted, because "none today" is not "none ever".
-    """
-    return f"{last}, {first}" if first else last
 
 
 # 🚨 R-733. THE LABELS ARE DATA NOW, AND B098 SAID WHY IT HAD TO CHANGE. That round shipped
@@ -2603,10 +2630,8 @@ def _leader_card(row, usage=None) -> str:
     # formatting to Position."* — the same SIZE AND WEIGHT as the surname, not `font-weight`
     # bolted onto a faded line, which is what makes the header read as a grid rather than as
     # three unrelated stacks.
-    # 🚨 R-806. `Last, First` ON ITS OWN ROW. Marc, v06: *"Player Card - Last Name, First. Font
-    # same as Jersey number."* ⚠️ It is NOT at the jersey's size and `_CARD_NAME_SIZE` carries
-    # the measurement that says why. The name gets its own full-width row because sharing one
-    # with the jersey and the position left it ~60px, and even the whole card is not enough.
+    # 🚨 R-835. THE NAME IS TWO LINES AGAIN AND SHARES THE ROW — see `_CARD_JERSEY_SIZE` for
+    # Marc's words and for why splitting the name is what makes it fit.
     small = "font-size:.66rem;opacity:.6;line-height:1.1"
     strong = "font-weight:700;font-size:.78rem;line-height:1.15"
     # 🚨 `nan` WAS REACHING THE PAGE, AND `or ""` IS EXACTLY WHY. A null arrives out of the
@@ -2622,21 +2647,38 @@ def _leader_card(row, usage=None) -> str:
     # renders the bold line alone rather than an empty row that shifts the card's height.
     year = _card_text(row.get("class_year_display"))
     position = _card_text(row.get("position"))
+    # ⚠️ `min-width:0` ON EVERY FLEX CHILD THAT CAN OVERFLOW, and it is what makes the ellipsis
+    # work at all: without it a flex child refuses to shrink below its content and the name
+    # pushes the year/position column off the card instead of truncating — the R-745 class,
+    # five rounds old now.
+    # ⚠️ THE JERSEY'S `min-width` CAME DOWN WITH ITS FONT, AND THE SECOND CUT WAS MEASURED.
+    # 2.4rem was set for a 1.5rem jersey. At 1.25rem `#14` draws ~26px, so 2.4rem (38px) was
+    # reserving 12px the NAME column needed — and the name column is the one that runs out.
+    # 1.7rem (27px) still clears the widest real jersey, `#99` at ~26px, with a pixel to spare.
+    # 🚨 MEASURED, NOT PICKED: at 2.0rem the name column was 68px and `Singleton` needed 74.
+    clip = "min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+    name_block = (
+        f"<div style='flex:1;{clip}'>"
+        # 🚨 THE FIRST NAME IS OMITTED, NOT BLANKED, WHEN THERE IS NONE — B103's ruling, and it
+        # survives the reshape unchanged. An empty first line would still take its line-height
+        # and drop that one card's surname below its neighbours': a hole reserved for something
+        # that does not exist (AC-G.11).
+        + (f"<div style='font-size:{_CARD_FIRST_SIZE}rem;opacity:.6;line-height:1.15;{clip}'>"
+           f"{html.escape(first)}</div>" if first else "")
+        + f"<div style='font-weight:700;font-size:{_CARD_LAST_SIZE}rem;line-height:1.15;"
+          f"{clip}'>{html.escape(last)}</div></div>")
     top = [
-        f"<div style='min-width:2.4rem;font-weight:700;font-size:{_CARD_JERSEY_SIZE}rem;"
+        # 🚨 `align-items:center` IS MARC'S OWN ARGUMENT MADE MECHANICAL: the jersey spans the
+        # two-line block, so it is centred against BOTH lines rather than sitting on the first.
+        # That vertical room is his stated reason it may be the largest of the three.
+        f"<div style='min-width:1.7rem;font-weight:700;font-size:{_CARD_JERSEY_SIZE}rem;"
         f"line-height:1;display:flex;align-items:center'>{number}</div>",
-        "<div style='flex:1;min-width:0'></div>",
+        name_block,
         "<div style='text-align:right;min-width:0'>"
         + (f"<div style='{small}'>{html.escape(year)}</div>" if year else "")
         + f"<div style='{strong};white-space:nowrap'>"
           f"{html.escape(position) if position else fmt.EM_DASH}</div></div>",
     ]
-    # ⚠️ `min-width:0` IS WHAT MAKES THE ELLIPSIS WORK. Without it a flex/grid child refuses to
-    # shrink below its content and the name overflows the card instead of truncating — the
-    # R-745 class, four rounds old.
-    name_row = (f"<div style='font-weight:700;font-size:{_CARD_NAME_SIZE}rem;line-height:1.15;"
-                f"min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                f"margin-top:.1rem'>{html.escape(_last_first(first, last))}</div>")
     # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
     # AC-G.32 puts a dash where a VALUE is missing; a slot with no label is a MEASURE that does
     # not exist, which is a different statement (AC-G.11). B098 argued this when two of three
@@ -2657,8 +2699,8 @@ def _leader_card(row, usage=None) -> str:
             f"<div style='font-size:.92rem;font-weight:600'>{shown}</div></div>")
     return (f"<div style='border:1px solid rgba(128,128,128,.22);border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem'>"
-            f"<div style='display:flex;align-items:flex-start;gap:.4rem'>"
-            f"{''.join(top)}</div>{name_row}"
+            f"<div style='display:flex;align-items:stretch;gap:.4rem'>"
+            f"{''.join(top)}</div>"
             f"<div style='display:grid;grid-template-columns:repeat({_CARD_KPI_SLOTS},1fr);"
             f"gap:.3rem;margin-top:.25rem;text-align:center'>{''.join(cells)}</div>"
             f"{_card_dots(row, usage)}</div>")
@@ -3225,7 +3267,39 @@ _POST_GAME_LEADER_COLUMNS = """
 # 🚨 ONE QB AND THREE RUSHERS, AND A120 MEASURED WHY IT IS NOT THREE OF EACH: of 6,736 `total`
 # groups, **6,300 — 93.5% — have fewer than three leaders**, and 3,990 have exactly one. A team
 # plays one quarterback. Marc's own wording already says so: QB singular, three rushers.
-_POST_GAME_CARDS = (("total", 1), ("rushing", 3))
+#
+# 🚨 R-809. THE RECEIVERS JOIN THEM, AND THIS IS A SCOPE EXPANSION RATHER THAN A DEFECT FIX.
+# Marc, 2026-09-14: *"I don't see any WR in the player cards, but I see the RB's in Box Score AND
+# Advanced. We need full coverage."*
+#
+# ⚠️ THERE WERE NO RECEIVERS BECAUSE NOTHING ASKED FOR ANY. His v03 said *"Include QA, Top 3
+# Rusher"* and that is exactly what shipped — the `passing` panel was never in this tuple.
+# **Nothing was broken; the ask grew.** Saying so matters: a round that reports this as a bug
+# reports a fix for something that was working to its specification.
+#
+# ⚠️ AND `passing` IS THE RECEIVERS, NOT THE PASSERS — A116 and B099 both settled that, and the
+# quarterback is already here under `total`. Correcting "passing" to "passers" would draw the
+# same man twice and still leave Marc without a WR.
+#
+# ✅ ORDERED THE WAY A READER READS A GAME: the quarterback, then who ran it, then who caught it.
+# ✅ AND THE DATA IS THE BEST-COVERED OF THE THREE — A120 measured the passing panel at 7,341
+# groups with only 50 (0.7%) holding fewer than three players, against rushing's 6.6%.
+#
+# 🚨 THE DEPTH CAME DOWN 3 → 2, AND IT IS THE DIAL COWORK NAMED RATHER THAN ONE THIS ROUND
+# INVENTED: *"if seven cards run taller than the panel they flank, TRIM THE DEPTH — 3 → 2 per
+# discipline — RATHER THAN DROP A DISCIPLINE. Coverage is what he asked for; depth is the
+# adjustable dial."* ⚠️ THE CONDITION FIRED, MEASURED on Sam Houston at Troy at 1300px:
+#
+#     depth              cards   card column   Box score   Advanced    overrun
+#     3 per discipline     7        515px         353px       384px    +162 / +131
+#     2 per discipline     5        426px         353px       384px     +73 /  +42   ← shipped
+#
+# 🚨 AND IT COLLIDES WITH A LITERAL OF MARC'S OWN, WHICH IS FLAGGED RATHER THAN RESOLVED HERE:
+# v03 says *"Include QA, Top 3 Rusher"* — **three** is his number for the rushers. The RECEIVERS
+# have no stated depth, so `("passing", 2)` contradicts nothing; `("rushing", 2)` contradicts
+# him. ⚠️ **It is one literal to put back, and B107's report puts the trade in front of him with
+# these numbers rather than deciding it in a comment.**
+_POST_GAME_CARDS = (("total", 1), ("rushing", 2), ("passing", 2))
 
 # ⚠️ AWAY LEFT, TABLE MIDDLE, HOME RIGHT — the away-over-home law this site follows everywhere
 # (R-522, spec §0), and the only arrangement in which a reader can tell whose card is whose

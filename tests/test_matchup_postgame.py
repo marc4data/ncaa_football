@@ -103,20 +103,26 @@ def panel():
 # R-738's post-game cards, measured from `srv_game_team_leader_in_this_game`: one quarterback
 # from the `total` panel and three rushers, per side. ⚠️ THE LABELS AND FORMATS ARE THE VIEW'S
 # OWN — A120 shipped the same twelve slot columns the preview card already reads.
+# ⚠️ THE SLOT LABELS PER PANEL, AS A116 PUBLISHES THEM — the view carries them per row and the
+# card reads them (R-733), so a fixture that invented its own would be testing itself.
 _POST_GAME_PANELS = {
     "total": (("Comp-Att", "pair"), ("Yards", "integer"), ("TD", "integer")),
     "rushing": (("Carries", "integer"), ("Yards", "integer"), ("Yds/Carry", "decimal_1")),
+    # 🚨 R-809. `passing` IS THE RECEIVERS, NOT THE PASSERS — A116 and B099 both settled it, and
+    # the quarterback is already on the card under `total`.
+    "passing": (("Receptions", "integer"), ("Yards", "integer"), ("TD", "integer")),
 }
 
 
 def _post_game_leaders(**overrides):
-    """Both sides' post-game leaders: one QB each, three rushers each."""
+    """Both sides' post-game leaders: one QB, three rushers and three receivers each (R-809)."""
     rows = []
     # ⚠️ THE SAME IDS `_side()` USES — 2 at home, 96 away. A card frame keyed on ids the box
     # score does not carry would render no cards at all while every table assertion passed.
     for team_id, who in ((2, "Home"), (96, "Away")):
         for panel, names in (("total", [f"{who} QB"]),
-                             ("rushing", [f"{who} RB1", f"{who} RB2", f"{who} RB3"])):
+                             ("rushing", [f"{who} RB1", f"{who} RB2", f"{who} RB3"]),
+                             ("passing", [f"{who} WR1", f"{who} WR2", f"{who} WR3"])):
             (l1, f1), (l2, f2), (l3, f3) = _POST_GAME_PANELS[panel]
             for rank, name in enumerate(names, start=1):
                 rows.append({
@@ -124,7 +130,8 @@ def _post_game_leaders(**overrides):
                     "tied_players": 1, "qualified_players": len(names),
                     "player_id": f"p{team_id}{panel[:2]}{rank}", "player_name": name,
                     "player_slug": name.lower().replace(" ", "-"),
-                    "jersey": 10 + rank, "position": "QB" if panel == "total" else "RB",
+                    "jersey": 10 + rank,
+                    "position": {"total": "QB", "rushing": "RB", "passing": "WR"}[panel],
                     "class_year_display": "SR",
                     "stat_1_label": l1, "stat_1_format": f1,
                     "stat_1_value": 18.0 if f1 == "pair" else 12.0,
@@ -675,29 +682,77 @@ def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
     # ⚠️ PLAIN TEXT SINCE R-753: the name is two elements — small first line, bold last line —
     # so "Away QB" no longer appears contiguously in the markup.
     away, home = _plain(blocks[0]), _plain(blocks[1])
-    assert "QB, Away" in away and "QB, Home" not in away, \
+    # ⚠️ R-835 PUT THE NAME BACK ON TWO LINES, so `_plain` yields `Away QB` rather than
+    # `QB, Away`. The claim is unchanged — which SIDE is drawn first — and it is still
+    # positional rather than a presence check.
+    assert "Away QB" in away and "Home QB" not in away, \
         f"the first card column is not the AWAY side: {away[:120]}"
-    assert "QB, Home" in home and "QB, Away" not in home, \
+    assert "Home QB" in home and "Away QB" not in home, \
         f"the second card column is not the HOME side: {home[:120]}"
 
 
-def test_ONE_quarterback_and_THREE_rushers(panel):
-    """🚨 A120 MEASURED WHY IT IS NOT THREE OF EACH: of 6,736 `total` groups, 6,300 — 93.5% —
-    have fewer than three leaders and 3,990 have exactly one. A team plays one quarterback, and
-    Marc's own wording says so — *"Include QA, Top 3 Rusher"*: QB singular, three rushers."""
+def test_EVERY_DISCIPLINE_IS_REPRESENTED_on_the_post_game_cards(panel):
+    """🚨 R-809. Marc: *"I don't see any WR in the player cards… We need full coverage."*
+
+    ⚠️ THE EXPECTED SET IS WRITTEN OUT HERE AND IS **NOT** READ FROM `_POST_GAME_CARDS`, AND
+    THAT IS THE WHOLE POINT. A test that iterated the page's own tuple would drop `passing` from
+    its expectations the moment the page dropped it — it would pass the staged break and assert
+    nothing but that the page agrees with itself (R-744).
+
+    ✅ ASSERTED BY WHAT THE READER SEES, per discipline: the slot-1 LABEL the view publishes for
+    that panel. `Comp-Att` can only come from `total`, `Carries` from `rushing`, `Receptions`
+    from `passing` — so this cannot be satisfied by drawing the same man three times.
+
+    ⚠️ AND IT INVOKES THE PAGE RATHER THAN REPRODUCING IT (R-768, A123's break went green
+    because the test built its own frame). `run()` calls the real `_post_game`.
+    """
+    run, _ = panel
+    away = _plain("".join(_cards_in(_card_blocks(run(_both())[0])[0])))
+    for discipline, marker in (("the quarterback", "Comp-Att"),
+                               ("the rushers", "Carries"),
+                               ("the receivers", "Receptions")):
+        assert marker in away, (
+            f"{discipline} are not on the post-game cards — no {marker!r} in the away column. "
+            f"Marc asked for full coverage: {away[:200]}")
+
+
+def test_ONE_quarterback_and_TWO_of_each_other_discipline(panel):
+    """🚨 A120 MEASURED WHY THE QB IS ALONE: of 6,736 `total` groups, 6,300 — 93.5% — have fewer
+    than three leaders and 3,990 have exactly one. A team plays one quarterback.
+
+    🚨 AND THE OTHER TWO ARE AT **2**, WHICH IS A TRADE RATHER THAN A PREFERENCE. Measured on Sam
+    Houston at Troy at 1300px: at three per discipline the card column runs 515px against a
+    353px Box score and a 384px Advanced — 162px and 131px past the panel it flanks. At two it
+    is 426px, so +73 and +42.
+
+    ⚠️ THE COUNT IS ASSERTED AGAINST THE MEASURED SHAPE AND NOT READ FROM `_POST_GAME_CARDS`,
+    for the same reason `test_EVERY_DISCIPLINE_IS_REPRESENTED` writes its set out: a test that
+    took the page's own tuple as its expectation would agree with any tuple.
+    """
     run, _ = panel
     away = _cards_in(_card_blocks(run(_both())[0])[0])
-    assert len(away) == 4, f"expected one QB and three rushers, got {len(away)} cards"
+    assert len(away) == 5, (
+        f"expected one QB, two rushers and two receivers, got {len(away)} cards")
     text = _plain("".join(away))
     # ⚠️ ORDERED BY A TOKEN THAT SURVIVES A RENAME, NOT BY THE RENDERED NAME — R-758, and
     # B106's own name break is what exposed it: `text.index("QB, Away")` raised
     # `ValueError: substring not found` when the card went back to `First Last`, so this test
     # CRASHED instead of failing and proved only that the lookup was narrow. `Comp-Att` is the
     # quarterback's own KPI label and `RB1` is a whole token of the rusher's name either way.
-    assert text.index("Comp-Att") < text.index("RB1"), \
-        "the quarterback must lead the column"
-    for rb in ("RB1", "RB2", "RB3"):
-        assert rb in text, f"{rb} did not render"
+    # ⚠️ ORDERED BY A TOKEN THAT SURVIVES A RENAME, NOT BY THE RENDERED NAME — R-758, and
+    # B106's own name break is what exposed it: `text.index("QB, Away")` raised
+    # `ValueError: substring not found` when the card's name shape changed, so the test CRASHED
+    # instead of failing and proved only that the lookup was narrow.
+    # ✅ AND THE ORDER IS THE ROUND'S OWN CLAIM (R-809): the quarterback, then who ran it, then
+    # who caught it — the way a reader reads a game.
+    assert text.index("Comp-Att") < text.index("RB1") < text.index("WR1"), \
+        f"the cast is not QB, then rushers, then receivers: {text[:200]}"
+    for who in ("RB1", "RB2", "WR1", "WR2"):
+        assert who in text, f"{who} did not render"
+    # ⚠️ AND THE DEPTH STOPS AT TWO — the third of each discipline is NOT drawn. Without this the
+    # test passes any depth at or above two and says nothing about the trade R-809 made.
+    for who in ("RB3", "WR3"):
+        assert who not in text, f"{who} rendered — the depth is no longer 2 per discipline"
 
 
 def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
@@ -705,13 +760,26 @@ def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
     2026 have exactly two. A missing card is not an empty card, and an empty card is not an em
     dash: the column simply ends."""
     run, _ = panel
+    # ⚠️ THE FIXTURE MUST DROP A RUSHER THE PAGE WOULD OTHERWISE DRAW. At a depth of 2 the third
+    # rusher is not drawn anyway, so removing rank 3 would change nothing and this test would
+    # assert against a row the page never asked for — the R-760 shape, an assertion nothing can
+    # fail. Rank 2 is the one in the drawn set.
+    # 🚨 AND IT MUST DROP RANKS 2 AND 3, NOT JUST ONE. `[:wanted]` takes the first TWO of
+    # whatever survives, so removing rank 2 alone leaves ranks 1 and 3 and the page still draws
+    # two rushers — the test would assert a short row against a full one and pass for the wrong
+    # reason.
     rows = [r for r in _post_game_leaders()
-            if not (r["panel"] == "rushing" and r["leader_rank"] == 3)]
+            if not (r["panel"] == "rushing" and r["leader_rank"] in (2, 3))]
     away = _cards_in(_card_blocks(run(_both(), leaders=rows)[0])[0])
-    assert len(away) == 3, f"a two-rusher side should draw three cards, got {len(away)}"
+    assert len(away) == 4, (
+        f"a one-rusher side should draw four cards — QB, one rusher, two receivers — "
+        f"got {len(away)}")
     text = _plain("".join(away))
-    assert "RB3" not in text
-    assert "—" not in text, "an absent third rusher reserved a hole"
+    assert "RB2" not in text
+    # ⚠️ AND THE RECEIVERS ARE UNAFFECTED, which is the half a count alone cannot see: a short
+    # RUSHING row must not shorten the PASSING one.
+    assert "WR1" in text and "WR2" in text, "a missing rusher took a receiver with it"
+    assert "—" not in text, "an absent rusher reserved a hole"
 
 
 def test_the_cards_read_the_IN_THIS_GAME_view_and_never_the_preview_one(panel):

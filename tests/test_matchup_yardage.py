@@ -1596,7 +1596,9 @@ def test_the_card_top_row_carries_all_four_of_MARCS_FIELDS(panel):
     text = _text(panel(_game(), _both(), deltas=_deltas())[0])
     # ⚠️ `# 9` WITH A SPACE SINCE R-806: the hash is its own element at half the digits' size,
     # and `_plain` puts a space where it strips a tag. The reader sees `#9`.
-    for field in ("# 9", "Avant, Lloyd", "RB", "JR"):
+    # ⚠️ THE NAME IS TWO LINES AGAIN SINCE R-835, so the two parts are asserted separately —
+    # `_plain` puts a space between elements, so `Lloyd Avant` is what the stripped text holds.
+    for field in ("# 9", "Lloyd", "Avant", "RB", "JR"):
         assert field in text, f"the card top row is missing {field!r}"
 
 
@@ -2566,27 +2568,68 @@ def _header_row(entries, name):
     return card.split("repeat(3,1fr)")[0]
 
 
-def test_the_name_renders_LAST_COMMA_FIRST_and_not_merely_that_it_appears(panel):
+def test_the_name_renders_FIRST_over_BOLD_LAST_and_not_merely_that_it_appears(panel):
     """🚨 A PRESENCE ASSERTION CANNOT SEE THIS SWAP. B082 proved it on the game header and B083
     on the win-probability bar; *Avant Lloyd* contains exactly the same characters as
     *Lloyd Avant*.
 
-    Marc: *"Present player name on 2 lines. First name on top, not bold and small. Bold last
-    name."* ✅ So the WEIGHT is asserted against the part, not the presence of either.
+    Marc, R-835: *"First name should be above the last name in a small font."* — which is a
+    RETURN to his own v04 shape after B106's one-line `Last, First`. ⚠️ Nothing was broken: that
+    round was right for its premise, and Marc removed the premise.
+
+    ✅ So the ORDER and the WEIGHT are both asserted against the part, not the presence of
+    either: the small line must come FIRST and carry the given name, the bold line SECOND and
+    carry the surname.
     """
     # ⚠️ LOOKED UP BY A SINGLE TOKEN, NOT THE WHOLE NAME. Searching for "Lloyd Avant" makes the
     # swap a StopIteration in this helper — a crash, which proves the helper is narrow rather
     # than that the card is wrong. "Avant" is present whichever line it lands on, so the
     # assertion below is what fails.
     header = _header_row(panel(_game(), _both(), deltas=_deltas())[0], "Avant")
-    # ⚠️ SCOPED TO THE NAME COLUMN SINCE R-801. The POSITION now carries the same weight and
-    # size — that is the point of the mirror — so a bare `font-weight:700` sweep returns two
-    # strings and this assertion would be about whichever came first.
-    name = re.findall(r"text-overflow:ellipsis[^>]*>([^<]+)<", header)
-    assert name == ["Avant, Lloyd"], (
-        f"the name is not `Last, First` — and `First Last` contains exactly the same "
-        f"characters, so nothing that merely looks for the name can see the difference: {name}")
-    assert name[0].index("Avant") < name[0].index("Lloyd"), "the surname must come first"
+    # ⚠️ SCOPED TO THE NAME COLUMN. The POSITION carries a bold weight too (R-801's mirror), so
+    # a bare `font-weight:700` sweep would return two strings and this would be about whichever
+    # came first. Both name lines carry `text-overflow:ellipsis`; so does the block that wraps
+    # them, which has no font size of its own — hence the `font-size` in the pattern.
+    lines = re.findall(r"font-size:[^']*text-overflow:ellipsis[^>]*>([^<]+)<", header)
+    assert lines == ["Lloyd", "Avant"], (
+        f"the name is not `first` over `last` — and the two parts contain exactly the same "
+        f"characters whichever order they are in, so nothing that merely looks for the name "
+        f"can see the difference: {lines}")
+    # 🚨 AND THE WEIGHT, PER PART. Marc asked for the surname bold and the given name small and
+    # not bold; a test that only checked the ORDER would pass a header with both lines bold.
+    first_markup = header.split(">Lloyd<")[0].rsplit("<div", 1)[-1]
+    last_markup = header.split(">Avant<")[0].rsplit("<div", 1)[-1]
+    assert "font-weight:700" in last_markup, f"the surname is not bold: {last_markup}"
+    assert "font-weight:700" not in first_markup, (
+        f"the given name is bold, so the two lines carry equal weight and the surname stops "
+        f"being the one a reader finds first: {first_markup}")
+
+
+def test_the_THREE_HEADER_SIZES_keep_MARCS_ORDERING():
+    """🚨 R-835, AND IT IS A RULE HE STATED RATHER THAN A LOOK COWORK CHOSE.
+
+    Marc: *"Jersey # Font can be bigger than Last Name b/c it has the vertical space of First
+    Name `<br>` Last Name."* — so the ordering is **jersey > last > first**, and his REASON is
+    the geometry: the jersey spans the two-line block, the name lines do not.
+
+    ⚠️ ASSERTED AS A RELATIONSHIP, NOT AS THREE LITERALS. B106 pinned a single literal and Marc
+    then changed the shape rather than the number; what survives a reshape is the ordering. A
+    round that wants different sizes may have them — it may not invert the rule silently.
+    """
+    jersey = _module_constant("_CARD_JERSEY_SIZE")
+    last = _module_constant("_CARD_LAST_SIZE")
+    first = _module_constant("_CARD_FIRST_SIZE")
+    assert jersey > last > first, (
+        f"the header sizes are jersey={jersey} last={last} first={first}, which breaks Marc's "
+        f"ordering jersey > last > first")
+    # ⚠️ AND BOTH CAME DOWN FROM B106, because *"too big"* was said about the jersey's 1.5 AND
+    # the last name's 1.25. A round may not quietly put them back.
+    assert jersey <= 1.5 and last <= 1.25, (
+        f"jersey={jersey} last={last} — Marc called 1.5 and 1.25 too big (R-835)")
+    # The given name is a supporting line, not a second headline.
+    assert first < last * 0.9, (
+        f"the given name at {first} is within 10% of the surname at {last}, so the two lines "
+        f"read as equals and the surname stops being the one a reader finds first")
 
 
 def test_a_SINGLE_TOKEN_name_has_NO_COMMA_and_no_empty_second_part(panel):
