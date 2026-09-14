@@ -141,6 +141,8 @@ def _usage(players=None, games=3, window=None, skip=()):
         for index in range(games):
             if index >= observed:
                 continue
+            total = 0.10 + 0.05 * index
+            ceiling = 0.10 + 0.05 * (observed - 1)
             rows.append({
                 "team_id": leader["team_id"], "panel": leader["panel"],
                 "player_id": leader["player_id"],
@@ -148,8 +150,13 @@ def _usage(players=None, games=3, window=None, skip=()):
                 # ⚠️ THE REGULAR SEASON IS ORDINAL 1; the postseason row below is 2, and a sort
                 # on `usage_week` alone would put it first because bowl weeks restart at 1.
                 "usage_season_type_ordinal": 1, "usage_week": index + 1,
-                "usage_total": 0.10 + 0.05 * index,
-                "usage_total_max_in_window": 0.10 + 0.05 * (observed - 1),
+                "usage_total": total,
+                "usage_total_max_in_window": ceiling,
+                # 🚨 R-740. A120 PUBLISHES THE RATIO; the page reads it. Here it AGREES with the
+                # pair by default, and `test_the_SHARE_is_READ…` is the one fixture that makes
+                # them disagree — because a fixture where they agree cannot tell reading from
+                # dividing, which is the trap B099 fell into on this very line.
+                "usage_share_of_max": total / ceiling if ceiling else None,
                 "usage_games_in_window": observed})
     return rows
 
@@ -718,15 +725,16 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv)):
             found[node.lineno] = lines[node.lineno - 1].strip()
 
-    # ⚠️ ONE ENTRY, ONE REASON. To add one you must be able to finish "this page divides here
-    # and the warehouse cannot do it because…" — which is the bar `PROVIDED_BY_THE_PAGE` in
-    # ci/check_page_reads.py sets for its own exceptions.
-    allowed = {
-        "fill = max(0.0, min(1.0, float(share) / float(ceiling)))":
-            "R-694's dot fill. `usage_total_max_in_window` is a PUBLISHED denominator so the "
-            "page never takes a maximum over rows; scaling one published number by another to "
-            "size a shape is rendering. ⏳ R-740 publishes `usage_share_of_max` and this goes.",
-    }
+    # 🚨 THE LIST IS EMPTY NOW, AND R-740 IS WHY. B102 left one entry here — R-694's dot fill,
+    # `float(share) / float(ceiling)` — with the note "⏳ R-740 publishes `usage_share_of_max`
+    # and this goes". A120 published it, B101 read it, and the guard's own
+    # `assert found` fired on the next run to say the entry had become stale. ✅ REMOVED
+    # DELIBERATELY, which is what that assertion existed to force.
+    #
+    # ⚠️ TO ADD ONE you must be able to finish "this page divides here and the warehouse cannot
+    # do it because…" — the bar `PROVIDED_BY_THE_PAGE` in ci/check_page_reads.py sets for its
+    # own exceptions. **`site/views/matchup.py` now divides nowhere at all.**
+    allowed = {}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "
@@ -734,12 +742,16 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
         f"Metric arithmetic belongs upstream (§4.2) — a ratio computed here can disagree with "
         f"the Excel export, which reads the column. If this division is legitimate, add it to "
         f"`allowed` WITH THE REASON; do not delete the assertion.")
-    # 🚨 AND THE GUARD MUST NOT GO BLIND BY THE EXCEPTION LIST EMPTYING ITSELF. If the allowed
-    # division disappears, this test has stopped watching anything and should say so rather
-    # than passing quietly.
-    assert found, (
-        "no division found at all — either R-740 landed and this entry should be REMOVED "
-        "deliberately, or the parse has gone blind")
+    # 🚨 AND THE GUARD MUST NOT GO BLIND. With `allowed` empty, "no divisions found" is the
+    # CORRECT answer, so the emptiness of `found` can no longer be the liveness check — a parse
+    # that returned nothing at all would look identical to a clean file.
+    # ✅ So liveness is asserted on the PARSE instead: the walk must still be able to see this
+    # module's own functions.
+    walked = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    for name in ("_usage_dots", "_scatter", "_yardage_column"):
+        assert name in walked, (
+            f"the AST walk cannot see {name!r}, so it is not reading matchup.py any more and "
+            f"a division anywhere in the file would pass unnoticed")
 
 
 # --- R-522: away on the left, home on the right -------------------------------------------------
@@ -1869,7 +1881,8 @@ def test_the_dots_are_ordered_by_SEASON_TYPE_then_week_never_week_alone(panel):
                     # ⚠️ ONE CEILING FOR ALL FOUR, because the window maximum is a property of
                     # the PLAYER rather than of a game — and it makes every fill distinct, which
                     # is what lets the order be read off the render at all.
-                    usage_total_max_in_window=0.30, usage_games_in_window=4,
+                    usage_total_max_in_window=0.30,
+                    usage_share_of_max=total / 0.30, usage_games_in_window=4,
                     team_id=first["team_id"], panel=first["panel"],
                     player_id=first["player_id"])
 
@@ -1887,29 +1900,46 @@ def test_the_dots_are_ordered_by_SEASON_TYPE_then_week_never_week_alone(panel):
         f"among September's: {fills}")
 
 
-def test_the_DENOMINATOR_is_READ_not_derived_from_the_rows_on_the_page(panel):
-    """🚨 THE ASSERTION MY FIRST STAGED BREAK COULD NOT MAKE, AND THAT IS WHY IT IS HERE.
+def test_the_SHARE_is_READ_and_the_page_neither_divides_nor_derives_it(panel):
+    """🚨 R-740 / §4.2.1, AND THIS IS B099's BREAK INVERTED.
 
-    `usage_total_max_in_window` is a published column so the page never takes a maximum over
-    rows — that window function is what CLAUDE.md puts upstream, and A107 shipped the column
-    precisely to keep it there.
+    B099 shipped `float(share) / float(ceiling)` in the page. A120 published
+    `usage_share_of_max` — 159,418 of 159,418 populated — so the ratio has one definition and
+    the page reads it.
 
-    ⚠️ A FIXTURE WHOSE PUBLISHED MAX EQUALS THE MAX OF ITS OWN VALUES CANNOT TELL THE TWO
-    APART. I staged the break — the page deriving `max(...)` over the rows it holds — and every
-    dots test stayed green, because the two numbers agreed by construction. So this fixture sets
-    them APART: the published ceiling is higher than anything in the frame, which is what a real
-    window max does whenever the page holds a subset of it.
+    ⚠️ THE FIXTURE MAKES THE PUBLISHED SHARE DISAGREE WITH ITS OWN INPUTS, which is the only
+    way an assertion can tell READING from DIVIDING. B099 learned that twice on this line: its
+    first staged break stayed green because the fixture's ceiling equalled the max of its own
+    values, so both readings gave the same answer.
 
-    A page that derives would show the best row as 100%. A page that reads shows it below.
+    Here the pair says 0.20 / 0.40 = 50%, and the published column says 90%. A page that
+    divides draws half a circle; a page that reads draws nine tenths of one.
     """
-    rows = [dict(r, usage_total_max_in_window=0.40) for r in _usage()]
+    rows = [dict(r, usage_total=0.20, usage_total_max_in_window=0.40,
+                 usage_share_of_max=0.90) for r in _usage()]
     entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=_leaders(), usage=rows)
     _titles, fills = _dots(entries, _leaders()[0]["player_name"])
     assert fills, "no fill was drawn"
-    assert fills[-1] != "100", (
-        f"the best row filled the circle completely, so the denominator came from the page's "
-        f"own rows rather than from `usage_total_max_in_window`: {fills}")
-    assert fills[-1] == "50", f"0.20 of a published 0.40 ceiling is half a circle: {fills}"
+    assert set(fills) == {"90"}, (
+        f"the fill is not the PUBLISHED share. 0.20 over a 0.40 ceiling is 50%, and the column "
+        f"says 90% — a page still dividing draws 50: {fills}")
+
+
+@pytest.mark.parametrize("panel", [True], indirect=True)
+def test_a_NULL_published_share_RAISES_rather_than_drawing_an_empty_circle(panel):
+    """⚠️ R-742 SURVIVES R-740. The published ratio is null exactly where the ceiling is absent
+    or zero — 0 of 159,418 rows today — and an empty circle at full opacity would read as "he
+    took no part" when the truth is "we cannot scale this" (AC-G.11).
+
+    ⚠️ THE EXEMPTION IS DECLARED because proving the card DIES is this test's whole job — the
+    raise lands inside `states.section`, which draws the Error card R-610 makes fatal by
+    default. One declaration reaches both guards (B097).
+    """
+    rows = [dict(r, usage_share_of_max=None) for r in _usage()]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=_leaders(), usage=rows)
+    assert any(render_harness.ERROR_CARD in str(b) for _k, b in entries), (
+        "a null published share drew something rather than raising — an empty circle at full "
+        "opacity reads as 'took no part' and that is the one thing it must not say")
 
 
 # --- 🚨 R-735: the card and the chart share the row at 1:4 ---------------------------------

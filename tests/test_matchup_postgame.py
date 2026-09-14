@@ -62,7 +62,7 @@ def panel():
         matchup = importlib.reload(importlib.import_module("views.matchup"))
         seen = []
 
-        def run(sides, glossary=GLOSSARY, season=2026):
+        def run(sides, glossary=GLOSSARY, season=2026, leaders=None):
             # R-730. The season decides WHICH absence the Empty state states, so the
             # fixture has to carry one. 2026 is a completed modern game — the case
             # nearly every test here means; the scope tests pass a pre-2024 season.
@@ -71,6 +71,24 @@ def panel():
 
             def fake_query(sql, params=None):
                 seen.append(re.search(r"from\s+(\w+)", sql, re.I).group(1))
+                # 🚨 R-738 DISPATCHES FIRST AND THE ORDER IS NOT COSMETIC.
+                # "srv_game_team_leader_in_this_game" CONTAINS "srv_game_team", so a later
+                # branch would answer the CARDS with the box-score frame — two teams' worth of
+                # box score rendered as player cards, which is the same trap B099 hit with the
+                # usage query and the reason that one is checked first too.
+                if "srv_game_team_leader_in_this_game" in sql:
+                    return pd.DataFrame(leaders if leaders is not None
+                                        else _post_game_leaders())
+                # 🚨 THE PREVIEW VIEW ANSWERS TOO, WITH REAL-LOOKING PEOPLE AND NUMBERS, AND
+                # THAT IS THE WHOLE POINT. If this branch did not exist, pointing the cards at
+                # `..._through_prior_week` would hand them the BOX SCORE frame and the panel
+                # would crash — a break caught by a KeyError rather than by an assertion.
+                # ⚠️ The defect this round is exposed to does not crash: it renders three
+                # filled cards of the wrong window. So the wrong window is made to look right,
+                # and only a test that reads the NAMES and the SLOT VALUES can tell them apart.
+                if "srv_game_team_leader_through_prior_week" in sql:
+                    return pd.DataFrame(_post_game_leaders(
+                        player_name="Preview Player", stat_2_value=999.0))
                 return glossary if "srv_data_dictionary" in sql else pd.DataFrame(sides)
 
             matchup.query = fake_query
@@ -80,6 +98,45 @@ def panel():
             return list(captured.events), list(seen)
 
         yield run, matchup
+
+
+# R-738's post-game cards, measured from `srv_game_team_leader_in_this_game`: one quarterback
+# from the `total` panel and three rushers, per side. ⚠️ THE LABELS AND FORMATS ARE THE VIEW'S
+# OWN — A120 shipped the same twelve slot columns the preview card already reads.
+_POST_GAME_PANELS = {
+    "total": (("Comp-Att", "pair"), ("Yards", "integer"), ("TD", "integer")),
+    "rushing": (("Carries", "integer"), ("Yards", "integer"), ("Yds/Carry", "decimal_1")),
+}
+
+
+def _post_game_leaders(**overrides):
+    """Both sides' post-game leaders: one QB each, three rushers each."""
+    rows = []
+    # ⚠️ THE SAME IDS `_side()` USES — 2 at home, 96 away. A card frame keyed on ids the box
+    # score does not carry would render no cards at all while every table assertion passed.
+    for team_id, who in ((2, "Home"), (96, "Away")):
+        for panel, names in (("total", [f"{who} QB"]),
+                             ("rushing", [f"{who} RB1", f"{who} RB2", f"{who} RB3"])):
+            (l1, f1), (l2, f2), (l3, f3) = _POST_GAME_PANELS[panel]
+            for rank, name in enumerate(names, start=1):
+                rows.append({
+                    "team_id": team_id, "panel": panel, "leader_rank": rank,
+                    "tied_players": 1, "qualified_players": len(names),
+                    "player_id": f"p{team_id}{panel[:2]}{rank}", "player_name": name,
+                    "player_slug": name.lower().replace(" ", "-"),
+                    "jersey": 10 + rank, "position": "QB" if panel == "total" else "RB",
+                    "class_year_display": "SR",
+                    "stat_1_label": l1, "stat_1_format": f1,
+                    "stat_1_value": 18.0 if f1 == "pair" else 12.0,
+                    "stat_1_value_secondary": 29.0 if f1 == "pair" else None,
+                    "stat_2_label": l2, "stat_2_format": f2,
+                    "stat_2_value": 100.0 + rank, "stat_2_value_secondary": None,
+                    "stat_3_label": l3, "stat_3_format": f3,
+                    "stat_3_value": 4.5 if f3 == "decimal_1" else 2.0,
+                    "stat_3_value_secondary": None})
+    for row in rows:
+        row.update(overrides)
+    return rows
 
 
 _ADVANCED_VALUES = {
@@ -222,14 +279,26 @@ def test_the_box_score_and_the_advanced_block_are_one_read(panel):
         f"srv_game_team was read {seen.count('srv_game_team')} times, not once"
 
 
-def test_the_glossary_is_one_query_for_all_of_them(panel):
-    """Not one read per metric. `query` caches on the parameter set, so this is one read per
-    TTL window across every game anyone opens."""
+def test_the_panel_issues_exactly_THREE_reads_and_each_serves_both_sides(panel):
+    """Not one read per metric, and not one per card column.
+
+    ⚠️ THE SEQUENCE IS ASSERTED RATHER THAN THE COUNT, so a read that moves or doubles is
+    visible. `query` caches on the parameter set, so the dictionary is one read per TTL window
+    across every game anyone opens.
+
+    🚨 R-738 ADDED THE THIRD AND IT IS ONE READ FOR FOUR CARD COLUMNS — both panels are flanked
+    by the same cast, so reading per panel, or per side, would have been two or four reads for
+    one answer. That is the whole reason `_post_game_leaders` is called once in `_post_game`
+    rather than inside `_post_game_flank`.
+    """
     run, _ = panel
     _, seen = run(_both())
     assert seen.count("srv_data_dictionary") == 1
-    assert seen == ["srv_game_team", "srv_data_dictionary"], \
-        f"the panel issued {seen}"
+    assert seen.count("srv_game_team_leader_in_this_game") == 1, (
+        f"the cards were read {seen.count('srv_game_team_leader_in_this_game')} times — both "
+        f"panels are flanked by the same leaders and one read serves all four columns: {seen}")
+    assert seen == ["srv_game_team", "srv_game_team_leader_in_this_game",
+                    "srv_data_dictionary"], f"the panel issued {seen}"
 
 
 def test_a_game_with_no_advanced_block_does_not_read_the_dictionary(panel):
@@ -541,3 +610,128 @@ def test_a_pre_2024_game_is_still_told_it_is_out_of_SCOPE(panel):
     assert "2024 onward" in body
     assert "not arrived yet" not in body, (
         "a 1999 game was promised a box score that will never exist")
+
+
+# --- 🚨 R-738: the post-game cards ---------------------------------------------------------
+
+_CARD_MARK = "border:1px solid rgba(128,128,128,.22)"
+
+
+def _plain(markup: str) -> str:
+    """Tags out, whitespace collapsed — the sentence a reader sees."""
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", markup))).strip()
+
+
+def _card_blocks(entries):
+    """The card columns, in drawn order: away, home, away, home — two panels, two sides."""
+    return [str(b) for k, b in entries if k == "markdown" and _CARD_MARK in str(b)]
+
+
+def _cards_in(block):
+    """One column's cards, split apart."""
+    return [piece for piece in block.split(_CARD_MARK)[1:]]
+
+
+def test_the_cards_flank_BOTH_panels_and_the_cast_does_not_change(panel):
+    """Marc named ONE card list against TWO panels — Box score and Advanced.
+
+    ✅ COWORK'S LEAN, BUILT AND KEPT: the same QB and rushers beside both, because they are the
+    same game's leaders and a reader scrolling from one panel to the other should not find the
+    cast has changed under him.
+    """
+    run, _ = panel
+    blocks = _card_blocks(run(_both())[0])
+    assert len(blocks) == 4, (
+        f"expected two card columns per panel across two panels, got {len(blocks)}")
+    assert blocks[0] == blocks[2] and blocks[1] == blocks[3], \
+        "the cast changed between the box score and the advanced block"
+
+
+def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
+    """🚨 POSITIONAL, NOT PRESENCE. B082 proved a presence assertion passes a left/right swap on
+    the game header and B083 proved it again on the win-probability bar.
+
+    ⚠️ AND THIS PANEL IS NOT B098's MIRROR. That flanked two charts, one per side; this flanks
+    ONE TABLE carrying both sides, so away goes outside-left and home outside-right — the
+    away-over-home law (R-522) rather than a mirror.
+    """
+    run, _ = panel
+    blocks = _card_blocks(run(_both())[0])
+    assert "Away QB" in blocks[0] and "Home QB" not in blocks[0], \
+        f"the first card column is not the AWAY side: {_plain(blocks[0])[:120]}"
+    assert "Home QB" in blocks[1] and "Away QB" not in blocks[1], \
+        f"the second card column is not the HOME side: {_plain(blocks[1])[:120]}"
+
+
+def test_ONE_quarterback_and_THREE_rushers(panel):
+    """🚨 A120 MEASURED WHY IT IS NOT THREE OF EACH: of 6,736 `total` groups, 6,300 — 93.5% —
+    have fewer than three leaders and 3,990 have exactly one. A team plays one quarterback, and
+    Marc's own wording says so — *"Include QA, Top 3 Rusher"*: QB singular, three rushers."""
+    run, _ = panel
+    away = _cards_in(_card_blocks(run(_both())[0])[0])
+    assert len(away) == 4, f"expected one QB and three rushers, got {len(away)} cards"
+    text = _plain("".join(away))
+    assert text.index("Away QB") < text.index("Away RB1"), \
+        "the quarterback must lead the column"
+    for rb in ("Away RB1", "Away RB2", "Away RB3"):
+        assert rb in text
+
+
+def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
+    """⚠️ AC-G.11. A120 measured a third rusher missing 6.6% of the time — 31 team-games in
+    2026 have exactly two. A missing card is not an empty card, and an empty card is not an em
+    dash: the column simply ends."""
+    run, _ = panel
+    rows = [r for r in _post_game_leaders()
+            if not (r["panel"] == "rushing" and r["leader_rank"] == 3)]
+    away = _cards_in(_card_blocks(run(_both(), leaders=rows)[0])[0])
+    assert len(away) == 3, f"a two-rusher side should draw three cards, got {len(away)}"
+    text = _plain("".join(away))
+    assert "RB3" not in text
+    assert "—" not in text, "an absent third rusher reserved a hole"
+
+
+def test_the_cards_read_the_IN_THIS_GAME_view_and_never_the_preview_one(panel):
+    """🚨 THE DEFECT THE WHOLE ROUND IS EXPOSED TO, AND A PRESENCE ASSERTION CANNOT SEE IT.
+
+    `..._through_prior_week` is what a player brought INTO the game; `..._in_this_game` is what
+    he did IN it. ⚠️ Point the cards at the wrong one and you get real players, plausible
+    numbers and three filled slots — A102 spent a whole round on a pair this similar, and A120
+    staged the model-side twin (53,872 of 53,873 rows red).
+
+    ✅ So the SQL is asserted by name, and the slot values are asserted against the frame this
+    fixture answers that view with — a card showing the other window's numbers fails here.
+    """
+    run, matchup = panel
+    entries, seen = run(_both())
+    assert "srv_game_team_leader_in_this_game" in seen, (
+        f"the cards did not read the post-game view at all: {seen}")
+    assert "srv_game_team_leader_through_prior_week" not in seen, (
+        f"the post-game cards read the PREVIEW window — real players, plausible numbers, wrong "
+        f"game: {seen}")
+    # The fixture's QB carries Comp-Att 18-29 and 101 yards; the preview view would not.
+    away = _plain("".join(_cards_in(_card_blocks(entries)[0])))
+    assert "18-29" in away and "101" in away, (
+        f"the QB card's slots are not this game's figures: {away[:160]}")
+    source = matchup.__dict__["_POST_GAME_LEADER_COLUMNS"]
+    assert "stat_1_label" in source and "jersey" in source
+
+
+def test_a_player_with_NO_JERSEY_keeps_his_slot(panel):
+    """AC-G.32, and A120 found a real one. 2,335 rows on the view carry no jersey; the card
+    renders an em dash in the same place rather than shifting the row."""
+    run, _ = panel
+    rows = [dict(r, jersey=None) if r["leader_rank"] == 1 else r
+            for r in _post_game_leaders()]
+    away = _plain("".join(_cards_in(_card_blocks(run(_both(), leaders=rows)[0])[0])))
+    assert "—" in away, "a missing jersey must render an em dash in the same slot"
+    assert "#0" not in away and "#nan" not in away.lower()
+
+
+def test_NO_leaders_at_all_says_so_rather_than_drawing_an_empty_column(panel):
+    """AC-G.11 again: an absent cast is a sentence, not a blank gutter."""
+    run, _ = panel
+    entries, _ = run(_both(), leaders=[])
+    text = _text(entries)
+    assert "No player leaders held for this side." in text
+    assert not _card_blocks(entries), "an empty cast still drew card markup"
