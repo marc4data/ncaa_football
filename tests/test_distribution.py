@@ -176,3 +176,111 @@ def test_an_unlocked_week_says_it_can_still_move():
     text = distribution.describe(_row(is_locked=False, games_live=7))
     assert "still to kick off" in text and "7" in text
     assert "still to kick off" not in distribution.describe(_row(is_locked=True, games_live=0))
+
+
+# --- box(), the third entry point (R-808) -----------------------------------------------
+
+def _box_row(**over):
+    """A distribution row as any of the three sibling views publishes it."""
+    row = {"n": 135, "team_games_in_week": 135,
+           "p02": -3.0, "p05": 10.0, "p25": 108.0, "p50": 152.0, "p75": 232.5,
+           "p95": 380.0, "p98": 410.0, "iqr": 124.5,
+           "whisker_low": -3.0, "whisker_high": 418.0, "outlier_count": 2}
+    row.update(over)
+    return row
+
+
+def _texts(svg: str):
+    """Every label the box actually emitted, with its x."""
+    return [(float(x), t) for x, t in
+            re.findall(r"<text x='([-\d.]+)'[^>]*>([^<]*)</text>", svg)]
+
+
+def test_box_draws_marcs_five_elements():
+    """Marc's specification, element by element: the box is p25-p75, the median is BOLD, the
+    whiskers reach the published boundaries, the value is a blue line WITH a label, and the
+    whole thing spans the width it is handed.
+    """
+    svg = distribution.box(_box_row(), value=180, width=300)
+    assert "<rect" in svg, "the box"
+    assert "stroke-width='1.8'" in svg, "the median must be BOLD — Marc said so explicitly"
+    assert svg.count("<line") >= 4, "the whisker rule, two serifs, the median"
+    assert distribution.VALUE_COLOR in svg, "the value marker is blue"
+    assert "<polygon" in svg, "and carries a cap, so hue is not its only signal"
+    assert "width='300'" in svg, "spans the width it is given"
+
+
+def test_the_value_marker_survives_greyscale():
+    """🚨 AC-G.22, AND THIS PANEL HAS BEEN HERE BEFORE. B102 measured green and red at 1.8 luma
+    apart, separated only by Marc's diamond. A blue line on a grey box is the same trap.
+
+    So the marker carries three signals and only one is colour: DOUBLE WEIGHT against the
+    median's 1.8, a triangular CAP no other element has, and blue. This asserts the two that
+    are not colour — the ones a greyscale reader is left with.
+    """
+    svg = distribution.box(_box_row(), value=180, width=300)
+    assert "stroke-width='2.2'" in svg, "the value rule is heavier than the median's 1.8"
+    assert "<polygon points=" in svg, "the cap is a shape, not a hue"
+
+
+def test_labels_are_placed_rather_than_merely_emitted():
+    """🚨 THE RASTER CAUGHT THIS AND THE DOM COULD NOT. The first version emitted every label at
+    its own x: a value of 180 beside a median of 152 rendered as "152.080.0" — two real numbers
+    overprinted into a third that is neither — and a value past the upper whisker ran off the
+    edge as "450.(". Every <text> element was present and correct.
+
+    Two claims, and the second is the one the fix turns on: THE VALUE LABEL WINS, because it is
+    the number the reader came for.
+    """
+    svg = distribution.box(_box_row(), value=180, width=300)
+    xs = sorted(x for x, _ in _texts(svg))
+    gaps = [b - a for a, b in zip(xs, xs[1:])]
+    assert all(g > 14 for g in gaps), f"labels are overprinting — gaps {gaps}"
+    assert any(t == "180.0" for _, t in _texts(svg)), "the value label must be the one that wins"
+    assert not any(t == "152.0" for _, t in _texts(svg)), (
+        "the median label collided with the value and must have been dropped, not shifted — a "
+        "shifted label points at the wrong place on the axis")
+
+
+def test_a_label_outside_the_frame_is_clamped_not_clipped():
+    """An outlier past the whisker is the interesting case, and it was being cut off by the
+    viewBox. The frame widens to include the value and the label is clamped inside it."""
+    svg = distribution.box(_box_row(), value=450, width=300)
+    xs = [x for x, _ in _texts(svg)]
+    assert xs, "labels were drawn"
+    assert max(xs) <= 300, f"a label ran past the frame at x={max(xs)}"
+    assert any(t == "450.0" for _, t in _texts(svg)), "the outlier's own value must be labelled"
+
+
+def test_the_tick_strategies_differ_and_none_is_invented():
+    """Marc: "I want to set labels, tick mark strategy, etc." Three strategies, and each is one
+    the published row can actually support — `percentiles` is the default because its ticks are
+    values the row already carries."""
+    row = _box_row()
+    pct = distribution.box(row, value=180, width=300, ticks=distribution.TICK_PERCENTILES)
+    bounds = distribution.box(row, value=180, width=300, ticks=distribution.TICK_BOUNDS)
+    none = distribution.box(row, value=180, width=300, ticks=distribution.TICK_NONE)
+    assert len(_texts(pct)) > len(_texts(bounds)) > len(_texts(none)), (
+        "the three strategies must actually differ in how many labels they draw")
+    assert len(_texts(none)) == 1, "TICK_NONE still labels the reader's own value"
+    assert distribution.box(row, value=180, width=300,
+                            ticks=distribution.TICK_NONE, show_value=False).count("<text") == 0
+
+
+def test_box_needs_no_bin_columns_which_is_why_every_measure_is_reachable():
+    """🚨 THE ROUND'S FINDING, PINNED. `thumbnail` and `panel` draw the histogram and need
+    `bin_min`, `bin_incr` and `bin_counts`. A box plot is computed from the values, so the
+    eighteen box-score measures could be published WITHOUT eighteen hand-set bin ranges in
+    dbt_project.yml. If this ever starts needing a bin column, that trade is gone.
+    """
+    row = _box_row()
+    for key in ("bin_min", "bin_max", "bin_incr", "bin_count", "bin_counts"):
+        assert key not in row
+    svg = distribution.box(row, value=180, width=300)
+    assert "<rect" in svg and "<polygon" in svg, "it drew, with no bin columns present"
+
+
+def test_a_row_without_percentiles_says_so_rather_than_drawing_an_empty_box():
+    """AC-G.11: a week with no distribution is a different state from a week with a thin one."""
+    assert "–" in distribution.box(None, width=300)
+    assert "–" in distribution.box(_box_row(p25=None), value=180, width=300)

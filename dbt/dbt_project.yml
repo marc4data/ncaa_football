@@ -159,6 +159,38 @@ vars:
   # one has to move, that is a new bin_version on the row, not an edit.
   # ------------------------------------------------------------------------------------
   distribution_bin_count: 10
+  # R-808. THE MEASURES BOX SCORE AND ADVANCED RENDER, for fct_game_team_metric_distribution.
+  #
+  # 🚨 SEPARATE FROM `distribution_bins` ON PURPOSE, AND THAT SEPARATION IS THE ROUND'S FINDING.
+  # `distribution_bins` carries a hand-set {min, max} per metric because a HISTOGRAM needs bin
+  # edges. A BOX PLOT does not: percentiles and whiskers come from the values. Coupling the two
+  # would have meant eighteen hand-tuned ranges nobody would keep current, for a picture that
+  # never reads them.
+  #
+  # ⚠️ These are the eighteen `_BOX_SCORE_ROWS` and `_ADVANCED_ROWS` fields in
+  # site/views/matchup.py, counted rather than estimated.
+  game_team_distribution_metrics:
+    # Box Score — six
+    - first_downs
+    - total_yards
+    - rushing_yards
+    - passing_yards
+    - rushing_attempts
+    - penalty_yards
+    # Advanced — twelve
+    - offense_ppa
+    - offense_success_rate
+    - offense_explosiveness
+    - offense_standard_downs_success_rate
+    - offense_passing_downs_success_rate
+    - offense_rushing_plays_ppa
+    - offense_passing_plays_ppa
+    - offense_power_success
+    - offense_stuff_rate
+    - offense_line_yards
+    - defense_havoc_rate
+    - offense_plays
+
   distribution_bins:
     spread:                         {min: -56, max: 34}
     spread_abs:                     {min: 0,   max: 60}
