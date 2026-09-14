@@ -41,6 +41,17 @@ class _RecordedPage:
 
 
 class _StubNavigation:
+    """What `st.navigation` hands back: the page it routed to, `title` included.
+
+    ⚠️ THE `title` IS NOT DECORATION ON THIS STUB. A130 made `app.py` read it to set the
+    browser tab (`M4D · <Page Name>`), and a double that lacks an attribute the real object
+    has does not test the app — it fails it. This job caught exactly that, which is the job
+    working: the stub is the model of Streamlit, and the model had drifted from the code.
+    """
+
+    title = "Today"
+    url_path = "today"
+
     def run(self):
         captured["ran"] = True
 
@@ -53,6 +64,15 @@ def _fake_navigation(nav, **_kwargs):
 def main() -> int:
     st.Page = _RecordedPage
     st.navigation = _fake_navigation
+
+    real_set_page_config = st.set_page_config
+
+    def _record_page_config(**kwargs):
+        if "page_title" in kwargs:
+            captured["page_title"] = kwargs["page_title"]
+        return real_set_page_config(**kwargs)
+
+    st.set_page_config = _record_page_config
     try:
         runpy.run_path("/app/app.py", run_name="__main__")
     except Exception as exc:                                       # noqa: BLE001
@@ -86,8 +106,17 @@ def main() -> int:
               "automatic filename discovery, not st.navigation")
         return 1
 
+    # The browser tab, which the image is the only place that proves end to end. `M4D` alone
+    # is app.py's STATIC FALLBACK and a real string, so asserting "a title was set" would
+    # pass with the per-page call deleted (R-843). The page name is what must arrive.
+    tab_title = captured.get("page_title")
+    if tab_title != "M4D \u00b7 Today":
+        print(f"FAIL: the tab reads {tab_title!r}, expected 'M4D \u00b7 Today' — the routed "
+              "page's name never reached st.set_page_config")
+        return 1
+
     print(f"OK: app.py executed, st.navigation got {total} pages across "
-          f"{len(groups)} groups; titles look like titles")
+          f"{len(groups)} groups; titles look like titles; tab reads {tab_title!r}")
     return 0
 
 
