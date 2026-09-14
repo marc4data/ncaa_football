@@ -383,3 +383,189 @@ def test_a_row_with_no_whiskers_at_all_is_still_an_honest_absence():
     bare = _box_row()
     del bare["whisker_low"], bare["whisker_high"]
     assert not _drew(distribution.box(bare, value=180, width=448))
+
+
+# --- v10: ONE CHART, TWO TEAMS ------------------------------------------------------------
+#
+# Marc, 2026-09-14: *"make a single box-whisker chart... Populate the single chart with data
+# points for both teams. Use team color to differentiate. Would be ideal to label Away above the
+# line, Home below, if possible."*
+#
+# 🚨 THE "IF POSSIBLE" IS THE PART THAT MATTERS MOST AND IT IS NOT OPTIONAL. Two team colours on
+# one chart is AC-G.22 in its purest form — NOTHING PREVENTS TWO TEAMS BEING THE SAME RED — so
+# position is the primary encoding and hue is decoration on top. Hence two breaks, not one:
+# `same colour` leaves every marker drawn and merely wrong about whose is whose, and a colour
+# assertion cannot see `same side` at all.
+
+AWAY_COLOR = "light-dark(#0d5eaf, #6fb7ff)"
+HOME_COLOR = "light-dark(#a6192e, #ff6b7d)"
+
+
+def _polys(svg):
+    """Every marker cap, as its raw points string."""
+    return re.findall(r"<polygon points='([^']+)'", svg)
+
+
+def _value_rules(svg):
+    """Every value rule — the heavy ones, at 2.2 — as (x, y1, y2)."""
+    return [(float(x), float(y1), float(y2)) for x, y1, y2 in re.findall(
+        r"<line x1='([-\d.]+)' y1='([-\d.]+)' x2='[-\d.]+' y2='([-\d.]+)' "
+        r"stroke='[^']*' stroke-width='2\.2'", svg)]
+
+
+def _two(**kw):
+    return distribution.box(_box_row(), value=180, value_below=240, width=300,
+                            value_color=AWAY_COLOR, value_below_color=HOME_COLOR, **kw)
+
+
+def test_the_one_value_chart_is_untouched_by_the_second_side_existing():
+    """🚨 B108's CALL SITE IS ON THE LIVE SITE. `box(row, value=…)` had to keep rendering the
+    identical bytes, and it does — all 14 captured shapes (widths, tick strategies, both whisker
+    vocabularies, the empty states) hash the same before and after.
+
+    These are the structural halves of that: the one-value chart reserves NO band above the box,
+    so it is the same height it always was, and its marker still spans the full box rather than
+    half of it.
+    """
+    one = distribution.box(_box_row(), value=180, width=300)
+    assert "<g transform=" not in one, "a one-value chart must not be wrapped or offset"
+    assert f"height='{distribution.BOX_HEIGHT + 15}'" in one, "unchanged total height"
+    (_x, y1, y2), = _value_rules(one)
+    assert (y1, y2) == (0.0, float(distribution.BOX_HEIGHT)), "full-height marker, as before"
+
+
+def test_two_values_draw_two_markers_in_opposite_halves():
+    """🚨 THE ORIENTATION IS THE ENCODING. Away's marker lives in the upper half and its cap sits
+    on the top edge; home's lives in the lower half with its cap on the bottom. This is the
+    assertion the `same side` break moves and the `same colour` break cannot.
+    """
+    svg = _two()
+    rules = _value_rules(svg)
+    assert len(rules) == 2, "one marker per team"
+    mid = distribution.BOX_HEIGHT / 2.0
+    (_ax, ay1, ay2), (_hx, hy1, hy2) = rules
+    assert (ay1, ay2) == (0.0, mid), "away occupies the UPPER half"
+    assert (hy1, hy2) == (mid, float(distribution.BOX_HEIGHT)), "home occupies the LOWER half"
+
+    # The caps sit on the OUTSIDE edges and point inward at the axis, so the pair reads as a
+    # mirrored set rather than two unrelated glyphs. Parsed rather than pattern-matched on a
+    # hardcoded x, which would be asserting the fixture's arithmetic (R-859).
+    away_cap, home_cap = [[tuple(map(float, pt.split(","))) for pt in cap.split()]
+                          for cap in _polys(svg)]
+    box_h = float(distribution.BOX_HEIGHT)
+    assert [y for _x, y in away_cap] == [0.0, 0.0, 4.6], "away's cap sits on the TOP edge"
+    assert [y for _x, y in home_cap] == [box_h, box_h, box_h - 4.6], (
+        "home's cap sits on the BOTTOM edge")
+
+
+def test_the_two_markers_carry_different_colours():
+    """The `same colour` break. Every marker still draws under it — the picture is merely wrong
+    about whose is whose — so the assertion has to be about the colours themselves.
+    """
+    svg = _two()
+    assert AWAY_COLOR in svg and HOME_COLOR in svg
+    # Three apiece: the cap, the rule, and the figure's own label — the label carries the team
+    # colour too, which is what makes the number under the axis attributable at a glance.
+    assert svg.count(AWAY_COLOR) == 3, "away's cap, rule and label"
+    assert svg.count(HOME_COLOR) == 3, "home's cap, rule and label"
+    caps = re.findall(r"<polygon points='[^']+' fill='([^']+)'", svg)
+    assert caps[0] != caps[1], "the two caps must not be the same colour"
+
+
+def test_two_teams_with_the_SAME_figure_do_not_collide():
+    """🚨 MEASURED, NOT IMAGINED: 10.1% of the games that render this panel have at least one of
+    its six rows tied (372 of 3,674 on `srv_game_team`); `first_downs` alone ties in 4.74%. One
+    game in ten, which is why above/below is load-bearing rather than tidy.
+
+    Both markers land on the same x — they must, they are the same number — and they are still
+    two distinguishable marks because they occupy different halves.
+    """
+    svg = distribution.box(_box_row(), value=180, value_below=180, width=300,
+                           value_color=AWAY_COLOR, value_below_color=HOME_COLOR)
+    (ax, ay1, ay2), (hx, hy1, hy2) = _value_rules(svg)
+    assert ax == hx, "the same figure is the same place on the axis"
+    assert (ay1, ay2) != (hy1, hy2), "and yet they are not the same mark"
+    assert len(_polys(svg)) == 2, "two caps, one per team"
+
+
+def test_position_survives_two_teams_sharing_a_colour():
+    """🚨 AC-G.22, AND THE CASE HUE CANNOT ANSWER: two teams whose brand colours are the same red.
+    Nothing prevents it and nothing upstream will. With colour contributing nothing, the reader
+    is left with position — and position still separates them completely.
+    """
+    same = "light-dark(#a6192e, #ff6b7d)"
+    svg = distribution.box(_box_row(), value=180, value_below=240, width=300,
+                           value_color=same, value_below_color=same)
+    rules = _value_rules(svg)
+    assert len({(y1, y2) for _x, y1, y2 in rules}) == 2, (
+        "with one colour between them, the halves are the ONLY thing telling the reader "
+        "which mark is which")
+
+
+def test_a_side_with_no_figure_leaves_the_other_where_it_was():
+    """⚠️ `value_below=None` MEANS *this side has no figure*, and it is NOT the same as not
+    passing it. One team having the measure and the other not is a real state; when it happens,
+    away's marker must stay in the UPPER half, because the half is what identifies the team.
+    Sliding it to the one-value centre position would quietly relabel it as home's.
+    """
+    svg = distribution.box(_box_row(), value=180, value_below=None, width=300,
+                           value_color=AWAY_COLOR)
+    (_x, y1, y2), = _value_rules(svg)
+    assert (y1, y2) == (0.0, distribution.BOX_HEIGHT / 2.0), "still the upper half"
+    assert f"height='{distribution.LABEL_BAND + distribution.BOX_HEIGHT + 15}'" in svg, (
+        "and the band above is still reserved, so a column of these rows stays aligned")
+
+    only_home = distribution.box(_box_row(), value=None, value_below=240, width=300,
+                                 value_below_color=HOME_COLOR)
+    (_x2, hy1, hy2), = _value_rules(only_home)
+    assert (hy1, hy2) == (distribution.BOX_HEIGHT / 2.0, float(distribution.BOX_HEIGHT))
+
+
+def test_a_team_with_no_colour_still_draws():
+    """⚠️ 10.89% of games have a side with no sourced colour (B109). A missing colour is a
+    fallback, never a missing marker.
+    """
+    svg = distribution.box(_box_row(), value=180, value_below=240, width=300)
+    assert len(_value_rules(svg)) == 2
+    assert svg.count(distribution.VALUE_COLOR) >= 4, "both markers fall back to the accent"
+
+
+def test_the_frame_stretches_around_BOTH_figures():
+    """A frame built from one side would draw the other outside the viewBox — the same clipping
+    defect the single-value frame already guards against, one side over."""
+    svg = distribution.box(_box_row(), value=-50, value_below=600, width=300)
+    xs = [x for x, _y1, _y2 in _value_rules(svg)]
+    assert all(0 <= x <= 300 for x in xs), f"both markers inside the frame: {xs}"
+
+
+def test_the_two_labels_sit_on_their_own_baselines():
+    """✅ AND THIS IS WHY THE SECOND VALUE DOES NOT COST A LABEL. Labels collide only with labels
+    on the SAME baseline, so away's figure competes with nothing at all. Measured across
+    120/200/300/448: the two-value chart draws MORE labels than the one-value chart in ~75% of
+    random pairs and fewer in under 3%.
+    """
+    svg = _two()
+    ys = {y for y in re.findall(r"<text x='[-\d.]+' y='([-\d.]+)'", svg)}
+    assert len(ys) == 2, f"two label baselines, one per side: {ys}"
+    assert min(float(y) for y in ys) < 0, "away's label is ABOVE the box"
+
+
+def test_a_missing_side_is_NAMED_rather_than_silently_half_drawn():
+    """⚠️ AC-G.11: an absence must say WHICH absence it is, and the aria-label is all a screen
+    reader gets. Two figures and one figure are different pictures — narrating both as
+    "box and whisker" would report agreement between sides where one side has no number.
+
+    🚨 AND THE ONE-VALUE CHART'S LABEL IS UNCHANGED, because B108's call site is live.
+    """
+    both = distribution.box(_box_row(), value=180, value_below=240, width=300, label="Yards")
+    assert "aria-label='Yards: box and whisker, two values'" in both
+
+    one = distribution.box(_box_row(), value=180, value_below=None, width=300, label="Yards")
+    assert "one value — the other side has none" in one
+
+    neither = distribution.box(_box_row(), value=None, value_below=None, width=300,
+                               label="Yards")
+    assert "neither side has a value" in neither
+
+    legacy = distribution.box(_box_row(), value=180, width=300, label="Yards")
+    assert "aria-label='Yards: box and whisker'" in legacy, "unchanged for the live call site"

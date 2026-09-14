@@ -309,6 +309,17 @@ TICK_NONE = "none"
 
 BOX_HEIGHT = 26
 
+# The label band under the box — and, in two-value mode, an identical one above it.
+LABEL_BAND = 15
+
+# 🚨 A SENTINEL, BECAUSE `None` ALREADY MEANS SOMETHING ELSE HERE AND THE TWO CANNOT SHARE A
+# SPELLING. `value_below=None` means *this side has no figure for this measure*, which is a real
+# and common state; not passing `value_below` at all means *this is a one-value chart*. They draw
+# differently and they must: with a second side declared, a lone away figure stays ABOVE the axis,
+# because the side is what identifies the team. Collapsing them would put away's marker in the
+# one-value centre position and silently tell the reader it was home's.
+_UNSET = object()
+
 
 # 🚨 THE WHISKER PAIR IS SPELLED TWO WAYS ACROSS THE THREE SIBLING VIEWS — R-820.
 #
@@ -384,7 +395,7 @@ def _box_scale(lo: float, hi: float, width: float, pad: float):
     return at
 
 
-def _value_marker(x: float, height: float) -> str:
+def _value_marker(x: float, height: float, color: str = VALUE_COLOR) -> str:
     """The reader's own value: a blue line WITH WEIGHT AND A CAP, not colour alone.
 
     🚨 AC-G.22, AND THIS PANEL HAS BEEN HERE BEFORE. B102 measured that the green and red marks
@@ -396,15 +407,52 @@ def _value_marker(x: float, height: float) -> str:
     greyscale the weight and the cap both survive.
     """
     cap = (f"<polygon points='{x - 3.2:.1f},0 {x + 3.2:.1f},0 {x:.1f},4.6' "
-           f"fill='{VALUE_COLOR}'></polygon>")
+           f"fill='{color}'></polygon>")
     rule = (f"<line x1='{x:.1f}' y1='0' x2='{x:.1f}' y2='{height:.1f}' "
-            f"stroke='{VALUE_COLOR}' stroke-width='2.2'></line>")
+            f"stroke='{color}' stroke-width='2.2'></line>")
+    return cap + rule
+
+
+def _sided_marker(x: float, height: float, mid: float, above: bool, color: str) -> str:
+    """One team's value, in its OWN HALF of the box, with its cap on the outside.
+
+    🚨 POSITION IS THE ENCODING AND COLOUR IS DECORATION ON TOP — Marc asked for *"Away above the
+    line, Home below"* and prefixed it *"would be ideal... if possible"*. **It is not a nicety, it
+    is the accessibility answer**, and this is the AC-G.22 trap in its purest form: two team
+    colours on one chart, and NOTHING PREVENTS TWO TEAMS BEING THE SAME RED. B102 measured green
+    and red at 1.8 luma apart on this very panel, separated only by Marc's diamond; two brand
+    hues can be closer than that. Above and below survive greyscale, colour-blindness, and two
+    teams out of the same palette — hue survives none of them.
+
+    ✅ AND IT ANSWERS A SECOND PROBLEM THE COLOUR COULD NOT, WHICH IS WHY IT IS THE RIGHT SHAPE
+    RATHER THAN A PREFERENCE: two teams with the SAME figure put two markers at the SAME x.
+    MEASURED on `srv_game_team` — **10.1% of the games that render this panel have at least one of
+    its six rows tied** (372 of 3,674; `first_downs` alone ties in 4.74%). One game in ten, not a
+    corner. Stacked in one lane those markers are one mark and the reader loses a team; in
+    separate halves they cannot collide at all.
+
+    The cap points INWARD at the axis from each side, so the two markers read as a mirrored pair
+    rather than as two unrelated glyphs.
+    """
+    if above:
+        cap = (f"<polygon points='{x - 3.2:.1f},0 {x + 3.2:.1f},0 {x:.1f},4.6' "
+               f"fill='{color}'></polygon>")
+        rule = (f"<line x1='{x:.1f}' y1='0' x2='{x:.1f}' y2='{mid:.1f}' "
+                f"stroke='{color}' stroke-width='2.2'></line>")
+    else:
+        cap = (f"<polygon points='{x - 3.2:.1f},{height:.1f} {x + 3.2:.1f},{height:.1f} "
+               f"{x:.1f},{height - 4.6:.1f}' fill='{color}'></polygon>")
+        rule = (f"<line x1='{x:.1f}' y1='{mid:.1f}' x2='{x:.1f}' y2='{height:.1f}' "
+                f"stroke='{color}' stroke-width='2.2'></line>")
     return cap + rule
 
 
 def box(row, value=None, width: int = 240, label: str = "",
         ticks: str = TICK_PERCENTILES, show_value: bool = True,
-        value_label: Optional[str] = None, dp: int = 1) -> str:
+        value_label: Optional[str] = None, dp: int = 1,
+        value_color: Optional[str] = None,
+        value_below=_UNSET, value_below_label: Optional[str] = None,
+        value_below_color: Optional[str] = None) -> str:
     """A horizontal box-and-whisker for one measure, sized to the cell it is given.
 
     THE THIRD ENTRY POINT, over the SAME row as `thumbnail` and `panel`. One renderer, not two —
@@ -433,12 +481,39 @@ def box(row, value=None, width: int = 240, label: str = "",
     rule 3.1). The call sites in `site/views/matchup.py` are session B's to write on B's own
     round; shipping the entry point without them is the rule, not an omission.
 
-    row          a distribution row, or None
-    value        this game's own figure for the measure, or None
-    ticks        TICK_PERCENTILES (default) | TICK_BOUNDS | TICK_NONE
-    show_value   draw the value marker at all
-    value_label  override the text under the marker; defaults to the formatted value
-    dp           decimals for every label
+    ⚠️ TWO VALUES ON ONE CHART — Marc, 2026-09-14 (v10): *"make a single box-whisker chart...
+    Populate the single chart with data points for both teams. Use team color to differentiate.
+    Would be ideal to label Away above the line, Home below, if possible."*
+
+    ✅ PASS `value_below` AND THE CHART BECOMES TWO-SIDED: `value` is drawn in the UPPER half with
+    its label ABOVE the box, `value_below` in the LOWER half with its label BELOW. See
+    `_sided_marker` for why position rather than hue is the primary encoding, and for the 10.1%
+    of panels where the two figures collide.
+
+    🚨 THE COLOUR ARRIVES COMPOSED AND IS NEVER COMPUTED HERE. `value_color` and
+    `value_below_color` are CSS colour strings the caller has already resolved — in practice
+    `light-dark(<on-light>, <on-dark>)`, which is what `matchup.py:_table_header` already builds
+    from `identity.text_on`. **This module must not reach for a team colour**: `identity` owns
+    that (§4.2.1), and R-855 is one round old — B109 found that the app's only precedent,
+    `identity.text_on(row)` defaulting to the ON-LIGHT variant, rendered `rgb(0,0,0)` on a
+    `rgb(14,17,23)` page, invisible, for the **18.6% of teams that publish `#000000` there.**
+    Composing the pair a second time in here is exactly the drift that finding is about.
+
+    ⚠️ A COLOUR OF `None` FALLS BACK TO `VALUE_COLOR`, which matters because **10.89% of games
+    have a side with no sourced colour** (B109). The marker still draws, in the site accent.
+
+    row                a distribution row, or None
+    value              the figure for the measure, or None. Two-sided: the ABOVE side
+    ticks              TICK_PERCENTILES (default) | TICK_BOUNDS | TICK_NONE
+    show_value         draw the value marker(s) at all
+    value_label        override the text at the marker; defaults to the formatted value
+    dp                 decimals for every label
+    value_color        CSS colour for the value marker; defaults to VALUE_COLOR
+    value_below        the second side's figure. PASSING IT AT ALL selects two-sided mode —
+                       `None` then means *this side has no figure*, and the other side still
+                       draws in its own half rather than moving to the centre (see `_UNSET`)
+    value_below_label  as `value_label`, for the below side
+    value_below_color  as `value_color`, for the below side
     """
     if row is None:
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
@@ -459,12 +534,33 @@ def box(row, value=None, width: int = 240, label: str = "",
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
                 f"title='this week has no distribution for that measure'>\u2013</span>")
 
+    # ⚠️ TWO-SIDED MODE IS SELECTED BY THE CALLER, NOT BY THE DATA. See `_UNSET`: a declared
+    # second side with no figure still leaves the first one in its own half, because the half is
+    # what says which team it belongs to.
+    two_sided = show_value and value_below is not _UNSET
+
+    def usable(candidate) -> bool:
+        return candidate is not None and not pd.isna(candidate)
+
+    # Each entry: (x-value, label override, colour, side). `side` is None for the one-value
+    # chart, which keeps its full-height marker and its single label band unchanged.
+    markers = []
+    if show_value and usable(value):
+        markers.append((float(value), value_label, value_color or VALUE_COLOR,
+                        "above" if two_sided else None))
+    if two_sided and usable(value_below):
+        markers.append((float(value_below), value_below_label,
+                        value_below_color or VALUE_COLOR, "below"))
+
     # ⚠️ THE FRAME INCLUDES THE VALUE, so a figure outside the whiskers is drawn where it is
     # rather than clamped to the edge. An outlier pinned to the boundary reads as "at the
     # extreme" when the truth is "beyond it", and the outlier is the interesting case.
+    #
+    # ⚠️ BOTH VALUES WIDEN IT. A frame built from one side would draw the other outside the
+    # viewBox, which is the same clipping defect one layer over.
     frame_lo, frame_hi = lo, hi
-    if show_value and value is not None and not pd.isna(value):
-        frame_lo, frame_hi = min(frame_lo, float(value)), max(frame_hi, float(value))
+    for marker_value, _label, _color, _side in markers:
+        frame_lo, frame_hi = min(frame_lo, marker_value), max(frame_hi, marker_value)
 
     pad = 10.0
     height = BOX_HEIGHT
@@ -490,8 +586,10 @@ def box(row, value=None, width: int = 240, label: str = "",
                  f"y2='{mid + 7:.1f}' stroke='currentColor' stroke-width='1.8' "
                  f"opacity='{MEDIAN_OPACITY}'></line>")
 
-    if show_value and value is not None and not pd.isna(value):
-        parts.append(_value_marker(at(float(value)), height))
+    for marker_value, _label, marker_color, side in markers:
+        parts.append(
+            _value_marker(at(marker_value), height, marker_color) if side is None
+            else _sided_marker(at(marker_value), height, mid, side == "above", marker_color))
 
     # ── LABELS, IN ONE PLACEMENT PASS ────────────────────────────────────────────────────────
     #
@@ -511,37 +609,67 @@ def box(row, value=None, width: int = 240, label: str = "",
     # ⚠️ THE BOUNDARY LABELS ARE MARC'S "label upper/lower boundaries" and are drawn for every
     # tick strategy except `none` — they are the frame's meaning rather than decoration, so they
     # are placed BEFORE the percentile ticks and only the value outranks them.
-    placed = []
+    # ✅ ONE BAND PER BASELINE, AND THIS IS WHERE THE ABOVE/BELOW LAYOUT PAYS FOR ITSELF TWICE.
+    # Labels only collide with labels on the SAME baseline, so the above side's figure competes
+    # with nothing at all and the below side inherits exactly the contest the one-value chart
+    # already had. R-846 — the median's label being dropped whenever the value sits near it — is
+    # therefore not made worse by the second value; measured across 120/200/300/448, the two-value
+    # chart keeps MORE labels than the one-value chart at every width, because it adds a label in
+    # a band where nothing can displace it.
+    bands = {}
 
-    def place(x: float, text: str, color: Optional[str] = None) -> None:
+    def place(band: str, x: float, text: str, color: Optional[str] = None) -> None:
         # A 9px font averages ~5px a character; half the width each side is the exclusion zone.
         half = max(len(text) * 2.6, 9.0)
         x = min(max(x, pad + half - 8), width - pad - half + 8)
+        placed = bands.setdefault(band, [])
         for other_x, other_half, _, _ in placed:
             if abs(x - other_x) < (half + other_half) * 0.86:
                 return
         placed.append((x, half, text, color))
 
-    if show_value and value is not None and not pd.isna(value):
-        place(at(float(value)),
-              value_label if value_label is not None else fmt.number(float(value), dp=dp),
-              VALUE_COLOR)
+    # THE VALUE LABEL WINS, so it is placed into its band before anything else can take the room.
+    for marker_value, marker_label, marker_color, side in markers:
+        place("above" if side == "above" else "below", at(marker_value),
+              marker_label if marker_label is not None
+              else fmt.number(marker_value, dp=dp),
+              marker_color)
     if ticks != TICK_NONE:
-        place(at(lo), fmt.number(lo, dp=dp))
-        place(at(hi), fmt.number(hi, dp=dp))
+        place("below", at(lo), fmt.number(lo, dp=dp))
+        place("below", at(hi), fmt.number(hi, dp=dp))
     if ticks == TICK_PERCENTILES:
         for edge in (p50, p25, p75):
-            place(at(edge), fmt.number(edge, dp=dp))
+            place("below", at(edge), fmt.number(edge, dp=dp))
 
-    for x, _half, text, color in placed:
-        fill = f"fill='{color}'" if color else "fill='currentColor' opacity='.65'"
-        parts.append(f"<text x='{x:.1f}' y='{height + 11:.1f}' text-anchor='middle' "
-                     f"font-size='9' {fill}>{text}</text>")
+    # ⚠️ THE BOX KEEPS ITS OWN COORDINATES AND THE BAND IS ADDED AROUND IT, so every line above
+    # this point is written once and the one-value SVG is unchanged to the byte.
+    top_band = LABEL_BAND if two_sided else 0
+    for band, baseline in (("above", -6.0), ("below", height + 11)):
+        for x, _half, text, color in bands.get(band, []):
+            fill = f"fill='{color}'" if color else "fill='currentColor' opacity='.65'"
+            parts.append(f"<text x='{x:.1f}' y='{baseline:.1f}' text-anchor='middle' "
+                         f"font-size='9' {fill}>{text}</text>")
 
-    total_height = height + 15
+    body = "".join(parts)
+    if top_band:
+        body = f"<g transform='translate(0,{top_band})'>{body}</g>"
+    total_height = top_band + height + 15
+
+    # ⚠️ AC-G.11 — AN ABSENCE MUST SAY WHICH ABSENCE IT IS, AND A SCREEN READER GETS ONLY THIS
+    # STRING. Two markers drawn and one marker drawn are different pictures; silently narrating
+    # both as "box and whisker" would tell a reader the sides agree when one of them has no
+    # figure at all. Sighted readers see the empty half; this is how everyone else does.
+    #
+    # The one-value chart's label is UNCHANGED — B108's live call site renders the same bytes.
+    reading = f"{label or 'Distribution'}: box and whisker"
+    if two_sided:
+        drawn = len(markers)
+        reading += (", two values" if drawn == 2 else
+                    ", one value — the other side has none" if drawn == 1 else
+                    ", neither side has a value")
     svg = (f"<svg viewBox='0 0 {width} {total_height}' width='{width}' height='{total_height}' "
-           f"role='img' aria-label='{label or 'Distribution'}: box and whisker' "
-           f"style='display:block;max-width:100%'>{''.join(parts)}</svg>")
+           f"role='img' aria-label='{reading}' "
+           f"style='display:block;max-width:100%'>{body}</svg>")
     return f"<span class='cfdb-dist' title='{describe(row)}'>{svg}</span>"
 
 
