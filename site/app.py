@@ -78,5 +78,12 @@ page = st.navigation(nav, expanded=True)
 #
 # A page with more to say refines this DURING its own run and the later call wins — see
 # views/today.py, and Matchup's team abbreviations.
-tab.set_title(page.title)
+#
+# 🚨 `getattr`, NOT `page.title`, AND CI TAUGHT ME THE DIFFERENCE. tab.set_title swallows its
+# own failure, but an attribute error HERE is outside that guard and outside any page body —
+# so states.section never sees it, no Error card is drawn, and the whole app dies before
+# page.run() with a raw traceback on screen. That is the exact failure lib/tab.py rasters.
+# A navigation object that stops carrying `title` must cost the tab its page name and
+# nothing else; tests/test_tab_title.py and ci/site_smoke.py are what notice that it did.
+tab.set_title(getattr(page, "title", None))
 page.run()
