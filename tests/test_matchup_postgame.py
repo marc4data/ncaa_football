@@ -328,11 +328,26 @@ def test_away_is_on_the_left_and_home_on_the_right(panel):
 
 
 def _row_markup(entries, label):
-    """The single rendered row carrying this label, so an assertion can be scoped to it."""
+    """The VISIBLE TEXT of the single rendered row carrying this label.
+
+    ⚠️ IT SPLITS ON `data-cfdb='metric-cell'`, NOT ON A STYLE PREFIX. B106 moved the row into a
+    fixed-width cell (R-807) and the old anchor — the literal `<div style='display:flex;` — no
+    longer started the row, so every chunk collapsed into one and the whole panel came back as
+    "the row". The attribute exists to be anchored on; a style string is not an interface.
+
+    🚨 AND IT RETURNS TEXT RATHER THAN MARKUP, WHICH IS THE HALF THAT WAS ALWAYS WRONG. The two
+    callers assert `"%" not in row`, and the cell's own style carries `max-width:100%` — so on
+    markup the assertion fires on a CSS declaration and says the page divided. A `%` inside an
+    attribute was never what G-3 was about; a `%` the reader can see is.
+    """
+    # ⚠️ NON-GREEDY TO THE FIRST `</div>`, WHICH IS SOUND HERE AND SAYS WHY: a metric cell's
+    # children are all `<span>`, so the first close tag is the cell's own. The heading shares
+    # the cell's GEOMETRY but carries no `data-cfdb`, so it is not a row and never matches.
     for _kind, body in entries:
-        for chunk in body.split("<div style='display:flex;align-items:baseline"):
-            if f">{label}<" in chunk:
-                return chunk
+        for cell in re.findall(r"<div data-cfdb='metric-cell'.*?</div>", str(body)):
+            if f">{label}<" in cell:
+                return re.sub(r"\s+", " ",
+                              html.unescape(re.sub(r"<[^>]+>", " ", cell))).strip()
     return ""
 
 
@@ -660,9 +675,9 @@ def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
     # ⚠️ PLAIN TEXT SINCE R-753: the name is two elements — small first line, bold last line —
     # so "Away QB" no longer appears contiguously in the markup.
     away, home = _plain(blocks[0]), _plain(blocks[1])
-    assert "Away QB" in away and "Home QB" not in away, \
+    assert "QB, Away" in away and "QB, Home" not in away, \
         f"the first card column is not the AWAY side: {away[:120]}"
-    assert "Home QB" in home and "Away QB" not in home, \
+    assert "QB, Home" in home and "QB, Away" not in home, \
         f"the second card column is not the HOME side: {home[:120]}"
 
 
@@ -674,10 +689,15 @@ def test_ONE_quarterback_and_THREE_rushers(panel):
     away = _cards_in(_card_blocks(run(_both())[0])[0])
     assert len(away) == 4, f"expected one QB and three rushers, got {len(away)} cards"
     text = _plain("".join(away))
-    assert text.index("Away QB") < text.index("Away RB1"), \
+    # ⚠️ ORDERED BY A TOKEN THAT SURVIVES A RENAME, NOT BY THE RENDERED NAME — R-758, and
+    # B106's own name break is what exposed it: `text.index("QB, Away")` raised
+    # `ValueError: substring not found` when the card went back to `First Last`, so this test
+    # CRASHED instead of failing and proved only that the lookup was narrow. `Comp-Att` is the
+    # quarterback's own KPI label and `RB1` is a whole token of the rusher's name either way.
+    assert text.index("Comp-Att") < text.index("RB1"), \
         "the quarterback must lead the column"
-    for rb in ("Away RB1", "Away RB2", "Away RB3"):
-        assert rb in text
+    for rb in ("RB1", "RB2", "RB3"):
+        assert rb in text, f"{rb} did not render"
 
 
 def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
@@ -738,3 +758,157 @@ def test_NO_leaders_at_all_says_so_rather_than_drawing_an_empty_column(panel):
     text = _text(entries)
     assert "No player leaders held for this side." in text
     assert not _card_blocks(entries), "an empty cast still drew card markup"
+
+
+# --- R-807: the measure is a cell, centred, with right-aligned values -------------------------
+
+def _module_constant(name):
+    """One of matchup.py's module-level constants, by AST, without importing the page.
+
+    ⚠️ `ast.literal_eval` ONLY — so a constant computed from others is deliberately NOT
+    readable here, and the test below recomputes the total from its parts instead. That is the
+    point rather than a limitation: a test that read the page's own arithmetic back would
+    agree with any arithmetic the page happened to contain.
+    """
+    import ast
+    for node in ast.parse(SOURCE).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"matchup.py has no module-level {name}")
+
+
+def _cells(entries):
+    """Every metric cell rendered, as markup, by its own attribute."""
+    return [c for _k, b in entries
+            for c in re.findall(r"<div data-cfdb='metric-cell'.*?</div>", str(b))]
+
+
+def _resolved(style: str) -> dict:
+    """An inline style as the browser resolves it — LAST DECLARATION WINS.
+
+    🚨 THIS EXISTS BECAUSE A STAGED BREAK CAME BACK GREEN (R-744). B106 appended
+    `;text-align:left` to the home figure's style and the assertion `"text-align:right" in
+    style` still passed — the right-align was there, and overridden, and the test could not
+    tell the difference. **A test that reads a declaration's PRESENCE cannot see an override;
+    only its resolved VALUE can.**
+    """
+    out = {}
+    for part in style.split(";"):
+        if ":" in part:
+            key, _, value = part.partition(":")
+            out[key.strip()] = value.strip()
+    return out
+
+
+def _spans(cell: str) -> list:
+    """The three spans of a metric cell, each as a resolved style dict."""
+    return [_resolved(m) for m in re.findall(r"<span style='([^']*)'>", cell)]
+
+
+def test_the_metric_cell_FITS_the_middle_column_at_1300px_with_the_sidebar_open():
+    """🚨 R-807's FLOOR AND CEILING, PINNED THE WAY B103 PINNED `_SLOT_WIDTHS` — because nothing
+    in this suite can read a pixel, so the raster is the evidence and this test exists to stop a
+    later round widening the cell blind.
+
+    ⚠️ THE NUMBERS ARE MEASURED, IN THE BROWSER, NOT DERIVED:
+
+        `_POST_GAME_SPLIT`'s middle column      493px at 1300px with the sidebar open
+                                                733px at 1700px
+        "Havoc rate forced by this defense"     188px at .85rem, the page's own font
+        "12 (4 INT · 8 FUM)"                    118px at 1rem/600 — the widest figure either
+                                                panel can produce
+
+    🚨 AND THE CEILING IS THE ONE THAT MATTERS, BECAUSE B104 PAID FOR IT: a Streamlit column
+    does NOT clip its children, so a cell wider than 493px does not compress — it DRAWS OVER
+    the card column beside it, which is how `+214.0` landed on top of the home side's
+    `Rushing`.
+    """
+    value = _module_constant("_METRIC_VALUE_WIDTH")
+    label = _module_constant("_METRIC_LABEL_WIDTH")
+    gap = _module_constant("_METRIC_CELL_GAP")
+    pad = _module_constant("_METRIC_CELL_PAD")
+    total_px = (2 * value + label + 2 * gap + 2 * pad) * 16
+    assert total_px <= 493, (
+        f"the cell is {total_px:.0f}px against a 493px middle column at 1300px with the "
+        f"sidebar open — it will draw OVER the card column beside it, not compress")
+    assert total_px >= 420, (
+        f"the cell is {total_px:.0f}px, and the content it must hold is 188px of label plus "
+        f"two 118px figures plus gaps — tightening it below that clips a real label")
+    assert label * 16 >= 188, (
+        f"the label column is {label * 16:.0f}px and the longest label in _ADVANCED_ROWS "
+        f"measures 188px — 'Havoc rate forced by this defense' would be truncated")
+    assert value * 16 >= 118, (
+        f"the value column is {value * 16:.0f}px and a two-digit turnover line, "
+        f"'12 (4 INT · 8 FUM)', measures 118px")
+
+
+def test_BOTH_figures_are_RIGHT_aligned_and_not_only_the_away_one(panel):
+    """Marc, v06: *"Right align the metric value."*
+
+    🚨 A TEST THAT COUNTED `text-align:right` ONCE WOULD HAVE PASSED BEFORE THIS ROUND — the
+    away figure has been right-aligned since B076 and the HOME one was left-aligned, so a
+    column of figures lined up on its FIRST digit: `9` and `415` started in the same place.
+    ✅ So the assertion is on BOTH, per cell, by position.
+    """
+    run, _ = panel
+    cells = _cells(run(_both())[0])
+    assert cells, "no metric cell rendered at all"
+    for cell in cells:
+        away, label, home = _spans(cell)
+        assert away.get("text-align") == "right", (
+            f"the away figure resolves to text-align:{away.get('text-align')}")
+        assert home.get("text-align") == "right", (
+            f"the HOME figure resolves to text-align:{home.get('text-align')} — its column "
+            f"lines up on the first digit instead of the units, which is the comparison the "
+            f"panel exists to make")
+        assert label.get("text-align") == "center", (
+            f"the label resolves to text-align:{label.get('text-align')}")
+
+
+def test_the_cell_CLIPS_rather_than_drawing_over_the_column_beside_it(panel):
+    """🚨 R-755's LESSON, AND IT IS THE ONE THING THAT MAKES A FIXED WIDTH SAFE HERE. Without
+    `overflow:hidden` a cell that cannot have its width corrupts the card column beside it; with
+    it, it loses its rightmost characters inside its own column. A page that clips reads as
+    tight, a page that overlaps reads as broken."""
+    run, _ = panel
+    value = _module_constant("_METRIC_VALUE_WIDTH")
+    label_w = _module_constant("_METRIC_LABEL_WIDTH")
+    for cell in _cells(run(_both())[0]):
+        style = _resolved(cell.split("style='")[1].split("'")[0])
+        assert style.get("overflow") == "hidden", f"a metric cell does not clip: {style}"
+        assert style.get("margin") == "0 auto", "a metric cell is not centred in its column"
+        assert style.get("box-sizing") == "border-box", (
+            "without border-box the .4rem padding is ADDED to the width and the 32px of "
+            "headroom against the 493px column becomes 19px")
+        # 🚨 EVERY PART OF THE CELL IS FIXED, AND THIS IS ASSERTED ON THE CHILDREN TOO — the
+        # staged break put `flex:1` back on the LABEL, not on the cell, and an assertion that
+        # only read the cell's own style came back green (R-744). R-807 exists because a
+        # proportional row put the two figures 301px apart at 1300px and 541px apart at 1700px.
+        assert "flex:1" not in cell, (
+            f"something inside the cell is proportional again: {cell[:200]}")
+        away, label, home = _spans(cell)
+        for part, wanted, what in ((away, value, "away figure"),
+                                   (label, label_w, "label"),
+                                   (home, value, "home figure")):
+            assert part.get("flex") == "none", f"the {what} can grow or shrink"
+            assert part.get("width") == f"{wanted}rem", (
+                f"the {what} is {part.get('width')} rather than the {wanted}rem the cell's "
+                f"arithmetic budgets for it")
+
+
+def test_the_SIDE_HEADING_takes_the_cells_width_and_not_the_columns(panel):
+    """⚠️ A HEADING LEFT SPANNING THE FULL COLUMN STOPS BEING A HEADING. At 1700px the column is
+    733px and the cell is 461px, so a full-width heading would sit 136px outboard of its own
+    figures and read as a caption for something else."""
+    run, _ = panel
+    entries = run(_both())[0]
+    heading = next(str(b) for _k, b in entries if "Kentucky" in _plain(str(b)))
+    value = _module_constant("_METRIC_VALUE_WIDTH")
+    label = _module_constant("_METRIC_LABEL_WIDTH")
+    gap = _module_constant("_METRIC_CELL_GAP")
+    pad = _module_constant("_METRIC_CELL_PAD")
+    width = 2 * value + label + 2 * gap + 2 * pad
+    assert f"width:{width}rem" in heading, (
+        f"the side heading does not carry the cell's own {width}rem width")
+    assert "margin:0 auto" in heading, "the side heading is not centred with its cell"

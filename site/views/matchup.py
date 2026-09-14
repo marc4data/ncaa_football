@@ -2161,6 +2161,50 @@ _SLOT_WIDTHS = {"cards": 1.0, "chart": 1.6}
 # stale instruction as the mirrors in `docs/` (§4.4).
 _CARD_KPI_SLOTS = 3
 
+# 🚨 R-806. THE NAME IS NOT AT THE JERSEY'S SIZE, AND THE MEASUREMENT IS WHY.
+# Marc asked for *"Font same as Jersey number"*. ⚠️ MEASURED IN THE BROWSER, ON THE LIVE PAGE,
+# at 1300px with the sidebar open — not derived, because the derivation was wrong first: the
+# preview card is **150px** and the name row inside it **134px**, where an estimate off the
+# half-width had said 168px.
+#
+#     size     px per char   chars that fit 134px   of 4 real 2026 names, clipped
+#     1.5rem      11.0              12.2                  4 of 4  ← the jersey's, as asked
+#     1.25rem      9.24             14.5                  3 of 4  ← shipped
+#     1.1rem       8.29             16.2                  3 of 4
+#     1.0rem       7.88             17.0                  1 of 4  (the 28-char outlier only)
+#
+#     names as `Last, First`:  median 14 · p90 17 · max 28 ("Abdul-Rahim Gladding, Na'eem")
+#
+# 🚨 SO THE JERSEY'S SIZE DOES NOT FIT THE MEDIAN NAME, LET ALONE THE LONG ONES. `1.25rem`
+# clears the median and nothing more; only `1.0rem` clears the p90. ✅ **Said rather than
+# quietly shrunk** — B106's report carries all four side by side so the next value is Marc's
+# choice rather than a fourth guess, and this constant moves when he picks.
+_CARD_JERSEY_SIZE, _CARD_NAME_SIZE = 1.5, 1.25
+
+
+def _card_text(value) -> str:
+    """A card field as text, with NULL meaning ABSENT rather than the string `nan`.
+
+    🚨 `str(value or "")` DOES NOT DO THIS AND THAT IS THE WHOLE REASON THIS EXISTS: NaN is
+    truthy, so the `or` never fires and the page prints `nan`. `pd.isna` is the only test that
+    answers for None, NaN and NaT alike.
+    """
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    return str(value).strip()
+
+
+def _last_first(first: str, last: str) -> str:
+    """`Last, First` — and a single-token name has no comma and no second part.
+
+    ⚠️ STILL THE R-753 ASSUMPTION: first token, remainder. So *Emmett Mosley V* renders
+    *Mosley V, Emmett*, which keeps the suffix with the surname where a reader expects it.
+    B103 measured ZERO single-token names in 75,283 rows, so that branch is defensive — and it
+    stays asserted, because "none today" is not "none ever".
+    """
+    return f"{last}, {first}" if first else last
+
+
 # 🚨 R-733. THE LABELS ARE DATA NOW, AND B098 SAID WHY IT HAD TO CHANGE. That round shipped
 # `_CARD_KPIS` — a static tuple of (label, column) — which was the right shape for ONE measure
 # whose name the view did not carry. A116 then shipped three per row, and their names vary by
@@ -2413,7 +2457,14 @@ def _leader_card(row, usage=None) -> str:
     which keeps the cards aligned and says "we do not hold this" rather than "#0".
     """
     jersey = row.get("jersey")
-    number = f"#{int(jersey)}" if pd.notna(jersey) else "—"
+    # 🚨 R-806. THE `#` GLYPH AT HALF THE DIGITS' SIZE. Marc: *"Reduce font of the # in Jersey #
+    # to .5 of current value."* — the `#` alone, not the number, so `em` rather than `rem`: it
+    # halves whatever the jersey is set to and cannot drift if that constant moves.
+    # ⚠️ AC-G.32: NO JERSEY STILL RENDERS `—`, and it carries NO `#` — a hash with nothing after
+    # it reads as a broken number rather than as an absence. B104 judged the doubled em dash an
+    # absence rather than a defect; at this size it is the same em dash without the hash.
+    number = (f"<span style='font-size:.5em;opacity:.65'>#</span>{int(jersey)}"
+              if pd.notna(jersey) else "—")
     first, last = _split_name(row.get("player_name"))
     # 🚨 R-753. THREE COLUMNS, AND THE RANK IS GONE. Marc: *"Don't include the rank. The header
     # row should have 3 columns: 1 - Jersey number · 2 - Present player name on 2 lines. First
@@ -2434,24 +2485,40 @@ def _leader_card(row, usage=None) -> str:
     # formatting to Position."* — the same SIZE AND WEIGHT as the surname, not `font-weight`
     # bolted onto a faded line, which is what makes the header read as a grid rather than as
     # three unrelated stacks.
+    # 🚨 R-806. `Last, First` ON ITS OWN ROW. Marc, v06: *"Player Card - Last Name, First. Font
+    # same as Jersey number."* ⚠️ It is NOT at the jersey's size and `_CARD_NAME_SIZE` carries
+    # the measurement that says why. The name gets its own full-width row because sharing one
+    # with the jersey and the position left it ~60px, and even the whole card is not enough.
     small = "font-size:.66rem;opacity:.6;line-height:1.1"
     strong = "font-weight:700;font-size:.78rem;line-height:1.15"
-    name_lines = (f"<div style='{small}'>{html.escape(first)}</div>" if first else "")
-    year = str(row.get("class_year_display") or "")
+    # 🚨 `nan` WAS REACHING THE PAGE, AND `or ""` IS EXACTLY WHY. A null arrives out of the
+    # frame as `float('nan')`, and **NaN IS TRUTHY IN PYTHON** — so `row.get(…) or ""` returns
+    # the NaN rather than the fallback and `str()` renders the three characters `nan`. B106's
+    # own live render of Arkansas vs North Alabama is where this was seen; it is not new, and
+    # it is not rare: 13,431 of 75,283 preview leader rows (17.8%) and 3,734 of 53,873
+    # post-game rows (6.9%) carry no position and no class year.
+    # ⚠️ AC-G.32, AND THE TWO SLOTS TAKE DIFFERENT ANSWERS ON PURPOSE. The position is a VALUE
+    # and an absent value is an em dash — the same statement the jersey already makes one line
+    # above. The year is the small faded line and it is the surname block's mirror (R-801), so
+    # an absent year is an absent LINE, not a dash: B103 settled that a missing first name
+    # renders the bold line alone rather than an empty row that shifts the card's height.
+    year = _card_text(row.get("class_year_display"))
+    position = _card_text(row.get("position"))
     top = [
-        f"<div style='min-width:2.4rem;font-weight:700;font-size:1.5rem;line-height:1;"
-        f"display:flex;align-items:center'>{number}</div>",
-        # ⚠️ `flex:1` AND `min-width:0` TOGETHER — without the second, a flex child refuses to
-        # shrink below its content and the name pushes the third column off the card instead of
-        # ellipsing, which is the truncation R-745 has been about for four rounds.
-        f"<div style='flex:1;min-width:0;overflow:hidden'>{name_lines}"
-        f"<div style='{strong};white-space:nowrap;overflow:hidden;"
-        f"text-overflow:ellipsis'>{html.escape(last)}</div></div>",
+        f"<div style='min-width:2.4rem;font-weight:700;font-size:{_CARD_JERSEY_SIZE}rem;"
+        f"line-height:1;display:flex;align-items:center'>{number}</div>",
+        "<div style='flex:1;min-width:0'></div>",
         "<div style='text-align:right;min-width:0'>"
         + (f"<div style='{small}'>{html.escape(year)}</div>" if year else "")
         + f"<div style='{strong};white-space:nowrap'>"
-          f"{html.escape(str(row.get('position') or ''))}</div></div>",
+          f"{html.escape(position) if position else fmt.EM_DASH}</div></div>",
     ]
+    # ⚠️ `min-width:0` IS WHAT MAKES THE ELLIPSIS WORK. Without it a flex/grid child refuses to
+    # shrink below its content and the name overflows the card instead of truncating — the
+    # R-745 class, four rounds old.
+    name_row = (f"<div style='font-weight:700;font-size:{_CARD_NAME_SIZE}rem;line-height:1.15;"
+                f"min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                f"margin-top:.1rem'>{html.escape(_last_first(first, last))}</div>")
     # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
     # AC-G.32 puts a dash where a VALUE is missing; a slot with no label is a MEASURE that does
     # not exist, which is a different statement (AC-G.11). B098 argued this when two of three
@@ -2473,7 +2540,7 @@ def _leader_card(row, usage=None) -> str:
     return (f"<div style='border:1px solid rgba(128,128,128,.22);border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem'>"
             f"<div style='display:flex;align-items:flex-start;gap:.4rem'>"
-            f"{''.join(top)}</div>"
+            f"{''.join(top)}</div>{name_row}"
             f"<div style='display:grid;grid-template-columns:repeat({_CARD_KPI_SLOTS},1fr);"
             f"gap:.3rem;margin-top:.25rem;text-align:center'>{''.join(cells)}</div>"
             f"{_card_dots(row, usage)}</div>")
@@ -2864,6 +2931,68 @@ def _turnovers(row) -> str:
     return f"{int(total)}" + (f" ({' · '.join(parts)})" if parts else "")
 
 
+# --- R-807: the measure becomes a centred cell with right-aligned values ------------------
+#
+# Marc, v06: *"Bring the metrics in Box Score and Advanced in closer to the middle. Make it a
+# cell and locate it to center, the best you can. Right align the metric value."*
+#
+# 🚨 WHY THE ROW WAS SPREADING, AND IT IS NOT WHAT IT LOOKS LIKE: the LABEL carried `flex:1`,
+# so it absorbed the whole middle column and pushed the two figures out to its edges. Measured
+# in the browser rather than derived — `_POST_GAME_SPLIT`'s middle column is 493px at 1300px
+# with the sidebar open and 733px at 1700px — so the two numbers sat 301px apart on a laptop
+# and 541px apart on a desktop. 🚨 THE PANEL GOT WORSE THE MORE ROOM IT WAS GIVEN, which is why
+# a fixed cell is the fix and a smaller `flex` ratio is not: the distance has to stop depending
+# on the viewport.
+#
+# THE ARITHMETIC, measured in the page's own font at 16px root (B104's lesson — a width picked
+# by eye is what that round had to come back and fix):
+#
+#     widest label    "Havoc rate forced by this defense"   at .85rem       188px  → 12rem
+#     widest value    "3 (1 INT · 2 FUM)"  at 1rem/600                      110px
+#                     two-digit worst case "12 (4 INT · 8 FUM)"             118px  → 7.5rem
+#     two gaps        .5rem each                                             16px
+#     the cell's own padding, .4rem a side                                   13px
+#     ---------------------------------------------------------------------------
+#     120 + 8 + 192 + 8 + 120                                  = 448px of content
+#     + padding, and the box is border-box                     = 461px overall
+#
+#     against the middle column at 1300px with the sidebar open  493px
+#     headroom                                                    32px — 6.5%
+#
+# 🚨 AND IT CLIPS INSIDE ITS OWN COLUMN RATHER THAN OVER THE ONE BESIDE IT. R-755, and B104
+# paid for establishing it: a Streamlit column does NOT clip its children, so an element wider
+# than its share DRAWS OVER the next one. `overflow:hidden` is what makes the failure mode
+# "loses its rightmost characters" rather than "corrupts the column beside it" — a page that
+# clips reads as tight, a page that overlaps reads as broken.
+_METRIC_VALUE_WIDTH = 7.5      # rem — the widest figure either panel renders, plus headroom
+_METRIC_LABEL_WIDTH = 12.0     # rem — the longest label in _ADVANCED_ROWS, verbatim
+_METRIC_CELL_GAP = 0.5         # rem, twice
+_METRIC_CELL_PAD = 0.4         # rem, twice
+_METRIC_CELL_WIDTH = (2 * _METRIC_VALUE_WIDTH + _METRIC_LABEL_WIDTH
+                      + 2 * _METRIC_CELL_GAP + 2 * _METRIC_CELL_PAD)     # 28.8rem = 461px
+
+# ⚠️ B107 DRAWS A BOX-WHISKER ACROSS THIS CELL AND IT DOES NOT EXIST YET (A125 owns `box()` in
+# `site/lib/distribution.py`), so the width it will span is pinned HERE rather than measured
+# again then — the cell's INNER width, which is the cell minus its own padding. A component
+# that has to re-derive its container's geometry is a second copy of this arithmetic.
+_METRIC_BOX_WIDTH = _METRIC_CELL_WIDTH - 2 * _METRIC_CELL_PAD             # 28.0rem = 448px
+
+# The cell itself. `box-sizing:border-box` is load-bearing: without it the padding is ADDED to
+# the width above and the 6.5% headroom becomes 4%.
+_METRIC_CELL = (f"display:flex;align-items:baseline;gap:{_METRIC_CELL_GAP}rem;"
+                f"width:{_METRIC_CELL_WIDTH}rem;max-width:100%;box-sizing:border-box;"
+                f"margin:0 auto;padding:.15rem {_METRIC_CELL_PAD}rem;overflow:hidden")
+# 🚨 BOTH VALUES RIGHT-ALIGNED, WHICH IS THE HALF THAT IS NOT SYMMETRY FOR ITS OWN SAKE. The
+# home column used to be left-aligned, so a column of figures down the page lined up on its
+# FIRST digit — `9` and `415` started in the same place. Right-aligned, they line up on the
+# units, which is the only alignment that lets a reader compare two columns of numbers by eye.
+_METRIC_VALUE_CELL = (f"width:{_METRIC_VALUE_WIDTH}rem;flex:none;font-weight:600;"
+                      f"text-align:right;overflow:hidden;text-overflow:ellipsis;"
+                      f"white-space:nowrap")
+_METRIC_LABEL_CELL = (f"width:{_METRIC_LABEL_WIDTH}rem;flex:none;text-align:center;"
+                      f"opacity:.65;font-size:.85rem")
+
+
 def _comparison(away, home, rows, glossary=None) -> str:
     """One row per statistic, one column per side. Away left, home right — the same
     convention the scoreline uses and the reason that layout reads as a matchup."""
@@ -2882,35 +3011,44 @@ def _comparison(away, home, rows, glossary=None) -> str:
                   f"{label}</span>" if hint else
                   f"{label}<span style='opacity:.5' title='Not yet defined in the data "
                   f"dictionary'> (undefined)</span>" if glossary is not None else label)
-        lines.append(
-            f"<div style='display:flex;align-items:baseline;gap:.5rem;padding:.15rem 0'>"
-            f"<span style='min-width:5.5rem;font-weight:600;text-align:right'>"
-            f"{_figure(away, field, dp)}</span>"
-            f"<span style='flex:1;text-align:center;opacity:.65;font-size:.85rem'>"
-            f"{marked}</span>"
-            f"<span style='min-width:5.5rem;font-weight:600'>"
-            f"{_figure(home, field, dp)}</span></div>")
+        lines.append(_metric_cell(_figure(away, field, dp), marked,
+                                  _figure(home, field, dp)))
     return "".join(lines)
 
 
+def _metric_cell(away_value: str, label: str, home_value: str) -> str:
+    """One measure, as a cell: fixed width, centred in its column, clipping its own overflow.
+
+    R-807, and the whole point is that nothing here is proportional — see `_METRIC_CELL` for
+    the arithmetic and for why a `flex` ratio cannot answer this.
+    """
+    return (f"<div data-cfdb='metric-cell' style='{_METRIC_CELL}'>"
+            f"<span style='{_METRIC_VALUE_CELL}'>{away_value}</span>"
+            f"<span style='{_METRIC_LABEL_CELL}'>{label}</span>"
+            f"<span style='{_METRIC_VALUE_CELL}'>{home_value}</span></div>")
+
+
 def _custom_row(away, home, label, renderer) -> str:
-    return (f"<div style='display:flex;align-items:baseline;gap:.5rem;padding:.15rem 0'>"
-            f"<span style='min-width:5.5rem;font-weight:600;text-align:right'>"
-            f"{renderer(away)}</span>"
-            f"<span style='flex:1;text-align:center;opacity:.65;font-size:.85rem'>{label}</span>"
-            f"<span style='min-width:5.5rem;font-weight:600'>{renderer(home)}</span></div>")
+    return _metric_cell(renderer(away), label, renderer(home))
 
 
 def _side_heading(away, home) -> str:
+    """The two team names, over the cell they head rather than over the whole column.
+
+    ⚠️ THE HEADING TAKES THE CELL'S GEOMETRY OR IT STOPS BEING A HEADING. R-807 pulls the
+    figures into a 28.8rem cell; a heading left spanning the full column would sit 120px
+    outboard of its own numbers at 1700px and read as a caption for something else.
+    """
     parts = []
     for side, align in ((away, "flex-start"), (home, "flex-end")):
         logo = identity.logo_or_monogram(
             side.get("team_logo_url"), str(side.get("team_display") or "?"), 22)
-        parts.append(f"<div style='flex:1;display:flex;align-items:center;gap:.4rem;"
-                     f"justify-content:{align}'>{logo}"
-                     f"<span style='font-weight:600'>{side.get('team_display') or '?'}</span>"
+        parts.append(f"<div style='flex:1;min-width:0;display:flex;align-items:center;"
+                     f"gap:.4rem;justify-content:{align}'>{logo}"
+                     f"<span style='font-weight:600;overflow:hidden;text-overflow:ellipsis;"
+                     f"white-space:nowrap'>{side.get('team_display') or '?'}</span>"
                      f"</div>")
-    return ("<div style='display:flex;align-items:center;margin-bottom:.3rem'>"
+    return (f"<div style='{_METRIC_CELL};align-items:center;margin-bottom:.3rem'>"
             + parts[0] + parts[1] + "</div>")
 
 
