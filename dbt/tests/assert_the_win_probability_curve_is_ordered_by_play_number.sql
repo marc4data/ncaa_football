@@ -2,12 +2,17 @@
 -- 🚨 TAGGED `full_refresh_only`, AND A GUARD SAID SO BEFORE A GAME DAY DID — R-672, caught by
 -- `test_no_test_straddles_the_gated_dags_refresh_boundary` on this test's first full run.
 --
--- It compares `srv_game_win_probability_play` against `stg_game_win_probability`, and
--- `cfbd_scores_refresh` REBUILDS THE STAGING MODEL BUT NOT THE SERVING ONE — the curve is on the
--- weekly publish list, because a completed game's curve never changes and its source endpoint
--- (`metrics/wp`) is fetched on Sundays and Thursdays only. So a two-hourly run would compare a
--- FRESH source against a STALE output, report a difference that is a cadence artifact rather than
--- a defect, and stop that DAG's publish. That is R-672 exactly.
+-- ⚠️ THE ORIGINAL REASON NO LONGER HOLDS AND THE TAG DOES — BOTH FACTS BELONG HERE.
+-- The first version compared serving against `stg_game_win_probability`, which `cfbd_scores_refresh`
+-- rebuilds while leaving the curve alone, so a two-hourly run would have compared a FRESH source
+-- against a STALE output and stopped that DAG's publish. That is R-672 exactly, and the straddle
+-- guard caught it.
+--
+-- ✅ THE COMPARISON NOW READS THE MART, which moves on the same cadence as the view, so the
+-- straddle is gone. The tag stays because the curve is on the WEEKLY publish list — a completed
+-- game's curve never changes, and `metrics/wp` is fetched on Sundays and Thursdays only — so there
+-- is nothing for a two-hourly run to re-check and the blunt tag claims no coverage that does not
+-- exist.
 --
 -- ⚠️ AND THE BLUNT TAG IS THE CORRECT ONE HERE, as it is for the leader tests: no gated DAG
 -- rebuilds both sides, so `scores_refresh_only` would claim a coverage that does not exist.
@@ -75,7 +80,14 @@ against_source as (
         v.home_win_probability       as published_wp,
         w.home_win_probability       as source_wp
     from {{ ref('srv_game_win_probability_play') }} v
-    left join {{ ref('stg_game_win_probability') }} w
+    -- ⚠️ AGAINST THE MART, NOT AGAINST STAGING. A121 first compared serving to
+    -- `stg_game_win_probability` and `test_no_test_straddles_the_gated_dags_refresh_boundary`
+    -- refused it: the scores DAG rebuilds that staging model and not this curve, so a two-hourly
+    -- run would have compared a fresh source against a stale output and stopped that DAG's
+    -- publish (R-672). The mart is rebuilt on the same cadence as the view, so the comparison is
+    -- between two things that move together — and it is still an INDEPENDENT recomputation,
+    -- because the mart is where the play_number comes from and the view must not have changed it.
+    left join {{ ref('fct_game_win_probability_play') }} w
            on w.play_id = v.play_id
 
 )
