@@ -12,12 +12,16 @@ Purpose
 - Implementation repository for ingestion, DAGs, dbt, models, and the Streamlit app.
 
 Conventions
-- Python 3.11+ for scripts and Airflow workers.
+- **Python 3.12.** ⚠️ **PINNED, NOT PREFERRED** — `.github/workflows/ci.yml` sets
+  `python-version: '3.12'` in all four jobs, and `.venv` is 3.12. This used to read
+  "3.11+", which is worse than a wrong number: it reads as a FLOOR and so licenses the
+  exact version the charter records as unable to compile this tree (`../CLAUDE.md` §5.1 —
+  3.11.7 cost A097 an hour on a repository that was fine).
 - `src/` contains runnable scripts and packages.
 - DBT lives under `dbt/`.
 - Tests under `tests/` where applicable.
 
-Data scope (synced with Cowork `CLAUDE.md`, 2026-08-15)
+Data scope (synced with Cowork `CLAUDE.md`, 2026-08-15 · re-verified against `src/endpoints.py` 2026-09-14)
 - **Depth is declared per endpoint in `src/endpoints.py`, not per invocation.** The `history`
   attribute is the operative source of truth; `min_season` records the earliest season each
   endpoint actually serves, probed against the live API rather than assumed.
@@ -25,8 +29,11 @@ Data scope (synced with Cowork `CLAUDE.md`, 2026-08-15)
   fan-outs all stay here.
 - **`full`: every season the endpoint serves.** The ratified set is games, records, rankings,
   teams, coaches, stats/season, stats/season/advanced, stats/player/season, wepa/team/season,
-  ppa/players/season, and draft/*. Amending it is one registry line plus one decision-log line
-  — never a code change elsewhere.
+  ppa/players/season, draft/* (`draft/picks` today) and **`calendar`**. Amending it is one
+  registry line plus one decision-log line — never a code change elsewhere.
+  ⚠️ **`calendar` was missing from this list until 2026-09-14** — the registry carried it and
+  the prose did not. The registry is the operative source of truth; this list is a summary of
+  it and can drift, so check `history == HISTORY_FULL` rather than trusting the sentence.
 - **The current season's framework lands as soon as the season exists**: schedule, rosters,
   coaches, rankings, and season-scoped teams, before Week 1 and regardless of whether any game
   has been played.
@@ -106,7 +113,19 @@ different states, neither visible to the other. `scripts/preflight_env.py` and t
 `on-run-start` hook in `dbt/dbt_project.yml` exist so that the next such copy says so on the
 **first** dbt command rather than the twelfth model.
 
-**Resync after the environment fix merges (R-317)**
+**Resync after the environment fix merges (R-317)** — ✅ **DONE. KEPT AS THE PROCEDURE, NOT AS
+A TO-DO.**
+
+⚠️ **THE FIX MERGED ON 2026-09-06 AS PR #130** (`4319a60`, *"The environment correction: one
+warehouse, on the droplet, and a guard that says so"*), and `python scripts/preflight_env.py`
+passes in this working copy today — target `warehouse`, reached over the ssh tunnel, schemas
+`marts, serving, staging` visible. **This list was still written as pending work eight days
+later, which sends a new session through five steps of nothing.**
+
+✅ **It is kept because step 3 recurs: any NEW working copy needs the hand-copy, and `.env` /
+`dbt/profiles.yml` are still untracked.** Read it as the recipe for standing up a working copy,
+not as an outstanding migration.
+
 
     1. The environment fix merges to main.
     2. EVERY working copy fetches and rebases:
@@ -148,6 +167,14 @@ working copy, which is exactly where the silently-skipping tests are.** The fix 
 `srv_game.sql`, and A089 saw the same four tests go quiet in its own working copy one round later.
 
 Key commands
+- 🚨 **FIRST, IN EVERY SESSION, BEFORE ANY `python`, `pytest` OR `dbt` COMMAND:**
+
+      export PATH="$PWD/.venv/bin:$PATH"
+
+  ⚠️ **Without it the shell's `python` is base anaconda 3.11.7**, which cannot compile a file
+  this repo has carried since before A096 and whose `dbt` hangs and exits 0 while printing
+  nothing. Neither symptom looks like a PATH problem and neither means anything is wrong with
+  the repository. `../CLAUDE.md` §5.1 has the full account.
 - Reach the warehouse: `scripts/warehouse_tunnel.sh` then `python scripts/preflight_env.py`
 - Run ingestion (example): `python -m src.ingest fetch teams`
 - Historical backfill (idempotent, resumable): `python -m src.backfill --seasons 2024 2025`
@@ -181,11 +208,29 @@ Licensed material — NEVER COMMIT
   prohibits uploading the pack to a repository or sharing it with non-purchasers. The
   notebooks, `training_data.csv` and guides ARE the licensed material; the `.zip` is only
   the wrapper, so ignoring `*.zip` alone is not sufficient.
-- `cfdb_model_pack/`, `model_outputs/` and `*.zip` are gitignored. Verified clean: no pack
-  file has ever been tracked, committed on any branch, or left in the object store.
-- This repo is private today and going public has been discussed. **A later .gitignore does
-  not remove anything from git history** — if a pack file is ever committed, stop and raise
-  it rather than fixing it in passing.
+- `cfdb_model_pack/`, `model_outputs/` and `*.zip` are gitignored (`.gitignore:68-70`), and
+  both directories DO exist in a working copy — so the ignore is load-bearing rather than
+  theoretical.
+- ✅ **Verified clean: no pack file has ever been tracked, committed on any branch, or left in
+  the object store.** 🚨 **RE-VERIFIED 2026-09-14, because the original claim was made while the
+  repo was private and the answer matters more now that it is not.** Four checks, all clean,
+  matching `cfdb_model_pack|model_outputs|training_data|\.zip`:
+
+      git ls-files                                  # tracked now
+      git log --all --diff-filter=A --name-only     # ever ADDED on any ref
+      git log --all --name-only                     # ever touched at all
+      git rev-list --objects --all                  # reachable object store
+
+  ⚠️ **AND THE SCAN COVERED THE WHOLE REMOTE, which is the part worth stating:** origin carries
+  two heads (`main`, `env/warehouse-loopback-bind`) and `git cat-file -e` confirmed both are in
+  the local object store, so `--all` really did see everything origin has.
+- 🚨 **THIS REPO IS PUBLIC. NOT "private today" — PUBLIC, NOW.** Measured 2026-09-14:
+  `gh repo view --json visibility,isPrivate` → `{"isPrivate":false,"visibility":"PUBLIC"}`.
+  ⚠️ **This line used to read *"private today and going public has been discussed"*, which made
+  the whole section read as a FUTURE risk. It is a PRESENT one** — anything committed here is
+  world-readable the moment it is pushed. **A later .gitignore does not remove anything from
+  git history** — if a pack file is ever committed, stop and raise it rather than fixing it in
+  passing.
 - Predictions derived from the pack must be attributed as cfdb's own, built on a licensed
   training pack, and never presented as official CollegeFootballData.com predictions. The
   wording lives in `dim_model_version.attribution` and `srv_model_performance.attribution`
@@ -217,6 +262,12 @@ Authoritative documents (read before acting, in ../claude_work):
 Settled decisions you must work within:
 - Naming: fct_* / dim_* in the warehouse. Serving layer is pre-joined wide srv_* tables.
 - Streamlit is display-only: single-table SELECT + WHERE. No joins, no metric math in the app.
+  🚨 **THIS SENTENCE IS THE SETTLED DECISION AND THE CHARTER SAYS SO — but it is NOT the whole
+  rule, and a round deciding a hard case from this line alone will get it wrong.** The working
+  form is `../CLAUDE.md` **§4.2.1**, which carries the three accumulated rulings and the test
+  that actually decides: **how many consumers can this number have?** Scaling one column by a
+  literal is rendering; arithmetic BETWEEN two published columns is not. **Read §4.2.1 before
+  citing this line** — do not restate it here, because a second copy is what drifted.
 - dbt owns all transforms, metric definitions and tests. Airflow owns reliability only —
   no business logic in DAGs.
 - Scope: FBS spine. Non-FBS teams that play an FBS opponent exist as dim_team stubs
