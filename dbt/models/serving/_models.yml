@@ -4611,6 +4611,25 @@ models:
           The home side's win probability at this play, 0 to 1, exactly as the feed publishes it
           and NOT scaled to 0-100. An Altair axis takes format='%' and renders 0.62 as 62%, which
           is a rendering instruction rather than arithmetic, so the page still multiplies nothing.
+      - name: elapsed_from_kickoff_seconds
+        description: >
+          Seconds elapsed from kickoff, 0 to 3600. R-770, and Marc's ask: "Merge the into the data
+          model so we can tell the story with Win % over the fixed time of the game."
+          DELIBERATELY THE TWIN OF fct_drive.elapsed_from_kickoff_seconds - same name, same units,
+          same origin, same null rule - because the point of the column is that the drives and the
+          curve can share ONE x-axis. Two definitions of elapsed on one axis is the drift this
+          project keeps paying for.
+          NULL OUTSIDE REGULATION rather than extrapolated, which is fct_drive's rule and its
+          reason: overtime possessions are not 900 seconds of anything, so (period-1)*900 would
+          invent a duration that never elapsed. 787 of 291,548 rows go null on that boundary, over
+          70 of 1,898 games, plus the one play that has no stg_play match at all. A chart cannot
+          simply switch to this axis and carry on - it must decide what to do with overtime, and
+          that is a page decision this column does not make for it.
+          The arithmetic is (period - 1) * 900 + (900 - clock_seconds) with NO multiplication,
+          because stg_play.clock_seconds is ALREADY minutes * 60 + seconds. Its fct_drive twin
+          multiplies only because stg_drive.start_clock_seconds is the seconds COMPONENT of mm:ss.
+          The same word means opposite things in the two lineages; copying either expression
+          literally onto the other's columns produces a plausible axis where every value is wrong.
       - name: home_team_id
         description: The home team, so a legend needs no second query.
       - name: home_team

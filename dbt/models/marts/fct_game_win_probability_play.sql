@@ -96,6 +96,49 @@ select
     -- not know which period this play was in" are different facts, and `period >= 5` on a null
     -- yields null, which is the honest answer rather than a confident `false`. AC-G.32.
     case when p.period is not null then p.period >= 5 end as is_overtime,
+    -- ── THE CLOCK, SO THE CURVE AND THE DRIVES CAN SHARE ONE X-AXIS ─────────────────────────
+    --
+    -- Marc, 2026-09-14: "Merge the into the data model so we can tell the story with Win % over
+    -- the fixed time of the game." To draw the drives and the win-probability curve on ONE axis,
+    -- both need the same time unit.
+    --
+    -- 🚨 THIS IS DELIBERATELY THE TWIN OF `fct_drive.elapsed_from_kickoff_seconds` — same name,
+    -- same units (seconds from kickoff), same origin (kickoff = 0) and the same null rule. Two
+    -- definitions of "elapsed" on one x-axis is the exact drift this project keeps paying for:
+    -- B098's `metric`, B099's `_CARD_KPIS`, B100's two delta renderers, A116's labels-as-data.
+    -- The whole point of the column is that two marks share an axis, so it cannot be a second
+    -- definition of the thing they share.
+    --
+    -- 🚨🚨 AND THE ARITHMETIC IS NOT COPIED LITERALLY, BECAUSE `clock_seconds` MEANS THE OPPOSITE
+    -- THING IN THE TWO SOURCES. This is the trap and it is worth the space:
+    --
+    --     fct_drive reads  start_clock_seconds   the SECONDS COMPONENT of mm:ss
+    --                      -> so it must write   start_clock_minutes * 60 + start_clock_seconds
+    --     stg_play carries clock_seconds         ALREADY minutes * 60 + seconds (stg_play:85-87)
+    --                      clock_seconds_part    the component, if anyone wants it
+    --
+    -- ⚠️ `fct_drive`'s own comment names half of this already — "start_clock_seconds IS THE
+    -- SECONDS COMPONENT OF mm:ss, NOT A TOTAL". Copying its expression onto `stg_play`'s columns
+    -- would MULTIPLY A TOTAL BY 60, and the result would not look wrong: real integers on a
+    -- plausible axis. A122 verified by hand instead, on three plays of Ohio State at Texas:
+    --
+    --     play 401856682189   period 1, 0:00    (1-1)*900 + (900-0)   =  900  = 15:00
+    --     play 401856682418   period 3, 15:00   (3-1)*900 + (900-900) = 1800  = 30:00
+    --     play 401856682479   period 3, 10:00   (3-1)*900 + (900-600) = 2100  = 35:00
+    --
+    -- ⚠️ NULL OUTSIDE REGULATION RATHER THAN EXTRAPOLATED — `fct_drive`'s rule, which governs
+    -- this column because it is the same column: "Overtime possessions are not 900 seconds of
+    -- anything, so (period-1)*900 would invent a duration that never elapsed."
+    --
+    -- 🚨 AND THE CONSEQUENCE FOR THE CURVE IS MEASURED RATHER THAN LEFT TO BE DISCOVERED: 787 of
+    -- 291,548 rows (0.270%) go null, across 70 of 1,898 games (3.7%). A122 drew overtime by
+    -- compressing 24 plays into 20 pixels of a 180-wide viewBox; on an ELAPSED axis those plays
+    -- have no position at all. ✅ THIS ROUND PUBLISHES THE COLUMN AND STATES THAT. Redesigning
+    -- the curve is a page round and it is B's file.
+    case
+        when p.period between 1 and 4
+            then (p.period - 1) * 900 + (900 - p.clock_seconds)
+    end                                                   as elapsed_from_kickoff_seconds,
     -- THE VALUE, exactly as published. See the header on why it is not scaled.
     w.home_win_probability,
     -- IDENTITY, so a tooltip and a legend need no second query.
