@@ -62,7 +62,8 @@ def panel():
         matchup = importlib.reload(importlib.import_module("views.matchup"))
         seen = []
 
-        def run(sides, glossary=GLOSSARY, season=2026, leaders=None, spread=_SPREAD):
+        def run(sides, glossary=GLOSSARY, season=2026, leaders=None, spread=_SPREAD,
+                colors=_COLORS):
             # R-730. The season decides WHICH absence the Empty state states, so the
             # fixture has to carry one. 2026 is a completed modern game — the case
             # nearly every test here means; the scope tests pass a pre-2024 season.
@@ -94,6 +95,12 @@ def panel():
                 # later branch would hand the bands the BOX SCORE frame.
                 if "srv_game_team_metric_distribution" in sql:
                     return pd.DataFrame(spread if spread is not None else [])
+                # 🚨 R-848. `from srv_game ` WITH THE TRAILING SPACE, AND IT IS NOT FUSSINESS:
+                # every one of the four relations above STARTS with "srv_game", so a bare
+                # substring test here would answer the box score, the cards and the spread with
+                # a colour frame. The branch is last AND exact.
+                if re.search(r"from\s+srv_game\s", sql):
+                    return pd.DataFrame([colors] if colors is not None else [])
                 return glossary if "srv_data_dictionary" in sql else pd.DataFrame(sides)
 
             matchup.query = fake_query
@@ -150,6 +157,13 @@ def _post_game_leaders(**overrides):
         row.update(overrides)
     return rows
 
+
+# 🚨 R-848. THE TWO TEAMS' COLOURS, as `srv_game` publishes them — the pair `row_for_side`
+# renames for `identity.text_on`. ⚠️ The AWAY side deliberately carries NO colour: 10.89% of
+# games have one, and a fixture where both sides are populated could not tell the fallback path
+# from the sourced one.
+_COLORS = {"away_color_on_light": None, "away_color_on_dark": None,
+           "home_color_on_light": "#0021A5", "home_color_on_dark": "#4C7BEF"}
 
 # 🚨 R-808. THE WEEK'S SPREAD, PER MEASURE — real 2026 week-1 shapes off
 # `srv_game_team_metric_distribution`, so the bands are drawn over numbers the view actually
@@ -358,8 +372,13 @@ def test_the_panel_issues_exactly_THREE_reads_and_each_serves_both_sides(panel):
     assert seen.count("srv_game_team_metric_distribution") == 1, (
         f"the spread was read {seen.count('srv_game_team_metric_distribution')} times — one "
         f"week-keyed read serves all eighteen bands across both panels: {seen}")
+    # 🚨 R-848 ADDED THE FIFTH. `srv_game_team` carries no colour column, so the header's team
+    # accent comes from `srv_game` — one bounded read for both sides, not one per side.
+    assert seen.count("srv_game") == 1, (
+        f"the colours were read {seen.count('srv_game')} times — one read serves both sides "
+        f"and both sections: {seen}")
     assert seen == ["srv_game_team", "srv_game_team_leader_in_this_game",
-                    "srv_game_team_metric_distribution",
+                    "srv_game_team_metric_distribution", "srv_game",
                     "srv_data_dictionary"], f"the panel issued {seen}"
 
 
@@ -708,19 +727,36 @@ def _cards_in(block):
     return [piece for piece in block.split(_CARD_MARK)[1:]]
 
 
-def test_the_cards_flank_BOTH_panels_and_the_cast_does_not_change(panel):
-    """Marc named ONE card list against TWO panels — Box score and Advanced.
+def test_the_cards_sit_beside_BOTH_panels_and_RECEIVING_is_added_only_in_ADVANCED(panel):
+    """Marc named ONE card list against TWO panels — and v08 changed what that list is.
 
-    ✅ COWORK'S LEAN, BUILT AND KEPT: the same QB and rushers beside both, because they are the
-    same game's leaders and a reader scrolling from one panel to the other should not find the
-    cast has changed under him.
+    ⚠️ THIS TEST USED TO ASSERT THE TWO SECTIONS WERE IDENTICAL (R-738), and the reason was
+    good: *a reader scrolling from one panel to the other should not find the cast has changed
+    under him.* 🚨 **Marc's v08 overrules it — *"Receiving (3, in the Advanced section)"* — and
+    his reason beats the old one: Cowork argued about MEANING, he is arguing about FIT.**
+
+    ✅ SO THE CLAIM NARROWS RATHER THAN DISAPPEARING. The quarterbacks and rushers must STILL be
+    identical between the sections — that half of R-738 is untouched, and it is what stops a
+    reader finding a different cast — and Advanced adds receiving on top.
     """
     run, _ = panel
     blocks = _card_blocks(run(_both())[0])
     assert len(blocks) == 4, (
-        f"expected two card columns per panel across two panels, got {len(blocks)}")
-    assert blocks[0] == blocks[2] and blocks[1] == blocks[3], \
-        "the cast changed between the box score and the advanced block"
+        f"expected two card columns per section across two sections, got {len(blocks)}")
+    box_away, box_home, adv_away, adv_home = blocks
+    for section, box, adv in (("away", box_away, adv_away), ("home", box_home, adv_home)):
+        assert "Receiving" not in _plain(box), (
+            f"the {section} Box score column carries a Receiving group — v08 puts it in "
+            f"Advanced only")
+        assert "Receiving" in _plain(adv), (
+            f"the {section} Advanced column has no Receiving group")
+        # 🚨 THE SHARED HALF, ASSERTED AS A PREFIX RATHER THAN AS EQUALITY: Advanced is the Box
+        # score column plus receiving, so the quarterbacks and rushers must be byte-identical
+        # up to where receiving begins. Equality would have to be dropped entirely; a prefix
+        # keeps R-738's actual claim.
+        assert adv.startswith(box), (
+            f"the {section} column's quarterbacks and rushers differ between the sections — "
+            f"v08 adds receiving to Advanced, it does not rebuild the cast")
 
 
 def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
@@ -761,16 +797,24 @@ def test_EVERY_DISCIPLINE_IS_REPRESENTED_on_the_post_game_cards(panel):
     because the test built its own frame). `run()` calls the real `_post_game`.
     """
     run, _ = panel
-    away = _plain("".join(_cards_in(_card_blocks(run(_both())[0])[0])))
-    for discipline, marker in (("the quarterback", "Comp-Att"),
-                               ("the rushers", "Carries"),
-                               ("the receivers", "Receptions")):
-        assert marker in away, (
-            f"{discipline} are not on the post-game cards — no {marker!r} in the away column. "
-            f"Marc asked for full coverage: {away[:200]}")
+    blocks = _card_blocks(run(_both())[0])
+    box_away = _plain("".join(_cards_in(blocks[0])))
+    adv_away = _plain("".join(_cards_in(blocks[2])))
+    # ⚠️ WHICH SECTION EACH DISCIPLINE IS LOOKED FOR IN IS THE v08 CHANGE (R-848). Receiving
+    # moved to Advanced on Marc's word; the other two stay in both. **Looking for all three in
+    # the Box score column would now fail for the right reason and the wrong claim.**
+    for discipline, marker, where, text in (
+            ("the quarterback", "Comp-Att", "Box score", box_away),
+            ("the rushers", "Carries", "Box score", box_away),
+            ("the quarterback", "Comp-Att", "Advanced", adv_away),
+            ("the rushers", "Carries", "Advanced", adv_away),
+            ("the receivers", "Receptions", "Advanced", adv_away)):
+        assert marker in text, (
+            f"{discipline} are not on the {where} cards — no {marker!r} in the away column. "
+            f"Marc asked for full coverage: {text[:200]}")
 
 
-def test_ONE_quarterback_and_TWO_of_each_other_discipline(panel):
+def test_TWO_quarterback_slots_THREE_rushers_and_THREE_receivers(panel):
     """🚨 A120 MEASURED WHY THE QB IS ALONE: of 6,736 `total` groups, 6,300 — 93.5% — have fewer
     than three leaders and 3,990 have exactly one. A team plays one quarterback.
 
@@ -784,10 +828,19 @@ def test_ONE_quarterback_and_TWO_of_each_other_discipline(panel):
     took the page's own tuple as its expectation would agree with any tuple.
     """
     run, _ = panel
-    away = _cards_in(_card_blocks(run(_both())[0])[0])
-    assert len(away) == 5, (
-        f"expected one QB, two rushers and two receivers, got {len(away)} cards")
-    text = _plain("".join(away))
+    blocks = _card_blocks(run(_both())[0])
+    # ⚠️ `_cards_in` COUNTS DRAWN CARDS ONLY — a reserved slot carries a DASHED border, so it is
+    # deliberately not one of these. The reserved slots are asserted by their own text below.
+    box_away = _cards_in(blocks[0])
+    adv_away = _cards_in(blocks[2])
+    assert len(box_away) == 4, (
+        f"Box score should draw one quarterback and three rushers — the fixture has one QB, so "
+        f"the second slot is reserved rather than drawn — got {len(box_away)} cards")
+    assert len(adv_away) == 7, (
+        f"Advanced should draw the same four plus three receivers, got {len(adv_away)}")
+    assert _plain(blocks[0]).count("No second quarterback played") == 1, (
+        f"the missing second quarterback is not reserved: {_plain(blocks[0])[:200]}")
+    text = _plain("".join(adv_away))
     # ⚠️ ORDERED BY A TOKEN THAT SURVIVES A RENAME, NOT BY THE RENDERED NAME — R-758, and
     # B106's own name break is what exposed it: `text.index("QB, Away")` raised
     # `ValueError: substring not found` when the card went back to `First Last`, so this test
@@ -801,12 +854,11 @@ def test_ONE_quarterback_and_TWO_of_each_other_discipline(panel):
     # who caught it — the way a reader reads a game.
     assert text.index("Comp-Att") < text.index("RB1") < text.index("WR1"), \
         f"the cast is not QB, then rushers, then receivers: {text[:200]}"
-    for who in ("RB1", "RB2", "WR1", "WR2"):
+    for who in ("RB1", "RB2", "RB3", "WR1", "WR2", "WR3"):
         assert who in text, f"{who} did not render"
-    # ⚠️ AND THE DEPTH STOPS AT TWO — the third of each discipline is NOT drawn. Without this the
-    # test passes any depth at or above two and says nothing about the trade R-809 made.
-    for who in ("RB3", "WR3"):
-        assert who not in text, f"{who} rendered — the depth is no longer 2 per discipline"
+    # ⚠️ v08 TOOK THE DEPTH BACK TO THREE (R-848), superseding R-840's *keep 2 and 2* on Marc's
+    # own word. The fixture holds exactly three of each, so a depth ABOVE three would need a
+    # deeper fixture to catch — what this pins is that none of the three is being dropped.
 
 
 def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
@@ -824,16 +876,21 @@ def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
     # reason.
     rows = [r for r in _post_game_leaders()
             if not (r["panel"] == "rushing" and r["leader_rank"] in (2, 3))]
-    away = _cards_in(_card_blocks(run(_both(), leaders=rows)[0])[0])
-    assert len(away) == 4, (
-        f"a one-rusher side should draw four cards — QB, one rusher, two receivers — "
-        f"got {len(away)}")
-    text = _plain("".join(away))
+    blocks = _card_blocks(run(_both(), leaders=rows)[0])
+    adv_away = _cards_in(blocks[2])
+    assert len(adv_away) == 5, (
+        f"a one-rusher side should draw five cards in Advanced — QB, one rusher, three "
+        f"receivers — got {len(adv_away)}")
+    text = _plain("".join(adv_away))
     assert "RB2" not in text
     # ⚠️ AND THE RECEIVERS ARE UNAFFECTED, which is the half a count alone cannot see: a short
-    # RUSHING row must not shorten the PASSING one.
+    # RUSHING row must not shorten the RECEIVING one.
     assert "WR1" in text and "WR2" in text, "a missing rusher took a receiver with it"
-    assert "—" not in text, "an absent rusher reserved a hole"
+    # 🚨 AND THE SHORT GROUP IS **NOT** RESERVED — R-849 is scoped to the quarterbacks. Rushing
+    # and receiving are the last groups in their column, so a short one misaligns nothing
+    # beneath it and a reserved slot there would be a hole bought for no alignment.
+    assert "rusher played" not in _plain(blocks[2]), (
+        "a short rushing group reserved a slot — R-849 is quarterback-only")
 
 
 def test_the_cards_read_the_IN_THIS_GAME_view_and_never_the_preview_one(panel):
@@ -934,145 +991,14 @@ def _resolved(style: str) -> dict:
 
 
 def _spans(cell: str) -> list:
-    """The three spans of a metric cell, each as a resolved style dict."""
-    return [_resolved(m) for m in re.findall(r"<span style='([^']*)'>", cell)]
+    """The three spans of a measure ROW — name, away figure, home figure — resolved.
 
-
-def test_the_metric_cell_FITS_the_middle_column_at_1300px_with_the_sidebar_open():
-    """🚨 R-807's FLOOR AND CEILING, PINNED THE WAY B103 PINNED `_SLOT_WIDTHS` — because nothing
-    in this suite can read a pixel, so the raster is the evidence and this test exists to stop a
-    later round widening the cell blind.
-
-    ⚠️ THE NUMBERS ARE MEASURED, IN THE BROWSER, NOT DERIVED:
-
-        `_POST_GAME_SPLIT`'s middle column      493px at 1300px with the sidebar open
-                                                733px at 1700px
-        "Havoc rate forced by this defense"     188px at .85rem, the page's own font
-        "12 (4 INT · 8 FUM)"                    118px at 1rem/600 — the widest figure either
-                                                panel can produce
-
-    🚨 AND THE CEILING IS THE ONE THAT MATTERS, BECAUSE B104 PAID FOR IT: a Streamlit column
-    does NOT clip its children, so a cell wider than 493px does not compress — it DRAWS OVER
-    the card column beside it, which is how `+214.0` landed on top of the home side's
-    `Rushing`.
+    ⚠️ SCOPED TO THE ROW SINCE R-847. The band beneath it carries its own spans (a spacer the
+    width of the name column, then one per side), so a cell-wide sweep returns six and the
+    unpack fails — or worse, succeeds against the wrong three.
     """
-    value = _module_constant("_METRIC_VALUE_WIDTH")
-    label = _module_constant("_METRIC_LABEL_WIDTH")
-    gap = _module_constant("_METRIC_CELL_GAP")
-    pad = _module_constant("_METRIC_CELL_PAD")
-    total_px = (2 * value + label + 2 * gap + 2 * pad) * 16
-    assert total_px <= 493, (
-        f"the cell is {total_px:.0f}px against a 493px middle column at 1300px with the "
-        f"sidebar open — it will draw OVER the card column beside it, not compress")
-    assert total_px >= 420, (
-        f"the cell is {total_px:.0f}px, and the content it must hold is 188px of label plus "
-        f"two 118px figures plus gaps — tightening it below that clips a real label")
-    assert label * 16 >= 188, (
-        f"the label column is {label * 16:.0f}px and the longest label in _ADVANCED_ROWS "
-        f"measures 188px — 'Havoc rate forced by this defense' would be truncated")
-    # 🚨 THE BAR IS THE MEASURED WORST CASE, NOT THE IMAGINED ONE. B106 wrote 118px here for
-    # `12 (4 INT · 8 FUM)`. **Measured across all 7,348 rows with a box score: the maxima are 8
-    # turnovers, 7 interceptions and 5 fumbles lost, and NOT ONE row reaches double digits in
-    # any part.** So the widest string serving can actually produce is `8 (7 INT · 5 FUM)` at
-    # 110px — single digits throughout, the same width as the `1 (1 INT · 0 FUM)` on the page.
-    assert value * 16 >= 110, (
-        f"the value column is {value * 16:.0f}px and the widest turnover line serving has ever "
-        f"produced, '8 (7 INT · 5 FUM)', measures 110px")
-    # ⚠️ AND A CEILING, because R-810's whole point is that this slot is what pushes the two
-    # figures apart: the home value is right-aligned against the cell's OUTER edge, so every
-    # pixel of unused slot is a pixel of gap Marc asked to close.
-    assert value * 16 <= 130, (
-        f"the value column is {value * 16:.0f}px against a 110px worst case — the slack is gap "
-        f"between the two figures, which is what R-810 exists to remove")
-
-
-def test_BOTH_figures_are_RIGHT_aligned_and_not_only_the_away_one(panel):
-    """Marc, v06: *"Right align the metric value."*
-
-    🚨 A TEST THAT COUNTED `text-align:right` ONCE WOULD HAVE PASSED BEFORE THIS ROUND — the
-    away figure has been right-aligned since B076 and the HOME one was left-aligned, so a
-    column of figures lined up on its FIRST digit: `9` and `415` started in the same place.
-    ✅ So the assertion is on BOTH, per cell, by position.
-    """
-    run, _ = panel
-    cells = _cells(run(_both())[0])
-    assert cells, "no metric cell rendered at all"
-    for cell in cells:
-        away, label, home = _spans(cell)
-        assert away.get("text-align") == "right", (
-            f"the away figure resolves to text-align:{away.get('text-align')}")
-        assert home.get("text-align") == "right", (
-            f"the HOME figure resolves to text-align:{home.get('text-align')} — its column "
-            f"lines up on the first digit instead of the units, which is the comparison the "
-            f"panel exists to make")
-        assert label.get("text-align") == "center", (
-            f"the label resolves to text-align:{label.get('text-align')}")
-
-
-def test_the_cell_CLIPS_rather_than_drawing_over_the_column_beside_it(panel):
-    """🚨 R-755's LESSON, AND IT IS THE ONE THING THAT MAKES A FIXED WIDTH SAFE HERE. Without
-    `overflow:hidden` a cell that cannot have its width corrupts the card column beside it; with
-    it, it loses its rightmost characters inside its own column. A page that clips reads as
-    tight, a page that overlaps reads as broken."""
-    run, _ = panel
-    value = _module_constant("_METRIC_VALUE_WIDTH")
-    label_w = _module_constant("_METRIC_LABEL_WIDTH")
-    for cell in _cells(run(_both())[0]):
-        style = _resolved(cell.split("style='")[1].split("'")[0])
-        assert style.get("overflow") == "hidden", f"a metric cell does not clip: {style}"
-        assert style.get("margin") == "0 auto", "a metric cell is not centred in its column"
-        assert style.get("box-sizing") == "border-box", (
-            "without border-box the .4rem padding is ADDED to the width and the 32px of "
-            "headroom against the 493px column becomes 19px")
-        # 🚨 EVERY PART OF THE MEASURE ROW IS FIXED, AND THIS IS ASSERTED ON THE CHILDREN TOO —
-        # the staged break put `flex:1` back on the LABEL, not on the cell, and an assertion
-        # that only read the cell's own style came back green (R-744). R-807 exists because a
-        # proportional row put the two figures 301px apart at 1300px and 541px apart at 1700px.
-        # ⚠️ SCOPED TO THE MEASURE ROW SINCE R-808. The BAND beneath it splits the cell into two
-        # equal halves with `flex:1`, which is correct — each side's band takes half the cell —
-        # so a cell-wide sweep would now fire on the one proportional thing that belongs.
-        # The measure row runs from the cell's opening tag to the FIRST close — its children
-        # are three spans, so no nested div can end it early.
-        row_only = cell.split("</div>", 1)[0]
-        assert "flex:1" not in row_only, (
-            f"something inside the measure row is proportional again: {row_only[:200]}")
-        away, label, home = _spans(cell)
-        # ⚠️ THE VALUE SLOT IS PER PANEL SINCE R-810 — Box Score holds a 110px turnovers line and
-        # Advanced's widest value is `47.1%` at 43px — so the assertion is that BOTH sides of a
-        # cell agree with each other and with one of the two panel widths, not that every cell
-        # on the page is the same shape.
-        narrow = _module_constant("_METRIC_VALUE_NARROW")
-        assert away.get("width") == home.get("width"), (
-            f"the two figures in one cell have different widths — {away.get('width')} against "
-            f"{home.get('width')} — so the centre line is not where either of them thinks")
-        assert away.get("width") in (f"{value}rem", f"{narrow}rem"), (
-            f"the figures are {away.get('width')}, which is neither panel's measured width "
-            f"({value}rem for Box Score, {narrow}rem for Advanced)")
-        for part, wanted, what in ((away, None, "away figure"),
-                                   (label, label_w, "label"),
-                                   (home, None, "home figure")):
-            assert part.get("flex") == "none", f"the {what} can grow or shrink"
-            if wanted is not None:
-                assert part.get("width") == f"{wanted}rem", (
-                    f"the {what} is {part.get('width')} rather than the {wanted}rem the cell's "
-                    f"arithmetic budgets for it")
-
-
-def test_the_SIDE_HEADING_takes_the_cells_width_and_not_the_columns(panel):
-    """⚠️ A HEADING LEFT SPANNING THE FULL COLUMN STOPS BEING A HEADING. At 1700px the column is
-    733px and the cell is 461px, so a full-width heading would sit 136px outboard of its own
-    figures and read as a caption for something else."""
-    run, _ = panel
-    entries = run(_both())[0]
-    heading = next(str(b) for _k, b in entries if "Kentucky" in _plain(str(b)))
-    value = _module_constant("_METRIC_VALUE_WIDTH")
-    label = _module_constant("_METRIC_LABEL_WIDTH")
-    gap = _module_constant("_METRIC_CELL_GAP")
-    pad = _module_constant("_METRIC_CELL_PAD")
-    width = 2 * value + label + 2 * gap + 2 * pad
-    assert f"width:{width}rem" in heading, (
-        f"the side heading does not carry the cell's own {width}rem width")
-    assert "margin:0 auto" in heading, "the side heading is not centred with its cell"
+    row = cell.split("</div>", 1)[0]
+    return [_resolved(m) for m in re.findall(r"<span style='([^']*)'>", row)]
 
 
 # --- R-808: the band under each measure ----------------------------------------------------
@@ -1105,7 +1031,11 @@ def test_EVERY_MEASURE_WITH_A_DISTRIBUTION_gets_a_band_and_the_others_do_not(pan
     entries = run(_both())[0]
     banded, bare = [], []
     for cell in _cells(entries):
-        label = re.search(r"font-size:.85rem'>(?:<span[^>]*>)?([^<]+)", cell)
+        # ⚠️ THE MEASURE NAME IS THE ROW'S FIRST SPAN SINCE R-847 — it used to sit between the
+        # two figures in the centred cell, so a pattern keyed on the label's own font size is
+        # what survives the move rather than a positional one.
+        label = re.search(r"_TABLE_LABEL|opacity:.75;font-size:.85rem[^']*'>"
+                          r"(?:<span[^>]*>)?([^<]+)", cell)
         name = label.group(1).strip() if label else "?"
         (banded if _bands(cell) else bare).append(name)
     for measure in ("First downs", "Total yards", "Rushing yards", "Passing yards",
@@ -1115,43 +1045,6 @@ def test_EVERY_MEASURE_WITH_A_DISTRIBUTION_gets_a_band_and_the_others_do_not(pan
         assert composite not in banded, (
             f"{composite!r} is not a scalar — there is nothing to take a percentile of — and it "
             f"drew a band anyway")
-
-
-def test_the_band_is_given_the_CELLS_width_and_never_box_s_240px_default(panel):
-    """🚨 `box(row, value=None, width: int = 240, …)`. THE DEFAULT IS NOT THIS PANEL'S WIDTH and
-    a call site that took it would draw a band that stopped short of its own cell — 54% of Box
-    Score's inner width and 77% of Advanced's.
-
-    ⚠️ ASSERTED ON THE RENDERED viewBox, which is what the browser receives, rather than on the
-    argument this file passes — the same reason `_shipped()` reads Streamlit's spec rather than
-    altair's.
-    """
-    run, _ = panel
-    widths = {int(w) for cell in _cells(run(_both())[0]) for w, _h in _bands(cell)}
-    assert widths, "no band was drawn at all"
-    assert 240 not in widths, (
-        f"a band is 240px — that is `box()`'s own default, so the width was not passed: "
-        f"{sorted(widths)}")
-    # 🚨 HALF THE CELL EACH, NOT THE WHOLE CELL. Two bands sit on a measure row — one per side,
-    # because the spread is shared and the bright bar marks THIS team's figure — so each gets
-    # half the inner width less the gap between them. ⚠️ THE FIRST VERSION OF THE PAGE PASSED
-    # THE FULL WIDTH AND THE RASTER CAUGHT IT: `box()`'s own `max-width:100%` scaled a 432px
-    # viewBox into a 216px box and squashed every label 2:1 — the string `18` measured FOUR
-    # pixels. The DOM was correct and the text was unreadable.
-    expected = {_module_constant("_METRIC_VALUE_WIDTH"), _module_constant("_METRIC_VALUE_NARROW")}
-    gap, lab = (_module_constant("_METRIC_CELL_GAP"),
-                _module_constant("_METRIC_LABEL_WIDTH"))
-    wanted = {int(((2 * v + lab + 2 * gap) * 16 - gap * 16) / 2) for v in expected}
-    assert widths <= wanted, (
-        f"the bands are {sorted(widths)}px; half of each panel's inner cell, less the gap "
-        f"between the two sides, is {sorted(wanted)}px")
-    # 🚨 AND A MEASURED FLOOR. B108 swept `box()` over the real tightest distribution: 5 labels
-    # survive at 200px, 4 at 160, 3 at 120, 2 at 60. Advanced's 148px costs ONE quartile label
-    # on its tightest rows and Box Score's 216px costs nothing — the trade is in the report.
-    # Below ~120px half the labels are gone and the band stops being a distribution.
-    assert min(widths) >= 120, (
-        f"a band is {min(widths)}px wide. Below ~120px `box()`'s placement pass has dropped "
-        f"half the labels and the picture stops carrying the numbers it exists to carry")
 
 
 def test_the_BOX_SCORE_band_labels_carry_no_false_decimals(panel):
@@ -1212,3 +1105,268 @@ def test_the_band_draws_the_WHISKERS_and_not_the_MIN_MAX_it_could_have(panel):
             f"the band's lower end is not `whisker_low` (5) — `min_value` is 4: {labels}")
         return
     raise AssertionError("the first-downs row never rendered")
+
+
+# --- R-847: the table's own geometry, amended from B106/B108 rather than deleted ------------
+
+def test_the_MEASURE_NAME_comes_FIRST_and_both_figures_are_RIGHT_aligned(panel):
+    """🚨 AMENDED FROM B108's `test_BOTH_figures_are_RIGHT_aligned_and_not_only_the_away_one`.
+    The requirement did not change; the geometry it asserts against did.
+
+    Marc, v08: *"move the measure name to the left, then 2 columns for the metric values."*
+
+    ⚠️ RIGHT-ALIGNMENT SURVIVES THE MOVE AND IT WAS NEVER ABOUT CENTRING. The home column used
+    to be left-aligned, so a column of figures lined up on its FIRST digit — `9` and `415`
+    starting in the same place. Right-aligned they line up on the units, which is the only
+    alignment that lets a reader compare a column of numbers by eye, wherever the column sits.
+
+    ⚠️ AND THE ORDER IS ASSERTED, NOT JUST THE ALIGNMENT — B082 and B083 both proved a presence
+    assertion cannot see a left/right swap.
+    """
+    run, _ = panel
+    cells = _cells(run(_both())[0])
+    assert cells, "no measure row rendered at all"
+    for cell in cells:
+        label, away, home = _spans(cell)
+        assert label.get("text-align") is None, (
+            f"the measure name is right- or centre-aligned — v08 puts it LEFT: {label}")
+        assert away.get("text-align") == "right", (
+            f"the away figure resolves to text-align:{away.get('text-align')}")
+        assert home.get("text-align") == "right", (
+            f"the HOME figure resolves to text-align:{home.get('text-align')} — its column "
+            f"lines up on the first digit instead of the units")
+        # 🚨 THE NAME IS FIRST IN DOCUMENT ORDER, which is what "to the left" means and what a
+        # swap would change. `_spans` returns them in source order.
+        assert label.get("width") == f"{_module_constant('_TABLE_LABEL_WIDTH')}rem", (
+            f"the first span is not the measure-name column: {label}")
+
+
+def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel):
+    """🚨 AMENDED FROM B108. R-755's mechanism is unchanged and only its NEIGHBOUR moved: the
+    table used to sit between the two card columns, and now it is hard left with both card
+    columns to its right. **A Streamlit column still does not clip its children, so a row wider
+    than its share draws over the AWAY CARDS.**"""
+    run, _ = panel
+    label_w = _module_constant("_TABLE_LABEL_WIDTH")
+    value_w = _module_constant("_TABLE_VALUE_WIDTH")
+    for cell in _cells(run(_both())[0]):
+        style = _resolved(cell.split("style='")[1].split("'")[0])
+        assert style.get("overflow") == "hidden", f"a measure row does not clip: {style}"
+        assert style.get("box-sizing") == "border-box", (
+            "without border-box the padding is ADDED to the width and the row grows past its "
+            "column")
+        # ⚠️ NO PART OF THE ROW IS PROPORTIONAL — scoped to the row itself, because the band
+        # beneath it legitimately sizes its own spacer to the label column.
+        row_only = cell.split("</div>", 1)[0]
+        assert "flex:1" not in row_only, (
+            f"something in the measure row is proportional again: {row_only[:200]}")
+        label, away, home = _spans(cell)
+        for part, wanted, what in ((label, label_w, "measure name"),
+                                   (away, value_w, "away figure"),
+                                   (home, value_w, "home figure")):
+            assert part.get("flex") == "none", f"the {what} can grow or shrink"
+            assert part.get("width") == f"{wanted}rem", (
+                f"the {what} is {part.get('width')} rather than the {wanted}rem the table "
+                f"budgets for it")
+
+
+def test_the_TABLE_HEADER_carries_the_section_name_and_BOTH_logos_in_order(panel):
+    """🚨 AMENDED FROM B108's `test_the_SIDE_HEADING_takes_the_cells_width_and_not_the_columns`.
+    The heading is a TABLE HEADER ROW now — Marc, v08: *"One big table, with a header row for
+    Box Score / Logo Away / Logo Home"*.
+
+    ⚠️ AND IT TAKES THE TABLE'S OWN COLUMN WIDTHS OR IT STOPS BEING A HEADER: a header whose
+    cells do not line up with the rows beneath it is a caption.
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    # ⚠️ THE SUBHEADER ALSO SAYS "Box score", so the header ROW is found by its own markup
+    # rather than by its text — the first markdown that carries a rule under it.
+    header = next(str(b) for _k, b in entries
+                  if "Box score" in _plain(str(b)) and "border-top" in str(b))
+    assert f"width:{_module_constant('_TABLE_LABEL_WIDTH')}rem" in header, (
+        "the header's first cell is not the measure-name column's width")
+    assert f"width:{_module_constant('_TABLE_VALUE_WIDTH')}rem" in header, (
+        "the header's figure cells are not the value columns' width")
+    # 🚨 AWAY BEFORE HOME, BY THE TEAMS' OWN NAMES (R-522). `_both()` is Auburn at HOME and
+    # Kentucky AWAY, so a swap changes which name comes first — which is the thing B082 and
+    # B083 both proved a presence assertion cannot see.
+    plain = _plain(header)
+    assert plain.index("Kentucky") < plain.index("Auburn"), (
+        f"the header's two teams are not in away-then-home order — Kentucky is the away side: "
+        f"{plain[:160]}")
+    # Marc: *"a horizontal line between the header row and the metrics row"*.
+    assert "border-top" in header, "there is no rule under the header row"
+
+
+def test_the_band_is_given_the_VALUE_COLUMNS_width_and_never_box_s_240px_default(panel):
+    """🚨 AMENDED FROM B108. `box()`'s default is still not this panel's width; what changed is
+    which width that is. The band sits directly under its own figure now, so it IS the value
+    column — B108's two half-cells are gone with the centred cell.
+
+    ⚠️ AND THE NUMBER GOT SMALLER, WHICH THE REPORT CARRIES RATHER THAN THIS TEST HIDING: B108
+    measured the minimum useful plot width at 200px and shipped 216px (Box Score) and 148px
+    (Advanced). v08's value column is narrower than either. **That is a consequence of the shape
+    Marc asked for, not a choice — the floor assertion below is deliberately the wide one that
+    says when the picture stops carrying its numbers at all.**
+    """
+    run, _ = panel
+    widths = {int(w) for cell in _cells(run(_both())[0]) for w, _h in _bands(cell)}
+    assert widths, "no band was drawn at all"
+    assert 240 not in widths, (
+        f"a band is 240px — that is `box()`'s own default, so the width was not passed: "
+        f"{sorted(widths)}")
+    wanted = int(_module_constant("_TABLE_VALUE_WIDTH") * 16)
+    assert widths == {wanted}, (
+        f"the bands are {sorted(widths)}px; the value column they sit under is {wanted}px")
+    assert min(widths) >= 110, (
+        f"a band is {min(widths)}px wide. Below ~110px `box()`'s placement pass has dropped "
+        f"most of its labels and the picture stops carrying the numbers it exists to carry")
+
+
+def test_the_TABLE_is_the_LEFTMOST_block_and_the_cards_follow_it(panel):
+    """🚨 R-847. Marc, v08: *"Move the Box Score and Advanced tables all the way to the left.
+    Move the Away Player Cards to be next (left) of the Home Player cards."*
+
+    ⚠️ THE ORDER, NOT THE PRESENCE — B082 and B083 both proved a presence assertion cannot see a
+    left/right swap, and all three blocks are present in every arrangement. **The old layout put
+    the table BETWEEN the two card columns and every block was on the page then too.**
+
+    ✅ AND IT IS READABLE BECAUSE ONE LIST DECIDES BOTH THE ORDER AND THE WIDTH (B098's pattern):
+    `st.columns` hands its columns back left to right, so zipping them against `_POST_GAME_LAYOUT`
+    makes the visual position and the width the same fact. A round that moved the table back to
+    the middle would have to move its width with it.
+    """
+    layout = _module_constant("_POST_GAME_LAYOUT")
+    slots = [slot for slot, _w in layout]
+    assert slots == ["table", "away", "home"], (
+        f"the blocks are laid out {slots} — v08 is the table hard left, then away, then home")
+    widths = dict(layout)
+    # 🚨 THE TABLE IS THE WIDE ONE, AND IT IS PINNED TO THE SLOT RATHER THAN TO THE INDEX. If
+    # the weights were keyed by position, moving the table would hand it a card's width while
+    # every positional assertion still passed — which is exactly what B098 found on this page.
+    assert widths["table"] > widths["away"] * 2, (
+        f"the table is not the wide block: {widths}")
+    assert widths["away"] == widths["home"], (
+        f"the two card columns are different widths, so the cards cannot line up row for row: "
+        f"{widths}")
+
+
+def test_a_ONE_QUARTERBACK_side_RESERVES_the_second_slot_and_SAYS_SO(panel):
+    """🚨 R-849, AND IT REVERSES AC-G.11's USUAL ANSWER ON THIS PAGE. B107 ships
+    `test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole` and it is still right for rushing and
+    receiving; this is the narrow case where the opposite is true, and the reason is R-847.
+
+    **While the cards FLANKED the table a short away column had nothing to line up against.
+    Side by side, an unmatched quarterback slot puts every row below it out of register between
+    the two teams.** ✅ Marc asked for the reserved slot and Cowork's ruling keeps both rules: a
+    reserved slot is not a hole IF IT SAYS IT IS RESERVED.
+
+    📊 AND IT EARNS ITS KEEP — measured before it was built: **3,990 of 6,736 team-games (59.2%)
+    have exactly one quarterback, and 1,812 of 3,520 games (51.5%) have the two sides carrying
+    DIFFERENT counts.** More than half of all games are this case.
+
+    🚨 A COUNT CANNOT SEE THIS BREAK. Removing the reserved slot leaves the same number of DRAWN
+    cards — what changes is whether the two columns' rows line up. **So the assertion is the
+    reserved card's own text, which is a value that moves.**
+    """
+    run, _ = panel
+    # The fixture's away side has ONE quarterback; give the home side a second.
+    rows = list(_post_game_leaders())
+    second = dict(next(r for r in rows if r["panel"] == "total" and r["team_id"] == 2),
+                  leader_rank=2, player_name="Home QB2", player_id="p2to2")
+    blocks = _card_blocks(run(_both(), leaders=rows + [second])[0])
+    box_away, box_home = _plain(blocks[0]), _plain(blocks[1])
+    assert "No second quarterback played" in box_away, (
+        f"the away side has one quarterback and reserved nothing — every row below it is now "
+        f"out of register with the home column: {box_away[:200]}")
+    assert "Home QB2" in box_home, "the fixture's second home quarterback did not render"
+    assert "No second quarterback played" not in box_home, (
+        "the home side has two quarterbacks and still reserved a slot")
+    # 🚨 AND THE RESERVED SLOT IS A DRAWN BOX, NOT A GAP. An empty box a reader cannot
+    # distinguish from missing data is the hole AC-G.11 forbids; this one names itself.
+    assert "border:1px dashed" in blocks[0], (
+        "the reserved slot draws no box at all, so the column just ends short")
+    # 🚨 AND IT IS A REAL CARD'S HEIGHT, WHICH THE FIRST VERSION WAS NOT. A `min-height:3.2rem`
+    # slot measured 51px against a real card's 84px, so reserving kept the two columns' card
+    # COUNTS in step and left their group headers **33px out of register** — the exact
+    # misalignment this feature exists to remove, one level down. **Only the raster showed it:
+    # every card was present and every count was right.**
+    # ⚠️ Nothing here can read a pixel, so the constant is pinned against the measurement and
+    # B109's raster is the evidence — this is the guard that stops a later round shrinking it.
+    reserved_h = _module_constant("_RESERVED_CARD_HEIGHT")
+    assert reserved_h * 16 == 84, (
+        f"the reserved slot is {reserved_h * 16:.0f}px and a real card measured 84px at 1300px "
+        f"with the sidebar open. Any difference puts every group below it out of register "
+        f"between the two columns, which is the whole point of the slot")
+    assert f"height:{reserved_h}rem" in blocks[0], (
+        "the reserved slot does not declare a fixed height, so it collapses to its text")
+
+
+def test_the_RESERVED_SLOT_does_not_replace_the_HONEST_ABSENCE_for_a_side_we_hold_nothing_for(panel):
+    """🚨 THE REGRESSION R-849 ALMOST CAUSED, CAUGHT BY ITS OWN RENDER. Reserving the second
+    quarterback unconditionally meant a side with NO leaders at all drew two blank cards instead
+    of saying we hold nothing for it.
+
+    ⚠️ THOSE ARE DIFFERENT ABSENCES (AC-G.11) AND THE RESERVED CARD ANSWERS THE WRONG ONE: *no
+    second quarterback played* is a statement about one player; *we hold no leaders for this
+    side* is a statement about the side. **The sentence wins whenever every group is empty.**
+    """
+    run, _ = panel
+    # ⚠️ TEAM 2 IS THE HOME SIDE in `_side()`, so keeping only its rows leaves the AWAY column
+    # with nothing at all — which is the case under test.
+    rows = [r for r in _post_game_leaders() if r["team_id"] == 2]
+    entries = run(_both(), leaders=rows)[0]
+    # ⚠️ NOT `_card_blocks` — that helper keeps only blocks containing CARD markup, and the
+    # whole point here is that the away column contains none. The sentence would be filtered
+    # out by the very helper used to look for it.
+    text = _text(entries)
+    assert "No player leaders held for this side." in text, (
+        f"a side we hold nothing for drew reserved slots instead of saying so: {text[:300]}")
+    # And the home side, which does have leaders, still reserves its missing second quarterback.
+    home = _plain(_card_blocks(entries)[0])
+    assert "No second quarterback played" in home, (
+        "the side that DOES have one quarterback stopped reserving the second")
+
+
+def test_the_HEADER_ACCENT_names_BOTH_theme_variants_and_not_just_the_light_one(panel):
+    """🚨 AC-G.22, AND THE RASTER CAUGHT THE OBVIOUS VERSION FAILING.
+
+    The app's precedent is `identity.text_on(row)`, which defaults to the ON-LIGHT colour —
+    `_drives` says so in its own comment, *"which is what team.py does and the only precedent in
+    the app"*. **Rendered in dark mode, North Alabama's accent came out `rgb(0,0,0)` against a
+    `rgb(14,17,23)` page. Invisible.**
+
+    📊 NOT A CORNER CASE: **6,338 of 34,061 team rows — 18.6% — publish `#000000` as their
+    on-light colour, and every one of them has an on-dark variant.** So the fix is available for
+    100% of the teams the defect hits.
+
+    ✅ `light-dark()` IS THIS CODEBASE'S OWN TOOL FOR IT (theme.py, R-547/R-552): it follows the
+    `color-scheme` property Streamlit sets, where `prefers-color-scheme` answers the OPERATING
+    SYSTEM and hands a reader on a dark Mac with the app in Light the wrong palette.
+
+    ⚠️ ASSERTED ON BOTH VARIANTS BEING NAMED, because a single hex is exactly what shipped first
+    and it renders perfectly in one of the two modes — which is how it passed the eye.
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    header = next(str(b) for _k, b in entries
+                  if "Box score" in _plain(str(b)) and "border-top" in str(b))
+    accents = re.findall(r"border-bottom:3px solid ([^;']+)", header)
+    assert len(accents) == 2, f"expected one accent per side, got {accents}"
+    for accent in accents:
+        assert accent.startswith("light-dark("), (
+            f"the header accent is a single colour — {accent!r} — so it is right in one theme "
+            f"and wrong in the other. 18.6% of teams publish #000000 on light")
+        light, dark = accent[len("light-dark("):-1].split(", ")
+        assert light and dark, f"the accent names only one variant: {accent}"
+    # 🚨 AND THE FALLBACK PATH IS EXERCISED BY THE FIXTURE ON PURPOSE: `_COLORS` gives the AWAY
+    # side no colour at all, because 10.89% of games have one and a fixture with both sides
+    # populated could not tell the sourced path from the neutral one.
+    assert identity_fallback() in accents[0], (
+        f"a side with no published colour did not fall back to the neutral: {accents[0]}")
+
+
+def identity_fallback():
+    from lib import identity
+    return identity.FALLBACK

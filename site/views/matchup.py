@@ -2337,6 +2337,17 @@ _CARD_JERSEY_SIZE = 1.15
 _CARD_LAST_SIZE = 0.92
 _CARD_FIRST_SIZE = 0.7
 
+# 🚨 R-848. *"'#' font needs to be a little bigger"*, AND IT IS ONE OF TWO LITERALS — SAY WHICH.
+# The `#` is a RATIO of the jersey (R-806, `em` not `rem`, so it follows whatever the jersey is).
+# **The RATIO moved, .5 → .62; the jersey did NOT.**
+#
+# ⚠️ AND THAT IS THE WHOLE REASON: B107 measured `_CARD_LAST_SIZE = .92` as a CEILING —
+# `Sanders II` needs 70.8px of a 72px name column and truncates at `.95`. Growing the JERSEY
+# widens its column and takes those pixels straight out of the name, which would put
+# truncations back on a panel that measured 0 of 32. **Growing the ratio costs the name nothing:
+# the `#` is 5px of a 26px jersey block and the block is `min-width`-bounded either way.**
+_CARD_HASH_RATIO = 0.62
+
 
 def _card_text(value) -> str:
     """A card field as text, with NULL meaning ABSENT rather than the string `nan`.
@@ -2608,7 +2619,7 @@ def _leader_card(row, usage=None) -> str:
     # ⚠️ AC-G.32: NO JERSEY STILL RENDERS `—`, and it carries NO `#` — a hash with nothing after
     # it reads as a broken number rather than as an absence. B104 judged the doubled em dash an
     # absence rather than a defect; at this size it is the same em dash without the hash.
-    number = (f"<span style='font-size:.5em;opacity:.65'>#</span>{int(jersey)}"
+    number = (f"<span style='font-size:{_CARD_HASH_RATIO}em;opacity:.65'>#</span>{int(jersey)}"
               if pd.notna(jersey) else "—")
     first, last = _split_name(row.get("player_name"))
     # 🚨 R-753. THREE COLUMNS, AND THE RANK IS GONE. Marc: *"Don't include the rank. The header
@@ -3092,157 +3103,115 @@ def _turnovers(row) -> str:
     return f"{int(total)}" + (f" ({' · '.join(parts)})" if parts else "")
 
 
-# --- R-807: the measure becomes a centred cell with right-aligned values ------------------
+# --- R-847: the measure name goes LEFT, and the table goes hard left ----------------------
 #
-# Marc, v06: *"Bring the metrics in Box Score and Advanced in closer to the middle. Make it a
-# cell and locate it to center, the best you can. Right align the metric value."*
+# **Marc, v08: *"move the measure name to the left, then 2 columns for the metric values. One
+# big table, with a header row for Box Score / Logo Away / Logo Home"*.**
 #
-# 🚨 WHY THE ROW WAS SPREADING, AND IT IS NOT WHAT IT LOOKS LIKE: the LABEL carried `flex:1`,
-# so it absorbed the whole middle column and pushed the two figures out to its edges. Measured
-# in the browser rather than derived — `_POST_GAME_SPLIT`'s middle column is 493px at 1300px
-# with the sidebar open and 733px at 1700px — so the two numbers sat 301px apart on a laptop
-# and 541px apart on a desktop. 🚨 THE PANEL GOT WORSE THE MORE ROOM IT WAS GIVEN, which is why
-# a fixed cell is the fix and a smaller `flex` ratio is not: the distance has to stop depending
-# on the viewport.
+# 🚨 THIS REPLACES THE CENTRED CELL. IT DOES NOT EXTEND IT. `_METRIC_CELL_WIDTH`, the centring
+# `margin:0 auto`, the per-panel value slots R-810 sized and `_METRIC_BOX_WIDTH` are all GONE —
+# a round that left them beside this would put two layout systems in one panel, which is the
+# drift this file has paid for five times. ✅ **Not wasted work and not a criticism of Marc: he
+# is converging by eye and this is what that looks like.**
 #
-# THE ARITHMETIC, measured in the page's own font at 16px root (B104's lesson — a width picked
-# by eye is what that round had to come back and fix):
+# ⚠️ WHAT SURVIVES FROM R-807, BECAUSE IT WAS NEVER ABOUT CENTRING: **both values stay
+# RIGHT-ALIGNED.** A column of figures that lines up on its first digit rather than its units is
+# unreadable, and that is true wherever the column sits.
 #
-#     widest label    "Havoc rate forced by this defense"   at .85rem       188px  → 12rem
-#     widest value    "3 (1 INT · 2 FUM)"  at 1rem/600                      110px
-#                     two-digit worst case "12 (4 INT · 8 FUM)"             118px  → 7.5rem
-#     two gaps        .5rem each                                             16px
-#     the cell's own padding, .4rem a side                                   13px
-#     ---------------------------------------------------------------------------
-#     120 + 8 + 192 + 8 + 120                                  = 448px of content
-#     + padding, and the box is border-box                     = 461px overall
+# ⚠️ AND ONE WIDTH FOR BOTH SECTIONS, NOT R-810's TWO. R-810 sized Box Score and Advanced
+# separately because a CENTRED cell could differ per panel without the centre moving. Marc has
+# now asked for *one big table*, so the two sections' columns must line up with each other down
+# the page — and that means the widest value in EITHER section governs BOTH.
 #
-#     against the middle column at 1300px with the sidebar open  493px
-#     headroom                                                    32px — 6.5%
+# 📊 MEASURED IN THE BROWSER, by the text box rather than the slot:
 #
-# 🚨 AND IT CLIPS INSIDE ITS OWN COLUMN RATHER THAN OVER THE ONE BESIDE IT. R-755, and B104
-# paid for establishing it: a Streamlit column does NOT clip its children, so an element wider
-# than its share DRAWS OVER the next one. `overflow:hidden` is what makes the failure mode
-# "loses its rightmost characters" rather than "corrupts the column beside it" — a page that
-# clips reads as tight, a page that overlaps reads as broken.
-# 🚨 R-810. THE VALUE SLOT IS SIZED PER PANEL NOW, AND MARC'S SENTENCE IS THE REASON.
-# v07: *"Narrow the gap between the measures in left and right columns. Create a cell that's
-# butted up to the center. Only make wide enough to show the widest value in the cell."*
-#
-# ⚠️ AND THE MECHANISM IS NOT OBVIOUS, SO IT IS WRITTEN DOWN: both values are RIGHT-aligned
-# (R-807, and that is what lets a column of figures line up on its units). The AWAY value is
-# therefore already butted against the label; the HOME value is right-aligned against the
-# cell's OUTER edge, so a short figure sits a whole empty slot away from the centre.
-# **Narrowing the slot is what pulls the home number in. Nothing else does.**
-#
-# 📊 MEASURED IN THE BROWSER, every rendered value in both panels, by its text box and not by
-# its slot — `scrollWidth` reports the slot for a flex child that fills it, so a Range over the
-# text node is what actually answers:
-#
-#     `1 (1 INT · 0 FUM)`   110px   ← the widest in Box Score, and it is the TURNOVERS row
+#     `1 (1 INT · 0 FUM)`   110px   ← the widest anywhere, and it is Box Score's TURNOVERS row
 #     `47.1%`                43px   ← the widest in Advanced
-#     `30:51`                38px
-#     `373`                  25px
+#     `Havoc rate forced by this defense`  188px at .85rem  ← the widest measure name
 #
-# 🚨 SO ONE ROW GOVERNS BOX SCORE AND IT IS NOT A METRIC ROW. Turnovers is 110px against 43px
-# for every other value on the page — two and a half times the next widest. **Box Score can
-# only narrow to 110px while that row keeps its format, and Advanced can go to 48px.**
-# ⚠️ Reported rather than worked around: reshaping that row is a look decision and Marc's.
-#
-# ⚠️ PER PANEL, NOT PER ROW. A per-row width would make every row a different shape and the
-# centre line would wander down the page; the LABEL column is fixed, so the centre never moves
-# and only the outer edges differ between the two panels.
-# ⚠️ AND B106's WORST CASE WAS HYPOTHETICAL. It sized this slot for `12 (4 INT · 8 FUM)` at
-# 118px. MEASURED across all 7,348 rows that have a box score: the maxima are **8 turnovers,
-# 7 interceptions, 5 fumbles lost, and NOT ONE ROW reaches double digits in any part.** So the
-# real widest string is `8 (7 INT · 5 FUM)` — single digits throughout, 110px, the same as the
-# `1 (1 INT · 0 FUM)` actually rendered above.
-_METRIC_VALUE_WIDTH = 7.25     # rem — Box Score: 116px against a measured 110px worst case
-_METRIC_VALUE_NARROW = 3.0     # rem — Advanced: 43px of `47.1%`, plus headroom
-_METRIC_LABEL_WIDTH = 12.0     # rem — the longest label in _ADVANCED_ROWS, verbatim
-_METRIC_CELL_GAP = 0.5         # rem, twice
-_METRIC_CELL_PAD = 0.4         # rem, twice
+# 🚨 ONE ROW GOVERNS THE VALUE COLUMN AND IT IS NOT A METRIC ROW — turnovers is 2.5x the next
+# widest value on the page. Reshaping it is a look decision and Marc's; this round measured it.
+_TABLE_VALUE_WIDTH = 7.25      # rem — 116px against a measured 110px worst case
+_TABLE_LABEL_WIDTH = 12.0      # rem — the longest measure name, verbatim
+_TABLE_GAP = 0.5               # rem, between the three columns
+
+# ⚠️ THE MEASURE NAME IS LEFT-ALIGNED AND FIXED-WIDTH, not `flex:1`. A flexing name column is
+# what pushed the two figures apart in the centred layout (R-807); here it would let the value
+# columns drift right as the table column grows, so the two sections would stop lining up at
+# exactly the viewport widths where there is room to notice.
+_TABLE_LABEL_CELL = (f"width:{_TABLE_LABEL_WIDTH}rem;flex:none;opacity:.75;font-size:.85rem;"
+                     f"overflow:hidden;text-overflow:ellipsis")
+_TABLE_VALUE_CELL = (f"width:{_TABLE_VALUE_WIDTH}rem;flex:none;font-weight:600;"
+                     f"text-align:right;overflow:hidden;text-overflow:ellipsis;"
+                     f"white-space:nowrap")
+# 🚨 `overflow:hidden` ON THE ROW — R-755, and this panel has paid for it twice. A Streamlit
+# column does not clip its children, so a row wider than its share draws OVER the column beside
+# it rather than compressing. The table is hard left now and the card columns are to its right,
+# so what it would overrun is the AWAY CARDS.
+_TABLE_ROW = "display:block;max-width:100%;box-sizing:border-box;padding:.15rem 0;overflow:hidden"
+_TABLE_ROW_INNER = f"display:flex;align-items:baseline;gap:{_TABLE_GAP}rem"
 
 
-def _cell_width(value_width: float) -> float:
-    """The cell's outer width for a given value slot — one arithmetic, two panels."""
-    return (2 * value_width + _METRIC_LABEL_WIDTH
-            + 2 * _METRIC_CELL_GAP + 2 * _METRIC_CELL_PAD)
+def _table_band_width() -> float:
+    """ONE band's width — it sits under its own value column, so it IS the value column.
 
-
-_METRIC_CELL_WIDTH = _cell_width(_METRIC_VALUE_WIDTH)                    # 27.8rem = 445px
-
-# 🚨 R-808. THE BAND SPANS THE CELL'S INNER WIDTH, AND THE PROMPT'S 448px NO LONGER HOLDS —
-# WHICH IS A CONSEQUENCE OF PART 1 THAT NEITHER THIS ROUND'S PROMPT NOR B106's REPORT SAW.
-# B106 pinned 448px when the cell was 461px wide for BOTH panels. R-810 sizes the value slot
-# per panel, so the cell is now 445px in Box Score and 325px in Advanced — and the band, which
-# lives inside the cell, moves with it. **One derivation, applied twice, rather than a constant
-# that is right for one panel and wrong for the other.**
-#
-# ✅ AND PART 0's MEASUREMENT SAYS BOTH CLEAR THE BAR. Rendering the real `box()` over the real
-# tightest distribution and counting what survives:
-#
-#     width   box (p25–p75)   labels drawn of 6
-#      60px        10.8px           2      ← a smudge
-#      90px        18.9px           3
-#     120px        27.1px           3
-#     160px        37.9px           4
-#     200px        48.7px           5      ← the most the placement pass ever draws
-#     448px       115.8px           5
-#
-# 🚨 **200px IS THE MINIMUM USEFUL WIDTH**: below it the placement pass starts dropping labels,
-# and by 120px half of them are gone. Advanced's 312px clears it by 56% and Box Score's 432px
-# by 116%. ⚠️ The sixth label is never drawn at any width — see `_metric_band`.
-
-
-def _box_width(value_width: float) -> float:
-    """ONE band's width for a panel whose value slot is `value_width`.
-
-    🚨 HALF THE CELL, NOT THE WHOLE CELL, AND THE FIRST VERSION GOT THIS WRONG IN A WAY ONLY THE
-    RASTER SHOWED. There are TWO bands on a measure row — one per side, because the spread is
-    shared but the bright bar marks THIS team's own figure, and `box()` takes one value. Passing
-    each of them the full cell width emitted `viewBox='0 0 432 41'` into a 216px box, and
-    `box()`'s own `max-width:100%` then scaled it to fit: **every label squashed 2:1 — the
-    string `18` measured FOUR pixels wide.** The SVG was correct, the spec was correct, and the
-    text was unreadable. ⚠️ B105's lesson again: the test asserts the spec, the reader sees the
-    render.
-
-    ⚠️ ONE COPY OF THIS ARITHMETIC. `box()`'s own default is 240px, which is neither panel's
-    number; it is passed explicitly, every time, and never re-derived at the call site.
+    ⚠️ AND IT IS SMALLER THAN EITHER NUMBER B108 SHIPPED. That round sized the bands against a
+    CENTRED cell whose halves were 216px (Box Score) and 148px (Advanced); v08's value columns
+    are 116px, so the band loses room in both sections. **The report carries the measurement
+    against the 200px floor rather than burying it — it is a consequence of the shape Marc
+    asked for, not a choice this round made.**
     """
-    inner = (_cell_width(value_width) - 2 * _METRIC_CELL_PAD) * _REM
-    return (inner - _METRIC_CELL_GAP * _REM) / 2
+    return _TABLE_VALUE_WIDTH * _REM
 
 
-# The browser's root font size, and the only place this file converts rem to px.
 _REM = 16
-_METRIC_BOX_WIDTH = int(_box_width(_METRIC_VALUE_WIDTH))                  # 216px, Box Score
-_METRIC_BOX_NARROW = int(_box_width(_METRIC_VALUE_NARROW))                # 148px, Advanced
+_TABLE_BAND_WIDTH = int(_table_band_width())
 
 
-def _metric_cell_style(value_width: float) -> str:
-    """The cell's own style for a panel. `box-sizing:border-box` is load-bearing: without it the
-    padding is ADDED to the width and the headroom against the column disappears."""
-    return (f"display:flex;align-items:baseline;gap:{_METRIC_CELL_GAP}rem;"
-            f"width:{_cell_width(value_width)}rem;max-width:100%;box-sizing:border-box;"
-            f"margin:0 auto;padding:.15rem {_METRIC_CELL_PAD}rem;overflow:hidden")
+def _table_header(away, home, title: str, colors=None) -> str:
+    """Marc's *"header row for Box Score / Logo Away / Logo Home"*, with a rule beneath it.
 
+    ⚠️ THE TEAM COLOUR IS A RULE AND NOTHING ELSE — `identity.accent_style`'s own docstring
+    calls that *"the only place a team colour is allowed to appear (AC-G.25)"*, and B102
+    measured why: a raw hex behind text is 1.8 luma from its neighbour in dark mode. **A border
+    needs no contrast maths, so there is none in this file.**
 
-_METRIC_CELL = _metric_cell_style(_METRIC_VALUE_WIDTH)
-# 🚨 BOTH VALUES RIGHT-ALIGNED, WHICH IS THE HALF THAT IS NOT SYMMETRY FOR ITS OWN SAKE. The
-# home column used to be left-aligned, so a column of figures down the page lined up on its
-# FIRST digit — `9` and `415` started in the same place. Right-aligned, they line up on the
-# units, which is the only alignment that lets a reader compare two columns of numbers by eye.
+    🚨 AND `light-dark()` RATHER THAN THE ON-LIGHT VARIANT ALONE, BECAUSE THE RASTER CAUGHT THE
+    ALTERNATIVE FAILING. The app's precedent is `identity.text_on(row)`, which defaults to the
+    ON-LIGHT colour — `_drives` says so in its own comment, *"which is what team.py does and the
+    only precedent in the app"*. **Rendered in dark mode, North Alabama's accent came out
+    `rgb(0,0,0)` against a `rgb(14,17,23)` page: invisible.** Not a corner case — **6,338 of
+    34,061 team rows (18.6%) publish `#000000` as their on-light colour, and every one of them
+    has an on-dark variant.**
 
+    ✅ `light-dark()` IS THE TOOL THIS CODEBASE ALREADY USES FOR EXACTLY THIS, and theme.py says
+    why in full: it follows the `color-scheme` property Streamlit sets, where
+    `prefers-color-scheme` answers the OPERATING SYSTEM and gets a reader on a dark Mac with the
+    app in Light the wrong palette (R-547, R-552). **Both variants come straight from
+    `identity.text_on`; nothing here computes a colour.**
 
-def _metric_value_style(value_width: float) -> str:
-    return (f"width:{value_width}rem;flex:none;font-weight:600;"
-            f"text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
-
-
-_METRIC_VALUE_CELL = _metric_value_style(_METRIC_VALUE_WIDTH)
-_METRIC_LABEL_CELL = (f"width:{_METRIC_LABEL_WIDTH}rem;flex:none;text-align:center;"
-                      f"opacity:.65;font-size:.85rem")
+    ⚠️ A TEAM WITH NO SOURCED COLOUR DRAWS `identity.FALLBACK` — neutral grey, same footprint,
+    in both modes. Measured: 10.89% of games have a side with no colour published.
+    """
+    cells = [f"<span style='{_TABLE_LABEL_CELL};font-weight:700;opacity:.9;"
+             f"font-size:.92rem'>{html.escape(title)}</span>"]
+    for side, key in ((away, "away"), (home, "home")):
+        logo = identity.logo_or_monogram(
+            side.get("team_logo_url"), str(side.get("team_display") or "?"), 20)
+        pair = (colors or {}).get(key)
+        accent = (f"light-dark({identity.text_on(pair)}, "
+                  f"{identity.text_on(pair, dark_theme=True)})")
+        cells.append(
+            f"<span style='{_TABLE_VALUE_CELL};font-weight:700;display:flex;"
+            f"align-items:center;justify-content:flex-end;gap:.3rem;"
+            f"border-bottom:3px solid {accent};padding-bottom:.15rem'>{logo}"
+            f"<span style='overflow:hidden;text-overflow:ellipsis'>"
+            f"{html.escape(str(side.get('team_display') or '?'))}</span></span>")
+    return (f"<div style='{_TABLE_ROW}'><div style='{_TABLE_ROW_INNER}'>"
+            + "".join(cells) + "</div></div>"
+            # Marc: *"a horizontal line between the header row and the metrics row"*.
+            + "<div style='border-top:1px solid currentColor;opacity:.25;"
+              "margin:.15rem 0 .35rem'></div>")
 
 
 # 🚨 R-808. THE DISTRIBUTION THE BANDS ARE DRAWN AGAINST — Marc, v07: *"use it to show the
@@ -3300,6 +3269,9 @@ def _metric_band(row, away_value, home_value, width, dp) -> str:
     which is the only thing Marc asked the bright bar to show. One shared band could carry only
     one of the two marks, and the panel exists to compare two sides.
 
+    ⚠️ ONE BAND PER VALUE COLUMN SINCE R-847 — it sits directly under its own figure, so its
+    width IS the value column's. The centred cell it used to split in half is gone.
+
     ⚠️ THE WHISKERS DRAW `whisker_low`/`whisker_high`, NOT `min_value`/`max_value`, AND BOTH ARE
     PUBLISHED. v07 said *"measure the min/max"* and v06 said *"label upper/lower boundaries"* —
     they are different columns and they are different numbers. **The fences are drawn, because
@@ -3310,10 +3282,14 @@ def _metric_band(row, away_value, home_value, width, dp) -> str:
     """
     if row is None:
         return ""
-    return (f"<div style='display:flex;gap:{_METRIC_CELL_GAP}rem;margin-top:.1rem'>"
+    # ⚠️ THE LABEL COLUMN IS SPANNED BY AN EMPTY SPACER so each band starts exactly under its own
+    # figure. Without it the two bands would begin at the row's left edge and sit under the
+    # measure NAME, pointing at the wrong column.
+    return (f"<div style='{_TABLE_ROW_INNER};margin-top:.05rem'>"
+            f"<span style='{_TABLE_LABEL_CELL}'></span>"
             + "".join(
-                f"<div style='flex:1;min-width:0'>"
-                f"{distribution.box(row, value=v, width=int(width), dp=dp)}</div>"
+                f"<span style='width:{_TABLE_VALUE_WIDTH}rem;flex:none;min-width:0'>"
+                f"{distribution.box(row, value=v, width=int(width), dp=dp)}</span>"
                 for v in (away_value, home_value))
             + "</div>")
 
@@ -3322,7 +3298,6 @@ def _comparison(away, home, rows, glossary=None, spread=None,
                 value_width=None, dp_band=None) -> str:
     """One row per statistic, one column per side. Away left, home right — the same
     convention the scoreline uses and the reason that layout reads as a matchup."""
-    value_width = _METRIC_VALUE_WIDTH if value_width is None else value_width
     lines = []
     for label, field, dp in rows:
         hint = (glossary or {}).get(field)
@@ -3344,39 +3319,30 @@ def _comparison(away, home, rows, glossary=None, spread=None,
         # string would be drawing from text.
         lines.append(_metric_cell(
             _figure(away, field, dp), marked, _figure(home, field, dp),
-            value_width=value_width,
             band=_metric_band((spread or {}).get(field), away.get(field), home.get(field),
-                              _box_width(value_width),
+                              _TABLE_BAND_WIDTH,
                               dp if dp_band is None else dp_band)))
     return "".join(lines)
 
 
-def _metric_cell(away_value: str, label: str, home_value: str,
-                 value_width=None, band: str = "") -> str:
-    """One measure, as a cell: fixed width, centred in its column, clipping its own overflow.
+def _metric_cell(away_value: str, label: str, home_value: str, band: str = "") -> str:
+    """One measure, as a table row: NAME LEFT, then the two figures (R-847).
 
-    R-807, and the whole point is that nothing here is proportional — see `_metric_cell_style`
-    for the arithmetic and for why a `flex` ratio cannot answer this.
+    ⚠️ AWAY BEFORE HOME, AND IT IS ONE ORDERED PAIR RATHER THAN TWO ARGUMENTS USED TWICE — the
+    away-over-home law this site follows everywhere (R-522). B082 and B083 both proved a
+    presence assertion cannot see a left/right swap, so the test asserts the ORDER.
 
-    ⚠️ THE BAND GOES INSIDE THE CELL, NOT BESIDE IT (R-808), so it inherits the cell's own
-    `overflow:hidden` and cannot draw over the column beside it — R-755, which this panel has
-    now paid for twice.
+    ⚠️ THE BAND GOES INSIDE THE ROW, so it inherits `overflow:hidden` and cannot draw over the
+    card columns now sitting to the table's right — R-755, which this panel has paid for twice.
     """
-    value_width = _METRIC_VALUE_WIDTH if value_width is None else value_width
-    value_style = _metric_value_style(value_width)
-    row = (f"<div style='display:flex;align-items:baseline;"
-           f"gap:{_METRIC_CELL_GAP}rem'>"
-           f"<span style='{value_style}'>{away_value}</span>"
-           f"<span style='{_METRIC_LABEL_CELL}'>{label}</span>"
-           f"<span style='{value_style}'>{home_value}</span></div>")
-    # ⚠️ `align-items` GOES TO `stretch` WHEN THERE IS A BAND: the cell is a column then, and a
-    # baseline alignment on a column would push the band's box off the text baseline.
-    outer = _metric_cell_style(value_width).replace(
-        "display:flex;align-items:baseline", "display:block")
-    return f"<div data-cfdb='metric-cell' style='{outer}'>{row}{band}</div>"
+    row = (f"<div style='{_TABLE_ROW_INNER}'>"
+           f"<span style='{_TABLE_LABEL_CELL}'>{label}</span>"
+           f"<span style='{_TABLE_VALUE_CELL}'>{away_value}</span>"
+           f"<span style='{_TABLE_VALUE_CELL}'>{home_value}</span></div>")
+    return f"<div data-cfdb='metric-cell' style='{_TABLE_ROW}'>{row}{band}</div>"
 
 
-def _custom_row(away, home, label, renderer, value_width=None) -> str:
+def _custom_row(away, home, label, renderer) -> str:
     """A measure the view publishes no distribution for — a fraction, a composite, a clock.
 
     🚨 NO BAND, AND THAT IS AC-G.11 RATHER THAN AN OVERSIGHT. `box()`'s own placeholder says
@@ -3385,28 +3351,7 @@ def _custom_row(away, home, label, renderer, value_width=None) -> str:
     possession is `30:51`. **They are not scalars, so there is nothing to take a percentile of —
     ever — and a placeholder promising one later would be the wrong absence.**
     """
-    return _metric_cell(renderer(away), label, renderer(home), value_width=value_width)
-
-
-def _side_heading(away, home, value_width=None) -> str:
-    """The two team names, over the cell they head rather than over the whole column.
-
-    ⚠️ THE HEADING TAKES THE CELL'S GEOMETRY OR IT STOPS BEING A HEADING. R-807 pulls the
-    figures into a 28.8rem cell; a heading left spanning the full column would sit 120px
-    outboard of its own numbers at 1700px and read as a caption for something else.
-    """
-    parts = []
-    for side, align in ((away, "flex-start"), (home, "flex-end")):
-        logo = identity.logo_or_monogram(
-            side.get("team_logo_url"), str(side.get("team_display") or "?"), 22)
-        parts.append(f"<div style='flex:1;min-width:0;display:flex;align-items:center;"
-                     f"gap:.4rem;justify-content:{align}'>{logo}"
-                     f"<span style='font-weight:600;overflow:hidden;text-overflow:ellipsis;"
-                     f"white-space:nowrap'>{side.get('team_display') or '?'}</span>"
-                     f"</div>")
-    style = _metric_cell_style(_METRIC_VALUE_WIDTH if value_width is None else value_width)
-    return (f"<div style='{style};align-items:center;margin-bottom:.3rem'>"
-            + parts[0] + parts[1] + "</div>")
+    return _metric_cell(renderer(away), label, renderer(home))
 
 
 # The first season any of the three after-tab subjects exists at all. Drives, box scores and
@@ -3496,21 +3441,129 @@ _POST_GAME_LEADER_COLUMNS = """
 # have no stated depth, so `("passing", 2)` contradicts nothing; `("rushing", 2)` contradicts
 # him. ⚠️ **It is one literal to put back, and B107's report puts the trade in front of him with
 # these numbers rather than deciding it in a comment.**
-_POST_GAME_CARDS = (("total", 1), ("rushing", 2), ("passing", 2))
+# 🚨 R-848. GROUPED, WITH A HEADER OVER EACH GROUP, AND THE DEPTH IS MARC'S OWN v08 NUMBER.
+# *"grouped with a header above each section: Quarterback (2, if 2 QBS played…), Rushing (3),
+# Receiving (3, in the Advanced section)"*
+#
+# ⚠️ THIS REOPENS A DECISION HE MADE AN HOUR EARLIER — R-840, *keep 2 and 2 as shipped*, with
+# the height trade in front of him. **v08 supersedes it on his word; it is not new work being
+# smuggled in.**
+#
+# 🚨 AND RECEIVING-IN-ADVANCED-ONLY IS THE SPLIT COWORK EXPLICITLY REJECTED IN B107's PROMPT —
+# *"nothing in the data makes that division mean anything"*. ✅ **Marc overruled it and his
+# reason beats the objection: Cowork argued about MEANING, he is arguing about FIT.** Eight
+# cards beside one panel is a different shape from five beside each of two.
+#
+# ⚠️ HOW *"Receiving (3, in the Advanced section)"* IS READ, AND IT IS ONE LINE TO CHANGE:
+# **the quarterbacks and rushers stay in BOTH sections, and receiving is ADDED in Advanced.**
+# The parenthetical places receiving; it does not say the others move. So Box Score draws five
+# and Advanced draws eight, which is the "EIGHT per side" the round was briefed on.
+_CARD_GROUPS = {
+    "box": (("Quarterback", "total", 2), ("Rushing", "rushing", 3)),
+    "advanced": (("Quarterback", "total", 2), ("Rushing", "rushing", 3),
+                 ("Receiving", "passing", 3)),
+}
 
-# ⚠️ AWAY LEFT, TABLE MIDDLE, HOME RIGHT — the away-over-home law this site follows everywhere
-# (R-522, spec §0), and the only arrangement in which a reader can tell whose card is whose
-# without reading the name. 🚨 B098's MIRROR DOES NOT TRANSFER HERE: that flanked two charts,
-# one per side; this flanks ONE TABLE that carries both sides, so the cards go outside it
-# rather than beside their own half.
-_POST_GAME_SPLIT = (1, 3, 1)
+# 🚨 R-849. THE GROUPS A MISSING PLAYER IS RESERVED IN, AND IT IS SCOPED RATHER THAN GENERAL.
+#
+# **Marc: *"Quarterback (2, if 2 QBS played. If only 1 QB played reserve space for the second on
+# with a blank, so home/away cards are aligned)"*.**
+#
+# 🚨 THIS REVERSES AC-G.11, B103's RULING AND B107's OWN `test_a_SHORT_ROW_is_drawn_SHORT_and_
+# reserves_no_hole` — AND HE IS NOT BEING INCONSISTENT. **R-847 changed what the right answer
+# is.** While the cards FLANKED the table, a short away column had nothing to line up against.
+# **Side by side, an unmatched slot puts every row below it out of register between the teams.**
+#
+# ✅ AND IT KEEPS BOTH RULES, BECAUSE A RESERVED SLOT IS NOT A HOLE IF IT SAYS IT IS RESERVED.
+# An empty card reading *no second quarterback* is a statement; an empty box with nothing in it
+# is the hole AC-G.11 forbids. **Drawn, never left as a gap.**
+#
+# 📊 AND IT EARNS ITS KEEP — MEASURED BEFORE IT WAS BUILT (§2.5):
+#     3,990 of 6,736 team-games — 59.2% — have exactly ONE quarterback in the `total` panel
+#     🚨 1,812 of 3,520 games — 51.5% — have the two sides carrying DIFFERENT counts
+# **So more than half of all games are the case this exists for.**
+#
+# ⚠️ QUARTERBACK ONLY. Rushing is short 6.4% of the time and receiving 0.7%, and those groups
+# sit BELOW the quarterbacks — a short rushing group misaligns nothing under it in the other
+# column, because receiving is the last group in the only section that has it. **A reserved slot
+# there would be a hole bought for no alignment.**
+_RESERVED_GROUPS = ("Quarterback",)
+
+# 🚨 THE RESERVED CARD IS A REAL CARD'S HEIGHT, AND THE FIRST VERSION WAS NOT — WHICH MADE THE
+# WHOLE FEATURE USELESS. A `min-height:3.2rem` slot measured 51px against a real card's 84px, so
+# reserving kept the two columns' card COUNTS in step and left their group headers **33px out of
+# register** — the exact misalignment R-849 exists to remove, moved down a level. **Only the
+# raster showed it: every card was present and the count was right.**
+#
+# 📊 84px MEASURED IN THE BROWSER at 1300px with the sidebar open, and it is uniform — a card's
+# height is its jersey block plus its KPI row, and neither varies with the name (nowrap, and
+# ellipsised since R-745). `box-sizing:border-box` so the border and padding sit INSIDE it.
+_RESERVED_CARD_HEIGHT = 5.25   # rem = 84px
+
+# 🚨 R-847. TABLE HARD LEFT, THEN AWAY CARDS, THEN HOME CARDS. Marc, v08: *"Move the Box Score
+# and Advanced tables all the way to the left. Move the Away Player Cards to be next (left) of
+# the Home Player cards."*
+#
+# ⚠️ AWAY BEFORE HOME SURVIVES (R-522, spec §0). What ENDS is the MIRROR — `order` used to be
+# reversed per side so the cards flanked the table, and B105 measured that as the reason one
+# overflow landed on a different neighbour on each side. **Both card columns are on the same
+# side now, so there is no mirror left to get the wrong way round.**
+#
+# 📊 THE RATIO IS THE OLD ONE RE-EXPRESSED, NOT A NEW GUESS. B108 measured the three columns at
+# 1300px with the sidebar open: **table 493px, cards 157px each.** The same three widths in the
+# new order are 3.14 : 1 : 1, so the table keeps the width it had and the cards keep theirs —
+# **only their positions move, which is exactly what Marc asked for.**
+#
+# 🚨 ONE LIST DECIDES BOTH THE ORDER AND THE WIDTH, WHICH IS B098's PATTERN AND THE REASON A
+# TEST CAN BE TRUSTED HERE. `st.columns` returns its columns LEFT TO RIGHT, so zipping them
+# against this list makes the visual position and the width THE SAME FACT. **There is no way to
+# move a block without moving its width, and therefore no way for a passing positional test to
+# describe a layout that is not on the screen.**
+_POST_GAME_LAYOUT = (("table", 3.14), ("away", 1.0), ("home", 1.0))
+_POST_GAME_SPLIT = tuple(width for _slot, width in _POST_GAME_LAYOUT)
 
 
-def _post_game_flank(left, right, leaders, away, home) -> None:
-    """Both sides' cards, into the columns either side of a panel that holds both teams."""
-    for column, side in ((left, away), (right, home)):
-        column.markdown(_post_game_card_column(leaders, int(side["team_id"])),
-                        unsafe_allow_html=True)
+def _post_game_columns():
+    """The three columns, keyed by slot — table, away cards, home cards, left to right."""
+    return dict(zip((slot for slot, _w in _POST_GAME_LAYOUT),
+                    st.columns(_POST_GAME_SPLIT)))
+
+
+def _post_game_flank(away_col, home_col, leaders, away, home, section: str) -> None:
+    """Both sides' cards, side by side to the RIGHT of the table (R-847).
+
+    🚨 AWAY THEN HOME, AND THE ORDER IS THE PAGE LAW (R-522) RATHER THAN A HABIT. It used to be
+    a MIRROR — the cards flanked the table, so away sat left of it and home right of it — and
+    B105 measured that mirror as the reason a 59px overflow landed on a different neighbour on
+    each side. **Both columns are on the same side now, so the mirror is gone; the ordering
+    survives it.** ⚠️ B082 and B083 both proved a presence assertion cannot see a left/right
+    swap, so the test asserts the ORDER of the two blocks.
+    """
+    for column, side in ((away_col, away), (home_col, home)):
+        column.markdown(
+            _post_game_card_column(leaders, int(side["team_id"]), section),
+            unsafe_allow_html=True)
+
+
+def _post_game_colors(game_id: int) -> dict:
+    """The two teams' contrast-safe colours, for the table header's accent (R-848).
+
+    ⚠️ A SEPARATE READ BECAUSE `srv_game_team` HAS NO COLOUR COLUMN — measured, not assumed.
+    `srv_game` publishes `away_color_on_light` / `home_color_on_dark` and friends, which is the
+    pair `row_for_side` already renames for `identity.text_on`. **No new colour path, and no
+    contrast maths anywhere in this file.**
+    """
+    df = query("""
+        select away_color_on_light, away_color_on_dark,
+               home_color_on_light, home_color_on_dark
+        from srv_game
+        where game_id = :game_id
+        limit 1
+    """, {"game_id": game_id})
+    if df.empty:
+        return {}
+    row = df.iloc[0]
+    return {side: row_for_side(row, side) for side in ("away", "home")}
 
 
 def _post_game_leaders(game_id: int) -> dict:
@@ -3538,23 +3591,70 @@ def _post_game_leaders(game_id: int) -> dict:
     return out
 
 
-def _post_game_card_column(leaders, team_id) -> str:
-    """One side's cards: the quarterback, then the rushers, in that order.
+def _reserved_card(what: str) -> str:
+    """A slot held open for a player who does not exist, SAYING SO (R-849).
 
-    ⚠️ A SHORT ROW IS DRAWN SHORT (AC-G.11). A120 measured a third rusher missing 6.6% of the
-    time; a missing card is not an empty card and an empty card is not an em dash, so nothing
-    is reserved for the absence — the column simply ends.
+    🚨 THIS IS THE WHOLE DIFFERENCE BETWEEN A RESERVED SLOT AND A HOLE. AC-G.11 forbids an
+    empty box that a reader cannot distinguish from missing data; it does not forbid a box that
+    NAMES its own emptiness. The card keeps the row register between the two columns AND tells
+    the reader why it is blank — the same border and the same footprint as a real card, so
+    nothing shifts, and a sentence inside it so nothing is mysterious.
     """
-    cards = []
-    for panel, wanted in _POST_GAME_CARDS:
-        cards.extend((leaders or {}).get((int(team_id), panel), [])[:wanted])
-    if not cards:
+    return (f"<div style='border:1px dashed rgba(128,128,128,.28);border-radius:6px;"
+            f"padding:.28rem .45rem;margin-bottom:.3rem;box-sizing:border-box;"
+            f"height:{_RESERVED_CARD_HEIGHT}rem;display:flex;align-items:center'>"
+            f"<span style='font-size:.72rem;opacity:.5;line-height:1.25'>{what}</span></div>")
+
+
+def _card_group_header(title: str) -> str:
+    """The small heading over one group of cards — Marc's *"a header above each section"*."""
+    return (f"<div style='font-size:.66rem;font-weight:700;letter-spacing:.05em;"
+            f"text-transform:uppercase;opacity:.5;margin:.45rem 0 .2rem'>"
+            f"{html.escape(title)}</div>")
+
+
+def _post_game_card_column(leaders, team_id, section: str = "box") -> str:
+    """One side's cards, GROUPED, with a header over each group (R-848).
+
+    ⚠️ TWO ABSENCES, AND THEY ARE DIFFERENT SENTENCES (AC-G.11):
+
+      · the QUARTERBACK group reserves its second slot and says so — R-849, because the two
+        card columns now sit side by side and an unmatched slot pushes every row below it out
+        of register. Measured: 51.5% of games have the sides carrying different QB counts.
+      · RUSHING and RECEIVING are drawn SHORT, exactly as B107 shipped. They are the LAST
+        groups in their column, so a short one misaligns nothing beneath it, and a reserved
+        slot there would be a hole bought for no alignment at all.
+    """
+    # 🚨 A SIDE WE HOLD NOTHING FOR STILL SAYS SO, AND THE RESERVED SLOT MUST NOT SWALLOW THAT.
+    # R-849 reserves the second quarterback so the two columns stay in register — but a side
+    # with NO leaders in any group is not a side missing one player, it is a side we hold
+    # nothing for. **Reserving two blank quarterbacks there would answer a different question
+    # from the one the reader is asking**, and it is the exact AC-G.11 confusion the reserved
+    # card exists to avoid. The sentence wins whenever every group is empty.
+    if not any((leaders or {}).get((int(team_id), panel))
+               for _title, panel, _wanted in _CARD_GROUPS[section]):
         return ("<div style='font-size:.72rem;opacity:.45;padding:.3rem 0'>"
                 "No player leaders held for this side.</div>")
-    # ⚠️ `usage=None` ON PURPOSE: R-694's dots count EARLIER games, which is a preview question.
-    # `_card_dots` returns nothing for a card with no usage, so the post-game card is the same
-    # card without them rather than a second implementation of one.
-    return _leader_block(cards)
+    blocks = []
+    for title, panel, wanted in _CARD_GROUPS[section]:
+        rows = (leaders or {}).get((int(team_id), panel), [])[:wanted]
+        if not rows and title not in _RESERVED_GROUPS:
+            continue
+        # ⚠️ `usage=None` ON PURPOSE: R-694's dots count EARLIER games, which is a preview
+        # question. `_card_dots` returns nothing for a card with no usage, so the post-game
+        # card is the same card without them rather than a second implementation of one.
+        drawn = "".join(_leader_card(r) for r in rows)
+        if title in _RESERVED_GROUPS:
+            drawn += "".join(
+                _reserved_card(f"No {_ORDINALS[index]} {title.lower()} played")
+                for index in range(len(rows), wanted))
+        blocks.append(_card_group_header(title) + drawn)
+    return "".join(blocks)
+
+
+# The word a reserved slot uses for the place it is holding. ⚠️ Only as deep as the deepest
+# reserved group, so a list that runs out is a group that reserves more than it says it does.
+_ORDINALS = ("first", "second", "third")
 
 
 def _post_game(game_id, season) -> None:
@@ -3613,10 +3713,15 @@ def _post_game(game_id, season) -> None:
         # distribution is keyed by the week, and the game knows its own.
         spread = _metric_distribution(away.get("season"), away.get("season_type"),
                                       away.get("week"))
-        left, middle, right = st.columns(_POST_GAME_SPLIT)
-        _post_game_flank(left, right, leaders, away, home)
-        middle.markdown(
-            _side_heading(away, home)
+        # 🚨 R-847. THE COLOURS ARE READ HERE AND NOWHERE ELSE. `srv_game_team` carries NO
+        # colour column — measured — so the header's accent comes from `srv_game`, whose
+        # `away_color_on_light` / `home_color_on_dark` pairs are exactly the shape
+        # `row_for_side` was already written for. ⚠️ ONE bounded read, cached by `query`.
+        colors = _post_game_colors(game_id)
+        slots = _post_game_columns()
+        _post_game_flank(slots["away"], slots["home"], leaders, away, home, "box")
+        slots["table"].markdown(
+            _table_header(away, home, "Box score", colors)
             # 🚨 `dp=0` FOR BOX SCORE, AND IT IS THE PANEL'S OWN NATURE RATHER THAN A PREFERENCE:
             # all six measures are integer counts — first downs, yards, attempts. At `box()`'s
             # default of 1 every label reads `22.0`, `5.0`, `38.0`, which is precision the
@@ -3639,7 +3744,7 @@ def _post_game(game_id, season) -> None:
         # front of a reader; dividing it into 31:46 is arithmetic in the page. A080 published
         # possession_display, the same answer srv_drive gave for durations, so the row exists
         # now and nothing here computes it. Sanity check on 401752665: 29:38 + 30:22 = 60:00.
-        middle.markdown(
+        slots["table"].markdown(
             _custom_row(away, home, "Possession",
                         lambda r: r.get("possession_display") or fmt.EM_DASH),
             unsafe_allow_html=True)
@@ -3661,14 +3766,18 @@ def _post_game(game_id, season) -> None:
         rows = [r for r in _ADVANCED_ROWS
                 if r[1] != "defense_havoc_rate" or all(bool(s.get("has_havoc"))
                                                        for s in advanced)]
-        # R-738. ⚠️ THE SAME CAST FLANKS BOTH PANELS, AND THAT IS A DECISION RATHER THAN A
-        # SHORTCUT. Marc named ONE card list against TWO panels; these are the same game's
-        # leaders, and a reader scrolling from the box score to the advanced block should not
-        # find the cast has changed under him.
-        adv_left, adv_middle, adv_right = st.columns(_POST_GAME_SPLIT)
-        _post_game_flank(adv_left, adv_right, leaders, away, home)
-        adv_middle.markdown(
-            # 🚨 `dp=2` FOR ADVANCED, AND `_METRIC_VALUE_NARROW` WITH IT (R-810, R-829).
+        # 🚨 R-848. THE CAST IS NO LONGER THE SAME IN BOTH SECTIONS. R-738 kept it identical so
+        # a reader scrolling between the panels would not find it changed; Marc's v08 puts
+        # RECEIVING in Advanced only, and his reason is FIT rather than meaning — eight cards
+        # beside one panel is a different shape from five beside each of two.
+        adv = _post_game_columns()
+        _post_game_flank(adv["away"], adv["home"], leaders, away, home, "advanced")
+        adv["table"].markdown(
+            # 🚨 `dp=2` FOR ADVANCED (R-829). ⚠️ THE `_METRIC_VALUE_NARROW` THIS COMMENT USED
+            # TO NAME IS GONE WITH THE CENTRED CELL — R-810 sized the two panels' value slots
+            # separately because a centred cell could differ per panel without the centre
+            # moving; v08's *one big table* needs the two sections' columns to line up with
+            # each other, so one width serves both.
             # ⚠️ ELEVEN OF THESE TWELVE ARE RATES BETWEEN 0 AND 1. At `box()`'s default of 1 the
             # quartiles COLLAPSE — a real week-1 passing-downs row goes p25 0.240 → `0.2` and
             # p75 0.433 → `0.4`, so a box spanning a fifth of the scale is labelled as if it
@@ -3680,9 +3789,8 @@ def _post_game(game_id, season) -> None:
             # display string (`47.1%`) whose `dp` has nothing to do with the share the
             # distribution is published in. **Per panel is a rule; per row would be a rule with
             # six exceptions.**
-            _side_heading(away, home, value_width=_METRIC_VALUE_NARROW)
-            + _comparison(away, home, rows, glossary, spread=spread,
-                          value_width=_METRIC_VALUE_NARROW, dp_band=2),
+            _table_header(away, home, "Advanced", colors)
+            + _comparison(away, home, rows, glossary, spread=spread, dp_band=2),
             unsafe_allow_html=True)
 
         missing = [label for label, field, _dp in rows if field not in glossary]
