@@ -1438,6 +1438,24 @@ def _delta_for(deltas, column):
     return deltas.get(column)
 
 
+# 🚨 R-755. WHAT THIS ROW ACTUALLY NEEDS, MEASURED RATHER THAN PICKED BY EYE.
+#
+# At the widths B103 shipped, one direction row is: label + gained + the word "gained" + "vs" +
+# allowed + the word "allowed" + the delta chip. At the previous sizes that came to roughly
+#
+#     72 + 80 + 44 + 18 + 80 + 50 + 58  =  402px of content
+#     + six .5rem gaps and the block's .7rem padding  ≈  490px
+#
+# ⚠️ AND A HALF AT 1300px WITH THE SIDEBAR OPEN IS ABOUT 479px OF USABLE WIDTH. The row was two
+# per cent too wide, and a proportional column cannot make a fixed element smaller — R-750's
+# lesson, which this panel has now paid for twice.
+#
+# ✅ These bring the natural width to about 420px, which clears 1300px with headroom rather
+# than by a hair. ⚠️ They are a FLOOR on legibility, not a target: the numbers are per-game
+# averages to one decimal, so `_ROW_NUMBER` has to hold "154.4" at 600 weight.
+_ROW_LABEL, _ROW_NUMBER, _ROW_CHIP = 3.9, 4.2, 3.2
+
+
 def _delta_chip(value) -> str:
     """R-686. This side's offense against what the opponent's defense has conceded.
 
@@ -1452,7 +1470,7 @@ def _delta_chip(value) -> str:
     """
     if value is None or pd.isna(value):
         return ""
-    return (f"<span style='min-width:3.6rem;text-align:right;font-size:.8rem;"
+    return (f"<span style='min-width:{_ROW_CHIP}rem;text-align:right;font-size:.8rem;"
             f"font-weight:600'>{_signed_delta(value)}</span>")
 
 
@@ -1491,20 +1509,27 @@ def _yardage_direction(offense, defense, deltas=None) -> str:
     for label, for_column, allowed_column, delta_column, outlook_column in _YARDAGE_DIMENSIONS:
         subdued = " opacity:.75;font-size:.9rem;" if label == "Total" else ""
         lines.append(
-            f"<div style='display:flex;align-items:baseline;gap:.5rem;{subdued}"
-            f"padding:.15rem 0'>"
-            f"<span style='min-width:4.5rem;opacity:.6;font-size:.8rem'>{label}</span>"
-            f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
+            f"<div style='display:flex;align-items:baseline;gap:.35rem;{subdued}"
+            f"padding:.15rem 0;white-space:nowrap'>"
+            f"<span style='min-width:{_ROW_LABEL}rem;opacity:.6;font-size:.8rem'>{label}</span>"
+            f"<span style='min-width:{_ROW_NUMBER}rem;font-weight:600;text-align:right'>"
             f"{fmt.number(offense.get(for_column), for_column, dp=1)}</span>"
             f"<span style='opacity:.45;font-size:.8rem'>gained</span>"
-            f"<span style='opacity:.35;margin:0 .2rem'>vs</span>"
-            f"<span style='min-width:5rem;font-weight:600;text-align:right'>"
+            f"<span style='opacity:.35'>vs</span>"
+            f"<span style='min-width:{_ROW_NUMBER}rem;font-weight:600;text-align:right'>"
             f"{fmt.number(defense.get(allowed_column), allowed_column, dp=1)}</span>"
             f"<span style='opacity:.45;font-size:.8rem'>allowed</span>"
             f"{_delta_chip(_delta_for(deltas, delta_column))}</div>")
+    # 🚨 R-755. `overflow:hidden` IS THE ANSWER TO "WHAT DOES IT DO WHEN IT CANNOT HAVE ITS
+    # WIDTH", AND IT IS NOT A WORKAROUND. A Streamlit column does not clip its children, so a
+    # row wider than its half does not compress — it DRAWS OVER THE NEXT HALF. At 1300px with
+    # the sidebar open that put `+214.0` on top of the home side's `Rushing`, which reads as a
+    # broken page rather than a tight one.
+    # ✅ Clipping is the honest degradation: the row loses its rightmost characters inside its
+    # own half instead of corrupting the half beside it.
     return (
         f"<div style='border-left:4px solid {accent};padding:.4rem .7rem;"
-        f"margin-bottom:.5rem'>"
+        f"margin-bottom:.5rem;overflow:hidden'>"
         f"<div style='display:flex;align-items:center;gap:.45rem;margin-bottom:.2rem'>"
         f"{logo}<span style='font-weight:600'>{offense.get('team_display') or '?'}</span>"
         f"<span style='opacity:.6;font-size:.85rem'>offense against "
@@ -1828,12 +1853,33 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     return chart.properties(width=_CHART_SIDE, height=_CHART_SIDE, autosize=_AUTOSIZE)
 
 
-# Where the annotation sits inside the plot, in SCREEN pixels from the plot's top-left.
+# Where the annotation sits inside the plot, in SCREEN pixels.
 # ⚠️ `value` RATHER THAN A DATA COORDINATE ON PURPOSE: the mark can be anywhere in the frame, so
 # an annotation anchored to the data would move with it and collide with the band, the median
 # rules or an edge — which is B100's reason for putting the block beside the chart in the first
 # place. A fixed corner cannot chase the point.
-_ANNOTATION_X, _ANNOTATION_LINE, _ANNOTATION_SIZE = 4, 11, 8.5
+#
+# 🚨 R-759. TOP RIGHT, AND BIGGER, AND THE SIZE INSTRUCTION REVERSES v04's. Marc said *"smaller,
+# similar to the axis labels, maybe a little smaller"*, B103 shipped 8.5, and he then said
+# *"increase font substantially"*. ✅ **8.5 IS THE FLOOR NOW, NOT THE TARGET** — it went past
+# readable, and citing v04 to keep it small would be answering the wrong instruction.
+# **11 is the axis labels' own size**, which is the reference he reached for twice.
+#
+# 🚨 AND THE CORNER IS A MEASURED RISK RATHER THAN A FREE MOVE. `y` is GAINED and `x` is
+# ALLOWED, so the top right is where a strong offence meets a generous defence — a real mark
+# position. Measured on 2026 week 2: **15 of 570 rushing marks — 2.6% — land in that quadrant**,
+# where the annotation now sits over them. ⚠️ Top LEFT was never argued as a choice; the old
+# comment reasoned about screen pixels versus data, not about which corner.
+#
+# ⚠️ `alt.value()` POSITIONS FROM THE LEFT, so a right-anchored block is the plot width minus a
+# margin — and `mark_image` does not anchor like `mark_text`, so the logos carry their own
+# offset rather than inheriting the text's.
+_ANNOTATION_RIGHT = _CHART_SIDE - 6
+_ANNOTATION_TOP, _ANNOTATION_LINE, _ANNOTATION_SIZE = 4, 14, 11
+# How wide the block is allowed to be, measured from its right edge. `Allowed  333.0` at 11px is
+# about 84px; 104 leaves room for the logo and a longer metric name without reaching the plot's
+# middle, where the band sits.
+_ANNOTATION_BLOCK = 104
 
 
 def _annotation_layers(team, opponent, label, for_column, allowed_column, delta) -> list:
@@ -1855,9 +1901,10 @@ def _annotation_layers(team, opponent, label, for_column, allowed_column, delta)
     established that the name must appear when the logo cannot.
     """
     layers = []
+    logo_x = _ANNOTATION_RIGHT - _ANNOTATION_BLOCK
     for index, (side, caption, column) in enumerate(
             ((team, label, for_column), (opponent, "Allowed", allowed_column))):
-        y = _ANNOTATION_X + index * _ANNOTATION_LINE
+        y = _ANNOTATION_TOP + index * _ANNOTATION_LINE
         logo = side.get("logo_url")
         missing = (logo is None or (isinstance(logo, float) and pd.isna(logo))
                    or not str(logo).strip())
@@ -1865,27 +1912,32 @@ def _annotation_layers(team, opponent, label, for_column, allowed_column, delta)
             layers.append(alt.Chart(pd.DataFrame([
                 {"t": str(side.get("team_display") or "?")[:10]}])).mark_text(
                     align="left", baseline="top", fontSize=_ANNOTATION_SIZE, opacity=0.75
-                ).encode(x=alt.value(_ANNOTATION_X), y=alt.value(y), text="t:N"))
+                ).encode(x=alt.value(logo_x), y=alt.value(y), text="t:N"))
         else:
             layers.append(alt.Chart(pd.DataFrame([{"u": str(logo)}])).mark_image(
-                width=9, height=9, align="left", baseline="top"
-            ).encode(x=alt.value(_ANNOTATION_X), y=alt.value(y), url="u:N"))
+                width=12, height=12, align="left", baseline="top"
+            ).encode(x=alt.value(logo_x), y=alt.value(y), url="u:N"))
         layers.append(alt.Chart(pd.DataFrame([
             {"t": f"{caption}  {fmt.number(side.get(column), column, dp=1)}"}])).mark_text(
-                align="left", baseline="top", fontSize=_ANNOTATION_SIZE, opacity=0.8
-            ).encode(x=alt.value(_ANNOTATION_X + 12), y=alt.value(y), text="t:N"))
+                align="right", baseline="top", fontSize=_ANNOTATION_SIZE, opacity=0.85
+            ).encode(x=alt.value(_ANNOTATION_RIGHT), y=alt.value(y), text="t:N"))
     # ⚠️ THE RULE A WRITTEN SUBTRACTION HAS. Marc, v02.2: *"add a line below the Opponent metric
     # (like a math problem)"* — it is what makes the three numbers read as one sum rather than a
     # list, and moving the block into the spec dropped it once before this was caught.
-    rule_y = _ANNOTATION_X + 2 * _ANNOTATION_LINE - 2
-    layers.append(alt.Chart(pd.DataFrame([{"a": 0}])).mark_rule(
-        opacity=0.45, strokeWidth=1
-    ).encode(x=alt.value(_ANNOTATION_X + 11), x2=alt.value(_ANNOTATION_X + 74),
-             y=alt.value(rule_y)))
+    # ⚠️ THE RULE NEEDED CONTRAST AND CLEARANCE, AND THE RENDER IS WHAT SAID SO. At 45% opacity
+    # with three pixels under the line above it, it was invisible on the dark theme — a rule
+    # nobody can see is the same as the list-of-three-numbers the rule exists to prevent.
+    rule_y = _ANNOTATION_TOP + 2 * _ANNOTATION_LINE + 1
+    # 🚨 A `mark_rect`, NOT A `mark_rule`, AND THE RENDER IS WHY. A rule positioned entirely in
+    # SCREEN values inside a layer chart that has scales did not draw — it is in the spec, at
+    # the right coordinates, and nothing appears. A one-pixel rect with all four edges given as
+    # values does draw, and it is the same line.
+    layers.append(alt.Chart(pd.DataFrame([{"a": 0}])).mark_rect(opacity=0.75).encode(
+        x=alt.value(logo_x), x2=alt.value(_ANNOTATION_RIGHT),
+        y=alt.value(rule_y), y2=alt.value(rule_y + 1)))
     layers.append(alt.Chart(pd.DataFrame([{"t": _signed_delta(delta)}])).mark_text(
         align="right", baseline="top", fontSize=_ANNOTATION_SIZE, fontWeight="bold"
-    ).encode(x=alt.value(_ANNOTATION_X + 74),
-             y=alt.value(rule_y + 2), text="t:N"))
+    ).encode(x=alt.value(_ANNOTATION_RIGHT), y=alt.value(rule_y + 4), text="t:N"))
     return layers
 
 
@@ -2313,30 +2365,29 @@ def _usage_dots(entry, player_id) -> str:
         scaled = row.get("usage_share_of_max")
         share = row.get("usage_total")
         window = int(row.get("usage_games_in_window") or 0)
-        # 🚨 R-742. THIS USED TO FALL BACK TO `fill = 0.0` IN BOTH BRANCHES, WHICH DRAWS A LIE.
-        # A played game with no usable denominator rendered a full-opacity border and an empty
-        # circle — identical to "he took no part", when the truth is "we cannot scale this".
+        # 🚨 R-740's SECOND HALF: THE RAISE IS GONE, AND COWORK ASKED FOR IT AND WAS WRONG.
         #
-        # ✅ MEASURED BEFORE CHANGING A LINE (§2.5): of 159,418 rows on
-        # `srv_game_team_leader_usage`, the count with a null `usage_total` is ZERO, with a null
-        # `usage_total_max_in_window` is ZERO, and with a zero denominator is ZERO.
-        # **The branch is dead.** So it says so, loudly, instead of drawing the one thing it
-        # must not: a circle a reader would take for a measurement.
+        # B102 made a null share raise, on the reasoning that the branch was provably dead and
+        # a lie is worse than a loud failure. ⚠️ **BUT `_usage_dots` IS CALLED FROM
+        # `_leader_card` INSIDE `_yardage_column`** — so ONE bad row would take down three
+        # charts and nine cards for every viewer, on a game day, with no alert. The blast
+        # radius was never one dot.
         #
-        # ⚠️ R-740 MOVED THE DIVISION UPSTREAM AND THIS GUARD STAYED. A120 published
-        # `usage_share_of_max`, which is NULL on exactly the rows that could not be scaled — so
-        # the raise now fires on the published null rather than on a denominator the page
-        # inspects, and it is still dead: 159,418 of 159,418 rows are populated.
+        # ✅ ASSERT UPSTREAM, DEGRADE DOWNSTREAM. A121 shipped
+        # `assert_leader_usage_carries_a_drawable_denominator`, so the BUILD fails on a row the
+        # page cannot draw — that is the loud half, and it is upstream where it belongs. B099
+        # reasoned exactly this way about an unknown KPI format eight hundred lines above, and
+        # this is the shape the page should have had all along.
+        #
+        # ⚠️ AC-G.32: "NOTHING" IS NOT AN EMPTY CIRCLE. An empty circle at full border opacity
+        # is what `did not appear` draws, and a null share means the opposite — he played and
+        # we cannot scale it. So the dot is omitted entirely and the row is one shorter, which
+        # is the same choice `_post_game_card_column` makes for a missing third rusher.
         if scaled is None or pd.isna(scaled):
-            raise ValueError(
-                "srv_game_team_leader_usage returned a row with no usage_share_of_max, which "
-                "is the published ratio and is null only where the ceiling is absent or zero. "
-                "Measured at 0 of 159,418 rows when R-740 landed, so this is a CHANGE UPSTREAM "
-                "rather than a case the page forgot — an empty circle here would read as "
-                "'took no part' and that is why this raises instead of drawing one.")
-        # ⚠️ THE CLAMP STAYS. It is not arithmetic on the metric — it is a guard on what a CSS
-        # gradient can accept, and a published ratio outside 0–1 would otherwise paint outside
-        # the circle rather than announce itself.
+            continue
+        # ⚠️ THE CLAMP STAYS. It guards what a CSS gradient can accept rather than the metric —
+        # a published ratio outside 0–1 would paint outside the circle instead of announcing
+        # itself.
         fill = max(0.0, min(1.0, float(scaled)))
         # ⚠️ THE SECOND ABSENCE IS A CAVEAT RATHER THAN A GAP, AND THE HOVER CARRIES IT. With one
         # observation the maximum IS that game, so the circle is full by construction and means
@@ -2372,19 +2423,34 @@ def _leader_card(row, usage=None) -> str:
     # are drawn in rank order, so the ORDER still carries the rank — but nothing now carries a
     # TIE. Two players sharing second place render as second and third. **Reported rather than
     # solved in passing: inventing a new place for it is a look decision.**
-    name_lines = (f"<div style='font-size:.66rem;opacity:.6;line-height:1.1'>"
-                  f"{html.escape(first)}</div>" if first else "")
+    # 🚨 R-800. THE JERSEY IS 2x AND FILLS BOTH ROWS THE NAME BLOCK MAKES. Marc, v05: *"Make the
+    # Jersey Number 2x in size. Fill the 2 rows First/Last creates."* So it is one glyph
+    # spanning the header's full height rather than a small label on the first line.
+    # ⚠️ AC-G.32 GETS LOUDER HERE: no jersey renders `—` at the same 2x size, which is a big em
+    # dash. The round rendered it and reports whether it reads as an absence or as a defect.
+    #
+    # 🚨 R-801. COLUMN 3 IS COLUMN 2's MIRROR: year on top in the small faded line, POSITION in
+    # the last name's treatment below it. Marc: *"Flip Position and Year, then apply last name
+    # formatting to Position."* — the same SIZE AND WEIGHT as the surname, not `font-weight`
+    # bolted onto a faded line, which is what makes the header read as a grid rather than as
+    # three unrelated stacks.
+    small = "font-size:.66rem;opacity:.6;line-height:1.1"
+    strong = "font-weight:700;font-size:.78rem;line-height:1.15"
+    name_lines = (f"<div style='{small}'>{html.escape(first)}</div>" if first else "")
+    year = str(row.get("class_year_display") or "")
     top = [
-        f"<div style='min-width:1.9rem;font-weight:600;font-size:.82rem'>{number}</div>",
+        f"<div style='min-width:2.4rem;font-weight:700;font-size:1.5rem;line-height:1;"
+        f"display:flex;align-items:center'>{number}</div>",
         # ⚠️ `flex:1` AND `min-width:0` TOGETHER — without the second, a flex child refuses to
         # shrink below its content and the name pushes the third column off the card instead of
         # ellipsing, which is the truncation R-745 has been about for four rounds.
-        f"<div style='flex:1;min-width:0;line-height:1.15;overflow:hidden'>{name_lines}"
-        f"<div style='font-weight:700;font-size:.78rem;white-space:nowrap;overflow:hidden;"
+        f"<div style='flex:1;min-width:0;overflow:hidden'>{name_lines}"
+        f"<div style='{strong};white-space:nowrap;overflow:hidden;"
         f"text-overflow:ellipsis'>{html.escape(last)}</div></div>",
-        f"<div style='text-align:right;font-size:.62rem;opacity:.55;line-height:1.15'>"
-        f"<div>{html.escape(str(row.get('position') or ''))}</div>"
-        f"<div>{html.escape(str(row.get('class_year_display') or ''))}</div></div>",
+        "<div style='text-align:right;min-width:0'>"
+        + (f"<div style='{small}'>{html.escape(year)}</div>" if year else "")
+        + f"<div style='{strong};white-space:nowrap'>"
+          f"{html.escape(str(row.get('position') or ''))}</div></div>",
     ]
     # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
     # AC-G.32 puts a dash where a VALUE is missing; a slot with no label is a MEASURE that does
@@ -2409,7 +2475,7 @@ def _leader_card(row, usage=None) -> str:
             f"<div style='display:flex;align-items:flex-start;gap:.4rem'>"
             f"{''.join(top)}</div>"
             f"<div style='display:grid;grid-template-columns:repeat({_CARD_KPI_SLOTS},1fr);"
-            f"gap:.3rem;margin-top:.25rem'>{''.join(cells)}</div>"
+            f"gap:.3rem;margin-top:.25rem;text-align:center'>{''.join(cells)}</div>"
             f"{_card_dots(row, usage)}</div>")
 
 

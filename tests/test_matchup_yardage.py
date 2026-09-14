@@ -1972,21 +1972,30 @@ def test_the_SHARE_is_READ_and_the_page_neither_divides_nor_derives_it(panel):
         f"says 90% — a page still dividing draws 50: {fills}")
 
 
-@pytest.mark.parametrize("panel", [True], indirect=True)
-def test_a_NULL_published_share_RAISES_rather_than_drawing_an_empty_circle(panel):
-    """⚠️ R-742 SURVIVES R-740. The published ratio is null exactly where the ceiling is absent
-    or zero — 0 of 159,418 rows today — and an empty circle at full opacity would read as "he
-    took no part" when the truth is "we cannot scale this" (AC-G.11).
+def test_a_NULL_published_share_DRAWS_NOTHING_and_never_an_empty_circle(panel):
+    """🚨 R-740's SECOND HALF, AND IT REVERSES B102 — COWORK ASKED FOR THE RAISE AND WAS WRONG.
 
-    ⚠️ THE EXEMPTION IS DECLARED because proving the card DIES is this test's whole job — the
-    raise lands inside `states.section`, which draws the Error card R-610 makes fatal by
-    default. One declaration reaches both guards (B097).
+    B102 made a null share raise, reasoning the branch was provably dead and a lie is worse than
+    a loud failure. ⚠️ **But `_usage_dots` runs inside `_yardage_column`, so one bad row would
+    take down three charts and nine cards for every viewer, on a game day, with no alert.**
+
+    ✅ ASSERT UPSTREAM, DEGRADE DOWNSTREAM. A121's
+    `assert_leader_usage_carries_a_drawable_denominator` fails the BUILD on such a row — that is
+    the loud half, upstream where it belongs — and the page omits the one dot.
+
+    ⚠️ AC-G.32: "NOTHING" IS NOT AN EMPTY CIRCLE. An empty circle at full border opacity is what
+    `did not appear` draws, and a null share means the opposite: he played and we cannot scale
+    it. **So the assertion is that the row gets SHORTER, not that it gains a blank.**
     """
     rows = [dict(r, usage_share_of_max=None) for r in _usage()]
     entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=_leaders(), usage=rows)
-    assert any(render_harness.ERROR_CARD in str(b) for _k, b in entries), (
-        "a null published share drew something rather than raising — an empty circle at full "
-        "opacity reads as 'took no part' and that is the one thing it must not say")
+    titles, fills = _dots(entries, _leaders()[0]["player_name"])
+    assert not fills, f"a null share still drew a filled circle: {fills}"
+    assert not any("Did not appear" in t for t in titles), (
+        f"a null share drew the DID NOT APPEAR circle, which says he took no part — the "
+        f"opposite of what a null share means (AC-G.32): {titles}")
+    # And the panel survives: no error card, which is the whole reason the raise came out.
+    assert not any(render_harness.ERROR_CARD in str(b) for _k, b in entries)
 
 
 # --- 🚨 R-735: the card and the chart share the row at 1:4 ---------------------------------
@@ -2095,19 +2104,52 @@ def test_the_annotation_is_a_worked_SUBTRACTION_in_three_rows(panel):
         f"the annotation is not gained, then allowed, then the delta: {texts}")
 
 
-def test_the_annotation_is_at_or_below_the_AXIS_LABEL_size(panel):
-    """Marc: *"Font size similar to the axis labels, maybe a little smaller."*
+def test_the_annotation_size_is_BETWEEN_v04s_floor_and_a_ceiling_the_plot_can_hold(panel):
+    """🚨 THE SIZE INSTRUCTION REVERSED BETWEEN v04 AND v05, AND THIS RECORDS BOTH ENDS.
 
-    ⚠️ COMPARED AGAINST THE SPEC'S OWN AXIS CONFIG rather than a number typed here, so a theme
-    change that grew the axis labels cannot silently leave the annotation larger than them.
+      v04  *"Needs to be smaller. Font size similar to the axis labels, maybe a little
+           smaller."*  -> B103 shipped 8.5
+      v05  *"in-chart legend, nice. Move it to the top right. Increase font substantially."*
+
+    ⚠️ **8.5 IS THE FLOOR NOW, NOT THE TARGET.** It went past readable, and citing v04 to keep it
+    small would be answering the instruction he replaced. ✅ The axis labels are the reference he
+    reached for twice, so the size sits at theirs rather than below them.
+
+    ⚠️ AND THE CEILING IS THE PLOT. `_CHART_SIDE` is 240px; three lines at 14px plus a rule is a
+    quarter of the square's height, and the annotation would start competing with the data it
+    describes. **The round rendered two sizes and the report says what each costs.**
     """
     charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
-    spec = charts[0].to_dict()
-    sizes = {layer["mark"]["fontSize"] for layer in spec.get("layer", [])
+    sizes = {layer["mark"]["fontSize"] for layer in charts[0].to_dict().get("layer", [])
              if isinstance(layer.get("mark"), dict) and "fontSize" in layer["mark"]}
     assert sizes, "the annotation carries no explicit font size"
-    # Vega-Lite's default axis label size is 10; the annotation must not exceed it.
-    assert max(sizes) <= 10, f"the annotation is larger than the axis labels: {sizes}"
+    assert min(sizes) > 8.5, (
+        f"the annotation is back at or below v04's size, which Marc replaced: {sizes}")
+    assert max(sizes) <= 12, (
+        f"three lines of {max(sizes)}px plus a rule take too much of a 240px plot — the "
+        f"annotation starts competing with the mark it describes: {sizes}")
+
+
+def test_the_annotation_is_anchored_to_the_TOP_RIGHT(panel):
+    """Marc, v05: *"Move it to the top right."*
+
+    ⚠️ `alt.value()` POSITIONS FROM THE LEFT, so "right" is the plot width minus a margin and a
+    test that only checked for a large x would pass on a block that ran off the plot. The right
+    edge is asserted against `_CHART_SIDE` itself.
+    """
+    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
+    side = _module_constant("_CHART_SIDE")
+    xs = []
+    for layer in charts[0].to_dict().get("layer", []):
+        mark = layer.get("mark")
+        kind = mark.get("type") if isinstance(mark, dict) else mark
+        if kind in {"text", "image"} and "value" in (layer.get("encoding", {}).get("x") or {}):
+            xs.append(layer["encoding"]["x"]["value"])
+    assert xs, "no screen-positioned annotation layer found"
+    assert max(xs) <= side, f"the annotation runs off the right edge of a {side}px plot: {xs}"
+    assert min(xs) > side / 2, (
+        f"part of the annotation is in the LEFT half of the plot, so it is not anchored to the "
+        f"top right: {xs}")
 
 
 def test_the_annotation_carries_BOTH_logos(panel):
@@ -2371,10 +2413,13 @@ def test_the_BOLD_line_is_the_LAST_name_not_merely_that_the_name_appears(panel):
     # than that the card is wrong. "Avant" is present whichever line it lands on, so the
     # assertion below is what fails.
     header = _header_row(panel(_game(), _both(), deltas=_deltas())[0], "Avant")
-    bold = re.findall(r"font-weight:700[^>]*>([^<]+)<", header)
+    # ⚠️ SCOPED TO THE NAME COLUMN SINCE R-801. The POSITION now carries the same weight and
+    # size — that is the point of the mirror — so a bare `font-weight:700` sweep returns two
+    # strings and this assertion would be about whichever came first.
+    bold = re.findall(r"text-overflow:ellipsis'>([^<]+)<", header)
     small = re.findall(r"font-size:\.66rem[^>]*>([^<]+)<", header)
     assert bold == ["Avant"], f"the bold line is not the LAST name: {bold}"
-    assert small == ["Lloyd"], f"the small first line is not the FIRST name: {small}"
+    assert small[0] == "Lloyd", f"the small first line is not the FIRST name: {small}"
 
 
 def test_a_SINGLE_TOKEN_name_is_the_bold_line_alone_and_reserves_no_first_line(panel):
@@ -2392,8 +2437,9 @@ def test_a_SINGLE_TOKEN_name_is_the_bold_line_alone_and_reserves_no_first_line(p
             for r in _leaders()]
     header = _header_row(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0],
                          "Ochocinco")
-    assert re.findall(r"font-weight:700[^>]*>([^<]+)<", header) == ["Ochocinco"]
-    assert "font-size:.66rem" not in header, (
+    assert re.findall(r"text-overflow:ellipsis'>([^<]+)<", header) == ["Ochocinco"]
+    name_column = header.split("flex:1;min-width:0")[1]
+    assert "font-size:.66rem" not in name_column.split("</div></div>")[0], (
         "a one-token name reserved an empty first line, which shifts that card's header down "
         "relative to every other card in the column")
 
@@ -2435,3 +2481,27 @@ def test_a_small_RULE_separates_the_three_blocks_and_not_the_first(panel):
     assert len(rules) == 4, (
         f"expected a rule between the blocks on each half — two per half, none before the "
         f"first — got {len(rules)}")
+
+
+def test_the_SUBTRACTION_RULE_is_drawn_and_not_merely_specified(panel):
+    """🚨 IT WAS IN THE SPEC AND DID NOT APPEAR, WHICH A SPEC ASSERTION CANNOT SEE.
+
+    The rule was a `mark_rule` positioned entirely in SCREEN values inside a layer chart that
+    has scales. ⚠️ **It serialised at the right coordinates and drew nothing** — so a test
+    asserting "a rule layer exists" passed while the reader saw three numbers in a list, which
+    is exactly what the rule exists to prevent (v02.2: *"like a math problem"*).
+
+    ✅ A one-pixel `mark_rect` with all four edges as values does draw. **This asserts the MARK
+    TYPE, because that is the part that was wrong** — and the render in B104's report is the
+    evidence that it appears.
+    """
+    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
+    rects = [layer for layer in charts[0].to_dict().get("layer", [])
+             if isinstance(layer.get("mark"), dict)
+             and layer["mark"].get("type") == "rect"
+             and "value" in (layer.get("encoding", {}).get("y") or {})]
+    assert len(rects) == 1, (
+        f"expected exactly one screen-positioned rect — the subtraction's rule: {len(rects)}")
+    edges = rects[0]["encoding"]
+    assert edges["y2"]["value"] - edges["y"]["value"] == 1, "the rule is not one pixel tall"
+    assert edges["x2"]["value"] > edges["x"]["value"], "the rule has no width"
