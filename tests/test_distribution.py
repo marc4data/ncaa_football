@@ -180,14 +180,48 @@ def test_an_unlocked_week_says_it_can_still_move():
 
 # --- box(), the third entry point (R-808) -----------------------------------------------
 
-def _box_row(**over):
-    """A distribution row as any of the three sibling views publishes it."""
+# 🚨 THE TWO WHISKER VOCABULARIES, AS FIXTURES — R-820, and the reason this file needed two.
+#
+# ⚠️ THIS DOCSTRING USED TO READ "a distribution row as any of the three sibling views publishes
+# it" AND THAT WAS FALSE. It carries `whisker_low`, which TWO of the three publish; the week-grain
+# view publishes `whisker_lo`. Meanwhile `_row()` twenty lines above — correctly labelled as the
+# shape `srv_week_metric_distribution` actually returns — carried `whisker_lo` all along.
+#
+# 🚨 TWO FIXTURES CONTRADICTED EACH OTHER IN ONE FILE AND NOTHING COMPARED THEM, so every box test
+# passed while `box()` could not draw one of the three views it promised. §6 mode 1 in its purest
+# form: the fixture was doing the asserting.
+#
+# ✅ SO THE SHAPES ARE NAMED AND THE TESTS BELOW RUN AGAINST BOTH.
+_WHISKER_SHAPES = {
+    "whisker_low/high — team_week and game_team": ("whisker_low", "whisker_high"),
+    "whisker_lo/hi — week (the one A125 could not draw)": ("whisker_lo", "whisker_hi"),
+}
+
+
+def _box_row(shape=("whisker_low", "whisker_high"), **over):
+    """A distribution row in ONE of the two published whisker vocabularies.
+
+    ⚠️ The default is the pair TWO of the three views use, so the existing tests keep testing what
+    they were written to test. `shape` is how a test reaches the third.
+    """
+    lo_key, hi_key = shape
     row = {"n": 135, "team_games_in_week": 135,
            "p02": -3.0, "p05": 10.0, "p25": 108.0, "p50": 152.0, "p75": 232.5,
            "p95": 380.0, "p98": 410.0, "iqr": 124.5,
-           "whisker_low": -3.0, "whisker_high": 418.0, "outlier_count": 2}
+           lo_key: -3.0, hi_key: 418.0, "outlier_count": 2}
     row.update(over)
     return row
+
+
+def _drew(svg: str) -> bool:
+    """🚨 DID IT DRAW A PICTURE, OR RETURN THE PLACEHOLDER?
+
+    ⚠️ THIS IS THE ASSERTION A125 WAS MISSING AND IT IS THE WHOLE ROUND. The empty-dash
+    placeholder IS a string, so `assert svg`, `assert len(svg)` and `assert "cfdb-dist" in svg`
+    all pass against a box that drew nothing. The only honest question is whether an <svg> with
+    marks in it came back.
+    """
+    return "<svg" in svg and "<rect" in svg
 
 
 def _texts(svg: str):
@@ -284,3 +318,68 @@ def test_a_row_without_percentiles_says_so_rather_than_drawing_an_empty_box():
     """AC-G.11: a week with no distribution is a different state from a week with a thin one."""
     assert "–" in distribution.box(None, width=300)
     assert "–" in distribution.box(_box_row(p25=None), value=180, width=300)
+
+
+# --- R-820: box() must draw for ALL THREE siblings, not two of them ----------------------
+
+@pytest.mark.parametrize("label,shape", list(_WHISKER_SHAPES.items()))
+def test_box_draws_for_every_published_whisker_vocabulary(label, shape):
+    """🚨 THE TEST A125 DID NOT WRITE, AND THE ONE THAT WOULD HAVE CAUGHT THE DEFECT.
+
+    `box()` read `whisker_low` alone. The week-grain view publishes `whisker_lo`, so it fell
+    through the guard and returned the EMPTY PLACEHOLDER — 123 characters, zero elements, titled
+    "this week has no distribution for that measure".
+
+    ⚠️ AND THAT IS THE WORST FAILURE AVAILABLE: not a crash and not a blank, but a CONFIDENT
+    WRONG ABSENCE. The page would tell a reader the week has no distribution for a measure whose
+    percentiles were sitting in the row it was just handed (AC-G.11).
+
+    🚨 THE ASSERTION IS THAT IT DREW, NOT THAT A STRING CAME BACK. The placeholder is a string;
+    every assertion A125 wrote passes against it.
+    """
+    svg = distribution.box(_box_row(shape=shape), value=180, width=448)
+    assert _drew(svg), (
+        f"{label}: box() returned the empty placeholder for a row that carries p25, p50, p75 and "
+        f"both whiskers — the same confident wrong absence R-820 fixed")
+    assert svg.count("<line") >= 4, f"{label}: the whisker rule, its serifs and the median"
+    assert svg.count("<text") >= 3, f"{label}: the boundary labels and the value"
+
+
+def test_both_whisker_vocabularies_draw_the_same_picture():
+    """⚠️ NOT MERELY 'BOTH DRAW' — both must draw the SAME marks from the same numbers.
+
+    A lookup that found the second vocabulary but read it into the wrong end would still draw,
+    and would draw a box inside out. The two shapes carry identical values, so the element counts
+    and every label must match exactly.
+    """
+    a = distribution.box(_box_row(shape=("whisker_low", "whisker_high")), value=180, width=448)
+    b = distribution.box(_box_row(shape=("whisker_lo", "whisker_hi")), value=180, width=448)
+    assert _drew(a) and _drew(b)
+    for tag in ("<rect", "<line", "<text", "<polygon"):
+        assert a.count(tag) == b.count(tag), f"{tag} differs between the two vocabularies"
+    assert _texts(a) == _texts(b), "the two vocabularies produced different labels"
+
+
+def test_a_row_mixing_the_two_vocabularies_raises_rather_than_averaging_them():
+    """⚠️ `lo` and `hi` must come from the SAME view's vocabulary.
+
+    A row answering `whisker_low` and `whisker_hi` is not an unusual spelling — it is a row no
+    serving view publishes, so it can only have been built by hand. Drawing a box from two
+    models' numbers would be a silent half-answer, which is how the original defect survived.
+
+    🚨 THIS IS A PROGRAMMING ERROR, NOT A DATA CONDITION, so it raises rather than degrading.
+    R-748's assert-upstream-degrade-downstream is about rows the warehouse can produce; this is
+    not one.
+    """
+    mixed = _box_row()
+    mixed["whisker_hi"] = mixed.pop("whisker_high")
+    with pytest.raises(ValueError, match="without its pair"):
+        distribution.box(mixed, value=180, width=448)
+
+
+def test_a_row_with_no_whiskers_at_all_is_still_an_honest_absence():
+    """AC-G.11 the other way: a row genuinely missing both ends has no box to draw, and the
+    placeholder is correct there. The fix must not turn a real absence into a drawn box."""
+    bare = _box_row()
+    del bare["whisker_low"], bare["whisker_high"]
+    assert not _drew(distribution.box(bare, value=180, width=448))
