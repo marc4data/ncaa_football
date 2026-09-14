@@ -123,11 +123,28 @@ _POST_GAME_PANELS = {
     # 🚨 R-809. `passing` IS THE RECEIVERS, NOT THE PASSERS — A116 and B099 both settled it, and
     # the quarterback is already on the card under `total`.
     "passing": (("Receptions", "integer"), ("Yards", "integer"), ("TD", "integer")),
+    # 🚨 R-839/B110. A128's DEFENSIVE PANEL, IN THE SHAPE SERVING ACTUALLY PUBLISHES IT —
+    # read off `srv_game_team_leader_in_this_game`, not copied from the prompt. `stat_1_format`
+    # is `pair`, the same format `Comp-Att` uses, which is why it needed no new page branch.
+    "defensive": (("Solo-Ast", "pair"), ("Tackles", "integer"), ("TFL", "integer")),
 }
+
+# 🚨 A128's NAMED ANCHOR, AND IT IS THE CASE THE SOLO COLUMN EXISTS FOR — read live from
+# game 401628319, team 333: **Campbell 6 solo / 3 assisted and Lawson 3 solo / 6 assisted are
+# BOTH on 9 tackles and BOTH on 1 TFL.** Two of the three columns cannot separate them; the
+# first one can, and the card shows it. ⚠️ Generic 12/101/4.5 filler would have made the two
+# cards differ on every slot and proved nothing about which column does the work.
+_DEFENSIVE_ANCHOR = (
+    # name, solo, assisted, tackles, tfl
+    ("Campbell", 6.0, 3.0, 9.0, 1.0),
+    ("Lawson", 3.0, 6.0, 9.0, 1.0),
+    ("Hubbard", 5.0, 1.0, 6.0, 1.0),
+)
 
 
 def _post_game_leaders(**overrides):
-    """Both sides' post-game leaders: one QB, three rushers and three receivers each (R-809)."""
+    """Both sides' post-game leaders: one QB, three rushers, three receivers, three
+    defenders each (R-809, and the defence in B110)."""
     rows = []
     # ⚠️ THE SAME IDS `_side()` USES — 2 at home, 96 away. A card frame keyed on ids the box
     # score does not carry would render no cards at all while every table assertion passed.
@@ -153,6 +170,20 @@ def _post_game_leaders(**overrides):
                     "stat_3_label": l3, "stat_3_format": f3,
                     "stat_3_value": 4.5 if f3 == "decimal_1" else 2.0,
                     "stat_3_value_secondary": None})
+        (dl1, df1), (dl2, df2), (dl3, df3) = _POST_GAME_PANELS["defensive"]
+        for rank, (surname, solo, ast_, tackles, tfl) in enumerate(_DEFENSIVE_ANCHOR, start=1):
+            rows.append({
+                "team_id": team_id, "panel": "defensive", "leader_rank": rank,
+                "tied_players": 1, "qualified_players": len(_DEFENSIVE_ANCHOR),
+                "player_id": f"p{team_id}de{rank}", "player_name": f"{who} {surname}",
+                "player_slug": f"{who}-{surname}".lower(),
+                "jersey": 40 + rank, "position": "LB", "class_year_display": "SR",
+                "stat_1_label": dl1, "stat_1_format": df1,
+                "stat_1_value": solo, "stat_1_value_secondary": ast_,
+                "stat_2_label": dl2, "stat_2_format": df2,
+                "stat_2_value": tackles, "stat_2_value_secondary": None,
+                "stat_3_label": dl3, "stat_3_format": df3,
+                "stat_3_value": tfl, "stat_3_value_secondary": None})
     for row in rows:
         row.update(overrides)
     return rows
@@ -162,8 +193,15 @@ def _post_game_leaders(**overrides):
 # renames for `identity.text_on`. ⚠️ The AWAY side deliberately carries NO colour: 10.89% of
 # games have one, and a fixture where both sides are populated could not tell the fallback path
 # from the sourced one.
+# 🚨 R-856. THE ABBREVIATIONS RIDE ON THIS SAME ROW — `srv_game`'s own columns, and these are
+# the two teams' real published values. ⚠️ THE COLOURS STAY ASYMMETRIC (away null) because that
+# asymmetry is what makes the accent fallback testable; the abbreviations are BOTH present here
+# so the away-then-home ordering assertions still have two distinct tokens to order. **The null
+# path gets its own test, which overrides this dict rather than weakening it** — 39 of the 3,674
+# games with a box score publish no away abbreviation, so the fallback is real.
 _COLORS = {"away_color_on_light": None, "away_color_on_dark": None,
-           "home_color_on_light": "#0021A5", "home_color_on_dark": "#4C7BEF"}
+           "home_color_on_light": "#0021A5", "home_color_on_dark": "#4C7BEF",
+           "away_abbreviation": "UK", "home_abbreviation": "AUB"}
 
 # 🚨 R-808. THE WEEK'S SPREAD, PER MEASURE — real 2026 week-1 shapes off
 # `srv_game_team_metric_distribution`, so the bands are drawn over numbers the view actually
@@ -394,7 +432,7 @@ def test_a_game_with_no_advanced_block_does_not_read_the_dictionary(panel):
 def test_a_2024_game_draws_real_figures_for_both_sides(panel):
     run, _ = panel
     body = _text(run(_both())[0])
-    assert "Auburn" in body and "Kentucky" in body
+    assert "AUB" in body and "UK" in body, "the two sides are not both identified"
     for figure in ("17", "16", "241", "240", "118", "79", "123", "161"):
         assert figure in body, f"{figure} is missing from the box score"
 
@@ -403,8 +441,10 @@ def test_away_is_on_the_left_and_home_on_the_right(panel):
     """The scoreline's convention, and the reason that layout reads as a matchup at all."""
     run, _ = panel
     blocks = [b for kind, b in run(_both())[0] if kind == "markdown"]
-    heading = next(b for b in blocks if "Kentucky" in b and "Auburn" in b)
-    assert heading.index("Kentucky") < heading.index("Auburn"), \
+    # ⚠️ R-856: the header identifies the sides by ABBREVIATION now. The convention asserted
+    # here — away left, home right — is unchanged and is still positional.
+    heading = next(b for b in blocks if "UK" in b and "AUB" in b)
+    assert heading.index("UK") < heading.index("AUB"), \
         "the home team was drawn on the left"
 
 
@@ -650,21 +690,33 @@ def test_the_ranking_is_read_and_never_computed_in_the_page():
     code = _code_only(SOURCE)
     for banned in ("srv_player_game_log", "srv_player_stats"):
         assert banned not in code, f"{banned} was read to rank players in the page"
-    assert "srv_game_team_leader" in code, "the leaders panel does not read the ranked object"
+    # 🚨 REPOINTED IN B110 FROM `_leaders` TO `_post_game_leaders`, AND THE ASSERTION GOT
+    # STRONGER RATHER THAN WEAKER. R-839 deleted the `Game leaders` section, so the ranked
+    # read this gripped no longer exists — **but the reason it existed does.** The CARDS now
+    # carry the only in-game ranking on the page, so they inherit the ban whole.
+    #
+    # ⚠️ AND THE NAME IS THE LONG ONE ON PURPOSE. `"srv_game_team_leader" in code` passed as a
+    # PREFIX of `srv_game_team_leader_in_this_game`, so it would have gone on passing after the
+    # relation it was written for was deleted — an assertion that survives its own subject.
+    # A128 and `_game_leaders`'s docstring both warn that these names differ by a suffix.
+    assert "srv_game_team_leader_in_this_game" in code, \
+        "the cards do not read the ranked object"
     # ⚠️ ANCHORED ON THE QUERY LITERAL, NOT ON ITS FIRST COLUMN. B077 wrote
     # `block.index("select team_id")`, and B078 adding one column to the select — `season`,
     # for the player link — made that anchor vanish and this test raise ValueError instead of
     # asserting anything. The assertion is unchanged; only what it grips has moved to
     # something a column list cannot break.
-    block = SOURCE[SOURCE.index("def _leaders("):SOURCE.index("def _leader_heading(")]
-    sql = block.split('query("""')[1].split('"""')[0].lower()
+    block = SOURCE[SOURCE.index("def _post_game_leaders("):SOURCE.index("def _reserved_card(")]
+    sql = block.split('query(f"""')[1].split('"""')[0].lower()
     for computed in ("order by", "rank(", "row_number(", "over (", "group by", "join"):
-        assert computed not in sql, f"the leaders query contains `{computed}`"
+        assert computed not in sql, f"the cards' query contains `{computed}`"
 
 
 def test_the_panel_computes_nothing(panel):
     """G-3, asserted on the SQL the panel actually issued."""
-    block = SOURCE[SOURCE.index("_POSTGAME_COLUMNS = "):SOURCE.index("def _leader_note(")]
+    # ⚠️ END ANCHOR MOVED IN B110: `def _leader_note(` went with R-839's section. `_travel`
+    # is the next panel after `_post_game` and is not going anywhere this round.
+    block = SOURCE[SOURCE.index("_POSTGAME_COLUMNS = "):SOURCE.index("def _travel(")]
     sql = block[block.index("select {_POSTGAME_COLUMNS}"):block.index('limit 2')].lower()
     for banned in ("group by", "sum(", "avg(", "row_number(", "rank(", "over (", "join"):
         assert banned not in sql, f"the panel's query contains `{banned}`"
@@ -717,6 +769,24 @@ def _plain(markup: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", markup))).strip()
 
 
+_GROUP_RE = re.compile(r"<div style='font-size:\.66rem;font-weight:700;[^']*'>([^<]+)</div>")
+
+
+def _groups(block):
+    """One card column split into its NAMED groups, keyed by the header the reader sees.
+
+    🚨 B110 NEEDED THIS BECAUSE THE TWO SECTIONS NO LONGER SHARE A PREFIX. Until this round
+    Advanced was the Box score column plus receiving, so `adv.startswith(box)` was the whole
+    claim. **Box score now ends in Defense and Advanced ends in Receiving**, so they agree on
+    the first two groups and diverge on the third — a prefix test would fail for the right
+    reason and the wrong claim. Comparing the named groups says what R-738 actually meant:
+    *a reader scrolling between the panels must not find the shared cast changed.*
+    """
+    marks = [(m.start(), m.group(1)) for m in _GROUP_RE.finditer(block)]
+    return {title: block[start:(marks[i + 1][0] if i + 1 < len(marks) else len(block))]
+            for i, (start, title) in enumerate(marks)}
+
+
 def _card_blocks(entries):
     """The card columns, in drawn order: away, home, away, home — two panels, two sides."""
     return [str(b) for k, b in entries if k == "markdown" and _CARD_MARK in str(b)]
@@ -750,13 +820,20 @@ def test_the_cards_sit_beside_BOTH_panels_and_RECEIVING_is_added_only_in_ADVANCE
             f"Advanced only")
         assert "Receiving" in _plain(adv), (
             f"the {section} Advanced column has no Receiving group")
-        # 🚨 THE SHARED HALF, ASSERTED AS A PREFIX RATHER THAN AS EQUALITY: Advanced is the Box
-        # score column plus receiving, so the quarterbacks and rushers must be byte-identical
-        # up to where receiving begins. Equality would have to be dropped entirely; a prefix
-        # keeps R-738's actual claim.
-        assert adv.startswith(box), (
-            f"the {section} column's quarterbacks and rushers differ between the sections — "
-            f"v08 adds receiving to Advanced, it does not rebuild the cast")
+        # 🚨 THE SHARED HALF, ASSERTED GROUP BY GROUP. Until B110 this read `adv.startswith(box)`
+        # and that was exactly right while Advanced was Box plus receiving. **R-839 put Defense
+        # in Box score only**, so the two columns now agree on Quarterback and Rushing and then
+        # each add one group the other does not have. The prefix is gone; R-738's claim is not.
+        assert "Defense" in _plain(box), (
+            f"the {section} Box score column has no Defense group — B110 put it there, and it "
+            f"is the only defensive figure left on the page")
+        assert "Defense" not in _plain(adv), (
+            f"the {section} Advanced column carries a Defense group — it belongs to Box score")
+        box_groups, adv_groups = _groups(box), _groups(adv)
+        for shared in ("Quarterback", "Rushing"):
+            assert box_groups[shared] == adv_groups[shared], (
+                f"the {section} column's {shared} group differs between the sections — each "
+                f"section adds ONE group of its own, it does not rebuild the shared cast")
 
 
 def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
@@ -808,7 +885,13 @@ def test_EVERY_DISCIPLINE_IS_REPRESENTED_on_the_post_game_cards(panel):
             ("the rushers", "Carries", "Box score", box_away),
             ("the quarterback", "Comp-Att", "Advanced", adv_away),
             ("the rushers", "Carries", "Advanced", adv_away),
-            ("the receivers", "Receptions", "Advanced", adv_away)):
+            ("the receivers", "Receptions", "Advanced", adv_away),
+            # 🚨 R-839/B110. `Tackles` CAN ONLY COME FROM THE `defensive` PANEL, which is what
+            # makes this the right assertion for the staged break rather than a card COUNT: a
+            # count moves for every legitimate depth change too, and every other discipline
+            # publishes a different slot-2 label. **It is also the whole reason the section
+            # could be deleted — the tackle was one of two figures it alone carried.**
+            ("the defence", "Tackles", "Box score", box_away)):
         assert marker in text, (
             f"{discipline} are not on the {where} cards — no {marker!r} in the away column. "
             f"Marc asked for full coverage: {text[:200]}")
@@ -833,12 +916,13 @@ def test_TWO_quarterback_slots_THREE_rushers_and_THREE_receivers(panel):
     # deliberately not one of these. The reserved slots are asserted by their own text below.
     box_away = _cards_in(blocks[0])
     adv_away = _cards_in(blocks[2])
-    assert len(box_away) == 4, (
-        f"Box score should draw one quarterback and three rushers — the fixture has one QB, so "
-        f"the second slot is reserved rather than drawn — got {len(box_away)} cards")
+    assert len(box_away) == 7, (
+        f"Box score should draw one quarterback, three rushers and three defenders — the "
+        f"fixture has one QB, so the second slot is reserved rather than drawn — got "
+        f"{len(box_away)} cards")
     assert len(adv_away) == 7, (
         f"Advanced should draw the same four plus three receivers, got {len(adv_away)}")
-    assert _plain(blocks[0]).count("No second quarterback played") == 1, (
+    assert _plain(blocks[0]).count("No second quarterback recorded") == 1, (
         f"the missing second quarterback is not reserved: {_plain(blocks[0])[:200]}")
     text = _plain("".join(adv_away))
     # ⚠️ ORDERED BY A TOKEN THAT SURVIVES A RENAME, NOT BY THE RENDERED NAME — R-758, and
@@ -1192,9 +1276,11 @@ def test_the_TABLE_HEADER_carries_the_section_name_and_BOTH_logos_in_order(panel
     # Kentucky AWAY, so a swap changes which name comes first — which is the thing B082 and
     # B083 both proved a presence assertion cannot see.
     plain = _plain(header)
-    assert plain.index("Kentucky") < plain.index("Auburn"), (
-        f"the header's two teams are not in away-then-home order — Kentucky is the away side: "
-        f"{plain[:160]}")
+    # ⚠️ THE TOKENS ARE THE ABBREVIATIONS SINCE R-856 — the header draws `UK` and `AUB`, not
+    # the full names. The CLAIM is untouched: away before home, by the teams' own identities.
+    assert plain.index("UK") < plain.index("AUB"), (
+        f"the header's two teams are not in away-then-home order — Kentucky (UK) is the away "
+        f"side: {plain[:160]}")
     # Marc: *"a horizontal line between the header row and the metrics row"*.
     assert "border-top" in header, "there is no rule under the header row"
 
@@ -1277,11 +1363,11 @@ def test_a_ONE_QUARTERBACK_side_RESERVES_the_second_slot_and_SAYS_SO(panel):
                   leader_rank=2, player_name="Home QB2", player_id="p2to2")
     blocks = _card_blocks(run(_both(), leaders=rows + [second])[0])
     box_away, box_home = _plain(blocks[0]), _plain(blocks[1])
-    assert "No second quarterback played" in box_away, (
+    assert "No second quarterback recorded" in box_away, (
         f"the away side has one quarterback and reserved nothing — every row below it is now "
         f"out of register with the home column: {box_away[:200]}")
     assert "Home QB2" in box_home, "the fixture's second home quarterback did not render"
-    assert "No second quarterback played" not in box_home, (
+    assert "No second quarterback recorded" not in box_home, (
         "the home side has two quarterbacks and still reserved a slot")
     # 🚨 AND THE RESERVED SLOT IS A DRAWN BOX, NOT A GAP. An empty box a reader cannot
     # distinguish from missing data is the hole AC-G.11 forbids; this one names itself.
@@ -1303,13 +1389,72 @@ def test_a_ONE_QUARTERBACK_side_RESERVES_the_second_slot_and_SAYS_SO(panel):
         "the reserved slot does not declare a fixed height, so it collapses to its text")
 
 
+def test_a_side_with_NO_QUARTERBACK_gets_ONE_block_and_NOT_a_FIRST_and_a_SECOND(panel):
+    """🚨 R-856, AND IT IS LANGUAGE RATHER THAN GEOMETRY — WHICH IS WHY B109's MEASUREMENTS
+    COULD NOT CATCH IT. That round measured ALIGNMENT and got it exactly right: group headers
+    at identical y in both columns. **A side with no quarterback still drew:**
+
+        No first quarterback played
+        No second quarterback played
+
+    ⚠️ THE SECOND IS FINE. THE FIRST IS NOT. A reader does not think of quarterbacks as
+    numbered slots — the ordinal is an artefact of the card grid, not a fact about the game —
+    so *no FIRST quarterback* reads as a rendering error. **One block saying the thing that is
+    true of the SIDE answers the question actually being asked.**
+
+    🚨 AND `recorded` RATHER THAN `played`, WHICH IS A MEASUREMENT. Of the **573** sides with no
+    `total` row on `srv_game_team_leader_in_this_game`, **571 — 99.7% — have receivers in the
+    same game.** The ball was thrown and caught, so a quarterback was on the field; only the
+    box score is silent. *Played* would be false on essentially every side this sentence draws
+    for. **The live render game is one of them — North Alabama at Arkansas, game 401856635.**
+
+    ✅ AND THE FOOTPRINT SURVIVES, WHICH IS THE WHOLE REASON R-849 EXISTS. One block standing
+    in for `n` cards must occupy `n` heights plus the `n - 1` margins between them, or every
+    group below it goes out of register between the two columns — the 33px error B109 shipped
+    and caught only in a raster.
+    """
+    run, _ = panel
+    # ⚠️ THE AWAY SIDE KEEPS ITS RUSHERS AND DEFENDERS AND LOSES ONLY ITS QUARTERBACK. A side
+    # stripped of everything is the OTHER absence and is covered by the test below — if this
+    # fixture removed all its rows, the honest-absence sentence would answer instead and this
+    # test would pass while asserting nothing about the quarterback group (§6, R-760).
+    rows = [r for r in _post_game_leaders()
+            if not (r["panel"] == "total" and r["team_id"] == 96)]
+    blocks = _card_blocks(run(_both(), leaders=rows)[0])
+    away = _plain(blocks[0])
+    assert "No quarterback recorded for this side." in away, (
+        f"a side with no quarterback did not get the side-level sentence: {away[:200]}")
+    # 🚨 THE ORDINAL MUST BE GONE FOR THIS SIDE — and `first` is the one that read as a bug.
+    assert "No first quarterback" not in away, (
+        f"the invented FIRST slot is still drawn — the ordinal is an artefact of the grid, "
+        f"not a fact about the game: {away[:200]}")
+    assert "No second quarterback" not in away, (
+        f"the side-level block did not replace the per-slot cards, it joined them: {away[:200]}")
+    # ✅ AND THE VERB, ASSERTED SEPARATELY FROM THE SHAPE so a reworded sentence cannot pass
+    # by accident while re-asserting about the GAME rather than about the RECORD.
+    assert "played" not in away, (
+        "the block says a quarterback did not PLAY — 571 of 573 such sides have receivers in "
+        "the same game, so the ball was thrown and only the box score is silent")
+    # 🚨 THE FOOTPRINT, IN THE MARKUP, BECAUSE THE ALIGNMENT IS THE FEATURE. Two cards at
+    # `_RESERVED_CARD_HEIGHT` plus the one `.3rem` margin BETWEEN them.
+    card_h = _module_constant("_RESERVED_CARD_HEIGHT")
+    spanned = 2 * card_h + 0.3
+    assert f"height:{spanned:g}rem" in blocks[0], (
+        f"the spanning block is not {spanned:g}rem, so it does not occupy the two slots it "
+        f"replaced and every group below it is out of register with the home column")
+    # ✅ AND THE HOME SIDE, WHICH HAS ONE QUARTERBACK, STILL GETS THE ORDINAL — the two
+    # sentences must not collapse into one another.
+    assert "No second quarterback recorded" in _plain(blocks[1]), (
+        "the side WITH a quarterback stopped naming which slot is missing")
+
+
 def test_the_RESERVED_SLOT_does_not_replace_the_HONEST_ABSENCE_for_a_side_we_hold_nothing_for(panel):
     """🚨 THE REGRESSION R-849 ALMOST CAUSED, CAUGHT BY ITS OWN RENDER. Reserving the second
     quarterback unconditionally meant a side with NO leaders at all drew two blank cards instead
     of saying we hold nothing for it.
 
     ⚠️ THOSE ARE DIFFERENT ABSENCES (AC-G.11) AND THE RESERVED CARD ANSWERS THE WRONG ONE: *no
-    second quarterback played* is a statement about one player; *we hold no leaders for this
+    second quarterback recorded* is a statement about one player; *we hold no leaders for this
     side* is a statement about the side. **The sentence wins whenever every group is empty.**
     """
     run, _ = panel
@@ -1325,8 +1470,51 @@ def test_the_RESERVED_SLOT_does_not_replace_the_HONEST_ABSENCE_for_a_side_we_hol
         f"a side we hold nothing for drew reserved slots instead of saying so: {text[:300]}")
     # And the home side, which does have leaders, still reserves its missing second quarterback.
     home = _plain(_card_blocks(entries)[0])
-    assert "No second quarterback played" in home, (
+    assert "No second quarterback recorded" in home, (
         "the side that DOES have one quarterback stopped reserving the second")
+
+
+def test_the_HEADER_uses_the_ABBREVIATION_and_FALLS_BACK_to_the_full_name(panel):
+    """🚨 R-856. B109's new header truncated *North Alabama* to **North Ala…**.
+
+    ⚠️ AND B109 WAS NOT WRONG TO MISS IT: it counted 0 of 40 truncations in the CARD names and
+    that count was correct. **The table header is an element the same round had just built and
+    did not count** — a new element is outside the population of the measurement taken before
+    it existed.
+
+    ✅ `srv_game.away_abbreviation` / `home_abbreviation` ALREADY EXIST, so this is two columns
+    on the `limit 1` read the header was ALREADY doing for its colours — no second query, and
+    G-2 untouched. **Max published length is 9 characters, so the abbreviation cannot itself
+    truncate.** 📊 And the same column answers A130's browser-tab question, which is why it is
+    worth saying flat: the two rounds should read one object rather than coin two.
+
+    ⚠️ THE FALLBACK IS NOT DEFENSIVE TYPING. Across all 112,675 games 12,018 away and 5,560 home
+    abbreviations are null; on the 3,674 that HAVE a box score — the only ones this header ever
+    draws — it is 39 away and 2 home. **~1% of this panel's population takes the fallback**, and
+    the fixture's away side is one of them.
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    header = next(str(b) for _k, b in entries
+                  if "Box score" in _plain(str(b)) and "border-top" in str(b))
+    text = _plain(header)
+    # 🚨 THE HOME SIDE HAS AN ABBREVIATION AND MUST USE IT — asserted as the FULL NAME BEING
+    # ABSENT as well as the short one being present, because a header carrying both would
+    # satisfy a presence check while still overflowing, which is the defect.
+    assert "AUB" in text and "UK" in text, (
+        f"the header does not use the published abbreviations: {text[:160]}")
+    # 🚨 ASSERTED AS THE FULL NAME BEING ABSENT TOO, because a header carrying BOTH would
+    # satisfy a presence check while still overflowing — which is the defect, not the fix.
+    assert "Auburn" not in text, (
+        f"the header still prints the full team name beside the abbreviation: {text[:160]}")
+    # ✅ AND THE FALLBACK, ON ITS OWN RUN. A side with no published abbreviation keeps its full
+    # name rather than drawing blank — AC-G.11: an absent abbreviation is not an absent team.
+    fallback = next(
+        str(b) for _k, b in run(_both(), colors=dict(_COLORS, home_abbreviation=None))[0]
+        if "Box score" in _plain(str(b)) and "border-top" in str(b))
+    assert "Auburn" in _plain(fallback), (
+        f"a side with no published abbreviation lost its name entirely: "
+        f"{_plain(fallback)[:160]}")
 
 
 def test_the_HEADER_ACCENT_names_BOTH_theme_variants_and_not_just_the_light_one(panel):

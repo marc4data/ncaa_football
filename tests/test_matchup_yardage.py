@@ -1368,11 +1368,10 @@ def test_a_TIE_shares_its_rank_and_is_NOT_truncated_to_three(panel):
     time on this page that a fixture could not distinguish what it claimed to test, and the
     prompt named it in advance.
 
-    ⚠️ THE "T-2nd" HALF OF THIS TEST WENT WITH R-753. Marc: *"Don't include the rank."* The rows
-    are still all drawn — which is what matters, because dropping one would invent a winner —
-    but nothing on the card now says they SHARE a place. See
-    `test_the_RANK_and_the_TIE_MARKER_are_gone_and_NOTHING_carries_the_tie`, which records that
-    loss as an assertion rather than leaving it in a report nobody greps.
+    ⚠️ THE "T-2nd" HALF OF THIS TEST WENT WITH R-753 AND THE TIE CAME BACK IN B110 — as
+    `tied 2`, which says the place is SHARED without reintroducing the ordinal Marc removed.
+    The rows are still all drawn, which is what matters here because dropping one would invent
+    a winner. See `test_the_RANK_IS_STILL_GONE_but_a_TIE_IS_NOW_CARRIED`.
     """
     tied = [r for r in _leaders() if r["panel"] == "rushing" and r["team_id"] == AWAY_ID]
     tied.append(dict(tied[0], player_name="Tory Blaylock", jersey=4,
@@ -1694,30 +1693,49 @@ def test_the_JERSEY_em_dash_SURVIVES_the_card_rewrite(panel):
     assert "#0" not in card and "#nan" not in card.lower()
 
 
-def test_the_RANK_and_the_TIE_MARKER_are_gone_and_NOTHING_carries_the_tie(panel):
-    """🚨 R-753 REMOVED THE RANK, AND THIS RECORDS WHAT WENT WITH IT.
+def test_the_RANK_IS_STILL_GONE_but_a_TIE_IS_NOW_CARRIED(panel):
+    """🚨 R-753 REMOVED THE RANK; R-856 PUT THE TIE BACK WITHOUT PUTTING THE RANK BACK.
 
-    Marc: *"Don't include the rank."* ✅ The cards are drawn in rank order, so the ORDER carries
-    the rank and nothing is lost there.
+    ⚠️ THIS TEST USED TO ASSERT THE OPPOSITE, AND IT ASKED TO BE CHANGED IN THESE WORDS: *"if
+    that is deliberate, this test is the one to update, and say what carries it."* B110 is that
+    round. **The two rulings are compatible and neither was overturned:**
 
-    ⚠️ BUT THE `T-2nd` MARKER WENT TOO, AND A TIE IS NOW INDISTINGUISHABLE FROM AN ORDER. Two
-    players sharing second place render as second and third. **That is a real loss and it is
-    asserted here rather than only described**, so a future round that wants to carry the tie
-    again has a test to change and a reason written next to it.
+      Marc, R-753:  *"Don't include the rank."*  → NO ORDINAL. Still asserted below.
+      Cowork, B110: a card that draws a shared place as an order is claiming a competition
+                    that did not resolve.                   → the tie is SAID, without a place.
 
-    ⚠️ NOT SOLVED IN PASSING: where a tie should live on a three-column header Marc specified is
-    a look decision, and inventing a slot for it would be exactly the quiet substitution §2
-    forbids.
+    ✅ SO THE MARKER IS `tied 2` AND DELIBERATELY NOT `T-2nd`. The cards are drawn in rank order
+    and the ORDER carries the rank; what was missing was the statement that a place is not sole.
+
+    📊 IT IS NOT DEFENCE-ONLY. Measured on `srv_game_team_leader_in_this_game`, rows with
+    `tied_players > 1`: passing rank 3 **9.8%**, rushing rank 3 **7.7%**, defensive rank 3
+    **11.9%**, `total` **0.1%**. This panel is the PREVIEW card, and it shares `_leader_card`
+    with the post-game one — so the marker had to be right for both or wrong for both.
+
+    ⚠️ AND IT MUST NOT CHANGE THE CARD'S HEIGHT. `_RESERVED_CARD_HEIGHT` is pinned to a real
+    card's 84px (B109 measured what a 33px register error costs), so a marker on its own line
+    would grow only the TIED cards and put two cards in one column out of step. Inline in the
+    position line, at `.6rem` inside a `.78rem` line, it cannot raise the line box.
     """
     rows = [dict(r, tied_players=2) if r["leader_rank"] == 2 else r for r in _leaders()]
     tied_text = _text(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0])
     plain_text = _text(panel(_game(), _both(), deltas=_deltas(), leaders=_leaders())[0])
+    # 🚨 R-753 IS UNTOUCHED AND THIS HALF IS UNCHANGED FROM THE ORIGINAL TEST.
     for marker in ("T-1st", "T-2nd", "1st", "2nd", "3rd"):
         assert marker not in tied_text, f"the card still carries a rank marker: {marker!r}"
-    # 🚨 THE LOSS, STATED AS AN ASSERTION: the tied render and the untied one are the same card.
-    assert tied_text == plain_text, (
-        "a tie now renders differently from an order, so something IS carrying it — if that is "
-        "deliberate, this test is the one to update, and say what carries it")
+    # 🚨 THE POSITIVE HALF. A bare `tied_text != plain_text` would pass on ANY difference, so
+    # the marker's own text is what is asserted, and the COUNT with it — `tied_players=2` was
+    # set on the rank-2 row of every panel in the fixture, so one card per panel must carry it.
+    assert "tied 2" in tied_text, (
+        f"a tied card does not say so — a shared place is being drawn as an order: "
+        f"{tied_text[:300]}")
+    assert "tied" not in plain_text, (
+        "an UNTIED card carries the marker, so it says nothing about being tied")
+    # ⚠️ AND THE MARKER IS DRIVEN BY THE COLUMN, NOT BY THE RANK: `tied_players=1` is the
+    # untied value and must draw nothing even on a card that is not first.
+    ones = [dict(r, tied_players=1) for r in _leaders()]
+    assert "tied" not in _text(panel(_game(), _both(), deltas=_deltas(), leaders=ones)[0]), \
+        "`tied_players = 1` drew a tie marker — 1 is the value for a place held alone"
 
 
 # --- 🚨 R-733: the labels are DATA, and the page must not guess at a format it does not know

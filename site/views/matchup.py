@@ -147,21 +147,25 @@ TABS = (
     # claude_work/cfdb_matchup_postgame_spec.md §1, all three on relations that already
     # exist. Nothing is stubbed here: a stub of an unbuilt thing is a promise the page
     # cannot keep, and it makes the next round impossible to measure.
-    (AFTER, "After the game", ("_post_game", "_leaders", "_drives")),
+    (AFTER, "After the game", ("_post_game", "_drives")),
 )
 
 # Which argument each panel takes. Named here rather than adapting the panels, because
 # changing three signatures so a lookup table can be uniform would rewrite three test files
 # to serve a data structure.
-_GAME_ID_PANELS = {"_travel", "_drives", "_post_game", "_leaders"}
+_GAME_ID_PANELS = {"_travel", "_drives", "_post_game"}
 
-# ⚠️ AND WHICH ALSO NEED THE SEASON (R-730). These three state an absence whose REASON
-# depends on it — before 2024 the data was never collected, from 2024 on it lands after the
-# game — and NEITHER the game_id NOR the returned frame can tell those apart: `_drives` and
-# `_leaders` get a genuinely empty frame, and `_post_game`'s columns carry no season. The
-# season is on the row `_run_tab` already holds, so this needs no query and no new column.
-# `_travel` has one absence and needs no season.
-_SEASON_PANELS = {"_post_game", "_leaders", "_drives"}
+# ⚠️ AND WHICH ALSO NEED THE SEASON (R-730). Both state an absence whose REASON depends on it
+# — before 2024 the data was never collected, from 2024 on it lands after the game — and
+# NEITHER the game_id NOR the returned frame can tell those apart: `_drives` gets a genuinely
+# empty frame, and `_post_game`'s columns carry no season. The season is on the row `_run_tab`
+# already holds, so this needs no query and no new column. `_travel` has one absence and needs
+# no season.
+#
+# ⚠️ `_leaders` WAS THE THIRD ENTRY HERE AND WENT WITH THE SECTION (R-839, B110). Its absence
+# note is not lost — the reason it needed the season is the same reason `_post_game` does, and
+# that panel now carries the whole After tab's player story.
+_SEASON_PANELS = {"_post_game", "_drives"}
 
 
 def _available_tabs(played: bool) -> tuple:
@@ -2604,6 +2608,45 @@ def _usage_dots(entry, player_id) -> str:
             f"flex-wrap:wrap'>{''.join(dots)}</div>")
 
 
+def _card_tie(row) -> str:
+    """The marker that says this player's place is SHARED — R-856's half of the tie problem.
+
+    🚨 IT PUTS BACK WHAT R-753 TOOK, WITHOUT PUTTING BACK THE THING MARC REMOVED. His words
+    were *"Don't include the rank"*, and this file recorded the cost in `_leader_card` at the
+    time: *"`_ORDINAL` AND THE `T-1st` TIE MARKER WENT WITH IT… nothing now carries a TIE. Two
+    players sharing second place render as second and third. Reported rather than solved in
+    passing."* **So this deliberately does NOT read `T-1st`.** The cards are drawn in rank
+    order and the order is what carries the place; what was missing is the statement that a
+    place is not sole, and that is all this says.
+
+    📊 IT IS NOT DEFENCE-ONLY, AND MAKING IT SO WOULD HAVE READ AS A DEFENSIVE ANNOTATION
+    RATHER THAN AS A TIE. Measured on `srv_game_team_leader_in_this_game`, share of rows with
+    `tied_players > 1`: passing rank 3 **9.8%**, rushing rank 3 **7.7%**, defensive rank 3
+    **11.9%**, `total` **0.1%**. Every panel ties; the defence ties most. `tied_players` was
+    already in `_POST_GAME_LEADER_COLUMNS` and read by nothing, which is how the gap survived.
+
+    🚨 COWORK'S TIE FIGURES FOR THIS ROUND CAME OFF THE WRONG RELATION, AND IT IS THE EXACT
+    TRAP ITS OWN PART 0 WARNED ABOUT. The prompt gave *"at rank 1, 20.3% of team-games are
+    tied"*. **20.3% is `srv_game_team_leader` — 888 of 4,375 `defensive/TOT` rows — which is
+    the relation this round DELETED, not the one the cards read.** Measured on the cards'
+    relation, ties run **2.1% / 3.3% / 5.7%** of the 4,368 defensive team-games at ranks 1/2/3.
+    ✅ The two figures Cowork took from the right relation were exact: **1,017 rows carry
+    `tied_players > 1`**, and **5.9% of defensive team-games return more than three rows**.
+
+    ⚠️ AND IT MUST NOT CHANGE THE CARD'S HEIGHT, WHICH IS WHY IT IS INLINE IN THE POSITION LINE
+    RATHER THAN A LINE OF ITS OWN. `_RESERVED_CARD_HEIGHT` is pinned to a real card's 84px, and
+    B109 measured what a 33px register error does to two columns side by side. A marker on its
+    own row would grow ONLY the tied cards, so two cards in the same column would differ —
+    worse than the misalignment R-849 exists to remove. At `.6rem` inside a line whose
+    `line-height` is set by `.78rem` text, the inline span cannot raise the line box.
+    """
+    tied = row.get("tied_players")
+    if tied is None or pd.isna(tied) or int(tied) <= 1:
+        return ""
+    return (f"<span style='font-size:.6rem;font-weight:400;opacity:.55;"
+            f"white-space:nowrap'> tied {int(tied)}</span>")
+
+
 def _leader_card(row, usage=None) -> str:
     """One player: name, jersey, position, class, and his yards so far.
 
@@ -2658,6 +2701,7 @@ def _leader_card(row, usage=None) -> str:
     # renders the bold line alone rather than an empty row that shifts the card's height.
     year = _card_text(row.get("class_year_display"))
     position = _card_text(row.get("position"))
+    tie = _card_tie(row)
     # ⚠️ `min-width:0` ON EVERY FLEX CHILD THAT CAN OVERFLOW, and it is what makes the ellipsis
     # work at all: without it a flex child refuses to shrink below its content and the name
     # pushes the year/position column off the card instead of truncating — the R-745 class,
@@ -2688,7 +2732,7 @@ def _leader_card(row, usage=None) -> str:
         "<div style='text-align:right;min-width:0'>"
         + (f"<div style='{small}'>{html.escape(year)}</div>" if year else "")
         + f"<div style='{strong};white-space:nowrap'>"
-          f"{html.escape(position) if position else fmt.EM_DASH}</div></div>",
+          f"{html.escape(position) if position else fmt.EM_DASH}{tie}</div></div>",
     ]
     # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
     # AC-G.32 puts a dash where a VALUE is missing; a slot with no label is a MEASURE that does
@@ -3198,15 +3242,21 @@ def _table_header(away, home, title: str, colors=None) -> str:
     for side, key in ((away, "away"), (home, "home")):
         logo = identity.logo_or_monogram(
             side.get("team_logo_url"), str(side.get("team_display") or "?"), 20)
-        pair = (colors or {}).get(key)
+        pair, abbr = (colors or {}).get(key) or (None, "")
         accent = (f"light-dark({identity.text_on(pair)}, "
                   f"{identity.text_on(pair, dark_theme=True)})")
+        # 🚨 R-856. THE ABBREVIATION, FALLING BACK TO THE FULL NAME. `North Alabama` did not
+        # fit this cell and drew `North Ala…`; `UNA` fits with room to spare, and the LOGO
+        # beside it is doing the identifying work that a clipped word was failing at. The
+        # monogram still comes off the full name — a two-letter fallback built from `UNA`
+        # would be a worse answer than one built from `North Alabama`.
+        name = abbr or str(side.get("team_display") or "?")
         cells.append(
             f"<span style='{_TABLE_VALUE_CELL};font-weight:700;display:flex;"
             f"align-items:center;justify-content:flex-end;gap:.3rem;"
             f"border-bottom:3px solid {accent};padding-bottom:.15rem'>{logo}"
             f"<span style='overflow:hidden;text-overflow:ellipsis'>"
-            f"{html.escape(str(side.get('team_display') or '?'))}</span></span>")
+            f"{html.escape(name)}</span></span>")
     return (f"<div style='{_TABLE_ROW}'><div style='{_TABLE_ROW_INNER}'>"
             + "".join(cells) + "</div></div>"
             # Marc: *"a horizontal line between the header row and the metrics row"*.
@@ -3458,8 +3508,24 @@ _POST_GAME_LEADER_COLUMNS = """
 # **the quarterbacks and rushers stay in BOTH sections, and receiving is ADDED in Advanced.**
 # The parenthetical places receiving; it does not say the others move. So Box Score draws five
 # and Advanced draws eight, which is the "EIGHT per side" the round was briefed on.
+# 🚨 R-839's PAGE HALF. THE DEFENCE JOINS BOX SCORE, AND IT IS THE ONLY DEFENSIVE FIGURE LEFT
+# ON THE PAGE. The `st.subheader("Game leaders")` section went in the same round (B110), and its
+# own comment had already measured what that section alone carried: `defensive/TOT` was one of
+# two rows *"NOWHERE ELSE"*. **Deleting it without this tuple line would have taken the last
+# tackle off the Matchup page.** The two changes are one change and must not be separated.
+#
+# ✅ A128 BUILT THE PANEL TO DROP STRAIGHT IN, AND IT DOES — VERIFIED RATHER THAN ASSUMED:
+# Solo-Ast · Tackles · TFL, with `stat_1_format` = `pair`, which is the format `Comp-Att`
+# already uses. **No new page branch, and `game_yards` is read NOWHERE in this file** — the
+# cards read the generic `stat_N_*` slots, so the 19.9% of defensive rows with a null
+# `game_yards` cannot draw a hole here. Checked before building, not after.
+#
+# ⚠️ BOX RATHER THAN ADVANCED, ON BALANCE: box goes 5 → 8 and advanced stays 8. The
+# meaning argument — tackles are counting stats, Box Score is the counting panel — is the
+# weaker of the two, because Marc split receiving by FIT rather than by meaning (R-848).
 _CARD_GROUPS = {
-    "box": (("Quarterback", "total", 2), ("Rushing", "rushing", 3)),
+    "box": (("Quarterback", "total", 2), ("Rushing", "rushing", 3),
+            ("Defense", "defensive", 3)),
     "advanced": (("Quarterback", "total", 2), ("Rushing", "rushing", 3),
                  ("Receiving", "passing", 3)),
 }
@@ -3545,17 +3611,32 @@ def _post_game_flank(away_col, home_col, leaders, away, home, section: str) -> N
             unsafe_allow_html=True)
 
 
-def _post_game_colors(game_id: int) -> dict:
-    """The two teams' contrast-safe colours, for the table header's accent (R-848).
+def _post_game_identity(game_id: int) -> dict:
+    """The two teams' colours AND abbreviations, for the table header (R-848, R-856).
 
     ⚠️ A SEPARATE READ BECAUSE `srv_game_team` HAS NO COLOUR COLUMN — measured, not assumed.
     `srv_game` publishes `away_color_on_light` / `home_color_on_dark` and friends, which is the
     pair `row_for_side` already renames for `identity.text_on`. **No new colour path, and no
     contrast maths anywhere in this file.**
+
+    🚨 R-856. THE ABBREVIATION RIDES ON THE READ THAT WAS ALREADY HAPPENING. B109's new header
+    truncated *North Alabama* to **North Ala…** — it counted 0 of 40 truncations in the CARD
+    names and was right, but the table header is an element it had just built and did not
+    count. **`srv_game.away_abbreviation` / `home_abbreviation` exist**, so this is two columns
+    on an existing bounded `limit 1` rather than a second query, and G-2 is untouched.
+
+    📊 AND THE ANSWER IS THE SAME ONE A130 NEEDS, WHICH IS WHY IT IS WORTH STATING FLAT: the
+    column EXISTS, so the browser tab and this header should read the same object rather than
+    inventing two page-level abbreviations. ⚠️ Coverage is not total and the gap is ancient
+    rather than current — across all 112,675 games, 12,018 away and 5,560 home are null; **on
+    the 3,674 games that actually have a box score, 39 away and 2 home.** Max length is 9
+    characters, so it cannot itself truncate. **A null falls back to the full name**, which is
+    exactly the behaviour before this change, on ~1% of the games this header draws.
     """
     df = query("""
         select away_color_on_light, away_color_on_dark,
-               home_color_on_light, home_color_on_dark
+               home_color_on_light, home_color_on_dark,
+               away_abbreviation, home_abbreviation
         from srv_game
         where game_id = :game_id
         limit 1
@@ -3563,7 +3644,15 @@ def _post_game_colors(game_id: int) -> dict:
     if df.empty:
         return {}
     row = df.iloc[0]
-    return {side: row_for_side(row, side) for side in ("away", "home")}
+    # ⚠️ A TUPLE RATHER THAN A DICT, AND `ci/check_page_reads.py` IS THE REASON — it scans
+    # `row.get("name")` reads and asks which SELECT provides that column. A dict of the page's
+    # own making reads identically to a serving row at the call site, so `entry.get("abbr")`
+    # tripped it as a column no query selects. **The checker is right that the two are
+    # indistinguishable; the fix is to stop them looking alike.** Unpacking says at the call
+    # site that this is a page-built pair, not a row.
+    return {side: (row_for_side(row, side),
+                   _card_text(row.get(f"{side}_abbreviation")))
+            for side in ("away", "home")}
 
 
 def _post_game_leaders(game_id: int) -> dict:
@@ -3591,7 +3680,7 @@ def _post_game_leaders(game_id: int) -> dict:
     return out
 
 
-def _reserved_card(what: str) -> str:
+def _reserved_card(what: str, slots: int = 1) -> str:
     """A slot held open for a player who does not exist, SAYING SO (R-849).
 
     🚨 THIS IS THE WHOLE DIFFERENCE BETWEEN A RESERVED SLOT AND A HOLE. AC-G.11 forbids an
@@ -3599,10 +3688,24 @@ def _reserved_card(what: str) -> str:
     NAMES its own emptiness. The card keeps the row register between the two columns AND tells
     the reader why it is blank — the same border and the same footprint as a real card, so
     nothing shifts, and a sentence inside it so nothing is mysterious.
+
+    🚨 R-856. `slots` LETS ONE BLOCK STAND IN FOR SEVERAL, AND IT EXISTS BECAUSE THE ORDINAL
+    WAS LYING. A side with no quarterback at all drew *No first quarterback recorded* over *No
+    second quarterback recorded*, and **a reader does not think of quarterbacks as numbered
+    slots** — the ordinal is an artefact of the card grid, not a fact about the game, so the
+    first of those reads as a rendering error. One block saying the thing that is true of the
+    SIDE answers the question actually being asked.
+
+    ⚠️ THE FOOTPRINT IS ARITHMETIC, NOT A GUESS, BECAUSE B109 PROVED THE COST OF GETTING IT
+    WRONG. `n` stacked cards occupy `n` heights plus the `n-1` margins BETWEEN them (the last
+    margin is outside the run either way), so a block replacing them is
+    `n * _RESERVED_CARD_HEIGHT + (n - 1) * 0.3rem`. **Alignment survives to the pixel and the
+    group headers below stay in register** — which is the whole reason R-849 exists.
     """
+    height = slots * _RESERVED_CARD_HEIGHT + (slots - 1) * 0.3
     return (f"<div style='border:1px dashed rgba(128,128,128,.28);border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem;box-sizing:border-box;"
-            f"height:{_RESERVED_CARD_HEIGHT}rem;display:flex;align-items:center'>"
+            f"height:{height:g}rem;display:flex;align-items:center'>"
             f"<span style='font-size:.72rem;opacity:.5;line-height:1.25'>{what}</span></div>")
 
 
@@ -3644,10 +3747,27 @@ def _post_game_card_column(leaders, team_id, section: str = "box") -> str:
         # question. `_card_dots` returns nothing for a card with no usage, so the post-game
         # card is the same card without them rather than a second implementation of one.
         drawn = "".join(_leader_card(r) for r in rows)
-        if title in _RESERVED_GROUPS:
-            drawn += "".join(
-                _reserved_card(f"No {_ORDINALS[index]} {title.lower()} played")
-                for index in range(len(rows), wanted))
+        if title in _RESERVED_GROUPS and len(rows) < wanted:
+            # 🚨 R-856. TWO SENTENCES, AND WHICH ONE IS TRUE DEPENDS ON WHETHER ANY PLAYED.
+            # A side with ONE quarterback is missing its second and the ordinal is a fact
+            # about the pair. A side with NONE is not missing a second anything, and naming
+            # a *first* quarterback that never existed invents the slot it is apologising for.
+            #
+            # 🚨 AND THE VERB IS `recorded` RATHER THAN `played`, WHICH IS A MEASUREMENT AND
+            # NOT A PREFERENCE. *Played* asserts about the GAME; the box score's silence only
+            # means nothing was WRITTEN DOWN. Measured on the cards' own relation: of the
+            # **573** sides with no `total` row, **571 — 99.7% — have receivers in the same
+            # game**, so the ball was thrown and caught and a quarterback was unmistakably on
+            # the field. *No quarterback played* would be false on essentially every side this
+            # sentence is drawn for. **The render game is one of them: North Alabama at
+            # Arkansas, no quarterback row, three receivers.**
+            if rows:
+                drawn += "".join(
+                    _reserved_card(f"No {_ORDINALS[index]} {title.lower()} recorded")
+                    for index in range(len(rows), wanted))
+            else:
+                drawn += _reserved_card(
+                    f"No {title.lower()} recorded for this side.", slots=wanted)
         blocks.append(_card_group_header(title) + drawn)
     return "".join(blocks)
 
@@ -3717,7 +3837,7 @@ def _post_game(game_id, season) -> None:
         # colour column — measured — so the header's accent comes from `srv_game`, whose
         # `away_color_on_light` / `home_color_on_dark` pairs are exactly the shape
         # `row_for_side` was already written for. ⚠️ ONE bounded read, cached by `query`.
-        colors = _post_game_colors(game_id)
+        colors = _post_game_identity(game_id)
         slots = _post_game_columns()
         _post_game_flank(slots["away"], slots["home"], leaders, away, home, "box")
         slots["table"].markdown(
@@ -3803,241 +3923,30 @@ def _post_game(game_id, season) -> None:
                 "offensive plays, which are counted on the last row — the two sides do not "
                 "run the same number. Definitions come from the data dictionary the Excel "
                 "export ships, so the page and the workbook cannot disagree.")
-        table.as_of_caption(df)
-
-
-# --- R-511: who led ---------------------------------------------------------------------
-
-# ⚠️ THE CUT, AND IT WAS MEASURED BEFORE IT WAS CHOSEN. There are 50 category/type pairs per
-# game. Coverage and field size are not remotely uniform, measured across 3,542 games:
-#
-#     category/type      games   avg field   field of one   tied
-#     receiving/YDS      100.0%      7.2          0.1%       1.6%   ← the deepest competition
-#     rushing/YDS        100.0%      5.6          0.0%       1.3%
-#     passing/YDS        100.0%      1.6      ⚠️ 51.2%       0.1%   ← half are a field of ONE
-#     defensive/TOT       58.1%     21.4          0.1%    ⚠️ 20.2%   ← the biggest field, and
-#                                                                     a fifth end in a tie
-#     kicking/*           99.7%      1.1      ⚠️ 91.3%
-#     punting/*           99.8%      1.1      ⚠️ 88.8%
-#
-# ⚠️ KICKING AND PUNTING ARE EXCLUDED ON THAT EVIDENCE, not on taste: at a field of one in
-# nine games out of ten, "the kicking leader" is a sentence about a competition that did not
-# happen almost every time it is printed.
-#
-# TOUCHDOWN ROWS ARE EXCLUDED TOO, and for the opposite reason — rushing/TD ties 47.3% of the
-# time and receiving/TD 53.3%, because most games have several players with exactly one. A row
-# that is a tie more often than not is noise wearing a leaderboard.
-#
-# ⚠️ DIRECTION IS DECLARED PER ROW AND ALL FOUR ARE `highest_*`. Both ends ship because the
-# warehouse does not know which way a stat reads and the page must not decide with arithmetic.
-# For yards and tackles, more is the achievement. NOTHING here maps to `lowest_*`: "the player
-# who threw the fewest interceptions" is not a leader, it is a sentence nobody wants, so
-# passing/INT is omitted rather than inverted or relabelled.
-#
-# (label, stat_category, stat_type)
-# 🚨 R-738 CONSIDERED DELETING THIS SECTION AND KEPT IT. THE MEASUREMENT IS WHY.
-#
-# Marc, v03: *"Replace Game Leaders section by adding player cards"* — which reads as DELETE,
-# and that was Cowork's call unless the loss turned out to be embarrassing. ⚠️ **It is.**
-#
-# The prompt put it as "the short view answers 50 stat pairs and the cards answer 3". The VIEW
-# does carry 50 — measured — but this PANEL has only ever rendered FOUR, and of those:
-#
-#     Passing yards    ✅ now also on the QB card      (Comp-Att · Yards · TD)
-#     Rushing yards    ✅ now also on the rusher cards (Carries · Yards · Yds/Carry)
-#     Receiving yards  🚨 NOWHERE ELSE — Marc's card list is "QB, Top 3 Rusher", no receiver
-#     Tackles          🚨 NOWHERE ELSE, and `srv_game_team_leader_in_this_game` HAS NO
-#                         DEFENSIVE PANEL AT ALL — passing, rushing, total, and nothing else.
-#                         **This is the only defensive figure on the whole Matchup page.**
-#
-# ⚠️ NARROWING IT TO THE TWO THE CARDS DO NOT ANSWER WAS BUILT AND THEN REVERTED. It is a THIRD
-# option nobody asked for, it changes what the section ANSWERS rather than how prominent it is,
-# and Marc judges that from a picture he has not seen yet. The cards ship; if the two duplicated
-# rows then read as repetition, removing them is one edit to this tuple.
-_LEADER_ROWS = (
-    ("Passing yards", "passing", "YDS"),
-    ("Rushing yards", "rushing", "YDS"),
-    ("Receiving yards", "receiving", "YDS"),
-    ("Tackles", "defensive", "TOT"),
-)
-
-_LEADER_KEYS = tuple(f"{category}/{stat}" for _label, category, stat in _LEADER_ROWS)
-
-
-def _leader_note(row) -> str:
-    """⚠️ THE HONESTY THIS PANEL EXISTS TO KEEP. What the number is actually a leader OF.
-
-    `rank_population` is how many players the ranking ran over, and on `passing/YDS` it is
-    **1 in 51.2% of team-games** — one team, one passer. "Ty Simpson led Alabama in passing"
-    is true and is a claim about a competition that did not happen, and it is on the very
-    first game anyone opens (401752665). A panel that prints "led" without reading this
-    overclaims more often than not on the row a reader looks at first.
-
-    `highest_tied_players > 1` is the other half of the same problem: 20.2% of `defensive/TOT`
-    rows end in a tie, and a name printed alone where three players tied is a different false
-    claim. A080 breaks ties with min() so the same name returns on every load — ⚠️ **stable is
-    not the same as sole**, and the count is what says which.
-    """
-    field = row.get("rank_population")
-    tied = row.get("highest_tied_players")
-    if pd.isna(field) or int(field) <= 1:
-        return "only player recorded"
-    if pd.notna(tied) and int(tied) > 1:
-        return f"tied, {int(tied)} of {int(field)}"
-    return f"best of {int(field)}"
-
-
-def _leader_name(row) -> str:
-    """The player's name, linked to their page — or plain text where it cannot be (R-515).
-
-    ⚠️ FOLLOWS team.py's ROSTER LINK RATHER THAN COINING A SECOND ONE. That call site is
-    `params.link("players", q=full_name, player=slug, season=season)`, and all three arguments
-    are load-bearing: the Players page refuses a search term under two characters, `player`
-    picks this athlete out of the matches, and the page is season-scoped. Verified end to end
-    against serving — q="Ty Simpson" matches, slug `ty-simpson-4685522` selects, and
-    srv_player_stats returns 15 rows across 3 categories for it.
-
-    ⚠️ A NULL SLUG RENDERS PLAIN TEXT, NOT A LINK TO NOWHERE — srv_game.sql's own rule.
-    Measured before deciding which of its two cases this is: `highest_player_slug` is null or
-    blank on **0 of 296,629 rows**, so the branch is unreachable against today's data. It is
-    written anyway because it costs one condition, and because the alternative — discovering
-    the object changed by shipping an anchor with an empty destination — is the failure the
-    rule exists to name.
-
-    ⚠️ ESCAPED, AND THAT IS NOT DEFENSIVE TYPING: 6,124 leader names carry an apostrophe
-    (A'Amear Walton), which would close a single-quoted attribute and spill markup onto the
-    page. Double quotes plus html.escape, the same pair B076's tooltips use.
-    """
-    name = str(row.get("highest_player_name") or "?")
-    slug = row.get("highest_player_slug")
-    if not slug or (isinstance(slug, float) and pd.isna(slug)) or not str(slug).strip():
-        return html.escape(name)
-    href = params.link("players", q=name, player=str(slug).strip(),
-                       season=row.get("season"))
-    return (f"<a href=\"{html.escape(href, quote=True)}\" target=\"_self\" "
-            f"style='color:inherit'>{html.escape(name)}</a>")
-
-
-def _leader_cell(row) -> str:
-    """One side's leader for one row: who, how much, and out of what."""
-    if row is None:
-        return f"<span style='opacity:.45'>{fmt.EM_DASH}</span>"
-    value = row.get("highest_stat_value")
-    # highest_stat_raw carries the fraction-shaped stats — C/ATT, FG, XP — where there is no
-    # numeric value at all (21,183 rows). None of the four rows above is one of those,
-    # measured, but the fallback costs a line and means a later addition cannot render blank.
-    figure = (fmt.number(value, dp=0) if pd.notna(value)
-              else (row.get("highest_stat_raw") or fmt.EM_DASH))
-    # ⚠️ NO NESTED ANCHOR. Col's comment records that a row link and a cell link cannot both
-    # apply — but these rows are plain divs with no row-level href, so the name is the only
-    # anchor here and there is nothing to lose a fight with. Checked before writing it.
-    return (f"<div style='font-weight:600'>{_leader_name(row)}</div>"
-            f"<div><span style='font-weight:600'>{figure}</span>"
-            f"<span style='opacity:.55;font-size:.8rem'> · {_leader_note(row)}</span></div>")
-
-
-def _leaders(game_id, season) -> None:
-    """Who led each side, read rather than computed (R-511).
-
-    ⚠️ THE RANKING IS NOT DONE HERE AND COULD NOT BE. B076 ended with this item blocked:
-    nothing in serving ranked players within a game — `srv_player_stats` ranks at SEASON grain
-    and carries no game_id, `srv_player_game_log` carries no rank — so "who led" was a window
-    function, which CLAUDE.md puts upstream. A080 built `srv_game_team_leader` at
-    (game_id, team_id, stat_category, stat_type), one row per QUESTION ASKED rather than per
-    player, with both ends already resolved. This panel reads it with a WHERE and nothing else:
-    no `order by`, no `rank(`, no `over (`, no `group by`.
-
-    ⚠️ AND THE CADENCE IS NOT THE BOX SCORE'S, WHICH IS WHY IT CARRIES ITS OWN STAMP. The
-    source is `/games/players` in the IMMUTABLE_WK bucket, so this object rebuilds Thursday and
-    Sunday rather than two-hourly — deliberately, because a two-hourly rebuild would write
-    byte-identical rows, which is the false freshness A078 and A079 spent two rounds removing.
-    On a Saturday night the box score above will have moved and this will not. One page-level
-    stamp over three blocks with three cadences would be the composition failure AC-G.33 is
-    about, so this block says its own.
-    """
-    st.subheader("Game leaders")
-    with states.section("srv_game_team_leader", dataset=DATASETS["srv_game_team_leader"]):
-        # ONE QUERY FOR BOTH TEAMS AND ALL FOUR ROWS. srv_game_team_leader is a different
-        # relation to the box score's, so this is a second read on the tab and that is correct
-        # rather than a G-2 violation — G-2 is one relation per query, not one query per tab.
-        # The composite key is filtered in SQL so no cross product of category and type can
-        # come back; eight rows is the ceiling and the grain restated (AC-G.39).
-        df = query("""
-            select season, team_id, team, home_away, stat_category, stat_type,
-                   highest_player_name, highest_player_slug, highest_player_id,
-                   highest_stat_value, highest_stat_raw, highest_tied_players,
-                   rank_population, as_of_ts
-            from srv_game_team_leader
-            where game_id = :game_id
-              and stat_category || '/' || stat_type = any(:keys)
-            limit 8
-        """, {"game_id": game_id, "keys": list(_LEADER_KEYS)})
-
-        usable = [r for _, r in df.iterrows() if r.get("highest_player_name")]
-        if not usable:
-            # ⚠️ EMPTY, AND THE FRAME IS GENUINELY EMPTY HERE — WHICH IS THE OPPOSITE OF THE
-            # BOX SCORE ABOVE IT. srv_game_team holds an all-NULL row for every game back to
-            # 1869, so its emptiness test has to be on the values (AC-G.6, R-509). This object
-            # covers 2024-2026 only and returns NO ROWS for anything earlier, so both tests
-            # agree here — the value test is still what is written, because a row arriving
-            # with no leader on it is the failure the frame check would miss.
-            states.empty(
-                "Who led each side would be here.",
-                _absence_note(
-                    season,
-                    not_yet="Player-level box scores are collected after the game finishes, "
-                            "and this game's have not arrived yet.",
-                    out_of_scope="Player-level box scores are collected from 2024 onward, "
-                                 "and this game's are not among them."))
-            return
-
-        by_side = {}
-        for row in usable:
-            by_side[(str(row.get("home_away")), f"{row['stat_category']}/{row['stat_type']}")] \
-                = row
-
-        lines = []
-        for label, category, stat in _LEADER_ROWS:
-            key = f"{category}/{stat}"
-            away, home = by_side.get(("away", key)), by_side.get(("home", key))
-            if away is None and home is None:
-                # ⚠️ PER-ROW ABSENCE IS REAL AND IT IS NOT AN EDGE CASE. defensive/TOT covers
-                # 58.1% of games, so tackles are missing on two games in five while the other
-                # three rows are present. The row is dropped rather than drawn with two
-                # dashes, which would read as "nobody made a tackle".
-                continue
-            lines.append(
-                f"<div style='display:flex;align-items:flex-start;gap:.5rem;"
-                f"padding:.3rem 0;border-top:1px solid rgba(128,128,128,.18)'>"
-                f"<div style='flex:1;text-align:right'>{_leader_cell(away)}</div>"
-                f"<div style='min-width:8rem;text-align:center;opacity:.65;"
-                f"font-size:.85rem;padding-top:.15rem'>{label}</div>"
-                f"<div style='flex:1'>{_leader_cell(home)}</div></div>")
-
-        away_side = next((r for r in usable if str(r.get("home_away")) == "away"), None)
-        home_side = next((r for r in usable if str(r.get("home_away")) == "home"), None)
-        heading = _leader_heading(away_side, home_side)
-        st.markdown(heading + "".join(lines), unsafe_allow_html=True)
-
+        # 🚨 R-839. THIS SENTENCE OUTLIVED THE SECTION IT WAS WRITTEN FOR, AND THE MEASUREMENT
+        # IS WHY. B110 deleted `st.subheader("Game leaders")`, whose caption read *"Player box
+        # scores refresh Thursday and Sunday, so on a game night this block can sit behind the
+        # box score above it."* **The fact is still true of what is left on this tab and
+        # nothing else here says it**, so it belongs to the TAB rather than to the section —
+        # deleting it with its block would have lost it.
+        #
+        # 📊 MEASURED ON LIVE SERVING RATHER THAN REASONED FROM THE DAG, 2026-09-14:
+        #     srv_game_team                      as_of  12:00 UTC today
+        #     srv_game_team_leader_in_this_game  as_of  17:58 UTC YESTERDAY
+        # **The cards are eighteen hours behind the table they sit beside, right now.** The
+        # box score is on the two-hourly bucket and the player box scores are `IMMUTABLE_WK`,
+        # Thursday and Sunday.
+        #
+        # ⚠️ AND THE STAMP BELOW IS THE BOX SCORE'S, NOT THE CARDS'. `as_of_caption(df)` reads
+        # the `srv_game_team` frame, so it prints the newer of the two times for a panel that
+        # contains both. That is a REPORTED finding rather than one fixed in passing (R-500):
+        # a second timestamp is a look decision, and the deleted section used to carry the
+        # honest one for free. **The sentence is what keeps the reader from being misled by it.**
         st.caption(
-            "\"best of 8\" is the field the ranking ran over. **\"only player recorded\" means "
-            "nobody else on that side registered the stat**, so the figure is a total rather "
-            "than a competition won — half of all passing rows are one team, one passer. "
-            "\"tied\" means the value is shared and the name shown is one of several.")
-        st.caption(
-            "Player box scores refresh Thursday and Sunday, so on a game night this block can "
-            "sit behind the box score above it.")
+            "The player cards refresh Thursday and Sunday, so on a game night they can sit "
+            "behind the box score beside them. **\"tied 2\" on a card means that figure is "
+            "shared** — the players are level, not first and second.")
         table.as_of_caption(df)
-
-
-def _leader_heading(away, home) -> str:
-    """Team names over their own columns, away left — the scoreline's convention."""
-    def name(side):
-        return "?" if side is None else (side.get("team") or "?")
-    return (f"<div style='display:flex;align-items:center;margin-bottom:.2rem'>"
-            f"<div style='flex:1;text-align:right;font-weight:600'>{name(away)}</div>"
-            f"<div style='min-width:8rem'></div>"
-            f"<div style='flex:1;font-weight:600'>{name(home)}</div></div>")
 
 
 def _travel(game_id) -> None:

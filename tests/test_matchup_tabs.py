@@ -58,8 +58,12 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # so the TAB names one panel where it used to name two. Marc: "Model — move to the right of
 # Market, so they share the same row." Both still exist and both still carry their own
 # states.section; only who calls them changed.
+# ⚠️ R-839/B110: `_leaders` LEFT THIS LIST WITH THE SECTION IT NAMED. Marc's v03 —
+# *"Replace Game Leaders section by adding player cards"* — and the cards absorbed the last
+# two figures it alone carried: receiving arrived in B107, the defence in B110's own
+# `_CARD_GROUPS`. **The list's whole purpose is that such a change is visible here.**
 ALL_PANELS = ("_market_and_model", "_series", "_yardage",
-              "_travel", "_post_game", "_leaders", "_drives")
+              "_travel", "_post_game", "_drives")
 
 
 @pytest.fixture
@@ -138,7 +142,7 @@ def test_a_completed_game_opens_on_the_after_tab(page):
     """
     run, _ = page
     _, called = run({"is_completed": True})
-    assert called == ["_post_game", "_leaders", "_drives"], \
+    assert called == ["_post_game", "_drives"], \
         f"a completed game did not open on the after tab — it ran {called}"
 
 
@@ -169,7 +173,7 @@ def test_a_played_game_keeps_the_after_tab_even_where_cfdb_holds_nothing(page):
     is that we do not hold it."""
     run, _ = page
     entries, called = run({"is_completed": True, "season": 1999, "game_id": 62718})
-    assert called == ["_post_game", "_leaders", "_drives"]
+    assert called == ["_post_game", "_drives"]
     assert "After the game" in _text(entries)
 
 
@@ -188,7 +192,7 @@ def test_an_unknown_tab_slug_falls_back_and_does_not_raise(page):
     """scores.py already treats a hand-edited `?tab=` as noise, not a request (AC-G.11)."""
     run, _ = page
     entries, called = run({"is_completed": True}, tab="box-score-please")
-    assert called == ["_post_game", "_leaders", "_drives"], "an unknown slug did not fall back to this game's own look"
+    assert called == ["_post_game", "_drives"], "an unknown slug did not fall back to this game's own look"
     assert "Something went wrong" not in _text(entries)
 
 
@@ -337,8 +341,22 @@ def test_no_post_game_content_was_stubbed(page):
     assert reads == {"_post_game": 1, "_game_team_rows": 1}, (
         f"srv_game_team is read somewhere new, or the box score split back into two reads "
         f"(G-2, one read two renderings): {reads}")
-    assert len(re.findall(r"from srv_game_team_leader\b", SOURCE)) == 1, \
-        "the leaders panel must be one read too (R-511)"
+    # 🚨 R-839/B110. THIS WAS `== 1` AND IS NOW `== 0`, AND IT IS THE §3.3 EVIDENCE RATHER
+    # THAN A DELETED ASSERTION. EXPAND → MIGRATE → CONTRACT: **the page stops reading the
+    # relation FIRST, and the publish drops it on a LATER round** (A's — 308,232 rows, 87 MB).
+    # An unread published table costs disk; a published table removed under a page that still
+    # reads it is a broken page. **So this assertion is what says the migrate step is done**,
+    # and it must go red if anything reads it again before A contracts it.
+    #
+    # ⚠️ THE `\b` IS LOAD-BEARING AND ALWAYS WAS — B077 found it the hard way. It stops this
+    # matching `srv_game_team_leader_in_this_game`, which is the relation the CARDS read and
+    # which must keep being read. Three names in this file differ by a suffix (A128, and
+    # `_game_leaders`'s own docstring warns about it); an unanchored grep conflates them.
+    assert len(re.findall(r"from srv_game_team_leader\b", SOURCE)) == 0, \
+        "the Game leaders section was removed (R-839) — nothing may read srv_game_team_leader"
+    # ✅ AND THE POSITIVE HALF, so this cannot pass by the cards ALSO disappearing.
+    assert len(re.findall(r"from srv_game_team_leader_in_this_game\b", SOURCE)) == 1, \
+        "the post-game cards must still read their own view, exactly once"
     # ⚠️ THE srv_player_* BAN USED TO BE REPEATED HERE AND HAS MOVED, NOT GONE. It now lives
     # ONCE, in test_matchup_postgame.test_the_ranking_is_read_and_never_computed_in_the_page,
     # where it is strictly STRONGER: that version strips comments and docstrings with ast
@@ -366,10 +384,13 @@ def test_the_split_is_two_tabs_named_for_when_not_what(page):
 # --- 🚨 R-730: the three after-tab panels need the SEASON, and this is where it comes from ---
 
 def test_the_after_tab_panels_are_handed_the_games_season(page):
-    """Each of the three states an absence whose REASON depends on the season, and neither the
-    game_id nor the returned frame can supply it — `_drives` and `_leaders` get a genuinely
-    empty frame and `_post_game`'s columns carry no season. It comes off the row `body()`
-    already holds, so this needs no query and no new column.
+    """Each states an absence whose REASON depends on the season, and neither the game_id nor
+    the returned frame can supply it — `_drives` gets a genuinely empty frame and
+    `_post_game`'s columns carry no season. It comes off the row `body()` already holds, so
+    this needs no query and no new column.
+
+    ⚠️ IT WAS THREE PANELS UNTIL B110 AND IS TWO NOW: `_leaders` went with R-839's section.
+    The test reads `_SEASON_PANELS` rather than a list of its own, so it followed.
     """
     run, matchup = page
     run({"is_completed": True, "season": 2026, "game_id": 401856679})
