@@ -1398,18 +1398,21 @@ def _series(row) -> None:
 # `*_yards_for_minus_opponent_allowed_per_game` on `srv_game_team` at game × team grain
 # precisely so this page would not subtract two numbers itself — §4.2, and the same rule that
 # keeps the per-game division in the mart.
+# ⚠️ FIVE ELEMENTS SINCE R-722: (label, for, allowed, delta, outlook). The outlook column is
+# NAMED here rather than assembled from the label at runtime — `ci/check_page_reads.py` parses
+# the source for column-shaped reads, and an f-string name is invisible to it.
 _YARDAGE_DIMENSIONS = (
     ("Rushing", "rushing_yards_for_per_game", "rushing_yards_allowed_per_game",
-     "rushing_yards_for_minus_opponent_allowed_per_game"),
+     "rushing_yards_for_minus_opponent_allowed_per_game", "rushing_matchup_outlook"),
     ("Passing", "passing_yards_for_per_game", "passing_yards_allowed_per_game",
-     "passing_yards_for_minus_opponent_allowed_per_game"),
+     "passing_yards_for_minus_opponent_allowed_per_game", "passing_matchup_outlook"),
     # TOTAL EARNS ITS ROW ON A MEASUREMENT, NOT ON SYMMETRY. It is rushing + passing in
     # 13,686 of the 13,728 rows that carry any form, and differs in 42 by up to 11 yards —
     # so it is the source's own total rather than our arithmetic, and adding the two above
     # in this file would be metric maths in the app. It renders last and subordinate,
     # because 99.7% of the time it is the sum of the two lines over it.
     ("Total", "total_yards_for_per_game", "total_yards_allowed_per_game",
-     "total_yards_for_minus_opponent_allowed_per_game"),
+     "total_yards_for_minus_opponent_allowed_per_game", "total_matchup_outlook"),
 )
 
 _YARDAGE_COLUMNS = """
@@ -1563,7 +1566,7 @@ def _yardage_direction(offense, defense, deltas=None) -> str:
     # and putting two sides beside each other is the whole job of this panel. If that is ever
     # overturned, the reversal is DELETING `dp=1` — the column name is already correct, so
     # `fmt` decides from then on.
-    for label, for_column, allowed_column, delta_column in _YARDAGE_DIMENSIONS:
+    for label, for_column, allowed_column, delta_column, outlook_column in _YARDAGE_DIMENSIONS:
         subdued = " opacity:.75;font-size:.9rem;" if label == "Total" else ""
         lines.append(
             f"<div style='display:flex;align-items:baseline;gap:.5rem;{subdued}"
@@ -1752,8 +1755,61 @@ def _off_the_frame(value, axis) -> bool:
     return not (float(axis["axis_min"]) <= float(value) <= float(axis["axis_max"]))
 
 
+# 🚨 R-722. MARC'S RULE, AND NONE OF IT IS COMPUTED HERE.
+#
+#     Green Circle: Gained < Allowed
+#     Red Diamond:  Gained > Allowed and (Gained - Allowed) / Gained > .2
+#     Yellow Circle: Gained > Allowed
+#
+# A119 published that as a column (`c89b516`) because the ratio is a DIVISION and a three-way
+# bucketing is a CLASSIFICATION, and §4.2 puts both upstream. This page maps a value to a look.
+#
+# 🚨 THE LITERAL IS `favorable`, AMERICAN SPELLING, AND IT IS NOT A DETAIL. A119 first shipped
+# `favourable`, `test_no_dbt_description_uses_british_spelling` failed the build, and the value
+# changed — so Cowork's own prompt for THIS round specified the British spelling. A mapping keyed
+# on `favourable` matches nothing and every mark silently disappears, which is why
+# `test_the_MAPPING_KEYS_are_the_values_the_warehouse_actually_stores` reads them out of serving's
+# own macro rather than trusting this tuple.
+#
+# ⚠️ SHAPE FIRST, COLOUR SECOND (AC-G.22). Marc's own rule gives the diamond to `challenging`, so
+# the one state that says "this will be hard" is the one a greyscale reader can find by outline.
+# Green and yellow are both circles and are separated by colour alone — see the round's report for
+# what that looks like in greyscale; the two tones are chosen for LUMINANCE distance, not hue.
+_OUTLOOK_MARKS = {
+    "favorable": ("circle", "#1b6b3a", True),
+    "contested": ("circle", "#c8a415", True),
+    "challenging": ("diamond", "#b3261e", True),
+}
+
+# ⚠️ AN UNCLASSIFIED MARK DOES NOT BORROW ONE OF THE THREE LOOKS (AC-G.11). WHETHER IT CAN BE
+# SEEN AT ALL WAS CHASED AND THE ANSWER IS "NOT DEMONSTRATED", WHICH IS NOT THE SAME AS "NEVER":
+#
+#   · the outlook is null on EXACTLY the rows the delta is null on — 0 of 225,350 disagree, so
+#     A119's claim holds when re-measured independently;
+#   · but the outlook lives on `srv_game_team` and the chart's two figures live on
+#     `srv_team_week`, which are different relations at different grains, so nothing STRUCTURAL
+#     ties them;
+#   · 243 rows in 2026 carry a null rushing outlook while that team has both team-week figures
+#     at that game's week — ⚠️ that is the NECESSARY condition only. `_scatter` also needs the
+#     week's distribution, a non-degenerate axis and a point inside the frame, and a sample of
+#     those 243 rendered ZERO charts.
+#
+# 🚨 SO THE BRANCH IS NOT KNOWN TO BE REACHABLE AND IS NOT KNOWN TO BE DEAD — and an unclassified
+# mark must still not borrow a verdict's look if it ever draws. It gets a hollow grey square: a
+# shape neither other state uses, unfilled so it reads as "not classified" rather than as a
+# fourth verdict. `test_an_UNCLASSIFIED_mark_does_not_BORROW_one_of_the_three_looks` covers it.
+_OUTLOOK_UNKNOWN = ("square", "#6b6b68", False)
+
+
+def _outlook_mark(value):
+    """The look for one stored outlook — or the unclassified one, which is not a fourth verdict."""
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return _OUTLOOK_UNKNOWN
+    return _OUTLOOK_MARKS.get(str(value), _OUTLOOK_UNKNOWN)
+
+
 def _scatter(team, opponent, for_column, allowed_column, distribution,
-             team_name: str, opponent_name: str, label: str):
+             team_name: str, opponent_name: str, label: str, outlook=None):
     """One metric: this side's attack against that side's defense, on the week's frame.
 
     ⚠️ THE TWO AXES ARE DIFFERENT MEASUREMENTS AND THE LABELS SAY SO. Y is this team's
@@ -1821,11 +1877,18 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     mid_y = alt.Chart(pd.DataFrame([{"y": float(y_axis[_BAND_MID])}])).mark_rule(
         opacity=0.35, strokeDash=[3, 3]).encode(y=y_enc)
 
+    # R-722. The mark's SHAPE and COLOUR are the published classification, read not derived.
+    # ⚠️ SET ON THE MARK RATHER THAN ENCODED FROM THE DATA, because this chart plots exactly one
+    # point — an encoding would add a scale and a legend to say what a single mark already is.
+    shape, colour, filled = _outlook_mark(outlook)
+    verdict = (str(outlook) if isinstance(outlook, str)
+               else "not classified — one side has no per-game form for this week")
     point = alt.Chart(pd.DataFrame([{
         "x": float(value_x), "y": float(value_y),
         "who": f"{team_name} {float(value_y):.1f} gained vs "
-               f"{opponent_name} {float(value_x):.1f} allowed",
-    }])).mark_point(size=140, filled=True, opacity=0.95).encode(
+               f"{opponent_name} {float(value_x):.1f} allowed — {verdict}",
+    }])).mark_point(size=150, shape=shape, color=colour, filled=filled,
+                    strokeWidth=2, opacity=0.95).encode(
         x=x_enc, y=y_enc, tooltip=alt.Tooltip("who:N", title=label))
 
     # ⚠️ THE POINT IS DRAWN LAST so the box's edges cannot sit on top of the one mark a reader
@@ -1845,7 +1908,7 @@ def _off_the_frame_metrics(team, opponent, distribution) -> list:
     different conclusion from the chart it explains.
     """
     out = []
-    for label, for_column, allowed_column, delta_column in _YARDAGE_DIMENSIONS:
+    for label, for_column, allowed_column, delta_column, outlook_column in _YARDAGE_DIMENSIONS:
         y_axis, x_axis = distribution.get(for_column), distribution.get(allowed_column)
         if y_axis is None or x_axis is None:
             continue
@@ -1861,7 +1924,8 @@ _GAME_TEAM_COLUMNS = """
     team_id, is_home, team_display, spread_final,
     rushing_yards_for_minus_opponent_allowed_per_game,
     passing_yards_for_minus_opponent_allowed_per_game,
-    total_yards_for_minus_opponent_allowed_per_game
+    total_yards_for_minus_opponent_allowed_per_game,
+    rushing_matchup_outlook, passing_matchup_outlook, total_matchup_outlook
 """
 
 
@@ -1928,9 +1992,10 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
     opponent_name = str(opponent.get("team_display") or "?")
     order = ("chart", "cards") if _is_home_side(deltas) else ("cards", "chart")
     widths = [_SLOT_WIDTHS[slot] for slot in order]
-    for label, for_column, allowed_column, delta_column in _YARDAGE_DIMENSIONS:
+    for label, for_column, allowed_column, delta_column, outlook_column in _YARDAGE_DIMENSIONS:
         chart = _scatter(team, opponent, for_column, allowed_column, distribution,
-                         team_name, opponent_name, label)
+                         team_name, opponent_name, label,
+                         _delta_for(deltas, outlook_column))
         # R-687. The names go OUTSIDE the chart; R-731 puts them BESIDE it rather than below.
         panel_key = (int(team["team_id"]), _LEADER_PANELS[label])
         cards = _leader_block((leaders or {}).get(panel_key, []),
@@ -1994,9 +2059,10 @@ _ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
 # which is why this is one literal rather than a layout round.
 _SLOT_WIDTHS = {"cards": 1.0, "chart": 4.0}
 
-# 🚨 R-731. THE CARD IS BUILT FOR THREE KPIs AND FILLED WITH WHAT EXISTS. A116 is widening
-# `fct_player_leader_week`; the next two measures are added to `_CARD_KPIS` and nowhere else,
-# because the grid below is sized by `_CARD_KPI_SLOTS` rather than by how many there are.
+# R-731. The card is built for three KPI slots. ⚠️ THE SENTENCE THAT USED TO SIT HERE SENT A
+# FUTURE ROUND TO `_CARD_KPIS`, WHICH B099 DELETED — the labels are read off the row now, and
+# the block below says why. A comment naming a thing that no longer exists is the same class of
+# stale instruction as the mirrors in `docs/` (§4.4).
 _CARD_KPI_SLOTS = 3
 
 # 🚨 R-733. THE LABELS ARE DATA NOW, AND B098 SAID WHY IT HAD TO CHANGE. That round shipped
@@ -2197,10 +2263,27 @@ def _usage_dots(entry, player_id) -> str:
         share = row.get("usage_total")
         ceiling = row.get("usage_total_max_in_window")
         window = int(row.get("usage_games_in_window") or 0)
-        try:
-            fill = max(0.0, min(1.0, float(share) / float(ceiling))) if ceiling else 0.0
-        except (TypeError, ValueError, ZeroDivisionError):
-            fill = 0.0
+        # 🚨 R-742. THIS USED TO FALL BACK TO `fill = 0.0` IN BOTH BRANCHES, WHICH DRAWS A LIE.
+        # A played game with no usable denominator rendered a full-opacity border and an empty
+        # circle — identical to "he took no part", when the truth is "we cannot scale this".
+        #
+        # ✅ MEASURED BEFORE CHANGING A LINE (§2.5): of 159,418 rows on
+        # `srv_game_team_leader_usage`, the count with a null `usage_total` is ZERO, with a null
+        # `usage_total_max_in_window` is ZERO, and with a zero denominator is ZERO.
+        # **The branch is dead.** So it says so, loudly, instead of drawing the one thing it
+        # must not: a circle a reader would take for a measurement.
+        if share is None or ceiling is None or pd.isna(share) or pd.isna(ceiling):
+            raise ValueError(
+                "srv_game_team_leader_usage returned a row with no usage_total or no "
+                "usage_total_max_in_window. Measured at 0 of 159,418 rows when R-742 was "
+                "written, so this is a CHANGE UPSTREAM rather than a case the page forgot — "
+                "an empty circle here would read as 'took no part' and that is why this "
+                "raises instead of drawing one.")
+        if float(ceiling) == 0:
+            raise ValueError(
+                "srv_game_team_leader_usage returned usage_total_max_in_window = 0, which "
+                "cannot scale a fill. Measured at 0 of 159,418 rows when R-742 was written.")
+        fill = max(0.0, min(1.0, float(share) / float(ceiling)))
         # ⚠️ THE SECOND ABSENCE IS A CAVEAT RATHER THAN A GAP, AND THE HOVER CARRIES IT. With one
         # observation the maximum IS that game, so the circle is full by construction and means
         # "we have seen him once" rather than "fully involved" — B085's single-snapshot shape.
