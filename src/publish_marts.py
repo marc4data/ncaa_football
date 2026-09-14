@@ -176,6 +176,11 @@ DEFAULT_SERVING = [
     # every time a line moves, and a week-old distribution on a live page is worse than none.
     "srv_week_metric_distribution",
     "srv_week_metric_distribution_bin",
+    # R-808. The box-score distribution — 18 measures at single-game team grain, 648 rows.
+    # HOT for the same reason as its two siblings above: a week's box-score distribution moves
+    # every time a game in that week completes, and a stale one sits under a live number as a
+    # comparison the reader cannot tell is out of date. Small enough that the cadence is free.
+    "srv_game_team_metric_distribution",
     "srv_team_roster",
     "srv_game_travel",
     "srv_edge_bucket_performance",

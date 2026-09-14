@@ -4205,6 +4205,78 @@ models:
 
   # ⚠️ APPENDED AT THE END, TOUCHING NOTHING ABOVE — both sessions edit this file and the
   # charter's rule is that the non-owning session appends. A080/R-534.
+  - name: srv_game_team_metric_distribution
+    description: >
+      The shape of a week's BOX SCORES, at single-game team grain. One row per (season,
+      season_type, week, metric), over the eighteen measures Box Score and Advanced render.
+      R-808, and Marc's ask: "For every measure I'd like a horizontal box-whisker plot under the
+      measure value."
+      THE THIRD SIBLING IN A FAMILY OF THREE, distinguished by GRAIN rather than by version:
+      srv_week_metric_distribution is GAME grain (spread, total, temperature);
+      srv_team_week_metric_distribution is TEAM grain over CUMULATIVE per-game averages; this is
+      TEAM grain over a SINGLE GAME. All three publish the same percentile vocabulary, which is
+      what lets one renderer draw any of them.
+      NO BIN COLUMNS, deliberately: distribution_bins exists for the histogram, which needs a
+      hand-set min and max per metric. A box plot is computed from the values and needs none.
+    columns:
+      - name: game_team_metric_distribution_sk
+        description: Surrogate key over season, season_type, week and metric.
+      - name: season
+        description: Season the week belongs to.
+      - name: season_type
+        description: regular or postseason.
+      - name: week
+        description: Week within the season type.
+      - name: metric
+        description: >
+          Which measure this row describes - one of the eighteen Box Score and Advanced fields,
+          named exactly as the column they come from so a page needs no lookup table.
+      - name: n
+        description: >
+          How many team-games carried a value for this measure in this week. AC-G.11: a week with
+          fewer than two observations gets NO ROW at all, because one value is not a distribution;
+          a week with a row and a small n has a thin one. Those are different states and the page
+          decides what a thin distribution is worth drawing.
+      - name: team_games_in_week
+        description: >
+          How many FBS team-games the week held, whether or not they carried this measure. With n
+          beside it, the difference is the measure's coverage.
+      - name: mean
+        description: Arithmetic mean of the week's values for this measure.
+      - name: stddev
+        description: Sample standard deviation.
+      - name: min_value
+        description: The lowest value recorded, including outliers.
+      - name: max_value
+        description: The highest value recorded, including outliers.
+      - name: p02
+        description: 2nd percentile.
+      - name: p05
+        description: 5th percentile.
+      - name: p25
+        description: 25th percentile - the bottom of the box.
+      - name: p50
+        description: Median - the bold line in the box.
+      - name: p75
+        description: 75th percentile - the top of the box.
+      - name: p95
+        description: 95th percentile.
+      - name: p98
+        description: 98th percentile.
+      - name: iqr
+        description: p75 minus p25, the box's width.
+      - name: whisker_low
+        description: >
+          Tukey's lower whisker - the most extreme OBSERVATION still inside p25 minus 1.5 times
+          the IQR, never the fence itself. A fence drawn as a whisker is longer than the data and
+          reads as a value nobody recorded. Both sibling models state the same convention.
+      - name: whisker_high
+        description: The upper whisker, by the same rule.
+      - name: outlier_count
+        description: How many values fell outside the fences. Zero is a fact, not an absence.
+      - name: as_of_ts
+        description: When the game domain was last refreshed.
+
   - name: srv_game_team_leader
     description: >
       Who led a game, per team, per stat. One row per game x team x stat_category x stat_type

@@ -136,10 +136,32 @@ def describe(row) -> str:
 
     Carries the DENOMINATOR, always. A distribution over 9 games looks identical to one over
     124 and reports a different claim, which is why `n` is on the row at all (AC-G.33).
+
+    🚨 THE DENOMINATOR'S COLUMN NAME DIFFERS BY GRAIN, AND THIS FUNCTION USED TO ASSUME ONE OF
+    THEM. `row['games_in_week']` raised `KeyError` the first time `box()` was handed a row from
+    `srv_game_team_metric_distribution`, whose denominator is `team_games_in_week` because its
+    observations are team-games. `srv_team_week_metric_distribution` calls it `teams_in_week` for
+    the same reason.
+
+    ✅ SO THE LOOKUP IS BY CANDIDATE AND THE NOUN FOLLOWS IT. That is what makes one module able
+    to describe all three siblings — Marc's "consistent method... applied to the all/subset of
+    the population" — and the alternative was three describe() functions that would drift.
+    ⚠️ The candidates are ordered most-specific first so a model publishing two of them cannot be
+    described by the wrong one.
     """
     if row is None:
         return "cfdb holds no distribution for this week yet"
-    bits = [f"n={int(row['n'])} of {int(row['games_in_week'])} games"]
+    denominators = (("team_games_in_week", "team-games"),
+                    ("teams_in_week", "teams"),
+                    ("games_in_week", "games"))
+    bits = []
+    for key, noun in denominators:
+        total = row.get(key)
+        if total is not None and not pd.isna(total):
+            bits.append(f"n={int(row['n'])} of {int(total)} {noun}")
+            break
+    else:
+        bits.append(f"n={int(row['n'])}")
     for label, key in (("p25", "p25"), ("median", "p50"), ("p75", "p75")):
         value = row.get(key)
         if value is not None and not pd.isna(value):
@@ -252,6 +274,201 @@ def panel(row, label: str = "", width: int = 420) -> str:
             f"<span class='cfdb-dist-sub'>{subtitle}{tail_note}</span></div>"
             f"<div class='cfdb-dist-body'>{svg}"
             f"<div class='cfdb-dist-stats'>{''.join(stats)}</div></div></div>")
+
+
+# ── box() ───────────────────────────────────────────────────────────────────────────────────
+#
+# Marc, 2026-09-14: "For every measure I'd like a horizontal box-whisker plot under the measure
+# value. Span the full width of the cell. label upper/lower boundaries... annotate .25, .75.
+# Bold line for .50. Blue line with label for Metric Value. Make it easy to configure. I want to
+# set labels, tick mark strategy, etc"
+
+# THE VALUE MARKER'S COLOUR, and it is only half of the marker — see `_value_marker`.
+VALUE_COLOR = "#2f6fdb"
+
+# TICK STRATEGIES, offered rather than invented. Marc asked to "set tick mark strategy"; these
+# are the three the published row can actually support, and `percentiles` is the default because
+# it is the only one whose ticks are values the row already carries — the other two derive
+# positions the data never named.
+TICK_PERCENTILES = "percentiles"   # p25, p50, p75 — the box's own edges
+# TICK_BOUNDS draws the whisker ends only — what Marc called "upper/lower boundaries".
+TICK_BOUNDS = "bounds"
+TICK_NONE = "none"
+
+BOX_HEIGHT = 26
+
+
+def _box_scale(lo: float, hi: float, width: float, pad: float):
+    """A closure mapping a value to an x offset inside the box plot.
+
+    ⚠️ A COORDINATE TRANSFORM, NOT METRIC ARITHMETIC — §4.2.1, and the same note A122 put on the
+    win-probability sparkline because the next reader will see a division in `site/` and reach
+    for R-611. The test is how many CONSUMERS a number can have: this produces a pixel offset
+    inside one <svg>, which nobody can cite, export or sort on. Every quantity with a reader —
+    the percentiles, the whiskers, the value itself — arrives computed.
+    """
+    span = (hi - lo) or 1.0
+
+    def at(value: float) -> float:
+        return pad + (float(value) - lo) / span * (width - 2 * pad)
+
+    return at
+
+
+def _value_marker(x: float, height: float) -> str:
+    """The reader's own value: a blue line WITH WEIGHT AND A CAP, not colour alone.
+
+    🚨 AC-G.22, AND THIS PANEL HAS BEEN HERE BEFORE. B102 measured that the green and red marks
+    were 1.8 luma apart and that only Marc's diamond separated them for a greyscale reader. A
+    blue line on a grey box is the same trap: hue is the first thing to go.
+
+    So the marker carries THREE signals, only one of which is colour — it is twice the weight of
+    the median rule, it has a triangular cap no other element has, and it is blue. Rendered in
+    greyscale the weight and the cap both survive.
+    """
+    cap = (f"<polygon points='{x - 3.2:.1f},0 {x + 3.2:.1f},0 {x:.1f},4.6' "
+           f"fill='{VALUE_COLOR}'></polygon>")
+    rule = (f"<line x1='{x:.1f}' y1='0' x2='{x:.1f}' y2='{height:.1f}' "
+            f"stroke='{VALUE_COLOR}' stroke-width='2.2'></line>")
+    return cap + rule
+
+
+def box(row, value=None, width: int = 240, label: str = "",
+        ticks: str = TICK_PERCENTILES, show_value: bool = True,
+        value_label: Optional[str] = None, dp: int = 1) -> str:
+    """A horizontal box-and-whisker for one measure, sized to the cell it is given.
+
+    THE THIRD ENTRY POINT, over the SAME row as `thumbnail` and `panel`. One renderer, not two —
+    the module's opening argument, and the reason it exists: "two renderers drift, and the day
+    they disagree the reader cannot tell which is lying."
+
+    ✅ AND IT WORKS OVER ANY OF THE THREE DISTRIBUTION VIEWS, which is Marc's "consistent method
+    for evaluating how to present measures so that we can apply it to the all/subset of the
+    population". `srv_week_metric_distribution` (game grain), `srv_team_week_metric_distribution`
+    (team, cumulative) and `srv_game_team_metric_distribution` (team, single game) all publish
+    the same percentile vocabulary, so this function needs no metric name and no lookup table.
+
+    ⚠️ IT READS NO BIN COLUMNS. `thumbnail` and `panel` draw the histogram and need `bin_min`,
+    `bin_incr` and `bin_counts`; a box plot is p25/p50/p75 and the whiskers. That is why the
+    eighteen box-score measures could be published without eighteen hand-set bin ranges.
+
+    Marc's specification, in his words, and where each part is:
+
+        the box          p25 to p75
+        the median       a BOLD line at p50 — 1.8 against the box's 1
+        the whiskers     whisker_low to whisker_high, with both boundaries LABELLED
+        the value        a BLUE line WITH A LABEL — and a cap and double weight, see AC-G.22
+        the width        spans whatever cell width it is handed
+
+    ⚠️ EVERY PARAMETER HAS A DEFAULT AND THE DEFAULTS ARE WHAT A CALLER GETS ON DAY ONE (§3
+    rule 3.1). The call sites in `site/views/matchup.py` are session B's to write on B's own
+    round; shipping the entry point without them is the rule, not an omission.
+
+    row          a distribution row, or None
+    value        this game's own figure for the measure, or None
+    ticks        TICK_PERCENTILES (default) | TICK_BOUNDS | TICK_NONE
+    show_value   draw the value marker at all
+    value_label  override the text under the marker; defaults to the formatted value
+    dp           decimals for every label
+    """
+    if row is None:
+        return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
+                f"title='cfdb holds no distribution for this week yet'>\u2013</span>")
+
+    def num(key):
+        raw = row.get(key)
+        return None if raw is None or pd.isna(raw) else float(raw)
+
+    p25, p50, p75 = num("p25"), num("p50"), num("p75")
+    lo, hi = num("whisker_low"), num("whisker_high")
+    if None in (p25, p50, p75) or lo is None or hi is None:
+        return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
+                f"title='this week has no distribution for that measure'>\u2013</span>")
+
+    # ⚠️ THE FRAME INCLUDES THE VALUE, so a figure outside the whiskers is drawn where it is
+    # rather than clamped to the edge. An outlier pinned to the boundary reads as "at the
+    # extreme" when the truth is "beyond it", and the outlier is the interesting case.
+    frame_lo, frame_hi = lo, hi
+    if show_value and value is not None and not pd.isna(value):
+        frame_lo, frame_hi = min(frame_lo, float(value)), max(frame_hi, float(value))
+
+    pad = 10.0
+    height = BOX_HEIGHT
+    mid = height / 2.0
+    at = _box_scale(frame_lo, frame_hi, width, pad)
+    parts = []
+
+    # The whisker rule, end to end, with serifs at the boundaries.
+    parts.append(f"<line x1='{at(lo):.1f}' y1='{mid:.1f}' x2='{at(hi):.1f}' y2='{mid:.1f}' "
+                 f"stroke='currentColor' stroke-width='1' opacity='.55'></line>")
+    for end in (lo, hi):
+        parts.append(f"<line x1='{at(end):.1f}' y1='{mid - 5:.1f}' x2='{at(end):.1f}' "
+                     f"y2='{mid + 5:.1f}' stroke='currentColor' stroke-width='1' "
+                     f"opacity='.55'></line>")
+
+    # The box: p25 to p75.
+    parts.append(f"<rect x='{at(p25):.1f}' y='{mid - 7:.1f}' width='{max(at(p75) - at(p25), 1):.1f}' "
+                 f"height='14' fill='currentColor' fill-opacity='.14' stroke='currentColor' "
+                 f"stroke-width='1' stroke-opacity='.5'></rect>")
+
+    # 🚨 THE MEDIAN IS BOLD — Marc said so explicitly, and it is the one line a reader looks for.
+    parts.append(f"<line x1='{at(p50):.1f}' y1='{mid - 7:.1f}' x2='{at(p50):.1f}' "
+                 f"y2='{mid + 7:.1f}' stroke='currentColor' stroke-width='1.8' "
+                 f"opacity='{MEDIAN_OPACITY}'></line>")
+
+    if show_value and value is not None and not pd.isna(value):
+        parts.append(_value_marker(at(float(value)), height))
+
+    # ── LABELS, IN ONE PLACEMENT PASS ────────────────────────────────────────────────────────
+    #
+    # 🚨 THE FIRST VERSION EMITTED EVERY LABEL AT ITS OWN x AND THE RASTER SHOWED WHY THAT FAILS.
+    # Rendered at 2x, a value of 180 beside a median of 152 produced "152.080.0" — two real
+    # numbers overprinted into a third that is not either of them — and a value past the upper
+    # whisker ran off the right edge as "450.(". Both are legibility defects invisible in the
+    # DOM: every <text> element was present and correct.
+    #
+    # ✅ SO LABELS ARE PLACED, NOT JUST EMITTED. Three rules, in order:
+    #   1. THE VALUE LABEL WINS. It is the reader's own number and the only one they came for.
+    #   2. A LABEL THAT WOULD COLLIDE IS DROPPED, not shrunk and not offset — a shifted label
+    #      points at the wrong place on the axis, which is worse than one fewer label.
+    #   3. EVERY LABEL IS CLAMPED INSIDE THE FRAME, with its anchor following, so nothing is
+    #      clipped by the viewBox.
+    #
+    # ⚠️ THE BOUNDARY LABELS ARE MARC'S "label upper/lower boundaries" and are drawn for every
+    # tick strategy except `none` — they are the frame's meaning rather than decoration, so they
+    # are placed BEFORE the percentile ticks and only the value outranks them.
+    placed = []
+
+    def place(x: float, text: str, color: Optional[str] = None) -> None:
+        # A 9px font averages ~5px a character; half the width each side is the exclusion zone.
+        half = max(len(text) * 2.6, 9.0)
+        x = min(max(x, pad + half - 8), width - pad - half + 8)
+        for other_x, other_half, _, _ in placed:
+            if abs(x - other_x) < (half + other_half) * 0.86:
+                return
+        placed.append((x, half, text, color))
+
+    if show_value and value is not None and not pd.isna(value):
+        place(at(float(value)),
+              value_label if value_label is not None else fmt.number(float(value), dp=dp),
+              VALUE_COLOR)
+    if ticks != TICK_NONE:
+        place(at(lo), fmt.number(lo, dp=dp))
+        place(at(hi), fmt.number(hi, dp=dp))
+    if ticks == TICK_PERCENTILES:
+        for edge in (p50, p25, p75):
+            place(at(edge), fmt.number(edge, dp=dp))
+
+    for x, _half, text, color in placed:
+        fill = f"fill='{color}'" if color else "fill='currentColor' opacity='.65'"
+        parts.append(f"<text x='{x:.1f}' y='{height + 11:.1f}' text-anchor='middle' "
+                     f"font-size='9' {fill}>{text}</text>")
+
+    total_height = height + 15
+    svg = (f"<svg viewBox='0 0 {width} {total_height}' width='{width}' height='{total_height}' "
+           f"role='img' aria-label='{label or 'Distribution'}: box and whisker' "
+           f"style='display:block;max-width:100%'>{''.join(parts)}</svg>")
+    return f"<span class='cfdb-dist' title='{describe(row)}'>{svg}</span>"
 
 
 def render(html: str) -> None:
