@@ -1438,103 +1438,64 @@ def _delta_for(deltas, column):
     return deltas.get(column)
 
 
-# 🚨 R-755. WHAT THIS ROW ACTUALLY NEEDS, MEASURED RATHER THAN PICKED BY EYE.
+# 🚨 R-756: THE DELTA TABLE IS GONE. Marc, 2026-09-14: *"R-756 is a Go. It needs to happen."*
 #
-# At the widths B103 shipped, one direction row is: label + gained + the word "gained" + "vs" +
-# allowed + the word "allowed" + the delta chip. At the previous sizes that came to roughly
+# It printed the same three figures the in-chart annotation prints — `Rushing 119.0 gained vs
+# 134.0 allowed −15.0`, a few hundred pixels above the chart that says it again as a worked
+# subtraction with both logos. **B104 measured the duplication and judged the annotation the one
+# doing work; Cowork parked it on Marc because the table was also the only place the three
+# metrics could be compared at a glance; he has now traded that away.**
 #
-#     72 + 80 + 44 + 18 + 80 + 50 + 58  =  402px of content
-#     + six .5rem gaps and the block's .7rem padding  ≈  490px
+# 🚨 AND R-755's REASON MUST OUTLIVE THE CODE THAT CARRIED IT, WHICH IS WHY IT IS RESTATED HERE
+# RATHER THAN DELETED WITH THE ROWS. The deleted block's `min-width` values were the two per cent
+# overrun that DREW OVER THE NEXT HALF at 1300px — a Streamlit column does not clip its children,
+# so an element wider than its share does not compress, it corrupts the column beside it. **The
+# answer was `overflow:hidden` plus a natural width with headroom, and the next fixed-width block
+# in this file will need that answer again.** It is live today on `_METRIC_CELL` (R-807).
 #
-# ⚠️ AND A HALF AT 1300px WITH THE SIDEBAR OPEN IS ABOUT 479px OF USABLE WIDTH. The row was two
-# per cent too wide, and a proportional column cannot make a fixed element smaller — R-750's
-# lesson, which this panel has now paid for twice.
-#
-# ✅ These bring the natural width to about 420px, which clears 1300px with headroom rather
-# than by a hair. ⚠️ They are a FLOOR on legibility, not a target: the numbers are per-game
-# averages to one decimal, so `_ROW_NUMBER` has to hold "154.4" at 600 weight.
-_ROW_LABEL, _ROW_NUMBER, _ROW_CHIP = 3.9, 4.2, 3.2
-
-
-def _delta_chip(value) -> str:
-    """R-686. This side's offense against what the opponent's defense has conceded.
-
-    🚨 THE SIGN CARRIES IT AND THE COLOUR ONLY AGREES WITH THE SIGN (AC-G.22). Marc asked for
-    negatives in red; a reader in greyscale, or one of the ~8% of men with a colour vision
-    deficiency, gets exactly the same fact from the leading `+` or `−`. Colour that is the ONLY
-    carrier is the R-547 class, which this project has already removed once.
-
-    ⚠️ THE VALUE IS READ, NOT COMPUTED. A106 shipped it at game × team grain so the page would
-    not subtract; a subtraction here would be metric maths in the app (§4.2) and would let this
-    number disagree with the Excel export, which reads the column.
-    """
-    if value is None or pd.isna(value):
-        return ""
-    return (f"<span style='min-width:{_ROW_CHIP}rem;text-align:right;font-size:.8rem;"
-            f"font-weight:600'>{_signed_delta(value)}</span>")
+# ⚠️ WHAT DID NOT GO, AND IT IS A DELIBERATE DEPARTURE FROM THE PROMPT'S WORDING — see the report.
+# The prompt said *`_yardage_direction` goes*. Its three METRIC ROWS are the delta table and they
+# are gone. Its one-line HEADING is not: it is the only thing on the panel that says whose half
+# this is, the annotation does not duplicate it, and R-756 is about the duplicated figures.
+# **Removing it would be removing something nobody asked about.**
 
 
 def _signed_delta(value) -> str:
-    """The delta as a number, ONE definition for the chip and the mark label (R-736).
+    """The delta as a number, for the mark label (R-736).
 
     ⚠️ `+0` IS DELIBERATE AND IS NOT A BUG. Exactly level is a real answer — this side gains
     what that side concedes — and rendering it bare would read as "no figure". AC-G.32 asks
     that a null show `—` and a zero show a number, and `+0.0` is a number.
 
-    🚨 IT IS SHARED BECAUSE THE CHIP AND THE LABEL ARE THE SAME FIGURE ON THE SAME ROW. Two
-    renderers for one number is the R-574 drift this panel has already paid for twice — B098's
-    `metric` and B099's `_CARD_KPIS` — and here they would sit within an inch of each other.
+    ⚠️ IT USED TO BE SHARED WITH `_delta_chip` ON THE DELETED ROW, and that sharing was the
+    point: two renderers for one number is the R-574 drift this panel paid for twice. R-756 took
+    the chip, so there is one caller now — the annotation — and the function stays because the
+    reason it exists is the FIGURE's definition, not the number of callers.
     """
     if value is None or pd.isna(value):
         return fmt.EM_DASH
     return f"{float(value):+,.1f}"
 
 
-def _yardage_direction(offense, defense, deltas=None) -> str:
-    """One direction of the comparison: this side's attack against that side's defense."""
+def _yardage_side_heading(offense, defense) -> str:
+    """Whose half this is: the team, and whose defense its figures are measured against.
+
+    🚨 THIS IS WHAT SURVIVED R-756. The three metric rows under it are gone; without this line a
+    reader cannot tell the two halves apart except by reading the logos inside a 180px chart.
+    """
     accent = identity.text_on(offense)
     logo = identity.logo_or_monogram(
         offense.get("logo_url"), str(offense.get("team_display") or "?"), 20)
-    lines = []
-    # R-516. THE SECOND ARGUMENT IS THE COLUMN-NAME SLOT AND IT USED TO HOLD THE BARE WORD
-    # 'yards', so `fmt.precision_for` had never once seen a column from this panel. A085
-    # flipped that fallback to 0 and had to key ('yards', 1) in `fmt.PRECISION` purely to
-    # hold this file harmless — 154.4 would otherwise have rendered 154 here.
-    #
-    # `dp=1` states the panel's precision where the decision is made, the way _ADVANCED_ROWS
-    # already does. A PER-GAME AVERAGE IS NOT A COUNT: 154.4 and 154.0 are different seasons,
-    # and putting two sides beside each other is the whole job of this panel. If that is ever
-    # overturned, the reversal is DELETING `dp=1` — the column name is already correct, so
-    # `fmt` decides from then on.
-    for label, for_column, allowed_column, delta_column, outlook_column in _YARDAGE_DIMENSIONS:
-        subdued = " opacity:.75;font-size:.9rem;" if label == "Total" else ""
-        lines.append(
-            f"<div style='display:flex;align-items:baseline;gap:.35rem;{subdued}"
-            f"padding:.15rem 0;white-space:nowrap'>"
-            f"<span style='min-width:{_ROW_LABEL}rem;opacity:.6;font-size:.8rem'>{label}</span>"
-            f"<span style='min-width:{_ROW_NUMBER}rem;font-weight:600;text-align:right'>"
-            f"{fmt.number(offense.get(for_column), for_column, dp=1)}</span>"
-            f"<span style='opacity:.45;font-size:.8rem'>gained</span>"
-            f"<span style='opacity:.35'>vs</span>"
-            f"<span style='min-width:{_ROW_NUMBER}rem;font-weight:600;text-align:right'>"
-            f"{fmt.number(defense.get(allowed_column), allowed_column, dp=1)}</span>"
-            f"<span style='opacity:.45;font-size:.8rem'>allowed</span>"
-            f"{_delta_chip(_delta_for(deltas, delta_column))}</div>")
-    # 🚨 R-755. `overflow:hidden` IS THE ANSWER TO "WHAT DOES IT DO WHEN IT CANNOT HAVE ITS
-    # WIDTH", AND IT IS NOT A WORKAROUND. A Streamlit column does not clip its children, so a
-    # row wider than its half does not compress — it DRAWS OVER THE NEXT HALF. At 1300px with
-    # the sidebar open that put `+214.0` on top of the home side's `Rushing`, which reads as a
-    # broken page rather than a tight one.
-    # ✅ Clipping is the honest degradation: the row loses its rightmost characters inside its
-    # own half instead of corrupting the half beside it.
+    # ⚠️ `overflow:hidden` STAYS — R-755. One line of two team names is narrower than the rows
+    # that used to sit under it, but a long pair still exceeds a 412px half, and the failure mode
+    # without this is drawing over the column beside it rather than clipping inside this one.
     return (
         f"<div style='border-left:4px solid {accent};padding:.4rem .7rem;"
         f"margin-bottom:.5rem;overflow:hidden'>"
-        f"<div style='display:flex;align-items:center;gap:.45rem;margin-bottom:.2rem'>"
+        f"<div style='display:flex;align-items:center;gap:.45rem;white-space:nowrap'>"
         f"{logo}<span style='font-weight:600'>{offense.get('team_display') or '?'}</span>"
         f"<span style='opacity:.6;font-size:.85rem'>offense against "
-        f"{defense.get('team_display') or '?'}'s defense</span></div>"
-        + "".join(lines) + "</div>")
+        f"{defense.get('team_display') or '?'}'s defense</span></div></div>")
 
 
 # --- R-590: a shared axis for the whole week -------------------------------------------------
@@ -1651,8 +1612,72 @@ _AUTOSIZE = {"type": "pad", "contains": "padding"}
 
 # 🚨 ONE NUMBER, USED FOR BOTH DIMENSIONS — that IS the 1:1 (R-609). Two constants could drift
 # apart and the chart would stop being square without anything failing.
-_CHART_SIDE = 240
+#
+# 🚨 R-804/R-817: 240 → 180, AND THE MEASUREMENT IS WHY. THREE ROUNDS ASKED FOR A SMALLER PAD
+# AND THE PAD IS NOT THE PROBLEM.
+#
+# ⚠️ MEASURED IN THE BROWSER at 1300px with the sidebar open, not derived:
+#
+#     the page's content              840px          (1300 viewport − 300 sidebar − padding)
+#     one half, `st.columns(2)`       412px
+#     inside it, `_SLOT_WIDTHS` 1:1.6 cards 150px  ·  chart slot 246px
+#     the chart the browser drew      305px         ← 59px WIDER THAN ITS COLUMN
+#
+# 🚨 AND A STREAMLIT COLUMN DOES NOT CLIP ITS CHILDREN (R-755), SO THOSE 59px DRAW OVER WHATEVER
+# IS TO THE RIGHT. That is ONE overflow with TWO symptoms, which is why four rounds saw two bugs:
+#
+#     away half, order [cards, chart]   the chart overflows into the HOME half  → B104's
+#                                       "the away chart clips its last x-axis label"
+#     home half, order [chart, cards]   the chart overflows into its OWN cards  → B106's
+#                                       "the home cards draw over the home chart, ~20px"
+#
+# 🚨 THE PAD CANNOT CLOSE A 59px GAP, AND THIS WAS MEASURED BEFORE IT WAS CONCLUDED. Compiling the
+# real spec with vl_convert and sweeping every axis lever:
+#
+#     as shipped                              290px  (vl_convert; the browser draws it 305)
+#     x tickCount 4, or 3, or labelFlush      290px  ← THE TICK COUNT MOVES THE WIDTH BY ZERO
+#     labelFontSize 9                         289px
+#     labelPadding 1 + tickSize 3             287px
+#     every lever at once                     286px  ← 4px, against a 59px gap
+#     dropping the Y-AXIS TITLE               275px  ← 15px, and it is not for sale: `_scatter`
+#                                                      exists to say the two axes are DIFFERENT
+#                                                      measurements, and the title is what says so
+#
+# ⚠️ THE X-AXIS RUNS *UNDER* THE PLOT, SO ITS LABELS COST HEIGHT AND NOT WIDTH. The 50px of
+# horizontal chrome is the Y axis — its rotated title and its tick labels — and it is CONSTANT:
+# the shipped box is `_CHART_SIDE + 50` in vl_convert and `+ 65` in the browser, at every size.
+#
+# ✅ SO THE SQUARE SHRINKS, WHICH IS THE ANSWER THE MEASUREMENT EARNS AND NOT THE ONE ASKED FOR.
+# 180 + 65 = 245px against a 246px column is a hair, so the axis levers above are taken TOO —
+# not to buy width they cannot buy, but to buy HEADROOM on top of the shrink.
+#
+# ❌ THE ALTERNATIVE WAS WORSE AND IT IS NAMED RATHER THAN ASSUMED: giving the chart its 305px
+# would leave the cards 75px. B106 measured the card's name row at 134px inside a 150px card and
+# names ALREADY ellipsise. Marc has spent three rounds (B103, B104, B106) making that card
+# readable; 75px would undo all of it to keep a square nobody asked to be 240.
+#
+# ⚠️ R-609 IS NOT RE-OPENED. The square is still square, still `pad`, still not
+# `use_container_width` — one constant still drives both sides. Only the NUMBER moved.
+_CHART_SIDE = 180
 _CHART_HEIGHT = _CHART_SIDE
+
+# 🚨 AND THE TICK COUNT MATTERS NOW FOR THE REASON IT NEVER DID BEFORE: LEGIBILITY, NOT WIDTH.
+# Vega chose 8 ticks for the 0–350 rushing axis. At 240px that is 34px apart; at 180px it is 26px
+# apart against ~18px labels — legible but crowded, and a crowded axis at this size is the
+# readability cost the shrink has to answer for. 4 ticks gives 0 · 100 · 200 · 300 at 60px apart,
+# which a reader can still interpolate between.
+# ⚠️ `tickCount` IS A HINT, NOT A COUNT — Vega picks its own "nice" values near it, which is what
+# keeps the labels round numbers instead of 87.5.
+# ⚠️ AND THE THREE BELOW ARE WORTH ~3px BETWEEN THEM, WHICH IS SAID RATHER THAN IMPLIED. The
+# first draft of this block set Vega's OWN DEFAULTS — labelPadding 2, tickSize 5, labelFontSize
+# 10 — and measured a 1px saving, because it had changed nothing. These are real reductions.
+# ❌ `labelFontSize` STAYS AT VEGA'S 10 AND IS NOT DROPPED TO 9 FOR ONE PIXEL: the axis labels
+# are the size Marc anchored the annotation to, twice (v04, v05), so shrinking them moves the
+# reference he is judging against to buy a pixel that does not decide anything.
+_AXIS_TICKS = 4
+_AXIS_LABEL_SIZE = 10
+_AXIS_LABEL_PADDING = 1
+_AXIS_TICK_SIZE = 3
 
 
 def _degenerate(axis) -> bool:
@@ -1689,8 +1714,12 @@ def _off_the_frame(value, axis) -> bool:
     🚨 SO THE CHART WAS DRAWN AND THE POINT WAS NOT ON IT: a band, two medians, a labelled
     pair of axes, and nothing plotted. That reads as "this matchup is unremarkable", which is
     a confident false statement — the class this project keeps removing. ⚠️ The numbers
-    themselves are NOT lost: `_yardage_direction` prints both of them as text immediately
-    above, so skipping the chart drops a misleading picture and no measurement.
+    themselves are NOT lost — but WHAT KEEPS THEM CHANGED UNDER THIS COMMENT IN B105, which is
+    why it is rewritten rather than left. It used to be `_yardage_direction`, printing all three
+    metrics as text immediately above; R-756 deleted that block, and the annotation that
+    replaced it lives INSIDE the chart, so on exactly this path it disappears with the picture.
+    ✅ `_off_the_frame_figures` now puts the two figures into the caption that explains the
+    absence, so skipping the chart still drops a misleading picture and no measurement.
 
     ⚠️ THIS IS A GUARD, NOT THE FIX, AND IT IS DELIBERATELY NOT AN AXIS OVERRIDE. The real
     repair is in the mart — the frame should be built over the teams it will be asked to
@@ -1779,9 +1808,15 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     def domain(axis):
         return [float(axis["axis_min"]), float(axis["axis_max"])]
 
-    x_enc = alt.X("x:Q", title=f"{opponent_name} allowed",
+    # ⚠️ THE AXIS CONFIG IS EXPLICIT SINCE R-804, and what it buys is legibility at 180px rather
+    # than width — see `_CHART_SIDE` for the measurement that says the width was never here.
+    def ticks():
+        return alt.Axis(tickCount=_AXIS_TICKS, labelFontSize=_AXIS_LABEL_SIZE,
+                        labelPadding=_AXIS_LABEL_PADDING, tickSize=_AXIS_TICK_SIZE)
+
+    x_enc = alt.X("x:Q", title=f"{opponent_name} allowed", axis=ticks(),
                   scale=alt.Scale(domain=domain(x_axis), nice=False))
-    y_enc = alt.Y("y:Q", title=f"{team_name} gained",
+    y_enc = alt.Y("y:Q", title=f"{team_name} gained", axis=ticks(),
                   scale=alt.Scale(domain=domain(y_axis), nice=False))
 
     # The middle half of the week on BOTH axes. Same rectangle on every matchup in the week,
@@ -1874,12 +1909,35 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
 # ⚠️ `alt.value()` POSITIONS FROM THE LEFT, so a right-anchored block is the plot width minus a
 # margin — and `mark_image` does not anchor like `mark_text`, so the logos carry their own
 # offset rather than inheriting the text's.
+#
+# 🚨 R-804 RESIZED THE SQUARE AND THE ANNOTATION DID NOT FOLLOW, WHICH IS HOW A FIXED PIXEL
+# BLOCK INSIDE A RESIZED PLOT FAILS: at 240px the 104px block was 43% of the width; at 180px the
+# same 104px is 58%, and `test_the_annotation_is_anchored_to_the_TOP_RIGHT` went red because the
+# block had reached into the LEFT half. ✅ **The geometry is DERIVED from `_CHART_SIDE` now, so
+# the next round to move the square cannot leave the annotation behind** — the same reason
+# `_ANNOTATION_RIGHT` was already derived.
 _ANNOTATION_RIGHT = _CHART_SIDE - 6
-_ANNOTATION_TOP, _ANNOTATION_LINE, _ANNOTATION_SIZE = 4, 14, 11
-# How wide the block is allowed to be, measured from its right edge. `Allowed  333.0` at 11px is
-# about 84px; 104 leaves room for the logo and a longer metric name without reaching the plot's
-# middle, where the band sits.
-_ANNOTATION_BLOCK = 104
+# ⚠️ THE SIZE IS THE AXIS LABELS', BY REFERENCE RATHER THAN BY COINCIDENCE. Marc reached for the
+# axis labels as the yardstick twice (v04 *"similar to the axis labels"*, v05 *"increase font
+# substantially"* off an 8.5 that went past readable). It was written as the literal 11 when the
+# axis labels happened to be 11; R-804 sets them explicitly, so this now TRACKS them and a round
+# that changes one cannot silently separate the two.
+_ANNOTATION_SIZE = _AXIS_LABEL_SIZE
+_ANNOTATION_TOP, _ANNOTATION_LINE = 4, 13
+# How wide the block is allowed to be, measured from its right edge, and it is bounded at BOTH
+# ends — which is what the old fixed 104 could not be:
+#
+#     FLOOR    `Allowed  333.0` at 10px is about 76px, and the text is right-aligned at
+#              `_ANNOTATION_RIGHT`, so a block narrower than the text does not clip it — the
+#              text simply reaches further left than the logo beside it and the row stops
+#              reading as one line.
+#     CEILING  the block must stay in the RIGHT half or it sits over the band: its left edge is
+#              `_ANNOTATION_RIGHT - _ANNOTATION_BLOCK`, which must exceed `_CHART_SIDE / 2`.
+#
+# `_CHART_SIDE // 2 - 10` is 80 at 180px — above the 76px floor, and leaving the left edge at 94
+# against a 90px midpoint. ⚠️ At any side below ~160 the two bounds cross and the annotation
+# needs a smaller font rather than a narrower block; the test asserts the ceiling.
+_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10
 
 
 def _annotation_layers(team, opponent, label, for_column, allowed_column, delta) -> list:
@@ -1928,10 +1986,23 @@ def _annotation_layers(team, opponent, label, for_column, allowed_column, delta)
     # with three pixels under the line above it, it was invisible on the dark theme — a rule
     # nobody can see is the same as the list-of-three-numbers the rule exists to prevent.
     rule_y = _ANNOTATION_TOP + 2 * _ANNOTATION_LINE + 1
-    # 🚨 A `mark_rect`, NOT A `mark_rule`, AND THE RENDER IS WHY. A rule positioned entirely in
-    # SCREEN values inside a layer chart that has scales did not draw — it is in the spec, at
-    # the right coordinates, and nothing appears. A one-pixel rect with all four edges given as
-    # values does draw, and it is the same line.
+    # 🚨 A `mark_rect`, NOT A `mark_rule`, AND IT WILL LOOK LIKE A MISTAKE TO THE NEXT READER.
+    #
+    # ⚠️ LEAVE IT. A `mark_rule` positioned ENTIRELY IN SCREEN VALUES — `alt.value()` on every
+    # channel — inside a layer chart that HAS SCALES does not draw. It serialises at the right
+    # coordinates, the spec validates, `chart.to_dict()` contains it, and the reader sees
+    # nothing. A one-pixel `mark_rect` with all four edges given as values does draw, and it is
+    # the same line. Do not "simplify" this back to a rule.
+    #
+    # 🚨 AND THE CLASS IS WORTH MORE THAN THE WORKAROUND (R-803): **THE TEST ASSERTS THE SPEC,
+    # THE READER SEES THE RENDER.** Every assertion about this annotation passed while the rule
+    # was invisible — they read `to_dict()`, which is exactly where the rule WAS. This is the
+    # third time a raster caught what a passing assertion could not: B100's clipped axis,
+    # A118's wrap inside "OT", and this. ⚠️ A spec assertion is not a rendering assertion, and
+    # the only instrument this project has for the difference is the live raster in the report.
+    #
+    # ✅ RE-CHECKED BY B105 AFTER R-804 MOVED THE AXIS AND SHRANK THE SQUARE TO 180px: the rule
+    # still DRAWS, not merely still serialises — confirmed on the raster, not on the spec.
     layers.append(alt.Chart(pd.DataFrame([{"a": 0}])).mark_rect(opacity=0.75).encode(
         x=alt.value(logo_x), x2=alt.value(_ANNOTATION_RIGHT),
         y=alt.value(rule_y), y2=alt.value(rule_y + 1)))
@@ -1958,6 +2029,25 @@ def _off_the_frame_metrics(team, opponent, distribution) -> list:
             continue
         if _off_the_frame(value_y, y_axis) or _off_the_frame(value_x, x_axis):
             out.append(label)
+    return out
+
+
+def _off_the_frame_figures(team, opponent, off) -> list:
+    """`Rushing 393.0 gained vs 118.0 allowed` — the figures the dropped chart would have shown.
+
+    🚨 THIS IS WHAT THE DELTA TABLE USED TO DO FOR FREE (R-756). The table printed all three
+    metrics whether or not their charts drew; the annotation that replaced it lives inside the
+    chart, so it disappears with it. **This is the narrow case the table was load-bearing for,
+    and it is one sentence rather than the table coming back.**
+    """
+    labels = {label: (for_column, allowed_column)
+              for label, for_column, allowed_column, _d, _o in _YARDAGE_DIMENSIONS}
+    out = []
+    for label in off:
+        for_column, allowed_column = labels[label]
+        out.append(
+            f"{label} {fmt.number(team.get(for_column), for_column, dp=1)} gained vs "
+            f"{fmt.number(opponent.get(allowed_column), allowed_column, dp=1)} allowed")
     return out
 
 
@@ -2028,11 +2118,18 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
     read out of `order` rather than written as a second tuple, a ratio cannot end up applied
     the wrong way round while the positional assertions still pass.
     """
-    st.markdown(_yardage_direction(team, opponent, deltas), unsafe_allow_html=True)
+    st.markdown(_yardage_side_heading(team, opponent), unsafe_allow_html=True)
     team_name = str(team.get("team_display") or "?")
     opponent_name = str(opponent.get("team_display") or "?")
     order = ("chart", "cards") if _is_home_side(deltas) else ("cards", "chart")
     widths = [_SLOT_WIDTHS[slot] for slot in order]
+    # 🚨 R-756's SECOND HOLE, AND IT IS THE ONE NOBODY PREDICTED. The prompt's premise was *the
+    # three figures survive in the annotation* — TRUE ONLY WHERE THE CHART SURVIVES. The
+    # annotation lives INSIDE the Vega spec, so on every row that draws no chart the figures the
+    # deleted table used to print now have nowhere to be. ⚠️ Not a rare path: A092 measured that
+    # NO week-wide distribution exists at week 1 of a regular season, so the whole panel is in
+    # this state at the start of every year.
+    drawn = set()
     for index, (label, for_column, allowed_column, delta_column,
                 outlook_column) in enumerate(_YARDAGE_DIMENSIONS):
         # 🚨 R-752. THE HEADER IS THE ROW'S, NOT THE CHART'S. It used to be the Altair spec's
@@ -2055,6 +2152,8 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
                          team_name, opponent_name, label,
                          _delta_for(deltas, outlook_column),
                          _delta_for(deltas, delta_column))
+        if chart is not None:
+            drawn.add(label)
         # R-687. The names go OUTSIDE the chart; R-731 puts them BESIDE it rather than below.
         panel_key = (int(team["team_id"]), _LEADER_PANELS[label])
         cards = _leader_block((leaders or {}).get(panel_key, []),
@@ -2072,12 +2171,31 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
     # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11). A chart silently missing from a
     # row of three reads as "we hold nothing"; these two hold a figure that is off the scale
     # the rest of the week is drawn on, and the figures are printed in full just above.
+    # 🚨 R-756 BROKE THIS SENTENCE AND THE ROUND THAT REMOVED THE TABLE HAD TO MEND IT.
+    # It used to end *"The numbers are above"* — and "above" WAS the delta table. With the table
+    # gone the only place those three figures survive is the annotation INSIDE the chart, so on
+    # exactly the rows where the chart is DROPPED they now survive nowhere. **A caption that
+    # points at figures that no longer exist is the R-571 class, and AC-G.11 asks an absence to
+    # say WHICH absence it is — so the caption carries the numbers itself.**
+    # ✅ Not a new layout: the sentence already named the metrics, and naming their values is
+    # what makes it true again.
     off = _off_the_frame_metrics(team, opponent, distribution)
     if off:
         st.caption(
-            f"{'  ·  '.join(off)} not plotted — one of these two figures falls outside the "
-            f"range this week's chart is drawn on, so there is no honest place to put the "
-            f"point. The numbers are above.")
+            f"{'  ·  '.join(_off_the_frame_figures(team, opponent, off))} not plotted — one of "
+            f"each pair falls outside the range this week's chart is drawn on, so there is no "
+            f"honest place to put the point.")
+    # ⚠️ AND WHICH ABSENCE IT IS, SEPARATELY (AC-G.11). `off` is the metric we CAN explain — the
+    # point leaves a frame we hold. This is the rest: no distribution built for the week, or an
+    # axis that cannot carry a position. The page holds the two figures either way and says them.
+    # ❌ NOT one merged sentence: "outside the week's range" and "there is no week's range" are
+    # different facts, and B075's rule is that an absence names itself.
+    unplotted = [label for label, *_rest in _YARDAGE_DIMENSIONS
+                 if label not in drawn and label not in off]
+    figures = _off_the_frame_figures(team, opponent, unplotted)
+    if figures:
+        st.caption(f"{'  ·  '.join(figures)} — not drawn against the week, because this week "
+                   f"has no distribution to draw them against.")
 
 
 # ⚠️ THE LEADER BLOCK LIVES BELOW `_yardage_column` ON PURPOSE.
