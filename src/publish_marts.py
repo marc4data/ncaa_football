@@ -176,11 +176,6 @@ DEFAULT_SERVING = [
     # every time a line moves, and a week-old distribution on a live page is worse than none.
     "srv_week_metric_distribution",
     "srv_week_metric_distribution_bin",
-    # R-808. The box-score distribution — 18 measures at single-game team grain, 648 rows.
-    # HOT for the same reason as its two siblings above: a week's box-score distribution moves
-    # every time a game in that week completes, and a stale one sits under a live number as a
-    # comparison the reader cannot tell is out of date. Small enough that the cadence is free.
-    "srv_game_team_metric_distribution",
     "srv_team_roster",
     "srv_game_travel",
     "srv_edge_bucket_performance",
@@ -345,6 +340,19 @@ HEAVY_SERVING = [
     # a table fresher than its source endpoint — A078 and A079 spent two rounds removing that
     # "arrives looking as fresh as the rows beside it" failure.
     "srv_game_win_probability_play",
+    # A125/R-808. The box-score distribution — 18 measures at single-game team grain, 648 rows.
+    #
+    # ⚠️ I PUT THIS ON THE HOT LIST FIRST AND `ci/check_publish_build_agreement.py` REFUSED IT,
+    # correctly. My reasoning was "a week's distribution moves every time a game completes" —
+    # true of the GAMES, false of the DATA. It is computed from `fct_game_team` and
+    # `fct_game_team_advanced`, which come from `/games/teams` and `game/box/advanced`, and those
+    # are fetched by cfbd_results_refresh (Sunday) and cfbd_midweek_results (Thursday). The
+    # two-hourly scores DAG fetches /games alone and does not rebuild this lineage at all.
+    #
+    # 🚨 SO A HOT PUBLISH WOULD SHIP A TABLE NO HOT DAG REBUILDS — which is exactly the
+    # disagreement that guard exists to catch, and the same lesson A078, A079, A120 and A121 all
+    # recorded: hot publishing cannot make a table fresher than its source endpoint.
+    "srv_game_team_metric_distribution",
 ]
 
 # What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,
