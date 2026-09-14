@@ -673,29 +673,73 @@ def test_the_axis_query_reads_one_relation_and_computes_nothing(panel):
         assert banned not in sql, f"the axis query contains `{banned}`"
 
 
-def test_the_CHART_CODE_does_not_divide(panel):
-    """🚨 A092 MOVED THE PER-GAME DIVISION INTO THE MART SO THERE IS EXACTLY ONE OF IT.
+def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
+    """🚨 R-743. THIS REPLACES A SOURCE-WINDOW TEXT SCAN THAT WENT BLIND TWICE IN THIS FILE.
 
-    ⚠️ RENAMED IN B092 (R-611), AND THE OLD NAME WAS A CLAIM THE TEST NEVER MADE. It was
-    `test_the_page_does_not_divide_anywhere`, and it is scoped to the source between
-    `def _week_distribution(` and `def _yardage_column(` — the chart code, nothing else. The
-    docstring was always honest; the NAME was not, and B091's own report cited it three times
-    as though it guarded the page.
+    ⚠️ SCOPE, IN THE SAME SENTENCE AS THE CLAIM: this parses `site/views/matchup.py` and asserts
+    that the only DIVISION OPERATORS in the module are the ones named below. It says nothing
+    about other operators, nothing about other modules, and nothing about a division expressed
+    as a method call rather than `/`.
 
-    🚨 THE PAGE DOES DIVIDE: `site/views/players.py:202` renders
-    `f"{int(made)}/{int(attempted)} ({made / attempted * 100:.0f}%)"` — a ratio of TWO COLUMNS
-    computed in the page. That is session A's file and B092 reported it rather than touching it.
+    ── WHY THE OLD SHAPE HAD TO GO ─────────────────────────────────────────────────────────
 
+    `test_the_CHART_CODE_does_not_divide` sliced `SOURCE` between `def _week_distribution(` and
+    `def _yardage_column(`, so it could only ever see code written BETWEEN those two names.
 
-    Two copies of `yards / games_counted` would let the axis disagree with the point drawn on
-    it, and that reads to a viewer as a rendering fault rather than a metric one. Asserted on
-    the source of the chart code, because the defect is an operator rather than an output.
+      · B092 renamed it once for over-claiming — it was `test_the_page_does_not_divide_anywhere`,
+        "a claim the test never made". The NAME became honest; the SCOPE did not.
+      · B100 staged a page-side subtraction in `_mark_label` at line 1477. The window opens at
+        1632. 🚨 THE GUARD PASSED. A helper gets written wherever it fits, and this file has now
+        put one above the window twice.
+      · And a text scan cannot tell an operator from a character: quoting Marc's own rule —
+        "(Gained - Allowed) / Gained > .2" — inside the window turns the guard RED for a comment.
+        B090 spent a round on the same class.
+
+    ── WHY AN AST SCAN RATHER THAN A WIDER WINDOW ──────────────────────────────────────────
+
+    Measured on the merged file: **206 solidus characters on 177 lines, and exactly ONE real
+    division operator.** Widening the text scan to the whole file would mean excluding 177 lines
+    of markup, URLs and prose — a guard that is mostly exceptions is one nobody can read, and
+    every exception is a place it is blind. The AST sees the operator and nothing else.
+
+    ⚠️ WHAT IT STILL CANNOT SEE, NAMED RATHER THAN LEFT TO BE DISCOVERED: a division done for
+    this page inside `site/lib/`, one written as `.div()` or `np.divide`, and any OTHER piece of
+    metric arithmetic — a subtraction included. 🚨 THAT LAST ONE IS NOT HYPOTHETICAL: B100's
+    break was a SUBTRACTION, and what caught it was
+    `test_the_label_reads_A106s_COLUMN_and_subtracts_nothing`, which makes the published column
+    disagree with its own inputs so no fixture can satisfy both readings. **A behavioural
+    assertion per published figure is the other half of this and neither replaces the other.**
     """
-    block = SOURCE[SOURCE.index("def _week_distribution("):SOURCE.index("def _yardage_column(")]
-    assert "games_counted" not in block, \
-        "the chart code touches games_counted, which is the mart's arithmetic"
-    assert "/" not in block.replace("__", "").replace("# ", ""), \
-        "the chart code contains a division"
+    import ast
+    tree = ast.parse(SOURCE)
+    lines = SOURCE.splitlines()
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv)):
+            found[node.lineno] = lines[node.lineno - 1].strip()
+
+    # ⚠️ ONE ENTRY, ONE REASON. To add one you must be able to finish "this page divides here
+    # and the warehouse cannot do it because…" — which is the bar `PROVIDED_BY_THE_PAGE` in
+    # ci/check_page_reads.py sets for its own exceptions.
+    allowed = {
+        "fill = max(0.0, min(1.0, float(share) / float(ceiling)))":
+            "R-694's dot fill. `usage_total_max_in_window` is a PUBLISHED denominator so the "
+            "page never takes a maximum over rows; scaling one published number by another to "
+            "size a shape is rendering. ⏳ R-740 publishes `usage_share_of_max` and this goes.",
+    }
+    unexpected = {line: text for line, text in found.items() if text not in allowed}
+    assert not unexpected, (
+        f"site/views/matchup.py divides where nothing says it may: "
+        f"{unexpected!r}. "
+        f"Metric arithmetic belongs upstream (§4.2) — a ratio computed here can disagree with "
+        f"the Excel export, which reads the column. If this division is legitimate, add it to "
+        f"`allowed` WITH THE REASON; do not delete the assertion.")
+    # 🚨 AND THE GUARD MUST NOT GO BLIND BY THE EXCEPTION LIST EMPTYING ITSELF. If the allowed
+    # division disappears, this test has stopped watching anything and should say so rather
+    # than passing quietly.
+    assert found, (
+        "no division found at all — either R-740 landed and this entry should be REMOVED "
+        "deliberately, or the parse has gone blind")
 
 
 # --- R-522: away on the left, home on the right -------------------------------------------------
@@ -1565,16 +1609,51 @@ def test_the_TIE_BADGE_SURVIVES_the_card_rewrite(panel):
 
 # --- 🚨 R-733: the labels are DATA, and the page must not guess at a format it does not know
 
-# ⚠️ REPOINTED BY A120 (R-723) FROM THE VIEW TO THE MACRO, AND THIS GUARD CAUGHT ITS OWN MOVE.
-# The twelve slot columns used to be written out in the preview view. A120 added a POST-GAME twin
-# needing the identical twelve and lifted the expressions into `macros/player_card_slots.sql`, so
-# the format literals left this view — and the parse below found NONE and failed with "the parse
-# has gone blind", exactly as its author intended. A guard that notices its subject moved is
-# working; one that silently found zero literals and passed would not be.
+# ⚠️ REPOINTED FROM THE VIEW TO THE MACRO BY A120 (R-723), AND B102's OWN DOCSTRING PREDICTED IT:
+# "a format introduced by a DIFFERENT model, or by A MACRO THIS PARSE DOES NOT FOLLOW, is not
+# covered." A120 lifted the twelve slot expressions out of the preview view into a shared macro so
+# the new POST-GAME twin could call the identical ones, and the literals left this parse's subject
+# the same day the sentence was written.
 #
-# 🚨 AND THE MACRO IS THE STRONGER SUBJECT NOW, because BOTH leader views call it: a format added
-# there reaches the preview card AND the post-game card, and this one assertion covers both.
+# 🚨 THE PER-SLOT LOGIC BELOW IS B102's AND IS UNCHANGED — only the file it reads moved. That
+# logic is strictly stronger than what A120 had written against the old subject, and the merge
+# kept it rather than the weaker version.
+#
+# ✅ AND THE MACRO IS NOW THE BETTER SUBJECT: BOTH leader views call it, so one assertion covers
+# the preview card AND the post-game card. A format added there reaches both.
 _MODEL = (Path(__file__).resolve().parents[1] / "dbt" / "macros" / "player_card_slots.sql")
+
+
+def _declared_formats_by_slot():
+    """Each slot's format literals, read out of the MODEL'S OWN SOURCE, anchored on `case`.
+
+    🚨 R-739. THE FIRST VERSION READ A FIXED 250-CHARACTER WINDOW BEFORE EACH
+    `as stat_N_format`, AND THAT CAN GO PARTLY BLIND WHILE STILL PASSING. A fourth format
+    introduced inside a LONGER `case` falls outside the window, `declared` stays a subset of
+    `known`, the assertion passes — and the KPI silently vanishes from every card, which is the
+    exact outcome the guard exists to prevent.
+
+    ⚠️ AND THE `>= 3` FLOOR DID NOT CATCH IT: three slots each emitting `integer` clear it while
+    one slot's new format is missed entirely. **That is why this returns PER SLOT and the caller
+    asserts per slot** — a slot that yields nothing is now a failure rather than a silence.
+    """
+    text = _MODEL.read_text()
+    by_slot = {}
+    for slot in (1, 2, 3):
+        marker = f"as stat_{slot}_format"
+        idx = text.index(marker)
+        head = text[:idx]
+        case_at = head.rfind("case ")
+        # ⚠️ THE `case` MUST BE OURS. If another column's `end as stat_…` sits between it and
+        # us, that CASE belongs to an earlier slot and this one is a bare literal instead.
+        if case_at != -1 and "end as stat_" not in text[case_at:idx]:
+            window = text[case_at:idx]
+        else:
+            window = text[head.rfind("\n") + 1:idx]
+        found = set(re.findall(r"(?:then|else)\s+'([a-z_0-9]+)'", window))
+        found |= set(re.findall(r"'([a-z_0-9]+)'\s*$", window.rstrip()))
+        by_slot[slot] = found
+    return by_slot
 
 
 def test_the_page_knows_every_FORMAT_the_view_can_emit():
@@ -1586,28 +1665,65 @@ def test_the_page_knows_every_FORMAT_the_view_can_emit():
     of the MODEL'S OWN SOURCE and checked against the page here — the shape
     `ci/check_health_signals.py` uses for the same reason, and the one A110 named as the model.
 
-    ⚠️ A fourth format then fails in CI on the commit that adds it, which is the only moment it
-    is cheap to design a rendering for.
+    ⚠️ SCOPE, IN THE SAME SENTENCE AS THE CLAIM: this reads the three `stat_N_format`
+    expressions in `macros/player_card_slots.sql` and nothing else — the macro BOTH leader views
+    call, as of A120. A format introduced by a DIFFERENT model, or by a second macro this parse
+    does not follow, is still not covered.
     """
-    assert _MODEL.exists(), (
-        f"{_MODEL.name} moved — this guard is pinned to it by name. The slot expressions live in "
-        f"the shared macro as of A120; if they move again, repoint this rather than widening it.")
-    # ⚠️ SCOPED TO THE EXPRESSION THAT PRODUCES EACH COLUMN, not to the whole file. A global
-    # `then '...'` sweep would read a future CASE for an unrelated column as a format and fail
-    # this test for a reason that has nothing to do with the card.
-    text = _MODEL.read_text()
-    declared = set()
-    for match in re.finditer(r"as stat_\d_format", text):
-        window = text[max(0, match.start() - 250):match.start()]
-        declared |= set(re.findall(r"(?:then|else)\s+'([a-z_0-9]+)'", window))
-        declared |= set(re.findall(r"'([a-z_0-9]+)'\s*$", window.rstrip()))
-    assert declared, "no format literals found in the model — the parse has gone blind"
-    assert len(declared) >= 3, f"the parse found only {sorted(declared)} — it has gone partly blind"
+    assert _MODEL.exists(), f"{_MODEL.name} moved — this guard is pinned to it by name"
     known = {_module_constant(n) for n in ("_KPI_INTEGER", "_KPI_DECIMAL_1", "_KPI_PAIR")}
-    assert declared <= known, (
-        f"the view emits {sorted(declared - known)} and matchup.py has no rendering for it, so "
-        f"that KPI would silently vanish from every card. Adding a format is a LAYOUT decision "
-        f"— design the cell, do not widen this assertion.")
+    by_slot = _declared_formats_by_slot()
+    for slot, declared in sorted(by_slot.items()):
+        # 🚨 PER SLOT. A slot whose formats this parse cannot see yields an EMPTY set, and an
+        # empty set is trivially a subset of `known` — so the emptiness is the assertion.
+        assert declared, (
+            f"slot {slot}: no format literal found in the model's own expression, so this "
+            f"guard has gone blind for that slot — a new rendering there would vanish from "
+            f"every card with the suite green")
+        assert declared <= known, (
+            f"slot {slot}: the view emits {sorted(declared - known)} and matchup.py has no "
+            f"rendering for it, so that KPI would silently vanish from every card. Adding a "
+            f"format is a LAYOUT decision — design the cell, do not widen this assertion.")
+
+
+def test_the_FORMAT_PARSE_survives_a_longer_case_than_the_old_window(tmp_path):
+    """🚨 R-739's OWN BREAK, AND IT IS THE REASON THE ANCHOR CHANGED.
+
+    A fourth format introduced inside a `case` longer than 250 characters was invisible to the
+    old parse. This builds exactly that model on disk and asserts the parse SEES the new value —
+    if it did not, `declared` would stay a subset of `known` and the guard would pass while the
+    page dropped the KPI.
+    """
+    # ⚠️ THE NEW FORMAT GOES FIRST AND THE PADDING AFTER IT, WHICH IS THE WHOLE POINT. My first
+    # version put `furlongs` on the line above the marker, where the OLD 250-character window
+    # could still see it — a break that does not break. Measured both ways: from here the old
+    # window reads back 250 characters and lands INSIDE the filler, so it never reaches this
+    # literal, while the `case` anchor does.
+    padding = "\n".join(
+        f"                 -- filler line {n} to push this literal out of reach"
+        for n in range(8))
+    model = tmp_path / "srv_game_team_leader_through_prior_week.sql"
+    model.write_text(
+        "select\n"
+        "    case l.panel when 'total' then 'pair' else 'integer'\n"
+        "    end as stat_1_format,\n"
+        "    'integer' as stat_2_format,\n"
+        "    case l.panel when 'passing' then 'furlongs'\n"
+        f"{padding}\n"
+        "                 when 'rushing' then 'decimal_1'\n"
+        "                 else 'integer'\n"
+        "    end as stat_3_format\n")
+    import test_matchup_yardage as self_module
+    original = self_module._MODEL
+    try:
+        self_module._MODEL = model
+        by_slot = self_module._declared_formats_by_slot()
+    finally:
+        self_module._MODEL = original
+    assert "furlongs" in by_slot[3], (
+        f"the parse did not see a format introduced inside a long case — which is exactly how "
+        f"R-739 goes blind while passing: {by_slot}")
+    assert by_slot[1] == {"pair", "integer"} and by_slot[2] == {"integer"}
 
 
 def test_an_UNKNOWN_format_draws_NOTHING_rather_than_something_plausible(panel):
@@ -1973,3 +2089,149 @@ def test_the_delta_CHIP_no_longer_carries_a_COLOUR(panel):
             "the delta chip is still tinted, so red points two ways in one panel"
     # The sign is what carries it, and it must still be there.
     assert "-6.0" in _plain(chips[-1]) or "−6.0" in _plain(chips[-1])
+
+
+# --- 🚨 R-722: the mark, and the pairing a presence assertion cannot see -------------------
+
+_OUTLOOK_MACRO = (Path(__file__).resolve().parents[1] / "dbt" / "macros"
+                  / "matchup_outlook.sql")
+
+
+def _mark_of(chart):
+    """One chart's point mark, as (shape, colour, filled)."""
+    spec = chart.to_dict()
+    layers = spec.get("layer", [])
+    point = next(layer for layer in layers
+                 if isinstance(layer.get("mark"), dict)
+                 and layer["mark"].get("type") == "point")
+    mark = point["mark"]
+    return mark.get("shape"), mark.get("color"), mark.get("filled")
+
+
+def _with_outlook(value, metric="rushing"):
+    """The deltas frame with one metric's outlook forced to `value` on both sides."""
+    return [dict(r, **{f"{metric}_matchup_outlook": value}) for r in _deltas()]
+
+
+def test_the_MAPPING_KEYS_are_the_values_the_warehouse_actually_stores():
+    """🚨 THE FAILURE THIS PREVENTS ALREADY HAPPENED ONCE, ONE LAYER UP.
+
+    A119 shipped `favourable`, `test_no_dbt_description_uses_british_spelling` failed the build,
+    and the value changed to `favorable`. ⚠️ **Cowork's prompt for THIS round still specified the
+    British spelling.** A mapping keyed on `favourable` matches nothing, every mark falls to the
+    unclassified look, and NOTHING ELSE SAYS SO — the page renders, the suite passes, and three
+    verdicts quietly become one.
+
+    ✅ So the keys are read out of the macro that WRITES them — `ci/check_health_signals.py`'s
+    shape, which A110 named as the model for exactly this.
+
+    ⚠️ SCOPE, IN THE SAME SENTENCE AS THE CLAIM: this compares the string literals emitted by
+    `dbt/macros/matchup_outlook.sql` against the keys of `_OUTLOOK_MARKS`. It cannot see a value
+    written by any other model, and it says nothing about which LOOK each value gets.
+    """
+    assert _OUTLOOK_MACRO.exists(), f"{_OUTLOOK_MACRO.name} moved — this guard is pinned by name"
+    stored = set(re.findall(r"then '([a-z_]+)'", _OUTLOOK_MACRO.read_text()))
+    stored |= set(re.findall(r"else '([a-z_]+)'", _OUTLOOK_MACRO.read_text()))
+    assert stored, "no outlook literals found in the macro — the parse has gone blind"
+    mapped = set(_module_constant("_OUTLOOK_MARKS"))
+    assert stored == mapped, (
+        f"the warehouse stores {sorted(stored)} and matchup.py maps {sorted(mapped)}. A key the "
+        f"page does not have falls to the UNCLASSIFIED mark on every game and nothing else "
+        f"reports it — which is precisely how `favourable` would have shipped.")
+
+
+def test_each_STORED_VALUE_gets_ITS_OWN_LOOK_not_merely_A_look(panel):
+    """🚨 A PRESENCE ASSERTION IS BLIND TO A SWAP, AND THIS PROJECT HAS PROVED IT THREE TIMES —
+    B082 on the game header, B083 on the win-probability bar, and A119 one layer down, where
+    reversing its two positive-delta branches passed the exhaustiveness test completely.
+
+    So the VALUE-to-LOOK pairing is asserted, one row at a time. Marc's rule:
+
+        favorable   -> green circle       challenging -> red diamond
+        contested   -> yellow circle
+    """
+    seen = {}
+    for value in ("favorable", "contested", "challenging"):
+        entries, _ = panel(_game(), _both(), deltas=_with_outlook(value))
+        seen[value] = _mark_of(_charts(entries)[0])
+    shapes = {v: m[0] for v, m in seen.items()}
+    colours = {v: m[1] for v, m in seen.items()}
+    assert shapes["favorable"] == shapes["contested"] == "circle", \
+        f"Marc's rule gives favorable and contested a CIRCLE: {shapes}"
+    assert shapes["challenging"] == "diamond", (
+        f"`challenging` must be the DIAMOND — it is the one state a greyscale reader can find "
+        f"by outline alone: {shapes}")
+    assert len({colours["favorable"], colours["contested"], colours["challenging"]}) == 3, \
+        f"two outlooks share a colour: {colours}"
+    # 🚨 THE SWAP THE BREAK STAGES: green must be the FAVOURABLE one, not merely present.
+    assert _luminance(colours["challenging"]) < _luminance(colours["contested"]), (
+        f"the challenging mark is not the darkest — swapping favorable and challenging in the "
+        f"mapping would paint a hard matchup green: {colours}")
+    assert colours["favorable"] != colours["challenging"]
+
+
+def _luminance(hex_colour: str) -> float:
+    """Rec. 601 luma, which is what a greyscale render collapses a colour to."""
+    r, g, b = (int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def test_GREEN_and_YELLOW_are_separated_in_GREYSCALE_too(panel):
+    """⚠️ AC-G.22, AND THIS IS THE ONE PLACE MARC'S RULE SPENDS COLOUR ALONE.
+
+    Two of the three states are CIRCLES, so `favorable` and `contested` differ by colour and
+    nothing else. In greyscale, or to a red-green colour-blind reader, that is one distinction
+    rather than two — unless the two tones are far enough apart in LUMINANCE to read as light
+    and dark.
+
+    🚨 SO THE TONES ARE CHOSEN FOR LUMA DISTANCE RATHER THAN HUE, and this asserts it rather
+    than trusting the eye. The round's report carries the greyscale picture.
+    """
+    tones = {v: _mark_of(_charts(panel(_game(), _both(), deltas=_with_outlook(v))[0])[0])[1]
+             for v in ("favorable", "contested", "challenging")}
+    lumas = {v: _luminance(c) for v, c in tones.items()}
+    gap = abs(lumas["favorable"] - lumas["contested"])
+    assert gap >= 40, (
+        f"favorable and contested are both circles, so greyscale leaves only their tone to "
+        f"tell them apart, and these two collapse to {lumas['favorable']:.0f} and "
+        f"{lumas['contested']:.0f} — a gap of {gap:.0f}. Under 40 they read as the same grey "
+        f"disc and the panel has two marks a colour-blind reader cannot distinguish.")
+
+
+def test_an_UNCLASSIFIED_mark_does_not_BORROW_one_of_the_three_looks(panel):
+    """🚨 REACHABLE, AND MEASURED RATHER THAN ASSUMED (AC-G.11).
+
+    The prompt expected a null outlook to be unreachable, because `_scatter` returns None when
+    either figure is missing and A119 proved the outlook is null on exactly the rows the delta
+    is null on — 0 rows disagree across all 225,350.
+
+    ⚠️ BUT THOSE ARE DIFFERENT RELATIONS — `srv_game_team` at game x team grain against
+    `srv_team_week` at week grain — so nothing STRUCTURAL ties the two absences together.
+
+    🚨 CHASED, AND THE HONEST ANSWER IS "NOT DEMONSTRATED". 243 rows in 2026 carry a null rushing
+    outlook while that team has both team-week figures at that game's week — ⚠️ but that is the
+    NECESSARY condition only, and `_scatter` also needs the week's distribution, a non-degenerate
+    axis and a point inside the frame. A sample of those 243 rendered ZERO charts.
+
+    ✅ SO THE BRANCH IS NEITHER PROVEN REACHABLE NOR PROVEN DEAD, and this test is what keeps it
+    honest if it ever draws: a shape neither other state uses, unfilled, in grey.
+    """
+    shape, colour, filled = _mark_of(
+        _charts(panel(_game(), _both(), deltas=_with_outlook(None))[0])[0])
+    marks = _module_constant("_OUTLOOK_MARKS")
+    assert shape not in {m[0] for m in marks.values()} or filled is False, (
+        f"an unclassified mark borrowed a classified look: {(shape, colour, filled)}")
+    assert filled is False, "the unclassified mark must be hollow — it is not a fourth verdict"
+    assert colour not in {m[1] for m in marks.values()}, \
+        f"the unclassified mark uses a verdict's colour: {colour}"
+
+
+def test_an_UNKNOWN_outlook_string_falls_to_the_UNCLASSIFIED_look_not_a_verdict(panel):
+    """A value the warehouse starts emitting that this page has never heard of must not be
+    painted as one of Marc's three. `test_the_MAPPING_KEYS…` is what makes it LOUD; this is what
+    makes it SAFE in the meantime."""
+    shape, colour, filled = _mark_of(
+        _charts(panel(_game(), _both(), deltas=_with_outlook("favourable"))[0])[0])
+    assert filled is False and shape == "square", (
+        f"the British spelling — the one Cowork's prompt specified — was painted as a verdict: "
+        f"{(shape, colour, filled)}")
