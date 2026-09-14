@@ -1565,8 +1565,16 @@ def test_the_TIE_BADGE_SURVIVES_the_card_rewrite(panel):
 
 # --- 🚨 R-733: the labels are DATA, and the page must not guess at a format it does not know
 
-_MODEL = (Path(__file__).resolve().parents[1] / "dbt" / "models" / "serving"
-          / "srv_game_team_leader_through_prior_week.sql")
+# ⚠️ REPOINTED BY A120 (R-723) FROM THE VIEW TO THE MACRO, AND THIS GUARD CAUGHT ITS OWN MOVE.
+# The twelve slot columns used to be written out in the preview view. A120 added a POST-GAME twin
+# needing the identical twelve and lifted the expressions into `macros/player_card_slots.sql`, so
+# the format literals left this view — and the parse below found NONE and failed with "the parse
+# has gone blind", exactly as its author intended. A guard that notices its subject moved is
+# working; one that silently found zero literals and passed would not be.
+#
+# 🚨 AND THE MACRO IS THE STRONGER SUBJECT NOW, because BOTH leader views call it: a format added
+# there reaches the preview card AND the post-game card, and this one assertion covers both.
+_MODEL = (Path(__file__).resolve().parents[1] / "dbt" / "macros" / "player_card_slots.sql")
 
 
 def test_the_page_knows_every_FORMAT_the_view_can_emit():
@@ -1581,7 +1589,9 @@ def test_the_page_knows_every_FORMAT_the_view_can_emit():
     ⚠️ A fourth format then fails in CI on the commit that adds it, which is the only moment it
     is cheap to design a rendering for.
     """
-    assert _MODEL.exists(), f"{_MODEL.name} moved — this guard is pinned to it by name"
+    assert _MODEL.exists(), (
+        f"{_MODEL.name} moved — this guard is pinned to it by name. The slot expressions live in "
+        f"the shared macro as of A120; if they move again, repoint this rather than widening it.")
     # ⚠️ SCOPED TO THE EXPRESSION THAT PRODUCES EACH COLUMN, not to the whole file. A global
     # `then '...'` sweep would read a future CASE for an unrelated column as a format and fail
     # this test for a reason that has nothing to do with the card.

@@ -35,6 +35,7 @@
     'srv_game',
     'srv_game_team',
     'srv_game_team_leader',
+    'srv_game_team_leader_in_this_game',
     'srv_game_team_leader_through_prior_week',
     'srv_game_team_leader_usage',
     'srv_game_travel',

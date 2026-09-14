@@ -76,8 +76,26 @@ select
     w.usage_total,
     w.usage_rushing,
     w.usage_passing,
-    -- The denominator, so the page divides nothing.
+    -- The denominator. ⚠️ THIS COMMENT USED TO END "so the page divides nothing" AND IT WAS
+    -- ASPIRATIONAL: site/views/matchup.py computed
+    -- `float(usage_total) / float(usage_total_max_in_window)` to size B099's circles. Publishing
+    -- a denominator does not stop a page dividing by it; publishing the QUOTIENT does. R-725.
     w.usage_total_max_in_window,
+    -- ✅ THE SHARE ITSELF — R-725, and §4.2.1's display-only contract is the rule it satisfies.
+    -- 0.0 to 1.0, where 1.0 is the busiest player in the window and sizes a full circle.
+    --
+    -- 🚨 THE DEFENCE FOR COMPUTING THIS IN THE PAGE WAS "scaling one published number by another
+    -- published one to size a shape is rendering", AND THE TEST COWORK RULED ON IS HOW MANY
+    -- CONSUMERS THE NUMBER CAN HAVE. This one can have several — a circle, a bar, a sort, a
+    -- tooltip, an export — and each would re-derive it, which is how two surfaces come to disagree
+    -- about the same quantity. The same argument licensed the delta chip and `ats`.
+    --
+    -- ⚠️ AC-G.32: A NULL OR ZERO CEILING YIELDS NULL, NEVER ZERO. `nullif` handles the zero, and
+    -- null propagates on its own. A zero here would say "this player did nothing", when the truth
+    -- is that nobody in the window did anything measurable and the ratio is undefined. A circle
+    -- sized 0 and a circle that should not be drawn are different instructions to a page.
+    round(w.usage_total / nullif(w.usage_total_max_in_window, 0), 4)
+        as usage_share_of_max,
     -- How many observations the maximum is drawn from. 1 means a full circle on one data point.
     w.usage_games_in_window,
     ao.as_of_ts
