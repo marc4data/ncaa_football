@@ -4403,6 +4403,90 @@ models:
       - name: as_of_ts
         description: When this view's underlying data was last loaded.
 
+  - name: srv_game_win_probability_play
+    description: >
+      The win-probability CURVE, one row per (game_id, play), for a completed game. R-724, and
+      Marc's ask: "We need win probability graphs for the games."
+      Until now the curve stopped at STAGING - only the game-level summary reached serving, through
+      fct_game_win_probability_summary and srv_game. This is the per-play series a chart draws.
+      291,548 rows over 1,898 games, the SIXTH-largest serving object of thirty-three - smaller
+      than srv_player_stats (1,521,532) and srv_player_play (375,925) - so it is built whole and
+      nothing is downsampled. A thinned curve is a different chart and a reader cannot tell.
+      Coverage is 2024-2026 only, bounded by the settled play-by-play scope decision rather than by
+      this model: 2024 has 139,052 plays over 912 games, 2025 124,486 over 803, 2026 28,010 over
+      183. A 2019 game has no curve, and that is a scope decision rather than missing data - the
+      page must say which absence it is (AC-G.11).
+      The leakage rule does NOT apply and a later round must not "fix" it in: this describes a
+      COMPLETED game and is read afterwards to say what happened, which is the opposite case from
+      fct_player_leader_week's point-in-time frame.
+    columns:
+      - name: game_win_probability_play_sk
+        description: Surrogate key over game_id and play_id.
+      - name: game_id
+        description: CFBD game id. Also ESPN's event id, verified by hand on three games in A118.
+      - name: season
+        description: Season the game was played in. From fct_game.
+      - name: season_type
+        description: regular or postseason. From fct_game.
+      - name: week
+        description: Week within the season type. From fct_game.
+      - name: play_id
+        description: >
+          CFBD play id, unique across the feed. TEXT, not a number, and the ids are not fixed width
+          - lengths run 5 to 18 - so sorting on it is a LEXICAL sort and scrambles play order.
+          Never order a curve by this; order by play_number.
+      - name: play_number
+        description: >
+          The play's position within the game, from the feed. MONOTONIC, always present, no gaps
+          that matter and no restarts, so this is what a chart should POSITION on - a line drawn
+          against it cannot fold back on itself.
+      - name: period
+        description: >
+          Quarter, or 5 and above for overtime. Joined from stg_play on play_id, because the
+          win-probability feed carries NO period at all. What a chart should ANNOTATE with - a
+          reader does not think in play numbers - so quarter boundaries come from here. NULL on
+          exactly one play of 291,548, which has no matching stg_play row; the join is a left join
+          deliberately, because a curve missing a play is worse than a null period on one row.
+      - name: is_overtime
+        description: >
+          Whether this play was in overtime (period 5 or above). Carried separately so a chart can
+          shade or break out overtime rather than letting it read as a longer fourth quarter.
+          NULL, never false, where the period is unknown: "not in overtime" and "we do not know
+          which period this was" are different facts (AC-G.32).
+      - name: home_win_probability
+        description: >
+          The home side's win probability at this play, 0 to 1, exactly as the feed publishes it
+          and NOT scaled to 0-100. An Altair axis takes format='%' and renders 0.62 as 62%, which
+          is a rendering instruction rather than arithmetic, so the page still multiplies nothing.
+      - name: home_team_id
+        description: The home team, so a legend needs no second query.
+      - name: home_team
+        description: Home team name, as the feed carries it.
+      - name: away_team_id
+        description: The away team.
+      - name: away_team
+        description: Away team name, as the feed carries it.
+      - name: home_score
+        description: Home score at this play - the tooltip's content.
+      - name: away_score
+        description: Away score at this play.
+      - name: down
+        description: Down at this play.
+      - name: distance
+        description: Yards to go at this play.
+      - name: yard_line
+        description: Field position at this play.
+      - name: home_has_ball
+        description: Whether the home side had possession at this play.
+      - name: play_text
+        description: >
+          CFBD's description of the play. Carried, and the width was measured rather than guessed:
+          23 MB on disk across 291,548 rows, averaging 78 characters and peaking at 770 - 7% of
+          srv_player_stats's 306 MB. It is what makes a hovered point say WHAT happened rather than
+          only when, which is the reason a reader hovers a win-probability curve at all.
+      - name: as_of_ts
+        description: When the play domain was last refreshed.
+
   - name: srv_game_team_leader_in_this_game
     description: >
       The three players who led this team IN THIS GAME, in the three panels Matchup uses. One row

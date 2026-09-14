@@ -326,6 +326,20 @@ HEAVY_SERVING = [
     # 5.6% of the per-player grain R-534 rejected — because the card asks for three panels and the
     # HIGH end only rather than fifty stat pairs and both extremes.
     "srv_game_team_leader_in_this_game",
+    # A121/R-724. The win-probability CURVE, per play — 291,548 rows, the sixth-largest serving
+    # object. Marc: "We need win probability graphs for the games."
+    #
+    # HEAVY, AND HERE THE REASON IS BOTH SIZE AND FETCH. It is derived from `metrics/wp`, which
+    # A115 put on a weekly cadence (R-716) in the IMMUTABLE_WK bucket — one call per completed
+    # game, fetched by cfbd_results_refresh on Sunday and cfbd_midweek_results on Thursday. The
+    # two-hourly scores DAG fetches /games alone, so a hot rebuild would recompute this from raw
+    # that has not moved and ship 291,548 identical rows every two hours.
+    #
+    # ⚠️ AND THE CURVE OF A COMPLETED GAME NEVER CHANGES, which is the stronger half of the
+    # argument: a game that finished on Saturday has one curve forever. Hot publishing cannot make
+    # a table fresher than its source endpoint — A078 and A079 spent two rounds removing that
+    # "arrives looking as fresh as the rows beside it" failure.
+    "srv_game_win_probability_play",
 ]
 
 # What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,
