@@ -1,12 +1,24 @@
-"""ONE PICTURE, TWO SIZES. The standard way cfdb draws a distribution.
+"""ONE PICTURE, THREE ENTRY POINTS. The standard way cfdb draws a distribution.
 
 Marc: *"I want to have a standard way of showing. A good starting point for that method is in
-`plot_distribution`."* — and *"It will be reusable call from several pages."*
+`plot_distribution`."* — and *"It will be reusable call from several pages."* — and, for the
+third, *"For every measure I'd like a horizontal box-whisker plot under the measure value."*
 
-So: one module, two entry points over the SAME row, and no page owns either.
+So: one module, three entry points over the SAME row, and no page owns any of them.
 
     thumbnail(row)  ->  inline SVG, ~120x28, for a header bar
     panel(row)      ->  the full layout, for a page with room
+    box(row)        ->  a horizontal box-and-whisker, sized to the cell it is given
+
+⚠️ THIS HEADER SAID "TWO SIZES" AND "two entry points" FOR A FULL ROUND AFTER `box()` SHIPPED —
+R-821, and the file's own rule is four paragraphs down in R-562's correction: "Left uncorrected
+this would have been a fresh instance of the failure this project keeps paying for: a
+justification that stays in the file after it stops being true." It was the same failure, in the
+same file, against the same paragraph.
+
+⚠️ AND `box()` READS NO BIN COLUMNS, which is what lets it draw all three sibling views.
+`thumbnail` and `panel` draw the HISTOGRAM and need `bin_min`, `bin_incr` and `bin_counts`;
+a box plot is percentiles and whiskers, which every sibling publishes.
 
 ONE RENDERER, NOT TWO. An earlier draft had the thumbnail as inline SVG and the panel as
 Vega-Lite. That is two implementations of one picture, which is the thing the bin edges are
@@ -298,6 +310,63 @@ TICK_NONE = "none"
 BOX_HEIGHT = 26
 
 
+# 🚨 THE WHISKER PAIR IS SPELLED TWO WAYS ACROSS THE THREE SIBLING VIEWS — R-820.
+#
+#     srv_week_metric_distribution        whisker_lo   whisker_hi
+#     srv_team_week_metric_distribution   whisker_low  whisker_high
+#     srv_game_team_metric_distribution   whisker_low  whisker_high
+#
+# ⚠️ A125 SHIPPED `box()` READING `whisker_low` ALONE, so the week-grain view — the oldest of the
+# three and the only one with a histogram — fell through the guard four lines on and returned the
+# EMPTY PLACEHOLDER. Measured at width 448: the working shape draws 1,605 characters with a rect,
+# five lines and six labels; the `whisker_lo` shape returned 123 characters and ZERO elements,
+# titled "this week has no distribution for that measure".
+#
+# 🚨 THAT IS THE WORST FAILURE AVAILABLE AND AN AC-G.11 VIOLATION: not a crash and not a blank, but
+# a CONFIDENT WRONG ABSENCE — the page telling a reader the week has no distribution for a measure
+# whose percentiles are sitting in the row it was just handed.
+#
+# ⚠️ AND `describe()` TWENTY LINES BELOW ALREADY CARRIED THE LESSON. It met the same seam on the
+# DENOMINATOR (`games_in_week` / `teams_in_week` / `team_games_in_week`), and A125's fix was to look
+# it up BY CANDIDATE with the noun following, because "the alternative was three describe()
+# functions that would drift". THE DENOMINATOR GOT THE LESSON AND THE WHISKERS DID NOT.
+#
+# ✅ THE COLUMN IS NOT RENAMED, DELIBERATELY. `whisker_lo`/`whisker_hi` are PUBLISHED, so §3.3 makes
+# that EXPAND -> MIGRATE -> CONTRACT across three rounds for a cosmetic consistency nobody outside
+# this module has asked for. The reader's cost is zero either way; the renderer absorbs it.
+#
+# ⚠️ MEASURED ACROSS ALL THREE VIEWS BEFORE FIXING ONLY THIS ONE: 19 columns are common to all
+# three — every percentile p02 through p98, `iqr`, `min_value`, `max_value`, `mean`, `stddev`, `n`,
+# `outlier_count`, the keys and `as_of_ts`. The whiskers are THE ONLY same-concept-different-name
+# divergence. Everything else that differs is genuinely grain-specific: the bin columns and the
+# lock columns belong to the week view alone, the axis columns to the team-week view alone.
+_WHISKER_NAMES = (("whisker_low", "whisker_high"), ("whisker_lo", "whisker_hi"))
+
+
+def _whisker_pair(row):
+    """The whisker ends, whichever of the two vocabularies the row speaks.
+
+    ⚠️ ONE LOOKUP FOR THE PAIR, NOT TWO INDEPENDENT ONES. `lo` and `hi` must come from the SAME
+    view's vocabulary: a row answering `whisker_low` and `whisker_hi` is not a row with an
+    unusual spelling, it is a row nobody published — no view emits that combination — and
+    averaging two conventions would draw a box from two different models' numbers.
+
+    🚨 SO A MIXED ROW RAISES RATHER THAN DEGRADES. R-748's rule is assert upstream and degrade
+    downstream, and this is neither half: it is a PROGRAMMING error, not a data condition. It
+    cannot arrive from serving, so it can only arrive from a hand-built dict — and surfacing that
+    in a test is the whole point. A silent half-answer here is how the original defect survived.
+    """
+    for lo_key, hi_key in _WHISKER_NAMES:
+        has_lo, has_hi = lo_key in row, hi_key in row
+        if has_lo and has_hi:
+            return row.get(lo_key), row.get(hi_key)
+        if has_lo != has_hi:
+            raise ValueError(
+                f"distribution row carries {lo_key if has_lo else hi_key} without its pair — "
+                f"no serving view publishes that combination, so this row was built by hand")
+    return None, None
+
+
 def _box_scale(lo: float, hi: float, width: float, pad: float):
     """A closure mapping a value to an x offset inside the box plot.
 
@@ -379,8 +448,13 @@ def box(row, value=None, width: int = 240, label: str = "",
         raw = row.get(key)
         return None if raw is None or pd.isna(raw) else float(raw)
 
+    def as_number(raw):
+        return None if raw is None or pd.isna(raw) else float(raw)
+
     p25, p50, p75 = num("p25"), num("p50"), num("p75")
-    lo, hi = num("whisker_low"), num("whisker_high")
+    # See _whisker_pair: the three views spell this two ways and the column is not renamed.
+    raw_lo, raw_hi = _whisker_pair(row)
+    lo, hi = as_number(raw_lo), as_number(raw_hi)
     if None in (p25, p50, p75) or lo is None or hi is None:
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
                 f"title='this week has no distribution for that measure'>\u2013</span>")
