@@ -18,8 +18,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import (attribution, chips, filters, fmt, identity, params, shell,
-                 states, table)
+from lib import (attribution, chips, distribution, filters, fmt, identity, params,
+                 shell, states, table)
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -2936,6 +2936,7 @@ def _yardage(row) -> None:
 # free: one column per side, one row per statistic.
 _POSTGAME_COLUMNS = """
     game_id, team_id, team_display, team_logo_url, is_home,
+    season, season_type, week,
     has_box_score, has_box_advanced, has_team_advanced, has_havoc,
     first_downs, total_yards, rushing_yards, passing_yards, rushing_attempts,
     turnovers, interceptions, fumbles_lost,
@@ -3124,38 +3125,204 @@ def _turnovers(row) -> str:
 # than its share DRAWS OVER the next one. `overflow:hidden` is what makes the failure mode
 # "loses its rightmost characters" rather than "corrupts the column beside it" — a page that
 # clips reads as tight, a page that overlaps reads as broken.
-_METRIC_VALUE_WIDTH = 7.5      # rem — the widest figure either panel renders, plus headroom
+# 🚨 R-810. THE VALUE SLOT IS SIZED PER PANEL NOW, AND MARC'S SENTENCE IS THE REASON.
+# v07: *"Narrow the gap between the measures in left and right columns. Create a cell that's
+# butted up to the center. Only make wide enough to show the widest value in the cell."*
+#
+# ⚠️ AND THE MECHANISM IS NOT OBVIOUS, SO IT IS WRITTEN DOWN: both values are RIGHT-aligned
+# (R-807, and that is what lets a column of figures line up on its units). The AWAY value is
+# therefore already butted against the label; the HOME value is right-aligned against the
+# cell's OUTER edge, so a short figure sits a whole empty slot away from the centre.
+# **Narrowing the slot is what pulls the home number in. Nothing else does.**
+#
+# 📊 MEASURED IN THE BROWSER, every rendered value in both panels, by its text box and not by
+# its slot — `scrollWidth` reports the slot for a flex child that fills it, so a Range over the
+# text node is what actually answers:
+#
+#     `1 (1 INT · 0 FUM)`   110px   ← the widest in Box Score, and it is the TURNOVERS row
+#     `47.1%`                43px   ← the widest in Advanced
+#     `30:51`                38px
+#     `373`                  25px
+#
+# 🚨 SO ONE ROW GOVERNS BOX SCORE AND IT IS NOT A METRIC ROW. Turnovers is 110px against 43px
+# for every other value on the page — two and a half times the next widest. **Box Score can
+# only narrow to 110px while that row keeps its format, and Advanced can go to 48px.**
+# ⚠️ Reported rather than worked around: reshaping that row is a look decision and Marc's.
+#
+# ⚠️ PER PANEL, NOT PER ROW. A per-row width would make every row a different shape and the
+# centre line would wander down the page; the LABEL column is fixed, so the centre never moves
+# and only the outer edges differ between the two panels.
+# ⚠️ AND B106's WORST CASE WAS HYPOTHETICAL. It sized this slot for `12 (4 INT · 8 FUM)` at
+# 118px. MEASURED across all 7,348 rows that have a box score: the maxima are **8 turnovers,
+# 7 interceptions, 5 fumbles lost, and NOT ONE ROW reaches double digits in any part.** So the
+# real widest string is `8 (7 INT · 5 FUM)` — single digits throughout, 110px, the same as the
+# `1 (1 INT · 0 FUM)` actually rendered above.
+_METRIC_VALUE_WIDTH = 7.25     # rem — Box Score: 116px against a measured 110px worst case
+_METRIC_VALUE_NARROW = 3.0     # rem — Advanced: 43px of `47.1%`, plus headroom
 _METRIC_LABEL_WIDTH = 12.0     # rem — the longest label in _ADVANCED_ROWS, verbatim
 _METRIC_CELL_GAP = 0.5         # rem, twice
 _METRIC_CELL_PAD = 0.4         # rem, twice
-_METRIC_CELL_WIDTH = (2 * _METRIC_VALUE_WIDTH + _METRIC_LABEL_WIDTH
-                      + 2 * _METRIC_CELL_GAP + 2 * _METRIC_CELL_PAD)     # 28.8rem = 461px
 
-# ⚠️ B107 DRAWS A BOX-WHISKER ACROSS THIS CELL AND IT DOES NOT EXIST YET (A125 owns `box()` in
-# `site/lib/distribution.py`), so the width it will span is pinned HERE rather than measured
-# again then — the cell's INNER width, which is the cell minus its own padding. A component
-# that has to re-derive its container's geometry is a second copy of this arithmetic.
-_METRIC_BOX_WIDTH = _METRIC_CELL_WIDTH - 2 * _METRIC_CELL_PAD             # 28.0rem = 448px
 
-# The cell itself. `box-sizing:border-box` is load-bearing: without it the padding is ADDED to
-# the width above and the 6.5% headroom becomes 4%.
-_METRIC_CELL = (f"display:flex;align-items:baseline;gap:{_METRIC_CELL_GAP}rem;"
-                f"width:{_METRIC_CELL_WIDTH}rem;max-width:100%;box-sizing:border-box;"
-                f"margin:0 auto;padding:.15rem {_METRIC_CELL_PAD}rem;overflow:hidden")
+def _cell_width(value_width: float) -> float:
+    """The cell's outer width for a given value slot — one arithmetic, two panels."""
+    return (2 * value_width + _METRIC_LABEL_WIDTH
+            + 2 * _METRIC_CELL_GAP + 2 * _METRIC_CELL_PAD)
+
+
+_METRIC_CELL_WIDTH = _cell_width(_METRIC_VALUE_WIDTH)                    # 27.8rem = 445px
+
+# 🚨 R-808. THE BAND SPANS THE CELL'S INNER WIDTH, AND THE PROMPT'S 448px NO LONGER HOLDS —
+# WHICH IS A CONSEQUENCE OF PART 1 THAT NEITHER THIS ROUND'S PROMPT NOR B106's REPORT SAW.
+# B106 pinned 448px when the cell was 461px wide for BOTH panels. R-810 sizes the value slot
+# per panel, so the cell is now 445px in Box Score and 325px in Advanced — and the band, which
+# lives inside the cell, moves with it. **One derivation, applied twice, rather than a constant
+# that is right for one panel and wrong for the other.**
+#
+# ✅ AND PART 0's MEASUREMENT SAYS BOTH CLEAR THE BAR. Rendering the real `box()` over the real
+# tightest distribution and counting what survives:
+#
+#     width   box (p25–p75)   labels drawn of 6
+#      60px        10.8px           2      ← a smudge
+#      90px        18.9px           3
+#     120px        27.1px           3
+#     160px        37.9px           4
+#     200px        48.7px           5      ← the most the placement pass ever draws
+#     448px       115.8px           5
+#
+# 🚨 **200px IS THE MINIMUM USEFUL WIDTH**: below it the placement pass starts dropping labels,
+# and by 120px half of them are gone. Advanced's 312px clears it by 56% and Box Score's 432px
+# by 116%. ⚠️ The sixth label is never drawn at any width — see `_metric_band`.
+
+
+def _box_width(value_width: float) -> float:
+    """ONE band's width for a panel whose value slot is `value_width`.
+
+    🚨 HALF THE CELL, NOT THE WHOLE CELL, AND THE FIRST VERSION GOT THIS WRONG IN A WAY ONLY THE
+    RASTER SHOWED. There are TWO bands on a measure row — one per side, because the spread is
+    shared but the bright bar marks THIS team's own figure, and `box()` takes one value. Passing
+    each of them the full cell width emitted `viewBox='0 0 432 41'` into a 216px box, and
+    `box()`'s own `max-width:100%` then scaled it to fit: **every label squashed 2:1 — the
+    string `18` measured FOUR pixels wide.** The SVG was correct, the spec was correct, and the
+    text was unreadable. ⚠️ B105's lesson again: the test asserts the spec, the reader sees the
+    render.
+
+    ⚠️ ONE COPY OF THIS ARITHMETIC. `box()`'s own default is 240px, which is neither panel's
+    number; it is passed explicitly, every time, and never re-derived at the call site.
+    """
+    inner = (_cell_width(value_width) - 2 * _METRIC_CELL_PAD) * _REM
+    return (inner - _METRIC_CELL_GAP * _REM) / 2
+
+
+# The browser's root font size, and the only place this file converts rem to px.
+_REM = 16
+_METRIC_BOX_WIDTH = int(_box_width(_METRIC_VALUE_WIDTH))                  # 216px, Box Score
+_METRIC_BOX_NARROW = int(_box_width(_METRIC_VALUE_NARROW))                # 148px, Advanced
+
+
+def _metric_cell_style(value_width: float) -> str:
+    """The cell's own style for a panel. `box-sizing:border-box` is load-bearing: without it the
+    padding is ADDED to the width and the headroom against the column disappears."""
+    return (f"display:flex;align-items:baseline;gap:{_METRIC_CELL_GAP}rem;"
+            f"width:{_cell_width(value_width)}rem;max-width:100%;box-sizing:border-box;"
+            f"margin:0 auto;padding:.15rem {_METRIC_CELL_PAD}rem;overflow:hidden")
+
+
+_METRIC_CELL = _metric_cell_style(_METRIC_VALUE_WIDTH)
 # 🚨 BOTH VALUES RIGHT-ALIGNED, WHICH IS THE HALF THAT IS NOT SYMMETRY FOR ITS OWN SAKE. The
 # home column used to be left-aligned, so a column of figures down the page lined up on its
 # FIRST digit — `9` and `415` started in the same place. Right-aligned, they line up on the
 # units, which is the only alignment that lets a reader compare two columns of numbers by eye.
-_METRIC_VALUE_CELL = (f"width:{_METRIC_VALUE_WIDTH}rem;flex:none;font-weight:600;"
-                      f"text-align:right;overflow:hidden;text-overflow:ellipsis;"
-                      f"white-space:nowrap")
+
+
+def _metric_value_style(value_width: float) -> str:
+    return (f"width:{value_width}rem;flex:none;font-weight:600;"
+            f"text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+
+
+_METRIC_VALUE_CELL = _metric_value_style(_METRIC_VALUE_WIDTH)
 _METRIC_LABEL_CELL = (f"width:{_METRIC_LABEL_WIDTH}rem;flex:none;text-align:center;"
                       f"opacity:.65;font-size:.85rem")
 
 
-def _comparison(away, home, rows, glossary=None) -> str:
+# 🚨 R-808. THE DISTRIBUTION THE BANDS ARE DRAWN AGAINST — Marc, v07: *"use it to show the
+# spread/dispersion of each metric in the Box Score and Advanced… where the data point lands
+# shown with a bright vertical bar, labeled."*
+#
+# ⚠️ `srv_game_team_metric_distribution`, AND THE GRAIN IS THE WHOLE CHOICE. It is every FBS
+# TEAM-GAME in that week, so the band answers *where did this team's afternoon sit among every
+# other team's afternoon* — which is the question a box score invites. The two siblings answer
+# different ones: `srv_week_metric_distribution` is game-grain (both teams summed) and
+# `srv_team_week_metric_distribution` is a team's cumulative season form, which is what the
+# Offense-vs-Defense charts already use.
+#
+# ⚠️ AND IT PUBLISHES EXACTLY THE EIGHTEEN MEASURES THE TWO PANELS RENDER — 6 in Box Score and
+# 12 in Advanced — which is not a coincidence: A125 built it for this call site.
+_DISTRIBUTION_ROW_COLUMNS = """
+    metric, n, team_games_in_week,
+    min_value, whisker_low, p25, p50, p75, whisker_high, max_value
+"""
+
+
+def _metric_distribution(season, season_type, week) -> dict:
+    """Every measure's spread for this week, keyed by metric. ONE read for eighteen bands.
+
+    🚨 ONE READ, NOT ONE PER MEASURE. Eighteen queries for one panel would be eighteen round
+    trips per page load, and `query` caches on the parameter set — so this is one read per TTL
+    window across every game in the week, not one per render.
+
+    ⚠️ AC-G.39, AND THE LIMIT IS THE GRAIN RESTATED RATHER THAN A GUESS AT A CEILING: one row
+    per metric per week, and serving publishes eighteen. ⚠️ IT IS A LITERAL RATHER THAN A NAMED
+    CONSTANT because `ci/check_page_queries.py` interpolates these strings to execute them and
+    cannot resolve a placeholder it has not been taught — every other query in this file states
+    its limit the same way.
+    """
+    if season is None or week is None:
+        return {}
+    df = query(f"""
+        select {_DISTRIBUTION_ROW_COLUMNS}
+        from srv_game_team_metric_distribution
+        where season = :season and season_type = :season_type and week = :week
+        limit 24
+    """, {"season": int(season), "season_type": str(season_type or "regular"),
+          "week": int(week)})
+    return {str(r["metric"]): r for _, r in df.iterrows()}
+
+
+def _metric_band(row, away_value, home_value, width, dp) -> str:
+    """The spread for one measure, under its two figures — A125's `box()`, at this cell's width.
+
+    ❌ `site/lib/distribution.py` IS SESSION A's AND IS NOT EDITED HERE (§3 rule 3.1). This is
+    the call site A125 shipped the parameters for.
+
+    🚨 TWO BANDS, ONE PER SIDE, AND THAT IS THE POINT RATHER THAN A DUPLICATION. The measure's
+    spread is the same for both teams; what differs is WHERE EACH TEAM'S OWN FIGURE FALLS in it,
+    which is the only thing Marc asked the bright bar to show. One shared band could carry only
+    one of the two marks, and the panel exists to compare two sides.
+
+    ⚠️ THE WHISKERS DRAW `whisker_low`/`whisker_high`, NOT `min_value`/`max_value`, AND BOTH ARE
+    PUBLISHED. v07 said *"measure the min/max"* and v06 said *"label upper/lower boundaries"* —
+    they are different columns and they are different numbers. **The fences are drawn, because
+    the extremes compress the box to nothing: on 2026 week 1 rushing yards the box is 35% of the
+    whisker span and 22% of the min-max span, and the outliers are counted separately in
+    `outlier_count` precisely so the box stays readable.** `box()` reads the fences and is A's;
+    this call site could not choose otherwise without editing it.
+    """
+    if row is None:
+        return ""
+    return (f"<div style='display:flex;gap:{_METRIC_CELL_GAP}rem;margin-top:.1rem'>"
+            + "".join(
+                f"<div style='flex:1;min-width:0'>"
+                f"{distribution.box(row, value=v, width=int(width), dp=dp)}</div>"
+                for v in (away_value, home_value))
+            + "</div>")
+
+
+def _comparison(away, home, rows, glossary=None, spread=None,
+                value_width=None, dp_band=None) -> str:
     """One row per statistic, one column per side. Away left, home right — the same
     convention the scoreline uses and the reason that layout reads as a matchup."""
+    value_width = _METRIC_VALUE_WIDTH if value_width is None else value_width
     lines = []
     for label, field, dp in rows:
         hint = (glossary or {}).get(field)
@@ -3171,28 +3338,57 @@ def _comparison(away, home, rows, glossary=None) -> str:
                   f"{label}</span>" if hint else
                   f"{label}<span style='opacity:.5' title='Not yet defined in the data "
                   f"dictionary'> (undefined)</span>" if glossary is not None else label)
-        lines.append(_metric_cell(_figure(away, field, dp), marked,
-                                  _figure(home, field, dp)))
+        # ⚠️ THE RAW COLUMN FEEDS THE BAND, NOT `_figure`'s STRING. `_figure` returns serving's
+        # display string where there is one — `47.1%` for six of the Advanced rates — and the
+        # distribution is published in the metric's own unit. A band drawn from the display
+        # string would be drawing from text.
+        lines.append(_metric_cell(
+            _figure(away, field, dp), marked, _figure(home, field, dp),
+            value_width=value_width,
+            band=_metric_band((spread or {}).get(field), away.get(field), home.get(field),
+                              _box_width(value_width),
+                              dp if dp_band is None else dp_band)))
     return "".join(lines)
 
 
-def _metric_cell(away_value: str, label: str, home_value: str) -> str:
+def _metric_cell(away_value: str, label: str, home_value: str,
+                 value_width=None, band: str = "") -> str:
     """One measure, as a cell: fixed width, centred in its column, clipping its own overflow.
 
-    R-807, and the whole point is that nothing here is proportional — see `_METRIC_CELL` for
-    the arithmetic and for why a `flex` ratio cannot answer this.
+    R-807, and the whole point is that nothing here is proportional — see `_metric_cell_style`
+    for the arithmetic and for why a `flex` ratio cannot answer this.
+
+    ⚠️ THE BAND GOES INSIDE THE CELL, NOT BESIDE IT (R-808), so it inherits the cell's own
+    `overflow:hidden` and cannot draw over the column beside it — R-755, which this panel has
+    now paid for twice.
     """
-    return (f"<div data-cfdb='metric-cell' style='{_METRIC_CELL}'>"
-            f"<span style='{_METRIC_VALUE_CELL}'>{away_value}</span>"
-            f"<span style='{_METRIC_LABEL_CELL}'>{label}</span>"
-            f"<span style='{_METRIC_VALUE_CELL}'>{home_value}</span></div>")
+    value_width = _METRIC_VALUE_WIDTH if value_width is None else value_width
+    value_style = _metric_value_style(value_width)
+    row = (f"<div style='display:flex;align-items:baseline;"
+           f"gap:{_METRIC_CELL_GAP}rem'>"
+           f"<span style='{value_style}'>{away_value}</span>"
+           f"<span style='{_METRIC_LABEL_CELL}'>{label}</span>"
+           f"<span style='{value_style}'>{home_value}</span></div>")
+    # ⚠️ `align-items` GOES TO `stretch` WHEN THERE IS A BAND: the cell is a column then, and a
+    # baseline alignment on a column would push the band's box off the text baseline.
+    outer = _metric_cell_style(value_width).replace(
+        "display:flex;align-items:baseline", "display:block")
+    return f"<div data-cfdb='metric-cell' style='{outer}'>{row}{band}</div>"
 
 
-def _custom_row(away, home, label, renderer) -> str:
-    return _metric_cell(renderer(away), label, renderer(home))
+def _custom_row(away, home, label, renderer, value_width=None) -> str:
+    """A measure the view publishes no distribution for — a fraction, a composite, a clock.
+
+    🚨 NO BAND, AND THAT IS AC-G.11 RATHER THAN AN OVERSIGHT. `box()`'s own placeholder says
+    *"cfdb holds no distribution for this week yet"*, which is TRUE of a measure that could have
+    one and FALSE of these five: third down is `6/14`, turnovers is `1 (1 INT · 0 FUM)` and
+    possession is `30:51`. **They are not scalars, so there is nothing to take a percentile of —
+    ever — and a placeholder promising one later would be the wrong absence.**
+    """
+    return _metric_cell(renderer(away), label, renderer(home), value_width=value_width)
 
 
-def _side_heading(away, home) -> str:
+def _side_heading(away, home, value_width=None) -> str:
     """The two team names, over the cell they head rather than over the whole column.
 
     ⚠️ THE HEADING TAKES THE CELL'S GEOMETRY OR IT STOPS BEING A HEADING. R-807 pulls the
@@ -3208,7 +3404,8 @@ def _side_heading(away, home) -> str:
                      f"<span style='font-weight:600;overflow:hidden;text-overflow:ellipsis;"
                      f"white-space:nowrap'>{side.get('team_display') or '?'}</span>"
                      f"</div>")
-    return (f"<div style='{_METRIC_CELL};align-items:center;margin-bottom:.3rem'>"
+    style = _metric_cell_style(_METRIC_VALUE_WIDTH if value_width is None else value_width)
+    return (f"<div style='{style};align-items:center;margin-bottom:.3rem'>"
             + parts[0] + parts[1] + "</div>")
 
 
@@ -3410,11 +3607,22 @@ def _post_game(game_id, season) -> None:
         # R-738. ONE read, four card columns — both panels are flanked by the same cast.
         leaders = _post_game_leaders(game_id)
 
+        # 🚨 R-808. ONE READ FOR EIGHTEEN BANDS, BEFORE EITHER PANEL DRAWS.
+        # ⚠️ THE WEEK COMES OFF THE ROW THIS PANEL ALREADY HAS, which is why `_POSTGAME_COLUMNS`
+        # gained `season`, `season_type` and `week` rather than this taking a second query: the
+        # distribution is keyed by the week, and the game knows its own.
+        spread = _metric_distribution(away.get("season"), away.get("season_type"),
+                                      away.get("week"))
         left, middle, right = st.columns(_POST_GAME_SPLIT)
         _post_game_flank(left, right, leaders, away, home)
         middle.markdown(
             _side_heading(away, home)
-            + _comparison(away, home, _BOX_SCORE_ROWS)
+            # 🚨 `dp=0` FOR BOX SCORE, AND IT IS THE PANEL'S OWN NATURE RATHER THAN A PREFERENCE:
+            # all six measures are integer counts — first downs, yards, attempts. At `box()`'s
+            # default of 1 every label reads `22.0`, `5.0`, `38.0`, which is precision the
+            # measure does not have. Measured: `dp` changes no label COUNT at this width, so
+            # this costs nothing — see `_metric_band` and R-829.
+            + _comparison(away, home, _BOX_SCORE_ROWS, spread=spread, dp_band=0)
             + _custom_row(away, home, "Third down",
                           lambda r: _fraction(r, "third_down_conversions",
                                               "third_down_attempts"))
@@ -3460,7 +3668,21 @@ def _post_game(game_id, season) -> None:
         adv_left, adv_middle, adv_right = st.columns(_POST_GAME_SPLIT)
         _post_game_flank(adv_left, adv_right, leaders, away, home)
         adv_middle.markdown(
-            _side_heading(away, home) + _comparison(away, home, rows, glossary),
+            # 🚨 `dp=2` FOR ADVANCED, AND `_METRIC_VALUE_NARROW` WITH IT (R-810, R-829).
+            # ⚠️ ELEVEN OF THESE TWELVE ARE RATES BETWEEN 0 AND 1. At `box()`'s default of 1 the
+            # quartiles COLLAPSE — a real week-1 passing-downs row goes p25 0.240 → `0.2` and
+            # p75 0.433 → `0.4`, so a box spanning a fifth of the scale is labelled as if it
+            # spanned two tenths, and this team's 0.348 prints `0.3`, the same as the median it
+            # is not.
+            # ⚠️ AND THE COST OF THE ONE-SENTENCE RULE IS NAMED: `Offensive plays` is a count and
+            # reads `71.00`. The alternative — each row's own `dp`, which this file already
+            # carries for the VALUE — was not taken because six of these rates print a serving
+            # display string (`47.1%`) whose `dp` has nothing to do with the share the
+            # distribution is published in. **Per panel is a rule; per row would be a rule with
+            # six exceptions.**
+            _side_heading(away, home, value_width=_METRIC_VALUE_NARROW)
+            + _comparison(away, home, rows, glossary, spread=spread,
+                          value_width=_METRIC_VALUE_NARROW, dp_band=2),
             unsafe_allow_html=True)
 
         missing = [label for label, field, _dp in rows if field not in glossary]

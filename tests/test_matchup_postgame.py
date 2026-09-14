@@ -62,7 +62,7 @@ def panel():
         matchup = importlib.reload(importlib.import_module("views.matchup"))
         seen = []
 
-        def run(sides, glossary=GLOSSARY, season=2026, leaders=None):
+        def run(sides, glossary=GLOSSARY, season=2026, leaders=None, spread=_SPREAD):
             # R-730. The season decides WHICH absence the Empty state states, so the
             # fixture has to carry one. 2026 is a completed modern game — the case
             # nearly every test here means; the scope tests pass a pre-2024 season.
@@ -89,6 +89,11 @@ def panel():
                 if "srv_game_team_leader_through_prior_week" in sql:
                     return pd.DataFrame(_post_game_leaders(
                         player_name="Preview Player", stat_2_value=999.0))
+                # 🚨 R-808. ALSO BEFORE `srv_game_team`, and for the same reason the two leader
+                # views are: "srv_game_team_metric_distribution" CONTAINS "srv_game_team", so a
+                # later branch would hand the bands the BOX SCORE frame.
+                if "srv_game_team_metric_distribution" in sql:
+                    return pd.DataFrame(spread if spread is not None else [])
                 return glossary if "srv_data_dictionary" in sql else pd.DataFrame(sides)
 
             matchup.query = fake_query
@@ -146,6 +151,45 @@ def _post_game_leaders(**overrides):
     return rows
 
 
+# 🚨 R-808. THE WEEK'S SPREAD, PER MEASURE — real 2026 week-1 shapes off
+# `srv_game_team_metric_distribution`, so the bands are drawn over numbers the view actually
+# publishes rather than over invented ones.
+#
+# ⚠️ `min_value` AND `whisker_low` DISAGREE ON PURPOSE, AND THAT IS WHAT MAKES THE STAGED BREAK
+# DECIDABLE. `first_downs` really does run 4 → 38 with fences at 5 → 38, and `rushing_yards` 2 →
+# 569 with fences at 2 → 365. A band drawn from the extremes and labelled as the fences is a
+# picture describing a wider spread than its own labels claim — and only a fixture whose two
+# pairs differ can tell them apart.
+_SPREAD = [
+    {"metric": "first_downs", "n": 150, "team_games_in_week": 150,
+     "min_value": 4.0, "whisker_low": 5.0, "p25": 18.0, "p50": 21.0, "p75": 27.0,
+     "whisker_high": 38.0, "max_value": 38.0},
+    {"metric": "total_yards", "n": 150, "team_games_in_week": 150,
+     "min_value": 67.0, "whisker_low": 67.0, "p25": 322.0, "p50": 402.0, "p75": 519.0,
+     "whisker_high": 762.0, "max_value": 762.0},
+    {"metric": "rushing_yards", "n": 150, "team_games_in_week": 150,
+     "min_value": 2.0, "whisker_low": 2.0, "p25": 109.5, "p50": 163.5, "p75": 237.0,
+     "whisker_high": 365.0, "max_value": 569.0},
+    {"metric": "passing_yards", "n": 150, "team_games_in_week": 150,
+     "min_value": 19.0, "whisker_low": 19.0, "p25": 164.25, "p50": 233.0, "p75": 308.5,
+     "whisker_high": 480.0, "max_value": 480.0},
+    {"metric": "rushing_attempts", "n": 150, "team_games_in_week": 150,
+     "min_value": 17.0, "whisker_low": 17.0, "p25": 31.0, "p50": 38.0, "p75": 42.0,
+     "whisker_high": 58.0, "max_value": 73.0},
+    {"metric": "penalty_yards", "n": 150, "team_games_in_week": 150,
+     "min_value": 4.0, "whisker_low": 4.0, "p25": 35.0, "p50": 52.0, "p75": 70.0,
+     "whisker_high": 119.0, "max_value": 134.0},
+    {"metric": "offense_ppa", "n": 150, "team_games_in_week": 150,
+     "min_value": -0.336, "whisker_low": -0.336, "p25": 0.075, "p50": 0.234, "p75": 0.402,
+     "whisker_high": 0.743, "max_value": 0.743},
+    {"metric": "offense_passing_downs_success_rate", "n": 150, "team_games_in_week": 150,
+     "min_value": 0.0, "whisker_low": 0.0, "p25": 0.240, "p50": 0.333, "p75": 0.433,
+     "whisker_high": 0.714, "max_value": 0.733},
+    {"metric": "offense_plays", "n": 150, "team_games_in_week": 150,
+     "min_value": 41.0, "whisker_low": 41.0, "p25": 61.0, "p50": 69.0, "p75": 76.0,
+     "whisker_high": 95.0, "max_value": 101.0},
+]
+
 _ADVANCED_VALUES = {
     "offense_plays": 71, "offense_drives": 12, "offense_ppa": 0.123,
     "offense_success_rate": 0.451, "offense_explosiveness": 1.234,
@@ -165,6 +209,10 @@ def _side(team, is_home, **overrides):
     """
     row = {"game_id": 401752754, "team_id": 2 if is_home else 96,
            "team_display": team, "team_logo_url": None, "is_home": is_home,
+           # 🚨 R-808. THE WEEK IS WHAT KEYS THE DISTRIBUTION, and without it `_metric_band`
+           # draws nothing at all — silently, because an absent spread is a legitimate state.
+           # **A fixture missing these three would make every band assertion vacuous.**
+           "season": 2025, "season_type": "regular", "week": 10,
            "has_box_score": True, "has_box_advanced": True,
            "has_team_advanced": True, "has_havoc": True,
            "first_downs": 17 if is_home else 16,
@@ -304,7 +352,14 @@ def test_the_panel_issues_exactly_THREE_reads_and_each_serves_both_sides(panel):
     assert seen.count("srv_game_team_leader_in_this_game") == 1, (
         f"the cards were read {seen.count('srv_game_team_leader_in_this_game')} times — both "
         f"panels are flanked by the same leaders and one read serves all four columns: {seen}")
+    # 🚨 R-808 ADDED THE FOURTH, AND IT IS ONE READ FOR EIGHTEEN BANDS. The distribution is
+    # keyed by the WEEK, not by the measure, so one row set serves every band in both panels —
+    # eighteen reads for one answer is the shape this assertion exists to prevent.
+    assert seen.count("srv_game_team_metric_distribution") == 1, (
+        f"the spread was read {seen.count('srv_game_team_metric_distribution')} times — one "
+        f"week-keyed read serves all eighteen bands across both panels: {seen}")
     assert seen == ["srv_game_team", "srv_game_team_leader_in_this_game",
+                    "srv_game_team_metric_distribution",
                     "srv_data_dictionary"], f"the panel issued {seen}"
 
 
@@ -350,11 +405,10 @@ def _row_markup(entries, label):
     # ⚠️ NON-GREEDY TO THE FIRST `</div>`, WHICH IS SOUND HERE AND SAYS WHY: a metric cell's
     # children are all `<span>`, so the first close tag is the cell's own. The heading shares
     # the cell's GEOMETRY but carries no `data-cfdb`, so it is not a row and never matches.
-    for _kind, body in entries:
-        for cell in re.findall(r"<div data-cfdb='metric-cell'.*?</div>", str(body)):
-            if f">{label}<" in cell:
-                return re.sub(r"\s+", " ",
-                              html.unescape(re.sub(r"<[^>]+>", " ", cell))).strip()
+    for cell in _cells(entries):
+        if f">{label}<" in cell:
+            return re.sub(r"\s+", " ",
+                          html.unescape(re.sub(r"<[^>]+>", " ", cell))).strip()
     return ""
 
 
@@ -847,9 +901,19 @@ def _module_constant(name):
 
 
 def _cells(entries):
-    """Every metric cell rendered, as markup, by its own attribute."""
-    return [c for _k, b in entries
-            for c in re.findall(r"<div data-cfdb='metric-cell'.*?</div>", str(b))]
+    """Every metric cell rendered, as markup, by its own attribute.
+
+    🚨 SPLIT ON THE MARKER, NOT ON `</div>`, SINCE R-808. The cell used to be a flat row and a
+    non-greedy match to the first close tag captured all of it. It now NESTS — a row div, and
+    under it a band div holding two svgs — so that match stops at the row's close and silently
+    drops the band. **A helper that returns most of the thing it names is how an assertion
+    passes over the half that changed.**
+    """
+    out = []
+    for _kind, body in entries:
+        pieces = str(body).split("<div data-cfdb='metric-cell'")
+        out.extend("<div data-cfdb='metric-cell'" + piece for piece in pieces[1:])
+    return out
 
 
 def _resolved(style: str) -> dict:
@@ -906,9 +970,20 @@ def test_the_metric_cell_FITS_the_middle_column_at_1300px_with_the_sidebar_open(
     assert label * 16 >= 188, (
         f"the label column is {label * 16:.0f}px and the longest label in _ADVANCED_ROWS "
         f"measures 188px — 'Havoc rate forced by this defense' would be truncated")
-    assert value * 16 >= 118, (
-        f"the value column is {value * 16:.0f}px and a two-digit turnover line, "
-        f"'12 (4 INT · 8 FUM)', measures 118px")
+    # 🚨 THE BAR IS THE MEASURED WORST CASE, NOT THE IMAGINED ONE. B106 wrote 118px here for
+    # `12 (4 INT · 8 FUM)`. **Measured across all 7,348 rows with a box score: the maxima are 8
+    # turnovers, 7 interceptions and 5 fumbles lost, and NOT ONE row reaches double digits in
+    # any part.** So the widest string serving can actually produce is `8 (7 INT · 5 FUM)` at
+    # 110px — single digits throughout, the same width as the `1 (1 INT · 0 FUM)` on the page.
+    assert value * 16 >= 110, (
+        f"the value column is {value * 16:.0f}px and the widest turnover line serving has ever "
+        f"produced, '8 (7 INT · 5 FUM)', measures 110px")
+    # ⚠️ AND A CEILING, because R-810's whole point is that this slot is what pushes the two
+    # figures apart: the home value is right-aligned against the cell's OUTER edge, so every
+    # pixel of unused slot is a pixel of gap Marc asked to close.
+    assert value * 16 <= 130, (
+        f"the value column is {value * 16:.0f}px against a 110px worst case — the slack is gap "
+        f"between the two figures, which is what R-810 exists to remove")
 
 
 def test_BOTH_figures_are_RIGHT_aligned_and_not_only_the_away_one(panel):
@@ -949,20 +1024,38 @@ def test_the_cell_CLIPS_rather_than_drawing_over_the_column_beside_it(panel):
         assert style.get("box-sizing") == "border-box", (
             "without border-box the .4rem padding is ADDED to the width and the 32px of "
             "headroom against the 493px column becomes 19px")
-        # 🚨 EVERY PART OF THE CELL IS FIXED, AND THIS IS ASSERTED ON THE CHILDREN TOO — the
-        # staged break put `flex:1` back on the LABEL, not on the cell, and an assertion that
-        # only read the cell's own style came back green (R-744). R-807 exists because a
+        # 🚨 EVERY PART OF THE MEASURE ROW IS FIXED, AND THIS IS ASSERTED ON THE CHILDREN TOO —
+        # the staged break put `flex:1` back on the LABEL, not on the cell, and an assertion
+        # that only read the cell's own style came back green (R-744). R-807 exists because a
         # proportional row put the two figures 301px apart at 1300px and 541px apart at 1700px.
-        assert "flex:1" not in cell, (
-            f"something inside the cell is proportional again: {cell[:200]}")
+        # ⚠️ SCOPED TO THE MEASURE ROW SINCE R-808. The BAND beneath it splits the cell into two
+        # equal halves with `flex:1`, which is correct — each side's band takes half the cell —
+        # so a cell-wide sweep would now fire on the one proportional thing that belongs.
+        # The measure row runs from the cell's opening tag to the FIRST close — its children
+        # are three spans, so no nested div can end it early.
+        row_only = cell.split("</div>", 1)[0]
+        assert "flex:1" not in row_only, (
+            f"something inside the measure row is proportional again: {row_only[:200]}")
         away, label, home = _spans(cell)
-        for part, wanted, what in ((away, value, "away figure"),
+        # ⚠️ THE VALUE SLOT IS PER PANEL SINCE R-810 — Box Score holds a 110px turnovers line and
+        # Advanced's widest value is `47.1%` at 43px — so the assertion is that BOTH sides of a
+        # cell agree with each other and with one of the two panel widths, not that every cell
+        # on the page is the same shape.
+        narrow = _module_constant("_METRIC_VALUE_NARROW")
+        assert away.get("width") == home.get("width"), (
+            f"the two figures in one cell have different widths — {away.get('width')} against "
+            f"{home.get('width')} — so the centre line is not where either of them thinks")
+        assert away.get("width") in (f"{value}rem", f"{narrow}rem"), (
+            f"the figures are {away.get('width')}, which is neither panel's measured width "
+            f"({value}rem for Box Score, {narrow}rem for Advanced)")
+        for part, wanted, what in ((away, None, "away figure"),
                                    (label, label_w, "label"),
-                                   (home, value, "home figure")):
+                                   (home, None, "home figure")):
             assert part.get("flex") == "none", f"the {what} can grow or shrink"
-            assert part.get("width") == f"{wanted}rem", (
-                f"the {what} is {part.get('width')} rather than the {wanted}rem the cell's "
-                f"arithmetic budgets for it")
+            if wanted is not None:
+                assert part.get("width") == f"{wanted}rem", (
+                    f"the {what} is {part.get('width')} rather than the {wanted}rem the cell's "
+                    f"arithmetic budgets for it")
 
 
 def test_the_SIDE_HEADING_takes_the_cells_width_and_not_the_columns(panel):
@@ -980,3 +1073,142 @@ def test_the_SIDE_HEADING_takes_the_cells_width_and_not_the_columns(panel):
     assert f"width:{width}rem" in heading, (
         f"the side heading does not carry the cell's own {width}rem width")
     assert "margin:0 auto" in heading, "the side heading is not centred with its cell"
+
+
+# --- R-808: the band under each measure ----------------------------------------------------
+
+def _bands(cell):
+    """The distribution svgs inside one metric cell — one per side."""
+    return re.findall(r"<svg[^>]*viewBox='0 0 (\d+) (\d+)'", cell)
+
+
+def _band_labels(cell):
+    """Every label drawn inside this cell's bands, in document order."""
+    return re.findall(r"<text[^>]*>([^<]*)</text>", cell)
+
+
+def test_EVERY_MEASURE_WITH_A_DISTRIBUTION_gets_a_band_and_the_others_do_not(panel):
+    """🚨 R-808. Marc, v07: *"use it to show the spread/dispersion of EACH metric in the Box
+    Score and Advanced"* — and R-816, in two words, *"R-816, both"*, with the height cost in
+    front of him.
+
+    ⚠️ SO THE ASSERTION IS COVERAGE, NOT PRESENCE: every row the view publishes a distribution
+    for carries a band, and the five that are NOT scalars — third down `6/14`, turnovers
+    `1 (1 INT · 0 FUM)`, possession `30:51` — carry none.
+
+    🚨 AND THAT SECOND HALF IS AC-G.11 RATHER THAN AN OVERSIGHT. `box()`'s placeholder says
+    *"cfdb holds no distribution for this week yet"*, which is true of a measure that could have
+    one and FALSE of a fraction. **A band promising a percentile for `6/14` names the wrong
+    absence.**
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    banded, bare = [], []
+    for cell in _cells(entries):
+        label = re.search(r"font-size:.85rem'>(?:<span[^>]*>)?([^<]+)", cell)
+        name = label.group(1).strip() if label else "?"
+        (banded if _bands(cell) else bare).append(name)
+    for measure in ("First downs", "Total yards", "Rushing yards", "Passing yards",
+                    "Rushing attempts", "Penalty yards"):
+        assert measure in banded, f"{measure!r} has a distribution and drew no band: {banded}"
+    for composite in ("Third down", "Fourth down", "Turnovers", "Possession", "Penalties"):
+        assert composite not in banded, (
+            f"{composite!r} is not a scalar — there is nothing to take a percentile of — and it "
+            f"drew a band anyway")
+
+
+def test_the_band_is_given_the_CELLS_width_and_never_box_s_240px_default(panel):
+    """🚨 `box(row, value=None, width: int = 240, …)`. THE DEFAULT IS NOT THIS PANEL'S WIDTH and
+    a call site that took it would draw a band that stopped short of its own cell — 54% of Box
+    Score's inner width and 77% of Advanced's.
+
+    ⚠️ ASSERTED ON THE RENDERED viewBox, which is what the browser receives, rather than on the
+    argument this file passes — the same reason `_shipped()` reads Streamlit's spec rather than
+    altair's.
+    """
+    run, _ = panel
+    widths = {int(w) for cell in _cells(run(_both())[0]) for w, _h in _bands(cell)}
+    assert widths, "no band was drawn at all"
+    assert 240 not in widths, (
+        f"a band is 240px — that is `box()`'s own default, so the width was not passed: "
+        f"{sorted(widths)}")
+    # 🚨 HALF THE CELL EACH, NOT THE WHOLE CELL. Two bands sit on a measure row — one per side,
+    # because the spread is shared and the bright bar marks THIS team's figure — so each gets
+    # half the inner width less the gap between them. ⚠️ THE FIRST VERSION OF THE PAGE PASSED
+    # THE FULL WIDTH AND THE RASTER CAUGHT IT: `box()`'s own `max-width:100%` scaled a 432px
+    # viewBox into a 216px box and squashed every label 2:1 — the string `18` measured FOUR
+    # pixels. The DOM was correct and the text was unreadable.
+    expected = {_module_constant("_METRIC_VALUE_WIDTH"), _module_constant("_METRIC_VALUE_NARROW")}
+    gap, lab = (_module_constant("_METRIC_CELL_GAP"),
+                _module_constant("_METRIC_LABEL_WIDTH"))
+    wanted = {int(((2 * v + lab + 2 * gap) * 16 - gap * 16) / 2) for v in expected}
+    assert widths <= wanted, (
+        f"the bands are {sorted(widths)}px; half of each panel's inner cell, less the gap "
+        f"between the two sides, is {sorted(wanted)}px")
+    # 🚨 AND A MEASURED FLOOR. B108 swept `box()` over the real tightest distribution: 5 labels
+    # survive at 200px, 4 at 160, 3 at 120, 2 at 60. Advanced's 148px costs ONE quartile label
+    # on its tightest rows and Box Score's 216px costs nothing — the trade is in the report.
+    # Below ~120px half the labels are gone and the band stops being a distribution.
+    assert min(widths) >= 120, (
+        f"a band is {min(widths)}px wide. Below ~120px `box()`'s placement pass has dropped "
+        f"half the labels and the picture stops carrying the numbers it exists to carry")
+
+
+def test_the_BOX_SCORE_band_labels_carry_no_false_decimals(panel):
+    """R-829. Every Box Score measure is an integer count — first downs, yards, attempts — and
+    `box()`'s default `dp=1` labels them `22.0`, `5.0`, `38.0`: precision the measure does not
+    have. ⚠️ Measured: `dp` changes no label COUNT at these widths, so this costs nothing."""
+    run, _ = panel
+    for cell in _cells(run(_both())[0]):
+        if ">First downs<" not in cell:
+            continue
+        labels = _band_labels(cell)
+        assert labels, "the first-downs band drew no labels"
+        assert not any("." in text for text in labels), (
+            f"a count's band is labelled with decimals it does not have: {labels}")
+        return
+    raise AssertionError("the first-downs row never rendered")
+
+
+def test_the_band_draws_the_WHISKERS_and_not_the_MIN_MAX_it_could_have(panel):
+    """🚨 BOTH PAIRS ARE PUBLISHED AND THEY ARE DIFFERENT NUMBERS, WHICH IS THE WHOLE EXPOSURE.
+    `srv_game_team_metric_distribution` carries `whisker_low`/`whisker_high` AND
+    `min_value`/`max_value`. Marc's v07 said *"measure the min/max"*; his v06 said *"label
+    upper/lower boundaries"*. A band drawn from the extremes and labelled as the fences is a
+    picture describing a wider spread than its own labels claim — **every number real, the box
+    still drawn, and nothing crashing.**
+
+    ✅ SO THE ASSERTION IS THE DRAWN EXTENT AGAINST THE COLUMN THE LABEL NAMES. On 2026 week 1
+    rushing yards the fences run 2 → **365** and the extremes 2 → **569**; on first downs the
+    fences are **5** → 38 and the extremes **4** → 38. Either swap changes a printed label.
+
+    ⚠️ AND IT INVOKES THE PAGE RATHER THAN REPRODUCING IT (R-768): `run()` calls the real
+    `_post_game`, and these are the labels `box()` actually emitted.
+
+    ⚠️ WHY THE FENCES ARE THE RIGHT ANSWER, measured rather than asserted: on that rushing-yards
+    row the box spans 35% of the fence range and 22% of the min-max range. Drawing the extremes
+    compresses the box toward a line, which is what `outlier_count` is published separately to
+    avoid.
+    """
+    run, _ = panel
+    for cell in _cells(run(_both())[0]):
+        if ">Rushing yards<" not in cell:
+            continue
+        labels = _band_labels(cell)
+        assert "365" in labels, (
+            f"the band's upper end is not `whisker_high` (365) — if it reads 569 it is drawing "
+            f"`max_value` while the plot claims to be a box-and-whisker: {labels}")
+        assert "569" not in labels, (
+            f"the band is drawn to `max_value` (569), which is 56% wider than the fence it is "
+            f"labelled as, and it squeezes the box from 35% of the frame to 22%: {labels}")
+        break
+    else:
+        raise AssertionError("the rushing-yards row never rendered")
+    for cell in _cells(run(_both())[0]):
+        if ">First downs<" not in cell:
+            continue
+        labels = _band_labels(cell)
+        assert "5" in labels and "4" not in labels, (
+            f"the band's lower end is not `whisker_low` (5) — `min_value` is 4: {labels}")
+        return
+    raise AssertionError("the first-downs row never rendered")

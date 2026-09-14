@@ -781,7 +781,14 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
     # from 240 to 180 and the annotation's FIXED 104px block silently became 58% of the plot —
     # `test_the_annotation_is_anchored_to_the_TOP_RIGHT` caught it. A derived constant cannot be
     # left behind by the next round that moves the square.
-    allowed = {"_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10"}
+    # 🚨 R-808's ENTRY, AND IT IS THE SAME KIND AS R-804's: a SCREEN-PIXEL SPLIT. There are two
+    # bands on a measure row — one per side — so each gets half the cell's inner width less the
+    # gap between them. The warehouse cannot do this: `_METRIC_CELL_GAP` and `_REM` are layout
+    # constants in this file, serving has never heard of either, there is no column it could
+    # disagree with and no export reads it. ⚠️ The quantity has exactly ONE consumer by
+    # construction, which is the test §4.2.1 actually sets.
+    allowed = {"_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10",
+               "return (inner - _METRIC_CELL_GAP * _REM) / 2"}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "
