@@ -7,10 +7,19 @@ dim_athlete" is a portfolio asset.
 """
 import streamlit as st
 
-from lib import theme
+from lib import tab, theme
 from lib.registry import GROUPS, PAGES
 
-st.set_page_config(page_title="cfdb — college football data", page_icon="🏈",
+# THE STATIC FALLBACK, AND IT IS THE DEGRADED PATH RATHER THAN A LEFTOVER.
+#
+# This runs at import, BEFORE st.navigation has routed, so it cannot know the page. The real
+# per-page title is set a few lines below once routing has resolved. If that ever fails —
+# a future Streamlit refusing a second set_page_config — the tab keeps THIS string and the
+# page draws normally. `lib/tab.py` records why that is the correct failure direction.
+#
+# `page_icon` is set HERE ONLY. tab.set_title deliberately does not pass it, and the favicon
+# survives untouched; measured byte-identical across the second call.
+st.set_page_config(page_title=tab.BRAND, page_icon="🏈",
                    layout="wide", initial_sidebar_state="expanded")
 theme.inject()
 
@@ -61,4 +70,13 @@ theme.hide_nav_entries([p.url_path_for_nav for p in PAGES if not p.in_nav])
 # that threshold, so eight of eighteen pages — every Betting page, every Reference page —
 # vanished behind a disclosure the moment the legend shipped. Navigation is the sidebar's
 # primary job and a page-specific legend must never cost it.
-st.navigation(nav, expanded=True).run()
+page = st.navigation(nav, expanded=True)
+
+# `M4D · <Page Name>` — Marc, 2026-09-14. st.Page's `title` names the sidebar entry and does
+# NOT reach the browser tab; measured on five pages, all of which read the entrypoint's
+# string. st.navigation hands back the page it routed to, so the name is already in hand.
+#
+# A page with more to say refines this DURING its own run and the later call wins — see
+# views/today.py, and Matchup's team abbreviations.
+tab.set_title(page.title)
+page.run()

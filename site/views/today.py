@@ -20,7 +20,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import filters, fmt, params, shell, states, table
+from lib import filters, fmt, params, shell, states, tab, table
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -1290,6 +1290,14 @@ def _looking_forward(scope, depth: int) -> None:
 
 def body(page) -> None:
     scope = filters.game_scope()
+
+    # THE TAB SAYS WHICH WEEK YOU ARE LOOKING AT. `lib/tab.py`, and this is also the call
+    # that EXERCISES its suffix parameter in production rather than only in a test — both
+    # branches of it, because `scope.week` is None whenever the week filter reads "All" and
+    # the suffix is then dropped instead of rendering `M4D · Today · Week None`.
+    #
+    # The later call wins: app.py has already set `M4D · Today` before this page ran.
+    tab.set_title_for("today", suffix=f"Week {scope.week}" if scope.week else None)
 
     # ⚠️ R-574. THE PAGE-LEVEL `table.dataset_caption("Looking Back", "srv_game")` THAT USED
     # TO SIT HERE IS GONE, and it was wrong twice over: "Looking Back" is a TAB, not a
