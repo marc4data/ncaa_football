@@ -268,26 +268,20 @@ HEAVY_SERVING = [
     "srv_player_stats",
     "srv_player_game_log",
     "srv_player_play",
-    # A080/R-534. Game-grain player leaders. HEAVY rather than HOT, and the reason is the
-    # FETCH rather than the size.
+    # 🚨 `srv_game_team_leader` WAS PUBLISHED HERE AND CONTRACTED IN A132 (R-841/R-867). It was
+    # 308,232 rows and 87 MB, republished every week, and after B110 removed Matchup's
+    # `Game leaders` section it was read by NOTHING. §3.3's EXPAND → MIGRATE → CONTRACT: B
+    # migrated the page, A dropped the object a round later.
     #
-    # ⚠️ Size would have argued the other way: 84 MB over 296,629 rows, SMALLER than
-    # srv_game_team (112 MB) which is already in the hot set, and a third of the smallest
-    # heavy table. A078 put srv_drive in HOT at 40 MB on exactly that comparison.
+    # ⚠️ THE MART IS UNTOUCHED. `fct_player_game_stat` still carries every row; what went is the
+    # serving copy and its weekly publish. Restoring it is one model file and one list entry.
     #
-    # But leaders are computed from player box scores, and /games/players is in the
-    # IMMUTABLE_WK bucket — fetched only by cfbd_results_refresh (Sunday) and
-    # cfbd_midweek_results (Thursday). The scores DAG fetches /games and nothing else. So a
-    # two-hourly rebuild would rebuild this from raw that has not moved, twelve times a game
-    # day, to produce identical rows. Hot publishing cannot make a table fresher than its
-    # source endpoint, and pretending otherwise is the failure A078 and A079 spent two rounds
-    # removing — a table that ARRIVES looking as fresh as the rows beside it.
+    # ⚠️ AND IT IS NOT THE VIEW THE POST-GAME CARDS READ. That is
+    # `srv_game_team_leader_in_this_game`, which differs by a suffix, is published below, and
+    # now draws every card including the defence.
     #
-    # Weekly is therefore honest for it, and it is the same cadence as srv_player_game_log,
-    # which it is derived from and which B's box score already reads.
-    "srv_game_team_leader",
     # A106/R-687. The POINT-IN-TIME leaders — the three players leading a team going INTO a
-    # game, as opposed to srv_game_team_leader above, which answers who led IN one.
+    # game, as opposed to `srv_game_team_leader_in_this_game`, which answers who led IN one.
     #
     # HEAVY for the same reason as its sibling, and the reason is the FETCH rather than the
     # size: it is computed from player box scores, and /games/players is in the IMMUTABLE_WK
@@ -296,9 +290,10 @@ HEAVY_SERVING = [
     # would rebuild this from raw that has not moved and produce identical rows. Hot
     # publishing cannot make a table fresher than its source endpoint.
     #
-    # Size would have argued the same way rather than against it this time: 74,282 rows, a
-    # quarter of srv_game_team_leader's 296,629, because the grain is capped at three players
-    # per team per panel per game instead of one row per category/type pair.
+    # Size would have argued the same way rather than against it this time: 74,282 rows —
+    # a quarter of the 296,629 the retired `srv_game_team_leader` carried — because the grain
+    # is capped at three players per team per panel per game instead of one row per
+    # category/type pair.
     "srv_game_team_leader_through_prior_week",
     # A107/R-694. Each leader's participation share in the games he had already played — the
     # series behind B092's circles.
