@@ -42,8 +42,18 @@
 -- all quarter-ends and all three would have passed the break. 120 * 60 = 7200 moves this one to
 -- -6300.
 --
--- ⚠️ AN ABSENT ANCHOR FIRES. If that play ever leaves the curve this test says so rather than
--- passing vacuously over zero rows — §6 mode 2 again, one level up.
+-- ⚠️ THE ANCHOR IS SCOPED TO ITS GAME, AND THAT CONDITION IS DELIBERATE — CI CAUGHT THE FIRST
+-- VERSION, WHICH WAS NOT. An unconditional `not exists` fired in CI and was RIGHT to: `ci/fixtures.sql`
+-- is a small synthetic raw-layer load that does not carry game 401856682 and is not going to.
+-- So the claim is conditional on the GAME being in the curve — if it is, the play must be there
+-- and must read 780; if the game is absent, as in any fixture, the branch says nothing.
+--
+-- 🚨 AND A CONDITIONAL ASSERTION THAT NOBODY NAMES IS §6 MODE 2, so this names it: in CI this
+-- branch is VACUOUS and only the recomputation above is doing any work. The anchor earns its
+-- keep in the WAREHOUSE, which is where this round's verification happened and where the curve
+-- actually lives. ⚠️ A missing game would go unnoticed HERE and loudly everywhere else — the
+-- curve is 1,898 games and `assert_the_win_probability_curve_is_ordered_by_play_number` compares
+-- every published play against its feed row.
 --
 -- ⚠️ REGULATION ONLY, and the boundary is the same one `fct_drive` draws and for the same
 -- reason: college overtime has no game clock, so elapsed is undefined there and null BY DESIGN.
@@ -73,13 +83,18 @@ with recomputed as (
 
 ),
 
-anchor as (
+-- THE ANCHOR'S GAME, in one pass: how much of it is in the curve at all, and what the anchor
+-- play reads if it is there. Scoping on the game is what makes the branch silent in a fixture
+-- and load-bearing in the warehouse.
+anchor_game as (
 
     select
-        c.play_id,
-        c.elapsed_from_kickoff_seconds as published
+        count(*)                                                            as rows_in_game,
+        count(*) filter (where c.play_id = '401856682175')                   as anchor_rows,
+        max(c.elapsed_from_kickoff_seconds)
+            filter (where c.play_id = '401856682175')                        as anchor_elapsed
     from {{ ref('fct_game_win_probability_play') }} c
-    where c.play_id = '401856682175'
+    where c.game_id = 401856682
 
 )
 
@@ -99,13 +114,15 @@ where published is distinct from from_components
 union all
 
 select
-    '401856682175', null::bigint, null::integer, null::integer, null::integer,
-    (select published from anchor),
+    '401856682175', 401856682::bigint, 1, 2, 0,
+    anchor_elapsed,
     780,
     case
-      when not exists (select 1 from anchor)
-        then 'the hand-checked anchor play is no longer in the curve, so this test proves nothing'
+      when anchor_rows = 0
+        then 'the anchor game is in the curve but the hand-checked play is not, '
+             || 'so this branch can no longer detect anything'
       else 'the hand-checked anchor is wrong: period 1 at 2:00 is 780 seconds from kickoff'
     end
-where not exists (select 1 from anchor)
-   or (select published from anchor) is distinct from 780
+from anchor_game
+where rows_in_game > 0
+  and (anchor_rows = 0 or anchor_elapsed is distinct from 780)
