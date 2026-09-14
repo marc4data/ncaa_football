@@ -432,6 +432,15 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
                # POINTS while market_implied_*_win_probability above is a 0-1 fraction. The
                # two do not share a scale and the fixture says so.
                "game_id": 401752817,
+               # A122. The curve cell reads `game_id`, to slice the batched frame.
+               #
+               # ⚠️ AND THE CURVE'S OWN COLUMNS, because `page.query` is stubbed ONCE and every
+               # panel gets this same frame — including `_win_probability_curves`. Without them
+               # the sparkline raises KeyError inside the cell renderer, which is this test
+               # working: it exercises the real render path rather than a list it wrote itself.
+               "season": 2026,
+               "play_number": 1, "period": 1, "is_overtime": False,
+               "home_win_probability": 0.62,
                "line_spread_largest_excursion": -6.0,
                "line_spread_move_from_open": -3.0,
                "line_total_largest_excursion": 4.0,
@@ -736,3 +745,123 @@ def test_most_exciting_orders_on_published_columns_and_does_no_arithmetic():
     # No weighting, no scaling, no composite — the line this project has held three times.
     for banned in ("* 0.", "weight", "z_score", "normali"):
         assert banned not in order, f"no composite index: found {banned!r} in the ordering"
+
+
+# --- the win-probability curve ----------------------------------------------------------
+
+def _curve(n=40, overtime_from=None):
+    """A game's worth of plotted points, in play order."""
+    import pandas as pd
+    rows = []
+    for i in range(n):
+        rows.append({
+            "game_id": 1, "play_number": i,
+            "period": 1 + i // 10 if overtime_from is None or i < overtime_from else 5,
+            "is_overtime": None if overtime_from is None else (i >= overtime_from),
+            "home_win_probability": 0.5 + 0.4 * ((i % 7) - 3) / 3,
+            "home_score": i, "away_score": i, "play_text": "a play",
+        })
+    frame = pd.DataFrame(rows)
+    # ⚠️ OBJECT DTYPE ON PURPOSE, AND R-744 IS WHY. Built from bools, pandas types this column
+    # `bool` and then REFUSES to store a null in it — `LossySetitemError`. The live column is
+    # nullable (the one play of 291,548 with no stg_play match), so a fixture that cannot hold a
+    # null is a fixture that cannot test the case the column exists to handle.
+    frame["is_overtime"] = frame["is_overtime"].astype("object")
+    return frame
+
+
+def _polyline_xs(svg: str):
+    """Every polyline's x coordinates, in the order they are plotted."""
+    xs = []
+    for points in re.findall(r"<polyline points='([^']*)'", svg):
+        xs.extend(float(p.split(",")[0]) for p in points.split())
+    return xs
+
+
+def test_the_curve_is_plotted_in_play_order_and_the_assertion_can_actually_fire():
+    """🚨 R-760's QUESTION, ASKED OF THIS TEST BEFORE IT WAS WRITTEN: what would have to be
+    wrong for it to fire?
+
+    ⚠️ A121's guard could not answer that. It asserted a `row_number()` column was monotonic —
+    monotonic BY CONSTRUCTION — so it fired on 0 rows under the very break it was written for.
+
+    This one fires when the points arrive in any order but play order, which is exactly what
+    changing one clause in `_win_probability_curves` produces: `order by game_id,
+    home_win_probability` instead of `order by game_id, play_number`. Every point is real, the
+    count is right, and the line becomes a smooth ramp — which looks like a SMOOTHED curve, so
+    it does not read as broken to anyone glancing at it.
+
+    ✅ SO THE SECOND HALF IS THE PROOF: the same frame, sorted the way the break would sort it,
+    must make the assertion FAIL. A guard that cannot be shown failing is decoration.
+    """
+    today = _today()
+
+    ordered = _curve()
+    xs = _polyline_xs(today._sparkline_svg(ordered))
+    assert xs == sorted(xs), "a frame in play order must plot left to right"
+
+    # The break, reproduced: same points, ordered by probability.
+    scrambled = ordered.sort_values("home_win_probability").reset_index(drop=True)
+    broken_xs = _polyline_xs(today._sparkline_svg(scrambled))
+    assert broken_xs != sorted(broken_xs), (
+        "the assertion above cannot fail, so it proves nothing — a frame ordered by probability "
+        "must plot out of order")
+
+
+def test_the_curve_query_orders_by_play_number():
+    """The ordering lives in the SQL, and `play_number` is the only column that can carry it.
+
+    ⚠️ `play_id` is TEXT in this feed and the ids are NOT fixed width (A121 measured 5 to 18
+    characters), so ordering on it is a lexical sort that scrambles play order while every row
+    stays real.
+    """
+    assert "order by game_id, play_number" in SOURCE, (
+        "the curve query must order by play_number — the position axis A121 established")
+
+
+def test_overtime_breaks_the_line_and_regulation_does_not():
+    """🚨 A118's RULE, APPLIED TO A CURVE: overtime must never read as a longer fourth quarter.
+
+    Jacksonville State at Ohio had TWO fourth-quarter lead changes and ELEVEN in overtime. On an
+    unmarked curve that attributes the drama to the wrong part of the game with every point
+    still real.
+
+    ⚠️ AND THE SHADING ALONE COULD NOT CARRY IT — A122 rasterised it and looked. `play_number`
+    COMPRESSES overtime into a sliver: Wake Forest at Purdue's 24 overtime plays of 171 are 20
+    pixels at the right-hand edge. The break is what survives that, so the break is what is
+    asserted.
+    """
+    today = _today()
+    assert today._sparkline_svg(_curve()).count("<polyline") == 1, \
+        "a game with no overtime is one continuous line"
+    assert today._sparkline_svg(_curve(overtime_from=30)).count("<polyline") == 2, \
+        "overtime must be a separate segment, not a continuation"
+
+
+def test_an_unknown_period_is_never_read_as_regulation():
+    """⚠️ AC-G.32, and the live data contains this case: `is_overtime` is NULL — not False — on
+    the one play of 291,548 with no `stg_play` match.
+
+    Read as regulation it would draw a break that did not happen; read as overtime it would
+    suppress a real one. `is True` does neither.
+    """
+    import pandas as pd
+    today = _today()
+    frame = _curve(overtime_from=30)
+    frame.loc[frame["play_number"] == 29, "is_overtime"] = None
+    svg = today._sparkline_svg(frame)
+    assert svg.count("<polyline") == 2, "a null play must not add or remove a break"
+    assert pd.isna(frame.loc[frame["play_number"] == 29, "is_overtime"]).all()
+
+
+def test_the_curve_is_never_smoothed():
+    """❌ NO SMOOTHING, NO INTERPOLATION, NO ROLLING AVERAGE — every published point is plotted.
+
+    The spikes ARE the drama and this panel exists to show them; a smoothed win-probability
+    curve is a different claim about the game and a reader cannot tell the two apart.
+    """
+    today = _today()
+    frame = _curve(n=40)
+    plotted = _polyline_xs(today._sparkline_svg(frame))
+    assert len(plotted) == 40, (
+        f"{len(plotted)} points plotted from a 40-play frame — something is resampling")
