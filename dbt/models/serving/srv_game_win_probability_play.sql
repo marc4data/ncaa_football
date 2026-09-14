@@ -47,6 +47,9 @@ select
     c.play_number,
     c.period,
     c.is_overtime,
+    -- The shared x-axis. See the mart's header: deliberately the twin of
+    -- `fct_drive.elapsed_from_kickoff_seconds`, so a chart can put both marks on one axis.
+    c.elapsed_from_kickoff_seconds,
     c.home_win_probability,
     c.home_team_id,
     c.home_team,
