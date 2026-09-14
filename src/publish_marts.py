@@ -310,6 +310,22 @@ HEAVY_SERVING = [
     # is pulling, which is the "arrives looking as fresh as the rows beside it" failure A078 and
     # A079 spent two rounds removing.
     "srv_game_team_leader_usage",
+    # A120/R-723. The POST-GAME TWIN of srv_game_team_leader_through_prior_week — who led IN this
+    # game, at the same (game, team, panel, leader_rank) grain, for the player cards Marc asked to
+    # flank Box Score and Advanced.
+    #
+    # HEAVY FOR EXACTLY THE SAME REASON AS THE THREE ABOVE, AND THE REASON IS THE FETCH RATHER THAN
+    # THE SIZE. It is computed from player box scores, and /games/players sits in the IMMUTABLE_WK
+    # bucket — fetched by cfbd_results_refresh on Sunday and cfbd_midweek_results on Thursday, and
+    # by nothing else. The two-hourly scores DAG fetches /games alone, so a hot rebuild would
+    # recompute this from raw that has not moved and ship identical rows. Hot publishing cannot
+    # make a table fresher than its source endpoint — A078 and A079 spent two rounds removing that
+    # exact "arrives looking as fresh as the rows beside it" failure.
+    #
+    # Size argues the same way rather than against it: 53,873 rows, the smallest of the four, and
+    # 5.6% of the per-player grain R-534 rejected — because the card asks for three panels and the
+    # HIGH end only rather than fifty stat pairs and both extremes.
+    "srv_game_team_leader_in_this_game",
 ]
 
 # What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,

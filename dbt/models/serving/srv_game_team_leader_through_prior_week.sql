@@ -85,36 +85,23 @@ select
     l.completions_through_prior_week,
     l.attempts_through_prior_week,
     l.yards_per_carry_through_prior_week,
-    -- SLOT 1
-    case l.panel when 'passing' then 'Receptions'
-                 when 'rushing' then 'Carries'
-                 when 'total'   then 'Comp-Att'
-    end as stat_1_label,
-    case l.panel when 'passing' then l.receptions_through_prior_week
-                 when 'rushing' then l.carries_through_prior_week
-                 when 'total'   then l.completions_through_prior_week
-    end as stat_1_value,
-    case l.panel when 'total'   then l.attempts_through_prior_week
-    end as stat_1_value_secondary,
-    case l.panel when 'total'   then 'pair' else 'integer'
-    end as stat_1_format,
-    -- SLOT 2 — the yards every panel ranks on, in the middle, so the number the ordering comes
-    -- from sits where a reader looks first.
-    'Yards'                       as stat_2_label,
-    l.yards_through_prior_week    as stat_2_value,
-    null::numeric                 as stat_2_value_secondary,
-    'integer'                     as stat_2_format,
-    -- SLOT 3
-    case l.panel when 'passing' then 'TD'
-                 when 'rushing' then 'Yds/Carry'
-                 when 'total'   then 'TD'
-    end as stat_3_label,
-    case l.panel when 'rushing' then l.yards_per_carry_through_prior_week
-                 else l.touchdowns_through_prior_week
-    end as stat_3_value,
-    null::numeric as stat_3_value_secondary,
-    case l.panel when 'rushing' then 'decimal_1' else 'integer'
-    end as stat_3_format,
+    -- 🚨 THE TWELVE SLOT COLUMNS COME FROM A SHARED MACRO — A120, R-723. They used to be written
+    -- out here, and A120 added a POST-GAME twin that needs the identical twelve. A second copy is
+    -- the drift this project has paid for four times in two weeks, so the expressions moved to
+    -- `macros/player_card_slots.sql` and BOTH views call it.
+    --
+    -- ⚠️ §3.3 EXPAND WITH NO MIGRATE: the column NAMES and VALUES are unchanged and only the
+    -- expression's home moved. Proved rather than asserted — A120 checksummed all 75,283 rows of
+    -- this view before and after and the md5 was identical.
+    {{ player_card_slots(
+        panel           = 'l.panel',
+        receptions      = 'l.receptions_through_prior_week',
+        carries         = 'l.carries_through_prior_week',
+        completions     = 'l.completions_through_prior_week',
+        attempts        = 'l.attempts_through_prior_week',
+        yards           = 'l.yards_through_prior_week',
+        touchdowns      = 'l.touchdowns_through_prior_week',
+        yards_per_carry = 'l.yards_per_carry_through_prior_week') }},
     a.jersey,
     a.position,
     a.class_year_display,

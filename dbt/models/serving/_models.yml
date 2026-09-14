@@ -4403,6 +4403,126 @@ models:
       - name: as_of_ts
         description: When this view's underlying data was last loaded.
 
+  - name: srv_game_team_leader_in_this_game
+    description: >
+      The three players who led this team IN THIS GAME, in the three panels Matchup uses. One row
+      per game x team x panel x leader_rank, top three only. R-723.
+      THE POST-GAME TWIN of srv_game_team_leader_through_prior_week, and the window is the only
+      real difference: that view answers who leads the team GOING INTO this game, accumulated over
+      earlier weeks and containing nothing from the game it is attached to. This one reads this
+      game's own box score and nothing else. The two names differ by one suffix and A102 spent a
+      whole round on a pair this similar, so both suffixes name their window.
+      The leakage rule does NOT apply here and a later round must not "fix" it in: a preview card
+      is read before kickoff and must not see the game, while this describes a completed game and
+      is read afterwards to say what happened.
+      NOT the same object as srv_game_team_leader, which is one row per (game, team, stat_category,
+      stat_type) carrying only the highest and lowest of each stat - rank 1 and rank last, nothing
+      between, and no player identity.
+    columns:
+      - name: game_team_leader_in_this_game_sk
+        description: Surrogate key over game_id, team_id, panel and player_id.
+      - name: game_id
+        description: CFBD game id. Also ESPN's event id, verified by hand on three games in A118.
+      - name: season
+        description: Season the game was played in.
+      - name: season_type
+        description: regular or postseason.
+      - name: week
+        description: Week within the season type.
+      - name: team_id
+        description: The team whose leaders these are.
+      - name: team_display
+        description: That team's display name, from dim_team.
+      - name: team_slug
+        description: URL-safe form of the team name.
+      - name: opponent_team_id
+        description: The other side of this fixture.
+      - name: home_away
+        description: Which side of the fixture this team was on.
+      - name: panel
+        description: >
+          Which Matchup panel this leader belongs to - passing, rushing or total. Marc's pairing is
+          deliberate and this column carries it: the PASSING panel is accompanied by the people who
+          CAUGHT the passes, not the thrower. fct_player_yardage_week's header owns the reasoning.
+      - name: leader_metric
+        description: >
+          What the ranking measures, restated as data so a page or a test can assert the pairing
+          without reading prose. The names end in _in_this_game because the preview view's identical
+          column says receiving_yards for a season-to-date figure, and the two must not be confused.
+      - name: leader_rank
+        description: >
+          1, 2 or 3. Ties SHARE a rank, so a three-way tie for third returns more than three rows -
+          the honest shape rather than a silent truncation.
+      - name: tied_players
+        description: How many players share this rank, so a page knows to write "T-2nd".
+      - name: qualified_players
+        description: >
+          How many players in this panel recorded yards in this game at all. Often fewer than three,
+          and on the total panel that is the normal case rather than the edge: measured over
+          2024-2026, 93.5% of total-panel groups have fewer than three, because a team plays ONE
+          quarterback. Whoever draws these cards must handle a short list.
+      - name: player_id
+        description: CFBD athlete id.
+      - name: player_name
+        description: The player's name, from the box score, which always carries it.
+      - name: player_slug
+        description: URL-safe form of the name.
+      - name: game_yards
+        description: >
+          Yards in this panel's metric, in THIS GAME. The figure the ranking comes from. Always
+          greater than zero - a player on nothing did not lead anything.
+      - name: stat_1_label
+        description: >
+          What the first KPI slot is called - Receptions, Carries or Comp-Att depending on the panel.
+          Carried as DATA rather than mapped in the page, so changing a trio is one model edit.
+          Built by the shared player_card_slots macro, which both leader views call.
+      - name: stat_1_value
+        description: First KPI slot's number, for the panel named in panel.
+      - name: stat_1_value_secondary
+        description: >
+          The second half of a PAIRED slot - the attempts in Comp-Att. Total panel only, NULL
+          elsewhere, which is how the page knows to render one number rather than two.
+      - name: stat_1_format
+        description: >
+          How to render the first slot - integer, decimal_1 or pair. Names the RENDERING, never the
+          arithmetic.
+      - name: stat_2_label
+        description: Always Yards, on every panel, because the yards are what every panel ranks on.
+      - name: stat_2_value
+        description: Second KPI slot's number - the same value as game_yards.
+      - name: stat_2_value_secondary
+        description: Always NULL. The yards slot is never a pair; the column exists so all three slots have one shape.
+      - name: stat_2_format
+        description: Always integer.
+      - name: stat_3_label
+        description: TD on the passing and total panels, Yds/Carry on the rushing panel.
+      - name: stat_3_value
+        description: >
+          Touchdowns, or yards per carry on the rushing panel. On the total panel the touchdowns are
+          passing PLUS rushing, because that panel ranks total offense and a passing-only count
+          beside it would describe the same quarterback two ways in one card row.
+      - name: stat_3_value_secondary
+        description: Always NULL. The third slot is never a pair.
+      - name: stat_3_format
+        description: integer, or decimal_1 on the rushing panel where the value is yards per carry.
+      - name: jersey
+        description: >
+          Squad number, from dim_athlete. NULLABLE, and measured: the 2026 roster load covers 138 of
+          305 teams, so a leader with no roster row still appears with the name and the yards the
+          box score always carries. Dropping him would silently remove a real leader in order to
+          protect three display fields.
+      - name: position
+        description: >
+          Listed position, from dim_athlete. Nullable on the same rows as jersey. This is also how
+          the total panel establishes who is a quarterback, so a missing roster row is the one case
+          that costs a player his place there.
+      - name: class_year_display
+        description: >
+          FR, SO, JR or SR. READ from dim_athlete, not rebuilt - that model already maps 1-4 and
+          already treats anything outside the range as unknown.
+      - name: as_of_ts
+        description: When the player_game domain was last refreshed.
+
   - name: srv_game_team_leader_through_prior_week
     description: >
       The three players leading this team in a metric GOING INTO this game. One row per
@@ -4636,6 +4756,13 @@ models:
         description: The same share restricted to rushing plays.
       - name: usage_passing
         description: The same share restricted to passing plays.
+      - name: usage_share_of_max
+        description: >
+          usage_total divided by usage_total_max_in_window, 0.0 to 1.0, where 1.0 is the busiest
+          player in the window. Published so the page divides nothing (R-725): matchup.py was
+          computing this ratio itself, and publishing a denominator does not stop a page dividing
+          by it - publishing the quotient does. NULL, never zero, when the ceiling is zero or
+          absent: a circle sized 0 and a circle that should not be drawn are different instructions.
       - name: usage_total_max_in_window
         description: >
           The largest usage_total this player recorded in the window. THE DENOMINATOR — the page

@@ -1609,8 +1609,19 @@ def test_the_TIE_BADGE_SURVIVES_the_card_rewrite(panel):
 
 # --- 🚨 R-733: the labels are DATA, and the page must not guess at a format it does not know
 
-_MODEL = (Path(__file__).resolve().parents[1] / "dbt" / "models" / "serving"
-          / "srv_game_team_leader_through_prior_week.sql")
+# ⚠️ REPOINTED FROM THE VIEW TO THE MACRO BY A120 (R-723), AND B102's OWN DOCSTRING PREDICTED IT:
+# "a format introduced by a DIFFERENT model, or by A MACRO THIS PARSE DOES NOT FOLLOW, is not
+# covered." A120 lifted the twelve slot expressions out of the preview view into a shared macro so
+# the new POST-GAME twin could call the identical ones, and the literals left this parse's subject
+# the same day the sentence was written.
+#
+# 🚨 THE PER-SLOT LOGIC BELOW IS B102's AND IS UNCHANGED — only the file it reads moved. That
+# logic is strictly stronger than what A120 had written against the old subject, and the merge
+# kept it rather than the weaker version.
+#
+# ✅ AND THE MACRO IS NOW THE BETTER SUBJECT: BOTH leader views call it, so one assertion covers
+# the preview card AND the post-game card. A format added there reaches both.
+_MODEL = (Path(__file__).resolve().parents[1] / "dbt" / "macros" / "player_card_slots.sql")
 
 
 def _declared_formats_by_slot():
@@ -1655,8 +1666,9 @@ def test_the_page_knows_every_FORMAT_the_view_can_emit():
     `ci/check_health_signals.py` uses for the same reason, and the one A110 named as the model.
 
     ⚠️ SCOPE, IN THE SAME SENTENCE AS THE CLAIM: this reads the three `stat_N_format`
-    expressions in `srv_game_team_leader_through_prior_week.sql` and nothing else. A format
-    introduced by a DIFFERENT model, or by a macro this parse does not follow, is not covered.
+    expressions in `macros/player_card_slots.sql` and nothing else — the macro BOTH leader views
+    call, as of A120. A format introduced by a DIFFERENT model, or by a second macro this parse
+    does not follow, is still not covered.
     """
     assert _MODEL.exists(), f"{_MODEL.name} moved — this guard is pinned to it by name"
     known = {_module_constant(n) for n in ("_KPI_INTEGER", "_KPI_DECIMAL_1", "_KPI_PAIR")}
