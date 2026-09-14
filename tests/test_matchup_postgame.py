@@ -657,10 +657,13 @@ def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
     """
     run, _ = panel
     blocks = _card_blocks(run(_both())[0])
-    assert "Away QB" in blocks[0] and "Home QB" not in blocks[0], \
-        f"the first card column is not the AWAY side: {_plain(blocks[0])[:120]}"
-    assert "Home QB" in blocks[1] and "Away QB" not in blocks[1], \
-        f"the second card column is not the HOME side: {_plain(blocks[1])[:120]}"
+    # ⚠️ PLAIN TEXT SINCE R-753: the name is two elements — small first line, bold last line —
+    # so "Away QB" no longer appears contiguously in the markup.
+    away, home = _plain(blocks[0]), _plain(blocks[1])
+    assert "Away QB" in away and "Home QB" not in away, \
+        f"the first card column is not the AWAY side: {away[:120]}"
+    assert "Home QB" in home and "Away QB" not in home, \
+        f"the second card column is not the HOME side: {home[:120]}"
 
 
 def test_ONE_quarterback_and_THREE_rushers(panel):
