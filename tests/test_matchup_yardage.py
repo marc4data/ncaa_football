@@ -385,6 +385,21 @@ def _text(entries):
     return " ".join(_plain(body) for kind, body in entries if kind != "chart")
 
 
+def _metric_of(chart):
+    """Which metric a chart is, now that it carries no title.
+
+    🚨 R-752 TOOK `title=` OUT OF THE SPEC, and these tests used it to tell the three charts
+    apart. The header is markup emitted before the row now, so the chart identifies itself the
+    only way left: by the COLUMNS its axes are bound to, which is a stronger claim anyway — a
+    title is a caption and a field is what was plotted.
+    """
+    spec = str(chart.to_dict())
+    for metric in ("rushing", "passing", "total"):
+        if f"{metric}_yards_for_per_game" in spec or f"'{metric.title()}" in spec:
+            return metric.title()
+    return None
+
+
 def _charts(entries):
     """The altair charts the panel drew, in the order it drew them."""
     return [body for kind, body in entries if kind == "chart"]
@@ -977,7 +992,7 @@ def test_a_figure_OFF_the_weeks_scale_draws_no_chart_rather_than_a_point_beside_
                        distribution=_distribution(
                            axes={"rushing_yards_allowed_per_game": (-50.0, 350.0)}))
     charts = _charts(entries)
-    titles = [c.to_dict().get("title") for c in charts]
+    titles = [_metric_of(c) for c in charts]
     assert titles.count("Rushing") == 1, (
         f"the away column's rushing chart was drawn with a point off its own frame: {titles}")
 
@@ -1171,7 +1186,7 @@ def test_a_DEGENERATE_y_domain_draws_nothing_rather_than_a_confident_flat_chart(
     entries, _ = panel(_game(), sides,
                        distribution=_distribution(
                            axes={"rushing_yards_for_per_game": (200.0, 200.0)}))
-    titles = [c.to_dict().get("title") for c in _charts(entries)]
+    titles = [_metric_of(c) for c in _charts(entries)]
     assert titles.count("Rushing") == 0, (
         f"a scale with no extent was drawn as a chart: {titles}")
 
@@ -1190,6 +1205,12 @@ def _edge_weights(chart):
     for layer in spec.get("layer", []):
         mark = layer.get("mark", {})
         if mark.get("type") != "rule" or mark.get("strokeWidth") is None:
+            continue
+        # ⚠️ THE ANNOTATION'S RULE IS A `rule` WITH A strokeWidth TOO, SINCE R-751 — and it is
+        # positioned in SCREEN pixels rather than bound to a percentile column, so the band's
+        # edges are the ones whose data carries a value. Without this the subtraction's rule
+        # counts as a box edge and this test reports four edges where there are two.
+        if "value" in (layer.get("encoding", {}).get("y") or {}):
             continue
         name = layer.get("data", {}).get("name")
         values = (datasets.get(name) or [{}])[0]
@@ -1296,12 +1317,18 @@ def test_FEWER_THAN_THREE_is_drawn_as_what_exists_and_never_padded(panel):
 
 def test_a_TIE_shares_its_rank_and_is_NOT_truncated_to_three(panel):
     """🚨 STATE THREE, AND TRUNCATION WOULD INVENT A WINNER. Ranks are shared, so a three-way
-    tie for third returns MORE than three rows. `tied_players` is what makes "T-3rd" honest.
+    tie for third returns MORE than three rows.
 
     🚨 THE FIXTURE CARRIES **FOUR** ROWS AND THE FIRST VERSION CARRIED THREE, WHICH IS WHY THE
     STAGED BREAK PASSED. Truncating to three cannot be detected by a three-row tie — the eighth
     time on this page that a fixture could not distinguish what it claimed to test, and the
     prompt named it in advance.
+
+    ⚠️ THE "T-2nd" HALF OF THIS TEST WENT WITH R-753. Marc: *"Don't include the rank."* The rows
+    are still all drawn — which is what matters, because dropping one would invent a winner —
+    but nothing on the card now says they SHARE a place. See
+    `test_the_RANK_and_the_TIE_MARKER_are_gone_and_NOTHING_carries_the_tie`, which records that
+    loss as an assertion rather than leaving it in a report nobody greps.
     """
     tied = [r for r in _leaders() if r["panel"] == "rushing" and r["team_id"] == AWAY_ID]
     tied.append(dict(tied[0], player_name="Tory Blaylock", jersey=4,
@@ -1312,7 +1339,6 @@ def test_a_TIE_shares_its_rank_and_is_NOT_truncated_to_three(panel):
         r["qualified_players"] = 4
     entries, _ = panel(_game(), _both(), leaders=tied)
     body = _text(entries)
-    assert "T-2nd" in body, f"a shared rank was not marked as tied: {body[:400]}"
     for name in ("Lloyd Avant", "Ben McCreary", "Xavier Robinson", "Tory Blaylock"):
         assert name in body, f"{name} was truncated out of a four-way tie"
 
@@ -1537,8 +1563,10 @@ def _lone_card(entries):
     three players at once. The fixture's own docstring already names this panel: one quarterback
     has thrown, `qualified_players` is 1, and padding it to three would invent players.
     """
+    # ⚠️ MATCHED ON PLAIN TEXT SINCE R-753. The name is rendered as two elements — small first
+    # line, bold last line — so "Bryce Underwood" no longer appears contiguously in the markup.
     return next(str(b) for k, b in entries
-                if k == "markdown" and "Bryce Underwood" in str(b) and "217" in str(b))
+                if k == "markdown" and "Bryce Underwood" in _plain(str(b)) and "217" in str(b))
 
 
 def _module_constant(name):
@@ -1605,18 +1633,36 @@ def test_the_JERSEY_em_dash_SURVIVES_the_card_rewrite(panel):
     rows = [dict(r, jersey=None) if r["player_name"] == "Lloyd Avant" else r
             for r in _leaders()]
     entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=rows)
-    card = next(str(b) for k, b in entries if k == "markdown" and "Lloyd Avant" in str(b))
+    card = next(str(b) for k, b in entries
+                if k == "markdown" and "Lloyd Avant" in _plain(str(b)))
     assert "—" in card, "a missing jersey must render an em dash in the same slot"
     assert "#0" not in card and "#nan" not in card.lower()
 
 
-def test_the_TIE_BADGE_SURVIVES_the_card_rewrite(panel):
-    """⚠️ A TIE SHARES A RANK, so "T-2nd" is the honest label and the row count can exceed
-    three. Dropping the badge would turn shared places into an invented order."""
+def test_the_RANK_and_the_TIE_MARKER_are_gone_and_NOTHING_carries_the_tie(panel):
+    """🚨 R-753 REMOVED THE RANK, AND THIS RECORDS WHAT WENT WITH IT.
+
+    Marc: *"Don't include the rank."* ✅ The cards are drawn in rank order, so the ORDER carries
+    the rank and nothing is lost there.
+
+    ⚠️ BUT THE `T-2nd` MARKER WENT TOO, AND A TIE IS NOW INDISTINGUISHABLE FROM AN ORDER. Two
+    players sharing second place render as second and third. **That is a real loss and it is
+    asserted here rather than only described**, so a future round that wants to carry the tie
+    again has a test to change and a reason written next to it.
+
+    ⚠️ NOT SOLVED IN PASSING: where a tie should live on a three-column header Marc specified is
+    a look decision, and inventing a slot for it would be exactly the quiet substitution §2
+    forbids.
+    """
     rows = [dict(r, tied_players=2) if r["leader_rank"] == 2 else r for r in _leaders()]
-    text = _text(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0])
-    assert "T-2nd" in text, "the tie badge did not survive"
-    assert "T-1st" not in text, "an untied leader was labelled as tied"
+    tied_text = _text(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0])
+    plain_text = _text(panel(_game(), _both(), deltas=_deltas(), leaders=_leaders())[0])
+    for marker in ("T-1st", "T-2nd", "1st", "2nd", "3rd"):
+        assert marker not in tied_text, f"the card still carries a rank marker: {marker!r}"
+    # 🚨 THE LOSS, STATED AS AN ASSERTION: the tied render and the untied one are the same card.
+    assert tied_text == plain_text, (
+        "a tie now renders differently from an order, so something IS carrying it — if that is "
+        "deliberate, this test is the one to update, and say what carries it")
 
 
 # --- 🚨 R-733: the labels are DATA, and the page must not guess at a format it does not know
@@ -1765,9 +1811,10 @@ def test_the_PAIR_format_composes_two_columns_and_invents_no_number(panel):
 
 def _dots(entries, name):
     """The dot row for one player, as (title, fill-percentage) pairs in drawn order."""
-    block = next(str(b) for k, b in entries if k == "markdown" and name in str(b))
+    block = next(str(b) for k, b in entries
+                 if k == "markdown" and name in _plain(str(b)))
     card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
-                if name in piece)
+                if name in _plain(piece))
     out = []
     for span in re.findall(r"<span title='([^']*)'[^>]*>", card):
         out.append(span)
@@ -1856,9 +1903,9 @@ def test_NO_usage_rows_at_all_is_a_SENTENCE_not_a_row_of_empty_circles(panel):
     entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=leaders,
                        usage=_usage(skip=(missing,)))
     block = next(str(b) for k, b in entries
-                 if k == "markdown" and leaders[1]["player_name"] in str(b))
+                 if k == "markdown" and leaders[1]["player_name"] in _plain(str(b)))
     card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
-                if leaders[1]["player_name"] in piece)
+                if leaders[1]["player_name"] in _plain(piece))
     assert "No game-by-game usage held" in card, (
         "a player we hold nothing for drew circles instead of saying so")
     assert "Did not appear" not in card, (
@@ -1944,18 +1991,40 @@ def test_a_NULL_published_share_RAISES_rather_than_drawing_an_empty_circle(panel
 
 # --- 🚨 R-735: the card and the chart share the row at 1:4 ---------------------------------
 
-def test_the_card_and_the_chart_share_the_row_at_ONE_TO_FOUR():
-    """Marc: "The Player Card and Yard scatterplot should share the horizontal space at 1:4."
+def test_the_CHART_SLOT_is_wide_enough_for_the_square_it_holds():
+    """🚨 R-750. THE RATIO IS NOT A PREFERENCE ANY MORE, IT IS A CONSTRAINT, AND THE RENDER SET
+    IT.
 
-    ⚠️ READ OFF THE CONSTANT rather than off a rendered width, because Streamlit's columns are
-    laid out in the browser and nothing in this suite can measure a pixel. The ratio is the
-    instruction; whether the CARD survives it is a question only a raster answers, and B100's
-    report carries that picture.
+    Marc asked for 1:4 (B100) and then *"too much white space between the left side and right
+    side"* (v04.1). ⚠️ **Those pull in opposite directions and the second one wins**, because a
+    PROPORTIONAL column cannot size a FIXED-WIDTH element: at 1:4 the chart slot took four
+    fifths of the half to draw a 240px square, and the remainder was dead space on the side away
+    from the cards — both gaps in his screenshot.
+
+    ⚠️ AND A SLACK THIRD COLUMN WAS BUILT AND REMOVED. Cowork's lean was to absorb the remainder
+    at each half's outer edge. **Rendered at 1300px it made things worse**: with the sidebar
+    open each half is ~520px, the chart needs ~310px including its axis labels, and there is no
+    slack to give — the charts clipped and the card's name column collapsed to three lines.
+
+    ✅ SO THE CHART SLOT IS SIZED TO THE CHART AND THE REMAINDER GOES TO THE CARD, which answers
+    both complaints with one number: the gap closes because the slot no longer exceeds its
+    contents, and the card gets the width R-745 has wanted for four rounds.
+
+    ⚠️ THE FLOOR IS WHAT THIS ASSERTS. `_CHART_SIDE` is 240 and `autosize: pad` ships the square
+    PLUS its axis labels — about 300px — so a chart slot below ~55% of a ~520px half clips the
+    axis, which B098 measured and B100 measured again. **This is a floor, not the ratio: nothing
+    here can read a pixel width, so the raster in the report is the evidence and this is the
+    guard that stops a future round tightening it blind.**
     """
     widths = _module_constant("_SLOT_WIDTHS")
-    assert widths["chart"] / widths["cards"] == 4.0, (
-        f"the split is not 1:4 — the card takes "
-        f"{widths['cards'] / sum(widths.values()):.0%} of the pair: {widths}")
+    assert set(widths) == {"cards", "chart"}, (
+        f"a third slot is back — R-750 removed the slack column because at 1300px there is no "
+        f"slack to give: {widths}")
+    share = widths["chart"] / sum(widths.values())
+    assert 0.55 <= share <= 0.70, (
+        f"the chart slot takes {share:.0%} of the pair. Below ~55% the 240px square plus its "
+        f"axis labels clips (B098, B100); above ~70% the dead space Marc reported comes back "
+        f"and the card cannot hold the three-column header R-753 specified.")
 
 
 def test_the_WIDTHS_are_pinned_to_the_SLOT_and_not_to_the_column_index(panel):
@@ -1977,129 +2046,140 @@ def test_the_WIDTHS_are_pinned_to_the_SLOT_and_not_to_the_column_index(panel):
 
 # --- 🚨 R-736: the mark's label, as a worked subtraction ------------------------------------
 
-def _labels(entries):
-    """The mark-label blocks, in drawn order. Identified by the rule a subtraction has."""
-    return [str(b) for k, b in entries
-            if k == "markdown" and "border-top:1px solid currentColor" in str(b)]
+def _annotation(chart):
+    """One chart's annotation, as (texts, logo urls) read out of the SHIPPED SPEC.
+
+    🚨 R-751 MOVED IT INSIDE THE VEGA SPEC, so these assertions moved with it. B100 put the
+    block BESIDE the chart because marks inside the spec can move the box `autosize: pad`
+    ships; this round put it in and PROVES the box did not move —
+    `test_the_spec_STREAMLIT_SHIPS_does_not_make_height_the_outer_box` is the proof, and it
+    runs against this same chart.
+    """
+    spec = chart.to_dict()
+    # ⚠️ A LAYER'S `data` IS A NAMED REFERENCE, NOT INLINE VALUES. Altair hoists every frame into
+    # a top-level `datasets` map and leaves `{"name": "data-…"}` behind, so reading
+    # `layer["data"]["values"]` finds nothing and this helper returns empty — which would make
+    # every assertion below vacuously true. Resolved rather than assumed.
+    datasets = spec.get("datasets", {})
+
+    def rows(layer):
+        data = layer.get("data") or {}
+        if "values" in data:
+            return data["values"]
+        return datasets.get(data.get("name"), [])
+
+    texts, urls = [], []
+    for layer in spec.get("layer", []):
+        mark = layer.get("mark")
+        kind = mark.get("type") if isinstance(mark, dict) else mark
+        if kind == "text":
+            texts.extend(str(v["t"]) for v in rows(layer) if "t" in v)
+        elif kind == "image":
+            urls.extend(str(v["u"]) for v in rows(layer) if "u" in v)
+    assert texts or urls, "the annotation could not be read out of the spec at all"
+    return texts, urls
 
 
-def test_the_mark_label_is_a_worked_SUBTRACTION_in_three_rows(panel):
-    """Marc: "Use the Logo with appropriate metric … below that opponent team logo and the
-    allowed metric, add a line below the Opponent metric (like a math problem), third row
-    should the result of the math prefixed with a +/- then the delta."
+def test_the_annotation_is_a_worked_SUBTRACTION_in_three_rows(panel):
+    """Marc, v04: *"The logo math that ties to the mark is supposed to be a label/annotation on
+    the chart. Needs to be smaller."*
 
     ⚠️ ASSERTED IN ORDER, not on presence. All three numbers appear elsewhere on the panel
-    already; what this round added is that they are stacked as a subtraction a reader can
-    check, which only an ordering assertion can see.
+    already; what makes this an annotation rather than three numbers is that they are stacked
+    as a subtraction, gained over allowed over the delta.
     """
-    labels = _labels(panel(_game(), _both(), deltas=_deltas())[0])
-    assert len(labels) == 6, f"expected one label per chart on both sides, got {len(labels)}"
-    first = _plain(labels[0])
-    assert first.index("Rushing") < first.index("Allowed"), \
-        "the opponent's row must sit BELOW this team's"
-    assert first.index("154.4") < first.index("84.5") < first.index("+38.0"), (
-        f"the three rows are not gained, allowed, then the delta: {first!r}")
+    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
+    texts, _urls = _annotation(charts[0])
+    joined = " | ".join(texts)
+    assert joined.index("Rushing") < joined.index("Allowed") < joined.index("+38.0"), (
+        f"the annotation is not gained, then allowed, then the delta: {texts}")
 
 
-def test_the_label_carries_BOTH_logos_and_names_the_team_behind_each(panel):
-    """Two logos, and the team each belongs to is in the title so a reader can tell them
-    apart — the row itself says only "Rushing" and "Allowed"."""
-    label = _labels(panel(_game(), _both(), deltas=_deltas())[0])[0]
-    assert label.count("<img") + label.count("cfdb-monogram") >= 2, \
-        f"the label does not carry two logos: {label}"
-    for team in ("Kentucky", "Auburn"):
-        assert f"title='{team}'" in label, f"{team} is not named behind its logo"
+def test_the_annotation_is_at_or_below_the_AXIS_LABEL_size(panel):
+    """Marc: *"Font size similar to the axis labels, maybe a little smaller."*
+
+    ⚠️ COMPARED AGAINST THE SPEC'S OWN AXIS CONFIG rather than a number typed here, so a theme
+    change that grew the axis labels cannot silently leave the annotation larger than them.
+    """
+    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
+    spec = charts[0].to_dict()
+    sizes = {layer["mark"]["fontSize"] for layer in spec.get("layer", [])
+             if isinstance(layer.get("mark"), dict) and "fontSize" in layer["mark"]}
+    assert sizes, "the annotation carries no explicit font size"
+    # Vega-Lite's default axis label size is 10; the annotation must not exceed it.
+    assert max(sizes) <= 10, f"the annotation is larger than the axis labels: {sizes}"
 
 
-def test_a_NULL_logo_puts_the_TEAM_NAME_in_the_row(panel):
-    """🚨 AC-G.11, AND THE LIVE RENDER IS WHAT FOUND IT.
+def test_the_annotation_carries_BOTH_logos(panel):
+    """The logos are what make it a subtraction rather than three numbers."""
+    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
+    _texts, urls = _annotation(charts[0])
+    assert len(urls) == 2, f"expected this team's logo and the opponent's: {urls}"
+    assert urls[0] != urls[1]
 
-    `identity.logo_or_monogram` returns a DELIBERATELY EMPTY box for a missing logo — Marc
-    flagged "OD" beside "Ohio Dominican" as reading the name twice — and its comment states the
-    condition that makes that safe: *"the name is right there"*.
 
-    ⚠️ IN THIS ROW IT IS NOT. The label reads `[logo] Rushing 170.0` and names no team, so on
-    game 401891330 Chicago State rendered as an empty circle, a metric and a number.
+def test_a_NULL_logo_puts_the_TEAM_NAME_in_the_annotation(panel):
+    """🚨 AC-G.11 AT 8.5px, AND THE FALLBACK HAD TO CHANGE WITH THE MOVE.
 
-    Measured: 14,619 of 375,594 `srv_team_week` rows carry no logo, and 116 are 2026 rows with
-    counted games — this is reachable today, not a defensive branch.
+    B100 rendered a missing logo as `identity.logo_or_monogram`'s empty box plus the team name,
+    because the helper's own comment says the box is only safe when *"the name is right there"*.
+    ⚠️ **Inside a Vega spec there is no `identity` and no monogram** — so the row falls back to
+    the team's NAME as a text mark in the logo's place, which is the same promise kept by the
+    only means available.
     """
     sides = _both()
     sides[0]["logo_url"] = None
     sides[1]["logo_url"] = None
-    label = _labels(panel(_game(), sides, deltas=_deltas())[0])[0]
-    assert "<img" not in label, "a null logo still emitted an image element"
-    plain = _plain(label)
-    assert "Auburn" in plain and "Kentucky" in plain, (
-        f"a row with no logo must NAME its team in the row itself — the title attribute is not "
-        f"visible and this row names no team otherwise: {plain!r}")
+    charts = _charts(panel(_game(), sides, deltas=_deltas())[0])
+    texts, urls = _annotation(charts[0])
+    assert not urls, f"a null logo still emitted an image mark: {urls}"
+    joined = " ".join(texts)
+    assert "Kentucky" in joined and "Auburn" in joined, (
+        f"a row with no logo must NAME its team — nothing else in the annotation does: {texts}")
 
 
 def test_a_PRESENT_logo_does_NOT_repeat_the_team_name(panel):
-    """⚠️ THE OTHER HALF, AND IT IS MARC'S OWN COMPLAINT. He flagged the name appearing twice;
-    the name is a FALLBACK for the absent logo, not a second label beside a present one."""
-    plain = _plain(_labels(panel(_game(), _both(), deltas=_deltas())[0])[0])
-    assert "Kentucky" not in plain and "Auburn" not in plain, (
-        f"the team name is rendered beside a logo that is present: {plain!r}")
+    """⚠️ MARC'S OWN COMPLAINT, one level down: he flagged the name appearing twice. The name is
+    a FALLBACK for an absent logo, not a second label beside a present one."""
+    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
+    texts, _urls = _annotation(charts[0])
+    joined = " ".join(texts)
+    assert "Kentucky" not in joined and "Auburn" not in joined, (
+        f"the team name is drawn beside a logo that is present: {texts}")
 
 
-def test_the_MONOGRAM_MARKER_this_label_keys_on_is_the_one_identity_emits():
-    """🚨 THE COUPLING IS PINNED, because the alternative is a silent regression.
-
-    `_mark_label` decides whether to print the team name by asking what
-    `identity.logo_or_monogram` RETURNED, rather than re-testing the URL itself — a second copy
-    of "is this logo missing" is the R-574 drift, and `site/lib/identity.py` is session A's file.
-
-    ⚠️ RENAME THAT CLASS AND THE LABEL GOES QUIETLY BACK TO AN UNIDENTIFIABLE ROW. B096 pinned
-    `ERROR_CARD` to `states.py` for exactly this reason; this is the same join.
-    """
-    import importlib
-    with render_harness.streamlit_stubbed() as (_st, _c, _ch):
-        identity = importlib.import_module("lib.identity")
-        matchup = importlib.reload(importlib.import_module("views.matchup"))
-        marker = matchup._LOGO_FELL_BACK
-        fell_back = identity.logo_or_monogram(None, "Anytown State", 16)
-        drawn = identity.logo_or_monogram("https://example.invalid/x.png", "Anytown State", 16)
-    assert marker in fell_back, (
-        f"`identity.logo_or_monogram` no longer emits {marker!r} when it has no logo, so the "
-        f"mark label will stop naming the team and nothing else will say so")
-    assert marker not in drawn, (
-        f"{marker!r} appears even when a logo IS drawn, so the label would print the team name "
-        f"beside every logo — the duplication Marc flagged")
-
-
-def test_the_label_reads_A106s_COLUMN_and_subtracts_nothing(panel):
+def test_the_annotation_reads_A106s_COLUMN_and_subtracts_nothing(panel):
     """🚨 §4.2. The delta is a published column at game x team grain precisely so this page does
-    not compute it; a subtraction here would let the label disagree with the Excel export,
+    not compute it; a subtraction here would let the annotation disagree with the Excel export,
     which reads the same column — R-645, one panel along.
 
     ⚠️ PROVED BY MAKING THE COLUMN DISAGREE WITH ITS OWN INPUTS. A page that subtracts would
     print 69.9; a page that reads prints the column. A fixture whose delta happens to equal
-    `gained - allowed` cannot tell the two apart, which is the trap B099 fell into twice.
+    `gained - allowed` cannot tell the two apart.
     """
     deltas = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=-12.5)
               for r in _deltas()]
-    first = _plain(_labels(panel(_game(), _both(), deltas=deltas)[0])[0])
-    assert "-12.5" in first or "−12.5" in first, \
-        f"the label did not print the column's value: {first!r}"
-    assert "69.9" not in first, "the page subtracted the two figures instead of reading A106's column"
+    texts, _urls = _annotation(_charts(panel(_game(), _both(), deltas=deltas)[0])[0])
+    joined = " ".join(texts)
+    assert "-12.5" in joined or "−12.5" in joined, \
+        f"the annotation did not print the column's value: {texts}"
+    assert "69.9" not in joined, "the page subtracted instead of reading A106's column"
 
 
 def test_a_NULL_delta_renders_an_em_dash_and_a_ZERO_renders_a_number(panel):
     """AC-G.32, on the result row. A null is the absence of a measurement; a zero is one."""
     nulls = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=None)
              for r in _deltas()]
-    assert "—" in _plain(_labels(panel(_game(), _both(), deltas=nulls)[0])[0])
+    texts, _u = _annotation(_charts(panel(_game(), _both(), deltas=nulls)[0])[0])
+    assert "—" in " ".join(texts)
     zeros = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=0.0)
              for r in _deltas()]
-    drawn = _plain(_labels(panel(_game(), _both(), deltas=zeros)[0])[0])
+    drawn = " ".join(_annotation(_charts(panel(_game(), _both(), deltas=zeros)[0])[0])[0])
     assert "—" not in drawn, "a measured zero rendered as an absence"
     assert "+0.0" in drawn, (
         "exactly level is a real answer and rendering it bare reads as 'no figure' — the chip "
-        "has said so since R-686, and the label shares that renderer")
+        "has said so since R-686, and the annotation shares that renderer")
 
-
-# --- ⚠️ R-737: red now means ONE thing in this panel ---------------------------------------
 
 def test_the_delta_CHIP_no_longer_carries_a_COLOUR(panel):
     """✅ COWORK'S RULING, and Marc can reverse it in one line.
@@ -2265,3 +2345,93 @@ def test_an_UNKNOWN_outlook_string_falls_to_the_UNCLASSIFIED_look_not_a_verdict(
     assert filled is False and shape == "square", (
         f"the British spelling — the one Cowork's prompt specified — was painted as a verdict: "
         f"{(shape, colour, filled)}")
+
+
+# --- 🚨 R-753 / R-752: the card header, and the metric header that left the spec -----------
+
+def _header_row(entries, name):
+    """One card's header row markup, by the player it names."""
+    block = next(str(b) for k, b in entries
+                 if k == "markdown" and name in _plain(str(b)))
+    card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
+                if name in _plain(piece))
+    return card.split("repeat(3,1fr)")[0]
+
+
+def test_the_BOLD_line_is_the_LAST_name_not_merely_that_the_name_appears(panel):
+    """🚨 A PRESENCE ASSERTION CANNOT SEE THIS SWAP. B082 proved it on the game header and B083
+    on the win-probability bar; *Avant Lloyd* contains exactly the same characters as
+    *Lloyd Avant*.
+
+    Marc: *"Present player name on 2 lines. First name on top, not bold and small. Bold last
+    name."* ✅ So the WEIGHT is asserted against the part, not the presence of either.
+    """
+    # ⚠️ LOOKED UP BY A SINGLE TOKEN, NOT THE WHOLE NAME. Searching for "Lloyd Avant" makes the
+    # swap a StopIteration in this helper — a crash, which proves the helper is narrow rather
+    # than that the card is wrong. "Avant" is present whichever line it lands on, so the
+    # assertion below is what fails.
+    header = _header_row(panel(_game(), _both(), deltas=_deltas())[0], "Avant")
+    bold = re.findall(r"font-weight:700[^>]*>([^<]+)<", header)
+    small = re.findall(r"font-size:\.66rem[^>]*>([^<]+)<", header)
+    assert bold == ["Avant"], f"the bold line is not the LAST name: {bold}"
+    assert small == ["Lloyd"], f"the small first line is not the FIRST name: {small}"
+
+
+def test_a_SINGLE_TOKEN_name_is_the_bold_line_alone_and_reserves_no_first_line(panel):
+    """⚠️ AC-G.11 ON A NAME. An empty first line would still take its line-height and push that
+    one card's header down relative to its neighbours — a hole reserved for something that does
+    not exist.
+
+    🚨 MEASURED AGAINST LIVE SERVING RATHER THAN ASSUMED: `srv_game_team_leader_through_prior_
+    week` carries **no single-token `player_name`** today — every one of the 75,283 rows has at
+    least two tokens. **So this is a defensive branch, and saying so is the measurement.** It is
+    still asserted, because "none today" is not "none ever" and a one-word name is a rendering
+    decision rather than a data error.
+    """
+    rows = [dict(r, player_name="Ochocinco") if r["leader_rank"] == 1 else r
+            for r in _leaders()]
+    header = _header_row(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0],
+                         "Ochocinco")
+    assert re.findall(r"font-weight:700[^>]*>([^<]+)<", header) == ["Ochocinco"]
+    assert "font-size:.66rem" not in header, (
+        "a one-token name reserved an empty first line, which shifts that card's header down "
+        "relative to every other card in the column")
+
+
+def test_the_RANK_is_not_on_the_card_at_all(panel):
+    """Marc: *"Don't include the rank."* Asserted on the header row rather than the whole panel,
+    because "1st" appears in prose elsewhere on the page."""
+    header = _header_row(panel(_game(), _both(), deltas=_deltas())[0], "Lloyd Avant")
+    for marker in ("1st", "2nd", "3rd", "T-"):
+        assert marker not in header, f"the card header still carries {marker!r}"
+
+
+def test_the_METRIC_HEADER_is_emitted_OUTSIDE_the_chart_spec(panel):
+    """🚨 R-752, AND A TEST THAT THE TEXT IS ON THE PAGE WOULD PASS EITHER WAY.
+
+    Marc: *"The header over the Chart should be the header for the whole row."* `Rushing` was the
+    Altair spec's own `title=`, which can only ever sit over the chart — so the assertion is that
+    it is NOT in the spec and IS in the markup, not that it exists.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    for chart in _charts(entries):
+        spec = chart.to_dict()
+        assert "title" not in spec, (
+            f"the metric is still the chart's own title, so it can never be a ROW header: "
+            f"{spec.get('title')!r}")
+    headers = [_plain(str(b)) for k, b in entries
+               if k == "markdown" and _plain(str(b)) in {"Rushing", "Passing", "Total"}]
+    assert headers == ["Rushing", "Passing", "Total"] * 2, (
+        f"expected one header per metric per half, emitted before each row: {headers}")
+
+
+def test_a_small_RULE_separates_the_three_blocks_and_not_the_first(panel):
+    """Marc: *"There should a small line or element to break the space between Rushing, Passing,
+    and Total."* ⚠️ Subtle — the three blocks are one panel, so a rule BEFORE the first would
+    section the panel off from the delta table above it."""
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    rules = [str(b) for k, b in entries
+             if k == "markdown" and "opacity:.12" in str(b)]
+    assert len(rules) == 4, (
+        f"expected a rule between the blocks on each half — two per half, none before the "
+        f"first — got {len(rules)}")

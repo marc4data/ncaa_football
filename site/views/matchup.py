@@ -1472,84 +1472,6 @@ def _signed_delta(value) -> str:
     return f"{float(value):+,.1f}"
 
 
-# What `identity.logo_or_monogram` emits when it has no logo to draw. ⚠️ READ, NOT REDEFINED:
-# this page must not carry a second copy of "is this logo missing", and `identity.py` is A's.
-_LOGO_FELL_BACK = "cfdb-monogram-empty"
-
-
-def _mark_label(team, opponent, label, for_column, allowed_column, delta) -> str:
-    """R-736. Marc's label for the mark, laid out as a subtraction a reader can check.
-
-    **Marc:** *"Label the mark on the scatterplot. Use the Logo with appropriate metric
-    (Rushing, Passing, or Total yards), below that opponent team logo and the allowed metric,
-    add a line below the Opponent metric (like a math problem), third row should the result of
-    the math prefixed with a +/- then the delta."*
-
-        [team logo]   Rushing   170.0
-        [opp  logo]   Allowed   132.0
-        ─────────────────────────────
-                                +38.0
-
-    🚨 BESIDE THE CHART, NOT ON IT, AND THE REASON IS THAT IT CANNOT THEN COLLIDE. The spec
-    offered both. An Altair annotation has to be placed at a coordinate, and the mark it labels
-    sits anywhere in the frame — over the shaded interquartile band, on a median rule, or hard
-    against an edge — so an on-chart version needs collision logic, which is page logic about
-    data. ⚠️ THE SQUARE IS ALSO LOAD-BEARING: B091 spent four rounds making `height` mean the
-    plot (R-609, `autosize: pad`), and `_shipped()` asserts the 1:1 through Streamlit's own
-    function. Marks inside the spec can change that box; markup under it cannot.
-    ✅ And R-735 has just given the chart slot 80% of the pair, which is where the room came
-    from.
-
-    ⚠️ NO SUBTRACTION HERE. NONE. The third row reads A106's
-    `*_yards_for_minus_opponent_allowed_per_game`, which exists at game x team grain precisely
-    so this page does not compute it (§4.2). Subtracting the two figures above would let this
-    number disagree with the Excel export, which reads the column — R-645, one panel along.
-
-    🚨 A MISSING LOGO PUTS THE TEAM'S NAME IN THE ROW, AND THE LIVE RENDER IS WHY.
-    `identity.logo_or_monogram` returns a DELIBERATELY EMPTY box when there is no logo, and its
-    own comment gives the reason: *"NO INITIALS … the box stays so a missing logo does not shift
-    the row (AC-G.28 is about FOOTPRINT), but it is empty: THE NAME IS RIGHT THERE."* Marc
-    flagged "OD" beside "Ohio Dominican" as reading the name twice.
-
-    ⚠️ THAT PREMISE IS TRUE EVERYWHERE ELSE ON THIS PAGE AND FALSE HERE. This row reads
-    `[logo] Rushing 170.0` — the team is named nowhere in it. Rendered live on game 401891330,
-    Chicago State has no logo and its row came out as an empty circle, a metric and a number,
-    identifying nobody.
-
-    ✅ SO THE NAME IS RENDERED IN PLACE OF THE ABSENT LOGO, which satisfies the helper's own
-    condition rather than working around it. ⚠️ THE FALLBACK IS DETECTED BY ASKING THE HELPER
-    WHAT IT RETURNED, not by re-testing the URL — a second copy of "is this logo missing" is the
-    R-574 drift, and `identity.py` is session A's file. `test_the_MONOGRAM_MARKER_this_label_
-    keys_on_is_the_one_identity_emits` pins the coupling so a rename fails loudly.
-
-    Measured: 14,619 of 375,594 `srv_team_week` rows carry no logo, and 116 of them are 2026
-    rows with counted games — a real branch rather than a defensive one.
-    """
-    rows = []
-    for side, caption, column in ((team, label, for_column),
-                                  (opponent, "Allowed", allowed_column)):
-        name = str(side.get("team_display") or "?")
-        mark = identity.logo_or_monogram(side.get("logo_url"), name, 16)
-        named = (f"<span style='opacity:.75;font-size:.72rem;max-width:6rem;overflow:hidden;"
-                 f"text-overflow:ellipsis;white-space:nowrap'>{html.escape(name)}</span>"
-                 if _LOGO_FELL_BACK in mark else "")
-        rows.append(
-            f"<div style='display:flex;align-items:center;gap:.4rem;padding:.08rem 0'>"
-            f"<span title='{html.escape(name)}' style='display:flex;align-items:center'>"
-            f"{mark}</span>{named}"
-            f"<span style='flex:1;opacity:.55;font-size:.72rem'>{html.escape(str(caption))}"
-            f"</span>"
-            f"<span style='font-weight:600;font-size:.8rem;text-align:right'>"
-            f"{fmt.number(side.get(column), column, dp=1)}</span></div>")
-    return (
-        f"<div style='max-width:15rem;margin:.15rem 0 .6rem .2rem'>"
-        f"{''.join(rows)}"
-        # The rule a written subtraction has, above its result and nowhere else.
-        f"<div style='border-top:1px solid currentColor;opacity:.3;margin:.15rem 0'></div>"
-        f"<div style='display:flex;justify-content:flex-end;font-weight:600;font-size:.85rem'>"
-        f"{_signed_delta(delta)}</div></div>")
-
-
 def _yardage_direction(offense, defense, deltas=None) -> str:
     """One direction of the comparison: this side's attack against that side's defense."""
     accent = identity.text_on(offense)
@@ -1809,7 +1731,7 @@ def _outlook_mark(value):
 
 
 def _scatter(team, opponent, for_column, allowed_column, distribution,
-             team_name: str, opponent_name: str, label: str, outlook=None):
+             team_name: str, opponent_name: str, label: str, outlook=None, delta=None):
     """One metric: this side's attack against that side's defense, on the week's frame.
 
     ⚠️ THE TWO AXES ARE DIFFERENT MEASUREMENTS AND THE LABELS SAY SO. Y is this team's
@@ -1896,8 +1818,75 @@ def _scatter(team, opponent, for_column, allowed_column, distribution,
     layered = band
     for edge in edges:
         layered = layered + edge
-    return (layered + mid_x + mid_y + point).properties(
-        width=_CHART_SIDE, height=_CHART_SIDE, title=label, autosize=_AUTOSIZE)
+    # 🚨 R-752. THE TITLE IS GONE FROM THE SPEC AND THAT IS THE WHOLE FIX. Marc: *"The header
+    # over the Chart should be the header for the whole row … maybe a header for each half."*
+    # A chart's `title=` can only ever sit over the chart, so no amount of styling makes it a
+    # ROW header — `_yardage_column` emits one before the row instead.
+    chart = layered + mid_x + mid_y + point
+    for layer in _annotation_layers(team, opponent, label, for_column, allowed_column, delta):
+        chart = chart + layer
+    return chart.properties(width=_CHART_SIDE, height=_CHART_SIDE, autosize=_AUTOSIZE)
+
+
+# Where the annotation sits inside the plot, in SCREEN pixels from the plot's top-left.
+# ⚠️ `value` RATHER THAN A DATA COORDINATE ON PURPOSE: the mark can be anywhere in the frame, so
+# an annotation anchored to the data would move with it and collide with the band, the median
+# rules or an edge — which is B100's reason for putting the block beside the chart in the first
+# place. A fixed corner cannot chase the point.
+_ANNOTATION_X, _ANNOTATION_LINE, _ANNOTATION_SIZE = 4, 11, 8.5
+
+
+def _annotation_layers(team, opponent, label, for_column, allowed_column, delta) -> list:
+    """R-751. Marc's worked subtraction, ON the chart and at axis-label size.
+
+    **Marc:** *"The logo math that ties to the mark is supposed to be a label/annotation on the
+    chart. Needs to be smaller. Font size similar to the axis labels, maybe a little smaller."*
+
+    🚨 INSIDE THE VEGA SPEC, WHICH B100 DELIBERATELY AVOIDED — so this round PROVES the thing
+    B100 was protecting rather than asserting it. `autosize: pad` makes the shipped box the
+    square PLUS its decorations, so a layer that overflowed the plot would grow it;
+    `test_the_spec_STREAMLIT_SHIPS_does_not_make_height_the_outer_box` and
+    `test_one_constant_drives_BOTH_sides_of_the_square` run against this and stay green.
+
+    ⚠️ THE LOGOS STAY — they are what makes it a subtraction rather than three numbers — drawn
+    with `mark_image` from the same CDN url the card uses.
+    🚨 AC-G.11 AT THIS SIZE: a missing logo cannot fall back to `identity`'s monogram inside a
+    Vega spec, so the row falls back to the TEAM'S NAME as text in the logo's place. B100
+    established that the name must appear when the logo cannot.
+    """
+    layers = []
+    for index, (side, caption, column) in enumerate(
+            ((team, label, for_column), (opponent, "Allowed", allowed_column))):
+        y = _ANNOTATION_X + index * _ANNOTATION_LINE
+        logo = side.get("logo_url")
+        missing = (logo is None or (isinstance(logo, float) and pd.isna(logo))
+                   or not str(logo).strip())
+        if missing:
+            layers.append(alt.Chart(pd.DataFrame([
+                {"t": str(side.get("team_display") or "?")[:10]}])).mark_text(
+                    align="left", baseline="top", fontSize=_ANNOTATION_SIZE, opacity=0.75
+                ).encode(x=alt.value(_ANNOTATION_X), y=alt.value(y), text="t:N"))
+        else:
+            layers.append(alt.Chart(pd.DataFrame([{"u": str(logo)}])).mark_image(
+                width=9, height=9, align="left", baseline="top"
+            ).encode(x=alt.value(_ANNOTATION_X), y=alt.value(y), url="u:N"))
+        layers.append(alt.Chart(pd.DataFrame([
+            {"t": f"{caption}  {fmt.number(side.get(column), column, dp=1)}"}])).mark_text(
+                align="left", baseline="top", fontSize=_ANNOTATION_SIZE, opacity=0.8
+            ).encode(x=alt.value(_ANNOTATION_X + 12), y=alt.value(y), text="t:N"))
+    # ⚠️ THE RULE A WRITTEN SUBTRACTION HAS. Marc, v02.2: *"add a line below the Opponent metric
+    # (like a math problem)"* — it is what makes the three numbers read as one sum rather than a
+    # list, and moving the block into the spec dropped it once before this was caught.
+    rule_y = _ANNOTATION_X + 2 * _ANNOTATION_LINE - 2
+    layers.append(alt.Chart(pd.DataFrame([{"a": 0}])).mark_rule(
+        opacity=0.45, strokeWidth=1
+    ).encode(x=alt.value(_ANNOTATION_X + 11), x2=alt.value(_ANNOTATION_X + 74),
+             y=alt.value(rule_y)))
+    layers.append(alt.Chart(pd.DataFrame([{"t": _signed_delta(delta)}])).mark_text(
+        align="right", baseline="top", fontSize=_ANNOTATION_SIZE, fontWeight="bold"
+    ).encode(x=alt.value(_ANNOTATION_X + 74),
+             y=alt.value(rule_y + 2), text="t:N"))
+    return layers
 
 
 def _off_the_frame_metrics(team, opponent, distribution) -> list:
@@ -1992,10 +1981,28 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
     opponent_name = str(opponent.get("team_display") or "?")
     order = ("chart", "cards") if _is_home_side(deltas) else ("cards", "chart")
     widths = [_SLOT_WIDTHS[slot] for slot in order]
-    for label, for_column, allowed_column, delta_column, outlook_column in _YARDAGE_DIMENSIONS:
+    for index, (label, for_column, allowed_column, delta_column,
+                outlook_column) in enumerate(_YARDAGE_DIMENSIONS):
+        # 🚨 R-752. THE HEADER IS THE ROW'S, NOT THE CHART'S. It used to be the Altair spec's
+        # own `title=`, which can only ever sit over the chart — Marc asked for a header for the
+        # row, and *"maybe a header for each half (start with each half)"*. ✅ ONE PER HALF PER
+        # METRIC, emitted before the row; a header spanning BOTH halves is his later option and
+        # is deliberately not built, because the two halves are separate Streamlit columns.
+        #
+        # ⚠️ AND A SMALL RULE BETWEEN THE BLOCKS, NOT BEFORE THE FIRST. Marc: *"a small line or
+        # element to break the space between Rushing, Passing, and Total."* A hairline at low
+        # opacity — the three blocks are one panel, so this separates them without sectioning
+        # them.
+        st.markdown(
+            ("<div style='border-top:1px solid currentColor;opacity:.12;"
+             "margin:.9rem 0 0'></div>" if index else "")
+            + f"<div style='font-weight:600;font-size:.95rem;margin:.45rem 0 .1rem'>"
+              f"{html.escape(label)}</div>",
+            unsafe_allow_html=True)
         chart = _scatter(team, opponent, for_column, allowed_column, distribution,
                          team_name, opponent_name, label,
-                         _delta_for(deltas, outlook_column))
+                         _delta_for(deltas, outlook_column),
+                         _delta_for(deltas, delta_column))
         # R-687. The names go OUTSIDE the chart; R-731 puts them BESIDE it rather than below.
         panel_key = (int(team["team_id"]), _LEADER_PANELS[label])
         cards = _leader_block((leaders or {}).get(panel_key, []),
@@ -2006,11 +2013,8 @@ def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
                     # ⚠️ NOT use_container_width: a square the container can stretch is
                     # not a square. R-609, and a narrower column does not change that.
                     column.altair_chart(chart, use_container_width=False)
-                # R-736. The label goes with the chart, under the mark it describes.
-                column.markdown(
-                    _mark_label(team, opponent, label, for_column, allowed_column,
-                                _delta_for(deltas, delta_column)),
-                    unsafe_allow_html=True)
+                # ⚠️ R-751 MOVED THIS ONTO THE CHART. The block that used to sit under it is
+                # `_annotation_layers` now, inside the spec — see `_scatter`.
             else:
                 column.markdown(cards, unsafe_allow_html=True)
     # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11). A chart silently missing from a
@@ -2043,7 +2047,29 @@ _LEADER_COLUMNS = """
 # produced, which is a different and deliberate question.
 _LEADER_PANELS = {"Rushing": "rushing", "Passing": "passing", "Total": "total"}
 
-_ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
+# ⚠️ `_ORDINAL` WAS HERE AND R-753 REMOVED IT WITH THE RANK BADGE. Marc: *"Don't include the
+# rank."* The cards are drawn in rank order so the ORDER carries it; nothing carries a TIE any
+# more, which the round reported rather than inventing a place for.
+
+
+def _split_name(value) -> tuple:
+    """A player's name as (first line, bold line). 🚨 AN ASSUMPTION, NOT A FORMAT.
+
+    `player_name` is ONE STRING; the view does not carry the parts. **First token as the first
+    name and the remainder as the last** is the rule, and it renders *Emmett Mosley V* and
+    *Ray Davis Jr.* the way a reader expects — the remainder keeps the suffix with the surname
+    rather than stranding it on its own line.
+
+    ⚠️ A SINGLE-TOKEN NAME HAS NO FIRST LINE AND RENDERS AS THE BOLD LINE ALONE. An empty first
+    line would still occupy its line-height and shift that one card's header down relative to
+    the others — a hole reserved for something that does not exist (AC-G.11), and the same
+    mistake as an em dash for an absent measure.
+    """
+    parts = str(value or "?").split()
+    if len(parts) < 2:
+        return "", (parts[0] if parts else "?")
+    return parts[0], " ".join(parts[1:])
+
 
 # 🚨 R-735. MARC: "Reduce Player Card width by 50%. The Player Card and Yard scatterplot
 # should share the horizontal space at 1:4." ⚠️ THOSE ARE ONE INSTRUCTION AND THE RATIO
@@ -2057,7 +2083,25 @@ _ORDINAL = {1: "1st", 2: "2nd", 3: "3rd"}
 #
 # ⚠️ Read out of `order` rather than written as a second mirrored tuple — see `_yardage_column`,
 # which is why this is one literal rather than a layout round.
-_SLOT_WIDTHS = {"cards": 1.0, "chart": 4.0}
+# 🚨 R-750. THE THIRD SLOT IS SLACK, AND COWORK MEASURED WHY THE RATIO ALONE CANNOT FIX IT.
+# Marc: *"Too much white space between the left side and right side."*
+#
+#     outer split   `left, right = st.columns(2)` — each half is 50% of the page
+#     the chart     `_CHART_SIDE = 240`, `use_container_width=False`
+#
+# 🚨 A PROPORTIONAL COLUMN CANNOT SIZE A FIXED-WIDTH ELEMENT. At ~1300px each half is ~640px
+# and the chart slot took 4/5 of it — ~512px — to draw something ~300px wide. **The ~210px of
+# dead space is INSIDE the chart slot**, on the side away from the cards, which is both gaps in
+# his screenshot: between the away chart and the home block, and between the home chart and its
+# own cards. ⚠️ **1:3 buys the card ~32px and removes ~32px of gap; it is the answer to the CARD
+# being narrow and NOT to the white space. Two problems, named as one.**
+#
+# ✅ So a third slot absorbs the remainder at the OUTER edge of each half, pulling both halves'
+# content toward the centre. ⚠️ IT IS STILL PROPORTIONAL AND THEREFORE BRITTLE ACROSS VIEWPORT
+# WIDTHS — the page cannot read a column's pixel width — which is why this round renders at two
+# of them rather than tuning against one. ❌ R-609 is NOT re-opened: the square stays 240px and
+# `use_container_width` stays False.
+_SLOT_WIDTHS = {"cards": 1.0, "chart": 1.6}
 
 # R-731. The card is built for three KPI slots. ⚠️ THE SENTENCE THAT USED TO SIT HERE SENT A
 # FUTURE ROUND TO `_CARD_KPIS`, WHICH B099 DELETED — the labels are read off the row now, and
@@ -2319,21 +2363,29 @@ def _leader_card(row, usage=None) -> str:
     """
     jersey = row.get("jersey")
     number = f"#{int(jersey)}" if pd.notna(jersey) else "—"
-    rank = int(row["leader_rank"])
-    tied = int(row.get("tied_players") or 1)
-    # ⚠️ A TIE SHARES A RANK, so "T-2nd" is the honest label and the row count can exceed three.
-    place = f"T-{_ORDINAL.get(rank, f'{rank}th')}" if tied > 1 else _ORDINAL.get(rank, f"{rank}th")
-    # ⚠️ THE RANK STAYS, AND MARC'S LIST DID NOT NAME IT. It is kept because it is the only
-    # thing on the card that carries a TIE: three cards where two share second place is a fact
-    # about the week, and dropping the badge would silently turn shared places into an order.
-    top = [f"<span style='opacity:.45;min-width:2.3rem'>{place}</span>",
-           f"<span style='font-weight:600;min-width:2rem;text-align:right'>{number}</span>",
-           f"<span style='font-weight:600'>"
-           f"{html.escape(str(row.get('player_name') or '?'))}</span>"]
-    for field in ("position", "class_year_display"):
-        value = row.get(field)
-        if value:
-            top.append(f"<span style='opacity:.5'>{html.escape(str(value))}</span>")
+    first, last = _split_name(row.get("player_name"))
+    # 🚨 R-753. THREE COLUMNS, AND THE RANK IS GONE. Marc: *"Don't include the rank. The header
+    # row should have 3 columns: 1 - Jersey number · 2 - Present player name on 2 lines. First
+    # name on top, not bold and small. Bold last name. · 3 - Position on top, year on bottom."*
+    #
+    # ⚠️ `_ORDINAL` AND THE `T-1st` TIE MARKER WENT WITH IT, AND SOMETHING WAS LOST. The cards
+    # are drawn in rank order, so the ORDER still carries the rank — but nothing now carries a
+    # TIE. Two players sharing second place render as second and third. **Reported rather than
+    # solved in passing: inventing a new place for it is a look decision.**
+    name_lines = (f"<div style='font-size:.66rem;opacity:.6;line-height:1.1'>"
+                  f"{html.escape(first)}</div>" if first else "")
+    top = [
+        f"<div style='min-width:1.9rem;font-weight:600;font-size:.82rem'>{number}</div>",
+        # ⚠️ `flex:1` AND `min-width:0` TOGETHER — without the second, a flex child refuses to
+        # shrink below its content and the name pushes the third column off the card instead of
+        # ellipsing, which is the truncation R-745 has been about for four rounds.
+        f"<div style='flex:1;min-width:0;line-height:1.15;overflow:hidden'>{name_lines}"
+        f"<div style='font-weight:700;font-size:.78rem;white-space:nowrap;overflow:hidden;"
+        f"text-overflow:ellipsis'>{html.escape(last)}</div></div>",
+        f"<div style='text-align:right;font-size:.62rem;opacity:.55;line-height:1.15'>"
+        f"<div>{html.escape(str(row.get('position') or ''))}</div>"
+        f"<div>{html.escape(str(row.get('class_year_display') or ''))}</div></div>",
+    ]
     # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
     # AC-G.32 puts a dash where a VALUE is missing; a slot with no label is a MEASURE that does
     # not exist, which is a different statement (AC-G.11). B098 argued this when two of three
@@ -2354,8 +2406,8 @@ def _leader_card(row, usage=None) -> str:
             f"<div style='font-size:.92rem;font-weight:600'>{shown}</div></div>")
     return (f"<div style='border:1px solid rgba(128,128,128,.22);border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem'>"
-            f"<div style='display:flex;align-items:baseline;gap:.35rem;font-size:.78rem;"
-            f"white-space:nowrap;overflow:hidden'>{''.join(top)}</div>"
+            f"<div style='display:flex;align-items:flex-start;gap:.4rem'>"
+            f"{''.join(top)}</div>"
             f"<div style='display:grid;grid-template-columns:repeat({_CARD_KPI_SLOTS},1fr);"
             f"gap:.3rem;margin-top:.25rem'>{''.join(cells)}</div>"
             f"{_card_dots(row, usage)}</div>")
