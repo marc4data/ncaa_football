@@ -1292,7 +1292,7 @@ def test_the_PASSING_panel_shows_RECEIVERS_because_that_is_the_data(panel):
     entries, _ = panel(_game(), _both())
     body = _text(entries)
     # Isaiah Sategna is a WR and leads Oklahoma's receiving through the prior week.
-    assert "Isaiah Sategna" in body, f"the passing panel drew no receiver: {body[:400]}"
+    assert "Sategna" in body, f"the passing panel drew no receiver: {body[:400]}"
     assert "WR" in body
 
 
@@ -1310,9 +1310,9 @@ def test_FEWER_THAN_THREE_is_drawn_as_what_exists_and_never_padded(panel):
     thrown — and `qualified_players` says so. Padding to three would invent players."""
     entries, _ = panel(_game(), _both())
     body = _text(entries)
-    assert body.count("Bryce Underwood") >= 1
+    assert body.count("Underwood") >= 1
     # One name in that panel, so no 2nd or 3rd place label can follow it there.
-    assert "John Mateer" in body, "the away QB is missing"
+    assert "Mateer" in body, "the away QB is missing"
 
 
 def test_a_TIE_shares_its_rank_and_is_NOT_truncated_to_three(panel):
@@ -1339,7 +1339,7 @@ def test_a_TIE_shares_its_rank_and_is_NOT_truncated_to_three(panel):
         r["qualified_players"] = 4
     entries, _ = panel(_game(), _both(), leaders=tied)
     body = _text(entries)
-    for name in ("Lloyd Avant", "Ben McCreary", "Xavier Robinson", "Tory Blaylock"):
+    for name in ("Avant", "McCreary", "Robinson", "Blaylock"):
         assert name in body, f"{name} was truncated out of a four-way tie"
 
 
@@ -1355,7 +1355,7 @@ def test_a_MISSING_JERSEY_is_an_absence_and_never_a_zero(panel):
     body = _text(entries)
     assert "#0" not in body, "a missing jersey rendered as number zero"
     assert "—" in body, "a missing jersey rendered as a blank rather than an absence"
-    assert "Isaiah Sategna" in body, "the player vanished with his jersey"
+    assert "Sategna" in body, "the player vanished with his jersey"
 
 
 # --- 🚨 R-686: the delta is READ, and the fixture proves which ---------------------------------
@@ -1441,7 +1441,7 @@ def test_the_leaders_are_drawn_in_RANK_ORDER(panel):
     """
     entries, _ = panel(_game(), _both())
     body = _text(entries)
-    first, second = body.index("Isaiah Sategna"), body.index("Trell Harris")
+    first, second = body.index("Sategna"), body.index("Harris")
     assert first < second, (
         "the leaders are not in rank order — Sategna is 1st and Harris 2nd, and the card "
         "listed them the other way round")
@@ -1550,7 +1550,9 @@ def test_an_ABSENT_game_team_row_falls_back_rather_than_guessing(panel):
 def test_the_card_top_row_carries_all_four_of_MARCS_FIELDS(panel):
     """Marc: "Top Row: Jersey #, Name, Position, Year in school." All four are on the view."""
     text = _text(panel(_game(), _both(), deltas=_deltas())[0])
-    for field in ("#9", "Lloyd Avant", "RB", "JR"):
+    # ⚠️ `# 9` WITH A SPACE SINCE R-806: the hash is its own element at half the digits' size,
+    # and `_plain` puts a space where it strips a tag. The reader sees `#9`.
+    for field in ("# 9", "Avant, Lloyd", "RB", "JR"):
         assert field in text, f"the card top row is missing {field!r}"
 
 
@@ -1566,7 +1568,7 @@ def _lone_card(entries):
     # ⚠️ MATCHED ON PLAIN TEXT SINCE R-753. The name is rendered as two elements — small first
     # line, bold last line — so "Bryce Underwood" no longer appears contiguously in the markup.
     return next(str(b) for k, b in entries
-                if k == "markdown" and "Bryce Underwood" in _plain(str(b)) and "217" in str(b))
+                if k == "markdown" and "Underwood" in _plain(str(b)) and "217" in str(b))
 
 
 def _module_constant(name):
@@ -1634,7 +1636,7 @@ def test_the_JERSEY_em_dash_SURVIVES_the_card_rewrite(panel):
             for r in _leaders()]
     entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=rows)
     card = next(str(b) for k, b in entries
-                if k == "markdown" and "Lloyd Avant" in _plain(str(b)))
+                if k == "markdown" and "Avant" in _plain(str(b)))
     assert "—" in card, "a missing jersey must render an em dash in the same slot"
     assert "#0" not in card and "#nan" not in card.lower()
 
@@ -1810,11 +1812,19 @@ def test_the_PAIR_format_composes_two_columns_and_invents_no_number(panel):
 # --- 🚨 R-694: Marc's game dots ------------------------------------------------------------
 
 def _dots(entries, name):
-    """The dot row for one player, as (title, fill-percentage) pairs in drawn order."""
+    """The dot row for one player, as (title, fill-percentage) pairs in drawn order.
+
+    🚨 LOOKED UP BY THE SURNAME, NOT THE WHOLE NAME, AND R-758 IS WHY. The card renders
+    `Last, First` since R-806; a helper matching the full `First Last` string raises
+    `StopIteration` the moment the order changes — **a crash, which proves the helper is narrow
+    rather than that the card is wrong.** B101 and B103 each hit that, and this is the fix
+    applied once rather than at nine call sites.
+    """
+    token = str(name).split()[-1]
     block = next(str(b) for k, b in entries
-                 if k == "markdown" and name in _plain(str(b)))
+                 if k == "markdown" and token in _plain(str(b)))
     card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
-                if name in _plain(piece))
+                if token in _plain(piece))
     out = []
     for span in re.findall(r"<span title='([^']*)'[^>]*>", card):
         out.append(span)
@@ -1902,10 +1912,12 @@ def test_NO_usage_rows_at_all_is_a_SENTENCE_not_a_row_of_empty_circles(panel):
     missing = leaders[1]["player_id"]
     entries, _ = panel(_game(), _both(), deltas=_deltas(), leaders=leaders,
                        usage=_usage(skip=(missing,)))
+    # ⚠️ BY SURNAME (R-758) — the card renders `Last, First`, so a full-name lookup raises.
+    token = leaders[1]["player_name"].split()[-1]
     block = next(str(b) for k, b in entries
-                 if k == "markdown" and leaders[1]["player_name"] in _plain(str(b)))
+                 if k == "markdown" and token in _plain(str(b)))
     card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
-                if leaders[1]["player_name"] in _plain(piece))
+                if token in _plain(piece))
     assert "No game-by-game usage held" in card, (
         "a player we hold nothing for drew circles instead of saying so")
     assert "Did not appear" not in card, (
@@ -2400,7 +2412,7 @@ def _header_row(entries, name):
     return card.split("repeat(3,1fr)")[0]
 
 
-def test_the_BOLD_line_is_the_LAST_name_not_merely_that_the_name_appears(panel):
+def test_the_name_renders_LAST_COMMA_FIRST_and_not_merely_that_it_appears(panel):
     """🚨 A PRESENCE ASSERTION CANNOT SEE THIS SWAP. B082 proved it on the game header and B083
     on the win-probability bar; *Avant Lloyd* contains exactly the same characters as
     *Lloyd Avant*.
@@ -2416,13 +2428,14 @@ def test_the_BOLD_line_is_the_LAST_name_not_merely_that_the_name_appears(panel):
     # ⚠️ SCOPED TO THE NAME COLUMN SINCE R-801. The POSITION now carries the same weight and
     # size — that is the point of the mirror — so a bare `font-weight:700` sweep returns two
     # strings and this assertion would be about whichever came first.
-    bold = re.findall(r"text-overflow:ellipsis'>([^<]+)<", header)
-    small = re.findall(r"font-size:\.66rem[^>]*>([^<]+)<", header)
-    assert bold == ["Avant"], f"the bold line is not the LAST name: {bold}"
-    assert small[0] == "Lloyd", f"the small first line is not the FIRST name: {small}"
+    name = re.findall(r"text-overflow:ellipsis[^>]*>([^<]+)<", header)
+    assert name == ["Avant, Lloyd"], (
+        f"the name is not `Last, First` — and `First Last` contains exactly the same "
+        f"characters, so nothing that merely looks for the name can see the difference: {name}")
+    assert name[0].index("Avant") < name[0].index("Lloyd"), "the surname must come first"
 
 
-def test_a_SINGLE_TOKEN_name_is_the_bold_line_alone_and_reserves_no_first_line(panel):
+def test_a_SINGLE_TOKEN_name_has_NO_COMMA_and_no_empty_second_part(panel):
     """⚠️ AC-G.11 ON A NAME. An empty first line would still take its line-height and push that
     one card's header down relative to its neighbours — a hole reserved for something that does
     not exist.
@@ -2437,17 +2450,49 @@ def test_a_SINGLE_TOKEN_name_is_the_bold_line_alone_and_reserves_no_first_line(p
             for r in _leaders()]
     header = _header_row(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0],
                          "Ochocinco")
-    assert re.findall(r"text-overflow:ellipsis'>([^<]+)<", header) == ["Ochocinco"]
-    name_column = header.split("flex:1;min-width:0")[1]
-    assert "font-size:.66rem" not in name_column.split("</div></div>")[0], (
-        "a one-token name reserved an empty first line, which shifts that card's header down "
-        "relative to every other card in the column")
+    name = re.findall(r"text-overflow:ellipsis[^>]*>([^<]+)<", header)
+    assert name == ["Ochocinco"], f"a one-token name did not render alone: {name}"
+    assert "," not in name[0], (
+        "a one-token name rendered a comma with nothing after it, which reads as a truncated "
+        "surname rather than as a whole name")
+
+
+def test_a_leader_with_NO_POSITION_renders_an_EM_DASH_and_never_the_string_nan(panel):
+    """🚨 THE LIVE RENDER FOUND THIS, AND `or ""` IS WHY IT SURVIVED THREE ROUNDS. A null
+    arrives out of the frame as `float('nan')`, **and NaN is TRUTHY in Python** — so
+    `str(row.get("position") or "")` returns the NaN and the card printed the three characters
+    `nan` where a position belongs. B106's render of Arkansas vs North Alabama shows it on
+    three of the four away cards.
+
+    ⚠️ NOT RARE, MEASURED IN SERVING RATHER THAN ASSUMED: 13,431 of 75,283 rows on
+    `srv_game_team_leader_through_prior_week` (17.8%) and 3,734 of 53,873 on
+    `..._in_this_game` (6.9%) carry no position and no class year.
+
+    ✅ AC-G.32, AND THE TWO SLOTS ANSWER DIFFERENTLY ON PURPOSE. The position is a VALUE, so an
+    absent one is an em dash — the same statement the jersey already makes. The year is the
+    small faded line, the surname block's mirror, so an absent year is an absent LINE: B103
+    settled that a missing first name renders the bold line alone rather than an empty row that
+    shifts the card's height.
+    """
+    rows = [dict(r, position=float("nan"), class_year_display=float("nan"))
+            if r["leader_rank"] == 1 else r for r in _leaders()]
+    header = _header_row(panel(_game(), _both(), deltas=_deltas(), leaders=rows)[0], "Avant")
+    assert "nan" not in header.lower(), (
+        f"a null position or class year reached the page as the literal string `nan`: "
+        f"{_plain(header)!r}")
+    # ⚠️ ASSERTED ON THE POSITION'S OWN SLOT, not on the card. The jersey already renders an em
+    # dash elsewhere, so a card-wide dash count cannot tell the two absences apart.
+    slot = header.split("text-align:right;min-width:0")[1]
+    assert "—" in slot, "an absent position must render an em dash in its own slot"
+    assert slot.count("—") == 1, (
+        f"an absent YEAR drew a dash of its own — it is the faded mirror of the first-name "
+        f"line and an absent one is an absent line, not a hole: {_plain(slot)!r}")
 
 
 def test_the_RANK_is_not_on_the_card_at_all(panel):
     """Marc: *"Don't include the rank."* Asserted on the header row rather than the whole panel,
     because "1st" appears in prose elsewhere on the page."""
-    header = _header_row(panel(_game(), _both(), deltas=_deltas())[0], "Lloyd Avant")
+    header = _header_row(panel(_game(), _both(), deltas=_deltas())[0], "Avant")
     for marker in ("1st", "2nd", "3rd", "T-"):
         assert marker not in header, f"the card header still carries {marker!r}"
 
