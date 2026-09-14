@@ -41,6 +41,7 @@ DATASETS = {
     "srv_team_game_log": "Team box scores",
     "srv_player_game_log": "Player box scores",
     "srv_rankings": "AP and Coaches polls",
+    "srv_game_win_probability_play": "Win probability, play by play",
     # --- read by Matchup, labelled here so B consumes rather than copies (R-583) ---------
     # ⚠️ srv_game and srv_team_week are ALREADY ABOVE and Matchup reads both. That overlap is
     # the argument for this module existing rather than a duplication to tidy up.
