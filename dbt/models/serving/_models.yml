@@ -107,6 +107,87 @@ models:
         description: AC-G.35. Last load of the `rankings` domain, rendered instead of now().
 
   # ---------------------------------------------------------------------------------------
+  - name: srv_coach_team_season
+    description: >
+      The coach behind a team's season, with the tenure that season belongs to. One row per
+      (coach_id, team_id, season). R-766, and Marc's ask: "We need to add some structure and
+      information about the coach involved in the game."
+      WHAT A PAGE MAY SAY WITH THIS, and what it may not. "Ohio State's 2026 head coach" is always
+      available. "In his 20th season at Air Force" is available and is derived from CONSECUTIVE
+      seasons, never from a hire date. "The coach in THIS GAME" is NOT available, and not because
+      the model is thin: 10.54% of 2024-2026 (season, team) pairs had more than one coach, and
+      nothing in the feed says which games are whose. coaches_in_team_season is how a page knows
+      to soften the sentence.
+    columns:
+      - name: coach_team_season_sk
+        description: Surrogate key over coach_id, team_id and season.
+      - name: coach_id
+        description: CFBD coach id.
+      - name: coach_name
+        description: First and last name joined, for display.
+      - name: first_name
+        description: The coach's first name, as CFBD carries it.
+      - name: last_name
+        description: The coach's last name.
+      - name: team_id
+        description: The school this season was coached at.
+      - name: school
+        description: That school's name, as the coaches feed spells it.
+      - name: season
+        description: The season.
+      - name: tenure_number
+        description: >
+          Which spell at this school this season belongs to - 1 for the first, 2 after a gap year,
+          and so on. Barry Alvarez has three at Wisconsin (1990-2005, 2012, 2014).
+      - name: tenure_first_season
+        description: The first season of this spell.
+      - name: tenure_last_season
+        description: The last season of this spell, as the data currently stands.
+      - name: tenure_seasons
+        description: How many seasons the spell runs, inclusive.
+      - name: season_in_tenure
+        description: >
+          Which season of this spell it is - 1 for the first. This is the number a card means by
+          "in his Nth season", and it is derived from consecutive seasons rather than from
+          hired_at, which belongs to the COACH and repeats on every season row.
+      - name: games
+        description: Games credited to this coach in this season, by CFBD's own attribution.
+      - name: wins
+        description: Wins credited to this coach in this season.
+      - name: losses
+        description: Losses credited to this coach in this season.
+      - name: ties
+        description: Ties credited to this coach in this season.
+      - name: win_percentage
+        description: CFBD's own win percentage for the coach-season.
+      - name: tenure_games_to_date
+        description: Games in this spell up to and including this season.
+      - name: tenure_wins_to_date
+        description: Wins in this spell up to and including this season.
+      - name: tenure_losses_to_date
+        description: Losses in this spell up to and including this season.
+      - name: tenure_wins_before_season
+        description: >
+          Wins in this spell BEFORE this season. NULL - never zero - in a coach's first season of
+          a spell, because no prior record and a 0-0 prior record are different facts and a card
+          reading "0-0 coming in" about a first-year coach has invented one (AC-G.32).
+      - name: tenure_losses_before_season
+        description: Losses in this spell before this season. Null in a first season, as above.
+      - name: coaches_in_team_season
+        description: >
+          How many coaches that school had in that season. 1 for the ordinary case; 2 or more
+          where there was a mid-season change, which is 10.54% of 2024-2026 team-seasons. A page
+          showing a coach beside a GAME must read this: with more than one, no coach can honestly
+          be named as the coach of that game.
+      - name: attribution_complete
+        description: >
+          CFBD's own flag for whether it could fully attribute the season's games to this coach.
+          FALSE on exactly the rows it could not - all of them in multi-coach seasons. NULL, not
+          false, for seasons before 2024, because the detail feed covers 2024-2026 only and "no
+          opinion" is a different fact from "incomplete" (AC-G.11).
+      - name: as_of_ts
+        description: When the game domain was last refreshed.
+
   - name: srv_data_dictionary
     description: >
       Data Dictionary page and the Excel export. One row per modeled column across every
