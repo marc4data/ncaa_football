@@ -66,6 +66,59 @@
 -- three rushers. The v02 pairing "Total -> top 3 QBs" was about the PREVIEW, where a team may
 -- have used three quarterbacks across a season; in ONE GAME it almost never has.
 --
+-- 🚨 A128 ADDS A FOURTH PANEL, `defensive`, AND IT IS A SEPARATE BRANCH RATHER THAN A WIDENING.
+-- `per_player`'s `having sum(yards) is not null` is the OFFENSIVE grain and it is untouched: a
+-- tackler records no yards and must never reach that clause. The defensive rows aggregate and
+-- qualify on their own terms (`having max(TOT) > 0`) and meet the offensive rows only at the
+-- final select, where `panel` and `leader_metric` already distinguish them — which is what the
+-- first three panels have always done. The view's declared grain generalises from "a player who
+-- recorded yards in this panel" to "a player who recorded THIS PANEL'S OWN MEASURE"; each branch
+-- still enforces its own strictly.
+--
+-- ⚠️ SO `game_yards` IS NULL ON 19.9% OF THIS VIEW'S ROWS, and that is honest rather than
+-- missing: a linebacker has no yards. AC-G.32 — null, never 0, because 0 yards would be a
+-- measurement of something he never did. The defensive figure lives in `game_tackles`.
+--
+-- 🚨🚨 TIES ARE THIS PANEL'S CENTRAL PROBLEM AND NO ORDERING SOLVES THEM. MEASURED, 2024-2026,
+-- over 4,374 team-games:
+--
+--     ranked on                      team-games where MORE THAN 3 men occupy ranks 1-3
+--     TOT alone                          1,889   43.2%   worst case 12 men
+--     TOT, SOLO                            591   13.5%
+--     TOT, SOLO, TFL   <- shipped          259    5.9%
+--     TOT, SOLO, TFL, SACKS                242    5.5%
+--     TOT, SOLO, TFL, SACKS, PD            159    3.6%
+--
+-- ⚠️ TACKLES ARE SMALL INTEGERS AND SEVEN OF THEM IS A CROWD. The offensive panels have never
+-- had to answer this — yards almost never tie.
+--
+-- 🚨 THE CHAIN IS A CLAIM ABOUT FOOTBALL AND IS STATED AS ONE SO THE NEXT READER CAN DISAGREE
+-- WITH THE FOOTBALL RATHER THAN REVERSE-ENGINEER THE SQL:
+--
+--   1. TOT   — total tackles. The measure. Not a claim.
+--   2. SOLO  — "same tackle count, more of them unassisted ranks higher". ⚠️ THE LEAST
+--      OPINIONATED TIEBREAK AVAILABLE, because SOLO is a COMPONENT of TOT rather than a
+--      different currency — and it does the heavy lifting, 43.2% -> 13.5%.
+--   3. TFL   — 🚨 THIS ONE IS A REAL CLAIM: that a tackle for loss is worth more than a tackle.
+--      It is applied ONLY to break a tie among equal tackles and equal solos, never to reorder
+--      the primary measure.
+--
+-- ❌ SACKS AND PD ARE DELIBERATELY NOT IN THE CHAIN. Sacks buy 0.4pp and PD 2.3pp, and each adds
+-- another claim — PD especially, which would rank a cornerback over a linebacker on a different
+-- skill entirely. THE RESIDUAL 5.9% IS LEFT VISIBLE INSTEAD, which is the honest answer:
+-- `tied_players` already exists on this view and a defensive card MUST read it. Three named
+-- defenders cannot always be ranked fairly, and the model says so rather than inventing a total
+-- order the sport does not have.
+--
+-- ⚠️ AND THE RESIDUAL TIE SHARES A RANK, EXACTLY AS IT DOES ON THE OTHER THREE PANELS. An
+-- earlier draft of this branch appended `player_id` to the ordering to make the rank a total
+-- order — which produced a tidy three rows per group and 0.0% visible ties. 🚨 THAT WAS A SECOND
+-- RULE IN ONE VIEW: the offensive panels return MORE THAN THREE ROWS on a tie deliberately (see
+-- above — "the honest shape rather than a silent truncation"), and a page reading this view must
+-- not need to know which panel it is looking at to know what a rank means. A silent tiebreak on
+-- an arbitrary id is precisely the "page picking one by accident of planner order" this view
+-- already refuses.
+--
 -- ⚠️ JERSEY, POSITION AND CLASS COME FROM `dim_athlete` AND ARE NULLABLE, deliberately, exactly
 -- as on the preview view: the 2026 roster load covers 138 of 305 teams, so a leader whose roster
 -- row is missing still appears with the name and the yards the box score always carries.
@@ -178,6 +231,89 @@ ranked as (
     from per_player p
     where p.game_yards > 0
 
+),
+
+-- THE DEFENSIVE PANEL. Its own aggregation, its own qualification, its own ranking measure —
+-- see the header. It never passes through `per_player`, so the offensive grain rule is intact.
+defensive_per_player as (
+
+    select
+        s.game_id, s.season, s.season_type, s.week, s.team_id,
+        s.player_id,
+        min(s.player_name) as player_name,
+        min(s.player_slug) as player_slug,
+        min(s.athlete_sk)  as athlete_sk,
+        max(s.stat_value) filter (where s.stat_type = 'TOT')   as game_tackles,
+        max(s.stat_value) filter (where s.stat_type = 'SOLO')  as game_solo_tackles,
+        max(s.stat_value) filter (where s.stat_type = 'TFL')   as game_tackles_for_loss,
+        max(s.stat_value) filter (where s.stat_type = 'SACKS') as game_sacks
+    from {{ ref('fct_player_game_stat') }} s
+    where s.stat_category = 'defensive'
+      and s.stat_type in ('TOT', 'SOLO', 'TFL', 'SACKS')
+      and s.stat_value is not null
+      and s.season >= 2024
+    group by s.game_id, s.season, s.season_type, s.week, s.team_id, s.player_id
+    -- This branch's own grain: a player who RECORDED A TACKLE in this game. 2,355 of 93,901
+    -- defensive box rows carry TOT = 0 — a man who dressed and made no tackle did not lead
+    -- anything, exactly as a runner on zero yards does not.
+    having max(s.stat_value) filter (where s.stat_type = 'TOT') > 0
+
+),
+
+defensive_ranked as (
+
+    select
+        d.*,
+        rank() over (
+            partition by d.game_id, d.team_id
+            order by d.game_tackles desc, d.game_solo_tackles desc,
+                     d.game_tackles_for_loss desc) as leader_rank,
+        count(*) over (partition by d.game_id, d.team_id) as qualified_players,
+        -- ⚠️ TIED ON THE WHOLE CHAIN, not on tackles alone — otherwise the card would say "T-1st"
+        -- about two men the ranking has in fact separated on solos.
+        count(*) over (partition by d.game_id, d.team_id, d.game_tackles,
+                                    d.game_solo_tackles, d.game_tackles_for_loss)
+            as tied_players
+    from defensive_per_player d
+
+),
+
+-- THE TWO BRANCHES MEET HERE AND NOWHERE EARLIER. Each column a panel does not have is null by
+-- construction rather than by omission — see the header on `game_yards`.
+combined as (
+
+    select
+        game_id, season, season_type, week, team_id,
+        player_id, player_name, player_slug, athlete_sk,
+        panel,
+        leader_rank, tied_players, qualified_players,
+        game_yards, game_receptions, game_carries, game_touchdowns,
+        game_completions, game_attempts, game_yards_per_carry,
+        null::numeric as game_tackles,
+        null::numeric as game_solo_tackles,
+        null::numeric as game_assisted_tackles,
+        null::numeric as game_tackles_for_loss,
+        null::numeric as game_sacks
+    from ranked
+
+    union all
+
+    select
+        game_id, season, season_type, week, team_id,
+        player_id, player_name, player_slug, athlete_sk,
+        'defensive' as panel,
+        leader_rank, tied_players, qualified_players,
+        null::numeric, null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric, null::numeric,
+        game_tackles,
+        game_solo_tackles,
+        -- ASSISTED IS DERIVED, NOT PUBLISHED BY THE FEED: total minus solo. It is the second half
+        -- of the Solo-Ast pair and exists so the card can show the tiebreak it is ordered on.
+        game_tackles - game_solo_tackles as game_assisted_tackles,
+        game_tackles_for_loss,
+        game_sacks
+    from defensive_ranked
+
 )
 
 select
@@ -197,9 +333,12 @@ select
     -- without reading prose. ⚠️ The names say IN THIS GAME, because the preview view's identical
     -- column says `receiving_yards` for a season-to-date figure and these must not be confused.
     case rk.panel
-        when 'passing' then 'receiving_yards_in_this_game'
-        when 'rushing' then 'rushing_yards_in_this_game'
-        when 'total'   then 'quarterback_total_yards_in_this_game'
+        when 'passing'   then 'receiving_yards_in_this_game'
+        when 'rushing'   then 'rushing_yards_in_this_game'
+        when 'total'     then 'quarterback_total_yards_in_this_game'
+        -- ⚠️ THE NAME CARRIES THE WHOLE CHAIN, because the ordering is a claim (see header) and a
+        -- reader must be able to see it without opening the SQL.
+        when 'defensive' then 'tackles_then_solo_then_tfl_in_this_game'
     end as leader_metric,
     rk.leader_rank,
     rk.tied_players,
@@ -208,6 +347,11 @@ select
     rk.player_name,
     rk.player_slug,
     rk.game_yards,
+    rk.game_tackles,
+    rk.game_solo_tackles,
+    rk.game_assisted_tackles,
+    rk.game_tackles_for_loss,
+    rk.game_sacks,
     {{ player_card_slots(
         panel           = 'rk.panel',
         receptions      = 'rk.game_receptions',
@@ -216,12 +360,16 @@ select
         attempts        = 'rk.game_attempts',
         yards           = 'rk.game_yards',
         touchdowns      = 'rk.game_touchdowns',
-        yards_per_carry = 'rk.game_yards_per_carry') }},
+        yards_per_carry = 'rk.game_yards_per_carry',
+        tackles         = 'rk.game_tackles',
+        solo            = 'rk.game_solo_tackles',
+        assisted        = 'rk.game_assisted_tackles',
+        tfl             = 'rk.game_tackles_for_loss') }},
     a.jersey,
     a.position,
     a.class_year_display,
     ao.as_of_ts
-from ranked rk
+from combined rk
 -- Both sides of every fixture, so a leader row knows who it was playing and which side it was on.
 join (
 

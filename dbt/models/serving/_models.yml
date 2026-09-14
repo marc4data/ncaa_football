@@ -4725,8 +4725,38 @@ models:
         description: URL-safe form of the name.
       - name: game_yards
         description: >
-          Yards in this panel's metric, in THIS GAME. The figure the ranking comes from. Always
-          greater than zero - a player on nothing did not lead anything.
+          Yards in this panel's metric, in THIS GAME. The figure the ranking comes from on the
+          three OFFENSIVE panels. Always greater than zero there - a player on nothing did not
+          lead anything. NULL on every defensive row, which is 19.9% of this view: a tackler
+          records no yards, and 0 would be a measurement of something he never did (AC-G.32).
+      - name: game_tackles
+        description: >
+          Total tackles in THIS GAME, solo plus assisted. The figure the DEFENSIVE panel's
+          ranking comes from, and always greater than zero there. NULL on the three offensive
+          panels. A128.
+      - name: game_solo_tackles
+        description: >
+          Unassisted tackles in this game. The FIRST TIEBREAK behind game_tackles, and the least
+          opinionated one available because it is a COMPONENT of the total rather than a
+          different currency - "same tackle count, more of them unassisted ranks higher". It
+          does most of the work: ranking on tackles alone leaves 43.2% of team-games with more
+          than three men in the top three, and adding this drops that to 13.5%.
+      - name: game_assisted_tackles
+        description: >
+          Assisted tackles, DERIVED as game_tackles minus game_solo_tackles because the feed
+          publishes only the two. The second half of the Solo-Ast pair in KPI slot 1, so the
+          card can show the tiebreak it is ordered on.
+      - name: game_tackles_for_loss
+        description: >
+          Tackles for loss in this game. The SECOND TIEBREAK, and the one that is a real claim
+          about football: that a tackle for loss is worth more than a tackle. It breaks ties only
+          among equal tackles AND equal solos, never reordering the primary measure. With it the
+          residual falls to 5.9%. Also KPI slot 3 on the defensive card.
+      - name: game_sacks
+        description: >
+          Sacks in this game. PUBLISHED BUT DELIBERATELY NOT IN THE RANKING CHAIN - it buys 0.4
+          percentage points of tie-breaking and costs another claim about football. Available to
+          a page that wants it; it does not decide who is on the card.
       - name: stat_1_label
         description: >
           What the first KPI slot is called - Receptions, Carries or Comp-Att depending on the panel.
@@ -4736,8 +4766,10 @@ models:
         description: First KPI slot's number, for the panel named in panel.
       - name: stat_1_value_secondary
         description: >
-          The second half of a PAIRED slot - the attempts in Comp-Att. Total panel only, NULL
-          elsewhere, which is how the page knows to render one number rather than two.
+          The second half of a PAIRED slot - the attempts in Comp-Att, the assists in Solo-Ast.
+          Total and defensive panels only, NULL elsewhere, which is how the page knows to render
+          one number rather than two. Both use format 'pair', so the defensive card needs no new
+          rendering branch.
       - name: stat_1_format
         description: >
           How to render the first slot - integer, decimal_1 or pair. Names the RENDERING, never the
