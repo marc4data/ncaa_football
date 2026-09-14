@@ -2182,7 +2182,8 @@ _Usage = namedtuple("_Usage", "timeline players")
 _USAGE_COLUMNS = """
     team_id, panel, player_id, usage_game_id,
     usage_season_type_ordinal, usage_week,
-    usage_total, usage_total_max_in_window, usage_games_in_window
+    usage_total, usage_total_max_in_window, usage_games_in_window,
+    usage_share_of_max
 """
 
 
@@ -2260,8 +2261,13 @@ def _usage_dots(entry, player_id) -> str:
                 f"border-radius:50%;border:1px solid currentColor;opacity:.35;"
                 f"display:inline-block'></span>")
             continue
+        # 🚨 R-740 / §4.2.1. THE SHARE IS READ, NOT DIVIDED. A120 published
+        # `usage_share_of_max` precisely so this page stops computing `usage_total /
+        # usage_total_max_in_window` — the test is how many consumers the number can have, not
+        # whether the result is a pixel. `usage_total` stays because the HOVER quotes the
+        # absolute share, which is a different number from the scaled one.
+        scaled = row.get("usage_share_of_max")
         share = row.get("usage_total")
-        ceiling = row.get("usage_total_max_in_window")
         window = int(row.get("usage_games_in_window") or 0)
         # 🚨 R-742. THIS USED TO FALL BACK TO `fill = 0.0` IN BOTH BRANCHES, WHICH DRAWS A LIE.
         # A played game with no usable denominator rendered a full-opacity border and an empty
@@ -2272,18 +2278,22 @@ def _usage_dots(entry, player_id) -> str:
         # `usage_total_max_in_window` is ZERO, and with a zero denominator is ZERO.
         # **The branch is dead.** So it says so, loudly, instead of drawing the one thing it
         # must not: a circle a reader would take for a measurement.
-        if share is None or ceiling is None or pd.isna(share) or pd.isna(ceiling):
+        #
+        # ⚠️ R-740 MOVED THE DIVISION UPSTREAM AND THIS GUARD STAYED. A120 published
+        # `usage_share_of_max`, which is NULL on exactly the rows that could not be scaled — so
+        # the raise now fires on the published null rather than on a denominator the page
+        # inspects, and it is still dead: 159,418 of 159,418 rows are populated.
+        if scaled is None or pd.isna(scaled):
             raise ValueError(
-                "srv_game_team_leader_usage returned a row with no usage_total or no "
-                "usage_total_max_in_window. Measured at 0 of 159,418 rows when R-742 was "
-                "written, so this is a CHANGE UPSTREAM rather than a case the page forgot — "
-                "an empty circle here would read as 'took no part' and that is why this "
-                "raises instead of drawing one.")
-        if float(ceiling) == 0:
-            raise ValueError(
-                "srv_game_team_leader_usage returned usage_total_max_in_window = 0, which "
-                "cannot scale a fill. Measured at 0 of 159,418 rows when R-742 was written.")
-        fill = max(0.0, min(1.0, float(share) / float(ceiling)))
+                "srv_game_team_leader_usage returned a row with no usage_share_of_max, which "
+                "is the published ratio and is null only where the ceiling is absent or zero. "
+                "Measured at 0 of 159,418 rows when R-740 landed, so this is a CHANGE UPSTREAM "
+                "rather than a case the page forgot — an empty circle here would read as "
+                "'took no part' and that is why this raises instead of drawing one.")
+        # ⚠️ THE CLAMP STAYS. It is not arithmetic on the metric — it is a guard on what a CSS
+        # gradient can accept, and a published ratio outside 0–1 would otherwise paint outside
+        # the circle rather than announce itself.
+        fill = max(0.0, min(1.0, float(scaled)))
         # ⚠️ THE SECOND ABSENCE IS A CAVEAT RATHER THAN A GAP, AND THE HOVER CARRIES IT. With one
         # observation the maximum IS that game, so the circle is full by construction and means
         # "we have seen him once" rather than "fully involved" — B085's single-snapshot shape.
@@ -2822,6 +2832,86 @@ def _absence_note(season, not_yet: str, out_of_scope: str) -> str:
     return not_yet
 
 
+# 🚨 R-738. THE POST-GAME CARDS READ A DIFFERENT VIEW FROM THE PREVIEW'S, AND THE TWO NAMES
+# DIFFER BY A SUFFIX. `..._through_prior_week` is what a player brought INTO the game;
+# `..._in_this_game` is what he did IN it. ⚠️ A102 spent a whole round on a pair this similar,
+# so these constants and their reader are deliberately separate from `_LEADER_COLUMNS` and
+# `_game_leaders` — one function must never be able to read both.
+_POST_GAME_LEADER_COLUMNS = """
+    team_id, panel, leader_rank, tied_players, qualified_players,
+    player_id, player_name, player_slug, jersey, position, class_year_display,
+    stat_1_label, stat_1_value, stat_1_value_secondary, stat_1_format,
+    stat_2_label, stat_2_value, stat_2_value_secondary, stat_2_format,
+    stat_3_label, stat_3_value, stat_3_value_secondary, stat_3_format
+"""
+
+# Marc, v03: *"Include QA, Top 3 Rusher"*. ⚠️ `QA` READ AS `QB` — his v02 pairing was
+# "Total → top 3 QBs", and the `total` panel ranks quarterback total yards.
+#
+# 🚨 ONE QB AND THREE RUSHERS, AND A120 MEASURED WHY IT IS NOT THREE OF EACH: of 6,736 `total`
+# groups, **6,300 — 93.5% — have fewer than three leaders**, and 3,990 have exactly one. A team
+# plays one quarterback. Marc's own wording already says so: QB singular, three rushers.
+_POST_GAME_CARDS = (("total", 1), ("rushing", 3))
+
+# ⚠️ AWAY LEFT, TABLE MIDDLE, HOME RIGHT — the away-over-home law this site follows everywhere
+# (R-522, spec §0), and the only arrangement in which a reader can tell whose card is whose
+# without reading the name. 🚨 B098's MIRROR DOES NOT TRANSFER HERE: that flanked two charts,
+# one per side; this flanks ONE TABLE that carries both sides, so the cards go outside it
+# rather than beside their own half.
+_POST_GAME_SPLIT = (1, 3, 1)
+
+
+def _post_game_flank(left, right, leaders, away, home) -> None:
+    """Both sides' cards, into the columns either side of a panel that holds both teams."""
+    for column, side in ((left, away), (right, home)):
+        column.markdown(_post_game_card_column(leaders, int(side["team_id"])),
+                        unsafe_allow_html=True)
+
+
+def _post_game_leaders(game_id: int) -> dict:
+    """Who led IN this game, keyed by (team_id, panel) — A120's `..._in_this_game` view.
+
+    ⚠️ ONE READ FOR FOUR CARD COLUMNS. Both post-game panels are flanked by the same cast, so a
+    read per panel would be two reads for one answer.
+
+    The limit is the grain restated (AC-G.39): two teams x three panels x three ranks is
+    eighteen, and ties can push a rank past one row.
+    """
+    df = query(f"""
+        select {_POST_GAME_LEADER_COLUMNS}
+        from srv_game_team_leader_in_this_game
+        where game_id = :game_id
+        limit 60
+    """, {"game_id": game_id})
+    out = {}
+    for _, r in df.iterrows():
+        out.setdefault((int(r["team_id"]), str(r["panel"])), []).append(r)
+    # Rank order is the column's own answer, not a ranking done here — B091's point about
+    # `leader_rank`, and the query carries no `order by`.
+    for rows in out.values():
+        rows.sort(key=lambda r: int(r["leader_rank"]))
+    return out
+
+
+def _post_game_card_column(leaders, team_id) -> str:
+    """One side's cards: the quarterback, then the rushers, in that order.
+
+    ⚠️ A SHORT ROW IS DRAWN SHORT (AC-G.11). A120 measured a third rusher missing 6.6% of the
+    time; a missing card is not an empty card and an empty card is not an em dash, so nothing
+    is reserved for the absence — the column simply ends.
+    """
+    cards = []
+    for panel, wanted in _POST_GAME_CARDS:
+        cards.extend((leaders or {}).get((int(team_id), panel), [])[:wanted])
+    if not cards:
+        return ("<div style='font-size:.72rem;opacity:.45;padding:.3rem 0'>"
+                "No player leaders held for this side.</div>")
+    # ⚠️ `usage=None` ON PURPOSE: R-694's dots count EARLIER games, which is a preview question.
+    # `_card_dots` returns nothing for a card with no usage, so the post-game card is the same
+    # card without them rather than a second implementation of one.
+    return _leader_block(cards)
+
+
 def _post_game(game_id, season) -> None:
     """The box score and the advanced block — what happened, once it has happened (R-505).
 
@@ -2869,8 +2959,12 @@ def _post_game(game_id, season) -> None:
 
         away = next((r for r in played if not bool(r.get("is_home"))), played[0])
         home = next((r for r in played if bool(r.get("is_home"))), played[-1])
+        # R-738. ONE read, four card columns — both panels are flanked by the same cast.
+        leaders = _post_game_leaders(game_id)
 
-        st.markdown(
+        left, middle, right = st.columns(_POST_GAME_SPLIT)
+        _post_game_flank(left, right, leaders, away, home)
+        middle.markdown(
             _side_heading(away, home)
             + _comparison(away, home, _BOX_SCORE_ROWS)
             + _custom_row(away, home, "Third down",
@@ -2889,7 +2983,7 @@ def _post_game(game_id, season) -> None:
         # front of a reader; dividing it into 31:46 is arithmetic in the page. A080 published
         # possession_display, the same answer srv_drive gave for durations, so the row exists
         # now and nothing here computes it. Sanity check on 401752665: 29:38 + 30:22 = 60:00.
-        st.markdown(
+        middle.markdown(
             _custom_row(away, home, "Possession",
                         lambda r: r.get("possession_display") or fmt.EM_DASH),
             unsafe_allow_html=True)
@@ -2911,7 +3005,13 @@ def _post_game(game_id, season) -> None:
         rows = [r for r in _ADVANCED_ROWS
                 if r[1] != "defense_havoc_rate" or all(bool(s.get("has_havoc"))
                                                        for s in advanced)]
-        st.markdown(
+        # R-738. ⚠️ THE SAME CAST FLANKS BOTH PANELS, AND THAT IS A DECISION RATHER THAN A
+        # SHORTCUT. Marc named ONE card list against TWO panels; these are the same game's
+        # leaders, and a reader scrolling from the box score to the advanced block should not
+        # find the cast has changed under him.
+        adv_left, adv_middle, adv_right = st.columns(_POST_GAME_SPLIT)
+        _post_game_flank(adv_left, adv_right, leaders, away, home)
+        adv_middle.markdown(
             _side_heading(away, home) + _comparison(away, home, rows, glossary),
             unsafe_allow_html=True)
 
@@ -2957,6 +3057,25 @@ def _post_game(game_id, season) -> None:
 # passing/INT is omitted rather than inverted or relabelled.
 #
 # (label, stat_category, stat_type)
+# 🚨 R-738 CONSIDERED DELETING THIS SECTION AND KEPT IT. THE MEASUREMENT IS WHY.
+#
+# Marc, v03: *"Replace Game Leaders section by adding player cards"* — which reads as DELETE,
+# and that was Cowork's call unless the loss turned out to be embarrassing. ⚠️ **It is.**
+#
+# The prompt put it as "the short view answers 50 stat pairs and the cards answer 3". The VIEW
+# does carry 50 — measured — but this PANEL has only ever rendered FOUR, and of those:
+#
+#     Passing yards    ✅ now also on the QB card      (Comp-Att · Yards · TD)
+#     Rushing yards    ✅ now also on the rusher cards (Carries · Yards · Yds/Carry)
+#     Receiving yards  🚨 NOWHERE ELSE — Marc's card list is "QB, Top 3 Rusher", no receiver
+#     Tackles          🚨 NOWHERE ELSE, and `srv_game_team_leader_in_this_game` HAS NO
+#                         DEFENSIVE PANEL AT ALL — passing, rushing, total, and nothing else.
+#                         **This is the only defensive figure on the whole Matchup page.**
+#
+# ⚠️ NARROWING IT TO THE TWO THE CARDS DO NOT ANSWER WAS BUILT AND THEN REVERTED. It is a THIRD
+# option nobody asked for, it changes what the section ANSWERS rather than how prominent it is,
+# and Marc judges that from a picture he has not seen yet. The cards ship; if the two duplicated
+# rows then read as repetition, removing them is one edit to this tuple.
 _LEADER_ROWS = (
     ("Passing yards", "passing", "YDS"),
     ("Rushing yards", "rushing", "YDS"),
