@@ -666,7 +666,7 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
         st.caption(
             f"Market-only edition. Model-derived framing is withheld before week "
             f"{MODEL_WEEK_FLOOR} because the season has not trained enough games to say "
-            f"anything honest; these three lists are the closing market and the result.")
+            f"anything honest; both lists are the closing market and the result.")
 
     graded = df[df["spread_favorite_side"].notna() & df["actual_margin"].notna()].copy()
     if graded.empty:
@@ -705,40 +705,65 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
         lambda r: r.market_implied_home_win_probability if r.spread_favorite_side == "home"
         else r.market_implied_away_win_probability, axis=1)
 
-    missed = graded[graded["ats"] < 0].sort_values("ats").head(10)
-    lost = graded[graded["fav_margin"] < 0].sort_values(
+    # 🚨 TWO LISTS, NOT THREE — AND THE UPSETS LEAD. R-711, and Marc's words were
+    # "Underperformers - should be biggest upsets."
+    #
+    # ⚠️ THE THING HE ASKED FOR WAS ALREADY ON THE PAGE, SECOND, UNDER A METHOD DESCRIPTION.
+    # `lost` — favorites that lost outright, ranked by how likely the market thought they were to
+    # win — IS "biggest upsets" by the best definition this warehouse can express. It was headed
+    # "Underperformers — by how likely the market thought they were to win", which is a method
+    # standing in for a title, and it sat below a list headed "Underperformers". He read the
+    # first heading and asked for what was underneath it.
+    #
+    # 🚨 AND THE OTHER TWO LISTS WERE THE SAME ROWS. Not overlapping — IDENTICAL, by
+    # construction. The two expressions were character-for-character the same:
+    #
+    #     missed = graded[graded["ats"] < 0].sort_values("ats").head(10)
+    #     covers = graded[graded["ats"] < 0].sort_values("ats").head(10)
+    #
+    # so the section spent two of its three lists on one set of games, framed twice, and buried
+    # the third. The old caption argued for keeping both — "the reader's question differs: who
+    # disappointed, and who was undervalued" — and that argument was written when the upset list
+    # was NOT the headline. Once "biggest upsets" leads, "who disappointed" is the same question
+    # again, asked twice.
+    #
+    # ✅ THE UNDERDOG FRAMING SURVIVES, AND THAT IS A DECISION WITH A REASON: a section about
+    # upsets should name the team that did the unlikely thing, not the one that failed to.
+    # ⚠️ Nothing is deleted but a PRESENTATION — `ats` keeps a reader in the surviving list.
+    upsets = graded[graded["fav_margin"] < 0].sort_values(
         "fav_win_prob", ascending=False, na_position="last").head(10)
     covers = graded[graded["ats"] < 0].sort_values("ats").head(10)
 
-    cols = [Col("favorite", "Favorite"), Col("opponent", "Opponent"),
-            Col("spread", "Spread", kind="num", dp=1),
-            Col("fav_margin", "Margin", kind="num"),
-            Col("ats", "vs spread", kind="num", dp=1)]
-
-    st.markdown("**Underperformers — by points missed against the closing spread**")
-    table.render(missed, cols, caption="Favorites, ranked by how far short of the number they finished.")
-
-    st.markdown("**Underperformers — by how likely the market thought they were to win**")
-    table.render(lost, cols + [Col("fav_win_prob", "Win prob", kind="num", dp=3)],
-                 caption="Favorites that lost outright, ranked by pregame market-implied win probability.")
+    st.markdown("**Biggest upsets**")
+    st.caption(
+        "Favorites that lost outright, ranked by how likely the market thought the loser was "
+        "to win \u2014 not by the size of the spread, and not by the final margin. A short "
+        "favorite losing a coin-flip is not an upset; a heavy one losing is.")
+    table.render(
+        upsets,
+        [Col("favorite", "Lost"), Col("opponent", "Beaten by"),
+         Col("spread", "Favored by", kind="num", dp=1),
+         Col("fav_margin", "Margin", kind="num"),
+         Col("fav_win_prob", "Market gave them", kind="num", dp=3)],
+        caption="Ranked by the loser's pregame market-implied win probability.")
 
     st.markdown("**Biggest underdog covers**")
     st.caption(
-        "⚠️ This is the same set of games as the first list, read from the other side: a "
-        "favorite missing by X is the underdog covering by X. Both are shown because the "
-        "reader's question differs — who disappointed, and who was undervalued.")
+        "Underdogs the market priced too low, ranked by how far past the number they finished. "
+        "These are graded against the spread rather than the result, so a team here may still "
+        "have lost the game.")
     table.render(covers.assign(underdog=covers["opponent"], beat=covers["ats"].abs()),
                  [Col("underdog", "Underdog"), Col("favorite", "Favorite"),
                   Col("spread", "Getting", kind="num", dp=1),
                   Col("beat", "Covered by", kind="num", dp=1)],
-                 caption="The mirror of the first list.")
+                 caption="Ranked by points beyond the closing spread.")
 
     disagree = int(graded["favorite_definitions_disagree"].fillna(False).sum())
     if disagree:
         st.caption(
-            f"⚠️ In {disagree} of these games the spread and the moneyline named different "
-            "favorites. The first and third lists use the spread; the second uses the "
-            "moneyline, because that is what an implied win probability comes from.")
+            f"\u26a0\ufe0f In {disagree} of these games the spread and the moneyline named "
+            "different favorites. The upsets list uses the moneyline, because that is what an "
+            "implied win probability comes from; the covers list uses the spread.")
 
 
 def _movers(scope, depth: int) -> None:

@@ -865,3 +865,144 @@ def test_the_curve_is_never_smoothed():
     plotted = _polyline_xs(today._sparkline_svg(frame))
     assert len(plotted) == 40, (
         f"{len(plotted)} points plotted from a 40-play frame — something is resampling")
+
+
+# --- the upsets section (R-711) ---------------------------------------------------------
+
+def _code_only(source: str) -> str:
+    """The module's source with `#` comment lines removed.
+
+    🚨 A SOURCE-GREP ASSERTION MUST SCAN WHAT RUNS, NOT WHAT IS WRITTEN ABOUT IT. A123 removed
+    a duplicated list and recorded the removed expressions in a comment — which is exactly the
+    right thing to leave behind, and it made a raw grep count three occurrences of a filter that
+    appears once in the code. Deleting the comment to satisfy the grep would have been the wrong
+    repair: the test was measuring the file, and the claim is about the program.
+    """
+    return "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#"))
+
+
+def _graded(*rows):
+    """Graded games as `_recap_lists` builds them, after the derived columns exist."""
+    import pandas as pd
+    return pd.DataFrame([
+        {"favorite": f, "opponent": o, "spread": s, "fav_margin": m,
+         "ats": m - s, "fav_win_prob": w}
+        for f, o, s, m, w in rows])
+
+
+def test_the_upsets_list_is_ordered_by_how_likely_the_loser_was_to_win():
+    """🚨 THE ORDERING IS THE CLAIM THE HEADING MAKES, and it is the only thing separating
+    "biggest upsets" from "a list of favorites that lost".
+
+    ⚠️ AND THE FIRST VERSION OF THIS TEST WAS WORTHLESS, WHICH THE STAGED BREAK PROVED RATHER
+    THAN THE REVIEW. It built its own frame, applied its own `sort_values`, and asserted the
+    result — so it asserted that PANDAS SORTS, never that the page does. Flipping the page to
+    `ascending=True` left all thirty tests green. That is this file's own recorded failure
+    ("the second draft constructed its own Col list ... it was testing a list the test wrote
+    rather than the one the page writes") repeated in a new panel, and §6's fourth way a staged
+    break proves nothing.
+
+    ✅ SO THIS CALLS THE REAL `_recap_lists` AND READS THE FRAME IT HANDS TO `table.render`.
+    Sorting ascending leaves every row real and the count right, and turns the list into THE
+    LEAST SURPRISING UPSETS while it is still headed "Biggest" — the picture is the only place
+    that shows, so the order is what has to be asserted.
+
+    The live shape this mirrors, 2026 week 2: Oregon were 23.5-point favorites given a 91.3%
+    market-implied chance and lost to Oklahoma State, while Idaho at 3.5 and 60.3% is the least
+    surprising of the seventeen.
+    """
+    import sys
+    import pandas as pd
+
+    site_path = str(ROOT / "site")
+    path_added = site_path not in sys.path
+    if path_added:
+        sys.path.insert(0, site_path)
+    saved_st = sys.modules.get("streamlit")
+    stub, _calls = _stub_streamlit()
+    sys.modules["streamlit"] = stub
+    try:
+        _reload_all()
+        page = sys.modules["views.today"]
+        assert page.st is stub, "views.today is not talking to the stub — the reload failed"
+
+        rendered = []
+        page.table.render = lambda df, columns, *a, **k: rendered.append(df)
+
+        # Three favorites that lost: the market gave them 91.3%, 65.1% and 60.3%.
+        games = pd.DataFrame([
+            _upset_row("Idaho", "Lamar", spread=-3.5, win_prob=0.603, margin=-6),
+            _upset_row("Oregon", "Oklahoma State", spread=-23.5, win_prob=0.913, margin=-8),
+            _upset_row("Oklahoma", "Michigan", spread=-4.5, win_prob=0.651, margin=-7),
+        ])
+        page._recap_lists(games, _Scope())
+
+        assert rendered, "the panel rendered no table at all"
+        order = list(rendered[0]["favorite"])
+        assert order == ["Oregon", "Oklahoma", "Idaho"], (
+            f"the upsets list must lead with the least likely loss, got {order}")
+    finally:
+        if saved_st is not None:
+            sys.modules["streamlit"] = saved_st
+        else:
+            sys.modules.pop("streamlit", None)
+        _reload_all()
+        if path_added:
+            sys.path.remove(site_path)
+
+
+class _Scope:
+    """The minimum a recap panel asks of its scope."""
+    week = 9
+    season = 2026
+
+    def describe(self):
+        return "2026 week 9"
+
+
+def _upset_row(favorite, opponent, spread, win_prob, margin):
+    """One graded game where the HOME side was favored and lost by `margin`."""
+    return {
+        "home_team_display": favorite, "away_team_display": opponent,
+        "spread_favorite_side": "home", "moneyline_favorite_side": "home",
+        "favorite_definitions_disagree": False,
+        "spread_at_close": spread, "spread_current": spread,
+        "actual_margin": -margin, "actual_margin_home_perspective": margin,
+        "market_implied_home_win_probability": win_prob,
+        "market_implied_away_win_probability": 1 - win_prob,
+    }
+
+
+def test_the_recap_section_no_longer_ships_one_set_of_games_twice():
+    """🚨 THE TWO REMOVED LISTS WERE IDENTICAL BY CONSTRUCTION, not merely overlapping.
+
+        missed = graded[graded["ats"] < 0].sort_values("ats").head(10)
+        covers = graded[graded["ats"] < 0].sort_values("ats").head(10)
+
+    Character for character the same expression, so the section spent two of its three lists on
+    one set of games and buried the upsets underneath them. This pins the collapse: exactly one
+    `ats < 0` list survives.
+    """
+    code = _code_only(SOURCE)
+    assert code.count('graded[graded["ats"] < 0]') == 1, (
+        "two lists filtering on `ats < 0` is the duplicate R-711 removed — they cannot "
+        "differ, because the filter and the sort are the whole definition")
+    assert "Underperformers" not in code, (
+        "Marc read that heading and asked for what was underneath it; the section leads with "
+        "the upsets now")
+    assert "**Biggest upsets**" in code
+
+
+def test_ats_still_has_a_reader_after_the_collapse():
+    """⚠️ THE ROUND REMOVED A PRESENTATION, NOT A MEASURE.
+
+    `ats` is computed in the page — `fav_margin - spread` — which is §4.2.1's line, and moving
+    it upstream needs a game-grain column that does not exist yet (`srv_game_team` carries
+    `ats_margin_final` at game x TEAM grain). That is a model round, deliberately not this one.
+    This test records that the column still has exactly one consumer, so that round knows how
+    small it is.
+    """
+    code = _code_only(SOURCE)
+    assert 'covers["ats"].abs()' in code, "the underdog covers list reads `ats`"
+    assert code.count('graded["ats"] = ') == 1, "computed once"
