@@ -414,27 +414,33 @@ def test_the_pairing_runs_across_sides_not_down_one(panel):
     appear TOGETHER, in that order, on one line — Kentucky's number beside AUBURN's, not
     beside Kentucky's own 132.6 allowed.
 
-    This was verified by breaking it: swapping the two arguments of `_yardage_direction` in
-    the panel makes both assertions below fail, because the away block then reads 154.4
-    against Kentucky's own 132.6.
+    🚨 R-756 MOVED WHERE THIS IS ASSERTED AND NOT WHAT IT ASSERTS. It used to read the delta
+    table's text rows; Marc had those removed, and the same two figures are now the chart's own
+    annotation. ✅ **Reading them off the CHART is a stronger claim than reading them off a block
+    of markup: the old form asked whether two strings appeared somewhere in the same block, this
+    one asks what the rushing chart itself was built from.**
+
+    ⚠️ AND THE PAIRING IS ASSERTED PER CHART, which is what makes the negative half bite: the
+    away rushing chart must contain Auburn's 84.5 and must NOT contain Kentucky's own 132.6.
     """
     entries, _ = panel(_game(), _both())
-    blocks = [_plain(body) for kind, body in entries if kind == "markdown"]
-    away_block = " ".join(b for b in blocks if "Kentucky offense" in b)
-    assert away_block, "the away team's attack was never drawn"
-    assert "154.4" in away_block, "Kentucky's rushing offense is missing"
-    assert "84.5" in away_block, \
-        "Kentucky's attack is not paired with AUBURN's rushing defense"
-    assert "132.6" not in away_block, \
-        "the panel paired Kentucky's offense with Kentucky's own defense — one team " \
-        "described as though it were a matchup"
+    charts = _charts(entries)
+    rushing = [c for c in charts if _metric_of(c) == "Rushing"]
+    assert len(rushing) == 2, f"expected one rushing chart per side, got {len(rushing)}"
+    away, home = rushing
+    away_text = " ".join(_annotation(away)[0])
+    assert "154.4" in away_text, f"Kentucky's rushing offense is missing: {away_text}"
+    assert "84.5" in away_text, (
+        f"Kentucky's attack is not paired with AUBURN's rushing defense: {away_text}")
+    assert "132.6" not in away_text, (
+        f"the panel paired Kentucky's offense with Kentucky's own defense — one team "
+        f"described as though it were a matchup: {away_text}")
 
-    home_block = " ".join(b for b in blocks if "Auburn offense" in b)
-    assert home_block, "the home team's attack was never drawn"
-    assert "170.8" in home_block and "132.6" in home_block, \
-        "Auburn's attack is not paired with Kentucky's rushing defense"
-    assert "84.5" not in home_block, \
-        "the panel paired Auburn's offense with Auburn's own defense"
+    home_text = " ".join(_annotation(home)[0])
+    assert "170.8" in home_text and "132.6" in home_text, (
+        f"Auburn's attack is not paired with Kentucky's rushing defense: {home_text}")
+    assert "84.5" not in home_text, (
+        f"the panel paired Auburn's offense with Auburn's own defense: {home_text}")
 
 
 def test_both_directions_are_drawn(panel):
@@ -446,11 +452,18 @@ def test_both_directions_are_drawn(panel):
 
 
 def test_rushing_and_passing_are_both_present_and_separate(panel):
-    """Marc named both, separately, and asked for them separately rather than as a total."""
-    body = _text(panel(_game(), _both())[0])
+    """Marc named both, separately, and asked for them separately rather than as a total.
+
+    ⚠️ R-756 TOOK THE FIGURES OFF THE PAGE'S TEXT AND LEFT THEM ON THE CHARTS, so the eight
+    numbers are gathered from the annotations rather than from the rendered body. The claim is
+    unchanged: every one of them is on the panel somewhere a reader can see it.
+    """
+    entries = panel(_game(), _both())[0]
+    body = _text(entries)
     assert "Rushing" in body and "Passing" in body
+    drawn = " ".join(t for c in _charts(entries) for t in _annotation(c)[0])
     for figure in ("154.4", "207.0", "170.8", "170.0", "84.5", "234.4", "132.6", "253.0"):
-        assert figure in body, f"{figure} is missing from the panel"
+        assert figure in drawn, f"{figure} is on no chart in the panel: {drawn}"
 
 
 # --- the denominator travels with the numbers (AC-G.33) ------------------------------------
@@ -749,7 +762,26 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
     # ⚠️ TO ADD ONE you must be able to finish "this page divides here and the warehouse cannot
     # do it because…" — the bar `PROVIDED_BY_THE_PAGE` in ci/check_page_reads.py sets for its
     # own exceptions. **`site/views/matchup.py` now divides nowhere at all.**
-    allowed = {}
+    #
+    # 🚨 R-804 ADDED THE FIRST ENTRY SINCE THE LIST WAS EMPTIED, AND IT IS A DIFFERENT KIND OF
+    # DIVISION FROM EVERY ONE THIS GUARD WAS BUILT FOR — which is worth saying, because a guard
+    # whose exceptions are all one shape stops being read.
+    #
+    # Finishing the required sentence: **this page divides here, and the warehouse cannot do it,
+    # because the quantity is a SCREEN-PIXEL MIDPOINT.** `_ANNOTATION_BLOCK` is how far left of
+    # the plot's right edge the annotation may reach, and it must stay in the right half or it
+    # sits over the middle-half band. `_CHART_SIDE` is a layout constant in this file; serving
+    # has never heard of it, there is no column it could disagree with, and no export reads it.
+    #
+    # ⚠️ THE DISTINCTION THIS ENTRY DRAWS, AND IT IS THE ONE §4.2.1 ACTUALLY MAKES: the rule is
+    # about METRIC arithmetic — a quantity a second consumer could want and therefore a quantity
+    # two consumers could compute differently. A pixel derived from a constant declared twelve
+    # lines above has exactly one consumer by construction.
+    # ✅ B105 derived it rather than writing the literal 80 ON PURPOSE: R-804 moved `_CHART_SIDE`
+    # from 240 to 180 and the annotation's FIXED 104px block silently became 58% of the plot —
+    # `test_the_annotation_is_anchored_to_the_TOP_RIGHT` caught it. A derived constant cannot be
+    # left behind by the next round that moves the square.
+    allowed = {"_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10"}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "
@@ -983,8 +1015,13 @@ def test_a_figure_OFF_the_weeks_scale_draws_no_chart_rather_than_a_point_beside_
     2026-09-11. The away column's rushing chart pairs Marist's `_for` against that `_allowed`,
     so it is the x value that leaves the frame.
 
-    🚨 SKIPPING IT LOSES NO MEASUREMENT. `_yardage_direction` prints both figures as text
-    directly above, so what is dropped is a picture that could not be honest — not a number.
+    🚨 SKIPPING IT LOSES NO MEASUREMENT — AND B105 HAD TO MEND THAT, NOT JUST RESTATE IT.
+    This used to read "`_yardage_direction` prints both figures as text directly above". R-756
+    deleted that block on Marc's word, and the annotation that carries the figures now lives
+    INSIDE the chart — so on the one path where the chart is DROPPED, the figures went with it
+    and this sentence became false. ✅ The caption carries them itself now
+    (`_off_the_frame_figures`), which is what `test_the_dropped_chart_SAYS_it_was_dropped`
+    asserts alongside this.
     """
     sides = [_side(HOME_ID, "Stetson", rushing_yards_allowed_per_game=393.0),
              _side(AWAY_ID, "Marist")]
@@ -1373,22 +1410,29 @@ def test_the_delta_is_READ_from_the_column_and_never_subtracted_in_the_page(pane
     🚨 WHY IT MATTERS BEYOND THE RULE: the Excel export reads the same column. A subtraction
     here would make the page and the workbook disagree about one fact, which is R-645 exactly —
     the defect Marc found himself on a betting page.
+
+    ⚠️ R-756 MOVED WHERE IT IS READ. The delta chip on the removed table used to carry this;
+    the annotation carries it now, and the fixture's disagreement — 38.0 published against a
+    69.9 subtraction — is what still makes only one of the two readings possible.
     """
     entries, _ = panel(_game(), _both())
-    body = _text(entries)
-    assert "+38.0" in body, (
-        f"the rushing delta is not A106's column value: {body[:400]}")
-    assert "+69.9" not in body, (
-        "the page SUBTRACTED 154.4 - 84.5 instead of reading the column (§4.2)")
+    drawn = " ".join(t for c in _charts(entries) for t in _annotation(c)[0])
+    assert "+38.0" in drawn, (
+        f"the rushing delta is not A106's column value: {drawn}")
+    assert "+69.9" not in drawn, (
+        "the page SUBTRACTED 154.4 - 84.5 instead of reading the column (§4.2.1)")
 
 
 def test_a_NEGATIVE_delta_carries_its_sign_without_relying_on_colour(panel):
     """⚠️ AC-G.22. Marc asked for negatives in red; the leading minus is what a reader in
     greyscale, or with a colour vision deficiency, gets instead. Michigan's rushing delta is
-    -6.0 — measured — so the sign is on the page whether or not the colour renders."""
+    -6.0 — measured — so the sign is on the page whether or not the colour renders.
+
+    ⚠️ R-756 TOOK THE CHIP; the annotation's bold delta line carries the sign now."""
     entries, _ = panel(_game(), _both())
-    body = _text(entries)
-    assert "-6.0" in body, f"the negative delta lost its sign: {body[:400]}"
+    drawn = " ".join(t for c in _charts(entries) for t in _annotation(c)[0])
+    assert "-6.0" in drawn or "\u22126.0" in drawn, (
+        f"the negative delta lost its sign: {drawn}")
 
 
 # --- 🚨 R-609: the charts are square, asserted on what Streamlit ships --------------------------
@@ -2031,21 +2075,119 @@ def test_the_CHART_SLOT_is_wide_enough_for_the_square_it_holds():
     both complaints with one number: the gap closes because the slot no longer exceeds its
     contents, and the card gets the width R-745 has wanted for four rounds.
 
-    ⚠️ THE FLOOR IS WHAT THIS ASSERTS. `_CHART_SIDE` is 240 and `autosize: pad` ships the square
-    PLUS its axis labels — about 300px — so a chart slot below ~55% of a ~520px half clips the
-    axis, which B098 measured and B100 measured again. **This is a floor, not the ratio: nothing
-    here can read a pixel width, so the raster in the report is the evidence and this is the
-    guard that stops a future round tightening it blind.**
+    🚨 R-804 RE-DERIVED EVERY NUMBER IN THIS DOCSTRING, BECAUSE FOUR ROUNDS REASONED FROM
+    ESTIMATES AND THE ESTIMATES WERE WRONG. Measured in the browser at 1300px, sidebar open:
+
+        the page's content              840px
+        one half, `st.columns(2)`       412px    ← the old text here said "~520px"
+        the gap `st.columns` inserts     16px
+        so the pair splits              396px
+        the shipped chart               227px    ← the old text here said "about 300px"
+
+    ⚠️ THE FLOOR IS WHAT THIS ASSERTS, and it is now arithmetic rather than a guess: the chart
+    slot is `396 × share`, and it must hold 227px. `227 / 396` is **0.573**, so anything at or
+    below that CLIPS — which is what B098, B100, B104 and B106 each measured as a symptom
+    without ever measuring the column. 0.58 is the floor with a little headroom.
+
+    ⚠️ AND THE CEILING IS THE CARD, WHICH IS NOT SLACK. At 0.68 the card gets 127px, and B106
+    measured its name row at 134px inside a 150px card with names ALREADY ellipsising. Above
+    that the header Marc spent B103, B104 and B106 shaping stops fitting at all.
+
+    **Nothing here can read a pixel, so the raster in B105's report is the evidence and this is
+    the guard that stops a future round tightening it blind.**
     """
     widths = _module_constant("_SLOT_WIDTHS")
     assert set(widths) == {"cards", "chart"}, (
         f"a third slot is back — R-750 removed the slack column because at 1300px there is no "
         f"slack to give: {widths}")
     share = widths["chart"] / sum(widths.values())
-    assert 0.55 <= share <= 0.70, (
-        f"the chart slot takes {share:.0%} of the pair. Below ~55% the 240px square plus its "
-        f"axis labels clips (B098, B100); above ~70% the dead space Marc reported comes back "
-        f"and the card cannot hold the three-column header R-753 specified.")
+    assert 0.58 <= share <= 0.68, (
+        f"the chart slot takes {share:.0%} of the pair, which is 396px at 1300px with the "
+        f"sidebar open. Below 58% the {_module_constant('_CHART_SIDE')}px square plus its 47px "
+        f"of axis chrome does not fit and DRAWS OVER the column beside it (R-755); above 68% "
+        f"the card drops under 127px and cannot hold the header R-753 specified.")
+
+
+# The two numbers B105 measured in the browser, pinned where the assertion can use them.
+# ⚠️ THEY ARE MEASUREMENTS, NOT TARGETS: 246 is what `st.columns([1, 1.6])` gave the chart slot
+# inside a 412px half at 1300px with the sidebar open, and 47 is `shipped width − _CHART_SIDE`
+# for the same chart in the same browser. Both were read off the live page, not derived.
+_CHART_SLOT_AT_1300 = 246
+_CHART_CHROME = 47
+# Average glyph width as a fraction of font size, for this page's sans stack. ⚠️ MEASURED in the
+# browser by B106 — 1.5rem held 12.2 characters in 134px, 1.25rem held 14.5, 1.0rem held 17.0 —
+# which is 0.52em per character at all three sizes.
+_AXIS_LABEL_EM = 0.52
+
+
+def test_the_AXIS_LABELS_have_room_to_be_read_at_the_smaller_square():
+    """🚨 THIS TEST EXISTS BECAUSE THE ROUND'S OWN STAGED BREAK CAME BACK GREEN (R-744).
+
+    B105 was asked to restore the eight-tick axis and assert the PAD. It did, and the pad
+    assertion passed — **because the tick count moves the shipped width by exactly zero.** The
+    x axis runs UNDER the plot, so its labels cost HEIGHT; the 47px of horizontal chrome is all
+    y axis. A break that cannot fail proves nothing, and the honest response is not to drop it
+    but to assert the thing the tick count is actually FOR.
+
+    ⚠️ WHICH IS LEGIBILITY, AND ONLY SINCE R-804. At 240px, 8 ticks sat 34px apart and nobody
+    had to think about it. At 180px they sit 22px apart against a label about 16px wide — a
+    three-digit number at `_AXIS_LABEL_SIZE`, at roughly 0.52em per character. **That is 6px of
+    clearance, which is a solid band of digits rather than an axis.**
+
+    ⚠️ ASSERTED WITHOUT A DIVISION ON PURPOSE — `2 * ticks * label <= side` is the same claim as
+    "the labels take under half the axis" and does not need an entry in
+    `test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to`.
+    """
+    ticks = _module_constant("_AXIS_TICKS")
+    side = _module_constant("_CHART_SIDE")
+    # A three-digit tick label — "350", "700" — at the axis label size. Every axis this panel
+    # draws is per-game yardage, so three digits is the real worst case and not a guess.
+    label = 3 * _AXIS_LABEL_EM * _module_constant("_AXIS_LABEL_SIZE")
+    assert 2 * ticks * label <= side, (
+        f"{ticks} ticks of about {label:.0f}px each on a {side}px axis leaves "
+        f"{(side - ticks * label) / ticks:.0f}px between labels — they read as one band rather "
+        f"than as a scale a reader can interpolate from")
+    assert ticks >= 3, (
+        f"{ticks} ticks cannot carry a scale — a reader needs a low, a high and something "
+        f"between them to interpolate")
+
+
+def test_the_shipped_CHART_FITS_the_column_it_is_drawn_in():
+    """🚨 R-804/R-817. THE ONE ASSERTION FOUR ROUNDS OF SYMPTOM-CHASING DID NOT HAVE.
+
+    B098, B100, B104 and B106 each reported a DIFFERENT symptom — a clipped axis label, a
+    clipped annotation, cards drawn over a chart — and every one of them was the same fact:
+    **the chart is wider than its column, and a Streamlit column does not clip its children
+    (R-755), so the overflow lands on whatever sits to the right.** At 240px the shipped box was
+    305px in a 246px column: 59px over.
+
+    ⚠️ ASSERTED ON THE PAD, NOT ON THE TICK COUNT, AND THE DIFFERENCE IS THE ROUND'S FINDING.
+    B105 swept every axis lever with vl_convert and measured that **the tick count moves the
+    width by ZERO** — the x axis runs UNDER the plot, so its labels cost height. The whole 47px
+    is the y axis: its rotated title and its tick labels. A test that counted ticks would pass
+    any styling that kept four of them and would say nothing about whether the chart fits.
+
+    ⚠️ WHY IT PINS A NUMBER RATHER THAN COMPILING THE SPEC: the measurement was taken with
+    `vl_convert`, which is NOT in `requirements*.txt` — it is in the local venv incidentally.
+    A test that imported it would ERROR in CI, and guarding it with `importorskip` would make
+    it skip there, which is the silently-thinner green run §3.4 exists to stop. **So the
+    measurement is pinned and the raster is the evidence, which is this file's own idiom.**
+    """
+    side = _module_constant("_CHART_SIDE")
+    shipped = side + _CHART_CHROME
+    assert shipped <= _CHART_SLOT_AT_1300, (
+        f"the chart ships at {shipped}px ({side}px square + {_CHART_CHROME}px of y-axis chrome) "
+        f"into a {_CHART_SLOT_AT_1300}px column at 1300px with the sidebar open. It is "
+        f"{shipped - _CHART_SLOT_AT_1300}px too wide, and a Streamlit column does not clip its "
+        f"children — it draws over the one beside it (R-755).")
+    # ⚠️ HEADROOM, NOT A HAIR — B104's rule, after a row that was two per cent over.
+    assert shipped <= _CHART_SLOT_AT_1300 - 10, (
+        f"the chart fits by only {_CHART_SLOT_AT_1300 - shipped}px. Font metrics differ between "
+        f"browsers and this margin is the whole defence against the class.")
+    # ⚠️ AND A FLOOR, so nobody answers a future overflow by shrinking the square to nothing.
+    assert side >= 150, (
+        f"a {side}px plot carries a band, two median rules, a point and a three-line "
+        f"annotation; below ~150 the annotation alone is half of it")
 
 
 def test_the_WIDTHS_are_pinned_to_the_SLOT_and_not_to_the_column_index(panel):
@@ -2244,15 +2386,27 @@ def test_the_delta_CHIP_no_longer_carries_a_COLOUR(panel):
 
     ⚠️ AND IT COSTS NOTHING A GREYSCALE READER HAD: B091 established on this very delta that
     the SIGN carries it and the colour only agrees (AC-G.22).
+    🚨 R-756 DELETED THE CHIP ITSELF, AND THE RULING OUTLIVES IT. The same comparison is now
+    the annotation's bold bottom line, an inch from a mark whose COLOUR says the opposite thing
+    — so "red points two ways in one panel" is live, on the same chart rather than across it.
+    ✅ Asserted on the annotation's own layers: the delta line carries no colour, and the sign
+    still carries the fact.
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    chips = [str(b) for k, b in entries if k == "markdown" and "gained" in str(b)]
-    assert chips, "the direction block did not render"
-    for markup in chips:
-        assert "cfdb-negative" not in markup and "cfdb-positive" not in markup, \
-            "the delta chip is still tinted, so red points two ways in one panel"
-    # The sign is what carries it, and it must still be there.
-    assert "-6.0" in _plain(chips[-1]) or "−6.0" in _plain(chips[-1])
+    charts = _charts(entries)
+    assert charts, "no charts drew, so the annotation could not be checked"
+    for chart in charts:
+        for layer in chart.to_dict().get("layer", []):
+            mark = layer.get("mark")
+            if not isinstance(mark, dict) or mark.get("type") != "text":
+                continue
+            if mark.get("fontWeight") != "bold":
+                continue
+            assert "color" not in mark and "fill" not in mark, (
+                f"the delta line is tinted, so red points two ways within one chart: {mark}")
+    drawn = " ".join(t for c in charts for t in _annotation(c)[0])
+    assert "-6.0" in drawn or "\u22126.0" in drawn, (
+        f"the sign is what carries it and it is gone: {drawn}")
 
 
 # --- 🚨 R-722: the mark, and the pairing a presence assertion cannot see -------------------
