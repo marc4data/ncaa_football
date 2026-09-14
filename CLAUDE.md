@@ -1,5 +1,11 @@
 # CLAUDE.md — Claude Code repo guidance
 
+> 🚨 **THIS IS NOT THE PROJECT CHARTER.** The charter is `../CLAUDE.md`, one directory up,
+> outside this repository — roles, naming, the round protocol, and how a session's terminal
+> reply ends. Claude Code does not auto-load it, because this directory is the git root.
+> **READ IT AT THE START OF EVERY SESSION.**
+
+
 This file seeds repo-level engineering conventions, commands, and layout for the Claude Code implementation of the cfdb project.
 
 Purpose

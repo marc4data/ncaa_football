@@ -14,12 +14,23 @@
 -- ⚠️ AND IT ASSERTS THE SLOT COLUMNS, NOT ONLY `game_yards`. The slots are what a reader sees, and
 -- they come from a shared macro that the preview view also calls — so a future edit to
 -- `player_card_slots` that reached for the wrong argument would show up here rather than on a page.
+--
+-- 🚨 A128 ADDED THE DEFENSIVE PANEL AND THIS TEST CAUGHT IT IMMEDIATELY — 13,078 rows, every one
+-- reading "a card exists for a player with no box-score line in this game", because the `box` CTE
+-- knew only the three offensive panels. ✅ THE TEST WAS RIGHT AND THE FIX IS TO TEACH IT THE NEW
+-- PANEL, never to exempt the panel from it.
+--
+-- ⚠️ AND SLOT 2 IS NO LONGER "YARDS" FOR EVERY PANEL. It is THE FIGURE THE PANEL RANKS ON —
+-- yards on the three offensive panels, TACKLES on the defensive one. `game_yards` is still
+-- compared against yards separately, and on a defensive row both sides are NULL, which is the
+-- assertion that a tackler is never handed offence.
 with box as (
 
     {% for panel, category in [('passing', 'receiving'), ('rushing', 'rushing')] %}
     select
         s.game_id, s.team_id, s.player_id, '{{ panel }}' as panel,
         sum(case when s.stat_type = 'YDS' then s.stat_value end) as yards,
+        sum(case when s.stat_type = 'YDS' then s.stat_value end) as slot_2,
         sum(case when s.stat_type = '{{ 'REC' if panel == 'passing' else 'CAR' }}'
                  then s.stat_value end)                          as slot_1,
         sum(case when s.stat_type = 'TD' then s.stat_value end)  as touchdowns
@@ -36,6 +47,7 @@ with box as (
     select
         s.game_id, s.team_id, s.player_id, 'total' as panel,
         sum(case when s.stat_type = 'YDS'   then s.stat_value end) as yards,
+        sum(case when s.stat_type = 'YDS'   then s.stat_value end) as slot_2,
         sum(case when s.stat_type = 'C/ATT' then s.stat_made end)  as slot_1,
         sum(case when s.stat_type = 'TD'    then s.stat_value end) as touchdowns
     from {{ ref('fct_player_game_stat') }} s
@@ -44,6 +56,24 @@ with box as (
     where s.stat_category in ('passing', 'rushing')
       and s.stat_type in ('YDS', 'TD', 'C/ATT')
       and (s.stat_value is not null or s.stat_type = 'C/ATT')
+      and s.season >= 2024
+    group by s.game_id, s.team_id, s.player_id
+
+    union all
+
+    -- THE DEFENSIVE PANEL. `yards` is deliberately NULL — a tackler records none, and the
+    -- comparison below asserts the view agrees. Slot 1 is the SOLO half of Solo-Ast, slot 2 is
+    -- total tackles (the ranking measure), slot 3 is TFL.
+    select
+        s.game_id, s.team_id, s.player_id, 'defensive' as panel,
+        null::numeric                                          as yards,
+        max(s.stat_value) filter (where s.stat_type = 'TOT')   as slot_2,
+        max(s.stat_value) filter (where s.stat_type = 'SOLO')  as slot_1,
+        max(s.stat_value) filter (where s.stat_type = 'TFL')   as touchdowns
+    from {{ ref('fct_player_game_stat') }} s
+    where s.stat_category = 'defensive'
+      and s.stat_type in ('TOT', 'SOLO', 'TFL')
+      and s.stat_value is not null
       and s.season >= 2024
     group by s.game_id, s.team_id, s.player_id
 
@@ -61,12 +91,12 @@ select
         then 'a card exists for a player with no box-score line in this game'
       when v.game_yards is distinct from b.yards
         then 'the ranked yards are not this game''s yards'
-      when v.stat_2_value is distinct from b.yards
-        then 'slot 2 is not this game''s yards'
+      when v.stat_2_value is distinct from b.slot_2
+        then 'slot 2 is not this game''s ranking figure — yards, or tackles on the defensive panel'
       when v.stat_1_value is distinct from b.slot_1
         then 'slot 1 is not this game''s figure'
       when v.panel <> 'rushing' and v.stat_3_value is distinct from b.touchdowns
-        then 'slot 3 is not this game''s touchdowns'
+        then 'slot 3 is not this game''s figure — touchdowns, or TFL on the defensive panel'
     end as rule
 from {{ ref('srv_game_team_leader_in_this_game') }} v
 left join box b
@@ -76,6 +106,6 @@ left join box b
        and b.panel     = v.panel
 where b.game_id is null
    or v.game_yards    is distinct from b.yards
-   or v.stat_2_value  is distinct from b.yards
+   or v.stat_2_value  is distinct from b.slot_2
    or v.stat_1_value  is distinct from b.slot_1
    or (v.panel <> 'rushing' and v.stat_3_value is distinct from b.touchdowns)

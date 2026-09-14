@@ -322,9 +322,15 @@ HEAVY_SERVING = [
     # make a table fresher than its source endpoint — A078 and A079 spent two rounds removing that
     # exact "arrives looking as fresh as the rows beside it" failure.
     #
-    # Size argues the same way rather than against it: 53,873 rows, the smallest of the four, and
-    # 5.6% of the per-player grain R-534 rejected — because the card asks for three panels and the
-    # HIGH end only rather than fifty stat pairs and both extremes.
+    # Size argues the same way rather than against it: 67,248 rows, and 5.6% of the per-player
+    # grain R-534 rejected — because the card asks for four panels and the HIGH end only rather
+    # than fifty stat pairs and both extremes.
+    #
+    # ⚠️ A128 ADDED THE DEFENSIVE PANEL AND THE CADENCE ARGUMENT IS UNCHANGED BY IT — the
+    # defensive box score arrives through `game/box/advanced` exactly as the offensive one does,
+    # and the two-hourly scores DAG fetches neither. 53,873 -> 67,248 rows, of which 13,375 are
+    # defensive; the extra 297 over a flat three-per-group are ties SHARING a rank, which this
+    # view does deliberately on every panel.
     "srv_game_team_leader_in_this_game",
     # A121/R-724. The win-probability CURVE, per play — 291,548 rows, the sixth-largest serving
     # object. Marc: "We need win probability graphs for the games."
