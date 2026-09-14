@@ -28,6 +28,7 @@
 
 {% macro serving_models() %}
   {{ return([
+    'srv_coach_team_season',
     'srv_data_dictionary',
     'srv_drive',
     'srv_edge_bucket_performance',

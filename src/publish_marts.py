@@ -353,6 +353,18 @@ HEAVY_SERVING = [
     # disagreement that guard exists to catch, and the same lesson A078, A079, A120 and A121 all
     # recorded: hot publishing cannot make a table fresher than its source endpoint.
     "srv_game_team_metric_distribution",
+    # A124/R-766. The coach behind a game — 12,564 rows, one per (coach, team, season).
+    #
+    # ⚠️ WEEKLY BY THE SAME RULE A125 LEARNED AN HOUR EARLIER, and stated up front this time
+    # rather than after ci/check_publish_build_agreement.py refused it: `/coaches` is registered
+    # HISTORY_FULL with min_season=1886 and is fetched by the BACKFILL. No gated DAG fetches it
+    # and no gated DAG rebuilds this lineage, so a hot publish would ship a table nothing hot
+    # refreshes.
+    #
+    # 🚨 AND THE DATA ITSELF IS ANNUAL. A coach's season row changes when a season ends, not when
+    # a game does. Hot publishing cannot make a table fresher than its source endpoint — A078,
+    # A079, A120, A121 and A125 have all recorded that, and this is the sixth.
+    "srv_coach_team_season",
 ]
 
 # What the two-hourly publish ships: everything except the heavy three. Measured at 324 MB,
