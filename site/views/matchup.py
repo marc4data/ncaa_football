@@ -2586,7 +2586,7 @@ def _usage_dots(entry, player_id) -> str:
         # ⚠️ AC-G.32: "NOTHING" IS NOT AN EMPTY CIRCLE. An empty circle at full border opacity
         # is what `did not appear` draws, and a null share means the opposite — he played and
         # we cannot scale it. So the dot is omitted entirely and the row is one shorter, which
-        # is the same choice `_post_game_card_column` makes for a missing third rusher.
+        # is the same choice `_card_half` makes for a missing third rusher.
         if scaled is None or pd.isna(scaled):
             continue
         # ⚠️ THE CLAMP STAYS. It guards what a CSS gradient can accept rather than the metric —
@@ -2647,7 +2647,7 @@ def _card_tie(row) -> str:
             f"white-space:nowrap'> tied {int(tied)}</span>")
 
 
-def _leader_card(row, usage=None) -> str:
+def _leader_card(row, usage=None, accent: str = None) -> str:
     """One player: name, jersey, position, class, and his yards so far.
 
     ⚠️ AC-G.32 ON THE JERSEY. 0 of 8,447 non-FBS leader rows carry one, because the roster
@@ -2750,9 +2750,27 @@ def _leader_card(row, usage=None) -> str:
             continue
         cells.append(
             f"<div><div style='font-size:.6rem;letter-spacing:.03em;text-transform:uppercase;"
-            f"opacity:.5;white-space:nowrap'>{html.escape(str(label))}</div>"
+            f"opacity:{_CARD_KPI_LABEL_OPACITY};white-space:nowrap'>"
+            f"{html.escape(str(label))}</div>"
             f"<div style='font-size:.92rem;font-weight:600'>{shown}</div></div>")
-    return (f"<div style='border:1px solid rgba(128,128,128,.22);border-radius:6px;"
+    # 🚨 R-886. THE BORDER IS THE TEAM'S COLOUR — Marc, v11: *"Player Card borders should be
+    # color of team."* ✅ `_accent` is B111's ONE producer of the composed `light-dark(...)`
+    # string and the table header's underline already uses it (R-855); this is the same call,
+    # not a second one. ⚠️ A side with no sourced colour yields `identity.FALLBACK` and the
+    # border still draws — **1.01% of the games this panel renders (37 of 3,674), not the
+    # 10.89% all-games figure** (R-876).
+    #
+    # ⚠️ AND IT IS LOUDER THAN THE 22%-ALPHA GREY IT REPLACES. That is a look decision and it is
+    # Marc's; it is rendered as asked rather than quietly toned down. **Position still carries
+    # the away/home distinction (AC-G.22) — the colour is the second signal, and the greyscale
+    # render is in the report to prove the columns are still tellable apart without it.**
+    # ⚠️ `data-cfdb='leader-card'` IS AN INTERFACE AND THE BORDER IS NOT. The tests anchored on
+    # the literal grey border string until R-886 put the TEAM COLOUR there, at which point every
+    # card-finding helper silently matched nothing — `_row_markup`'s own comment already says it:
+    # *"The attribute exists to be anchored on; a style string is not an interface."*
+    return (f"<div data-cfdb='leader-card' "
+            f"style='border:1px solid {accent or 'rgba(128,128,128,.22)'};"
+            f"border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem'>"
             f"<div style='display:flex;align-items:stretch;gap:.4rem'>"
             f"{''.join(top)}</div>"
@@ -3138,13 +3156,25 @@ def _turnovers(row) -> str:
     total = row.get("turnovers")
     if pd.isna(total):
         return fmt.EM_DASH
+    # 🚨 R-885. `1 (1/0)` RATHER THAN `1 (1 INT · 0 FUM)` — Marc, v11, and the unit moved to the
+    # LABEL, which is where a unit belongs when every row in the column shares it. The measure
+    # is `Turnovers (INT/FUM)`; the value is the split.
+    #
+    # 📊 AND IT IS THE WHOLE POINT OF THE CHANGE RATHER THAN A TIDY-UP. This one string governed
+    # `_TABLE_VALUE_WIDTH` for the entire panel — measured at **116px in a 116px cell**, 2.5x the
+    # next widest value (`47.1%`, 45px) — which is why B111's chart shipped at 110px, 45% under
+    # B108's 200px floor. **Marc went at the constraint rather than the symptom.**
+    #
+    # ⚠️ THE ORDER IS INT THEN FUM AND THE LABEL SAYS SO. A bare `1 (1/0)` with no key is two
+    # numbers a reader must guess at; `Turnovers (INT/FUM)` overhead makes the pair readable
+    # once for the whole column instead of on every row.
     ints, fumbles = row.get("interceptions"), row.get("fumbles_lost")
-    parts = []
-    if pd.notna(ints):
-        parts.append(f"{int(ints)} INT")
-    if pd.notna(fumbles):
-        parts.append(f"{int(fumbles)} FUM")
-    return f"{int(total)}" + (f" ({' · '.join(parts)})" if parts else "")
+    if pd.isna(ints) and pd.isna(fumbles):
+        return f"{int(total)}"
+    # ⚠️ A MISSING HALF IS AN EM DASH, NOT A ZERO (AC-G.32). `0/1` and `—/1` are different
+    # claims: one says no interceptions, the other says we do not hold the split.
+    part = "/".join(str(int(v)) if pd.notna(v) else fmt.EM_DASH for v in (ints, fumbles))
+    return f"{int(total)} ({part})"
 
 
 # --- R-847: the measure name goes LEFT, and the table goes hard left ----------------------
@@ -3175,7 +3205,9 @@ def _turnovers(row) -> str:
 #
 # 🚨 ONE ROW GOVERNS THE VALUE COLUMN AND IT IS NOT A METRIC ROW — turnovers is 2.5x the next
 # widest value on the page. Reshaping it is a look decision and Marc's; this round measured it.
-_TABLE_VALUE_WIDTH = 7.25      # rem — 116px against a measured 110px worst case
+# ⚠️ SUPERSEDED BY R-885's BUDGET BELOW, AND KEPT AS THE REASON RATHER THAN AS A NUMBER: the
+# value column is no longer sized against the turnovers string, because that string is now
+# `1 (1/0)`. The measurement above is why it HAD to be 116 and why it no longer does.
 
 # 🚨 R-864. THE LABEL COLUMN CAME DOWN 12.0 → 8.5rem TO PAY FOR THE CHART COLUMN, AND IT IS THE
 # ONLY COLUMN ON THIS ROW WITH REAL SLACK. Measured in the browser at 1300px, sidebar open:
@@ -3205,6 +3237,74 @@ _TABLE_VALUE_WIDTH = 7.25      # rem — 116px against a measured 110px worst ca
 # and the question does not arise.
 _TABLE_LABEL_WIDTH = 8.5       # rem — 136px; the four longest Advanced names ellipsise
 _TABLE_GAP = 0.5               # rem, between the four columns
+
+_REM = 16
+
+# 🚨 R-885. THE THREE CELLS, AND WHICH ARITHMETIC GOVERNS THEM IS ONE CONSTANT.
+#
+# **Marc, v11: *"Measure Cells and graph cells should be equal horizontal widths."*** ✅ Built,
+# and the report puts the cost in front of him rather than just obeying — because the two
+# readings of the same sentence are 122px apart on the one number this panel has been fighting
+# over for four rounds.
+#
+# 📊 MEASURED AT 1300px WITH THE SIDEBAR OPEN, after v11's halved gutter gives the table 510px:
+#
+#     row = label 136 + three cells + three 8px gaps (24)   ->  486px for the three cells
+#
+#     EQUAL     three cells of 162px            -> the chart is 162px
+#     CONTENT   values at what they now need    -> the chart is what is left
+#
+# ⚠️ AND `CONTENT` ONLY BECAME POSSIBLE THIS ROUND. The value column was 116px because
+# `1 (1 INT · 0 FUM)` needed 116; at `1 (1/0)` the widest value in either section is far
+# narrower, so the room the turnovers row was holding is released to the chart. **That is the
+# whole causal chain Marc described, and it checks out.**
+#
+# 🚨 THE FLOOR IS THE REASON IT MATTERS: B108 measured the minimum useful plot width at 200px
+# and A131's sweep agrees. B111 shipped 110px and said so. **One of these two options clears
+# that floor for the first time and the other does not.**
+# 🚨 SHIPPED `True` — MARC'S LITERAL WORDS — AND THE ARITHMETIC IS IN THE REPORT RATHER THAN
+# THE DECISION BEING TAKEN HERE. Measured at 1300px, both rendered:
+#
+#     True   label 136 | value 116 | value 116 | chart 118     the three cells are equal
+#     False  label 136 | value  60 | value  60 | chart 230     the values are at their content
+#
+# ⚠️ AND THE TWO HALVES OF HIS OWN SENTENCE PULL APART, WHICH IS WHY BOTH ARE BUILT. He wrote
+# *"That will allow the Box Score to **reduce width of the measure value cells**. Measure Cells
+# and graph cells should be **equal** horizontal widths."* **At `True` the value cells do not
+# reduce at all** — they stay 116px around a 46px number, because equal-thirds of the same
+# budget is what 116 already was. The reduction he gave as the REASON for changing the
+# turnovers string only happens at `False`.
+#
+# 📊 AND THE FLOOR IS WHAT IT COSTS: B108 measured the minimum useful plot width at 200px and
+# A131's sweep agrees. **`True` is 118px — 41% under it, and barely better than B111's 110px.
+# `False` is 230px, over it for the first time since the chart existed.**
+_TABLE_CELLS_EQUAL = True      # True = Marc's literal reading; False = values at their content
+
+# 📊 THE ROW BUDGET, MEASURED RATHER THAN ASSUMED. At 1300px with the sidebar open the content
+# area runs 380 → 1220 = 840px. v11 makes it two Streamlit columns instead of three and halves
+# the gutter (Part 3), so: 840 − 8 (gutter) − 322 (the card region, two 153px columns and their
+# own 16px gap) = **510px for the table**.
+#
+# ⚠️ IT IS A DECLARED CONSTANT BECAUSE THE CHART'S WIDTH MUST BE A REAL NUMBER OF PIXELS.
+# `box()` emits `max-width:100%`, so a chart handed a width its cell cannot honour is SCALED
+# rather than clipped — B108's 432px viewBox squeezed into 216px rendered its `18` four pixels
+# tall, correct in the DOM and unreadable on the screen. **The row is built to fit the budget;
+# the budget is not inferred from the row.**
+_TABLE_ROW_BUDGET = 510        # px — the table column at 1300px, sidebar open, after Part 3
+
+_TABLE_CELL_BUDGET = (_TABLE_ROW_BUDGET - int(_TABLE_LABEL_WIDTH * _REM)
+                      - 3 * int(_TABLE_GAP * _REM))
+
+# 📊 WHAT THE VALUES ACTUALLY NEED AT `1 (1/0)`, measured in the browser at 1.05rem:
+#     `1 (1/0)`  48px   ·  `47.1%`  45px  ·  `-0.075`  45px  ·  `762`  30px
+# **60px carries the widest with 12px to spare** — and it is the first time since v08 that the
+# value column has been sized by a METRIC rather than by one composite string.
+_TABLE_VALUE_CONTENT_PX = 60   # px — the widest value at `1 (1/0)` is 48, plus margin
+_TABLE_VALUE_PX = ((_TABLE_CELL_BUDGET // 3) if _TABLE_CELLS_EQUAL
+                   else _TABLE_VALUE_CONTENT_PX)
+_TABLE_CHART_WIDTH = _TABLE_CELL_BUDGET - 2 * _TABLE_VALUE_PX
+_TABLE_VALUE_WIDTH = _TABLE_VALUE_PX / _REM    # rem, for the cell CSS
+
 
 # 🚨 MARC, v10: *"Make the font of the value a little bigger."* ⚠️ NAMED AGAINST ITS NEIGHBOURS
 # RATHER THAN PICKED: the measure name is `.85rem` and the column header is `.92rem`, and a
@@ -3238,8 +3338,6 @@ _TABLE_ROW = "display:block;max-width:100%;box-sizing:border-box;padding:.15rem 
 _TABLE_ROW_INNER = f"display:flex;align-items:center;gap:{_TABLE_GAP}rem"
 
 
-_REM = 16
-
 # 🚨 R-864. THE CHART'S OWN COLUMN — Marc, v10: *"make a single box-whisker chart, create a new
 # column for it to the right of the home metric value."*
 #
@@ -3254,7 +3352,6 @@ _REM = 16
 # sweep, which puts 200px at the point where the below band stops dropping to three labels.
 # **This is 45% under it.** See `_TABLE_LABEL_WIDTH` for where the room came from and why the
 # cards could not give any.
-_TABLE_CHART_WIDTH = 110       # px
 
 # ⚠️ R-854 IS DISSOLVED RATHER THAN ARGUED. The old band was 116px because it sat UNDER a 116px
 # value column governed by `1 (1 INT · 0 FUM)` — a composite string that cannot be plotted at
@@ -3293,6 +3390,39 @@ def _accent(pair) -> str:
             f"{identity.text_on(pair, dark_theme=True)})")
 
 
+# ✅ R-885. THE SECOND SECTION'S NAME — Marc, v11. He typed *"Advances"*; the section is
+# **Advanced Team Stats**, and it is a constant because the string is keyed in three places:
+# the heading, the table header row, and the glossary caption beneath. A rename that moves the
+# visible word and leaves the others is a rename that half happened.
+_ADVANCED_SECTION = "Advanced Team Stats"
+
+# 🚨 R-885. THE BOLD UNDERLINE UNDER EACH SECTION NAME — Marc, v11: *"should have a bold
+# underline to help define the section."*
+#
+# ⚠️ IT IS A SECOND, HEAVIER RULE AND NOT THE ONE ALREADY THERE. `_table_header` draws a 1px
+# rule at 25% under the LOGO ROW, which separates the header from the figures; this one sits
+# under the section's NAME and separates one section from the other. **Two rules doing two
+# jobs**, which is why this is 2px and the other stays 1px — same weight twice would read as
+# the same boundary drawn twice.
+_SECTION_RULE = "border-bottom:2px solid currentColor"
+
+
+def _section_heading(title: str) -> str:
+    """One section's name inside the table, with the bold rule under it (R-885).
+
+    🚨 IT IS MARKUP RATHER THAN `st.subheader`, AND THAT IS THE WHOLE POINT. Two subheaders
+    meant two Streamlit blocks with two `st.columns` splits between them, and the seam between
+    those blocks IS the whitespace Marc asked to remove. **Inside the table's own markdown
+    there is no seam to remove** — the sections are two headings in one continuous run of rows.
+
+    ⚠️ AND IT KEEPS THE HEADING INSIDE THE TABLE COLUMN, so it cannot span the card region the
+    way `st.subheader` did. A section name stretching over the player cards was always wrong;
+    it only looked right while the cards were cut to the same sections.
+    """
+    return (f"<div style='font-size:1.15rem;font-weight:700;margin:1.1rem 0 .4rem;"
+            f"padding-bottom:.25rem;{_SECTION_RULE}'>{html.escape(title)}</div>")
+
+
 def _table_header(away, home, title: str, colors=None) -> str:
     """Marc's *"header row for Box Score / Logo Away / Logo Home"*, with a rule beneath it.
 
@@ -3318,8 +3448,13 @@ def _table_header(away, home, title: str, colors=None) -> str:
     ⚠️ A TEAM WITH NO SOURCED COLOUR DRAWS `identity.FALLBACK` — neutral grey, same footprint,
     in both modes. Measured: 10.89% of games have a side with no colour published.
     """
-    cells = [f"<span style='{_TABLE_LABEL_CELL};font-weight:700;opacity:.9;"
-             f"font-size:.92rem'>{html.escape(title)}</span>"]
+    # 🚨 R-885. THE NAME MOVED OUT OF THIS CELL AND THE CELL STAYED. `_section_heading` now
+    # carries the section's name with Marc's bold rule under it, so printing it here as well
+    # drew **"Box score" twice, one line apart** — which the raster showed and no assertion
+    # could: both elements were correct, present, and exactly what their own tests asked for.
+    # ⚠️ THE EMPTY CELL IS NOT DEAD SPACE: it is the label column's width, and removing it
+    # would slide both logos left out of register with every figure beneath them.
+    cells = [f"<span style='{_TABLE_LABEL_CELL}'></span>"]
     for side, key in ((away, "away"), (home, "home")):
         logo = identity.logo_or_monogram(
             side.get("team_logo_url"), str(side.get("team_display") or "?"), 20)
@@ -3642,12 +3777,28 @@ _POST_GAME_LEADER_COLUMNS = """
 # ⚠️ BOX RATHER THAN ADVANCED, ON BALANCE: box goes 5 → 8 and advanced stays 8. The
 # meaning argument — tackles are counting stats, Box Score is the counting panel — is the
 # weaker of the two, because Marc split receiving by FIT rather than by meaning (R-848).
-_CARD_GROUPS = {
-    "box": (("Quarterback", "total", 2), ("Rushing", "rushing", 3),
-            ("Defense", "defensive", 3)),
-    "advanced": (("Quarterback", "total", 2), ("Rushing", "rushing", 3),
-                 ("Receiving", "passing", 3)),
-}
+# 🚨 R-886. ONE ORDERED LIST, NOT TWO SECTIONS — AND THE DICT IS WHAT MARC'S v11 DISSOLVED.
+#
+# **Marc: *"For the Player Cards. Continuous, top-down, Quarterbacks (2), Rushing (3),
+# Receiving (3), Defense (3), Punter (1), Placekicker (1) … The Player cards should flow top to
+# bottom, with no vertical association to the Box/Advanced."***
+#
+# ⚠️ THE SPLIT BY SECTION EXISTED ONLY TO KEEP THE CARDS IN REGISTER WITH THE TABLE BESIDE THEM.
+# The cards were drawn TWICE — once beside Box score, once beside Advanced — which is why
+# `_CARD_GROUPS` was keyed by section and why Receiving was in one and Defense in the other.
+# **v11 says the vertical breaks are independent, so the cards are drawn ONCE and every group
+# appears exactly once.** The keying by section had no other job.
+#
+# ✅ AND THIS IS THE MACHINERY B113 NEEDS: Punter and Placekicker are **two more tuples in this
+# list and nothing else**. The renderer loops it, the reserved-slot rule reads `_RESERVED_GROUPS`,
+# and the position header spans both columns for whatever is in it. ❌ **They are NOT added here
+# — the serving relation publishes neither panel yet; A134 is measuring whether it can.**
+_CARD_GROUPS = (
+    ("Quarterback", "total", 2),
+    ("Rushing", "rushing", 3),
+    ("Receiving", "passing", 3),
+    ("Defense", "defensive", 3),
+)
 
 # 🚨 R-849. THE GROUPS A MISSING PLAYER IS RESERVED IN, AND IT IS SCOPED RATHER THAN GENERAL.
 #
@@ -3704,30 +3855,34 @@ _RESERVED_CARD_HEIGHT = 5.25   # rem = 84px
 # against this list makes the visual position and the width THE SAME FACT. **There is no way to
 # move a block without moving its width, and therefore no way for a passing positional test to
 # describe a layout that is not on the screen.**
-_POST_GAME_LAYOUT = (("table", 3.14), ("away", 1.0), ("home", 1.0))
+# 🚨 R-886. TWO SLOTS: THE TABLE, THEN THE CARD REGION. The weights are the old three
+# re-expressed — the cards were 1.0 + 1.0 with a gutter between them, and that whole assembly
+# is now one slot that splits itself, so 3.14 : 2.0 keeps the same proportions.
+_POST_GAME_LAYOUT = (("table", 3.14), ("cards", 2.0))
 _POST_GAME_SPLIT = tuple(width for _slot, width in _POST_GAME_LAYOUT)
+
+# 📊 HALF OF THE 16px MEASURED BEFORE THE CHANGE (Part 3). An int, because Streamlit 1.63's
+# `gap` accepts one — the named sizes jump 8 → 16 and neither `xsmall` nor `xxsmall` is
+# guaranteed to be 8 across versions, so the number is stated rather than named.
+_POST_GAME_GUTTER = 8
 
 
 def _post_game_columns():
-    """The three columns, keyed by slot — table, away cards, home cards, left to right."""
-    return dict(zip((slot for slot, _w in _POST_GAME_LAYOUT),
-                    st.columns(_POST_GAME_SPLIT)))
+    """The TWO columns, keyed by slot — the table, then the whole card region (R-886).
 
+    🚨 IT WAS THREE AND IS NOW TWO, AND THAT IS v11's STRUCTURAL CHANGE RATHER THAN A TIDY-UP.
+    The away and home cards were two Streamlit slots, which is why a position header could not
+    *"cover the entire row of player cards"* — Streamlit has no way to place one element across
+    two of its columns. **The card region is one slot now and splits itself**, so the header
+    spans, and the two halves stay in register without depending on Streamlit at all.
 
-def _post_game_flank(away_col, home_col, leaders, away, home, section: str) -> None:
-    """Both sides' cards, side by side to the RIGHT of the table (R-847).
-
-    🚨 AWAY THEN HOME, AND THE ORDER IS THE PAGE LAW (R-522) RATHER THAN A HABIT. It used to be
-    a MIRROR — the cards flanked the table, so away sat left of it and home right of it — and
-    B105 measured that mirror as the reason a 59px overflow landed on a different neighbour on
-    each side. **Both columns are on the same side now, so the mirror is gone; the ordering
-    survives it.** ⚠️ B082 and B083 both proved a presence assertion cannot see a left/right
-    swap, so the test asserts the ORDER of the two blocks.
+    📊 THE GUTTER IS HALVED — Marc, v11: *"Cut the whitespace in half."* **Measured at 1300px
+    before the change: 16px.** `st.columns` takes `gap` as an int in Streamlit 1.63, so this is
+    an argument rather than CSS — which is what the round was told to establish rather than
+    assume. `gap=8` is exactly half, and the report carries the after-measurement.
     """
-    for column, side in ((away_col, away), (home_col, home)):
-        column.markdown(
-            _post_game_card_column(leaders, int(side["team_id"]), section),
-            unsafe_allow_html=True)
+    return dict(zip((slot for slot, _w in _POST_GAME_LAYOUT),
+                    st.columns(_POST_GAME_SPLIT, gap=_POST_GAME_GUTTER)))
 
 
 def _post_game_identity(game_id: int) -> dict:
@@ -3833,73 +3988,179 @@ def _reserved_card(what: str, slots: int = 1) -> str:
     group headers below stay in register** — which is the whole reason R-849 exists.
     """
     height = slots * _RESERVED_CARD_HEIGHT + (slots - 1) * 0.3
-    return (f"<div style='border:1px dashed rgba(128,128,128,.28);border-radius:6px;"
+    return (f"<div data-cfdb='reserved-card' "
+            f"style='border:1px dashed rgba(128,128,128,.28);border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem;box-sizing:border-box;"
             f"height:{height:g}rem;display:flex;align-items:center'>"
             f"<span style='font-size:.72rem;opacity:.5;line-height:1.25'>{what}</span></div>")
 
 
-def _card_group_header(title: str) -> str:
-    """The small heading over one group of cards — Marc's *"a header above each section"*."""
-    return (f"<div style='font-size:.66rem;font-weight:700;letter-spacing:.05em;"
-            f"text-transform:uppercase;opacity:.5;margin:.45rem 0 .2rem'>"
-            f"{html.escape(title)}</div>")
+# 🚨 R-886. THE BOLD UNDERLINE — Marc, v11: *"the Position … should cover the entire row of
+# player cards and have a bold underline breaking the vertical space."* Two pixels against the
+# table header's one, so the two rules read as different weights rather than as the same rule
+# drawn twice, and in the same neutral grey the card border uses so nothing here invents a
+# colour (the team colour is the CARD's edge, not the heading's).
+_CARD_RULE = "border-bottom:2px solid rgba(128,128,128,.45)"
+
+# 📊 MARC: *"The metric names are too light, gain 50% darker."* They were `opacity:.5`. **.75 is
+# the reading that makes them 50% less transparent**, and the alternative reading — 50% of the
+# remaining gap to opaque, which is also .75 — agrees. Both renders are in the report.
+_CARD_KPI_LABEL_OPACITY = .75
+
+# The gap between the away and home card halves, inside the card region's own flex.
+_CARD_COLUMN_GAP = 0.6
 
 
-def _post_game_card_column(leaders, team_id, section: str = "box") -> str:
-    """One side's cards, GROUPED, with a header over each group (R-848).
+# 🚨 R-889. THE VERTICAL DIVIDER — Marc, v11: *"give a vertical line divider (25% gray)."*
+#
+# 🚨 IT IS DRAWN ON THE COLUMN, NOT INSIDE A ROW, AND THAT IS R-755. `_TABLE_ROW` carries
+# `overflow:hidden` because a Streamlit column does not clip its children — a rule drawn inside
+# a table row would be clipped by it, and one drawn inside the card region would end where the
+# cards end. **This panel has paid for that twice.**
+#
+# ✅ AND IT SPANS THE TALLER SIDE FOR FREE, WHICH IS THE THING THE PROMPT ASKED TO BE SOLVED.
+# Streamlit's columns are flex children, and flex's default `align-items: stretch` makes every
+# child the height of the tallest. **A border on the column is therefore the full height of the
+# row**, whichever half is taller — and with the two halves no longer in register (v11), which
+# one that is now varies by game. A rule sized to the table would end mid-card; one sized to
+# the cards would overrun the table. **Neither is sized; the browser is.**
+#
+# ⚠️ `:has()` SCOPES IT TO THIS COLUMN ONLY. The marker is emitted inside the card region, so
+# the selector cannot reach any other `st.columns` on the page — and this page has several.
+#
+# ⚠️ 25% GREY IN BOTH THEMES, NOT `#404040`. `rgba(128,128,128,.25)` is neutral against either
+# ground and is the same family as the card's own `rgba(128,128,128,.22)`, which is the
+# precedent this file already set.
+_CARD_DIVIDER_CSS = (
+    "<div data-cfdb='cards-rule'></div>"
+    "<style>[data-testid=\"stColumn\"]:has([data-cfdb=\"cards-rule\"])"
+    "{border-left:1px solid rgba(128,128,128,.25);padding-left:.55rem}</style>")
 
-    ⚠️ TWO ABSENCES, AND THEY ARE DIFFERENT SENTENCES (AC-G.11):
 
-      · the QUARTERBACK group reserves its second slot and says so — R-849, because the two
-        card columns now sit side by side and an unmatched slot pushes every row below it out
-        of register. Measured: 51.5% of games have the sides carrying different QB counts.
-      · RUSHING and RECEIVING are drawn SHORT, exactly as B107 shipped. They are the LAST
-        groups in their column, so a short one misaligns nothing beneath it, and a reserved
-        slot there would be a hole bought for no alignment at all.
+def _card_position_header(title: str) -> str:
+    """One position heading, SPANNING BOTH card columns, with a bold rule under it (R-886).
+
+    🚨 THIS IS WHY THE CARDS STOPPED BEING TWO `st.columns` SLOTS. A header that *"covers the
+    entire row of player cards"* cannot be drawn inside either column — it has to span them —
+    and Streamlit gives no way to place one element across two of its columns. **So the whole
+    card region is now ONE markdown block with its own two-column flex inside it**, which is
+    also what lets the away and home halves stay in register without depending on Streamlit.
     """
-    # 🚨 A SIDE WE HOLD NOTHING FOR STILL SAYS SO, AND THE RESERVED SLOT MUST NOT SWALLOW THAT.
-    # R-849 reserves the second quarterback so the two columns stay in register — but a side
+    return (f"<div style='font-size:.7rem;font-weight:700;letter-spacing:.06em;"
+            f"text-transform:uppercase;opacity:.8;margin:.85rem 0 .35rem;"
+            f"padding-bottom:.2rem;{_CARD_RULE}'>{html.escape(title)}</div>")
+
+
+def _card_team_header(away, home, accents) -> str:
+    """Team logo and name over each side's cards — Marc, v11: *"an overall header"*.
+
+    ⚠️ `identity.logo_or_monogram` IS THE ONE PRODUCER AND `_table_header` ALREADY USES IT — a
+    team with no logo gets a monogram at the identical footprint (AC-G.28), so the two halves
+    cannot fall out of register because one side has no crest.
+    """
+    cells = []
+    for side, accent in zip((away, home), accents):
+        logo = identity.logo_or_monogram(
+            side.get("team_logo_url"), str(side.get("team_display") or "?"), 22)
+        cells.append(
+            f"<div style='flex:1;min-width:0;display:flex;align-items:center;gap:.35rem;"
+            f"padding-bottom:.25rem;border-bottom:3px solid {accent}'>{logo}"
+            f"<span style='font-weight:700;font-size:.9rem;overflow:hidden;"
+            f"text-overflow:ellipsis;white-space:nowrap'>"
+            f"{html.escape(str(side.get('team_display') or '?'))}</span></div>")
+    return (f"<div style='display:flex;gap:{_CARD_COLUMN_GAP}rem;margin-bottom:.2rem'>"
+            + "".join(cells) + "</div>")
+
+
+def _post_game_cards(leaders, away, home, colors) -> str:
+    """ONE continuous, top-to-bottom card region — away left, home right (R-886).
+
+    🚨 DRAWN ONCE, NOT ONCE PER SECTION, AND THAT IS v11's STRUCTURAL CHANGE. The cards used to
+    be rendered beside Box score and again beside Advanced, which is what kept them in vertical
+    register with the table and what forced `_CARD_GROUPS` to be keyed by section. **Marc:
+    *"the vertical breaks are independent"*.** So the region is one block, every group appears
+    exactly once, and the table beside it is free to be whatever height it is.
+
+    ⚠️ R-849's RESERVED QUARTERBACK SLOT SURVIVES, AND DELETING IT WOULD HAVE BEEN THE WRONG
+    READING OF v11. It was built for TWO alignments and Marc dissolved only one of them:
+
+      · cards ↔ the table beside them — **dissolved**, explicitly
+      · AWAY cards ↔ HOME cards — **still wanted**, and now load-bearing in a new way: a
+        position header SPANS both halves, so an unmatched card does not merely misalign the
+        rows below, it puts them under the wrong heading.
+
+    📊 Measured: **3,990 of 6,736 team-games (59.2%) have exactly one quarterback, and 1,812 of
+    3,520 games (51.5%) have the two sides carrying different counts.**
+    """
+    accents = _accent_pair(colors)
+    blocks = [_CARD_DIVIDER_CSS, _card_team_header(away, home, accents)]
+
+    # 🚨 A SIDE WE HOLD NOTHING FOR STILL SAYS SO, AND THE RESERVED SLOT MUST NOT SWALLOW IT.
+    # R-849 reserves the second quarterback so the two halves stay in register — but a side
     # with NO leaders in any group is not a side missing one player, it is a side we hold
-    # nothing for. **Reserving two blank quarterbacks there would answer a different question
-    # from the one the reader is asking**, and it is the exact AC-G.11 confusion the reserved
-    # card exists to avoid. The sentence wins whenever every group is empty.
-    if not any((leaders or {}).get((int(team_id), panel))
-               for _title, panel, _wanted in _CARD_GROUPS[section]):
-        return ("<div style='font-size:.72rem;opacity:.45;padding:.3rem 0'>"
-                "No player leaders held for this side.</div>")
-    blocks = []
-    for title, panel, wanted in _CARD_GROUPS[section]:
-        rows = (leaders or {}).get((int(team_id), panel), [])[:wanted]
-        if not rows and title not in _RESERVED_GROUPS:
+    # nothing for. **Reserving two blank quarterbacks there answers a different question from
+    # the one the reader is asking** (AC-G.11). ⚠️ SAID ONCE, UNDER THE TEAM HEADER, rather than
+    # once per group: four copies of the same sentence down one column is the hole restated.
+    held = {which: any((leaders or {}).get((int(side["team_id"]), panel))
+                       for _t, panel, _w in _CARD_GROUPS)
+            for which, side in zip(("away", "home"), (away, home))}
+    if not all(held.values()):
+        notices = "".join(
+            f"<div data-cfdb='card-half' data-side='{which}' style='flex:1;min-width:0'>"
+            + ("" if held[which] else
+               "<div style='font-size:.72rem;opacity:.45;padding:.3rem 0'>"
+               "No player leaders held for this side.</div>")
+            + "</div>"
+            for which in ("away", "home"))
+        blocks.append(f"<div style='display:flex;gap:{_CARD_COLUMN_GAP}rem;"
+                      f"align-items:flex-start'>{notices}</div>")
+
+    for title, panel, wanted in _CARD_GROUPS:
+        halves = []
+        drawn_any = False
+        for which, side, accent in zip(("away", "home"), (away, home), accents):
+            team_id = int(side["team_id"])
+            rows = (leaders or {}).get((team_id, panel), [])[:wanted]
+            drawn_any = drawn_any or bool(rows)
+            # ⚠️ A SIDE WE HOLD NOTHING FOR DRAWS NO RESERVED SLOTS EITHER — its sentence is
+            # above, and a reserved quarterback under it would contradict it.
+            halves.append(_card_half(rows, wanted, title, accent, which)
+                          if held[which] else
+                          f"<div data-cfdb='card-half' data-side='{which}' "
+                          f"style='flex:1;min-width:0'></div>")
+        # ⚠️ A GROUP NEITHER SIDE HAS IS DROPPED WITH ITS HEADER — a heading over two empty
+        # halves is a promise of players nobody recorded, which is the wrong absence (AC-G.11).
+        # The QUARTERBACK group is the exception and reserves instead; that is `_RESERVED_GROUPS`.
+        if not drawn_any and title not in _RESERVED_GROUPS:
             continue
-        # ⚠️ `usage=None` ON PURPOSE: R-694's dots count EARLIER games, which is a preview
-        # question. `_card_dots` returns nothing for a card with no usage, so the post-game
-        # card is the same card without them rather than a second implementation of one.
-        drawn = "".join(_leader_card(r) for r in rows)
-        if title in _RESERVED_GROUPS and len(rows) < wanted:
-            # 🚨 R-856. TWO SENTENCES, AND WHICH ONE IS TRUE DEPENDS ON WHETHER ANY PLAYED.
-            # A side with ONE quarterback is missing its second and the ordinal is a fact
-            # about the pair. A side with NONE is not missing a second anything, and naming
-            # a *first* quarterback that never existed invents the slot it is apologising for.
-            #
-            # 🚨 AND THE VERB IS `recorded` RATHER THAN `played`, WHICH IS A MEASUREMENT AND
-            # NOT A PREFERENCE. *Played* asserts about the GAME; the box score's silence only
-            # means nothing was WRITTEN DOWN. Measured on the cards' own relation: of the
-            # **573** sides with no `total` row, **571 — 99.7% — have receivers in the same
-            # game**, so the ball was thrown and caught and a quarterback was unmistakably on
-            # the field. *No quarterback played* would be false on essentially every side this
-            # sentence is drawn for. **The render game is one of them: North Alabama at
-            # Arkansas, no quarterback row, three receivers.**
-            if rows:
-                drawn += "".join(
-                    _reserved_card(f"No {_ORDINALS[index]} {title.lower()} recorded")
-                    for index in range(len(rows), wanted))
-            else:
-                drawn += _reserved_card(
-                    f"No {title.lower()} recorded for this side.", slots=wanted)
-        blocks.append(_card_group_header(title) + drawn)
+        blocks.append(_card_position_header(title))
+        blocks.append(f"<div style='display:flex;gap:{_CARD_COLUMN_GAP}rem;"
+                      f"align-items:flex-start'>" + "".join(halves) + "</div>")
     return "".join(blocks)
+
+
+def _card_half(rows, wanted: int, title: str, accent: str, side: str) -> str:
+    """One side's cards for one group, in its own half of the region.
+
+    ⚠️ TWO ABSENCES, AND THEY ARE DIFFERENT SENTENCES (AC-G.11): a side missing its SECOND
+    quarterback reserves the slot and names it; a side with none at all gets one block spanning
+    the group, because naming a *first* quarterback that never existed invents the slot it is
+    apologising for (R-856).
+    """
+    drawn = "".join(_leader_card(r, accent=accent) for r in rows)
+    if title in _RESERVED_GROUPS and len(rows) < wanted:
+        if rows:
+            drawn += "".join(
+                _reserved_card(f"No {_ORDINALS[index]} {title.lower()} recorded")
+                for index in range(len(rows), wanted))
+        else:
+            drawn += _reserved_card(
+                f"No {title.lower()} recorded for this side.", slots=wanted)
+    # ⚠️ `data-side` IS AN INTERFACE. Away and home are two `flex:1` children of the same row,
+    # and telling them apart by position in a regex over nested divs is the kind of helper that
+    # answers wrongly (R-758). The attribute says which is which.
+    return (f"<div data-cfdb='card-half' data-side='{side}' "
+            f"style='flex:1;min-width:0'>{drawn}</div>")
 
 
 # The word a reserved slot uses for the place it is holding. ⚠️ Only as deep as the deepest
@@ -3923,7 +4184,17 @@ def _post_game(game_id, season) -> None:
     have havoc. A game can therefore have a complete box score and no advanced figures at all,
     which is a Degraded state for that section rather than a reason to hide the panel.
     """
-    st.subheader("Box score")
+    # 🚨 R-885. THE `st.subheader` IS GONE AND THE SECTION NAMES LIVE IN THE TABLE. Marc, v11:
+    # *"one big continuous table … There should not be a block of whitespace that splits
+    # Box/Advanced."* Two subheaders around two `st.columns` splits IS that whitespace — the
+    # seam between Streamlit blocks — so removing it means having one block, and the names move
+    # inside it where `_section_heading` gives each one Marc's bold rule.
+    #
+    # ⚠️ THE DATASET CAPTION STAYS WITH `states.section` AND THAT IS THE CHOICE THE ROUND MADE.
+    # It names the RELATION the whole panel reads (`srv_game_team`), not a section of the table
+    # — both sections come from that one read — so it belongs to the panel and renders once,
+    # above the split. **Putting it under one of the two headings would have implied the other
+    # section came from somewhere else.**
     with states.section("srv_game_team", dataset=DATASETS["srv_game_team"]):
         # ONE READ. Two rows, because the grain is game × team — the limit is the grain
         # restated rather than a guess at a ceiling (AC-G.39).
@@ -3968,82 +4239,81 @@ def _post_game(game_id, season) -> None:
         # `away_color_on_light` / `home_color_on_dark` pairs are exactly the shape
         # `row_for_side` was already written for. ⚠️ ONE bounded read, cached by `query`.
         colors = _post_game_identity(game_id)
-        slots = _post_game_columns()
-        _post_game_flank(slots["away"], slots["home"], leaders, away, home, "box")
-        slots["table"].markdown(
-            _table_header(away, home, "Box score", colors)
+        # 🚨 R-885/R-886. ONE TABLE, BUILT AS ONE STRING, WRITTEN ONCE.
+        #
+        # **Marc, v11: *"Box Score and Advanced should be one big continuous table … There
+        # should not be a block of whitespace that splits Box/Advanced."*** The two sections
+        # used to be two `st.subheader` calls around two separate `st.columns` splits, and the
+        # whitespace he is describing is the seam between those two Streamlit blocks — not a
+        # margin this file sets. **Removing it means there is only one block.**
+        parts = [
+            _section_heading("Box score"),
+            _table_header(away, home, "Box score", colors),
             # 🚨 `dp=0` FOR BOX SCORE, AND IT IS THE PANEL'S OWN NATURE RATHER THAN A PREFERENCE:
             # all six measures are integer counts — first downs, yards, attempts. At `box()`'s
             # default of 1 every label reads `22.0`, `5.0`, `38.0`, which is precision the
-            # measure does not have. Measured: `dp` changes no label COUNT at this width, so
-            # this costs nothing — see `_metric_chart` and R-829.
-            + _comparison(away, home, _BOX_SCORE_ROWS, spread=spread, dp_band=0,
-                          colors=colors)
-            + _custom_row(away, home, "Third down",
-                          lambda r: _fraction(r, "third_down_conversions",
-                                              "third_down_attempts"))
-            + _custom_row(away, home, "Fourth down",
-                          lambda r: _fraction(r, "fourth_down_conversions",
-                                              "fourth_down_attempts"))
-            + _custom_row(away, home, "Penalties",
-                          lambda r: fmt.number(r.get("penalties"), dp=0))
-            + _custom_row(away, home, "Turnovers", _turnovers),
-            unsafe_allow_html=True)
-
-        # ⚠️ POSSESSION, WHICH B076 REPORTED AS A SERVING GAP RATHER THAN WORKING AROUND.
-        # It carried possession_seconds and nothing else, and 1,906 is not a figure to put in
-        # front of a reader; dividing it into 31:46 is arithmetic in the page. A080 published
-        # possession_display, the same answer srv_drive gave for durations, so the row exists
-        # now and nothing here computes it. Sanity check on 401752665: 29:38 + 30:22 = 60:00.
-        slots["table"].markdown(
+            # measure does not have.
+            _comparison(away, home, _BOX_SCORE_ROWS, spread=spread, dp_band=0, colors=colors),
+            _custom_row(away, home, "Third down",
+                        lambda r: _fraction(r, "third_down_conversions",
+                                            "third_down_attempts")),
+            _custom_row(away, home, "Fourth down",
+                        lambda r: _fraction(r, "fourth_down_conversions",
+                                            "fourth_down_attempts")),
+            _custom_row(away, home, "Penalties",
+                        lambda r: fmt.number(r.get("penalties"), dp=0)),
+            _custom_row(away, home, "Turnovers (INT/FUM)", _turnovers),
+            # ⚠️ POSSESSION, WHICH B076 REPORTED AS A SERVING GAP RATHER THAN WORKING AROUND.
+            # It carried possession_seconds and nothing else, and 1,906 is not a figure to put
+            # in front of a reader; dividing it into 31:46 is arithmetic in the page. A080
+            # published possession_display, so the row exists and nothing here computes it.
             _custom_row(away, home, "Possession",
                         lambda r: r.get("possession_display") or fmt.EM_DASH),
-            unsafe_allow_html=True)
+        ]
 
-        st.subheader("Advanced")
         # ⚠️ A SEPARATE FLAG, SO A SEPARATE STATE. 72 of the 3,543 games that have a box score
         # do not have this block, and a section that silently vanished would be
-        # indistinguishable from one that had never been written.
+        # indistinguishable from one that had never been written. **What changed in v11 is that
+        # its absence no longer ends the panel** — the table is one continuous run, so Box
+        # score stays drawn and only the second section reports itself missing.
         advanced = [r for r in played if bool(r.get("has_team_advanced"))]
+        glossary, rows = None, []
+        if len(advanced) >= 2:
+            glossary = _postgame_glossary()
+            rows = [r for r in _ADVANCED_ROWS
+                    if r[1] != "defense_havoc_rate" or all(bool(s.get("has_havoc"))
+                                                           for s in advanced)]
+            parts += [
+                # ✅ R-885. `Advanced Team Stats`, Marc's v11 name. His *"Advances"* is a typo.
+                _section_heading(_ADVANCED_SECTION),
+                _table_header(away, home, _ADVANCED_SECTION, colors),
+                # ⚠️ ELEVEN OF THESE TWELVE ARE RATES BETWEEN 0 AND 1. At `box()`'s default of
+                # 1 the quartiles COLLAPSE — a real week-1 passing-downs row goes p25 0.240 →
+                # `0.2` and p75 0.433 → `0.4`, so a box spanning a fifth of the scale is
+                # labelled as if it spanned two tenths. `dp=2` (R-829).
+                _comparison(away, home, rows, glossary, spread=spread, dp_band=2,
+                            colors=colors),
+            ]
+
+        # 🚨 THE SPLIT HAPPENS ONCE, AFTER BOTH SECTIONS ARE BUILT. Two splits are what put the
+        # cards in vertical register with each section, which is exactly what v11 dissolves.
+        slots = _post_game_columns()
+        slots["table"].markdown("".join(parts), unsafe_allow_html=True)
+        # ⚠️ THE CARD REGION IS ONE BLOCK AND IS DRAWN ONCE — every group appears exactly once,
+        # top to bottom, with no vertical association to the table beside it.
+        slots["cards"].markdown(
+            _post_game_cards(leaders, away, home, colors), unsafe_allow_html=True)
+
         if len(advanced) < 2:
-            states.empty(
-                "The advanced figures would be here.",
-                "This game has a box score but no advanced breakdown — the two are collected "
-                "separately and one can arrive without the other.")
+            # ⚠️ INSIDE THE TABLE COLUMN, NOT FULL WIDTH — the absence belongs to the table's
+            # second section, and a full-width empty state would read as the whole panel's.
+            with slots["table"]:
+                states.empty(
+                    "The advanced figures would be here.",
+                    "This game has a box score but no advanced breakdown — the two are "
+                    "collected separately and one can arrive without the other.")
             table.as_of_caption(df)
             return
-
-        glossary = _postgame_glossary()
-        rows = [r for r in _ADVANCED_ROWS
-                if r[1] != "defense_havoc_rate" or all(bool(s.get("has_havoc"))
-                                                       for s in advanced)]
-        # 🚨 R-848. THE CAST IS NO LONGER THE SAME IN BOTH SECTIONS. R-738 kept it identical so
-        # a reader scrolling between the panels would not find it changed; Marc's v08 puts
-        # RECEIVING in Advanced only, and his reason is FIT rather than meaning — eight cards
-        # beside one panel is a different shape from five beside each of two.
-        adv = _post_game_columns()
-        _post_game_flank(adv["away"], adv["home"], leaders, away, home, "advanced")
-        adv["table"].markdown(
-            # 🚨 `dp=2` FOR ADVANCED (R-829). ⚠️ THE `_METRIC_VALUE_NARROW` THIS COMMENT USED
-            # TO NAME IS GONE WITH THE CENTRED CELL — R-810 sized the two panels' value slots
-            # separately because a centred cell could differ per panel without the centre
-            # moving; v08's *one big table* needs the two sections' columns to line up with
-            # each other, so one width serves both.
-            # ⚠️ ELEVEN OF THESE TWELVE ARE RATES BETWEEN 0 AND 1. At `box()`'s default of 1 the
-            # quartiles COLLAPSE — a real week-1 passing-downs row goes p25 0.240 → `0.2` and
-            # p75 0.433 → `0.4`, so a box spanning a fifth of the scale is labelled as if it
-            # spanned two tenths, and this team's 0.348 prints `0.3`, the same as the median it
-            # is not.
-            # ⚠️ AND THE COST OF THE ONE-SENTENCE RULE IS NAMED: `Offensive plays` is a count and
-            # reads `71.00`. The alternative — each row's own `dp`, which this file already
-            # carries for the VALUE — was not taken because six of these rates print a serving
-            # display string (`47.1%`) whose `dp` has nothing to do with the share the
-            # distribution is published in. **Per panel is a rule; per row would be a rule with
-            # six exceptions.**
-            _table_header(away, home, "Advanced", colors)
-            + _comparison(away, home, rows, glossary, spread=spread, dp_band=2,
-                          colors=colors),
-            unsafe_allow_html=True)
 
         missing = [label for label, field, _dp in rows if field not in glossary]
         if missing:
