@@ -2098,6 +2098,35 @@ models:
       - name: passing_yards
         description: >
           Passing yards gained.
+      - name: opponent_abbreviation
+        description: >
+          The opponent's short label for the schedule strip - A135. The abbreviation, falling back
+          to the full team name, which is A130's chain from the browser tab: abbreviation is not
+          universal and A130 measured it null on 10.7% of srv_game rows. Resolved here rather than
+          in the page so the two cannot drift. On FBS 2026 regular the fallback never fires.
+      - name: total_yards_allowed
+        description: >
+          Total yards the OPPONENT gained in THIS game - what this team allowed. A135. The
+          opponent's own box score, joined on the same game_id with a different team_id, so on one
+          row total_yards and total_yards_allowed are the two sides of this fixture.
+          NOT total_yards_for_minus_opponent_allowed_per_game, which is a season average.
+          Null unless game_figures_state is 'played'.
+      - name: rushing_yards_allowed
+        description: >
+          Rushing yards the opponent gained in this game. See total_yards_allowed.
+      - name: passing_yards_allowed
+        description: >
+          Passing yards the opponent gained in this game. See total_yards_allowed.
+      - name: game_figures_state
+        description: >
+          WHICH ABSENCE A ROW WITH NO FIGURES IS - 'played', 'scheduled' or 'no_box_score'.
+          A single null for all of them is the defect this column exists to prevent (AC-G.11).
+          Measured on the 2026 regular calendar: 5,848 scheduled, 842 no_box_score, 668 played.
+          THE NO-BOX-SCORE CASE IS A DIVISION STORY, NOT A DATE ONE - across 2024-2025 completed
+          regular games FBS-vs-FBS coverage is 100.0% and FCS 99.1%, while Division II and
+          Division III are 0.0% across 8,256 games. A canceled or no-contest game is NOT a
+          fourth value because the feed carries no such flag; it is indistinguishable from a game
+          still to be played.
       - name: rushing_attempts
         description: >
           Rushing attempts.
