@@ -251,6 +251,51 @@ TABLE_CSS = """
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
     table-layout:fixed; }
 
+/* A138. THE SCOREBOARD INSIDE A CELL — away over home, quarters across, final at the right.
+   Marc: "present each row like a scoreboard, Away over Home, each quarter, then final score."
+
+   ⚠ NESTED INSIDE `.cfdb-table`, so every rule here has to UNDO something the outer table
+   sets. `table-layout:fixed` on the outer one does not inherit, but the font size, the cell
+   padding and the header opacity all reach in and have to be answered explicitly — an inner
+   table that quietly takes the outer's 90% header opacity reads as disabled.
+
+   ⚠ `width:auto`, NOT `100%`: the scoreboard is as wide as its own numbers and is not stretched
+   across a cell sized for the longest team name on the page. */
+/* 🚨 `table-layout:fixed` AND FIXED CELL WIDTHS, AND THE RASTER IS WHY — TWICE. With the
+   columns sized to their content, a row with two-digit quarters was wider than a row without,
+   so the "4" was in a different place on every game and a reader scanning ten scoreboards had
+   to re-find it each time. A scoreboard's whole value is that the same number is always in the
+   same place. Widths are per-column rather than on the table, so an overtime game is simply one
+   column wider than a regulation one. */
+.cfdb-table td .cfdb-scoreboard { width:auto; border-collapse:collapse;
+    font-size:.88em; table-layout:fixed; }
+.cfdb-table td .cfdb-scoreboard th,
+.cfdb-table td .cfdb-scoreboard td { width:1.75rem; }
+.cfdb-table td .cfdb-scoreboard th,
+.cfdb-table td .cfdb-scoreboard td { padding:.05rem .3rem; border:0; opacity:1;
+    text-align:right; white-space:nowrap; font-weight:400; }
+/* The quarter labels are a scale, not data: muted, so the numbers under them read first. */
+.cfdb-table td .cfdb-scoreboard thead th { font-size:.82em; opacity:.6;
+    letter-spacing:.02em; }
+/* The team is the row's name and reads left; everything after it is a number and reads right. */
+/* A FIXED WIDTH, NOT A MAX, AND THE RASTER IS WHY. With the column sized to its content every
+   scoreboard was a different width, so the quarter columns did not line up down the page and a
+   reader scanning ten games had to re-find the "4" on every row. A scoreboard's whole value is
+   that the same number is always in the same place. Long names ellipsise rather than widening
+   the grid. */
+.cfdb-table td .cfdb-scoreboard .cfdb-sb-team { text-align:left; padding-right:.5rem;
+    font-weight:500; width:9.5rem; max-width:9.5rem; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; }
+/* THE FINAL SCORE IS THE ONE NUMBER A READER LOOKS FOR, and a scoreboard sets it apart from
+   the quarters it is the sum of. A rule rather than bold: bold on both lines would compete
+   with the team names for the same emphasis. */
+.cfdb-table td .cfdb-scoreboard .cfdb-sb-final { font-weight:600; padding-left:.5rem;
+    width:2.6rem; border-left:1px solid var(--cfdb-edge); }
+/* AWAY OVER HOME IS THE LAW (R-522) AND THE HOME SIDE CARRIES THE ONLY DIVIDER, so the two
+   lines cannot be read as an unordered pair. */
+.cfdb-table td .cfdb-scoreboard .cfdb-sb-home th,
+.cfdb-table td .cfdb-scoreboard .cfdb-sb-home td { border-top:1px solid var(--cfdb-edge); }
+
 /* R-269. HORIZONTAL SCROLLING, WHICH THE PERCENTAGE LAYOUT MADE IMPOSSIBLE.
    `width:100%` plus a percentage colgroup cannot overflow — thirty-nine columns compress
    until unreadable and there is nothing wider than the viewport to scroll. `max-content`

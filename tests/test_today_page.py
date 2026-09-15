@@ -441,6 +441,13 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
                "season": 2026,
                "play_number": 1, "period": 1, "is_overtime": False,
                "home_win_probability": 0.62,
+               # A138. THE CHART'S X AXIS IS THE CLOCK NOW, not `play_number` —
+               # cfdb-main-R-916 measured that column non-chronological on 336 of 1,898 games.
+               "elapsed_from_kickoff_seconds": 120,
+               "overtime_period": None, "overtime_axis_offset_periods": None,
+               # A138. The truncation flag the chart reads to decide whether it may print a
+               # final value at all.
+               "win_probability_curve_reaches_final_score": True,
                "line_spread_largest_excursion": -6.0,
                "line_spread_move_from_open": -3.0,
                "line_total_largest_excursion": 4.0,
@@ -635,15 +642,17 @@ def test_a_scoreless_quarter_is_a_zero_and_an_unplayed_one_is_absent():
     invent shut-out quarters, and printing only the non-zero ones would delete real ones.
 
     Both directions are asserted, because a fix for either one alone produces the other.
+
+    ⚠️ A138 MOVED THIS ONTO `_quarter_cells`. The states are unchanged; only their container is.
     """
     today = _today()
-    played = today._quarter_line(_scoreline(), "home")
-    assert played.split(" &middot; ") == ["7", "3", "0", "7"], (
+    played = today._quarter_cells(_scoreline(), "home")
+    assert played == [("1", "7"), ("2", "3"), ("3", "0"), ("4", "7")], (
         f"a played, scoreless quarter must render 0, got {played!r}")
 
     # A game whose feed carries only three periods must not grow a fourth.
-    short = today._quarter_line(_scoreline(home_periods=3, home_q4=None), "home")
-    assert short.split(" &middot; ") == ["7", "3", "0"], (
+    short = today._quarter_cells(_scoreline(home_periods=3, home_q4=None), "home")
+    assert short == [("1", "7"), ("2", "3"), ("3", "0")], (
         f"an unplayed quarter must be absent, not zero — got {short!r}")
 
 
@@ -656,39 +665,53 @@ def test_overtime_is_labelled_and_never_folded_into_the_fourth_quarter():
     real number, which is what makes it worth a test rather than a comment.
     """
     today = _today()
-    line = today._quarter_line(
-        _scoreline(home_periods=5, home_overtime_points=13), "home")
-    parts = line.split(" &middot; ")
+    pairs = today._quarter_cells(_scoreline(home_periods=5, home_overtime_points=13), "home")
 
-    assert len(parts) == 5, f"a 5-period game shows five columns, got {parts}"
-    assert parts[:4] == ["7", "3", "0", "7"], "the four quarters are unchanged by overtime"
-    assert parts[4] == "OT&nbsp;13", f"overtime must be LABELLED, got {parts[4]!r}"
-    assert "20" not in parts[3], "overtime points must not be added onto the fourth quarter"
+    assert len(pairs) == 5, f"a 5-period game shows five columns, got {pairs}"
+    assert pairs[:4] == [("1", "7"), ("2", "3"), ("3", "0"), ("4", "7")], \
+        "the four quarters are unchanged by overtime"
+    assert pairs[4] == ("OT", "13"), f"overtime must be LABELLED, got {pairs[4]!r}"
+    assert pairs[3][1] != "20", "overtime points must not be added onto the fourth quarter"
 
 
 def test_the_overtime_label_cannot_be_broken_across_two_lines():
-    """⚠️ A REAL DEFECT THIS ROUND SHIPPED AND THEN FIXED, so it stays pinned.
+    """⚠️ A REAL DEFECT THIS PANEL SHIPPED AND THEN FIXED, AND A138 MADE IT STRUCTURAL.
 
-    The first version joined with `&nbsp;&middot;&nbsp;`, which makes a five-period line ONE
-    unbreakable run. It does not fit the column, and a browser with nowhere legal to break
-    breaks mid-word instead: Wake Forest at Purdue rendered as `7 · 10 · 3 · 3 · O` / `T 15`,
-    with the wrap inside the word "OT".
+    The joined version rendered `7 · 10 · 3 · 3 · O` / `T 15` at Wake Forest at Purdue — the
+    wrap landed INSIDE the word "OT", because `&nbsp;&middot;&nbsp;` had made the whole line one
+    unbreakable run with nowhere legal to break.
 
-    So both halves matter and they pull in opposite directions: the SEPARATORS must be
-    breakable so the line can wrap somewhere sensible, and the LABEL must not be.
+    ✅ In the grid each value is its own `<td>`, so there is no run to break at all. The
+    assertion is therefore about the STRUCTURE rather than about the separators: the label and
+    its number are in different cells, and no cell holds a joined line.
     """
     today = _today()
-    line = today._quarter_line(_scoreline(home_periods=5, home_overtime_points=15), "home")
-    assert "OT&nbsp;" in line, "the label and its number must be one token to the browser"
-    assert "&nbsp;&middot;" not in line, (
-        "the separators must stay breakable, or the whole line becomes one unbreakable run "
-        "and the browser wraps inside a word")
+    html = today._scoreboard(_scoreline(home_periods=5, away_periods=5,
+                                        home_overtime_points=15, away_overtime_points=7))
+    assert ">OT</th>" in html, "the label is a column header, not part of a value"
+    assert "&middot;" not in html, (
+        "no cell may hold a joined run — that is the shape that wrapped mid-word")
+    assert ">15</td>" in html, "and the overtime number is a cell of its own"
 
 
 def test_a_game_with_no_period_data_reads_as_a_dash():
-    """An absence that says which absence it is: no periods means no scoreboard, not 0-0-0-0."""
+    """An absence that says which absence it is: no periods means no scoreboard, not 0-0-0-0.
+
+    🚨 AND IN THE GRID THE WHOLE LINE HAS TO BE EM DASHES, NOT BLANKS. A blank cell already
+    means "that side has no such period"; using it for "we do not have the number" is the exact
+    collapse `_quarter_cells` exists to prevent, and a grid is where it is easiest to commit.
+    """
     today = _today()
-    assert today._quarter_line(_scoreline(home_periods=None), "home") == "—"
+    assert today._quarter_cells(_scoreline(home_periods=None), "home") is None
+
+    # ⚠️ THE FINAL SCORE IS GIVEN, so the em dashes counted below are the QUARTERS only — a
+    # fixture with no points would put a fifth em dash in the final column and the assertion
+    # would pass for the wrong reason.
+    html = today._scoreboard(_scoreline(home_periods=None, home_points=24, away_points=23))
+    home = html[html.index("cfdb-sb-home"):]
+    assert home.count(">\u2014</td>") == 4, (
+        "a side with no period count reads as four em dashes, not four blanks")
+    assert ">24</td>" in home, "and its final score is still a number"
 
 
 # --- the ESPN link ----------------------------------------------------------------------
@@ -750,14 +773,28 @@ def test_most_exciting_orders_on_published_columns_and_does_no_arithmetic():
 # --- the win-probability curve ----------------------------------------------------------
 
 def _curve(n=40, overtime_from=None):
-    """A game's worth of plotted points, in play order."""
+    """A game's worth of plotted points, in clock order.
+
+    🚨 A138. THE FIXTURE CARRIES THE CLOCK COORDINATES, and the two are mutually exclusive
+    exactly as the warehouse publishes them: `elapsed_from_kickoff_seconds` is NULL for every
+    overtime play and `overtime_axis_offset_periods` is NULL in regulation. A fixture where
+    both were populated could not test the thing the columns exist to keep apart.
+    """
     import pandas as pd
+    regulation = n if overtime_from is None else overtime_from
+    overtime_plays = 0 if overtime_from is None else n - overtime_from
     rows = []
     for i in range(n):
+        in_overtime = overtime_from is not None and i >= overtime_from
         rows.append({
             "game_id": 1, "play_number": i,
-            "period": 1 + i // 10 if overtime_from is None or i < overtime_from else 5,
-            "is_overtime": None if overtime_from is None else (i >= overtime_from),
+            "period": 1 + i // 10 if not in_overtime else 5,
+            "is_overtime": None if overtime_from is None else in_overtime,
+            "elapsed_from_kickoff_seconds":
+                None if in_overtime else round(i / max(regulation - 1, 1) * 3600),
+            "overtime_period": 1 if in_overtime else None,
+            "overtime_axis_offset_periods":
+                ((i - overtime_from) / max(overtime_plays, 1)) if in_overtime else None,
             "home_win_probability": 0.5 + 0.4 * ((i % 7) - 3) / 3,
             "home_score": i, "away_score": i, "play_text": "a play",
         })
@@ -778,7 +815,7 @@ def _polyline_xs(svg: str):
     return xs
 
 
-def test_the_curve_is_plotted_in_play_order_and_the_assertion_can_actually_fire():
+def test_the_curve_is_plotted_in_clock_order_and_the_assertion_can_actually_fire():
     """🚨 R-760's QUESTION, ASKED OF THIS TEST BEFORE IT WAS WRITTEN: what would have to be
     wrong for it to fire?
 
@@ -808,15 +845,25 @@ def test_the_curve_is_plotted_in_play_order_and_the_assertion_can_actually_fire(
         "must plot out of order")
 
 
-def test_the_curve_query_orders_by_play_number():
-    """The ordering lives in the SQL, and `play_number` is the only column that can carry it.
+def test_the_curve_query_orders_by_the_clock_and_not_by_play_number():
+    """🚨 cfdb-main-R-916. `play_number` IS NOT CHRONOLOGICAL AND THE CHART USED TO TRUST IT.
 
-    ⚠️ `play_id` is TEXT in this feed and the ids are NOT fixed width (A121 measured 5 to 18
-    characters), so ordering on it is a lexical sort that scrambles play order while every row
-    stays real.
+    Measured on the published curve: **795 consecutive pairs step BACKWARDS on the clock, across
+    336 of 1,898 games (17.7%)**, worst single back-step −3,567 seconds. Game 401635615 carries
+    fourth-quarter plays at `play_number` 0–3 and a first-quarter play at 4.
+
+    ⚠️ `nulls last` IS LOAD-BEARING AND IS ASSERTED SEPARATELY. `elapsed_from_kickoff_seconds`
+    is NULL for every overtime play by design, so without it the sort puts overtime at the FRONT
+    of the game — R-890's shape, and the symptom would be a line that starts in overtime.
+
+    ✅ `play_number` SURVIVES AS THE TIE-BREAK, which is the one place it is still right: inside
+    an overtime period it is the only order a play has.
     """
-    assert "order by game_id, play_number" in SOURCE, (
-        "the curve query must order by play_number — the position axis A121 established")
+    assert "order by game_id, elapsed_from_kickoff_seconds nulls last, play_number" in SOURCE, (
+        "the curve query must order by the clock, with nulls last, and use play_number only as "
+        "the tie-break inside overtime")
+    assert "order by game_id, play_number\n" not in SOURCE, (
+        "the old play_number ordering must be gone, not merely joined")
 
 
 def test_overtime_breaks_the_line_and_regulation_does_not():
@@ -865,6 +912,405 @@ def test_the_curve_is_never_smoothed():
     plotted = _polyline_xs(today._sparkline_svg(frame))
     assert len(plotted) == 40, (
         f"{len(plotted)} points plotted from a 40-play frame — something is resampling")
+
+
+# --- A138: the clock axis, the fill, the label and the scoreboard -------------------------
+
+def test_the_chart_positions_on_the_clock_and_not_on_play_number():
+    """🚨 cfdb-main-R-916, AND THIS IS THE TEST THE OLD SUITE COULD NOT HAVE WRITTEN.
+
+    The published feed's `play_number` is not chronological on 336 of 1,898 games. Game
+    401635615 is the shape reproduced here: its `play_number` 0–3 are FOURTH-QUARTER plays at
+    3,528–3,590 seconds and `play_number` 4 is a first-quarter play at 23 seconds. Drawn on
+    `play_number` the line crosses the whole width backwards with every point real.
+
+    ⚠️ THE OLD ORDER-TEST COULD NOT SEE THIS because its fixture had the two axes agreeing —
+    which is R-744's family: a fixture whose defaults make the assertion true. This one builds
+    a frame where they DISAGREE, so it fires on exactly the defect that shipped.
+    """
+    import pandas as pd
+    today = _today()
+    rows = []
+    # Four fourth-quarter plays first by play_number, then the rest of the game.
+    for play_number, elapsed in enumerate([3528, 3534, 3584, 3590]):
+        rows.append({"game_id": 1, "play_number": play_number, "period": 4,
+                     "is_overtime": False, "elapsed_from_kickoff_seconds": elapsed,
+                     "overtime_period": None, "overtime_axis_offset_periods": None,
+                     "home_win_probability": 0.5})
+    for index, elapsed in enumerate([23, 58, 87, 109]):
+        rows.append({"game_id": 1, "play_number": 4 + index, "period": 1,
+                     "is_overtime": False, "elapsed_from_kickoff_seconds": elapsed,
+                     "overtime_period": None, "overtime_axis_offset_periods": None,
+                     "home_win_probability": 0.5})
+    frame = pd.DataFrame(rows)
+    frame["is_overtime"] = frame["is_overtime"].astype("object")
+
+    # The page receives the frame in the order the SQL returns it — by the clock.
+    in_clock_order = frame.sort_values("elapsed_from_kickoff_seconds").reset_index(drop=True)
+    xs = _polyline_xs(today._sparkline_svg(in_clock_order))
+    assert xs == sorted(xs), "a frame in clock order must plot left to right"
+
+    # ✅ AND THE PROOF THAT IT CAN FAIL: the same points in `play_number` order — which is what
+    # the old query returned — must NOT plot left to right.
+    by_play_number = frame.sort_values("play_number").reset_index(drop=True)
+    broken = _polyline_xs(today._sparkline_svg(by_play_number))
+    assert broken != sorted(broken), (
+        "play_number order must plot backwards on this frame, or the assertion above proves "
+        "nothing about which axis the chart uses")
+
+
+def test_the_curve_is_filled_from_zero_and_the_zero_is_the_middle():
+    """Marc: "Make it an area chart … -1 to 1". Fill from zero makes the SIGN the picture.
+
+    ⚠️ AC-G.22: above-or-below the line is POSITION and survives greyscale; the fill is
+    decoration on a signal that already works without it. So the assertion is that the filled
+    path STARTS AND ENDS on the zero line — an area hung off the top or the bottom of the box
+    would still look like an area chart and would say something else entirely.
+    """
+    today = _today()
+    svg = today._sparkline_svg(_curve())
+    paths = re.findall(r"<path d='([^']*)'", svg)
+    assert paths, "an area chart has a filled path"
+    for d in paths:
+        first = d.split()[0]                       # M x,y
+        last = [p for p in d.split() if p.startswith("L")][-1]
+        start_y = float(first.split(",")[1])
+        end_y = float(last.split(",")[1])
+        assert abs(start_y - end_y) < 0.05, (
+            "the fill must close on one horizontal baseline, not on the curve")
+    assert "<polyline" in svg, "the line survives the fill — the spikes are the drama"
+
+
+def test_a_truncated_curve_is_never_labelled_with_a_final_value():
+    """🚨 AC-G.11, AND IT IS ONE ROW IN NINE RATHER THAN A DEFENSIVE BRANCH.
+
+    99 of 1,898 published curves never reach their own game's final score (A136). A138 measured
+    what a reader actually meets: **38 of 337 top-ten rows across 35 season-weeks, in 22 of those
+    weeks, two of them at #1.** Coastal Carolina at UTSA ends at 0.1% for a side that won 44-15.
+
+    Printing "0%" beside that line is a confident wrong number a reader cannot tell from a real
+    collapse — so the label is withheld and the end of the line is cut and named instead.
+    """
+    today = _today()
+    complete = today._sparkline_svg(_curve(), reaches_final=True)
+    truncated = today._sparkline_svg(_curve(), reaches_final=False)
+
+    assert "%</text>" in complete, "a complete curve labels its final value — Marc asked for it"
+    assert "%</text>" not in truncated, (
+        "a truncated curve must not print a final value: the number is not one")
+    assert "cut</text>" in truncated, "the absence has to say which absence it is"
+    assert "stroke-dasharray='1 2'" in truncated, "and be visible without reading the label"
+    assert "feed stops" in truncated, "including to a screen reader"
+    assert "feed stops" not in complete
+
+
+def test_overtime_is_wider_and_the_scale_is_shared():
+    """✅ READING B — shared SCALE, not shared extent. Marc asked for both "consistent across
+    all rows" and "games with overtime will be longer", and only this reading gives both.
+
+    📊 A136 measured the alternative: sizing every chart to the week's longest game spends
+    15.8-42.9% of a regulation chart's width on emptiness. The assertion here is the property
+    that makes reading B true — a quarter boundary lands at the SAME pixel on both charts, and
+    the overtime one is longer because it contains more game.
+    """
+    today = _today()
+    regulation = today._sparkline_svg(_curve())
+    overtime = today._sparkline_svg(_curve(overtime_from=30))
+
+    def width(svg):
+        return float(re.search(r"viewBox='0 0 ([\d.]+) ", svg).group(1))
+
+    assert width(overtime) > width(regulation), (
+        "an overtime game's chart is physically longer — that is Marc's second sentence")
+    expected = today._CURVE_OT_BAND_UNITS * today._CURVE_PX_PER_UNIT
+    assert abs((width(overtime) - width(regulation)) - expected) < 1.5, (
+        "one overtime period must add exactly one band at the shared scale")
+
+    # THE SHARED SCALE ITSELF: the fourth-quarter reference line is at the same x on both.
+    def quarter_line_xs(svg):
+        return sorted({float(x) for x in re.findall(r"<line x1='([\d.]+)' y1='2'", svg)})
+    assert quarter_line_xs(regulation)[:5] == quarter_line_xs(overtime)[:5], (
+        "the regulation reference lines must land identically, or the scale is not shared")
+
+
+def test_the_PANEL_passes_the_truncation_flag_and_not_just_the_helper(monkeypatch):
+    """🚨 §6, MODE 1: THE FIRST VERSION OF THE TEST ABOVE CAME BACK GREEN UNDER ITS OWN BREAK.
+
+    Removing the flag from the cell renderer — `_sparkline_svg(points, reaches_final=True)`,
+    unconditionally — left every assertion in
+    `test_a_truncated_curve_is_never_labelled_with_a_final_value` passing, because that test
+    calls the HELPER with the argument it wants. A helper that honours a parameter says nothing
+    about whether the caller ever passes it. A133 hit the identical shape with the label placer
+    and closed it the same way.
+
+    ✅ SO THIS DRIVES THE PANEL. It builds the real column list through `_most_exciting`, finds
+    the curve column, and formats a row whose published flag is False.
+    """
+    import contextlib
+    import pandas as pd
+    today = _today()
+
+    class _Quiet:
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    captured = []
+
+    def capture_render(df, columns, *a, **k):
+        captured.append(columns)
+
+    def capture_ros(df, view, what, why, renderer=None, **k):
+        if renderer is not None and df is not None and not df.empty:
+            renderer(df)
+
+    curve = _curve()
+    curve["game_id"] = 7
+
+    monkeypatch.setattr(today, "st", _Quiet())
+    monkeypatch.setattr(today.states, "section", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(today.states, "render_or_state", capture_ros)
+    monkeypatch.setattr(today.table, "render", capture_render)
+    monkeypatch.setattr(today, "_win_probability_curves", lambda ids: curve)
+
+    class _Scope:
+        def describe(self):
+            return "the fixture"
+
+    frame = pd.DataFrame([{
+        "game_id": 7, "away_team_display": "Away U", "home_team_display": "Home U",
+        "away_points": 15, "home_points": 44,
+        "home_periods": 4, "away_periods": 4,
+        "home_q1": 7, "home_q2": 14, "home_q3": 13, "home_q4": 10,
+        "away_q1": 0, "away_q2": 7, "away_q3": 8, "away_q4": 0,
+        "lead_changes_fourth_quarter": 2, "lead_changes_overtime": 0,
+        "mean_distance_from_even_fourth_quarter_onward": 0.31, "lead_changes": 3,
+        "excitement_index": 6.1,
+        # THE GAME THE FLAG EXISTS FOR: Coastal Carolina at UTSA's shape — the feed stops
+        # while the eventual winner is still near zero.
+        "win_probability_curve_reaches_final_score": False,
+    }])
+
+    today._most_exciting(frame, _Scope())
+    assert captured, "the panel handed no columns to table.render"
+    columns = {c.field: c for c in captured[-1]}
+    assert "curve" in columns, "the curve column vanished from the panel"
+
+    cell = columns["curve"].format(frame.iloc[0])
+    assert "cut</text>" in cell, (
+        "the panel did not pass the truncation flag through to the chart — the helper honours "
+        "it, which is a different claim")
+    assert "%</text>" not in cell, (
+        "a truncated curve must not print a final value even when the panel renders it")
+
+    # ✅ AND THE OTHER DIRECTION, so the assertion above is not satisfied by a chart that never
+    # labels anything.
+    complete = frame.copy()
+    complete.loc[0, "win_probability_curve_reaches_final_score"] = True
+    assert "%</text>" in columns["curve"].format(complete.iloc[0])
+
+
+# --- A138: the scoreboard (cfdb-main-R-906) ----------------------------------------------
+
+def _scoreline_row(**overrides):
+    row = {"away_team_display": "Away U", "home_team_display": "Home U",
+           "away_points": 23, "home_points": 24,
+           "home_periods": 4, "away_periods": 4,
+           "home_q1": 7, "home_q2": 3, "home_q3": 4, "home_q4": 10,
+           "away_q1": 0, "away_q2": 10, "away_q3": 3, "away_q4": 10}
+    row.update(overrides)
+    import pandas as pd
+    return pd.Series(row)
+
+
+def _scoreboard_team_order(html):
+    """The team names in the order the scoreboard actually emits them."""
+    return re.findall(r"cfdb-sb-team'>([^<]*)</th>", html)
+
+
+def test_away_is_above_home_in_every_scoreboard_under_every_sort():
+    """🚨 MARC: "Sorting moves the games, not the rows within the game." THAT IS A GRAIN
+    STATEMENT, NOT A PREFERENCE, and R-522 is the law it restates.
+
+    ⚠️ B082 AND B083 BOTH PROVED A PRESENCE ASSERTION CANNOT SEE THIS. "The scoreboard has two
+    rows" passes with them in either order. So this drives the page's REAL sort — `table.apply_sort`,
+    the same function `table.render` calls — over every sortable column in both directions, and
+    checks the rendered scoreboard of every game each time.
+
+    ✅ AND IT FIRES: building the two lines from `sorted(...)` by points, or emitting home first,
+    turns every assertion below red on the first column tried.
+    """
+    import pandas as pd
+    today = _today()
+    from lib import table as table_module
+
+    frame = pd.DataFrame([
+        _scoreline_row(away_points=10, home_points=38, away_team_display="A1",
+                       home_team_display="H1"),
+        _scoreline_row(away_points=45, home_points=3, away_team_display="A2",
+                       home_team_display="H2"),
+    ])
+    columns = [table_module.Col("away_points", "Away"), table_module.Col("home_points", "Home")]
+
+    for field in ("away_points", "home_points"):
+        for order in ("asc", "desc"):
+            ordered = frame.sort_values(field, ascending=(order == "asc"),
+                                        na_position="last", kind="mergesort")
+            for _, row in ordered.iterrows():
+                names = _scoreboard_team_order(today._scoreboard(row))
+                assert names == [row["away_team_display"], row["home_team_display"]], (
+                    f"sorting by {field} {order} moved the home side above the away side")
+    assert columns, "the sortable columns are the outer table's, never the scoreboard's"
+
+
+def test_the_scoreboard_keeps_the_three_quarter_states_apart():
+    """🚨 AC-G.32 SURVIVES THE LAYOUT CHANGE, WHICH IS THE THING A RESTRUCTURE LOSES QUIETLY.
+
+        played and scoreless      `0`
+        never played              NO COLUMN AT ALL — not a blank one
+        score not held            an em dash in that position
+
+    ⚠️ A BLANK CELL FOR "never played" AND A BLANK CELL FOR "we do not know" IS THE EXACT
+    COLLAPSE `_quarter_cells` exists to prevent, and a grid is where it is easiest to commit.
+    """
+    today = _today()
+
+    played = today._quarter_cells(_scoreline_row(home_q2=0), "home")
+    assert ("2", "0") in played, "a scoreless quarter that was played reads 0"
+
+    short = today._quarter_cells(_scoreline_row(home_periods=3, home_q4=None), "home")
+    assert [label for label, _ in short] == ["1", "2", "3"], (
+        "a three-period game has THREE columns, not four with a blank")
+
+    unknown = today._quarter_cells(_scoreline_row(home_q3=None), "home")
+    assert ("3", "\u2014") in unknown, "a quarter we do not have reads as an em dash"
+
+    assert today._quarter_cells(_scoreline_row(home_periods=None), "home") is None, (
+        "no period count at all is a fourth state and is not a scoreboard")
+
+    # AND IN THE RENDERED GRID, not only in the helper.
+    html = today._scoreboard(_scoreline_row(home_q3=None))
+    assert ">\u2014</td>" in html, "the em dash has to survive into the cell"
+
+
+def test_the_scoreboard_labels_overtime_and_never_folds_it_into_the_fourth():
+    """🚨 A117's LESSON APPLIED TO THE DISPLAY. Jacksonville State at Ohio had TWO fourth-quarter
+    lead changes and ELEVEN in overtime; a scoreboard that added the overtime points onto Q4
+    would put the drama in a quarter where it did not happen, with every number still real.
+    """
+    today = _today()
+    pairs = today._quarter_cells(
+        _scoreline_row(home_periods=5, home_overtime_points=13, home_q4=10), "home")
+    assert pairs[-1] == ("OT", "13"), "overtime is its own labelled column"
+    assert ("4", "10") in pairs, "and the fourth quarter keeps its own number"
+
+    html = today._scoreboard(_scoreline_row(home_periods=5, away_periods=5,
+                                            home_overtime_points=13, away_overtime_points=7))
+    assert ">OT</th>" in html, "the grid needs the label, not just the value"
+
+
+def test_the_scoreboard_absorbed_four_columns_and_dropped_none():
+    """🚨 MARC'S SENTENCE DESCRIBES THE SCOREBOARD AND THE CHART. IT DOES NOT SAY DELETE THE
+    MEASUREMENTS — they are what the ordering claims, and the caption cites two of them by name.
+
+    The eleven columns became eight: the matchup, the score and the two by-quarter lines are all
+    inside the scoreboard cell. The six that carry a number or a link are untouched.
+    """
+    source = _code_only(SOURCE)
+    # ⚠️ SCOPED TO THE PANEL. `Col("matchup", ...)` also exists in the line-movement panel, so a
+    # whole-file grep answers "does this string appear" rather than "does THIS panel have that
+    # column" — R-859's class, in a test.
+    panel = source[source.index("def _most_exciting"):source.index("def _favorite_margin")]
+    for field in ("lead_changes_fourth_quarter", "lead_changes_overtime",
+                  "mean_distance_from_even_fourth_quarter_onward", "lead_changes",
+                  "excitement_index"):
+        assert f'Col("{field}"' in panel, f"{field} lost its column in the restructure"
+    assert 'Col("espn", "Commentary"' in panel, "the ESPN link is a column, not a row link"
+    assert 'Col("scoreboard", "Scoreboard"' in panel
+    assert 'Col("matchup"' not in panel and 'Col("away_line"' not in panel, (
+        "the absorbed columns must be gone from this panel, not duplicated")
+    assert len(re.findall(r"Col\(", panel)) == 8, (
+        "eleven columns became eight: four absorbed into the scoreboard, and none dropped")
+
+
+def test_the_panel_survives_the_curve_view_being_unpublished(monkeypatch):
+    """🚨 R-748 — ASSERT UPSTREAM, DEGRADE DOWNSTREAM — AND A RESTRUCTURE IS EXACTLY THE EDIT
+    THAT BREAKS THIS QUIETLY.
+
+    `srv_game_win_probability_play` is the SECOND view behind this panel and the supplementary
+    one: if it has not been published, the ranking, the scoreboard and the ESPN links are all
+    still correct and worth showing. `curves` is bound BEFORE the `states.section` block for
+    that reason — `section` swallows the exception and the code below still runs, so an unbound
+    name there turns a handled degradation into a crash.
+
+    ⚠️ AND THE SCOREBOARD IS NOW THE THING THAT MUST SURVIVE IT. Before A138 the panel degraded
+    to ten rows of quarter columns; now it degrades to ten scoreboards, which is strictly more
+    of the page depending on the binding staying where it is.
+    """
+    import contextlib
+    import pandas as pd
+    today = _today()
+
+    class _Quiet:
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    captured = []
+
+    def capture_ros(df, view, what, why, renderer=None, **k):
+        if renderer is not None and df is not None and not df.empty:
+            renderer(df)
+
+    @contextlib.contextmanager
+    def swallowing_section(*a, **k):
+        try:
+            yield
+        except Exception:
+            pass
+
+    def unpublished(_ids):
+        raise RuntimeError('relation "srv_game_win_probability_play" does not exist')
+
+    monkeypatch.setattr(today, "st", _Quiet())
+    monkeypatch.setattr(today.states, "section", swallowing_section)
+    monkeypatch.setattr(today.states, "render_or_state", capture_ros)
+    monkeypatch.setattr(today.table, "render",
+                        lambda df, columns, *a, **k: captured.append((df, columns)))
+    monkeypatch.setattr(today, "_win_probability_curves", unpublished)
+
+    class _Scope:
+        def describe(self):
+            return "the fixture"
+
+    frame = pd.DataFrame([{
+        "game_id": 7, "away_team_display": "Away U", "home_team_display": "Home U",
+        "away_points": 23, "home_points": 24, "home_periods": 4, "away_periods": 4,
+        "home_q1": 7, "home_q2": 3, "home_q3": 4, "home_q4": 10,
+        "away_q1": 0, "away_q2": 10, "away_q3": 3, "away_q4": 10,
+        "lead_changes_fourth_quarter": 6, "lead_changes_overtime": 0,
+        "mean_distance_from_even_fourth_quarter_onward": 0.12, "lead_changes": 14,
+        "excitement_index": 5.0, "win_probability_curve_reaches_final_score": True,
+    }])
+
+    today._most_exciting(frame, _Scope())
+    assert captured, "the panel rendered nothing at all with the curve view unpublished"
+    df, columns = captured[-1]
+    by_field = {c.field: c for c in columns}
+    row = df.iloc[0]
+    assert "Home U" in by_field["scoreboard"].format(row), "the scoreboard must still render"
+    assert "ESPN" in by_field["espn"].format(row), "the links must still work"
+    assert by_field["curve"].format(row) == "\u2014", (
+        "the curve column degrades to an em dash rather than taking the panel down")
+
+
+def test_the_panel_still_passes_no_row_link():
+    """⚠️ `table.render` WRAPS A CELL IN THE ROW'S ANCHOR WHEN THERE IS ONE, and nested anchors
+    are invalid HTML with the OUTER one winning — the reader would click "ESPN" and stay on the
+    site, and it would look fine. The restructure is exactly the edit that introduces a row link.
+    """
+    source = _code_only(SOURCE)
+    panel = source[source.index("def _most_exciting"):source.index("def _favorite_margin")]
+    assert "link_builder" not in panel, (
+        "a row link would silently break the ESPN column — see _espn_link's docstring")
 
 
 # --- the upsets section (R-711) ---------------------------------------------------------
