@@ -61,27 +61,6 @@ def _section_views():
     return named
 
 
-# 🚨 R-839/B110. ONE LABEL IS ORPHANED ON PURPOSE, AND THE EXEMPTION EXPIRES BY ITSELF.
-#
-# §3.3 is EXPAND → MIGRATE → CONTRACT, and the order is not negotiable: **the page stops
-# reading the relation FIRST, and the publish drops it on a LATER round.** B110 deleted the
-# Matchup page's `Game leaders` section (Marc's v03, *"Replace Game Leaders section by adding
-# player cards"*), which is the MIGRATE. The CONTRACT — `site/lib/datasets.py:49`, the
-# `src/publish_marts.py` entry and the 308,232-row table itself — is **session A's round**,
-# and `site/lib/` is A's file that B must not reach into (§3 rule 3).
-#
-# ⚠️ SO THERE IS A WINDOW WHERE THE LABEL HAS NO READER, AND IT COSTS NOTHING: an unread
-# published table is disk, while a published table removed under a page that still reads it
-# is a broken page. The window is in the safe direction by construction.
-#
-# 🚨 AND AN EXEMPTION THAT OUTLIVES ITS CAUSE IS EXACTLY THE DEAD COPY THIS GUARD EXISTS TO
-# FIND. So it is asserted to still be NEEDED: the moment A's round removes the label from
-# `datasets.py`, the second assertion below goes red and this block must be deleted with it.
-# **It cannot rot quietly, which is the only thing that makes it different from the test
-# exemption the message below refuses.**
-_MIGRATING = {"srv_game_team_leader"}
-
-
 def test_every_dataset_label_has_a_reader():
     """🚨 THE DEAD-COPY DIRECTION, RESTORED.
 
@@ -90,28 +69,11 @@ def test_every_dataset_label_has_a_reader():
     Excel export, which is exactly what Marc said he would use these captions for.
     """
     named = _section_views()
-    orphans = sorted(set(DATASETS) - set(named) - _MIGRATING)
+    orphans = sorted(set(DATASETS) - set(named))
     assert not orphans, (
         "these datasets.py labels are named by no states.section under site/views/, so they "
         f"render nowhere: {orphans}. Either a page is missing the call site, or the label is "
         "dead copy — and which one it is, is Cowork's call rather than a test exemption.")
-
-
-def test_the_MIGRATION_EXEMPTION_still_has_something_to_exempt():
-    """🚨 THE EXEMPTION ABOVE IS TIME-BOXED BY THIS ASSERTION AND BY NOTHING ELSE (R-839).
-
-    ⚠️ `test_every_dataset_label_has_a_reader` is an ABSENCE test, and an absence passes just
-    as well when the thing doing the looking has been quietly narrowed — which is what a
-    permanent exemption list is. This is the other half: **a name in `_MIGRATING` that is no
-    longer in `datasets.py` means session A's contract step has LANDED**, so the window is
-    closed and the exemption is now hiding a real orphan rather than a planned one.
-
-    ✅ WHEN THIS GOES RED THE FIX IS TO DELETE `_MIGRATING` AND THIS TEST, not to edit the set.
-    """
-    stale = sorted(_MIGRATING - set(DATASETS))
-    assert not stale, (
-        f"{stale} is no longer a label in datasets.py, so the EXPAND → MIGRATE → CONTRACT "
-        f"window this exemption covers has closed. Delete `_MIGRATING` and this test (R-839).")
 
 
 def test_the_guard_would_notice_a_label_with_no_reader():
@@ -145,10 +107,17 @@ def test_matchup_names_every_view_it_reads():
     """
     named = _section_views()
     # ⚠️ `srv_game_team_leader` LEFT THIS LIST IN B110 (R-839) — the page's `Game leaders`
-    # section was removed, so matchup.py genuinely no longer names it. The CARDS' relation,
-    # `srv_game_team_leader_in_this_game`, is a DIFFERENT view and is read inside
-    # `_post_game`'s own section; the two names differ only by a suffix, which is the trap
-    # A128 and `_game_leaders`'s docstring both warn about.
+    # section was removed, so matchup.py genuinely no longer names it. ✅ A132 then completed
+    # §3.3's CONTRACT: the label, the publish entry and the serving object are all gone, so
+    # there is no longer anything for a migration exemption to cover. B110's `_MIGRATING` set
+    # and its self-destruct test were deleted with them, which is what B built them for.
+    #
+    # 🚨 THE CARDS' RELATION IS A DIFFERENT VIEW AND IS UNTOUCHED.
+    # `srv_game_team_leader_in_this_game` is read inside `_post_game`'s own section and now
+    # draws every card including the defence. The two names differ only by a suffix, which is
+    # the trap A128 and `_game_leaders`'s docstring both warn about — and B110 found a real
+    # assertion that matched the short name as a PREFIX of the long one and would have gone on
+    # passing after its own subject was deleted.
     for view in ("srv_game", "srv_team_week", "srv_game_team",
                  "srv_game_travel", "srv_drive", "srv_game_weather"):
         assert "matchup.py" in named.get(view, set()), \

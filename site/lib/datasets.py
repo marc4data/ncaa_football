@@ -46,7 +46,6 @@ DATASETS = {
     # ⚠️ srv_game and srv_team_week are ALREADY ABOVE and Matchup reads both. That overlap is
     # the argument for this module existing rather than a duplication to tidy up.
     "srv_game_team": "Team box scores, one row per side",
-    "srv_game_team_leader": "Game leaders, by player",
     "srv_game_weather": "Kickoff weather",
     "srv_game_travel": "Travel and rest",
     "srv_drive": "Drive-by-drive log",
