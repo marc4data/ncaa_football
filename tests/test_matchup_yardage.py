@@ -1312,14 +1312,29 @@ def test_the_caption_SAYS_which_side_is_which(panel):
 def test_the_leaders_come_from_the_THROUGH_PRIOR_WEEK_view(panel):
     """🚨 TWO VIEWS, TWO WINDOWS, AND NOTHING BUT THIS STANDS BETWEEN THEM.
 
-    `srv_game_team_leader` answers who led IN this game, from its own box score.
+    `srv_game_team_leader` answered who led IN this game, from its own box score.
     `srv_game_team_leader_through_prior_week` answers who leads GOING IN. On a preview the
-    first does not exist yet, and on a completed game the two are different facts about
+    first did not exist yet, and on a completed game the two were different facts about
     different windows — so reading the short name here would put post-game numbers on a
     pre-game card and look entirely reasonable doing it.
 
     ⚠️ A102 SPENT A WHOLE ROUND on two near-identically-named COLUMNS that disagreed on 83% of
-    games. These are two VIEWS whose names differ by a suffix.
+    games. These were two VIEWS whose names differ by a suffix.
+
+    🚨 PAST TENSE SINCE A132 (R-841): `srv_game_team_leader` NO LONGER EXISTS. B110 removed the
+    page section that read it and A132 contracted the serving object; only the mart remains.
+
+    ✅ THE GUARD IS KEPT ANYWAY, AND THIS IS THE ARGUMENT (R-873, A133's call). What it defends
+    has changed rather than gone: it used to stop this panel reading the WRONG LIVE VIEW and
+    quietly showing post-game numbers on a pre-game card. Today reading that name would raise
+    `UndefinedTable` instead — a loud failure rather than a plausible-looking wrong one — so
+    the guard is less critical than it was and still correct.
+
+    ⚠️ IT IS KEPT BECAUSE THE NAME CAN COME BACK. `fct_player_game_stat` still carries every
+    row, so republishing that view is one model file and one list entry, and `srv_game_team_leader`
+    is the obvious name for it. The day it returns this assertion resumes its original job with
+    nobody having to remember to write it again. A regex costs microseconds; re-deriving
+    B077's finding costs a round.
     """
     _entries, seen = panel(_game(), _both())
     sql = seen.get("leader_sql", "")

@@ -26,7 +26,7 @@
 --     2  srv_player_game_log                  1,410,331
 --     3  srv_player_play                        375,925
 --     4  srv_team_week                          375,594
---     5  srv_game_team_leader                   308,232
+--     5  srv_game_team_leader                   308,232   <- RETIRED, A132 (R-841)
 --     6  THIS MODEL                             291,548   <- sixth of thirty-three
 --     7  srv_game_team                          225,350
 --

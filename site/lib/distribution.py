@@ -309,6 +309,56 @@ TICK_NONE = "none"
 
 BOX_HEIGHT = 26
 
+# ── HOW WIDE IS A LABEL, REALLY ─────────────────────────────────────────────────────────────
+#
+# 🚨 A133. THE PLACER USED TO GUESS THIS TWICE OVER AND BOTH GUESSES WERE WRONG IN THE SAME
+# DIRECTION. It modelled a label as `len(text) * 2.6` per half — "a 9px font averages ~5px a
+# character" — and then discounted the result by a factor of 0.86 before comparing. A factor
+# below 1.0 is a deliberate ALLOWANCE FOR OVERLAP, and this one permitted two 5-character
+# labels to sit 22.36px apart when their ink needs 25.2px. The result was `180.0232.5` on the
+# live site: two real numbers overprinted into a third that is neither, which is the exact
+# defect A125's placement pass was built to prevent, surviving in a narrower gap.
+#
+# 📊 MEASURED IN CHROMIUM, `getComputedTextLength()` on a real <text> at font-size 9 in the
+# font the page actually resolves — "Source Sans Pro", -apple-system, system-ui, … — because
+# nothing in the DOM or in a character average can answer this:
+#
+#     0  5.844   1  4.344   2  5.609   3  5.812   4  5.969
+#     5  5.734   6  5.906   7  5.297   8  5.922   9  5.906
+#     .  2.844   -  4.422   ,  2.844   %  8.500   :  2.844   ' ' 2.703
+#
+# ⚠️ THE DIGITS ARE PROPORTIONAL, NOT TABULAR — `1` is 4.344 and `4` is 5.969, a 37% spread —
+# so `len(text)` cannot work: `111.1` and `444.4` are the same length and differ by 7px. And
+# `.` is 2.844 against the 5.2 the old model charged it, so a decimal was over-reserved while
+# the whole label was under-reserved.
+#
+# ⚠️ `.cfdb-dist` SETS NO `font-family`, so the SVG inherits the page. If the site ever sets a
+# font on this element these numbers must be re-measured; that is why the method is recorded
+# rather than just the table.
+_ADVANCE_9PX = {
+    "0": 5.844, "1": 4.344, "2": 5.609, "3": 5.812, "4": 5.969,
+    "5": 5.734, "6": 5.906, "7": 5.297, "8": 5.922, "9": 5.906,
+    ".": 2.844, "-": 4.422, ",": 2.844, "%": 8.500, ":": 2.844, " ": 2.703,
+}
+
+# ⚠️ AN UNMEASURED CHARACTER IS CHARGED THE WIDEST THING IN THE TABLE. `value_label` takes
+# arbitrary text from a caller, and erring wide DROPS a label where erring narrow OVERPRINTS
+# one — and this whole section exists because the second is the worse failure.
+_ADVANCE_FALLBACK = max(_ADVANCE_9PX.values())
+
+# 🚨 ADDITIVE, NOT A MULTIPLIER, AND THE DIFFERENCE IS THE WHOLE BUG. `(half + other_half)` is
+# already the exact condition for two ink boxes not to touch; anything wanted beyond it is
+# CLEAR SPACE, which is a constant — two numbers need the same visual separation whether they
+# read `7` or `-12.75`. A multiplier instead scales the allowance with the label, so it is most
+# permissive exactly where the labels are longest and the crowding is worst.
+LABEL_GAP = 2.0
+
+
+def _text_width(text: str) -> float:
+    """The rendered advance width of a label at font-size 9, summed per character."""
+    return sum(_ADVANCE_9PX.get(ch, _ADVANCE_FALLBACK) for ch in text)
+
+
 # The label band under the box — and, in two-value mode, an identical one above it.
 LABEL_BAND = 15
 
@@ -619,12 +669,14 @@ def box(row, value=None, width: int = 240, label: str = "",
     bands = {}
 
     def place(band: str, x: float, text: str, color: Optional[str] = None) -> None:
-        # A 9px font averages ~5px a character; half the width each side is the exclusion zone.
-        half = max(len(text) * 2.6, 9.0)
+        # Half the label's MEASURED width each side is the exclusion zone — see _ADVANCE_9PX
+        # for why this is summed per character rather than averaged over the length.
+        half = _text_width(text) / 2.0
         x = min(max(x, pad + half - 8), width - pad - half + 8)
         placed = bands.setdefault(band, [])
         for other_x, other_half, _, _ in placed:
-            if abs(x - other_x) < (half + other_half) * 0.86:
+            # Touching boxes plus a constant of clear space. No multiplier: see LABEL_GAP.
+            if abs(x - other_x) < half + other_half + LABEL_GAP:
                 return
         placed.append((x, half, text, color))
 

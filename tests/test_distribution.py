@@ -569,3 +569,148 @@ def test_a_missing_side_is_NAMED_rather_than_silently_half_drawn():
 
     legacy = distribution.box(_box_row(), value=180, width=300, label="Yards")
     assert "aria-label='Yards: box and whisker'" in legacy, "unchanged for the live call site"
+
+
+# --- A133: the labels stop overprinting ---------------------------------------------------
+#
+# 🚨 THE DEFECT WAS ON THE LIVE SITE AND IT WAS REPRODUCED ON REAL ROWS BEFORE IT WAS FIXED.
+# 64,213 charts the Matchup panel actually renders — every (game, metric) pair joined to its
+# own week's distribution — measured against RENDERED GLYPH BOXES rather than a character
+# model: at B111's shipped width of 110px, 11.22% of advanced charts and 6.08% of box-score
+# charts had at least one overlapping label pair. After: 0.00% at every width, both panels.
+#
+# ⚠️ B111 RASTERED ITS OWN PANEL AND FOUND 0 OF 49 PAIRS, AND THAT WAS NOT WRONG — it is one
+# game's eighteen box-score rows, where the rate is 6%. Expected hits: about one. Zero is an
+# ordinary draw from that sample, not evidence of absence.
+
+_PLAYS_ROW = {"n": 100, "team_games_in_week": 100,
+              "p25": 59.0, "p50": 66.0, "p75": 74.0,
+              "whisker_low": 41.0, "whisker_high": 94.0, "outlier_count": 0}
+
+
+def _placed(svg):
+    """Every drawn label as (x, baseline, text)."""
+    return [(float(x), float(y), t) for x, y, t in re.findall(
+        r"<text x='([-\d.]+)' y='([-\d.]+)'[^>]*>([^<]*)</text>", svg)]
+
+
+def _overlapping_pairs(svg):
+    """Pairs whose ink boxes intersect. text-anchor=middle, so each spans x ± width/2."""
+    labels = _placed(svg)
+    bad = []
+    for i in range(len(labels)):
+        xi, yi, ti = labels[i]
+        for j in range(i + 1, len(labels)):
+            xj, yj, tj = labels[j]
+            if yi != yj:
+                continue                      # different baselines cannot collide
+            need = (distribution._text_width(ti) + distribution._text_width(tj)) / 2.0
+            if abs(xi - xj) < need:
+                bad.append((ti, tj, round(need - abs(xi - xj), 2)))
+    return bad
+
+
+def test_the_label_width_is_measured_per_character_not_averaged():
+    """🚨 THE DIGITS ARE PROPORTIONAL AND `len(text)` CANNOT SEE IT.
+
+    Measured in Chromium at font-size 9 in the font the page resolves: `1` is 4.344px and `4`
+    is 5.969px, a 37% spread. So `111.1` and `444.4` are the same LENGTH and differ by 6.5px
+    of ink — and the old model, `len(text) * 2.6` a half, charged both exactly 26.0px.
+
+    ⚠️ The floor was the worse half: a single digit was charged 18.0px for 5.3px of ink, which
+    is why short labels used to be pushed apart for no reason.
+    """
+    narrow, wide = distribution._text_width("111.1"), distribution._text_width("444.4")
+    assert narrow < wide, "a per-character sum must distinguish 1 from 4"
+    assert wide - narrow > 5.0, f"the spread is real: {narrow:.2f} vs {wide:.2f}"
+    assert distribution._text_width("7") < 7.0, "a single digit is not 18px wide"
+    # An unmeasured character is charged the widest thing in the table, never the narrowest:
+    # erring wide drops a label, erring narrow overprints one.
+    assert distribution._text_width("W") == distribution._ADVANCE_FALLBACK
+
+
+def test_no_two_drawn_labels_overlap():
+    """🚨 THE PROPERTY, ON THE REAL ROW THAT PRODUCED THE DEFECT.
+
+    `offense_plays` in 2026: whiskers 41–94, quartiles 59/66/74, this game 67 and 76, drawn at
+    B111's shipped 110px with `dp=2`. Before the fix this chart rendered `41.0059.00` and
+    `76.0094.00` — four real numbers overprinted into two strings that are none of them.
+    """
+    svg = distribution.box(_PLAYS_ROW, width=110, dp=2, value=67.0, value_below=76.0)
+    assert _overlapping_pairs(svg) == [], f"labels overlap: {_overlapping_pairs(svg)}"
+
+
+def test_no_two_drawn_labels_overlap_when_one_is_much_LONGER():
+    """🚨 THE CASE THAT DECIDES MULTIPLIER versus ADDITIVE, AND THEY DISAGREE MOST HERE.
+
+    A multiplier scales its allowance with the label, so it is most permissive exactly where
+    the labels are longest — `(half + other_half) * 0.86` forgives 3.6px between two 5-character
+    labels and 4.0px between two 6-character ones. An additive gap forgives a constant, which
+    is what clear space actually is.
+    """
+    svg = distribution.box(_PLAYS_ROW, width=110, dp=2, value=67.0, value_below=76.0,
+                           value_label="-12.75", value_below_label="-108.25")
+    assert _overlapping_pairs(svg) == [], f"long labels overlap: {_overlapping_pairs(svg)}"
+
+
+def test_a_label_that_cannot_fit_is_actually_DROPPED():
+    """⚠️ THE OTHER HALF, AND WITHOUT IT THE TWO ABOVE PASS ON A PLACER THAT NEVER DROPS
+    ANYTHING. A threshold of zero satisfies "nothing overlaps" trivially by drawing every label
+    wherever it lands — which is the §6 failure mode by name: an absence test that passes
+    because the thing doing the looking was switched off.
+
+    At 110px this chart has six labels' worth of numbers and room for a few of them.
+    """
+    svg = distribution.box(_PLAYS_ROW, width=110, dp=2, value=67.0, value_below=76.0)
+    drawn = {t for _x, _y, t in _placed(svg)}
+    possible = {"41.00", "59.00", "66.00", "74.00", "94.00", "67.00", "76.00"}
+    assert drawn < possible, "nothing was dropped — the collision test is not running"
+    assert drawn, "everything was dropped — the collision test is too strict to draw a chart"
+
+
+def test_the_clearance_is_additive_rather_than_a_fraction_of_the_labels():
+    """The shape of the rule, pinned. `(half + other_half)` IS the touching condition; anything
+    beyond it is clear space, and clear space is a constant.
+
+    ⚠️ A FACTOR BELOW 1.0 IS AN ALLOWANCE FOR OVERLAP. That is what `0.86` was, and naming it
+    as a deliberate allowance is what made it obviously wrong once anybody looked.
+    """
+    assert distribution.LABEL_GAP > 0, "some clear space is wanted"
+    assert distribution.LABEL_GAP < 6, "but a constant, not a wedge"
+
+
+def test_the_PLACER_uses_the_measured_width_not_just_the_helper():
+    """🚨 THIS TEST EXISTS BECAUSE A STAGED BREAK CAME BACK GREEN.
+
+    A133 staged three breaks. The third put the old `max(len(text) * 2.6, 9.0)` model back
+    inside `place()` while leaving `_text_width` correct and leaving the additive gap in place —
+    and ALL THIRTY-NINE TESTS PASSED. The overprint did not return, because `len * 2.6` is
+    WIDER than the real ink for most labels: it over-reserves, so it drops labels that would
+    have fitted but never lets two collide.
+
+    ⚠️ SO THE TWO HALVES OF THE FIX ARE NOT EQUALLY LOAD-BEARING, AND SAYING SO MATTERS. The
+    THRESHOLD is what stopped the overprinting. The MEASURED WIDTHS are what stop labels being
+    dropped for no reason — worth ~0.09 labels a chart back on the box-score panel at 110px.
+
+    🚨 AND THE GAP WAS IN THE TEST, NOT THE CODE: asserting `_text_width` is correct says
+    nothing about whether the placer CALLS it. A correct helper nobody uses is the dead-copy
+    class. This asserts the placer's own behaviour instead.
+
+    The edge clamp is where the two models are separable — `x` is clamped to
+    `pad + half - 8` — but ONLY for a label wide enough that the clamp actually binds.
+
+    ⚠️ AND GETTING THAT WRONG IS WHY THIS DOCSTRING SAYS IT. The first draft asserted on a
+    two-character label, whose natural x of 10.0 already sits right of its own clamp bound of
+    7.16, so the clamp never fired and the test failed against CORRECT code. `41.00` at `dp=2`
+    binds: 14.42px under the measured half of 12.42, 15.00px under the old floor of 13.00.
+    """
+    row = dict(_PLAYS_ROW, p25=41.0, p50=41.0, p75=41.0, whisker_low=41.0, whisker_high=94.0)
+    svg = distribution.box(row, width=300, dp=2, ticks=distribution.TICK_BOUNDS,
+                           show_value=False)
+    xs = {t: x for x, _y, t in _placed(svg)}
+    assert "41.00" in xs, "the lower boundary label must be drawn"
+    # 10 (pad) + _text_width("41.00")/2 - 8 = 14.42.  Under max(len*2.6, 9.0): 15.00.
+    expected = 10.0 + distribution._text_width("41.00") / 2.0 - 8.0
+    assert abs(xs["41.00"] - expected) < 0.1, (
+        f"the leftmost label sits at {xs['41.00']}, expected {expected:.2f} — the placer is "
+        "not clamping by the MEASURED width, so it is not using _text_width")
