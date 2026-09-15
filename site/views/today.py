@@ -146,6 +146,13 @@ def _completed_games(scope) -> pd.DataFrame:
     that calls that function selects the column; Today was the only one that did not. The
     message was right about itself and wrong about the view.
 
+    🚨 A138. `win_probability_curve_reaches_final_score` IS SELECTED BECAUSE THE CHART CANNOT
+    BE HONEST WITHOUT IT. 99 of 1,898 curves stop before their game does (A136), and A138
+    measured what a reader actually meets: 38 of 337 top-ten rows across 35 season-weeks, in 22
+    of those weeks, two of them at #1. Without the flag the panel draws a line ending at 0.1%
+    for a side that won 44-15 and nothing distinguishes it from a real collapse. ❌ SELECTING IT
+    IS NOT RANKING ON IT — `MOST_EXCITING_ORDER` is untouched.
+
     ⚠️ R-558. `attribution` IS STILL SELECTED THOUGH body() NO LONGER CALLS
     model_attribution() — that is deliberate, not a leftover. See the note at the end of
     body(): attribution attaches to rendered model output, this page renders none yet, and
@@ -166,6 +173,7 @@ def _completed_games(scope) -> pd.DataFrame:
                home_win_probability_range_fourth_quarter,
                lead_changes_overtime, plays_with_win_probability_fourth_quarter,
                mean_distance_from_even_fourth_quarter_onward,
+               win_probability_curve_reaches_final_score,
                home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
                away_q1, away_q2, away_q3, away_q4, away_overtime_points, away_periods,
                attribution, as_of_ts
@@ -310,208 +318,491 @@ def _win_probability_curves(game_ids) -> pd.DataFrame:
     ten games at the observed maximum of 255 plays is 2,550, so 4,000 is that bound with room
     for a longer game and is not a number chosen to look safe.
 
-    ⚠️ ORDERED BY `play_number`, WHICH IS THE WHOLE POINT OF THE COLUMN. A121 established it as
-    the POSITION axis: monotonic, unique within a game, no restarts. Ordering by anything else
-    — `play_id` is TEXT and not fixed width — draws a real curve of real points in the wrong
-    order, and the picture is the only place that shows.
+    🚨 IT USED TO ORDER BY `play_number` AND THIS DOCSTRING USED TO CALL THAT COLUMN THE
+    POSITION AXIS — "monotonic, unique within a game, no restarts". **cfdb-main-R-916 measured
+    that false.** Ordering each curve by `play_number`:
+
+        consecutive regulation pairs stepping BACKWARDS on the clock      795
+        games affected                                        336 of 1,898 (17.7%)
+        worst single back-step                                    −3,567 seconds
+        overtime games with overtime interleaved into regulation       10 of 70
+
+    Game 401635615 carries fourth-quarter plays at `play_number` 0–3 and a first-quarter play
+    at 4. Drawn on that axis its line crossed the whole width backwards, and every point on it
+    was a real point.
+
+    ✅ SO THE ORDER FOLLOWS THE COORDINATE THE CHART ACTUALLY DRAWS ON — A136's
+    `elapsed_from_kickoff_seconds`, which is the clock. ⚠️ `nulls last` IS LOAD-BEARING: that
+    column is NULL for every overtime play on purpose, so without it Postgres would sort
+    overtime to the FRONT of the game (R-890's shape, DESC or ASC — `nulls last` is explicit
+    either way). ⚠️ AND INSIDE AN OVERTIME PERIOD `play_number` IS THE ONLY ORDER A PLAY HAS —
+    `stg_play`'s period-5-and-above rows take six distinct clock values in total — so it stays
+    as the tie-break, which is exactly where it is still correct.
+
+    ❌ NOT `play_id`: it is TEXT in this feed and not fixed width (A121 measured 5 to 18
+    characters), so ordering on it is a lexical sort that scrambles play order while every row
+    stays real.
     """
     if not len(game_ids):
         return pd.DataFrame()
     return query("""
         select game_id, play_number, period, is_overtime,
+               elapsed_from_kickoff_seconds, overtime_period, overtime_axis_offset_periods,
                home_win_probability, home_score, away_score, play_text
         from srv_game_win_probability_play
         where game_id = any(:game_ids)
-        order by game_id, play_number
+        order by game_id, elapsed_from_kickoff_seconds nulls last, play_number
         limit 4000
     """, {"game_ids": [int(g) for g in game_ids]})
 
 
-def _sparkline_svg(points: pd.DataFrame, width: int = 180, height: int = 44) -> str:
+# ── HOW DARK THE AXIS MARKS ARE, IN ONE PLACE (A138) ──────────────────────────────────────
+#
+# 🚨 MARC: "The axis marks need to be darker on the win probability chart." A122's precedent is
+# exactly this class and it is the reason these are named rather than inlined: a band shaded at
+# .07 was invisible, shipped looking finished, and .18 was chosen BY RASTERISING IT AT 4x AND
+# LOOKING. A138 did the same and the before/after is in its report.
+#
+#     tick   .18 -> .32    quarter boundaries. The complaint.
+#     major  (new) .55     halftime and the fourth quarter — Marc's own "(darker)"
+#     zero   .35 -> .50    the even line, which is now the fill's baseline and carries more
+#     fill   (new) .20     the area. Read at the same weight as the overtime band on purpose:
+#                          neither may drown a tick, and the two are often adjacent.
+_CURVE_TICK_OPACITY = .32
+_CURVE_MAJOR_OPACITY = .55
+_CURVE_ZERO_OPACITY = .50
+_CURVE_FILL_OPACITY = .20
+_CURVE_OT_SHADE_OPACITY = .18
+_CURVE_OT_RULE_OPACITY = .8
+
+
+# ── THE WIN-PROBABILITY CHART'S COORDINATE SYSTEM (A138, cfdb-main-R-905) ──────────────────
+#
+# 🚨 SHARED SCALE, NOT SHARED EXTENT, AND MARC'S TWO SENTENCES BOTH SURVIVE IT.
+# "Y axis should be consistent across all rows" and "Games with overtime will be longer"
+# cannot both hold if every chart is the same width — one of them has to give. They both hold
+# if what is shared is the PIXELS PER SECOND: a quarter boundary lands at the same offset on
+# every row, and an overtime game's chart is physically wider because it contains more game.
+#
+# 📊 A136 MEASURED THE ALTERNATIVE AND IT IS EXPENSIVE. Sizing every chart to the week's
+# longest game spends 15.8-42.9% of a regulation chart's width on emptiness; in 2026 week 2 —
+# the only week of 33 that reaches three overtimes — that is 84 charts paying for two.
+_CURVE_REGULATION_UNITS = 3600          # seconds of regulation, and the axis unit itself
+_CURVE_PX_PER_UNIT = 176.0 / 3600.0     # the SHARED SCALE. 176px of regulation, as before.
+# ⚠️ ONE OVERTIME PERIOD IS DRAWN A QUARTER WIDE, AND THE NUMBER IS ARGUED RATHER THAN PICKED.
+# A122's complaint was density: on the `play_number` axis Wake Forest at Purdue's 24 overtime
+# plays occupied 20px of 180, about 0.8px a play against regulation's 1.0. A quarter's width is
+# 44px, so those same 24 plays get 1.8px each — denser than regulation rather than sparser,
+# which is the right way round for the part of the game that decided it.
+_CURVE_OT_BAND_UNITS = 900
+# Room at the right for the final-value label. Part of the width, not an overhang.
+_CURVE_LABEL_GUTTER = 30
+
+
+def _curve_axis_units(points: pd.DataFrame) -> pd.Series:
+    """Where each play sits on the chart's x axis, in axis units.
+
+    🚨 TWO PUBLISHED COORDINATES, NEVER ADDED AND NEVER COALESCED — A136 built them that way
+    and asserted it in dbt:
+
+        regulation   `elapsed_from_kickoff_seconds`, 0…3600. NULL for every overtime play.
+        overtime     `overtime_axis_offset_periods`, in OVERTIME PERIODS. NULL in regulation.
+
+    They are never both populated on one row (0 of 291,548) and they are in different units,
+    so the overtime one is scaled onto this axis by ONE page constant — §4.2.1's permitted
+    shape, the same one `sx`/`sy` have always been. Combining two published columns would not
+    be.
+
+    ⚠️ A PLAY WITH NO PERIOD HAS NO POSITION ON A CLOCK AXIS, and gets NaN here rather than a
+    guess. Exactly one play of 291,548 is in that state — the one with no `stg_play` match —
+    and it is dropped from the line rather than placed somewhere it was not. AC-G.32: an
+    unknown is not a zero and is not the end of the game.
+    """
+    elapsed = pd.to_numeric(points["elapsed_from_kickoff_seconds"], errors="coerce")
+    offset = pd.to_numeric(points["overtime_axis_offset_periods"], errors="coerce")
+    return elapsed.where(
+        elapsed.notna(),
+        _CURVE_REGULATION_UNITS + offset * _CURVE_OT_BAND_UNITS)
+
+
+_CURVE_PAD = 2
+
+
+def _curve_bands(points: pd.DataFrame) -> int:
+    """How many overtime periods this game's curve spans. 0 for a regulation game."""
+    if points is None or points.empty or "overtime_period" not in points:
+        return 0
+    periods = pd.to_numeric(points["overtime_period"], errors="coerce")
+    return int(periods.max()) if periods.notna().any() else 0
+
+
+def _curve_width(points: pd.DataFrame) -> int:
+    """This game's chart width in pixels, at the shared scale.
+
+    🚨 THE PANEL NEEDS THIS BEFORE IT RENDERS ANY ROW, which is why it is its own function.
+    `.cfdb-table` is `table-layout:fixed`: with no colgroup every column takes an equal share,
+    and a chart that is wider than its share overflows the cell rather than shrinking. Reading B
+    makes the charts differ in width on purpose, so the column has to be the widest of them —
+    and that is a fact about the FRAME, not about any one row.
+    """
+    span = _CURVE_REGULATION_UNITS + _curve_bands(points) * _CURVE_OT_BAND_UNITS
+    return int(round(_CURVE_PAD * 2 + span * _CURVE_PX_PER_UNIT + _CURVE_LABEL_GUTTER))
+
+
+def _sparkline_svg(points: pd.DataFrame, reaches_final: bool = True,
+                   height: int = 44) -> str:
     """One game's win-probability curve, as inline SVG sized for a table cell.
 
     🚨 A CHART CANNOT LIVE INSIDE `table.render`, WHICH IS WHY THIS IS SVG AND NOT ALTAIR.
     `table.render` emits HTML and `st.altair_chart` is a Streamlit call; a cell cannot contain
-    one. The alternatives were a single full chart below the table, which loses the
-    at-a-glance comparison the table exists for, and ten charts in expanders, which is ten
-    specs to render for a panel a reader scans in one pass. The table's whole value is ten
-    games SIDE BY SIDE, and a sparkline is the only shape that keeps that.
-    ⚠️ `_scatter_svg` in this same file is the precedent: hand-drawn inline SVG in
-    `currentColor`, following `lib/distribution.py`.
+    one. ⚠️ A138 RE-ASKED THIS RATHER THAN INHERITING IT, because the scoreboard change could
+    have moved the container — and the answer is unchanged, because the container did not move.
+    The scoreboard became one CELL of the same table, not a replacement for it, so the ten
+    games still sit side by side in one grid and a sparkline is still the only mark that keeps
+    that. ⚠️ `_scatter_svg` in this same file is the precedent: hand-drawn inline SVG in
+    `currentColor`.
 
-    🚨 THE COORDINATE MAPPING BELOW IS A DIVISION IN A PAGE FILE, AND IT IS NOT R-611's CLASS.
-    Saying so here because the next reader will see `/` in `site/` and reach for that rule.
-    §4.2.1's test is HOW MANY CONSUMERS A NUMBER CAN HAVE: `sx`/`sy` turn a play number and a
-    probability into pixel offsets inside this one <svg>, and a pixel offset is not a quantity
-    anybody can cite, export, sort on or disagree with. The published numbers — the probability
-    itself, the lead-change counts, the mean distance — all arrive computed. Nothing here
-    creates a fact about football; it creates a position on a line.
+    🚨 THE X AXIS IS THE ELAPSED CLOCK, AND IT USED TO BE `play_number`. The docstring this
+    replaces said `play_number` was "monotonic, unique within a game, no restarts" — and
+    cfdb-main-R-916 measured that false: **795 consecutive pairs step BACKWARDS on the clock,
+    across 336 of 1,898 games (17.7%)**, worst single back-step −3,567 seconds. Game 401635615
+    has fourth-quarter plays at `play_number` 0–3 and a first-quarter play at 4, so its line
+    crossed the whole width backwards with every point real. A comment asserting a property the
+    warehouse does not have is worse than no comment, because the next reader trusts it.
+
+    ⚠️ ORDER FOLLOWS THE COORDINATE, NOT `play_number` — see `_win_probability_curves`. Inside
+    an overtime period `play_number` is the only order a play has, and there it is still used.
+
+    🚨 THE COORDINATE MAPPING BELOW IS ARITHMETIC IN A PAGE FILE, AND IT IS NOT R-611's CLASS.
+    §4.2.1's test is HOW MANY CONSUMERS A NUMBER CAN HAVE: `sx`/`sy` turn an axis position and
+    a probability into pixel offsets inside this one <svg>, and a pixel offset is not a quantity
+    anybody can cite, export, sort on or disagree with. ✅ THE SAME GOES FOR THE SIGNED AXIS.
+    Marc asked for −1…1; the published column is 0…1 and the transform is `2p − 1`. That is a
+    COORDINATE, not a fact about football — nobody can export "the home side was at +0.42" —
+    so it lives here beside `sx`/`sy` rather than in dbt.
+
+    📊 AND THE SIGNED AXIS CHANGES NO PIXEL, WHICH IS WORTH SAYING PLAINLY RATHER THAN LETTING
+    A READER ASSUME OTHERWISE: `sy` already mapped an ABSOLUTE 0…1 onto the full height, so the
+    y axis was ALREADY consistent across rows and 2p−1 onto −1…1 is the identical mapping. What
+    actually changes is that the mid line is now ZERO and the curve is FILLED FROM IT — which is
+    the point. Fill from zero makes the SIGN the picture, and above-or-below-zero is POSITION,
+    so it survives greyscale (AC-G.22). The fill is decoration on a signal that already works
+    without it — A131's argument for the two-sided box, one panel over.
+
+    ⚠️ `sy` FLIPS AND MUST KEEP FLIPPING — SVG y grows downward and a home side at 1.0 belongs
+    at the top. `_scatter_svg` in this same file deliberately does not flip and says why; the
+    two sit in one file, so each states which it is.
 
     ❌ NO SMOOTHING, NO INTERPOLATION, NO ROLLING AVERAGE — every published point is plotted.
     The spikes ARE the drama and this panel exists to show them; a smoothed win-probability
-    curve is a different claim about the game, and a reader cannot tell the two apart.
+    curve is a different claim about the game, and an AREA chart of a smoothed curve is the same
+    different claim with more ink on it.
     """
     if points is None or points.empty:
         return fmt.EM_DASH
 
-    pad = 2
-    pw, ph = width - 2 * pad, height - 2 * pad
-    numbers = points["play_number"].astype(float)
-    lo, hi = float(numbers.min()), float(numbers.max())
-    span = (hi - lo) or 1.0
+    pad = _CURVE_PAD
+    units = _curve_axis_units(points)
+    plotted = points.assign(_x_units=units)
+    plotted = plotted[plotted["_x_units"].notna()]
+    if plotted.empty:
+        return fmt.EM_DASH
 
-    def sx(play_number) -> float:
-        return pad + (float(play_number) - lo) / span * pw
+    # THE WIDTH IS THE GAME'S OWN LENGTH AT THE SHARED SCALE. A regulation game ends at 3600
+    # units; each overtime period adds a band. Nothing is padded out to match another row.
+    bands = _curve_bands(plotted)
+    span_units = _CURVE_REGULATION_UNITS + bands * _CURVE_OT_BAND_UNITS
+    width = _curve_width(plotted)
+    ph = height - 2 * pad
+
+    def sx(axis_units) -> float:
+        return pad + float(axis_units) * _CURVE_PX_PER_UNIT
 
     def sy(probability) -> float:
-        # SVG y grows downward and probability grows upward, so this one IS flipped: a home
-        # side at 1.0 belongs at the top. `_scatter_svg` deliberately does not flip and says
-        # why; the two sit in one file, so each states which it is.
+        # −1…1 with zero in the middle, which is arithmetically the same mapping 0…1 had.
         return pad + (1.0 - float(probability)) * ph
 
+    right = sx(span_units)
+    zero = sy(0.5)
     parts = []
 
-    # ⚠️ OVERTIME IS SHADED FIRST, SO IT SITS UNDER THE LINE. A118 measured Jacksonville State
-    # at Ohio: TWO fourth-quarter lead changes and ELEVEN in overtime. On an unmarked curve
-    # that reads as one very long fourth quarter — the drama attributed to the wrong part of
-    # the game, with every point still real.
+    # ── REFERENCE LINES ───────────────────────────────────────────────────────────────────
     #
-    # 🚨 `is_overtime` IS NULL, NOT FALSE, ON THE ONE PLAY OF 291,548 WITH NO `stg_play` MATCH.
-    # `== True` rather than truthiness, so an unknown period is never silently shaded as
-    # regulation OR as overtime — it simply contributes no boundary. AC-G.32.
-    overtime = points[points["is_overtime"] == True]            # noqa: E712
-    if not overtime.empty:
-        ot_x = sx(overtime["play_number"].astype(float).min())
-        # ⚠️ SHADE **AND** RULE, AND THE OPACITY WAS SET BY LOOKING RATHER THAN BY TASTE. The
-        # first version shaded at .07 and A122 rasterised it at 4x: the band was invisible, so
-        # the double-overtime game read as one very long fourth quarter — the exact failure the
-        # shading exists to prevent, shipped while looking finished. .18 reads, and the solid
-        # rule at the boundary carries it in greyscale and at thumbnail size where a wash does
-        # not.
-        parts.append(f"<rect x='{ot_x:.1f}' y='{pad}' width='{(width - pad) - ot_x:.1f}' "
-                     f"height='{ph}' fill='currentColor' opacity='.18'></rect>")
-        # ⚠️ DELIBERATELY HEAVIER THAN A QUARTER TICK (1.4 against .5, .8 against .18). Overtime
-        # is a different KIND of boundary from a quarter change and must not read as one more
-        # tick — this is the divider a reader sees first.
-        parts.append(f"<line x1='{ot_x:.1f}' y1='{pad}' x2='{ot_x:.1f}' y2='{height - pad}' "
-                     f"stroke='currentColor' stroke-width='1.4' opacity='.8'></line>")
+    # 🚨 MARC NAMED FIVE REGULATION MARKS AND THE CLOCK HAS FOUR BOUNDARIES. "Start, 2nd, half,
+    # 3rd, 4th" is what a broadcast shows, where halftime is an INTERVAL and the third quarter
+    # begins after it. On an elapsed-clock axis "half" and "3rd" ARE THE SAME INSTANT — 1800
+    # seconds — so five names map to four distinct quarter starts:
+    #
+    #     Start          0      kickoff
+    #     2nd          900      the second quarter begins
+    #     half / 3rd  1800      halftime AND the third quarter, one line carrying both names
+    #     4th         2700      the quarter this panel's whole ordering is about
+    #     (end)       3600      regulation ends; where overtime begins if there is any
+    #
+    # ✅ SO FIVE MARKS ARE DRAWN, NOT FOUR, and the fifth is the end of regulation rather than
+    # an invented boundary. Marc's "Final" is the labelled end of the curve, below.
+    #
+    # ⚠️ AND THE EMPHASIS IS MARC'S OWN — "half (darker)", "4th (full, darker)". 1800 carries
+    # two of his names and 2700 opens the quarter this panel ranks on, so those two are the
+    # heavy ones.
+    for at_units, weight, opacity in ((0, .5, _CURVE_TICK_OPACITY),
+                                      (900, .5, _CURVE_TICK_OPACITY),
+                                      (1800, .9, _CURVE_MAJOR_OPACITY),
+                                      (2700, 1.1, _CURVE_MAJOR_OPACITY),
+                                      (3600, .5, _CURVE_TICK_OPACITY)):
+        if at_units > span_units:
+            continue
+        x = sx(at_units)
+        parts.append(f"<line x1='{x:.1f}' y1='{pad}' x2='{x:.1f}' y2='{height - pad}' "
+                     f"stroke='currentColor' stroke-width='{weight}' "
+                     f"opacity='{opacity}'></line>")
 
-    # QUARTER BOUNDARIES, from `period` — so the x axis means something without a play-number
-    # label a reader cannot interpret. Drawn only where the period is known.
-    known = points[points["period"].notna()]
-    if not known.empty:
-        first_of_period = known.groupby("period")["play_number"].min()
-        for play_number in list(first_of_period)[1:]:
-            x = sx(play_number)
+    # ── OVERTIME: A SHADED BAND AND A HEAVY DIVIDER PER PERIOD ────────────────────────────
+    #
+    # ⚠️ SHADED FIRST, SO IT SITS UNDER THE LINE. A118 measured Jacksonville State at Ohio: TWO
+    # fourth-quarter lead changes and ELEVEN in overtime. On an unmarked curve that reads as one
+    # very long fourth quarter — the drama attributed to the wrong part of the game, with every
+    # point still real.
+    #
+    # 🚨 THE DIVIDER IS PER PERIOD NOW, NOT ONE AT THE START OF OVERTIME. Each overtime period
+    # has its own band and its own boundary, because each resets the clock and alternates
+    # possession. A136 proved the arithmetic that makes this land exactly: the reference line
+    # for overtime k falls on offset k − 1, so it sits exactly on the band edge.
+    if bands:
+        ot_start = sx(_CURVE_REGULATION_UNITS)
+        parts.append(f"<rect x='{ot_start:.1f}' y='{pad}' "
+                     f"width='{right - ot_start:.1f}' height='{ph}' "
+                     f"fill='currentColor' opacity='{_CURVE_OT_SHADE_OPACITY}'></rect>")
+        for band in range(bands):
+            x = sx(_CURVE_REGULATION_UNITS + band * _CURVE_OT_BAND_UNITS)
+            # ⚠️ DELIBERATELY HEAVIER THAN A QUARTER TICK. Overtime is a different KIND of
+            # boundary from a quarter change and must not read as one more tick.
             parts.append(f"<line x1='{x:.1f}' y1='{pad}' x2='{x:.1f}' y2='{height - pad}' "
-                         f"stroke='currentColor' stroke-width='.5' opacity='.18'></line>")
+                         f"stroke='currentColor' stroke-width='1.4' "
+                         f"opacity='{_CURVE_OT_RULE_OPACITY}'></line>")
 
-    # THE EVEN LINE. A curve without it does not say who was winning — 0.5 is the only
-    # reference point on the whole picture.
-    mid = sy(0.5)
-    parts.append(f"<line x1='{pad}' y1='{mid:.1f}' x2='{width - pad}' y2='{mid:.1f}' "
-                 f"stroke='currentColor' stroke-width='.5' opacity='.35' "
-                 f"stroke-dasharray='2 2'></line>")
+    # ── ZERO. The only reference point on the whole picture, and now the fill's baseline. ──
+    parts.append(f"<line x1='{pad}' y1='{zero:.1f}' x2='{right:.1f}' y2='{zero:.1f}' "
+                 f"stroke='currentColor' stroke-width='.6' "
+                 f"opacity='{_CURVE_ZERO_OPACITY}' stroke-dasharray='2 2'></line>")
 
-    # THE CURVE ITSELF — every point, in play order.
+    # ── THE CURVE ─────────────────────────────────────────────────────────────────────────
     #
-    # 🚨 BROKEN AT THE OVERTIME BOUNDARY, AND THAT IS THE DECISION THE RASTER FORCED. A122 shaded
-    # overtime first, looked at it at 4x, and the band was not legible — because `play_number`
-    # COMPRESSES OVERTIME INTO A SLIVER. Wake Forest at Purdue's overtime is 24 plays of 171, so
-    # the shaded region is 20 pixels at the right-hand edge of a 180-pixel sparkline. It decided
-    # the game and held 3 of its 12 lead changes, and it looked like nothing.
+    # 🚨 STILL BROKEN AT EVERY OVERTIME BOUNDARY, AND A138 RE-DECIDED IT RATHER THAN INHERITING
+    # IT. The original reason was density — `play_number` compressed overtime into a 20px sliver
+    # and a wash was not legible — and the new coordinate removes that reason: overtime now
+    # starts exactly where regulation ends and gets a quarter's width. ✅ THE OTHER REASON
+    # STANDS ON ITS OWN AND IS WHY THE BREAK SURVIVES: overtime IS discontinuous football. The
+    # clock resets, possession alternates, and the curve genuinely does not continue from the
+    # fourth quarter's last play. A filled area that ran straight through would draw one
+    # continuous game where there were two.
     #
-    # ✅ A GAP IS LEGIBLE AT ANY SIZE, where a wash is not: it survives greyscale, thumbnailing and
-    # a reader scanning ten rows in one pass. It is also the honest shape — overtime IS
-    # discontinuous football. The clock resets, possession alternates, and the curve genuinely
-    # does not continue from the fourth quarter's last play.
+    # ⚠️ AND NO POINT MOVES TO ACHIEVE IT. A stroke weight is a rendering property; a coordinate
+    # is a claim about when something happened.
     #
-    # ⚠️ `is_overtime == True` again, never truthiness: on the one play with a null period the
-    # segment boundary simply is not drawn, rather than that play being assigned to regulation.
-    # ONE PASS, carrying the previous play's state — not a lookup per point. The first draft
-    # re-filtered the frame for every play, which is the O(n^2) shape A097 and A120 both paid for;
-    # it is small here and still the wrong habit to leave in a file.
-    #
-    # ⚠️ `is True` RATHER THAN TRUTHINESS, twice. A null `is_overtime` is UNKNOWN: read as
-    # regulation it would draw a break that did not happen, read as overtime it would suppress the
-    # real one. Compared this way it does neither — it simply never triggers a transition.
-    segments, current, previous_overtime = [], [], False
-    for number, probability, in_overtime in zip(
-            points["play_number"], points["home_win_probability"], points["is_overtime"]):
+    # ⚠️ `is True` RATHER THAN TRUTHINESS. A null `is_overtime` is UNKNOWN: read as regulation it
+    # would draw a break that did not happen, read as overtime it would suppress the real one.
+    # Compared this way it does neither — it never triggers a transition. AC-G.32.
+    # ONE PASS, carrying the previous play's band — not a lookup per point. The first draft
+    # re-filtered the frame for every play, which is the O(n^2) shape A097 and A120 both paid for.
+    segments, current, previous_band = [], [], None
+    for axis_units, probability, in_overtime, ot_period in zip(
+            plotted["_x_units"], plotted["home_win_probability"],
+            plotted["is_overtime"], plotted.get("overtime_period", plotted["_x_units"] * 0)):
         now_overtime = in_overtime is True or in_overtime == 1
-        if now_overtime and not previous_overtime and current:
+        band = int(ot_period) if (now_overtime and pd.notna(ot_period)) else 0
+        if band != previous_band and previous_band is not None and current:
             segments.append(current)
             current = []
-        current.append(f"{sx(number):.1f},{sy(probability):.1f}")
-        previous_overtime = now_overtime
+        current.append((sx(axis_units), sy(probability)))
+        previous_band = band
     segments.append(current)
-    # ⚠️ THE OVERTIME SEGMENT IS DRAWN HEAVIER, AND NO POINT MOVES TO ACHIEVE IT. Widening the
-    # gap would have been the easy way to make the break obvious and it would have put every
-    # overtime play at a position it was not at. A stroke weight is a rendering property; a
-    # coordinate is a claim about when something happened.
+
     for index, coords in enumerate(segments):
         if len(coords) < 2:
             continue
+        line = " ".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+        # THE AREA, FILLED FROM ZERO. One closed path down to the baseline at each end: the
+        # lobes above and below fill on their own sides, so the sign is the shape.
+        area = (f"M{coords[0][0]:.1f},{zero:.1f} "
+                + " ".join(f"L{x:.1f},{y:.1f}" for x, y in coords)
+                + f" L{coords[-1][0]:.1f},{zero:.1f} Z")
+        parts.append(f"<path d='{area}' fill='currentColor' "
+                     f"opacity='{_CURVE_FILL_OPACITY}' stroke='none'></path>")
         is_overtime_segment = index > 0
         parts.append(
-            f"<polyline points='{' '.join(coords)}' fill='none' stroke='currentColor' "
+            f"<polyline points='{line}' fill='none' stroke='currentColor' "
             f"stroke-width='{1.8 if is_overtime_segment else 1.1}' "
-            f"opacity='{1.0 if is_overtime_segment else 0.8}'></polyline>")
+            f"opacity='{1.0 if is_overtime_segment else 0.85}'></polyline>")
+
+    # ── THE FINAL VALUE, AND THE ONE ABSENCE THAT MATTERS (AC-G.11) ───────────────────────
+    #
+    # 🚨 99 OF 1,898 CURVES NEVER REACH THEIR OWN GAME'S FINAL SCORE — CFBD's feed truncates,
+    # and `srv_game.win_probability_curve_reaches_final_score` says which. A136 measured the
+    # consequence and A138 measured how often a reader would actually meet it: **38 of 337
+    # top-ten rows across 35 season-weeks, in 22 of those weeks, including two #1 rows.** This
+    # is not a defensive branch; it is one row in nine.
+    #
+    # ❌ SO A TRUNCATED CURVE IS NOT LABELLED WITH A FINAL VALUE, because the number is not one.
+    # Coastal Carolina at UTSA ends at 0.1% for a side that won 44-15; printing "0%" beside it
+    # would be a confident wrong number a reader cannot tell from a real collapse.
+    # ✅ IT IS STILL DRAWN — the first four fifths of the curve are real and dropping them would
+    # lose more than it protects — and the end of the line is cut with a dashed rule and the word
+    # so the absence says WHICH absence it is.
+    last_x, last_y = segments[-1][-1] if segments and segments[-1] else (right, zero)
+    # ⚠️ CLAMPED INTO THE BOX. A game that ends at 100% puts its last point on the top edge, and
+    # a baseline placed 3px below it still hangs the glyphs above the viewBox — where they are
+    # clipped by the cell, not by the SVG, so it looks like a rendering bug. Found by rasterising.
+    label_y = min(max(last_y + 3.0, pad + 7.0), height - pad - 1.0)
+    if reaches_final:
+        final = float(plotted["home_win_probability"].iloc[-1])
+        parts.append(f"<text x='{last_x + 4:.1f}' y='{label_y:.1f}' font-size='9' "
+                     f"fill='currentColor' opacity='.75'>{final * 100:.0f}%</text>")
+        label = f"Home win probability by play, ending at {final * 100:.0f} percent"
+    else:
+        parts.append(f"<line x1='{last_x:.1f}' y1='{pad}' x2='{last_x:.1f}' "
+                     f"y2='{height - pad}' stroke='currentColor' stroke-width='1' "
+                     f"opacity='.5' stroke-dasharray='1 2'></line>")
+        parts.append(f"<text x='{last_x + 4:.1f}' y='{label_y:.1f}' font-size='8' "
+                     f"fill='currentColor' opacity='.75'>cut</text>")
+        label = ("Home win probability by play; the feed stops before the end of the game, "
+                 "so there is no final value")
 
     return (f"<svg viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
-            f"role='img' aria-label='Home win probability by play' "
+            f"role='img' aria-label='{label}' "
             f"style='display:block'>{''.join(parts)}</svg>")
 
 
-def _quarter_line(row, side: str) -> str:
-    """One team's score by quarter, as a scoreboard reads it.
+def _quarter_cells(row, side: str):
+    """One team's score by quarter, as (column label, value) pairs — or None if unknown.
 
-    🚨 AC-G.32 IS THE WHOLE JOB HERE, AND THE TWO CASES LOOK IDENTICAL IF YOU ARE NOT CAREFUL:
+    🚨 AC-G.32 IS THE WHOLE JOB HERE, AND THE THREE CASES LOOK IDENTICAL IF YOU ARE NOT CAREFUL:
 
         a quarter that was PLAYED and scoreless     0
-        a quarter that was NEVER PLAYED             absent from the line entirely
+        a quarter that was NEVER PLAYED             ABSENT — no pair is emitted for it at all
         a quarter whose score we do not HAVE        an em dash in that position
 
     A line reading `7 0 3 0` says the team was shut out in two quarters. A line reading
-    `7 0 3` says the game had three quarters, which happens to no completed game — so
-    printing four values with zeroes for the missing ones would invent two shut-out quarters.
+    `7 0 3` says the game had three quarters. Printing four values with zeroes for the missing
+    ones would invent two shut-out quarters; printing a BLANK for both "never played" and
+    "we do not know" collapses two different facts into one.
 
     ⚠️ `home_periods` / `away_periods` IS WHAT TELLS THEM APART, and it is the reason this
-    function takes a side rather than assuming four. A game with 4 periods has no fifth
-    column; a game with 5 or more has overtime, with a real number in it.
+    function takes a side rather than assuming four. A game with 4 periods has no fifth column;
+    a game with 5 or more has overtime, with a real number in it.
 
-    🚨 AND OVERTIME IS LABELLED, NEVER FOLDED INTO THE FOURTH QUARTER — A117's lesson applied
-    to the display. Jacksonville State @ Ohio had TWO fourth-quarter lead changes and ELEVEN
-    in overtime. A scoreboard that added the overtime points onto Q4 would tell the reader the
-    drama happened in a quarter where it did not, and every number on the line would still be
-    a real number.
+    🚨 AND OVERTIME IS LABELLED, NEVER FOLDED INTO THE FOURTH QUARTER — A117's lesson applied to
+    the display. Jacksonville State @ Ohio had TWO fourth-quarter lead changes and ELEVEN in
+    overtime. A scoreboard that added the overtime points onto Q4 would tell the reader the
+    drama happened in a quarter where it did not, and every number on the line would still be a
+    real number.
+
+    ⚠️ ONE OVERTIME COLUMN, NOT ONE PER PERIOD, AND THAT IS THE DATA'S SHAPE RATHER THAN A
+    CHOICE: `{side}_overtime_points` is a single total. A game in the panel reaches as many as
+    twelve periods — eight overtimes — and there is no per-overtime breakdown published to draw.
+
+    📊 A138 SPLIT THIS OUT OF `_quarter_line`, WHICH IS NOW RETIRED. That function joined these
+    same values into one string with ` &middot; ` separators and had exactly one caller — the two
+    by-quarter columns the scoreboard absorbed. It is deleted rather than left unused: a page
+    helper nothing calls is a helper the next reader has to prove is dead.
+
+    ⚠️ AND THE DEFECT IT CARRIED A FIX FOR CANNOT RECUR IN A GRID, WHICH IS WHY DELETING IT IS
+    SAFE. Its first version joined with `&nbsp;&middot;&nbsp;`, making a five-period line ONE
+    unbreakable run: it did not fit the column, and a browser with nowhere legal to break broke
+    mid-word instead — Wake Forest at Purdue rendered as `7 · 10 · 3 · 3 · O` / `T 15`, the wrap
+    landing inside the word "OT". ✅ In the scoreboard every value is its own `<td>`, so there is
+    no run to break and the fix is structural rather than typographic.
     """
     periods = row.get(f"{side}_periods")
     if periods is None or pd.isna(periods):
-        return fmt.EM_DASH
+        return None
     periods = int(periods)
 
-    parts = []
+    pairs = []
     for quarter in range(1, min(periods, 4) + 1):
         value = row.get(f"{side}_q{quarter}")
-        parts.append(fmt.EM_DASH if value is None or pd.isna(value) else f"{int(value)}")
+        pairs.append((str(quarter),
+                      fmt.EM_DASH if value is None or pd.isna(value) else f"{int(value)}"))
 
     if periods >= 5:
         overtime = row.get(f"{side}_overtime_points")
-        # Labelled, so it cannot be mistaken for a fifth quarter. A game that went to
-        # overtime and scored nothing there is still "OT 0" rather than absent.
-        #
-        # ⚠️ NON-BREAKING SPACE INSIDE THE LABEL ONLY. "OT" and its number are one token to a
-        # reader and must be one to the browser.
-        parts.append("OT&nbsp;" + (fmt.EM_DASH if overtime is None or pd.isna(overtime)
-                                   else f"{int(overtime)}"))
-    # 🚨 THE SEPARATORS ARE BREAKABLE AND THE FIRST VERSION'S WERE NOT, WHICH IS WHAT BROKE IT.
-    # Written as `&nbsp;&middot;&nbsp;`, a five-period line becomes ONE unbreakable run; it does
-    # not fit the column, and a browser with nowhere legal to break breaks mid-word instead.
-    # Wake Forest at Purdue rendered as `7 · 10 · 3 · 3 · O` / `T 15` — the wrap landed inside
-    # the word "OT", which no amount of non-breaking space between "OT" and "15" can prevent.
-    # Ordinary spaces let it wrap between quarters, where a reader expects it.
-    return " &middot; ".join(parts)
+        pairs.append(("OT", fmt.EM_DASH if overtime is None or pd.isna(overtime)
+                      else f"{int(overtime)}"))
+    return pairs
+
+
+def _scoreboard(row) -> str:
+    """One game as a scoreboard: away over home, quarter by quarter, final at the right.
+
+    > **MARC:** *"Can you present each row like a scoreboard, Away over Home, each quarter, then
+    > final score, followed by the chart. Sorting moves the games, not the rows within the
+    > game."*
+
+    🚨 THE SECOND SENTENCE IS A GRAIN STATEMENT, NOT A PREFERENCE, AND IT IS WHY THIS IS ONE
+    CELL RATHER THAN TWO ROWS OF THE OUTER TABLE. The sort key is the GAME. Away-over-home is
+    fixed INSIDE it and never participates in a sort — and building it as a nested table makes
+    that structurally impossible rather than merely intended: `table.render` sorts the outer
+    frame, and there is no column on it whose ordering can reach inside a cell. R-522's
+    away-over-home law, which B082 and B083 both proved a presence assertion cannot see.
+
+    ✅ AND IT IS WHY THE CHART IS STILL SVG. The scoreboard became one CELL of the same table,
+    not a replacement for it, so ten games still sit side by side in one grid and the constraint
+    that forced inline SVG is unchanged. A138 re-asked that question rather than inheriting the
+    answer; see `_sparkline_svg`.
+
+    📊 ONE HEADER ROW SERVES BOTH SIDES, AND THAT IS MEASURED RATHER THAN ASSUMED: `home_periods`
+    and `away_periods` differ on **0 of 109,739 completed games**. Where they somehow did, each
+    side emits its own cells and the shorter one is simply shorter — which is `_quarter_cells`'s
+    "never played" state reading correctly rather than a ragged table reading wrongly.
+
+    ⚠️ THE TEAM NAMES LIVE HERE NOW. This cell absorbs what were four columns — the matchup, the
+    final score, and the two by-quarter lines — so nothing was dropped to make room for it.
+    """
+    away_pairs = _quarter_cells(row, "away")
+    home_pairs = _quarter_cells(row, "home")
+    labels = [label for label, _ in (away_pairs or home_pairs or [])]
+
+    def side_row(name, points, pairs, css):
+        """One line of the scoreboard, with AC-G.32's three states as three different cells.
+
+        ⚠️ THE GRID HAS TO CARRY THE SAME THREE STATES THE STRING DID, and a blank cell is only
+        ONE of them:
+
+            `0`        played and scoreless
+            blank      that side has no such period — the column exists because the OTHER side
+                       reports it. Never observed: `home_periods` and `away_periods` differ on
+                       0 of 109,739 completed games, so this is the unreachable branch
+            em dash    we do not have the number. `pairs is None` means no period count at all,
+                       so the WHOLE line is em dashes rather than blanks — blanking it would say
+                       the game had no quarters
+        """
+        cells = [f"<th scope='row' class='cfdb-sb-team'>{name}</th>"]
+        for index in range(len(labels)):
+            if pairs is None:
+                value = fmt.EM_DASH
+            elif index < len(pairs):
+                value = pairs[index][1]
+            else:
+                value = ""
+            cells.append(f"<td>{value}</td>")
+        final = fmt.EM_DASH if points is None or pd.isna(points) else f"{int(points)}"
+        cells.append(f"<td class='cfdb-sb-final'>{final}</td>")
+        return f"<tr class='{css}'>{''.join(cells)}</tr>"
+
+    # ⚠️ THE HEADER'S FIRST CELL CARRIES THE TEAM CLASS THOUGH IT HOLDS NOTHING. Under
+    # `table-layout:fixed` the browser takes every column's width from the FIRST row, so an
+    # unclassed corner cell leaves the name column to be guessed and the grid stops lining up
+    # down the page — which is the defect the fixed layout is there to fix.
+    head = ("<tr><td class='cfdb-sb-team'></td>"
+            + "".join(f"<th scope='col'>{label}</th>" for label in labels)
+            + "<th scope='col' class='cfdb-sb-final'>F</th></tr>")
+    # AWAY FIRST, ALWAYS. The order of these two lines is the law, not a default.
+    body = (side_row(row.get("away_team_display"), row.get("away_points"), away_pairs,
+                     "cfdb-sb-away")
+            + side_row(row.get("home_team_display"), row.get("home_points"), home_pairs,
+                       "cfdb-sb-home"))
+    return (f"<table class='cfdb-scoreboard'><thead>{head}</thead>"
+            f"<tbody>{body}</tbody></table>")
 
 
 def _espn_link(row) -> str:
@@ -553,10 +844,13 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     st.caption(
         "Ranked by **lead changes in the fourth quarter**, then by how close the game stayed "
         "after it — not by CFBD's excitement index, which ranked the week's best "
-        "fourth quarter 31st of 86. Quarter scores read left to right, overtime shown "
-        "separately. The curve is the home side's win probability on every play, "
-        "unsmoothed \u2014 the dashed line is even, and overtime is drawn heavier "
-        "after a divider. "
+        "fourth quarter 31st of 86. Each scoreboard reads away over home, quarter by "
+        "quarter, with overtime shown separately and the final at the right. The chart "
+        "is the home side's win probability on every play against the game clock, "
+        "unsmoothed and filled from even — above the line the home side was ahead, below "
+        "it the away side was. Quarter marks fall at the same place on every chart, so a "
+        "game that went to overtime is simply longer. A cut line at the end means CFBD's "
+        "feed stopped before the game did, so there is no final value to show. "
         "Source: [CollegeFootballData.com](https://collegefootballdata.com); commentary links "
         "go to ESPN.")
     # ⚠️ THE ROWS ARRIVE IN ORDER. `_completed_games` orders by MOST_EXCITING_ORDER, so the
@@ -613,30 +907,54 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
         points = by_game.get(row.game_id)
         if points is None or points.empty:
             return fmt.EM_DASH
-        return _sparkline_svg(points)
+        # 🚨 THE FLAG TRAVELS WITH THE POINTS, AND `is False` IS THE WRONG TEST — WHICH A138's
+        # OWN PANEL TEST CAUGHT ON ITS FIRST RUN. A boolean arriving out of a pandas frame is
+        # `numpy.bool_(False)`, which is NOT the Python `False` singleton: `reaches is not False`
+        # is True for every row, so every truncated curve would have been labelled with a final
+        # value and the whole branch would have been dead code that reads as handled.
+        #
+        # ⚠️ NULL STILL MEANS "DRAW IT NORMALLY" (AC-G.32). The column is null only for a game
+        # with no result, which cannot enter this panel — but an unexpected null must not stamp
+        # every curve as cut, which is the louder and more wrong failure of the two.
+        reaches = row.get("win_probability_curve_reaches_final_score")
+        return _sparkline_svg(points,
+                              reaches_final=bool(reaches) if pd.notna(reaches) else True)
+
+    # 🚨 THE CURVE COLUMN IS SIZED TO THE WIDEST CHART IN THIS FRAME, AND IT HAS TO BE.
+    # `.cfdb-table` is `table-layout:fixed`, so without a colgroup every column takes an equal
+    # share and a 254px overtime chart overflows a 137px cell. Reading B — shared SCALE, not
+    # shared extent — means the charts differ in width by design, so the column is the widest of
+    # them and the narrower ones simply do not fill it. Computed from the data rather than from a
+    # constant, because a constant would be wrong the first week nothing goes to overtime.
+    widest = max(
+        (_curve_width(by_game[game_id]) for game_id in top["game_id"] if game_id in by_game),
+        default=_curve_width(None))
+    layout = ["26%", f"{widest + 12}px"] + ["auto"] * 6
 
     states.render_or_state(
         top, "srv_game",
         "The week's most exciting games would be here.",
         f"No completed games with fourth-quarter win probability for {scope.describe()}.",
         renderer=lambda d: table.render(d, [
-            Col("matchup", "Game", render=lambda r: f"{r.away_team_display} at {r.home_team_display}"),
-            Col("score", "Score", render=lambda r: f"{int(r.away_points)}–{int(r.home_points)}"
-                if pd.notna(r.away_points) else fmt.EM_DASH),
-            # ⚠️ THE CURVE SITS BESIDE THE SCORE, not at the end of eleven columns. It is the
-            # picture of what the ordering claims, so it belongs where a reader looking at the
-            # outcome already is.
+            # 🚨 ONE SCOREBOARD CELL, ABSORBING FOUR COLUMNS — the matchup, the final score and
+            # the two by-quarter lines. Marc: "present each row like a scoreboard, Away over
+            # Home, each quarter, then final score, followed by the chart." Nothing was dropped
+            # to make room: what were eleven columns are eight, and the four that went are all
+            # inside this one.
+            Col("scoreboard", "Scoreboard", render=_scoreboard),
+            # ⚠️ THE CURVE SITS BESIDE THE SCORE, not at the end of the row. It is the picture of
+            # what the ordering claims, so it belongs where a reader looking at the outcome
+            # already is — and Marc asked for it in exactly that place.
             Col("curve", "Win probability", render=curve_cell),
-            Col("away_line", "Away by quarter", render=lambda r: _quarter_line(r, "away")),
-            Col("home_line", "Home by quarter", render=lambda r: _quarter_line(r, "home")),
             Col("lead_changes_fourth_quarter", "4th-qtr lead changes", kind="num"),
             Col("lead_changes_overtime", "OT lead changes", kind="num"),
             Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
             Col("lead_changes", "Lead changes, game", kind="num"),
             Col("excitement_index", "Excitement", kind="num", dp=1),
             Col("espn", "Commentary", render=_espn_link),
-        ], caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
-                   "even win probability from the fourth quarter onward (lower is closer)."))
+        ], layout=layout,
+            caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
+                    "even win probability from the fourth quarter onward (lower is closer)."))
 
 
 def _favorite_margin(row):
