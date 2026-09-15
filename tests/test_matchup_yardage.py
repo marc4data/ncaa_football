@@ -787,8 +787,19 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
     # constants in this file, serving has never heard of either, there is no column it could
     # disagree with and no export reads it. ⚠️ The quantity has exactly ONE consumer by
     # construction, which is the test §4.2.1 actually sets.
+    # 🚨 R-885's TWO ENTRIES, AND THEY ARE THE SAME KIND AS THE TWO ABOVE: SCREEN-PIXEL SPLITS.
+    # Marc's v11 asks for *"Measure Cells and graph cells … equal horizontal widths"*, so the
+    # row's cell budget is divided three ways; and the cell CSS wants rem where the budget is
+    # kept in px, so the px is divided by `_REM`. **The warehouse cannot do either.**
+    # `_TABLE_ROW_BUDGET`, `_TABLE_LABEL_WIDTH`, `_TABLE_GAP` and `_REM` are layout constants
+    # in this file, serving has never heard of any of them, there is no column these could
+    # disagree with and no export reads them. ⚠️ Each quantity has exactly ONE consumer by
+    # construction — a CSS width — which is the test §4.2.1 actually sets, rather than "is the
+    # result a pixel" (R-741, and the formulation B099 was told not to license).
     allowed = {"_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10",
-               "return (inner - _METRIC_CELL_GAP * _REM) / 2"}
+               "return (inner - _METRIC_CELL_GAP * _REM) / 2",
+               "_TABLE_VALUE_PX = ((_TABLE_CELL_BUDGET // 3) if _TABLE_CELLS_EQUAL",
+               "_TABLE_VALUE_WIDTH = _TABLE_VALUE_PX / _REM    # rem, for the cell CSS"}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "

@@ -621,7 +621,11 @@ def test_a_box_score_without_advanced_says_so_rather_than_vanishing(panel):
     run, _ = panel
     body = _text(run(_both(has_team_advanced=False))[0])
     assert "First downs" in body, "the box score went with the advanced block"
-    assert "Advanced" in body and "would be here" in body
+    # ⚠️ AMENDED FOR v11. The section HEADING is part of the table's markup and is only built
+    # when the section is, so a game with no advanced block no longer prints the words
+    # "Advanced Team Stats" at all — it prints the empty state, inside the table column. **The
+    # claim that matters is unchanged: the absence is NAMED rather than the section vanishing.**
+    assert "would be here" in body and "collected separately" in body
 
 
 # --- ⚠️ the definitions come from the dictionary, not from the page ---------------------------
@@ -761,7 +765,12 @@ def test_a_pre_2024_game_is_still_told_it_is_out_of_SCOPE(panel):
 
 # --- 🚨 R-738: the post-game cards ---------------------------------------------------------
 
-_CARD_MARK = "border:1px solid rgba(128,128,128,.22)"
+# 🚨 AN ATTRIBUTE, NOT A COLOUR — R-886. This was the literal grey border string until v11 put
+# the TEAM COLOUR on the card, at which point every helper below would have matched nothing and
+# a dozen assertions would have passed over an empty list. **`_row_markup`'s own comment already
+# said it: the attribute exists to be anchored on; a style string is not an interface.**
+_CARD_MARK = "<div data-cfdb='leader-card'"
+_RESERVED_MARK = "<div data-cfdb='reserved-card'"
 
 
 def _plain(markup: str) -> str:
@@ -787,53 +796,74 @@ def _groups(block):
             for i, (start, title) in enumerate(marks)}
 
 
-def _card_blocks(entries):
-    """The card columns, in drawn order: away, home, away, home — two panels, two sides."""
-    return [str(b) for k, b in entries if k == "markdown" and _CARD_MARK in str(b)]
+def _card_region(entries):
+    """THE card region — one markdown block, drawn once (R-886).
+
+    🚨 IT WAS FOUR BLOCKS AND IS NOW ONE, WHICH IS v11's WHOLE STRUCTURAL CHANGE. The cards
+    were rendered beside Box score and again beside Advanced, two Streamlit columns each. Marc:
+    *"the vertical breaks are independent"* — so they are drawn once, top to bottom, and a
+    helper returning four is a helper describing a page that no longer exists.
+    """
+    blocks = [str(b) for k, b in entries
+              if k == "markdown" and (_CARD_MARK in str(b) or _RESERVED_MARK in str(b))]
+    assert len(blocks) <= 1, (
+        f"the cards were drawn {len(blocks)} times — v11 draws them ONCE, with no vertical "
+        f"association to the table beside them")
+    return blocks[0] if blocks else ""
+
+
+def _card_halves(region: str) -> list:
+    """Every card half in DRAWN ORDER, as (side, markup) — away, home, away, home… (R-886).
+
+    ⚠️ AWAY FIRST, AND THE SIDE IS READ FROM THE MARKUP RATHER THAN FROM ITS POSITION. B082 and
+    B083 both proved a presence assertion cannot see a left/right swap; a helper that assumed
+    the first half is away could not either. `data-side` is what the page states.
+    """
+    pieces = region.split("<div data-cfdb='card-half' data-side='")[1:]
+    return [(p.split("'", 1)[0], p) for p in pieces]
+
+
+def _side_cards(region: str, side: str) -> str:
+    """One side's whole card column — every group's half for that side, concatenated."""
+    return "".join(markup for which, markup in _card_halves(region) if which == side)
 
 
 def _cards_in(block):
-    """One column's cards, split apart."""
+    """The real (non-reserved) cards inside a block, split apart."""
     return [piece for piece in block.split(_CARD_MARK)[1:]]
 
 
-def test_the_cards_sit_beside_BOTH_panels_and_RECEIVING_is_added_only_in_ADVANCED(panel):
-    """Marc named ONE card list against TWO panels — and v08 changed what that list is.
+def _groups_in(region: str) -> list:
+    """The position headings drawn over the card region, in order (R-886)."""
+    return re.findall(r"text-transform:uppercase;opacity:\.8;[^>]*>([^<]+)</div>", region)
 
-    ⚠️ THIS TEST USED TO ASSERT THE TWO SECTIONS WERE IDENTICAL (R-738), and the reason was
-    good: *a reader scrolling from one panel to the other should not find the cast has changed
-    under him.* 🚨 **Marc's v08 overrules it — *"Receiving (3, in the Advanced section)"* — and
-    his reason beats the old one: Cowork argued about MEANING, he is arguing about FIT.**
 
-    ✅ SO THE CLAIM NARROWS RATHER THAN DISAPPEARING. The quarterbacks and rushers must STILL be
-    identical between the sections — that half of R-738 is untouched, and it is what stops a
-    reader finding a different cast — and Advanced adds receiving on top.
+def test_the_cards_are_ONE_CONTINUOUS_COLUMN_with_every_group_drawn_ONCE(panel):
+    """🚨 R-886. Marc, v11: *"Continuous, top-down, Quarterbacks (2), Rushing (3), Receiving (3),
+    Defense (3) … The Player cards should flow top to bottom, with no vertical association to
+    the Box/Advanced."*
+
+    ⚠️ THIS REPLACES `test_the_cards_sit_beside_BOTH_panels_and_RECEIVING_is_added_only_in_
+    ADVANCED`, AND THE CLAIM IS INVERTED RATHER THAN RELAXED. That test asserted the cards were
+    drawn TWICE with a different cast each time, which was right while they flanked two panels.
+    **Drawing them twice is now the defect**, and the old test would have passed a page that
+    kept doing it.
+
+    ✅ AND IT IS WHY B113 IS TWO TUPLES: the renderer loops `_CARD_GROUPS` and draws whatever is
+    in it, so Punter and Placekicker need no new branch.
     """
     run, _ = panel
-    blocks = _card_blocks(run(_both())[0])
-    assert len(blocks) == 4, (
-        f"expected two card columns per section across two sections, got {len(blocks)}")
-    box_away, box_home, adv_away, adv_home = blocks
-    for section, box, adv in (("away", box_away, adv_away), ("home", box_home, adv_home)):
-        assert "Receiving" not in _plain(box), (
-            f"the {section} Box score column carries a Receiving group — v08 puts it in "
-            f"Advanced only")
-        assert "Receiving" in _plain(adv), (
-            f"the {section} Advanced column has no Receiving group")
-        # 🚨 THE SHARED HALF, ASSERTED GROUP BY GROUP. Until B110 this read `adv.startswith(box)`
-        # and that was exactly right while Advanced was Box plus receiving. **R-839 put Defense
-        # in Box score only**, so the two columns now agree on Quarterback and Rushing and then
-        # each add one group the other does not have. The prefix is gone; R-738's claim is not.
-        assert "Defense" in _plain(box), (
-            f"the {section} Box score column has no Defense group — B110 put it there, and it "
-            f"is the only defensive figure left on the page")
-        assert "Defense" not in _plain(adv), (
-            f"the {section} Advanced column carries a Defense group — it belongs to Box score")
-        box_groups, adv_groups = _groups(box), _groups(adv)
-        for shared in ("Quarterback", "Rushing"):
-            assert box_groups[shared] == adv_groups[shared], (
-                f"the {section} column's {shared} group differs between the sections — each "
-                f"section adds ONE group of its own, it does not rebuild the shared cast")
+    region = _card_region(run(_both())[0])
+    assert region, "no card region was drawn at all"
+    groups = _groups_in(region)
+    assert groups == ["Quarterback", "Rushing", "Receiving", "Defense"], (
+        f"the card groups are {groups} — v11 asks for one continuous top-down run, in the "
+        f"order Marc listed, with each group drawn exactly once")
+    # 🚨 EVERY GROUP EXACTLY ONCE. A page that still drew the cards per section would repeat
+    # Quarterback and Rushing, and a set comparison would not see it.
+    assert len(groups) == len(set(groups)), (
+        f"a group is drawn more than once — the cards are still keyed to the table's sections: "
+        f"{groups}")
 
 
 def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
@@ -845,10 +875,14 @@ def test_the_AWAY_cards_are_drawn_BEFORE_the_HOME_cards(panel):
     away-over-home law (R-522) rather than a mirror.
     """
     run, _ = panel
-    blocks = _card_blocks(run(_both())[0])
+    region = _card_region(run(_both())[0])
     # ⚠️ PLAIN TEXT SINCE R-753: the name is two elements — small first line, bold last line —
     # so "Away QB" no longer appears contiguously in the markup.
-    away, home = _plain(blocks[0]), _plain(blocks[1])
+    # ⚠️ AND THE SIDE IS READ FROM `data-side` SINCE R-886, not from a block's position.
+    halves = _card_halves(region)
+    assert halves and halves[0][0] == "away", (
+        f"the first card half drawn is {halves[0][0] if halves else None!r}, not away (R-522)")
+    away, home = _plain(_side_cards(region, "away")), _plain(_side_cards(region, "home"))
     # ⚠️ R-835 PUT THE NAME BACK ON TWO LINES, so `_plain` yields `Away QB` rather than
     # `QB, Away`. The claim is unchanged — which SIDE is drawn first — and it is still
     # positional rather than a presence check.
@@ -874,9 +908,8 @@ def test_EVERY_DISCIPLINE_IS_REPRESENTED_on_the_post_game_cards(panel):
     because the test built its own frame). `run()` calls the real `_post_game`.
     """
     run, _ = panel
-    blocks = _card_blocks(run(_both())[0])
-    box_away = _plain("".join(_cards_in(blocks[0])))
-    adv_away = _plain("".join(_cards_in(blocks[2])))
+    region = _card_region(run(_both())[0])
+    box_away = adv_away = _plain(_side_cards(region, "away"))
     # ⚠️ WHICH SECTION EACH DISCIPLINE IS LOOKED FOR IN IS THE v08 CHANGE (R-848). Receiving
     # moved to Advanced on Marc's word; the other two stay in both. **Looking for all three in
     # the Box score column would now fail for the right reason and the wrong claim.**
@@ -897,52 +930,35 @@ def test_EVERY_DISCIPLINE_IS_REPRESENTED_on_the_post_game_cards(panel):
             f"Marc asked for full coverage: {text[:200]}")
 
 
-def test_TWO_quarterback_slots_THREE_rushers_and_THREE_receivers(panel):
+def test_ONE_quarterback_slot_pair_and_THREE_of_each_other_group(panel):
     """🚨 A120 MEASURED WHY THE QB IS ALONE: of 6,736 `total` groups, 6,300 — 93.5% — have fewer
     than three leaders and 3,990 have exactly one. A team plays one quarterback.
 
-    🚨 AND THE OTHER TWO ARE AT **2**, WHICH IS A TRADE RATHER THAN A PREFERENCE. Measured on Sam
-    Houston at Troy at 1300px: at three per discipline the card column runs 515px against a
-    353px Box score and a 384px Advanced — 162px and 131px past the panel it flanks. At two it
-    is 426px, so +73 and +42.
+    ⚠️ AMENDED FOR v11: the cards are ONE column now, so the counts are per GROUP across the
+    whole region rather than per section. The fixture has one QB, three rushers, three
+    receivers and three defenders, so the away column draws **ten real cards plus one reserved
+    quarterback slot**.
 
-    ⚠️ THE COUNT IS ASSERTED AGAINST THE MEASURED SHAPE AND NOT READ FROM `_POST_GAME_CARDS`,
-    for the same reason `test_EVERY_DISCIPLINE_IS_REPRESENTED` writes its set out: a test that
-    took the page's own tuple as its expectation would agree with any tuple.
+    ⚠️ THE COUNT IS ASSERTED AGAINST THE MEASURED SHAPE AND NOT READ FROM `_CARD_GROUPS`, for
+    the same reason the coverage test writes its set out: a test that took the page's own tuple
+    as its expectation would agree with any tuple.
     """
     run, _ = panel
-    blocks = _card_blocks(run(_both())[0])
-    # ⚠️ `_cards_in` COUNTS DRAWN CARDS ONLY — a reserved slot carries a DASHED border, so it is
-    # deliberately not one of these. The reserved slots are asserted by their own text below.
-    box_away = _cards_in(blocks[0])
-    adv_away = _cards_in(blocks[2])
-    assert len(box_away) == 7, (
-        f"Box score should draw one quarterback, three rushers and three defenders — the "
-        f"fixture has one QB, so the second slot is reserved rather than drawn — got "
-        f"{len(box_away)} cards")
-    assert len(adv_away) == 7, (
-        f"Advanced should draw the same four plus three receivers, got {len(adv_away)}")
-    assert _plain(blocks[0]).count("No second quarterback recorded") == 1, (
-        f"the missing second quarterback is not reserved: {_plain(blocks[0])[:200]}")
-    text = _plain("".join(adv_away))
+    region = _card_region(run(_both())[0])
+    away = _side_cards(region, "away")
+    # ⚠️ `_cards_in` COUNTS DRAWN CARDS ONLY — a reserved slot carries its own marker, so it is
+    # deliberately not one of these. The reserved slot is asserted by its text below.
+    assert len(_cards_in(away)) == 10, (
+        f"the away column should draw one quarterback, three rushers, three receivers and "
+        f"three defenders — got {len(_cards_in(away))} cards")
+    assert _plain(away).count("No second quarterback recorded") == 1, (
+        f"the missing second quarterback is not reserved: {_plain(away)[:200]}")
+    text = _plain(away)
     # ⚠️ ORDERED BY A TOKEN THAT SURVIVES A RENAME, NOT BY THE RENDERED NAME — R-758, and
-    # B106's own name break is what exposed it: `text.index("QB, Away")` raised
-    # `ValueError: substring not found` when the card went back to `First Last`, so this test
-    # CRASHED instead of failing and proved only that the lookup was narrow. `Comp-Att` is the
-    # quarterback's own KPI label and `RB1` is a whole token of the rusher's name either way.
-    # ⚠️ ORDERED BY A TOKEN THAT SURVIVES A RENAME, NOT BY THE RENDERED NAME — R-758, and
-    # B106's own name break is what exposed it: `text.index("QB, Away")` raised
-    # `ValueError: substring not found` when the card's name shape changed, so the test CRASHED
-    # instead of failing and proved only that the lookup was narrow.
-    # ✅ AND THE ORDER IS THE ROUND'S OWN CLAIM (R-809): the quarterback, then who ran it, then
-    # who caught it — the way a reader reads a game.
-    assert text.index("Comp-Att") < text.index("RB1") < text.index("WR1"), \
-        f"the cast is not QB, then rushers, then receivers: {text[:200]}"
-    for who in ("RB1", "RB2", "RB3", "WR1", "WR2", "WR3"):
-        assert who in text, f"{who} did not render"
-    # ⚠️ v08 TOOK THE DEPTH BACK TO THREE (R-848), superseding R-840's *keep 2 and 2* on Marc's
-    # own word. The fixture holds exactly three of each, so a depth ABOVE three would need a
-    # deeper fixture to catch — what this pins is that none of the three is being dropped.
+    # B106's own name break is what exposed it: a lookup by full name CRASHED instead of
+    # failing and proved only that the lookup was narrow.
+    assert text.index("Comp-Att") < text.index("RB1"), (
+        f"the quarterback is not drawn above the rushers: {text[:200]}")
 
 
 def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
@@ -960,10 +976,10 @@ def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
     # reason.
     rows = [r for r in _post_game_leaders()
             if not (r["panel"] == "rushing" and r["leader_rank"] in (2, 3))]
-    blocks = _card_blocks(run(_both(), leaders=rows)[0])
-    adv_away = _cards_in(blocks[2])
-    assert len(adv_away) == 5, (
-        f"a one-rusher side should draw five cards in Advanced — QB, one rusher, three "
+    away_cards = _cards_in(_side_cards(_card_region(run(_both(), leaders=rows)[0]), "away"))
+    adv_away = away_cards
+    assert len(adv_away) == 8, (
+        f"a one-rusher side should draw eight cards — QB, one rusher, three receivers, three "
         f"receivers — got {len(adv_away)}")
     text = _plain("".join(adv_away))
     assert "RB2" not in text
@@ -973,7 +989,7 @@ def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
     # 🚨 AND THE SHORT GROUP IS **NOT** RESERVED — R-849 is scoped to the quarterbacks. Rushing
     # and receiving are the last groups in their column, so a short one misaligns nothing
     # beneath it and a reserved slot there would be a hole bought for no alignment.
-    assert "rusher played" not in _plain(blocks[2]), (
+    assert "rusher played" not in _plain(away_cards and "".join(away_cards)), (
         "a short rushing group reserved a slot — R-849 is quarterback-only")
 
 
@@ -996,7 +1012,7 @@ def test_the_cards_read_the_IN_THIS_GAME_view_and_never_the_preview_one(panel):
         f"the post-game cards read the PREVIEW window — real players, plausible numbers, wrong "
         f"game: {seen}")
     # The fixture's QB carries Comp-Att 18-29 and 101 yards; the preview view would not.
-    away = _plain("".join(_cards_in(_card_blocks(entries)[0])))
+    away = _plain("".join(_cards_in(_side_cards(_card_region(entries), "away"))))
     assert "18-29" in away and "101" in away, (
         f"the QB card's slots are not this game's figures: {away[:160]}")
     source = matchup.__dict__["_POST_GAME_LEADER_COLUMNS"]
@@ -1009,7 +1025,8 @@ def test_a_player_with_NO_JERSEY_keeps_his_slot(panel):
     run, _ = panel
     rows = [dict(r, jersey=None) if r["leader_rank"] == 1 else r
             for r in _post_game_leaders()]
-    away = _plain("".join(_cards_in(_card_blocks(run(_both(), leaders=rows)[0])[0])))
+    away = _plain("".join(_cards_in(
+        _side_cards(_card_region(run(_both(), leaders=rows)[0]), "away"))))
     assert "—" in away, "a missing jersey must render an em dash in the same slot"
     assert "#0" not in away and "#nan" not in away.lower()
 
@@ -1020,7 +1037,7 @@ def test_NO_leaders_at_all_says_so_rather_than_drawing_an_empty_column(panel):
     entries, _ = run(_both(), leaders=[])
     text = _text(entries)
     assert "No player leaders held for this side." in text
-    assert not _card_blocks(entries), "an empty cast still drew card markup"
+    assert not _cards_in(_card_region(entries)), "an empty cast still drew a real card"
 
 
 # --- R-807: the measure is a cell, centred, with right-aligned values -------------------------
@@ -1039,6 +1056,36 @@ def _module_constant(name):
                 isinstance(t, ast.Name) and t.id == name for t in node.targets):
             return ast.literal_eval(node.value)
     raise AssertionError(f"matchup.py has no module-level {name}")
+
+
+def _expected_value_width() -> float:
+    """The value cell's width in rem, recomputed from the literals (R-885)."""
+    rem = _module_constant("_REM")
+    budget = _module_constant("_TABLE_ROW_BUDGET")
+    cells = budget - int(_module_constant("_TABLE_LABEL_WIDTH") * rem) - 3 * int(
+        _module_constant("_TABLE_GAP") * rem)
+    value = (cells // 3 if _module_constant("_TABLE_CELLS_EQUAL")
+             else _module_constant("_TABLE_VALUE_CONTENT_PX"))
+    return value / rem
+
+
+def _expected_chart_width() -> int:
+    """The chart's width RECOMPUTED FROM ITS PARTS, never read back off the page (R-885).
+
+    🚨 `_TABLE_CHART_WIDTH` IS DERIVED NOW, and `_module_constant` refuses a computed constant
+    on purpose: *"a test that read the page's own arithmetic back would agree with any
+    arithmetic the page happened to contain."* **So the test does the arithmetic itself**, from
+    the literals — the row budget, the label column, the gap, and which of Marc's two readings
+    of *"equal horizontal widths"* is switched on.
+    """
+    rem = _module_constant("_REM")
+    budget = _module_constant("_TABLE_ROW_BUDGET")
+    label = int(_module_constant("_TABLE_LABEL_WIDTH") * rem)
+    gap = int(_module_constant("_TABLE_GAP") * rem)
+    cells = budget - label - 3 * gap
+    value = (cells // 3 if _module_constant("_TABLE_CELLS_EQUAL")
+             else _module_constant("_TABLE_VALUE_CONTENT_PX"))
+    return cells - 2 * value
 
 
 def _cells(entries):
@@ -1237,7 +1284,7 @@ def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel)
     than its share draws over the AWAY CARDS.**"""
     run, _ = panel
     label_w = _module_constant("_TABLE_LABEL_WIDTH")
-    value_w = _module_constant("_TABLE_VALUE_WIDTH")
+    value_w = _expected_value_width()
     for cell in _cells(run(_both())[0]):
         style = _resolved(cell.split("style='")[1].split("'")[0])
         assert style.get("overflow") == "hidden", f"a measure row does not clip: {style}"
@@ -1261,20 +1308,24 @@ def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel)
             assert part.get("width") == f"{wanted}rem", (
                 f"the {what} is {part.get('width')} rather than the {wanted}rem the table "
                 f"budgets for it")
-        chart_w = _module_constant("_TABLE_CHART_WIDTH")
+        chart_w = _expected_chart_width()
         assert chart.get("flex") == "none", "the chart column can grow or shrink"
         assert chart.get("width") == f"{chart_w}px", (
             f"the chart column is {chart.get('width')} rather than the {chart_w}px it declares "
             f"— and `box()` is handed that same number, so the two cannot be allowed to drift")
 
 
-def test_the_TABLE_HEADER_carries_the_section_name_and_BOTH_logos_in_order(panel):
+def test_the_TABLE_HEADER_takes_the_TABLES_OWN_COLUMN_WIDTHS_and_BOTH_logos_in_order(panel):
     """🚨 AMENDED FROM B108's `test_the_SIDE_HEADING_takes_the_cells_width_and_not_the_columns`.
     The heading is a TABLE HEADER ROW now — Marc, v08: *"One big table, with a header row for
     Box Score / Logo Away / Logo Home"*.
 
     ⚠️ AND IT TAKES THE TABLE'S OWN COLUMN WIDTHS OR IT STOPS BEING A HEADER: a header whose
     cells do not line up with the rows beneath it is a caption.
+
+    ⚠️ RENAMED IN R-885: it no longer carries the section NAME. `_section_heading` does, with
+    Marc's bold rule under it, and this row is the logos. **The old name described an assertion
+    this test never made** — see `test_each_SECTION_NAME_is_drawn_ONCE_with_a_BOLD_RULE`.
     """
     run, _ = panel
     entries = run(_both())[0]
@@ -1284,7 +1335,7 @@ def test_the_TABLE_HEADER_carries_the_section_name_and_BOTH_logos_in_order(panel
                   if "Box score" in _plain(str(b)) and "border-top" in str(b))
     assert f"width:{_module_constant('_TABLE_LABEL_WIDTH')}rem" in header, (
         "the header's first cell is not the measure-name column's width")
-    assert f"width:{_module_constant('_TABLE_VALUE_WIDTH')}rem" in header, (
+    assert f"width:{_expected_value_width()}rem" in header, (
         "the header's figure cells are not the value columns' width")
     # 🚨 AWAY BEFORE HOME, BY THE TEAMS' OWN NAMES (R-522). `_both()` is Auburn at HOME and
     # Kentucky AWAY, so a swap changes which name comes first — which is the thing B082 and
@@ -1327,7 +1378,7 @@ def test_ONE_chart_per_row_at_the_CHART_COLUMNS_width_and_never_box_s_240px_defa
     assert 240 not in widths, (
         f"a chart is 240px — that is `box()`'s own default, so the width was not passed: "
         f"{sorted(widths)}")
-    wanted = _module_constant("_TABLE_CHART_WIDTH")
+    wanted = _expected_chart_width()
     assert widths == {wanted}, (
         f"the charts are {sorted(widths)}px; the column budgets {wanted}px. `box()` emits "
         f"max-width:100%, so a chart wider than its cell is SCALED DOWN and its labels shrink "
@@ -1384,11 +1435,30 @@ def _markers(cell):
     return out
 
 
+def _table_header_markup(entries) -> str:
+    """The table's own header ROW — the one with the two logos and a rule under it.
+
+    ⚠️ SCOPED SINCE R-886. The card region gained a team header that ALSO carries a 3px accent
+    underline, so a sweep over the whole page returns four accents where a test expects two —
+    and the two extra ones are correct markup, which is what makes it a silent miscount rather
+    than an obvious break (R-859: name the question the command actually answered).
+    """
+    return next(str(b) for _k, b in entries
+                if "Box score" in _plain(str(b)) and "border-top" in str(b))
+
+
 def _header_accents(entries):
-    """The away and home underline colours from the table header, in that order."""
-    header = next(str(b) for _k, b in entries
-                  if "Box score" in _plain(str(b)) and "border-top" in str(b))
-    return re.findall(r"border-bottom:3px solid ([^;']+)", header)
+    """The away and home underline colours from the TABLE header, in that order."""
+    header = _table_header_markup(entries)
+    # 🚨 THE FIRST TWO, AND THE REASON IS v11's ONE TABLE. `_table_header` runs TWICE inside a
+    # single markdown now — once for Box score and once for Advanced Team Stats — so a sweep
+    # returns FOUR correct accents where this test means the first section's two. **A count
+    # that was right while there were two markdown blocks silently doubled when there was one.**
+    found = re.findall(r"border-bottom:3px solid ([^;']+)", header)
+    assert len(found) % 2 == 0 and found[:2] == found[2:4] or len(found) == 2, (
+        f"the two sections' header accents disagree, so one of them is naming the wrong team: "
+        f"{found}")
+    return found[:2]
 
 
 def test_AWAY_is_the_ABOVE_marker_and_HOME_is_the_BELOW_one(panel):
@@ -1534,7 +1604,7 @@ def test_the_COMPOSITE_rows_RESERVE_the_chart_column_and_draw_NO_PLACEHOLDER(pan
     cells = _cells(run(_both())[0])
     composite = [c for c in cells if "Third down" in _plain(c) or "Turnovers" in _plain(c)]
     assert composite, "neither composite row rendered"
-    chart_w = _module_constant("_TABLE_CHART_WIDTH")
+    chart_w = _expected_chart_width()
     for cell in composite:
         assert not _bands(cell), (
             f"a composite row drew a chart — there is no percentile of {_plain(cell)[:60]!r}")
@@ -1565,17 +1635,136 @@ def test_the_TABLE_is_the_LEFTMOST_block_and_the_cards_follow_it(panel):
     """
     layout = _module_constant("_POST_GAME_LAYOUT")
     slots = [slot for slot, _w in layout]
-    assert slots == ["table", "away", "home"], (
+    assert slots == ["table", "cards"], (
         f"the blocks are laid out {slots} — v08 is the table hard left, then away, then home")
     widths = dict(layout)
     # 🚨 THE TABLE IS THE WIDE ONE, AND IT IS PINNED TO THE SLOT RATHER THAN TO THE INDEX. If
     # the weights were keyed by position, moving the table would hand it a card's width while
     # every positional assertion still passed — which is exactly what B098 found on this page.
-    assert widths["table"] > widths["away"] * 2, (
+    assert widths["table"] > widths["cards"], (
         f"the table is not the wide block: {widths}")
-    assert widths["away"] == widths["home"], (
-        f"the two card columns are different widths, so the cards cannot line up row for row: "
-        f"{widths}")
+    # ⚠️ THE AWAY/HOME EQUALITY MOVED INSIDE THE REGION (R-886). It used to be two Streamlit
+    # weights; the two halves are now `flex:1` siblings, which is the same claim enforced by
+    # the browser rather than by a tuple — and `test_the_two_card_HALVES_are_EQUAL_WIDTH`
+    # asserts it on the markup.
+
+
+def test_each_SECTION_NAME_is_drawn_ONCE_with_a_BOLD_RULE(panel):
+    """🚨 R-885. Marc, v11: *"Box Score and Advanced (renamed to Advanced Team Stats) … should
+    have a bold underline to help define the section."*
+
+    🚨 AND `ONCE` IS THE HALF THE RASTER CAUGHT. The section heading was added above a table
+    header row that ALREADY printed the same words in its first cell, so the page drew **"Box
+    score" twice, one line apart.** Both elements were correct, both were exactly what their
+    own tests asked for, and every assertion passed. **Only the picture showed it** — the
+    fourth time on this panel (B103's invisible rule, B108's squash, B111's floating chart).
+
+    ⚠️ THE RULE IS HEAVIER THAN THE HEADER ROW'S ON PURPOSE. `_table_header` draws 1px under
+    the LOGOS, which separates a header from its figures; this draws 2px under the section's
+    NAME, which separates one section from the other. Same weight twice would read as the same
+    boundary drawn twice — which is what the duplicated name looked like.
+    """
+    run, _ = panel
+    body = _text(run(_both())[0])
+    for name in ("Box score", _module_constant("_ADVANCED_SECTION")):
+        assert body.count(name) == 1, (
+            f"{name!r} is drawn {body.count(name)} times — the section heading and the table "
+            f"header row are both printing it")
+    table = next(str(b) for _k, b in run(_both())[0]
+                 if "Box score" in _plain(str(b)) and "border-top" in str(b))
+    rule = _module_constant("_SECTION_RULE")
+    assert table.count(rule) == 2, (
+        f"expected one bold section rule per section, found {table.count(rule)}")
+
+
+def test_the_two_card_HALVES_are_EQUAL_WIDTH_and_AWAY_comes_FIRST(panel):
+    """🚨 R-886/R-522. The away and home halves are `flex:1` siblings of one row, so equality is
+    enforced by the browser rather than by two Streamlit weights that could drift apart.
+
+    ⚠️ AND THE ORDER IS ASSERTED, NOT THE PRESENCE. B082 and B083 both proved a presence
+    assertion cannot see a left/right swap, and both halves are present in either arrangement.
+    """
+    run, _ = panel
+    halves = _card_halves(_card_region(run(_both())[0]))
+    assert halves, "no card halves were drawn"
+    sides = [which for which, _m in halves]
+    assert sides[::2] == ["away"] * (len(sides) // 2 + len(sides) % 2), (
+        f"the halves are not away-then-home down the column: {sides}")
+    assert sides.count("away") == sides.count("home"), (
+        f"a group drew one side and not the other, so the position header above it spans a "
+        f"row that is missing a half: {sides}")
+    for _which, markup in halves:
+        assert "flex:1" in markup, "a card half is not proportional, so the two can differ"
+
+
+def test_each_POSITION_HEADER_spans_BOTH_halves_and_carries_a_BOLD_RULE(panel):
+    """🚨 R-886. Marc, v11: *"the Position … should cover the entire row of player cards and
+    have a bold underline breaking the vertical space."*
+
+    🚨 THIS IS WHY THE CARDS STOPPED BEING TWO STREAMLIT COLUMNS. A header that spans both
+    halves cannot live inside either of them, and Streamlit offers no way to place one element
+    across two of its columns — so the region is one markdown block that splits itself.
+
+    ⚠️ ASSERTED AS *OUTSIDE ANY HALF*, which is the thing that would break if someone put the
+    header back inside a column: it would still render, still read correctly, and silently stop
+    spanning. A presence check could not see that.
+    """
+    run, _ = panel
+    region = _card_region(run(_both())[0])
+    groups = _groups_in(region)
+    assert groups, "no position header was drawn"
+    for title in groups:
+        before = region.split(f">{title}</div>")[0]
+        # the header must not sit inside a half — every half opened before it must be closed
+        opened = before.count("<div data-cfdb='card-half'")
+        assert opened == before.count("</div></div>") or "card-half" not in \
+            before.rsplit("<div style='display:flex", 1)[-1], (
+            f"the {title!r} header is drawn inside a card half, so it spans one side rather "
+            f"than the row")
+    rule = _module_constant("_CARD_RULE")
+    assert region.count(rule) >= len(groups), (
+        f"{len(groups)} position headers but only {region.count(rule)} bold rules — v11 asks "
+        f"for one under each")
+
+
+def test_the_CARD_BORDER_is_the_TEAM_COLOUR_and_each_side_gets_ITS_OWN(panel):
+    """🚨 R-886. Marc, v11: *"Player Card borders should be color of team."*
+
+    ✅ `_accent` IS B111's ONE PRODUCER (R-855) and the table header's underline already uses
+    it, so this asserts the card border EQUALS that underline rather than merely being a
+    colour. **A second copy of the expression would pass a presence check and drift.**
+
+    ⚠️ AND EACH SIDE GETS ITS OWN, which a swap would not change the COUNT of — so the away
+    half's border is checked against away's underline specifically.
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    away_accent, home_accent = _header_accents(entries)
+    assert away_accent != home_accent, "the fixture's two sides share an accent"
+    region = _card_region(entries)
+    for side, accent in (("away", away_accent), ("home", home_accent)):
+        cards = _cards_in(_side_cards(region, side))
+        assert cards, f"the {side} side drew no cards"
+        for card in cards:
+            assert f"border:1px solid {accent}" in card, (
+                f"a {side} card's border is not that side's team colour — the border and the "
+                f"header underline must be the same `_accent` call: {card[:140]}")
+
+
+def test_a_side_with_NO_SOURCED_COLOUR_still_gets_a_CARD_BORDER(panel):
+    """⚠️ POSITION IS THE FIRST SIGNAL AND COLOUR THE SECOND (AC-G.22), so a team with no
+    published colour must still have an edge. `_accent(None)` yields `identity.FALLBACK`.
+
+    📊 **1.01% of the games THIS panel renders — 37 of 3,674** — not the 10.89% all-games
+    figure B109 measured and the prompt repeated (R-876). Both are true of different questions.
+    """
+    run, _ = panel
+    region = _card_region(run(_both())[0])
+    away_cards = _cards_in(_side_cards(region, "away"))
+    assert away_cards, "the uncoloured side drew no cards at all"
+    for card in away_cards:
+        assert "border:1px solid light-dark(" in card, (
+            f"the uncoloured side's card has no border, or a single-theme one: {card[:140]}")
 
 
 def test_a_ONE_QUARTERBACK_side_RESERVES_the_second_slot_and_SAYS_SO(panel):
@@ -1601,8 +1790,9 @@ def test_a_ONE_QUARTERBACK_side_RESERVES_the_second_slot_and_SAYS_SO(panel):
     rows = list(_post_game_leaders())
     second = dict(next(r for r in rows if r["panel"] == "total" and r["team_id"] == 2),
                   leader_rank=2, player_name="Home QB2", player_id="p2to2")
-    blocks = _card_blocks(run(_both(), leaders=rows + [second])[0])
-    box_away, box_home = _plain(blocks[0]), _plain(blocks[1])
+    region = _card_region(run(_both(), leaders=rows + [second])[0])
+    box_away_markup = _side_cards(region, "away")
+    box_away, box_home = _plain(box_away_markup), _plain(_side_cards(region, "home"))
     assert "No second quarterback recorded" in box_away, (
         f"the away side has one quarterback and reserved nothing — every row below it is now "
         f"out of register with the home column: {box_away[:200]}")
@@ -1611,7 +1801,7 @@ def test_a_ONE_QUARTERBACK_side_RESERVES_the_second_slot_and_SAYS_SO(panel):
         "the home side has two quarterbacks and still reserved a slot")
     # 🚨 AND THE RESERVED SLOT IS A DRAWN BOX, NOT A GAP. An empty box a reader cannot
     # distinguish from missing data is the hole AC-G.11 forbids; this one names itself.
-    assert "border:1px dashed" in blocks[0], (
+    assert "border:1px dashed" in box_away_markup, (
         "the reserved slot draws no box at all, so the column just ends short")
     # 🚨 AND IT IS A REAL CARD'S HEIGHT, WHICH THE FIRST VERSION WAS NOT. A `min-height:3.2rem`
     # slot measured 51px against a real card's 84px, so reserving kept the two columns' card
@@ -1625,7 +1815,7 @@ def test_a_ONE_QUARTERBACK_side_RESERVES_the_second_slot_and_SAYS_SO(panel):
         f"the reserved slot is {reserved_h * 16:.0f}px and a real card measured 84px at 1300px "
         f"with the sidebar open. Any difference puts every group below it out of register "
         f"between the two columns, which is the whole point of the slot")
-    assert f"height:{reserved_h}rem" in blocks[0], (
+    assert f"height:{reserved_h}rem" in box_away_markup, (
         "the reserved slot does not declare a fixed height, so it collapses to its text")
 
 
@@ -1660,8 +1850,8 @@ def test_a_side_with_NO_QUARTERBACK_gets_ONE_block_and_NOT_a_FIRST_and_a_SECOND(
     # test would pass while asserting nothing about the quarterback group (§6, R-760).
     rows = [r for r in _post_game_leaders()
             if not (r["panel"] == "total" and r["team_id"] == 96)]
-    blocks = _card_blocks(run(_both(), leaders=rows)[0])
-    away = _plain(blocks[0])
+    region = _card_region(run(_both(), leaders=rows)[0])
+    away = _plain(_side_cards(region, "away"))
     assert "No quarterback recorded for this side." in away, (
         f"a side with no quarterback did not get the side-level sentence: {away[:200]}")
     # 🚨 THE ORDINAL MUST BE GONE FOR THIS SIDE — and `first` is the one that read as a bug.
@@ -1679,12 +1869,12 @@ def test_a_side_with_NO_QUARTERBACK_gets_ONE_block_and_NOT_a_FIRST_and_a_SECOND(
     # `_RESERVED_CARD_HEIGHT` plus the one `.3rem` margin BETWEEN them.
     card_h = _module_constant("_RESERVED_CARD_HEIGHT")
     spanned = 2 * card_h + 0.3
-    assert f"height:{spanned:g}rem" in blocks[0], (
+    assert f"height:{spanned:g}rem" in _side_cards(region, "away"), (
         f"the spanning block is not {spanned:g}rem, so it does not occupy the two slots it "
         f"replaced and every group below it is out of register with the home column")
     # ✅ AND THE HOME SIDE, WHICH HAS ONE QUARTERBACK, STILL GETS THE ORDINAL — the two
     # sentences must not collapse into one another.
-    assert "No second quarterback recorded" in _plain(blocks[1]), (
+    assert "No second quarterback recorded" in _plain(_side_cards(region, "home")), (
         "the side WITH a quarterback stopped naming which slot is missing")
 
 
@@ -1709,7 +1899,7 @@ def test_the_RESERVED_SLOT_does_not_replace_the_HONEST_ABSENCE_for_a_side_we_hol
     assert "No player leaders held for this side." in text, (
         f"a side we hold nothing for drew reserved slots instead of saying so: {text[:300]}")
     # And the home side, which does have leaders, still reserves its missing second quarterback.
-    home = _plain(_card_blocks(entries)[0])
+    home = _plain(_side_cards(_card_region(entries), "home"))
     assert "No second quarterback recorded" in home, (
         "the side that DOES have one quarterback stopped reserving the second")
 
@@ -1778,9 +1968,7 @@ def test_the_HEADER_ACCENT_names_BOTH_theme_variants_and_not_just_the_light_one(
     """
     run, _ = panel
     entries = run(_both())[0]
-    header = next(str(b) for _k, b in entries
-                  if "Box score" in _plain(str(b)) and "border-top" in str(b))
-    accents = re.findall(r"border-bottom:3px solid ([^;']+)", header)
+    accents = _header_accents(entries)
     assert len(accents) == 2, f"expected one accent per side, got {accents}"
     for accent in accents:
         assert accent.startswith("light-dark("), (
