@@ -79,6 +79,18 @@
 -- Scoping it to prior weeks would make every row describe a different game. (A120 wrote this same
 -- sentence for the post-game leader twin; the two read as one rule on purpose.)
 --
+-- 📊 A136 MEASURED THE SHAPE OF OVERTIME, BECAUSE A MAX OF ONE IS A DIFFERENT DRAWING PROBLEM
+-- FROM A MAX OF FOUR. Of the 70 games with overtime plays:
+--
+--     overtime periods   games   overtime plays   min / mean / max plays
+--            1             50          447            1 /  8.9 / 20
+--            2             19          318            8 / 16.7 / 28
+--            3              1           22           22 / 22.0 / 22
+--
+-- ⚠️ SO THE LONGEST GAME IN THE WAREHOUSE RUNS TO THREE OVERTIMES, AND ONE OVERTIME PERIOD
+-- CARRIES AS FEW AS ONE WIN-PROBABILITY PLAY. A chart sized for the longest game in a week
+-- leaves a regulation game short of the right-hand edge; A136's report carries that cost.
+
 -- ⚠️ `home_win_probability` IS PUBLISHED AS THE FEED GIVES IT, 0 TO 1, AND IS NOT SCALED TO 0-100.
 -- §4.2.1 forbids the PAGE multiplying, and it does not have to: an Altair axis takes `format='%'`
 -- and renders 0.62 as 62%, which is a rendering instruction rather than arithmetic. A second
@@ -139,6 +151,54 @@ select
         when p.period between 1 and 4
             then (p.period - 1) * 900 + (900 - p.clock_seconds)
     end                                                   as elapsed_from_kickoff_seconds,
+    -- ── A136: THE OVERTIME COORDINATE, AND IT IS NOT A CLOCK ────────────────────────────────
+    --
+    -- Marc, 2026-09-15, on the chart's reference lines: "Start, 2nd, half (darker), 3rd, 4th
+    -- (full, darker), each OT, Final" and "Games with overtime will be longer."
+    --
+    -- 🚨 THE REGULATION HALF WAS ALREADY FREE — 900 / 1800 / 2700 on the column above. THE
+    -- OVERTIME HALF COULD NOT BE DRAWN AT ALL, because `elapsed_from_kickoff_seconds` is null
+    -- for every overtime play and that decision is correct and is NOT being reversed: an
+    -- overtime period is not 900 seconds of anything, and A118 established that overtime must
+    -- never fold into a longer fourth quarter.
+    --
+    -- ✅ SO OVERTIME GETS ITS OWN COORDINATE, IN ITS OWN UNIT, WITH A NAME THAT CANNOT BE READ
+    -- AS TIME:
+    --
+    --     overtime_axis_offset_periods   HOW FAR PAST THE END OF REGULATION THIS PLAY SITS,
+    --                                    MEASURED IN OVERTIME PERIODS. 0.0 is the first play of
+    --                                    the first overtime; 1.5 is halfway through the second.
+    --                                    NULL in regulation.
+    --
+    -- 🚨 WHAT IT IS NOT, because the name is the load-bearing part of this column:
+    --
+    --     NOT a duration        its unit is PERIODS, not seconds. Nothing elapsed to produce it
+    --     NOT elapsed clock     it is not comparable with elapsed_from_kickoff_seconds and must
+    --                           never be added to it, coalesced with it, or plotted on its scale
+    --     NOT a play index      it is continuous and bounded to its own period, so two plays in
+    --                           different overtimes cannot collide
+    --
+    -- ✅ AND IT IS DELIBERATELY ONE COLUMN SCALED BY ONE CONSTANT AT THE PAGE (§4.2.1). The chart
+    -- writes `x = 3600 + overtime_axis_offset_periods * BAND_WIDTH`, where BAND_WIDTH is a layout
+    -- literal in the page — because how wide an overtime band should be is a DRAWING decision and
+    -- has no business being frozen into the warehouse. A pair of columns the page had to combine
+    -- would be arithmetic BETWEEN two published values, which is the thing §4.2.1 forbids.
+    --
+    -- ⚠️ THE REFERENCE LINE FOR OVERTIME k FALLS EXACTLY ON k - 1, and that is a property rather
+    -- than a coincidence: the fraction is (n - 1) / count, so the FIRST play of each overtime
+    -- sits exactly on the integer and the last sits strictly below the next one.
+    --
+    -- ⚠️ ORDERED BY `play_number`, WHICH IS THE ONLY ORDER AN OVERTIME PLAY HAS. Overtime carries
+    -- no usable clock — A136 measured stg_play's period-5-and-up rows as taking six distinct
+    -- clock values in total, essentially 0 and 900 — so there is nothing else to sort on. It is
+    -- also the same order the published curve is already drawn in, so this coordinate is exactly
+    -- as ordered as the line it positions, and no more.
+    case when p.period >= 5 then p.period - 4 end          as overtime_period,
+    case when p.period >= 5
+         then (p.period - 5)
+              + (row_number() over (partition by w.game_id, p.period order by w.play_number) - 1)
+                / (count(*) over (partition by w.game_id, p.period))::numeric
+    end                                                   as overtime_axis_offset_periods,
     -- THE VALUE, exactly as published. See the header on why it is not scaled.
     w.home_win_probability,
     -- IDENTITY, so a tooltip and a legend need no second query.

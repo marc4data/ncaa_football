@@ -3112,6 +3112,46 @@ models:
           The closest the home win probability ever got to 0.5 from period 4 onward — the single
           most level moment late in the game. Pairs with the mean: the mean says how close it was
           for how long, this says how close it ever got.
+      - name: winner_mean_win_probability
+        description: >
+          THE EVENTUAL WINNER'S mean win probability across the whole curve, every play weighted
+          the same. LOW MEANS A COMEBACK: the side that won spent most of the game behind. Ohio
+          State @ Texas, 2026 week 2, reads 0.2291 and is the lowest of that week's 86 games.
+          Marc, 2026-09-15: "big disparity between low win probability (behind the whole game),
+          but were successful in the end".
+          NOT A VARIANT OF mean_distance_from_even_fourth_quarter_onward. That column measures how
+          CLOSE a game stayed late and does not know who won; this one measures how far BEHIND the
+          winner was and is meaningless without the result. The two answer different questions and
+          disagree constantly.
+          Per play rather than per unit of clock, and the alternative was built and compared: mean
+          absolute difference 0.0108 over 1,898 games, Pearson 0.9963. The deciding argument is
+          overtime — an overtime play has no clock, so a clock-weighted mean would drop the most
+          dramatic part of exactly the games this column exists to find.
+          READ win_probability_curve_reaches_final_score BEFORE RANKING ON THIS.
+          NULL WHILE A GAME IS STILL BEING PLAYED, and that is deliberate: srv_game is on the hot
+          publish list and fct_game is rebuilt every two hours, so the scoreboard behind this is
+          live. Naming whoever is currently ahead as "the winner" would flip the value mid-game.
+          Also null for a tie and where the curve has no plays.
+      - name: mean_home_win_probability
+        description: >
+          The HOME side's mean win probability across the whole curve, every play weighted the
+          same. The raw curve property winner_mean_win_probability is derived from, published so
+          that derivation is auditable and so a chart can shade with it. A page must not rebuild
+          the winner mean from this and the score: that is arithmetic between two published
+          columns, and computing it once upstream is the reason the other column exists.
+      - name: win_probability_curve_reaches_final_score
+        description: >
+          Whether the win-probability curve's OWN scoreboard ever reaches the game's final score.
+          FALSE on 99 of 1,898 games (5.2%), where CFBD's curve stops before the game does.
+          THIS IS THE GUARD ON THE COMEBACK MEASURE, not a footnote. A truncated curve ends with
+          the trailing side still low, so its mean sits low and the game reads as a comeback it
+          never was: those 99 games are five of the twenty-five lowest winner means, a 3.8x
+          enrichment at exactly the end of the list a page would show. Coastal Carolina @ UTSA
+          (2024 week 1) ranks 3rd on the comeback measure and UTSA won 44-15.
+          Computed from the highest home and away scores anywhere on the curve, which is
+          order-independent on purpose: 336 games of 1,898 have a feed whose play numbering is
+          not chronological, so a "last play" test would carry the same defect it is meant to
+          detect. Null where the game carries no final score.
       - name: is_upset
         description: >
           Whether a RANKED side lost to a side ranked worse or unranked. AP poll only, at the
@@ -4576,6 +4616,32 @@ models:
           multiplies only because stg_drive.start_clock_seconds is the seconds COMPONENT of mm:ss.
           The same word means opposite things in the two lineages; copying either expression
           literally onto the other's columns produces a plausible axis where every value is wrong.
+      - name: overtime_period
+        description: >
+          Which overtime this play is in - 1 for the first, 2 for the second - and NULL in
+          regulation. The label half of the overtime coordinate: "OT2" comes from here.
+      - name: overtime_axis_offset_periods
+        description: >
+          HOW FAR PAST THE END OF REGULATION THIS PLAY SITS, MEASURED IN OVERTIME PERIODS. 0.0 is
+          the first play of the first overtime; 1.5 is halfway through the second. NULL in
+          regulation.
+          IT IS NOT A CLOCK AND MUST NEVER BE TREATED AS ONE. Its unit is periods, not seconds;
+          nothing elapsed to produce it; it is not comparable with elapsed_from_kickoff_seconds
+          and must never be added to it, coalesced with it, or plotted on its scale. No play ever
+          carries both, which is asserted rather than assumed.
+          It exists because elapsed_from_kickoff_seconds is null for every overtime play and stays
+          that way: an overtime period is not 900 seconds of anything, so extending the clock
+          formula would invent a duration that never elapsed. The remedy is a second coordinate in
+          a different unit, not a wider definition of the first.
+          A chart writes x = 3600 + overtime_axis_offset_periods * BAND_WIDTH, where BAND_WIDTH is
+          a layout literal in the page - one published column scaled by one constant - because how
+          wide an overtime band should be is a drawing decision and not a warehouse one.
+          The reference line for overtime k falls exactly on k - 1, because the fraction is
+          (n - 1) / count: the first play of each overtime sits on the integer and the last sits
+          strictly below the next one.
+          Ordered by play_number, which is the only order an overtime play has - overtime carries
+          no usable clock, and stg_play's period-5-and-above rows take six distinct clock values
+          in total.
       - name: home_team_id
         description: The home team, so a legend needs no second query.
       - name: home_team

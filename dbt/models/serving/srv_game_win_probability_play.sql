@@ -50,6 +50,15 @@ select
     -- The shared x-axis. See the mart's header: deliberately the twin of
     -- `fct_drive.elapsed_from_kickoff_seconds`, so a chart can put both marks on one axis.
     c.elapsed_from_kickoff_seconds,
+    -- 🚨 A136, cfdb-main-R-904. THE OVERTIME COORDINATE, AND IT IS NOT A CLOCK. The column above
+    -- is null for every overtime play and stays that way: an overtime period is not 900 seconds
+    -- of anything. These two say WHICH overtime a play is in and HOW FAR PAST REGULATION it sits,
+    -- measured in OVERTIME PERIODS rather than in seconds. The chart writes
+    -- `x = 3600 + overtime_axis_offset_periods * BAND_WIDTH` — one column, one layout literal —
+    -- because how wide an overtime band should be is a drawing decision, not a warehouse one.
+    -- The reference line for overtime k falls exactly on k - 1. See the mart's header.
+    c.overtime_period,
+    c.overtime_axis_offset_periods,
     c.home_win_probability,
     c.home_team_id,
     c.home_team,
