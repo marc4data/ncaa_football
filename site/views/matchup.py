@@ -14,7 +14,6 @@ import html
 import re
 from collections import namedtuple
 
-import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -1406,17 +1405,31 @@ def _series(row) -> None:
 # NAMED here rather than assembled from the label at runtime — `ci/check_page_reads.py` parses
 # the source for column-shaped reads, and an f-string name is invisible to it.
 _YARDAGE_DIMENSIONS = (
+    # 🚨 cfdb-wta-R-900. MARC'S v14 ORDER IS TOTAL FIRST, AND THIS TUPLE IS THE ONLY PLACE IT IS
+    # WRITTEN: *"The Offense vs Defense section should be a single table, organized in Rows:
+    # Total, Rushing, Passing."* ⚠️ **It was Rushing · Passing · Total and the comment below said
+    # why** — Total *"renders last and subordinate, because 99.7% of the time it is the sum of
+    # the two lines over it"*. That reasoning is still TRUE and is no longer the instruction;
+    # Marc has put the summary line first, which is a reading order, not a claim about the
+    # arithmetic. ✅ The measurement it rests on is kept because it is still the reason Total is
+    # not computed here.
+    #
+    # ⚠️ AND THE ORDER IS LOAD-BEARING TWICE: the sections render in this order AND
+    # `_LEADER_PANELS` maps each label to the card panel beside it, so *"Total has QB Cards"* is
+    # this tuple's first row meeting `"Total": "total"` — the panel the post-game tab calls
+    # **Quarterback**. **Nothing had to be built for that half of the instruction; it had to be
+    # checked, and it was.**
+    #
+    # TOTAL EARNS ITS ROW ON A MEASUREMENT, NOT ON SYMMETRY. It is rushing + passing in
+    # 13,686 of the 13,728 rows that carry any form, and differs in 42 by up to 11 yards —
+    # so it is the source's own total rather than our arithmetic, and adding the two below
+    # in this file would be metric maths in the app.
+    ("Total", "total_yards_for_per_game", "total_yards_allowed_per_game",
+     "total_yards_for_minus_opponent_allowed_per_game", "total_matchup_outlook"),
     ("Rushing", "rushing_yards_for_per_game", "rushing_yards_allowed_per_game",
      "rushing_yards_for_minus_opponent_allowed_per_game", "rushing_matchup_outlook"),
     ("Passing", "passing_yards_for_per_game", "passing_yards_allowed_per_game",
      "passing_yards_for_minus_opponent_allowed_per_game", "passing_matchup_outlook"),
-    # TOTAL EARNS ITS ROW ON A MEASUREMENT, NOT ON SYMMETRY. It is rushing + passing in
-    # 13,686 of the 13,728 rows that carry any form, and differs in 42 by up to 11 yards —
-    # so it is the source's own total rather than our arithmetic, and adding the two above
-    # in this file would be metric maths in the app. It renders last and subordinate,
-    # because 99.7% of the time it is the sum of the two lines over it.
-    ("Total", "total_yards_for_per_game", "total_yards_allowed_per_game",
-     "total_yards_for_minus_opponent_allowed_per_game", "total_matchup_outlook"),
 )
 
 _YARDAGE_COLUMNS = """
@@ -1517,10 +1530,24 @@ def _yardage_side_heading(offense, defense) -> str:
 # 0 disagreements. A second `yards / games_counted` in this file would let the frame disagree
 # with the point inside it, and that reads to a viewer as a rendering bug rather than a
 # metric one.
+# 🚨 cfdb-wta-R-900. `whisker_low` AND `whisker_high` JOINED THIS LIST AND THE PANEL DID NOT
+# WORK WITHOUT THEM — which is worth stating, because the failure is SILENT.
+#
+# `distribution.box()` frames on the whisker pair and reads it through
+# `distribution._whisker_pair`, which looks the two keys up IN THE ROW. A row that carries
+# neither returns `(None, None)`, and `box()` then returns its em-dash placeholder span rather
+# than raising. ⚠️ **So every chart in this panel would have drawn a single `–` and every
+# assertion of the form "the chart element is present" would have passed** — R-852's class, and
+# the reason this round staged a break on it rather than trusting the render to look wrong.
+#
+# ⚠️ THE AXIS COLUMNS STAY EVEN THOUGH `box()` READS NONE OF THEM. `axis_min` / `axis_max` are
+# the HISTOGRAM frame — `thumbnail` and `panel` need them, a box plot is percentiles and
+# whiskers — and `_week_frame_captions` still reports the week's own span from them.
 _DISTRIBUTION_COLUMNS = """
     season, season_type, week, metric, n, teams_in_week,
     min_games_counted, max_games_counted, mean, stddev,
-    p25, p50, p75, axis_min, axis_max, axis_step, as_of_ts
+    p25, p50, p75, whisker_low, whisker_high,
+    axis_min, axis_max, axis_step, as_of_ts
 """
 
 # ⚠️ PERCENTILES, NOT THE STANDARD DEVIATION, AND IT IS AN ARGUMENT RATHER THAN A PREFERENCE.
@@ -1534,9 +1561,16 @@ _DISTRIBUTION_COLUMNS = """
 # zero, which is not a yardage.
 #
 # p25–p75 is the middle half by count, so it moves where the teams actually are, and p50 is a
-# centre a single 762 cannot drag. The same reasoning is why the site's existing distribution
-# work draws a box-and-whisker rather than error bars.
-_BAND_LOW, _BAND_MID, _BAND_HIGH = "p25", "p50", "p75"
+# centre a single 762 cannot drag.
+#
+# ✅ THE LAST SENTENCE USED TO READ *"the same reasoning is why the site's existing distribution
+# work draws a box-and-whisker rather than error bars"* — AND v14 MAKES THIS PANEL THAT WORK.
+# The argument is unchanged and it now governs the chart directly: `box()` draws p25/p50/p75 and
+# the published whiskers, and reads `stddev` no more than this panel ever did.
+# ⚠️ `_BAND_LOW` / `_BAND_MID` / `_BAND_HIGH` WERE HERE AND WENT WITH THE SCATTER. They named the
+# percentile COLUMNS for a band this file drew itself; `box()` reads the row, so the page no
+# longer names them. **Deleted rather than left as three unused strings — a constant nothing
+# reads is the next reader's false lead.**
 
 # A thin sample is a property of the week and the page says so rather than letting a reader
 # assume season form. Two games or fewer is where "per game" and "that game" are the same
@@ -1612,129 +1646,6 @@ def _week_distribution(row):
 # ⚠️ THE DANGEROUS VALUE IS AND ALWAYS WAS `fit`, WHICH MAKES `height` THE OUTER BOX. `fit-x`
 # and `pad` are both safe on that axis; `test_the_spec_STREAMLIT_SHIPS_does_not_make_height_
 # the_outer_box` asserts the danger rather than one particular safe answer, so it still holds.
-_AUTOSIZE = {"type": "pad", "contains": "padding"}
-
-# 🚨 ONE NUMBER, USED FOR BOTH DIMENSIONS — that IS the 1:1 (R-609). Two constants could drift
-# apart and the chart would stop being square without anything failing.
-#
-# 🚨 R-804/R-817: 240 → 180, AND THE MEASUREMENT IS WHY. THREE ROUNDS ASKED FOR A SMALLER PAD
-# AND THE PAD IS NOT THE PROBLEM.
-#
-# ⚠️ MEASURED IN THE BROWSER at 1300px with the sidebar open, not derived:
-#
-#     the page's content              840px          (1300 viewport − 300 sidebar − padding)
-#     one half, `st.columns(2)`       412px
-#     inside it, `_SLOT_WIDTHS` 1:1.6 cards 150px  ·  chart slot 246px
-#     the chart the browser drew      305px         ← 59px WIDER THAN ITS COLUMN
-#
-# 🚨 AND A STREAMLIT COLUMN DOES NOT CLIP ITS CHILDREN (R-755), SO THOSE 59px DRAW OVER WHATEVER
-# IS TO THE RIGHT. That is ONE overflow with TWO symptoms, which is why four rounds saw two bugs:
-#
-#     away half, order [cards, chart]   the chart overflows into the HOME half  → B104's
-#                                       "the away chart clips its last x-axis label"
-#     home half, order [chart, cards]   the chart overflows into its OWN cards  → B106's
-#                                       "the home cards draw over the home chart, ~20px"
-#
-# 🚨 THE PAD CANNOT CLOSE A 59px GAP, AND THIS WAS MEASURED BEFORE IT WAS CONCLUDED. Compiling the
-# real spec with vl_convert and sweeping every axis lever:
-#
-#     as shipped                              290px  (vl_convert; the browser draws it 305)
-#     x tickCount 4, or 3, or labelFlush      290px  ← THE TICK COUNT MOVES THE WIDTH BY ZERO
-#     labelFontSize 9                         289px
-#     labelPadding 1 + tickSize 3             287px
-#     every lever at once                     286px  ← 4px, against a 59px gap
-#     dropping the Y-AXIS TITLE               275px  ← 15px, and it is not for sale: `_scatter`
-#                                                      exists to say the two axes are DIFFERENT
-#                                                      measurements, and the title is what says so
-#
-# ⚠️ THE X-AXIS RUNS *UNDER* THE PLOT, SO ITS LABELS COST HEIGHT AND NOT WIDTH. The 50px of
-# horizontal chrome is the Y axis — its rotated title and its tick labels — and it is CONSTANT:
-# the shipped box is `_CHART_SIDE + 50` in vl_convert and `+ 65` in the browser, at every size.
-#
-# ✅ SO THE SQUARE SHRINKS, WHICH IS THE ANSWER THE MEASUREMENT EARNS AND NOT THE ONE ASKED FOR.
-# 180 + 65 = 245px against a 246px column is a hair, so the axis levers above are taken TOO —
-# not to buy width they cannot buy, but to buy HEADROOM on top of the shrink.
-#
-# ❌ THE ALTERNATIVE WAS WORSE AND IT IS NAMED RATHER THAN ASSUMED: giving the chart its 305px
-# would leave the cards 75px. B106 measured the card's name row at 134px inside a 150px card and
-# names ALREADY ellipsise. Marc has spent three rounds (B103, B104, B106) making that card
-# readable; 75px would undo all of it to keep a square nobody asked to be 240.
-#
-# ⚠️ R-609 IS NOT RE-OPENED. The square is still square, still `pad`, still not
-# `use_container_width` — one constant still drives both sides. Only the NUMBER moved.
-_CHART_SIDE = 180
-_CHART_HEIGHT = _CHART_SIDE
-
-# 🚨 AND THE TICK COUNT MATTERS NOW FOR THE REASON IT NEVER DID BEFORE: LEGIBILITY, NOT WIDTH.
-# Vega chose 8 ticks for the 0–350 rushing axis. At 240px that is 34px apart; at 180px it is 26px
-# apart against ~18px labels — legible but crowded, and a crowded axis at this size is the
-# readability cost the shrink has to answer for. 4 ticks gives 0 · 100 · 200 · 300 at 60px apart,
-# which a reader can still interpolate between.
-# ⚠️ `tickCount` IS A HINT, NOT A COUNT — Vega picks its own "nice" values near it, which is what
-# keeps the labels round numbers instead of 87.5.
-# ⚠️ AND THE THREE BELOW ARE WORTH ~3px BETWEEN THEM, WHICH IS SAID RATHER THAN IMPLIED. The
-# first draft of this block set Vega's OWN DEFAULTS — labelPadding 2, tickSize 5, labelFontSize
-# 10 — and measured a 1px saving, because it had changed nothing. These are real reductions.
-# ❌ `labelFontSize` STAYS AT VEGA'S 10 AND IS NOT DROPPED TO 9 FOR ONE PIXEL: the axis labels
-# are the size Marc anchored the annotation to, twice (v04, v05), so shrinking them moves the
-# reference he is judging against to buy a pixel that does not decide anything.
-_AXIS_TICKS = 4
-_AXIS_LABEL_SIZE = 10
-_AXIS_LABEL_PADDING = 1
-_AXIS_TICK_SIZE = 3
-
-
-def _degenerate(axis) -> bool:
-    """An axis whose two limits are the same number cannot carry a position.
-
-    ⚠️ IT IS A REACHABLE STATE, NOT A HYPOTHETICAL. `axis_min` and `axis_max` are derived per
-    (season, season_type, week, metric); a week in which every counted team returns the same
-    figure — one game, one shared opponent, or a metric the source fills with a constant —
-    produces min == max, and `alt.Scale(domain=[v, v])` is a scale with no extent.
-
-    🚨 VEGA-LITE DOES NOT ERROR ON IT. It draws every mark at the same height, which is
-    precisely the picture R-603 was reported as: a confident flat chart. The panel refuses it
-    for the same reason it refuses an off-frame point — there is no honest position to draw.
-    """
-    return float(axis["axis_max"]) <= float(axis["axis_min"])
-
-
-def _off_the_frame(value, axis) -> bool:
-    """Is this value outside the week's axis, so Vega-Lite would clip it away?
-
-    🚨 R-601. THE FRAME IS BUILT FROM 138 FBS TEAMS AND THE PANEL PLOTS ANY OF 658. Measured
-    2026-09-11: `srv_team_week_metric_distribution` reports `n` = `teams_in_week` = 138 for
-    every 2026 week, while `srv_team_week` carries 658 teams in each of those weeks — every
-    non-FBS side an FBS school schedules. A team outside the FBS spread therefore plots
-    outside the axis built without it, and **26 distribution rows in 2026 alone have at least
-    one team beyond their own limits.**
-
-    ⚠️ IT IS NOT A THEORETICAL STATE. Game 401868264, Marist at Stetson, week 5: Stetson
-    allow 393.0 rushing yards per game against a `rushing_yards_allowed_per_game` axis of
-    [-50, 350]. Rendered, the point lands OUTSIDE the plotting rectangle — floating in the
-    chart's right-hand margin, past the last tick — because `scale.domain` with `nice=False`
-    bounds the axis and not the mark.
-
-    🚨 SO THE CHART WAS DRAWN AND THE POINT WAS NOT ON IT: a band, two medians, a labelled
-    pair of axes, and nothing plotted. That reads as "this matchup is unremarkable", which is
-    a confident false statement — the class this project keeps removing. ⚠️ The numbers
-    themselves are NOT lost — but WHAT KEEPS THEM CHANGED UNDER THIS COMMENT IN B105, which is
-    why it is rewritten rather than left. It used to be `_yardage_direction`, printing all three
-    metrics as text immediately above; R-756 deleted that block, and the annotation that
-    replaced it lives INSIDE the chart, so on exactly this path it disappears with the picture.
-    ✅ `_off_the_frame_figures` now puts the two figures into the caption that explains the
-    absence, so skipping the chart still drops a misleading picture and no measurement.
-
-    ⚠️ THIS IS A GUARD, NOT THE FIX, AND IT IS DELIBERATELY NOT AN AXIS OVERRIDE. The real
-    repair is in the mart — the frame should be built over the teams it will be asked to
-    hold, or the panel should be told which teams it may plot — and
-    `srv_team_week_metric_distribution` is A092's model, so it is session A's (§3, rule 3).
-    Widening the limits here would put a second axis calculation in the page and let the
-    frame disagree with the one the caption describes.
-    """
-    return not (float(axis["axis_min"]) <= float(value) <= float(axis["axis_max"]))
-
-
 # 🚨 R-722. MARC'S RULE, AND NONE OF IT IS COMPUTED HERE.
 #
 #     Green Circle: Gained < Allowed
@@ -1788,273 +1699,6 @@ def _outlook_mark(value):
     return _OUTLOOK_MARKS.get(str(value), _OUTLOOK_UNKNOWN)
 
 
-def _scatter(team, opponent, for_column, allowed_column, distribution,
-             team_name: str, opponent_name: str, label: str, outlook=None, delta=None):
-    """One metric: this side's attack against that side's defense, on the week's frame.
-
-    ⚠️ THE TWO AXES ARE DIFFERENT MEASUREMENTS AND THE LABELS SAY SO. Y is this team's
-    `_for` — yards it gains — and X is the opponent's `_allowed` — yards they concede. A
-    chart whose axes both read "yards" explains nothing, and the pairing running across sides
-    rather than down one is the thing `test_the_pairing_runs_across_sides_not_down_one` was
-    written first to protect.
-    """
-    y_axis, x_axis = distribution.get(for_column), distribution.get(allowed_column)
-    if y_axis is None or x_axis is None:
-        return None
-    value_y, value_x = team.get(for_column), opponent.get(allowed_column)
-    if pd.isna(value_y) or pd.isna(value_x):
-        return None
-    if _degenerate(y_axis) or _degenerate(x_axis):
-        return None
-    if _off_the_frame(value_y, y_axis) or _off_the_frame(value_x, x_axis):
-        return None
-
-    def domain(axis):
-        return [float(axis["axis_min"]), float(axis["axis_max"])]
-
-    # ⚠️ THE AXIS CONFIG IS EXPLICIT SINCE R-804, and what it buys is legibility at 180px rather
-    # than width — see `_CHART_SIDE` for the measurement that says the width was never here.
-    def ticks():
-        return alt.Axis(tickCount=_AXIS_TICKS, labelFontSize=_AXIS_LABEL_SIZE,
-                        labelPadding=_AXIS_LABEL_PADDING, tickSize=_AXIS_TICK_SIZE)
-
-    x_enc = alt.X("x:Q", title=f"{opponent_name} allowed", axis=ticks(),
-                  scale=alt.Scale(domain=domain(x_axis), nice=False))
-    y_enc = alt.Y("y:Q", title=f"{team_name} gained", axis=ticks(),
-                  scale=alt.Scale(domain=domain(y_axis), nice=False))
-
-    # The middle half of the week on BOTH axes. Same rectangle on every matchup in the week,
-    # because it comes from the week's row rather than from these two teams.
-    band = alt.Chart(pd.DataFrame([{
-        "x": float(x_axis[_BAND_LOW]), "x2": float(x_axis[_BAND_HIGH]),
-        "y": float(y_axis[_BAND_LOW]), "y2": float(y_axis[_BAND_HIGH]),
-    }])).mark_rect(opacity=0.10).encode(
-        x=x_enc, x2="x2:Q", y=y_enc, y2="y2:Q")
-
-    # 🚨 R-608: THE BOX'S EDGES CARRY WHICH PERCENTILE THEY ARE, IN LINE WEIGHT.
-    #
-    # Marc: "Use a thinner line for the sides that represent 25th percentile, thicker (maybe
-    # double line) for the 75th percentile."
-    #
-    # ⚠️ A `rect` HAS ONE STROKE FOR ALL FOUR EDGES, so the two weights cannot come from the
-    # shaded box itself — each edge is its own `rule` segment, bounded to the box rather than
-    # spanning the chart the way the medians do.
-    #
-    # ✅ WEIGHT RATHER THAN COLOUR, AND THAT IS AC-G.22 RATHER THAN TASTE. A line weight
-    # survives greyscale and colour-blindness; two hues do not, and this project has already
-    # removed one colour-carries-meaning defect (R-547).
-    edges = []
-    for axis_low_high, thickness in ((_BAND_LOW, 1), (_BAND_HIGH, 2.5)):
-        # The vertical edge: one x, spanning the box's y extent.
-        edges.append(alt.Chart(pd.DataFrame([{
-            "x": float(x_axis[axis_low_high]),
-            "y": float(y_axis[_BAND_LOW]), "y2": float(y_axis[_BAND_HIGH]),
-        }])).mark_rule(opacity=0.45, strokeWidth=thickness).encode(
-            x=x_enc, y=y_enc, y2="y2:Q"))
-        # The horizontal edge: one y, spanning the box's x extent.
-        edges.append(alt.Chart(pd.DataFrame([{
-            "y": float(y_axis[axis_low_high]),
-            "x": float(x_axis[_BAND_LOW]), "x2": float(x_axis[_BAND_HIGH]),
-        }])).mark_rule(opacity=0.45, strokeWidth=thickness).encode(
-            y=y_enc, x=x_enc, x2="x2:Q"))
-
-    mid_x = alt.Chart(pd.DataFrame([{"x": float(x_axis[_BAND_MID])}])).mark_rule(
-        opacity=0.35, strokeDash=[3, 3]).encode(x=x_enc)
-    mid_y = alt.Chart(pd.DataFrame([{"y": float(y_axis[_BAND_MID])}])).mark_rule(
-        opacity=0.35, strokeDash=[3, 3]).encode(y=y_enc)
-
-    # R-722. The mark's SHAPE and COLOUR are the published classification, read not derived.
-    # ⚠️ SET ON THE MARK RATHER THAN ENCODED FROM THE DATA, because this chart plots exactly one
-    # point — an encoding would add a scale and a legend to say what a single mark already is.
-    shape, colour, filled = _outlook_mark(outlook)
-    verdict = (str(outlook) if isinstance(outlook, str)
-               else "not classified — one side has no per-game form for this week")
-    point = alt.Chart(pd.DataFrame([{
-        "x": float(value_x), "y": float(value_y),
-        "who": f"{team_name} {float(value_y):.1f} gained vs "
-               f"{opponent_name} {float(value_x):.1f} allowed — {verdict}",
-    }])).mark_point(size=150, shape=shape, color=colour, filled=filled,
-                    strokeWidth=2, opacity=0.95).encode(
-        x=x_enc, y=y_enc, tooltip=alt.Tooltip("who:N", title=label))
-
-    # ⚠️ THE POINT IS DRAWN LAST so the box's edges cannot sit on top of the one mark a reader
-    # is actually looking for.
-    layered = band
-    for edge in edges:
-        layered = layered + edge
-    # 🚨 R-752. THE TITLE IS GONE FROM THE SPEC AND THAT IS THE WHOLE FIX. Marc: *"The header
-    # over the Chart should be the header for the whole row … maybe a header for each half."*
-    # A chart's `title=` can only ever sit over the chart, so no amount of styling makes it a
-    # ROW header — `_yardage_column` emits one before the row instead.
-    chart = layered + mid_x + mid_y + point
-    for layer in _annotation_layers(team, opponent, label, for_column, allowed_column, delta):
-        chart = chart + layer
-    return chart.properties(width=_CHART_SIDE, height=_CHART_SIDE, autosize=_AUTOSIZE)
-
-
-# Where the annotation sits inside the plot, in SCREEN pixels.
-# ⚠️ `value` RATHER THAN A DATA COORDINATE ON PURPOSE: the mark can be anywhere in the frame, so
-# an annotation anchored to the data would move with it and collide with the band, the median
-# rules or an edge — which is B100's reason for putting the block beside the chart in the first
-# place. A fixed corner cannot chase the point.
-#
-# 🚨 R-759. TOP RIGHT, AND BIGGER, AND THE SIZE INSTRUCTION REVERSES v04's. Marc said *"smaller,
-# similar to the axis labels, maybe a little smaller"*, B103 shipped 8.5, and he then said
-# *"increase font substantially"*. ✅ **8.5 IS THE FLOOR NOW, NOT THE TARGET** — it went past
-# readable, and citing v04 to keep it small would be answering the wrong instruction.
-# **11 is the axis labels' own size**, which is the reference he reached for twice.
-#
-# 🚨 AND THE CORNER IS A MEASURED RISK RATHER THAN A FREE MOVE. `y` is GAINED and `x` is
-# ALLOWED, so the top right is where a strong offence meets a generous defence — a real mark
-# position. Measured on 2026 week 2: **15 of 570 rushing marks — 2.6% — land in that quadrant**,
-# where the annotation now sits over them. ⚠️ Top LEFT was never argued as a choice; the old
-# comment reasoned about screen pixels versus data, not about which corner.
-#
-# ⚠️ `alt.value()` POSITIONS FROM THE LEFT, so a right-anchored block is the plot width minus a
-# margin — and `mark_image` does not anchor like `mark_text`, so the logos carry their own
-# offset rather than inheriting the text's.
-#
-# 🚨 R-804 RESIZED THE SQUARE AND THE ANNOTATION DID NOT FOLLOW, WHICH IS HOW A FIXED PIXEL
-# BLOCK INSIDE A RESIZED PLOT FAILS: at 240px the 104px block was 43% of the width; at 180px the
-# same 104px is 58%, and `test_the_annotation_is_anchored_to_the_TOP_RIGHT` went red because the
-# block had reached into the LEFT half. ✅ **The geometry is DERIVED from `_CHART_SIDE` now, so
-# the next round to move the square cannot leave the annotation behind** — the same reason
-# `_ANNOTATION_RIGHT` was already derived.
-_ANNOTATION_RIGHT = _CHART_SIDE - 6
-# ⚠️ THE SIZE IS THE AXIS LABELS', BY REFERENCE RATHER THAN BY COINCIDENCE. Marc reached for the
-# axis labels as the yardstick twice (v04 *"similar to the axis labels"*, v05 *"increase font
-# substantially"* off an 8.5 that went past readable). It was written as the literal 11 when the
-# axis labels happened to be 11; R-804 sets them explicitly, so this now TRACKS them and a round
-# that changes one cannot silently separate the two.
-_ANNOTATION_SIZE = _AXIS_LABEL_SIZE
-_ANNOTATION_TOP, _ANNOTATION_LINE = 4, 13
-# How wide the block is allowed to be, measured from its right edge, and it is bounded at BOTH
-# ends — which is what the old fixed 104 could not be:
-#
-#     FLOOR    `Allowed  333.0` at 10px is about 76px, and the text is right-aligned at
-#              `_ANNOTATION_RIGHT`, so a block narrower than the text does not clip it — the
-#              text simply reaches further left than the logo beside it and the row stops
-#              reading as one line.
-#     CEILING  the block must stay in the RIGHT half or it sits over the band: its left edge is
-#              `_ANNOTATION_RIGHT - _ANNOTATION_BLOCK`, which must exceed `_CHART_SIDE / 2`.
-#
-# `_CHART_SIDE // 2 - 10` is 80 at 180px — above the 76px floor, and leaving the left edge at 94
-# against a 90px midpoint. ⚠️ At any side below ~160 the two bounds cross and the annotation
-# needs a smaller font rather than a narrower block; the test asserts the ceiling.
-_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10
-
-
-def _annotation_layers(team, opponent, label, for_column, allowed_column, delta) -> list:
-    """R-751. Marc's worked subtraction, ON the chart and at axis-label size.
-
-    **Marc:** *"The logo math that ties to the mark is supposed to be a label/annotation on the
-    chart. Needs to be smaller. Font size similar to the axis labels, maybe a little smaller."*
-
-    🚨 INSIDE THE VEGA SPEC, WHICH B100 DELIBERATELY AVOIDED — so this round PROVES the thing
-    B100 was protecting rather than asserting it. `autosize: pad` makes the shipped box the
-    square PLUS its decorations, so a layer that overflowed the plot would grow it;
-    `test_the_spec_STREAMLIT_SHIPS_does_not_make_height_the_outer_box` and
-    `test_one_constant_drives_BOTH_sides_of_the_square` run against this and stay green.
-
-    ⚠️ THE LOGOS STAY — they are what makes it a subtraction rather than three numbers — drawn
-    with `mark_image` from the same CDN url the card uses.
-    🚨 AC-G.11 AT THIS SIZE: a missing logo cannot fall back to `identity`'s monogram inside a
-    Vega spec, so the row falls back to the TEAM'S NAME as text in the logo's place. B100
-    established that the name must appear when the logo cannot.
-    """
-    layers = []
-    logo_x = _ANNOTATION_RIGHT - _ANNOTATION_BLOCK
-    for index, (side, caption, column) in enumerate(
-            ((team, label, for_column), (opponent, "Allowed", allowed_column))):
-        y = _ANNOTATION_TOP + index * _ANNOTATION_LINE
-        logo = side.get("logo_url")
-        missing = (logo is None or (isinstance(logo, float) and pd.isna(logo))
-                   or not str(logo).strip())
-        if missing:
-            layers.append(alt.Chart(pd.DataFrame([
-                {"t": str(side.get("team_display") or "?")[:10]}])).mark_text(
-                    align="left", baseline="top", fontSize=_ANNOTATION_SIZE, opacity=0.75
-                ).encode(x=alt.value(logo_x), y=alt.value(y), text="t:N"))
-        else:
-            layers.append(alt.Chart(pd.DataFrame([{"u": str(logo)}])).mark_image(
-                width=12, height=12, align="left", baseline="top"
-            ).encode(x=alt.value(logo_x), y=alt.value(y), url="u:N"))
-        layers.append(alt.Chart(pd.DataFrame([
-            {"t": f"{caption}  {fmt.number(side.get(column), column, dp=1)}"}])).mark_text(
-                align="right", baseline="top", fontSize=_ANNOTATION_SIZE, opacity=0.85
-            ).encode(x=alt.value(_ANNOTATION_RIGHT), y=alt.value(y), text="t:N"))
-    # ⚠️ THE RULE A WRITTEN SUBTRACTION HAS. Marc, v02.2: *"add a line below the Opponent metric
-    # (like a math problem)"* — it is what makes the three numbers read as one sum rather than a
-    # list, and moving the block into the spec dropped it once before this was caught.
-    # ⚠️ THE RULE NEEDED CONTRAST AND CLEARANCE, AND THE RENDER IS WHAT SAID SO. At 45% opacity
-    # with three pixels under the line above it, it was invisible on the dark theme — a rule
-    # nobody can see is the same as the list-of-three-numbers the rule exists to prevent.
-    rule_y = _ANNOTATION_TOP + 2 * _ANNOTATION_LINE + 1
-    # 🚨 A `mark_rect`, NOT A `mark_rule`, AND IT WILL LOOK LIKE A MISTAKE TO THE NEXT READER.
-    #
-    # ⚠️ LEAVE IT. A `mark_rule` positioned ENTIRELY IN SCREEN VALUES — `alt.value()` on every
-    # channel — inside a layer chart that HAS SCALES does not draw. It serialises at the right
-    # coordinates, the spec validates, `chart.to_dict()` contains it, and the reader sees
-    # nothing. A one-pixel `mark_rect` with all four edges given as values does draw, and it is
-    # the same line. Do not "simplify" this back to a rule.
-    #
-    # 🚨 AND THE CLASS IS WORTH MORE THAN THE WORKAROUND (R-803): **THE TEST ASSERTS THE SPEC,
-    # THE READER SEES THE RENDER.** Every assertion about this annotation passed while the rule
-    # was invisible — they read `to_dict()`, which is exactly where the rule WAS. This is the
-    # third time a raster caught what a passing assertion could not: B100's clipped axis,
-    # A118's wrap inside "OT", and this. ⚠️ A spec assertion is not a rendering assertion, and
-    # the only instrument this project has for the difference is the live raster in the report.
-    #
-    # ✅ RE-CHECKED BY B105 AFTER R-804 MOVED THE AXIS AND SHRANK THE SQUARE TO 180px: the rule
-    # still DRAWS, not merely still serialises — confirmed on the raster, not on the spec.
-    layers.append(alt.Chart(pd.DataFrame([{"a": 0}])).mark_rect(opacity=0.75).encode(
-        x=alt.value(logo_x), x2=alt.value(_ANNOTATION_RIGHT),
-        y=alt.value(rule_y), y2=alt.value(rule_y + 1)))
-    layers.append(alt.Chart(pd.DataFrame([{"t": _signed_delta(delta)}])).mark_text(
-        align="right", baseline="top", fontSize=_ANNOTATION_SIZE, fontWeight="bold"
-    ).encode(x=alt.value(_ANNOTATION_RIGHT), y=alt.value(rule_y + 4), text="t:N"))
-    return layers
-
-
-def _off_the_frame_metrics(team, opponent, distribution) -> list:
-    """Which metrics this side cannot be drawn on, because the week's frame excludes it.
-
-    ⚠️ ONE PREDICATE, TWO CALLERS. `_scatter` decides whether to draw and this decides what
-    to say about it not drawing; both ask `_off_the_frame`, so the caption cannot come to a
-    different conclusion from the chart it explains.
-    """
-    out = []
-    for label, for_column, allowed_column, delta_column, outlook_column in _YARDAGE_DIMENSIONS:
-        y_axis, x_axis = distribution.get(for_column), distribution.get(allowed_column)
-        if y_axis is None or x_axis is None:
-            continue
-        value_y, value_x = team.get(for_column), opponent.get(allowed_column)
-        if pd.isna(value_y) or pd.isna(value_x):
-            continue
-        if _off_the_frame(value_y, y_axis) or _off_the_frame(value_x, x_axis):
-            out.append(label)
-    return out
-
-
-def _off_the_frame_figures(team, opponent, off) -> list:
-    """`Rushing 393.0 gained vs 118.0 allowed` — the figures the dropped chart would have shown.
-
-    🚨 THIS IS WHAT THE DELTA TABLE USED TO DO FOR FREE (R-756). The table printed all three
-    metrics whether or not their charts drew; the annotation that replaced it lives inside the
-    chart, so it disappears with it. **This is the narrow case the table was load-bearing for,
-    and it is one sentence rather than the table coming back.**
-    """
-    labels = {label: (for_column, allowed_column)
-              for label, for_column, allowed_column, _d, _o in _YARDAGE_DIMENSIONS}
-    out = []
-    for label in off:
-        for_column, allowed_column = labels[label]
-        out.append(
-            f"{label} {fmt.number(team.get(for_column), for_column, dp=1)} gained vs "
-            f"{fmt.number(opponent.get(allowed_column), allowed_column, dp=1)} allowed")
-    return out
-
-
 _GAME_TEAM_COLUMNS = """
     team_id, is_home, team_display, spread_final,
     rushing_yards_for_minus_opponent_allowed_per_game,
@@ -2091,115 +1735,61 @@ def _game_team_rows(game_id: int) -> dict:
     return {int(r["team_id"]): r for _, r in df.iterrows()}
 
 
-def _yardage_column(team, opponent, distribution, deltas=None, leaders=None,
-                    usage=None) -> None:
-    """One side of the comparison: the text rows, then a chart per metric with its cards BESIDE.
+def _yardage_row(offense, defense, week_rows, dimension, deltas=None,
+                 leaders=None, usage=None) -> None:
+    """ONE metric for ONE side: the box-and-whisker pair, with that side's cards BESIDE it.
 
-    🚨 R-731, AND THE LAYOUT IS A MIRROR. Marc: *"There should be a round for B to get the
-    layout correct with the Player Cards on the OUTSIDE of the charts in the Offense vs Defense
-    section."* So the two charts sit together in the middle of the page and the cards are
-    pushed to the outer edges:
+    🚨 cfdb-wta-R-900 TURNED `_yardage_column` INSIDE OUT, AND THE REASON IS THE SPANNING
+    HEADER. Marc: *"Total, Rushing, and Passing should each have a single header row that spans
+    the whole page."* The old shape was **two Streamlit columns, each looping the three
+    metrics** — so a metric's heading could only ever be emitted INSIDE one half, which is
+    exactly the limitation the previous round wrote down and declined to fix: *"a header
+    spanning BOTH halves is his later option and is deliberately not built, because the two
+    halves are separate Streamlit columns."*
+    ✅ **So the loop moved OUT and the columns moved IN** — `_yardage` now loops the metrics at
+    the top level, emits one `_section_heading` across the page, and opens a fresh `st.columns`
+    pair underneath it. **This is B112's shape on the other tab, reused rather than reinvented.**
 
-        away (left column)     cards | chart
-        home (right column)    chart | cards
-
-    ⚠️ WHICH MEANS THIS FUNCTION HAS TO KNOW WHICH SIDE IT IS, and it is called twice with the
-    same signature. It reads `is_home` off the `srv_game_team` row it is ALREADY handed — see
-    `_is_home_side` for what was measured and what the alternatives were.
-
-    🚨 ONE LIST DECIDES BOTH THE ORDER AND THE COLUMN, which is the whole reason the test can
-    be trusted. `order` is in left-to-right order and `st.columns` returns left-to-right, so
-    zipping them makes the emission order and the visual position the SAME FACT. Reversing the
-    list moves the card block and its emission together; there is no way to change one and
-    leave the other, and therefore no way for a passing test to describe a layout that is not
-    on the screen.
-
-    ⚠️ THE WIDTHS COME OFF THE SAME LIST, WHICH IS WHY AN ASYMMETRIC RATIO IS SAFE HERE. The
-    first version split the side 50/50 and the LIVE RENDER showed the away charts clipped on
-    their right edge — the axis read "300 :" where the home side read "300 350". `autosize:
-    pad` makes the spec's outer box the plot PLUS its axis labels, so 240px of square needs
-    more than 240px of column. Weighting the chart slot fixes it, and because the weights are
-    read out of `order` rather than written as a second tuple, a ratio cannot end up applied
-    the wrong way round while the positional assertions still pass.
+    ⚠️ THE MIRROR SURVIVES INTACT (R-731): cards on the OUTSIDE, charts together in the middle.
+    `order` is still in left-to-right order and still zipped against `st.columns`, so emission
+    order and visual position remain the same fact and the positional tests still mean what
+    they say.
     """
-    st.markdown(_yardage_side_heading(team, opponent), unsafe_allow_html=True)
-    team_name = str(team.get("team_display") or "?")
-    opponent_name = str(opponent.get("team_display") or "?")
+    label, for_column, allowed_column, delta_column, outlook_column = dimension
     order = ("chart", "cards") if _is_home_side(deltas) else ("cards", "chart")
     widths = [_SLOT_WIDTHS[slot] for slot in order]
-    # 🚨 R-756's SECOND HOLE, AND IT IS THE ONE NOBODY PREDICTED. The prompt's premise was *the
-    # three figures survive in the annotation* — TRUE ONLY WHERE THE CHART SURVIVES. The
-    # annotation lives INSIDE the Vega spec, so on every row that draws no chart the figures the
-    # deleted table used to print now have nowhere to be. ⚠️ Not a rare path: A092 measured that
-    # NO week-wide distribution exists at week 1 of a regular season, so the whole panel is in
-    # this state at the start of every year.
-    drawn = set()
-    for index, (label, for_column, allowed_column, delta_column,
-                outlook_column) in enumerate(_YARDAGE_DIMENSIONS):
-        # 🚨 R-752. THE HEADER IS THE ROW'S, NOT THE CHART'S. It used to be the Altair spec's
-        # own `title=`, which can only ever sit over the chart — Marc asked for a header for the
-        # row, and *"maybe a header for each half (start with each half)"*. ✅ ONE PER HALF PER
-        # METRIC, emitted before the row; a header spanning BOTH halves is his later option and
-        # is deliberately not built, because the two halves are separate Streamlit columns.
-        #
-        # ⚠️ AND A SMALL RULE BETWEEN THE BLOCKS, NOT BEFORE THE FIRST. Marc: *"a small line or
-        # element to break the space between Rushing, Passing, and Total."* A hairline at low
-        # opacity — the three blocks are one panel, so this separates them without sectioning
-        # them.
-        st.markdown(
-            ("<div style='border-top:1px solid currentColor;opacity:.12;"
-             "margin:.9rem 0 0'></div>" if index else "")
-            + f"<div style='font-weight:600;font-size:.95rem;margin:.45rem 0 .1rem'>"
-              f"{html.escape(label)}</div>",
-            unsafe_allow_html=True)
-        chart = _scatter(team, opponent, for_column, allowed_column, distribution,
-                         team_name, opponent_name, label,
-                         _delta_for(deltas, outlook_column),
-                         _delta_for(deltas, delta_column))
-        if chart is not None:
-            drawn.add(label)
-        # R-687. The names go OUTSIDE the chart; R-731 puts them BESIDE it rather than below.
-        panel_key = (int(team["team_id"]), _LEADER_PANELS[label])
-        cards = _leader_block((leaders or {}).get(panel_key, []),
-                              (usage or {}).get(panel_key))
-        for slot, column in zip(order, st.columns(widths)):
-            if slot == "chart":
-                if chart is not None:
-                    # ⚠️ NOT use_container_width: a square the container can stretch is
-                    # not a square. R-609, and a narrower column does not change that.
-                    column.altair_chart(chart, use_container_width=False)
-                # ⚠️ R-751 MOVED THIS ONTO THE CHART. The block that used to sit under it is
-                # `_annotation_layers` now, inside the spec — see `_scatter`.
-            else:
-                column.markdown(cards, unsafe_allow_html=True)
-    # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11). A chart silently missing from a
-    # row of three reads as "we hold nothing"; these two hold a figure that is off the scale
-    # the rest of the week is drawn on, and the figures are printed in full just above.
-    # 🚨 R-756 BROKE THIS SENTENCE AND THE ROUND THAT REMOVED THE TABLE HAD TO MEND IT.
-    # It used to end *"The numbers are above"* — and "above" WAS the delta table. With the table
-    # gone the only place those three figures survive is the annotation INSIDE the chart, so on
-    # exactly the rows where the chart is DROPPED they now survive nowhere. **A caption that
-    # points at figures that no longer exist is the R-571 class, and AC-G.11 asks an absence to
-    # say WHICH absence it is — so the caption carries the numbers itself.**
-    # ✅ Not a new layout: the sentence already named the metrics, and naming their values is
-    # what makes it true again.
-    off = _off_the_frame_metrics(team, opponent, distribution)
-    if off:
-        st.caption(
-            f"{'  ·  '.join(_off_the_frame_figures(team, opponent, off))} not plotted — one of "
-            f"each pair falls outside the range this week's chart is drawn on, so there is no "
-            f"honest place to put the point.")
-    # ⚠️ AND WHICH ABSENCE IT IS, SEPARATELY (AC-G.11). `off` is the metric we CAN explain — the
-    # point leaves a frame we hold. This is the rest: no distribution built for the week, or an
-    # axis that cannot carry a position. The page holds the two figures either way and says them.
-    # ❌ NOT one merged sentence: "outside the week's range" and "there is no week's range" are
-    # different facts, and B075's rule is that an absence names itself.
-    unplotted = [label for label, *_rest in _YARDAGE_DIMENSIONS
-                 if label not in drawn and label not in off]
-    figures = _off_the_frame_figures(team, opponent, unplotted)
-    if figures:
-        st.caption(f"{'  ·  '.join(figures)} — not drawn against the week, because this week "
-                   f"has no distribution to draw them against.")
+    # ✅ cfdb-wta-R-901 / R-855. ONE PRODUCER, CALLED TWICE HERE — the series rule beside each
+    # box and the card borders beside it are the SAME string, so a reader cannot be shown two
+    # different colours for one team on one row.
+    accent, opponent_accent = _accent(offense), _accent(defense)
+    chart = _gained_allowed(offense, defense, for_column, allowed_column, week_rows, label,
+                            _delta_for(deltas, outlook_column),
+                            _delta_for(deltas, delta_column),
+                            accent=accent, opponent_accent=opponent_accent)
+    panel_key = (int(offense["team_id"]), _LEADER_PANELS[label])
+    cards = _leader_block((leaders or {}).get(panel_key, []),
+                          (usage or {}).get(panel_key), accent=accent)
+    for slot, column in zip(order, st.columns(widths)):
+        column.markdown(chart if slot == "chart" else cards, unsafe_allow_html=True)
+
+
+def _metrics_without_a_week(week_rows) -> list:
+    """Which of the six series this week holds no distribution for.
+
+    🚨 THIS IS WHAT SURVIVED THE CHART CHANGE, AND ONE OF THE TWO OLD ABSENCES IS GONE FOR GOOD.
+    The scatter could not plot a point outside `axis_min`/`axis_max`, so `_off_the_frame_*`
+    existed to name the metrics it dropped and print their figures. ✅ **`box()` frames on the
+    whiskers WIDENED BY THE VALUE** — its own comment: *"a figure outside the whiskers is drawn
+    where it is rather than clamped to the edge"* — **so the new chart cannot exclude a team,
+    and the absence it explained can no longer occur.**
+
+    ⚠️ THE OTHER ABSENCE IS REAL AND STAYS: a week with no distribution row for a metric.
+    `box(None, …)` returns a titled em dash, which holds the row's height (R-141) and says
+    nothing a sighted reader can read — so the page says it here, in words, naming WHICH
+    metrics (AC-G.11).
+    """
+    return [label for label, for_column, allowed_column, _d, _o in _YARDAGE_DIMENSIONS
+            if week_rows.get(for_column) is None or week_rows.get(allowed_column) is None]
 
 
 # ⚠️ THE LEADER BLOCK LIVES BELOW `_yardage_column` ON PURPOSE.
@@ -2801,8 +2391,13 @@ def _card_dots(row, usage) -> str:
     return _usage_dots(usage, row.get("player_id"))
 
 
-def _leader_block(rows, usage=None) -> str:
+def _leader_block(rows, usage=None, accent: str = None) -> str:
     """The three names under one chart — or an honest absence.
+
+    ⚠️ `accent` IS cfdb-wta-R-901 AND IT IS A PASS-THROUGH, NOT A NEW PRODUCER. `_leader_card`
+    has taken the parameter since R-886 and applies it to the border; this block simply never
+    handed it one, so the BEFORE-THE-GAME cards drew the neutral grey while the POST-GAME cards
+    drew the team colour. **One producer, `_accent`, two call sites — the state R-855 asks for.**
 
     ⚠️ FOUR STATES A106 MEASURED, AND EACH IS A DIFFERENT SENTENCE:
       · ZERO rows — a week-1 game, where nobody has yards through week zero. Not a failure.
@@ -2815,7 +2410,253 @@ def _leader_block(rows, usage=None) -> str:
     if not rows:
         return ("<div style='font-size:.75rem;opacity:.5;padding:.15rem 0'>"
                 "No yards recorded before this week.</div>")
-    return "".join(_leader_card(r, usage) for r in rows)
+    return "".join(_leader_card(r, usage, accent=accent) for r in rows)
+
+
+# --- cfdb-wta-R-900 / R-898: the Gained vs Allowed chart is a BOX-AND-WHISKER ----------------
+
+# 🚨 MARC, v14: *"Let's modify the Gained vs Allowed chart. Instead make it a horizontal box
+# whisker. Two rows/sections of data on the chart. Gained on top, Allowed on Bottom, label each
+# series accordingly with team name and gained or allowed, as appropriate. Add a line for the
+# average for the team at this point. Color and label the Metric value."*
+#
+# ✅ THE RENDERER IS A125's `distribution.box` AND NOTHING HERE DRAWS AN SVG. That module's
+# opening argument is *"two renderers drift, and the day they disagree the reader cannot tell
+# which is lying"*, and a second box plot written in this file is exactly that. This function
+# composes TWO of its rows and owns the labels, the legend and the layout — which is the
+# division of labour §3 rule 3.1 sets for a shared module and its call sites.
+#
+# ⚠️ *"a line for the average for the team at this point"* IS THE `value` MARKER, NOT A SECOND
+# RULE. Before kickoff the team has no game figure, so its `*_per_game` through the prior week
+# IS the number Marc is asking to see against the week's spread — and `box(value=…,
+# value_color=…, value_label=…)` is a call A131 already ships for it. **A second line drawn
+# from `mean` would put the LEAGUE average beside a series whose median is already on the
+# chart, and the median is the better centre here for the reason the percentile note
+# above `_THIN_SAMPLE` gives.**
+# 📊 240, AND IT IS MEASURED IN THE BROWSER RATHER THAN DERIVED — R-750's LESSON, PAID AGAIN.
+# The first draft wrote 296 from an arithmetic estimate of the slot, and the live render at
+# 1300px with the sidebar open measured the chart slot at **246px**. `box()` emits
+# `max-width:100%`, so the SVG did not overflow — **it SCALED**, to 246, quietly taking its 9px
+# labels down with it to about 7.5.
+#
+# 🚨 AND THE DOM WAS SILENT: `width='296'` was on the element, every label was present, and the
+# only instrument that could see it was `getBoundingClientRect()` on the live page. ⚠️ This is
+# B108's class — *a `scrollWidth` reports the slot rather than the glyphs* — and R-859's: the
+# attribute answers *what was declared*, which is a different question from *what was drawn*.
+#
+# ✅ 240 FITS THE 246px SLOT AT ITS DECLARED SIZE, so nothing scales and the labels stay 9px.
+# ⚠️ It follows `_SLOT_WIDTHS` rather than the viewport: cards take 1.0 and the chart 1.6 of each
+# half, and the card measured 150px beside a 246px chart — 1:1.64, which is the ratio doing
+# exactly what it says. **A wider viewport gives the slot more room and leaves slack at the
+# outer edge; it does not make this number wrong**, which is the property the fixed 180px square
+# had before it and the reason R-609 keeps `use_container_width` off.
+_BOX_ROW_WIDTH = 240
+
+# 🚨 THE TWO ROWS DO NOT SHARE AN X-AXIS TODAY, MARC ASKED THAT THEY SHOULD, AND THE THING IN
+# THE WAY IS ONE PARAMETER IN SESSION A's MODULE. This is stated as a constant rather than left
+# in a report, because the next round to read this code must not have to rediscover it.
+#
+# 📊 WHAT `box()` ACTUALLY FRAMES ON, read rather than assumed: `frame_lo, frame_hi` start at
+# the row's whisker pair and are widened by the value markers — `axis_min` and `axis_max` are
+# never read at all, and the module says so (*"IT READS NO BIN COLUMNS"*). ⚠️ **So the premise
+# that the two series differ because their BIN RANGES differ is the wrong mechanism.** They
+# differ because each row is framed on ITS OWN whiskers, which is not a decision anybody made —
+# it is what two independent calls give you.
+#
+# 📊 MEASURED ON LIVE SERVING, 2026 regular week 15, the three pairs' whisker spans:
+#
+#     metric pair        gained             allowed            union
+#     total            204.0 – 620.5      142.5 – 508.5      142.5 – 620.5
+#     rushing           40.5 – 336.0       10.0 – 241.0        10.0 – 336.0
+#     passing           46.0 – 396.5       47.5 – 352.0        46.0 – 396.5
+#
+# 🚨 SO 400 YARDS SITS AT A DIFFERENT x IN THE TWO ROWS, SILENTLY. On `total` the gained row
+# spans 416.5 yards and the allowed row 366.0 across the same pixels — a 13.8% scale difference
+# — and the reader is invited by the layout to compare them by eye. **That is the defect, and it
+# is worse than an empty margin because nothing on the screen admits to it.**
+#
+# ✅ THE COST OF THE FIX IS SMALL AND MEASURABLE: on the union frame the narrower row simply
+# ends early. `total` allowed would use 87.9% of the width, `rushing` allowed 70.8%, `passing`
+# 93.7% — and the widest gap, rushing, is the pair a reader is least likely to compare across.
+#
+# ❌ AND IT CANNOT BE DONE FROM THIS FILE WITHOUT EITHER LYING OR COPYING.
+#   · Handing `box()` a row whose whisker pair is the UNION would frame it correctly and then
+#     draw the whisker serifs and print the boundary LABELS at the union numbers — falsifying
+#     two published figures to buy a layout.
+#   · Sizing the two SVGs so their px-per-yard match and offsetting the narrower one is exact
+#     arithmetic and needs `box()`'s internal `pad`, which is a local variable. **Coupling this
+#     file to another module's private constant is worse than the parameter it is avoiding.**
+#
+# ✅ SO IT IS `box(row, frame=(lo, hi))` — one optional parameter, defaulting to today's
+# behaviour — AND `site/lib/distribution.py` IS SESSION A's (§3 rule 3). **Raised in the report,
+# not reached across for.** B074 did exactly this with `states.degraded()` and was right to
+# (R-500). ⚠️ The union is a property of the WEEK, not of the two teams on screen, so it keeps
+# R-590's guarantee that every matchup in a week is drawn on the same axes.
+_BOX_SHARED_AXIS = False
+
+
+def _box_frame(row, value):
+    """The span `box()` will frame this row on: its whiskers, widened by the value marker.
+
+    ⚠️ IT IS A READ, NOT A CALCULATION, AND IT EXISTS FOR THE REPORT RATHER THAN FOR THE PAGE.
+    Nothing in the rendered panel calls it — `_week_frame_captions` does, to say how wide each
+    series is drawn, and the tests do, to measure what a shared axis would cost. **A copy of
+    `box()`'s framing RULE would drift; this is a copy of its INPUTS, which cannot.**
+    """
+    if row is None:
+        return None
+    lo, hi = row.get("whisker_low"), row.get("whisker_high")
+    if lo is None or hi is None or pd.isna(lo) or pd.isna(hi):
+        return None
+    lo, hi = float(lo), float(hi)
+    if value is not None and not pd.isna(value):
+        lo, hi = min(lo, float(value)), max(hi, float(value))
+    return lo, hi
+
+
+# 🚨 THE GLYPH IS THE OUTLOOK'S SHAPE, AND SHAPE COMES FIRST (AC-G.22). R-722's classification
+# survives the chart change: the scatter carried it on its single point, and a box-and-whisker
+# has no single point, so it moves into the legend block beside the subtraction it describes.
+# ⚠️ FILLED AND HOLLOW ARE THE THIRD SIGNAL, which is what `_OUTLOOK_UNKNOWN` needs — it is not
+# a fourth verdict and must not read as one, so it is a hollow SQUARE: neither of Marc's two
+# shapes, and legible in greyscale without the colour.
+_OUTLOOK_GLYPHS = {("circle", True): "\u25cf", ("circle", False): "\u25cb",
+                   ("diamond", True): "\u25c6", ("diamond", False): "\u25c7",
+                   ("square", True): "\u25a0", ("square", False): "\u25a1"}
+
+
+def _outlook_glyph(outlook) -> str:
+    """R-722's verdict as one character plus its colour, for the legend block."""
+    shape, colour, filled = _outlook_mark(outlook)
+    glyph = _OUTLOOK_GLYPHS[(shape, filled)]
+    verdict = str(outlook) if isinstance(outlook, str) else "not classified"
+    return (f"<span title='{html.escape(verdict)}' style='color:{colour};font-size:.8rem'>"
+            f"{glyph}</span>")
+
+
+def _legend_line(side, caption: str, column) -> str:
+    """One line of the top-right block: logo, the word, the figure.
+
+    🚨 AC-G.11 AT LOGO SIZE, AND IT IS B100's RULE CARRIED OVER: a missing logo falls back to
+    the TEAM'S NAME, never to a hole.
+
+    ⚠️ AND `identity.logo_or_monogram` IS NOT THAT FALLBACK, WHICH THIS ROUND FOUND BY READING IT
+    RATHER THAN BY ASSUMING. Leaving the Vega spec looked like it turned B100's hand-rolled text
+    substitute back into the app's own helper — **and the helper returns
+    `<span class='cfdb-monogram-empty' … style='width:14px;height:14px'></span>` for a null
+    logo.** That is correct for AC-G.28, which is about the FOOTPRINT not moving, and it draws
+    **nothing a reader can see**. On a card the name is already beside it; in this block the
+    logo is the only thing naming the side, so an empty box makes `Gained 154.4` anonymous.
+    ✅ **So the branch stays, and it is B100's: no logo, the name in its place.** R-855's lesson
+    pointed the other way for once — the existing path was right for its own call sites and
+    wrong for this one, and only reading it said so.
+    """
+    name = str(side.get("team_display") or "?")
+    logo_url = side.get("logo_url")
+    missing = (logo_url is None or (isinstance(logo_url, float) and pd.isna(logo_url))
+               or not str(logo_url).strip())
+    logo = (f"<span style='opacity:.75'>{html.escape(name[:10])}</span>" if missing
+            else identity.logo_or_monogram(logo_url, name, 14))
+    return (f"<div style='display:flex;align-items:center;gap:.3rem;"
+            f"justify-content:flex-end;white-space:nowrap'>"
+            f"{logo}<span style='opacity:.8'>{html.escape(caption)}</span>"
+            f"<span style='font-weight:600;min-width:3.2rem;text-align:right'>"
+            f"{fmt.number(side.get(column), column, dp=1)}</span></div>")
+
+
+def _matchup_legend(team, opponent, for_column, allowed_column, delta, outlook) -> str:
+    """Marc's *"Keep the current legend on the graph on top right"* — the worked subtraction.
+
+    🚨 THE PROMPT CALLED THIS *"the green/red/yellow one"* AND THERE HAS NEVER BEEN A LEGEND ON
+    THIS CHART. `matchup.py` contains the word nowhere, and `_scatter` says why in its own
+    comment: the outlook's shape and colour were *"SET ON THE MARK RATHER THAN ENCODED FROM THE
+    DATA, because this chart plots exactly one point — an encoding would add a scale and a
+    legend to say what a single mark already is."* ⚠️ **What sits in the top right is
+    `_annotation_layers`: Marc's own v02.2 request for *"a line below the Opponent metric (like
+    a math problem)"*.** That is the thing he is asking to keep, and it is kept.
+    #
+    ✅ AND LEAVING THE VEGA SPEC FIXES A FRAGILITY R-803 HAD TO WORK AROUND. In there the rule
+    under the subtraction could not be a `mark_rule` — one positioned entirely in screen values
+    inside a layered chart serialises correctly and DRAWS NOTHING — so it was a one-pixel
+    `mark_rect` with a comment begging the next reader not to simplify it. **In HTML it is a
+    `border-top` and the class of defect is gone**, which is the second thing this change buys
+    beyond the shape Marc asked for.
+    """
+    return (
+        f"<div data-cfdb='matchup-legend' style='float:right;text-align:right;"
+        f"font-size:.72rem;line-height:1.35;margin:0 0 .15rem .6rem'>"
+        f"{_legend_line(team, 'Gained', for_column)}"
+        f"{_legend_line(opponent, 'Allowed', allowed_column)}"
+        f"<div style='border-top:1px solid currentColor;opacity:.75;margin:.1rem 0'></div>"
+        f"<div style='display:flex;align-items:center;gap:.3rem;justify-content:flex-end'>"
+        f"{_outlook_glyph(outlook)}"
+        f"<span style='font-weight:700'>{_signed_delta(delta)}</span></div></div>")
+
+
+def _box_row(row, side, caption: str, column, accent: str) -> str:
+    """One series: its label, then `box()`'s SVG.
+
+    ⚠️ THE LABEL IS DRAWN HERE BECAUSE `box()`'s OWN `label` IS NOT DRAWN AT ALL — it goes into
+    the `aria-label` and nowhere else, which is correct for a module that does not know what
+    layout it is in. Marc asked for *"team name and gained or allowed"*, so both are in it.
+    ⚠️ AND THE ACCENT IS A LEFT RULE ON THE LABEL, NOT A COLOURED WORD (AC-G.25): the team
+    colour is *"only allowed to appear as a rule"*, and the label still reads in greyscale
+    because the WORD says which series it is.
+    """
+    # 🚨 `side is None`, NEVER `side or {}` — R-610, AND THIS ROUND WALKED INTO IT. The sides
+    # arrive as pandas Series and `Series.__bool__` RAISES, so `(side or {}).get(...)` is a
+    # ValueError inside `states.section`, which catches it and draws an Error card. B091 shipped
+    # exactly this expression one panel along; `test_matchup_yardage.py` records it in the
+    # fixture's own comment; **the first draft of this function did it again anyway, and the
+    # harness's `assert_no_error_card` is what said so.** A comment recording a trap does not
+    # prevent the trap (R-768).
+    value = None if side is None else side.get(column)
+    name = "?" if side is None else str(side.get("team_display") or "?")
+    # ⚠️ THE LABEL IS THE FORMATTED FIGURE, NOT `box()`'s DEFAULT. `fmt.number` is given the
+    # COLUMN, so a yardage renders the way every other yardage on this page does; `box()`'s own
+    # fallback knows only a decimal count. **`None` means "let the module label it", which is
+    # what an absent figure must get — there is nothing to format.**
+    chart = distribution.box(
+        row, value=value, width=_BOX_ROW_WIDTH, label=caption, value_color=accent,
+        value_label=(None if value is None or pd.isna(value)
+                     else fmt.number(value, column, dp=1)))
+    return (
+        f"<div data-cfdb='box-series' data-series='{caption.lower()}' "
+        f"style='margin:.1rem 0 .45rem'>"
+        f"<div style='font-size:.7rem;opacity:.75;border-left:3px solid {accent};"
+        f"padding-left:.35rem;margin-bottom:.1rem;white-space:nowrap;overflow:hidden;"
+        f"text-overflow:ellipsis'>"
+        f"{html.escape(name)} "
+        f"<span style='font-weight:600'>{html.escape(caption)}</span></div>"
+        f"{chart}</div>")
+
+
+def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
+                    label: str, outlook=None, delta=None,
+                    accent: str = None, opponent_accent: str = None) -> str:
+    """Marc's v14 chart: the team's GAINED on top, the opponent's ALLOWED below, and the legend.
+
+    🚨 TWO SERIES OVER TWO DIFFERENT DISTRIBUTIONS, WHICH IS WHY IT IS TWO CALLS AND NOT
+    `box()`'s TWO-SIDED MODE. Two-sided draws two VALUES on ONE distribution — v10's *"data
+    points for both teams"* on a single measure — and this is the other shape: one value each on
+    two league-wide spreads, `*_for_per_game` and `*_allowed_per_game`. **Reaching for
+    `value_below` here would draw the opponent's allowed figure against the GAINED spread, which
+    is a real number in the wrong place.**
+
+    ⚠️ AND THE PAIRING IS THE PANEL'S, NOT A CHOICE MADE HERE: this team's offence against THAT
+    team's defence, which is what `_scatter` plotted and what `_yardage_side_heading` announces.
+
+    🚨 AN ABSENT WEEK ROW IS `box()`'s OWN PLACEHOLDER AND THAT IS DELIBERATE. It returns a
+    titled em dash rather than nothing, so the row keeps its height and the two series stay
+    aligned — R-141's rule, and the alternative is the top series sliding down onto the bottom
+    one's label whenever one of the six metrics is missing for the week.
+    """
+    return (
+        f"<div data-cfdb='gained-allowed' data-metric='{html.escape(label.lower())}'>"
+        f"{_matchup_legend(team, opponent, for_column, allowed_column, delta, outlook)}"
+        f"{_box_row(week_rows.get(for_column), team, 'Gained', for_column, accent)}"
+        f"{_box_row(week_rows.get(allowed_column), opponent, 'Allowed', allowed_column, opponent_accent)}"
+        f"<div style='clear:both'></div></div>")
 
 
 def _yardage(row) -> None:
@@ -2947,13 +2788,43 @@ def _yardage(row) -> None:
         # information for the Home team will be on the right" — and the game header already
         # obeys it. The two blocks used to be stacked, away above home, which said the same
         # thing in a different shape on the same page.
-        left, right = st.columns(2)
-        with left:
-            _yardage_column(away, home, distribution,
-                            deltas.get(int(away_id)), leaders, usage)
-        with right:
-            _yardage_column(home, away, distribution,
-                            deltas.get(int(home_id)), leaders, usage)
+        # 🚨 THE SIDE HEADINGS ARE EMITTED ONCE, ABOVE THE SECTIONS, AND THAT IS FORCED BY THE
+        # SPANNING HEADER. They used to be the first thing inside each column, which was right
+        # while each column owned the whole run of metrics; with the metric loop outside, a
+        # per-column heading would repeat three times down the page.
+        head_left, head_right = st.columns(2)
+        head_left.markdown(_yardage_side_heading(away, home), unsafe_allow_html=True)
+        head_right.markdown(_yardage_side_heading(home, away), unsafe_allow_html=True)
+
+        # 🚨 cfdb-wta-R-900. ONE TABLE, THREE SECTIONS, EACH HEADER SPANNING THE PAGE — Marc,
+        # v14. The heading is emitted OUTSIDE the `st.columns` pair beneath it, and that is the
+        # whole mechanism: a markdown block at the top level is the full content width, and the
+        # two halves open under it. **B112 solved *"cover the entire row"* this way on the
+        # post-game tab and this is the same call, not a second implementation.**
+        for dimension in _YARDAGE_DIMENSIONS:
+            st.markdown(_section_heading(dimension[0]), unsafe_allow_html=True)
+            left, right = st.columns(2)
+            with left:
+                _yardage_row(away, home, distribution, dimension,
+                             deltas.get(int(away_id)), leaders, usage)
+            with right:
+                _yardage_row(home, away, distribution, dimension,
+                             deltas.get(int(home_id)), leaders, usage)
+
+        # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11), AND THERE IS NOW ONE RATHER
+        # THAN TWO. See `_metrics_without_a_week`: the off-the-frame case the scatter had cannot
+        # happen to a box plot, so the caption that named it has gone with the defect. This is
+        # the one that survives — the week itself holds no spread for that metric — and it still
+        # prints the two figures, because the row otherwise draws an em dash and says nothing.
+        missing_week = _metrics_without_a_week(distribution)
+        if missing_week:
+            st.caption("  ·  ".join(
+                f"{label} {fmt.number(away.get(for_column), for_column, dp=1)} gained vs "
+                f"{fmt.number(home.get(allowed_column), allowed_column, dp=1)} allowed"
+                for label, for_column, allowed_column, _d, _o in _YARDAGE_DIMENSIONS
+                if label in missing_week)
+                + " — not drawn against the week, because this week has no distribution "
+                  "to draw them against.")
 
         # AC-G.33. The denominator is not decoration and it is named for each side
         # separately, because a bye or a missing box score makes the two differ.
@@ -2972,10 +2843,23 @@ def _yardage(row) -> None:
             # SO. The weights carry which percentile each edge is, and a reader cannot deduce
             # that from the picture — so the sentence that explains the box explains its sides
             # too, in the one place that already had to exist.
-            frame = (f"Both columns share one frame: the shaded box is the middle half of all "
-                     f"{teams} FBS teams this week and the dashed lines are the medians, so "
-                     f"every matchup in the week is drawn on the same axes. The box's thin "
-                     f"sides are the 25th percentile and its thick sides the 75th.")
+            # 🚨 REWRITTEN FOR THE BOX PLOT, AND THE OLD TEXT IS EXACTLY THE DEFECT B113 SPENT
+            # A ROUND ON. It said *"the shaded box is the middle half … the dashed lines are the
+            # medians … the box's thin sides are the 25th percentile and its thick sides the
+            # 75th"* — a true and careful description of the SCATTER's band, its two dashed
+            # median rules and its weighted edges, **none of which exist on a box-and-whisker.**
+            # A caption that survives the chart it describes is a justification that stays in
+            # the file after it stops being true, one layer out from the code.
+            # ⚠️ AMERICAN SPELLING, AND IT IS ENFORCED RATHER THAN PREFERRED. The first draft
+            # of this caption read "labelled" and "coloured";
+            # `test_no_user_facing_string_uses_british_spelling` failed the build, which is the
+            # same guard A119 hit on `favourable` and the reason that literal is what it is.
+            frame = (f"Each series is drawn against all {teams} FBS teams in this week: the box "
+                     f"is the middle half, the bold line inside it the median, and the whiskers "
+                     f"run to the low and high boundaries, both labeled. The colored mark is "
+                     f"this team's own figure. ⚠️ The two rows are framed on their OWN spreads "
+                     f"rather than on a shared one, so read each against its own boundary "
+                     f"labels rather than comparing the two by eye.")
             if sample <= _THIN_SAMPLE:
                 # 🚨 A092 MEASURED THIS AND SAID TO SAY IT. At 2026 week 2 the thinnest team
                 # has played ONE game, so its "per game" IS that game — the same figure the
