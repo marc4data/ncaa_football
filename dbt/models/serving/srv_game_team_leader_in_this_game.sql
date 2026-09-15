@@ -278,6 +278,128 @@ defensive_ranked as (
 
 ),
 
+-- ── THE SPECIAL TEAMS, MARC'S v11 ──────────────────────────────────────────────────────────
+--
+-- Marc: "Quarterbacks (2), Rushing (3), Receiving (3), Defense (3), Punter (1), Placekicker (1)."
+--
+-- 📊 THE GATE WAS MEASURED BEFORE A LINE OF THIS WAS WRITTEN (R-887), because a card slot
+-- reserved for a man who is not there is the hole AC-G.11 forbids. Of the 7,309 team-games this
+-- view renders, 7,156 (97.9%) carry a punting row and 7,149 (97.8%) carry a kicking one — the
+-- two best-covered categories after the four that were already here, and far better than the
+-- 59.2% that justified R-849's reserved quarterback slot.
+--
+-- ⚠️ "PUNTER (1)" AND "PLACEKICKER (1)" DESCRIBE THE USUAL CASE, NOT A GUARANTEE. Measured:
+-- 773 team-games have two punters, 49 have three and one has four; 594 have two kickers, 34
+-- three and two four. `leader_rank <= 3` is therefore the right filter and these panels CAN
+-- return two or three rows. Whoever draws the card must not reserve exactly one slot.
+--
+-- ⚠️ AND THE SAME MAN FILLS BOTH SLOTS IN 484 TEAM-GAMES (6.7%). He is one player with two
+-- jobs, so he appears once per panel, which is correct — but a page showing Punter and
+-- Placekicker side by side will show his name twice and should expect to.
+
+punting_per_player as (
+
+    select
+        s.game_id, s.season, s.season_type, s.week, s.team_id,
+        s.player_id,
+        min(s.player_name) as player_name,
+        min(s.player_slug) as player_slug,
+        min(s.athlete_sk)  as athlete_sk,
+        max(s.stat_value) filter (where s.stat_type = 'NO')   as game_punts,
+        max(s.stat_value) filter (where s.stat_type = 'YDS')  as game_punt_yards,
+        max(s.stat_value) filter (where s.stat_type = 'AVG')  as game_punt_average
+    from {{ ref('fct_player_game_stat') }} s
+    where s.stat_category = 'punting'
+      and s.stat_type in ('NO', 'YDS', 'AVG')
+      and s.stat_value is not null
+      and s.season >= 2024
+    group by s.game_id, s.season, s.season_type, s.week, s.team_id, s.player_id
+    -- ⚠️ THE DEFENSIVE BRANCH'S `having` IS COPIED IN SHAPE BUT NOT IN NECESSITY, AND SAYING SO
+    -- IS THE POINT: 0 of 8,066 punting rows carry NO = 0, so this excludes nothing TODAY. It is
+    -- here because the feed could start listing a punter who never punted, and on that day a man
+    -- with no punts must not lead the panel — the same rule as a runner on zero yards.
+    having max(s.stat_value) filter (where s.stat_type = 'NO') > 0
+
+),
+
+punting_ranked as (
+
+    select
+        p.*,
+        -- 🚨 VOLUME, NOT AVERAGE, AND THE ALTERNATIVE WAS REJECTED ON A MEASUREMENT. Marc asked
+        -- for "the punter", singular — the man who did the punting. `AVG` names the man who
+        -- punted WELL, which on one or two punts is noise: a single 60-yard punt outranks eight
+        -- averaging 44. Its range reaches -41.0, so a blocked punt would rank a man last on a
+        -- question that is not about quality at all.
+        --
+        -- 🚨 AND `AVG` CANNOT BE A TIEBREAK EITHER, WHICH IS WHY THE CHAIN STOPS AT TWO.
+        -- Measured: AVG equals YDS/NO on 8,066 of 8,066 rows (100.00%), so two punters level on
+        -- both punts AND yards are level on average BY CONSTRUCTION. Ranking on it third would
+        -- be an expression that cannot break what it is asked to break — R-760 exactly. `LONG`
+        -- was tested for the same job and moved nothing: 12 tied rows with it, 12 without.
+        rank() over (
+            partition by p.game_id, p.team_id
+            order by p.game_punts desc, p.game_punt_yards desc)          as leader_rank,
+        count(*) over (partition by p.game_id, p.team_id)                as qualified_players,
+        count(*) over (partition by p.game_id, p.team_id,
+                                    p.game_punts, p.game_punt_yards)     as tied_players
+    from punting_per_player p
+
+),
+
+kicking_per_player as (
+
+    select
+        s.game_id, s.season, s.season_type, s.week, s.team_id,
+        s.player_id,
+        min(s.player_name) as player_name,
+        min(s.player_slug) as player_slug,
+        min(s.athlete_sk)  as athlete_sk,
+        -- 🚨 `stat_made` / `stat_attempted`, NOT `stat_value`. FG and XP are MADE/ATTEMPTED PAIRS
+        -- whose raw form is `2/2`, and `stat_value` is NULL on all 7,842 rows of each. A128's
+        -- catastrophe was `rank()` over an all-NULL column making every row jointly 1st and the
+        -- panel going 13,375 -> 91,434; ranking these on `stat_value` would reproduce it exactly.
+        sum(s.stat_made)      filter (where s.stat_type = 'FG')  as game_field_goals_made,
+        sum(s.stat_attempted) filter (where s.stat_type = 'FG')  as game_field_goals_attempted,
+        sum(s.stat_made)      filter (where s.stat_type = 'XP')  as game_extra_points_made,
+        sum(s.stat_attempted) filter (where s.stat_type = 'XP')  as game_extra_points_attempted,
+        max(s.stat_value)     filter (where s.stat_type = 'PTS') as game_kicking_points,
+        sum(s.stat_attempted) filter (where s.stat_type in ('FG', 'XP')) as game_placekicks
+    from {{ ref('fct_player_game_stat') }} s
+    where s.stat_category = 'kicking'
+      and s.stat_type in ('FG', 'XP', 'PTS')
+      and s.season >= 2024
+    group by s.game_id, s.season, s.season_type, s.week, s.team_id, s.player_id
+    -- ⚠️ NO `and stat_value is not null` HERE, and that is deliberate rather than an omission:
+    -- FG and XP carry their figures in made/attempted and their `stat_value` IS null, so the
+    -- defensive branch's filter would discard every row this panel is made of.
+    having sum(s.stat_attempted) filter (where s.stat_type in ('FG', 'XP')) > 0
+
+),
+
+kicking_ranked as (
+
+    select
+        k.*,
+        -- 🚨 ATTEMPTS, NOT MADE, AND THIS IS THE WHOLE JUDGEMENT. A kicker who went 0 for 2 is
+        -- still the placekicker: he is the man the team sent out. Ranking on made — or on points,
+        -- which is made in disguise — hides him behind a team-mate who kicked three extra points,
+        -- and the card would then name the wrong man for the job it claims to describe.
+        --
+        -- ⚠️ POINTS IS THE TIEBREAK RATHER THAN THE MEASURE, which resolves most of what attempts
+        -- alone cannot: 181 rows tie on attempts, 60 survive points. A third key was tested — FG
+        -- made — and moved nothing at all, 60 either way, so it is not in the chain.
+        rank() over (
+            partition by k.game_id, k.team_id
+            order by k.game_placekicks desc, k.game_kicking_points desc) as leader_rank,
+        count(*) over (partition by k.game_id, k.team_id)                as qualified_players,
+        count(*) over (partition by k.game_id, k.team_id,
+                                    k.game_placekicks,
+                                    k.game_kicking_points)               as tied_players
+    from kicking_per_player k
+
+),
+
 -- THE TWO BRANCHES MEET HERE AND NOWHERE EARLIER. Each column a panel does not have is null by
 -- construction rather than by omission — see the header on `game_yards`.
 combined as (
@@ -293,7 +415,16 @@ combined as (
         null::numeric as game_solo_tackles,
         null::numeric as game_assisted_tackles,
         null::numeric as game_tackles_for_loss,
-        null::numeric as game_sacks
+        null::numeric as game_sacks,
+        null::numeric as game_punts,
+        null::numeric as game_punt_yards,
+        null::numeric as game_punt_average,
+        null::numeric as game_field_goals_made,
+        null::numeric as game_field_goals_attempted,
+        null::numeric as game_extra_points_made,
+        null::numeric as game_extra_points_attempted,
+        null::numeric as game_kicking_points,
+        null::numeric as game_placekicks
     from ranked
 
     union all
@@ -311,8 +442,47 @@ combined as (
         -- of the Solo-Ast pair and exists so the card can show the tiebreak it is ordered on.
         game_tackles - game_solo_tackles as game_assisted_tackles,
         game_tackles_for_loss,
-        game_sacks
+        game_sacks,
+        null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric
     from defensive_ranked
+
+    union all
+
+    select
+        game_id, season, season_type, week, team_id,
+        player_id, player_name, player_slug, athlete_sk,
+        'punting' as panel,
+        leader_rank, tied_players, qualified_players,
+        null::numeric, null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric, null::numeric, null::numeric, null::numeric,
+        game_punts,
+        game_punt_yards,
+        game_punt_average,
+        null::numeric, null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric
+    from punting_ranked
+
+    union all
+
+    select
+        game_id, season, season_type, week, team_id,
+        player_id, player_name, player_slug, athlete_sk,
+        'kicking' as panel,
+        leader_rank, tied_players, qualified_players,
+        null::numeric, null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric, null::numeric, null::numeric, null::numeric,
+        null::numeric, null::numeric, null::numeric,
+        game_field_goals_made,
+        game_field_goals_attempted,
+        game_extra_points_made,
+        game_extra_points_attempted,
+        game_kicking_points,
+        game_placekicks
+    from kicking_ranked
 
 )
 
@@ -339,6 +509,11 @@ select
         -- ⚠️ THE NAME CARRIES THE WHOLE CHAIN, because the ordering is a claim (see header) and a
         -- reader must be able to see it without opening the SQL.
         when 'defensive' then 'tackles_then_solo_then_tfl_in_this_game'
+        -- ⚠️ BOTH NAMES CARRY THE WHOLE CHAIN AND STOP WHERE THE CHAIN STOPS. Neither says
+        -- `_then_average` or `_then_fg_made`: those keys were measured and break nothing, so
+        -- naming them would claim an ordering the SQL does not perform.
+        when 'punting'   then 'punts_then_yards_in_this_game'
+        when 'kicking'   then 'placekicks_then_points_in_this_game'
     end as leader_metric,
     rk.leader_rank,
     rk.tied_players,
@@ -352,6 +527,15 @@ select
     rk.game_assisted_tackles,
     rk.game_tackles_for_loss,
     rk.game_sacks,
+    rk.game_punts,
+    rk.game_punt_yards,
+    rk.game_punt_average,
+    rk.game_field_goals_made,
+    rk.game_field_goals_attempted,
+    rk.game_extra_points_made,
+    rk.game_extra_points_attempted,
+    rk.game_kicking_points,
+    rk.game_placekicks,
     {{ player_card_slots(
         panel           = 'rk.panel',
         receptions      = 'rk.game_receptions',
@@ -364,7 +548,14 @@ select
         tackles         = 'rk.game_tackles',
         solo            = 'rk.game_solo_tackles',
         assisted        = 'rk.game_assisted_tackles',
-        tfl             = 'rk.game_tackles_for_loss') }},
+        tfl             = 'rk.game_tackles_for_loss',
+        punts           = 'rk.game_punts',
+        punt_yards      = 'rk.game_punt_yards',
+        punt_average    = 'rk.game_punt_average',
+        field_goals_made      = 'rk.game_field_goals_made',
+        field_goals_attempted = 'rk.game_field_goals_attempted',
+        kicking_points  = 'rk.game_kicking_points',
+        placekicks      = 'rk.game_placekicks') }},
     a.jersey,
     a.position,
     a.class_year_display,

@@ -49,35 +49,77 @@
   solo         defensive panel, slot 1 (paired with assisted)
   assisted     defensive panel, slot 1 secondary
   tfl          defensive panel, slot 3
+
+  🚨 A134 ADDS MARC'S FIFTH AND SIXTH PANELS, `punting` AND `kicking`, AND NEITHER NEEDS A NEW
+  FORMAT. The placekicker's FG is a MADE/ATTEMPTED pair and reuses slot 1's existing `pair` — the
+  same shape as Comp-Att and Solo-Ast — so the page draws both new cards with no new branch. That
+  was A128's bar and it is met: B110 consumed the defensive panel without touching a renderer.
+
+  ⚠️ AND SLOT 2 STAYS THE FIGURE THE PANEL IS RANKED ON, in the middle where a reader looks first
+  — `Punts` for the punter, `Kicks` for the placekicker. Slot 2's label `case` now has four arms
+  and a default; the default still returns 'Yards' for the three original panels, so A120's
+  row-for-row checksum on the preview view continues to hold.
+
+  ⚠️ ONLY SLOT 1 HAS A `_value_secondary`, so only ONE pair fits on a card. The placekicker's XP
+  is therefore NOT a slot — it is published as its own column for anyone who wants it, and the
+  card shows FG, Kicks and Points instead.
+
+  punts            punting panel, slot 2 — the figure the punting ranking comes from
+  punt_yards       punting panel, slot 1 — the tiebreak, so the ordering is visible
+  punt_average     punting panel, slot 3 (decimal_1) — the number every broadcast shows
+  field_goals_made       kicking panel, slot 1 (paired with attempted)
+  field_goals_attempted  kicking panel, slot 1 secondary
+  placekicks       kicking panel, slot 2 — FG + XP attempts, the ranking figure
+  kicking_points   kicking panel, slot 3 — the tiebreak
 #}
 {% macro player_card_slots(panel, receptions, carries, completions, attempts,
                            yards, touchdowns, yards_per_carry,
                            tackles='null::numeric', solo='null::numeric',
-                           assisted='null::numeric', tfl='null::numeric') %}
+                           assisted='null::numeric', tfl='null::numeric',
+                           punts='null::numeric', punt_yards='null::numeric',
+                           punt_average='null::numeric',
+                           field_goals_made='null::numeric',
+                           field_goals_attempted='null::numeric',
+                           kicking_points='null::numeric',
+                           placekicks='null::numeric') %}
     -- SLOT 1
     case {{ panel }} when 'passing'   then 'Receptions'
                      when 'rushing'   then 'Carries'
                      when 'total'     then 'Comp-Att'
                      when 'defensive' then 'Solo-Ast'
+                     when 'punting'   then 'Yards'
+                     when 'kicking'   then 'FG'
     end as stat_1_label,
     case {{ panel }} when 'passing'   then {{ receptions }}
                      when 'rushing'   then {{ carries }}
                      when 'total'     then {{ completions }}
                      when 'defensive' then {{ solo }}
+                     when 'punting'   then {{ punt_yards }}
+                     when 'kicking'   then {{ field_goals_made }}
     end as stat_1_value,
     case {{ panel }} when 'total'     then {{ attempts }}
                      when 'defensive' then {{ assisted }}
+                     when 'kicking'   then {{ field_goals_attempted }}
     end as stat_1_value_secondary,
-    -- ⚠️ `pair` for BOTH, and that is the point: Comp-Att and Solo-Ast are the same shape, so the
-    -- page needs no new format and no new branch to draw the defensive card.
+    -- ⚠️ `pair` for THREE now, and that is the point: Comp-Att, Solo-Ast and FG made/attempted
+    -- are the same shape, so the page needs no new format and no new branch to draw any of them.
     case {{ panel }} when 'total'     then 'pair'
                      when 'defensive' then 'pair'
+                     when 'kicking'   then 'pair'
                      else 'integer'
     end as stat_1_format,
     -- SLOT 2 — the yards every panel ranks on, in the middle, so the number the ordering comes
     -- from sits where a reader looks first.
-    case {{ panel }} when 'defensive' then 'Tackles' else 'Yards' end as stat_2_label,
-    case {{ panel }} when 'defensive' then {{ tackles }} else {{ yards }} end as stat_2_value,
+    case {{ panel }} when 'defensive' then 'Tackles'
+                     when 'punting'   then 'Punts'
+                     when 'kicking'   then 'Kicks'
+                     else 'Yards'
+    end as stat_2_label,
+    case {{ panel }} when 'defensive' then {{ tackles }}
+                     when 'punting'   then {{ punts }}
+                     when 'kicking'   then {{ placekicks }}
+                     else {{ yards }}
+    end as stat_2_value,
     null::numeric  as stat_2_value_secondary,
     'integer'      as stat_2_format,
     -- SLOT 3
@@ -85,12 +127,18 @@
                      when 'rushing'   then 'Yds/Carry'
                      when 'total'     then 'TD'
                      when 'defensive' then 'TFL'
+                     when 'punting'   then 'Avg'
+                     when 'kicking'   then 'Points'
     end as stat_3_label,
     case {{ panel }} when 'rushing'   then {{ yards_per_carry }}
                      when 'defensive' then {{ tfl }}
+                     when 'punting'   then {{ punt_average }}
+                     when 'kicking'   then {{ kicking_points }}
                      else {{ touchdowns }}
     end as stat_3_value,
     null::numeric as stat_3_value_secondary,
-    case {{ panel }} when 'rushing' then 'decimal_1' else 'integer'
+    case {{ panel }} when 'rushing' then 'decimal_1'
+                     when 'punting' then 'decimal_1'
+                     else 'integer'
     end as stat_3_format
 {% endmacro %}
