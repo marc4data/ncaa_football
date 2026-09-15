@@ -3176,8 +3176,42 @@ def _turnovers(row) -> str:
 # 🚨 ONE ROW GOVERNS THE VALUE COLUMN AND IT IS NOT A METRIC ROW — turnovers is 2.5x the next
 # widest value on the page. Reshaping it is a look decision and Marc's; this round measured it.
 _TABLE_VALUE_WIDTH = 7.25      # rem — 116px against a measured 110px worst case
-_TABLE_LABEL_WIDTH = 12.0      # rem — the longest measure name, verbatim
-_TABLE_GAP = 0.5               # rem, between the three columns
+
+# 🚨 R-864. THE LABEL COLUMN CAME DOWN 12.0 → 8.5rem TO PAY FOR THE CHART COLUMN, AND IT IS THE
+# ONLY COLUMN ON THIS ROW WITH REAL SLACK. Measured in the browser at 1300px, sidebar open:
+#
+#     table Streamlit column   502px      the row used 440 of it — 62px spare
+#     label 192 · value 116 · value 116   + three 8px gaps
+#     widest measure name      188px      `Havoc rate forced by this defense`, 4px under its box
+#     widest value             110px      `1 (0 INT · 1 FUM)`, 6px under its box
+#     card name column          86px      tightest names need 87 — the cards have NO slack
+#
+# ⚠️ SO THE 62px OF SPARE WAS THE WHOLE BUDGET, AND A USEFUL CHART NEEDS 200 (B108's floor,
+# confirmed by A131's own sweep). **The cards cannot pay** — their name column is already at its
+# measured limit. The label can, because it is the one cell whose full text survives being
+# clipped: `_comparison` already wraps every defined measure in `<span title="...">`, so the
+# name is on hover and the dotted underline says so.
+#
+# ⚠️ AND THE COST TURNED OUT TO BE SMALLER THAN THIS COMMENT FIRST CLAIMED — MEASURED IN THE
+# BROWSER, NOT REASONED. `_TABLE_LABEL_CELL` carries `overflow:hidden;text-overflow:ellipsis`
+# but **no `white-space:nowrap`**, so a long name WRAPS to a second line instead of truncating.
+# At 136px the widest name measures 133px and **0 of 23 labels clip**. The two-line names sit
+# inside the 56px the chart already imposes, so nothing grows. **The ellipsis this column was
+# sized against never fires.**
+#
+# 🚨 AND IT IS STILL NOT ENOUGH AT 1300px — 136 + 116 + 116 + 24 leaves **110px**, which is 45%
+# under the floor. **That is a real finding and it is Marc's trade, not this round's to settle**;
+# the report renders both this and the 200px alternative. At 1700px the same row leaves 299px
+# and the question does not arise.
+_TABLE_LABEL_WIDTH = 8.5       # rem — 136px; the four longest Advanced names ellipsise
+_TABLE_GAP = 0.5               # rem, between the four columns
+
+# 🚨 MARC, v10: *"Make the font of the value a little bigger."* ⚠️ NAMED AGAINST ITS NEIGHBOURS
+# RATHER THAN PICKED: the measure name is `.85rem` and the column header is `.92rem`, and a
+# value larger than its own header inverts the hierarchy. **1.05rem sits above both and is the
+# largest step that does not.** The turnovers row is the one to watch and the report measures
+# it — `1 (0 INT · 1 FUM)` had 6px of margin at the old size.
+_TABLE_VALUE_FONT = 1.05       # rem — against .85 (measure name) and .92 (column header)
 
 # ⚠️ THE MEASURE NAME IS LEFT-ALIGNED AND FIXED-WIDTH, not `flex:1`. A flexing name column is
 # what pushed the two figures apart in the centred layout (R-807); here it would let the value
@@ -3186,6 +3220,7 @@ _TABLE_GAP = 0.5               # rem, between the three columns
 _TABLE_LABEL_CELL = (f"width:{_TABLE_LABEL_WIDTH}rem;flex:none;opacity:.75;font-size:.85rem;"
                      f"overflow:hidden;text-overflow:ellipsis")
 _TABLE_VALUE_CELL = (f"width:{_TABLE_VALUE_WIDTH}rem;flex:none;font-weight:600;"
+                     f"font-size:{_TABLE_VALUE_FONT}rem;"
                      f"text-align:right;overflow:hidden;text-overflow:ellipsis;"
                      f"white-space:nowrap")
 # 🚨 `overflow:hidden` ON THE ROW — R-755, and this panel has paid for it twice. A Streamlit
@@ -3193,23 +3228,69 @@ _TABLE_VALUE_CELL = (f"width:{_TABLE_VALUE_WIDTH}rem;flex:none;font-weight:600;"
 # it rather than compressing. The table is hard left now and the card columns are to its right,
 # so what it would overrun is the AWAY CARDS.
 _TABLE_ROW = "display:block;max-width:100%;box-sizing:border-box;padding:.15rem 0;overflow:hidden"
-_TABLE_ROW_INNER = f"display:flex;align-items:baseline;gap:{_TABLE_GAP}rem"
-
-
-def _table_band_width() -> float:
-    """ONE band's width — it sits under its own value column, so it IS the value column.
-
-    ⚠️ AND IT IS SMALLER THAN EITHER NUMBER B108 SHIPPED. That round sized the bands against a
-    CENTRED cell whose halves were 216px (Box Score) and 148px (Advanced); v08's value columns
-    are 116px, so the band loses room in both sections. **The report carries the measurement
-    against the 200px floor rather than burying it — it is a consequence of the shape Marc
-    asked for, not a choice this round made.**
-    """
-    return _TABLE_VALUE_WIDTH * _REM
+# 🚨 `center`, NOT `baseline`, SINCE R-864 — AND THE RASTER IS THE ONLY THING THAT SAID SO.
+# Baseline is the right answer for a row of three text cells and the wrong one the moment a
+# 56px picture joins them: an SVG's baseline is its bottom edge, so the chart hung above its own
+# figures and read as belonging to the row above. **Every cell was present, every width was
+# exact, and the DOM said nothing.** Measured after the change: the chart's centre and the
+# figures' centre agree to 0px, against 15px apart with `align-self:center` alone and further
+# still with baseline.
+_TABLE_ROW_INNER = f"display:flex;align-items:center;gap:{_TABLE_GAP}rem"
 
 
 _REM = 16
-_TABLE_BAND_WIDTH = int(_table_band_width())
+
+# 🚨 R-864. THE CHART'S OWN COLUMN — Marc, v10: *"make a single box-whisker chart, create a new
+# column for it to the right of the home metric value."*
+#
+# ⚠️ IT IS A FIXED PIXEL WIDTH AND IT HAS TO BE, WHICH IS WHY IT COULD NOT SIMPLY BE `flex:1`.
+# `box()` emits `<svg viewBox='0 0 W H' width='W' style='max-width:100%'>`, so an SVG handed a
+# width its cell cannot honour is SCALED DOWN rather than clipped — and B108 paid for exactly
+# that: a 432px viewBox squeezed into 216px rendered its `18` at 4px tall. **The DOM was
+# correct and the text was unreadable.** A flexible cell would reintroduce it at every viewport
+# the arithmetic did not happen to match, so the width is declared and the row is built to fit.
+#
+# 📊 WHAT IT IS AND WHAT IT IS NOT: **110px at 1300px** against B108's 200px floor and A131's
+# sweep, which puts 200px at the point where the below band stops dropping to three labels.
+# **This is 45% under it.** See `_TABLE_LABEL_WIDTH` for where the room came from and why the
+# cards could not give any.
+_TABLE_CHART_WIDTH = 110       # px
+
+# ⚠️ R-854 IS DISSOLVED RATHER THAN ARGUED. The old band was 116px because it sat UNDER a 116px
+# value column governed by `1 (1 INT · 0 FUM)` — a composite string that cannot be plotted at
+# all. Its own column is governed by nothing but the chart, so the constraint is gone; what
+# replaces it is the room the cards need, which is a different and smaller number.
+# 🚨 `align-self:center`, AND THE RASTER IS WHAT FOUND IT. `_TABLE_ROW_INNER` aligns the row on
+# the TEXT BASELINE, which is right for three cells of text and wrong for a 56px picture: the
+# chart's baseline is its bottom edge, so it hung ABOVE its own row and read as belonging to the
+# row above it. **Every cell was present, the widths were exact and the DOM said nothing** — the
+# third time on this panel that a picture caught what the markup could not (B103's invisible
+# `mark_rule`, B108's 2:1 squash, this).
+_TABLE_CHART_CELL = (f"width:{_TABLE_CHART_WIDTH}px;flex:none;min-width:0;"
+                     f"display:flex;align-items:center")
+
+
+def _accent(pair) -> str:
+    """ONE team colour, as the finished CSS string — and it is written HERE and nowhere else.
+
+    🚨 R-855, AND THIS ROUND IS THE THIRD TO TOUCH IT. `_table_header` built this expression
+    inline; B111 needs the identical string for the chart marker. **Two copies that agree today
+    are two copies that drift**, and the header underline and the marker naming the same team in
+    different colours is precisely the kind of quiet disagreement this file has paid for.
+
+    ⚠️ `identity.text_on(pair)` ALONE IS NOT THE ANSWER, AND B109 MEASURED WHY. It defaults to
+    the ON-LIGHT variant, which rendered `rgb(0,0,0)` against a `rgb(14,17,23)` page — invisible
+    — for the **18.6% of teams that publish `#000000` there**. `light-dark()` follows the
+    `color-scheme` property Streamlit sets, where `prefers-color-scheme` answers the OPERATING
+    SYSTEM and hands a reader on a dark Mac with the app in Light the wrong palette (R-547,
+    R-552). **Nothing here computes a colour; both variants come straight from `identity`.**
+
+    ⚠️ A SIDE WITH NO SOURCED COLOUR GETS `identity.FALLBACK` from `text_on` — neutral grey, in
+    both modes. **10.89% of games have one** (B109), and the marker must still draw: position is
+    the encoding and colour is decoration on top (AC-G.22).
+    """
+    return (f"light-dark({identity.text_on(pair)}, "
+            f"{identity.text_on(pair, dark_theme=True)})")
 
 
 def _table_header(away, home, title: str, colors=None) -> str:
@@ -3243,8 +3324,7 @@ def _table_header(away, home, title: str, colors=None) -> str:
         logo = identity.logo_or_monogram(
             side.get("team_logo_url"), str(side.get("team_display") or "?"), 20)
         pair, abbr = (colors or {}).get(key) or (None, "")
-        accent = (f"light-dark({identity.text_on(pair)}, "
-                  f"{identity.text_on(pair, dark_theme=True)})")
+        accent = _accent(pair)
         # 🚨 R-856. THE ABBREVIATION, FALLING BACK TO THE FULL NAME. `North Alabama` did not
         # fit this cell and drew `North Ala…`; `UNA` fits with room to spare, and the LOGO
         # beside it is doing the identifying work that a clipped word was failing at. The
@@ -3257,6 +3337,10 @@ def _table_header(away, home, title: str, colors=None) -> str:
             f"border-bottom:3px solid {accent};padding-bottom:.15rem'>{logo}"
             f"<span style='overflow:hidden;text-overflow:ellipsis'>"
             f"{html.escape(name)}</span></span>")
+    # ⚠️ THE FOURTH CELL IS EMPTY AND IS STILL EMITTED. The header row is a row like any other,
+    # and a header one cell short of the rows beneath it stops being a header — its two logos
+    # would sit over the wrong columns the moment the chart column exists (R-864).
+    cells.append(f"<span style='{_TABLE_CHART_CELL}'></span>")
     return (f"<div style='{_TABLE_ROW}'><div style='{_TABLE_ROW_INNER}'>"
             + "".join(cells) + "</div></div>"
             # Marc: *"a horizontal line between the header row and the metrics row"*.
@@ -3308,46 +3392,65 @@ def _metric_distribution(season, season_type, week) -> dict:
     return {str(r["metric"]): r for _, r in df.iterrows()}
 
 
-def _metric_band(row, away_value, home_value, width, dp) -> str:
-    """The spread for one measure, under its two figures — A125's `box()`, at this cell's width.
+def _metric_chart(row, away_value, home_value, dp, accents) -> str:
+    """ONE chart for the measure, carrying BOTH teams — Marc, v10, and it replaces two.
 
-    ❌ `site/lib/distribution.py` IS SESSION A's AND IS NOT EDITED HERE (§3 rule 3.1). This is
-    the call site A125 shipped the parameters for.
+    ❌ `site/lib/distribution.py` IS SESSION A's AND IS NOT EDITED HERE (§3 rule 3.1). A131
+    shipped the two-sided parameters; this is the call site they were built for.
 
-    🚨 TWO BANDS, ONE PER SIDE, AND THAT IS THE POINT RATHER THAN A DUPLICATION. The measure's
-    spread is the same for both teams; what differs is WHERE EACH TEAM'S OWN FIGURE FALLS in it,
-    which is the only thing Marc asked the bright bar to show. One shared band could carry only
-    one of the two marks, and the panel exists to compare two sides.
+    🚨 AWAY IS THE ABOVE VALUE AND HOME IS THE BELOW VALUE, and that pairing is the whole
+    assertion this function makes. Marc: *"Would be ideal to label Away above the line, Home
+    below, if possible."* ⚠️ **`accents` arrives as an ORDERED PAIR, not a dict**, for the same
+    reason `_metric_cell` takes away and home positionally: B082 and B083 both proved a presence
+    assertion cannot see a left/right swap, and A131 proved the sharper version one round ago —
+    its colour break left every orientation test GREEN and its side break left the colour test
+    GREEN. **They are two independent mistakes and they need two independent tests.**
 
-    ⚠️ ONE BAND PER VALUE COLUMN SINCE R-847 — it sits directly under its own figure, so its
-    width IS the value column's. The centred cell it used to split in half is gone.
+    🚨 `value_below` IS PASSED ON EVERY ROW, INCLUDING WHEN IT IS `None`, AND THAT IS LOAD-
+    BEARING RATHER THAN TIDY. `box()` selects two-sided mode on the ARGUMENT BEING PRESENT, not
+    on its value: `two_sided = show_value and value_below is not _UNSET`. Omit it for a side
+    that has no figure and away silently stops being *the upper half* and becomes *the only
+    value*, drawn as a centre marker — **a mark that reads as belonging to neither team, on a
+    panel whose entire job is comparing two.** The absence is then narrated by the `aria-label`
+    as *"one value — the other side has none"* (AC-G.11), which is the honest sentence.
+
+    ⚠️ THE COLOUR ARRIVES COMPOSED. `box()` takes the finished `light-dark(...)` string and
+    resolves nothing; `_accent` is its one producer, shared with the header underline so the two
+    cannot disagree (R-855). A `None` pair still yields a string — `identity.FALLBACK` — because
+    **10.89% of games have a side with no sourced colour** and the marker must still draw.
 
     ⚠️ THE WHISKERS DRAW `whisker_low`/`whisker_high`, NOT `min_value`/`max_value`, AND BOTH ARE
-    PUBLISHED. v07 said *"measure the min/max"* and v06 said *"label upper/lower boundaries"* —
-    they are different columns and they are different numbers. **The fences are drawn, because
-    the extremes compress the box to nothing: on 2026 week 1 rushing yards the box is 35% of the
-    whisker span and 22% of the min-max span, and the outliers are counted separately in
-    `outlier_count` precisely so the box stays readable.** `box()` reads the fences and is A's;
-    this call site could not choose otherwise without editing it.
+    PUBLISHED. The fences are drawn because the extremes compress the box to nothing: on 2026
+    week 1 rushing yards the box is 35% of the whisker span and 22% of the min-max span, and the
+    outliers are counted separately in `outlier_count` precisely so the box stays readable.
     """
     if row is None:
         return ""
-    # ⚠️ THE LABEL COLUMN IS SPANNED BY AN EMPTY SPACER so each band starts exactly under its own
-    # figure. Without it the two bands would begin at the row's left edge and sit under the
-    # measure NAME, pointing at the wrong column.
-    return (f"<div style='{_TABLE_ROW_INNER};margin-top:.05rem'>"
-            f"<span style='{_TABLE_LABEL_CELL}'></span>"
-            + "".join(
-                f"<span style='width:{_TABLE_VALUE_WIDTH}rem;flex:none;min-width:0'>"
-                f"{distribution.box(row, value=v, width=int(width), dp=dp)}</span>"
-                for v in (away_value, home_value))
-            + "</div>")
+    away_accent, home_accent = accents
+    return distribution.box(
+        row, width=_TABLE_CHART_WIDTH, dp=dp,
+        value=away_value, value_color=away_accent, value_label=None,
+        value_below=home_value, value_below_color=home_accent)
+
+
+def _accent_pair(colors) -> tuple:
+    """The two teams' finished colour strings, AWAY FIRST — one ordered pair, never a dict.
+
+    🚨 A DICT WOULD LET A SWAP PASS A PRESENCE TEST. The pair is unpacked positionally at every
+    call site, so away's colour cannot reach home's marker without the unpacking changing too —
+    which is the same reason `_metric_cell` takes its two figures positionally (R-522, B082,
+    B083). ⚠️ A side with no entry still yields a string: `_accent(None)` is `identity.FALLBACK`
+    in both themes, and 10.89% of games need it.
+    """
+    lookup = colors or {}
+    return tuple(_accent((lookup.get(side) or (None, ""))[0]) for side in ("away", "home"))
 
 
 def _comparison(away, home, rows, glossary=None, spread=None,
-                value_width=None, dp_band=None) -> str:
+                value_width=None, dp_band=None, colors=None) -> str:
     """One row per statistic, one column per side. Away left, home right — the same
     convention the scoreline uses and the reason that layout reads as a matchup."""
+    accents = _accent_pair(colors)
     lines = []
     for label, field, dp in rows:
         hint = (glossary or {}).get(field)
@@ -3369,37 +3472,53 @@ def _comparison(away, home, rows, glossary=None, spread=None,
         # string would be drawing from text.
         lines.append(_metric_cell(
             _figure(away, field, dp), marked, _figure(home, field, dp),
-            band=_metric_band((spread or {}).get(field), away.get(field), home.get(field),
-                              _TABLE_BAND_WIDTH,
-                              dp if dp_band is None else dp_band)))
+            chart=_metric_chart((spread or {}).get(field),
+                                away.get(field), home.get(field),
+                                dp if dp_band is None else dp_band, accents)))
     return "".join(lines)
 
 
-def _metric_cell(away_value: str, label: str, home_value: str, band: str = "") -> str:
-    """One measure, as a table row: NAME LEFT, then the two figures (R-847).
+def _metric_cell(away_value: str, label: str, home_value: str, chart: str = "") -> str:
+    """One measure, as a table row: NAME, the two figures, then the CHART (R-847, R-864).
 
     ⚠️ AWAY BEFORE HOME, AND IT IS ONE ORDERED PAIR RATHER THAN TWO ARGUMENTS USED TWICE — the
     away-over-home law this site follows everywhere (R-522). B082 and B083 both proved a
     presence assertion cannot see a left/right swap, so the test asserts the ORDER.
 
-    ⚠️ THE BAND GOES INSIDE THE ROW, so it inherits `overflow:hidden` and cannot draw over the
-    card columns now sitting to the table's right — R-755, which this panel has paid for twice.
+    🚨 THE CHART IS A FOURTH CELL ON THE SAME FLEX ROW, NOT A SECOND ROW UNDERNEATH. Marc, v10:
+    *"create a new column for it to the right of the home metric value."* The band that used to
+    sit below the figures is gone with `_metric_band`; a row is now one line.
+
+    ⚠️ THE CHART CELL IS ALWAYS EMITTED, EVEN EMPTY — R-141's law, which this file already
+    follows in `thumbnail`: *an element that appears only when populated shifts everything
+    beside it.* The five composite rows draw nothing inside it and still reserve it, so the
+    figures do not jump left on those rows.
+
+    ⚠️ EVERYTHING STAYS INSIDE THE ROW, so it inherits `overflow:hidden` and cannot draw over
+    the card columns sitting to the table's right — R-755, which this panel has paid for twice.
     """
-    row = (f"<div style='{_TABLE_ROW_INNER}'>"
-           f"<span style='{_TABLE_LABEL_CELL}'>{label}</span>"
-           f"<span style='{_TABLE_VALUE_CELL}'>{away_value}</span>"
-           f"<span style='{_TABLE_VALUE_CELL}'>{home_value}</span></div>")
-    return f"<div data-cfdb='metric-cell' style='{_TABLE_ROW}'>{row}{band}</div>"
+    return (f"<div data-cfdb='metric-cell' style='{_TABLE_ROW}'>"
+            f"<div style='{_TABLE_ROW_INNER}'>"
+            f"<span style='{_TABLE_LABEL_CELL}'>{label}</span>"
+            f"<span style='{_TABLE_VALUE_CELL}'>{away_value}</span>"
+            f"<span style='{_TABLE_VALUE_CELL}'>{home_value}</span>"
+            f"<span style='{_TABLE_CHART_CELL}'>{chart}</span></div></div>")
 
 
 def _custom_row(away, home, label, renderer) -> str:
     """A measure the view publishes no distribution for — a fraction, a composite, a clock.
 
-    🚨 NO BAND, AND THAT IS AC-G.11 RATHER THAN AN OVERSIGHT. `box()`'s own placeholder says
+    🚨 NO CHART, AND THAT IS AC-G.11 RATHER THAN AN OVERSIGHT. `box()`'s own placeholder says
     *"cfdb holds no distribution for this week yet"*, which is TRUE of a measure that could have
     one and FALSE of these five: third down is `6/14`, turnovers is `1 (1 INT · 0 FUM)` and
     possession is `30:51`. **They are not scalars, so there is nothing to take a percentile of —
     ever — and a placeholder promising one later would be the wrong absence.**
+
+    ✅ THE COLUMN IS STILL RESERVED, THOUGH, AND THAT IS R-141's LAW: *an element that appears
+    only when populated shifts everything beside it.* `_metric_cell` emits the chart cell on
+    every row and this one leaves it empty, so the two figures sit in the same place on a
+    turnovers row as on a yards row. **Reserved and blank is not the same as absent, and only
+    one of the two keeps the table a table.**
     """
     return _metric_cell(renderer(away), label, renderer(home))
 
@@ -3857,8 +3976,9 @@ def _post_game(game_id, season) -> None:
             # all six measures are integer counts — first downs, yards, attempts. At `box()`'s
             # default of 1 every label reads `22.0`, `5.0`, `38.0`, which is precision the
             # measure does not have. Measured: `dp` changes no label COUNT at this width, so
-            # this costs nothing — see `_metric_band` and R-829.
-            + _comparison(away, home, _BOX_SCORE_ROWS, spread=spread, dp_band=0)
+            # this costs nothing — see `_metric_chart` and R-829.
+            + _comparison(away, home, _BOX_SCORE_ROWS, spread=spread, dp_band=0,
+                          colors=colors)
             + _custom_row(away, home, "Third down",
                           lambda r: _fraction(r, "third_down_conversions",
                                               "third_down_attempts"))
@@ -3921,7 +4041,8 @@ def _post_game(game_id, season) -> None:
             # distribution is published in. **Per panel is a rule; per row would be a rule with
             # six exceptions.**
             _table_header(away, home, "Advanced", colors)
-            + _comparison(away, home, rows, glossary, spread=spread, dp_band=2),
+            + _comparison(away, home, rows, glossary, spread=spread, dp_band=2,
+                          colors=colors),
             unsafe_allow_html=True)
 
         missing = [label for label, field, _dp in rows if field not in glossary]

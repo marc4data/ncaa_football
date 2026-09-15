@@ -1075,11 +1075,16 @@ def _resolved(style: str) -> dict:
 
 
 def _spans(cell: str) -> list:
-    """The three spans of a measure ROW — name, away figure, home figure — resolved.
+    """The FOUR spans of a measure ROW — name, away figure, home figure, chart — resolved.
 
-    ⚠️ SCOPED TO THE ROW SINCE R-847. The band beneath it carries its own spans (a spacer the
-    width of the name column, then one per side), so a cell-wide sweep returns six and the
-    unpack fails — or worse, succeeds against the wrong three.
+    ⚠️ SCOPED TO THE ROW SINCE R-847, AND IT IS FOUR SINCE R-864. The band that used to sit
+    BENEATH the row carried its own spans, so a cell-wide sweep returned six and the unpack
+    failed — or worse, succeeded against the wrong three. v10 replaced that second row with a
+    fourth cell on this one, so the sweep is honest again and the count changed.
+
+    🚨 THE CHART CELL IS RETURNED EVEN WHEN EMPTY, which is what lets a test assert R-141's
+    reservation on the five composite rows: `_custom_row` draws no chart and must still hold
+    the column, or every figure on those rows shifts right relative to the metric rows.
     """
     row = cell.split("</div>", 1)[0]
     return [_resolved(m) for m in re.findall(r"<span style='([^']*)'>", row)]
@@ -1211,7 +1216,7 @@ def test_the_MEASURE_NAME_comes_FIRST_and_both_figures_are_RIGHT_aligned(panel):
     cells = _cells(run(_both())[0])
     assert cells, "no measure row rendered at all"
     for cell in cells:
-        label, away, home = _spans(cell)
+        label, away, home, _chart = _spans(cell)
         assert label.get("text-align") is None, (
             f"the measure name is right- or centre-aligned — v08 puts it LEFT: {label}")
         assert away.get("text-align") == "right", (
@@ -1239,12 +1244,16 @@ def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel)
         assert style.get("box-sizing") == "border-box", (
             "without border-box the padding is ADDED to the width and the row grows past its "
             "column")
-        # ⚠️ NO PART OF THE ROW IS PROPORTIONAL — scoped to the row itself, because the band
-        # beneath it legitimately sizes its own spacer to the label column.
+        # 🚨 NO PART OF THE ROW IS PROPORTIONAL, AND SINCE R-864 THAT INCLUDES THE CHART CELL.
+        # A `flex:1` chart cell would be the obvious way to fill the leftover room and it is the
+        # wrong one: `box()` emits `max-width:100%`, so an SVG whose declared width its cell
+        # cannot honour is SCALED rather than clipped — B108 squeezed a 432px viewBox into 216px
+        # and rendered its `18` four pixels tall. **The DOM was correct and the text was
+        # unreadable**, which no assertion on the markup could have caught.
         row_only = cell.split("</div>", 1)[0]
         assert "flex:1" not in row_only, (
             f"something in the measure row is proportional again: {row_only[:200]}")
-        label, away, home = _spans(cell)
+        label, away, home, chart = _spans(cell)
         for part, wanted, what in ((label, label_w, "measure name"),
                                    (away, value_w, "away figure"),
                                    (home, value_w, "home figure")):
@@ -1252,6 +1261,11 @@ def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel)
             assert part.get("width") == f"{wanted}rem", (
                 f"the {what} is {part.get('width')} rather than the {wanted}rem the table "
                 f"budgets for it")
+        chart_w = _module_constant("_TABLE_CHART_WIDTH")
+        assert chart.get("flex") == "none", "the chart column can grow or shrink"
+        assert chart.get("width") == f"{chart_w}px", (
+            f"the chart column is {chart.get('width')} rather than the {chart_w}px it declares "
+            f"— and `box()` is handed that same number, so the two cannot be allowed to drift")
 
 
 def test_the_TABLE_HEADER_carries_the_section_name_and_BOTH_logos_in_order(panel):
@@ -1285,29 +1299,255 @@ def test_the_TABLE_HEADER_carries_the_section_name_and_BOTH_logos_in_order(panel
     assert "border-top" in header, "there is no rule under the header row"
 
 
-def test_the_band_is_given_the_VALUE_COLUMNS_width_and_never_box_s_240px_default(panel):
-    """🚨 AMENDED FROM B108. `box()`'s default is still not this panel's width; what changed is
-    which width that is. The band sits directly under its own figure now, so it IS the value
-    column — B108's two half-cells are gone with the centred cell.
+def test_ONE_chart_per_row_at_the_CHART_COLUMNS_width_and_never_box_s_240px_default(panel):
+    """🚨 R-864. Marc, v10: *"make a single box-whisker chart, create a new column for it."*
 
-    ⚠️ AND THE NUMBER GOT SMALLER, WHICH THE REPORT CARRIES RATHER THAN THIS TEST HIDING: B108
-    measured the minimum useful plot width at 200px and shipped 216px (Box Score) and 148px
-    (Advanced). v08's value column is narrower than either. **That is a consequence of the shape
-    Marc asked for, not a choice — the floor assertion below is deliberately the wide one that
-    says when the picture stops carrying its numbers at all.**
+    ⚠️ AMENDED FROM B108's band test, TWICE OVER: the count changed as well as the width. There
+    were TWO bands per row, one under each figure, because a band could carry only one team's
+    mark; A131's two-sided `box()` carries both, so there is now ONE chart and it has its own
+    column. **A test that only checked the width would pass on two charts of the right size.**
+
+    📊 AND THE WIDTH IS BELOW THE FLOOR, WHICH THIS TEST STATES RATHER THAN HIDES. B108 measured
+    the minimum useful plot width at 200px and A131's own sweep puts 200px at the point where
+    the below band stops dropping to three labels. **The chart ships at 110px** because that is
+    what is left at 1300px once the label column has given up everything it can and the cards
+    have given up nothing — measured, not chosen. **The report carries the trade to Marc.**
     """
     run, _ = panel
-    widths = {int(w) for cell in _cells(run(_both())[0]) for w, _h in _bands(cell)}
-    assert widths, "no band was drawn at all"
+    cells = _cells(run(_both())[0])
+    assert cells, "no measure row rendered at all"
+    metric_cells = [c for c in cells if _bands(c)]
+    assert metric_cells, "no chart was drawn at all"
+    # 🚨 ONE PER ROW. Two would mean the two-sided call was not used and each side got its own.
+    for cell in metric_cells:
+        assert len(_bands(cell)) == 1, (
+            f"a measure row carries {len(_bands(cell))} charts — v10 asks for a SINGLE chart "
+            f"holding both teams, not one per side")
+    widths = {int(w) for cell in metric_cells for w, _h in _bands(cell)}
     assert 240 not in widths, (
-        f"a band is 240px — that is `box()`'s own default, so the width was not passed: "
+        f"a chart is 240px — that is `box()`'s own default, so the width was not passed: "
         f"{sorted(widths)}")
-    wanted = int(_module_constant("_TABLE_VALUE_WIDTH") * 16)
+    wanted = _module_constant("_TABLE_CHART_WIDTH")
     assert widths == {wanted}, (
-        f"the bands are {sorted(widths)}px; the value column they sit under is {wanted}px")
-    assert min(widths) >= 110, (
-        f"a band is {min(widths)}px wide. Below ~110px `box()`'s placement pass has dropped "
-        f"most of its labels and the picture stops carrying the numbers it exists to carry")
+        f"the charts are {sorted(widths)}px; the column budgets {wanted}px. `box()` emits "
+        f"max-width:100%, so a chart wider than its cell is SCALED DOWN and its labels shrink "
+        f"with it — B108's 4px-tall `18`")
+
+
+def test_the_chart_is_TWO_SIDED_and_says_so_to_a_SCREEN_READER(panel):
+    """🚨 AC-G.11 THROUGH THE ONE CHANNEL A SIGHTED READER DOES NOT USE. `box()` narrates two
+    markers, one marker and none as three different sentences; a reader who cannot see the empty
+    half has only this string. **A chart drawn one-sided would still LOOK plausible.**
+
+    ⚠️ AND IT IS THE ARGUMENT'S PRESENCE THAT SELECTS THE MODE, NOT ITS VALUE —
+    `two_sided = show_value and value_below is not _UNSET`. Passing `value_below=None` for a side
+    with no figure keeps away in its own half; OMITTING it redraws away as a centre marker
+    belonging to neither team. That distinction is invisible in a width or a count, so it is
+    asserted on the narration.
+    """
+    run, _ = panel
+    cells = [c for c in _cells(run(_both())[0]) if _bands(c)]
+    labels = [m for c in cells for m in re.findall(r"aria-label='([^']*)'", c)]
+    assert labels, "no chart carried an aria-label at all"
+    for reading in labels:
+        assert ", two values" in reading, (
+            f"the chart does not narrate two values — a one-sided chart on a two-team panel "
+            f"reads as belonging to neither side: {reading!r}")
+
+
+BOX_HEIGHT = 26      # `distribution.BOX_HEIGHT` — the box's own height in the SVG
+
+
+def _markers(cell):
+    """Every sided value marker in one cell's chart: (side, x, colour).
+
+    🚨 READ OFF `_sided_marker`'s OWN GEOMETRY, which is what makes the two Part 4 tests
+    independent. The above marker's rule runs `y1='0'` to the midline; the below marker's runs
+    from the midline to the full height. **Side is read from y, colour from stroke** — so a test
+    can assert one while staying blind to the other, and a single mistake cannot redden both.
+    """
+    out = []
+    for x, y1, y2, colour in re.findall(
+            r"<line x1='([\d.]+)' y1='([\d.]+)' x2='[\d.]+' y2='([\d.]+)' "
+            r"stroke='([^']*)' stroke-width='2\.2'", cell):
+        top, bottom = float(y1), float(y2)
+        # 🚨 CLASSIFIED ON THE SPAN, NOT ON `y1` ALONE — AND THE FIRST VERSION WAS WRONG.
+        # `_sided_marker` draws 0→13 above and 13→26 below; `_value_marker` — the ONE-VALUE
+        # centre mark — draws 0→26, which shares its `y1` with the above marker. Keying on the
+        # start alone reported a centre marker as "above", so the staged break that omits
+        # `value_below` slipped past the geometry assertion entirely and was caught only by the
+        # aria-label. **A helper that answers the wrong question is R-758's family**, and it is
+        # exactly what the break existed to find.
+        side = ("centre" if bottom - top > BOX_HEIGHT * 0.75
+                else "above" if top == 0.0 else "below")
+        out.append((side, float(x), colour))
+    return out
+
+
+def _header_accents(entries):
+    """The away and home underline colours from the table header, in that order."""
+    header = next(str(b) for _k, b in entries
+                  if "Box score" in _plain(str(b)) and "border-top" in str(b))
+    return re.findall(r"border-bottom:3px solid ([^;']+)", header)
+
+
+def test_AWAY_is_the_ABOVE_marker_and_HOME_is_the_BELOW_one(panel):
+    """🚨 R-864, PART 4. Marc, v10: *"label Away above the line, Home below, if possible."*
+
+    ⚠️ HE PREFIXED IT *"would be ideal… if possible"* AND IT IS NOT A NICETY — it is the
+    accessibility answer. `_sided_marker`'s own docstring makes the case: nothing prevents two
+    teams being the same red, B102 measured green and red 1.8 luma apart on this very panel, and
+    **10.1% of the games that render this panel have at least one row where the two sides have
+    the SAME figure** — two markers at the same x, which in one lane is one mark and a lost team.
+    Above and below survive greyscale, colour-blindness and two teams from one palette.
+
+    🚨 THIS TEST IS DELIBERATELY BLIND TO COLOUR. A131 measured why: its colour break left every
+    orientation test GREEN and its side break left the colour test GREEN. **They are two
+    independent mistakes.** A test that reddened on both would tell you something broke without
+    telling you which — see `test_AWAY_S_COLOUR_goes_with_AWAY_S_MARKER`.
+
+    ⚠️ ASSERTED ON x-ORDER, NOT ON PRESENCE. The fixture's rushing yards are away 79 and home
+    118, so away's marker must sit LEFT of home's. Both markers are present in either
+    arrangement, which is exactly what B082 and B083 proved a presence assertion cannot see.
+    """
+    run, _ = panel
+    cell = next(c for c in _cells(run(_both())[0])
+                if "Rushing yards" in _plain(c) and _bands(c))
+    marks = _markers(cell)
+    assert len(marks) == 2, f"expected one marker per side, got {len(marks)}: {marks}"
+    sides = {side: x for side, x, _c in marks}
+    assert set(sides) == {"above", "below"}, (
+        f"the two markers are not one above and one below — a side lost its half: {marks}")
+    # away 79 < home 118, so away's x is the smaller. The ABOVE marker must be away's.
+    assert sides["above"] < sides["below"], (
+        f"the ABOVE marker sits at x={sides['above']} and the BELOW one at x={sides['below']}. "
+        f"Away's rushing yards are 79 and home's are 118, so away is the smaller x — the two "
+        f"sides are swapped and home is being drawn above the line")
+
+
+def test_AWAY_S_COLOUR_goes_with_AWAY_S_MARKER(panel):
+    """🚨 R-864, PART 4, AND THE OTHER HALF. The marker in away's half must carry away's colour.
+
+    🚨 DELIBERATELY BLIND TO WHICH VALUE IS WHERE. It reads the side off the geometry and then
+    asserts ONLY the colour, so swapping the two figures leaves it green and swapping the two
+    colour strings reddens it alone. **Two mistakes, two tests, and each says which.**
+
+    ✅ AND IT TIES THE CHART TO THE HEADER, WHICH IS R-855's CLAIM MADE MECHANICAL. `_accent` is
+    the one producer of the `light-dark(...)` string; the header underline and the chart marker
+    are the same call. Asserting they are EQUAL rather than merely both-present is what catches a
+    second copy of the expression drifting from the first — the failure R-855 exists for, and
+    which this file has now paid for three rounds running.
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    away_accent, home_accent = _header_accents(entries)
+    assert away_accent != home_accent, (
+        "the fixture's two sides resolve to the same accent, so this test cannot tell them "
+        "apart — it would pass on any swap")
+    cell = next(c for c in _cells(entries) if "Rushing yards" in _plain(c) and _bands(c))
+    by_side = {side: colour for side, _x, colour in _markers(cell)}
+    assert by_side.get("above") == away_accent, (
+        f"the ABOVE marker is {by_side.get('above')!r} and away's header underline is "
+        f"{away_accent!r} — the chart and the header are naming the same team in different "
+        f"colours, or the two colour strings are swapped")
+    assert by_side.get("below") == home_accent, (
+        f"the BELOW marker is {by_side.get('below')!r} and home's header underline is "
+        f"{home_accent!r}")
+
+
+def test_value_below_is_PASSED_even_when_it_is_NONE_so_away_keeps_its_own_half(panel):
+    """🚨 R-864. `box()` SELECTS TWO-SIDED MODE ON THE ARGUMENT'S PRESENCE, NOT ITS VALUE —
+    `two_sided = show_value and value_below is not _UNSET`. Omitting it for a side with no
+    figure does not draw "away plus a gap": it redraws away as a ONE-VALUE CENTRE MARKER, a
+    mark belonging to neither team on a panel whose whole job is comparing two.
+
+    ⚠️ AND THE STATE IS NOT REACHABLE IN PRODUCTION TODAY, WHICH THIS TEST SAYS OUT LOUD RATHER
+    THAN IMPLYING COVERAGE IT DOES NOT HAVE (§6, R-762). Measured on live serving: **0 of 7,348
+    box-score rows carry a null on any charted measure**, and the only advanced column that goes
+    null per side is `defense_havoc_rate` — whose row `_post_game` already drops unless BOTH
+    sides carry `has_havoc`. `has_havoc` and the null agree on all 7,204 rows, so the filter is
+    exact and **0 games reach this branch**.
+
+    ✅ SO WHY TEST IT AT ALL: the thing being guarded is REACHED ON EVERY ROW. Passing
+    `value_below` is what selects two-sided mode for the 18 rows that DO draw two values, and a
+    fixture null is simply the cheapest way to prove the argument is passed rather than omitted.
+    **The assertion is on the call, not on a state nobody can reach.**
+    """
+    run, _ = panel
+    home = dict(_side("Auburn", True), rushing_yards=None)
+    entries = run([home, _side("Kentucky", False)])[0]
+    cell = next(c for c in _cells(entries) if "Rushing yards" in _plain(c) and _bands(c))
+    marks = _markers(cell)
+    assert len(marks) == 1, (
+        f"a side with no figure should leave ONE marker drawn, got {len(marks)}: {marks}")
+    assert marks[0][0] == "above", (
+        f"away's marker slid out of its own half to {marks[0][0]} — `value_below` was omitted "
+        f"rather than passed as None, so box() drew a one-value CENTRE marker that belongs to "
+        f"neither team")
+    reading = re.search(r"aria-label='([^']*)'", cell).group(1)
+    assert "one value — the other side has none" in reading, (
+        f"the chart does not narrate WHICH absence this is (AC-G.11): {reading!r}")
+
+
+def test_a_side_with_NO_SOURCED_COLOUR_still_draws_its_marker(panel):
+    """⚠️ COLOUR IS THE SECOND SIGNAL AND POSITION IS THE FIRST (AC-G.22), SO A TEAM WITH NO
+    PUBLISHED COLOUR MUST STILL APPEAR. `identity.text_on(None)` yields `identity.FALLBACK` —
+    neutral grey in both themes — and the marker draws in its own half exactly as any other.
+
+    📊 THE POPULATION, CORRECTED. B109 measured **10.89% of games** with a side carrying no
+    sourced colour and that is right across all **112,675** games. **This panel only ever renders
+    the 3,674 that have a box score, and there it is 37 games — 1.01%.** Both numbers are true
+    of different questions; the one that governs this branch is the smaller (§2.4, R-859).
+
+    ⚠️ THE FIXTURE'S AWAY SIDE ALREADY HAS NO COLOUR, which is why `_COLORS` is asymmetric — a
+    symmetric fixture could not tell a fallback from a real colour.
+    """
+    run, _ = panel
+    entries = run(_both())[0]
+    away_accent, home_accent = _header_accents(entries)
+    cell = next(c for c in _cells(entries) if "Rushing yards" in _plain(c) and _bands(c))
+    by_side = {side: colour for side, _x, colour in _markers(cell)}
+    assert set(by_side) == {"above", "below"}, (
+        f"a side with no sourced colour lost its marker entirely: {by_side}")
+    assert by_side["above"] == away_accent, (
+        f"the uncoloured side's marker is {by_side['above']!r} rather than the fallback its "
+        f"own header underline uses, {away_accent!r}")
+    assert "light-dark(" in by_side["above"], (
+        f"the fallback is a single colour, so it is right in one theme and wrong in the other: "
+        f"{by_side['above']!r}")
+
+
+def test_the_COMPOSITE_rows_RESERVE_the_chart_column_and_draw_NO_PLACEHOLDER(panel):
+    """🚨 R-864, PART 5. Third down, turnovers and possession are not scalars — `6/14`,
+    `1 (1 INT · 0 FUM)`, `30:51` — so there is nothing to take a percentile of, ever.
+
+    ✅ THE COLUMN IS STILL RESERVED (R-141: *an element that appears only when populated shifts
+    everything beside it*). Without it the two figures would sit in a different place on a
+    turnovers row than on a yards row, and the table would stop being a table.
+
+    ❌ AND IT DRAWS NO PLACEHOLDER. `box()`'s own empty state says *"cfdb holds no distribution
+    for this week yet"*, which is TRUE of a measure that could have one and FALSE of these five.
+    **A placeholder promising one later is the wrong absence** — AC-G.11, and it is the same
+    distinction B110 drew between *no second quarterback* and *no leaders at all*.
+    """
+    run, _ = panel
+    cells = _cells(run(_both())[0])
+    composite = [c for c in cells if "Third down" in _plain(c) or "Turnovers" in _plain(c)]
+    assert composite, "neither composite row rendered"
+    chart_w = _module_constant("_TABLE_CHART_WIDTH")
+    for cell in composite:
+        assert not _bands(cell), (
+            f"a composite row drew a chart — there is no percentile of {_plain(cell)[:60]!r}")
+        assert "no distribution" not in _plain(cell).lower(), (
+            f"a composite row drew box()'s placeholder, which promises a distribution that can "
+            f"never arrive: {_plain(cell)[:120]}")
+        spans = _spans(cell)
+        assert len(spans) == 4, (
+            f"a composite row has {len(spans)} cells against the metric rows' 4 — the chart "
+            f"column was dropped rather than reserved, so every figure on this row shifts")
+        assert spans[3].get("width") == f"{chart_w}px", (
+            f"the composite row's chart column is {spans[3].get('width')} rather than "
+            f"{chart_w}px, so it does not line up with the metric rows above it")
 
 
 def test_the_TABLE_is_the_LEFTMOST_block_and_the_cards_follow_it(panel):
