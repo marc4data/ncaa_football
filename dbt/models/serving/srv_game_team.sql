@@ -167,6 +167,63 @@ select
     t.total_yards,
     t.rushing_yards,
     t.passing_yards,
+
+    -- ── WHAT THIS TEAM ALLOWED, THIS GAME — A135 (R-899) ───────────────────────────────────
+    --
+    -- Marc, v14: a strip with "the Gained or Allowed value for the game", one row per game on the
+    -- calendar. GAINED is `total_yards` above; ALLOWED IS THE OPPONENT'S GAINED IN THE SAME GAME,
+    -- which is a SELF-JOIN on this grain and therefore belongs here rather than in the page —
+    -- §4.2.1's test is how many consumers a number can have, and a per-game allowed series
+    -- plainly has more than one.
+    --
+    -- 🚨 THE PAIRING TRAP, AND `matchup.py` ALREADY NAMES IT: "a team's `_for` sits beside the
+    -- OTHER side's `_allowed`. Pairing a team's `_for` with its own `_allowed` describes ONE TEAM
+    -- rather than a matchup." These columns are this team's ALLOWED — the opponent's gained — so
+    -- on one row `total_yards` and `total_yards_allowed` are the two sides of THIS fixture.
+    --
+    -- ⚠️ NOT TO BE CONFUSED WITH `total_yards_for_minus_opponent_allowed_per_game` further down,
+    -- which is a SEASON AVERAGE out of fct_game_team_advanced. These three are THIS GAME.
+    --
+    -- ✅ THE JOIN CANNOT FAN OUT AND THAT WAS MEASURED, NOT ASSUMED: fct_game_team holds exactly
+    -- two rows for every one of its 112,675 games — min 2, max 2, zero exceptions — so
+    -- `game_id` equal and `team_id` different is exactly one row.
+    -- 🚨 THE LABEL ON MARC'S STRIP: "Label with the abbreviation of the opponent". A130 met this
+    -- exact problem on the browser tab and settled the chain there — THE ABBREVIATION, THEN THE
+    -- FULL NAME — because `abbreviation` is not universal: it measured `away_abbreviation` null on
+    -- 10.7% of `srv_game` rows. ✅ SAME CHAIN, RESOLVED HERE RATHER THAN IN THE PAGE, so the page
+    -- needs no chain at all and the two cannot drift.
+    --
+    -- ⚠️ MEASURED ON THE SCOPE THIS STRIP ACTUALLY DRAWS — FBS, 2026, regular — the fallback never
+    -- fires: 0 of 1,649 rows have a null opponent abbreviation. It is here for the rows outside
+    -- that scope and for the day the feed changes, not because it is load-bearing today.
+    coalesce(o.abbreviation, t.opponent)  as opponent_abbreviation,
+
+    opp.total_yards   as total_yards_allowed,
+    opp.rushing_yards as rushing_yards_allowed,
+    opp.passing_yards as passing_yards_allowed,
+
+    -- 🚨 WHICH ABSENCE A NULL ROW IS — AC-G.11, AND A SINGLE NULL FOR ALL OF THEM IS THE DEFECT.
+    --
+    -- The strip reserves a row for every scheduled game, so most rows have no figures and the
+    -- reasons are not the same thing. Measured on the 2026 regular calendar: 5,848 of 7,358
+    -- team-games NOT PLAYED YET (79.5%), 842 PLAYED WITH NO BOX SCORE (11.4%), 668 with figures.
+    --
+    -- 🚨 AND THE NO-BOX-SCORE CASE IS A DIVISION STORY, NOT A DATE ONE. This is the measurement
+    -- that matters most here, because the obvious copy would be wrong: across 2024-2025 completed
+    -- regular games, FBS-vs-FBS coverage is 3,028 of 3,028 — 100.0% — FCS 99.1%, and
+    -- DIVISION II AND DIVISION III ARE 0.0% ACROSS 8,256 GAMES. Telling a reader "collected from
+    -- 2024 onward" would be flatly false for a 2025 Division III fixture, which is R-730's defect
+    -- rebuilt for a different reason. The state says what is true; the page supplies the words.
+    --
+    -- ⚠️ A CANCELED OR NO-CONTEST GAME IS NOT A FOURTH STATE, BECAUSE THE FEED DOES NOT CARRY
+    -- ONE. Checked rather than assumed: no status, cancelled, postponed or notes column exists on
+    -- fct_game or fct_game_team. Such a game is indistinguishable from one still to be played,
+    -- and inventing a value for it would be a claim nothing supports.
+    case
+        when not t.is_completed        then 'scheduled'
+        when t.total_yards is not null then 'played'
+        else                                'no_box_score'
+    end as game_figures_state,
     t.rushing_attempts,
     t.turnovers,
     t.interceptions,
@@ -590,6 +647,12 @@ left join {{ ref('dim_team') }} o on o.season = t.season and o.team_id = t.oppon
 -- Game-grain context. One row per game_id, so this cannot fan out — asserted by the row-count
 -- half of the parity check rather than assumed.
 left join {{ ref('fct_game') }} fg on fg.game_id = t.game_id
+-- THE OTHER SIDE OF THE SAME FIXTURE, for the allowed figures above. `team_id <>` rather than a
+-- home/away test, because that works on a neutral-site game where neither side is the home team.
+-- LEFT so a row survives even if the opponent's half were ever missing; it never is today.
+left join {{ ref('fct_game_team') }} opp
+       on  opp.game_id = t.game_id
+      and  opp.team_id <> t.team_id
 -- ALL FOUR KEYS, AND THE FOURTH IS THE TRAP. Postseason week numbers RESTART, so joining on
 -- (season, week, team_id) silently matches a bowl game to a September record row. The
 -- uniqueness of the result is asserted by its own dbt test rather than trusted.
