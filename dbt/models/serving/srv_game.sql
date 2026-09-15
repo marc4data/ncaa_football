@@ -306,6 +306,29 @@ select
     wps.mean_distance_from_even,
     wps.mean_distance_from_even_fourth_quarter_onward,
     wps.closest_to_even_fourth_quarter_onward,
+    -- 🚨 A136, cfdb-main-R-903. THE COMEBACK MEASURE — HOW FAR BEHIND THE EVENTUAL WINNER WAS,
+    -- across the whole curve. LOW = a comeback. It is NOT a variant of the two columns above it:
+    -- `mean_distance_from_even_*` is symmetric and does not know who won; this one is meaningless
+    -- without the result. Marc, 2026-09-15: "big disparity between low win probability (behind the
+    -- whole game), but were successful in the end (Texas of Ohio State)."
+    --
+    -- ⚠️ MEASURED BEFORE IT WAS ARGUED FOR, and it is a better TIE-BREAK than lead key. On the 86
+    -- games of 2026 week 2, ordering by it alone puts Ohio State @ Texas 1st and buries the other
+    -- two games Marc named at 27th and 30th; used behind `lead_changes_fourth_quarter` it improves
+    -- the worst rank of his seven from 21 to 18. A136's report carries the whole table. The page's
+    -- ordering constant is A137's to change, not this model's.
+    wps.winner_mean_win_probability,
+    -- The raw curve property the measure above is derived from, published so the derivation is
+    -- auditable and so a chart can shade with it. ❌ A PAGE MUST NOT RE-DERIVE the winner mean
+    -- from this and the score — that is arithmetic between two published columns (§4.2.1), and
+    -- the whole reason the winner mean is computed once, upstream.
+    wps.mean_home_win_probability,
+    -- 🚨 AND THE GUARD THAT HAS TO TRAVEL WITH IT. A truncated curve ends with the trailing side
+    -- still low, so its mean sits low and the game reads as a comeback it never was. 99 of 1,898
+    -- curves never reach their game's final score, and those 99 are FIVE OF THE TWENTY-FIVE lowest
+    -- winner means — Coastal Carolina @ UTSA (2024 week 1) is 3rd on the list and UTSA won 44-15.
+    -- Anything ranking on the comeback measure reads this first. AC-G.11.
+    wps.win_probability_curve_reaches_final_score,
     g.is_upset,
 
     -- FBS SPINE. EITHER team, not both: a Division II visitor's trip to an FBS stadium is an
