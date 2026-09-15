@@ -3231,11 +3231,14 @@ def _turnovers(row) -> str:
 # inside the 56px the chart already imposes, so nothing grows. **The ellipsis this column was
 # sized against never fires.**
 #
-# 🚨 AND IT IS STILL NOT ENOUGH AT 1300px — 136 + 116 + 116 + 24 leaves **110px**, which is 45%
-# under the floor. **That is a real finding and it is Marc's trade, not this round's to settle**;
-# the report renders both this and the 200px alternative. At 1700px the same row leaves 299px
-# and the question does not arise.
-_TABLE_LABEL_WIDTH = 8.5       # rem — 136px; the four longest Advanced names ellipsise
+# 🚨 AND IT IS STILL NOT ENOUGH AT 1300px. ⚠️ **CORRECTED IN R-893: this paragraph said 110px
+# and 45% under the floor, and named "the 200px alternative" — all three were B111's numbers and
+# B112 moved every one of them.** The row budget is 510px now (the gutter halved), so
+# 136 + 116 + 116 + 24 leaves **118px, 41% under the floor**, and the alternative this file
+# actually carries is **230px** at `_TABLE_CELLS_EQUAL = True `. **That is Marc's trade, not
+# this round's to settle.** At 1700px the same row leaves 244px unused and the question does
+# not arise.
+_TABLE_LABEL_WIDTH = 8.5       # rem — 136px; the longest Advanced names WRAP, they do not clip
 _TABLE_GAP = 0.5               # rem, between the four columns
 
 _REM = 16
@@ -3278,7 +3281,7 @@ _REM = 16
 # 📊 AND THE FLOOR IS WHAT IT COSTS: B108 measured the minimum useful plot width at 200px and
 # A131's sweep agrees. **`True` is 118px — 41% under it, and barely better than B111's 110px.
 # `False` is 230px, over it for the first time since the chart existed.**
-_TABLE_CELLS_EQUAL = True      # True = Marc's literal reading; False = values at their content
+_TABLE_CELLS_EQUAL = True     # True = Marc's literal reading; False = values at their content
 
 # 📊 THE ROW BUDGET, MEASURED RATHER THAN ASSUMED. At 1300px with the sidebar open the content
 # area runs 380 → 1220 = 840px. v11 makes it two Streamlit columns instead of three and halves
@@ -3300,6 +3303,23 @@ _TABLE_CELL_BUDGET = (_TABLE_ROW_BUDGET - int(_TABLE_LABEL_WIDTH * _REM)
 # **60px carries the widest with 12px to spare** — and it is the first time since v08 that the
 # value column has been sized by a METRIC rather than by one composite string.
 _TABLE_VALUE_CONTENT_PX = 60   # px — the widest value at `1 (1/0)` is 48, plus margin
+
+# 🚨 R-895. THE THIRD OPTION, AND IT ONLY MAKES SENSE BESIDE `_TABLE_CELLS_EQUAL = False`.
+#
+# 📊 **AND THE CAVEAT IN THE ASK IS ANSWERABLE FROM THE CODE RATHER THAN THE BROWSER: the header
+# cell does NOT set the value column's width.** `_TABLE_VALUE_CELL` carries
+# `width:{_TABLE_VALUE_WIDTH}rem`, a declared constant derived from the row budget — so the cell
+# cannot shrink or grow from its contents, and **removing the text buys no width at all.** What
+# it buys is the absence of a TRUNCATION.
+#
+# ⚠️ WHICH IS THE WHOLE POINT, BECAUSE v11 MOVED THE IDENTITY. The card region's header now
+# carries the FULL team name — `North Alabama`, `Arkansas` — one column to the right and on the
+# same line. So at `False` the abbreviation is not lost, it is **duplicated badly**: a clipped
+# `U…` beside an intact `North Alabama`. **Dropping the text leaves the logo, the team-coloured
+# rule under it, and the full name one column over.**
+#
+# ❌ NOT PICKED HERE. Three options, three renders, one constant each.
+_TABLE_HEADER_SHOWS_NAME = True
 _TABLE_VALUE_PX = ((_TABLE_CELL_BUDGET // 3) if _TABLE_CELLS_EQUAL
                    else _TABLE_VALUE_CONTENT_PX)
 _TABLE_CHART_WIDTH = _TABLE_CELL_BUDGET - 2 * _TABLE_VALUE_PX
@@ -3348,21 +3368,33 @@ _TABLE_ROW_INNER = f"display:flex;align-items:center;gap:{_TABLE_GAP}rem"
 # correct and the text was unreadable.** A flexible cell would reintroduce it at every viewport
 # the arithmetic did not happen to match, so the width is declared and the row is built to fit.
 #
-# 📊 WHAT IT IS AND WHAT IT IS NOT: **110px at 1300px** against B108's 200px floor and A131's
-# sweep, which puts 200px at the point where the below band stops dropping to three labels.
-# **This is 45% under it.** See `_TABLE_LABEL_WIDTH` for where the room came from and why the
-# cards could not give any.
+# 📊 WHAT IT IS AND WHAT IT IS NOT. ⚠️ **CORRECTED IN R-893 — it read "110px … 45% under it",
+# which was true of B111 and stopped being true the moment B112 halved the gutter.** The width
+# is **118px at 1300px** against B108's 200px floor and A131's sweep, which puts 200px at the
+# point where the below band stops dropping to three labels: **41% under it.** See
+# `_TABLE_CELLS_EQUAL` for the alternative that clears the floor and what it costs, and
+# `_TABLE_LABEL_WIDTH` for where the room came from and why the cards could not give any.
 
 # ⚠️ R-854 IS DISSOLVED RATHER THAN ARGUED. The old band was 116px because it sat UNDER a 116px
 # value column governed by `1 (1 INT · 0 FUM)` — a composite string that cannot be plotted at
 # all. Its own column is governed by nothing but the chart, so the constraint is gone; what
 # replaces it is the room the cards need, which is a different and smaller number.
-# 🚨 `align-self:center`, AND THE RASTER IS WHAT FOUND IT. `_TABLE_ROW_INNER` aligns the row on
-# the TEXT BASELINE, which is right for three cells of text and wrong for a 56px picture: the
-# chart's baseline is its bottom edge, so it hung ABOVE its own row and read as belonging to the
-# row above it. **Every cell was present, the widths were exact and the DOM said nothing** — the
+# 🚨 THE CHART IS CENTRED ON ITS ROW, AND THE RASTER IS WHAT FOUND IT — but the fix is on
+# `_TABLE_ROW_INNER`, not here.
+#
+# ⚠️ **CORRECTED IN R-875. THIS COMMENT SAID `align-self:center` AND CLAIMED `_TABLE_ROW_INNER`
+# ALIGNS THE ROW ON THE TEXT BASELINE. Both halves were wrong**, and the comment 25 lines above
+# `_TABLE_ROW_INNER` says so correctly: **it has been `align-items:center` since B111.** Worse,
+# `align-self:center` on this cell alone is the technique B111 MEASURED AT 15px AND REJECTED —
+# the chart centred and the text stayed at the top of the row. **So a reader who found this
+# comment first was handed the rejected fix as the shipped one.**
+#
+# ✅ THE HISTORY WORTH KEEPING: baseline alignment is right for three cells of text and wrong
+# for a 56px picture, because an SVG's baseline is its bottom edge — so the chart hung ABOVE its
+# own row and read as belonging to the row above. **Every cell was present, the widths were
+# exact and the DOM said nothing.** Centring the ROW put the two centres 0px apart. It was the
 # third time on this panel that a picture caught what the markup could not (B103's invisible
-# `mark_rule`, B108's 2:1 squash, this).
+# `mark_rule`, B108's 2:1 squash, that).
 _TABLE_CHART_CELL = (f"width:{_TABLE_CHART_WIDTH}px;flex:none;min-width:0;"
                      f"display:flex;align-items:center")
 
@@ -3465,7 +3497,8 @@ def _table_header(away, home, title: str, colors=None) -> str:
         # beside it is doing the identifying work that a clipped word was failing at. The
         # monogram still comes off the full name — a two-letter fallback built from `UNA`
         # would be a worse answer than one built from `North Alabama`.
-        name = abbr or str(side.get("team_display") or "?")
+        name = (abbr or str(side.get("team_display") or "?")
+                if _TABLE_HEADER_SHOWS_NAME else "")
         cells.append(
             f"<span style='{_TABLE_VALUE_CELL};font-weight:700;display:flex;"
             f"align-items:center;justify-content:flex-end;gap:.3rem;"
@@ -3798,6 +3831,22 @@ _CARD_GROUPS = (
     ("Rushing", "rushing", 3),
     ("Receiving", "passing", 3),
     ("Defense", "defensive", 3),
+    # ✅ R-887. THE TWO MARC ASKED FOR IN v11, AT THE END, IN HIS ORDER RATHER THAN ALPHABETICAL:
+    # *"Quarterbacks (2), Rushing (3), Receiving (3), Defense (3), Punter (1), Placekicker (1)."*
+    #
+    # 📊 THE GATE WAS QUERIED BEFORE THESE WERE ADDED, not after (R-887): serving carries
+    # **punting 8,016 rows over 7,156 team-games** and **kicking 7,816 over 7,149**. A134's
+    # publish had shipped by the time this round ran; a group pointed at an empty panel would
+    # draw a row of empty boxes, which is the hole AC-G.11 forbids.
+    #
+    # ⚠️ AND THE DEPTH LITERAL IS `1` BECAUSE MARC SAID SO, NOT BECAUSE THE DATA GUARANTEES IT.
+    # Measured on serving: **810 punting team-games (11.3%) and 629 kicking (8.8%) carry more
+    # than one man** — maximum **3** for punting and **4** for kicking. `rank()` with a tie
+    # yields `1,2,3,3`, and all four rows pass `leader_rank <= 3`. **The slice takes rank 1; the
+    # renderer must not assume the relation hands it only one row, and a fixture returning four
+    # proves it does not.**
+    ("Punter", "punting", 1),
+    ("Placekicker", "kicking", 1),
 )
 
 # 🚨 R-849. THE GROUPS A MISSING PLAYER IS RESERVED IN, AND IT IS SCOPED RATHER THAN GENERAL.
@@ -4147,6 +4196,30 @@ def _card_half(rows, wanted: int, title: str, accent: str, side: str) -> str:
     the group, because naming a *first* quarterback that never existed invents the slot it is
     apologising for (R-856).
     """
+    # 🚨 R-887. AN ENTIRELY EMPTY HALF UNDER A DRAWN HEADER IS THE HOLE AC-G.11 FORBIDS, AND
+    # v11's SPANNING HEADER IS WHAT CREATED IT. A group is skipped only when NEITHER side has
+    # rows; when ONE side has a punter and the other does not, the header draws across both and
+    # the empty half was **blank — no card, no text, nothing a reader could tell from missing
+    # data.** Measured before it was fixed: `leader-cards=0 reserved=0 text=''`.
+    #
+    # 📊 IT IS NOT AN EDGE CASE AT THE NEW DEPTH. **153 of 7,309 sides (2.1%) have no punting
+    # row at all**, and at depth 1 "short" and "empty" are the same thing — which is why
+    # Rushing and Receiving never needed this and Punter does.
+    #
+    # ⚠️ AND IT IS A RULE RATHER THAN A LIST, so the next group added cannot forget it. It is
+    # deliberately NOT `_RESERVED_GROUPS`: that reserves a FIXED-HEIGHT slot to keep the two
+    # columns' card counts in register (R-849), which is a different job from naming an absence.
+    # **A sentence, not a held slot** — nothing below it needs the register, because these are
+    # the last two groups. ⚠️ AND `_RESERVED_GROUPS` IS EXCLUDED EXPLICITLY: a side with no
+    # quarterback gets R-856's block spanning both slots, which already names the absence and
+    # holds the height. Letting this branch take that case replaced an 84px block with one line
+    # and put every group below it out of register — caught by
+    # `test_a_side_with_NO_QUARTERBACK_gets_ONE_block_and_NOT_a_FIRST_and_a_SECOND`.
+    if not rows and title not in _RESERVED_GROUPS:
+        return (f"<div data-cfdb='card-half' data-side='{side}' "
+                f"style='flex:1;min-width:0'>"
+                f"<div style='font-size:.7rem;opacity:.45;padding:.3rem 0'>"
+                f"No {title.lower()} recorded.</div></div>")
     drawn = "".join(_leader_card(r, accent=accent) for r in rows)
     if title in _RESERVED_GROUPS and len(rows) < wanted:
         if rows:

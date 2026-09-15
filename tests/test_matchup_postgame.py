@@ -127,6 +127,12 @@ _POST_GAME_PANELS = {
     # read off `srv_game_team_leader_in_this_game`, not copied from the prompt. `stat_1_format`
     # is `pair`, the same format `Comp-Att` uses, which is why it needed no new page branch.
     "defensive": (("Solo-Ast", "pair"), ("Tackles", "integer"), ("TFL", "integer")),
+    # ✅ R-887. A134's TWO PANELS, IN THE SHAPE SERVING ACTUALLY PUBLISHES THEM — read off
+    # `srv_game_team_leader_in_this_game`, not copied from the prompt. ⚠️ `kicking`'s slot 1 is
+    # a **`pair`**, the same format `Comp-Att` and `Solo-Ast` already use, which is why neither
+    # panel needed a new branch in the renderer.
+    "punting": (("Yards", "integer"), ("Punts", "integer"), ("Avg", "decimal_1")),
+    "kicking": (("FG", "pair"), ("Kicks", "integer"), ("Points", "integer")),
 }
 
 # 🚨 A128's NAMED ANCHOR, AND IT IS THE CASE THE SOLO COLUMN EXISTS FOR — read live from
@@ -170,6 +176,28 @@ def _post_game_leaders(**overrides):
                     "stat_3_label": l3, "stat_3_format": f3,
                     "stat_3_value": 4.5 if f3 == "decimal_1" else 2.0,
                     "stat_3_value_secondary": None})
+        # ✅ R-887. THE TWO SPECIAL-TEAMS PANELS, AT DEPTH 1 — and they are in the fixture
+        # because WITHOUT them the group-order test asserts only the four groups the fixture
+        # happens to carry. **A tuple added to the page and not to the fixture is a group no
+        # test can see**, which is §6's first failure mode wearing a different hat.
+        for panel, surname in (("punting", "Pace"), ("kicking", "Boot")):
+            (p1, f1), (p2, f2), (p3, f3) = _POST_GAME_PANELS[panel]
+            rows.append({
+                "team_id": team_id, "panel": panel, "leader_rank": 1,
+                "tied_players": 1, "qualified_players": 1,
+                "player_id": f"p{team_id}{panel[:2]}1", "player_name": f"{who} {surname}",
+                "player_slug": f"{who}-{surname}".lower(),
+                "jersey": 90, "position": "K" if panel == "kicking" else "P",
+                "class_year_display": "JR",
+                "stat_1_label": p1, "stat_1_format": f1,
+                "stat_1_value": 2.0 if f1 == "pair" else 180.0,
+                "stat_1_value_secondary": 3.0 if f1 == "pair" else None,
+                "stat_2_label": p2, "stat_2_format": f2,
+                "stat_2_value": 4.0, "stat_2_value_secondary": None,
+                "stat_3_label": p3, "stat_3_format": f3,
+                "stat_3_value": 45.0 if f3 == "decimal_1" else 8.0,
+                "stat_3_value_secondary": None})
+
         (dl1, df1), (dl2, df2), (dl3, df3) = _POST_GAME_PANELS["defensive"]
         for rank, (surname, solo, ast_, tackles, tfl) in enumerate(_DEFENSIVE_ANCHOR, start=1):
             rows.append({
@@ -856,7 +884,12 @@ def test_the_cards_are_ONE_CONTINUOUS_COLUMN_with_every_group_drawn_ONCE(panel):
     region = _card_region(run(_both())[0])
     assert region, "no card region was drawn at all"
     groups = _groups_in(region)
-    assert groups == ["Quarterback", "Rushing", "Receiving", "Defense"], (
+    # ⚠️ ALL SIX SINCE R-887, AND IN MARC'S ORDER RATHER THAN ALPHABETICAL. The two
+    # special-teams groups go at the END — *"Quarterbacks (2), Rushing (3), Receiving (3),
+    # Defense (3), Punter (1), Placekicker (1)"* — and asserting the LIST rather than a set is
+    # what makes the order part of the claim.
+    assert groups == ["Quarterback", "Rushing", "Receiving", "Defense",
+                      "Punter", "Placekicker"], (
         f"the card groups are {groups} — v11 asks for one continuous top-down run, in the "
         f"order Marc listed, with each group drawn exactly once")
     # 🚨 EVERY GROUP EXACTLY ONCE. A page that still drew the cards per section would repeat
@@ -948,9 +981,13 @@ def test_ONE_quarterback_slot_pair_and_THREE_of_each_other_group(panel):
     away = _side_cards(region, "away")
     # ⚠️ `_cards_in` COUNTS DRAWN CARDS ONLY — a reserved slot carries its own marker, so it is
     # deliberately not one of these. The reserved slot is asserted by its text below.
-    assert len(_cards_in(away)) == 10, (
-        f"the away column should draw one quarterback, three rushers, three receivers and "
-        f"three defenders — got {len(_cards_in(away))} cards")
+    # ⚠️ TWELVE SINCE R-887: one quarterback, three rushers, three receivers, three defenders,
+    # one punter, one placekicker. **The count moved because the page gained two groups, which
+    # is the change being asserted** — and the reserved quarterback slot is still not one of
+    # these, because a reserved slot carries its own marker.
+    assert len(_cards_in(away)) == 12, (
+        f"the away column should draw one quarterback, three rushers, three receivers, three "
+        f"defenders, a punter and a placekicker — got {len(_cards_in(away))} cards")
     assert _plain(away).count("No second quarterback recorded") == 1, (
         f"the missing second quarterback is not reserved: {_plain(away)[:200]}")
     text = _plain(away)
@@ -978,8 +1015,8 @@ def test_a_SHORT_ROW_is_drawn_SHORT_and_reserves_no_hole(panel):
             if not (r["panel"] == "rushing" and r["leader_rank"] in (2, 3))]
     away_cards = _cards_in(_side_cards(_card_region(run(_both(), leaders=rows)[0]), "away"))
     adv_away = away_cards
-    assert len(adv_away) == 8, (
-        f"a one-rusher side should draw eight cards — QB, one rusher, three receivers, three "
+    assert len(adv_away) == 10, (
+        f"a one-rusher side should draw ten cards — QB, one rusher, three receivers, three "
         f"receivers — got {len(adv_away)}")
     text = _plain("".join(adv_away))
     assert "RB2" not in text
@@ -1675,6 +1712,101 @@ def test_each_SECTION_NAME_is_drawn_ONCE_with_a_BOLD_RULE(panel):
     rule = _module_constant("_SECTION_RULE")
     assert table.count(rule) == 2, (
         f"expected one bold section rule per section, found {table.count(rule)}")
+
+
+def test_a_DEPTH_ONE_group_handed_FOUR_ROWS_draws_ONE_and_does_not_break(panel):
+    """🚨 R-891. MARC'S `(1)` DESCRIBES THE USUAL CASE; IT IS NOT A GUARANTEE THE DATA MAKES.
+
+    📊 Measured on serving: **810 punting team-games (11.3%) and 629 kicking (8.8%) carry more
+    than one man**, with a maximum of **3** for punting and **4** for kicking. 🚨 **And
+    `leader_rank <= 3` is not a cap of three** — `rank()` with a tie yields `1,2,3,3`, so four
+    rows pass the filter. **The real case is game 401655657, team 2086: ranks 1, 2, 3, 3.**
+
+    ✅ THE DECISION IS *DRAW RANK 1 ONLY*, which is what Marc asked for — but the thing this
+    test exists for is that the page must not BREAK on four, and a fixture carrying one could
+    never tell. **`[:wanted]` is the slice; this proves the slice is what limits it rather than
+    an assumption about the relation.**
+
+    ⚠️ AND IT ASSERTS WHICH ONE SURVIVES, NOT MERELY HOW MANY. Taking the LAST of four would
+    also draw one card — and would show the reader the fourth-best kicker.
+    """
+    run, _ = panel
+    rows = [r for r in _post_game_leaders() if r["panel"] != "kicking"]
+    for rank, (name, tied) in enumerate(
+            (("Boot One", 1), ("Boot Two", 1), ("Boot Three", 2), ("Boot Four", 2)), start=1):
+        rows.append(dict(
+            next(r for r in _post_game_leaders() if r["panel"] == "kicking"),
+            team_id=96, leader_rank=min(rank, 3), tied_players=tied,
+            player_id=f"p96ki{rank}", player_name=name, qualified_players=4))
+    region = _card_region(run(_both(), leaders=rows)[0])
+    away = _side_cards(region, "away")
+    kicking = [c for c in _cards_in(away) if "Points" in c]
+    assert len(kicking) == 1, (
+        f"a depth-1 group handed four rows drew {len(kicking)} cards — the slice is what must "
+        f"limit it, not an assumption that the relation returns one row")
+    assert "Boot One" in _plain(kicking[0]), (
+        f"the card drawn is not rank 1 — the reader is being shown the wrong kicker: "
+        f"{_plain(kicking[0])[:120]}")
+    # ✅ AND THE GROUP AFTER IT STILL DRAWS, which is what would break if four rows overflowed
+    # into the next group's row rather than being sliced off.
+    assert _groups_in(region) == ["Quarterback", "Rushing", "Receiving", "Defense",
+                                  "Punter", "Placekicker"], (
+        f"the group run was disturbed by the extra rows: {_groups_in(region)}")
+
+
+def test_an_EMPTY_HALF_under_a_DRAWN_HEADER_names_its_own_absence(panel):
+    """🚨 R-887, AND v11's SPANNING HEADER IS WHAT CREATED IT.
+
+    A group is skipped only when NEITHER side has rows. When ONE side has a punter and the
+    other does not, the header draws **across both halves** and the empty one was blank — no
+    card, no text, nothing a reader could distinguish from missing data. **Measured before the
+    fix: `leader-cards=0 reserved=0 text=''`.** That is the hole AC-G.11 forbids.
+
+    📊 **153 of 7,309 sides (2.1%) carry no punting row**, and at depth 1 *short* and *empty*
+    are the same thing — which is why Rushing and Receiving never needed this and Punter does.
+
+    ⚠️ IT IS A SENTENCE RATHER THAN A HELD SLOT, and deliberately not `_RESERVED_GROUPS`: that
+    reserves a fixed 84px to keep the two columns' card COUNTS in register (R-849), a different
+    job. These are the last two groups, so nothing below them needs the register.
+    """
+    run, _ = panel
+    rows = [r for r in _post_game_leaders()
+            if not (r["panel"] == "punting" and r["team_id"] == 96)]
+    region = _card_region(run(_both(), leaders=rows)[0])
+    assert "Punter" in _groups_in(region), (
+        "the Punter header vanished — one side still has a punter, so it must draw")
+    away = _side_cards(region, "away")
+    assert "No punter recorded." in away, (
+        f"the empty half under the Punter header says nothing: {_plain(away)[-200:]!r}")
+    # 🚨 AND THE OTHER SIDE STILL DRAWS ITS CARD — a fix that silenced both halves would pass a
+    # "the absence is named" check while losing the punter who actually played.
+    home = _side_cards(region, "home")
+    assert "Punts" in home, "the side that HAS a punter lost its card"
+    assert "No punter recorded." not in home, "the side with a punter also claims it has none"
+
+
+def test_ONE_MAN_can_be_BOTH_punter_and_placekicker_and_that_is_not_a_defect(panel):
+    """⚠️ R-887. THE SAME NAME APPEARS IN TWO GROUPS, AND IT IS CORRECT — he has two jobs.
+
+    📊 Measured on serving: **380 of 7,156 punting team-games — 5.3%** have the same `player_id`
+    at rank 1 in both panels. The real case is **Aeron Burrell, North Carolina at TCU (game
+    401856766)**, which this round rendered rather than assumed.
+
+    🚨 IT IS TESTED BECAUSE THE OBVIOUS DEFENCE IS THE BUG. A renderer that de-duplicated cards
+    by player — or a test that asserted every card names a different man — would drop his second
+    card and leave a group with a header and no card under it.
+    """
+    run, _ = panel
+    rows = list(_post_game_leaders())
+    kick = next(r for r in rows if r["panel"] == "kicking" and r["team_id"] == 96)
+    pun = next(r for r in rows if r["panel"] == "punting" and r["team_id"] == 96)
+    kick.update(player_id=pun["player_id"], player_name=pun["player_name"])
+    away = _side_cards(_card_region(run(_both(), leaders=rows)[0]), "away")
+    cards = _cards_in(away)
+    assert len([c for c in cards if "Punts" in c]) == 1, "the punter card vanished"
+    assert len([c for c in cards if "Points" in c]) == 1, (
+        "the placekicker card vanished — the same man in two groups was de-duplicated, which "
+        "leaves a position header with nothing under it")
 
 
 def test_the_two_card_HALVES_are_EQUAL_WIDTH_and_AWAY_comes_FIRST(panel):
