@@ -291,9 +291,15 @@ HEAVY_SERVING = [
     # publishing cannot make a table fresher than its source endpoint.
     #
     # Size would have argued the same way rather than against it this time: 74,282 rows —
-    # a quarter of the 296,629 the retired `srv_game_team_leader` carried — because the grain
+    # a QUARTER of the 308,232 the retired `srv_game_team_leader` carried — because the grain
     # is capped at three players per team per panel per game instead of one row per
     # category/type pair.
+    #
+    # ⚠️ THAT FIGURE READ 296,629 UNTIL A133 (R-873). A132 CONTRACTED THAT TABLE AND MEASURED
+    # IT AT 308,232 IN THE SAME ROUND — and then rewrote the sentence around it while carrying
+    # the stale number through. A number restated in a rewrite is not re-measured by the
+    # rewrite, which is the whole failure this project keeps paying for, committed inside the
+    # commit that was fixing the same class two lines above.
     "srv_game_team_leader_through_prior_week",
     # A107/R-694. Each leader's participation share in the games he had already played — the
     # series behind B092's circles.

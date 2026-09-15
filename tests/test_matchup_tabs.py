@@ -352,6 +352,13 @@ def test_no_post_game_content_was_stubbed(page):
     # matching `srv_game_team_leader_in_this_game`, which is the relation the CARDS read and
     # which must keep being read. Three names in this file differ by a suffix (A128, and
     # `_game_leaders`'s own docstring warns about it); an unanchored grep conflates them.
+    #
+    # 🚨 AND SINCE A132 (R-841) THE RELATION ITSELF IS GONE — B110 removed the section, A132
+    # dropped the serving object, and only the mart remains. ✅ THE GUARD IS KEPT (R-873):
+    # reading that name would now raise `UndefinedTable` rather than return the wrong window,
+    # so this is a cheaper failure than it used to defend against — but `fct_player_game_stat`
+    # still carries every row, so the view is one file away from returning, and the `\b` above
+    # is what will keep it honest when it does.
     assert len(re.findall(r"from srv_game_team_leader\b", SOURCE)) == 0, \
         "the Game leaders section was removed (R-839) — nothing may read srv_game_team_leader"
     # ✅ AND THE POSITIVE HALF, so this cannot pass by the cards ALSO disappearing.
