@@ -27,9 +27,12 @@ import getpass
 import socket
 import gzip
 import os
+import shutil
 import subprocess
 import sys
-from typing import List, Optional
+import tempfile
+from pathlib import Path
+from typing import List, Optional, Union
 
 from dotenv import load_dotenv
 
@@ -85,14 +88,26 @@ QUICK_VERB_TIMEOUT_SECONDS = 120
 COMPRESS_LEVEL = 6
 
 
-def _publish_ssh(verb: str, *, stdin: bytes = b"") -> subprocess.CompletedProcess:
-    """Invoke one verb of the forced command. The remote side chooses nothing."""
-    timeout = PUBLISH_TIMEOUT_SECONDS if stdin else QUICK_VERB_TIMEOUT_SECONDS
+def _publish_ssh(verb: str, *, stdin: bytes = b"",
+                 stdin_file: Optional[Path] = None) -> subprocess.CompletedProcess:
+    """Invoke one verb of the forced command. The remote side chooses nothing.
+
+    🚨 `stdin_file` IS THE PATH THE RESTORE TAKES, AND IT EXISTS BECAUSE OF AN OOM.
+    A payload handed over as `bytes` has to exist in this process's memory in full; handed
+    over as a FILE, ssh reads it straight off the descriptor and this process holds none of
+    it. See `publish_schema` for the incident. `stdin` stays for the cheap verbs, which send
+    nothing or a few bytes.
+    """
+    command = ["ssh", "-i", PUBLISH_KEY, "-o", "BatchMode=yes",
+               "-o", "StrictHostKeyChecking=accept-new", PUBLISH_HOST, verb]
+    timeout = (PUBLISH_TIMEOUT_SECONDS if (stdin or stdin_file is not None)
+               else QUICK_VERB_TIMEOUT_SECONDS)
     try:
-        return subprocess.run(
-            ["ssh", "-i", PUBLISH_KEY, "-o", "BatchMode=yes",
-             "-o", "StrictHostKeyChecking=accept-new", PUBLISH_HOST, verb],
-            input=stdin, capture_output=True, timeout=timeout)
+        if stdin_file is not None:
+            with open(stdin_file, "rb") as payload:
+                return subprocess.run(command, stdin=payload,
+                                      capture_output=True, timeout=timeout)
+        return subprocess.run(command, input=stdin, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         # Raised, not returned: a timed-out publish must fail the task so the retry runs.
         # Returning a non-zero result would be indistinguishable from a remote refusal, and
@@ -434,8 +449,30 @@ def _local_psql_args() -> List[str]:
             "-U", cfg["user"], "-d", cfg["dbname"]]
 
 
-def dump_marts(marts: List[str], schema: str = MARTS_SCHEMA) -> bytes:
-    """pg_dump the named tables from one schema of the transform warehouse."""
+# How much the spooling copies move at a time. Big enough that the syscall count does not
+# matter, small enough that it is noise beside anything else this process holds.
+COPY_CHUNK = 1 << 20
+
+
+def _spool_dir() -> Optional[str]:
+    """Where the dump is spooled. Overridable, and NOT silently a RAM disk.
+
+    🚨 A127 found `/dev/shm` breaking a rebuild for exactly this reason: a tmpfs looks like
+    a directory and spends memory. The default is the platform temp directory, which is
+    disk-backed on the droplet (overlay on /dev/vda1, 43 GB free) and on a laptop.
+    """
+    return os.getenv("CFDB_PUBLISH_SPOOL_DIR") or None
+
+
+def dump_marts_to_file(marts: List[str], sink: Path,
+                       schema: str = MARTS_SCHEMA) -> int:
+    """pg_dump the named tables STRAIGHT TO DISK. Returns the bytes written.
+
+    🚨 THE DESTINATION IS A FILE AND NOT A RETURN VALUE, AND THAT IS THE WHOLE POINT.
+    `subprocess.run(capture_output=True)` accumulates the child's stdout in Python and then
+    joins it, so it peaks at roughly TWICE the dump — and the serving dump is now 1.67 GB
+    against a 3.9 GB droplet with 1.8 GB already in use. See `publish_schema`.
+    """
     table_args = []
     for mart in marts:
         table_args += ["-t", f"{schema}.{mart}"]
@@ -443,10 +480,36 @@ def dump_marts(marts: List[str], schema: str = MARTS_SCHEMA) -> bytes:
     flags = ["--clean", "--if-exists", "--no-owner", "--no-privileges"]
     command = [_pg_dump_binary()] + _local_psql_args() + flags + table_args
 
-    result = subprocess.run(command, capture_output=True, env=local_pg_env())
+    with open(sink, "wb") as handle:
+        result = subprocess.run(command, stdout=handle, stderr=subprocess.PIPE,
+                                env=local_pg_env())
     if result.returncode != 0:
         raise RuntimeError(f"pg_dump failed: {result.stderr.decode()[:400]}")
-    return result.stdout
+    return Path(sink).stat().st_size
+
+
+def _gzip_file(source: Path, target: Path) -> int:
+    """Compress one file into another a chunk at a time. Returns the compressed size.
+
+    ⚠️ NOT `gzip.compress(blob)`: that needs the whole input in memory AND allocates the
+    whole output beside it, which is the second of the two doublings that produced the OOM.
+    """
+    with open(source, "rb") as raw, gzip.open(target, "wb", COMPRESS_LEVEL) as packed:
+        shutil.copyfileobj(raw, packed, COPY_CHUNK)
+    return Path(target).stat().st_size
+
+
+def dump_marts(marts: List[str], schema: str = MARTS_SCHEMA) -> bytes:
+    """pg_dump the named tables and return them as bytes.
+
+    ⚠️ KEPT FOR CALLERS THAT WANT THE BYTES — nothing in the publish path does any more, and
+    nothing that handles the real serving dump should: 1.67 GB as a Python `bytes` is the
+    defect `dump_marts_to_file` exists to avoid.
+    """
+    with tempfile.TemporaryDirectory(prefix="cfdb-dump-", dir=_spool_dir()) as tmp:
+        sink = Path(tmp) / "dump.sql"
+        dump_marts_to_file(marts, sink, schema)
+        return sink.read_bytes()
 
 
 def remote_sql(statement: str) -> None:
@@ -468,8 +531,22 @@ def remote_sql(statement: str) -> None:
         raise RuntimeError(f"remote sql failed: {result.stderr.decode()[:400]}")
 
 
-def restore_to_serving(dump: bytes, schema: str = MARTS_SCHEMA) -> None:
-    """Stream the dump into the serving database over SSH."""
+def restore_to_serving(dump: Union[bytes, Path, str],
+                       schema: str = MARTS_SCHEMA) -> None:
+    """Stream the dump into the serving database over SSH.
+
+    🚨 `dump` IS A PATH IN THE PUBLISH PATH. Bytes are still accepted — a caller with a small
+    dump in hand should not have to spool it itself — but the real serving dump is 1.67 GB
+    and is never materialised. See `publish_schema` for the incident that moved it.
+    """
+    if isinstance(dump, (bytes, bytearray)):
+        with tempfile.TemporaryDirectory(prefix="cfdb-restore-", dir=_spool_dir()) as tmp:
+            spooled = Path(tmp) / "dump.sql"
+            spooled.write_bytes(dump)
+            restore_to_serving(spooled, schema)
+        return
+
+    source = Path(dump)
     # pg_dump -t emits no CREATE SCHEMA, so the target schema has to exist first.
     if _use_restricted():
         for verb in (f"ensure-schema {schema}", ):
@@ -478,22 +555,29 @@ def restore_to_serving(dump: bytes, schema: str = MARTS_SCHEMA) -> None:
                 raise RuntimeError(f"{verb} failed: {result.stderr.decode()[:400]}")
         # COMPRESS, BECAUSE THE WIRE IS THE BOTTLENECK AND THE WIRE IS WHAT FAILS.
         #
-        # Measured: the dump is 334 MB, the link to the droplet runs at about 20 Mbit/s, and
-        # a healthy publish takes 135 seconds — which is, to within a few seconds, exactly
-        # the time needed to upload 334 MB at that rate. The database work is not the cost;
-        # the upload is essentially all of it.
+        # Measured in August: the dump was 334 MB, the link to the droplet runs at about
+        # 20 Mbit/s, and a healthy publish took 135 seconds — which is, to within a few
+        # seconds, exactly the time needed to upload 334 MB at that rate. The database work
+        # is not the cost; the upload is essentially all of it.
+        #
+        # ⚠️ THE 334 MB IS STALE AND IS KEPT ONLY AS THE HISTORY. A137 measured the same dump
+        # at 1,671,065,249 bytes — 1.67 GB, five times the figure this comment was written
+        # against. The ratio argument still holds; the absolute number does not.
         #
         # That is why this job is fragile. When the link is busy the same publish takes 13 to
         # 17 minutes, which is long enough for Airflow to disown the task as a zombie and
         # kill it mid-stream. Postgres then logs a truncated COPY at a different random line
         # every time, which reads like data corruption and is really just a severed pipe.
         #
-        # gzip -6 costs about four seconds of CPU and takes 334 MB to 59 MB. Same bytes land,
-        # same single transaction wraps them; the window that was failing gets 5.6x smaller.
-        payload = gzip.compress(dump, COMPRESS_LEVEL)
-        print(f"  compressed to {len(payload) / 1e6:.1f} MB "
-              f"({len(dump) / max(len(payload), 1):.1f}x) for transfer")
-        result = _publish_ssh(f"restore-gz {schema}", stdin=payload)
+        # gzip -6 costs a few seconds of CPU per hundred MB. Same bytes land, same single
+        # transaction wraps them; the window that was failing gets about 5.6x smaller.
+        with tempfile.TemporaryDirectory(prefix="cfdb-payload-", dir=_spool_dir()) as tmp:
+            payload = Path(tmp) / "payload.gz"
+            packed = _gzip_file(source, payload)
+            raw = source.stat().st_size
+            print(f"  compressed to {packed / 1e6:.1f} MB "
+                  f"({raw / max(packed, 1):.1f}x) for transfer")
+            result = _publish_ssh(f"restore-gz {schema}", stdin_file=payload)
         if result.returncode != 0:
             raise RuntimeError(f"restore failed: {result.stderr.decode()[:400]}")
         return
@@ -505,10 +589,11 @@ def restore_to_serving(dump: bytes, schema: str = MARTS_SCHEMA) -> None:
         'docker compose exec -T postgres psql -v ON_ERROR_STOP=1 '
         '-U "$SERVING_PG_USER" -d "$SERVING_PG_DB"'
     )
-    result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", DROPLET, remote],
-        input=dump, capture_output=True,
-    )
+    with open(source, "rb") as handle:
+        result = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", DROPLET, remote],
+            stdin=handle, capture_output=True,
+        )
     if result.returncode != 0:
         raise RuntimeError(f"restore failed: {result.stderr.decode()[:400]}")
 
@@ -564,11 +649,44 @@ def verify(marts: List[str], schema: str = MARTS_SCHEMA) -> None:
 
 
 def publish_schema(tables: List[str], schema: str) -> None:
-    """Dump, restore, grant and verify one schema."""
+    """Dump, restore, grant and verify one schema.
+
+    🚨 THE DUMP GOES TO DISK AND NEVER INTO MEMORY — A137, cfdb-main-R-914, and the reason is
+    an outage rather than tidiness.
+
+    📊 WHAT HAPPENED. On 2026-09-15 `cfbd_pregame_refresh.publish_to_serving` was killed by
+    the kernel on all three attempts, at the same point every time: the marts publish
+    finished, `[serving] publishing 34 table(s)` printed, and the task died with SIGKILL.
+    Airflow reported it as "Process terminated by signal. Likely out of memory error (OOM)."
+    ⚠️ NO dbt TEST FAILED — that run captured 498 pass, 4 warn, 0 fail — so nothing about the
+    data was wrong and nothing about the gate was wrong. The publisher simply could not fit.
+
+    📊 THE ARITHMETIC, MEASURED RATHER THAN REASONED:
+
+        the serving dump                 1,671,065,249 bytes (1.67 GB)
+        the droplet                      3.9 GB total, 1.8 GB already in use, 2.1 GB free
+        `capture_output=True`            accumulates the child's stdout in a list and JOINS
+                                         it, so it peaks at about TWICE the dump
+        `gzip.compress(dump)`            allocates the compressed copy WHILE the dump is
+                                         still alive
+
+    ⚠️ TWO INDEPENDENT DOUBLINGS ON A 1.67 GB PAYLOAD. There is no droplet size at which
+    holding the whole dump in memory to hand it to a pipe is the right shape, which is why
+    this is a code fix and not a capacity question.
+
+    ✅ AND IT EXPLAINS WHY THE TWO-HOURLY PUBLISH KEPT WORKING: `hot=True` ships the 25
+    fast-moving views, 569 MB against the full 1,527 MB, and that fitted. The failure was
+    specific to the full publish, which is what the three weekly DAGs run.
+
+    Nothing else about the publish changes: same tables, same bytes on the wire, same gzip,
+    same single remote transaction, same row-count verification.
+    """
     print(f"\n[{schema}] publishing {len(tables)} table(s)")
-    dump = dump_marts(tables, schema)
-    print(f"  dumped {len(dump) / 1e6:.1f} MB")
-    restore_to_serving(dump, schema)
+    with tempfile.TemporaryDirectory(prefix="cfdb-publish-", dir=_spool_dir()) as tmp:
+        spooled = Path(tmp) / f"{schema}.sql"
+        written = dump_marts_to_file(tables, spooled, schema)
+        print(f"  dumped {written / 1e6:.1f} MB")
+        restore_to_serving(spooled, schema)
     grant_read_access(tables, schema)
     print("  restored; verifying")
     verify(tables, schema)

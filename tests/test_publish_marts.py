@@ -9,6 +9,7 @@ has committed.
 These pin the two properties that make that impossible rather than unlikely.
 """
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -121,18 +122,104 @@ def test_the_dump_is_compressed_before_it_crosses_the_wire(monkeypatch):
     sent = {}
     monkeypatch.setattr(publish_marts, "PUBLISH_KEY", "/tmp/key")
     monkeypatch.setattr(publish_marts, "PUBLISH_HOST", "user@host")
-    monkeypatch.setattr(publish_marts, "_publish_ssh",
-                        lambda verb, stdin=b"": sent.update(verb=verb, stdin=stdin)
-                        or subprocess.CompletedProcess([], 0, b"", b""))
+
+    def _record(verb, stdin=b"", stdin_file=None):
+        # A137: the restore now hands ssh a FILE rather than a buffer. Read it here so the
+        # assertion below still checks the bytes that would cross the wire.
+        payload = Path(stdin_file).read_bytes() if stdin_file is not None else stdin
+        sent.update(verb=verb, stdin=payload, streamed=stdin_file is not None)
+        return subprocess.CompletedProcess([], 0, b"", b"")
+
+    monkeypatch.setattr(publish_marts, "_publish_ssh", _record)
 
     body = b"COPY serving.srv_game FROM stdin;\n" + b"row\tdata\n" * 5000
     publish_marts.restore_to_serving(body, "serving")
 
     assert sent["verb"] == "restore-gz serving", (
-        "the plain `restore` verb sends 334 MB uncompressed over the link that is already "
+        "the plain `restore` verb sends the dump uncompressed over the link that is already "
         "the failure point")
+    assert sent["streamed"], (
+        "A137: the payload must reach ssh as a file. Handing it over as bytes is the OOM "
+        "that took the weekly publish down on 2026-09-15")
     assert gzip.decompress(sent["stdin"]) == body, "the remote must receive the same bytes"
     assert len(sent["stdin"]) < len(body), "compression must actually shrink the payload"
+
+
+# --- the dump must never become a Python object (A137, cfdb-main-R-914) --------------------
+
+def test_the_dump_never_becomes_a_python_object(tmp_path, monkeypatch):
+    """🚨 THE OOM THAT TOOK THE WEEKLY PUBLISH DOWN, PINNED AS A MEASUREMENT.
+
+    On 2026-09-15 `cfbd_pregame_refresh.publish_to_serving` was SIGKILLed on all three
+    attempts at `[serving] publishing 34 table(s)`. No dbt test failed — that run captured
+    498 pass, 4 warn, 0 fail. The serving dump measures 1,671,065,249 bytes and the droplet
+    has 3.9 GB with 1.8 GB already in use, and the old code held the dump as `bytes` twice
+    over: `capture_output=True` peaks at about 2x while joining the chunks, then
+    `gzip.compress(dump)` allocates the compressed copy beside the live original.
+
+    ⚠️ THIS IS A REAL MEASUREMENT AND NOT A STRUCTURAL ONE. It runs a fake `pg_dump` that
+    emits 64 MB and asserts the Python heap never grows to hold it. Under the old
+    implementation the peak was the whole payload; under this one it is one chunk.
+    """
+    import tracemalloc
+
+    payload_mb = 64
+    faker = tmp_path / "fake_pg_dump.py"
+    faker.write_text(
+        "import sys\n"
+        "block = b'x' * (1 << 20)\n"
+        f"for _ in range({payload_mb}):\n"
+        "    sys.stdout.buffer.write(block)\n"
+    )
+    monkeypatch.setattr(publish_marts, "_pg_dump_binary", lambda: sys.executable)
+    monkeypatch.setattr(publish_marts, "_local_psql_args", lambda: [str(faker)])
+    monkeypatch.setattr(publish_marts, "local_pg_env", dict)
+
+    sink = tmp_path / "dump.sql"
+    tracemalloc.start()
+    written = publish_marts.dump_marts_to_file(["srv_game"], sink, "serving")
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert written == payload_mb * (1 << 20), "the whole dump must reach the file"
+    assert peak < 8 * (1 << 20), (
+        f"the dump was held in memory: peak {peak / 1e6:.1f} MB for a "
+        f"{payload_mb} MB dump. capture_output=True is how the publish died")
+
+
+def test_the_compressor_streams_too(tmp_path):
+    """The second doubling. `gzip.compress(blob)` needs the input in memory and allocates the
+    output beside it; fixing only the dump would have moved the OOM four lines down."""
+    import gzip
+    import tracemalloc
+
+    source = tmp_path / "big.sql"
+    with open(source, "wb") as handle:
+        for _ in range(64):
+            handle.write(b"COPY serving.srv_game FROM stdin;\n" * 16384)
+    target = tmp_path / "big.sql.gz"
+
+    tracemalloc.start()
+    packed = publish_marts._gzip_file(source, target)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert packed == target.stat().st_size
+    assert gzip.decompress(target.read_bytes()) == source.read_bytes(), "same bytes"
+    assert peak < 8 * (1 << 20), (
+        f"the compressor held the payload: peak {peak / 1e6:.1f} MB for a "
+        f"{source.stat().st_size / 1e6:.1f} MB input")
+
+
+def test_the_spool_is_not_a_ram_disk_by_default(monkeypatch):
+    """⚠️ A127 found `/dev/shm` breaking a rebuild for exactly this reason: a tmpfs looks like
+    a directory and spends memory. Spooling 1.67 GB into one would reproduce the OOM with the
+    fix in place, which is the worst possible outcome — it would look fixed."""
+    monkeypatch.delenv("CFDB_PUBLISH_SPOOL_DIR", raising=False)
+    assert publish_marts._spool_dir() is None, (
+        "the default must be the platform temp directory, which is disk-backed")
+    monkeypatch.setenv("CFDB_PUBLISH_SPOOL_DIR", "/var/tmp")
+    assert publish_marts._spool_dir() == "/var/tmp", "the override must be honored"
 
 
 def test_the_remote_understands_the_compressed_verb():
