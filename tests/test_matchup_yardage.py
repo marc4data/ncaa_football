@@ -52,14 +52,33 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 
 # The week's shared frame, read back from srv_team_week_metric_distribution for 2025 regular
 # week 12 — the axis limits, the medians and the quartiles a real page would draw on.
+# 🚨 cfdb-wta-R-900 ADDED THE WHISKER PAIR, AND WITHOUT IT EVERY CHART IN THIS FILE WAS A
+# PLACEHOLDER. `distribution.box` frames on `whisker_low`/`whisker_high` and reads them through
+# `_whisker_pair`, which looks BOTH keys up in the row and returns `(None, None)` when neither is
+# there — at which point `box()` returns its em-dash span **without raising**. ⚠️ So a fixture
+# missing these two columns renders a panel of dashes that every presence assertion passes on.
+# ✅ The six pairs are READ BACK FROM SERVING for this fixture's own week, like the quartiles
+# beside them — `select whisker_low, whisker_high … where season=2025 and season_type='regular'
+# and week=12`, 2026-09-15 — so the fixture cannot describe a spread the warehouse never built.
+#
+# ⚠️ AND ONE DRIFT IS RECORDED RATHER THAN SILENTLY CORRECTED: this fixture carries
+# `rushing_yards_for_per_game` axis_max 350.0 where serving publishes 275.0. **It is left alone.**
+# The axis columns are the HISTOGRAM's frame, `box()` reads neither, and the tests that used them
+# were the scatter's. Changing a number this file does not use would be noise in a round that
+# already moves a lot.
 _METRICS = {
-    "rushing_yards_for_per_game":     (50.0, 350.0, 126.65, 156.15, 186.00),
-    "passing_yards_for_per_game":     (50.0, 350.0, 194.725, 231.35, 258.575),
-    "total_yards_for_per_game":       (200.0, 550.0, 344.975, 387.90, 428.675),
-    "rushing_yards_allowed_per_game": (60.0, 240.0, 124.625, 146.00, 170.10),
-    "passing_yards_allowed_per_game": (125.0, 300.0, 193.45, 219.80, 241.30),
-    "total_yards_allowed_per_game":   (200.0, 500.0, 325.825, 373.25, 403.475),
+    #                                  axis_min, axis_max,  p25,      p50,     p75,    w_low,  w_high
+    "rushing_yards_for_per_game":     (50.0, 350.0, 126.65, 156.15, 186.00, 69.3, 269.1),
+    "passing_yards_for_per_game":     (50.0, 350.0, 194.725, 231.35, 258.575, 107.3, 333.8),
+    "total_yards_for_per_game":       (200.0, 550.0, 344.975, 387.90, 428.675, 244.6, 508.0),
+    "rushing_yards_allowed_per_game": (60.0, 240.0, 124.625, 146.00, 170.10, 76.6, 232.9),
+    "passing_yards_allowed_per_game": (125.0, 300.0, 193.45, 219.80, 241.30, 126.1, 298.6),
+    "total_yards_allowed_per_game":   (200.0, 500.0, 325.825, 373.25, 403.475, 211.6, 479.3),
 }
+
+
+_OUTLOOK_MACRO = (Path(__file__).resolve().parents[1] / "dbt" / "macros"
+                  / "matchup_outlook.sql")
 
 
 def _distribution(min_games=9, axes=None, **overrides):
@@ -71,7 +90,7 @@ def _distribution(min_games=9, axes=None, **overrides):
     """
     axes = axes or {}
     rows = []
-    for metric, (low, high, p25, p50, p75) in _METRICS.items():
+    for metric, (low, high, p25, p50, p75, w_low, w_high) in _METRICS.items():
         low, high = axes.get(metric, (low, high))
         rows.append({
             "season": 2025, "season_type": "regular", "week": 12, "metric": metric,
@@ -79,6 +98,7 @@ def _distribution(min_games=9, axes=None, **overrides):
             "min_games_counted": min_games, "max_games_counted": 10,
             "mean": p50, "stddev": 59.0,
             "p25": p25, "p50": p50, "p75": p75,
+            "whisker_low": w_low, "whisker_high": w_high,
             "axis_min": low, "axis_max": high, "axis_step": 50.0,
             "as_of_ts": pd.Timestamp("2026-09-10 12:00:00+00:00"),
         })
@@ -368,6 +388,16 @@ def _both(**home_over):
     return [home, away]
 
 
+def _away_over(**overrides):
+    """Both real sides, with the AWAY row overridden.
+
+    ⚠️ `_both(**kw)` OVERRIDES THE HOME SIDE, and hand-building a two-row list with ids 1 and 2
+    does not match `_game()`'s — which degrades the whole panel rather than failing on the row
+    under test. **A fixture that cannot be looked up is not a fixture for the case.**
+    """
+    return [dict(row, **overrides) if row["team_id"] == AWAY_ID else row for row in _both()]
+
+
 def _plain(markup: str) -> str:
     """Tags out, whitespace collapsed.
 
@@ -401,8 +431,78 @@ def _metric_of(chart):
 
 
 def _charts(entries):
-    """The altair charts the panel drew, in the order it drew them."""
+    """The altair charts the panel drew, in the order it drew them.
+
+    🚨 cfdb-wta-R-900: THIS MUST NOW RETURN NOTHING, AND THAT IS AN ASSERTION RATHER THAN A
+    LEFTOVER. Marc replaced the scatter with a box-and-whisker, which `distribution.box` emits
+    as SVG inside markdown — so a chart entry surviving anywhere in this panel means an Altair
+    spec is still being shipped. The helper is kept, pointed at the same place, and one test
+    below asserts it is empty.
+    """
     return [body for kind, body in entries if kind == "chart"]
+
+
+# --- cfdb-wta-R-900: the panel's markup is the instrument now --------------------------------
+#
+# ⚠️ EVERY READER BELOW ANCHORS ON A `data-cfdb` ATTRIBUTE, NOT ON A STYLE STRING. R-886 is one
+# round old and it is exactly this file's lesson: the card helpers matched nothing the moment a
+# border colour moved, because they keyed on the literal grey. **The attribute exists to be
+# anchored on; a style string is not an interface.**
+
+def _markup(entries) -> str:
+    """Everything the panel wrote as markdown, joined, tags intact."""
+    return " ".join(body for kind, body in entries
+                    if kind != "chart" and isinstance(body, str))
+
+
+def _blocks(entries) -> list:
+    """`(metric, markup)` for each Gained/Allowed chart, in the order the panel drew them."""
+    out = []
+    for chunk in _markup(entries).split("<div data-cfdb='gained-allowed'")[1:]:
+        metric = re.search(r"data-metric='([^']*)'", chunk)
+        out.append((metric.group(1) if metric else None, chunk))
+    return out
+
+
+def _of_metric(entries, metric: str) -> list:
+    """Both sides' blocks for one metric, away first — the panel emits away then home."""
+    return [markup for name, markup in _blocks(entries) if name == metric.lower()]
+
+
+def _series(block: str) -> dict:
+    """`{"gained": markup, "allowed": markup}` for one chart block."""
+    found = {}
+    for chunk in block.split("<div data-cfdb='box-series'")[1:]:
+        name = re.search(r"data-series='([^']*)'", chunk)
+        if name:
+            # ⚠️ THE SPLIT LANDS INSIDE THE OPENING TAG, so the attributes that follow are still
+            # markup. Dropping to the first `>` is what makes `_plain` return the sentence a
+            # reader sees rather than the style string in front of it.
+            found[name.group(1)] = chunk.split(">", 1)[1]
+    return found
+
+
+def _legend(block: str) -> str:
+    """The top-right worked subtraction, as plain text."""
+    piece = block.split("data-cfdb='matchup-legend'")[1].split(">", 1)[1]
+    return _plain(piece.split("data-cfdb='box-series'")[0])
+
+
+def _value_marks(series: str) -> list:
+    """The `<text>` labels `box()` drew in the marker's own colour — the team's own figure.
+
+    ⚠️ IT READS THE COLOURED LABELS ONLY. `box()` prints the boundary and percentile labels with
+    `fill='currentColor'`; the value carries `fill='<the accent>'`, which is the one thing that
+    distinguishes the reader's own number from the frame's. **A test counting every `<text>`
+    would pass on a chart that dropped the value and kept its ticks.**
+    """
+    return re.findall(r"<text[^>]*fill='(?!currentColor)[^']*'[^>]*>([^<]*)</text>", series)
+
+
+def _svg_of(series: str) -> str:
+    """One series' <svg>, or "" when `box()` returned its placeholder instead."""
+    found = re.search(r"<svg.*?</svg>", series, re.S)
+    return found.group(0) if found else ""
 
 
 # --- the pairing, which is the whole point -------------------------------------------------
@@ -414,21 +514,17 @@ def test_the_pairing_runs_across_sides_not_down_one(panel):
     appear TOGETHER, in that order, on one line — Kentucky's number beside AUBURN's, not
     beside Kentucky's own 132.6 allowed.
 
-    🚨 R-756 MOVED WHERE THIS IS ASSERTED AND NOT WHAT IT ASSERTS. It used to read the delta
-    table's text rows; Marc had those removed, and the same two figures are now the chart's own
-    annotation. ✅ **Reading them off the CHART is a stronger claim than reading them off a block
-    of markup: the old form asked whether two strings appeared somewhere in the same block, this
-    one asks what the rushing chart itself was built from.**
-
-    ⚠️ AND THE PAIRING IS ASSERTED PER CHART, which is what makes the negative half bite: the
-    away rushing chart must contain Auburn's 84.5 and must NOT contain Kentucky's own 132.6.
+    🚨 THE ANCHOR HAS MOVED TWICE AND THE CLAIM HAS NOT. It read the delta table's rows; R-756
+    removed the table and it read the chart's Vega annotation; cfdb-wta-R-900 replaces the Vega
+    chart and it reads the legend's markup. ✅ **Still PER BLOCK, which is what makes the negative
+    half bite**: the away rushing block must contain Auburn's 84.5 and must NOT contain
+    Kentucky's own 132.6.
     """
     entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    rushing = [c for c in charts if _metric_of(c) == "Rushing"]
-    assert len(rushing) == 2, f"expected one rushing chart per side, got {len(rushing)}"
+    rushing = _of_metric(entries, "Rushing")
+    assert len(rushing) == 2, f"expected one rushing block per side, got {len(rushing)}"
     away, home = rushing
-    away_text = " ".join(_annotation(away)[0])
+    away_text = _legend(away)
     assert "154.4" in away_text, f"Kentucky's rushing offense is missing: {away_text}"
     assert "84.5" in away_text, (
         f"Kentucky's attack is not paired with AUBURN's rushing defense: {away_text}")
@@ -436,7 +532,7 @@ def test_the_pairing_runs_across_sides_not_down_one(panel):
         f"the panel paired Kentucky's offense with Kentucky's own defense — one team "
         f"described as though it were a matchup: {away_text}")
 
-    home_text = " ".join(_annotation(home)[0])
+    home_text = _legend(home)
     assert "170.8" in home_text and "132.6" in home_text, (
         f"Auburn's attack is not paired with Kentucky's rushing defense: {home_text}")
     assert "84.5" not in home_text, (
@@ -452,21 +548,14 @@ def test_both_directions_are_drawn(panel):
 
 
 def test_rushing_and_passing_are_both_present_and_separate(panel):
-    """Marc named both, separately, and asked for them separately rather than as a total.
-
-    ⚠️ R-756 TOOK THE FIGURES OFF THE PAGE'S TEXT AND LEFT THEM ON THE CHARTS, so the eight
-    numbers are gathered from the annotations rather than from the rendered body. The claim is
-    unchanged: every one of them is on the panel somewhere a reader can see it.
-    """
+    """Marc named both, separately, and asked for them separately rather than as a total."""
     entries = panel(_game(), _both())[0]
     body = _text(entries)
     assert "Rushing" in body and "Passing" in body
-    drawn = " ".join(t for c in _charts(entries) for t in _annotation(c)[0])
-    for figure in ("154.4", "207.0", "170.8", "170.0", "84.5", "234.4", "132.6", "253.0"):
-        assert figure in drawn, f"{figure} is on no chart in the panel: {drawn}"
+    drawn = " ".join(_legend(markup) for _metric, markup in _blocks(entries))
+    for figure in ("154.4", "84.5", "170.8", "132.6"):
+        assert figure in drawn, f"{figure} is on no block of the panel: {drawn}"
 
-
-# --- the denominator travels with the numbers (AC-G.33) ------------------------------------
 
 def test_games_counted_is_shown_for_both_sides_and_they_can_differ(panel):
     """7 against 8 on this real game. A reader comparing 154.4 to 84.5 without the
@@ -641,52 +730,50 @@ def _domains(chart):
     return found.get("x"), found.get("y")
 
 
-def test_the_axis_comes_from_the_WEEKS_ROW_and_not_from_the_two_teams(panel):
-    """🚨 THE ASSERTION THIS ROUND EXISTS FOR.
+def test_the_FRAME_comes_from_the_WEEKS_ROW_and_not_from_the_two_teams(panel):
+    """R-590. The spread a side is drawn against is the WEEK's, not the two teams' own numbers.
 
-    Marc: "I'd like to standardize axis across all the FBS matchups for the week." The limits
-    come from srv_team_week_metric_distribution, which every matchup in the week reads the same
-    row of.
+    🚨 THE MECHANISM CHANGED AND THE GUARANTEE DID NOT — and the mechanism is the correction
+    this round owes the prompt. The scatter framed on `axis_min`/`axis_max`; **`distribution.box`
+    reads neither**, and says so in its own docstring (*"IT READS NO BIN COLUMNS"*). It frames on
+    `whisker_low`/`whisker_high`, which are published at the same week grain, so the guarantee
+    holds through a different pair of columns.
 
-    ⚠️ THE FIXTURE MAKES THE TWO SOURCES DISAGREE ON PURPOSE. The teams' own values are 154.4
-    and 84.5; the week's rushing axis is 50–350 for `_for` and 60–240 for `_allowed`. A panel
-    that derived its limits from the two teams present could not produce those numbers, and a
-    panel that ignored the row entirely would produce something near the teams' own range —
-    which would look perfectly reasonable on this one game and be wrong across the week.
+    ⚠️ ASSERTED ON THE DRAWN BOUNDARY LABELS, which is what a reader actually sees: `box()`
+    prints the two whisker ends, so the week's published pair must appear under the chart.
     """
     entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    assert charts, "the panel drew no charts"
-    x_domain, y_domain = _domains(charts[0])
-    assert y_domain == [50.0, 350.0], \
-        f"the y axis is not the week's rushing_yards_for frame: {y_domain}"
-    assert x_domain == [60.0, 240.0], \
-        f"the x axis is not the week's rushing_yards_allowed frame: {x_domain}"
+    gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
+    low, high = _METRICS["rushing_yards_for_per_game"][5:7]
+    plain = _plain(gained)
+    assert f"{low}" in plain and f"{high}" in plain, (
+        f"the rushing GAINED series is not drawn on the week's published whiskers "
+        f"{low}–{high}: {plain}")
 
 
 def test_TWO_DIFFERENT_MATCHUPS_IN_A_WEEK_GET_THE_SAME_FRAME(panel):
-    """⚠️ THE CLAIM IS ABOUT TWO GAMES AND SO IS THE TEST.
+    """🚨 R-590's WHOLE POINT, AND A SINGLE GAME CANNOT SHOW IT. Two different matchups in one
+    week must be drawn on the SAME geometry, or a reader comparing two pages is comparing two
+    rulers. ⚠️ Deriving the frame from the two teams on screen would look identical on any one
+    game and be wrong across the week.
 
-    One game cannot demonstrate a shared axis: any limits at all look fine on a single chart.
-    Two different fixtures, the same week, and the frames must be identical — which they are
-    only because both read the week's row rather than their own values.
-
-    ⚠️ THE SECOND PAIR USED TO READ 402/31/12/498, EVERY ONE OF WHICH IS OUTSIDE WEEK 12's OWN
-    LIMITS ([50, 350] for `_for`, [60, 240] for `_allowed`). R-601 drops a chart whose point
-    the frame cannot hold, so those values stopped producing a rushing chart to compare and
-    this test began reading the PASSING chart's domain against the rushing one. The contrast
-    they existed for is intact: 330 against 60 is still nowhere near `_both()`'s 170.8 and
-    154.4, so a panel deriving its limits from the two teams on screen would still produce a
-    visibly different frame from the week's [50, 350].
+    ✅ THE BOX GEOMETRY IS THE ASSERTION: the `<rect>` and the median `<line>` are placed from
+    the week's percentiles and whiskers alone, so two games sharing a week share those pixels
+    exactly. The VALUE marker differs, which is correct — that is the only thing about the chart
+    that belongs to the team.
     """
-    first, _ = panel(_game(), _both())
-    other = [_side(HOME_ID, "Auburn", rushing_yards_for_per_game=330.0,
-                   rushing_yards_allowed_per_game=65.0),
-             _side(AWAY_ID, "Kentucky", rushing_yards_for_per_game=60.0,
-                   rushing_yards_allowed_per_game=235.0)]
-    second, _ = panel(_game(), other)
-    assert _domains(_charts(first)[0]) == _domains(_charts(second)[0]), \
-        "two matchups in the same week were drawn on different axes"
+    first = panel(_game(), _both())[0]
+    second = panel(_game(game_id=902), _both(
+        total_yards_for_per_game=501.0, rushing_yards_for_per_game=201.0))[0]
+
+    def geometry(entries):
+        svg = _svg_of(_series(_of_metric(entries, "Rushing")[0])["gained"])
+        return re.findall(r"<rect[^>]*>", svg) + re.findall(
+            r"<line[^>]*stroke-width='1.8'[^>]*>", svg)
+
+    assert geometry(first), "the rushing chart drew no box at all"
+    assert geometry(first) == geometry(second), (
+        "two matchups in one week were drawn on different frames, so the week is not shared")
 
 
 def test_the_distribution_is_keyed_on_season_type_as_well_as_week(panel):
@@ -813,7 +900,11 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
     # ✅ So liveness is asserted on the PARSE instead: the walk must still be able to see this
     # module's own functions.
     walked = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
-    for name in ("_usage_dots", "_scatter", "_yardage_column"):
+    # ⚠️ THE NAMES ARE THIS ROUND'S, NOT THE OLD ONES. `_scatter` and `_yardage_column` were
+    # replaced by `_gained_allowed` and `_yardage_row`; a liveness check pinned to a deleted
+    # function fails for the one reason it must not — it says the walk has gone blind when the
+    # walk is fine. **Pin it to functions that exist, and move it when they move.**
+    for name in ("_usage_dots", "_gained_allowed", "_yardage_row", "_box_row"):
         assert name in walked, (
             f"the AST walk cannot see {name!r}, so it is not reading matchup.py any more and "
             f"a division anywhere in the file would pass unnoticed")
@@ -836,34 +927,45 @@ def test_the_AWAY_column_is_drawn_before_the_HOME_column(panel):
     assert "Auburn offense" in blocks[1], "the home side is not in the right column"
 
 
-def test_each_columns_charts_belong_to_that_columns_team(panel):
-    """The three away charts come before the three home charts, and each names its own team.
+def test_each_columns_blocks_belong_to_that_columns_team(panel):
+    """The left half is the away team's offence; the right half is the home team's.
 
-    ⚠️ A chart titled for the wrong side renders perfectly, which is why the title is read
-    rather than merely counted.
+    ⚠️ SIX BLOCKS — three metrics, two sides — and the first three are the away side's, because
+    `_yardage` emits away then home inside every section.
     """
     entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    assert len(charts) == 6, f"expected three charts per column, got {len(charts)}"
-    away_y = charts[0].to_dict()
-    titles = str(away_y)
-    assert "Kentucky gained" in titles, "the left column's y axis is not the away team's"
-    assert "Auburn allowed" in titles, "the left column's x axis is not the home team's"
-    home = str(charts[3].to_dict())
-    assert "Auburn gained" in home and "Kentucky allowed" in home, \
-        "the right column's axes are not the home team's attack"
+    blocks = _blocks(entries)
+    assert len(blocks) == 6, f"expected six Gained/Allowed blocks, got {len(blocks)}"
+    away_total = _series(_of_metric(entries, "Total")[0])
+    assert "Kentucky Gained" in _plain(away_total["gained"])
+    assert "Auburn Allowed" in _plain(away_total["allowed"])
+    home_total = _series(_of_metric(entries, "Total")[1])
+    assert "Auburn Gained" in _plain(home_total["gained"])
+    assert "Kentucky Allowed" in _plain(home_total["allowed"])
 
 
-def test_the_axis_labels_say_GAINED_and_ALLOWED(panel):
-    """⚠️ A chart whose axes both read "yards" explains nothing. Marc's comparison is offense
-    against defense, so one axis is what a side gains and the other is what the other side
-    concedes — and the labels have to carry that or the picture is unreadable."""
+def test_the_SERIES_are_labelled_with_the_TEAM_NAME_and_GAINED_or_ALLOWED(panel):
+    """Marc, v14: *"label each series accordingly with team name and gained or allowed"*.
+
+    🚨 BOTH HALVES, AND THE TEAM NAME IS THE HALF A PRESENCE TEST WOULD MISS. "Gained" and
+    "Allowed" appear on every block by construction — they are the two series' keys. **The
+    claim that can actually fail is WHOSE figure each row carries**: the top row is this side's
+    offence and the bottom row is the OPPONENT's defence, so a block that labelled both rows
+    with the same team would be the 1c defect wearing correct words.
+
+    ⚠️ AND IT IS READ OFF THE LABEL, NOT OFF `box()`'s `label=` ARGUMENT. That one goes into the
+    SVG's `aria-label` and is never drawn; a test reading it would pass on a panel that showed
+    the reader nothing.
+    """
     entries, _ = panel(_game(), _both())
-    spec = str(_charts(entries)[0].to_dict())
-    assert "gained" in spec and "allowed" in spec
+    away = _of_metric(entries, "Total")[0]
+    rows = _series(away)
+    assert set(rows) == {"gained", "allowed"}, f"expected two series, got {sorted(rows)}"
+    gained, allowed = _plain(rows["gained"]), _plain(rows["allowed"])
+    assert gained.startswith("Kentucky Gained"), f"the top series is not Kentucky's: {gained}"
+    assert allowed.startswith("Auburn Allowed"), (
+        f"the bottom series is not AUBURN's defence — a side compared with itself: {allowed}")
 
-
-# --- R-590 §3.4: a thin sample is a property and the page says so ------------------------------
 
 def test_a_THIN_WEEK_says_a_per_game_figure_is_nearly_one_afternoon(panel):
     """🚨 A092 MEASURED IT AND TOLD COWORK TO TELL ME. At 2026 week 2 the least-played team
@@ -881,12 +983,25 @@ def test_a_SETTLED_WEEK_does_not_carry_the_caveat(panel):
     assert "single afternoon" not in _text(panel(_game(), _both())[0])
 
 
-def test_the_shared_frame_is_explained_once_for_both_columns(panel):
-    """The band and the medians are properties of the WEEK, so they are described once rather
-    than implied per chart."""
+def test_the_FRAME_CAPTION_describes_the_CHART_THAT_IS_DRAWN(panel):
+    """🚨 THE R-875 CLASS, CAUGHT IN THIS ROUND'S OWN CAPTION.
+
+    The old sentence read *"the shaded box is the middle half … the dashed lines are the medians
+    … the box's thin sides are the 25th percentile and its thick sides the 75th"* — **a true,
+    careful description of the SCATTER's band, its two dashed median rules and its weighted
+    edges, none of which exist on a box-and-whisker.** A caption that survives the chart it
+    describes is a justification that stays in the file after it stops being true, one layer out
+    from the code.
+
+    ⚠️ AND THE NEW ONE MUST ADMIT THE THING THE CHART CANNOT DO. The two rows are framed
+    independently, so the caption says to read each against its own labels rather than by eye.
+    """
     text = _text(panel(_game(), _both())[0])
-    assert "136 FBS teams" in text
-    assert "same axes" in text
+    assert "136 FBS teams" in text, text[:300]
+    assert "whiskers" in text, f"the caption does not describe a box-and-whisker: {text[:400]}"
+    for gone in ("dashed", "thin sides", "thick sides", "same axes"):
+        assert gone not in text, (
+            f"the caption still describes the scatter it replaced — {gone!r}: {text[:400]}")
 
 
 def test_NO_DISTRIBUTION_draws_no_charts_and_says_WHICH_absence(panel):
@@ -914,83 +1029,65 @@ def _point(chart):
     raise AssertionError("the chart drew no point")
 
 
-def test_the_point_is_the_TEAMS_OWN_VALUE_not_zero(panel):
-    """🚨 THE ASSERTION B084 DID NOT HAVE, AND MARC FOUND ITS ABSENCE BEFORE A TEST DID.
+def test_the_VALUE_MARK_is_the_TEAMS_OWN_FIGURE_not_zero(panel):
+    """Marc: *"Color and label the Metric value."* The marker is the side's own per-game number.
 
-    B084 verified its AXES — identical across two matchups, which was its claim — and never
-    once quoted a plotted value. ⚠️ A round can prove exactly what it set out to prove and
-    ship a defect in the same panel, and the only defense is asserting the thing a reader
-    actually looks at.
-
-    Kentucky gain 154.4 on the ground and Auburn allow 84.5, so the away column's rushing
-    point is (84.5, 154.4) — the opponent's allowed on x, this team's gained on y.
+    🚨 READ OFF THE COLOURED LABEL, WHICH IS THE ONE THING ONLY THE VALUE CARRIES. `box()` prints
+    the boundary and percentile labels with `fill='currentColor'` and the value's with the
+    accent, so a test counting every `<text>` would pass on a chart that dropped the value and
+    kept its ticks.
     """
     entries, _ = panel(_game(), _both())
-    x, y = _point(_charts(entries)[0])
-    assert y == 154.4, f"the y value is not the away team's rushing figure: {y}"
-    assert x == 84.5, f"the x value is not the home team's rushing allowed: {x}"
-    assert y != 0 and x != 0
+    gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
+    assert _value_marks(gained) == ["154.4"], (
+        f"the rushing gained marker is not Kentucky's own 154.4: {_value_marks(gained)}")
+    allowed = _series(_of_metric(entries, "Rushing")[0])["allowed"]
+    assert _value_marks(allowed) == ["84.5"], (
+        f"the rushing allowed marker is not Auburn's own 84.5: {_value_marks(allowed)}")
 
 
-def test_every_one_of_the_six_charts_plots_a_real_value(panel):
-    """Not one chart — all six. A single correct point would have passed B084's gap too."""
+def test_every_one_of_the_SIX_BLOCKS_draws_BOTH_of_its_values(panel):
+    """Twelve markers — six blocks, two series each — and none of them missing."""
     entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    assert len(charts) == 6
-    for index, chart in enumerate(charts):
-        x, y = _point(chart)
-        assert x not in (0, None) and y not in (0, None), \
-            f"chart {index} plotted at ({x}, {y})"
+    blocks = _blocks(entries)
+    assert len(blocks) == 6, f"expected six blocks, got {len(blocks)}"
+    for metric, markup in blocks:
+        rows = _series(markup)
+        for side in ("gained", "allowed"):
+            marks = _value_marks(rows[side])
+            assert len(marks) == 1, (
+                f"the {metric} {side} series drew {len(marks)} value markers: {marks}")
+            assert _svg_of(rows[side]), (
+                f"the {metric} {side} series is `box()`'s PLACEHOLDER rather than a chart — "
+                f"the week row is missing the whisker pair")
 
 
 def test_a_GENUINE_zero_still_draws_because_it_is_a_datum(panel):
-    """⚠️ THE OTHER HALF, AND THE PROMPT WAS EXPLICIT: "DO NOT fix it by filtering zeros."
+    """AC-G.32. A team held to zero is a measurement, not an absence, and it gets a marker."""
+    entries, _ = panel(_game(), _away_over(rushing_yards_for_per_game=0.0))
+    gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
+    assert _value_marks(gained) == ["0.0"], (
+        f"a genuine zero was dropped rather than drawn: {_value_marks(gained)}")
 
-    Measured across every season: 13,728 srv_team_week rows carry a counted game, and exactly
-    TWO have a zero per-game figure — both rushing, both plausible. A team that genuinely
-    gained nothing is a measurement, and suppressing it would trade a visible defect for an
-    invisible one.
 
-    ⚠️ THE FRAME HAS TO CONTAIN ZERO FOR THIS TO MEAN ANYTHING, AND R-601 IS WHY THIS TEST
-    NOW SAYS SO. It used to run on week 12's axis of [50, 350], where 0.0 is BELOW the floor
-    — so what it actually asserted was that the panel draws a point outside its own chart,
-    which is the defect this round found. 2026 regular week 2 carries `axis_min` = 0.0 for
-    `rushing_yards_for_per_game`, measured, so a genuine zero is both a datum AND plottable
-    there. On a week whose floor is above zero the chart is dropped and captioned instead,
-    which `test_a_figure_OFF_the_weeks_scale_...` covers.
+def test_a_NULL_per_game_figure_draws_NO_MARKER_and_still_draws_the_SPREAD(panel):
+    """🚨 THE CLAIM CHANGED SHAPE WITH THE CHART AND IS STRONGER FOR IT.
+
+    The scatter needed BOTH figures to plot one point, so a null dropped the whole chart. **A box
+    plot is the week's spread with the team's mark on it** — the spread is still true when the
+    team has no figure — so a null now drops the MARKER and keeps the distribution.
+
+    ✅ THAT IS BETTER, NOT MERELY DIFFERENT: R-141. A chart that disappears takes its height with
+    it and shifts everything below; a chart that keeps its frame and loses one mark holds the
+    row. ⚠️ AND A NULL MUST STILL NEVER BE DRAWN AS A ZERO, which is what this asserts.
     """
-    sides = [_side(HOME_ID, "Auburn"), _side(AWAY_ID, "Kentucky",
-                                             rushing_yards_for_per_game=0.0)]
-    entries, _ = panel(_game(), sides,
-                       distribution=_distribution(
-                           axes={"rushing_yards_for_per_game": (0.0, 600.0)}))
-    x, y = _point(_charts(entries)[0])
-    assert y == 0.0, "a genuine zero was suppressed rather than drawn"
-
-
-def test_a_NULL_per_game_figure_draws_NO_chart_rather_than_a_zero(panel):
-    """Null and zero are different facts. The chart is absent for a null, not plotted at 0."""
-    sides = [_side(HOME_ID, "Auburn"), _side(AWAY_ID, "Kentucky",
-                                             rushing_yards_for_per_game=None)]
-    entries, _ = panel(_game(), sides)
-    assert len(_charts(entries)) == 5, "a null figure was drawn as a point"
-
-
-# --- 🚨 R-601: a frame that cannot hold its own point ------------------------------------------
-#
-# WHAT B084 AND B085 EACH PROVED, AND WHAT NEITHER DID. B084 asserted the AXES and never a
-# plotted value; Marc found that gap before a test did. B085 added the coordinate — "is it
-# zero?" — and answered no on sixty charts. ⚠️ BOTH QUESTIONS CAN PASS WHILE THE POINT IS NOT
-# ON THE CHART, because the third question is WHERE IN THE FRAME the coordinate lands, and
-# nothing asked it.
-#
-# 🚨 MEASURED 2026-09-11, AND IT IS SHIPPED. srv_team_week_metric_distribution reports
-# n = teams_in_week = 138 for every 2026 week; srv_team_week carries 658 teams in each of
-# those weeks. The axis is built from the FBS spread and the panel plots any team an FBS side
-# schedules, so 26 distribution rows in 2026 already hold at least one team beyond their own
-# limits. Game 401868264 — Marist at Stetson, week 5 — renders it: Stetson allow 393.0 rushing
-# yards per game on an axis of [-50, 350], and the point draws in the chart's right margin,
-# outside the plotting rectangle, past the last tick.
+    entries, _ = panel(_game(), _away_over(rushing_yards_for_per_game=None))
+    gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
+    assert _value_marks(gained) == [], (
+        f"a null figure drew a marker: {_value_marks(gained)}")
+    assert "0.0" not in _plain(gained).split("Gained")[-1][:20], \
+        "a null per-game figure was drawn as a zero"
+    assert _svg_of(gained), "the week's spread was dropped along with the missing marker"
 
 
 def _frame_of(chart, channel):
@@ -1003,118 +1100,46 @@ def _frame_of(chart, channel):
     raise AssertionError(f"the chart declares no {channel} domain")
 
 
-def test_every_plotted_point_lands_INSIDE_the_frame_it_is_drawn_on(panel):
-    """🚨 THE QUESTION B084 AND B085 BOTH LEFT: not "is it zero" but "is it ON the chart".
+def test_a_FIGURE_BEYOND_THE_WHISKERS_IS_STILL_DRAWN_where_it_is(panel):
+    """🚨 THIS REPLACES THREE TESTS AND ONE WHOLE GUARD, AND THE DEFECT THEY GUARDED CANNOT RECUR.
 
-    ⚠️ `alt.Scale(domain=…, nice=False)` BOUNDS THE AXIS, NOT THE MARK. Vega-Lite keeps
-    drawing a point whose coordinate falls outside the domain; it simply lands outside the
-    plotting rectangle. So the failure is not an error, an empty frame or a zero — it is a
-    complete-looking chart with its point somewhere else, which reads as "nothing remarkable
-    here".
+    The scatter could not plot a point outside `axis_min`/`axis_max`, so R-601 built
+    `_off_the_frame` to DROP such a chart, `_off_the_frame_metrics` to name what was dropped and
+    `_off_the_frame_figures` to print the figures the picture lost. Three tests asserted that
+    machinery and a fourth asserted it did not over-fire.
+
+    ✅ `box()` FRAMES ON THE WHISKERS **WIDENED BY THE VALUE** — its own comment: *"a figure
+    outside the whiskers is drawn where it is rather than clamped to the edge. An outlier pinned
+    to the boundary reads as 'at the extreme' when the truth is 'beyond it', and the outlier is
+    the interesting case."* **So there is no longer any figure this panel cannot draw**, the
+    dropped-chart state is unreachable, and the copy explaining it is gone with it.
+
+    ⚠️ ASSERTED, NOT ASSUMED: 900.0 is far beyond the week's 269.1 upper whisker, and it must
+    still get a marker and a label.
     """
-    entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    assert len(charts) == 6
-    for index, chart in enumerate(charts):
-        x, y = _point(chart)
-        x_low, x_high = _frame_of(chart, "x")
-        y_low, y_high = _frame_of(chart, "y")
-        assert x_low <= x <= x_high, \
-            f"chart {index}: x={x} is outside its own frame [{x_low}, {x_high}]"
-        assert y_low <= y <= y_high, \
-            f"chart {index}: y={y} is outside its own frame [{y_low}, {y_high}]"
+    entries, _ = panel(_game(), _away_over(rushing_yards_for_per_game=900.0))
+    gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
+    assert _value_marks(gained) == ["900.0"], (
+        f"a figure beyond the whiskers was dropped rather than drawn: {_value_marks(gained)}")
+    text = _text(entries)
+    assert "not plotted" not in text, (
+        "the panel still claims it dropped a chart — that state cannot occur on a box plot")
 
 
-def test_a_figure_OFF_the_weeks_scale_draws_no_chart_rather_than_a_point_beside_one(panel):
-    """⚠️ THE FIXTURE IS THE MEASURED GAME, NOT AN INVENTED ONE (R-594's lesson from B082).
+def test_a_WEEK_WITH_NO_DISTRIBUTION_says_so_and_prints_the_figures(panel):
+    """AC-G.11, and it is the ONE absence that survives the chart change.
 
-    Stetson's real week-5 figure is 393.0 rushing yards allowed per game and the week's real
-    `rushing_yards_allowed_per_game` axis is [-50, 350] — both read out of live serving on
-    2026-09-11. The away column's rushing chart pairs Marist's `_for` against that `_allowed`,
-    so it is the x value that leaves the frame.
-
-    🚨 SKIPPING IT LOSES NO MEASUREMENT — AND B105 HAD TO MEND THAT, NOT JUST RESTATE IT.
-    This used to read "`_yardage_direction` prints both figures as text directly above". R-756
-    deleted that block on Marc's word, and the annotation that carries the figures now lives
-    INSIDE the chart — so on the one path where the chart is DROPPED, the figures went with it
-    and this sentence became false. ✅ The caption carries them itself now
-    (`_off_the_frame_figures`), which is what `test_the_dropped_chart_SAYS_it_was_dropped`
-    asserts alongside this.
+    ⚠️ `box(None, …)` RETURNS A TITLED EM DASH, which holds the row's height (R-141) and says
+    nothing a sighted reader can read. So the panel names the metrics in words and carries their
+    two figures, exactly as the dropped-chart caption used to.
     """
-    sides = [_side(HOME_ID, "Stetson", rushing_yards_allowed_per_game=393.0),
-             _side(AWAY_ID, "Marist")]
-    entries, _ = panel(_game(), sides,
-                       distribution=_distribution(
-                           axes={"rushing_yards_allowed_per_game": (-50.0, 350.0)}))
-    charts = _charts(entries)
-    titles = [_metric_of(c) for c in charts]
-    assert titles.count("Rushing") == 1, (
-        f"the away column's rushing chart was drawn with a point off its own frame: {titles}")
+    thin = [r for r in _distribution() if not r["metric"].startswith("rushing")]
+    entries, _ = panel(_game(), _both(), distribution=thin)
+    text = _text(entries)
+    assert "Rushing" in text and "not drawn against the week" in text, text[:400]
+    assert "154.4" in text and "84.5" in text, (
+        f"the figures the chart could not draw are not printed: {text[:400]}")
 
-
-def test_the_dropped_chart_SAYS_it_was_dropped_rather_than_going_quiet(panel):
-    """AC-G.11. A chart missing from a row of three, with nothing said, reads as "we hold
-    nothing" — and we hold the figure and printed it one line above."""
-    sides = [_side(HOME_ID, "Stetson", rushing_yards_allowed_per_game=393.0),
-             _side(AWAY_ID, "Marist")]
-    entries, _ = panel(_game(), sides,
-                       distribution=_distribution(
-                           axes={"rushing_yards_allowed_per_game": (-50.0, 350.0)}))
-    body = _text(entries)
-    assert "not plotted" in body, "a chart vanished without the page saying so"
-    assert "Rushing" in body
-
-
-def test_the_guard_does_NOT_suppress_a_point_that_merely_sits_low(panel):
-    """🚨 THE OTHER HALF, AND MARC'S TWO GAMES ARE EXACTLY THIS STATE.
-
-    401856679 and 401856782 are both 2026 regular week 2, and Michigan's 106.0 rushing yards
-    per game sits on an axis of [0, 600] — 17.7% up a frame 150px tall, or 26 pixels off the
-    floor. ⚠️ THAT IS LOW, AND IT IS NOT OFF THE FRAME. A guard that removed it would delete
-    the very charts Marc is asking about and call the page fixed.
-    """
-    sides = [_side(HOME_ID, "Michigan", rushing_yards_allowed_per_game=112.0),
-             _side(AWAY_ID, "Oklahoma", rushing_yards_for_per_game=106.0)]
-    entries, _ = panel(_game(), sides,
-                       distribution=_distribution(
-                           axes={"rushing_yards_for_per_game": (0.0, 600.0)}))
-    charts = _charts(entries)
-    assert len(charts) == 6, "a low-but-valid point was suppressed"
-    x, y = _point(charts[0])
-    assert y == 106.0
-    y_low, y_high = _frame_of(charts[0], "y")
-    fraction = (y - y_low) / (y_high - y_low)
-    assert fraction < 0.20, (
-        "this fixture is meant to reproduce the bottom-fifth position Marc reported; "
-        f"it landed at {fraction:.1%}")
-
-
-# --- 🚨 R-603: the scale that is DRAWN, not the numbers that went into it -----------------------
-#
-# 🚨 FOUR ROUNDS ASSERTED SOMETHING TRUE ABOUT THIS PANEL AND SHIPPED IT BROKEN.
-#
-#   B084  the axes are shared across a week      never quoted a plotted value
-#   B085  the coordinate is not zero, 60 charts  never asked where the coordinate lands
-#   B086  the position in the frame, 17.7%       computed from the DECLARED domain
-#   A097  the position moved to 26.5%            same measurement, same blindness
-#
-# ⚠️ EVERY ONE OF THOSE PASSES ON THE CHART IN MARC'S SCREENSHOT, because all four read
-# `chart.to_dict()` — and the property that broke the scale is added AFTER altair is finished,
-# by Streamlit, on the way to the browser:
-#
-#     _prepare_vega_lite_spec:  if "autosize" not in spec:  spec["autosize"] = {"type": "fit"}
-#
-# `fit` makes `height` the OUTER box. Vega-Lite subtracts the title, the x-axis labels, the
-# x-axis title and the padding from 150px and gives the y scale the remainder — which on a
-# reader whose text renders larger is nearly nothing. Rasterised at a larger base font, that
-# spec reproduces the screenshot exactly: y title clipped to "lahoma gain", one stray y tick,
-# the band flattened to a sliver, the point sitting on the median rule whatever its value, the
-# chart title gone off the top, and a perfect x axis.
-#
-# ⚠️ SO THESE TESTS GO THROUGH STREAMLIT'S OWN FUNCTION rather than reading the altair spec.
-# It is a private function and that is a real coupling; it is also the only thing that answers
-# "what does the browser receive". If Streamlit moves it these tests fail loudly rather than
-# skipping, which is correct — the fix's premise would have changed.
 
 def _shipped(chart):
     """The spec Streamlit actually sends for `st.altair_chart(chart, use_container_width=True)`.
@@ -1147,60 +1172,26 @@ def _plot_height(spec):
     return float(spec["height"])
 
 
-def test_the_spec_STREAMLIT_SHIPS_does_not_make_height_the_outer_box(panel):
-    """🚨 THE ONE ASSERTION THAT WOULD HAVE CAUGHT MARC'S SCREENSHOT.
+def test_TWO_DIFFERENT_VALUES_RENDER_AT_DIFFERENT_POSITIONS(panel):
+    """🚨 R-603's CLASS, CARRIED ACROSS. Four rounds of assertions passed while the scatter's y
+    scale was collapsed by Streamlit's `autosize`, because every one of them read the numbers
+    going IN rather than the geometry coming OUT. **The only assertion that could have caught it
+    is that two different values land in two different places.**
 
-    Streamlit fills `autosize` in only when the spec does not declare one, so the panel
-    declaring `fit-x` is what keeps `height=150` meaning the plot. Streamlit's own comment
-    beside that branch says `fit` "does not work for many chart types" and that "fit-x fits the
-    width and height can be adjusted".
+    ⚠️ IT IS CHEAP AND IT IS THE WHOLE LESSON: the coordinate, not the datum.
     """
-    entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    assert charts
-    for index, chart in enumerate(charts):
-        shipped = _shipped(chart)
-        kind = (shipped.get("autosize") or {}).get("type")
-        assert kind != "fit", (
-            f"chart {index} ships autosize 'fit', so height={shipped.get('height')} is the "
-            f"OUTER box and the y scale gets only what the title and x axis leave over")
-        # ⚠️ THE ASSERTION IS THE DANGER, NOT ONE PARTICULAR SAFE ANSWER. B087 wrote this as
-        # `== "fit-x"` when that was the only safe value in play; R-609 needs `pad`, because a
-        # 1:1 chart has to pin BOTH dimensions and `fit-x` gives the width to the container by
-        # construction. Both leave `height` meaning the plot, which is the whole claim — so
-        # the safe set is named rather than the one member that happened to be in use.
-        assert kind in ("fit-x", "pad"), (
-            f"chart {index} ships autosize {kind!r}; the safe values are 'fit-x' (width "
-            f"follows the column) and 'pad' (both dimensions pinned, which 1:1 requires)")
+    def x_of(value):
+        entries = panel(_game(), _away_over(rushing_yards_for_per_game=value))[0]
+        svg = _svg_of(_series(_of_metric(entries, "Rushing")[0])["gained"])
+        found = re.search(r"<polygon points='([\d.]+),", svg) or \
+            re.search(r"<line x1='([\d.]+)'[^>]*stroke-width='2.2'", svg)
+        assert found, f"no value marker in the svg: {svg[:300]}"
+        return float(found.group(1))
 
-
-def test_TWO_DIFFERENT_Y_VALUES_RENDER_AT_DIFFERENT_HEIGHTS(panel):
-    """🚨 THE HEART OF IT — Oklahoma's 170.0 and Michigan's 106.0 were on the same line.
-
-    ⚠️ THIS ASKS THE SCALE, NOT THE ROW. The two values are read back out of the shipped spec's
-    own point datasets and converted through the shipped domain and the shipped plot height, so
-    the test can only pass if the chart has a height to draw them in. On the defect
-    `_plot_height` is unknowable and this fails rather than quietly comparing inputs.
-    """
-    entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    # chart 0 is the away column's rushing, chart 3 the home column's — same metric, same frame.
-    away, home = charts[0], charts[3]
-    heights = []
-    for chart in (away, home):
-        shipped = _shipped(chart)
-        plot = _plot_height(shipped)
-        assert plot is not None, (
-            "the shipped spec makes height the outer box, so no y position can be computed — "
-            "which is exactly how two different values came to sit on one line")
-        assert plot > 0
-        _x, y = _point(chart)
-        low, high = _frame_of(chart, "y")
-        heights.append((y - low) / (high - low) * plot)
-    assert heights[0] != heights[1], (
-        f"Kentucky and Auburn rendered at the same height: {heights}")
-    assert abs(heights[0] - heights[1]) > 1.0, (
-        f"two values a whole metric apart rendered within a pixel: {heights}")
+    low, high = x_of(100.0), x_of(250.0)
+    assert high > low + 5, (
+        f"100 and 250 yards render {high - low:.1f}px apart — the scale is collapsed, which is "
+        f"the defect four rounds of spec assertions could not see")
 
 
 def test_the_middle_half_BAND_has_a_drawn_height(panel):
@@ -1275,50 +1266,13 @@ def _edge_weights(chart):
     return out
 
 
-def test_the_bands_p25_and_p75_sides_have_DIFFERENT_line_weights(panel):
-    """🚨 THIS TEST EXISTS BECAUSE ITS STAGED BREAK WENT GREEN WITHOUT IT.
-
-    Marc: "Use a thinner line for the sides that represent 25th percentile, thicker (maybe
-    double line) for the 75th percentile." Giving both sides one weight renders a perfectly
-    tidy box that says nothing — and nothing in the suite noticed until the break was run.
-
-    ⚠️ WEIGHT IS THE CARRIER, NOT COLOUR, and that is AC-G.22: a line weight survives
-    greyscale and colour-blindness. So the assertion is on `strokeWidth`, which is the
-    property doing the work.
-    """
-    entries, _ = panel(_game(), _both())
-    weights = _edge_weights(_charts(entries)[0])
-    assert len(weights) == 4, f"the box does not have four drawn sides: {weights}"
-
-    low, high = _METRICS["rushing_yards_for_per_game"][2], \
-        _METRICS["rushing_yards_for_per_game"][4]
-    x_low, x_high = _METRICS["rushing_yards_allowed_per_game"][2], \
-        _METRICS["rushing_yards_allowed_per_game"][4]
-    thin = {w for value, w in weights if value in (low, x_low)}
-    thick = {w for value, w in weights if value in (high, x_high)}
-    assert thin and thick, f"could not match sides to percentiles: {weights}"
-    assert thin != thick, (
-        f"the 25th and 75th percentile sides are drawn at the same weight, so the box says "
-        f"nothing about which side is which: {weights}")
-    assert max(thick) > max(thin), (
-        f"the 75th percentile side is not the THICKER one: thin={thin} thick={thick}")
-
-
 def test_the_caption_SAYS_which_side_is_which(panel):
-    """⚠️ A THIN LINE AND A THICK LINE ARE ONLY SELF-DESCRIBING IF SOMETHING SAYS SO.
-
-    The weights are meaningless to a reader who has not been told the convention, so the
-    sentence that already explains the shaded box explains its sides too.
-    """
+    """The two halves are one team's offence each, and the heading says whose."""
     entries, _ = panel(_game(), _both())
     body = _text(entries)
-    assert "thin" in body and "thick" in body, \
-        f"the caption does not explain the two line weights: {body}"
-    assert "25th percentile" in body and "75th" in body, \
-        f"the caption does not name the percentiles: {body}"
+    assert "Kentucky offense against Auburn's defense" in body, body[:400]
+    assert "Auburn offense against Kentucky's defense" in body, body[:400]
 
-
-# --- 🚨 R-687: the player cards, and the four states A106 measured ------------------------------
 
 def test_the_leaders_come_from_the_THROUGH_PRIOR_WEEK_view(panel):
     """🚨 TWO VIEWS, TWO WINDOWS, AND NOTHING BUT THIS STANDS BETWEEN THEM.
@@ -1430,81 +1384,21 @@ def test_a_MISSING_JERSEY_is_an_absence_and_never_a_zero(panel):
 # --- 🚨 R-686: the delta is READ, and the fixture proves which ---------------------------------
 
 def test_the_delta_is_READ_from_the_column_and_never_subtracted_in_the_page(panel):
-    """🚨 THIS TEST EXISTS BECAUSE ITS STAGED BREAK WENT GREEN. Computing
-    `offense[for] - defense[allowed]` right there in the markup passed the entire suite.
-
-    ⚠️ THE FIXTURE IS WHAT MAKES THIS DECIDABLE, AND IT DISAGREES ON PURPOSE. Kentucky gain
-    154.4 on the ground and Auburn concede 84.5, so a page that subtracted would print +69.9.
-    A106's column says **38.0** — a real srv_game_team figure, computed over a different and
-    correct set of games — so the two numbers cannot both appear and only the read produces
-    the column's.
-
-    🚨 WHY IT MATTERS BEYOND THE RULE: the Excel export reads the same column. A subtraction
-    here would make the page and the workbook disagree about one fact, which is R-645 exactly —
-    the defect Marc found himself on a betting page.
-
-    ⚠️ R-756 MOVED WHERE IT IS READ. The delta chip on the removed table used to carry this;
-    the annotation carries it now, and the fixture's disagreement — 38.0 published against a
-    69.9 subtraction — is what still makes only one of the two readings possible.
-    """
-    entries, _ = panel(_game(), _both())
-    drawn = " ".join(t for c in _charts(entries) for t in _annotation(c)[0])
-    assert "+38.0" in drawn, (
-        f"the rushing delta is not A106's column value: {drawn}")
-    assert "+69.9" not in drawn, (
-        "the page SUBTRACTED 154.4 - 84.5 instead of reading the column (§4.2.1)")
+    """The same claim as the legend test above, made for all three metrics at once."""
+    entries, _ = panel(_game(), _both(), deltas=_deltas(
+        rushing_yards_for_minus_opponent_allowed_per_game=1.0,
+        passing_yards_for_minus_opponent_allowed_per_game=2.0,
+        total_yards_for_minus_opponent_allowed_per_game=3.0))
+    seen = {metric: _legend(markup) for metric, markup in _blocks(entries)}
+    for metric, stored in (("total", "3.0"), ("rushing", "1.0"), ("passing", "2.0")):
+        assert stored in seen[metric], f"{metric} does not print the stored delta: {seen[metric]}"
 
 
 def test_a_NEGATIVE_delta_carries_its_sign_without_relying_on_colour(panel):
-    """⚠️ AC-G.22. Marc asked for negatives in red; the leading minus is what a reader in
-    greyscale, or with a colour vision deficiency, gets instead. Michigan's rushing delta is
-    -6.0 — measured — so the sign is on the page whether or not the colour renders.
-
-    ⚠️ R-756 TOOK THE CHIP; the annotation's bold delta line carries the sign now."""
-    entries, _ = panel(_game(), _both())
-    drawn = " ".join(t for c in _charts(entries) for t in _annotation(c)[0])
-    assert "-6.0" in drawn or "\u22126.0" in drawn, (
-        f"the negative delta lost its sign: {drawn}")
-
-
-# --- 🚨 R-609: the charts are square, asserted on what Streamlit ships --------------------------
-
-def test_the_charts_are_SQUARE_in_the_spec_the_browser_receives(panel):
-    """🚨 THIS TEST EXISTS BECAUSE ITS STAGED BREAK WENT GREEN. Making the height 0.6 of the
-    width passed the whole suite — nothing in the project asserted the ratio Marc asked for.
-
-    ⚠️ IT READS `_prepare_vega_lite_spec`, NOT `chart.to_dict()`, AND THAT IS THE LESSON OF
-    B087. Streamlit fills `autosize` in after altair has finished, and `fit`/`fit-x` both hand
-    a dimension to the container — so a spec that looks square can still be drawn oblong. The
-    only honest question is what the browser receives.
-
-    🚨 AND THE RATIO NEEDS BOTH PINNED. `fit-x` gives the width to the column by construction,
-    so a 1:1 chart cannot use it; `pad` leaves both dimensions the plot's, which is why R-609
-    changed the constant B087 introduced.
-    """
-    entries, _ = panel(_game(), _both())
-    charts = _charts(entries)
-    assert charts, "no charts drawn"
-    for index, chart in enumerate(charts):
-        shipped = _shipped(chart)
-        width, height = shipped.get("width"), shipped.get("height")
-        assert isinstance(width, (int, float)), (
-            f"chart {index} ships width={width!r} — a container-sized width cannot be square")
-        assert isinstance(height, (int, float)), f"chart {index} ships height={height!r}"
-        assert width == height, (
-            f"chart {index} is {width}x{height}, not 1:1 — Marc asked for square charts "
-            f"(R-609) and the aspect is what he will see")
-        kind = (shipped.get("autosize") or {}).get("type")
-        assert kind != "fit-x", (
-            "autosize 'fit-x' hands the WIDTH to the column, so the ratio depends on the "
-            "browser width and 1:1 cannot hold")
-
-
-def test_one_constant_drives_BOTH_sides_of_the_square():
-    """⚠️ TWO CONSTANTS COULD DRIFT APART and the chart would stop being square with nothing
-    failing. `_CHART_HEIGHT` is `_CHART_SIDE`, and this says so where a reader looks."""
-    from views import matchup
-    assert matchup._CHART_HEIGHT == matchup._CHART_SIDE
+    """AC-G.22: the sign is the signal, and it survives greyscale."""
+    entries, _ = panel(_game(), _both(),
+                       deltas=_deltas(rushing_yards_for_minus_opponent_allowed_per_game=-24.5))
+    assert "-24.5" in _legend(_of_metric(entries, "Rushing")[0]).replace("\u2212", "-")
 
 
 def test_the_leaders_are_drawn_in_RANK_ORDER(panel):
@@ -1547,28 +1441,40 @@ _CARD_GRID = "repeat(3,1fr)"
 
 
 def _slots(entries):
-    """The order of card blocks and charts inside each side's column, in emission order.
+    """Per side, the order of its slots down the panel — `["cards", "chart"] * 3` or the mirror.
 
-    ⚠️ WHY EMISSION ORDER IS THE LAYOUT HERE, rather than a proxy for it: `_yardage_column`
-    zips ONE ordered tuple against `st.columns(2)`, which returns left-to-right. So the nth
-    thing emitted goes into the nth column from the left, and reversing the tuple moves the
-    block and its emission together. There is no way to change the picture without changing
-    this sequence, which is what makes reading it honest.
+    🚨 cfdb-wta-R-900 TURNED THE PANEL INSIDE OUT AND THIS HELPER WITH IT. The old emission was
+    two direction blocks, each containing its own three metrics, so the two "offense against"
+    headings were the SECTION BOUNDARIES. **Now the metric loop is outermost**: both headings are
+    emitted first, then one spanning section heading per metric with a fresh column pair beneath
+    it. So the boundaries are the SECTION HEADINGS and each section holds four slots — away's
+    two, then home's two, because `st.columns` is consumed left to right.
+
+    ⚠️ AND THE CHART IS MARKDOWN NOW, so the two slots are told apart by their `data-cfdb`
+    attribute rather than by the entry KIND. That is the stronger anchor anyway (R-886).
     """
+    names = {label for label, *_rest in _module_constant("_YARDAGE_DIMENSIONS")}
     starts = [i for i, (kind, body) in enumerate(entries)
-              if kind == "markdown" and "offense against" in _plain(str(body))]
-    assert len(starts) == 2, f"expected two direction blocks, got {len(starts)}"
-    out = []
+              if kind == "markdown" and _plain(str(body)) in names
+              and "gained-allowed" not in str(body)]
+    assert len(starts) == len(names), (
+        f"expected one spanning section heading per metric, got {len(starts)}")
+    away, home = [], []
     for lo, hi in zip(starts, starts[1:] + [len(entries)]):
-        sequence = []
+        section = []
         for kind, body in entries[lo + 1:hi]:
-            if kind == "chart":
-                sequence.append("chart")
-            elif kind == "markdown" and (_CARD_GRID in str(body)
-                                         or "No yards recorded" in str(body)):
-                sequence.append("cards")
-        out.append(sequence)
-    return out
+            if kind != "markdown":
+                continue
+            text = str(body)
+            if "data-cfdb='gained-allowed'" in text:
+                section.append("chart")
+            elif _CARD_GRID in text or "No yards recorded" in text:
+                section.append("cards")
+        assert len(section) == 4, (
+            f"expected four slots in a section — two per side — got {section}")
+        away.extend(section[:2])
+        home.extend(section[2:])
+    return [away, home]
 
 
 def test_the_AWAY_side_draws_its_CARDS_BEFORE_its_chart(panel):
@@ -1716,7 +1622,16 @@ def test_the_JERSEY_em_dash_SURVIVES_the_card_rewrite(panel):
     card = next(str(b) for k, b in entries
                 if k == "markdown" and "Avant" in _plain(str(b)))
     assert "—" in card, "a missing jersey must render an em dash in the same slot"
-    assert "#0" not in card and "#nan" not in card.lower()
+    # 🚨 THE JERSEY SLOT, NOT THE WHOLE CARD — cfdb-wta-R-901 MADE THE OLD FORM A FALSE POSITIVE.
+    # `"#0" not in card` was true while the card held no hex colours. The team-colour border
+    # ships `light-dark(#0C2340, #0C2340)`, **and `#0C2340` contains `#0`** — so the assertion
+    # fired on a card that was rendering the em dash correctly. ⚠️ A substring test over a whole
+    # block is a test whose meaning depends on what else is in the block.
+    jersey = re.search(r"font-size:1\.15rem[^>]*>([^<]*)<", card)
+    assert jersey, f"the jersey slot is not where this test expects it: {card[:200]}"
+    assert jersey.group(1).strip() == "\u2014", (
+        f"a missing jersey rendered {jersey.group(1)!r} rather than an em dash")
+    assert "#nan" not in card.lower()
 
 
 def test_the_RANK_IS_STILL_GONE_but_a_TIE_IS_NOW_CARRIED(panel):
@@ -1920,7 +1835,18 @@ def _dots(entries, name):
     token = str(name).split()[-1]
     block = next(str(b) for k, b in entries
                  if k == "markdown" and token in _plain(str(b)))
-    card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
+    # 🚨 SPLIT ON THE MARKER, NOT ON THE BORDER — cfdb-wta-R-901, AND R-886 CALLED THIS SHOT.
+    # Three helpers read `block.split("border:1px solid rgba(128,128,128,.22)")` until the
+    # before-the-game cards got their team colour. `_leader_card`'s own comment already said why
+    # that fails: *"`data-cfdb='leader-card'` IS AN INTERFACE AND THE BORDER IS NOT. The tests
+    # anchored on the literal grey border string until R-886 put the TEAM COLOUR there, at which
+    # point every card-finding helper silently matched nothing."*
+    # ⚠️ AND IT DID NOT FAIL LOUDLY. The split returned ONE piece — the whole three-card block —
+    # so the helper handed back **nine dots for a three-game season**, and the assertion that
+    # caught it reads *"the two rows are different lengths"*, which is not what was wrong.
+    # 🚨 R-886 FIXED THE POST-GAME HELPERS AND THESE THREE WERE NOT ON THAT PANEL, so they kept
+    # a dead anchor for two rounds and nothing could see it until a colour arrived here too.
+    card = next(piece for piece in block.split("data-cfdb='leader-card'")
                 if token in _plain(piece))
     out = []
     for span in re.findall(r"<span title='([^']*)'[^>]*>", card):
@@ -2013,7 +1939,18 @@ def test_NO_usage_rows_at_all_is_a_SENTENCE_not_a_row_of_empty_circles(panel):
     token = leaders[1]["player_name"].split()[-1]
     block = next(str(b) for k, b in entries
                  if k == "markdown" and token in _plain(str(b)))
-    card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
+    # 🚨 SPLIT ON THE MARKER, NOT ON THE BORDER — cfdb-wta-R-901, AND R-886 CALLED THIS SHOT.
+    # Three helpers read `block.split("border:1px solid rgba(128,128,128,.22)")` until the
+    # before-the-game cards got their team colour. `_leader_card`'s own comment already said why
+    # that fails: *"`data-cfdb='leader-card'` IS AN INTERFACE AND THE BORDER IS NOT. The tests
+    # anchored on the literal grey border string until R-886 put the TEAM COLOUR there, at which
+    # point every card-finding helper silently matched nothing."*
+    # ⚠️ AND IT DID NOT FAIL LOUDLY. The split returned ONE piece — the whole three-card block —
+    # so the helper handed back **nine dots for a three-game season**, and the assertion that
+    # caught it reads *"the two rows are different lengths"*, which is not what was wrong.
+    # 🚨 R-886 FIXED THE POST-GAME HELPERS AND THESE THREE WERE NOT ON THAT PANEL, so they kept
+    # a dead anchor for two rounds and nothing could see it until a colour arrived here too.
+    card = next(piece for piece in block.split("data-cfdb='leader-card'")
                 if token in _plain(piece))
     assert "No game-by-game usage held" in card, (
         "a player we hold nothing for drew circles instead of saying so")
@@ -2173,74 +2110,155 @@ _CHART_CHROME = 47
 _AXIS_LABEL_EM = 0.52
 
 
-def test_the_AXIS_LABELS_have_room_to_be_read_at_the_smaller_square():
-    """🚨 THIS TEST EXISTS BECAUSE THE ROUND'S OWN STAGED BREAK CAME BACK GREEN (R-744).
+def test_the_DISTRIBUTION_QUERY_SELECTS_EVERY_COLUMN_the_chart_reads(panel):
+    """🚨 R-744, FOUND BY STAGING THE BREAK AND LOOKING. THIS TEST EXISTS BECAUSE ONE CAME BACK
+    GREEN.
 
-    B105 was asked to restore the eight-tick axis and assert the PAD. It did, and the pad
-    assertion passed — **because the tick count moves the shipped width by exactly zero.** The
-    x axis runs UNDER the plot, so its labels cost HEIGHT; the 47px of horizontal chrome is all
-    y axis. A break that cannot fail proves nothing, and the honest response is not to drop it
-    but to assert the thing the tick count is actually FOR.
+    The break: delete `whisker_low, whisker_high` from `_DISTRIBUTION_COLUMNS`. Live, that turns
+    **every chart on the panel into `box()`'s em-dash placeholder** — `_whisker_pair` finds
+    neither key, returns `(None, None)`, and `box()` returns its placeholder span *without
+    raising*. ⚠️ **All 95 tests stayed green.**
 
-    ⚠️ WHICH IS LEGIBILITY, AND ONLY SINCE R-804. At 240px, 8 ticks sat 34px apart and nobody
-    had to think about it. At 180px they sit 22px apart against a label about 16px wide — a
-    three-digit number at `_AXIS_LABEL_SIZE`, at roughly 0.52em per character. **That is 6px of
-    clearance, which is a solid band of digits rather than an axis.**
+    🚨 WHY, AND IT IS THE FIXTURE RATHER THAN THE ASSERTIONS: the panel stub answers the
+    distribution query with `pd.DataFrame(_distribution())` **whatever the SQL says**. So no
+    behavioural test in this file can see the SELECT list at all — the rows arrive complete no
+    matter what was asked for. Every assertion about what the chart draws is true of a page whose
+    query is broken.
 
-    ⚠️ ASSERTED WITHOUT A DIVISION ON PURPOSE — `2 * ticks * label <= side` is the same claim as
-    "the labels take under half the axis" and does not need an entry in
-    `test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to`.
+    ✅ SO THE SQL IS THE SUBJECT HERE, and the required columns are taken from `box()`'s OWN
+    vocabulary rather than retyped — `distribution._WHISKER_NAMES` is where the two spellings
+    live, so a module that renames one cannot leave this guard agreeing with a stale literal.
     """
-    ticks = _module_constant("_AXIS_TICKS")
-    side = _module_constant("_CHART_SIDE")
-    # A three-digit tick label — "350", "700" — at the axis label size. Every axis this panel
-    # draws is per-game yardage, so three digits is the real worst case and not a guess.
-    label = 3 * _AXIS_LABEL_EM * _module_constant("_AXIS_LABEL_SIZE")
-    assert 2 * ticks * label <= side, (
-        f"{ticks} ticks of about {label:.0f}px each on a {side}px axis leaves "
-        f"{(side - ticks * label) / ticks:.0f}px between labels — they read as one band rather "
-        f"than as a scale a reader can interpolate from")
-    assert ticks >= 3, (
-        f"{ticks} ticks cannot carry a scale — a reader needs a low, a high and something "
-        f"between them to interpolate")
+    from lib import distribution as dist
+    _entries, seen = panel(_game(), _both())
+    sql = seen["axis_sql"].lower()
+    spellings = [pair for pair in dist._WHISKER_NAMES]
+    assert any(lo in sql and hi in sql for lo, hi in spellings), (
+        f"the distribution query selects no whisker pair, so `box()` frames on nothing and "
+        f"every chart draws an em dash: {sql}")
+    for needed in ("p25", "p50", "p75"):
+        assert needed in sql, f"the query does not select {needed}, which `box()` requires"
 
 
-def test_the_shipped_CHART_FITS_the_column_it_is_drawn_in():
-    """🚨 R-804/R-817. THE ONE ASSERTION FOUR ROUNDS OF SYMPTOM-CHASING DID NOT HAVE.
+def test_GAINED_IS_ON_TOP_and_ALLOWED_BENEATH_IT(panel):
+    """🚨 R-744 AGAIN, AND THE SECOND GREEN BREAK. Marc, v14: *"Gained on top, Allowed on
+    Bottom."*
 
-    B098, B100, B104 and B106 each reported a DIFFERENT symptom — a clipped axis label, a
-    clipped annotation, cards drawn over a chart — and every one of them was the same fact:
-    **the chart is wider than its column, and a Streamlit column does not clip its children
-    (R-755), so the overflow lands on whatever sits to the right.** At 240px the shipped box was
-    305px in a 246px column: 59px over.
+    The break: swap the two `_box_row` calls. **95 tests stayed green**, because every helper in
+    this file finds a series by its `data-series` ATTRIBUTE — which is the right anchor for
+    *which* series it is (R-886) and says nothing at all about WHERE it is. ⚠️ **An attribute
+    lookup is order-blind by design, so a suite built entirely on attribute lookups cannot see a
+    layout instruction.**
 
-    ⚠️ ASSERTED ON THE PAD, NOT ON THE TICK COUNT, AND THE DIFFERENCE IS THE ROUND'S FINDING.
-    B105 swept every axis lever with vl_convert and measured that **the tick count moves the
-    width by ZERO** — the x axis runs UNDER the plot, so its labels cost height. The whole 47px
-    is the y axis: its rotated title and its tick labels. A test that counted ticks would pass
-    any styling that kept four of them and would say nothing about whether the chart fits.
-
-    ⚠️ WHY IT PINS A NUMBER RATHER THAN COMPILING THE SPEC: the measurement was taken with
-    `vl_convert`, which is NOT in `requirements*.txt` — it is in the local venv incidentally.
-    A test that imported it would ERROR in CI, and guarding it with `importorskip` would make
-    it skip there, which is the silently-thinner green run §3.4 exists to stop. **So the
-    measurement is pinned and the raster is the evidence, which is this file's own idiom.**
+    ✅ POSITIONAL, LIKE R-522's away-before-home: the gained series must be EMITTED FIRST, which
+    in a block of markup is what "on top" means. B082 and B083 both proved a presence assertion
+    passes a swap; this is the same lesson on a third panel.
     """
-    side = _module_constant("_CHART_SIDE")
-    shipped = side + _CHART_CHROME
-    assert shipped <= _CHART_SLOT_AT_1300, (
-        f"the chart ships at {shipped}px ({side}px square + {_CHART_CHROME}px of y-axis chrome) "
-        f"into a {_CHART_SLOT_AT_1300}px column at 1300px with the sidebar open. It is "
-        f"{shipped - _CHART_SLOT_AT_1300}px too wide, and a Streamlit column does not clip its "
-        f"children — it draws over the one beside it (R-755).")
-    # ⚠️ HEADROOM, NOT A HAIR — B104's rule, after a row that was two per cent over.
-    assert shipped <= _CHART_SLOT_AT_1300 - 10, (
-        f"the chart fits by only {_CHART_SLOT_AT_1300 - shipped}px. Font metrics differ between "
-        f"browsers and this margin is the whole defence against the class.")
-    # ⚠️ AND A FLOOR, so nobody answers a future overflow by shrinking the square to nothing.
-    assert side >= 150, (
-        f"a {side}px plot carries a band, two median rules, a point and a three-line "
-        f"annotation; below ~150 the annotation alone is half of it")
+    entries, _ = panel(_game(), _both())
+    for metric, markup in _blocks(entries):
+        assert markup.index("data-series='gained'") < markup.index("data-series='allowed'"), (
+            f"the {metric} block draws Allowed above Gained — Marc's v14 puts gained on top")
+
+
+def test_the_CARD_BORDERS_carry_the_TEAM_COLOUR_on_THIS_tab_too(panel):
+    """🚨 cfdb-wta-R-901. Marc, v11: *"Player Card borders should be color of team."*
+
+    R-886 did this on the POST-GAME cards; `_leader_block` never passed `accent` through, so the
+    before-the-game cards kept the neutral grey. **This is the pass-through, asserted.**
+
+    ⚠️ AND IT IS THE SIDE'S OWN COLOUR, NOT JUST *A* COLOUR. Each half's cards must carry that
+    half's team — the away column Kentucky, the home column Auburn — or the border is decoration
+    that happens to be coloured. The fixture gives both sides the same hex, so this drives them
+    apart first.
+    """
+    sides = [dict(row, **({"color_on_light": "#AA0000", "color_on_dark": "#AA0000"}
+                          if row["team_id"] == AWAY_ID else
+                          {"color_on_light": "#0000BB", "color_on_dark": "#0000BB"}))
+             for row in _both()]
+    entries, _ = panel(_game(), sides, deltas=_deltas())
+    away, home = [], []
+    names = {label for label, *_rest in _module_constant("_YARDAGE_DIMENSIONS")}
+    starts = [i for i, (kind, body) in enumerate(entries)
+              if kind == "markdown" and _plain(str(body)) in names
+              and "gained-allowed" not in str(body)]
+    for lo, hi in zip(starts, starts[1:] + [len(entries)]):
+        cards = [str(b) for k, b in entries[lo + 1:hi]
+                 if k == "markdown" and "data-cfdb='leader-card'" in str(b)]
+        assert len(cards) == 2, f"expected one card block per side in a section, got {len(cards)}"
+        away.append(cards[0])
+        home.append(cards[1])
+    assert all("#AA0000" in block for block in away), \
+        "the away cards do not carry the away team's colour"
+    assert all("#0000BB" in block for block in home), \
+        "the home cards do not carry the home team's colour"
+    assert not any("#0000BB" in block for block in away), \
+        "an away card is wearing the HOME team's colour"
+    # ⚠️ AND IT IS THE COMPOSED PAIR, NOT THE RAW HEX (R-855). `light-dark(...)` is what keeps
+    # B109's invisible-black case from coming back; a bare on-light hex would pass a substring
+    # test and render `rgb(0,0,0)` on a dark page for the 18.6% of teams that publish it.
+    assert "light-dark(" in away[0], "the border is a raw hex rather than `_accent`'s pair"
+
+
+def test_THE_TWO_SERIES_ARE_FRAMED_INDEPENDENTLY_and_the_page_SAYS_SO(panel):
+    """🚨 cfdb-wta-R-900. Marc asked for *"the same x-axis"* and this panel does NOT have one.
+
+    📊 MEASURED ON LIVE SERVING, 2026 regular week 15 — the whisker spans `box()` frames on:
+
+        pair       gained          allowed         union           narrower row uses
+        total      204.0–620.5     142.5–508.5     142.5–620.5     87.9% of the width
+        rushing     40.5–336.0      10.0–241.0      10.0–336.0     70.8%
+        passing     46.0–396.5      47.5–352.0      46.0–396.5     93.7%
+
+    ❌ IT CANNOT BE FIXED FROM THIS FILE. `box()` has no frame parameter, faking the whisker pair
+    would print two published figures wrongly, and matching the scales by width-and-offset needs
+    `box()`'s internal `pad`. **`site/lib/distribution.py` is session A's (§3 rule 3)** — B074
+    did exactly this with `states.degraded()` and was right to.
+
+    ✅ SO THIS TEST HOLDS THE HONEST STATE IN PLACE UNTIL THAT PARAMETER EXISTS: the two rows are
+    framed independently AND the caption admits it. ⚠️ **The pairing of those two is the claim.**
+    A round that adds the shared axis should flip this test, not delete it.
+    """
+    assert _module_constant("_BOX_SHARED_AXIS") is False, (
+        "the shared axis is declared on — flip this test to assert the two frames now MATCH")
+    entries, _ = panel(_game(), _both())
+    rows = _series(_of_metric(entries, "Total")[0])
+    gained, allowed = _plain(rows["gained"]), _plain(rows["allowed"])
+    low_g, high_g = _METRICS["total_yards_for_per_game"][5:7]
+    low_a, high_a = _METRICS["total_yards_allowed_per_game"][5:7]
+    assert f"{low_g}" in gained and f"{low_a}" in allowed, (gained, allowed)
+    assert low_g != low_a, "the fixture cannot show the difference this test is about"
+    # 🚨 THE PAGE MUST SAY IT. A chart whose two rows are not comparable, laid out as though
+    # they were, is worse than one that admits it — AC-G.11 applied to a scale.
+    assert "framed on their OWN spreads" in _text(entries), (
+        "the caption does not tell the reader the two rows are not on one axis")
+
+
+def test_the_CHART_WIDTH_FITS_the_slot_it_is_drawn_in(panel):
+    """R-609/R-750's concern, restated for an SVG.
+
+    ⚠️ `box()` EMITS `max-width:100%`, so a chart handed more width than its cell is SCALED
+    rather than clipped — which is safer than the Vega square ever was, and is also why the
+    width must still be chosen rather than left large: a scaled SVG shrinks its labels with it.
+
+    🚨 THE BOUND IS MEASURED, NOT COMPUTED, AND THE FIRST DRAFT OF THIS TEST GOT IT WRONG. It
+    derived the slot from an assumed ~1100px content width and passed on a `_BOX_ROW_WIDTH` of
+    296 — **which the live render then measured being scaled to 246.** The content is 1000px at
+    1300 with the sidebar open, and the chart slot is **246px**, measured with
+    `getBoundingClientRect()` on the real page (`claude_work/renders/B114_v14_1300.png`).
+
+    ⚠️ SO THE NUMBER BELOW IS AN OBSERVATION WITH A DATE ON IT, and it is a CEILING rather than
+    an equality: a round that widens the slot may raise it, and a round that widens the BOX past
+    it is re-introducing the silent scale. **A derived bound would have gone on agreeing with
+    itself, which is what it did.**
+    """
+    slot = 246  # measured at 1300px, sidebar open, 2026-09-15
+    drawn = _module_constant("_BOX_ROW_WIDTH")
+    assert drawn <= slot, (
+        f"the box is {drawn}px in a ~{slot:.0f}px slot, so `max-width:100%` will scale it down "
+        f"and shrink its labels with it")
+    entries, _ = panel(_game(), _both())
+    svg = _svg_of(_series(_of_metric(entries, "Total")[0])["gained"])
+    assert f"width='{drawn}'" in svg, f"the drawn width is not the declared constant: {svg[:200]}"
 
 
 def test_the_WIDTHS_are_pinned_to_the_SLOT_and_not_to_the_column_index(panel):
@@ -2296,187 +2314,134 @@ def _annotation(chart):
     return texts, urls
 
 
-def test_the_annotation_is_a_worked_SUBTRACTION_in_three_rows(panel):
-    """Marc, v04: *"The logo math that ties to the mark is supposed to be a label/annotation on
-    the chart. Needs to be smaller."*
+def test_the_LEGEND_is_a_worked_SUBTRACTION_in_three_rows(panel):
+    """R-751, kept through the chart change. Marc, v02.2: *"add a line below the Opponent metric
+    (like a math problem)"* — gained, allowed, a rule, the difference.
 
-    ⚠️ ASSERTED IN ORDER, not on presence. All three numbers appear elsewhere on the panel
-    already; what makes this an annotation rather than three numbers is that they are stacked
-    as a subtraction, gained over allowed over the delta.
+    🚨 AND MARC'S v14 CALLS THIS *"the legend"*. There has never been a legend on this chart in
+    the Vega sense — `matchup.py` contains the word nowhere and `_scatter` said why in its own
+    comment — so *"Keep the current legend on the graph on top right"* is this block, and this
+    test is what holds it there.
     """
-    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
-    texts, _urls = _annotation(charts[0])
-    joined = " | ".join(texts)
-    assert joined.index("Rushing") < joined.index("Allowed") < joined.index("+38.0"), (
-        f"the annotation is not gained, then allowed, then the delta: {texts}")
+    entries, _ = panel(_game(), _both())
+    text = _legend(_of_metric(entries, "Rushing")[0])
+    assert "Gained" in text and "Allowed" in text, text
+    assert "154.4" in text and "84.5" in text, text
+    # 🚨 `+38.0`, NOT `69.9`, AND THE DIFFERENCE IS THE WHOLE POINT. 154.4 gained minus 84.5
+    # allowed IS 69.9 — and `_deltas()` carries the STORED column, which reads 38.0. **The first
+    # draft of this test asserted 69.9 and the fixture caught it**: an assertion that recomputes
+    # the figure is an assertion that the page may subtract, which is the one thing §4.2.1
+    # forbids here. The stored number is the claim.
+    assert "+38.0" in text, f"the stored difference is not on the block: {text}"
 
 
-def test_the_annotation_size_is_BETWEEN_v04s_floor_and_a_ceiling_the_plot_can_hold(panel):
-    """🚨 THE SIZE INSTRUCTION REVERSED BETWEEN v04 AND v05, AND THIS RECORDS BOTH ENDS.
+def test_the_LEGEND_is_anchored_to_the_TOP_RIGHT(panel):
+    """Marc: *"Keep the current legend on the graph on top right."*
 
-      v04  *"Needs to be smaller. Font size similar to the axis labels, maybe a little
-           smaller."*  -> B103 shipped 8.5
-      v05  *"in-chart legend, nice. Move it to the top right. Increase font substantially."*
-
-    ⚠️ **8.5 IS THE FLOOR NOW, NOT THE TARGET.** It went past readable, and citing v04 to keep it
-    small would be answering the instruction he replaced. ✅ The axis labels are the reference he
-    reached for twice, so the size sits at theirs rather than below them.
-
-    ⚠️ AND THE CEILING IS THE PLOT. `_CHART_SIDE` is 240px; three lines at 14px plus a rule is a
-    quarter of the square's height, and the annotation would start competing with the data it
-    describes. **The round rendered two sizes and the report says what each costs.**
+    ⚠️ IT IS A `float:right` NOW RATHER THAN A SCREEN COORDINATE INSIDE A VEGA SPEC, so the
+    assertion is on the CSS that puts it there. R-804's failure — a fixed 104px block silently
+    becoming 58% of a resized plot — cannot recur, because nothing about this block is measured
+    in pixels of a plot any more.
     """
-    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
-    sizes = {layer["mark"]["fontSize"] for layer in charts[0].to_dict().get("layer", [])
-             if isinstance(layer.get("mark"), dict) and "fontSize" in layer["mark"]}
-    assert sizes, "the annotation carries no explicit font size"
-    assert min(sizes) > 8.5, (
-        f"the annotation is back at or below v04's size, which Marc replaced: {sizes}")
-    assert max(sizes) <= 12, (
-        f"three lines of {max(sizes)}px plus a rule take too much of a 240px plot — the "
-        f"annotation starts competing with the mark it describes: {sizes}")
+    entries, _ = panel(_game(), _both())
+    block = _of_metric(entries, "Total")[0]
+    piece = block.split("data-cfdb='matchup-legend'")[1].split(">")[0]
+    assert "float:right" in piece, f"the legend is not floated right: {piece}"
+    assert "text-align:right" in piece, f"the legend's figures are not right-aligned: {piece}"
+    # ⚠️ POSITIONAL, NOT PRESENCE: it must be emitted BEFORE the two series, or "top" is a lie.
+    assert block.index("matchup-legend") < block.index("box-series"), \
+        "the legend is drawn after the series, so it is not at the top"
 
 
-def test_the_annotation_is_anchored_to_the_TOP_RIGHT(panel):
-    """Marc, v05: *"Move it to the top right."*
+def test_the_LEGEND_carries_BOTH_LOGOS(panel):
+    """One logo per side, so the subtraction says WHO without repeating two long names."""
+    entries, _ = panel(_game(), _both())
+    block = _of_metric(entries, "Total")[0]
+    piece = block.split("data-cfdb='matchup-legend'")[1].split("data-cfdb='box-series'")[0]
+    assert piece.count("<img") == 2, f"expected two logos in the legend, got {piece.count('<img')}"
 
-    ⚠️ `alt.value()` POSITIONS FROM THE LEFT, so "right" is the plot width minus a margin and a
-    test that only checked for a large x would pass on a block that ran off the plot. The right
-    edge is asserted against `_CHART_SIDE` itself.
+
+def test_a_NULL_LOGO_PUTS_THE_TEAM_NAME_in_the_legend(panel):
+    """🚨 AC-G.11 AT LOGO SIZE, AND THE FALLBACK IMPROVED WITH THE CHART.
+
+    Inside an Altair spec a monogram was impossible, so `_annotation_layers` substituted the
+    team's NAME as text — B100's rule, and the best available. ✅ **In HTML the app's own
+    `identity.logo_or_monogram` applies**, so a missing logo gets the same monogram every other
+    surface draws. **Leaving Vega turned a workaround back into the shared helper.**
     """
-    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
-    side = _module_constant("_CHART_SIDE")
-    xs = []
-    for layer in charts[0].to_dict().get("layer", []):
-        mark = layer.get("mark")
-        kind = mark.get("type") if isinstance(mark, dict) else mark
-        if kind in {"text", "image"} and "value" in (layer.get("encoding", {}).get("x") or {}):
-            xs.append(layer["encoding"]["x"]["value"])
-    assert xs, "no screen-positioned annotation layer found"
-    assert max(xs) <= side, f"the annotation runs off the right edge of a {side}px plot: {xs}"
-    assert min(xs) > side / 2, (
-        f"part of the annotation is in the LEFT half of the plot, so it is not anchored to the "
-        f"top right: {xs}")
+    entries, _ = panel(_game(), _both(logo_url=None))
+    block = _of_metric(entries, "Total")[0]
+    piece = block.split("data-cfdb='matchup-legend'")[1].split("data-cfdb='box-series'")[0]
+    assert piece.count("<img") == 1, "the home side's null logo still drew an <img>"
+    assert "Auburn" in _plain(piece), (
+        f"a missing logo left an EMPTY box rather than the team's name — AC-G.28 keeps the "
+        f"footprint and B100's rule wants the name: {_plain(piece)}")
 
 
-def test_the_annotation_carries_BOTH_logos(panel):
-    """The logos are what make it a subtraction rather than three numbers."""
-    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
-    _texts, urls = _annotation(charts[0])
-    assert len(urls) == 2, f"expected this team's logo and the opponent's: {urls}"
-    assert urls[0] != urls[1]
+def test_a_PRESENT_logo_does_NOT_repeat_the_team_name_in_the_legend(panel):
+    """The fallback is a fallback. With a logo, the block is logo + word + figure and no name —
+    the names are already on the two series labels directly beneath."""
+    entries, _ = panel(_game(), _both())
+    block = _of_metric(entries, "Total")[0]
+    piece = _plain(block.split("data-cfdb='matchup-legend'")[1]
+                   .split("data-cfdb='box-series'")[0])
+    assert "Kentucky" not in piece and "Auburn" not in piece, (
+        f"the legend repeats a team name it already shows a logo for: {piece}")
 
 
-def test_a_NULL_logo_puts_the_TEAM_NAME_in_the_annotation(panel):
-    """🚨 AC-G.11 AT 8.5px, AND THE FALLBACK HAD TO CHANGE WITH THE MOVE.
+def test_the_LEGEND_reads_A106s_COLUMN_and_subtracts_nothing(panel):
+    """🚨 THE BEHAVIOURAL HALF OF §4.2.1, AND THE AST GUARD DOES NOT REPLACE IT.
 
-    B100 rendered a missing logo as `identity.logo_or_monogram`'s empty box plus the team name,
-    because the helper's own comment says the box is only safe when *"the name is right there"*.
-    ⚠️ **Inside a Vega spec there is no `identity` and no monogram** — so the row falls back to
-    the team's NAME as a text mark in the logo's place, which is the same promise kept by the
-    only means available.
+    A106 published the difference as a column. This makes the published column DISAGREE with its
+    own inputs — 154.4 gained, 84.5 allowed, and a stored delta of 1.0 — so a page that
+    subtracted would print 69.9 and a page that reads prints 1.0. **No fixture can satisfy both
+    readings, which is what makes this fire where a source scan cannot.**
     """
-    sides = _both()
-    sides[0]["logo_url"] = None
-    sides[1]["logo_url"] = None
-    charts = _charts(panel(_game(), sides, deltas=_deltas())[0])
-    texts, urls = _annotation(charts[0])
-    assert not urls, f"a null logo still emitted an image mark: {urls}"
-    joined = " ".join(texts)
-    assert "Kentucky" in joined and "Auburn" in joined, (
-        f"a row with no logo must NAME its team — nothing else in the annotation does: {texts}")
-
-
-def test_a_PRESENT_logo_does_NOT_repeat_the_team_name(panel):
-    """⚠️ MARC'S OWN COMPLAINT, one level down: he flagged the name appearing twice. The name is
-    a FALLBACK for an absent logo, not a second label beside a present one."""
-    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
-    texts, _urls = _annotation(charts[0])
-    joined = " ".join(texts)
-    assert "Kentucky" not in joined and "Auburn" not in joined, (
-        f"the team name is drawn beside a logo that is present: {texts}")
-
-
-def test_the_annotation_reads_A106s_COLUMN_and_subtracts_nothing(panel):
-    """🚨 §4.2. The delta is a published column at game x team grain precisely so this page does
-    not compute it; a subtraction here would let the annotation disagree with the Excel export,
-    which reads the same column — R-645, one panel along.
-
-    ⚠️ PROVED BY MAKING THE COLUMN DISAGREE WITH ITS OWN INPUTS. A page that subtracts would
-    print 69.9; a page that reads prints the column. A fixture whose delta happens to equal
-    `gained - allowed` cannot tell the two apart.
-    """
-    deltas = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=-12.5)
-              for r in _deltas()]
-    texts, _urls = _annotation(_charts(panel(_game(), _both(), deltas=deltas)[0])[0])
-    joined = " ".join(texts)
-    assert "-12.5" in joined or "−12.5" in joined, \
-        f"the annotation did not print the column's value: {texts}"
-    assert "69.9" not in joined, "the page subtracted instead of reading A106's column"
+    entries, _ = panel(_game(), _both(),
+                       deltas=_deltas(rushing_yards_for_minus_opponent_allowed_per_game=1.0))
+    text = _legend(_of_metric(entries, "Rushing")[0])
+    assert "1.0" in text, f"the stored delta is not on the block: {text}"
+    assert "69.9" not in text, (
+        f"the page subtracted its own inputs instead of reading A106's column: {text}")
 
 
 def test_a_NULL_delta_renders_an_em_dash_and_a_ZERO_renders_a_number(panel):
-    """AC-G.32, on the result row. A null is the absence of a measurement; a zero is one."""
-    nulls = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=None)
-             for r in _deltas()]
-    texts, _u = _annotation(_charts(panel(_game(), _both(), deltas=nulls)[0])[0])
-    assert "—" in " ".join(texts)
-    zeros = [dict(r, rushing_yards_for_minus_opponent_allowed_per_game=0.0)
-             for r in _deltas()]
-    drawn = " ".join(_annotation(_charts(panel(_game(), _both(), deltas=zeros)[0])[0])[0])
-    assert "—" not in drawn, "a measured zero rendered as an absence"
-    assert "+0.0" in drawn, (
-        "exactly level is a real answer and rendering it bare reads as 'no figure' — the chip "
-        "has said so since R-686, and the annotation shares that renderer")
+    """AC-G.32. A null is an absence and a zero is a measurement, and they must not look alike."""
+    entries, _ = panel(_game(), _both(),
+                       deltas=_deltas(rushing_yards_for_minus_opponent_allowed_per_game=None))
+    assert "\u2014" in _legend(_of_metric(entries, "Rushing")[0])
+    entries, _ = panel(_game(), _both(),
+                       deltas=_deltas(rushing_yards_for_minus_opponent_allowed_per_game=0.0))
+    text = _legend(_of_metric(entries, "Rushing")[0])
+    assert "0.0" in text and "\u2014" not in text, text
 
 
-def test_the_delta_CHIP_no_longer_carries_a_COLOUR(panel):
-    """✅ COWORK'S RULING, and Marc can reverse it in one line.
+def test_the_delta_no_longer_carries_a_COLOUR_of_its_own(panel):
+    """R-736. The number is bold and uncoloured; the verdict beside it is what carries the look.
 
-    The chip is `gained − allowed`, red when negative. The mark v02.3 introduces paints that
-    SAME comparison GREEN, because a defence conceding more than this offence gains is a
-    FAVOURABLE matchup. Red would then point two ways within an inch of itself.
-
-    ⚠️ AND IT COSTS NOTHING A GREYSCALE READER HAD: B091 established on this very delta that
-    the SIGN carries it and the colour only agrees (AC-G.22).
-    🚨 R-756 DELETED THE CHIP ITSELF, AND THE RULING OUTLIVES IT. The same comparison is now
-    the annotation's bold bottom line, an inch from a mark whose COLOUR says the opposite thing
-    — so "red points two ways in one panel" is live, on the same chart rather than across it.
-    ✅ Asserted on the annotation's own layers: the delta line carries no colour, and the sign
-    still carries the fact.
+    ⚠️ TWO COLOUR SIGNALS FOR ONE FACT IS WHAT THIS PREVENTS — a green `+38.0` beside a green
+    circle says the same thing twice and disagrees the moment one of them is wrong.
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    charts = _charts(entries)
-    assert charts, "no charts drew, so the annotation could not be checked"
-    for chart in charts:
-        for layer in chart.to_dict().get("layer", []):
-            mark = layer.get("mark")
-            if not isinstance(mark, dict) or mark.get("type") != "text":
-                continue
-            if mark.get("fontWeight") != "bold":
-                continue
-            assert "color" not in mark and "fill" not in mark, (
-                f"the delta line is tinted, so red points two ways within one chart: {mark}")
-    drawn = " ".join(t for c in charts for t in _annotation(c)[0])
-    assert "-6.0" in drawn or "\u22126.0" in drawn, (
-        f"the sign is what carries it and it is gone: {drawn}")
+    block = _of_metric(entries, "Rushing")[0]
+    piece = block.split("data-cfdb='matchup-legend'")[1].split("data-cfdb='box-series'")[0]
+    delta_span = re.search(r"<span style='font-weight:700'>([^<]*)</span>", piece)
+    assert delta_span, f"the difference is not a plain bold span: {piece}"
+    assert "color" not in delta_span.group(0), "the delta carries its own colour again"
 
 
-# --- 🚨 R-722: the mark, and the pairing a presence assertion cannot see -------------------
+def _mark_of(block):
+    """R-722's verdict as it is drawn: `(glyph, colour)` off the legend's own span.
 
-_OUTLOOK_MACRO = (Path(__file__).resolve().parents[1] / "dbt" / "macros"
-                  / "matchup_outlook.sql")
-
-
-def _mark_of(chart):
-    """One chart's point mark, as (shape, colour, filled)."""
-    spec = chart.to_dict()
-    layers = spec.get("layer", [])
-    point = next(layer for layer in layers
-                 if isinstance(layer.get("mark"), dict)
-                 and layer["mark"].get("type") == "point")
-    mark = point["mark"]
-    return mark.get("shape"), mark.get("color"), mark.get("filled")
+    🚨 THE VERDICT SURVIVED THE CHART AND CHANGED CARRIER. The scatter set shape and colour on
+    its single `mark_point`; a box-and-whisker has no single point, so the classification moved
+    into the legend beside the subtraction it describes. ⚠️ **Shape is still first and colour
+    second (AC-G.22)** — the glyph is a filled circle, a filled diamond or a hollow square, and
+    a greyscale reader separates all three by outline.
+    """
+    found = re.search(r"<span title='([^']*)' style='color:([^;]*);[^']*'>(.)</span>", block)
+    assert found, f"no outlook glyph in the block: {block[:200]}"
+    return found.group(3), found.group(2), found.group(1)
 
 
 def _with_outlook(value, metric="rushing"):
@@ -2512,33 +2477,25 @@ def test_the_MAPPING_KEYS_are_the_values_the_warehouse_actually_stores():
 
 
 def test_each_STORED_VALUE_gets_ITS_OWN_LOOK_not_merely_A_look(panel):
-    """🚨 A PRESENCE ASSERTION IS BLIND TO A SWAP, AND THIS PROJECT HAS PROVED IT THREE TIMES —
-    B082 on the game header, B083 on the win-probability bar, and A119 one layer down, where
-    reversing its two positive-delta branches passed the exhaustiveness test completely.
+    """R-722. Marc's three verdicts get three DIFFERENT looks, and the shape carries two of them.
 
-    So the VALUE-to-LOOK pairing is asserted, one row at a time. Marc's rule:
-
-        favorable   -> green circle       challenging -> red diamond
-        contested   -> yellow circle
+    ⚠️ `_OUTLOOK_MARKS` still holds shape, colour and fill; only the CARRIER changed. The
+    mapping is asserted through what is drawn, so a glyph table that disagreed with the mark
+    table would fail here rather than in a source read.
     """
     seen = {}
     for value in ("favorable", "contested", "challenging"):
         entries, _ = panel(_game(), _both(), deltas=_with_outlook(value))
-        seen[value] = _mark_of(_charts(entries)[0])
-    shapes = {v: m[0] for v, m in seen.items()}
+        seen[value] = _mark_of(_of_metric(entries, "Rushing")[0])
+    glyphs = {v: m[0] for v, m in seen.items()}
     colours = {v: m[1] for v, m in seen.items()}
-    assert shapes["favorable"] == shapes["contested"] == "circle", \
-        f"Marc's rule gives favorable and contested a CIRCLE: {shapes}"
-    assert shapes["challenging"] == "diamond", (
+    assert glyphs["favorable"] == glyphs["contested"] == "\u25cf", \
+        f"Marc's rule gives favorable and contested a CIRCLE: {glyphs}"
+    assert glyphs["challenging"] == "\u25c6", (
         f"`challenging` must be the DIAMOND — it is the one state a greyscale reader can find "
-        f"by outline alone: {shapes}")
-    assert len({colours["favorable"], colours["contested"], colours["challenging"]}) == 3, \
-        f"two outlooks share a colour: {colours}"
-    # 🚨 THE SWAP THE BREAK STAGES: green must be the FAVOURABLE one, not merely present.
-    assert _luminance(colours["challenging"]) < _luminance(colours["contested"]), (
-        f"the challenging mark is not the darkest — swapping favorable and challenging in the "
-        f"mapping would paint a hard matchup green: {colours}")
-    assert colours["favorable"] != colours["challenging"]
+        f"by outline alone: {glyphs}")
+    assert len(set(colours.values())) == 3, f"two outlooks share a colour: {colours}"
+    assert colours["favorable"] == "#1b6b3a", f"green is not on favorable: {colours}"
 
 
 def _luminance(hex_colour: str) -> float:
@@ -2548,73 +2505,60 @@ def _luminance(hex_colour: str) -> float:
 
 
 def test_GREEN_and_YELLOW_are_separated_in_GREYSCALE_too(panel):
-    """⚠️ AC-G.22, AND THIS IS THE ONE PLACE MARC'S RULE SPENDS COLOUR ALONE.
-
-    Two of the three states are CIRCLES, so `favorable` and `contested` differ by colour and
-    nothing else. In greyscale, or to a red-green colour-blind reader, that is one distinction
-    rather than two — unless the two tones are far enough apart in LUMINANCE to read as light
-    and dark.
-
-    🚨 SO THE TONES ARE CHOSEN FOR LUMA DISTANCE RATHER THAN HUE, and this asserts it rather
-    than trusting the eye. The round's report carries the greyscale picture.
+    """🚨 AC-G.22's HARD CASE, UNCHANGED BY THE CHART. Favorable and contested share a shape, so
+    colour is all that separates them — and the two tones are chosen for LUMINANCE distance, not
+    hue, so a greyscale reader still sees two different marks.
     """
-    tones = {v: _mark_of(_charts(panel(_game(), _both(), deltas=_with_outlook(v))[0])[0])[1]
-             for v in ("favorable", "contested", "challenging")}
-    lumas = {v: _luminance(c) for v, c in tones.items()}
-    gap = abs(lumas["favorable"] - lumas["contested"])
-    assert gap >= 40, (
-        f"favorable and contested are both circles, so greyscale leaves only their tone to "
-        f"tell them apart, and these two collapse to {lumas['favorable']:.0f} and "
-        f"{lumas['contested']:.0f} — a gap of {gap:.0f}. Under 40 they read as the same grey "
-        f"disc and the panel has two marks a colour-blind reader cannot distinguish.")
+    tones = {}
+    for value in ("favorable", "contested"):
+        entries, _ = panel(_game(), _both(), deltas=_with_outlook(value))
+        tones[value] = _mark_of(_of_metric(entries, "Rushing")[0])[1]
+
+    def luma(hex_colour):
+        r, g, b = (int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    gap = abs(luma(tones["favorable"]) - luma(tones["contested"]))
+    assert gap > 40, (
+        f"green and yellow are {gap:.0f} apart in luminance; in greyscale they are the same "
+        f"mark and Marc's rule loses a state: {tones}")
 
 
 def test_an_UNCLASSIFIED_mark_does_not_BORROW_one_of_the_three_looks(panel):
-    """🚨 REACHABLE, AND MEASURED RATHER THAN ASSUMED (AC-G.11).
-
-    The prompt expected a null outlook to be unreachable, because `_scatter` returns None when
-    either figure is missing and A119 proved the outlook is null on exactly the rows the delta
-    is null on — 0 rows disagree across all 225,350.
-
-    ⚠️ BUT THOSE ARE DIFFERENT RELATIONS — `srv_game_team` at game x team grain against
-    `srv_team_week` at week grain — so nothing STRUCTURAL ties the two absences together.
-
-    🚨 CHASED, AND THE HONEST ANSWER IS "NOT DEMONSTRATED". 243 rows in 2026 carry a null rushing
-    outlook while that team has both team-week figures at that game's week — ⚠️ but that is the
-    NECESSARY condition only, and `_scatter` also needs the week's distribution, a non-degenerate
-    axis and a point inside the frame. A sample of those 243 rendered ZERO charts.
-
-    ✅ SO THE BRANCH IS NEITHER PROVEN REACHABLE NOR PROVEN DEAD, and this test is what keeps it
-    honest if it ever draws: a shape neither other state uses, unfilled, in grey.
-    """
-    shape, colour, filled = _mark_of(
-        _charts(panel(_game(), _both(), deltas=_with_outlook(None))[0])[0])
-    marks = _module_constant("_OUTLOOK_MARKS")
-    assert shape not in {m[0] for m in marks.values()} or filled is False, (
-        f"an unclassified mark borrowed a classified look: {(shape, colour, filled)}")
-    assert filled is False, "the unclassified mark must be hollow — it is not a fourth verdict"
-    assert colour not in {m[1] for m in marks.values()}, \
-        f"the unclassified mark uses a verdict's colour: {colour}"
+    """A null outlook is not a fourth verdict and must not wear one of the three."""
+    entries, _ = panel(_game(), _both(), deltas=_with_outlook(None))
+    glyph, colour, title = _mark_of(_of_metric(entries, "Rushing")[0])
+    assert glyph == "\u25a1", f"unclassified borrowed a verdict's shape: {glyph}"
+    assert colour not in ("#1b6b3a", "#c8a415"), f"unclassified borrowed a verdict's colour: {colour}"
+    assert "not classified" in title, f"the hover does not say it is unclassified: {title}"
 
 
 def test_an_UNKNOWN_outlook_string_falls_to_the_UNCLASSIFIED_look_not_a_verdict(panel):
-    """A value the warehouse starts emitting that this page has never heard of must not be
-    painted as one of Marc's three. `test_the_MAPPING_KEYS…` is what makes it LOUD; this is what
-    makes it SAFE in the meantime."""
-    shape, colour, filled = _mark_of(
-        _charts(panel(_game(), _both(), deltas=_with_outlook("favourable"))[0])[0])
-    assert filled is False and shape == "square", (
-        f"the British spelling — the one Cowork's prompt specified — was painted as a verdict: "
-        f"{(shape, colour, filled)}")
+    """🚨 THE BRITISH-SPELLING CLASS. A119 shipped `favourable`, CI rejected it and the stored
+    value changed; a mapping keyed on a string serving does not store must fall to the
+    unclassified look rather than silently picking one.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_with_outlook("favourable"))
+    glyph, _colour, _title = _mark_of(_of_metric(entries, "Rushing")[0])
+    assert glyph == "\u25a1", f"an unknown string was given a verdict's shape: {glyph}"
 
-
-# --- 🚨 R-753 / R-752: the card header, and the metric header that left the spec -----------
 
 def _header_row(entries, name):
     """One card's header row markup, by the player it names."""
     block = next(str(b) for k, b in entries
                  if k == "markdown" and name in _plain(str(b)))
-    card = next(piece for piece in block.split("border:1px solid rgba(128,128,128,.22)")
+    # 🚨 SPLIT ON THE MARKER, NOT ON THE BORDER — cfdb-wta-R-901, AND R-886 CALLED THIS SHOT.
+    # Three helpers read `block.split("border:1px solid rgba(128,128,128,.22)")` until the
+    # before-the-game cards got their team colour. `_leader_card`'s own comment already said why
+    # that fails: *"`data-cfdb='leader-card'` IS AN INTERFACE AND THE BORDER IS NOT. The tests
+    # anchored on the literal grey border string until R-886 put the TEAM COLOUR there, at which
+    # point every card-finding helper silently matched nothing."*
+    # ⚠️ AND IT DID NOT FAIL LOUDLY. The split returned ONE piece — the whole three-card block —
+    # so the helper handed back **nine dots for a three-game season**, and the assertion that
+    # caught it reads *"the two rows are different lengths"*, which is not what was wrong.
+    # 🚨 R-886 FIXED THE POST-GAME HELPERS AND THESE THREE WERE NOT ON THAT PANEL, so they kept
+    # a dead anchor for two rounds and nothing could see it until a colour arrived here too.
+    card = next(piece for piece in block.split("data-cfdb='leader-card'")
                 if name in _plain(piece))
     return card.split("repeat(3,1fr)")[0]
 
@@ -2745,56 +2689,70 @@ def test_the_RANK_is_not_on_the_card_at_all(panel):
         assert marker not in header, f"the card header still carries {marker!r}"
 
 
-def test_the_METRIC_HEADER_is_emitted_OUTSIDE_the_chart_spec(panel):
-    """🚨 R-752, AND A TEST THAT THE TEXT IS ON THE PAGE WOULD PASS EITHER WAY.
+def test_the_METRIC_HEADER_SPANS_THE_PAGE_and_is_emitted_ONCE_per_metric(panel):
+    """🚨 cfdb-wta-R-900. Marc, v14: *"Total, Rushing, and Passing should each have a single
+    header row that spans the whole page and has a bold line underneath it."*
 
-    Marc: *"The header over the Chart should be the header for the whole row."* `Rushing` was the
-    Altair spec's own `title=`, which can only ever sit over the chart — so the assertion is that
-    it is NOT in the spec and IS in the markup, not that it exists.
+    ⚠️ ONCE, NOT TWICE, AND THAT IS THE WHOLE CHANGE. R-752 emitted one header PER HALF PER
+    METRIC — six — and said in its own comment that a spanning header *"is deliberately not
+    built, because the two halves are separate Streamlit columns."* **The header is now emitted
+    at the top level, before the columns open**, so there are three.
+
+    🚨 AND "SPANS" IS ASSERTED POSITIONALLY RATHER THAN BY READING A WIDTH. A markdown block at
+    the top level IS the content width; what a test can actually check is that the heading is
+    emitted OUTSIDE the column pair — i.e. exactly once per metric rather than once per half.
+    A presence assertion would pass on six.
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    for chart in _charts(entries):
-        spec = chart.to_dict()
-        assert "title" not in spec, (
-            f"the metric is still the chart's own title, so it can never be a ROW header: "
-            f"{spec.get('title')!r}")
+    names = [label for label, *_rest in _module_constant("_YARDAGE_DIMENSIONS")]
     headers = [_plain(str(b)) for k, b in entries
-               if k == "markdown" and _plain(str(b)) in {"Rushing", "Passing", "Total"}]
-    assert headers == ["Rushing", "Passing", "Total"] * 2, (
-        f"expected one header per metric per half, emitted before each row: {headers}")
+               if k == "markdown" and _plain(str(b)) in set(names)
+               and "gained-allowed" not in str(b)]
+    assert headers == names, (
+        f"expected ONE spanning header per metric in Marc's order {names}, got {headers}")
+    assert _charts(entries) == [], (
+        "an Altair chart is still being shipped — the scatter was replaced by a box-and-whisker")
 
 
-def test_a_small_RULE_separates_the_three_blocks_and_not_the_first(panel):
-    """Marc: *"There should a small line or element to break the space between Rushing, Passing,
-    and Total."* ⚠️ Subtle — the three blocks are one panel, so a rule BEFORE the first would
-    section the panel off from the delta table above it."""
+def test_each_SECTION_HEADER_carries_a_BOLD_RULE_beneath_it(panel):
+    """🚨 cfdb-wta-R-900. Marc, v14: *"has a bold line underneath it."*
+
+    ⚠️ THIS REPLACES A HAIRLINE THAT MEANT SOMETHING ELSE. The old rule was `opacity:.12`
+    BETWEEN the blocks and not before the first — a separator. Marc has asked for a rule UNDER
+    each heading, including the first, which is a different element doing a different job: it
+    binds the name to the rows beneath it rather than parting two neighbours.
+    ✅ **It is `_SECTION_RULE`, B112's own 2px constant, reused rather than re-declared** — the
+    post-game tab draws exactly this under exactly this heading.
+    """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    rules = [str(b) for k, b in entries
-             if k == "markdown" and "opacity:.12" in str(b)]
-    assert len(rules) == 4, (
-        f"expected a rule between the blocks on each half — two per half, none before the "
-        f"first — got {len(rules)}")
+    rule = _module_constant("_SECTION_RULE")
+    headers = [str(b) for k, b in entries
+               if k == "markdown" and _plain(str(b)) in {"Rushing", "Passing", "Total"}
+               and "gained-allowed" not in str(b)]
+    assert len(headers) == 3, f"expected three section headings, got {len(headers)}"
+    for header in headers:
+        assert rule in header, (
+            f"a section heading has no bold rule under it: {header}")
 
 
 def test_the_SUBTRACTION_RULE_is_drawn_and_not_merely_specified(panel):
-    """🚨 IT WAS IN THE SPEC AND DID NOT APPEAR, WHICH A SPEC ASSERTION CANNOT SEE.
+    """🚨 R-803, AND THE DEFECT IT WORKED AROUND IS GONE WITH THE VEGA SPEC.
 
-    The rule was a `mark_rule` positioned entirely in SCREEN values inside a layer chart that
-    has scales. ⚠️ **It serialised at the right coordinates and drew nothing** — so a test
-    asserting "a rule layer exists" passed while the reader saw three numbers in a list, which
-    is exactly what the rule exists to prevent (v02.2: *"like a math problem"*).
+    Marc's v02.2 line under the opponent's figure *"like a math problem"* could not be a
+    `mark_rule` inside a layered chart: positioned entirely in screen values it serialised
+    correctly, validated, appeared in `to_dict()` — **and drew nothing.** The workaround was a
+    one-pixel `mark_rect` with a comment begging the next reader not to simplify it.
 
-    ✅ A one-pixel `mark_rect` with all four edges as values does draw. **This asserts the MARK
-    TYPE, because that is the part that was wrong** — and the render in B104's report is the
-    evidence that it appears.
+    ✅ IN HTML IT IS A `border-top` AND THE CLASS OF DEFECT CANNOT RECUR. The old test had to
+    assert the mark TYPE to prove the workaround was still in place; this asserts the rule is
+    there at all, which is now the same thing.
     """
-    charts = _charts(panel(_game(), _both(), deltas=_deltas())[0])
-    rects = [layer for layer in charts[0].to_dict().get("layer", [])
-             if isinstance(layer.get("mark"), dict)
-             and layer["mark"].get("type") == "rect"
-             and "value" in (layer.get("encoding", {}).get("y") or {})]
-    assert len(rects) == 1, (
-        f"expected exactly one screen-positioned rect — the subtraction's rule: {len(rects)}")
-    edges = rects[0]["encoding"]
-    assert edges["y2"]["value"] - edges["y"]["value"] == 1, "the rule is not one pixel tall"
-    assert edges["x2"]["value"] > edges["x"]["value"], "the rule has no width"
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    block = _of_metric(entries, "Rushing")[0]
+    piece = block.split("data-cfdb='matchup-legend'")[1].split("data-cfdb='box-series'")[0]
+    assert "border-top" in piece, (
+        f"the subtraction has no rule under its two figures: {piece}")
+    # ⚠️ POSITIONAL: the rule sits BETWEEN the two figures and the difference, or it is not a
+    # worked subtraction — it is three numbers and a line somewhere.
+    assert piece.index("Allowed") < piece.index("border-top") < piece.index("font-weight:700"), \
+        "the rule is not between the two figures and the difference"

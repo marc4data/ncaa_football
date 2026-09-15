@@ -35,7 +35,13 @@ KNOWN_CHART_CALLS = {
     ("today.py", "altair_chart"),
     ("movement.py", "line_chart"),
     ("performance.py", "altair_chart"),
-    ("matchup.py", "altair_chart"),          # session B's, fixed by B087
+    # 🚨 matchup.py's ENTRY IS GONE — cfdb-wta-R-900. Marc replaced the Gained vs Allowed
+    # scatter with a box-and-whisker, which `distribution.box` emits as an inline SVG, so the
+    # page makes no `st.altair_chart` call at all. ⚠️ **Removed rather than left as a stale
+    # allowance**: this registry's whole job is that a chart call nobody measured cannot appear
+    # unnoticed, and an entry for a call that no longer exists is a slot a future one could
+    # occupy silently. `test_the_METRIC_HEADER_SPANS_THE_PAGE…` asserts the absence from the
+    # page's side.
 }
 
 # Below this, the furniture leaves no usable plot. Matchup asked for 150 and got almost
