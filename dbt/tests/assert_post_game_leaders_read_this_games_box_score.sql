@@ -21,6 +21,8 @@
 -- PANEL, never to exempt the panel from it.
 --
 -- ⚠️ AND SLOT 2 IS NO LONGER "YARDS" FOR EVERY PANEL. It is THE FIGURE THE PANEL RANKS ON —
+-- ⚠️ SIX PANELS NOW. A134 added `punting` and `kicking`, and the kicking branch is the first to
+-- read `stat_made`/`stat_attempted` instead of `stat_value` — see it for why.
 -- yards on the three offensive panels, TACKLES on the defensive one. `game_yards` is still
 -- compared against yards separately, and on a defensive row both sides are NULL, which is the
 -- assertion that a tackler is never handed offence.
@@ -77,6 +79,44 @@ with box as (
       and s.season >= 2024
     group by s.game_id, s.team_id, s.player_id
 
+    union all
+
+    -- 🚨 THE PUNTING PANEL — A134. `yards` is NULL (a punter records no rushing or receiving
+    -- yards), slot 1 is PUNT yards, slot 2 is punts (the ranking measure) and slot 3 is the
+    -- average. ⚠️ THE TEST WAS RIGHT AND THE FIX IS TO TEACH IT THE NEW PANEL, never to exempt
+    -- the panel from it — A128's words, and this is the second time they have been needed.
+    select
+        s.game_id, s.team_id, s.player_id, 'punting' as panel,
+        null::numeric                                          as yards,
+        max(s.stat_value) filter (where s.stat_type = 'NO')    as slot_2,
+        max(s.stat_value) filter (where s.stat_type = 'YDS')   as slot_1,
+        max(s.stat_value) filter (where s.stat_type = 'AVG')   as touchdowns
+    from {{ ref('fct_player_game_stat') }} s
+    where s.stat_category = 'punting'
+      and s.stat_type in ('NO', 'YDS', 'AVG')
+      and s.stat_value is not null
+      and s.season >= 2024
+    group by s.game_id, s.team_id, s.player_id
+
+    union all
+
+    -- 🚨 THE KICKING PANEL — A134, AND IT IS THE ONE THAT READS `stat_made`/`stat_attempted`
+    -- RATHER THAN `stat_value`. FG and XP are made/attempted pairs whose `stat_value` is null on
+    -- all 7,842 rows of each; a branch written like the five above would compare null to null and
+    -- pass while asserting nothing. Slot 1 is FG made, slot 2 is FG+XP attempts (the ranking
+    -- measure), slot 3 is points.
+    select
+        s.game_id, s.team_id, s.player_id, 'kicking' as panel,
+        null::numeric                                                    as yards,
+        sum(s.stat_attempted) filter (where s.stat_type in ('FG', 'XP')) as slot_2,
+        sum(s.stat_made)      filter (where s.stat_type = 'FG')          as slot_1,
+        max(s.stat_value)     filter (where s.stat_type = 'PTS')         as touchdowns
+    from {{ ref('fct_player_game_stat') }} s
+    where s.stat_category = 'kicking'
+      and s.stat_type in ('FG', 'XP', 'PTS')
+      and s.season >= 2024
+    group by s.game_id, s.team_id, s.player_id
+
 )
 
 select
@@ -96,7 +136,8 @@ select
       when v.stat_1_value is distinct from b.slot_1
         then 'slot 1 is not this game''s figure'
       when v.panel <> 'rushing' and v.stat_3_value is distinct from b.touchdowns
-        then 'slot 3 is not this game''s figure — touchdowns, or TFL on the defensive panel'
+        then 'slot 3 is not this game''s figure — touchdowns, TFL on the defensive panel, '
+             'the punting average, or kicking points'
     end as rule
 from {{ ref('srv_game_team_leader_in_this_game') }} v
 left join box b

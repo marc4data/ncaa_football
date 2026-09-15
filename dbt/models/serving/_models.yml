@@ -4674,6 +4674,47 @@ models:
           Sacks in this game. PUBLISHED BUT DELIBERATELY NOT IN THE RANKING CHAIN - it buys 0.4
           percentage points of tie-breaking and costs another claim about football. Available to
           a page that wants it; it does not decide who is on the card.
+      - name: game_punts
+        description: >
+          Punts in this game, from the box score's punting NO. THE PUNTING PANEL RANKS ON THIS,
+          and KPI slot 2. Volume rather than average, because Marc asked for "the punter" - the
+          man who did the punting. Average names the man who punted WELL, which on one or two
+          punts is noise.
+      - name: game_punt_yards
+        description: >
+          Gross punting yards in this game. The punting panel's TIEBREAK and KPI slot 1, so the
+          card shows the number the ordering turns on.
+      - name: game_punt_average
+        description: >
+          Yards per punt in this game, as the feed publishes it. KPI slot 3 - the number every
+          broadcast shows - but NOT in the ranking chain: it equals yards/punts on 8,066 of 8,066
+          rows, so two punters level on both punts and yards are level on average by construction
+          and it can break nothing.
+      - name: game_field_goals_made
+        description: >
+          Field goals made in this game. KPI slot 1 on the placekicker card, paired with attempted.
+          Read from stat_made, NOT stat_value - FG is a made/attempted pair whose stat_value is
+          null on all 7,842 rows.
+      - name: game_field_goals_attempted
+        description: >
+          Field goals attempted in this game. KPI slot 1 secondary, the other half of the pair.
+      - name: game_extra_points_made
+        description: >
+          Extra points made in this game. Published for a page that wants it; NOT a KPI slot,
+          because only slot 1 carries a secondary value and the field goals have it.
+      - name: game_extra_points_attempted
+        description: >
+          Extra points attempted in this game. Published, not a slot - see game_extra_points_made.
+      - name: game_kicking_points
+        description: >
+          Points scored by this kicker in this game. The placekicker panel's TIEBREAK and KPI
+          slot 3. It is the tiebreak rather than the measure DELIBERATELY: points is "made" in
+          disguise, and a kicker who went 0 for 2 is still the placekicker.
+      - name: game_placekicks
+        description: >
+          Field goal attempts plus extra point attempts in this game. THE PLACEKICKER PANEL RANKS
+          ON THIS, and KPI slot 2. Attempts rather than made, so the man the team sent out is the
+          man on the card even when he missed.
       - name: stat_1_label
         description: >
           What the first KPI slot is called - Receptions, Carries or Comp-Att depending on the panel.
