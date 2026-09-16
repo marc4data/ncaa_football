@@ -1681,9 +1681,16 @@ _OUTLOOK_MARKS = {
 #     `srv_team_week`, which are different relations at different grains, so nothing STRUCTURAL
 #     ties them;
 #   · 243 rows in 2026 carry a null rushing outlook while that team has both team-week figures
-#     at that game's week — ⚠️ that is the NECESSARY condition only. `_scatter` also needs the
-#     week's distribution, a non-degenerate axis and a point inside the frame, and a sample of
-#     those 243 rendered ZERO charts.
+#     at that game's week — ⚠️ that is the NECESSARY condition only. `_scatter`, which B114
+#     removed, ALSO needed the week's distribution, a non-degenerate axis and a point inside the
+#     frame, and a sample of those 243 rendered ZERO charts.
+#
+# ⚠️ AND THE MEASUREMENT IS WEAKER NOW THAN WHEN IT WAS TAKEN, WHICH IS WORTH SAYING RATHER THAN
+# QUIETLY KEEPING. Three of those four conditions were the SCATTER's; `box()` frames on the
+# whiskers widened by the value and drops nothing, so the only surviving gate is whether the week
+# has a distribution row at all. **The branch is therefore MORE reachable than this note's
+# evidence establishes, not less** — which is an argument for keeping the unclassified look, and
+# the reason it is kept.
 #
 # 🚨 SO THE BRANCH IS NOT KNOWN TO BE REACHABLE AND IS NOT KNOWN TO BE DEAD — and an unclassified
 # mark must still not borrow a verdict's look if it ever draws. It gets a hollow grey square: a
@@ -1736,7 +1743,7 @@ def _game_team_rows(game_id: int) -> dict:
 
 
 def _yardage_row(offense, defense, week_rows, dimension, deltas=None,
-                 leaders=None, usage=None) -> None:
+                 leaders=None, usage=None, games=None) -> None:
     """ONE metric for ONE side: the box-and-whisker pair, with that side's cards BESIDE it.
 
     🚨 cfdb-wta-R-900 TURNED `_yardage_column` INSIDE OUT, AND THE REASON IS THE SPANNING
@@ -1765,7 +1772,8 @@ def _yardage_row(offense, defense, week_rows, dimension, deltas=None,
     chart = _gained_allowed(offense, defense, for_column, allowed_column, week_rows, label,
                             _delta_for(deltas, outlook_column),
                             _delta_for(deltas, delta_column),
-                            accent=accent, opponent_accent=opponent_accent)
+                            accent=accent, opponent_accent=opponent_accent,
+                            games=games, game_column=_GAME_YARDS[label])
     panel_key = (int(offense["team_id"]), _LEADER_PANELS[label])
     cards = _leader_block((leaders or {}).get(panel_key, []),
                           (usage or {}).get(panel_key), accent=accent)
@@ -1810,6 +1818,15 @@ _LEADER_COLUMNS = """
 # reads. ⚠️ Do not "correct" passing to passers: he asked for the receivers a passing game
 # produced, which is a different and deliberate question.
 _LEADER_PANELS = {"Rushing": "rushing", "Passing": "passing", "Total": "total"}
+
+# 🚨 R-899. THE SECTION's PER-GAME COLUMN, WHICH IS NOT THE PER-GAME-AVERAGE ONE.
+#
+# ⚠️ THE TWO VOCABULARIES DIFFER BY A SUFFIX AND THAT IS THE TRAP A128, A132 AND B110 EACH PAID
+# FOR. `total_yards_for_per_game` is the team's AVERAGE on `srv_team_week`, which is what the box
+# row draws; `total_yards` is ONE GAME's figure on `srv_game_team`, which is what the strip
+# draws. **Deriving one from the other with a string replace would work until a column is renamed
+# and then fail silently**, so the mapping is written out.
+_GAME_YARDS = {"Total": "total_yards", "Rushing": "rushing_yards", "Passing": "passing_yards"}
 
 # ⚠️ `_ORDINAL` WAS HERE AND R-753 REMOVED IT WITH THE RANK BADGE. Marc: *"Don't include the
 # rank."* The cards are drawn in rank order so the ORDER carries it; nothing carries a TIE any
@@ -2450,7 +2467,8 @@ def _leader_block(rows, usage=None, accent: str = None) -> str:
 # exactly what it says. **A wider viewport gives the slot more room and leaves slack at the
 # outer edge; it does not make this number wrong**, which is the property the fixed 180px square
 # had before it and the reason R-609 keeps `use_container_width` off.
-_BOX_ROW_WIDTH = 240
+# ⚠️ MOVED. cfdb-wta-R-899 gave the box and the strip a shared gutter, so this
+# constant is declared beside `_STRIP_GUTTER` where the two are traded off.
 
 # 🚨 THE TWO ROWS DO NOT SHARE AN X-AXIS TODAY, MARC ASKED THAT THEY SHOULD, AND THE THING IN
 # THE WAY IS ONE PARAMETER IN SESSION A's MODULE. This is stated as a constant rather than left
@@ -2568,12 +2586,13 @@ def _matchup_legend(team, opponent, for_column, allowed_column, delta, outlook) 
     """Marc's *"Keep the current legend on the graph on top right"* — the worked subtraction.
 
     🚨 THE PROMPT CALLED THIS *"the green/red/yellow one"* AND THERE HAS NEVER BEEN A LEGEND ON
-    THIS CHART. `matchup.py` contains the word nowhere, and `_scatter` says why in its own
-    comment: the outlook's shape and colour were *"SET ON THE MARK RATHER THAN ENCODED FROM THE
-    DATA, because this chart plots exactly one point — an encoding would add a scale and a
-    legend to say what a single mark already is."* ⚠️ **What sits in the top right is
-    `_annotation_layers`: Marc's own v02.2 request for *"a line below the Opponent metric (like
-    a math problem)"*.** That is the thing he is asking to keep, and it is kept.
+    THIS CHART. `matchup.py` contains the word nowhere, and `_scatter` — the Altair scatter B114
+    replaced with this chart — said why in its own comment: the outlook's shape and colour were
+    *"SET ON THE MARK RATHER THAN ENCODED FROM THE DATA, because this chart plots exactly one
+    point — an encoding would add a scale and a legend to say what a single mark already is."*
+    ⚠️ **What sat in the top right was `_annotation_layers`, also removed by B114: Marc's own
+    v02.2 request for *"a line below the Opponent metric (like a math problem)"*.** That is the
+    thing he is asking to keep, and this function is where it is kept.
     #
     ✅ AND LEAVING THE VEGA SPEC FIXES A FRAGILITY R-803 HAD TO WORK AROUND. In there the rule
     under the subtraction could not be a `mark_rule` — one positioned entirely in screen values
@@ -2623,17 +2642,306 @@ def _box_row(row, side, caption: str, column, accent: str) -> str:
     return (
         f"<div data-cfdb='box-series' data-series='{caption.lower()}' "
         f"style='margin:.1rem 0 .45rem'>"
+        # ⚠️ THE LABEL KEEPS THE FULL WIDTH AND ONLY THE SVG IS INDENTED. The gutter exists so
+        # the strip's opponent column can sit beside a plot that lines up with this one; pushing
+        # the team's name in by 40px too would buy nothing and cost the label its room.
         f"<div style='font-size:.7rem;opacity:.75;border-left:3px solid {accent};"
         f"padding-left:.35rem;margin-bottom:.1rem;white-space:nowrap;overflow:hidden;"
         f"text-overflow:ellipsis'>"
         f"{html.escape(name)} "
         f"<span style='font-weight:600'>{html.escape(caption)}</span></div>"
-        f"{chart}</div>")
+        f"<div style='margin-left:{_STRIP_GUTTER}px'>{chart}</div></div>")
+
+
+# 🚨 R-899. THE CALENDAR, ONE READ FOR BOTH SIDES AND ALL THREE METRICS.
+#
+# ⚠️ IT IS THE SECOND QUERY THIS PANEL MAKES AGAINST `srv_game_team` AND THAT IS THE GRAIN
+# TALKING, NOT A DUPLICATE. `_game_team_rows` reads ONE GAME's two rows for the deltas; this
+# reads TWO TEAMS' whole regular seasons. Different `where`, different row count, same relation —
+# G-2 is one relation per query, which both satisfy. `lib.query.query` is `@st.cache_data`
+# wrapped, so neither pays for the other.
+#
+# ⚠️ AND IT CARRIES ALL SIX PER-GAME COLUMNS RATHER THAN ONE, because the three sections draw
+# three different strips off the same rows. Six columns in one read beats three reads.
+_CALENDAR_COLUMNS = """
+    team_id, week, game_date, is_home, opponent_abbreviation,
+    total_yards, rushing_yards, passing_yards,
+    total_yards_allowed, rushing_yards_allowed, passing_yards_allowed,
+    game_figures_state
+"""
+
+
+def _game_calendar(season: int, season_type: str, team_ids: tuple) -> dict:
+    """Both teams' regular-season calendars, kickoff descending, keyed by team_id.
+
+    🚨 THE ORDER IS THE QUERY's — Marc asked for kickoff DESCENDING and this is where that is
+    decided, once, so nothing downstream forms a second opinion.
+
+    ⚠️ AC-G.39, AND THE BOUND IS THE GRAIN RESTATED RATHER THAN A GUESS. A regular-season
+    calendar measured on 2026 serving runs from 1 to 13 games — `min 1 / median 11 / max 13`
+    across 716 teams — so two teams cannot exceed 26 rows. **40 leaves headroom for a longer
+    season without being a number nobody can justify**, and a season that ever exceeded it would
+    truncate the OLDEST games, which is the end a descending order makes least harmful.
+    """
+    df = query(f"""
+        select {_CALENDAR_COLUMNS}
+        from srv_game_team
+        where season = :season
+          and season_type = :season_type
+          and team_id in (:away_team_id, :home_team_id)
+        order by game_date desc
+        limit 40
+    """, {"season": season, "season_type": season_type,
+          "away_team_id": int(team_ids[0]), "home_team_id": int(team_ids[1])})
+    return {team: rows for team, rows in df.groupby("team_id", sort=False)}
+
+
+# --- R-899: the calendar strip, the second control under the box rows ------------------------
+
+# 🚨 MARC, v14: *"Layer in a second graph control that has the same x-axis, 1 row/game on the
+# calendar, with the Gained or Allowed value for the game. Label with the abbreviation of the
+# opponent, order by kick-off date, desc. Go ahead and reserve/print rows for each regular season
+# game on the calendar. It should cover vertically, the same real estate as 3 player cards."*
+#
+# ✅ *"THE SAME X-AXIS"* IS THE WHOLE POINT AND IT IS WHAT MAKES THIS WORTH DRAWING: the week's
+# spread, and then this team's actual games placed on it. A strip on its own axis would be a
+# second chart that happens to sit underneath a first one.
+
+# 🚨 THE GUTTER, AND WHY BOTH THE BOX AND THE STRIP PAY FOR IT.
+#
+# `box()` maps the frame onto `pad … width - pad` of ITS OWN svg. For a strip row to line up with
+# it, the strip's plot must start at the same page x — so the opponent abbreviation cannot sit in
+# a column to the left of the strip unless the BOX is indented by that same column too.
+# ⚠️ **So the gutter is applied to both**, and `_BOX_ROW_WIDTH` came down from 240 to make room
+# inside the 246px slot B114 measured. The box loses 40px of plot; the alternative is a strip
+# whose marks do not line up with the distribution they are drawn against, which is the one thing
+# this element exists to do.
+_STRIP_GUTTER = 40
+_BOX_ROW_WIDTH = 206
+
+# ⚠️ ROW HEIGHT FIXED, TOTAL HEIGHT VARYING — AND THE OTHER CHOICE IS NAMED BECAUSE IT IS
+# TEMPTING. Marc asked for *"the same real estate as 3 player cards"*.
+#
+# 🚨 B107's 84px CARD IS STALE AND THE PROMPT CARRIED IT FORWARD. **Measured in the browser this
+# round at 1300px: a card is 97px, and a block of three — which is what Marc actually named — is
+# 325px**, because the third card on this panel often carries the *"No game-by-game usage held"*
+# note and runs to 120. ⚠️ 270px was the number this round started from and it was **19% short**;
+# a strip built to it would have been a fifth smaller than the thing it was told to match.
+# **R-805's class: a carried measurement re-checked in the round that leans on it.**
+#
+# ✅ SO 27px × 12 = 324, against a measured 325. The instruction is satisfied at 12 games, which
+# is the median FBS calendar.
+#
+# 🚨 THE CALENDAR IS NOT ALWAYS 12 AND THE MARGIN IS NOT SMALL. Measured on 2026 regular serving
+# this round: of 716 teams, **231 have 12 games and 485 (67.7%) do not** — 1, 2, 3, 4, 6, 8, 9,
+# 10, 11, 12 and 13 all occur, with 251 teams at 10 and 146 at 11. Within FBS it is tighter and
+# still not uniform: **129 teams at 12, 8 at 11 and San José State at 13.**
+#
+# ❌ FIXING THE TOTAL HEIGHT AT 270px AND DIVIDING IT BY THE ROW COUNT WOULD COST THE THING THE
+# CHART IS FOR. A team with one game played gets a single 270px row; a 13-game team gets 20.8px
+# where its neighbour gets 22.5 — **and two strips on one screen stop being comparable, which is
+# the same defect as two box rows on two axes, one element down.** ✅ A fixed row is the same
+# size on every team, so the strip's LENGTH becomes an honest reading of how long the season is.
+_STRIP_ROW_H = 27
+
+# 🚨 `_STRIP_PAD` IS `box()`'s PRIVATE `pad` AND COPYING IT IS THE THING B114 REFUSED TO DO.
+#
+# B114's own words, declining to align two box rows by width-and-offset: *"it needs `box()`'s
+# internal `pad`, which is a local variable. Coupling this file to another module's private
+# constant is worse than the parameter it is avoiding."* ⚠️ **That judgement stands for that
+# problem and cannot be applied to this one**: there is no way to put a NEW element on an
+# existing chart's axis without knowing that chart's geometry, and the alternative is a strip
+# that does not line up.
+#
+# ✅ SO THE COUPLING IS DECLARED AND THEN MADE LOUD. `test_the_STRIP_and_the_BOX_agree_about_
+# WHERE_A_VALUE_GOES` renders a real `box()` and reads back the x it drew its median at, then
+# asserts this module's own mapping puts the same number in the same place. **The day
+# `site/lib/distribution.py` changes its padding, that test fails and names why** — which is what
+# a silent copy of a constant can never do.
+_STRIP_PAD = 10
+
+
+def _strip_x(value, frame, width):
+    """Where `value` sits on the box row's axis — the SAME mapping `box()` uses.
+
+    ⚠️ A COORDINATE TRANSFORM, NOT METRIC ARITHMETIC (§4.2.1), and the same note `_box_scale`
+    carries in `site/lib/distribution.py`: this produces a pixel offset inside one <svg>, which
+    nobody can cite, export or sort on. The quantities it maps — the whiskers, the frame, the
+    game's own yardage — all arrive published.
+    """
+    lo, hi = frame
+    span = (hi - lo) or 1.0
+    return _STRIP_PAD + (float(value) - lo) / span * (width - 2 * _STRIP_PAD)
+
+
+# 🚨 THREE STATES, THREE SENTENCES, AND THE MIDDLE ONE IS cfdb-main-R-911's TRAP.
+#
+# `game_figures_state` states the fact and the page supplies the words (AC-G.11). Measured on
+# 2026 regular serving this round: `scheduled` 5,848 · `no_box_score` 842 · `played` 668.
+#
+# ❌ *"COLLECTED FROM 2024 ONWARD"* IS FLATLY FALSE AND R-730's VERSION OF IT REACHED THE LIVE
+# PAGE ONCE. It is a DIVISION story, not a date one. A135 measured the seasons; this round
+# measured whose games they are, which is the half that makes the sentence writable:
+#
+#     of the 842 `no_box_score` team-games in 2026 regular
+#       Division III   425        Division II   368        FCS   5        FBS   0
+#
+# ✅ SO THE SENTENCE NAMES THE OPPONENT'S LEVEL RATHER THAN A YEAR, and it is true of the D-III
+# fixtures it was checked against (team 354 vs MILK, team 2781 vs BSU, week 1, 2026-09-03).
+#
+# ⚠️ AND `scheduled` AND `no_box_score` BOTH CARRY A NULL YARDAGE — measured, 5,848 and 842 nulls
+# against 0 non-null — so the page CANNOT tell them apart from the figure. It must read the
+# state, which is exactly why A135 published one.
+# 🚨 TWO REGISTERS, AND THE RENDER IS WHAT DECIDED IT. The first version printed the full
+# sentence on every reserved row, and at week 3 that is **"not yet played" ten times down a
+# twelve-row strip** — the page shouting one fact at a reader who understood it on the first row.
+# ⚠️ Marc asked for the ROW to be reserved so the shape of the season is visible; he did not ask
+# for the words to repeat.
+#
+# ✅ SO THE ROW CARRIES A SHORT TAG AND THE STRIP CARRIES THE SENTENCE, ONCE, AND ONLY FOR THE
+# STATES ACTUALLY PRESENT. AC-G.11 is satisfied where it asks to be — the absence is named and
+# the two absences are still told apart row by row — and the explanation sits in the one place
+# that does not multiply by the calendar's length.
+_STRIP_STATES = {
+    "played": (None, None),
+    "scheduled": ("not yet", "not yet played"),
+    "no_box_score": (
+        "no box score",
+        "no box score — cfdb holds one for every FBS meeting, and for no Division II or "
+        "Division III opponent"),
+}
+
+# ⚠️ NOT A FOURTH STATE. An unrecognised value is a row this page does not understand, and
+# saying so is true of it without claiming to know why.
+_STRIP_UNKNOWN = ("no figure", "no figure, and cfdb does not record why")
+
+
+def _strip_note(state) -> str:
+    """The short tag for one row's absence, or "" when the game has a figure."""
+    if state is None or (not isinstance(state, str) and pd.isna(state)):
+        return _STRIP_UNKNOWN[0]
+    return _STRIP_STATES.get(str(state), _STRIP_UNKNOWN)[0] or ""
+
+
+def _strip_absences(games, column) -> list:
+    """The full sentence for each absence actually on this strip, in the order it first appears.
+
+    🚨 *ACTUALLY ON THIS STRIP* IS THE WHOLE POINT, AND IT IS R-762's RULE APPLIED TO COPY. A
+    legend listing all three states on every team would decorate two absences that are not there
+    — and **an FBS-vs-FBS calendar has no `no_box_score` row at all**: measured on 2026 regular
+    serving, of 842 such team-games **425 are Division III, 368 Division II, 5 FCS and ZERO are
+    FBS.** A sentence explaining a state the reader cannot see is the decoration §6 warns about.
+    """
+    seen, out = set(), []
+    for _i, game in games.iterrows():
+        value = game.get(column)
+        if not (value is None or pd.isna(value)):
+            continue
+        state = game.get("game_figures_state")
+        key = str(state)
+        if key in seen:
+            continue
+        seen.add(key)
+        sentence = _STRIP_STATES.get(key, _STRIP_UNKNOWN)[1]
+        if sentence:
+            out.append(sentence)
+    return out
+
+
+def _strip_row(game, column, frame, accent, width) -> str:
+    """One game: the opponent in the gutter, then its yardage on the box row's axis.
+
+    🚨 A RESERVED ROW IS NOT A BLANK ROW, AND A FUTURE GAME IS NOT A ZERO. Marc asked to
+    *"reserve/print rows for each regular season game on the calendar"* so the shape of the season
+    is visible before it is played — and a zero on a yards axis is a claim about a game that has
+    not happened (AC-G.32). **A row with no figure draws NO MARK and says which absence it is.**
+    """
+    # 🚨 `width:{width}px;flex:none`, NEVER `flex:1` — AND THE 1700px RENDER IS THE ONLY THING
+    # THAT COULD SEE WHY. The first version let the plot stretch to fill the row. At 1300px the
+    # slot happens to be 246px, so 40 of gutter left exactly 206 and the strip lined up with the
+    # box perfectly. **At 1700px the slot is 369px, the strip's plot took 329 and the box's SVG
+    # stayed at its declared 206** — the strip drawn on an axis 60% longer than the distribution
+    # it sits under, with every mark in the wrong place.
+    #
+    # ⚠️ AND EVERY OTHER INSTRUMENT SAID IT WAS FINE: the suite was green, the markup was
+    # identical, and the 1300px raster was pixel-exact. **`box()` ships a FIXED width, so
+    # anything that means to share its axis must be fixed too** — a proportional element cannot
+    # track an absolute one, which is R-750's finding pointed at a different pair.
+    value = game.get(column)
+    state = game.get("game_figures_state")
+    home = game.get("is_home")
+    # ⚠️ `@` AND `vs` RATHER THAN A HOME/AWAY COLUMN OF ITS OWN: one glyph, and it is the
+    # convention every schedule on this site already uses.
+    where = "" if home is None or pd.isna(home) else ("vs " if bool(home) else "@ ")
+    abbr = str(game.get("opponent_abbreviation") or "?")
+    label = (f"<span style='display:inline-block;width:{_STRIP_GUTTER}px;font-size:.62rem;"
+             f"opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+             f"{html.escape(where + abbr)}</span>")
+
+    if value is None or pd.isna(value):
+        note = _strip_note(state)
+        return (f"<div data-cfdb='strip-row' data-state='{html.escape(str(state))}' "
+                f"style='display:flex;align-items:center;height:{_STRIP_ROW_H}px'>{label}"
+                f"<span style='width:{width}px;flex:none;font-size:.58rem;opacity:.42;"
+                f"padding-left:{_STRIP_PAD}px;"
+                f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>"
+                f"{html.escape(note)}</span></div>")
+
+    lo, hi = frame
+    inside = lo <= float(value) <= hi
+    x = _strip_x(min(max(float(value), lo), hi), frame, width)
+    # 🚨 A VALUE BEYOND THE SHARED FRAME IS PINNED AND SAYS SO, WHICH IS THE ONE PLACE THIS CHART
+    # CANNOT FOLLOW `box()`. `box()` widens its frame around an out-of-range value; the strip
+    # CANNOT, because widening is precisely what would take it off the axis it is here to share.
+    # ⚠️ Measured: **2 of 262 played games in 2026 regular — 0.8% — fall outside their week's
+    # whiskers** (one below, one above; the extremes are 57 and 856 yards). ✅ **The NUMBER is
+    # never wrong — it is printed in full beside the mark — only the POSITION is bounded, and the
+    # caret is what says so.** An unmarked pin would read as "at the extreme" when the truth is
+    # "beyond it", which is the overclaim `box()`'s own comment warns about.
+    caret = "" if inside else (
+        f"<span style='position:absolute;left:{x - 4:.1f}px;top:1px;font-size:.5rem;"
+        f"opacity:.8'>{'\u25c2' if float(value) < lo else '\u25b8'}</span>")
+    return (f"<div data-cfdb='strip-row' data-state='played' "
+            f"style='display:flex;align-items:center;height:{_STRIP_ROW_H}px'>{label}"
+            f"<span style='position:relative;width:{width}px;flex:none;"
+            f"height:{_STRIP_ROW_H}px'>"
+            f"<span style='position:absolute;left:{x:.1f}px;top:4px;width:2px;"
+            f"height:{_STRIP_ROW_H - 9}px;background:{accent}'></span>{caret}"
+            f"<span style='position:absolute;left:{min(x + 5, width - 34):.1f}px;top:3px;"
+            f"font-size:.58rem;opacity:.75'>{fmt.number(value, column, dp=0)}</span>"
+            f"</span></div>")
+
+
+def _calendar_strip(games, column, frame, accent, width) -> str:
+    """Marc's second control: one row per regular-season game, kickoff descending.
+
+    ⚠️ THE ORDER IS THE QUERY's AND IS NOT RE-SORTED HERE. `_game_calendar` asks for
+    `order by game_date desc`, so re-sorting in the page would be a second opinion about the
+    same fact — and R-768's class is a test that sorts its own frame and then asserts pandas
+    sorts. **The page renders the order it was given.**
+
+    🚨 THE FRAME IS HANDED IN, NEVER RECOMPUTED. It is the frame the GAINED box row above is
+    drawn on, so the strip and the distribution share one scale. ⚠️ **A strip that computed its
+    own would look identical today and silently stop agreeing the moment `_BOX_SHARED_AXIS`
+    flips** — which is the property B116 needs and the reason this is a parameter.
+    """
+    if not len(games):
+        # AC-G.11 — and this is an absence about the CALENDAR, not about the figures.
+        return ("<div data-cfdb='calendar-strip' style='font-size:.62rem;opacity:.45;"
+                "padding:.2rem 0'>cfdb holds no regular-season schedule for this team.</div>")
+    rows = "".join(_strip_row(game, column, frame, accent, width) for _i, game in games.iterrows())
+    notes = "".join(
+        f"<div style='font-size:.58rem;opacity:.5;padding-left:{_STRIP_GUTTER}px'>"
+        f"{html.escape(sentence)}</div>" for sentence in _strip_absences(games, column))
+    return (f"<div data-cfdb='calendar-strip' data-games='{len(games)}' "
+            f"style='margin-top:.15rem'>{rows}"
+            f"<div data-cfdb='strip-absences'>{notes}</div></div>")
 
 
 def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
                     label: str, outlook=None, delta=None,
-                    accent: str = None, opponent_accent: str = None) -> str:
+                    accent: str = None, opponent_accent: str = None,
+                    games=None, game_column: str = None) -> str:
     """Marc's v14 chart: the team's GAINED on top, the opponent's ALLOWED below, and the legend.
 
     🚨 TWO SERIES OVER TWO DIFFERENT DISTRIBUTIONS, WHICH IS WHY IT IS TWO CALLS AND NOT
@@ -2644,18 +2952,44 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
     is a real number in the wrong place.**
 
     ⚠️ AND THE PAIRING IS THE PANEL'S, NOT A CHOICE MADE HERE: this team's offence against THAT
-    team's defence, which is what `_scatter` plotted and what `_yardage_side_heading` announces.
+    team's defence — which is what the `_scatter` B114 replaced plotted, and what
+    `_yardage_side_heading` still announces.
 
     🚨 AN ABSENT WEEK ROW IS `box()`'s OWN PLACEHOLDER AND THAT IS DELIBERATE. It returns a
     titled em dash rather than nothing, so the row keeps its height and the two series stay
     aligned — R-141's rule, and the alternative is the top series sliding down onto the bottom
     one's label whenever one of the six metrics is missing for the week.
+
+    🚨 R-899's STRIP TAKES THE **GAINED** ROW's FRAME, AND WHICH ONE IT TAKES IS A REAL CHOICE.
+    This half of the panel is *"<Team> offense against <Opponent>'s defense"*, and the strip
+    carries that team's own per-game yardage — so it belongs to the Gained series and is drawn on
+    Gained's axis.
+
+    ⚠️ **WHICH MEANS IT IS ALIGNED WITH THE TOP ROW AND NOT WITH THE BOTTOM ONE, and the page has
+    to say so.** cfdb-wta-R-927 is the same problem one element up: the two box rows are framed
+    on their own whiskers, 13.8% apart on `total`. **The caption already admits that and now
+    covers the strip too** — the page has been honest about this for a round and a new element
+    must not quietly break it. ✅ When A139's `box(row, frame=…)` lands and B116 flips
+    `_BOX_SHARED_AXIS`, a strip reading the shared frame moves with it for free.
+
+    ⚠️ AND THE FRAME IS `_box_frame`, WHICH IS THE SAME INPUTS `box()` USES — the week's whisker
+    pair widened by the team's own value — rather than a second computation off the same row.
     """
+    frame = _box_frame(week_rows.get(for_column), team.get(for_column))
+    strip = ""
+    if games is not None and frame is not None:
+        # ⚠️ THE CAPTION IS INDENTED AND THE STRIP IS NOT. Each strip ROW carries the gutter
+        # inside its own flex, so an outer margin here would indent it twice and take the marks
+        # off the axis this whole element exists to share.
+        strip = (f"<div style='margin-left:{_STRIP_GUTTER}px;font-size:.62rem;opacity:.6;"
+                 f"margin-top:.3rem'>Each game, most recent first</div>"
+                 f"{_calendar_strip(games, game_column, frame, accent, _BOX_ROW_WIDTH)}")
     return (
         f"<div data-cfdb='gained-allowed' data-metric='{html.escape(label.lower())}'>"
         f"{_matchup_legend(team, opponent, for_column, allowed_column, delta, outlook)}"
         f"{_box_row(week_rows.get(for_column), team, 'Gained', for_column, accent)}"
         f"{_box_row(week_rows.get(allowed_column), opponent, 'Allowed', allowed_column, opponent_accent)}"
+        f"{strip}"
         f"<div style='clear:both'></div></div>")
 
 
@@ -2782,6 +3116,9 @@ def _yardage(row) -> None:
         leaders = _game_leaders(int(row["game_id"]))
         # R-694. Marc's game dots, and the same rule: ONE read for six cards' worth.
         usage = _game_usage(int(row["game_id"]))
+        # R-899. Both calendars, one read, six strips.
+        calendars = _game_calendar(int(row["season"]), row["season_type"],
+                                   (int(away_id), int(home_id)))
 
         # ⚠️ R-522 / spec §0: AWAY ON THE LEFT, HOME ON THE RIGHT. Marc made it a page law
         # rather than this panel's choice — "Data about Away team will be on the left. Same
@@ -2806,10 +3143,12 @@ def _yardage(row) -> None:
             left, right = st.columns(2)
             with left:
                 _yardage_row(away, home, distribution, dimension,
-                             deltas.get(int(away_id)), leaders, usage)
+                             deltas.get(int(away_id)), leaders, usage,
+                             games=calendars.get(int(away_id)))
             with right:
                 _yardage_row(home, away, distribution, dimension,
-                             deltas.get(int(home_id)), leaders, usage)
+                             deltas.get(int(home_id)), leaders, usage,
+                             games=calendars.get(int(home_id)))
 
         # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11), AND THERE IS NOW ONE RATHER
         # THAN TWO. See `_metrics_without_a_week`: the off-the-frame case the scatter had cannot

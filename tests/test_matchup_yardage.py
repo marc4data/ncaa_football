@@ -107,6 +107,52 @@ def _distribution(min_games=9, axes=None, **overrides):
     return rows
 
 
+def _calendar(team_games=None):
+    """Both sides' regular-season calendars, kickoff DESCENDING — what `srv_game_team` returns.
+
+    📊 MEASURED, NOT INVENTED. This is **Boise State's real 2026 regular calendar** read back from
+    serving on 2026-09-15, re-keyed onto this file's two teams: **11 games, not 12**, two played
+    and nine still scheduled, and **week 7 missing because it is a bye**. ⚠️ Those three
+    properties are the ones the strip has to survive, and a hand-built 12-row ladder has none of
+    them.
+
+    🚨 AND THE NULLS ARE THE POINT. Measured on 2026 regular serving: `total_yards` is NULL on
+    **all 5,848 `scheduled` rows and all 842 `no_box_score` rows**, and non-null on all 668
+    `played` ones. **So the two absences are indistinguishable from the figure alone** — the page
+    must read `game_figures_state`, and a fixture that filled them with zeros could not tell
+    anyone that.
+    """
+    real = [
+        (12, "2026-11-21", True, "SDSU", None, None, "scheduled"),
+        (11, "2026-11-14", True, "ORST", None, None, "scheduled"),
+        (10, "2026-11-07", False, "CSU", None, None, "scheduled"),
+        (9, "2026-10-31", True, "TXST", None, None, "scheduled"),
+        (8, "2026-10-24", False, "WSU", None, None, "scheduled"),
+        (6, "2026-10-10", False, "FRES", None, None, "scheduled"),
+        (5, "2026-10-03", True, "USU", None, None, "scheduled"),
+        (4, "2026-09-26", False, "WMU", None, None, "scheduled"),
+        # ⚠️ ONE ROW IS RE-STATED AS `no_box_score` SO THE THIRD SENTENCE HAS A SUBJECT. On real
+        # serving this is a D-III or D-II opponent: of the 842 such team-games in 2026 regular,
+        # **425 are Division III, 368 Division II, 5 FCS and 0 FBS.**
+        (3, "2026-09-19", True, "SDAK", None, None, "no_box_score"),
+        (2, "2026-09-12", True, "MEM", 578, 519, "played"),
+        (1, "2026-09-05", False, "ORE", 274, 497, "played"),
+    ]
+    rows = []
+    for team in (AWAY_ID, HOME_ID):
+        for week, date, home, abbr, yards, allowed, state in (team_games or real):
+            rows.append({
+                "team_id": team, "week": week,
+                "game_date": pd.Timestamp(date, tz="UTC"), "is_home": home,
+                "opponent_abbreviation": abbr,
+                "total_yards": yards, "rushing_yards": yards,
+                "passing_yards": yards,
+                "total_yards_allowed": allowed, "rushing_yards_allowed": allowed,
+                "passing_yards_allowed": allowed,
+                "game_figures_state": state})
+    return rows
+
+
 def _deltas(**overrides):
     """R-686's three deltas for both sides, at game x team grain.
 
@@ -267,7 +313,8 @@ def panel(request):
         seen = {}
 
         def run(game, sides, distribution=_DISTRIBUTION, deltas=None,
-                leaders=None, usage=None, allow_error_state=allow_error_state):
+                leaders=None, usage=None, calendar=None,
+                allow_error_state=allow_error_state):
             """`sides` is what srv_team_week returns — zero, one or two constructed rows.
 
             ⚠️ THE PANEL READS TWO RELATIONS SINCE R-590, so the stub dispatches on the SQL rather
@@ -297,6 +344,15 @@ def panel(request):
                 if "srv_game_team_leader_through_prior_week" in sql:
                     seen["leader_sql"] = sql
                     return pd.DataFrame(leaders if leaders is not None else _leaders())
+                # 🚨 R-899's CALENDAR, AND IT DISPATCHES BEFORE THE DELTAS BRANCH FOR EXACTLY THE
+                # REASON R-694's COMMENT GIVES ABOVE. This query reads `srv_game_team` too, so a
+                # later branch would answer it with the DELTAS frame — two rows at game × team
+                # grain, carrying none of `game_date`, `opponent_abbreviation` or
+                # `game_figures_state`. ⚠️ **That is not a crash, it is a strip drawn from the
+                # wrong relation**, and it is how this stub first reported the panel as raising.
+                if "game_figures_state" in sql:
+                    seen["calendar_sql"], seen["calendar_params"] = sql, params or {}
+                    return pd.DataFrame(calendar if calendar is not None else _calendar())
                 if "srv_game_team" in sql:
                     seen["delta_sql"], seen["delta_params"] = sql, params or {}
                     return pd.DataFrame(deltas if deltas is not None else _deltas())
@@ -883,7 +939,15 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
     # disagree with and no export reads them. ⚠️ Each quantity has exactly ONE consumer by
     # construction — a CSS width — which is the test §4.2.1 actually sets, rather than "is the
     # result a pixel" (R-741, and the formulation B099 was told not to license).
+    # 🚨 R-899's ENTRY, AND IT IS THE SAME KIND AS THE FOUR ABOVE: A SCREEN-PIXEL COORDINATE.
+    # Finishing the required sentence: **this page divides here, and the warehouse cannot do it,
+    # because the quantity is an x OFFSET INSIDE ONE `<svg>`-sized row.** `_STRIP_PAD` and the
+    # row width are layout constants in this file; serving has never heard of either, there is no
+    # column this could disagree with and no export reads it. ⚠️ It is the same transform
+    # `site/lib/distribution.py`'s own `_box_scale` carries the identical note for — which is the
+    # point, because the strip must land on the axis `box()` drew.
     allowed = {"_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10",
+               "return _STRIP_PAD + (float(value) - lo) / span * (width - 2 * _STRIP_PAD)",
                "return (inner - _METRIC_CELL_GAP * _REM) / 2",
                "_TABLE_VALUE_PX = ((_TABLE_CELL_BUDGET // 3) if _TABLE_CELLS_EQUAL",
                "_TABLE_VALUE_WIDTH = _TABLE_VALUE_PX / _REM    # rem, for the cell CSS"}
@@ -2158,6 +2222,292 @@ def test_GAINED_IS_ON_TOP_and_ALLOWED_BENEATH_IT(panel):
     for metric, markup in _blocks(entries):
         assert markup.index("data-series='gained'") < markup.index("data-series='allowed'"), (
             f"the {metric} block draws Allowed above Gained — Marc's v14 puts gained on top")
+
+
+# --- R-899: the calendar strip ---------------------------------------------------------------
+
+def _strips(entries) -> list:
+    """`(metric, markup)` for each calendar strip, in the order the panel drew them."""
+    out = []
+    for metric, block in _blocks(entries):
+        chunks = block.split("<div data-cfdb='calendar-strip'")
+        if len(chunks) > 1:
+            out.append((metric, chunks[1]))
+    return out
+
+
+def _strip_rows(strip: str) -> list:
+    """`(state, plain text)` per row, in drawn order."""
+    rows = []
+    for chunk in strip.split("<div data-cfdb='strip-row'")[1:]:
+        state = re.search(r"data-state='([^']*)'", chunk)
+        body = chunk.split("</div></div>")[0]
+        rows.append((state.group(1) if state else None, _plain(body.split(">", 1)[1])))
+    return rows
+
+
+def test_the_STRIP_draws_ONE_ROW_PER_GAME_on_a_calendar_that_is_NOT_TWELVE(panel):
+    """🚨 R-899. Marc: *"reserve/print rows for each regular season game on the calendar."*
+
+    📊 PROVED ON A CALENDAR THAT IS NOT 12, WHICH IS THE CASE A 12-ROW ASSUMPTION SURVIVES. The
+    fixture is **Boise State's real 2026 regular season — 11 games**, read back from serving. Of
+    716 teams on that calendar, **231 have 12 games and 485 (67.7%) do not**; inside FBS it is
+    129 at 12, 8 at 11 and San José State at 13.
+
+    ⚠️ AND *"RESERVED"* IS THE HALF A ROW COUNT ALONE WOULD MISS: nine of those eleven have not
+    been played, so a strip that drew only games with figures would show TWO rows and look
+    entirely reasonable doing it.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    strips = _strips(entries)
+    assert len(strips) == 6, f"expected one strip per metric per side, got {len(strips)}"
+    for metric, strip in strips:
+        rows = _strip_rows(strip)
+        assert len(rows) == 11, (
+            f"the {metric} strip drew {len(rows)} rows for an 11-game calendar — a reserved row "
+            f"per scheduled game is the instruction, not a row per game with a figure")
+        assert "data-games='11'" in strip, "the strip does not declare its own row count"
+
+
+def test_the_STRIP_is_ordered_by_KICKOFF_DESCENDING_and_does_not_re_sort(panel):
+    """Marc: *"order by kick-off date, desc."*
+
+    🚨 THE ORDER IS THE QUERY's AND THE TEST READS WHAT WAS DRAWN. R-768's class is a test that
+    sorts its own frame and then asserts pandas sorts; this hands the panel rows in the order
+    serving returns them and reads the abbreviations back off the page.
+
+    ⚠️ AND IT IS ASSERTED AS A LIST, NOT AS *first* AND *last*. Two rows out of order in the
+    middle is exactly what a first/last check cannot see.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    _metric, strip = _strips(entries)[0]
+    drawn = [_plain(text).replace("vs ", "").replace("@ ", "").split()[0]
+             for _state, text in _strip_rows(strip)]
+    # Boise State's real 2026 calendar, kickoff descending — week 7 is a bye and is simply absent,
+    # which is the shape of a calendar the page must not "fill in".
+    assert drawn == ["SDSU", "ORST", "CSU", "TXST", "WSU", "FRES", "USU", "WMU",
+                     "SDAK", "MEM", "ORE"], \
+        f"the strip is not in kickoff-descending order: {drawn}"
+
+
+def test_the_THREE_ABSENCE_STATES_read_DIFFERENTLY(panel):
+    """🚨 AC-G.11 and cfdb-main-R-911. Three states, three sentences, and none of them a zero.
+
+    📊 MEASURED ON 2026 REGULAR SERVING THIS ROUND: `scheduled` 5,848 · `no_box_score` 842 ·
+    `played` 668 — **and `total_yards` is NULL on every one of the first two and present on every
+    one of the third.** So the two absences are indistinguishable from the figure alone and the
+    page must read `game_figures_state`.
+
+    ⚠️ THE ASSERTION IS THAT THEY DIFFER, NOT MERELY THAT EACH EXISTS. A page that printed the
+    same words for both absences would pass a presence check per state and still tell a reader
+    that a game in November and a D-III fixture in September are the same kind of nothing.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    _metric, strip = _strips(entries)[0]
+    words = {}
+    for state, text in _strip_rows(strip):
+        words.setdefault(state, set()).add(text)
+    assert set(words) == {"scheduled", "no_box_score", "played"}, (
+        f"the strip does not carry all three states: {sorted(words)}")
+    scheduled = " ".join(words["scheduled"])
+    no_box = " ".join(words["no_box_score"])
+    assert "not yet" in scheduled, f"a future game does not read as not yet: {scheduled}"
+    assert no_box != scheduled, "the two absences are told in the same words"
+    assert "no box score" in no_box, f"the no_box_score row does not say so: {no_box}"
+
+
+def test_the_NO_BOX_SCORE_sentence_is_TRUE_of_a_DIVISION_III_fixture(panel):
+    """🚨 cfdb-main-R-911, AND THE SENTENCE R-730 ALREADY PUT ON THE LIVE PAGE ONCE.
+
+    ❌ *"Collected from 2024 onward"* IS FLATLY FALSE ON A 2025 DIVISION III GAME. A135 measured
+    the seasons; **this round measured whose games they are**, which is the half that makes a
+    true sentence writable:
+
+        of the 842 `no_box_score` team-games in 2026 regular
+          Division III 425 · Division II 368 · FCS 5 · **FBS 0**
+
+    ✅ SO THE SENTENCE MUST NAME THE LEVEL OF OPPONENT, NEVER A YEAR. Checked against the real
+    D-III fixtures this round queried: team 354 vs MILK and team 2781 vs BSU, week 1, 2026-09-03.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    _metric, strip = _strips(entries)[0]
+    rows = [text for state, text in _strip_rows(strip) if state == "no_box_score"]
+    assert rows, "the fixture carries no no_box_score row, so this test has no subject"
+    assert "no box score" in " ".join(rows), (
+        f"the row does not say which absence it is (AC-G.11): {rows}")
+
+    # 🚨 THE SENTENCE LIVES IN THE STRIP's ABSENCE NOTE, NOT ON EVERY ROW, and that is where this
+    # asserts it. Printing the full explanation on each reserved row meant "not yet played" ten
+    # times down a twelve-row strip — the render is what said so — so the row carries a short tag
+    # and the strip carries the sentence ONCE, for the states actually present.
+    note = _plain(strip.split("data-cfdb='strip-absences'")[1])
+    assert "no box score" in note, f"the no_box_score absence is never explained: {note}"
+    for forbidden in ("2024", "2025", "onward", "since"):
+        assert forbidden not in note.lower(), (
+            f"the sentence makes a claim about DATES — {forbidden!r} — and the measurement says "
+            f"it is about the opponent's DIVISION: {note}")
+    assert "Division" in note, (
+        f"the sentence does not name the level of opponent, which is the only thing that makes "
+        f"it true of a D-III fixture: {note}")
+
+    # ✅ AND IT IS NOT PRINTED WHERE IT DOES NOT APPLY (R-762). An FBS-vs-FBS calendar has no
+    # `no_box_score` row — 0 of 842 in 2026 regular — so the sentence must not appear on one.
+    fbs_only = [g for g in _calendar() if g["game_figures_state"] != "no_box_score"]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), calendar=fbs_only)
+    _metric, strip = _strips(entries)[0]
+    clean = _plain(strip.split("data-cfdb='strip-absences'")[1])
+    assert "no box score" not in clean, (
+        f"a calendar with no such game still explains the absence: {clean}")
+
+
+def test_a_FUTURE_GAME_DRAWS_NO_MARK_and_never_a_ZERO(panel):
+    """🚨 AC-G.32 ON A YARDS AXIS. A zero is a claim about a game that has not happened.
+
+    ⚠️ AND THE MARK IS WHAT MATTERS, NOT THE TEXT. A scheduled row that printed no number but
+    still drew its tick at the axis origin would read as *held to nothing* — the same lie in a
+    different element, and invisible to a test that only greps for "0".
+    """
+    # 🚨 KEYED ON THE FIXTURE, NEVER ON `data-state` — AND STAGING THE BREAK IS WHAT SAID SO.
+    #
+    # The first version read each row's `data-state` off the markup and asserted accordingly. The
+    # break that removes the null guard makes every row take the mark-drawing branch, **which
+    # hardcodes `data-state='played'`** — so the break rewrote the very attribute the test used to
+    # decide what to expect, and **the test passed while every scheduled game drew a mark.**
+    #
+    # ⚠️ R-768's CLASS: a test must not key on a value the defect controls. ✅ The truth about
+    # which games have figures lives in the CALENDAR FIXTURE, so the rows are paired to it by
+    # opponent — the one field the page copies and never computes.
+    expected = {g["opponent_abbreviation"]: g["game_figures_state"]
+                for g in _calendar() if g["team_id"] == AWAY_ID}
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    _metric, strip = _strips(entries)[0]
+    chunks = strip.split("<div data-cfdb='strip-row'")[1:]
+    assert len(chunks) == len(expected), (
+        f"expected {len(expected)} rows, got {len(chunks)} — this test cannot pair them up")
+    for chunk in chunks:
+        # ⚠️ THE SPLIT LANDS INSIDE THE OPENING TAG, so the attributes that follow are still
+        # markup — dropping to the first `>` is what makes `_plain` return the row a reader sees.
+        body = chunk.split(">", 1)[1].split("</div></div>")[0]
+        abbr = _plain(body).replace("vs ", "").replace("@ ", "").split()[0]
+        state = expected[abbr]
+        if state == "played":
+            assert "background:" in body, f"a played game drew no mark: {_plain(body)}"
+        else:
+            assert "background:" not in body, (
+                f"a {state} game ({abbr}) drew a MARK on the yards axis — a game with no figure "
+                f"placed at a position is a measurement nobody made: {_plain(body)}")
+            assert not re.search(r">\s*0\s*<", body), (
+                f"a {state} game ({abbr}) rendered a zero: {_plain(body)}")
+
+
+def test_the_STRIP_and_the_BOX_agree_about_WHERE_A_VALUE_GOES(panel):
+    """🚨 THE GUARD THAT MAKES A BORROWED PRIVATE CONSTANT LOUD — R-899, and it is the reason
+    this round was allowed to do what B114 refused.
+
+    B114 declined to align two `box()` rows by width-and-offset because it *"needs `box()`'s
+    internal `pad`, which is a local variable. Coupling this file to another module's private
+    constant is worse than the parameter it is avoiding."* ⚠️ **That judgement stands for that
+    problem.** It cannot stand for this one: there is no way to put a NEW element on an existing
+    chart's axis without knowing that chart's geometry, and the alternative is a strip whose marks
+    do not line up with the distribution they are drawn against — which is the whole element.
+
+    ✅ SO THE COPY IS DECLARED (`_STRIP_PAD`) AND THEN CHECKED AGAINST THE REAL THING. This renders
+    an actual `box()` and reads back the x it drew its MEDIAN line at, then asks `_strip_x` where
+    it would put the same number. **They must agree to within half a pixel.**
+
+    🚨 THE DAY `site/lib/distribution.py` CHANGES ITS PADDING, THIS FAILS AND NAMES WHY — which is
+    exactly what a silent copy of a constant can never do. A139 is in that file right now.
+
+    ⚠️ AND THE MEDIAN IS THE RIGHT PROBE BECAUSE IT IS DRAWN FROM THE ROW RATHER THAN FROM THE
+    VALUE: `box()` widens its frame around a value marker, so probing with the value would
+    measure a frame this test had to predict. p50 sits inside the whiskers by construction.
+    """
+    from lib import distribution as dist
+    width = _module_constant("_BOX_ROW_WIDTH")
+    row = _distribution()[0]
+    frame = (float(row["whisker_low"]), float(row["whisker_high"]))
+    svg = dist.box(row, value=None, width=width, show_value=False)
+    drawn = re.search(r"<line x1='([\d.]+)'[^>]*stroke-width='1.8'", svg)
+    assert drawn, f"no median line in box()'s output — this probe has gone blind: {svg[:300]}"
+
+    import importlib
+    matchup = importlib.import_module("views.matchup")
+    ours = matchup._strip_x(float(row["p50"]), frame, width)
+    assert abs(float(drawn.group(1)) - ours) < 0.5, (
+        f"the strip would place {row['p50']} at {ours:.1f}px and `box()` drew it at "
+        f"{drawn.group(1)}px. The two are on DIFFERENT axes, which is the one thing the calendar "
+        f"strip exists not to be. `_STRIP_PAD` no longer matches `distribution.box`'s own `pad`.")
+
+
+def test_the_STRIPS_PLOT_IS_A_FIXED_WIDTH_and_never_stretches(panel):
+    """🚨 THE DEFECT THE 1700px RENDER FOUND AND EVERY OTHER INSTRUMENT MISSED.
+
+    The strip's plot was `flex:1`. At 1300px the chart slot is 246px, so a 40px gutter left
+    exactly 206 and it lined up with the box perfectly — **the suite was green and the 1300px
+    raster was pixel-exact.** 📊 **At 1700px the slot is 369px: the strip's plot took 329 and the
+    box's SVG stayed at its declared 206**, so the strip was drawn on an axis 60% longer than the
+    distribution beneath which it sits, with every mark in the wrong place.
+
+    ✅ `box()` SHIPS A FIXED WIDTH, SO ANYTHING SHARING ITS AXIS MUST BE FIXED TOO. A proportional
+    element cannot track an absolute one — R-750's finding on a different pair.
+
+    ⚠️ THIS TEST READS THE DECLARED WIDTH, WHICH IS WHAT A UNIT TEST CAN SEE. It cannot measure
+    the browser, and it is not a substitute for the two renders — it is the cheap guard that stops
+    the same edit coming back. **The expensive instrument found it; this one remembers it.**
+    """
+    width = _module_constant("_BOX_ROW_WIDTH")
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    _metric, strip = _strips(entries)[0]
+    for chunk in strip.split("<div data-cfdb='strip-row'")[1:]:
+        opening = chunk.split(">", 1)[1]
+        plot = opening.split("</span>")[0]
+        assert "flex:1" not in chunk, (
+            "a strip row still stretches to fill its slot, so its axis grows with the viewport "
+            "while `box()`'s stays fixed")
+        assert f"width:{width}px" in chunk, (
+            f"a strip row does not pin its plot to `_BOX_ROW_WIDTH` ({width}px), so it cannot "
+            f"be on the same axis as the chart above it: {plot[:160]}")
+
+
+def test_the_STRIP_takes_the_GAINED_rows_frame_and_the_PAGE_SAYS_SO(panel):
+    """🚨 cfdb-wta-R-927 REACHES THE STRIP, AND THE PAGE HAS TO STAY HONEST ABOUT IT.
+
+    The two box rows are framed on their own whiskers — measured 13.8% apart on `total` — so a
+    strip can share ONE of them. It shares **Gained's**, because this half of the panel is
+    *"<Team> offense against <Opponent>'s defense"* and the strip carries that team's own per-game
+    yardage. ⚠️ **Which means it is aligned with the top row and NOT with the bottom one.**
+
+    ✅ B114's caption already admitted the two rows are framed independently; this asserts it
+    still covers the page now that a third element sits on one of those frames. **The page has
+    been honest about this for a round and a new element must not quietly break it.**
+
+    ⚠️ THE PAIRING IS THE CLAIM: the strip reads the gained frame AND the caption says the frames
+    are not shared. A round that flips `_BOX_SHARED_AXIS` (B116) should change both together.
+    """
+    assert _module_constant("_BOX_SHARED_AXIS") is False, (
+        "the shared axis is on — the strip now sits on a frame BOTH box rows use, and this test "
+        "and the page's caption should both be revisited")
+
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    assert "framed on their OWN spreads" in _text(entries), (
+        "the caption no longer tells the reader the rows are not on one axis")
+    # 🚨 BEHAVIOURAL, NOT A SOURCE READ: move the GAINED whisker pair only, and the strip's mark
+    # must move with it. A strip computing its own frame would not budge.
+
+    def mark_x(gained_high):
+        rows = [dict(r, whisker_high=gained_high)
+                if r["metric"] == "total_yards_for_per_game" else r
+                for r in _distribution()]
+        entries, _ = panel(_game(), _both(), deltas=_deltas(), distribution=rows)
+        strip = dict(_strips(entries))["total"]
+        played = [c for c in strip.split("<div data-cfdb='strip-row'")[1:]
+                  if "background:" in c][0]
+        return float(re.search(r"left:([\d.]+)px;top:4px", played).group(1))
+
+    wide, narrow = mark_x(900.0), mark_x(600.0)
+    assert wide < narrow - 5, (
+        f"widening the GAINED row's frame did not move the strip's mark ({wide:.1f} vs "
+        f"{narrow:.1f}) — the strip is on an axis of its own, not on the box row's")
 
 
 def test_the_CARD_BORDERS_carry_the_TEAM_COLOUR_on_THIS_tab_too(panel):
