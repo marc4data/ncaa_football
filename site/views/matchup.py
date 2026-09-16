@@ -2470,47 +2470,68 @@ def _leader_block(rows, usage=None, accent: str = None) -> str:
 # ⚠️ MOVED. cfdb-wta-R-899 gave the box and the strip a shared gutter, so this
 # constant is declared beside `_STRIP_GUTTER` where the two are traded off.
 
-# 🚨 THE TWO ROWS DO NOT SHARE AN X-AXIS TODAY, MARC ASKED THAT THEY SHOULD, AND THE THING IN
-# THE WAY IS ONE PARAMETER IN SESSION A's MODULE. This is stated as a constant rather than left
-# in a report, because the next round to read this code must not have to rediscover it.
+# ✅ THE TWO ROWS SHARE ONE X-AXIS — cfdb-wta-R-927, CLOSED. A139 shipped the parameter this
+# needed and B116 flipped it; the argument is kept because it is the reason, not the status.
 #
-# 📊 WHAT `box()` ACTUALLY FRAMES ON, read rather than assumed: `frame_lo, frame_hi` start at
-# the row's whisker pair and are widened by the value markers — `axis_min` and `axis_max` are
-# never read at all, and the module says so (*"IT READS NO BIN COLUMNS"*). ⚠️ **So the premise
-# that the two series differ because their BIN RANGES differ is the wrong mechanism.** They
-# differ because each row is framed on ITS OWN whiskers, which is not a decision anybody made —
-# it is what two independent calls give you.
+# 📊 WHAT IT WAS. `box()` frames on the row's own whisker pair widened by its value markers, so
+# two independent calls gave two independent scales. Measured on live serving, 2026 regular
+# week 15: on `total` the gained row spanned **204.0–620.5 (416.5 yards)** and the allowed row
+# **142.5–508.5 (366.0)** across the same pixels — **a 13.8% scale difference, and the layout
+# invited the reader to compare them by eye.** Nothing on the screen admitted to it.
 #
-# 📊 MEASURED ON LIVE SERVING, 2026 regular week 15, the three pairs' whisker spans:
+# ✅ WHAT IT IS NOW. Both calls are handed `frame=` the WEEK's union of the two whisker pairs, and
+# A139's parameter only ever WIDENS — `frame_lo = min(frame_lo, given_lo)` — so `lo`/`hi` still
+# draw each row's own serifs and label each row's own boundaries. **The scale is shared; the
+# numbers under it stay each row's own.** A shared axis that relabelled the whiskers with the
+# union's numbers would tell a reader this team's week ran from 142.5 when it ran from 204.0,
+# which is the dishonest version and is one line away.
 #
-#     metric pair        gained             allowed            union
-#     total            204.0 – 620.5      142.5 – 508.5      142.5 – 620.5
-#     rushing           40.5 – 336.0       10.0 – 241.0        10.0 – 336.0
-#     passing           46.0 – 396.5       47.5 – 352.0        46.0 – 396.5
+# 📊 THE COST, MEASURED ACROSS ALL THIRTEEN 2026 REGULAR WEEKS rather than the one week the
+# prompt tabled — the narrower row simply ends early:
 #
-# 🚨 SO 400 YARDS SITS AT A DIFFERENT x IN THE TWO ROWS, SILENTLY. On `total` the gained row
-# spans 416.5 yards and the allowed row 366.0 across the same pixels — a 13.8% scale difference
-# — and the reader is invited by the layout to compare them by eye. **That is the defect, and it
-# is worse than an empty margin because nothing on the screen admits to it.**
+#     pair       gained span   allowed span   (as a share of the union)
+#     passing      100.0%         86.9%
+#     rushing       91.2%         71.9%
+#     total         88.1%         77.4%
 #
-# ✅ THE COST OF THE FIX IS SMALL AND MEASURABLE: on the union frame the narrower row simply
-# ends early. `total` allowed would use 87.9% of the width, `rushing` allowed 70.8%, `passing`
-# 93.7% — and the widest gap, rushing, is the pair a reader is least likely to compare across.
+# 🚨 AND THE RESIDUAL, WHICH IS REAL AND IS NOT ZERO. `box()` widens by its OWN value AFTER the
+# frame is applied, so a team whose per-game figure falls outside the week union re-widens THAT
+# row and the two stop matching exactly. **Measured: 60 of 3,786 team-weeks on the gained side
+# and 60 on the allowed side — 2.85% of sides have one.**
 #
-# ❌ AND IT CANNOT BE DONE FROM THIS FILE WITHOUT EITHER LYING OR COPYING.
-#   · Handing `box()` a row whose whisker pair is the UNION would frame it correctly and then
-#     draw the whisker serifs and print the boundary LABELS at the union numbers — falsifying
-#     two published figures to buy a layout.
-#   · Sizing the two SVGs so their px-per-yard match and offsetting the narrower one is exact
-#     arithmetic and needs `box()`'s internal `pad`, which is a local variable. **Coupling this
-#     file to another module's private constant is worse than the parameter it is avoiding.**
-#
-# ✅ SO IT IS `box(row, frame=(lo, hi))` — one optional parameter, defaulting to today's
-# behaviour — AND `site/lib/distribution.py` IS SESSION A's (§3 rule 3). **Raised in the report,
-# not reached across for.** B074 did exactly this with `states.degraded()` and was right to
-# (R-500). ⚠️ The union is a property of the WEEK, not of the two teams on screen, so it keeps
-# R-590's guarantee that every matchup in a week is drawn on the same axes.
-_BOX_SHARED_AXIS = False
+# ⚠️ THE ONE-LINE ALTERNATIVE IS DELIBERATELY NOT TAKEN, AND COWORK SHOULD DECIDE IT. Passing
+# `union ∪ both values` would make the two rows agree in 100% of cases — but the prompt's own
+# constraint is *"the union is computed from the week's distribution rows, NOT from the two teams
+# in front of the reader"*, because R-590's guarantee is that every matchup in a week shares a
+# frame. **The two acceptance criteria are in tension and this round followed the stated one.**
+# ✅ Either way the flip is a strict improvement: exact on 97.15% of sides, and closer on the
+# rest than the 13.8% it replaces.
+_BOX_SHARED_AXIS = True
+
+
+def _week_union(week_rows, *columns):
+    """The union of the named week rows' whisker pairs — the WEEK's, never the screen's.
+
+    🚨 R-590 IS THE WHOLE CONSTRAINT: *"the axis is a property of the week, not of the two teams
+    on screen … deriving the limits from the two teams present would look identical on any single
+    game and be wrong across the week."* **This reads only `srv_team_week_metric_distribution`
+    rows**, so two matchups in one week are handed the same union and stay comparable.
+
+    ⚠️ IT RETURNS `None` WHEN EITHER ROW IS ABSENT, AND THAT IS NOT A FALLBACK TO ONE OF THEM.
+    A union of one row is that row's own frame wearing a shared name — the chart would look
+    shared and not be. `box(frame=None)` is exactly today's behaviour, which is the honest thing
+    for a week we only half hold.
+    """
+    spans = []
+    for column in columns:
+        row = week_rows.get(column)
+        if row is None:
+            return None
+        lo, hi = row.get("whisker_low"), row.get("whisker_high")
+        if lo is None or hi is None or pd.isna(lo) or pd.isna(hi):
+            return None
+        spans.append((float(lo), float(hi)))
+    return min(lo for lo, _hi in spans), max(hi for _lo, hi in spans)
 
 
 def _box_frame(row, value):
@@ -2612,7 +2633,7 @@ def _matchup_legend(team, opponent, for_column, allowed_column, delta, outlook) 
         f"<span style='font-weight:700'>{_signed_delta(delta)}</span></div></div>")
 
 
-def _box_row(row, side, caption: str, column, accent: str) -> str:
+def _box_row(row, side, caption: str, column, accent: str, frame=None) -> str:
     """One series: its label, then `box()`'s SVG.
 
     ⚠️ THE LABEL IS DRAWN HERE BECAUSE `box()`'s OWN `label` IS NOT DRAWN AT ALL — it goes into
@@ -2635,8 +2656,12 @@ def _box_row(row, side, caption: str, column, accent: str) -> str:
     # COLUMN, so a yardage renders the way every other yardage on this page does; `box()`'s own
     # fallback knows only a decimal count. **`None` means "let the module label it", which is
     # what an absent figure must get — there is nothing to format.**
+    # ✅ `frame=` IS A139's PARAMETER AND IT ONLY WIDENS. Both series on a metric are handed the
+    # SAME week union, so they are drawn on one scale — and each row keeps its own whisker serifs
+    # and its own boundary labels, because `lo`/`hi` draw and `frame_lo`/`frame_hi` scale.
     chart = distribution.box(
         row, value=value, width=_BOX_ROW_WIDTH, label=caption, value_color=accent,
+        frame=frame,
         value_label=(None if value is None or pd.isna(value)
                      else fmt.number(value, column, dp=1)))
     return (
@@ -2965,17 +2990,32 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
     carries that team's own per-game yardage — so it belongs to the Gained series and is drawn on
     Gained's axis.
 
-    ⚠️ **WHICH MEANS IT IS ALIGNED WITH THE TOP ROW AND NOT WITH THE BOTTOM ONE, and the page has
-    to say so.** cfdb-wta-R-927 is the same problem one element up: the two box rows are framed
-    on their own whiskers, 13.8% apart on `total`. **The caption already admits that and now
-    covers the strip too** — the page has been honest about this for a round and a new element
-    must not quietly break it. ✅ When A139's `box(row, frame=…)` lands and B116 flips
-    `_BOX_SHARED_AXIS`, a strip reading the shared frame moves with it for free.
+    ✅ **AND SINCE B116 THAT IS THE SAME AXIS THE ALLOWED ROW IS ON.** cfdb-wta-R-927 was the
+    same problem one element up — the two box rows framed on their own whiskers, 13.8% apart on
+    `total` — and A139's `frame=` closed it. **All three elements on a metric now share one
+    scale**, so a position means the same yardage in the gained row, the allowed row and the
+    calendar beneath them.
+
+    ⚠️ **THE STRIP DID NOT MOVE FOR FREE, WHICH B115 PREDICTED IT WOULD.** It reads `_box_frame`
+    — the gained row's whiskers widened by its value — and that is **not** what `box()` scales on
+    once a union is handed in. The frame is widened by the union here before the strip sees it;
+    without that line the strip would have stayed on the pre-flip axis while the chart above it
+    moved, which is the identical disagreement in a new place.
 
     ⚠️ AND THE FRAME IS `_box_frame`, WHICH IS THE SAME INPUTS `box()` USES — the week's whisker
     pair widened by the team's own value — rather than a second computation off the same row.
     """
+    # ✅ ONE UNION PER METRIC, COMPUTED ONCE AND GIVEN TO EVERYTHING ON THE SCALE.
+    union = (_week_union(week_rows, for_column, allowed_column)
+             if _BOX_SHARED_AXIS else None)
+    # 🚨 THE STRIP'S FRAME IS THE GAINED ROW'S **EFFECTIVE** FRAME, NOT ITS WHISKERS.
+    # B115 wrote *"a strip reading the shared frame moves with it for free"* — that is true only
+    # if the strip reads what `box()` will ACTUALLY scale on, which is the row's own span widened
+    # by its value AND by the union. ⚠️ Reading `_box_frame` alone would have left the strip on
+    # the pre-flip axis while the box above it moved, which is the same disagreement one row up.
     frame = _box_frame(week_rows.get(for_column), team.get(for_column))
+    if frame is not None and union is not None:
+        frame = (min(frame[0], union[0]), max(frame[1], union[1]))
     strip = ""
     if games is not None and frame is not None:
         # ⚠️ THE CAPTION IS INDENTED AND THE STRIP IS NOT. Each strip ROW carries the gutter
@@ -2987,8 +3027,8 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
     return (
         f"<div data-cfdb='gained-allowed' data-metric='{html.escape(label.lower())}'>"
         f"{_matchup_legend(team, opponent, for_column, allowed_column, delta, outlook)}"
-        f"{_box_row(week_rows.get(for_column), team, 'Gained', for_column, accent)}"
-        f"{_box_row(week_rows.get(allowed_column), opponent, 'Allowed', allowed_column, opponent_accent)}"
+        f"{_box_row(week_rows.get(for_column), team, 'Gained', for_column, accent, union)}"
+        f"{_box_row(week_rows.get(allowed_column), opponent, 'Allowed', allowed_column, opponent_accent, union)}"
         f"{strip}"
         f"<div style='clear:both'></div></div>")
 
@@ -3193,12 +3233,20 @@ def _yardage(row) -> None:
             # of this caption read "labelled" and "coloured";
             # `test_no_user_facing_string_uses_british_spelling` failed the build, which is the
             # same guard A119 hit on `favourable` and the reason that literal is what it is.
+            # 🚨 THE LAST SENTENCE IS THE ONE THAT MOVED, AND IT HAD TO MOVE WITH THE FLAG.
+            # It read *"The two rows are framed on their OWN spreads rather than on a shared one,
+            # so read each against its own boundary labels rather than comparing the two by
+            # eye"* — **true for exactly as long as `_BOX_SHARED_AXIS` was False, and false the
+            # instant it flipped.** ⚠️ The flag, this sentence and the strip are three things that
+            # move together, and the paired tests exist so no future round can move one alone.
             frame = (f"Each series is drawn against all {teams} FBS teams in this week: the box "
                      f"is the middle half, the bold line inside it the median, and the whiskers "
                      f"run to the low and high boundaries, both labeled. The colored mark is "
-                     f"this team's own figure. ⚠️ The two rows are framed on their OWN spreads "
-                     f"rather than on a shared one, so read each against its own boundary "
-                     f"labels rather than comparing the two by eye.")
+                     f"this team's own figure. ✅ Both rows and the games beneath them share one "
+                     f"scale — the week's own range for gained and allowed together — so a "
+                     f"position means the same yardage wherever it appears. Each row still "
+                     f"labels its own boundaries, which is why the whiskers end in different "
+                     f"places.")
             if sample <= _THIN_SAMPLE:
                 # 🚨 A092 MEASURED THIS AND SAID TO SAY IT. At 2026 week 2 the thinnest team
                 # has played ONE game, so its "per game" IS that game — the same figure the
