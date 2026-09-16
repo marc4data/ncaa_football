@@ -178,6 +178,20 @@ def describe(row) -> str:
         value = row.get(key)
         if value is not None and not pd.isna(value):
             bits.append(f"{label} {fmt.number(float(value), dp=1)}")
+    # 🚨 A142. THE WHISKERS LOOK LIKE THE RANGE AND ARE NOT, AND UNTIL NOW NOTHING SAID SO.
+    # `whisker_low`/`whisker_high` are Tukey's — the most extreme observation still inside
+    # 1.5*IQR — so a week carrying one 800-yard game draws exactly like a week that does not.
+    # 📊 2026 regular week 2 `total_yards` at game grain: whisker_high 690, max_value 856, two
+    # observations outside. All three numbers are published and the reader was shown none of them.
+    # ⚠️ THE EXTREMES RIDE WITH THE COUNT rather than being a second sentence, because "2 outliers"
+    # answers *is this week unusual* and "to 856.0" answers *by how much* — and the second is the
+    # question a reader who noticed the first will ask.
+    outliers = row.get("outlier_count")
+    if outliers is not None and not pd.isna(outliers) and int(outliers) > 0:
+        span = [row.get("min_value"), row.get("max_value")]
+        reach = ("" if any(v is None or pd.isna(v) for v in span)
+                 else f" ({fmt.number(float(span[0]), dp=1)} to {fmt.number(float(span[1]), dp=1)})")
+        bits.append(f"{int(outliers)} beyond the whiskers{reach}")
     if not row.get("is_locked", False):
         live = int(row.get("games_live") or 0)
         if live:
@@ -445,6 +459,90 @@ def _box_scale(lo: float, hi: float, width: float, pad: float):
     return at
 
 
+# ── HOVER: `<title>` SURVIVES STREAMLIT'S SANITISER, AND THAT IS A MEASUREMENT ──────────────
+#
+# Marc, 2026-09-16: *"Is there hover functionality in the charts?"*
+#
+# 📊 THE ANSWER HAS TWO HALVES AND THE FIRST ONE IS "ALREADY, ON THE WHOLE CHART". Every entry
+# point in this module wraps its SVG in `<span class='cfdb-dist' title='{describe(row)}'>`, which
+# is a native tooltip — measured on a real page in Chromium, one `.cfdb-dist` element carrying
+# `n=120 of 120 team-games · p25 300.0 · median 377.0 · p75 448.0`.
+#
+# 🚨 WHAT WAS MISSING IS PER-MARK HOVER, and the reason to check rather than assume is in
+# `table.py`: this codebase has already lost `onclick` to Streamlit's sanitiser. ✅ MEASURED IN A
+# REAL BROWSER AGAINST A REAL `st.markdown(..., unsafe_allow_html=True)`: `<title>` SURVIVES, as a
+# child of `<svg>`, of `<circle>`, of `<line>` and of `<g>` — four probes, four elements in the
+# DOM, attributes intact. No JavaScript, no library, and nothing for the sanitiser to strip.
+#
+# ⚠️ SO THE MECHANISM IS A WRAPPER RATHER THAN A FEATURE. A caller supplies the words; this module
+# owns only the escaping and the placement. B118's *"Week #, Opponent Rank, Name, Record, Final
+# Score"* is four joins in the page's own query and is not this module's to compose (§4.2.1).
+def _esc(text: str) -> str:
+    """Markup-safe text for a `<title>`, which is ELEMENT CONTENT rather than an attribute.
+
+    ⚠️ THE EXISTING `title='...'` ATTRIBUTES ARE NOT ROUTED THROUGH HERE AND THAT IS DELIBERATE:
+    changing them would move bytes on every chart the site already draws, to fix nothing anybody
+    has hit — `describe()` composes from numbers. New text comes from callers, so it is escaped.
+    """
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _titled(body: str, title: Optional[str]) -> str:
+    """A mark, with its own hover if it was given one.
+
+    ⚠️ A `<g>` RATHER THAN A `<title>` INSIDE THE SHAPE, so this works for the composed marks —
+    `_value_marker` returns a cap AND a rule, and a title has to cover both or the reader gets a
+    tooltip on the triangle and nothing on the line under it.
+    """
+    if not title:
+        return body
+    return f"<g><title>{_esc(title)}</title>{body}</g>"
+
+
+# ── THE OUTLIERS, WHICH ARE PUBLISHED AND HAVE NEVER BEEN DRAWN ─────────────────────────────
+#
+# 🚨 `min_value`, `max_value` AND `outlier_count` ARE ALL ON THE ROW AND THE CHART SHOWED NONE OF
+# THEM. Marc asked to *"add the data points to also show the IQR whiskers"* — the whiskers already
+# ARE the IQR fences (1.5*IQR, Tukey), so that half of the request is already shipped and a round
+# that rebuilt them would have built nothing. What is genuinely absent is the tail.
+#
+# ⚠️ AN OPEN CIRCLE, AND AC-G.22 DECIDES THE SHAPE RATHER THAN TASTE. B116 measured that a BORDER
+# does not survive greyscale; position and shape do. So the outlier is a ring — unfilled, which is
+# the vocabulary Marc used for a single observation — and it sits OUTSIDE the whisker serif, where
+# nothing else in this chart can be. It cannot be confused with the value marker (a weighted rule
+# with a triangular cap) or the median (a bold rule), in colour or out of it.
+#
+# 🚨 IT WIDENS THE FRAME AND THAT IS THE POINT, NOT A SIDE EFFECT. The module's existing rule says
+# an outlier pinned to the boundary "reads as 'at the extreme' when the truth is 'beyond it'".
+# Drawing the extreme where it is means the box gets narrower; a reader who wanted to know the
+# week had an 856 in it is being told exactly that, and the cost is visible rather than hidden.
+# ⚠️ WHICH IS ALSO WHY IT IS OFF BY DEFAULT: every existing caller draws the same bytes as before.
+OUTLIER_RADIUS = 3.2
+
+
+def _outlier_marks(at, mid: float, lo: float, hi: float,
+                   min_value, max_value, count) -> str:
+    """Rings at the observed extremes, drawn only where they lie outside the whiskers.
+
+    ⚠️ THE DRAW RULE IS GEOMETRIC, NOT `outlier_count > 0`, AND THE TWO ARE DIFFERENT QUESTIONS.
+    A week with every outlier on the high side has `min_value == whisker_low`, and a ring drawn
+    there would sit exactly on the serif claiming to be beyond it. The count narrates; the
+    comparison decides what is drawn.
+    """
+    marks = []
+    tail = f" — {int(count)} beyond the whiskers" if count else ""
+    for value, end, side in ((min_value, lo, "lowest"), (max_value, hi, "highest")):
+        if value is None or pd.isna(value):
+            continue
+        value = float(value)
+        if (side == "lowest" and value >= end) or (side == "highest" and value <= end):
+            continue
+        ring = (f"<circle cx='{at(value):.1f}' cy='{mid:.1f}' r='{OUTLIER_RADIUS}' fill='none' "
+                f"stroke='currentColor' stroke-width='1.2' opacity='.7'></circle>")
+        marks.append(_titled(ring, f"{side} {fmt.number(value, dp=1)}{tail}"))
+    return "".join(marks)
+
+
 def _value_marker(x: float, height: float, color: str = VALUE_COLOR) -> str:
     """The reader's own value: a blue line WITH WEIGHT AND A CAP, not colour alone.
 
@@ -503,7 +601,9 @@ def box(row, value=None, width: int = 240, label: str = "",
         value_color: Optional[str] = None,
         value_below=_UNSET, value_below_label: Optional[str] = None,
         value_below_color: Optional[str] = None,
-        frame: Optional[tuple] = None) -> str:
+        frame: Optional[tuple] = None, outliers: bool = False,
+        value_title: Optional[str] = None,
+        value_below_title: Optional[str] = None) -> str:
     """A horizontal box-and-whisker for one measure, sized to the cell it is given.
 
     THE THIRD ENTRY POINT, over the SAME row as `thumbnail` and `panel`. One renderer, not two —
@@ -567,6 +667,12 @@ def box(row, value=None, width: int = 240, label: str = "",
     value_below_color  as `value_color`, for the below side
     frame              `(lo, hi)` to widen the SCALE by — see below. Never narrows, never moves
                        a label, never changes a printed figure
+    outliers           draw `min_value`/`max_value` as rings where they lie outside the whiskers.
+                       OFF BY DEFAULT, so every existing caller renders the same bytes; on, it
+                       widens the frame, which is the honest cost of showing the tail
+    value_title        hover text for the value marker — a native SVG `<title>`, measured to
+                       survive Streamlit's sanitiser. The words are the caller's (§4.2.1)
+    value_below_title  as `value_title`, for the below side
     """
     if row is None:
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
@@ -600,10 +706,10 @@ def box(row, value=None, width: int = 240, label: str = "",
     markers = []
     if show_value and usable(value):
         markers.append((float(value), value_label, value_color or VALUE_COLOR,
-                        "above" if two_sided else None))
+                        "above" if two_sided else None, value_title))
     if two_sided and usable(value_below):
         markers.append((float(value_below), value_below_label,
-                        value_below_color or VALUE_COLOR, "below"))
+                        value_below_color or VALUE_COLOR, "below", value_below_title))
 
     # 🚨 `lo`/`hi` DRAW. `frame_lo`/`frame_hi` SCALE. THEY ARE TWO DIFFERENT THINGS AND THE
     # WHOLE OF A139's PART 1 LIVES IN THAT SEAM.
@@ -615,8 +721,19 @@ def box(row, value=None, width: int = 240, label: str = "",
     # ⚠️ BOTH VALUES WIDEN IT. A frame built from one side would draw the other outside the
     # viewBox, which is the same clipping defect one layer over.
     frame_lo, frame_hi = lo, hi
-    for marker_value, _label, _color, _side in markers:
+    for marker_value, _label, _color, _side, _title in markers:
         frame_lo, frame_hi = min(frame_lo, marker_value), max(frame_hi, marker_value)
+
+    # 🚨 A142. A RING DRAWN AT THE EXTREME HAS TO BE INSIDE THE viewBox, so the frame takes the
+    # extremes the same way it takes the value markers — and for the same stated reason, which is
+    # that clamping an outlier to the boundary tells the reader it is AT the extreme when it is
+    # BEYOND it. ⚠️ ONLY WHEN `outliers` IS ON: an unasked-for widening would move every chart the
+    # site already draws, which is the one thing a default may not do.
+    out_min, out_max = (num("min_value"), num("max_value")) if outliers else (None, None)
+    if out_min is not None:
+        frame_lo = min(frame_lo, out_min)
+    if out_max is not None:
+        frame_hi = max(frame_hi, out_max)
 
     # 🚨 A139, cfdb-wta-R-927. `frame=(lo, hi)` PUTS TWO CHARTS ON ONE SCALE, and it is the
     # honest version of a thing B114 refused to fake from the page.
@@ -670,10 +787,19 @@ def box(row, value=None, width: int = 240, label: str = "",
                  f"y2='{mid + 7:.1f}' stroke='currentColor' stroke-width='1.8' "
                  f"opacity='{MEDIAN_OPACITY}'></line>")
 
-    for marker_value, _label, marker_color, side in markers:
-        parts.append(
-            _value_marker(at(marker_value), height, marker_color) if side is None
-            else _sided_marker(at(marker_value), height, mid, side == "above", marker_color))
+    # ⚠️ THE RINGS GO DOWN BEFORE THE VALUE MARKERS, so a team figure that happens to sit on the
+    # week's own extreme draws ON TOP of the ring rather than under it. The reader's own number
+    # outranks the week's furniture — the same precedence the label placer already applies.
+    drawn_outliers = ""
+    if outliers:
+        drawn_outliers = _outlier_marks(at, mid, lo, hi, out_min, out_max,
+                                        num("outlier_count"))
+        parts.append(drawn_outliers)
+
+    for marker_value, _label, marker_color, side, marker_title in markers:
+        body = (_value_marker(at(marker_value), height, marker_color) if side is None
+                else _sided_marker(at(marker_value), height, mid, side == "above", marker_color))
+        parts.append(_titled(body, marker_title))
 
     # ── LABELS, IN ONE PLACEMENT PASS ────────────────────────────────────────────────────────
     #
@@ -715,7 +841,7 @@ def box(row, value=None, width: int = 240, label: str = "",
         placed.append((x, half, text, color))
 
     # THE VALUE LABEL WINS, so it is placed into its band before anything else can take the room.
-    for marker_value, marker_label, marker_color, side in markers:
+    for marker_value, marker_label, marker_color, side, _title in markers:
         place("above" if side == "above" else "below", at(marker_value),
               marker_label if marker_label is not None
               else fmt.number(marker_value, dp=dp),
@@ -748,6 +874,13 @@ def box(row, value=None, width: int = 240, label: str = "",
     #
     # The one-value chart's label is UNCHANGED — B108's live call site renders the same bytes.
     reading = f"{label or 'Distribution'}: box and whisker"
+    # 🚨 AC-G.11 AGAIN, AND IT IS THE HALF A139 CAUGHT GOING THE OTHER WAY. A138's curve told a
+    # screen-reader user which side the number belonged to and told a sighted reader nothing; this
+    # is the mirror of it, so the rings do not become a mark only sighted readers can count.
+    if outliers and drawn_outliers:
+        count = num("outlier_count")
+        reading += (f", {int(count)} beyond the whiskers" if count
+                    else ", extremes beyond the whiskers")
     if two_sided:
         drawn = len(markers)
         reading += (", two values" if drawn == 2 else

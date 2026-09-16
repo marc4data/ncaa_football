@@ -825,3 +825,208 @@ def test_two_stacked_rows_share_one_scale_when_framed_on_their_union():
     assert abs(framed[0] - framed[1]) <= quantisation, (
         f"framed on the union, one yard must be the same width on both rows: "
         f"{framed[0]:.6f} against {framed[1]:.6f}")
+
+
+# --- A142: the whiskers were already Tukey's; the OUTLIERS were the missing half ----------
+#
+# 🚨 MARC ASKED FOR SOMETHING THAT WAS ALREADY THERE AND FOR SOMETHING THAT WAS NOT, IN ONE
+# SENTENCE: *"can we add the data points to also show the IQR whiskers and make it available to
+# the box-whisker plots on the site?"* The whiskers `box()` draws ARE the 1.5*IQR fences — Tukey's,
+# reaching the most extreme observation inside the fence — and a round that rebuilt them would
+# have shipped nothing. `min_value`, `max_value` and `outlier_count` are all published and none of
+# the three was drawn, which is the half worth building.
+
+def _outlier_row(**over):
+    """A row whose extremes lie OUTSIDE its whiskers — the state the rings exist for.
+
+    🚨 R-744, ASKED OF THIS FIXTURE: what do its defaults make true? The whiskers here are 128/690
+    and the extremes 90/856, so BOTH sides are outside and neither ring can be drawn by accident.
+    ⚠️ AND THE TWO DISTANCES ARE DELIBERATELY UNEQUAL (38 low, 166 high): a fixture symmetric about
+    its own whiskers would let a break that swapped `min_value` and `max_value` pass unnoticed.
+    """
+    row = {"n": 135, "team_games_in_week": 135,
+           "p25": 312.5, "p50": 393.0, "p75": 480.0,
+           "whisker_low": 128.0, "whisker_high": 690.0,
+           "min_value": 90.0, "max_value": 856.0, "outlier_count": 2}
+    row.update(over)
+    return row
+
+
+def _circles(svg: str):
+    """Every ring the box drew, as (cx, r)."""
+    return [(float(cx), float(r)) for cx, r in
+            re.findall(r"<circle cx='([-\d.]+)' cy='[-\d.]+' r='([\d.]+)'", svg)]
+
+
+def test_the_whiskers_drawn_are_the_iqr_FENCES_and_not_the_range():
+    """📊 THE PICTURE THAT ANSWERS THE FIRST HALF OF MARC'S QUESTION.
+
+    The serifs sit at `whisker_low`/`whisker_high` and the printed boundary labels are those two
+    figures. `min_value` and `max_value` are on the row, differ from them, and appear nowhere.
+
+    ⚠️ KEYED ON THE LABELS AND THE GEOMETRY TOGETHER, because either alone is weak: a label could
+    be right with the serif in the wrong place, and R-820 is the round where the geometry was right
+    for two of three vocabularies while a reader got an em dash.
+    """
+    row = _outlier_row()
+    svg = distribution.box(row, width=300)
+    printed = {text for _x, text in _texts(svg)}
+    assert "128.0" in printed and "690.0" in printed, \
+        f"the whisker FENCES are the boundary labels; got {printed}"
+    assert "90.0" not in printed and "856.0" not in printed, \
+        "min_value/max_value are not the whiskers and must not be printed as them"
+
+
+def test_the_extremes_are_not_drawn_unless_a_caller_asks():
+    """⚠️ §3 rule 3.1: THE DEFAULT IS WHAT EVERY EXISTING CALLER GETS. `matchup.py` is session B's
+    and did not move this round, so the bytes it renders must not move either.
+
+    🚨 AND THIS IS A STRING EQUALITY RATHER THAN AN ABSENCE CHECK, because `assert "<circle" not in
+    svg` would also pass if the whole chart had stopped drawing — §6 mode 1, which this file has
+    already been bitten by once (R-820).
+    """
+    row = _outlier_row()
+    assert _drew(distribution.box(row, value=497.0, width=300)), "the chart must still draw"
+    assert distribution.box(row, value=497.0, width=300) == \
+        distribution.box(row, value=497.0, width=300, outliers=False)
+    assert _circles(distribution.box(row, value=497.0, width=300)) == []
+
+
+def test_a_ring_marks_each_extreme_that_lies_beyond_its_whisker():
+    """Both sides of `_outlier_row` are outside, so both rings draw — and they are OUTSIDE the
+    serifs, which is the only place in this chart nothing else can be."""
+    svg = distribution.box(_outlier_row(), width=300, outliers=True)
+    rings = _circles(svg)
+    assert len(rings) == 2, f"one per extreme beyond a whisker; got {rings}"
+    serifs = sorted(float(x) for x in re.findall(r"<line x1='([-\d.]+)' y1='[\d.]+' "
+                                                 r"x2='[-\d.]+' y2='[\d.]+' "
+                                                 r"stroke='currentColor' stroke-width='1' "
+                                                 r"opacity='.55'", svg))
+    low_ring, high_ring = sorted(cx for cx, _r in rings)
+    assert low_ring < min(serifs), "the low ring sits beyond the low whisker serif"
+    assert high_ring > max(serifs), "the high ring sits beyond the high whisker serif"
+
+
+def test_no_ring_is_drawn_where_the_extreme_IS_the_whisker():
+    """🚨 THE DRAW RULE IS GEOMETRIC, AND `outlier_count` CANNOT DECIDE IT.
+
+    📊 REAL DATA, 2026 regular week 2 `total_yards` at game grain: `outlier_count` 2, `whisker_low`
+    128 and `min_value` 128 — BOTH outliers are on the high side. A ring keyed on the count alone
+    would draw one at 128 sitting exactly on the serif, claiming to be beyond a boundary it is on.
+    """
+    one_sided = _outlier_row(min_value=128.0)
+    rings = _circles(distribution.box(one_sided, width=300, outliers=True))
+    assert len(rings) == 1, f"only the high side is outside; got {rings}"
+
+    none_outside = _outlier_row(min_value=128.0, max_value=690.0, outlier_count=0)
+    assert distribution.box(none_outside, width=300, outliers=True) == \
+        distribution.box(none_outside, width=300), \
+        "a week with nothing outside its whiskers draws the same picture either way"
+
+
+def test_the_ring_widens_the_frame_rather_than_being_clamped_to_the_edge():
+    """🚨 THE MODULE'S OWN RULE, APPLIED TO THE NEW MARK: *"an outlier pinned to the boundary reads
+    as 'at the extreme' when the truth is 'beyond it'"*.
+
+    ⚠️ R-843 — A PIN IS ONLY A PIN IF THE BREAK MOVES IT. The clamping break is the plausible one
+    here (it keeps the chart tidy), and it would leave the ring's cx sitting on the pad and the box
+    exactly where it was. So BOTH halves are asserted: the ring is inside the viewBox AND the box
+    got narrower, which clamping cannot produce.
+    """
+    row = _outlier_row()
+    plain = distribution.box(row, width=300)
+    widened = distribution.box(row, width=300, outliers=True)
+
+    def box_width(svg):
+        return float(re.search(r"<rect x='[-\d.]+' y='[-\d.]+' width='([\d.]+)'", svg).group(1))
+
+    assert box_width(widened) < box_width(plain), (
+        "the frame took in 90.0 and 856.0, so p25-p75 must occupy fewer pixels — "
+        f"{box_width(widened)} against {box_width(plain)}")
+    for cx, r in _circles(widened):
+        assert 0 <= cx - r and cx + r <= 300, f"ring at {cx} is clipped by the viewBox"
+
+
+def test_the_outliers_reach_a_reader_who_cannot_see_the_rings():
+    """🚨 AC-G.11, AND IT IS A139's FINDING RUN IN REVERSE. There the sighted reader was the one
+    told less than the screen-reader user; a ring nobody narrates is the same defect facing the
+    other way."""
+    svg = distribution.box(_outlier_row(), width=300, outliers=True, label="Total yards")
+    reading = re.search(r"aria-label='([^']*)'", svg).group(1)
+    assert "2 beyond the whiskers" in reading, reading
+    quiet = distribution.box(_outlier_row(), width=300, label="Total yards")
+    assert "beyond the whiskers" not in re.search(r"aria-label='([^']*)'", quiet).group(1), \
+        "a chart that drew no rings must not claim any"
+
+
+def test_the_tooltip_says_how_many_are_outside_and_how_far_they_reach():
+    """⚠️ THE TOOLTIP IS THE ONE PLACE THE FIGURES CAN GO WITHOUT COSTING PIXELS, and `describe()`
+    is shared, so this fact arrives on the thumbnail and the panel too — both of which had exactly
+    the same silence about the tail."""
+    text = distribution.describe(_outlier_row())
+    assert "2 beyond the whiskers (90.0 to 856.0)" in text, text
+    assert "beyond the whiskers" not in distribution.describe(_outlier_row(outlier_count=0))
+
+
+def test_a_mark_can_carry_its_own_hover_and_the_words_are_the_callers():
+    """📊 MEASURED IN A REAL BROWSER BEFORE BEING BUILT: `<title>` survives Streamlit's sanitiser
+    as a child of `<svg>`, `<circle>`, `<line>` and `<g>` — which is not a given, because this
+    codebase has already lost `onclick` to that sanitiser (`table.py` records it).
+
+    ⚠️ THE TEXT IS ESCAPED because it is element CONTENT and it comes from a caller — B118's
+    tooltip is *"Week #, Opponent Rank, Name, Record, Final Score"*, which is team names and
+    therefore arbitrary text.
+    """
+    svg = distribution.box(_outlier_row(), value=497.0, width=300,
+                           value_title="Oregon <b> & Ohio State")
+    assert "<title>Oregon &lt;b&gt; &amp; Ohio State</title>" in svg, svg[:400]
+    assert distribution.box(_outlier_row(), value=497.0, width=300).count("<title>") == 0, \
+        "no caller asked for a mark tooltip, so no mark carries one"
+
+
+def test_the_hover_the_chart_ALREADY_had_is_still_there():
+    """🚨 R-805's SHAPE, CAUGHT WHILE ANSWERING MARC: the claim *"there is no hover on any mark"*
+    was made from a grep that found two `title=` occurrences. There are six, and three of them are
+    `describe(row)` — on `thumbnail`, on `panel`, and on `box()` itself. A round that had believed
+    the grep would have built a tooltip beside one that already worked.
+    """
+    html = distribution.box(_outlier_row(), value=497.0, width=300)
+    assert html.startswith("<span class='cfdb-dist' title='"), html[:80]
+    assert "n=135 of 135 team-games" in html
+
+
+def test_a_row_that_does_not_carry_the_new_columns_degrades_rather_than_inventing():
+    """🚨 MEASURED ON THE LIVE PAGE, AND IT IS THE LIMIT OF WHAT THIS ROUND COULD SHIP.
+
+    📊 `matchup.py` selects its distribution columns by name, and NEITHER LIST CARRIES
+    `outlier_count`:
+
+        _DISTRIBUTION_COLUMNS      (before-game)  no outlier_count, no min_value, no max_value
+        _DISTRIBUTION_ROW_COLUMNS  (post-game)    min_value and max_value, no outlier_count
+
+    ✅ So `describe()`'s new sentence is INERT on the live page today and this round says so rather
+    than claiming the tooltip improved — §3 rule 3.1: a shared-module change ships the parameter
+    and the default, and the call sites in session B's file are B's to consume on B's own round.
+
+    ⚠️ WHAT THIS TEST PINS IS THE PROPERTY THAT OUTLIVES THAT: a row missing any of the three
+    columns must draw and describe exactly as it did before, never raise, and never print a figure
+    it was not given. A KeyError here would take out both tabs of a page this round must not touch.
+    """
+    full = _outlier_row()
+    before_game = {k: v for k, v in full.items()
+                   if k not in ("outlier_count", "min_value", "max_value")}
+    post_game = {k: v for k, v in full.items() if k != "outlier_count"}
+
+    assert "beyond the whiskers" not in distribution.describe(before_game)
+    assert _circles(distribution.box(before_game, width=300, outliers=True)) == [], \
+        "no extremes on the row means nothing to draw, not a guess"
+    assert distribution.box(before_game, width=300, outliers=True) == \
+        distribution.box(before_game, width=300)
+
+    # The post-game list HAS the extremes, so the geometry works and only the COUNT is silent.
+    assert len(_circles(distribution.box(post_game, width=300, outliers=True))) == 2
+    reading = re.search(r"aria-label='([^']*)'",
+                        distribution.box(post_game, width=300, outliers=True)).group(1)
+    assert "extremes beyond the whiskers" in reading, (
+        "with no count to quote it must still say the rings are there — an unnarrated mark is "
+        f"the AC-G.11 defect this file already fixed once; got {reading}")
