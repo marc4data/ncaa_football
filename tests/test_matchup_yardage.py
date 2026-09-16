@@ -408,7 +408,23 @@ def panel(request):
                 # wrong relation**, and it is how this stub first reported the panel as raising.
                 if "game_figures_state" in sql:
                     seen["calendar_sql"], seen["calendar_params"] = sql, params or {}
-                    return pd.DataFrame(calendar if calendar is not None else _calendar())
+                    frame = pd.DataFrame(calendar if calendar is not None else _calendar())
+                    # 🚨 THE STUB HONOURS THE LEAKAGE BOUND, AND IT HAS TO (cfdb-wta-R-1000).
+                    #
+                    # B119's lesson, one round old: **this stub returns the fixture frame whatever
+                    # the SQL says**, so `order by game_date desc` could be restored with all 112
+                    # tests green. **A `WHERE` clause is invisible to every behavioural test in
+                    # this file** — which is precisely how a leak that drew the previewed game's
+                    # own result survived B119, B120 and B122.
+                    #
+                    # ⚠️ THIS IS THE STUB MODELLING POSTGRES, NOT THE TEST REPRODUCING THE PAGE
+                    # (R-768). The page's logic is the SQL; a stub that ignores a `WHERE` is a
+                    # LESS faithful database, and every circle assertion in this file was being
+                    # made against rows the real query would never have returned.
+                    before = (params or {}).get("before")
+                    if before is not None and "game_date <" in " ".join(sql.split()):
+                        frame = frame[frame["game_date"] < pd.Timestamp(before)]
+                    return frame
                 if "srv_game_team" in sql:
                     seen["delta_sql"], seen["delta_params"] = sql, params or {}
                     return pd.DataFrame(deltas if deltas is not None else _deltas())
@@ -437,7 +453,13 @@ HOME_ID, AWAY_ID = 2, 96
 
 def _game(**overrides):
     """One srv_game row's worth of the columns this panel keys on."""
+    # 🚨 `game_date` JOINED THIS ROW IN B123 AND IT IS THE LEAKAGE BOUND (cfdb-wta-R-1000).
+    # `_game_calendar` filters the calendar to `game_date < :before`, so the previewed game's own
+    # date is what decides which circles exist. ⚠️ **It is set to the fixture calendar's week-10
+    # kickoff** so the two are on one timeline — before this, `_game()` said 2025 while `_calendar`
+    # used 2026 dates and nothing compared them, which is exactly how a bound goes untested.
     game = {"game_id": 401752754, "season": 2025, "season_type": "regular", "week": 10,
+            "game_date": pd.Timestamp("2026-11-07", tz="UTC"),
             "home_team": "Auburn", "away_team": "Kentucky",
             "home_team_id": HOME_ID, "away_team_id": AWAY_ID}
     game.update(overrides)
@@ -3799,3 +3821,112 @@ def test_NO_CIRCLE_IS_EVER_CLIPPED_BY_THE_BAND(games):
         f"falls past the {band}px band and is clipped — silently")
     assert pitch <= _module_constant("_CIRCLE_PITCH_MAX") + 1e-9, (
         f"the pitch {pitch} is looser than Marc's 50% ceiling")
+
+
+# --- cfdb-wta-R-1000: the leakage bound -----------------------------------------------------
+
+def test_THE_CALENDAR_QUERY_CARRIES_THE_LEAKAGE_BOUND(panel):
+    """🚨 MARC FOUND THIS ON THE LIVE SITE: *"It shouldn't present data that transpired during the
+    game… there should only be 1 circle in this Week 2 matchup."*
+
+    `_game_calendar` had **no time bound of any kind** — it fetched a team's whole season and the
+    page drew a circle for every row carrying a figure, **including the previewed game's own
+    result and every game after it.**
+
+    ⚠️ THIS IS THE SQL HALF, AND IT EXISTS BECAUSE B119 PROVED THE BEHAVIOURAL HALF CANNOT SEE A
+    `WHERE` ON ITS OWN. **The harness returns the fixture frame whatever the SQL says**, so a bound
+    deleted from the query is invisible to every render-based assertion unless the stub models it
+    (it does now — see `fake_query`). **Two tests, two failure modes.**
+
+    ✅ AND THE PARAM IS CHECKED AGAINST THE FIXTURE'S OWN GAME ROW, not a literal (cfdb-wta-R-944):
+    a bound that hard-coded a date, or passed the week number, would satisfy a string check.
+    """
+    _entries, seen = panel(_game(), _both(), deltas=_deltas())
+    sql = " ".join(seen["calendar_sql"].lower().split())
+    assert "game_date < :before" in sql, (
+        f"the calendar query has no leakage bound, so it returns the previewed game and every "
+        f"game after it: ...{sql[-160:]}")
+    assert seen["calendar_params"].get("before") == _game()["game_date"], (
+        f"the bound is not this game's own date — it is "
+        f"{seen['calendar_params'].get('before')!r} against {_game()['game_date']!r}")
+
+
+def test_NO_CIRCLE_IS_DRAWN_FOR_THE_PREVIEWED_GAME_OR_ANY_GAME_AFTER_IT(panel):
+    """🚨 MARC'S OWN CASE, BEHAVIOURALLY: a week-2 preview draws ONE circle, not two.
+
+    ⚠️ THE FIXTURE MUST CONTAIN A LATER GAME OR THIS PASSES ON A PAGE WITH NO BOUND AT ALL — the
+    prompt's own warning, and it is asserted first rather than assumed.
+
+    ✅ KEYED ON THE FIXTURE'S OWN KICKOFFS (cfdb-wta-R-944). The expected count is derived by
+    filtering the calendar rows by date here, so a page that returned some other number — including
+    the unbounded 2 — fails. **The count is not a literal, because the count is what the defect
+    controls.**
+    """
+    played = [r for r in _calendar()
+              if r["team_id"] == AWAY_ID and r["total_yards"] is not None]
+    assert len(played) >= 2, "the fixture needs at least two played games to bound between"
+    # Preview the SECOND played game: exactly one game precedes it.
+    previewed = sorted(played, key=lambda r: r["game_date"])[1]
+    expected = [r for r in played if r["game_date"] < previewed["game_date"]]
+    later = [r for r in played if r["game_date"] >= previewed["game_date"]]
+    assert expected and later, (
+        f"this fixture cannot tell a bounded page from an unbounded one: {len(expected)} before "
+        f"and {len(later)} at-or-after the previewed game")
+
+    entries, _ = panel(_game(game_date=previewed["game_date"], week=int(previewed["week"])),
+                       _both(), deltas=_deltas())
+    gained = _circle_columns(entries)[0]
+    drawn = [int(m.group(1)) for m in re.finditer(r"Week (\d+)", gained)]
+    assert drawn == [int(r["week"]) for r in expected], (
+        f"the page drew circles for weeks {drawn}; only {[int(r['week']) for r in expected]} "
+        f"kicked off before this game. A circle for week {int(previewed['week'])} is the result "
+        f"of the very game being previewed")
+
+
+def test_BOTH_COLUMNS_ARE_BOUNDED_not_just_the_gained_one(panel):
+    """⚠️ B120's allowed circles are the OPPONENT's games, and **a bound applied to one side only
+    would be right about half the time and look right all of it.**
+
+    ✅ It is structurally impossible here — `_game_calendar` fetches both teams in ONE read, so one
+    `WHERE` bounds both — **and that is exactly why it is worth an assertion**: a future round that
+    split the read into two queries would have to bound them both, and nothing else would say so.
+    """
+    played = [r for r in _calendar()
+              if r["team_id"] == AWAY_ID and r["total_yards"] is not None]
+    previewed = sorted(played, key=lambda r: r["game_date"])[1]
+    entries, _ = panel(_game(game_date=previewed["game_date"], week=int(previewed["week"])),
+                       _both(), deltas=_deltas())
+    for name, column in zip(("gained", "allowed"), _circle_columns(entries)):
+        weeks = [int(m.group(1)) for m in re.finditer(r"Week (\d+)", column)]
+        assert weeks and max(weeks) < int(previewed["week"]), (
+            f"the {name} column draws week {max(weeks) if weeks else None}, at or after the "
+            f"previewed week {int(previewed['week'])} — that side is unbounded")
+
+
+def test_A_SEASON_OPENER_SAYS_WHICH_ABSENCE_and_does_not_borrow_the_word_SPREAD(panel):
+    """🚨 cfdb-wta-R-1000 MADE THIS THE MOST-READ SENTENCE ON THE PANEL IN WEEK 1.
+
+    With the bound applied **every season-opening matchup hits the empty branch, on both sides, for
+    all six charts.** The old words were wrong twice: *"No games played yet"* is a claim about the
+    season rather than about games before this one, and *"nothing to plot against the spread"*
+    borrows a word **this same page uses five times for the BETTING LINE** (`Spread/Over/Under`).
+
+    ⚠️ ASSERTED BOTH WAYS — the new sentence present AND the ambiguous word absent — because a page
+    that printed both would pass a presence check.
+    """
+    opener = min(r["game_date"] for r in _calendar())
+    entries, _ = panel(_game(game_date=opener, week=1), _both(), deltas=_deltas())
+    columns = _circle_columns(entries)
+    # 🚨 BOTH COLUMNS, AND THE FIRST DRAFT CHECKED ONLY `[0]`. A staged break that skipped the
+    # GAINED overlay alone still passed, because index 0 then returned the ALLOWED one and its
+    # message read the same. **An assertion that can be satisfied by the wrong element is not an
+    # assertion about the right one** — the shape B120 found twice and B122 once.
+    assert len(columns) == 2, (
+        f"a season opener drew {len(columns)} circle elements; both rows must say why they are "
+        f"empty rather than one of them simply vanishing")
+    for name, column in zip(("gained", "allowed"), columns):
+        assert "no games before this one" in column.lower(), (
+            f"the {name} column does not name its own absence: {_plain(column)[:160]}")
+        assert "spread" not in column.lower(), (
+            f"the {name} column's empty sentence still borrows 'spread', which this page uses "
+            f"for the betting line")
