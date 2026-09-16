@@ -154,6 +154,32 @@ select
     -- symmetric across a game's two rows, so both rows agree by construction. Two spellings
     -- of one rule is how Schedule and the export drifted in R-184.
     (t.classification = 'fbs' or t.opponent_classification = 'fbs') as is_fbs_game,
+    -- 🚨 A146, cfdb-wta-R-1008. THE OPPONENT'S OWN CLASSIFICATION, EMITTED — it was consumed one
+    -- line above to derive `is_fbs_game` and never selected, which is the state B121 hit as
+    -- `UndefinedColumn: column "opponent_classification" does not exist` against live serving.
+    --
+    -- 🚨 AND `is_fbs_game` CANNOT STAND IN FOR IT, WHICH B121 MEASURED RATHER THAN ARGUED.
+    -- 2026 regular, played team-games: `fbs`/True **285**, `fcs`/False 247, `fcs`/True 85,
+    -- `ii`/False 33, `iii`/False 2. **For every FBS team-game — the whole population the Matchup
+    -- panel draws — `is_fbs_game` is TRUE.** It answers *was an FBS team involved*, which is a
+    -- different question from *was MY opponent FBS*, and on this population it carries no
+    -- information at all.
+    --
+    -- ⚠️ AND `opponent_conference` IS A PROXY RATHER THAN THE FACT — §2.5's shape exactly: right
+    -- most of the time and wrong silently. B123 keys a VISIBLE FILL on this, so a wrong value is
+    -- a claim about a team rather than a missing mark.
+    --
+    -- 🚨 SIX VALUES, NOT FOUR, AND ONE OF THEM IS NULL — measured after publishing rather than
+    -- assumed from the four everyone names:
+    --
+    --     fbs 66.35%  ·  fcs 15.10%  ·  iii 5.62%  ·  NULL 5.61%  ·  ii 5.39%  ·  ii/iii 1.92%
+    --
+    -- `ii/iii` is a COMBINED classification CFBD emits for programs spanning both divisions.
+    -- ⚠️ **A CONSUMER MUST TREAT NULL AS UNKNOWN RATHER THAN AS NON-FBS.** On the 2026 regular
+    -- played population that is 8 rows, and an unfilled circle there would be a claim about an
+    -- opponent nobody classified — which is the §2.5 failure this column exists to end, arriving
+    -- through the fix rather than through the gap.
+    t.opponent_classification,
     t.is_home,
     t.is_neutral_site,
     t.is_completed,
