@@ -64,7 +64,7 @@ from lib.table import Col
 # R-605: market_implied_home_points / _away_points were built by fct_market_probability and
 # never shown until the board's fourth column, which is why they were absent from this SELECT.
 COLUMNS = """
-    game_id, season, season_type, week, start_date, venue_display, attendance,
+    game_id, season, season_type, week, start_date, game_date, venue_display, attendance,
     home_team_id, away_team_id,
     is_completed, is_conference_game, is_neutral_site,
     home_team, home_abbreviation, home_conference, home_logo_url, home_color_on_light,
@@ -2783,8 +2783,52 @@ _CALENDAR_COLUMNS = """
 """
 
 
-def _game_calendar(season: int, season_type: str, team_ids: tuple) -> dict:
-    """Both teams' regular-season calendars, kickoff ASCENDING, keyed by team_id.
+def _game_calendar(season: int, season_type: str, team_ids: tuple, before) -> dict:
+    """Both teams' regular-season calendars BEFORE this game, kickoff ASCENDING, keyed by team_id.
+
+    🚨 `before` IS A LEAKAGE BOUND AND IT IS THE WHOLE OF cfdb-wta-R-1000. Marc found it on the
+    live site: *"this is the Today / Before the Game. It shouldn't present data that transpired
+    during the game. This should be data from prior to the game, so there should only be 1 circle
+    in this Week 2 matchup."*
+
+    ❌ **THIS QUERY HAD NO TIME BOUND OF ANY KIND.** It fetched a team's whole season and the page
+    drew a circle for every row carrying a figure — **including the game being previewed, and
+    every game after it.** A week-2 preview drew two circles; a week-1 matchup in a finished
+    season drew the entire twelve-game season, none of which had happened yet.
+
+    🚨 **AND THE IRONY IS WORTH KEEPING: THE BOX WAS ALWAYS HONEST AND THE MARKS ON IT WERE NOT.**
+    A143 built `srv_game_team_metric_distribution_through_prior_week` to be strictly-before-week,
+    argued the rule at length and shipped a dbt test asserting the boundary. **Half the panel
+    obeyed R-463 and half did not, on the same axis, in the same picture** — through B119, B120 and
+    B122, because the filter read *games with figures* and nobody asked **figures as of when.**
+
+
+    ✅ **`game_date <` IS THE BOUND, AND THE THREE CANDIDATES WERE MEASURED RATHER THAN RANKED.**
+
+    | | |
+    |---|---|
+    | ❌ `week < :week` | **wrong at a real edge, and a big one.** 📊 2026 regular **week 1 has NINE
+      distinct kickoff dates** and week 2 has three — so a Saturday preview would drop a team's own
+      Thursday game, which it genuinely played |
+    | ❌ a KICKOFF timestamp | **`srv_game_team` does not publish one.** It carries `game_date`
+      (a `date`) and nothing else temporal; `start_date` lives on `srv_game`. §2.5 again — the
+      column the obvious fix wants is not there |
+    | ✅ `game_date < :before` | **date against date, one filter, no cast.** A team cannot play
+      twice in a day, so *earlier date* and *earlier kickoff* are the same set |
+
+    ⚠️ **AND THE PROMPT SAID TO PREFER A KICKOFF BOUND BECAUSE A WEEK BOUND IS WRONG. IT IS RIGHT
+    ABOUT THE WEEK AND THE KICKOFF IS NOT AVAILABLE** — but the date bound is equivalent to it in
+    every case but one, measured: **120 team-games of 225,350 (0.053%) share a date with another
+    game of the same team, and exactly ONE pair since 2024.** Those lose an earlier same-day game.
+    ✅ **A `start_date` on `srv_game_team` would close it exactly; it is A's file and it is not
+    worth a round on its own** — reported rather than worked around.
+
+    ⚠️ **AND IT IS A FILTER, NOT A COMPUTATION (§4.2.1).** A `WHERE` on a published date creates no
+    quantity, has no second consumer and cannot disagree with an export. **The comparison is
+    date-to-date on two columns the warehouse already publishes** — which is also why the game
+    row's own `game_date` had to join `COLUMNS`: deriving it from `start_date` in the page would be
+    a timezone conversion, and the two genuinely differ (game 401856670 is `game_date`
+    **2026-09-12** against `start_date` **2026-09-13 02:15Z**).
 
     🚨 THE ORDER FLIPPED IN B119 AND IT IS MARC'S INSTRUCTION, NOT A TIDY-UP. v14 asked for the
     strip *"order by kick-off date, desc"*; v15 asks for the circles *"Order them top down (asc)
@@ -2826,10 +2870,12 @@ def _game_calendar(season: int, season_type: str, team_ids: tuple) -> dict:
         where season = :season
           and season_type = :season_type
           and team_id in (:away_team_id, :home_team_id)
+          and game_date < :before
         order by game_date asc
         limit 60
     """, {"season": season, "season_type": season_type,
-          "away_team_id": int(team_ids[0]), "home_team_id": int(team_ids[1])})
+          "away_team_id": int(team_ids[0]), "home_team_id": int(team_ids[1]),
+          "before": before})
     return {team: rows for team, rows in df.groupby("team_id", sort=False)}
 
 
@@ -3067,14 +3113,40 @@ def _circle_column(games, column, frame, accent, width, band: int = None) -> str
     circles at the same yardage still read as two marks rather than one darker blob, which is the
     whole point of a jitter.
     """
-    played = [game for _i, game in games.iterrows()
-              if not (game.get(column) is None or pd.isna(game.get(column)))]
+    # 🚨 `games is None` IS THE SAME ABSENCE AS "NO ROWS WITH FIGURES", AND BEFORE cfdb-wta-R-1000
+    # IT WAS A DIFFERENT CODE PATH THAT DREW NOTHING AT ALL.
+    #
+    # `_game_calendar` groups by `team_id`, so a team with NO rows is simply missing from the dict
+    # and `calendars.get(id)` is `None`. ⚠️ **That was unreachable while the query was unbounded —
+    # every team had a season.** With the bound, a team whose first game IS this one returns zero
+    # rows, and `_gained_allowed`'s old `games is not None` guard skipped the overlay silently:
+    # **no circles and no sentence**, which is the absence-with-no-name AC-G.11 exists to stop.
+    # ✅ Found by a test written for the reworded sentence, which could not reach it.
+    played = [] if games is None else [
+        game for _i, game in games.iterrows()
+        if not (game.get(column) is None or pd.isna(game.get(column)))]
     if not played:
-        # AC-G.11 — and this absence is about the GAMES, not about the calendar. A team with a
-        # schedule but nothing played yet is a real state in week 2 and it is not an error.
+        # 🚨 AC-G.11, AND cfdb-wta-R-1000 MADE THIS THE MOST-READ SENTENCE ON THE PANEL IN WEEK 1.
+        #
+        # It used to be a rare state; with the leakage bound applied **every season-opening
+        # matchup hits it, on both sides, for all six charts.** So the words were re-read as a
+        # week-1 reader would read them and they were wrong twice over:
+        #
+        # ❌ *"No games played yet"* — the team may have played plenty; what it has not played is
+        #   a game BEFORE THIS ONE. The old wording is a claim about the season, and after the
+        #   bound it is a claim this branch cannot support.
+        # ❌ *"nothing to plot against the spread"* — 🚨 **`Spread` appears FIVE times on this same
+        #   page meaning the BETTING LINE** (`Spread/Over/Under`, the market card). On a yardage
+        #   chart that is a genuine ambiguity, and it was sitting in the one sentence a week-1
+        #   reader sees six times.
+        #
+        # ✅ The replacement names the absence (*no games before this one*), names what is missing
+        # (*game marks*), and says it is temporary (*yet*) — without borrowing a word the page
+        # already uses for something else.
         return ("<div data-cfdb='game-circles' data-games='0' "
                 "style='font-size:.58rem;opacity:.45;padding:.2rem 0'>"
-                "No games played yet, so there is nothing to plot against the spread.</div>")
+                "No games before this one, so there are no game marks on this chart yet."
+                "</div>")
     lo, hi = frame
     band = _BOX_BAND if band is None else band
     # 🚨 THE SVG IS THE SAME BOX AS `box()`'s, WHICH IS WHAT MAKES THE OVERLAY EXACT. `box()`
@@ -3240,11 +3312,14 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
     allowed_frame = _box_frame(week_row, opponent.get(allowed_column))
     if allowed_frame is not None and union is not None:
         allowed_frame = (min(allowed_frame[0], union[0]), max(allowed_frame[1], union[1]))
+    # ⚠️ THE GUARD IS ON THE FRAME ALONE NOW. `games` being `None` is a state the element knows
+    # how to draw — it is the season opener, and it says so — whereas a missing FRAME means there
+    # is no axis to draw anything on, which is the week's own absence and is named in the caption.
     circles = ""
-    if games is not None and frame is not None:
+    if frame is not None:
         circles = _circle_column(games, game_column, frame, accent, _BOX_ROW_WIDTH)
     allowed_circles = ""
-    if opponent_games is not None and allowed_frame is not None:
+    if allowed_frame is not None:
         allowed_circles = _circle_column(opponent_games, game_allowed_column, allowed_frame,
                                          opponent_accent, _BOX_ROW_WIDTH)
     return (
@@ -3393,8 +3468,12 @@ def _yardage(row) -> None:
         # R-694. Marc's game dots, and the same rule: ONE read for six cards' worth.
         usage = _game_usage(int(row["game_id"]))
         # R-899. Both calendars, one read, six strips.
+        # 🚨 cfdb-wta-R-1000. THE BOUND IS THIS GAME'S OWN DATE, AND IT REACHES BOTH COLUMNS.
+        # `_game_calendar` fetches BOTH teams in one read, so a single `game_date < :before`
+        # bounds the Gained circles and the Allowed ones together — **a bound applied to one side
+        # only would be right about half the time and look right all of it.**
         calendars = _game_calendar(int(row["season"]), row["season_type"],
-                                   (int(away_id), int(home_id)))
+                                   (int(away_id), int(home_id)), row["game_date"])
 
         # ⚠️ R-522 / spec §0: AWAY ON THE LEFT, HOME ON THE RIGHT. Marc made it a page law
         # rather than this panel's choice — "Data about Away team will be on the left. Same

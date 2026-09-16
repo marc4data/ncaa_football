@@ -137,7 +137,12 @@ def test_the_REAL_columns_block_parses_cleanly_and_names_everything():
     parsed = select_list.selected_names(matchup.COLUMNS)
     # 101 -> 103: R-605 selected market_implied_home_points / _away_points, built by
     # fct_market_probability and never shown until the board's fourth column.
-    assert len(parsed) == 103
+    # 103 -> 104: cfdb-wta-R-1000 selected `game_date`. The Before-the-Game circles are bounded to
+    # games that kicked off BEFORE this one, and the bound needs this game's own date — **it
+    # cannot be derived from `start_date`, which is a UTC instant while `game_date` is the local
+    # calendar date, and the two genuinely differ** (game 401856670: `game_date` 2026-09-12
+    # against `start_date` 2026-09-13 02:15Z).
+    assert len(parsed) == 104
     assert not select_list.unnameable_items(matchup.COLUMNS)
     assert all(name.replace("_", "").isalnum() for name in parsed), \
         f"the parse produced something that is not an identifier: {sorted(parsed)}"
