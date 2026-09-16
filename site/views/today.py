@@ -146,6 +146,11 @@ def _completed_games(scope) -> pd.DataFrame:
     that calls that function selects the column; Today was the only one that did not. The
     message was right about itself and wrong about the view.
 
+    🚨 A139, cfdb-main-R-934. `home_abbreviation` IS SELECTED SO THE CURVE'S FINAL VALUE CAN NAME
+    ITS SIDE. The bare percentage sat beside the AWAY team's name — the scoreboard puts away on
+    the top line (R-522) — and told a reader the opposite of the truth while every label was
+    correct. Null on 0 of the 1,895 games that can enter this panel, measured in serving.
+
     🚨 A138. `win_probability_curve_reaches_final_score` IS SELECTED BECAUSE THE CHART CANNOT
     BE HONEST WITHOUT IT. 99 of 1,898 curves stop before their game does (A136), and A138
     measured what a reader actually meets: 38 of 337 top-ten rows across 35 season-weeks, in 22
@@ -161,6 +166,7 @@ def _completed_games(scope) -> pd.DataFrame:
     return query(f"""
         select game_id, season, week, season_type, game_date,
                home_team_display, away_team_display, home_team_slug, away_team_slug,
+               home_abbreviation,
                home_logo_url, away_logo_url, home_conference, away_conference,
                home_points, away_points, actual_margin,
                actual_margin_home_perspective, excitement_index,
@@ -395,8 +401,23 @@ _CURVE_PX_PER_UNIT = 176.0 / 3600.0     # the SHARED SCALE. 176px of regulation,
 # 44px, so those same 24 plays get 1.8px each — denser than regulation rather than sparser,
 # which is the right way round for the part of the game that decided it.
 _CURVE_OT_BAND_UNITS = 900
-# Room at the right for the final-value label. Part of the width, not an overhang.
-_CURVE_LABEL_GUTTER = 30
+# ── ROOM AT THE RIGHT FOR THE FINAL LABEL, MEASURED RATHER THAN GUESSED (A139) ────────────
+#
+# 🚨 THE LABEL IS MONOSPACE ON PURPOSE, AND THAT IS WHAT MAKES ITS WIDTH A MEASUREMENT RATHER
+# THAN A TABLE. A133 needed a per-character advance table for `distribution.py` because that
+# text is proportional and `1` is not `8`. Setting this one in the same monospace stack every
+# numeric column on the page already uses makes EVERY character the same width, so the whole
+# question collapses to one number.
+#
+# 📊 MEASURED IN THE BROWSER at `font-size:9` in `ui-monospace,SFMono-Regular,Menlo,monospace`,
+# via `getComputedTextLength()`: `M`, `i` and `%` all return **5.422px**, and `MICH 100%`
+# returns 48.781 for nine characters — 5.4201 each. That uniformity IS the property being
+# relied on, so it is recorded rather than assumed.
+_CURVE_LABEL_CHAR_PX = 5.4219
+# The gap between the last point and the first glyph, and a little air after the last one.
+_CURVE_LABEL_OFFSET = 4.0
+_CURVE_LABEL_TRAIL = 2.0
+_CURVE_LABEL_FONT = "ui-monospace,SFMono-Regular,Menlo,monospace"
 
 
 def _curve_axis_units(points: pd.DataFrame) -> pd.Series:
@@ -428,6 +449,70 @@ def _curve_axis_units(points: pd.DataFrame) -> pd.Series:
 _CURVE_PAD = 2
 
 
+def _curve_final_value(points: pd.DataFrame):
+    """The home win probability at the LAST PLOTTED play, or None.
+
+    ⚠️ "Last plotted" rather than "last row": a play with no period has no position on a clock
+    axis and is dropped from the line, so the label has to read the same filtered frame the
+    curve does or it would name a point that is not on the chart.
+    """
+    if points is None or points.empty:
+        return None
+    plotted = points[_curve_axis_units(points).notna()]
+    if plotted.empty:
+        return None
+    value = plotted["home_win_probability"].iloc[-1]
+    return None if pd.isna(value) else float(value)
+
+
+def _curve_label(row, points) -> tuple:
+    """`(text, is_cut)` for the mark at the end of the curve. ONE definition, two consumers.
+
+    🚨 cfdb-main-R-934. THE LABEL USED TO BE A BARE PERCENTAGE AND IT SAT BESIDE THE WRONG TEAM'S
+    NAME. Row 1 of 2026 week 2 read `IOWA STATE … / IOWA …` with `94%` against it — and the 94%
+    is IOWA's, the HOME side, while the scoreboard deliberately puts the AWAY team on the top
+    line (R-522). Every label was correct and the panel still told a reader the opposite of the
+    truth. ⚠️ The `aria-label` already said *"Home win probability"*, so a screen-reader user was
+    told which side it was and a sighted reader was not — an inversion of the usual failure.
+
+    ✅ THE FIX IS THE HOME SIDE'S ABBREVIATION IN FRONT OF THE NUMBER, and the other two
+    candidates were rejected for reasons rather than taste:
+
+        label the WINNER          ❌ DISQUALIFIED BY THE GEOMETRY. The curve is home-perspective
+                                  and the label sits at the last point's own height, so when the
+                                  away side won the number would read 96% while sitting at the
+                                  BOTTOM of the chart, where the home curve ended at 4%. A label
+                                  that contradicts its own position is worse than a bare one.
+        anchor it to the home row ❌ Moves the label away from the point it labels, and vertical
+                                  alignment is not something a reader decodes as "this is the
+                                  home team's number" while scanning ten rows.
+        the abbreviation          ✅ Same glyph run as the number, so it survives greyscale and
+                                  thumbnailing; agrees with the geometry (above the even line is
+                                  home); and agrees with the `aria-label`, which now names the
+                                  team rather than the role.
+
+    📊 COVERAGE MEASURED IN PUBLISHED SERVING RATHER THAN ASSUMED: `home_abbreviation` is null on
+    **0 of the 1,895 games that can enter this panel**, longest **4 characters**, mean 3.3. It is
+    null on 4.9% of `srv_game` as a whole and reaches 9 characters on 22 rows there, none of
+    which can be ranked here. ⚠️ A130's chain ends in "drop the suffix rather than print `None`";
+    the same applies — with no abbreviation the label falls back to the bare percentage, and the
+    `aria-label` still names the side.
+
+    ⚠️ THE CUT CASE KEEPS ITS OWN SHAPE. There is no value to attribute to anybody, so it stays
+    the single word and does not grow a team name in front of it.
+    """
+    reaches = row.get("win_probability_curve_reaches_final_score")
+    if not (bool(reaches) if pd.notna(reaches) else True):
+        return ("cut", True)
+    final = _curve_final_value(points)
+    if final is None:
+        return ("", False)
+    side = row.get("home_abbreviation")
+    side = None if side is None or pd.isna(side) else str(side).strip()
+    percent = f"{final * 100:.0f}%"
+    return ((f"{side} {percent}" if side else percent), False)
+
+
 def _curve_bands(points: pd.DataFrame) -> int:
     """How many overtime periods this game's curve spans. 0 for a regulation game."""
     if points is None or points.empty or "overtime_period" not in points:
@@ -436,20 +521,28 @@ def _curve_bands(points: pd.DataFrame) -> int:
     return int(periods.max()) if periods.notna().any() else 0
 
 
-def _curve_width(points: pd.DataFrame) -> int:
-    """This game's chart width in pixels, at the shared scale.
+def _curve_width(points: pd.DataFrame, label: str = "") -> int:
+    """This game's chart width in pixels, at the shared scale, including room for its label.
 
     🚨 THE PANEL NEEDS THIS BEFORE IT RENDERS ANY ROW, which is why it is its own function.
     `.cfdb-table` is `table-layout:fixed`: with no colgroup every column takes an equal share,
     and a chart that is wider than its share overflows the cell rather than shrinking. Reading B
     makes the charts differ in width on purpose, so the column has to be the widest of them —
     and that is a fact about the FRAME, not about any one row.
+
+    ⚠️ A139 MADE THE GUTTER DEPEND ON THE LABEL RATHER THAN ON A CONSTANT, because naming the
+    home side made the label variable. A fixed gutter would have had to be sized for the longest
+    label the data can produce — 9 characters plus " 100%" is 76px — and would have spent that on
+    every chart on the page forever. Sized per row it costs what it costs: `MICH 100%` is 55px
+    against the old constant's 30, and a `cut` row is 23 and gets NARROWER.
     """
     span = _CURVE_REGULATION_UNITS + _curve_bands(points) * _CURVE_OT_BAND_UNITS
-    return int(round(_CURVE_PAD * 2 + span * _CURVE_PX_PER_UNIT + _CURVE_LABEL_GUTTER))
+    gutter = (_CURVE_LABEL_OFFSET + len(label) * _CURVE_LABEL_CHAR_PX + _CURVE_LABEL_TRAIL
+              if label else _CURVE_LABEL_TRAIL)
+    return int(round(_CURVE_PAD * 2 + span * _CURVE_PX_PER_UNIT + gutter))
 
 
-def _sparkline_svg(points: pd.DataFrame, reaches_final: bool = True,
+def _sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
                    height: int = 44) -> str:
     """One game's win-probability curve, as inline SVG sized for a table cell.
 
@@ -512,7 +605,7 @@ def _sparkline_svg(points: pd.DataFrame, reaches_final: bool = True,
     # units; each overtime period adds a band. Nothing is padded out to match another row.
     bands = _curve_bands(plotted)
     span_units = _CURVE_REGULATION_UNITS + bands * _CURVE_OT_BAND_UNITS
-    width = _curve_width(plotted)
+    width = _curve_width(plotted, label)
     ph = height - 2 * pad
 
     def sx(axis_units) -> float:
@@ -654,22 +747,26 @@ def _sparkline_svg(points: pd.DataFrame, reaches_final: bool = True,
     # a baseline placed 3px below it still hangs the glyphs above the viewBox — where they are
     # clipped by the cell, not by the SVG, so it looks like a rendering bug. Found by rasterising.
     label_y = min(max(last_y + 3.0, pad + 7.0), height - pad - 1.0)
-    if reaches_final:
-        final = float(plotted["home_win_probability"].iloc[-1])
-        parts.append(f"<text x='{last_x + 4:.1f}' y='{label_y:.1f}' font-size='9' "
-                     f"fill='currentColor' opacity='.75'>{final * 100:.0f}%</text>")
-        label = f"Home win probability by play, ending at {final * 100:.0f} percent"
-    else:
+    if is_cut:
         parts.append(f"<line x1='{last_x:.1f}' y1='{pad}' x2='{last_x:.1f}' "
                      f"y2='{height - pad}' stroke='currentColor' stroke-width='1' "
                      f"opacity='.5' stroke-dasharray='1 2'></line>")
-        parts.append(f"<text x='{last_x + 4:.1f}' y='{label_y:.1f}' font-size='8' "
-                     f"fill='currentColor' opacity='.75'>cut</text>")
-        label = ("Home win probability by play; the feed stops before the end of the game, "
-                 "so there is no final value")
+        described = ("Win probability by play, home side; the feed stops before the end of the "
+                     "game, so there is no final value")
+    else:
+        described = (f"Win probability by play, home side, ending at {label}" if label
+                     else "Win probability by play, home side")
+    if label:
+        # 🚨 MONOSPACE, AND IT IS NOT A STYLE CHOICE — see `_CURVE_LABEL_CHAR_PX`. Every glyph
+        # is 5.4219px wide at this size, which is what lets `_curve_width` size the gutter
+        # exactly rather than from an advance table. It also matches `.cfdb-num`, so the label
+        # reads as one more figure on a page of figures.
+        parts.append(f"<text x='{last_x + _CURVE_LABEL_OFFSET:.1f}' y='{label_y:.1f}' "
+                     f"font-size='9' font-family='{_CURVE_LABEL_FONT}' "
+                     f"fill='currentColor' opacity='.75'>{label}</text>")
 
     return (f"<svg viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
-            f"role='img' aria-label='{label}' "
+            f"role='img' aria-label='{described}' "
             f"style='display:block'>{''.join(parts)}</svg>")
 
 
@@ -881,6 +978,14 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             curves = _win_probability_curves(top["game_id"])
     by_game = dict(tuple(curves.groupby("game_id"))) if not curves.empty else {}
 
+    # ⚠️ THE LABEL IS BUILT ONCE PER ROW AND USED TWICE — by the width below and by the chart.
+    # Two call sites deriving the same string is how the column ends up sized for a label the
+    # chart does not draw, and the symptom would be a clipped percentage rather than an error.
+    # ⚠️ `iterrows`, NOT `itertuples`: `_curve_label` reads columns with `.get` so a missing one
+    # is an absence rather than an AttributeError, and a namedtuple has no `.get`.
+    labels = {row["game_id"]: _curve_label(row, by_game.get(row["game_id"]))
+              for _index, row in top.iterrows()} if not top.empty else {}
+
     def curve_cell(row) -> str:
         """One row's sparkline.
 
@@ -907,18 +1012,12 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
         points = by_game.get(row.game_id)
         if points is None or points.empty:
             return fmt.EM_DASH
-        # 🚨 THE FLAG TRAVELS WITH THE POINTS, AND `is False` IS THE WRONG TEST — WHICH A138's
-        # OWN PANEL TEST CAUGHT ON ITS FIRST RUN. A boolean arriving out of a pandas frame is
-        # `numpy.bool_(False)`, which is NOT the Python `False` singleton: `reaches is not False`
-        # is True for every row, so every truncated curve would have been labelled with a final
-        # value and the whole branch would have been dead code that reads as handled.
-        #
-        # ⚠️ NULL STILL MEANS "DRAW IT NORMALLY" (AC-G.32). The column is null only for a game
-        # with no result, which cannot enter this panel — but an unexpected null must not stamp
-        # every curve as cut, which is the louder and more wrong failure of the two.
-        reaches = row.get("win_probability_curve_reaches_final_score")
-        return _sparkline_svg(points,
-                              reaches_final=bool(reaches) if pd.notna(reaches) else True)
+        # 🚨 `_curve_label` OWNS THE `is False` TRAP, AND A138's PANEL TEST CAUGHT IT ON ITS FIRST
+        # RUN. A boolean arriving out of a pandas frame is `numpy.bool_(False)`, which is NOT the
+        # Python `False` singleton, so `reaches is not False` was True for every row and the whole
+        # truncation branch would have been dead code that reads as handled.
+        text, is_cut = labels.get(row.game_id, ("", False))
+        return _sparkline_svg(points, label=text, is_cut=is_cut)
 
     # 🚨 THE CURVE COLUMN IS SIZED TO THE WIDEST CHART IN THIS FRAME, AND IT HAS TO BE.
     # `.cfdb-table` is `table-layout:fixed`, so without a colgroup every column takes an equal
@@ -927,7 +1026,8 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     # them and the narrower ones simply do not fill it. Computed from the data rather than from a
     # constant, because a constant would be wrong the first week nothing goes to overtime.
     widest = max(
-        (_curve_width(by_game[game_id]) for game_id in top["game_id"] if game_id in by_game),
+        (_curve_width(by_game[game_id], labels.get(game_id, ("", False))[0])
+         for game_id in top["game_id"] if game_id in by_game),
         default=_curve_width(None))
     layout = ["26%", f"{widest + 12}px"] + ["auto"] * 6
 
