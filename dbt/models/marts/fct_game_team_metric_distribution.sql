@@ -35,11 +35,31 @@
 -- needs a hand-set {min, max}; a box plot is computed from the values. So "every measure" is
 -- reachable without eighteen hand-tuned ranges, and this model sets none.
 --
--- ⚠️ THE POPULATION RULE IS READ, NOT REIMPLEMENTED. FBS only, spelled as
--- `fct_team_week_metric_distribution` spells it — `dim_team.classification = 'fbs'`, one layer
--- down from srv_team_week's `is_fbs`. A distribution computed over a different population than
--- the page's own numbers is a lie the reader cannot see, and a second copy of a population rule
--- is the drift this project has paid for repeatedly.
+-- ⚠️ THE POPULATION RULE IS READ, NOT REIMPLEMENTED. It lives in `int_game_team_metric_value`
+-- and nothing here restates it — a second copy of a population rule is the drift this project has
+-- paid for repeatedly.
+--
+-- 🚨 AND A142 CHANGED IT: the pool is now every team-game of a COMPLETED GAME INVOLVING AN FBS
+-- SCHOOL, both sides, rather than every FBS team's team-game. The intermediate's header carries
+-- the measurement and the argument; what matters HERE is the property it buys.
+--
+-- ✅ THE POOL IS CLOSED UNDER `mirror`, AND THAT MAKES MARC'S INVARIANT AN IDENTITY.
+-- For any metric M, a team-game's "allowed M" is its opponent's M in the same game. `mirror` is a
+-- bijection on the pool, so the multiset of allowed values IS the multiset of gained values —
+-- every percentile, the mean, the whiskers, the outlier count, all of them, exactly.
+--
+-- 📊 MEASURED BOTH WAYS ON `total_yards`: 2026 regular, p25/p50/p75 = 255.5 / 367.0 / 474.75 for
+-- gained AND for allowed; 2025 regular, 295.0 / 375.0 / 452.25 for both. Under the OLD population
+-- the same two columns read 398.0 and 322.0 at the median.
+--
+-- 🚨 SO A PAGE DRAWING GAINED AND ALLOWED AT THIS GRAIN DRAWS ONE DISTRIBUTION TWICE, and that is
+-- the correct picture rather than a redundancy: what differs between the two charts is where the
+-- TEAM's own marks fall on it, which is the comparison the reader came for.
+-- `assert_gained_and_allowed_match_at_game_grain` is what keeps it true.
+--
+-- ⚠️ THIS PROPERTY DOES NOT HOLD ONE MODEL OVER, AND IT CANNOT. See design note 6 in
+-- `fct_team_week_metric_distribution`: season-to-date AVERAGES break the pairing even in a
+-- perfectly closed league, measured.
 --
 -- ⚠️ NO `as_of_date` AND NO LOCK RULE, for the second model's reason rather than by omission: a
 -- completed game's box score does not reprice. `fct_week_metric_distribution` needs the lock

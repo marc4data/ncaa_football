@@ -73,6 +73,39 @@
 --    this model's. The FBS spine stays (R-051), and `_off_the_frame` in the page names the
 --    handful of teams the frame excludes.
 
+-- 6. 🚨 THE GAINED AND ALLOWED BOXES HERE WILL NEVER MATCH, AND CLOSING THE POPULATION CANNOT
+--    FIX IT. A142 measured this because Marc asked exactly the right question of the picture:
+--    *"If Oregon gained 497 yards last week. the opponent would have Allowed 497 and the match
+--    for setting the min/max and quartiles would lead to the same results."*
+--
+--    ✅ HIS INVARIANT IS A GAME-GRAIN FACT AND IT IS EXACTLY TRUE AT GAME GRAIN. It is not a
+--    statement about team season averages, and averaging destroys it: once each game's 497 is
+--    divided into its own team's season, the pairing between the two sides is gone.
+--
+--    📊 PROVED ON THE DATA RATHER THAN ARGUED, over a PERFECTLY CLOSED league — 2025 regular,
+--    FBS-vs-FBS only, 762 games, 1,524 team-games, sum_for = sum_allowed = 574,631, every
+--    team-game's mirror present. Zero leakage of any kind:
+--
+--      grain           side        min     p25     p50     p75     max      mean
+--      game            gained     68.0  302.75   377.5   448.0   775.0   377.054
+--      game            allowed    68.0  302.75   377.5   448.0   775.0   377.054   <- identical
+--      team average    gained    237.5   333.1   383.3   410.2   506.7   376.757
+--      team average    allowed   217.5   346.5   384.6   415.1   485.8   377.570   <- differs
+--
+--    🚨 EVEN THE GRAND MEANS DIFFER (376.757 against 377.570), because teams have played 11, 12
+--    or 13 games and an average of averages is not the average. The quartiles differ by up to
+--    13.4 yards and the extremes by 20.9.
+--
+--    ⚠️ SO THIS MODEL'S FBS-ONLY POPULATION IS LEFT EXACTLY AS IT WAS, and that is a decision
+--    rather than an omission. Closing it would move the shared scatter axis for every matchup in
+--    the week (design note 5 costed that: the median moves by up to 61.5 yards, in OPPOSITE
+--    directions for `_for` and `_allowed`) and WOULD STILL NOT MAKE THE TWO BOXES MATCH. A change
+--    that pays the whole cost and delivers none of the benefit is the one to refuse.
+--
+--    ✅ A PAGE THAT NEEDS THE TWO BOXES TO AGREE READS THE GAME-GRAIN SIBLING,
+--    `srv_game_team_metric_distribution`, where the identity holds and is guarded by
+--    `assert_gained_and_allowed_match_at_game_grain`.
+
 {% set metrics = [
     'total_yards_for_per_game', 'total_yards_allowed_per_game',
     'rushing_yards_for_per_game', 'rushing_yards_allowed_per_game',
