@@ -502,7 +502,8 @@ def box(row, value=None, width: int = 240, label: str = "",
         value_label: Optional[str] = None, dp: int = 1,
         value_color: Optional[str] = None,
         value_below=_UNSET, value_below_label: Optional[str] = None,
-        value_below_color: Optional[str] = None) -> str:
+        value_below_color: Optional[str] = None,
+        frame: Optional[tuple] = None) -> str:
     """A horizontal box-and-whisker for one measure, sized to the cell it is given.
 
     THE THIRD ENTRY POINT, over the SAME row as `thumbnail` and `panel`. One renderer, not two —
@@ -564,6 +565,8 @@ def box(row, value=None, width: int = 240, label: str = "",
                        draws in its own half rather than moving to the centre (see `_UNSET`)
     value_below_label  as `value_label`, for the below side
     value_below_color  as `value_color`, for the below side
+    frame              `(lo, hi)` to widen the SCALE by — see below. Never narrows, never moves
+                       a label, never changes a printed figure
     """
     if row is None:
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
@@ -602,6 +605,9 @@ def box(row, value=None, width: int = 240, label: str = "",
         markers.append((float(value_below), value_below_label,
                         value_below_color or VALUE_COLOR, "below"))
 
+    # 🚨 `lo`/`hi` DRAW. `frame_lo`/`frame_hi` SCALE. THEY ARE TWO DIFFERENT THINGS AND THE
+    # WHOLE OF A139's PART 1 LIVES IN THAT SEAM.
+    #
     # ⚠️ THE FRAME INCLUDES THE VALUE, so a figure outside the whiskers is drawn where it is
     # rather than clamped to the edge. An outlier pinned to the boundary reads as "at the
     # extreme" when the truth is "beyond it", and the outlier is the interesting case.
@@ -611,6 +617,34 @@ def box(row, value=None, width: int = 240, label: str = "",
     frame_lo, frame_hi = lo, hi
     for marker_value, _label, _color, _side in markers:
         frame_lo, frame_hi = min(frame_lo, marker_value), max(frame_hi, marker_value)
+
+    # 🚨 A139, cfdb-wta-R-927. `frame=(lo, hi)` PUTS TWO CHARTS ON ONE SCALE, and it is the
+    # honest version of a thing B114 refused to fake from the page.
+    #
+    # 📊 THE DEFECT IT CLOSES, MEASURED BY B114 ON THE GAINED-OVER-ALLOWED PAIR: two `box()`
+    # calls stacked vertically frame on their OWN whiskers, so on `total` the top row spans
+    # 416.5 yards and the bottom row 366.0 across the same pixels — a 13.8% scale difference in
+    # a layout that invites the reader to compare them by eye, with nothing on screen admitting
+    # to it. On `rushing` the narrower row uses 70.8% of the wider one's range.
+    #
+    # ✅ IT WIDENS AND NEVER REPLACES, which is the property the comment above protects: a value
+    # beyond the union is still drawn beyond it rather than clamped to the caller's bound. A
+    # `frame` narrower than the data is therefore inert rather than wrong.
+    #
+    # ❌ AND IT TOUCHES NOTHING THAT PRINTS. `lo`/`hi` still draw the whisker rule, its serifs
+    # and the boundary labels, so every figure on the chart stays this row's own figure. A
+    # shared axis that relabelled the whiskers with the union's numbers would be telling the
+    # reader this team's week ran from 142.5 when it ran from 204.0 — which is exactly the
+    # dishonest version, and it is one line away from here.
+    #
+    # ⚠️ THE UNION IS A PROPERTY OF THE WEEK, NOT OF THE TWO ROWS ON SCREEN (R-590: every matchup
+    # in a week is drawn on the same axes). This parameter only accepts it; the page computes it.
+    if frame is not None:
+        given_lo, given_hi = (as_number(frame[0]), as_number(frame[1]))
+        if given_lo is not None:
+            frame_lo = min(frame_lo, given_lo)
+        if given_hi is not None:
+            frame_hi = max(frame_hi, given_hi)
 
     pad = 10.0
     height = BOX_HEIGHT
