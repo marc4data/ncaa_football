@@ -912,6 +912,51 @@ def _domains(chart):
     return found.get("x"), found.get("y")
 
 
+def _chart_hover(markup: str) -> str:
+    """The `title=` on `box()`'s own wrapping span — what a reader gets by hovering the chart.
+
+    🚨 cfdb-main-R-1020 MADE THIS THE INSTRUMENT FOR A WHOLE CLASS OF ASSERTION. Until this round
+    several tests proved *the chart is drawn on the week's published row* by checking that the
+    row's numbers were PRINTED under it. **Marc took the printed numbers off**, so the proxy is
+    gone while the property is not — and `describe(row)` is where those figures still live.
+
+    ⚠️ IT IS AN ATTRIBUTE, NOT AN ELEMENT, so `_plain` cannot see it: `_plain` strips tags and the
+    hover text is inside one. **That is exactly how the first draft of this helper read empty.**
+    """
+    found = re.search(r"class='cfdb-dist' title='([^']*)'", markup)
+    return html.unescape(found.group(1)) if found else ""
+
+
+def test_THE_YARDAGE_CHARTS_PRINT_NO_TICK_NUMBERS_but_keep_the_teams_own(panel):
+    """🚨 cfdb-main-R-1020. **Marc:** *"Don't think we have real estate to print the numbers.
+    Draw the whiskers but don't add tick marks/labels for the values."*
+
+    🚨 THIS TEST EXISTS BECAUSE THE STAGED BREAK CAME BACK GREEN. Removing
+    `ticks=distribution.TICK_NONE` from the call site put every percentile and boundary number
+    back on the page and **the whole suite still passed — 1451 of 1451.** Marc's instruction had
+    been implemented with nothing holding it, so the next round could undo it in good faith.
+    ⚠️ R-758's first mode, found the only way it ever is.
+
+    ✅ AND IT ASSERTS BOTH HALVES, BECAUSE THE INSTRUCTION HAS TWO. The percentile and boundary
+    numbers must be GONE; **the team's own figure must still be there** — that is Marc's own
+    split, and a page that dropped the value label too would satisfy a one-sided test while
+    removing the one number a reader came for.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    svg = _svg_of(_series(_of_metric(entries, "Total")[0])["gained"])
+    assert svg, "the gained row drew no chart at all"
+    printed = re.findall(r"<text[^>]*>([^<]*)</text>", svg)
+    n, weeks, p25, p50, p75, low, high = _METRICS["total_yards"][:7]
+    for figure in (p25, p50, p75, low, high):
+        assert f"{figure}" not in printed, (
+            f"the chart still prints {figure} from the week's row — Marc asked for the whiskers "
+            f"without the tick marks or labels, and these are the labels: {printed}")
+    # 🚨 THE OTHER HALF. `_both()[0]`'s own total is the one figure that stays.
+    assert printed, (
+        "the chart prints nothing at all — the team's own figure went with the ticks, which is "
+        "the opposite of what Marc asked for")
+
+
 def test_the_FRAME_comes_from_the_WEEKS_ROW_and_not_from_the_two_teams(panel):
     """R-590. The spread a side is drawn against is the WEEK's, not the two teams' own numbers.
 
@@ -921,16 +966,32 @@ def test_the_FRAME_comes_from_the_WEEKS_ROW_and_not_from_the_two_teams(panel):
     `whisker_low`/`whisker_high`, which are published at the same week grain, so the guarantee
     holds through a different pair of columns.
 
-    ⚠️ ASSERTED ON THE DRAWN BOUNDARY LABELS, which is what a reader actually sees: `box()`
-    prints the two whisker ends, so the week's published pair must appear under the chart.
+    🚨 ASSERTED ON THE CHART'S HOVER SINCE cfdb-main-R-1020, AND THE OLD FORM IS WHY THIS
+    PARAGRAPH EXISTS. It read the two whisker ends **printed under the chart** — true, reader-
+    facing, and **deleted by Marc's own instruction**: *"Draw the whiskers but don't add tick
+    marks/labels for the values."* ⚠️ **The property did not move; only the instrument did.**
+
+    ✅ `describe(row)` STILL CARRIES THE ROW's OWN QUARTILES, and they are as diagnostic as the
+    boundaries were: a chart drawn from the two teams' numbers instead of the week's row cannot
+    produce the week's published p25/median/p75. ⚠️ **AND THE BOUNDARY PAIR IS NOT IN THE HOVER
+    AT ALL** — `describe` names the min/max beside the outlier count, not the fences — which this
+    round reports rather than works around (`distribution.py` is session A's).
     """
     entries, _ = panel(_game(), _both())
     gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
-    low, high = _METRICS["rushing_yards"][5:7]
-    plain = _plain(gained)
-    assert f"{low}" in plain and f"{high}" in plain, (
-        f"the rushing GAINED series is not drawn on the week's published whiskers "
-        f"{low}–{high}: {plain}")
+    _n, _w, p25, p50, p75 = _METRICS["rushing_yards"][:5]
+    hover = _chart_hover(gained)
+    assert hover, (
+        f"the rushing GAINED series has no hover at all, so the figures Marc moved off the "
+        f"page have nowhere left to live: {_plain(gained)[:200]}")
+    # ⚠️ FORMATTED TO 1dp BECAUSE `describe()` IS — the fixture's p25 is 93.75 and the hover
+    # says 93.8. **That is a display coupling, not cfdb-wta-R-944's trap:** the defect this test
+    # exists for (a chart drawn from the two teams instead of the week's row) changes the
+    # NUMBERS, not how many decimals they are printed to.
+    for figure in (p25, p50, p75):
+        assert f"{figure:.1f}" in hover, (
+            f"the rushing GAINED series is not drawn on the week's published row — its hover "
+            f"does not carry {figure:.1f} from p25/p50/p75 {p25}/{p50}/{p75}: {hover}")
 
 
 def test_TWO_DIFFERENT_MATCHUPS_IN_A_WEEK_GET_THE_SAME_FRAME(panel):
@@ -1254,12 +1315,20 @@ def test_the_FRAME_CAPTION_describes_the_CHART_THAT_IS_DRAWN(panel):
     assert "filled when" in text and "FBS" in text, (
         f"the caption does not say what a FILLED circle means, so the page draws a two-state "
         f"encoding and explains neither state: {text[:500]}")
+    # 🚨 cfdb-main-R-1017. THE WINDOW, WHICH THE PICTURE CANNOT CARRY.
+    assert "before this game's own" in text, (
+        f"the caption does not say WHICH weeks the box is built from, so a reader cannot tell a "
+        f"point-in-time spread from a whole-season one: {text[:500]}")
     for gone in ("dashed", "thin sides", "thick sides", "same axes", "FBS teams in this week",
                  # 🚨 B122 OVERLAID THE CIRCLES INSIDE THE BAND AND LEFT THIS SENTENCE SAYING
                  # THEY SIT UNDER IT — the same class as the scatter wording above, found in the
                  # same caption one round later. ⚠️ AND *"open circle"* stopped being true of
                  # every circle here, which is the other half of the same staleness.
-                 "circle below", "each open circle"):
+                 "circle below", "each open circle",
+                 # 🚨 cfdb-main-R-1020 DELETED THE TICK AND BOUNDARY LABELS, so a caption saying
+                 # the whiskers are "both labeled" describes a chart that no longer exists.
+                 # ⚠️ THIRD PHRASE IN THIS LIST PUT THERE BY THE SAME CLASS IN THREE ROUNDS.
+                 "both labeled", "first {weeks}"):
         assert gone not in text, (
             f"the caption still describes a chart or a population it replaced — {gone!r}: "
             f"{text[:400]}")
@@ -2880,10 +2949,14 @@ def test_THE_TWO_SERIES_SHARE_ONE_SCALE_and_the_page_SAYS_SO(panel):
             r"stroke='currentColor' stroke-width='1' opacity='.55'", svg))
         assert len(serifs) >= 2, f"{side}: no whisker serifs in the svg to measure: {svg[:200]}"
         boundaries[side] = (serifs[0], serifs[-1])
-        printed = _plain(rows[side])
-        assert f"{lo}" in printed and f"{hi}" in printed, (
-            f"the {side} row does not print the week's published boundaries {lo}-{hi}, so it is "
-            f"drawn against some other spread: {printed[:200]}")
+        # 🚨 cfdb-main-R-1020: THIS WAS THE PRINTED BOUNDARY PAIR AND MARC REMOVED IT FROM THE
+        # PAGE. The serif geometry above proves the two rows agree with EACH OTHER; this half
+        # proves they agree with the WEEK, and it now reads the hover for the same reason
+        # `test_the_FRAME_comes_from_the_WEEKS_ROW...` does.
+        hover = _chart_hover(rows[side])
+        assert f"{_METRICS['total_yards'][3]}" in hover, (
+            f"the {side} row's hover does not carry the week's published median "
+            f"{_METRICS['total_yards'][3]}, so it is drawn against some other spread: {hover}")
 
     assert boundaries["gained"] == boundaries["allowed"], (
         f"the two rows put the week's boundaries at different pixels — {boundaries} — so they "

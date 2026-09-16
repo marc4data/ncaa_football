@@ -1186,6 +1186,30 @@ def _band_labels(cell):
     return re.findall(r"<text[^>]*>([^<]*)</text>", cell)
 
 
+def _recovered_frame(cell, p25, p75):
+    """The frame `box()` actually scaled on, in DATA units, read back out of the drawn SVG.
+
+    🚨 cfdb-main-R-1020 TOOK THE PRINTED BOUNDARY NUMBERS OFF THE CHARTS, and several assertions
+    here were reading them as a proxy for *which column the frame came from*. **The frame is
+    still recoverable — it is just geometry now.**
+
+    ✅ TWO KNOWN DATA POINTS AND TWO KNOWN PIXELS ARE ENOUGH, AND IT NEEDS NO PRIVATE CONSTANT:
+    the box rect spans p25→p75, the whisker serifs sit at the frame's two ends, so the scale is
+    `(p75 - p25) / rect_width` and everything else follows. ⚠️ **Nothing here assumes `box()`'s
+    `pad`** — B114 refused to couple to that private value and this respects it.
+    """
+    rect = re.search(r"<rect x='([\d.]+)' y='[\d.]+' width='([\d.]+)'", cell)
+    serifs = sorted(float(x) for x in re.findall(
+        r"<line x1='([\d.]+)' y1='[\d.]+' x2='[\d.]+' y2='[\d.]+' "
+        r"stroke='currentColor' stroke-width='1' opacity='.55'", cell))
+    if rect is None or len(serifs) < 2:
+        return None
+    left, span = float(rect.group(1)), float(rect.group(2))
+    scale = (p75 - p25) / span
+    lo = p25 - (left - serifs[0]) * scale
+    return lo, lo + (serifs[-1] - serifs[0]) * scale
+
+
 def test_EVERY_MEASURE_WITH_A_DISTRIBUTION_gets_a_band_and_the_others_do_not(panel):
     """🚨 R-808. Marc, v07: *"use it to show the spread/dispersion of EACH metric in the Box
     Score and Advanced"* — and R-816, in two words, *"R-816, both"*, with the height cost in
@@ -1223,17 +1247,57 @@ def test_EVERY_MEASURE_WITH_A_DISTRIBUTION_gets_a_band_and_the_others_do_not(pan
 def test_the_BOX_SCORE_band_labels_carry_no_false_decimals(panel):
     """R-829. Every Box Score measure is an integer count — first downs, yards, attempts — and
     `box()`'s default `dp=1` labels them `22.0`, `5.0`, `38.0`: precision the measure does not
-    have. ⚠️ Measured: `dp` changes no label COUNT at these widths, so this costs nothing."""
+    have. ⚠️ Measured: `dp` changes no label COUNT at these widths, so this costs nothing.
+
+    🚨 ITS SUBJECT NARROWED IN cfdb-main-R-1020 AND THE TEST STAYED GREEN THROUGH IT, WHICH IS
+    WHY THIS PARAGRAPH IS HERE. Marc took the tick labels off, so the only `<text>` left in the
+    cell is **the two teams' own value labels** — `dp` still governs them, so the property holds
+    and the assertion still bites, **but it now covers two labels where it used to cover five.**
+    ⚠️ A test whose coverage shrinks silently is the thing this file keeps finding; the
+    `assert labels` below is what stops it shrinking to zero unnoticed."""
     run, _ = panel
     for cell in _cells(run(_both())[0]):
         if ">First downs<" not in cell:
             continue
         labels = _band_labels(cell)
-        assert labels, "the first-downs band drew no labels"
+        assert labels, (
+            "the first-downs cell drew no labels at all — with the ticks gone (cfdb-main-R-1020) "
+            "the value labels are all that is left, and this test has gone blind if they go too")
         assert not any("." in text for text in labels), (
             f"a count's band is labelled with decimals it does not have: {labels}")
         return
     raise AssertionError("the first-downs row never rendered")
+
+
+def test_THE_METRIC_CELLS_PRINT_NO_TICK_NUMBERS_but_keep_both_teams_own(panel):
+    """🚨 cfdb-main-R-1020, THE SECOND CALL SITE. **Marc:** *"Don't think we have real estate to
+    print the numbers.  Draw the whiskers but don't add tick marks/labels for the values."*
+
+    🚨 WRITTEN BECAUSE THE STAGED BREAK CAME BACK GREEN (R-758). Dropping
+    `ticks=distribution.TICK_NONE` from `_metric_chart` restored every boundary number in the
+    table and **the entire suite still passed.**
+
+    ⚠️ AND `value_label=None` DOES NOT MEAN *no label* HERE, WHICH IS THE THING TO KNOW BEFORE
+    READING THIS ASSERTION: `box()` falls back to `fmt.number(value, dp=dp)` when the override is
+    `None`, so **both teams' own figures are printed** — away above the axis, home below — and
+    both must survive. What `TICK_NONE` removes from these cells is the boundary pair.
+    """
+    run, _ = panel
+    spread = {row["metric"]: row for row in _SPREAD}["rushing_yards"]
+    for cell in _cells(run(_both())[0]):
+        if ">Rushing yards<" not in cell:
+            continue
+        labels = _band_labels(cell)
+        for key in ("whisker_low", "whisker_high", "p25", "p50", "p75"):
+            figure = spread[key]
+            assert f"{figure:g}" not in labels, (
+                f"the cell still prints {figure:g} ({key}) — Marc asked for the whiskers drawn "
+                f"without the tick marks or labels: {labels}")
+        assert len(labels) == 2, (
+            f"a metric cell should print exactly the two teams' own figures and nothing else; "
+            f"it printed {labels}")
+        return
+    raise AssertionError("the rushing-yards row never rendered")
 
 
 def test_the_band_draws_the_WHISKERS_and_not_the_MIN_MAX_it_could_have(panel):
@@ -1246,38 +1310,55 @@ def test_the_band_draws_the_WHISKERS_and_not_the_MIN_MAX_it_could_have(panel):
 
     ✅ SO THE ASSERTION IS THE DRAWN EXTENT AGAINST THE COLUMN THE LABEL NAMES. On 2026 week 1
     rushing yards the fences run 2 → **365** and the extremes 2 → **569**; on first downs the
-    fences are **5** → 38 and the extremes **4** → 38. Either swap changes a printed label.
+    fences are **5** → 38 and the extremes **4** → 38.
 
     ⚠️ AND IT INVOKES THE PAGE RATHER THAN REPRODUCING IT (R-768): `run()` calls the real
-    `_post_game`, and these are the labels `box()` actually emitted.
+    `_post_game`, and this is the geometry `box()` actually emitted.
 
-    ⚠️ WHY THE FENCES ARE THE RIGHT ANSWER, measured rather than asserted: on that rushing-yards
-    row the box spans 35% of the fence range and 22% of the min-max range. Drawing the extremes
-    compresses the box toward a line, which is what `outlier_count` is published separately to
-    avoid.
+    🚨 IT ASSERTED THE PRINTED BOUNDARY LABEL UNTIL cfdb-main-R-1020, WHEN MARC TOOK THE PRINTED
+    NUMBERS OFF THE CHARTS: *"Draw the whiskers but don't add tick marks/labels for the values."*
+    **`"365" in labels` had nothing left to read.** ⚠️ The exposure is unchanged and the fixture
+    still carries both pairs — so the instrument moved from the LABEL to the DRAWN BOX, which is
+    what this test's own docstring always said it was about.
+
+    ✅ AND THE DISCRIMINATOR IS THE ONE ALREADY MEASURED HERE: **the box spans 35% of the fence
+    range and 22% of the min-max range.** Drawing the extremes compresses the box toward a line,
+    which is what `outlier_count` is published separately to avoid. A swap moves the rect by ~13
+    points of plot width — far outside any rounding.
     """
     run, _ = panel
-    for cell in _cells(run(_both())[0]):
-        if ">Rushing yards<" not in cell:
-            continue
-        labels = _band_labels(cell)
-        assert "365" in labels, (
-            f"the band's upper end is not `whisker_high` (365) — if it reads 569 it is drawing "
-            f"`max_value` while the plot claims to be a box-and-whisker: {labels}")
-        assert "569" not in labels, (
-            f"the band is drawn to `max_value` (569), which is 56% wider than the fence it is "
-            f"labelled as, and it squeezes the box from 35% of the frame to 22%: {labels}")
-        break
-    else:
-        raise AssertionError("the rushing-yards row never rendered")
-    for cell in _cells(run(_both())[0]):
-        if ">First downs<" not in cell:
-            continue
-        labels = _band_labels(cell)
-        assert "5" in labels and "4" not in labels, (
-            f"the band's lower end is not `whisker_low` (5) — `min_value` is 4: {labels}")
-        return
-    raise AssertionError("the first-downs row never rendered")
+    spread = {row["metric"]: row for row in _SPREAD}
+    cells = _cells(run(_both())[0])
+    # (metric, cell heading, which end this row's two pairs disagree on)
+    for metric, heading, end in (("rushing_yards", ">Rushing yards<", "high"),
+                                 ("first_downs", ">First downs<", "low")):
+        row = spread[metric]
+        fence = (row["whisker_low"], row["whisker_high"])
+        extreme = (row["min_value"], row["max_value"])
+        index = 0 if end == "low" else 1
+        assert fence[index] != extreme[index], (
+            f"{metric}'s fence and extreme agree at the {end} end, so this row cannot tell the "
+            f"two columns apart — see the comment on `_SPREAD`")
+        for cell in cells:
+            if heading not in cell:
+                continue
+            got = _recovered_frame(cell, row["p25"], row["p75"])
+            assert got is not None, f"the {metric} cell drew no box to measure: {cell[:300]}"
+            # ⚠️ `box()` WIDENS ITS FRAME AROUND A VALUE MARKER, so the recovered end is the
+            # fence OR a team's own figure beyond it — never the OTHER published column. The
+            # assertion is therefore *nearer the fence than the extreme*, which is exactly the
+            # swap this test exists for and is immune to the widening.
+            to_fence = abs(got[index] - fence[index])
+            to_extreme = abs(got[index] - extreme[index])
+            assert to_fence < to_extreme, (
+                f"{metric}'s band is framed at {got[index]:.1f} on its {end} end — that is "
+                f"{to_fence:.1f} from `whisker_{'low' if end == 'low' else 'high'}` "
+                f"{fence[index]} and {to_extreme:.1f} from the extreme {extreme[index]}. A band "
+                f"drawn to the extremes describes a wider spread than a box-and-whisker claims, "
+                f"with every number real and nothing crashing")
+            break
+        else:
+            raise AssertionError(f"the {metric} row never rendered")
 
 
 # --- R-847: the table's own geometry, amended from B106/B108 rather than deleted ------------
