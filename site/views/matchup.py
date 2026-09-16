@@ -2717,9 +2717,21 @@ def _box_row(row, side, caption: str, column, accent: str, frame=None, overlay: 
     # Marc: *"The box-whisker will have to be taller to accommodate the circles."* A145 proved
     # `height=None` renders today's bytes exactly and that **Matchup is the only consumer of
     # `box()`**, so the whole blast radius of passing it is this page.
+    # 🚨 cfdb-main-R-1020. MARC TOOK THE PRINTED NUMBERS OFF: *"Don't think we have real estate
+    # to print the numbers.  Draw the whiskers but don't add tick marks/labels for the values."*
+    #
+    # ✅ `ticks` GATES ONLY THE `place(...)` CALLS IN `distribution.box` — the box edges, the bold
+    # median and the whisker serifs draw regardless — so this is *draw the whiskers, drop the
+    # numbers* exactly, with no geometry hanging off it. **Read at `e001a17` rather than taken
+    # from the prompt** (§2.2.1c), because B124 proved a three-round-old claim about a column
+    # false by opening the file.
+    #
+    # ⚠️ THE VALUE LABEL STAYS AND THAT IS MARC'S OWN SPLIT: the ticks are the percentile and
+    # boundary numbers, **the marker is the team's own figure and is the one they came for**.
+    # `box()` places the marker's label BEFORE the `ticks` gate, so the two are independent.
     chart = distribution.box(
         row, value=value, width=_BOX_ROW_WIDTH, label=caption, value_color=accent,
-        frame=frame, height=_BOX_BAND,
+        frame=frame, height=_BOX_BAND, ticks=distribution.TICK_NONE,
         value_label=(None if value is None or pd.isna(value)
                      else fmt.number(value, column, dp=1)))
     return (
@@ -3705,10 +3717,28 @@ def _yardage(row) -> None:
             # stops being true here for every FBS opponent. ⚠️ This is the defect the comment
             # forty lines up already names — *"a caption that survives the chart it describes"* —
             # found in the same caption one round later, which is why it is worth saying twice.
+            # 🚨 cfdb-main-R-1017 — THE PANEL NOW NAMES THE BOX'S WINDOW. A148 measured the
+            # boundary in anger and wrote the reasoning into the MODEL; **the reader meets the
+            # PANEL**, and §4.3 is the same rule here as anywhere: the thing carries its window
+            # or the caption does. Three facts a reader cannot deduce from the picture — the
+            # weeks are those BEFORE this game's own, the population is GAMES rather than team
+            # averages, and it is CUMULATIVE rather than last week alone.
+            # ⚠️ A148's one honest exception is deliberately NOT here: two previews a season
+            # (the Celebration Bowl) count a same-day game that kicks off later, worth ~1.7px.
+            # That is a footnote in the model, not a thing a reader needs.
+            #
+            # 🚨 AND *"BOTH LABELED"* WENT FALSE IN THIS SAME ROUND — cfdb-wta-R-1024 AGAIN, ONE
+            # ROUND AFTER IT WAS NAMED. Marc removed the tick and boundary labels
+            # (cfdb-main-R-1020), so a caption promising the whiskers are "both labeled" was
+            # describing a chart that no longer exists — **found only by re-reading the whole
+            # sentence rather than the clause this round came to edit.** That is now the standing
+            # instruction for this caption, and the guard list below holds all three phrases.
             frame = (f"Each series is drawn against all {observations:,} team-games played in "
-                     f"this season's first {weeks} week{'' if weeks == 1 else 's'}: the box is "
-                     f"the middle half, the bold line inside it the median, and the whiskers "
-                     f"run to the low and high boundaries, both labeled. The colored mark is "
+                     f"the {weeks} week{'' if weeks == 1 else 's'} before this game's own — "
+                     f"every game those weeks held, counted cumulatively rather than week by "
+                     f"week, and not the teams' averages. The box is the middle half, the bold "
+                     f"line inside it the median, and the whiskers run to the low and high "
+                     f"boundaries. The colored mark is "
                      f"that team's average per game, and each circle drawn on it is one game "
                      f"the team played, earliest at the top — filled when that game's "
                      f"opponent was an FBS team, open when it was not. ✅ Both rows are drawn "
@@ -4446,8 +4476,15 @@ def _metric_chart(row, away_value, home_value, dp, accents) -> str:
     if row is None:
         return ""
     away_accent, home_accent = accents
+    # 🚨 cfdb-main-R-1020, THE SECOND CALL SITE — the same instruction, and Marc scoped it to
+    # both when asked.
+    #
+    # ⚠️ `value_label=None` DOES NOT SUPPRESS A LABEL HERE, WHICH IS WORTH WRITING DOWN BECAUSE
+    # IT READS AS THOUGH IT DOES. `box()` falls back to `fmt.number(value, dp=dp)` when the
+    # override is `None`, so **both sides' own figures are printed and both survive this change**
+    # — away above the axis, home below it. What `TICK_NONE` removes here is the boundary pair.
     return distribution.box(
-        row, width=_TABLE_CHART_WIDTH, dp=dp,
+        row, width=_TABLE_CHART_WIDTH, dp=dp, ticks=distribution.TICK_NONE,
         value=away_value, value_color=away_accent, value_label=None,
         value_below=home_value, value_below_color=home_accent)
 

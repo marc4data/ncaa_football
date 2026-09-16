@@ -122,6 +122,49 @@ def test_an_expression_with_no_alias_is_DECLINED_rather_than_guessed():
     assert select_list.unnameable_items(sql) == ["count(*)"]
 
 
+def test_the_CALENDAR_columns_block_names_every_column_the_circles_need():
+    """🚨 cfdb-wta-R-1026. `_CALENDAR_COLUMNS` HAD NO GUARD AT ALL, AND B124 MEASURED WHAT THAT
+    COSTS: **removing a column from that SQL turned exactly ONE test of 130 red.**
+
+    The other 129 stayed green because the panel's harness stubs `query` and hands back a fixture
+    frame that still carried the column — so against live serving the page would have drawn every
+    circle open, **silently and correctly-looking**, with the suite behind it.
+
+    ✅ SO IT GETS WHAT `COLUMNS` HAS ABOVE: a parse, a pinned answer, and nothing unnameable.
+    ⚠️ **THE SET IS PINNED RATHER THAN THE COUNT**, which is the one improvement on the older
+    guard: a round that drops `opponent_classification` and adds `opponent_conference` keeps the
+    count at 18 and changes what the page can draw. A count cannot see a swap.
+
+    ⚠️ AND A BUMP WITHOUT A REASON IS WORSE THAN NO GUARD — see `COLUMNS`'s own comment history,
+    which records 101 → 103 → 104 and why each moved. **Add the name to the right group below
+    with the round that needed it.**
+    """
+    from views import matchup
+    parsed = select_list.selected_names(matchup._CALENDAR_COLUMNS)
+    expected = {
+        # the grain, and the leakage bound cfdb-wta-R-1000 put on it
+        "team_id", "week", "game_date",
+        # the hover: Marc's *"the Week #, Opponenet Rank, Name, Record, Final Score"* (B118/B119)
+        "is_home", "opponent_abbreviation", "opponent_team_display", "opponent_rank",
+        "record_before_display", "points_for", "points_against",
+        # the six per-game figures the three sections draw their circles from (R-899)
+        "total_yards", "rushing_yards", "passing_yards",
+        "total_yards_allowed", "rushing_yards_allowed", "passing_yards_allowed",
+        # which absence a missing figure is (B118)
+        "game_figures_state",
+        # cfdb-wta-R-994: Marc's fill rule — filled when THAT game's opponent was FBS
+        "opponent_classification",
+    }
+    assert parsed == expected, (
+        f"`_CALENDAR_COLUMNS` no longer selects what the circles read. "
+        f"missing {sorted(expected - parsed)}; unexpected {sorted(parsed - expected)}. "
+        f"⚠️ The panel's tests CANNOT see this — they stub `query` and return a fixture frame "
+        f"whatever the SQL says (B124's break 4: one test of 130 went red). If the change is "
+        f"deliberate, move the name here WITH its reason; do not delete the assertion.")
+    assert len(parsed) == 18
+    assert not select_list.unnameable_items(matchup._CALENDAR_COLUMNS)
+
+
 def test_the_REAL_columns_block_parses_cleanly_and_names_everything():
     """⚠️ THE NEW PARSE MUST NOT MOVE THE CURRENT ANSWER — 101 names, the same 101 the driver
     returned on 2026-09-11, and nothing it had to decline.
