@@ -255,25 +255,17 @@ def _team_name(row, side: str) -> str:
 def _record_span(row, side: str) -> str:
     """The record, on its own. R-129 needs it separable from the part that is a link.
 
-    The record is the one LEADING INTO this game's week, from fct_team_record_week — not the
-    season-final record, which is what fct_team_record would give and which would show 11-2
-    beside a game played in September. Renders NOTHING when it is absent rather than
-    substituting the season figure (R-084) — and after R-127 "absent" finally means what it
-    says: a team we hold no results for, not a team whose season has not started.
+    🚨 THE BODY MOVED TO `table.record_span` IN A144 AND THIS IS THE CALL BACK. Today's Looking
+    Back needs the identical rule — R-140's completed/scheduled choice and R-084's point-in-time
+    columns — and a second copy is the drift this project has paid for repeatedly. ⚠️ THE WRAPPER
+    STAYS HERE because the `{side}_` column naming is Schedule's own shape, not a fact about what
+    a record is: `srv_game_team` spells the same thing `record_before_display`.
+
+    ✅ BYTE-IDENTICAL, ASSERTED RATHER THAN CLAIMED — see
+    `test_the_record_span_moved_without_changing_a_byte`.
     """
-    # R-140. A COMPLETED GAME SHOWS THE RECORD IT PRODUCED; A SCHEDULED ONE SHOWS THE RECORD
-    # THE TEAM CARRIES IN. Two columns, one slot, chosen by whether the game has been played —
-    # which is the only reading of Marc's sentence that can be true, since a record "after the
-    # game" cannot exist for a game nobody has played.
-    if row.get("is_completed"):
-        record = row.get(f"{side}_team_record_after_display")
-        title = "record after this game"
-    else:
-        record = row.get(f"{side}_team_record_display")
-        title = "record going into this game"
-    if _missing(record):
-        return ""
-    return f"<span class='cfdb-team-record' title='{title}'>{record}</span>"
+    return table.record_span(row, f"{side}_team_record_display",
+                             f"{side}_team_record_after_display")
 
 
 def _team_with_record(row, side: str) -> str:
