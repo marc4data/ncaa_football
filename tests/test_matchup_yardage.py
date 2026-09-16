@@ -1619,18 +1619,23 @@ def _lone_card(entries):
                 if k == "markdown" and "Underwood" in _plain(str(b)) and "217" in str(b))
 
 
-def _module_constant(name):
+GLYPHS_SOURCE = (Path(__file__).resolve().parents[1] / "site" / "lib" / "glyphs.py").read_text()
+
+
+def _module_constant(name, source=None):
     """One of matchup.py's module-level constants, by AST, without importing the page.
 
     Importing the view outside `streamlit_stubbed` would bind the real streamlit into it for
     the rest of the session, which is R-665's shape. Reading the source cannot.
     """
     import ast
-    for node in ast.parse(SOURCE).body:
+    for node in ast.parse(source if source is not None else SOURCE).body:
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == name for t in node.targets):
             return ast.literal_eval(node.value)
-    raise AssertionError(f"matchup.py has no module-level {name}")
+    raise AssertionError(
+        f"no module-level {name} in "
+        f"{'glyphs.py' if source is GLYPHS_SOURCE else 'matchup.py'}")
 
 
 def test_the_KPI_row_puts_the_MEASURE_NAME_ABOVE_the_number(panel):
@@ -2837,14 +2842,21 @@ def test_the_MAPPING_KEYS_are_the_values_the_warehouse_actually_stores():
     ⚠️ SCOPE, IN THE SAME SENTENCE AS THE CLAIM: this compares the string literals emitted by
     `dbt/macros/matchup_outlook.sql` against the keys of `_OUTLOOK_MARKS`. It cannot see a value
     written by any other model, and it says nothing about which LOOK each value gets.
+
+    🚨 THE TABLE MOVED TO `site/lib/glyphs.py` (cfdb-wta-R-951) AND THIS GUARD MOVED WITH IT, WHICH
+    IS THE POINT RATHER THAN HOUSEKEEPING. **It now guards the ONE table two pages read**, so a
+    spelling that matches nothing takes out Matchup and Today together — and this is the single
+    test that would say so. ⚠️ Left pointed at `matchup.py` it would have read an AST that no
+    longer contains the constant and failed for the wrong reason, which is how a guard gets
+    "fixed" by deletion.
     """
     assert _OUTLOOK_MACRO.exists(), f"{_OUTLOOK_MACRO.name} moved — this guard is pinned by name"
     stored = set(re.findall(r"then '([a-z_]+)'", _OUTLOOK_MACRO.read_text()))
     stored |= set(re.findall(r"else '([a-z_]+)'", _OUTLOOK_MACRO.read_text()))
     assert stored, "no outlook literals found in the macro — the parse has gone blind"
-    mapped = set(_module_constant("_OUTLOOK_MARKS"))
+    mapped = set(_module_constant("_OUTLOOK_MARKS", GLYPHS_SOURCE))
     assert stored == mapped, (
-        f"the warehouse stores {sorted(stored)} and matchup.py maps {sorted(mapped)}. A key the "
+        f"the warehouse stores {sorted(stored)} and glyphs.py maps {sorted(mapped)}. A key the "
         f"page does not have falls to the UNCLASSIFIED mark on every game and nothing else "
         f"reports it — which is precisely how `favourable` would have shipped.")
 

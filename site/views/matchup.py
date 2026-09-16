@@ -17,7 +17,7 @@ from collections import namedtuple
 import pandas as pd
 import streamlit as st
 
-from lib import (attribution, chips, distribution, filters, fmt, identity, params,
+from lib import (attribution, chips, distribution, filters, fmt, glyphs, identity, params,
                  shell, states, table)
 from lib.datasets import DATASETS
 from lib.query import query
@@ -428,25 +428,28 @@ def _score_cell(points, played: bool) -> str:
 
 
 def _winner_glyph(row, side: str) -> str:
-    """Points AT that side's score, and ONLY if that side won.
+    """Matchup's rendering of `glyphs.winner` — the WRAPPER is all that is left here.
 
-    ⚠️ ABSENT, NOT EMPTY, BEFORE KICKOFF. B075's rule for the after tab is the same rule
-    here: a post-game element on a pre-game page does not render a placeholder. A tie draws
-    nothing on either side, which is why this asks who won rather than who did not lose.
+    🚨 cfdb-wta-R-951. THE MARK MOVED TO `site/lib/glyphs.py` AND THIS DID NOT, WHICH IS THE
+    WHOLE SHAPE OF THE MOVE. Marc asked for *"the same Matchup and outcome glyphs as on the
+    Schedule page"* on Today, and *the same* means the same PRODUCER — but **the markup below is
+    not about who won.** It is a block-level, centred, 1.4rem div, which is the geometry of the
+    gap between two scores on this page's scoreboard and is meaningless in Today's Commentary
+    cell. **A shared producer that hard-coded it would be forked the first time a second page
+    needed a different footprint.**
+
+    ⚠️ AND THE RULE TRAVELLED WITH THE MARK RATHER THAN STAYING HERE: `glyphs.winner` returns
+    `None` before kickoff, on a tie, and for the side that did not win — **absent, not empty** —
+    and says in its own docstring that a caller who does not know that will render a hole for a
+    game nobody has played. `glyphs.render(None)` is the empty string, so forwarding `None` is
+    already correct; this function keeps its own `if not mark` because the div must not be
+    emitted either.
     """
-    if not bool(row.get("is_completed")):
+    mark = glyphs.winner(row, side)
+    if mark is None:
         return ""
-    home, away = row.get("home_points"), row.get("away_points")
-    if home is None or away is None or pd.isna(home) or pd.isna(away):
-        return ""
-    won = (side == "home" and home > away) or (side == "away" and away > home)
-    if not won:
-        return ""
-    # The glyph sits BETWEEN the two scores, so it points outward towards the score it
-    # belongs to: the away score is to its left, the home score is to its right.
-    arrow = "\u25c0" if side == "away" else "\u25b6"
     return (f"<div style='text-align:center;font-size:1.4rem;line-height:1.1;"
-            f"opacity:.75'>{arrow}</div>")
+            f"opacity:.75'>{mark.glyph}</div>")
 
 
 # R-595. CFBD'S OWN VOCABULARY, ENUMERATED FROM THE DATA RATHER THAN GUESSED — all 17 values
@@ -1646,64 +1649,15 @@ def _week_distribution(row):
 # ⚠️ THE DANGEROUS VALUE IS AND ALWAYS WAS `fit`, WHICH MAKES `height` THE OUTER BOX. `fit-x`
 # and `pad` are both safe on that axis; `test_the_spec_STREAMLIT_SHIPS_does_not_make_height_
 # the_outer_box` asserts the danger rather than one particular safe answer, so it still holds.
-# 🚨 R-722. MARC'S RULE, AND NONE OF IT IS COMPUTED HERE.
+# 🚨 R-722's THREE VERDICTS MOVED TO `site/lib/glyphs.py` — cfdb-wta-R-951.
 #
-#     Green Circle: Gained < Allowed
-#     Red Diamond:  Gained > Allowed and (Gained - Allowed) / Gained > .2
-#     Yellow Circle: Gained > Allowed
+# Marc's rule, the `favorable` spelling that CI enforces, the shape-before-colour argument and the
+# unclassified hollow square all live there now, **once**, because Today draws the same three marks
+# and *"the same"* means the same producer. ❌ **Do not restate any of it here**: a second copy of a
+# rule is a copy that drifts, which is the defect this move exists to prevent.
 #
-# A119 published that as a column (`c89b516`) because the ratio is a DIVISION and a three-way
-# bucketing is a CLASSIFICATION, and §4.2 puts both upstream. This page maps a value to a look.
-#
-# 🚨 THE LITERAL IS `favorable`, AMERICAN SPELLING, AND IT IS NOT A DETAIL. A119 first shipped
-# `favourable`, `test_no_dbt_description_uses_british_spelling` failed the build, and the value
-# changed — so Cowork's own prompt for THIS round specified the British spelling. A mapping keyed
-# on `favourable` matches nothing and every mark silently disappears, which is why
-# `test_the_MAPPING_KEYS_are_the_values_the_warehouse_actually_stores` reads them out of serving's
-# own macro rather than trusting this tuple.
-#
-# ⚠️ SHAPE FIRST, COLOUR SECOND (AC-G.22). Marc's own rule gives the diamond to `challenging`, so
-# the one state that says "this will be hard" is the one a greyscale reader can find by outline.
-# Green and yellow are both circles and are separated by colour alone — see the round's report for
-# what that looks like in greyscale; the two tones are chosen for LUMINANCE distance, not hue.
-_OUTLOOK_MARKS = {
-    "favorable": ("circle", "#1b6b3a", True),
-    "contested": ("circle", "#c8a415", True),
-    "challenging": ("diamond", "#b3261e", True),
-}
-
-# ⚠️ AN UNCLASSIFIED MARK DOES NOT BORROW ONE OF THE THREE LOOKS (AC-G.11). WHETHER IT CAN BE
-# SEEN AT ALL WAS CHASED AND THE ANSWER IS "NOT DEMONSTRATED", WHICH IS NOT THE SAME AS "NEVER":
-#
-#   · the outlook is null on EXACTLY the rows the delta is null on — 0 of 225,350 disagree, so
-#     A119's claim holds when re-measured independently;
-#   · but the outlook lives on `srv_game_team` and the chart's two figures live on
-#     `srv_team_week`, which are different relations at different grains, so nothing STRUCTURAL
-#     ties them;
-#   · 243 rows in 2026 carry a null rushing outlook while that team has both team-week figures
-#     at that game's week — ⚠️ that is the NECESSARY condition only. `_scatter`, which B114
-#     removed, ALSO needed the week's distribution, a non-degenerate axis and a point inside the
-#     frame, and a sample of those 243 rendered ZERO charts.
-#
-# ⚠️ AND THE MEASUREMENT IS WEAKER NOW THAN WHEN IT WAS TAKEN, WHICH IS WORTH SAYING RATHER THAN
-# QUIETLY KEEPING. Three of those four conditions were the SCATTER's; `box()` frames on the
-# whiskers widened by the value and drops nothing, so the only surviving gate is whether the week
-# has a distribution row at all. **The branch is therefore MORE reachable than this note's
-# evidence establishes, not less** — which is an argument for keeping the unclassified look, and
-# the reason it is kept.
-#
-# 🚨 SO THE BRANCH IS NOT KNOWN TO BE REACHABLE AND IS NOT KNOWN TO BE DEAD — and an unclassified
-# mark must still not borrow a verdict's look if it ever draws. It gets a hollow grey square: a
-# shape neither other state uses, unfilled so it reads as "not classified" rather than as a
-# fourth verdict. `test_an_UNCLASSIFIED_mark_does_not_BORROW_one_of_the_three_looks` covers it.
-_OUTLOOK_UNKNOWN = ("square", "#6b6b68", False)
-
-
-def _outlook_mark(value):
-    """The look for one stored outlook — or the unclassified one, which is not a fourth verdict."""
-    if value is None or (not isinstance(value, str) and pd.isna(value)):
-        return _OUTLOOK_UNKNOWN
-    return _OUTLOOK_MARKS.get(str(value), _OUTLOOK_UNKNOWN)
+# ⚠️ WHAT STAYS ON THIS PAGE IS THE PRESENTATION — the `.8rem` in `_outlook_glyph` below, which is
+# the size of Matchup's own legend block and is not a fact about the matchup.
 
 
 _GAME_TEAM_COLUMNS = """
@@ -2499,13 +2453,22 @@ def _leader_block(rows, usage=None, accent: str = None) -> str:
 # row and the two stop matching exactly. **Measured: 60 of 3,786 team-weeks on the gained side
 # and 60 on the allowed side — 2.85% of sides have one.**
 #
-# ⚠️ THE ONE-LINE ALTERNATIVE IS DELIBERATELY NOT TAKEN, AND COWORK SHOULD DECIDE IT. Passing
-# `union ∪ both values` would make the two rows agree in 100% of cases — but the prompt's own
-# constraint is *"the union is computed from the week's distribution rows, NOT from the two teams
-# in front of the reader"*, because R-590's guarantee is that every matchup in a week shares a
-# frame. **The two acceptance criteria are in tension and this round followed the stated one.**
-# ✅ Either way the flip is a strict improvement: exact on 97.15% of sides, and closer on the
-# rest than the 13.8% it replaces.
+# ✅ SETTLED IN B117 (cfdb-wta-R-927's residual): **KEEP R-590. THE RESIDUAL STAYS.** B116 left
+# the trade open and Cowork closed it, and the reason is recorded HERE — beside the measurement —
+# so the next round does not reopen it from first principles.
+#
+# **Cowork's reason, kept because it is the argument and not the verdict:** cross-matchup
+# comparability is the stronger property, because it is what lets a reader carry an impression
+# from one page to the next. **A frame that widens for whichever two teams happen to be on screen
+# makes two matchups in the same week silently incomparable — the same defect as two box rows on
+# two axes, one level up.** ⚠️ **2.85% of rows extending past a shared boundary, each drawn with a
+# caret and its full number printed, is a cost a reader can SEE and reason about. An incomparable
+# axis is not.**
+#
+# ⚠️ THE ALTERNATIVE, NAMED SO IT IS NOT REDISCOVERED: passing `union ∪ both values` would make
+# the two rows agree in 100% of cases and would cost exactly the property above. **It is one line
+# and it is not taken.** ✅ Either way the flip is a strict improvement: exact on 97.15% of sides,
+# and closer on the rest than the 13.8% it replaces.
 _BOX_SHARED_AXIS = True
 
 
@@ -2559,18 +2522,15 @@ def _box_frame(row, value):
 # ⚠️ FILLED AND HOLLOW ARE THE THIRD SIGNAL, which is what `_OUTLOOK_UNKNOWN` needs — it is not
 # a fourth verdict and must not read as one, so it is a hollow SQUARE: neither of Marc's two
 # shapes, and legible in greyscale without the colour.
-_OUTLOOK_GLYPHS = {("circle", True): "\u25cf", ("circle", False): "\u25cb",
-                   ("diamond", True): "\u25c6", ("diamond", False): "\u25c7",
-                   ("square", True): "\u25a0", ("square", False): "\u25a1"}
-
-
 def _outlook_glyph(outlook) -> str:
-    """R-722's verdict as one character plus its colour, for the legend block."""
-    shape, colour, filled = _outlook_mark(outlook)
-    glyph = _OUTLOOK_GLYPHS[(shape, filled)]
-    verdict = str(outlook) if isinstance(outlook, str) else "not classified"
-    return (f"<span title='{html.escape(verdict)}' style='color:{colour};font-size:.8rem'>"
-            f"{glyph}</span>")
+    """R-722's verdict as one character plus its colour, at THIS page's size.
+
+    ⚠️ `.8rem` IS THE ONLY THING THIS FUNCTION STILL DECIDES, and it is the size of the legend
+    block it sits in rather than anything about the verdict. `glyphs.outlook` owns the shape, the
+    colour and the meaning; `glyphs.render` composes the span. **Today will call the same two and
+    pass its own size.**
+    """
+    return glyphs.render(glyphs.outlook(outlook), size="font-size:.8rem")
 
 
 def _legend_line(side, caption: str, column) -> str:
@@ -3506,9 +3466,20 @@ def _turnovers(row) -> str:
 # and 45% under the floor, and named "the 200px alternative" — all three were B111's numbers and
 # B112 moved every one of them.** The row budget is 510px now (the gutter halved), so
 # 136 + 116 + 116 + 24 leaves **118px, 41% under the floor**, and the alternative this file
-# actually carries is **230px** at `_TABLE_CELLS_EQUAL = True `. **That is Marc's trade, not
+# actually carries is **230px** at `_TABLE_CELLS_EQUAL = False`. **That is Marc's trade, not
 # this round's to settle.** At 1700px the same row leaves 244px unused and the question does
 # not arise.
+#
+# 🚨 CORRECTED AGAIN, IN B117 (cfdb-wta-R-961): THIS SENTENCE ATTACHED 230px TO `True`, WHICH IS
+# THE OPPOSITE OF WHAT THE CODE DOES. `True` makes the three value cells take a third of the
+# budget each, leaving the chart the NARROW 118px; `False` gives the value cells their content
+# width and the chart the wider 230px. ⚠️ **The paragraph already carried one correction notice
+# and shipped an inverted claim anyway**, and the stray space inside the old
+# `` `_TABLE_CELLS_EQUAL = True ` `` is the fingerprint of the edit that did it.
+# ✅ **So it now has a test.** `test_the_COMMENTS_ABOUT_THE_CHART_WIDTH_AGREE_WITH_THE_CODE`
+# recomputes both widths from the literals and checks every pixel figure this file pairs with a
+# flag value. **Comments have no test — that is the class, four instances this week — and this is
+# one that cheaply can.**
 _TABLE_LABEL_WIDTH = 8.5       # rem — 136px; the longest Advanced names WRAP, they do not clip
 _TABLE_GAP = 0.5               # rem, between the four columns
 
