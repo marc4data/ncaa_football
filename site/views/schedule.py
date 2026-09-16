@@ -77,7 +77,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from lib import chips, filters, fmt, params, shell, states, table
+from lib import chips, filters, fmt, glyphs, params, shell, states, table
 from lib import metrics
 from lib.query import query
 from lib.table import Col
@@ -222,19 +222,14 @@ def _rows(season: int, week, season_type: str, conference,
 # --- shared cell renderers ------------------------------------------------------------
 
 def _text(value) -> str:
-    """A cell value as a string, or "".
+    """A cell value as a string, or "". THE BODY MOVED TO `fmt.text` IN A147; this is the call back.
 
-    `value or ""` IS NOT THIS, and the difference cost the stacked view fifteen rows. pandas
-    returns NaN for a null in an object column, NaN is TRUTHY, so `nan or ""` evaluates to
-    nan — which then fails a str.join with "expected str instance, float found". The view
-    rendered the first fifteen games and died on the sixteenth, where the network was null.
-
-    It failed inside states.section, which caught it and rendered an Error state, so there
-    was no exception to see and no test to fail. It was found by counting cards against rows.
+    ⚠️ IT MOVED BECAUSE `lib/glyphs.py` NEEDS THE SAME RULE for the result strip's stored values,
+    and a second implementation of "NaN is truthy, so guard it" is the drift this project keeps
+    paying for. ⚠️ THE LOCAL NAME STAYS because eight call sites in this file read better with it
+    and renaming them would move bytes on a page A147 must render byte-identically.
     """
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return ""
-    return str(value)
+    return fmt.text(value)
 
 
 def _missing(value) -> bool:
@@ -353,104 +348,40 @@ def _weather_cell(row) -> str:
             f"{glyph or ''} {float(temp):.0f}°F</span>")
 
 
-# R-141. THE UPSET LEVELS DIFFER ONLY BY COLOUR, and that is a decision rather than an
-# oversight. It is the third deliberate exception to the site's glyph-plus-label convention
-# after R-026's neutral-site icon, taken for the same reason: a small known user base, a
-# legend that explains it once, and a dense row where three labelled indicators would cost more
-# width than the whole rest of the cell.
-UPSET_LEVEL_CLASS = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
-UPSET_LEVEL_TITLE = {
-    "": "no closing line, so nothing named a favorite",
-    "none": "the favorite won",
-    "upset": "upset",
-    "big": "upset by more than a touchdown",
-    "blowout": "upset by more than two touchdowns",
-}
-# R-181. ONE BASIS, so the tooltip states it rather than naming which of two produced the
-# verdict. Still said out loud: a reader checking a surprising upset needs to know it is the
-# closing spread being judged against and not a poll.
-UPSET_AGAINST = "the closing spread"
-
-
-# R-171. "No closing line held" is a DASH, not a shape.
+# 🚨 A147. THE UPSET VOCABULARY LIVES IN `lib/glyphs.py` NOW, AND THESE TWO NAMES SURVIVE AS
+# ALIASES RATHER THAN AS COPIES. `UPSET_LEVEL_CLASS`, `UPSET_LEVEL_TITLE` and `UPSET_AGAINST` were
+# left with **no reader in this file** once `_result_strip` and `_indicator` delegated, so they are
+# gone rather than kept as three definitions of a rule that now lives one layer down.
 #
-# It was a dotted outline, which still reads as a value being shown — Marc set Division to All
-# Divisions, pulled in lower-division games that carry no spread or total at all, and the strip
-# came out as three faint outlines with nothing saying why. A dash is the site's existing mark
-# for "we hold nothing here": `fmt.EM_DASH` does the same job in every table cell on the site.
-NO_DATA_MARK = "–"
+# ⚠️ THESE TWO STAY BECAUSE THIS FILE'S TESTS NAME THEM — `test_schedule_views.py` asserts on
+# `schedule.NO_DATA_MARK` and `schedule._upset_title`, and a test that reaches for the local name is
+# a reader like any other. **One definition, two names for it.**
+NO_DATA_MARK = glyphs.NO_DATA_MARK
 
 
 def _upset_title(level: str) -> str:
-    """The verdict, and what it was judged against. R-181."""
-    verdict = UPSET_LEVEL_TITLE.get(level, level)
-    return f"{verdict}, against {UPSET_AGAINST}" if level else verdict
+    """The upset tooltip. `glyphs.upset_title` owns the words and the basis it names (R-181)."""
+    return glyphs.upset_title(level)
 
 
 def _indicator(shape: str, state: str, title: str, extra: str = "") -> str:
-    """One indicator. SHAPES, NOT EMOJI — and a different shape per POSITION.
+    """One indicator. THE BODY MOVED TO `glyphs.indicator` IN A147; this is the call back.
 
-    Marc's three states mixed emoji-presentation characters with text-presentation ones, which
-    do not share a baseline, do not size together and vary by platform. A span with a
-    background, a border and a radius gives one rule for size, baseline and colour.
-
-    THE SHAPE IS WHAT MAKES EACH ONE SELF-IDENTIFYING. All three were circles, so they could
-    only be told apart by their position in the strip — and position is unreadable the moment
-    one of them is invisible, which is most of the time. Circle, square, diamond: a reader can
-    match any single indicator to its legend entry without counting its neighbours.
+    ⚠️ IT MOVED BECAUSE TODAY'S COMMENTARY CELL DRAWS THE SAME THREE MARKS — Marc answered "which
+    outlook?" with a picture of THIS page's *Game* column. The local name stays because
+    `_legend_key` and `_result_strip` read better with it and it keeps this file's own vocabulary
+    intact. ✅ Byte-identical, hashed both sides — see `test_the_result_strip_moved_without_changing_a_byte`.
     """
-    # THE DASH KEEPS THE SHAPE CLASS AND THEREFORE THE BOX. R-166 aligns every card's strip
-    # by giving the indicators identical footprints; a mark that sized itself differently
-    # would take that alignment out from under a whole column of cards.
-    mark = NO_DATA_MARK if state == "nodata" else ""
-    return (f"<span class='cfdb-ind cfdb-sh-{shape} cfdb-ind-{state} {extra}' "
-            f"title='{title}'>{mark}</span>")
+    return glyphs.indicator(shape, state, title, extra)
 
 
 def _result_strip(row) -> str:
-    """R-141. Three indicators, populated only for a completed game.
+    """R-141's three indicators. THE BODY MOVED TO `glyphs.result_strip` IN A147.
 
-    THE WIDTH IS RESERVED ON EVERY ROW, PLAYED OR NOT. An indicator set that appears only on
-    completed games shifts the columns beside it the moment a week is half played — the
-    alignment failure this page has fixed three times.
-
-    "NOT AN UPSET" IS AN ANSWER, AND IT USED TO RENDER AS NOTHING. That made it identical to
-    "not played yet", which is a different fact, and it meant the first slot was blank on all
-    124 completed games of a typical week — so the two visible indicators sat in slots two and
-    three and read as slots one and two. It now draws a quiet outline: present, answered,
-    unremarkable. Only a game nobody has played renders truly nothing.
+    ⚠️ EVERY RULE TRAVELLED WITH IT — the reserved width on an unplayed row, R-172's null-is-not-
+    "none", and the dash for "we hold nothing here". Nothing was reinterpreted on the way.
     """
-    if not row.get("is_completed"):
-        return ("<span class='cfdb-strip'>"
-                + _indicator("upset", "none", "not played yet")
-                + _indicator("cover", "none", "not played yet")
-                + _indicator("over", "none", "not played yet")
-                + "</span>")
-    # R-172. NULL IS NOT "none". `is_upset` is null when neither side was ranked, and the
-    # previous `or "none"` turned that absence into an assessment — a quiet circle claiming we
-    # had looked. It is a dash now, the same mark the cover and total slots already use for
-    # "nothing to measure against".
-    upset = _text(row.get("upset_level"))
-    cover, over = _text(row.get("winner_covered_close")), _text(row.get("over_met"))
-    fills = {"yes": "fill", "no": "open", "push": "push"}
-    parts = [
-        _indicator("upset",
-                   "fill" if upset in UPSET_LEVEL_CLASS
-                   else "quiet" if upset == "none" else "nodata",
-                   _upset_title(upset),
-                   UPSET_LEVEL_CLASS.get(upset, "")),
-        _indicator("cover", fills.get(cover, "nodata"),
-                   {"yes": "the winner also covered the closing spread",
-                    "no": "the winner did not cover the closing spread",
-                    "push": "the closing spread pushed"}.get(cover, "no closing spread held"),
-                   "cfdb-acc"),
-        _indicator("over", fills.get(over, "nodata"),
-                   {"yes": "over the closing total",
-                    "no": "under the closing total",
-                    "push": "landed on the closing total"}.get(over, "no closing total held"),
-                   "cfdb-acc"),
-    ]
-    return f"<span class='cfdb-strip'>{''.join(parts)}</span>"
+    return glyphs.result_strip(row)
 
 
 def _neutral_glyph(row) -> str:

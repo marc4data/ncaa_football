@@ -1105,6 +1105,13 @@ def test_the_PANEL_passes_the_truncation_flag_and_not_just_the_helper(monkeypatc
         def describe(self):
             return "the fixture"
 
+        def link(self, page, **extra):
+            # ⚠️ A147. `_commentary` DRAWS THE DETAILS GLYPH NOW, so the double has to model the
+            # one method the page actually calls on a scope. A stub that models less than the page
+            # uses fails as an AttributeError INSIDE `states.section`, which catches it and draws
+            # an Error card — the shape A141 shipped to production and A144 found.
+            return f"/{page}?" + "&".join(f"{k}={v}" for k, v in extra.items())
+
     frame = pd.DataFrame([{
         "game_id": 7, "away_team_display": "Away U", "home_team_display": "Home U",
         "away_points": 15, "home_points": 44,
@@ -1416,6 +1423,13 @@ def test_the_panel_survives_the_curve_view_being_unpublished(monkeypatch):
     class _Scope:
         def describe(self):
             return "the fixture"
+
+        def link(self, page, **extra):
+            # ⚠️ A147. `_commentary` DRAWS THE DETAILS GLYPH NOW, so the double has to model the
+            # one method the page actually calls on a scope. A stub that models less than the page
+            # uses fails as an AttributeError INSIDE `states.section`, which catches it and draws
+            # an Error card — the shape A141 shipped to production and A144 found.
+            return f"/{page}?" + "&".join(f"{k}={v}" for k, v in extra.items())
 
     frame = pd.DataFrame([{
         "game_id": 7, "away_team_display": "Away U", "home_team_display": "Home U",

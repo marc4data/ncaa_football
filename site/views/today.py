@@ -217,6 +217,18 @@ def _completed_games(scope) -> pd.DataFrame:
     `table.record_span` both READ it off the row, and a column a page filters on is not a column
     a page has. It was not in this select list before A144.
 
+    🚨 A147. THREE COLUMNS FOR THE RESULT STRIP, CHECKED AGAINST THE DATABASE RATHER THAN AGAINST
+    SCHEDULE'S QUERY (§2.2.1c.2).
+
+    `upset_level`, `winner_covered_close` and `over_met` are what `glyphs.result_strip` reads.
+    ⚠️ **THE PROMPT SAID SCHEDULE READS `srv_schedule`, THAT LOOKING BACK READS A DIFFERENT
+    RELATION, AND THAT THE SECOND MIGHT NOT CARRY THEM.** 📊 **THERE IS NO `srv_schedule`.**
+    `schedule.py:202` reads `from srv_game` — **the same relation this query reads** — so they are
+    the same columns, and all four the strip needs are on it.
+
+    ✅ THE CHECK WAS STILL WORTH RUNNING: it turned *"these may be different"* into *"they are the
+    same object"*, which is a stronger statement than either guess.
+
     ⚠️ R-558. `attribution` IS STILL SELECTED THOUGH body() NO LONGER CALLS
     model_attribution() — that is deliberate, not a leftover. See the note at the end of
     body(): attribution attaches to rendered model output, this page renders none yet, and
@@ -231,6 +243,7 @@ def _completed_games(scope) -> pd.DataFrame:
                home_team_record_display, away_team_record_display,
                home_team_record_after_display, away_team_record_after_display,
                is_completed,
+               upset_level, winner_covered_close, over_met,
                home_points, away_points, actual_margin,
                actual_margin_home_perspective, excitement_index,
                spread_at_close, spread_current, spread_open, spread_move_from_open,
@@ -977,43 +990,56 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
     return f"{cell}{table.record_span(row, record_field, record_after_field)}"
 
 
-def _commentary(row) -> str:
-    """The outcome glyph over the ESPN link, in one cell.
+def _commentary(row, scope) -> str:
+    """The game's own marks over the ESPN link, in one cell.
 
-    > **MARC:** *"In the Commentary column, add the same Matchup and outcome glyphs as on the
-    > Schedule page.  Put them in the top row of the cell, the ESPN link below in the same cell."*
+    > **MARC, Today v01:** *"In the Commentary column, add the same Matchup and outcome glyphs as
+    > on the Schedule page. Put them in the top row of the cell, the ESPN link below in the same
+    > cell."*
 
-    🚨 **ONE OF THE TWO GLYPH FAMILIES HE NAMED CANNOT BE DRAWN ON THIS PANEL, AND IT IS A GRAIN
-    FACT RATHER THAN A GAP.** `glyphs.entries()` offers exactly two groups, *Matchup* and
-    *Outcome*:
+    🚨 *"THE SAME … GLYPHS AS ON THE SCHEDULE PAGE"* MEANT SCHEDULE'S *Game* COLUMN CELL, AND MARC
+    SETTLED IT WITH A PICTURE — a column headed **Game**, then a lined rectangle, a filled circle, a
+    filled square and a hollow diamond. That is `schedule.py:512`'s `Col("game", "Game", …)`: the
+    details glyph followed by the three result indicators.
 
-        Outcome    `glyphs.winner(row, side)` — reads `is_completed` and the two scores, both of
-                   which are on `srv_game`. ✅ DRAWN HERE.
-        Matchup    R-722's favorable / contested / challenging verdict. 📊 MEASURED: there is NO
-                   outlook column on `srv_game` at all. All three live on `srv_game_team`
-                   — `total_`, `rushing_` and `passing_matchup_outlook` — at game x TEAM grain.
+    ⚠️ **A144 READ IT AS THE MATCHUP-OUTLOOK VERDICT AND FLAGGED THE AMBIGUITY AT THE TIME** —
+    *"Marc's phrase 'as on the Schedule page' is the imprecise part of his sentence"*. **So this is
+    a corrected reading of MARC, not a correction of A144**, and A144's measurement that Today
+    needed none of Schedule's producers was right for the reading it had.
 
-    ⚠️ SO DRAWING IT HERE WOULD MEAN JOINING A SECOND RELATION INTO THIS FRAME, and the settled
-    decision forbids exactly that: *"Streamlit is display-only: single-table SELECT + WHERE. No
-    joins."* It is one dbt line away — publish a game-grain outlook on `srv_game` — and that is
-    `dbt/`, which this round does not own. **Reported rather than worked around.**
+    ✅ **AND THE STRIP IS APT HERE IN A WAY THE OUTLOOK WOULD NOT HAVE BEEN.** *Upset · covered ·
+    over* are facts about a FINISHED game, which is all this panel contains. The outlook is a
+    PRE-GAME verdict — which is why choosing among its three variants needed a question put to Marc
+    at all. **A cell saying "the favorite lost and the total went over" is doing the job the column
+    is named for.**
 
-    ⚠️ AND THE SECOND HALF OF THE CHOICE IS MEANING, NOT PLUMBING: the outlook is a PRE-GAME
-    verdict built from yardage going INTO the fixture, and there are three of them per side.
-    Which one belongs on a panel of finished games is Marc's call, not a round's.
+    ── THE ORDER, AND WHY THE ANCHORS ARE SAFE ────────────────────────────────────────────────
 
-    ✅ `glyphs.winner` RETURNS `None` FOR FOUR REASONS AND ONLY ONE OF THEM CAN OCCUR HERE.
-    Its own header lists them — not completed, a missing score, a tie, and "this side did not
-    win". `_completed_games` filters on `is_completed`, so the first cannot happen; a completed
-    game with a null score cannot enter this panel either, because every ordering column is
-    derived from plays. **A TIE CAN.** So the cell draws nothing on both sides of a tie, which is
-    `winner()`'s absent-not-empty rule reading correctly — and R-762 is why no branch was written
-    for the two states this panel cannot produce.
+    Details glyph, then the outcome arrow, then the strip: the affordance first, then who won, then
+    what the market made of it — escalating specificity, left to right.
+
+    🚨 **TWO ANCHORS IN THIS CELL AND NEITHER IS INSIDE THE OTHER.** The details glyph goes to the
+    matchup; ESPN goes out. That is fine. What is not is either of them inside the ROW's anchor —
+    `table.render` wraps a cell in it when the table has a `link_builder`, nested anchors are
+    invalid HTML and the OUTER one wins, so a reader would click ESPN and stay on the site.
+    **Every table drawing this cell passes no `link_builder`**, asserted for all four.
+
+    ⚠️ **THE STRIP SITS OUTSIDE THE DETAILS ANCHOR, WHICH IS SCHEDULE'S OWN RULE CARRIED OVER**:
+    *"NOT inside the anchor: it is three states of information, not a destination, and a pointer
+    cursor over it would say otherwise."*
+
+    ✅ `glyphs.winner` STILL RETURNS `None` FOR FOUR REASONS AND EXACTLY ONE OCCURS HERE — a tie.
+    A144 established that; it is not re-opened.
     """
-    marks = "".join(glyphs.render(glyphs.winner(row, side), size="font-size:.85rem")
-                    for side in ("away", "home"))
+    href = scope.link("matchup", game_id=row.get("game_id"))
+    details = (f"<a class='cfdb-cell-link-alt' href='{href}' target='_self' "
+               f"title='Open the matchup'>"
+               f"<span class='cfdb-details'>{table.DETAILS_GLYPH}</span></a>")
+    arrows = "".join(glyphs.render(glyphs.winner(row, side), size="font-size:.85rem")
+                     for side in ("away", "home"))
     return (f"<span class='cfdb-commentary'>"
-            f"<span class='cfdb-commentary-marks'>{marks}</span>"
+            f"<span class='cfdb-commentary-marks'>{details}"
+            f"<span class='cfdb-strip-gap'></span>{arrows}{glyphs.result_strip(row)}</span>"
             f"{_espn_link(row)}</span>")
 
 
@@ -1250,7 +1276,7 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # top row of the cell, the ESPN link below in the same cell."* `_commentary` says
             # which of `glyphs.winner`'s four None-reasons can occur on a panel of completed
             # games, and why the Matchup half of his sentence is not here.
-            Col("espn", "Commentary", render=_commentary),
+            Col("espn", "Commentary", render=lambda r: _commentary(r, scope)),
         ], layout=layout, anchor="most-exciting",
             caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
                     "even win probability from the fourth quarter onward (lower is closer)."))
@@ -1284,42 +1310,54 @@ def _favorite_margin(row):
 # `srv_game` at any grain this page reads (see `_commentary`), so listing it would explain a mark
 # no row here can produce — which is the same defect as omitting one, pointed the other way.
 # **The day a Matchup outlook reaches this panel, this tuple is the one line that changes.**
+# 🚨 THE GROUPS THIS PAGE CAN ACTUALLY DRAW. R-178's law, and it cuts BOTH ways: *"the legend
+# cannot draw a mark the row does not"* — and it must not omit one the row can.
+#
+# ⚠️ A147 ADDED A SECOND FAMILY AND THE MATCHUP VERDICT IS STILL NOT IN IT. `glyphs.entries()`
+# offers *Matchup* and *Outcome*; this page draws **Outcome** and now the result strip's *Against
+# the line*, and it still cannot draw the Matchup outlook — there is no outlook column on
+# `srv_game` at any grain (A144 measured it). **Listing it would explain a mark no row here can
+# produce**, which is the same defect as omitting one, pointed the other way.
 LEGEND_GROUPS_DRAWN = ("Outcome",)
 
 
 def _legend() -> None:
-    """The legend, as a popover button. A144.
+    """The legend, as a popover button. A144, extended by A147.
 
     > **MARC:** *"Need the legend button to help with the icons"*
 
-    ✅ **`st.popover` IS SCHEDULE'S OWN CHOICE AND IT IS ALREADY A BUTTON**, so this is the same
-    control on both pages rather than a fourth pattern (§4.3). Schedule's reasoning applies here
-    unchanged and is worth not restating badly: *"a legend is consulted WHILE looking at the thing
-    it explains, and a modal covers exactly what the reader is comparing against."*
+    ✅ **`st.popover` IS SCHEDULE'S OWN CHOICE AND IT IS ALREADY A BUTTON**, so the site has one
+    legend affordance rather than two (§4.3). Schedule's own reasoning carries unchanged: *"a legend
+    is consulted WHILE looking at the thing it explains, and a modal covers exactly what the reader
+    is comparing against."*
 
-    🚨 IT ENUMERATES FROM THE MODULE, NEVER FROM A PARALLEL LIST. `glyphs.entries()` is built from
-    the same dictionaries `winner()` and `outlook()` read, which is what makes *cannot omit,
-    cannot invent* a property rather than a habit — B117 built it that way for exactly this
-    caller. Schedule earns the same property a different way, by delegating to `_indicator`.
+    🚨 IT ENUMERATES FROM THE MODULE, NEVER FROM A PARALLEL LIST — and A147 added a second
+    enumerator rather than merging the two. `glyphs.entries()` answers *what did we expect* and
+    *who won*; `glyphs.strip_entries()` answers *what did the market make of it*. **A flat list
+    would let this legend inherit Schedule's groups and Schedule's inherit the Matchup verdict**,
+    and neither page can draw the other's.
 
-    ⚠️ AND THE TEST DOES NOT TRUST EITHER. `test_the_legend_lists_every_mark_today_can_draw`
-    derives its expectation by RENDERING the commentary cell over a fixture and pulling the
-    glyphs back out of the HTML — because a test that reads `entries()` to build its expectation
-    passes on any implementation of `entries()`, including a broken one.
+    ⚠️ THE DETAILS GLYPH IS LISTED BY HAND AND THAT IS THE ONE ENTRY WITH NO ENUMERATOR BEHIND IT,
+    because it has no producer to enumerate: it is `table.DETAILS_GLYPH`, a single constant, drawn
+    by `_commentary` directly. **Said out loud rather than hidden, because every other entry on this
+    legend is derived and this one is not.**
     """
-    groups = [(title, marks) for title, marks in glyphs.entries()
-              if title in LEGEND_GROUPS_DRAWN]
+    groups = [(title, [(glyphs.render(mark, size="font-size:.95rem"), mark.title)
+                       for mark in marks])
+              for title, marks in glyphs.entries() if title in LEGEND_GROUPS_DRAWN]
+    groups.append(("Game", [
+        (f"<span class='cfdb-details'>{table.DETAILS_GLYPH}</span>", "Open the matchup")]))
+    groups += glyphs.strip_entries()
     with st.popover("Legend", use_container_width=False,
                     help="What every mark on this page means"):
-        for title, marks in groups:
+        for title, rows in groups:
             st.markdown(
                 f"<div class='cfdb-legend-side'>"
                 f"<div class='cfdb-legend-title'>{title}</div>"
                 + "".join(
                     f"<div class='cfdb-legend-row'>"
-                    f"<span class='cfdb-legend-key'>"
-                    f"{glyphs.render(mark, size='font-size:.95rem')}</span>"
-                    f"<span>{mark.title}</span></div>" for mark in marks)
+                    f"<span class='cfdb-legend-key'>{swatch}</span>"
+                    f"<span>{label}</span></div>" for swatch, label in rows)
                 + "</div>", unsafe_allow_html=True)
 
 
@@ -1444,7 +1482,7 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
          # the site had no percent shape and was about to get its second inline f-string.
          Col("fav_win_prob", "Market gave them",
              render=lambda r: fmt.percent(r.get("fav_win_prob"))),
-         Col("espn", "Commentary", render=_commentary)],
+         Col("espn", "Commentary", render=lambda r: _commentary(r, scope))],
         caption="Ranked by the loser's pregame market-implied win probability.",
         anchor="how-the-week-went-against-the-market")
 
@@ -1458,7 +1496,7 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
                   Col("favorite", "Favorite", render=_favorite_cell),
                   Col("spread", "Getting", kind="num", dp=1),
                   Col("beat", "Covered by", kind="num", dp=1),
-                  Col("espn", "Commentary", render=_commentary)],
+                  Col("espn", "Commentary", render=lambda r: _commentary(r, scope))],
                  caption="Ranked by points beyond the closing spread.",
                  anchor="how-the-week-went-against-the-market")
 
