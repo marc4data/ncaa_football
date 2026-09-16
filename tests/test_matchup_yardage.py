@@ -2469,45 +2469,49 @@ def test_the_STRIPS_PLOT_IS_A_FIXED_WIDTH_and_never_stretches(panel):
             f"be on the same axis as the chart above it: {plot[:160]}")
 
 
-def test_the_STRIP_takes_the_GAINED_rows_frame_and_the_PAGE_SAYS_SO(panel):
-    """🚨 cfdb-wta-R-927 REACHES THE STRIP, AND THE PAGE HAS TO STAY HONEST ABOUT IT.
+def test_the_STRIP_IS_ON_THE_SHARED_SCALE_and_moves_with_BOTH_rows(panel):
+    """🚨 THE THIRD THING THAT MOVED, AND B115's PREDICTION ABOUT IT WAS WRONG.
 
-    The two box rows are framed on their own whiskers — measured 13.8% apart on `total` — so a
-    strip can share ONE of them. It shares **Gained's**, because this half of the panel is
-    *"<Team> offense against <Opponent>'s defense"* and the strip carries that team's own per-game
-    yardage. ⚠️ **Which means it is aligned with the top row and NOT with the bottom one.**
+    B115 wrote: *"a strip reading the shared frame moves with it for free."* ⚠️ **It does not.**
+    The strip reads `_box_frame` — the gained row's whiskers widened by its value — and that is
+    **not** what `box()` scales on once a union is handed in. Without widening it by the union in
+    `_gained_allowed`, the strip would have stayed on the pre-flip axis while the chart above it
+    moved: the identical disagreement, in a new place, with a green suite.
 
-    ✅ B114's caption already admitted the two rows are framed independently; this asserts it
-    still covers the page now that a third element sits on one of those frames. **The page has
-    been honest about this for a round and a new element must not quietly break it.**
-
-    ⚠️ THE PAIRING IS THE CLAIM: the strip reads the gained frame AND the caption says the frames
-    are not shared. A round that flips `_BOX_SHARED_AXIS` (B116) should change both together.
+    ✅ SO THIS ASSERTS THE PROPERTY BEHAVIOURALLY AND FROM BOTH DIRECTIONS. Before the flip the
+    strip moved when the GAINED whiskers moved and was deaf to the ALLOWED ones. **On the shared
+    scale it must move with either**, because the union is built from both — and the second half
+    is the one that can only pass if the strip really is on the shared axis.
     """
-    assert _module_constant("_BOX_SHARED_AXIS") is False, (
-        "the shared axis is on — the strip now sits on a frame BOTH box rows use, and this test "
-        "and the page's caption should both be revisited")
+    assert _module_constant("_BOX_SHARED_AXIS") is True, (
+        "the shared axis is off, so the strip is back on the gained row's own frame and this "
+        "test should move back with the flag and the caption")
 
-    entries, _ = panel(_game(), _both(), deltas=_deltas())
-    assert "framed on their OWN spreads" in _text(entries), (
-        "the caption no longer tells the reader the rows are not on one axis")
-    # 🚨 BEHAVIOURAL, NOT A SOURCE READ: move the GAINED whisker pair only, and the strip's mark
-    # must move with it. A strip computing its own frame would not budge.
-
-    def mark_x(gained_high):
-        rows = [dict(r, whisker_high=gained_high)
-                if r["metric"] == "total_yards_for_per_game" else r
-                for r in _distribution()]
+    def mark_x(**whisker_overrides):
+        rows = []
+        for r in _distribution():
+            for metric, high in whisker_overrides.items():
+                if r["metric"] == metric:
+                    r = dict(r, whisker_high=high)
+            rows.append(r)
         entries, _ = panel(_game(), _both(), deltas=_deltas(), distribution=rows)
         strip = dict(_strips(entries))["total"]
         played = [c for c in strip.split("<div data-cfdb='strip-row'")[1:]
                   if "background:" in c][0]
         return float(re.search(r"left:([\d.]+)px;top:4px", played).group(1))
 
-    wide, narrow = mark_x(900.0), mark_x(600.0)
-    assert wide < narrow - 5, (
-        f"widening the GAINED row's frame did not move the strip's mark ({wide:.1f} vs "
-        f"{narrow:.1f}) — the strip is on an axis of its own, not on the box row's")
+    base = mark_x()
+    # 🚨 MOVING THE ALLOWED ROW'S CEILING MUST MOVE THE STRIP. Under the old behaviour the strip
+    # read the GAINED frame alone and this number would not budge by a pixel.
+    by_allowed = mark_x(total_yards_allowed_per_game=1200.0)
+    assert by_allowed < base - 5, (
+        f"widening the ALLOWED row's whiskers left the strip's mark at {by_allowed:.1f} against "
+        f"{base:.1f} — the strip is on the gained row's own frame, not on the shared scale")
+    # and the gained side still moves it, which is the half that was already true
+    by_gained = mark_x(total_yards_for_per_game=1200.0)
+    assert by_gained < base - 5, (
+        f"widening the GAINED row's whiskers did not move the strip ({by_gained:.1f} vs "
+        f"{base:.1f})")
 
 
 def test_the_CARD_BORDERS_carry_the_TEAM_COLOUR_on_THIS_tab_too(panel):
@@ -2549,38 +2553,57 @@ def test_the_CARD_BORDERS_carry_the_TEAM_COLOUR_on_THIS_tab_too(panel):
     assert "light-dark(" in away[0], "the border is a raw hex rather than `_accent`'s pair"
 
 
-def test_THE_TWO_SERIES_ARE_FRAMED_INDEPENDENTLY_and_the_page_SAYS_SO(panel):
-    """🚨 cfdb-wta-R-900. Marc asked for *"the same x-axis"* and this panel does NOT have one.
+def test_THE_TWO_SERIES_SHARE_ONE_SCALE_and_the_page_SAYS_SO(panel):
+    """🚨 cfdb-wta-R-927, CLOSED — AND THIS TEST IS FLIPPED RATHER THAN DELETED.
 
-    📊 MEASURED ON LIVE SERVING, 2026 regular week 15 — the whisker spans `box()` frames on:
+    B114 wrote the rule this obeys: *"a round that adds the shared axis should flip that test, not
+    delete it."* **The pairing is the point** — the flag, the page's sentence and the geometry must
+    never be able to disagree, and a deleted test lets all three drift apart silently.
 
-        pair       gained          allowed         union           narrower row uses
-        total      204.0–620.5     142.5–508.5     142.5–620.5     87.9% of the width
-        rushing     40.5–336.0      10.0–241.0      10.0–336.0     70.8%
-        passing     46.0–396.5      47.5–352.0      46.0–396.5     93.7%
+    📊 WHAT IT WAS: the two rows framed on their own whiskers. On `total` at 2026 regular week 15
+    the gained row spanned 416.5 yards and the allowed row 366.0 across the same pixels — **13.8%
+    apart, with the layout inviting the reader to compare them.**
 
-    ❌ IT CANNOT BE FIXED FROM THIS FILE. `box()` has no frame parameter, faking the whisker pair
-    would print two published figures wrongly, and matching the scales by width-and-offset needs
-    `box()`'s internal `pad`. **`site/lib/distribution.py` is session A's (§3 rule 3)** — B074
-    did exactly this with `states.degraded()` and was right to.
+    ✅ THE ASSERTION IS THE GEOMETRY, NOT THE FLAG. A test that read `_BOX_SHARED_AXIS is True`
+    would pass on a page that set the flag and forgot to pass `frame=`. **This measures
+    pixels-per-yard in each row's own SVG and requires them equal** — read from the whisker serifs
+    `box()` actually drew, against the boundaries it actually labelled.
 
-    ✅ SO THIS TEST HOLDS THE HONEST STATE IN PLACE UNTIL THAT PARAMETER EXISTS: the two rows are
-    framed independently AND the caption admits it. ⚠️ **The pairing of those two is the claim.**
-    A round that adds the shared axis should flip this test, not delete it.
+    ⚠️ THE TOLERANCE IS A139's QUANTISATION, COMPUTED NOT CHOSEN: the SVG prints one decimal, so
+    each serif carries ±0.05px and a span carries ±0.1px. Anything inside that is the same scale.
     """
-    assert _module_constant("_BOX_SHARED_AXIS") is False, (
-        "the shared axis is declared on — flip this test to assert the two frames now MATCH")
-    entries, _ = panel(_game(), _both())
+    assert _module_constant("_BOX_SHARED_AXIS") is True, (
+        "the shared axis is off — if that is deliberate, this test and the page's caption should "
+        "move back together, which is the pairing it exists to hold")
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    assert "share one scale" in _text(entries), (
+        "the caption no longer tells the reader the rows are on one scale")
+    assert "framed on their OWN spreads" not in _text(entries), (
+        "the caption still carries the pre-flip sentence, which is now false")
+
     rows = _series(_of_metric(entries, "Total")[0])
-    gained, allowed = _plain(rows["gained"]), _plain(rows["allowed"])
-    low_g, high_g = _METRICS["total_yards_for_per_game"][5:7]
-    low_a, high_a = _METRICS["total_yards_allowed_per_game"][5:7]
-    assert f"{low_g}" in gained and f"{low_a}" in allowed, (gained, allowed)
-    assert low_g != low_a, "the fixture cannot show the difference this test is about"
-    # 🚨 THE PAGE MUST SAY IT. A chart whose two rows are not comparable, laid out as though
-    # they were, is worse than one that admits it — AC-G.11 applied to a scale.
-    assert "framed on their OWN spreads" in _text(entries), (
-        "the caption does not tell the reader the two rows are not on one axis")
+    scales = {}
+    for side, column in (("gained", "total_yards_for_per_game"),
+                         ("allowed", "total_yards_allowed_per_game")):
+        svg = _svg_of(rows[side])
+        # the two whisker serifs: vertical lines of height 10 centred on the mid-line
+        serifs = sorted(float(x) for x in re.findall(
+            r"<line x1='([\d.]+)' y1='[\d.]+' x2='[\d.]+' y2='[\d.]+' "
+            r"stroke='currentColor' stroke-width='1' opacity='.55'", svg))
+        assert len(serifs) >= 2, f"{side}: no whisker serifs in the svg to measure: {svg[:200]}"
+        lo, hi = _METRICS[column][5:7]
+        scales[side] = (serifs[-1] - serifs[0]) / (hi - lo)
+
+    gained, allowed = scales["gained"], scales["allowed"]
+    # ±0.1px over the narrower span is the worst the printing can do.
+    bound = 0.1 / min(_METRICS["total_yards_for_per_game"][6]
+                      - _METRICS["total_yards_for_per_game"][5],
+                      _METRICS["total_yards_allowed_per_game"][6]
+                      - _METRICS["total_yards_allowed_per_game"][5])
+    assert abs(gained - allowed) <= bound, (
+        f"the two rows are drawn at {gained:.5f} and {allowed:.5f} pixels per yard — a "
+        f"{abs(gained - allowed) / min(gained, allowed) * 100:.1f}% difference, outside the "
+        f"±{bound:.5f} the SVG's one-decimal printing can account for. They are NOT on one scale.")
 
 
 def test_the_CHART_WIDTH_FITS_the_slot_it_is_drawn_in(panel):
