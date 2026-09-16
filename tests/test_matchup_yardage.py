@@ -43,6 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import render_harness  # noqa: E402
 
+# ⚠️ THE LIBRARY, NOT THE VIEW. `lib.distribution` imports streamlit but touches nothing at
+# import time, so it resolves here the way `render_harness` does — and cfdb-wta-R-968's tests
+# assert on ITS output rather than on the page's own column strings (cfdb-wta-R-944).
+from lib import distribution  # noqa: E402
+
 # ⚠️ IMPORTED HERE, BEFORE ANY STUB IS INSTALLED, AND `_shipped` SAYS WHY. Inside
 # `streamlit_stubbed` the name `streamlit` is a plain module and this import cannot resolve.
 from streamlit.elements.vega_charts import _prepare_vega_lite_spec  # noqa: E402
@@ -3141,3 +3146,79 @@ def test_the_SUBTRACTION_RULE_is_drawn_and_not_merely_specified(panel):
     # worked subtraction — it is three numbers and a line somewhere.
     assert piece.index("Allowed") < piece.index("border-top") < piece.index("font-weight:700"), \
         "the rule is not between the two figures and the difference"
+
+
+# --- cfdb-wta-R-968: the tail the page asks for, and the reason it is a test at all ----------
+
+def _row_from_the_pages_own_column_list(constant, values):
+    """A distribution row carrying EXACTLY the columns `matchup.py` selects, and nothing else.
+
+    🚨 THIS IS THE WHOLE INSTRUMENT. The page's queries name their columns, so a column absent
+    from the list is absent from every row the page ever sees — and `distribution.describe()`
+    and `box()` both DEGRADE rather than raise when one is missing (A142 pinned that). **The
+    defect is therefore invisible from the page and invisible from the suite**, which is the
+    silent class `_DISTRIBUTION_COLUMNS`' own header warns about for `whisker_low`.
+
+    ⚠️ IT BUILDS THE ROW FROM THE LIST RATHER THAN ASSERTING ON THE LIST'S TEXT (cfdb-wta-R-944).
+    `assert "outlier_count" in _DISTRIBUTION_COLUMNS` is keyed on the very string the defect
+    edits, and it would pass on a list that named the column inside a comment or misspelled the
+    relation. Building a row and asking `describe()` what it can say keys the assertion on a
+    module this page does not own.
+    """
+    selected = [name.strip() for name in
+                _module_constant(constant).replace("\n", " ").split(",") if name.strip()]
+    return pd.Series({name: values[name] for name in selected if name in values}), selected
+
+
+# The shape of a real published row, from live serving: 2026 regular week 3
+# `total_yards_for_per_game` (before-game) and week 2 `total_yards` (post-game). The tail is the
+# point — whiskers 204.0-620.5 with a max of 702.5 is a week a reader cannot see today.
+_TAIL_VALUES = {
+    "season": 2026, "season_type": "regular", "week": 3, "metric": "total_yards_for_per_game",
+    "n": 138, "teams_in_week": 138, "team_games_in_week": 172,
+    "min_games_counted": 2, "max_games_counted": 2, "mean": 412.0, "stddev": 90.0,
+    "p25": 346.475, "p50": 412.25, "p75": 461.375,
+    "whisker_low": 204.0, "whisker_high": 620.5,
+    "min_value": 204.0, "max_value": 702.5, "outlier_count": 1,
+    "axis_min": 0, "axis_max": 700, "axis_step": 100, "as_of_ts": None,
+}
+
+
+@pytest.mark.parametrize("constant", ("_DISTRIBUTION_COLUMNS", "_DISTRIBUTION_ROW_COLUMNS"))
+def test_the_COLUMNS_THE_PAGE_SELECTS_LET_THE_CHART_REPORT_ITS_TAIL(constant):
+    """🚨 BOTH TABS, AND THE POINT IS THAT NEITHER COULD SAY THIS BEFORE B118.
+
+    A142 published `outlier_count`, `min_value` and `max_value` and taught `describe()` to read
+    them; the page selects by name, so the sentence existed and no row on this page carried the
+    numbers to fill it. 📊 **207 of 282 rows on the before-game relation — 73.4% — carry at least
+    one outlier**, measured on live published serving.
+
+    ⚠️ THE ASSERTION IS ON `describe()`'s OUTPUT, WHICH LIVES IN A MODULE SESSION B DOES NOT OWN.
+    Delete a column from either list and the count disappears from the tooltip; the test names
+    which list and which column.
+    """
+    row, selected = _row_from_the_pages_own_column_list(constant, _TAIL_VALUES)
+    sentence = distribution.describe(row)
+    assert "beyond the whiskers" in sentence, (
+        f"{constant} does not carry what describe() needs to report the tail; it selects "
+        f"{sorted(selected)}")
+    assert "702.5" in sentence, (
+        f"{constant} reports a tail without saying how far it reaches — `max_value` is the "
+        f"column that says so, and this list selects {sorted(selected)}")
+
+
+def test_THE_TAIL_IS_REPORTED_BY_COUNT_AND_NOT_MERELY_ANNOUNCED():
+    """⚠️ AC-G.11 AND R-762 TOGETHER: an absence names itself, and a figure nobody was given is
+    not printed.
+
+    A142's `describe()` says *"N beyond the whiskers"* when it has the count and nothing at all
+    when it does not — it never invents one. **This is the half that would still pass if
+    `outlier_count` were dropped and `min_value`/`max_value` kept**, so it is asserted
+    separately: the NUMBER, not just the phrase.
+    """
+    row, _ = _row_from_the_pages_own_column_list("_DISTRIBUTION_COLUMNS", _TAIL_VALUES)
+    assert "1 beyond the whiskers" in distribution.describe(row)
+    # And a week with no tail says nothing rather than "0 beyond the whiskers".
+    quiet = row.copy()
+    quiet["outlier_count"] = 0
+    assert "beyond the whiskers" not in distribution.describe(quiet)

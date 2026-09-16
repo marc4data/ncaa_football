@@ -1546,10 +1546,30 @@ def _yardage_side_heading(offense, defense) -> str:
 # ⚠️ THE AXIS COLUMNS STAY EVEN THOUGH `box()` READS NONE OF THEM. `axis_min` / `axis_max` are
 # the HISTOGRAM frame — `thumbnail` and `panel` need them, a box plot is percentiles and
 # whiskers — and `_week_frame_captions` still reports the week's own span from them.
+#
+# 🚨 cfdb-wta-R-968. `min_value`, `max_value` AND `outlier_count` JOINED THIS LIST IN B118, AND
+# THE FAILURE THEY CLOSE IS THE SILENT ONE THIS BLOCK ALREADY WARNS ABOUT ONE PARAGRAPH UP.
+#
+# A142 taught `distribution.describe()` to report the tail — *"2 beyond the whiskers (128.0 to
+# 856.0)"* — and taught `box(outliers=True)` to draw it. **Both read the row, and this page
+# selects its columns BY NAME**, so until they were named here the chart's own tooltip could not
+# say how far the week reached. ⚠️ A row missing them degrades rather than raising (A142 pinned
+# that property), which is exactly why nobody would have noticed.
+#
+# 📊 AND THE TAIL IS NOT RARE, WHICH IS WHAT MAKES IT WORTH THE THREE COLUMNS. Measured on live
+# published serving this round: **207 of 282 rows on this relation — 73.4% — carry at least one
+# outlier**, and the page showed none of it. 2026 regular week 3 `total_yards_for_per_game`:
+# whiskers 204.0–620.5, `max_value` **702.5**, one team beyond. A reader could not tell that
+# week from one with nothing unusual in it.
+#
+# ❌ `outliers=True` IS **NOT** PASSED AT THIS CALL SITE AND THAT IS A MEASURED REFUSAL RATHER
+# THAN AN OVERSIGHT — see `_metric_chart` for the number that decided it. The COUNT is free; the
+# RINGS cost frame width, and that is a look decision Marc has not been shown yet.
 _DISTRIBUTION_COLUMNS = """
     season, season_type, week, metric, n, teams_in_week,
     min_games_counted, max_games_counted, mean, stddev,
     p25, p50, p75, whisker_low, whisker_high,
+    min_value, max_value, outlier_count,
     axis_min, axis_max, axis_step, as_of_ts
 """
 
@@ -3773,7 +3793,8 @@ def _table_header(away, home, title: str, colors=None) -> str:
 # 12 in Advanced — which is not a coincidence: A125 built it for this call site.
 _DISTRIBUTION_ROW_COLUMNS = """
     metric, n, team_games_in_week,
-    min_value, whisker_low, p25, p50, p75, whisker_high, max_value
+    min_value, whisker_low, p25, p50, p75, whisker_high, max_value,
+    outlier_count
 """
 
 
@@ -3833,6 +3854,51 @@ def _metric_chart(row, away_value, home_value, dp, accents) -> str:
     PUBLISHED. The fences are drawn because the extremes compress the box to nothing: on 2026
     week 1 rushing yards the box is 35% of the whisker span and 22% of the min-max span, and the
     outliers are counted separately in `outlier_count` precisely so the box stays readable.
+
+    🚨 cfdb-wta-R-968. `outliers=True` IS NOT PASSED HERE, AND THE PARAGRAPH ABOVE TURNED OUT TO
+    BE THE MEASUREMENT THAT DECIDES IT RATHER THAN A WORRY ABOUT ONE.
+
+    A142 shipped `box(outliers=True)`, which draws each extreme as an open ring and **widens the
+    frame to take it in** — deliberately, because *"an outlier pinned to the boundary reads as
+    'at the extreme' when the truth is 'beyond it'"*. ✅ The widening is the honest half. ❌ What
+    it costs at THIS chart's width is not.
+
+    📊 MEASURED ON ALL 648 PUBLISHED ROWS: 397 (61.3%) would widen, and on those the drawn
+    whisker span keeps a median 80.9% of its width — **and a worst case of 23.4%.** The
+    compression lands almost entirely on the ADVANCED measures, which is this panel:
+
+        offense_passing_plays_ppa   77.5% median   worst 23.4%  (2024 wk14: whisker 0.98, max 5.87)
+        offense_explosiveness       82.3%
+        offense_rushing_plays_ppa   82.8%
+        total_yards / passing_yards / first_downs    100.0% — the box-score half barely moves
+
+    🚨 `_TABLE_CHART_WIDTH` IS 118px TODAY, so 23.4% of it is a box about **twenty-seven pixels
+    wide** carrying two value markers and their labels.
+
+    ⚠️ AND THE WIDTH IS THE SYMPTOM RATHER THAN THE INSTRUMENT. B108's lesson is that the DOM
+    says nothing about illegibility — every element present, correct, and unreadable — so this
+    was counted instead of eyeballed. `box()` DROPS a label that would collide (its own rule 2:
+    *"a shifted label points at the wrong place on the axis"*), which turns squashing into a
+    countable loss:
+
+    📊 RENDERED AT 118px ACROSS ALL 648 PUBLISHED ROWS, rings off against rings on:
+        3,301 labels drawn -> 3,092. **209 printed numbers lost (6.3%),
+        and 161 of 648 charts (24.8%) lose at least one.**
+        The eight worst metrics are ALL Advanced — passing_plays_ppa 38, rushing_plays_ppa 36,
+        stuff_rate 20 — and **no Box Score measure appears among them.**
+
+    ✅ SO THE COST IS NOT UNIFORM AND A FUTURE ROUND HAS A REAL THIRD OPTION: `outliers` is a
+    per-CALL argument, so the Box Score half could draw rings while the Advanced half does not.
+    **That is a look decision with a measured price on both sides, which is exactly the shape
+    R-895 says goes to Marc rather than being taken in passing** — see
+    `claude_work/renders/B118_outlier_rings_at_real_width.png`.
+
+    ✅ SO THE COUNT SHIPS AND THE RINGS DO NOT. `outlier_count` is now selected, so `describe()`
+    tells every reader *how many* lie beyond the whiskers and how far the week reached, in the
+    tooltip that already exists on all eighteen charts — the whole of Marc's *"add the data
+    points to also show the IQR whiskers"* that costs no geometry. ⚠️ **Drawing them is a look
+    decision and it is Marc's** (R-895's pattern): B118 renders the two options rather than
+    picking one.
     """
     if row is None:
         return ""
