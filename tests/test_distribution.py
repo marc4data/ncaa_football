@@ -1030,3 +1030,170 @@ def test_a_row_that_does_not_carry_the_new_columns_degrades_rather_than_inventin
     assert "extremes beyond the whiskers" in reading, (
         "with no count to quote it must still say the rings are there — an unnarrated mark is "
         f"the AC-G.11 defect this file already fixed once; got {reading}")
+
+
+# --- A145: the box gets a height (cfdb-main-R-992) -----------------------------------------
+#
+# > **MARC, v16:** *"The circles need to be overlayed on top of the Box-Whisker with same x and
+# > y-axis. The box-whisker will have to be taller to accommodate the circles that will cover
+# > full regular season schedule (even with 50% overlap)."*
+
+def _tall_row(**over):
+    row = {"n": 370, "weeks_counted": 2, "p25": 255.5, "p50": 367.0, "p75": 474.8,
+           "whisker_low": 57.0, "whisker_high": 762.0,
+           "min_value": 57.0, "max_value": 856.0, "outlier_count": 1}
+    row.update(over)
+    return row
+
+
+def _svg_height(svg: str) -> float:
+    return float(re.search(r"<svg viewBox='0 0 [\d.]+ ([\d.]+)'", svg).group(1))
+
+
+def _rect(svg: str):
+    """(y, height) of the p25–p75 rect."""
+    match = re.search(r"<rect x='[-\d.]+' y='([-\d.]+)' width='[\d.]+' height='([\d.]+)'", svg)
+    return float(match.group(1)), float(match.group(2))
+
+
+def test_the_default_height_renders_the_same_bytes_as_before_the_parameter():
+    """🚨 §3 rule 3.1, AND THE HASH IS THE ASSERTION RATHER THAN A SPOT CHECK.
+
+    ⚠️ THIS TEST EXISTS BECAUSE THE FIRST DRAFT FAILED IT. Making `height` a float so the ratios
+    could be computed turned the viewBox's `41` into `41.0` — **580 of 600 renders changed** while
+    every picture stayed pixel-identical and every other test passed. A spot check on one call
+    would have missed it; comparing against the pre-change module did not.
+
+    ✅ THE CORPUS IS WIDE ON PURPOSE: widths, values, tick strategies, one- and two-sided modes,
+    outliers on and off, and a caller-supplied frame. It is cheap and it is the only thing standing
+    between a default parameter and a site-wide re-render.
+
+    ⚠️ **THE ONE-OFF PROOF IS NOT HERE AND CANNOT BE**, which is worth saying rather than faking.
+    Byte-identity was established by importing `site/lib/distribution.py` at `8294b2d` ALONGSIDE
+    this one and diffing 600 renders — **0 differences, matching sha256** — and that comparison
+    needs the old module, which a test in this repo does not have. 🚨 A FROZEN DIGEST LITERAL WOULD
+    BE WORSE THAN NOTHING: it pins whatever the code produced the day it was written, so it goes
+    red on any deliberate change to the default picture and says "bytes moved" rather than "this
+    change was unintended". The report carries the measurement; this carries the PROPERTY.
+
+    ✅ THE PROPERTY IS THE HALF THAT CAN LIVE IN CI: passing the default explicitly must be
+    indistinguishable from not passing it, across the whole parameter space. That is what a
+    default MEANS, and it is what breaks first if the ratios stop returning 7.0 and 5.0 at 26px.
+    """
+    for width in (120, 240, 300, 448):
+        for value in (None, 180.0, 900.0):
+            for ticks in (distribution.TICK_PERCENTILES, distribution.TICK_BOUNDS,
+                          distribution.TICK_NONE):
+                for outliers in (False, True):
+                    for below in ({}, {"value_below": 90.0}, {"value_below": None}):
+                        kw = dict(value=value, width=width, ticks=ticks,
+                                  outliers=outliers, label="T", **below)
+                        assert distribution.box(_tall_row(), **kw) == \
+                            distribution.box(_tall_row(), height=distribution.BOX_HEIGHT, **kw), (
+                            f"width={width} value={value} ticks={ticks} outliers={outliers} "
+                            f"below={below}: the explicit default is not the implicit one")
+    # And the two ratios still land on the literals they replaced.
+    assert distribution.BOX_HEIGHT * distribution._RECT_HALF_RATIO == 7.0
+    assert distribution.BOX_HEIGHT * distribution._SERIF_HALF_RATIO == 5.0
+
+
+def test_a_taller_box_is_taller_by_exactly_what_was_asked_for():
+    """The band grows by the parameter and the label band below it does not move relative to it."""
+    default = distribution.box(_tall_row(), width=420)
+    tall = distribution.box(_tall_row(), width=420, height=56)
+    assert _svg_height(default) == distribution.BOX_HEIGHT + 15
+    assert _svg_height(tall) == 56 + 15, "the 15px label band rides on top of the plot band"
+    assert _svg_height(tall) - _svg_height(default) == 56 - distribution.BOX_HEIGHT
+
+
+def test_the_furniture_scales_and_the_x_of_every_value_does_not():
+    """🚨 THE DESIGN DECISION, AS AN ASSERTION. A box plot's y carries nothing and its x carries
+    everything, so a height change must move no number sideways.
+
+    ⚠️ KEYED ON THE DRAWN COORDINATES RATHER THAN ON THE INPUTS — a test that checked the row was
+    unchanged would assert that dictionaries are immutable.
+    """
+    def xs(svg):
+        return (re.findall(r"x1='([\d.]+)'", svg)
+                + re.findall(r"<rect x='([\d.]+)'", svg)
+                + re.findall(r"<circle cx='([\d.]+)'", svg))
+
+    assert xs(distribution.box(_tall_row(), value=497.0, width=420, outliers=True)) == \
+        xs(distribution.box(_tall_row(), value=497.0, width=420, height=121, outliers=True)), \
+        "a taller box moved a value sideways"
+
+    short_y, short_h = _rect(distribution.box(_tall_row(), width=420))
+    tall_y, tall_h = _rect(distribution.box(_tall_row(), width=420, height=52))
+    assert (short_h, tall_h) == (14, 28), \
+        f"the rect keeps its 7/26 proportion: 14 at 26px, 28 at 52px — got {short_h}, {tall_h}"
+    assert short_y == 6.0 and tall_y == 12.0, "and stays centred in the band"
+
+
+def test_the_median_spans_the_box_at_every_height():
+    """⚠️ IT USED TO BE `mid ± 7`, A LITERAL. Left alone, a 1.8px rule stopping 7px either side of
+    centre in a 56px band reads as a tick rather than as the box's divider — and Marc called the
+    median bold on purpose."""
+    for height, expected in ((26, 14.0), (52, 28.0)):
+        svg = distribution.box(_tall_row(), width=420, height=height)
+        median = re.search(r"y1='([\d.]+)' x2='[\d.]+' y2='([\d.]+)' stroke='currentColor' "
+                           r"stroke-width='1.8'", svg)
+        assert median, svg[:200]
+        assert round(float(median.group(2)) - float(median.group(1)), 1) == expected
+        _y, rect_h = _rect(svg)
+        assert round(float(median.group(2)) - float(median.group(1))) == round(rect_h)
+
+
+def test_the_height_range_b122_can_ask_for_all_render():
+    """📊 B118 measured the two ends: fifteen circles at d=7 need **56px** at Marc's 50% overlap
+    ceiling and **121px** at pitch 8. Both, and the default, must draw a real chart.
+
+    ⚠️ `_drew` RATHER THAN A LENGTH CHECK — the em-dash placeholder is also a string, which is the
+    assertion R-820 was missing.
+    """
+    for height in (26, 40, 56, 80, 121, 200):
+        svg = distribution.box(_tall_row(), value=497.0, width=420, height=height,
+                               outliers=True, label="Total yards")
+        assert _drew(svg), f"height={height} drew no picture"
+        assert _svg_height(svg) == height + 15
+        assert "<circle" in svg, f"height={height} lost the outlier ring"
+
+
+# --- A145 part 2: the denominator noun the cumulative view never had ----------------------
+
+def test_a_cumulative_row_says_what_its_n_is_over():
+    """🚨 THE PROMPT ASKED FOR `("weeks_counted", "weeks")` IN THE DENOMINATOR LIST AND THAT WOULD
+    HAVE PRINTED A FALSE RATIO.
+
+    `describe()`'s denominator format is `n={n} of {total} {noun}`, so that entry renders
+    **`n=370 of 2 weeks`** — 370 counts team-games and 2 counts weeks, and "370 of 2" is not a
+    fraction that can exist. ⚠️ **A span is not a denominator**, and the format string is what
+    decides which a column becomes.
+
+    ✅ `n=370 over 2 weeks` is the honest form: it says what a reader of a cumulative box needs,
+    which is how much football is behind the number.
+    """
+    text = distribution.describe(_tall_row())
+    assert "n=370 over 2 weeks" in text, text
+    assert " of 2 weeks" not in text, "a span rendered as a denominator is a false ratio"
+    assert "n=198 over 1 week" in distribution.describe(_tall_row(n=198, weeks_counted=1)), \
+        "one week is singular"
+
+
+def test_a_row_with_a_real_denominator_is_untouched_by_the_span():
+    """The three sibling views keep their own noun — `weeks_counted` never overrides one."""
+    sibling = _tall_row(team_games_in_week=370)
+    del sibling["weeks_counted"]
+    assert "n=370 of 370 team-games" in distribution.describe(sibling)
+    both = _tall_row(team_games_in_week=370)
+    assert "n=370 of 370 team-games" in distribution.describe(both), \
+        "a row carrying both must prefer the real denominator"
+    assert "over 2 weeks" not in distribution.describe(both)
+
+
+def test_a_row_with_neither_still_degrades_rather_than_inventing():
+    """⚠️ A143 PINNED THIS PROPERTY AND A145 MUST NOT SPEND IT. A row with no denominator and no
+    span reports its `n` and claims no noun at all."""
+    bare = _tall_row()
+    del bare["weeks_counted"]
+    text = distribution.describe(bare)
+    assert "n=370 ·" in text and "over" not in text and " of " not in text, text
