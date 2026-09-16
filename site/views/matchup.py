@@ -1751,7 +1751,7 @@ def _game_team_rows(game_id: int) -> dict:
 
 
 def _yardage_row(offense, defense, week_rows, dimension, deltas=None,
-                 leaders=None, usage=None, games=None) -> None:
+                 leaders=None, usage=None, games=None, opponent_games=None) -> None:
     """ONE metric for ONE side: the box-and-whisker pair, with that side's cards BESIDE it.
 
     🚨 cfdb-wta-R-900 TURNED `_yardage_column` INSIDE OUT, AND THE REASON IS THE SPANNING
@@ -1777,11 +1777,17 @@ def _yardage_row(offense, defense, week_rows, dimension, deltas=None,
     # box and the card borders beside it are the SAME string, so a reader cannot be shown two
     # different colours for one team on one row.
     accent, opponent_accent = _accent(offense), _accent(defense)
+    # ⚠️ TWO CALENDARS, ONE READ. `_game_calendar` already fetches BOTH teams — its `where` is
+    # `team_id in (:away_team_id, :home_team_id)` — and returns them keyed by `team_id`, so the
+    # opponent's rows were fetched all along and simply were not passed down. **No new query and
+    # no new column** (cfdb-wta-R-986); this is plumbing, not a read.
     chart = _gained_allowed(offense, defense, for_column, allowed_column, week_rows, label,
                             _delta_for(deltas, outlook_column),
                             _delta_for(deltas, delta_column),
                             accent=accent, opponent_accent=opponent_accent,
-                            games=games, game_column=_GAME_YARDS[label])
+                            games=games, game_column=_GAME_YARDS[label],
+                            opponent_games=opponent_games,
+                            game_allowed_column=_GAME_YARDS_ALLOWED[label])
     panel_key = (int(offense["team_id"]), _LEADER_PANELS[label])
     cards = _leader_block((leaders or {}).get(panel_key, []),
                           (usage or {}).get(panel_key), accent=accent)
@@ -1841,6 +1847,14 @@ _LEADER_PANELS = {"Rushing": "rushing", "Passing": "passing", "Total": "total"}
 # draws. **Deriving one from the other with a string replace would work until a column is renamed
 # and then fail silently**, so the mapping is written out.
 _GAME_YARDS = {"Total": "total_yards", "Rushing": "rushing_yards", "Passing": "passing_yards"}
+
+# 🚨 WRITTEN OUT FOR THE REASON THE PARAGRAPH ABOVE GIVES, AND THE TEMPTATION HERE IS STRONGER.
+# `total_yards` -> `total_yards_allowed` is a suffix away, and `f"{_GAME_YARDS[label]}_allowed"`
+# would work today and **fail silently the day a column is renamed** — the same argument that
+# stopped `_GAME_YARDS` being derived from `_YARDAGE_DIMENSIONS`. Three lines is the whole cost.
+_GAME_YARDS_ALLOWED = {"Total": "total_yards_allowed",
+                       "Rushing": "rushing_yards_allowed",
+                       "Passing": "passing_yards_allowed"}
 
 # ⚠️ `_ORDINAL` WAS HERE AND R-753 REMOVED IT WITH THE RANK BADGE. Marc: *"Don't include the
 # rank."* The cards are drawn in rank order so the ORDER carries it; nothing carries a TIE any
@@ -2749,10 +2763,27 @@ def _game_calendar(season: int, season_type: str, team_ids: tuple) -> dict:
     decided HERE, once, so nothing downstream forms a second opinion (R-768: a page that re-sorts
     a frame it was given ends up asserting that pandas sorts).
 
-    ⚠️ AC-G.39, AND THE BOUND WAS RE-MEASURED RATHER THAN CARRIED (cfdb-wta-R-976). B115 wrote
-    *"max 13"* from 2026 alone and that figure travelled through two prompts. **Measured across
-    every season in serving: the longest regular-season calendar is 15 games — two teams in 2025
-    and one in 2024** — so two teams cannot exceed 30 rows and 40 still holds with headroom.
+    🚨 AC-G.39, AND THE BOUND WAS WRONG UNTIL B120 — TWICE IN A ROW, THE SAME WAY.
+
+    B115 wrote *"max 13"* from 2026 alone and it travelled through two prompts. B119 corrected it
+    to *"15 — two teams in 2025 and one in 2024"* and concluded *"two teams cannot exceed 30
+    rows"*. ⚠️ **B119's query was `order by season desc limit 12`, so it only ever looked at the
+    four most recent seasons.** R-859's class, committed while fixing an instance of it: the
+    command answered *the longest calendar in recent seasons*, which is a different question from
+    *the longest calendar*.
+
+    📊 MEASURED ACROSS EVERY SEASON `srv_game_team` HOLDS — the page can reach all of them, since
+    `srv_game` spans **1869 to 2026**:
+
+        longest regular-season calendar   22 games  (team 80, 1894 — the only season above 20)
+        arithmetic ceiling for two teams  44 rows   > the old limit of 40
+        worst REAL pair in any matchup    33 rows   (1894 game 1491: 11 + 22)
+        matchups that exceed 40 today     0
+
+    ✅ **SO NOTHING IS TRUNCATED ON THE LIVE SITE AND THE OLD LIMIT WAS NEVER BREACHED — but it
+    was justified by a false sentence, and the ceiling the GRAIN permits is 44.** AC-G.39 asks the
+    bound to be the grain restated rather than a guess, so it is **60**: above the ceiling with
+    room, and small enough to still be a bound.
 
     🚨 AND THE ASCENDING ORDER CHANGES WHICH END A TRUNCATION WOULD COST. The old comment said a
     descending order *"would truncate the OLDEST games, which is the end a descending order makes
@@ -2767,7 +2798,7 @@ def _game_calendar(season: int, season_type: str, team_ids: tuple) -> dict:
           and season_type = :season_type
           and team_id in (:away_team_id, :home_team_id)
         order by game_date asc
-        limit 40
+        limit 60
     """, {"season": season, "season_type": season_type,
           "away_team_id": int(team_ids[0]), "home_team_id": int(team_ids[1])})
     return {team: rows for team, rows in df.groupby("team_id", sort=False)}
@@ -2993,7 +3024,7 @@ def _circle_column(games, column, frame, accent, width) -> str:
     # ⚠️ A negative top margin closes the gap `box()`'s 15px label band leaves below itself, and
     # the bottom margin then separates the pair from the next series.
     return (f"<div data-cfdb='game-circles' data-games='{len(played)}' "
-            f"style='margin:-3px 0 .5rem'>"
+            f"style='margin:-6px 0 .95rem'>"
             f"<svg viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
             f"role='img' aria-label='{html.escape(reading)}' "
             f"style='display:block;max-width:100%'>{''.join(marks)}</svg></div>")
@@ -3002,7 +3033,8 @@ def _circle_column(games, column, frame, accent, width) -> str:
 def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
                     label: str, outlook=None, delta=None,
                     accent: str = None, opponent_accent: str = None,
-                    games=None, game_column: str = None) -> str:
+                    games=None, game_column: str = None,
+                    opponent_games=None, game_allowed_column: str = None) -> str:
     """Marc's v14 chart: the team's GAINED on top, the opponent's ALLOWED below, and the legend.
 
     🚨 TWO SERIES OVER TWO DIFFERENT DISTRIBUTIONS, WHICH IS WHY IT IS TWO CALLS AND NOT
@@ -3055,16 +3087,43 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
     frame = _box_frame(week_row, team.get(for_column))
     if frame is not None and union is not None:
         frame = (min(frame[0], union[0]), max(frame[1], union[1]))
-    # 🚨 GAINED ONLY, AND MARC SCOPED IT HIMSELF: *"Get it right for the primary team first
-    # (gained), then we'll do the same for the opponent (allowed)"*. The circles are drawn under
-    # the GAINED row because this half of the panel is *"<Team> offense against <Opponent>'s
-    # defense"* and the marks are that team's own per-game yardage.
-    # ✅ AND THE ALLOWED HALF IS NEARLY FREE WHEN HE ASKS FOR IT: at game grain the gained
-    # distribution IS the allowed distribution (see `_week_union`), so the opponent's circles
-    # would be drawn on this very frame from `*_yards_allowed` on the same calendar rows.
+    # 🚨 BOTH SIDES NOW — MARC ASKED FOR THE SECOND HALF: *"Get it right for the primary team
+    # first (gained), then we'll do the same for the opponent (allowed)"*.
+    #
+    # ⚠️ EACH COLUMN IS DRAWN ON **ITS OWN ROW'S** EFFECTIVE FRAME, NOT ON ONE SHARED FRAME, AND
+    # THAT IS cfdb-wta-R-941 RATHER THAN A REFINEMENT. The prompt said *"the frame — the same
+    # one"*, and the DISTRIBUTION row is indeed the same one. **The FRAME is not.** `box()` frames
+    # on the row's whiskers widened by ITS OWN value marker, and the two rows carry different
+    # markers — this team's gained average against the opponent's allowed average. When either
+    # falls outside the week's union, that row alone re-widens, and a circle column handed the
+    # other row's frame would sit on an axis its box is not drawn on.
+    # 📊 MEASURED THIS ROUND ON LIVE PUBLISHED SERVING, AND THE NUMBER IS SMALL ENOUGH TO BE
+    # WORTH STATING PRECISELY: the two effective frames differ on **147 of 24,759 sides —
+    # 0.594%** across 2025 and 2026 regular, all three metrics. On 2026 `total_yards` they differ
+    # on **none of 3,786**, because the game-grain whiskers (57–762) are far wider than the range
+    # of team season-averages that sit on them.
+    #
+    # ⚠️ SO THE PROMPT'S *"the frame — the same one"* IS RIGHT 99.4% OF THE TIME AND WRONG 147
+    # TIMES, AND THOSE 147 ARE EXACTLY THE ROWS A READER WOULD BE MISLED ON. Handing both columns
+    # one frame would cost nothing on almost every page and put a mark in the wrong place on the
+    # pages where a team's average is extreme — which is the same residual B117 weighed and kept
+    # when it settled cfdb-wta-R-927, and the same argument: a cost a reader can see beats one
+    # they cannot.
+    #
+    # ✅ THE PAIRING IS THE PANEL'S OWN: this half is *"<Team> offense against <Opponent>'s
+    # defense"*, so the GAINED circles are this team's per-game yardage and the ALLOWED circles
+    # are **the opponent's per-game yardage allowed** — the same rows the opponent's own Gained
+    # column would use on the other side of the page, read through a different column.
+    allowed_frame = _box_frame(week_row, opponent.get(allowed_column))
+    if allowed_frame is not None and union is not None:
+        allowed_frame = (min(allowed_frame[0], union[0]), max(allowed_frame[1], union[1]))
     circles = ""
     if games is not None and frame is not None:
         circles = _circle_column(games, game_column, frame, accent, _BOX_ROW_WIDTH)
+    allowed_circles = ""
+    if opponent_games is not None and allowed_frame is not None:
+        allowed_circles = _circle_column(opponent_games, game_allowed_column, allowed_frame,
+                                         opponent_accent, _BOX_ROW_WIDTH)
     return (
         f"<div data-cfdb='gained-allowed' data-metric='{html.escape(label.lower())}'>"
         f"{_matchup_legend(team, opponent, for_column, allowed_column, delta, outlook)}"
@@ -3080,6 +3139,7 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
         f"{_box_row(week_row, team, 'Gained', for_column, accent, union)}"
         f"{circles}"
         f"{_box_row(week_row, opponent, 'Allowed', allowed_column, opponent_accent, union)}"
+        f"{allowed_circles}"
         f"<div style='clear:both'></div></div>")
 
 
@@ -3234,11 +3294,13 @@ def _yardage(row) -> None:
             with left:
                 _yardage_row(away, home, distribution, dimension,
                              deltas.get(int(away_id)), leaders, usage,
-                             games=calendars.get(int(away_id)))
+                             games=calendars.get(int(away_id)),
+                             opponent_games=calendars.get(int(home_id)))
             with right:
                 _yardage_row(home, away, distribution, dimension,
                              deltas.get(int(home_id)), leaders, usage,
-                             games=calendars.get(int(home_id)))
+                             games=calendars.get(int(home_id)),
+                             opponent_games=calendars.get(int(away_id)))
 
         # ⚠️ AN ABSENCE THAT SAYS WHICH ABSENCE IT IS (AC-G.11), AND THERE IS NOW ONE RATHER
         # THAN TWO. See `_metrics_without_a_week`: the off-the-frame case the scatter had cannot
@@ -3304,10 +3366,10 @@ def _yardage(row) -> None:
                      f"this season's first {weeks} week{'' if weeks == 1 else 's'}: the box is "
                      f"the middle half, the bold line inside it the median, and the whiskers "
                      f"run to the low and high boundaries, both labeled. The colored mark is "
-                     f"this team's average per game, and each open circle below it is one game "
-                     f"the team played, earliest at the top. ✅ Both rows and the circles "
-                     f"beneath them share one scale, so a position means the same yardage "
-                     f"wherever it appears.")
+                     f"that team's average per game, and each open circle below it is one game "
+                     f"the team played, earliest at the top. ✅ Both rows are drawn against the "
+                     f"same spread, so the two sets of circles can be compared directly: the "
+                     f"same position means the same yardage whether it was gained or allowed.")
             if weeks <= _THIN_SAMPLE:
                 # 🚨 A092 MEASURED THIS AND SAID TO SAY IT, AND B119 MOVED WHAT "THIN" MEANS.
                 # It used to read the least-played TEAM's game count, because the population was
