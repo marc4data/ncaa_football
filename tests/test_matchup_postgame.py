@@ -1269,33 +1269,43 @@ def test_the_BOX_SCORE_band_labels_carry_no_false_decimals(panel):
     raise AssertionError("the first-downs row never rendered")
 
 
-def test_THE_METRIC_CELLS_PRINT_NO_TICK_NUMBERS_but_keep_both_teams_own(panel):
-    """🚨 cfdb-main-R-1020, THE SECOND CALL SITE. **Marc:** *"Don't think we have real estate to
-    print the numbers.  Draw the whiskers but don't add tick marks/labels for the values."*
+def test_THE_METRIC_CELLS_LABEL_MIN_AND_MAX_and_not_the_whisker_ends(panel):
+    """🚨 cfdb-main-R-1028, THE SECOND CALL SITE. **Marc, v17:** *"label MIN, Max, 25pctl, 75pctl
+    where there is room"* and *"the whisker endpoints don't need to be labeled"*.
 
-    🚨 WRITTEN BECAUSE THE STAGED BREAK CAME BACK GREEN (R-758). Dropping
-    `ticks=distribution.TICK_NONE` from `_metric_chart` restored every boundary number in the
-    table and **the entire suite still passed.**
+    ⚠️ FLIPPED FROM `test_THE_METRIC_CELLS_PRINT_NO_TICK_NUMBERS_but_keep_both_teams_own`, WHICH
+    B125 WROTE ONE ROUND AGO FOR v16. **v17 reverses the *no numbers* half and keeps the *not the
+    whisker ends* half**, so the test tracks the requirement rather than being deleted with it.
 
-    ⚠️ AND `value_label=None` DOES NOT MEAN *no label* HERE, WHICH IS THE THING TO KNOW BEFORE
-    READING THIS ASSERTION: `box()` falls back to `fmt.number(value, dp=dp)` when the override is
-    `None`, so **both teams' own figures are printed** — away above the axis, home below — and
-    both must survive. What `TICK_NONE` removes from these cells is the boundary pair.
+    🚨 ITS ORIGINAL REASON IS UNCHANGED: B125 staged the removal of `ticks=` and **the whole suite
+    stayed green.** Marc's instruction had nothing holding it at either call site.
+
+    ⚠️ `value_label=None` DOES NOT MEAN *no label* HERE — `box()` falls back to
+    `fmt.number(value, dp=dp)`, so **both teams' own figures print** and both must survive.
+
+    ⚠️ ONLY THE HIGH END IS DECIDABLE ON THIS ROW: rushing yards publishes `min_value` 2 and
+    `whisker_low` 2, **the same number**, so a labelled low whisker end is indistinguishable from
+    a labelled MIN. The high pair — fences to 365, extreme to 569 — is distinct, and the
+    assertion says so rather than pretending to test both.
     """
     run, _ = panel
     spread = {row["metric"]: row for row in _SPREAD}["rushing_yards"]
+    assert spread["whisker_high"] != spread["max_value"], (
+        "the fixture's high fence and high extreme now agree, so this test cannot tell a "
+        "labelled whisker end from a labelled MAX")
     for cell in _cells(run(_both())[0]):
         if ">Rushing yards<" not in cell:
             continue
         labels = _band_labels(cell)
-        for key in ("whisker_low", "whisker_high", "p25", "p50", "p75"):
-            figure = spread[key]
-            assert f"{figure:g}" not in labels, (
-                f"the cell still prints {figure:g} ({key}) — Marc asked for the whiskers drawn "
-                f"without the tick marks or labels: {labels}")
-        assert len(labels) == 2, (
-            f"a metric cell should print exactly the two teams' own figures and nothing else; "
-            f"it printed {labels}")
+        assert f"{spread['max_value']:g}" in labels, (
+            f"the cell does not print MAX {spread['max_value']:g} — v17 extends the frame to the "
+            f"extremes precisely so they can be labelled: {labels}")
+        assert f"{spread['whisker_high']:g}" not in labels, (
+            f"the cell prints the high whisker end {spread['whisker_high']:g} — v17: *the whisker "
+            f"endpoints don't need to be labeled*: {labels}")
+        assert f"{spread['p50']:g}" not in labels, (
+            f"the cell prints the median {spread['p50']:g}, which is in no version of Marc's "
+            f"list: {labels}")
         return
     raise AssertionError("the rushing-yards row never rendered")
 

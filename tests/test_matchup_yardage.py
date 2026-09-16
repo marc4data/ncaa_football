@@ -927,34 +927,50 @@ def _chart_hover(markup: str) -> str:
     return html.unescape(found.group(1)) if found else ""
 
 
-def test_THE_YARDAGE_CHARTS_PRINT_NO_TICK_NUMBERS_but_keep_the_teams_own(panel):
-    """🚨 cfdb-main-R-1020. **Marc:** *"Don't think we have real estate to print the numbers.
-    Draw the whiskers but don't add tick marks/labels for the values."*
+def test_THE_YARDAGE_CHARTS_LABEL_MIN_AND_MAX_and_not_the_whisker_ends(panel):
+    """🚨 cfdb-main-R-1028. **Marc, v17:** *"the boundaries of the chart should extend to the MIN
+    and MAX"*, *"label MIN, Max, 25pctl, 75pctl where there is room"*, and *"the whisker endpoints
+    don't need to be labeled"*.
 
-    🚨 THIS TEST EXISTS BECAUSE THE STAGED BREAK CAME BACK GREEN. Removing
-    `ticks=distribution.TICK_NONE` from the call site put every percentile and boundary number
-    back on the page and **the whole suite still passed — 1451 of 1451.** Marc's instruction had
-    been implemented with nothing holding it, so the next round could undo it in good faith.
-    ⚠️ R-758's first mode, found the only way it ever is.
+    ⚠️ THIS IS `test_THE_YARDAGE_CHARTS_PRINT_NO_TICK_NUMBERS_but_keep_the_teams_own`, FLIPPED
+    RATHER THAN DELETED — and it is the second flip in two rounds on the same line of code.
+    **B125 wrote it one round ago for v16's *"don't add tick marks/labels for the values"*, and
+    v17 reverses the half that said NO numbers while keeping the half that said not the whisker
+    ends.** ✅ **So the test does not disappear; it tracks the requirement**, and what survives
+    unchanged is the part that was never about the ticks: the team's own figure still prints.
 
-    ✅ AND IT ASSERTS BOTH HALVES, BECAUSE THE INSTRUCTION HAS TWO. The percentile and boundary
-    numbers must be GONE; **the team's own figure must still be there** — that is Marc's own
-    split, and a page that dropped the value label too would satisfy a one-sided test while
-    removing the one number a reader came for.
+    🚨 AND THE REASON IT EXISTS AT ALL IS STILL TRUE: B125 staged the removal of the `ticks=`
+    argument and **the whole suite stayed green — 1451 of 1451.** A requirement implemented with
+    nothing holding it is one good-faith edit from being undone.
+
+    ⚠️ ASSERTED ON `total_yards` BECAUSE IT IS THE ONLY FIXTURE ROW WHOSE FOUR NUMBERS ARE ALL
+    DISTINCT — `rushing` and `passing` both publish `whisker_low == min_value`, so on those rows
+    *"the whisker end is not labelled"* is untestable: the same string would be there either way.
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
     svg = _svg_of(_series(_of_metric(entries, "Total")[0])["gained"])
     assert svg, "the gained row drew no chart at all"
     printed = re.findall(r"<text[^>]*>([^<]*)</text>", svg)
-    n, weeks, p25, p50, p75, low, high = _METRICS["total_yards"][:7]
-    for figure in (p25, p50, p75, low, high):
+    _n, _w, p25, p50, p75, low, high, mn, mx = _METRICS["total_yards"][:9]
+    assert low not in (mn, mx) and high not in (mn, mx), (
+        f"the fixture's whisker pair {low}/{high} now coincides with its extremes {mn}/{mx}, so "
+        f"this test can no longer tell a labelled whisker end from a labelled extreme")
+    # ✅ MARC'S TWO NEW NUMBERS, THE ONES THE CHART HAS NEVER SHOWN BEFORE.
+    for figure in (mn, mx):
+        assert f"{figure}" in printed, (
+            f"the chart does not print {figure} — v17 asks for MIN and MAX labelled, and the "
+            f"frame is extended to them precisely so they can be: {printed}")
+    # ❌ AND THE TWO HE SAID NOT TO DRAW.
+    for figure in (low, high):
         assert f"{figure}" not in printed, (
-            f"the chart still prints {figure} from the week's row — Marc asked for the whiskers "
-            f"without the tick marks or labels, and these are the labels: {printed}")
-    # 🚨 THE OTHER HALF. `_both()[0]`'s own total is the one figure that stays.
+            f"the chart prints the whisker end {figure} — v17: *the whisker endpoints don't need "
+            f"to be labeled*: {printed}")
+    assert f"{p50}" not in printed, (
+        f"the chart prints the median {p50}, which is in no version of Marc's list: {printed}")
+    # 🚨 THE HALF THAT SURVIVED THE REVERSAL. The team's own figure is not a tick.
     assert printed, (
         "the chart prints nothing at all — the team's own figure went with the ticks, which is "
-        "the opposite of what Marc asked for")
+        "the opposite of what Marc asked for in either version")
 
 
 def test_the_FRAME_comes_from_the_WEEKS_ROW_and_not_from_the_two_teams(panel):
@@ -1315,6 +1331,17 @@ def test_the_FRAME_CAPTION_describes_the_CHART_THAT_IS_DRAWN(panel):
     assert "filled when" in text and "FBS" in text, (
         f"the caption does not say what a FILLED circle means, so the page draws a two-state "
         f"encoding and explains neither state: {text[:500]}")
+    # 🚨 cfdb-main-R-1028. WHAT THE CHART'S ENDS ARE, WHICH CHANGED THIS ROUND.
+    #
+    # ⚠️ **A POSITIVE ASSERTION, NOT A `gone` ENTRY, AND THE DIFFERENCE IS THE POINT.** The three
+    # phrases in that list below each went FALSE — the chart stopped having them. This round
+    # nothing went false: *"the whiskers run to the low and high boundaries"* is still true.
+    # **What changed is that the chart's ENDS stopped being the whisker ends**, and the caption
+    # had never said what they were, because until now they were the same thing.
+    assert "lowest and highest single game" in text, (
+        f"the caption does not say what the chart's ENDS are. Under v17 the frame runs past the "
+        f"whiskers to the extremes, so a reader sees an axis wider than the whisker serifs with "
+        f"nothing saying what the extra span is: {text[:500]}")
     # 🚨 cfdb-main-R-1017. THE WINDOW, WHICH THE PICTURE CANNOT CARRY.
     assert "before this game's own" in text, (
         f"the caption does not say WHICH weeks the box is built from, so a reader cannot tell a "
@@ -2735,6 +2762,37 @@ def test_THE_CIRCLES_DO_NOT_OVERLAP_BY_MORE_THAN_MARCS_CEILING(panel):
         f"pitch {pitch}px against a diameter of {diameter}px")
 
 
+def test_THE_CIRCLE_TOOLTIP_BREAKS_LIKE_THE_CHARTS_and_in_the_element_way(panel):
+    """🚨 cfdb-main-R-1046. **Two tooltips on one picture must not break differently.** A150 put
+    `describe()` one statement per line; the circle's own title still joined with `" · "`, and a
+    reader hovering a circle and then the chart behind it saw two conventions.
+
+    🚨 THE CHARACTER IS THE POINT, AND IT IS NOT A150's. `describe()` lands in a `title='…'`
+    ATTRIBUTE, where A150 correctly emits the numeric reference `&#10;`. **This string is an SVG
+    `<title>` ELEMENT rendered through `html.escape`**, and there the two swap places:
+
+        html.escape("a\nb")     -> 'a\nb'          ✅ breaks
+        html.escape("a&#10;b")  -> 'a&amp;#10;b'   ❌ the reader sees the literal characters
+
+    ✅ SO THIS ASSERTS BOTH: the line actually breaks, **and** the escaped reference is nowhere in
+    the markup — because the wrong fix produces a tooltip that still *looks* multi-line in a diff
+    and reads as `&#10;` on screen.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    column = _circle_columns(entries)[0]
+    titles = re.findall(r"<title>(.*?)</title>", column, re.S)
+    assert titles, "the circle column drew no tooltips at all"
+    for title in titles:
+        assert "\n" in title, (
+            f"a circle tooltip is still one line — the chart's own tooltip under it breaks per "
+            f"statement, and two conventions on one picture is the drift this closes: {title!r}")
+        assert "&#10;" not in title and "&amp;#10;" not in title, (
+            f"the circle tooltip carries a numeric character reference into ELEMENT content, "
+            f"where `html.escape` turns it into the literal text a reader then sees: {title!r}")
+        assert " · " not in title, (
+            f"a circle tooltip still joins statements with the old separator: {title!r}")
+
+
 def test_the_CIRCLES_and_the_BOX_agree_about_WHERE_A_VALUE_GOES(panel):
     """🚨 THE GUARD THAT MAKES A BORROWED PRIVATE CONSTANT LOUD — and it OUTLIVED the element it
     was built for, deliberately.
@@ -2770,13 +2828,36 @@ def test_the_CIRCLES_and_the_BOX_agree_about_WHERE_A_VALUE_GOES(panel):
     # **The page now passes `height=_BOX_BAND`, and a guard still probing the default would be
     # measuring a chart the reader never sees.** A145 states that height moves no value sideways;
     # ✅ this is the assertion that holds it to that, at the one height that matters here.
-    svg = dist.box(row, value=None, width=width, show_value=False,
-                   height=_module_constant("_BOX_BAND"))
-    drawn = re.search(r"<line x1='([\d.]+)'[^>]*stroke-width='1.8'", svg)
-    assert drawn, f"no median line in box()'s output — this probe has gone blind: {svg[:300]}"
-
+    # 🚨 cfdb-main-R-1028. PROBED AT THE PAGE'S OWN `ticks`, AND THIS LINE IS THE WHOLE FIX.
+    #
+    # ⚠️ **THIS GUARD EXISTED THROUGH A150 AND WAS BLIND TO IT.** It rendered with the module's
+    # DEFAULT tick strategy while the page passed its own, and `TICK_EXTREMES` does not merely
+    # change labels — **it widens `box()`'s frame to `min_value`/`max_value`** (its own
+    # `wants_extremes`). A probe on the default could never see that, so the circles and the box
+    # could drift onto different axes with this test green.
+    #
+    # 📊 MEASURED BEFORE THE FIX, ON ALL 141 REAL DISTRIBUTION ROWS: the two frames differ on
+    # **135**, moving a circle a median of **13.0px** and up to **77.9px on a 240px row.**
+    #
+    # ✅ IT IS THE SAME LESSON B122 WROTE TWELVE LINES UP ABOUT `height`, ONE PARAMETER OVER:
+    # *"a guard still probing the default would be measuring a chart the reader never sees."*
+    # **Reading the constant rather than restating it is what stops the next parameter repeating
+    # it a third time.**
+    # ⚠️ `_BOX_TICKS` IS READ OFF THE IMPORTED MODULE, NOT VIA `_module_constant`, WHICH PARSES
+    # THE SOURCE WITH `ast.literal_eval` AND CANNOT EVALUATE AN ATTRIBUTE REFERENCE. The constant
+    # is `distribution.TICK_EXTREMES` rather than a bare string **on purpose** — a literal here
+    # would be a second copy of the name.
     import importlib
     matchup = importlib.import_module("views.matchup")
+    svg = dist.box(row, value=None, width=width, show_value=False,
+                   height=_module_constant("_BOX_BAND"),
+                   ticks=matchup._BOX_TICKS)
+    drawn = re.search(r"<line x1='([\d.]+)'[^>]*stroke-width='1.8'", svg)
+    assert drawn, f"no median line in box()'s output — this probe has gone blind: {svg[:300]}"
+    # 🚨 AND THE FRAME IS THE PAGE'S OWN PREDICTION, NOT A HAND-BUILT PAIR. `_box_frame` is what
+    # `_gained_allowed` hands every circle column, so asserting against anything else would test
+    # a frame the page does not use — which is how this guard came to be green and wrong.
+    frame = matchup._box_frame(row, None)
     ours = matchup._axis_x(float(row["p50"]), frame, width)
     assert abs(float(drawn.group(1)) - ours) < 0.5, (
         f"the circles would place {row['p50']} at {ours:.1f}px and `box()` drew it at "
