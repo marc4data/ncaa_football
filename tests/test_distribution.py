@@ -714,3 +714,114 @@ def test_the_PLACER_uses_the_measured_width_not_just_the_helper():
     assert abs(xs["41.00"] - expected) < 0.1, (
         f"the leftmost label sits at {xs['41.00']}, expected {expected:.2f} — the placer is "
         "not clamping by the MEASURED width, so it is not using _text_width")
+
+
+# --- A139: `frame=` puts two charts on one scale (cfdb-wta-R-927) -------------------------
+
+def _serif_xs(svg: str):
+    """The two whisker serifs' x positions — where the boundaries are DRAWN."""
+    return sorted({float(x) for x in
+                   re.findall(r"<line x1='([-\d.]+)' y1='[\d.]+' x2='\1'", svg)})
+
+
+def test_the_frame_moves_the_scale_and_moves_no_label():
+    """🚨 cfdb-wta-R-927, AND BOTH HALVES ARE THE TEST.
+
+    📊 B114 measured the defect on Marc's gained-over-allowed pair: two `box()` calls stacked
+    vertically frame on their OWN whiskers, so `total` drew 416.5 yards of range on the top row
+    and 366.0 on the bottom across the same pixels — a 13.8% scale difference in a layout that
+    invites a reader to compare the two by eye.
+
+    ✅ SO `frame=` HAS TO MOVE THE PIXELS. A test that only checked the labels would pass on a
+    parameter that did nothing at all.
+
+    ❌ AND IT MUST MOVE NOTHING THAT PRINTS. `lo`/`hi` draw the whisker rule, its serifs and the
+    boundary labels; relabelling them with the union's numbers would tell the reader this team's
+    week ran from 142.5 when it ran from 204.0. That is the version B114 refused to fake from the
+    page, and it is one line away from the honest one.
+    """
+    row = _box_row(whisker_low=204.0, whisker_high=620.5,
+                   p25=300.0, p50=400.0, p75=500.0)
+
+    narrow = distribution.box(row, value=450.0, width=240, show_value=True, dp=1)
+    wide = distribution.box(row, value=450.0, width=240, show_value=True, dp=1,
+                            frame=(142.5, 620.5))
+
+    assert _drew(narrow) and _drew(wide)
+
+    # ✅ THE PIXELS MOVED. A wider frame pushes this row's own whisker boundaries inward.
+    assert _serif_xs(narrow) != _serif_xs(wide), (
+        "frame= did nothing — the scale is unchanged, so two stacked rows still disagree")
+    assert _serif_xs(wide)[0] > _serif_xs(narrow)[0], (
+        "widening the frame at the LOW end must move this row's low serif to the RIGHT")
+
+    # ❌ AND NOTHING THAT PRINTS MOVED WITH IT.
+    assert [text for _x, text in _texts(narrow)] == [text for _x, text in _texts(wide)], (
+        "a frame must not change a single printed figure — the labels are this row's own")
+    assert "142.5" not in wide, (
+        "the union's bound reached a label: that is the dishonest shared axis, not this one")
+    assert "204.0" in wide, "this row's real low boundary must still print"
+
+
+def test_a_narrower_frame_is_inert_rather_than_clipping():
+    """⚠️ IT WIDENS AND NEVER REPLACES, which is the property the existing outlier comment
+    protects: *"an outlier pinned to the boundary reads as 'at the extreme' when the truth is
+    'beyond it'"*. A caller handing in a frame narrower than the data must therefore change
+    nothing, rather than clamping real marks to its bounds.
+    """
+    row = _box_row(whisker_low=204.0, whisker_high=620.5)
+    plain = distribution.box(row, value=450.0, width=240)
+    narrowed = distribution.box(row, value=450.0, width=240, frame=(300.0, 400.0))
+    assert narrowed == plain, "a frame inside the data must be inert, not clipping"
+
+
+def test_the_frame_still_lets_a_value_outside_the_union_widen_it():
+    """🚨 THE OUTLIER RULE SURVIVES THE SHARED AXIS. A team beyond the week's union is drawn
+    beyond it — the frame is a floor on the scale, not a ceiling on the data.
+    """
+    row = _box_row(whisker_low=204.0, whisker_high=620.5)
+    beyond = distribution.box(row, value=900.0, width=240, frame=(142.5, 620.5))
+    assert _drew(beyond)
+    marker_xs = [float(x) for x in re.findall(r"<line x1='([-\d.]+)'[^>]*stroke-width='2", beyond)]
+    assert marker_xs, "the value marker must still be drawn"
+    # It is the rightmost mark on the chart, because 900 is past both the whisker and the union.
+    assert max(marker_xs) >= max(_serif_xs(beyond)), (
+        "a value beyond the union was pulled back to the frame — the clamping defect")
+
+
+def test_two_stacked_rows_share_one_scale_when_framed_on_their_union():
+    """✅ THE THING THE PARAMETER IS FOR, END TO END, at B114's own measured numbers.
+
+    Framed on the union, one yard is the same number of pixels on both rows — which is what makes
+    the vertical stack readable. Unframed it is not, and that difference is asserted rather than
+    assumed.
+    """
+    gained = _box_row(whisker_low=204.0, whisker_high=620.5,
+                      p25=300.0, p50=400.0, p75=500.0)
+    allowed = _box_row(whisker_low=142.5, whisker_high=508.5,
+                       p25=250.0, p50=330.0, p75=430.0)
+    union = (142.5, 620.5)
+
+    def span_per_unit(svg, lo, hi):
+        serifs = _serif_xs(svg)
+        return (serifs[-1] - serifs[0]) / (hi - lo)
+
+    unframed = (span_per_unit(distribution.box(gained, show_value=False, width=240),
+                              204.0, 620.5),
+                span_per_unit(distribution.box(allowed, show_value=False, width=240),
+                              142.5, 508.5))
+    # ⚠️ THE TOLERANCE IS THE SVG's OWN PRINT PRECISION, NOT A MAGIC NUMBER. Coordinates are
+    # emitted at one decimal place, so each serif carries up to ±0.05px of rounding and the
+    # derived pixels-per-yard can differ by 0.1 / (hi − lo) between two rows that agree exactly.
+    # On this pair that bound is 0.1 / 416.5 = 0.00024.
+    quantisation = 0.1 / (620.5 - 204.0)
+    assert abs(unframed[0] - unframed[1]) > 10 * quantisation, (
+        "the two rows already agreed, so this fixture cannot show the defect")
+
+    framed = (span_per_unit(distribution.box(gained, show_value=False, width=240, frame=union),
+                            204.0, 620.5),
+              span_per_unit(distribution.box(allowed, show_value=False, width=240, frame=union),
+                            142.5, 508.5))
+    assert abs(framed[0] - framed[1]) <= quantisation, (
+        f"framed on the union, one yard must be the same width on both rows: "
+        f"{framed[0]:.6f} against {framed[1]:.6f}")

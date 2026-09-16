@@ -448,6 +448,9 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
                # A138. The truncation flag the chart reads to decide whether it may print a
                # final value at all.
                "win_probability_curve_reaches_final_score": True,
+               # A139, cfdb-main-R-934. `_completed_games` selects this now, so the panel
+               # fixture carries it: the curve's final value names the HOME side on screen.
+               "home_abbreviation": "HOME", "away_abbreviation": "AWAY",
                "line_spread_largest_excursion": -6.0,
                "line_spread_move_from_open": -3.0,
                "line_total_largest_excursion": 4.0,
@@ -991,9 +994,20 @@ def test_a_truncated_curve_is_never_labelled_with_a_final_value():
     Printing "0%" beside that line is a confident wrong number a reader cannot tell from a real
     collapse — so the label is withheld and the end of the line is cut and named instead.
     """
+    import pandas as pd
     today = _today()
-    complete = today._sparkline_svg(_curve(), reaches_final=True)
-    truncated = today._sparkline_svg(_curve(), reaches_final=False)
+    points = _curve()
+    row = pd.Series({"win_probability_curve_reaches_final_score": True,
+                     "home_abbreviation": "MICH"})
+    cut_row = pd.Series({"win_probability_curve_reaches_final_score": False,
+                         "home_abbreviation": "MICH"})
+
+    # ⚠️ A139 MOVED THE DECISION INTO `_curve_label`, so the label is built ONCE per row and
+    # handed to the renderer. Exercising it through that function is exercising what ships.
+    text, is_cut = today._curve_label(row, points)
+    cut_text, cut_is_cut = today._curve_label(cut_row, points)
+    complete = today._sparkline_svg(points, label=text, is_cut=is_cut)
+    truncated = today._sparkline_svg(points, label=cut_text, is_cut=cut_is_cut)
 
     assert "%</text>" in complete, "a complete curve labels its final value — Marc asked for it"
     assert "%</text>" not in truncated, (
@@ -1002,6 +1016,12 @@ def test_a_truncated_curve_is_never_labelled_with_a_final_value():
     assert "stroke-dasharray='1 2'" in truncated, "and be visible without reading the label"
     assert "feed stops" in truncated, "including to a screen reader"
     assert "feed stops" not in complete
+    # 🚨 cfdb-main-R-934: AND THE COMPLETE ONE NAMES ITS SIDE, on screen and not only in the
+    # accessible label. A bare percentage beside a scoreboard whose TOP line is the away team
+    # reads as the away team's number.
+    assert "MICH" in complete, "the visible label must name the home side"
+    assert "home side" in complete, "and the aria-label must not say less than the pixels"
+    assert "MICH" not in truncated, "the cut case has no value to attribute to anybody"
 
 
 def test_overtime_is_wider_and_the_scale_is_shared():
@@ -1088,6 +1108,8 @@ def test_the_PANEL_passes_the_truncation_flag_and_not_just_the_helper(monkeypatc
         # THE GAME THE FLAG EXISTS FOR: Coastal Carolina at UTSA's shape — the feed stops
         # while the eventual winner is still near zero.
         "win_probability_curve_reaches_final_score": False,
+        # A139, cfdb-main-R-934 — the side the final value belongs to.
+        "home_abbreviation": "HOME",
     }])
 
     today._most_exciting(frame, _Scope())
@@ -1103,10 +1125,100 @@ def test_the_PANEL_passes_the_truncation_flag_and_not_just_the_helper(monkeypatc
         "a truncated curve must not print a final value even when the panel renders it")
 
     # ✅ AND THE OTHER DIRECTION, so the assertion above is not satisfied by a chart that never
-    # labels anything.
+    # labels anything. ⚠️ THE PANEL IS RE-RUN rather than the row mutated: A139 builds the label
+    # map once from the frame the panel was given, which is the point — two call sites deriving
+    # the same string is how a column ends up sized for a label the chart does not draw.
+    captured.clear()
     complete = frame.copy()
     complete.loc[0, "win_probability_curve_reaches_final_score"] = True
-    assert "%</text>" in columns["curve"].format(complete.iloc[0])
+    today._most_exciting(complete, _Scope())
+    columns = {c.field: c for c in captured[-1]}
+    cell = columns["curve"].format(complete.iloc[0])
+    assert "%</text>" in cell
+    assert "HOME" in cell, "cfdb-main-R-934: the visible label names the home side"
+
+
+def test_the_final_value_names_the_home_side_and_not_the_away_one():
+    """🚨 cfdb-main-R-934, AND NOTHING IN THE CODE WAS WRONG WHEN IT WAS FOUND.
+
+    A138's own raster, row 1 of 2026 week 2:
+
+        IOWA STATE   0 10 3 0 | 13
+        IOWA         0 10 0 6 | 16        [curve] 94%
+
+    **The 94% is IOWA's — the home side.** Every label was correct and the panel still told a
+    reader the opposite of the truth, because the scoreboard deliberately puts the AWAY team on
+    the TOP line (R-522) and the bare number sits nearest it. ⚠️ Worse, the `aria-label` already
+    read *"Home win probability"*, so a screen-reader user was told which side it was and a
+    sighted reader was not.
+
+    ✅ THE ASSERTION IS THAT THE ABBREVIATION IS THE HOME SIDE'S, which is the half a break can
+    invert without changing anything else on the chart.
+    """
+    import pandas as pd
+    today = _today()
+    points = _curve()
+    row = pd.Series({"win_probability_curve_reaches_final_score": True,
+                     "home_abbreviation": "IOWA", "away_abbreviation": "ISU"})
+
+    text, is_cut = today._curve_label(row, points)
+    assert not is_cut
+    assert text.startswith("IOWA "), f"the label must lead with the HOME abbreviation: {text!r}"
+    assert "ISU" not in text, "the away side's abbreviation must never appear on this label"
+    assert text.endswith("%"), "and the number is still the number"
+
+    svg = today._sparkline_svg(points, label=text, is_cut=is_cut)
+    assert f">{text}</text>" in svg, "the visible label is the one that was measured"
+    assert "home side" in svg, "the aria-label must not say less than the pixels"
+
+
+def test_the_label_falls_back_to_the_bare_percentage_rather_than_printing_none():
+    """⚠️ A130's CHAIN ENDS IN "drop it rather than publish `None @ AUB`", AND THE SAME APPLIES.
+
+    📊 `home_abbreviation` is null on 4.9% of `srv_game` and on **0 of the 1,895 games that can
+    enter this panel** — measured in published serving, not assumed. So this branch is
+    unreachable here today and is still the honest fallback: a chart label is no place for a
+    twenty-character team name, and `None 94%` is worse than `94%`.
+    """
+    import pandas as pd
+    today = _today()
+    points = _curve()
+    text, _ = today._curve_label(
+        pd.Series({"win_probability_curve_reaches_final_score": True,
+                   "home_abbreviation": None}), points)
+    assert text.endswith("%") and "None" not in text, text
+    assert " " not in text, "with no side to name, the label is just the number"
+
+
+def test_the_label_gutter_is_measured_and_the_cut_row_gets_narrower():
+    """📊 THE WIDTH COST, ASSERTED RATHER THAN DESCRIBED.
+
+    The label is monospace, so every glyph is the same width and the gutter is exactly
+    `offset + len(text) * 5.4219 + trail`. Measured in the browser with
+    `getComputedTextLength()`: `MICH 100%` is 48.781px for nine characters.
+
+    ⚠️ AND THE `cut` ROW IS NARROWER THAN THE OLD FIXED GUTTER, which is the half that makes the
+    per-row sizing worth it rather than merely honest.
+    """
+    today = _today()
+    points = _curve()
+    plain = today._curve_width(points, "94%")
+    named = today._curve_width(points, "MICH 94%")
+    cut = today._curve_width(points, "cut")
+
+    assert named > plain, "naming the side costs width and the cost is real"
+    assert named - plain == round(5 * today._CURVE_LABEL_CHAR_PX), (
+        "five more characters must cost exactly five monospace advances")
+    assert cut < named, "a cut row must not be padded out to match a named one"
+    # ⚠️ AND IT IS NARROWER THAN THE FIXED GUTTER A138 SHIPPED, which is the half that makes
+    # per-row sizing worth it rather than merely honest. That constant was 30px.
+    cut_gutter = (today._CURVE_LABEL_OFFSET + len("cut") * today._CURVE_LABEL_CHAR_PX
+                  + today._CURVE_LABEL_TRAIL)
+    assert cut_gutter < 30, f"the cut gutter is {cut_gutter:.1f}px against the old fixed 30"
+    # The chart itself must agree with what the column was sized for, or the label clips.
+    svg = today._sparkline_svg(points, label="MICH 94%")
+    assert f"width='{named}'" in svg, (
+        "the SVG and _curve_width disagree — the column would be sized for a different label")
 
 
 # --- A138: the scoreboard (cfdb-main-R-906) ----------------------------------------------
