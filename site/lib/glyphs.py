@@ -320,15 +320,16 @@ def strip_entries(bands=None) -> list:
             (indicator("over", "open", "", "cfdb-acc"), "Under"),
             (indicator("cover", "nodata", ""), "No closing line held"),
             (indicator("upset", "nodata", ""), "No line, so no favorite"),
-            # 🚨 A147 FOUND A GAP IN SCHEDULE'S OWN LEGEND AND THIS ROW IS IT. `LEGEND_GROUPS`
-            # lists `cover/nodata` and `upset/nodata` and NOT `over/nodata` — but a row draws it
+            # ✅ A147 FOUND A GAP IN SCHEDULE'S OWN LEGEND AND A149 CLOSED IT. `LEGEND_GROUPS`
+            # listed `cover/nodata` and `upset/nodata` and NOT `over/nodata` — while a row draws it
             # whenever no closing total was held, which is every lower-division game. R-178's law
-            # broken in the "omits a mark a row can draw" direction, and it has been there since
+            # broken in the "omits a mark a row can draw" direction, and it had been there since
             # the strip was built.
             #
-            # ⚠️ IT IS FIXED HERE AND NOT THERE, DELIBERATELY. Adding a row to `LEGEND_GROUPS`
-            # would change Schedule's rendered bytes, and A147's contract with that page is that
-            # it renders identically. **Reported for a later round rather than smuggled in.**
+            # ⚠️ A147 DECLINED TO FIX IT THERE BECAUSE ADDING A ROW MOVES SCHEDULE'S RENDERED
+            # BYTES, and that round's contract with the page was byte-identity. **That was A147's
+            # promise rather than a standing rule**, so A149 added `schedule.py:515` and the two
+            # inventories agree again. The label is copied from this line, not rewritten.
             (indicator("over", "nodata", ""), "No closing total held"),
         ]),
     ]
