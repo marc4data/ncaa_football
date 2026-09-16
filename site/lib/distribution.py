@@ -224,7 +224,20 @@ def describe(row) -> str:
     as_of = row.get("as_of_date")
     if as_of is not None and not pd.isna(as_of):
         bits.append(f"as of {as_of}")
-    return " · ".join(bits)
+    # 🚨 A150. ONE STATEMENT PER LINE — MARC, v17: *"I like the new hover tooltip, but can you
+    # include a `<br>` between each statement"*, with his own five-line sketch beside it.
+    #
+    # ⚠️ `<br>` IS THE INTENT AND WOULD BE A DEFECT AS AN IMPLEMENTATION. Every consumer of this
+    # string is a NATIVE tooltip — three `title='…'` attributes in this module and an SVG
+    # `<title>` element in `matchup.py` — and native tooltips render PLAIN TEXT. A literal `<br>`
+    # would reach the reader as the four characters `<br>`.
+    #
+    # ✅ SO THE SEPARATOR IS A NEWLINE AND THE ESCAPING IS THE CALLER'S. This function returns
+    # plain text, which is what it has always returned and what makes it testable; `_attr()`
+    # turns the newline into `&#10;` for the three attribute call sites. **An SVG `<title>` is
+    # ELEMENT content and needs no such thing — a raw newline is already a line break there**,
+    # which is the note `matchup.py`'s `_circle_title` needs when B126 makes the same change.
+    return "\n".join(bits)
 
 
 def thumbnail(row, label: str = "", width: int = 120) -> str:
@@ -249,7 +262,7 @@ def thumbnail(row, label: str = "", width: int = 120) -> str:
     svg = (f"<svg class='cfdb-dist-svg' viewBox='0 0 {width} {height}' "
            f"width='{width}' height='{height}' preserveAspectRatio='none' aria-hidden='true'>"
            f"{_bars(counts, width, height)}{_median_tick(row, width, height)}</svg>")
-    return (f"<span class='cfdb-dist' title='{describe(row)}'>"
+    return (f"<span class='cfdb-dist' title='{_attr(describe(row))}'>"
             f"<span class='cfdb-dist-label'>{label}</span>{svg}"
             f"<span class='cfdb-dist-median'>{median_text}</span></span>")
 
@@ -320,7 +333,7 @@ def panel(row, label: str = "", width: int = 420) -> str:
         tails.append(f"{int(row['above_max_count'])} above")
     tail_note = f" · {' and '.join(tails)} the axis" if tails else ""
 
-    return (f"<div class='cfdb-dist-panel' title='{describe(row)}'>"
+    return (f"<div class='cfdb-dist-panel' title='{_attr(describe(row))}'>"
             f"<div class='cfdb-dist-head'><b>{label}</b>"
             f"<span class='cfdb-dist-sub'>{subtitle}{tail_note}</span></div>"
             f"<div class='cfdb-dist-body'>{svg}"
@@ -345,6 +358,26 @@ TICK_PERCENTILES = "percentiles"   # p25, p50, p75 — the box's own edges
 # TICK_BOUNDS draws the whisker ends only — what Marc called "upper/lower boundaries".
 TICK_BOUNDS = "bounds"
 TICK_NONE = "none"
+# 🚨 A150. MIN · MAX · p25 · p75 — MARC, v17: *"label MIN, Max, 25pctl, 75pctl where there is
+# room"*, and, when Cowork asked what the whisker ends should then do: *"MIN and MAX should be
+# labeled on the axis, the whisker endpoints don't need to be labeled."*
+#
+# 🚨 HE IS SWAPPING TWO LABELS, NOT ADDING TWO. `TICK_PERCENTILES` prints FIVE — `lo` and `hi`,
+# which are the WHISKER ends, then p50, p25, p75. This prints FOUR and neither whisker end is
+# among them. **The median is not in his list either**; it stays in the tooltip, and the bold
+# rule already draws it on the chart without a number.
+#
+# ⚠️ A FOURTH STRATEGY RATHER THAN A REDEFINITION, because `TICK_PERCENTILES` is the default that
+# every other caller and 130 tests read. Marc asked for strategies in v06 — *"I want to set
+# labels, tick mark strategy, etc"* — and this is what those constants are for.
+#
+# 🚨 IT IMPLIES THE WIDER FRAME, AND THAT IS A CORRECTNESS RULE RATHER THAN A CONVENIENCE. A label
+# is a mark, and this module's existing law — A142's — is that a mark at the extreme has to be
+# inside the viewBox: "clamping an outlier to the boundary tells the reader it is AT the extreme
+# when it is BEYOND it." **A MIN label placed against a frame that stops at the whisker would sit
+# on top of the whisker end and say the minimum is there.** So asking for these ticks asks for
+# the frame that can hold them honestly.
+TICK_EXTREMES = "extremes"
 
 BOX_HEIGHT = 26
 
@@ -556,6 +589,27 @@ def _esc(text: str) -> str:
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+def _attr(text: str) -> str:
+    """Text for an HTML ATTRIBUTE, which is a different job from `_esc`'s element content.
+
+    🚨 THE NEWLINE IS THE WHOLE REASON THIS EXISTS (A150). `describe()` now separates its
+    statements with `\n` and the three call sites interpolate it straight into `title='…'`. A raw
+    newline inside an attribute is fragile — it survives a browser but not necessarily a
+    sanitiser between here and one — so it is emitted as the numeric reference `&#10;`, which is
+    a line break in every native tooltip and is not markup anybody can mangle.
+
+    ⚠️ `_esc`'s docstring says the attributes "are NOT routed through here and that is deliberate:
+    changing them would move bytes on every chart the site already draws". ✅ **That reasoning was
+    right and its premise is gone** — this round moves those bytes on purpose, so escaping them
+    correctly costs nothing extra and closes the gap that comment was tolerating.
+    📊 On every published row, escaping changes NOTHING but the newline: `describe()` composes
+    from numbers, fixed words and a date, and carries no `&`, `<`, `>` or `'` — measured, not
+    assumed.
+    """
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace("'", "&#39;").replace("\n", "&#10;"))
+
+
 def _titled(body: str, title: Optional[str]) -> str:
     """A mark, with its own hover if it was given one.
 
@@ -671,6 +725,7 @@ def box(row, value=None, width: int = 240, label: str = "",
         value_below=_UNSET, value_below_label: Optional[str] = None,
         value_below_color: Optional[str] = None,
         frame: Optional[tuple] = None, outliers: bool = False,
+        frame_extremes: bool = False,
         value_title: Optional[str] = None,
         value_below_title: Optional[str] = None,
         height: Optional[int] = None) -> str:
@@ -740,6 +795,11 @@ def box(row, value=None, width: int = 240, label: str = "",
     outliers           draw `min_value`/`max_value` as rings where they lie outside the whiskers.
                        OFF BY DEFAULT, so every existing caller renders the same bytes; on, it
                        widens the frame, which is the honest cost of showing the tail
+    frame_extremes     widen the scale to `min_value`/`max_value` and draw NOTHING there — A150,
+                       Marc's v17: "the boundaries of the chart should extend to the MIN and
+                       MAX". OFF BY DEFAULT. `outliers` and `ticks=TICK_EXTREMES` each imply it,
+                       because a ring and a label both have to sit inside the viewBox to be
+                       truthful; this is the third way to ask, for a caller that wants neither
     value_title        hover text for the value marker — a native SVG `<title>`, measured to
                        survive Streamlit's sanitiser. The words are the caller's (§4.2.1)
     value_below_title  as `value_title`, for the below side
@@ -797,16 +857,32 @@ def box(row, value=None, width: int = 240, label: str = "",
     for marker_value, _label, _color, _side, _title in markers:
         frame_lo, frame_hi = min(frame_lo, marker_value), max(frame_hi, marker_value)
 
-    # 🚨 A142. A RING DRAWN AT THE EXTREME HAS TO BE INSIDE THE viewBox, so the frame takes the
+    # 🚨 A142. A MARK DRAWN AT THE EXTREME HAS TO BE INSIDE THE viewBox, so the frame takes the
     # extremes the same way it takes the value markers — and for the same stated reason, which is
     # that clamping an outlier to the boundary tells the reader it is AT the extreme when it is
-    # BEYOND it. ⚠️ ONLY WHEN `outliers` IS ON: an unasked-for widening would move every chart the
-    # site already draws, which is the one thing a default may not do.
-    out_min, out_max = (num("min_value"), num("max_value")) if outliers else (None, None)
-    if out_min is not None:
-        frame_lo = min(frame_lo, out_min)
-    if out_max is not None:
-        frame_hi = max(frame_hi, out_max)
+    # BEYOND it. ⚠️ NEVER BY DEFAULT: an unasked-for widening would move every chart the site
+    # already draws, which is the one thing a default may not do.
+    #
+    # 🚨 A150 SPLIT THE WIDENING FROM THE RINGS, AND THE IMPLICATION ONLY EVER RAN ONE WAY.
+    # A142's argument is *a ring implies widening*; it was written as `if outliers`, which also
+    # made it *widening implies rings*. **Marc asked for the frame and said nothing about rings**
+    # — v17: *"the boundaries of the chart should extend to the MIN and MAX"* — so the three
+    # things that need the wider frame now ask for it independently:
+    #
+    #     outliers=True         a ring is drawn AT min/max, so it must be inside the box
+    #     ticks=TICK_EXTREMES   a LABEL is drawn at min/max, same rule, same reason
+    #     frame_extremes=True   the caller wants the range visible with no marks at all
+    #
+    # ⚠️ `min_value`/`max_value` ARE READ UNCONDITIONALLY NOW and that is free — two `row.get`s —
+    # but they WIDEN only when one of the three asks. The reading and the widening were one
+    # expression before, which is what welded the two features together.
+    out_min, out_max = num("min_value"), num("max_value")
+    wants_extremes = outliers or frame_extremes or ticks == TICK_EXTREMES
+    if wants_extremes:
+        if out_min is not None:
+            frame_lo = min(frame_lo, out_min)
+        if out_max is not None:
+            frame_hi = max(frame_hi, out_max)
 
     # 🚨 A139, cfdb-wta-R-927. `frame=(lo, hi)` PUTS TWO CHARTS ON ONE SCALE, and it is the
     # honest version of a thing B114 refused to fake from the page.
@@ -928,12 +1004,28 @@ def box(row, value=None, width: int = 240, label: str = "",
               marker_label if marker_label is not None
               else fmt.number(marker_value, dp=dp),
               marker_color)
-    if ticks != TICK_NONE:
+    # ⚠️ THE WHISKER ENDS ARE NOT LABELLED UNDER `TICK_EXTREMES` — Marc, v17: *"the whisker
+    # endpoints don't need to be labeled"*. Every other strategy prints them exactly as before.
+    if ticks not in (TICK_NONE, TICK_EXTREMES):
         place("below", at(lo), fmt.number(lo, dp=dp))
         place("below", at(hi), fmt.number(hi, dp=dp))
     if ticks == TICK_PERCENTILES:
         for edge in (p50, p25, p75):
             place("below", at(edge), fmt.number(edge, dp=dp))
+    elif ticks == TICK_EXTREMES:
+        # 🚨 THE ORDER IS MARC'S AND IT IS ALSO THE PRIORITY, because `place()` is
+        # first-come-first-served and drops whatever will not fit (its own rule 2). *"label MIN,
+        # Max, 25pctl, 75pctl where there is room"* — so when the four cannot all fit, the two he
+        # named first survive, which are also the two the chart has never shown before.
+        #
+        # ⚠️ AND A ROW MAY NOT CARRY THEM. `min_value`/`max_value` are published by the four
+        # distribution siblings but this module does not require them — `box()` already returns
+        # its empty state only for p25/p50/p75 and the whiskers. A missing extreme is skipped,
+        # never drawn at a substitute position (R-084's rule: render nothing rather than
+        # substitute something).
+        for edge in (out_min, out_max, p25, p75):
+            if edge is not None:
+                place("below", at(edge), fmt.number(edge, dp=dp))
 
     # ⚠️ THE BOX KEEPS ITS OWN COORDINATES AND THE BAND IS ADDED AROUND IT, so every line above
     # this point is written once and the one-value SVG is unchanged to the byte.
@@ -977,7 +1069,7 @@ def box(row, value=None, width: int = 240, label: str = "",
            f"height='{total_height:g}' "
            f"role='img' aria-label='{reading}' "
            f"style='display:block;max-width:100%'>{body}</svg>")
-    return f"<span class='cfdb-dist' title='{describe(row)}'>{svg}</span>"
+    return f"<span class='cfdb-dist' title='{_attr(describe(row))}'>{svg}</span>"
 
 
 def render(html: str) -> None:

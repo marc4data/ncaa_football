@@ -1196,4 +1196,124 @@ def test_a_row_with_neither_still_degrades_rather_than_inventing():
     bare = _tall_row()
     del bare["weeks_counted"]
     text = distribution.describe(bare)
-    assert "n=370 ·" in text and "over" not in text and " of " not in text, text
+    # ⚠️ `"n=370 ·"` BECAME `"n=370\n"` IN A150 — the separator changed by instruction (Marc, v17:
+    # one statement per line), not the property. **What this test pins is that the bare row claims
+    # NO NOUN**, and that is unchanged: the assertion still reads the first statement in full and
+    # still refuses both "over" and " of ".
+    assert text.split("\n")[0] == "n=370", text
+    assert "over" not in text and " of " not in text, text
+
+
+# ── A150: MIN to MAX, and a tooltip that breaks ────────────────────────────────────────────
+
+def _label_texts(svg: str) -> list:
+    """The label STRINGS only.
+
+    ⚠️ NOT NAMED `_texts`. This file already has one at line ~370 returning `(x, text)` PAIRS, and
+    a second definition later in the module silently replaces it for every test above — which is
+    exactly what happened while this block was being written: four unrelated tests failed with
+    `ValueError: too many values to unpack`. **A test helper appended to a long file is a name
+    collision waiting to happen, and the collision breaks the tests that were already passing.**
+    """
+    return re.findall(r"<text[^>]*>([^<]*)</text>", svg)
+
+
+def _frame_span(svg: str) -> float:
+    """The viewBox width — the frame, in the only place the SVG states it."""
+    return float(re.search(r"<svg viewBox='0 0 ([\d.]+) ", svg).group(1))
+
+
+def test_the_extremes_strategy_labels_marcs_four_and_neither_whisker_end():
+    """> **MARC, v17:** *"label MIN, Max, 25pctl, 75pctl where there is room"*, and when asked what
+    > the whisker ends should do: *"MIN and MAX should be labeled on the axis, the whisker
+    > endpoints don't need to be labeled."*
+
+    🚨 HE IS SWAPPING TWO LABELS, NOT ADDING TWO — so this asserts the ABSENCES as hard as the
+    presences. A test that only checked min and max were there would pass on a chart printing
+    six numbers, which is the opposite of what he asked for.
+    """
+    row = _tall_row()
+    svg = distribution.box(row, width=420, ticks=distribution.TICK_EXTREMES, show_value=False)
+    texts = _label_texts(svg)
+    assert "57.0" in texts, texts          # min_value
+    assert "856.0" in texts, texts         # max_value
+    assert "255.5" in texts and "474.8" in texts, texts   # p25, p75
+    # 🚨 whisker_high is 762.0 and is NOT labelled. min_value and whisker_low are both 57.0 on
+    # this row, which is why the whisker assertion is made on the HIGH end — the only end where
+    # the two values differ, and therefore the only end where the test can tell them apart.
+    assert "762.0" not in texts, f"the whisker end must not be labelled: {texts}"
+    assert "367.0" not in texts, f"the median is not in Marc's list: {texts}"
+
+
+def test_the_extremes_strategy_widens_the_frame_because_a_label_must_be_inside_it():
+    """A142's law applied to a label: a mark drawn at the extreme has to be inside the viewBox,
+    or it sits at the boundary and tells the reader the minimum is somewhere it is not."""
+    row = _tall_row()
+    default = distribution.box(row, width=420, show_value=False)
+    extremes = distribution.box(row, width=420, ticks=distribution.TICK_EXTREMES,
+                                show_value=False)
+    # The frame is the same pixel width; what changes is the VALUE RANGE mapped onto it, which
+    # shows up as the position of a landmark both charts draw — the median rule.
+
+    def median_x(svg):
+        return float(re.search(r"<line x1='([\d.]+)'[^>]*stroke-width='1.8'", svg).group(1))
+    assert median_x(default) != median_x(extremes), (
+        "the scale did not move, so the frame did not widen")
+
+
+def test_frame_extremes_widens_without_drawing_a_single_ring():
+    """🚨 A142 WROTE THE WIDENING AS `if outliers`, WHICH MADE *widening implies rings* TRUE TOO.
+    Marc asked for the frame and said nothing about rings, so the two are separable."""
+    row = _tall_row()
+    widened = distribution.box(row, width=420, frame_extremes=True, show_value=False)
+    ringed = distribution.box(row, width=420, outliers=True, show_value=False)
+    assert "<circle" not in widened, "frame_extremes must draw no rings"
+    assert "<circle" in ringed, "outliers must still draw them"
+    # Same scale both ways — the widening is identical, only the marks differ.
+
+    def median_x(svg):
+        return float(re.search(r"<line x1='([\d.]+)'[^>]*stroke-width='1.8'", svg).group(1))
+    assert median_x(widened) == median_x(ringed)
+
+
+def test_the_default_still_frames_on_the_whiskers_and_draws_nothing_new():
+    """⚠️ A145's RULE: the explicit default must be indistinguishable from before. A caller that
+    asks for none of the three ways in gets the chart it already had."""
+    row = _tall_row()
+    svg = distribution.box(row, width=420, show_value=False)
+    assert "<circle" not in svg
+    # whisker_high 762.0 is the frame's top, not max_value 856.0 — so the whisker serif sits at
+    # the right-hand edge. If the frame had widened, it would not.
+    serifs = re.findall(r"<line x1='([\d.]+)' y1='[\d.]+' x2='[\d.]+' y2='[\d.]+' "
+                        r"stroke='currentColor' stroke-width='1'", svg)
+    assert serifs, svg
+    assert max(float(x) for x in serifs) > _frame_span(svg) - 12, (
+        "the high whisker must still reach the frame edge at the default")
+
+
+def test_the_tooltip_breaks_one_statement_per_line():
+    """> **MARC, v17:** *"I like the new hover tooltip, but can you include a `<br>` between each
+    > statement"* — with his own five-line sketch.
+
+    ⚠️ AND `<br>` WOULD BE A DEFECT: every consumer is a NATIVE tooltip, which renders plain text.
+    """
+    text = distribution.describe(_tall_row())
+    lines = text.split("\n")
+    assert len(lines) == 5, lines
+    assert lines[0].startswith("n=370")
+    assert lines[1].startswith("p25") and lines[2].startswith("median") and lines[3].startswith("p75")
+    assert "beyond the whiskers" in lines[4], lines
+    assert "<br>" not in text, "a literal <br> would reach the reader as four characters"
+    assert " · " not in text
+
+
+def test_the_attribute_escaper_turns_the_break_into_a_numeric_reference():
+    """A raw newline in an attribute is fragile between here and a browser; `&#10;` is not."""
+    attr = distribution._attr(distribution.describe(_tall_row()))
+    assert "&#10;" in attr and "\n" not in attr
+    assert attr.count("&#10;") == 4, attr
+    # And the three chart entry points actually route through it.
+    for html in (distribution.box(_tall_row(), width=240),
+                 distribution.thumbnail(_row()),
+                 distribution.panel(_row())):
+        assert "&#10;" in html, html[:120]
