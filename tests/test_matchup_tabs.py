@@ -338,7 +338,22 @@ def test_no_post_game_content_was_stubbed(page):
             found = len(re.findall(r"from srv_game_team\b", body))
             if found:
                 reads[node.name] = found
-    assert reads == {"_post_game": 1, "_game_team_rows": 1}, (
+    # 🚨 A THIRD READER, ADDED BY R-899, AND IT IS THE GRAIN ARGUMENT B091's AMENDMENT ALREADY
+    # MADE — restated once rather than assumed to carry.
+    #
+    #     `_post_game`        ONE game's two rows — the box score
+    #     `_game_team_rows`   ONE game's two rows — A106's three deltas, on the other tab
+    #     `_game_calendar`    TWO TEAMS' WHOLE REGULAR SEASONS — Marc's v14 calendar strip
+    #
+    # ⚠️ THE THIRD IS NOT THE SECOND WITH A WIDER `where`. It returns up to 26 rows against two,
+    # it is ordered by kickoff, and it carries six per-game yardage columns the deltas query has
+    # no use for. **Folding them together would make the delta panel pay for the strip's rows on
+    # every render and give the strip a `limit 2`** — which is the coupling this map exists to
+    # prevent, pointed the other way.
+    #
+    # ✅ AND THE MAP IS WHY THIS IS A ONE-LINE AMENDMENT RATHER THAN A JUDGEMENT CALL: a fourth
+    # reader, or any of these three splitting in two, still fails.
+    assert reads == {"_post_game": 1, "_game_team_rows": 1, "_game_calendar": 1}, (
         f"srv_game_team is read somewhere new, or the box score split back into two reads "
         f"(G-2, one read two renderings): {reads}")
     # 🚨 R-839/B110. THIS WAS `== 1` AND IS NOW `== 0`, AND IT IS THE §3.3 EVIDENCE RATHER
