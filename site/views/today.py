@@ -1093,7 +1093,7 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             Col("lead_changes", "Lead changes, game", kind="num"),
             Col("excitement_index", "Excitement", kind="num", dp=1),
             Col("espn", "Commentary", render=_espn_link),
-        ], layout=layout,
+        ], layout=layout, anchor="most-exciting",
             caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
                     "even win probability from the fourth quarter onward (lower is closer)."))
 
@@ -1204,7 +1204,8 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
          Col("spread", "Favored by", kind="num", dp=1),
          Col("fav_margin", "Margin", kind="num"),
          Col("fav_win_prob", "Market gave them", kind="num", dp=3)],
-        caption="Ranked by the loser's pregame market-implied win probability.")
+        caption="Ranked by the loser's pregame market-implied win probability.",
+        anchor="how-the-week-went-against-the-market")
 
     st.markdown("**Biggest underdog covers**")
     st.caption(
@@ -1215,7 +1216,8 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
                  [Col("underdog", "Underdog"), Col("favorite", "Favorite"),
                   Col("spread", "Getting", kind="num", dp=1),
                   Col("beat", "Covered by", kind="num", dp=1)],
-                 caption="Ranked by points beyond the closing spread.")
+                 caption="Ranked by points beyond the closing spread.",
+                 anchor="how-the-week-went-against-the-market")
 
     disagree = int(graded["favorite_definitions_disagree"].fillna(False).sum())
     if disagree:
@@ -1339,7 +1341,8 @@ def _movers(scope, depth: int) -> None:
                         if r.get("line_movement_spans_snapshot_gap") else "complete")),
             ], caption=f"Spread and total in points; win probability in de-vigged "
                        f"probability points. Prices from {book}. A row marked "
-                       f"\u201chas a gap\u201d is a floor, not a measurement.{caveat}"))
+                       f"\u201chas a gap\u201d is a floor, not a measurement.{caveat}"),
+            anchor="the-weeks-movers")
 
 
 def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380) -> str:
@@ -1522,7 +1525,8 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("total_yards", "Total", kind="num"),
                 Col("rushing_yards", "Rush", kind="num"),
                 Col("passing_yards", "Pass", kind="num"),
-            ], caption="Ranked by total offense."))
+            ], caption="Ranked by total offense."),
+            anchor="leaderboards")
 
     with states.section("srv_player_game_log", dataset=DATASETS["srv_player_game_log"]):
         yards = _player_board(scope, depth, ("passing", "rushing", "receiving"), "YDS")
@@ -1535,7 +1539,8 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("player_name", "Player"), Col("team", "Team"),
                 Col("stat_category", "Category"),
                 Col("stat_value", "Yards", kind="num"),
-            ], caption="Passing, rushing and receiving yards in one board."))
+            ], caption="Passing, rushing and receiving yards in one board."),
+            anchor="leaderboards")
 
         tds = _player_board(scope, depth, ("passing", "rushing", "receiving"), "TD")
         st.markdown("**Touchdowns**")
@@ -1548,7 +1553,8 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("player_name", "Player"), Col("team", "Team"),
                 Col("stat_category", "Category"),
                 Col("stat_value", "TD", kind="num"),
-            ], caption="Passing, rushing and receiving touchdowns."))
+            ], caption="Passing, rushing and receiving touchdowns."),
+            anchor="leaderboards")
 
         st.markdown("**Defensive leaders**")
         defense = _player_board(scope, depth, ("defensive",), "TOT")
@@ -1560,7 +1566,8 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("player_name", "Player"), Col("team", "Team"),
                 Col("opponent", "Opponent"),
                 Col("stat_value", "Tackles", kind="num"),
-            ], caption="Total tackles. TFL and sacks are separate stat types on the same view."))
+            ], caption="Total tackles. TFL and sacks are separate stat types on the same view."),
+            anchor="leaderboards")
 
 
 # ⚠️ R-562. THE ONLY ALTAIR IN THE SITE, AND IT IS NOT A NEW DEPENDENCY.
@@ -1712,7 +1719,8 @@ def _bump(scope, depth: int) -> None:
             Col("points", "Points", kind="num"),
             Col("delta", "vs previous week"),
         ], caption=f"{poll}, week {latest_week}. Points are the poll total; first-place votes "
-                   "are carried separately on the view.")
+                   "are carried separately on the view.",
+            anchor="poll-movement")
 
 
 def _recap(scope, depth: int) -> None:

@@ -1370,7 +1370,8 @@ def body(page) -> None:
         df = _rows(scope.season, scope.week, scope.season_type, scope.conference,
                    scope.division)
         table.as_of_caption(df)          # R-158: into Band 1, beside the status.
-        df = table.apply_sort(df, _columns(scope))
+        # A141: `table.render` applies the sort it draws — see its docstring. Nothing
+        # between here and the render depends on the row order.
 
         # R-158 BAND 3, reordered: the view switch is the row's only CONTROL, so it leads.
         # Dataset and the Legend button are references and follow it.
