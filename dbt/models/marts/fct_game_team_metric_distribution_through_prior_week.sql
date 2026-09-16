@@ -77,6 +77,52 @@
 -- and fires if it moves by a single week. The precedent gets its guarantee from the frame; this
 -- model has to earn the same guarantee from an assertion, and saying so is the point of this note.
 --
+-- ── 🚨 THE WEEK BOUNDARY IS KEPT, AND IT IS NOT FREE — A148, cfdb-main-R-1013/R-1016 ─────────
+--
+-- 🚨 THE BOX AND THE MARKS ON IT CARRY DIFFERENT DEFINITIONS OF *BEFORE*, AND THAT IS DELIBERATE
+-- AS OF THIS NOTE RATHER THAN UNNOTICED. This model bounds on `(season_type_ordinal, week) <`;
+-- `matchup._game_calendar` bounds its circles on `game_date <` (cfdb-wta-R-1000). Same axis, same
+-- picture, two windows. ⚠️ THEY AGREE WHEREVER A WEEK LABEL AND A KICKOFF ORDER THE SAME WAY, AND
+-- THIS PROJECT'S DATA CONTAINS PLACES WHERE THEY DO NOT.
+--
+-- 📊 MEASURED, EVERY SEASON `fct_game_team` HOLDS: 128 (earlier-slot, later-slot) pairs across 45
+-- of 157 seasons contain a game whose date is NOT earlier than a game in a later slot. Restricted
+-- to the population this model actually draws from — observations carrying a value, 2024-2026,
+-- 4,076 team-games — 360 of them are admitted by the week rule into a preview whose kickoff they
+-- do not precede, across 36 previews.
+--
+-- ✅ BUT THE PANEL CANNOT DRAW MOST OF THOSE, AND THAT IS A MEASUREMENT AND NOT A CONSOLATION.
+-- `_yardage` returns its own Empty state unless BOTH sides carry `games_counted > 0` on
+-- `srv_team_week`. Of the 36, exactly FOUR clear that gate, and 32 do not: they are 2025 Division
+-- II and III fixtures that CFBD files under `postseason` weeks 13 and 14 while playing them in
+-- November, and no box is ever drawn for them.
+--
+-- 📊 SO THE READER-REACHABLE EXPOSURE IS TWO PREVIEWS PER SEASON AND IT IS THE SAME FIXTURE BOTH
+-- TIMES — the Celebration Bowl, kicking off at 17:00Z on championship Saturday, whose box counts
+-- the Army-Navy game that kicks off at 20:00Z THREE HOURS LATER. Two team-game observations of
+-- 1,746 (2024) and of 1,776 (2025): 0.115% and 0.113%. ⚠️ THE OTHER TWO SAME-DAY PREVIEWS KICK OFF
+-- AFTER Army-Navy, so including it there is CORRECT and a date bound would be the thing in error.
+--
+-- 🚨 AND THAT IS WHY THE WEEK BOUND STAYS. THE SLOT IS NOT A MOMENT: `postseason` week 1 spans
+-- 2024-12-14 to 2025-01-20, THIRTY-SEVEN DAYS. Any week-grain bound has to elect one instant to
+-- stand for the whole slot, and every candidate is wrong for some game inside it — bounding on the
+-- slot's FIRST kickoff fixes the Celebration Bowl and then wrongly hides Army-Navy from the
+-- January final, 37 days after it was played. ⚠️ A SECOND WRONG WINDOW IS NOT AN IMPROVEMENT ON
+-- ONE.
+--
+-- ✅ THE ONLY CORRECT FIX IS GAME GRAIN, AND IT IS COSTED RATHER THAN WAVED AT: the 47 week slots
+-- carried here hold 10,479 games, so the relation goes from 846 rows to roughly 223x that, with 18
+-- percentile_cont computations per game instead of per week. 📊 AGAINST A DEFECT WORTH 0.115% OF
+-- ONE BOX: removing the two observations moves the largest affected quartile by 0.81% of that
+-- box's own IQR — `passing_yards` p25 155.0 -> 156.0 on an IQR of 124 — which is 1.7px on the
+-- 206px row the panel draws. ⚠️ NOT ZERO, AND STATED RATHER THAN ROUNDED AWAY.
+--
+-- ⚠️ SO `assert_the_prior_week_distribution_excludes_its_own_week` STILL ASSERTS THE RIGHT THING:
+-- the boundary this model means. It is not asserting that no observation post-dates a preview,
+-- because at this grain that is not true and a test claiming it would be the decoration R-760
+-- describes. **The caption that would tell a reader which window this is lives in `matchup.py`,
+-- which is session B's file — reported, not reached into (cfdb-main-R-1017).**
+--
 -- ⚠️ ORDERED BY (season_type_ordinal, week), NEVER BY week ALONE — `fct_team_yardage_week`'s rule:
 -- "Postseason week numbers restart at 1, so ordering on week would sort a bowl game into the
 -- middle of October." ✅ It also means a POSTSEASON week 1 preview inherits the whole regular
