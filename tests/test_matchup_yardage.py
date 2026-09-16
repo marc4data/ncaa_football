@@ -3261,25 +3261,47 @@ def test_the_METRIC_HEADER_SPANS_THE_PAGE_and_is_emitted_ONCE_per_metric(panel):
         "an Altair chart is still being shipped — the scatter was replaced by a box-and-whisker")
 
 
-def test_each_SECTION_HEADER_carries_a_BOLD_RULE_beneath_it(panel):
-    """🚨 cfdb-wta-R-900. Marc, v14: *"has a bold line underneath it."*
+def test_each_SECTION_HEADER_carries_THE_BOLD_RULE_ABOVE_and_a_LIGHT_ONE_BELOW(panel):
+    """🚨 cfdb-wta-R-995. **RENAMED FROM `…carries_a_BOLD_RULE_beneath_it`, BECAUSE THE OLD NAME
+    NOW DESCRIBES THE OPPOSITE OF THE CODE.**
 
-    ⚠️ THIS REPLACES A HAIRLINE THAT MEANT SOMETHING ELSE. The old rule was `opacity:.12`
-    BETWEEN the blocks and not before the first — a separator. Marc has asked for a rule UNDER
-    each heading, including the first, which is a different element doing a different job: it
-    binds the name to the rows beneath it rather than parting two neighbours.
-    ✅ **It is `_SECTION_RULE`, B112's own 2px constant, reused rather than re-declared** — the
-    post-game tab draws exactly this under exactly this heading.
+    **Marc, v16:** *"Can you move the dark separator line to be above the row title instead of
+    below. Replace the lower line with one that is much lighter, the same weight as horizontal
+    line in the box-whisker plots."*
+
+    ⚠️ HE IS CHANGING HIS OWN v14 INSTRUCTION — *"has a bold line underneath it"* — which is what
+    this test used to quote. **A test keeping the old quote would have read as evidence that the
+    new code was wrong**, which is the comment-versus-code class five findings deep this week.
+
+    🚨 AND IT ASSERTS THE ARRANGEMENT, NOT MERELY THE PRESENCE OF TWO RULES. Both rules exist in
+    either layout; what Marc asked for is WHICH IS WHERE. A `rule in header` check — the old
+    assertion — passes on a heading that put the 2px back underneath, so this reads the order the
+    markup actually emits and the side each border sits on.
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
     rule = _module_constant("_SECTION_RULE")
+    light = _module_constant("_SECTION_UNDERRULE")
+    assert rule.startswith("border-top:2px"), (
+        f"the heavy rule is not on top of the heading: {rule!r} — Marc asked for the dark "
+        f"separator above the row title")
+    assert light.startswith("border-top:1px") and "opacity:.55" in light, (
+        f"the lower rule is not the box-whisker's weight: {light!r}. `distribution.py` draws its "
+        f"horizontal rule at stroke-width 1, opacity .55, which is what he asked to match")
     headers = [str(b) for k, b in entries
                if k == "markdown" and _plain(str(b)) in {"Rushing", "Passing", "Total"}
                and "gained-allowed" not in str(b)]
     assert len(headers) == 3, f"expected three section headings, got {len(headers)}"
     for header in headers:
-        assert rule in header, (
-            f"a section heading has no bold rule under it: {header}")
+        assert rule in header, f"a section heading has no heavy rule: {header}"
+        assert light in header, f"a section heading has no light lower rule: {header}"
+        # 🚨 ORDER IS THE ASSERTION. The heavy rule belongs to the heading element itself and the
+        # light one to a div that FOLLOWS it, so the heading's own markup must come first.
+        assert header.index(rule) < header.index(light), (
+            f"the light rule is emitted before the heading, so the heavy separator is not the "
+            f"thing at the top of the section: {header}")
+        assert "padding-bottom" not in header.split(light)[0], (
+            f"the heading still carries the padding it used to hold itself off a rule BELOW it; "
+            f"with the rule above, that space belongs on top: {header}")
 
 
 def test_the_SUBTRACTION_RULE_is_drawn_and_not_merely_specified(panel):

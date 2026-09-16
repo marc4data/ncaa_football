@@ -3853,15 +3853,44 @@ def _accent(pair) -> str:
 # visible word and leaves the others is a rename that half happened.
 _ADVANCED_SECTION = "Advanced Team Stats"
 
-# 🚨 R-885. THE BOLD UNDERLINE UNDER EACH SECTION NAME — Marc, v11: *"should have a bold
+# 🚨 R-885. THE BOLD RULE THAT DEFINES EACH SECTION — Marc, v11: *"should have a bold
 # underline to help define the section."*
 #
 # ⚠️ IT IS A SECOND, HEAVIER RULE AND NOT THE ONE ALREADY THERE. `_table_header` draws a 1px
-# rule at 25% under the LOGO ROW, which separates the header from the figures; this one sits
-# under the section's NAME and separates one section from the other. **Two rules doing two
-# jobs**, which is why this is 2px and the other stays 1px — same weight twice would read as
-# the same boundary drawn twice.
-_SECTION_RULE = "border-bottom:2px solid currentColor"
+# rule at 25% under the LOGO ROW, which separates the header from the figures; this one belongs
+# to the section's NAME and separates one section from the other. **Two rules doing two jobs**,
+# which is why this is 2px and the other stays 1px — same weight twice would read as the same
+# boundary drawn twice.
+#
+# 🚨 cfdb-wta-R-995. IT MOVED FROM `border-bottom` TO `border-top` IN B121, AND v11's WORD
+# *"underline"* IS NOW WRONG ABOUT THE CODE — WHICH IS WORTH SAYING RATHER THAN LEAVING.
+#
+# **Marc, v16:** *"Header rows (Total, Rushing, Passing. Can you move the dark separator line to
+# be above the row title instead of below. Replace the lower line with one that is much lighter,
+# the same weight as horizontal line in the box-whisker plots."*
+#
+# ⚠️ **HE IS CHANGING HIS OWN v11 AND v14 INSTRUCTIONS, NOT CONTRADICTING THE CODE.** B112 built
+# the spanning header for v14's *"a bold line underneath it"*, and that sentence is why this was
+# a `border-bottom` for nine rounds. **The 2px is unchanged and its job is unchanged — it still
+# marks where one section ends and the next begins. It now does that ABOVE the name**, which is
+# where a separator between two sections actually belongs: below the name it sat between the
+# title and the rows the title introduces.
+#
+# ✅ AND THE LOWER RULE IS A DIFFERENT THING NOW. It no longer separates sections — it closes the
+# heading off from the rows beneath, so it takes the weight of the chart's own furniture:
+# `distribution.py:774` draws the whisker rule at **`stroke-width='1' opacity='.55'`**, and this
+# is that line in CSS.
+_SECTION_RULE = "border-top:2px solid currentColor"
+
+# ⚠️ A SEPARATE `<div>` RATHER THAN A `border-bottom` ON THE HEADING, AND THAT IS THIS FILE'S OWN
+# PRECEDENT RATHER THAN A NEW MECHANISM (§4.3). `opacity` on the heading would fade the TITLE
+# with the rule; `_matchup_legend` and `_yardage_side_heading` both already draw a faded rule as
+# a standalone div — `border-top:1px solid currentColor;opacity:.75` and `…:.25` — so this is the
+# third instance of a pattern, not a first of a new one.
+# ⚠️ `color-mix(in srgb, currentColor 55%, transparent)` would also work and `site/lib/theme.py`
+# already uses `color-mix`. **The standalone div is preferred because it is THIS file's habit and
+# because it matches `opacity='.55'` exactly**, which is what Marc asked to match.
+_SECTION_UNDERRULE = "border-top:1px solid currentColor;opacity:.55"
 
 
 def _section_heading(title: str) -> str:
@@ -3876,8 +3905,14 @@ def _section_heading(title: str) -> str:
     way `st.subheader` did. A section name stretching over the player cards was always wrong;
     it only looked right while the cards were cut to the same sections.
     """
-    return (f"<div style='font-size:1.15rem;font-weight:700;margin:1.1rem 0 .4rem;"
-            f"padding-bottom:.25rem;{_SECTION_RULE}'>{html.escape(title)}</div>")
+    # ⚠️ THE PADDING MOVED WITH THE RULE AND WAS RE-TUNED BY LOOKING, NOT BY SWAPPING THE
+    # PROPERTY. `padding-bottom:.25rem` held the title off a rule BELOW it; with the 2px above,
+    # the space that matters is between that rule and the title, so it is `padding-top`. ⚠️ The
+    # top MARGIN also drops from 1.1rem to .9rem: the rule now sits at the very top of the block,
+    # so the old margin plus a visible rule read as a larger gap than v14's did.
+    return (f"<div style='font-size:1.15rem;font-weight:700;margin:.9rem 0 0;"
+            f"padding-top:.35rem;{_SECTION_RULE}'>{html.escape(title)}</div>"
+            f"<div style='{_SECTION_UNDERRULE};margin:.25rem 0 .45rem'></div>")
 
 
 def _table_header(away, home, title: str, colors=None) -> str:

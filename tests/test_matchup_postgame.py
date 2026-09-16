@@ -1752,9 +1752,18 @@ def test_each_SECTION_NAME_is_drawn_ONCE_with_a_BOLD_RULE(panel):
     fourth time on this panel (B103's invisible rule, B108's squash, B111's floating chart).
 
     ⚠️ THE RULE IS HEAVIER THAN THE HEADER ROW'S ON PURPOSE. `_table_header` draws 1px under
-    the LOGOS, which separates a header from its figures; this draws 2px under the section's
+    the LOGOS, which separates a header from its figures; this draws 2px for the section's
     NAME, which separates one section from the other. Same weight twice would read as the same
     boundary drawn twice — which is what the duplicated name looked like.
+
+    🚨 cfdb-wta-R-995 MOVED THAT 2px ABOVE THE NAME, AND THIS TAB WAS NOT WHAT MARC NAMED.
+    His v16 line is about *"Header rows (Total, Rushing, Passing"* — the BEFORE-GAME metric
+    headers. **`_section_heading` draws those AND this tab's "Box score" and "Advanced", so the
+    change reaches here too.** ✅ Taken deliberately: one element, one look — two arrangements of
+    the same heading would be the drift §4.3 exists to stop. ⚠️ **Reported so it can be reversed
+    if he meant only the three rows he named.**
+    ❌ `_CARD_RULE`, the position headings' own 2px, is untouched — a different element, and he
+    did not name it.
     """
     run, _ = panel
     body = _text(run(_both())[0])
