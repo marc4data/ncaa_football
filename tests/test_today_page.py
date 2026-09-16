@@ -761,7 +761,16 @@ def test_most_exciting_orders_on_published_columns_and_does_no_arithmetic():
     """
     assert "MOST_EXCITING_ORDER" in SOURCE, "the ordering decision must be named, not inline"
     order = re.search(r'MOST_EXCITING_ORDER = \((.*?)\)\n', SOURCE, re.S).group(1)
-    assert "lead_changes_fourth_quarter desc" in order
+    # ⚠️ A140 POINTED THE SAME KEY AT THE CORRECTED COLUMN (cfdb-main-R-916). The weighting is
+    # unchanged — same two keys, same directions, same tie-break — and the assertion below is the
+    # one that would catch a key being added or removed, which IS Marc's call.
+    assert "lead_changes_fourth_quarter_by_clock desc" in order, (
+        "the first key must be the clock-ordered column: the feed's play_number is not "
+        "chronological on 336 of 1,898 games, so the old column counts crossings that did not "
+        "happen")
+    assert order.count(",") == 2, (
+        "two keys and a tie-break, as before — adding or removing one is a weighting change and "
+        "is Marc's, not a round's")
     assert "mean_distance_from_even_fourth_quarter_onward asc" in order, (
         "the tie-break must be explicit — fourth-quarter lead changes is a small integer and "
         "ties are the common case, so without it the order inside a tie is planner accident")

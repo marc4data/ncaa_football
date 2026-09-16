@@ -69,7 +69,22 @@ POLLS = ("AP Top 25", "Coaches Poll")
 #
 # ⚠️ `nulls last` ON BOTH, because a game whose win-probability feed never reached the fourth
 # quarter must not sort as if it were a dull one. Three games of 1,898 are in that state (A117).
-MOST_EXCITING_ORDER = ("lead_changes_fourth_quarter desc nulls last, "
+# 🚨 A140, cfdb-main-R-916 — MIGRATE. THE SAME TWO KEYS, POINTED AT THE CORRECTED COLUMN.
+#
+# `lead_changes_fourth_quarter` counts win-probability crossings in the order the FEED lists the
+# plays, and `stg_game_win_probability.play_number` is not chronological: 795 consecutive pairs
+# step backwards on the clock across 336 of 1,898 games. `..._by_clock` counts the same crossings
+# in the order the plays happened.
+#
+# ⚠️ THE WEIGHTING IS UNCHANGED AND IS NOT MINE TO CHANGE. Same two keys, same directions, same
+# tie-break, same `nulls last`. Pointing an ordering at a corrected column is not a weighting
+# change; adding or removing a key would be.
+#
+# 📊 AND THE TABLE ABOVE STILL HOLDS, which is worth stating rather than leaving to be assumed:
+# **2026 week 2's top ten is IDENTICAL under both columns — same ten games, same order.** Across
+# all 35 season-weeks the correction moves 2 games into the top ten and 2 out, in 2 weeks, and
+# reorders 14 rows within it, in 3 weeks. Marc's Texas–Ohio State game does not move at all.
+MOST_EXCITING_ORDER = ("lead_changes_fourth_quarter_by_clock desc nulls last, "
                        "mean_distance_from_even_fourth_quarter_onward asc nulls last, "
                        "game_id")
 
@@ -146,6 +161,20 @@ def _completed_games(scope) -> pd.DataFrame:
     that calls that function selects the column; Today was the only one that did not. The
     message was right about itself and wrong about the view.
 
+    🚨 A140, cfdb-main-R-916 — MIGRATE. THE FIVE `lag()`-DERIVED COLUMNS ARE READ FROM THEIR
+    `..._by_clock` TWINS AND ALIASED BACK TO THEIR OLD NAMES.
+
+    The feed's `play_number` is not chronological — 795 consecutive pairs step backwards on the
+    clock across 336 of 1,898 games — so every column built from `lag()` over it counts crossings
+    and swings that did not happen. Memphis at Georgia State publishes 25 lead changes; the game
+    had 11.
+
+    ⚠️ ALIASED RATHER THAN RENAMED THROUGHOUT, DELIBERATELY. The page's vocabulary is "lead
+    changes", not "lead changes by clock": every `Col`, every filter and every caption downstream
+    keeps working and keeps meaning what it says. **The alias is the migration; the five lines
+    above are the only place a reader has to look to see which column is which.** When A141
+    CONTRACTS the old ones the alias is what disappears.
+
     🚨 A139, cfdb-main-R-934. `home_abbreviation` IS SELECTED SO THE CURVE'S FINAL VALUE CAN NAME
     ITS SIDE. The bare percentage sat beside the AWAY team's name — the scoreboard puts away on
     the top line (R-522) — and told a reader the opposite of the truth while every label was
@@ -174,10 +203,15 @@ def _completed_games(scope) -> pd.DataFrame:
                favorite_covered, spread_favorite_side, moneyline_favorite_side,
                favorite_definitions_disagree,
                market_implied_home_win_probability, market_implied_away_win_probability,
-               lead_changes, largest_single_play_swing, home_win_probability_range,
-               lead_changes_fourth_quarter, largest_single_play_swing_fourth_quarter,
+               lead_changes_by_clock as lead_changes,
+               largest_single_play_swing_by_clock as largest_single_play_swing,
+               home_win_probability_range,
+               lead_changes_fourth_quarter_by_clock as lead_changes_fourth_quarter,
+               largest_single_play_swing_fourth_quarter_by_clock
+                   as largest_single_play_swing_fourth_quarter,
                home_win_probability_range_fourth_quarter,
-               lead_changes_overtime, plays_with_win_probability_fourth_quarter,
+               lead_changes_overtime_by_clock as lead_changes_overtime,
+               plays_with_win_probability_fourth_quarter,
                mean_distance_from_even_fourth_quarter_onward,
                win_probability_curve_reaches_final_score,
                home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
