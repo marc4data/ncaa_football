@@ -2591,13 +2591,49 @@ def _week_union(week_rows, *columns):
     return min(lo for lo, _hi in spans), max(hi for _lo, hi in spans)
 
 
-def _box_frame(row, value):
-    """The span `box()` will frame this row on: its whiskers, widened by the value marker.
+# 🚨 cfdb-main-R-1028. THE PAGE'S TICK MODE, IN ONE PLACE, AND THE ONE PLACE IS THE POINT.
+#
+# **Marc, v17:** *"the boundaries of the chart should extend to the MIN and MAX"*, with those two
+# labelled and the whisker ends not. A150 shipped that as `ticks=TICK_EXTREMES`.
+#
+# 🚨 AND IT IS A CONSTANT RATHER THAN A LITERAL AT EACH CALL SITE BECAUSE **`TICK_EXTREMES`
+# SILENTLY CHANGES THE SCALE**, not just the labels: `box()` widens `frame_lo`/`frame_hi` to
+# `min_value`/`max_value` when it is set (its own `wants_extremes`). **Three things in this file
+# must therefore agree about it** — the two call sites, and `_box_frame`, which predicts the frame
+# for the circle overlay. ⚠️ **A literal at each of the three is three chances to move two.**
+_BOX_TICKS = distribution.TICK_EXTREMES
 
-    ⚠️ IT IS A READ, NOT A CALCULATION, AND IT EXISTS FOR THE REPORT RATHER THAN FOR THE PAGE.
-    Nothing in the rendered panel calls it — `_week_frame_captions` does, to say how wide each
-    series is drawn, and the tests do, to measure what a shared axis would cost. **A copy of
-    `box()`'s framing RULE would drift; this is a copy of its INPUTS, which cannot.**
+
+def _box_frame(row, value):
+    """The span `box()` will frame this row on: its whiskers, widened by the value marker — and,
+    under `_BOX_TICKS`, by the published extremes.
+
+    🚨 THE OLD DOCSTRING WAS WRONG THREE WAYS AND THE THIRD ONE COST THIS ROUND ITS PART 0.
+    It read: *"IT IS A READ, NOT A CALCULATION, AND IT EXISTS FOR THE REPORT RATHER THAN FOR THE
+    PAGE. Nothing in the rendered panel calls it — `_week_frame_captions` does … A copy of
+    `box()`'s framing RULE would drift; this is a copy of its INPUTS, which cannot."*
+
+    ❌ *"Nothing in the rendered panel calls it"* — **B122 wired it in.** `_gained_allowed` calls
+    it twice, and the frame it returns is the axis every circle is placed on.
+
+    ❌ *"`_week_frame_captions` does"* — **that function has not existed for several rounds**, and
+    this file already says so a thousand lines further up.
+
+    🚨 *"A copy of its INPUTS … cannot [drift]"* — **A150 GAVE `box()` A NEW INPUT.** A copy of a
+    function's inputs is only safe while the input list is CLOSED. Nothing was holding it closed,
+    and nothing failed.
+
+    📊 **MEASURED BEFORE THE FIX, ON EVERY REAL DISTRIBUTION ROW IN SERVING (141 of them):** the
+    two frames differ on **135**, and on a 240px row a circle moves a **median of 13.0px and up to
+    77.9px — 32% of the chart's width.** 61.5% of sampled placements drift 10px or more. ⚠️ **And
+    the clamp in `_circle_column` would have pinned the widest to the edge, which looks
+    deliberate.**
+
+    ✅ **SO THE COPY STAYS — the module exposes no way to ASK what frame it used — BUT IT IS
+    SINGLE-SOURCED TO `_BOX_TICKS` AND PROBED AT THE PAGE'S OWN CONFIGURATION.** See
+    `test_the_CIRCLES_and_the_BOX_agree_about_WHERE_A_VALUE_GOES`, which now renders a real
+    `box()` with the page's ticks rather than with the module's default — **that guard existed
+    through A150 and was blind for exactly this reason.**
     """
     if row is None:
         return None
@@ -2607,6 +2643,18 @@ def _box_frame(row, value):
     lo, hi = float(lo), float(hi)
     if value is not None and not pd.isna(value):
         lo, hi = min(lo, float(value)), max(hi, float(value))
+    # 🚨 THE HALF A150 ADDED. `box()` does this unconditionally once `wants_extremes` is true, so
+    # a frame computed here without it is an axis the box is not drawn on.
+    # ⚠️ GUARDED ON `_BOX_TICKS` RATHER THAN ALWAYS, so the day the page goes back to `TICK_NONE`
+    # this follows it instead of silently widening a chart nothing labels.
+    if _BOX_TICKS == distribution.TICK_EXTREMES:
+        for name, pick in (("min_value", min), ("max_value", max)):
+            edge = row.get(name)
+            if edge is not None and not pd.isna(edge):
+                if pick is min:
+                    lo = min(lo, float(edge))
+                else:
+                    hi = max(hi, float(edge))
     return lo, hi
 
 
@@ -2731,7 +2779,7 @@ def _box_row(row, side, caption: str, column, accent: str, frame=None, overlay: 
     # `box()` places the marker's label BEFORE the `ticks` gate, so the two are independent.
     chart = distribution.box(
         row, value=value, width=_BOX_ROW_WIDTH, label=caption, value_color=accent,
-        frame=frame, height=_BOX_BAND, ticks=distribution.TICK_NONE,
+        frame=frame, height=_BOX_BAND, ticks=_BOX_TICKS,
         value_label=(None if value is None or pd.isna(value)
                      else fmt.number(value, column, dp=1)))
     return (
@@ -3193,7 +3241,24 @@ def _circle_title(game, column) -> str:
     value = game.get(column)
     if not (value is None or pd.isna(value)):
         bits.append(f"{fmt.number(value, column, dp=0)} yards")
-    return " · ".join(bits)
+    # 🚨 cfdb-main-R-1046. ONE STATEMENT PER LINE, LIKE THE CHART'S OWN TOOLTIP UNDER IT.
+    #
+    # A150 broke `describe()` onto separate lines; this joined with `" · "`, so **two tooltips on
+    # one picture broke differently** and a reader hovering a circle and then the chart behind it
+    # saw two conventions. §4.3's drift, at the smallest possible scale.
+    #
+    # 🚨 AND THE CHARACTER IS NOT THE ONE A150 USED, WHICH IS THE WHOLE OF THIS FIX. `describe()`
+    # lands in a `title='…'` ATTRIBUTE, so A150's `_attr` emits the numeric reference `&#10;` —
+    # a raw newline in an attribute survives a browser but not necessarily a sanitiser.
+    # **This string is emitted as an SVG `<title>` ELEMENT, through `html.escape`**, and there
+    # the two swap places:
+    #
+    #     html.escape("a\nb")      -> 'a\nb'          ✅ the newline passes through and breaks
+    #     html.escape("a&#10;b")   -> 'a&amp;#10;b'   ❌ the reader sees the literal text &#10;
+    #
+    # ⚠️ **Measured in Python and then confirmed in Chromium with `el.textContent`**, because the
+    # question is what the TOOLTIP shows, not what the markup says (A150's own method).
+    return "\n".join(bits)
 
 
 def _circle_column(games, column, frame, accent, width, band: int = None) -> str:
@@ -3738,7 +3803,8 @@ def _yardage(row) -> None:
                      f"every game those weeks held, counted cumulatively rather than week by "
                      f"week, and not the teams' averages. The box is the middle half, the bold "
                      f"line inside it the median, and the whiskers run to the low and high "
-                     f"boundaries. The colored mark is "
+                     f"boundaries — while the chart itself runs past them to the lowest and "
+                     f"highest single game, labeled where there is room. The colored mark is "
                      f"that team's average per game, and each circle drawn on it is one game "
                      f"the team played, earliest at the top — filled when that game's "
                      f"opponent was an FBS team, open when it was not. ✅ Both rows are drawn "
@@ -4484,7 +4550,7 @@ def _metric_chart(row, away_value, home_value, dp, accents) -> str:
     # override is `None`, so **both sides' own figures are printed and both survive this change**
     # — away above the axis, home below it. What `TICK_NONE` removes here is the boundary pair.
     return distribution.box(
-        row, width=_TABLE_CHART_WIDTH, dp=dp, ticks=distribution.TICK_NONE,
+        row, width=_TABLE_CHART_WIDTH, dp=dp, ticks=_BOX_TICKS,
         value=away_value, value_color=away_accent, value_label=None,
         value_below=home_value, value_below_color=home_accent)
 
