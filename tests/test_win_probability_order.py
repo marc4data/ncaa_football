@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MACRO = ROOT / "dbt" / "macros" / "elapsed_from_kickoff.sql"
 PLAY = ROOT / "dbt" / "models" / "marts" / "fct_game_win_probability_play.sql"
 SUMMARY = ROOT / "dbt" / "models" / "marts" / "fct_game_win_probability_summary.sql"
+TODAY = ROOT / "site" / "views" / "today.py"
 
 
 def _code(text: str) -> str:
@@ -92,3 +93,31 @@ def test_the_two_dead_columns_do_not_come_back():
     # And nothing downstream may start selecting them either.
     for path in sorted((ROOT / "dbt" / "models" / "serving").glob("*.sql")):
         assert "final_home_win_probability" not in _code(path.read_text()), path.name
+
+
+def test_the_page_reads_the_corrected_columns_and_keeps_its_own_vocabulary():
+    """§3.3's MIGRATE, asserted where a later edit would undo it.
+
+    🚨 THE FIVE READS ARE ALIASED BACK TO THEIR OLD NAMES, which is the whole shape of the
+    migration: the page's vocabulary is "lead changes", so every `Col`, every filter and every
+    caption downstream keeps working and keeps meaning what it says. **The five aliases are the
+    only place a reader has to look to see which column is which**, and when A141 CONTRACTS the
+    old ones it is the alias that disappears.
+
+    ⚠️ SO BOTH HALVES ARE ASSERTED. Reading the `_by_clock` column without the alias would break
+    every consumer loudly; keeping the alias while reading the OLD column would be silent, and is
+    the failure this test is for.
+    """
+    body = TODAY.read_text()
+    for old, new in (("lead_changes", "lead_changes_by_clock"),
+                     ("largest_single_play_swing", "largest_single_play_swing_by_clock"),
+                     ("lead_changes_fourth_quarter", "lead_changes_fourth_quarter_by_clock"),
+                     ("largest_single_play_swing_fourth_quarter",
+                      "largest_single_play_swing_fourth_quarter_by_clock"),
+                     ("lead_changes_overtime", "lead_changes_overtime_by_clock")):
+        assert f"{new}\n                   as {old}" in body or f"{new} as {old}" in body, (
+            f"{old} is not read from {new} — the page is still ranking on the feed's order")
+
+    order = re.search(r"MOST_EXCITING_ORDER = \((.*?)\)\n", body, re.S).group(1)
+    assert "lead_changes_fourth_quarter_by_clock desc" in order, (
+        "the panel's first sort key is still the feed-ordered column")
