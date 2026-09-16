@@ -1352,6 +1352,61 @@ def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel)
             f"— and `box()` is handed that same number, so the two cannot be allowed to drift")
 
 
+def test_the_COMMENTS_ABOUT_THE_CHART_WIDTH_AGREE_WITH_THE_CODE():
+    """🚨 cfdb-wta-R-961. A COMMENT THAT MISSTATES THE CODE BESIDE IT — THE FOURTH THIS WEEK, AND
+    THE FIRST ONE CHEAP ENOUGH TO GIVE A TEST.
+
+    `matchup.py` said *"the alternative this file actually carries is **230px** at
+    `_TABLE_CELLS_EQUAL = True `"*. **The code does the opposite:** `True` makes the three value
+    cells take a third of the budget each and leaves the chart the NARROW 118px; `False` gives the
+    value cells their content width and the chart the wider 230px. ⚠️ **Twelve lines further down
+    the same file had it right**, so the file contradicted itself, and the paragraph was already
+    carrying a correction notice from R-893 when it shipped the inversion.
+
+    ✅ THE CLASS IS NOT CARELESSNESS — after A138's `play_number` docstring, B115's four dead
+    `_scatter` pointers and the note whose premises had died, the pattern is plain: **comments have
+    no test.** This is what one looks like when the comment states a NUMBER the code computes.
+
+    ⚠️ SCOPE, IN THE SAME SENTENCE AS THE CLAIM: this checks pixel figures that appear in the same
+    sentence as a `_TABLE_CELLS_EQUAL` value. **It cannot see a prose claim with no number in it**,
+    and it says nothing about the other three instances, which were not numeric. A guard that
+    caught one shape of one class is still a guard nothing else provides.
+    """
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
+
+    # Recompute BOTH widths from the module's own literals — never read `_TABLE_CHART_WIDTH`
+    # back, which would only prove the file agrees with whichever branch is shipped today.
+    budget = (_module_constant("_TABLE_ROW_BUDGET")
+              - int(_module_constant("_TABLE_LABEL_WIDTH") * _module_constant("_REM"))
+              - 3 * int(_module_constant("_TABLE_GAP") * _module_constant("_REM")))
+    width = {True: budget - 2 * (budget // 3),
+             False: budget - 2 * _module_constant("_TABLE_VALUE_CONTENT_PX")}
+    assert width[True] != width[False], (
+        "the two options compute the same width, so this test cannot tell them apart")
+
+    # Two shapes occur in the file: "**230px** at `_TABLE_CELLS_EQUAL = False`" and
+    # "`True` is 118px". Both pair a figure with a flag value in one sentence.
+    pairs = []
+    for line in source.splitlines():
+        if not line.lstrip().startswith("#"):
+            continue
+        for px, flag in re.findall(r"(\d{2,4})px\D{0,80}?`?_TABLE_CELLS_EQUAL = (True|False)",
+                                   line):
+            pairs.append((int(px), flag == "True", line.strip()))
+        for flag, px in re.findall(r"`(True|False)` is \*?\*?(\d{2,4})px", line):
+            pairs.append((int(px), flag == "True", line.strip()))
+
+    assert pairs, (
+        "no comment in matchup.py pairs a pixel figure with a `_TABLE_CELLS_EQUAL` value — this "
+        "guard has gone blind, which is exactly how the inverted claim survived R-893's fix")
+
+    wrong = [(px, flag, line) for px, flag, line in pairs if px != width[flag]]
+    assert not wrong, (
+        "a comment states a chart width the code does not produce — "
+        + " || ".join(f"says {px}px at _TABLE_CELLS_EQUAL={flag} but the code computes "
+                      f"{width[flag]}px :: {line[:90]}" for px, flag, line in wrong))
+
+
 def test_the_TABLE_HEADER_takes_the_TABLES_OWN_COLUMN_WIDTHS_and_BOTH_logos_in_order(panel):
     """🚨 AMENDED FROM B108's `test_the_SIDE_HEADING_takes_the_cells_width_and_not_the_columns`.
     The heading is a TABLE HEADER ROW now — Marc, v08: *"One big table, with a header row for
