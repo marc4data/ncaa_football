@@ -322,10 +322,35 @@ def _player_board(scope, depth: int, categories, stat_type: str) -> pd.DataFrame
 
     ⚠️ NO CLASSIFICATION COLUMN ON THIS VIEW, so `division` cannot be applied here the way it
     is on the team board — see the report. Conference still filters.
+
+    🚨 ONE SELECT LIST FEEDS ALL THREE BOARDS, which is why A149's eight new columns are one
+    change rather than three. A146 published them on this view (`63b05dd`) and nothing read them
+    for three rounds.
+
+    ⚠️ CHECKED AGAINST `information_schema` ON LIVE PUBLISHED SERVING BEFORE THEY WERE DRAWN, not
+    against A146's model file — §2.2.1c.2, which B121 learned by getting
+    `UndefinedColumn: column "opponent_classification" does not exist` back from a column a model
+    file appeared to publish. All eight are present; `srv_player_game_log` publishes 33.
+
+    🚨 AND §2.5's SECOND QUESTION — *how many rows carry it* — HAS A LOUD ANSWER FOR THE LIVE
+    SEASON, WHICH IS WHY `_player_identity` NAMES THE ABSENCE RATHER THAN DRAWING A DASH:
+
+        season   rows      jersey / position / class_year_display
+        2024     605,076   94.8%  ✅
+        2025     624,474   96.3%  ✅
+        2026     180,781   40.9%  🚨
+
+    📊 THE CAUSE IS NOT A JOIN AND NOT A PUBLISH. `marts.dim_athlete` holds **138 teams for 2026
+    and every one of them is FBS** — against 305 teams for 2025 — because `raw.raw_roster`'s 2026
+    payload was fetched ONCE, on 2026-08-15, before the season, at 5.1MB against 2025's 9.9MB.
+    **The boards are not FBS-filtered** (no classification column, above), so roughly half of any
+    top-N is a player whose team cfdb holds no 2026 roster for. Reported, not worked around.
     """
     return query("""
         select player_name, player_slug, team, conference, opponent, week,
-               stat_category, stat_type, stat_value, as_of_ts
+               stat_category, stat_type, stat_value, as_of_ts,
+               jersey, position, class_year_display,
+               team_slug, team_display, team_logo_url, team_rank, record_before_display
         from srv_player_game_log
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
@@ -988,6 +1013,110 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
     if href:
         cell = f"<a class='cfdb-teamlink' href='{href}' target='_self'>{cell}</a>"
     return f"{cell}{table.record_span(row, record_field, record_after_field)}"
+
+
+def _player_identity(row) -> str:
+    """Jersey, name and class year at the left; position at the right. One cell, two ends.
+
+    > **MARC, Today v01, verbatim:** *"Player Yardage, Touchdowns, Defensive Leaders include
+    > [Jersey #, Name, Year (left aligned)], Position (right aligned within the Player cell)"*
+
+    ⚠️ THE BRACKET IS THE SPEC. Three things travel together on the left because they identify
+    ONE player; the position is the one fact about what he does, so it takes the other end. A
+    four-column version would spend three columns of table width on two characters each.
+
+    🚨 EVERY PART IS OPTIONAL AND THE ABSENCES ARE NOT THE SAME ABSENCE (AC-G.11). For the live
+    season `srv_player_game_log` carries a jersey on **40.9%** of its rows — see `_player_board`,
+    which measured it and found the cause: 2026's roster is FBS-only. So the common case here is
+    not a missing jersey, it is **no roster row at all**:
+
+        2026, all three null together          106,645 rows
+        position present, jersey absent            121 rows
+        jersey present, position absent              0 rows
+
+    ✅ SO THE CELL HAS ONE ABSENCE WORTH NAMING AND TWO WORTH OMITTING. With nothing at all, the
+    name stands alone under a title that says WHY — *not* an em dash, which would read as a player
+    with no name. With one part missing the part is simply left out: a jersey-shaped gap before a
+    name is noise, and R-084's rule holds here as it does for a record — **render nothing rather
+    than substitute something.**
+
+    ⚠️ AND NO EM DASH MAY LAND INSIDE THE NAME. `Col.format`'s default returns `fmt.EM_DASH` for a
+    null, which is right for a standalone value column and wrong for a fragment of a composed
+    cell — the prompt's own words, *"none of them may render as an em dash in the middle of a
+    name"*. This function never calls that path; it reads the fields itself.
+
+    🚨 THE NAME ELLIPSISES AND THE POSITION DOES NOT, WHICH IS THE WHOLE REASON THE TWO ENDS ARE
+    SEPARATE ELEMENTS. `.cfdb-table .cfdb-team` already does exactly this for a team name
+    (theme.py:460) and `.cfdb-player-name` reuses that treatment, so the name gives up pixels
+    first and a two-character position is never the thing that wraps.
+
+    ⚠️ NOT `table.team_cell`'s SHAPE AND NOT `matchup.py`'s CARD. R-855 — read the existing path,
+    then test it for the case at hand. Matchup's player block is a **150px two-line preview card**
+    (`_CARD_JERSEY_SIZE` and friends, B107's counted-truncation set) and it is session B's file;
+    `team.py:322` spends a whole `Col("jersey", "#")` column on the roster table. **Neither is a
+    table cell with two ends, so this is a third shape rather than a fourth copy of a second one.**
+    """
+    name = row.get("player_name")
+    if name is None or (not isinstance(name, str) and pd.isna(name)) or name == "":
+        # The one thing the cell cannot do without. Every board filters `stat_value is not null`
+        # and the view is keyed on the player, so this is unreachable today — it returns the
+        # dash rather than raising because a leaderboard row is not worth a page state.
+        return fmt.EM_DASH
+
+    def _part(field):
+        value = row.get(field)
+        if value is None or (not isinstance(value, str) and pd.isna(value)) or value == "":
+            return None
+        return fmt.text(value)
+
+    jersey, position, year = _part("jersey"), _part("position"), _part("class_year_display")
+    # 🚨 THE JERSEY IS A NUMBER WORN, NOT A QUANTITY — `#7`, never `#7.0` and never `#7,000`.
+    #
+    # ⚠️ AND THE FIRST VERSION OF THIS LINE SHIPPED `#2.0` TO A LIVE RENDER. `srv_player_game_log`
+    # publishes `jersey` as an **integer** (`information_schema`, checked), and pandas has no
+    # integer that holds a null — so a frame where 59% of the column is missing comes back
+    # `float64` and every jersey is a float. **The unit tests could not see it: the fixture used
+    # the string `"14"`, which is R-763's exact class — a fixture whose dtype cannot hold the
+    # case the column actually carries.** §6.1's live render is what caught it.
+    #
+    # `Col.format`'s `plain` kind already states the rule for this — "A NUMERIC LABEL: no decimal
+    # point and NO THOUSANDS SEPARATOR. A season is 2025 and a game id is 401752817" — and a
+    # jersey is the same kind of thing, so it gets the same treatment rather than a new one.
+    if jersey is not None:
+        try:
+            jersey = f"{int(float(jersey))}"
+        except (TypeError, ValueError):
+            # A relation that publishes it as text keeps whatever it published. Not reachable
+            # from this view today; left honest rather than assuming one spelling forever.
+            pass
+    badge = f"<span class='cfdb-player-jersey'>#{jersey}</span>" if jersey else ""
+    year_span = f"<span class='cfdb-player-year'>{year}</span>" if year else ""
+    pos_span = f"<span class='cfdb-player-pos'>{position}</span>" if position else ""
+    title = ("" if (jersey or position or year) else
+             " title='cfdb holds no roster row for this player&#39;s team this season'")
+    return (f"<span class='cfdb-player'{title}>"
+            f"<span class='cfdb-player-who'>{badge}"
+            f"<span class='cfdb-player-name'>{fmt.text(name)}</span>{year_span}</span>"
+            f"{pos_span}</span>")
+
+
+# 🚨 THE THREE LEADERBOARDS SHARE ONE COLUMN PAIR, BECAUSE THEY SHARE ONE SELECT LIST.
+# `_player_board` is called three times with different categories and stat types and returns the
+# same shape every time, so a per-board copy of these two columns is three places to forget the
+# next change. Marc's sentence names all three boards in one breath and this is that sentence.
+#
+# ⚠️ NO `link_builder` ON ANY TABLE THAT DRAWS THESE — `_team_identity`'s own docstring is the
+# rule and `test_no_table_with_a_linked_team_name_also_links_its_rows` is the guard. The team
+# name is an anchor; a row anchor would nest inside it and the OUTER one wins, so a reader would
+# click the team and land on a game. **Four tables asserted before this round, seven after.**
+def _player_columns() -> list:
+    return [
+        Col("player_name", "Player", render=_player_identity),
+        Col("team_display", "Team", render=lambda r: _team_identity(
+            r, "", slug_field="team_slug", display_field="team_display",
+            logo_field="team_logo_url", rank_field="team_rank",
+            record_field="record_before_display")),
+    ]
 
 
 def _commentary(row, scope) -> str:
@@ -1830,7 +1959,7 @@ def _leaderboards(scope, depth: int) -> None:
             "The player yardage board would be here.",
             f"No player box scores for {scope.describe()}. Box scores start in 2024.",
             renderer=lambda d: table.render(d, [
-                Col("player_name", "Player"), Col("team", "Team"),
+                *_player_columns(),
                 Col("stat_category", "Category"),
                 Col("stat_value", "Yards", kind="num"),
             ], caption="Passing, rushing and receiving yards in one board.", anchor="leaderboards"),
@@ -1844,7 +1973,7 @@ def _leaderboards(scope, depth: int) -> None:
             "The touchdown board would be here.",
             f"No player box scores for {scope.describe()}.",
             renderer=lambda d: table.render(d, [
-                Col("player_name", "Player"), Col("team", "Team"),
+                *_player_columns(),
                 Col("stat_category", "Category"),
                 Col("stat_value", "TD", kind="num"),
             ], caption="Passing, rushing and receiving touchdowns.", anchor="leaderboards"),
@@ -1857,7 +1986,7 @@ def _leaderboards(scope, depth: int) -> None:
             "The defensive board would be here.",
             f"No defensive box scores for {scope.describe()}.",
             renderer=lambda d: table.render(d, [
-                Col("player_name", "Player"), Col("team", "Team"),
+                *_player_columns(),
                 Col("opponent", "Opponent"),
                 Col("stat_value", "Tackles", kind="num"),
             ], caption="Total tackles. TFL and sacks are separate stat types on the same view.", anchor="leaderboards"),

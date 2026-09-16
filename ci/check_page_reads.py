@@ -194,6 +194,36 @@ def _sql_from(node, strings, sheets, sheet_names):
             else:
                 parts.append(" ")
         return "".join(parts)
+    # 🚨 `query("""select …""".replace("{DEPTH}", str(depth)), …)` — A BLIND SPOT THIS CHECK HAD
+    # FROM THE DAY IT WAS WRITTEN, found by A149 when a correct new read was reported as
+    # unselected.
+    #
+    # `today.py` builds TWO of its queries this way — `_team_yardage` and `_player_board`, both
+    # interpolating a row limit that cannot be a bind parameter — and `_sql_from` handled
+    # Constant, Name, JoinedStr and a bound sheet, but never a METHOD CALL ON a string. So both
+    # SELECT lists were invisible: the union simply did not contain their columns, and the check
+    # stayed green because nothing in the module read one by literal name until now.
+    #
+    # ⚠️ AND THE FAILURE WAS IN THE DANGEROUS DIRECTION FOR A GUARD — SILENT UNDER-COUNTING.
+    # A module whose query cannot be parsed contributes NOTHING to `selected`, so every read it
+    # backs looks unselected while every read it does not back is unaffected. The visible symptom
+    # is therefore a FALSE POSITIVE on a correct change, which is the lucky half; the same gap
+    # would equally have hidden a real defect in a column those two queries do select.
+    #
+    # ✅ THE FIX IS THE RECEIVER, NOT THE ARGUMENTS. `.replace()`'s arguments are the substitution,
+    # and the SQL is the thing being called on — so recurse into `node.func.value` and let the
+    # existing Constant/Name branches answer. The placeholder stays in the text (`{DEPTH}`), which
+    # `selected_columns` never sees because it sits in the LIMIT clause after `from`.
+    # 🚨 AND THE RECEIVER MUST LOOK LIKE SQL, WHICH IS NOT PEDANTRY — THE FIRST VERSION OF THIS
+    # BRANCH BROKE THE SHEET BRANCH BELOW. `query(" ".join(SCORES_SHEET.sql.split()), …)` is also
+    # a Call on an Attribute, and its receiver is the Constant `" "` — truthy, returned, and the
+    # Scores sheet never reached `selected_columns`. The check then reported `as_of_ts` as
+    # unselected on scores.py: a REAL-LOOKING defect of exactly the class this file was built to
+    # catch (A088/R-564), produced entirely by the guard's own new blind spot.
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        inner = _sql_from(node.func.value, strings, sheets, sheet_names)
+        if inner and re.search(r"\bselect\b", inner, re.IGNORECASE):
+            return inner
     # `query(" ".join(SCORES_SHEET.sql.split()), …)` — the sheet this module bound.
     for sub in ast.walk(node):
         if isinstance(sub, ast.Attribute) and sub.attr == "sql":

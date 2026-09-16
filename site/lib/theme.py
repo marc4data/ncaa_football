@@ -468,6 +468,32 @@ TABLE_CSS = """
    opportunity and renders "5-" above "2" the moment the column is a few pixels tight — which
    it became when R-132 gave the rank badge the row's font size. A record split across two
    lines reads as a rendering fault, and it would bite at some viewport width regardless. */
+/* A149. THE PLAYER CELL HAS TWO ENDS — Marc, Today v01: "[Jersey #, Name, Year (left
+   aligned)], Position (right aligned within the Player cell)".
+
+   ⚠️ FLEX INSIDE AN EXISTING CELL, which is R-166's own precedent one column over: `.cfdb-gc-time`
+   right-aligns the result strip in the kickoff cell for exactly this reason, and its comment says
+   why it is safe — "Flex INSIDE an existing cell changes nothing about the grid; adding a cell
+   would." A fourth and fifth column for two characters each is the alternative.
+
+   🚨 THE NAME GIVES UP PIXELS FIRST AND THE POSITION NEVER DOES. `min-width:0` on the left group
+   is what actually lets the name ellipsise — a flex item defaults to `min-width:auto` and refuses
+   to shrink below its content, so without this line the position is what gets pushed out. The
+   name itself reuses `.cfdb-team`'s treatment (line 460) rather than restating it differently.
+
+   ⚠️ THE JERSEY AND THE YEAR ARE SECONDARY WEIGHT, THE NAME IS NOT. Marc's bracket groups them as
+   one identity; the name is the thing being read and the other two are its qualifiers, which is
+   the same relationship `.cfdb-team-record` already has to `.cfdb-team`. Same opacity, for that
+   reason rather than by coincidence. */
+.cfdb-player { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; }
+.cfdb-player-who { display:flex; align-items:baseline; gap:.35rem; min-width:0; }
+.cfdb-table .cfdb-player-name { display:inline-block; max-width:100%; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
+.cfdb-player-jersey { font-size:.78rem; font-weight:600; opacity:.6; white-space:nowrap; }
+.cfdb-player-year { font-size:.75rem; font-weight:400; opacity:.65; white-space:nowrap; }
+/* R-088's argument, reused: a position is two characters and does not deserve a column. */
+.cfdb-player-pos { font-size:.75rem; font-weight:600; opacity:.7; white-space:nowrap; }
+
 .cfdb-team-record { font-size:.75rem; font-weight:400; opacity:.65; margin-left:.4rem;
                     white-space:nowrap; }
 /* R-027: weather is a glyph plus a temperature, or a dome glyph alone. */

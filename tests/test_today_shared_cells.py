@@ -189,8 +189,15 @@ def test_no_table_with_a_linked_team_name_also_links_its_rows():
                 and node.func.attr == "render"):
             continue
         rendered = ast.unparse(node)
+        # 🚨 `_player_columns` IS IN THIS LIST OR THE GUARD PROTECTS ONLY THE TABLES THAT ALREADY
+        # PASSED. A149's three leaderboards do not mention `_team_identity` in their own
+        # `table.render` call — they spread `*_player_columns()`, which builds it one level down.
+        # **A name-matching guard is blind to exactly the indirection that makes a change safe**,
+        # which is this test's own docstring turned on the round that extended it: four tables
+        # before, SEVEN now, and the three new ones arrive through a different spelling.
         draws_a_team = any(name in rendered for name in
-                           ("_team_identity", "_favorite_cell", "_underdog_cell", "_scoreboard"))
+                           ("_team_identity", "_favorite_cell", "_underdog_cell", "_scoreboard",
+                            "_player_columns"))
         links_the_row = any(kw.arg == "link_builder" for kw in node.keywords)
         if draws_a_team and links_the_row:
             offenders.append(rendered[:90])
@@ -554,3 +561,133 @@ def test_the_legend_lists_the_strip_and_still_refuses_the_matchup_verdict():
     assert drawn <= listed, f"the page draws marks the legend does not explain: {drawn - listed}"
     assert "Matchup" not in today.LEGEND_GROUPS_DRAWN, \
         "there is no outlook column on srv_game; listing it would explain an undrawable mark"
+
+
+# --- A149: the player cell, and the three boards that share it -----------------------------
+
+def _player(**over):
+    """A leaderboard row, in `srv_player_game_log`'s spelling."""
+    row = {"player_name": "Steven Robinson", "player_slug": "steven-robinson",
+           "team": "Utah", "team_display": "Utah", "team_slug": "utah",
+           "team_logo_url": "https://x/utah.png", "team_rank": 21,
+           "record_before_display": "1-0", "conference": "Big 12", "opponent": "Arkansas",
+           "week": 2, "stat_category": "rushing", "stat_type": "YDS", "stat_value": 212.0,
+           # 🚨 A FLOAT, NOT A STRING, AND THAT IS THE WHOLE POINT (R-763). `jersey` is an
+           # INTEGER on `srv_player_game_log`; pandas has no integer that holds a null, so the
+           # real frame — 59% missing for the live season — arrives as `float64`. The first
+           # version of this fixture used `"14"` and the page shipped `#2.0` to a live render
+           # with 28 tests green. **A fixture whose dtype cannot hold the real value tests a
+           # column that does not exist.**
+           "jersey": 14.0, "position": "RB", "class_year_display": "JR"}
+    row.update(over)
+    return row
+
+
+def test_the_player_cell_is_marcs_bracket():
+    """> **MARC, Today v01:** *"[Jersey #, Name, Year (left aligned)], Position (right aligned
+    > within the Player cell)"*
+
+    The bracket is one group and the position is the other end — asserted as ORDER, not merely
+    as presence, because a cell containing all four facts in the wrong arrangement passes every
+    `in` check and is not what he asked for.
+    """
+    cell = today._player_identity(_player())
+    assert "cfdb-player-who" in cell and "cfdb-player-pos" in cell
+    for earlier, later in (("#14", "Steven Robinson"), ("Steven Robinson", "JR"),
+                           ("JR", "RB")):
+        assert cell.index(earlier) < cell.index(later), (
+            f"{earlier!r} must come before {later!r} in {cell!r}")
+    # The position sits OUTSIDE the left group, or `justify-content:space-between` has nothing
+    # to push apart and Marc's "right aligned within the Player cell" cannot happen.
+    assert cell.index("cfdb-player-pos") > cell.index("</span></span>")
+
+
+def test_no_part_of_the_player_cell_ever_renders_an_em_dash():
+    """🚨 THE PROMPT'S OWN WORDS: *"none of them may render as an em dash in the middle of a
+    name"*, and `Col.format`'s default does exactly that for a null.
+
+    Every combination of the three optional parts, including all of them missing.
+    """
+    for jersey in ("14", None):
+        for position in ("RB", None):
+            for year in ("JR", None):
+                cell = today._player_identity(
+                    _player(jersey=jersey, position=position, class_year_display=year))
+                assert fmt.EM_DASH not in cell, (jersey, position, year, cell)
+                assert "Steven Robinson" in cell
+
+
+def test_each_absence_in_the_player_cell_says_which_absence_it_is():
+    """AC-G.11. A missing jersey is omitted; a missing ROSTER ROW is named.
+
+    📊 The distinction is measured rather than invented: for 2026 all three are null TOGETHER on
+    106,645 rows and jersey-alone on 121, because the season's roster covers FBS only. So the
+    case worth explaining is the one that happens.
+    """
+    partial = today._player_identity(_player(jersey=None))
+    assert "cfdb-player-jersey" not in partial, "an absent jersey leaves a gap, not a marker"
+    assert "RB" in partial and "JR" in partial
+    assert "title=" not in partial, "a partial row is not the absence worth explaining"
+
+    nothing = today._player_identity(
+        _player(jersey=None, position=None, class_year_display=None))
+    assert "roster" in nothing, "the whole-row absence must say WHY, not render a bare name"
+    assert "Steven Robinson" in nothing
+
+
+def test_all_three_leaderboards_draw_the_shared_player_and_team_cells():
+    """🚨 MARC NAMED THREE BOARDS IN ONE SENTENCE — *"Player Yardage, Touchdowns, Defensive
+    Leaders"* — and they share one select list, so a per-board column pair is three places to
+    forget the next change.
+
+    ⚠️ READ FROM THE SOURCE, because the drift this guards against is three correct copies.
+    """
+    tree = ast.parse(SOURCE)
+    board = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_leaderboards")
+    spreads = [ast.unparse(n) for n in ast.walk(board)
+               if isinstance(n, ast.Starred) and "_player_columns" in ast.unparse(n)]
+    assert len(spreads) == 3, f"expected all three boards to share the cells, found {spreads}"
+    # And the old hand-written pair is gone from every one of them.
+    assert 'Col("player_name", "Player")' not in SOURCE
+    assert 'Col("team", "Team")' not in SOURCE
+
+
+def test_the_player_board_selects_every_column_the_two_cells_read():
+    """§2.2.1c.2's shape, one level down: a cell that reads a column its query does not select
+    renders the ABSENCE state on every real page load and fails nothing.
+
+    ⚠️ `ci/check_page_reads.py` is the general guard and it could not see this query at all until
+    A149 taught it about `.replace()`-built SQL. This pins the eight by name anyway, because the
+    checker answers *is every literal read selected* and cannot answer *are Marc's eight here*.
+    """
+    tree = ast.parse(SOURCE)
+    board = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_player_board")
+    # ⚠️ `and c.value.lstrip().lower().startswith("\n        select")` IS NOT PEDANTRY — the first
+    # draft matched on the view name alone and picked up the DOCSTRING, which names the view in
+    # its first line. It failed loudly, which is the lucky half; a docstring that happened to
+    # mention the eight columns would have passed while asserting nothing about the query.
+    sql = next(c.value for c in ast.walk(board)
+               if isinstance(c, ast.Constant) and isinstance(c.value, str)
+               and "srv_player_game_log" in c.value
+               and re.search(r"^\s*select\b", c.value, re.IGNORECASE | re.MULTILINE))
+    select = sql.split("from")[0]
+    for column in ("player_name", "jersey", "position", "class_year_display",
+                   "team_slug", "team_display", "team_logo_url", "team_rank",
+                   "record_before_display"):
+        assert re.search(rf"\b{column}\b", select), f"{column} is read but not selected"
+
+
+def test_the_jersey_is_a_worn_number_and_never_a_float():
+    """🚨 SHIPPED AS `#2.0` TO A LIVE RENDER BEFORE THIS TEST EXISTED.
+
+    `srv_player_game_log.jersey` is an `integer` and pandas floats it wherever the column has a
+    null — which is 59% of the live season. Every jersey on the page was `#7.0`.
+    """
+    assert "#14<" in today._player_identity(_player())
+    assert "#7<" in today._player_identity(_player(jersey=7.0))
+    # The value pandas actually hands a page for a present jersey in a nullable column.
+    assert "#23<" in today._player_identity(_player(jersey=float("23")))
+    for cell in (today._player_identity(_player(jersey=j)) for j in (14.0, 7.0, 99.0)):
+        assert ".0" not in cell, cell

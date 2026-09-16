@@ -897,7 +897,12 @@ def test_the_result_group_is_only_won_and_tied():
     under Against The Line." """
     by_title = dict(schedule.LEGEND_GROUPS)
     assert [e[-1] for e in by_title["Result"]] == ["Won", "Tied"]
-    assert len(by_title["Against the line"]) == 11
+    # ⚠️ 11 → 12 IN A149, AND THE BOUND IS UPDATED WITH ITS REASON RATHER THAN SILENCED.
+    # R-178's gap: `glyphs.result_strip` could draw `over/nodata` — "no closing total held" —
+    # and this legend did not define it. A147 found it, A148 re-verified it, A149 added the
+    # entry. **The guard did its job**: a legend that gains a row without anyone deciding to is
+    # exactly what this number is here to stop, so it moves only alongside the decision.
+    assert len(by_title["Against the line"]) == 12
     assert schedule.LEGEND_COLUMNS == [["Game", "Result"], ["Against the line"]]
 
 

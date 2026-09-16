@@ -505,6 +505,14 @@ LEGEND_GROUPS = [
         ("shape", "over", "fill", "cfdb-acc", "Over"),
         ("shape", "over", "open", "cfdb-acc", "Under"),
         ("shape", "cover", "nodata", "", "No closing line held"),
+        # 🚨 R-178, AND IT WAS MISSING FOR THREE ROUNDS. A147 found the gap while moving the strip
+        # into `lib/glyphs.py`, A148 re-verified it at `4bd3ea2` and this closes it. `glyphs.py`
+        # emits `indicator("over", "nodata", …)` for a game with no closing TOTAL — a different
+        # absence from "no closing line", which is the spread — and the legend defined the spread's
+        # and not the total's. **A mark the page can draw and the legend cannot name is exactly
+        # what R-178 forbids, in the direction that is hardest to notice: the reader sees a shape
+        # and finds nothing that explains it.**
+        ("shape", "over", "nodata", "", "No closing total held"),
         ("shape", "upset", "nodata", "", "No line, so no favorite"),
     ]),
 ]
@@ -561,9 +569,14 @@ LEGEND_SUBSECTION_COLUMNS = {
 # Spread — the 2 squares. Against Over/Under — the 2 diamonds. Misc — the 2 dashes."
 #
 # ⚠️ Δ IS AN INTERPRETATION AND MARC CAN OVERTURN IT BY LOOKING. His four subsections account
-# for 10 of the 11 entries; `MOVE_GLYPH` is the eleventh. It goes in Misc because it is not
-# part of the result strip's vocabulary at all — it renders in the line columns, not the
-# strip — but he described Misc as "the 2 dashes", so this makes it three.
+# for 10 of the 12 entries; `MOVE_GLYPH` is one of the other two. It goes in Misc because it is
+# not part of the result strip's vocabulary at all — it renders in the line columns, not the
+# strip — but he described Misc as "the 2 dashes", so this makes it four.
+#
+# ⚠️ AND THE TWELFTH IS A149's `over/nodata` (R-178), which was a mark the strip could draw and
+# this legend could not name. **Marc's sentence was written against an eleven-entry legend and
+# the twelfth is a correction to it rather than a disagreement with him** — he described the
+# marks he could see, and this is one he could see with nothing to explain it.
 #
 # Entries are identified by their LABEL POSITION in the group rather than by their text,
 # because three of the labels are substituted per render from the data (R-224) and matching on
@@ -579,7 +592,13 @@ LEGEND_SUBSECTIONS = {
                                 ("shape", "cover", "open", "cfdb-acc")]),
         ("Against Over/Under", [("shape", "over", "fill", "cfdb-acc"),
                                 ("shape", "over", "open", "cfdb-acc")]),
+        # ⚠️ A149 MAKES MISC FOUR. The three `nodata` marks sit together here rather than each in
+        # its own shape's subsection, which is the existing arrangement and not a new choice:
+        # `cover/nodata` and `upset/nodata` were already here. **An absence is not a result**, so
+        # "no closing total held" does not belong under *Against Over/Under* beside Over and
+        # Under — it belongs with the other two statements that cfdb held no line.
         ("Misc", [("shape", "cover", "nodata", ""),
+                  ("shape", "over", "nodata", ""),
                   ("shape", "upset", "nodata", ""),
                   ("glyph", "cfdb-legend-ch", MOVE_GLYPH)]),
     ],
