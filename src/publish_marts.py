@@ -375,6 +375,12 @@ HEAVY_SERVING = [
     # disagreement that guard exists to catch, and the same lesson A078, A079, A120 and A121 all
     # recorded: hot publishing cannot make a table fresher than its source endpoint.
     "srv_game_team_metric_distribution",
+    # A143. WEEKLY FOR ITS SIBLING'S REASON, WHICH IS THE ONE STATED DIRECTLY ABOVE: it is
+    # built from the same `int_game_team_metric_value` lineage, and the two-hourly scores DAG
+    # does not rebuild that lineage at all. ⚠️ A CUMULATIVE WINDOW MAKES IT NO FRESHER — the
+    # window only ever adds a COMPLETED week, so a hot publish would ship a table no hot DAG
+    # rebuilt, which is exactly what ci/check_publish_build_agreement.py exists to refuse.
+    "srv_game_team_metric_distribution_through_prior_week",
     # A124/R-766. The coach behind a game — 12,564 rows, one per (coach, team, season).
     #
     # ⚠️ WEEKLY BY THE SAME RULE A125 LEARNED AN HOUR EARLIER, and stated up front this time

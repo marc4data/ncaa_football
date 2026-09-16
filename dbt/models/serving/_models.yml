@@ -5153,3 +5153,100 @@ models:
           shape, and the page can only say so if it is told.
       - name: as_of_ts
         description: When the player_game domain was last refreshed.
+
+  # ⚠️ APPENDED AT THE END, TOUCHING NOTHING ABOVE — both sessions edit this file and the
+  # charter's rule is that the non-owning session appends. A080/R-534. A143.
+  - name: srv_game_team_metric_distribution_through_prior_week
+    description: >
+      The shape of the SEASON SO FAR, at single-game team grain. One row per (season, season_type,
+      week, metric): every team-game played in weeks STRICTLY BEFORE this one, over the eighteen
+      measures Box Score and Advanced render.
+      THE RELATION A PREVIEW READS. Its single-week sibling srv_game_team_metric_distribution
+      cannot serve one, and that is structural rather than a data gap: a single-game observation
+      belongs to the week it was played in, so an unplayed week has no row at all. Measured before
+      this view existed - for 2026 the sibling served regular weeks 1 and 2 against 2,924 unplayed
+      regular games, so a week-3 preview got zero rows and would have drawn six titled em dashes.
+      THE FOURTH SIBLING, and two things now tell the family apart rather than one:
+      srv_week_metric_distribution is GAME grain over the week; srv_team_week_metric_distribution
+      is TEAM grain over cumulative AVERAGES; srv_game_team_metric_distribution is TEAM grain,
+      single game, over the week; this is TEAM grain, single game, over the season so far. The
+      grain is identical to the third and only the WINDOW differs, which is why the name carries
+      the window - _through_prior_week is the project's existing word for it.
+      WHY NOT THE AVERAGES MODEL, which does serve every week: it describes a different population
+      from the marks drawn on it. Marc asked for a circle per game the team played - single games -
+      against a box built from season averages, and averaging shrinks variance. Measured on the 370
+      team-games behind a 2026 week-3 preview, 18.92% fall beyond the averages box's whiskers
+      against 0.27% beyond this one's, and 71.89% fall outside its middle half against 50.27% here.
+      A correctly framed box puts about half its population outside its middle half by definition.
+      LEAKAGE: strictly before, never through. This object is read before kickoff, and Marc's rule
+      is "can only include data through Week 4 in a Week 5 game". Ordered by season type then week,
+      so a postseason week 1 inherits the whole regular season rather than an empty box.
+      Week 1 has no row, because there is nothing before it.
+    columns:
+      - name: game_team_metric_distribution_through_prior_week_sk
+        description: Surrogate key over (season, season_type, week, metric).
+      - name: season
+        description: Season the preview week belongs to.
+      - name: season_type
+        description: regular, postseason, or a spring variant.
+      - name: week
+        description: >
+          The week being PREVIEWED. Every observation behind this row was played strictly before
+          it, ordered by season type first so postseason week 1 follows the regular season rather
+          than restarting the calendar.
+      - name: metric
+        description: >
+          One of the eighteen box-score and advanced measures, named exactly as the page's own
+          columns are. Same vocabulary as all three sibling distributions.
+      - name: n
+        description: >
+          How many team-game observations the distribution is drawn from. AC-G.11 - a week with no
+          row at all, a week with a row and a small n, and a week with a full season behind it are
+          three different states, and only the middle one is a judgement call the page makes. There
+          is deliberately no second denominator column: the window is built from observations, so n
+          already IS the number of team-games, and a second column equal to it would be the same
+          number twice under two names.
+      - name: weeks_counted
+        description: >
+          How many distinct prior weeks contributed. The denominator that actually travels with the
+          numerator here (AC-G.33): one week of football and eleven weeks of it are very different
+          claims behind an identical-looking box.
+      - name: mean
+        description: Mean of the observations in the window. Unrounded, as all four siblings are.
+      - name: stddev
+        description: Sample standard deviation of the same observations.
+      - name: min_value
+        description: >
+          The lowest observation in the window. NOT the whisker - see whisker_low, which is Tukey's
+          and is what the chart draws.
+      - name: max_value
+        description: The highest observation in the window. Again, not the whisker.
+      - name: p02
+        description: 2nd percentile of the window.
+      - name: p05
+        description: 5th percentile of the window.
+      - name: p25
+        description: 25th percentile - the lower edge of the box the page draws.
+      - name: p50
+        description: Median - the bold line.
+      - name: p75
+        description: 75th percentile - the upper edge of the box.
+      - name: p95
+        description: 95th percentile of the window.
+      - name: p98
+        description: 98th percentile of the window.
+      - name: iqr
+        description: p75 minus p25, published so nothing downstream subtracts two columns.
+      - name: whisker_low
+        description: >
+          Tukey's lower whisker: the most extreme observation still inside p25 - 1.5*IQR, never the
+          fence itself. A fence drawn as a whisker is longer than the data and reads as a value
+          nobody recorded.
+      - name: whisker_high
+        description: The same convention at the upper end.
+      - name: outlier_count
+        description: >
+          How many observations fall outside the two fences. Published so the cost of a Tukey frame
+          is stated per row rather than assumed - the whiskers look like the range and are not.
+      - name: as_of_ts
+        description: When the game domain was last refreshed.
