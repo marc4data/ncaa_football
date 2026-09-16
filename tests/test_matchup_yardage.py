@@ -143,32 +143,44 @@ def _calendar(team_games=None):
     # 668** — because only 25 teams are ranked in a week. **A fixture with a rank on every row
     # could not tell a tooltip that prints "unranked" from one that prints an em dash**, and the
     # em dash is the defect: it reports a data gap where the truth is a fact about football.
+    # 🚨 cfdb-wta-R-994. THE TWO PLAYED ROWS CARRY DIFFERENT CLASSIFICATIONS **AND THE TWO TEAMS
+    # CARRY THEM IN THE OPPOSITE ORDER** — see `_flip` below. That pairing is what makes a fill
+    # rule applied to the wrong side FAIL rather than pass, which is this fixture's recurring
+    # lesson (R-744): while both calendars held the same classifications, gained and allowed drew
+    # the same pattern and every assertion about the allowed column passed on the wrong rows.
+    # 📊 REAL 2026 SHAPE, MEASURED RATHER THAN ASSUMED — and the first draft of this comment
+    # said *"every FBS team, 133 of 133"*, which is **false**. Through week 2: **79 of the 138
+    # FBS teams with played games have exactly one FBS and one non-FBS opponent**, 48 have two
+    # FBS opponents and no non-FBS one, and 84 of 138 have at least one non-FBS opponent.
+    # ⚠️ So a week-3 preview draws one of each **on most panels but not on all**, which is why
+    # the round's render was taken on a game checked to contain one rather than on any week 3.
     # (week, date, is_home, abbr, opponent, rank, record_before, pts_for, pts_against,
-    #  yards, allowed, state)
+    #  yards, allowed, state, opponent_classification)
     real = [
-        (1, "2026-09-05", False, "ORE", "Oregon", 3, "0-0", 24, 34, 274, 497, "played"),
-        (2, "2026-09-12", True, "MEM", "Memphis", None, "0-1", 45, 21, 578, 519, "played"),
+        (1, "2026-09-05", False, "ORE", "Oregon", 3, "0-0", 24, 34, 274, 497, "played", "fbs"),
+        (2, "2026-09-12", True, "MEM", "Memphis", None, "0-1", 45, 21, 578, 519, "played",
+         "fcs"),
         # ⚠️ ONE ROW IS `no_box_score` AND THE REST ARE `scheduled`. Neither draws a circle now —
         # they are kept because the page must FILTER them, and a fixture of played games only
         # could not tell a page that filters from one that does not.
         (3, "2026-09-19", True, "SDAK", "South Dakota", None, "1-1",
-         None, None, None, None, "no_box_score"),
+         None, None, None, None, "no_box_score", "fcs"),
         (4, "2026-09-26", False, "WMU", "Western Michigan", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
         (5, "2026-10-03", True, "USU", "Utah State", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
         (6, "2026-10-10", False, "FRES", "Fresno State", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
         (8, "2026-10-24", False, "WSU", "Washington State", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
         (9, "2026-10-31", True, "TXST", "Texas State", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
         (10, "2026-11-07", False, "CSU", "Colorado State", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
         (11, "2026-11-14", True, "ORST", "Oregon State", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
         (12, "2026-11-21", True, "SDSU", "San Diego State", None, "1-1",
-         None, None, None, None, "scheduled"),
+         None, None, None, None, "scheduled", "fbs"),
     ]
     # 🚨 THE TWO TEAMS CARRY DIFFERENT FIGURES, AND B120 ADDED THAT BECAUSE WITHOUT IT A REAL
     # DEFECT IS INVISIBLE (R-744 — know what the fixture's defaults make true).
@@ -178,17 +190,28 @@ def _calendar(team_games=None):
     # the opponent's belonged would draw exactly the same marks** — and every assertion about the
     # allowed column would pass on it. ⚠️ `_shift` is applied to the yardage only: the weeks, the
     # dates, the opponents and the states stay shared, so nothing else in this file moves.
+    # 🚨 cfdb-wta-R-994. `_flip` IS `_shift`'s SIBLING AND IT EXISTS FOR THE SAME REASON.
+    # `_shift` makes the two teams' FIGURES differ so a page drawing the team's own calendar
+    # where the opponent's belongs is caught; `_flip` makes their CLASSIFICATIONS differ so a
+    # page applying the fill rule to the wrong side is caught too. **Without it both columns draw
+    # filled-then-open and a rule read off the panel's own opponent passes every assertion.**
+    # ⚠️ It swaps only fbs <-> fcs, so the scheduled rows and the states are untouched and
+    # nothing else in this file moves.
     rows = []
-    for team, _shift in ((AWAY_ID, 0), (HOME_ID, 37)):
+    for team, _shift, _flip in ((AWAY_ID, 0, False), (HOME_ID, 37, True)):
         for (week, date, home, abbr, opponent, rank, record, scored, against,
-             yards, allowed, state) in (team_games or real):
+             yards, allowed, state, classification) in (team_games or real):
             yards = None if yards is None else yards + _shift
             allowed = None if allowed is None else allowed + _shift
+            if _flip:
+                classification = {"fbs": "fcs", "fcs": "fbs"}.get(
+                    classification, classification)
             rows.append({
                 "team_id": team, "week": week,
                 "game_date": pd.Timestamp(date, tz="UTC"), "is_home": home,
                 "opponent_abbreviation": abbr,
                 "opponent_team_display": opponent, "opponent_rank": rank,
+                "opponent_classification": classification,
                 "record_before_display": record,
                 "points_for": scored, "points_against": against,
                 "total_yards": yards, "rushing_yards": yards,
@@ -1074,7 +1097,11 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
     allowed = {"_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10",
                "return min(_CIRCLE_PITCH_MAX, (band - _CIRCLE_D) / (n - 1))",
                "top = band / 2.0 - span / 2.0",
-               "f\"<circle cx='{x:.1f}' cy='{y:.1f}' r='{_CIRCLE_D / 2:.1f}' fill='none' \"",
+               # ⚠️ cfdb-wta-R-994 MOVED THIS LITERAL: `fill='none'` became `fill='{fill}'`
+               # when Marc's v16 rule made the fill per-circle. **The DIVISION in it is
+               # unchanged** — `_CIRCLE_D / 2` is still a diameter becoming a radius, one `<svg>`
+               # attribute, one consumer — so this is a pin being re-pinned, not a new exemption.
+               "f\"<circle cx='{x:.1f}' cy='{y:.1f}' r='{_CIRCLE_D / 2:.1f}' fill='{fill}' \"",
                "return _AXIS_PAD + (float(value) - lo) / span * (width - 2 * _AXIS_PAD)",
                "return (inner - _METRIC_CELL_GAP * _REM) / 2",
                "_TABLE_VALUE_PX = ((_TABLE_CELL_BUDGET // 3) if _TABLE_CELLS_EQUAL",
@@ -1217,7 +1244,22 @@ def test_the_FRAME_CAPTION_describes_the_CHART_THAT_IS_DRAWN(panel):
         f"single games: {text[:400]}")
     assert "one game the team played" in text, (
         f"the caption does not say what the circles are: {text[:400]}")
-    for gone in ("dashed", "thin sides", "thick sides", "same axes", "FBS teams in this week"):
+    # 🚨 cfdb-wta-R-994. THE FILL CARRIES MEANING NOW, AND A PICTURE WITH AN UNDOCUMENTED
+    # ENCODING IS THE DEFECT THIS PROJECT KEEPS FINDING RATHER THAN A NEW ONE.
+    #
+    # ⚠️ ASSERTED HERE AND NOT ONLY ON THE HOVER, DELIBERATELY. **A hover cannot introduce an
+    # encoding, only confirm one** — a reader hovers a mark because they already wonder what it
+    # is, and the reader who has to be reached is the one who sees two kinds of circle and does
+    # not know a question is available.
+    assert "filled when" in text and "FBS" in text, (
+        f"the caption does not say what a FILLED circle means, so the page draws a two-state "
+        f"encoding and explains neither state: {text[:500]}")
+    for gone in ("dashed", "thin sides", "thick sides", "same axes", "FBS teams in this week",
+                 # 🚨 B122 OVERLAID THE CIRCLES INSIDE THE BAND AND LEFT THIS SENTENCE SAYING
+                 # THEY SIT UNDER IT — the same class as the scatter wording above, found in the
+                 # same caption one round later. ⚠️ AND *"open circle"* stopped being true of
+                 # every circle here, which is the other half of the same staleness.
+                 "circle below", "each open circle"):
         assert gone not in text, (
             f"the caption still describes a chart or a population it replaced — {gone!r}: "
             f"{text[:400]}")
@@ -2529,19 +2571,54 @@ def test_THE_CALENDAR_IS_ORDERED_ASCENDING_IN_THE_QUERY(panel):
         "the calendar still carries the strip's DESCENDING order")
 
 
-def test_THE_CIRCLES_ARE_UNFILLED_so_an_overlap_still_reads_as_two_marks(panel):
-    """*"an unfilled circle mark"* — his word, and it is also the functional choice.
+def test_A_CIRCLE_IS_FILLED_WHEN_ITS_OWN_OPPONENT_WAS_FBS_and_open_when_it_was_not(panel):
+    """🚨 cfdb-wta-R-994. **Marc, v16:** *"Can circles be team color filled with 90% black border
+    (for FBS opponents). Non-FBS opponenets should not be filled."*
 
-    ⚠️ A FILLED MARK AT THE SAME YARDAGE AS ITS NEIGHBOUR READS AS ONE DARKER BLOB. The whole
-    point of a jitter is that the reader can count the games, so the stroke must be the mark and
-    the interior must stay empty.
+    ⚠️ THIS TEST IS `test_THE_CIRCLES_ARE_UNFILLED_so_an_overlap_still_reads_as_two_marks`,
+    FLIPPED RATHER THAN DELETED (B114's rule, now applied four times). It asserted v15's
+    *"an unfilled circle mark"* on EVERY circle, which v16 overrides for FBS opponents only —
+    **so the property it held is still half true and the half that survives is asserted below**:
+    a non-FBS circle keeps `fill='none'`, and B119's reason for that is unchanged — two games at
+    the same yardage still read as two marks rather than one darker blob.
+
+    ✅ KEYED ON THE FIXTURE'S OWN CLASSIFICATIONS (cfdb-wta-R-944), NOT ON A COUNT. The count of
+    filled circles is produced by the thing under test; the fixture's `opponent_classification`
+    per week is not, so each circle is paired to the week it was drawn for.
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    _metric, column = _circles(entries)[0]
-    for chunk in column.split("<circle ")[1:]:
-        head = chunk.split(">")[0]
-        assert "fill='none'" in head, f"a game circle is filled: {head}"
-        assert "stroke=" in head, f"a game circle has no stroke, so it draws nothing: {head}"
+    # The AWAY side's GAINED column draws the away team's own calendar, unflipped.
+    expected = {row["week"]: row["opponent_classification"]
+                for row in _calendar()
+                if row["team_id"] == AWAY_ID and row["total_yards"] is not None}
+    assert set(expected.values()) == {"fbs", "fcs"}, (
+        f"the fixture no longer carries both an FBS and a non-FBS played opponent, so this test "
+        f"can only see one branch of the rule: {expected}")
+    drawn = _marks_by_week(_circle_columns(entries)[0])
+    assert set(drawn) == set(expected), (
+        f"the circles drawn {sorted(drawn)} are not the played weeks {sorted(expected)}")
+    fbs = [w for w, c in expected.items() if c == "fbs"]
+    other = [w for w, c in expected.items() if c != "fbs"]
+    for week in other:
+        assert "fill='none'" in drawn[week], (
+            f"week {week}'s opponent was {expected[week]}, which is not FBS, and Marc's rule is "
+            f"that it must not be filled: {drawn[week]}")
+    for week in fbs:
+        assert "fill='none'" not in drawn[week], (
+            f"week {week}'s opponent was FBS and the circle is still open: {drawn[week]}")
+        assert "stroke='light-dark(rgba(0,0,0" in drawn[week], (
+            f"week {week} is filled with no light-dark border pair, so *90% black* has been read "
+            f"as a literal and B121 measured that ring vanishing on the dark page: {drawn[week]}")
+    # 🚨 THE TEAM COLOUR IS ASSERTED WITHOUT PINNING ONE, AND THIS IS THE LOAD-BEARING LINE.
+    # `_accent` composes a `light-dark(...)` pair from published colours and 10.89% of games have
+    # a side with no sourced colour (B109), so a hex literal would pin this fixture's teams
+    # rather than the property. ✅ **A filled circle's FILL and an open circle's STROKE are the
+    # same column's accent**, so they must be equal — which catches a fill taking the border
+    # colour, the opponent's colour, or a hard-coded one, none of which a "not none" check sees.
+    assert _attr(drawn[fbs[0]], "fill") == _attr(drawn[other[0]], "stroke"), (
+        f"the filled circle's team color {_attr(drawn[fbs[0]], 'fill')!r} is not the accent the "
+        f"open circles stroke with {_attr(drawn[other[0]], 'stroke')!r} — the fill is not this "
+        f"column's own team color")
 
 
 def test_THE_CIRCLE_COLUMN_IS_SIZED_FOR_FIFTEEN_GAMES(panel):
@@ -3572,6 +3649,23 @@ def _circle_columns(entries, metric="Total", side=0) -> list:
             .split("<div data-cfdb='game-circles'")[1:]]
 
 
+def _marks_by_week(column) -> dict:
+    """`{week: the <circle> tag}` for one circle column, so an assertion can pair a mark to the
+    fixture row that produced it rather than to its position (cfdb-wta-R-944)."""
+    marks = {}
+    for chunk in column.split("<g data-cfdb='game-circle'")[1:]:
+        week = re.search(r"data-week='([^']+)'", chunk).group(1)
+        marks[int(week)] = re.search(r"<circle [^>]*>", chunk).group(0)
+    return marks
+
+
+def _attr(tag: str, name: str) -> str:
+    """One attribute off an SVG tag. ⚠️ Values here contain commas and parentheses —
+    `light-dark(rgba(0,0,0,.9), rgba(255,255,255,.85))` — so it matches to the closing quote."""
+    found = re.search(rf"{name}='([^']*)'", tag)
+    return "" if found is None else found.group(1)
+
+
 def test_BOTH_SERIES_GET_A_CIRCLE_COLUMN(panel):
     """🚨 Marc's second half: *"then we'll do the same for the opponent (allowed)"*. He asked and
     this is it.
@@ -3644,6 +3738,104 @@ def test_THE_ALLOWED_CIRCLES_ARE_THE_OPPONENTS_GAMES(panel):
         f"team's own are {wrong_team}")
 
 
+def test_THE_TWO_COLUMNS_FILLS_ARE_DECIDED_BY_THEIR_OWN_ROWS_OPPONENT(panel):
+    """🚨 cfdb-wta-R-994, AND THIS IS THE TRAP THE PROMPT NAMED. The ALLOWED circles are **the
+    opposing team's** games, so on that column the opponent is the other team's opponent — *not*
+    the team this panel is about. **A rule written in page code as "is the opponent an FBS team"
+    would read the panel's own opponent and be wrong on every allowed circle.**
+
+    ✅ THE FIXTURE MAKES THAT FAIL RATHER THAN PASS. `_calendar`'s `_flip` gives the home team the
+    opposite classifications week for week, so the two columns must draw OPPOSITE fill patterns.
+    ⚠️ **Without the flip both calendars carry the same classifications, both columns draw
+    filled-then-open, and a rule read off the wrong side satisfies every other assertion here.**
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    gained, allowed = _circle_columns(entries)
+    rows = _calendar()
+    played = {
+        side: {r["week"]: r["opponent_classification"] for r in rows
+               if r["team_id"] == side and r["total_yards"] is not None}
+        for side in (AWAY_ID, HOME_ID)}
+    assert played[AWAY_ID] != played[HOME_ID], (
+        f"the fixture's two calendars carry the same classifications, so this test cannot tell a "
+        f"per-row rule from a per-panel one: {played}")
+    for name, column, side in (("gained", gained, AWAY_ID), ("allowed", allowed, HOME_ID)):
+        marks = _marks_by_week(column)
+        assert set(marks) == set(played[side]), (
+            f"the {name} column drew weeks {sorted(marks)}, not {sorted(played[side])}")
+        for week, classification in played[side].items():
+            filled = "fill='none'" not in marks[week]
+            assert filled == (classification == "fbs"), (
+                f"the {name} column's week {week} circle is "
+                f"{'filled' if filled else 'open'} and that game's opponent was "
+                f"{classification!r} — the fill is being decided by something other than this "
+                f"row's own opponent")
+
+
+def test_AN_UNKNOWN_OPPONENT_DIVISION_IS_NOT_FILLED_and_the_hover_says_which_absence(panel):
+    """🚨 cfdb-wta-R-994 / AC-G.11. NULL IS A THIRD STATE AND IT IS NOT A SYNONYM FOR NON-FBS.
+
+    📊 REACHABLE, MEASURED ON LIVE SERVING THIS ROUND: 37 played team-games carry a null
+    `opponent_classification` — every one an FCS team playing an unaffiliated or NAIA school —
+    and **19 team-seasons hold both such a game and an FBS opponent**, so an FBS-vs-that-team
+    Matchup draws one on its allowed column.
+
+    ✅ TWO ASSERTIONS, BECAUSE THE FILL AND THE HOVER ANSWER DIFFERENT QUESTIONS. A fill asserts
+    *this opponent was an FBS team* and a null cannot support that, so it draws OPEN — and an
+    open circle then means two different things, which is exactly what AC-G.11 forbids leaving
+    unsaid. **The hover is where the two are separated**, so a page that got the fill right and
+    said nothing would still be wrong.
+    """
+    rows = _calendar()
+    target = next(r for r in rows
+                  if r["team_id"] == AWAY_ID and r["total_yards"] is not None
+                  and r["opponent_classification"] == "fbs")
+    assert "fbs" == target["opponent_classification"]
+    # 🚨 THE ROW CHOSEN IS ONE THAT WOULD OTHERWISE BE **FILLED**, so the break this test sees is
+    # a null being treated as FBS — not a null landing on a circle that was open anyway.
+    target = dict(target, opponent_classification=None)
+    calendar = [target if (r["team_id"] == AWAY_ID and r["week"] == target["week"]) else r
+                for r in rows]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(), calendar=calendar)
+    marks = _marks_by_week(_circle_columns(entries)[0])
+    mark = marks[target["week"]]
+    assert "fill='none'" in mark, (
+        f"a game whose opponent's division is NOT RECORDED is filled, which asserts the opponent "
+        f"was an FBS team on evidence the row does not carry: {mark}")
+    column = _circle_columns(entries)[0]
+    title = [c.split("</title>")[0].split("<title>")[1]
+             for c in column.split("<g data-cfdb='game-circle'")[1:]
+             if f"data-week='{target['week']}'" in c][0]
+    assert "not recorded" in title, (
+        f"the hover on an unclassified opponent does not say WHICH absence it is, so it reads "
+        f"identically to a known FCS opponent: {title!r}")
+    known = [c.split("</title>")[0].split("<title>")[1]
+             for c in column.split("<g data-cfdb='game-circle'")[1:]
+             if f"data-week='{target['week']}'" not in c][0]
+    assert "FCS" in known and "not recorded" not in known, (
+        f"a KNOWN non-FBS opponent is not named by division, so the two absences the fill "
+        f"conflates are still indistinguishable: {known!r}")
+
+
+def test_THE_CALENDAR_QUERY_SELECTS_THE_OPPONENTS_CLASSIFICATION(panel):
+    """🚨 B119's LESSON, AND IT IS WHY THIS TEST EXISTS BESIDE THE BEHAVIOURAL ONES: **the harness
+    stubs `query` and returns the fixture frame whatever the SQL says.** A column dropped from
+    `_CALENDAR_COLUMNS` is invisible to every assertion above — the fixture would still carry it —
+    and the page would raise `KeyError` only against live serving.
+
+    ⚠️ ASSERTED ON THE **CALENDAR's** SQL SPECIFICALLY. `matchup.py` holds at least four select
+    blocks and two of them read `srv_game_team` (cfdb-main-R-1011's class), so a substring search
+    over the whole file would pass on the column appearing in a different query.
+    """
+    entries, seen = panel(_game(), _both(), deltas=_deltas())
+    assert entries
+    sql = " ".join(seen["calendar_sql"].split())
+    assert "opponent_classification" in sql, (
+        f"the calendar query does not select `opponent_classification`, so every circle's fill "
+        f"falls to its null branch against live serving while the fixture keeps the tests "
+        f"green: ...{sql[:200]}")
+
+
 def test_THE_ALLOWED_CIRCLES_CARRY_THE_OPPONENTS_ACCENT(panel):
     """⚠️ COLOUR IS THE SECOND SIGNAL, NOT THE FIRST (AC-G.22) — and it must still be the right
     one. The allowed row's rule is the opponent's colour, so the circles under it must match the
@@ -3656,9 +3848,19 @@ def test_THE_ALLOWED_CIRCLES_CARRY_THE_OPPONENTS_ACCENT(panel):
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
     gained, allowed = _circle_columns(entries)
-    g = set(re.findall(r"stroke='([^']+)'", gained))
-    a = set(re.findall(r"stroke='([^']+)'", allowed))
-    assert g and a, "a circle column draws no stroke at all"
+
+    # 🚨 cfdb-wta-R-994 MOVED WHERE THE TEAM COLOUR LIVES, AND READING ONLY `stroke=` WOULD LEAVE
+    # THIS TEST HALF BLIND. On an FBS opponent the accent is now the FILL and the stroke is the
+    # shared `_CIRCLE_FILL_BORDER`, which is **identical in both columns** — so a version of this
+    # assertion that looked at strokes alone would still pass, but on fewer and fewer circles as
+    # a calendar fills up with FBS opponents. ✅ The colour is gathered from BOTH attributes and
+    # the shared border is removed, which is the thing that is genuinely not an accent.
+    def accents(column):
+        found = set(re.findall(r"(?:stroke|fill)='([^']+)'", column))
+        return found - {"none"} - {c for c in found if c.startswith("light-dark(rgba(")}
+
+    g, a = accents(gained), accents(allowed)
+    assert g and a, "a circle column draws no team color at all, in either attribute"
     assert g != a, (
         f"both circle columns use the same accent {g} — the allowed column is taking the team's "
         f"colour rather than the opponent's, which is the box it sits under")
