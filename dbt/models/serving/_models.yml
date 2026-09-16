@@ -1545,6 +1545,48 @@ models:
           page scales it by 100, which is rendering. NULL when nothing was attempted, never zero:
           "0 for 0" and "no attempts recorded" are different facts.
 
+      - name: jersey
+        description: >
+          The player's jersey number, from dim_athlete. A146, for Marc's player cell -
+          "[Jersey #, Name, Year (left aligned)], Position (right aligned)".
+          NULL where cfdb holds no athlete dimension row for that player-season, which is 8.61%
+          of 2024+ rows - an honest absence rather than a gap, and the page renders it as one.
+      - name: position
+        description: >
+          The player's listed position, from dim_athlete. Same source and same null rule as
+          jersey. Marc asks for it right-aligned within the Player cell.
+      - name: class_year_display
+        description: >
+          The player's class year as a display string, from dim_athlete. Same source and null
+          rule as jersey.
+          A SEASON attribute on a GAME row, which asserts it did not change during the season -
+          measured before it was joined: of 68,347 season-players, ZERO carry more than one
+          jersey, position or class year. The join is on athlete_sk rather than
+          (season, player_id) because the dimension is NOT unique on that pair - ten mid-season
+          transfers - and athlete_sk is, so it cannot fan out and picks the team the player was
+          on for that game.
+      - name: team_slug
+        description: >
+          The player's team slug, for a link to the team page. From dim_team, spelled as
+          srv_game_team spells it so one page-side producer serves both relations.
+      - name: team_display
+        description: The team's display name, from dim_team.
+      - name: team_logo_url
+        description: >
+          The team's logo, from dim_team.logo_source_url. Named team_logo_url to match
+          srv_game_team rather than the dimension's own column name.
+      - name: team_rank
+        description: >
+          The team's poll rank IN THIS GAME, from fct_game's two rank columns picked by side -
+          the same source srv_game_team.team_rank uses. NULL means UNRANKED, which is a
+          published fact rather than a gap: the poll is a Top 25 and the values stop at 25.
+          A season rank would be a different fact wearing this name.
+      - name: record_before_display
+        description: >
+          The team's record GOING INTO this game's week, from fct_team_record_week.current_record,
+          which is built on a `1 preceding` frame. The name is the guard - on a game x player row
+          a bare "record" is ambiguous, and srv_game_team uses the same name for the same reason.
+          There is no after-record here: this view has no completed/scheduled split to choose with.
   - name: srv_player_play
     description: >
       Players page, the play-level drill-down — one row per play a player is credited on, and
@@ -2063,6 +2105,23 @@ models:
           the Division filter selects the same games from both views. Symmetric across a
           game's two rows: filtering on it keeps both or neither, which team-level
           `classification` cannot do.
+      - name: opponent_classification
+        description: >
+          The OPPONENT's division. A146, and it is not is_fbs_game said
+          differently: that column answers "was an FBS team involved", which is TRUE for every
+          FBS team-game and so carries no information about the opponent on the population the
+          Matchup panel draws. Measured on 2026 regular played team-games: fbs/True 285,
+          fcs/False 247, fcs/True 85, ii/False 33, iii/False 2.
+          Consumed one line upstream to derive is_fbs_game and simply never emitted until now,
+          which is why a page asking for it got UndefinedColumn rather than a null.
+          opponent_conference is a PROXY for this and not the fact - keying a visible mark on a
+          conference name is right most of the time and wrong silently.
+          SIX VALUES, NOT FOUR, AND ONE OF THEM IS NULL - measured after publishing rather than
+          assumed from the four everyone names: fbs 66.35%, fcs 15.10%, iii 5.62%, NULL 5.61%,
+          ii 5.39%, and ii/iii 1.92% - a combined classification CFBD emits for programs that
+          span both. A consumer keying a fill on this must treat NULL as UNKNOWN rather than as
+          non-FBS: on the 2026 regular played population it is 8 rows, and an unfilled circle
+          there would be a claim about an opponent nobody classified.
       - name: is_home
         description: >
           Whether this team was the designated home side.
