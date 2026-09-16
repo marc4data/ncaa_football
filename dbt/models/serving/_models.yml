@@ -3162,6 +3162,31 @@ models:
           1,898 games. Inside overtime the ordering falls back to play_number, which is the only
           order an overtime play has, so the two differ only where regulation plays were
           interleaved with overtime ones in the feed — 10 of the 70 overtime games.
+      - name: scoreboard_lead_changes
+        description: >
+          How many times the lead actually changed hands on the SCOREBOARD, whole game, counted
+          along the clock. This is the number the word "lead" promises, and it is a different
+          measure from lead_changes, which counts the model's win-probability estimate crossing
+          0.5 — a real thing, and not this. Across 1,898 games the crossings mean 6.69 and reach
+          38; these mean 1.06 and reach 10. A tie is not a lead, so it is passed through: ahead,
+          tied, then ahead the other way is ONE change. Counting a tie as its own state gives
+          North Texas at Western Michigan (2025 week 2) sixty-eight, against 2. Taking the lead
+          from 0-0 is not a lead change, because there was no lead to take it from. Caveat worth
+          knowing: the win-probability feed's scoreboard runs backwards on 885 plays across 495
+          games, where a play from elsewhere is stamped with an early clock, and 89 of the 2,012
+          counted changes (4.4%, in 76 games) sit on such a row. Every other feed measured is
+          worse — the play-by-play reverses on 60.8% of games, the drives feed on 22.0%.
+      - name: scoreboard_lead_changes_fourth_quarter
+        description: >
+          Scoreboard lead changes in the FOURTH QUARTER ONLY (period 4 exactly; overtime is its
+          own column). NULL rather than zero where the feed carries no fourth quarter, the same
+          rule lead_changes_fourth_quarter uses: we did not count none, we could not count.
+      - name: scoreboard_lead_changes_overtime
+        description: >
+          Scoreboard lead changes in overtime (period 5 and beyond), NULL where the feed carries
+          no fourth quarter. In college overtime each side gets a possession, so the lead changes
+          hands more freely than in regulation and a high count here is normal rather than
+          remarkable.
       - name: lead_changes_fourth_quarter
         description: >
           Win-probability crossings of 0.5 in the FOURTH QUARTER ONLY (period 4 exactly; overtime
