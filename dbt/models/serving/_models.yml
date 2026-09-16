@@ -3065,6 +3065,44 @@ models:
           Highest minus lowest home win probability across the game, in probability points.
           A game that never left 60-70% ran flat; one spanning 5-95% did not. Null for games
           with no play data.
+      - name: lead_changes_by_clock
+        description: >
+          The same crossings as lead_changes, counted in the order the plays HAPPENED rather than
+          the order the feed lists them. cfdb-main-R-916: stg_game_win_probability.play_number is
+          not chronological — 795 consecutive pairs step backwards on the game clock across 336 of
+          1,898 games (17.7%), worst back-step 3,567 seconds.
+          THE FEED'S ORDER DOES NOT SHUFFLE THIS NUMBER, IT MANUFACTURES IT. Memphis at Georgia
+          State (2025 week 2) publishes 25 lead changes; along the clock the game had 11. Across
+          all 1,898 games the two disagree on 64, worst by 14.
+          Ordered by the regulation clock with nulls last, then by play_number, which is the one
+          place play_number is still right: inside an overtime period it is the only order a play
+          has. Same definition as the curve the Looking Back page draws (A138).
+          lead_changes is unchanged and is still what the page ranks on; moving it is a separate
+          step (A141).
+      - name: largest_single_play_swing_by_clock
+        description: >
+          The biggest change in home win probability between two CONSECUTIVE plays, consecutive
+          meaning on the clock rather than in the feed's listing. See lead_changes_by_clock.
+          THE WORST AFFECTED COLUMN OF THE FIVE: it disagrees with largest_single_play_swing on 76
+          of 1,898 games against that column's 64, worst by 0.4303 — 43 probability points, which
+          is a bigger move than most real plays produce. Memphis at Georgia State publishes 0.6704
+          and had 0.2401.
+      - name: lead_changes_fourth_quarter_by_clock
+        description: >
+          Fourth-quarter crossings counted along the clock. Disagrees with
+          lead_changes_fourth_quarter on 13 of 1,898 games, worst by 4. Null on the same three
+          games, and for the same reason: a feed that never reached the fourth quarter was not
+          counted and found none, it was not looked at.
+      - name: largest_single_play_swing_fourth_quarter_by_clock
+        description: >
+          The fourth quarter's biggest consecutive-play swing, counted along the clock. Null where
+          the feed never reached it.
+      - name: lead_changes_overtime_by_clock
+        description: >
+          Overtime crossings counted along the clock. Disagrees with lead_changes_overtime on 6 of
+          1,898 games. Inside overtime the ordering falls back to play_number, which is the only
+          order an overtime play has, so the two differ only where regulation plays were
+          interleaved with overtime ones in the feed — 10 of the 70 overtime games.
       - name: lead_changes_fourth_quarter
         description: >
           Win-probability crossings of 0.5 in the FOURTH QUARTER ONLY (period 4 exactly; overtime

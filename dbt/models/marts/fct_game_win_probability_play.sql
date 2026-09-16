@@ -147,10 +147,14 @@ select
     -- compressing 24 plays into 20 pixels of a 180-wide viewBox; on an ELAPSED axis those plays
     -- have no position at all. ✅ THIS ROUND PUBLISHES THE COLUMN AND STATES THAT. Redesigning
     -- the curve is a page round and it is B's file.
-    case
-        when p.period between 1 and 4
-            then (p.period - 1) * 900 + (900 - p.clock_seconds)
-    end                                                   as elapsed_from_kickoff_seconds,
+    --
+    -- ⚠️ A140 MOVED THE EXPRESSION INTO `elapsed_from_kickoff()` AND CHANGED NOTHING ELSE.
+    -- `fct_game_win_probability_summary` needs the same clock inside its `lag()` windows
+    -- (cfdb-main-R-916), and two copies of an arithmetic expression that must agree is the
+    -- drift this project has paid for four times in two weeks. The macro's header carries the
+    -- `fct_drive` trap and A122's hand-verified plays; they are not repeated here.
+    {{ elapsed_from_kickoff('p.period', 'p.clock_seconds') }}
+                                                          as elapsed_from_kickoff_seconds,
     -- ── A136: THE OVERTIME COORDINATE, AND IT IS NOT A CLOCK ────────────────────────────────
     --
     -- Marc, 2026-09-15, on the chart's reference lines: "Start, 2nd, half (darker), 3rd, 4th

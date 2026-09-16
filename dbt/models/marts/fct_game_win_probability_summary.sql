@@ -18,15 +18,30 @@
 -- favoured — a late one-score lead against a superior opponent with the ball — and it is
 -- precisely that disagreement the column is worth counting.
 --
--- WIN PROBABILITY AT THE HALF is taken as the last play with a play_number at or below the
--- midpoint of the game's plays, not by quarter: THIS FEED carries no period column. That is
--- an approximation and is named one — halftime_home_win_probability_approx — rather than
--- being presented as the value at the whistle.
+-- 🚨 `halftime_home_win_probability_approx` AND `final_home_win_probability` ARE GONE — A140,
+-- AND THE REASON THEY LASTED THIS LONG WAS A CLAIM NOBODY CHECKED.
 --
--- ⚠️ A117 DID NOT "FIX" THAT APPROXIMATION, THOUGH IT NOW COULD. The period is joined in below,
--- so a true halftime value is one `case` away — but the column is published, a page reads it, and
--- silently changing what a published number MEANS is worse than leaving an honestly-named
--- approximation in place. §3.3's shape: that is an expand-migrate-contract, not a passing edit.
+-- A117 declined to fix the halftime approximation and wrote why: *"the column is published, a
+-- page reads it, and silently changing what a published number MEANS is worse than leaving an
+-- honestly-named approximation in place."* 📊 **MEASURED AT `origin/main` BEFORE A140 TOUCHED
+-- ANYTHING: neither column is selected by `srv_game`, neither is in `_models.yml`, and
+-- `git grep` finds them in exactly one file — this one.** Zero pages, zero tests, zero
+-- consumers. The sentence that kept them was false when it was written.
+--
+-- ⚠️ BOTH WERE ALSO BUILT ON `row_number() over (order by play_number)`, so both inherited
+-- cfdb-main-R-916. **A column nobody reads, computed wrongly, is not a defect a reader can
+-- meet — it is dead weight that a future round will trust**, and A140 is the round that would
+-- otherwise have had to correct and carry them.
+--
+-- ✅ AND IT IS STILL §3.3's SHAPE, AT ZERO COST RATHER THAN NOT APPLYING: EXPAND was never
+-- needed, MIGRATE is empty because there is nobody to migrate, CONTRACT is this deletion.
+-- Saying that is the difference between following the rule and skipping it.
+--
+-- ❌ NEITHER IS REPLACED. A136 already publishes better answers to both questions:
+-- `win_probability_curve_reaches_final_score` says whether the curve finished at all — it does
+-- not on 99 of 1,898 games — and `winner_mean_win_probability` says how far behind the eventual
+-- winner was. A "final" probability that is on the wrong side of the result for 94 games is not
+-- repaired by sorting it.
 --
 -- 🚨 THE PERIOD COMES FROM `stg_play`, JOINED ON `play_id` — R-718/R-709, and MARC DIAGNOSED THE
 -- MECHANISM BEFORE IT WAS MEASURED: "stg_game_win_probability with stg_play for the time element."
@@ -143,9 +158,32 @@
 --
 -- ⚠️ A136 DID NOT FIX THE FEED AND DID NOT NARROW ANY EXISTING COLUMN. 94 of 1,898 games carry a
 -- final published probability on the wrong side of the actual result and 78 are internally
--- inconsistent on their own last row. That is upstream, it already affects `lead_changes`,
--- `final_home_win_probability` and `halftime_home_win_probability_approx`, and changing what a
--- published column means is §3.3's expand-migrate-contract rather than a passing edit.
+-- inconsistent on their own last row.
+--
+-- ── A140, cfdb-main-R-916: THE ORDER, AND WHICH COLUMNS ACTUALLY DEPEND ON IT ──────────────
+--
+-- 🚨 THE AFFECTED SET IS FIVE PUBLISHED COLUMNS, NOT THREE. Every round since A136 has repeated
+-- *"`lead_changes`, `final_home_win_probability` and `halftime_home_win_probability_approx`"*.
+-- 📊 Measured by reading the model rather than the sentence: the columns built from `lag()` are
+--
+--     lead_changes                                  published, and today.py's FIRST SORT KEY
+--     lead_changes_fourth_quarter                   published, ranked on
+--     lead_changes_overtime                         published, shown as a column
+--     largest_single_play_swing                     published, shown as a column   ← unnamed until now
+--     largest_single_play_swing_fourth_quarter      published, and cited by name in _models.yml
+--
+-- and the two that were named carry ZERO consumers and are deleted above. **The two nobody
+-- mentioned are the ones a reader has been looking at**, and `largest_single_play_swing` is the
+-- worst affected of all: it moves on 76 games against `lead_changes`'s 64.
+--
+-- ⚠️ EVERYTHING ELSE HERE IS ORDER-INDEPENDENT AND STAYS EXACTLY AS IT IS — the minimum, the
+-- maximum, the range, the play counts and A136's two means all read one row at a time or
+-- aggregate without a neighbour. That is why the expand is five columns and not fifteen.
+--
+-- ✅ THE CORRECTED COLUMNS ARRIVE BESIDE THE OLD ONES AS `*_by_clock`, AND THE SUFFIX IS MEANT
+-- TO LAST. It names the ORDER the measure is computed along, exactly as `_fourth_quarter` names
+-- the window — and it stays true even if CFBD ever fixes the feed, at which point the two would
+-- simply agree. `_v2` would have told a future reader nothing about why there are two.
 
 with plays as (
 
@@ -161,10 +199,19 @@ with plays as (
         -- The time element, from stg_play. See the header: joined on play_id, which is unique in
         -- both models, so this cannot change the play grain.
         p.period,
-        -- Half the plays, per game. An approximation of halftime; see the header.
-        row_number() over (partition by w.game_id order by w.play_number)                as seq,
-        count(*)     over (partition by w.game_id)                                       as total_plays,
-        lag(w.home_win_probability) over (partition by w.game_id order by w.play_number) as previous_wp
+        -- ── TWO LAGS, IN TWO DIFFERENT ORDERS, AND THAT IS THE WHOLE EXPAND (A140) ──────────
+        --
+        -- 🚨 `previous_wp` IS THE FEED'S ORDER AND IT IS WRONG. cfdb-main-R-916 measured
+        -- `play_number` non-chronological on 336 of 1,898 games. It is kept, unchanged, because
+        -- `srv_game` publishes five columns built from it and `today.py` ranks on one of them —
+        -- §3.3's EXPAND: the corrected values arrive beside the old ones, nothing moves yet.
+        lag(w.home_win_probability) over (partition by w.game_id order by w.play_number) as previous_wp,
+        -- ✅ `previous_wp_by_clock` IS THE ORDER THE PLAYS HAPPENED IN. One definition, shared
+        -- with `fct_game_win_probability_play`'s published coordinate — see `curve_order()`.
+        lag(w.home_win_probability) over (
+            partition by w.game_id
+            order by {{ curve_order('p.period', 'p.clock_seconds', 'w.play_number') }}
+        )                                                                                as previous_wp_by_clock
     from {{ ref('stg_game_win_probability') }} w
     left join {{ ref('stg_play') }} p
       on p.play_id = w.play_id
@@ -177,15 +224,26 @@ flagged as (
     select
         *,
         abs(home_win_probability - previous_wp)                                      as swing,
+        abs(home_win_probability - previous_wp_by_clock)                             as swing_by_clock,
         -- How far from a coin flip this play was. 0 = dead even. Threshold-free, so no cutoff
         -- gets baked in here that a later reader cannot see.
+        --
+        -- ✅ AND IT NEEDS NO `_by_clock` TWIN, WHICH IS WORTH SAYING RATHER THAN LEAVING TO BE
+        -- NOTICED: `distance_from_even` reads ONE play and is averaged, so it cannot depend on
+        -- what came before it. The same goes for `lowest_`, `highest_`, `home_win_probability_range`
+        -- and A136's two means. **Only the columns built from `lag()` are affected**, which is
+        -- why this expand is five columns and not fifteen.
         abs(home_win_probability - 0.5)                                              as distance_from_even,
         -- A crossing of the 0.5 line in either direction. Null previous_wp is the first play
         -- of a game and cannot be a crossing.
         case when previous_wp is null then 0
              when (previous_wp < 0.5 and home_win_probability >= 0.5)
                or (previous_wp >= 0.5 and home_win_probability < 0.5) then 1
-             else 0 end                                                              as lead_change
+             else 0 end                                                              as lead_change,
+        case when previous_wp_by_clock is null then 0
+             when (previous_wp_by_clock < 0.5 and home_win_probability >= 0.5)
+               or (previous_wp_by_clock >= 0.5 and home_win_probability < 0.5) then 1
+             else 0 end                                                              as lead_change_by_clock
     from plays
 
 ),
@@ -203,10 +261,18 @@ select
                                                     as home_win_probability_range,
     round(max(swing), 4)                            as largest_single_play_swing,
     sum(lead_change)                                as lead_changes,
-    round(max(case when seq <= total_plays / 2 then home_win_probability end), 4)
-                                                    as halftime_home_win_probability_approx,
-    round(max(case when seq = total_plays then home_win_probability end), 4)
-                                                    as final_home_win_probability,
+    -- ── THE SAME TWO, COUNTED IN THE ORDER THE PLAYS HAPPENED (A140) ─────────────────────
+    --
+    -- 📊 THE FEED'S ORDER DOES NOT MERELY SHUFFLE THESE — IT MANUFACTURES THEM. Memphis at
+    -- Georgia State (2025 week 2) publishes **25 lead changes and a 0.6704 largest swing**;
+    -- counted along the clock it had **11 and 0.2401**. Fourteen of those crossings are the
+    -- feed jumping between quarters, not the game changing hands.
+    --
+    -- 📊 ACROSS ALL 1,898 GAMES: `lead_changes` moves on **64**, worst by **14**;
+    -- `largest_single_play_swing` moves on **76**, worst by **0.4303**;
+    -- `lead_changes_fourth_quarter` on **13**, worst by 4; `lead_changes_overtime` on **6**.
+    round(max(swing_by_clock), 4)                   as largest_single_play_swing_by_clock,
+    sum(lead_change_by_clock)                       as lead_changes_by_clock,
 
     -- ── THE FOURTH QUARTER ITSELF (period = 4), which is what Marc asked for ──────────────
     --
@@ -224,6 +290,12 @@ select
                                                     as lead_changes_fourth_quarter,
     round(max(case when period = 4 then swing end), 4)
                                                     as largest_single_play_swing_fourth_quarter,
+    -- The A140 twins, same window, clock order. See the whole-game pair above.
+    case when count(*) filter (where period = 4) > 0
+         then sum(case when period = 4 then lead_change_by_clock else 0 end) end
+                                                    as lead_changes_fourth_quarter_by_clock,
+    round(max(case when period = 4 then swing_by_clock end), 4)
+                                                    as largest_single_play_swing_fourth_quarter_by_clock,
     round(max(case when period = 4 then home_win_probability end)
           - min(case when period = 4 then home_win_probability end), 4)
                                                     as home_win_probability_range_fourth_quarter,
@@ -244,6 +316,9 @@ select
     case when count(*) filter (where period = 4) > 0
          then sum(case when period >= 5 then lead_change else 0 end) end
                                                     as lead_changes_overtime,
+    case when count(*) filter (where period = 4) > 0
+         then sum(case when period >= 5 then lead_change_by_clock else 0 end) end
+                                                    as lead_changes_overtime_by_clock,
 
     -- ── COMPETITIVENESS: distance from even, threshold-free. See the header. ──────────────
     -- Whole game, for comparison against the late window.

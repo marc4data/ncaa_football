@@ -338,10 +338,17 @@ def _win_probability_curves(game_ids) -> pd.DataFrame:
     was a real point.
 
     ✅ SO THE ORDER FOLLOWS THE COORDINATE THE CHART ACTUALLY DRAWS ON — A136's
-    `elapsed_from_kickoff_seconds`, which is the clock. ⚠️ `nulls last` IS LOAD-BEARING: that
-    column is NULL for every overtime play on purpose, so without it Postgres would sort
-    overtime to the FRONT of the game (R-890's shape, DESC or ASC — `nulls last` is explicit
-    either way). ⚠️ AND INSIDE AN OVERTIME PERIOD `play_number` IS THE ONLY ORDER A PLAY HAS —
+    `elapsed_from_kickoff_seconds`, which is the clock.
+
+    ⚠️ `nulls last` IS EXPLICIT RATHER THAN LOAD-BEARING, AND A140 CORRECTED THIS SENTENCE BY
+    MEASURING IT. It used to say that without the clause "Postgres would sort overtime to the
+    FRONT of the game"; a staged break removing it came back **GREEN**, because `ORDER BY x`
+    ASCENDING already puts NULLs LAST in Postgres. It is DESC that puts them first — R-890's
+    actual shape, and `MOST_EXCITING_ORDER` above is where that matters. ✅ The clause stays
+    because it says out loud that the NULLs are overtime and belong at the end, so a round that
+    later flips this to DESC has to edit it rather than overlook a comment.
+
+    ⚠️ AND INSIDE AN OVERTIME PERIOD `play_number` IS THE ONLY ORDER A PLAY HAS —
     `stg_play`'s period-5-and-above rows take six distinct clock values in total — so it stays
     as the tie-break, which is exactly where it is still correct.
 

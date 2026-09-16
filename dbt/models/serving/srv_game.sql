@@ -281,6 +281,20 @@ select
     -- which is the defect this shape of change produces.
     wps.lead_changes,
     wps.largest_single_play_swing,
+    -- 🚨 A140, cfdb-main-R-916 — EXPAND. THE SAME TWO MEASURES, COUNTED IN THE ORDER THE PLAYS
+    -- HAPPENED IN RATHER THAN THE ORDER THE FEED LISTS THEM.
+    --
+    -- `stg_game_win_probability.play_number` is not chronological: A136 measured 795 consecutive
+    -- pairs stepping BACKWARDS on the clock across 336 of 1,898 games (17.7%). Everything above
+    -- that is built from `lag()` inherits it — and the feed's order does not merely shuffle these
+    -- numbers, it MANUFACTURES them. Memphis at Georgia State (2025 week 2) publishes 25 lead
+    -- changes and a 0.6704 largest swing; along the clock it had 11 and 0.2401.
+    --
+    -- ⚠️ THE OLD COLUMNS ARE UNTOUCHED AND STILL RANKED ON. `today.py` reads all five and
+    -- `MOST_EXCITING_ORDER` leads on `lead_changes_fourth_quarter`; moving it is the MIGRATE
+    -- step and it is not this round's. Nothing here changes what any published number means.
+    wps.lead_changes_by_clock,
+    wps.largest_single_play_swing_by_clock,
     wps.home_win_probability_range,
     -- A117, R-709. THE PERIOD-SCOPED MEASURES, and they are an ADDITION rather than a
     -- replacement — every whole-game column above keeps its meaning and its name. §3.3's EXPAND:
@@ -295,9 +309,12 @@ select
     -- somewhere it did not.
     wps.lead_changes_fourth_quarter,
     wps.largest_single_play_swing_fourth_quarter,
+    wps.lead_changes_fourth_quarter_by_clock,
+    wps.largest_single_play_swing_fourth_quarter_by_clock,
     wps.home_win_probability_range_fourth_quarter,
     wps.plays_with_win_probability_fourth_quarter,
     wps.lead_changes_overtime,
+    wps.lead_changes_overtime_by_clock,
     wps.plays_with_win_probability_overtime,
     -- HOW CLOSE IT WAS, AND FOR HOW LONG — threshold-free, so no cutoff nobody measured gets
     -- baked into a published column. Lower is closer. This is what separates a genuine thriller
