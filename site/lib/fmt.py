@@ -147,6 +147,29 @@ def precision_for(column: str) -> int:
     return 0
 
 
+def text(value) -> str:
+    """A cell value as a string, or "". MOVED HERE FROM `schedule.py` BY A147.
+
+    🚨 `value or ""` IS NOT THIS, AND THE DIFFERENCE COST THE STACKED VIEW FIFTEEN ROWS. pandas
+    returns NaN for a null in an object column, NaN is TRUTHY, so `nan or ""` evaluates to nan —
+    which then fails a str.join with "expected str instance, float found". The view rendered the
+    first fifteen games and died on the sixteenth, where the network was null.
+
+    ⚠️ It failed inside `states.section`, which caught it and rendered an Error state, so there was
+    no exception to see and no test to fail. **It was found by counting cards against rows.**
+
+    ⚠️ IT MOVED BECAUSE A SECOND CALLER ARRIVED, NOT TO TIDY UP. `lib/glyphs.py` needs exactly this
+    NaN-safe conversion for the result strip's three stored values, and writing it there would have
+    been two implementations of one rule — which is what this project pays for repeatedly. `fmt` is
+    the right home: it is a value-to-string normaliser, which is what this module is for.
+    ⚠️ `schedule._text` REMAINS as a one-line delegation, because its eight call sites read better
+    with the local name and renaming them would move bytes on a page this round must not change.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value)
+
+
 def number(value, column: str = "", dp: Optional[int] = None) -> str:
     """A number, or an em dash for null.
 

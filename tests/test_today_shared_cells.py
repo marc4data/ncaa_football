@@ -201,7 +201,7 @@ def test_no_table_with_a_linked_team_name_also_links_its_rows():
 
 def test_the_commentary_cell_puts_the_outcome_over_the_link():
     """> **MARC:** *"Put them in the top row of the cell, the ESPN link below in the same cell."*"""
-    cell = today._commentary(_game())
+    cell = today._commentary(_game(), _Scope())
     assert "cfdb-commentary-marks" in cell
     assert "espn.com" in cell
     assert cell.index("cfdb-commentary-marks") < cell.index("espn.com"), "glyphs above the link"
@@ -217,9 +217,9 @@ def test_only_the_winning_side_draws_an_arrow_and_a_tie_draws_neither():
     ⚠️ R-762: no branch was written for the two states this panel cannot produce, and this test is
     where that claim is checked rather than asserted in a comment.
     """
-    home_won = today._commentary(_game(home_points=16, away_points=13))
-    away_won = today._commentary(_game(home_points=13, away_points=16))
-    tied = today._commentary(_game(home_points=13, away_points=13))
+    home_won = today._commentary(_game(home_points=16, away_points=13), _Scope())
+    away_won = today._commentary(_game(home_points=13, away_points=16), _Scope())
+    tied = today._commentary(_game(home_points=13, away_points=13), _Scope())
     assert glyphs._WINNER["home"].glyph in home_won and glyphs._WINNER["away"].glyph not in home_won
     assert glyphs._WINNER["away"].glyph in away_won and glyphs._WINNER["home"].glyph not in away_won
     for mark in glyphs._WINNER.values():
@@ -230,9 +230,20 @@ def test_only_the_winning_side_draws_an_arrow_and_a_tie_draws_neither():
 # --- the legend ----------------------------------------------------------------------------
 
 def _legend_glyphs() -> set:
-    """Every glyph the legend lists, from the groups the page declares it draws."""
-    return {mark.glyph for title, marks in glyphs.entries()
-            if title in today.LEGEND_GROUPS_DRAWN for mark in marks}
+    """Every single-character glyph the legend lists, from ALL THREE of its sources.
+
+    ⚠️ A147 WIDENED THIS RATHER THAN NARROWING IT. A144's version read only the `entries()` groups,
+    which was the whole legend then. The legend now assembles three things — the Outcome arrows, the
+    details glyph, and `strip_entries()` — so a test that still checked one of them would let the
+    other two drift, which is the omission R-178 forbids.
+    """
+    found = {mark.glyph for title, marks in glyphs.entries()
+             if title in today.LEGEND_GROUPS_DRAWN for mark in marks}
+    found.add(table.DETAILS_GLYPH)
+    for _title, rows in glyphs.strip_entries():
+        for swatch, _label in rows:
+            found |= set(re.findall(r">([^<>\s])</span>", swatch))
+    return found
 
 
 def _glyphs_the_page_can_draw() -> set:
@@ -245,7 +256,7 @@ def _glyphs_the_page_can_draw() -> set:
     """
     drawn = set()
     for home, away in ((16, 13), (13, 16), (13, 13)):
-        html = today._commentary(_game(home_points=home, away_points=away))
+        html = today._commentary(_game(home_points=home, away_points=away), _Scope())
         # A single-character span is a MARK. The ESPN affordance is an `<a>` whose text is
         # "ESPN ↗", so it cannot match — and if it ever became a one-character span this test
         # would start counting it, which is a legend entry it would then correctly demand.
@@ -275,7 +286,7 @@ def test_the_legend_does_not_list_the_matchup_verdict_this_panel_cannot_draw():
     assert "Outcome" in today.LEGEND_GROUPS_DRAWN
     assert "outlook" not in today._completed_games.__doc__.lower() or True
     assert glyphs.outlook("favorable").glyph not in "".join(
-        today._commentary(_game(home_points=h, away_points=a))
+        today._commentary(_game(home_points=h, away_points=a), _Scope())
         for h, a in ((16, 13), (13, 16), (13, 13)))
 
 
@@ -387,3 +398,159 @@ def test_every_table_render_that_takes_an_anchor_is_the_one_that_draws():
                 and any(kw.arg == "anchor" for kw in node.keywords)]
     assert len(anchored) >= 9, (
         f"A141 anchored nine table.render calls; only {len(anchored)} carry an anchor now")
+
+
+# --- A147: the game strip in the commentary cell -------------------------------------------
+#
+# 🚨 MARC SETTLED "WHICH GLYPHS" WITH A PICTURE OF SCHEDULE'S *Game* COLUMN — the details glyph and
+# the three result indicators, not the matchup-outlook verdict. A144 read it the other way and
+# FLAGGED the ambiguity at the time, so this is a corrected reading of Marc rather than of A144.
+
+def _played(**over):
+    row = _game()
+    row.update({"upset_level": "big", "winner_covered_close": "yes", "over_met": "no"})
+    row.update(over)
+    return row
+
+
+class _Scope:
+    """The one method `_commentary` needs. The real `filters.game_scope()` carries the filters
+    forward; a test only needs the URL to come out shaped like a link."""
+
+    def link(self, page, **extra):
+        bits = "&".join(f"{k}={v}" for k, v in extra.items() if v is not None)
+        return f"/{page}?{bits}"
+
+
+def test_the_result_strip_moved_without_changing_a_byte():
+    """🚨 B117's INSTRUMENT ON THE FUNCTION A147 MOVED, and R-141 is why it is not optional.
+
+    `_indicator`'s own comment: *"a mark that sized itself differently would take that alignment out
+    from under a whole column of cards."* **Schedule is a page Marc is not looking at this round**,
+    and a footprint change there would be invisible to everything this round does look at.
+
+    ✅ THE EXPECTATION IS THE PRE-MOVE IMPLEMENTATION, INLINED — not a string I typed, which would
+    pass on a function that had quietly swapped two states.
+    """
+    def before_the_move(row):
+        """`schedule._result_strip` exactly as it stood at `63b05dd`."""
+        def ind(shape, state, title, extra=""):
+            mark = "–" if state == "nodata" else ""
+            return (f"<span class='cfdb-ind cfdb-sh-{shape} cfdb-ind-{state} {extra}' "
+                    f"title='{title}'>{mark}</span>")
+
+        def txt(v):
+            return "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+
+        levels = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
+        titles = {"": "no closing line, so nothing named a favorite",
+                  "none": "the favorite won", "upset": "upset",
+                  "big": "upset by more than a touchdown",
+                  "blowout": "upset by more than two touchdowns"}
+
+        def upset_title(level):
+            verdict = titles.get(level, level)
+            return f"{verdict}, against the closing spread" if level else verdict
+
+        if not row.get("is_completed"):
+            return ("<span class='cfdb-strip'>" + ind("upset", "none", "not played yet")
+                    + ind("cover", "none", "not played yet")
+                    + ind("over", "none", "not played yet") + "</span>")
+        upset = txt(row.get("upset_level"))
+        cover, over = txt(row.get("winner_covered_close")), txt(row.get("over_met"))
+        fills = {"yes": "fill", "no": "open", "push": "push"}
+        parts = [
+            ind("upset", "fill" if upset in levels else "quiet" if upset == "none" else "nodata",
+                upset_title(upset), levels.get(upset, "")),
+            ind("cover", fills.get(cover, "nodata"),
+                {"yes": "the winner also covered the closing spread",
+                 "no": "the winner did not cover the closing spread",
+                 "push": "the closing spread pushed"}.get(cover, "no closing spread held"),
+                "cfdb-acc"),
+            ind("over", fills.get(over, "nodata"),
+                {"yes": "over the closing total", "no": "under the closing total",
+                 "push": "landed on the closing total"}.get(over, "no closing total held"),
+                "cfdb-acc"),
+        ]
+        return f"<span class='cfdb-strip'>{''.join(parts)}</span>"
+
+    cases = []
+    for level in ("upset", "big", "blowout", "none", "", None, float("nan"), "unknown"):
+        for cover in ("yes", "no", "push", None, ""):
+            for over in ("yes", "no", "push", None):
+                for completed in (True, False):
+                    cases.append(_played(upset_level=level, winner_covered_close=cover,
+                                         over_met=over, is_completed=completed))
+    for row in cases:
+        assert glyphs.result_strip(row) == before_the_move(row), (
+            f"the strip changed when it moved — upset={row['upset_level']!r} "
+            f"cover={row['winner_covered_close']!r} over={row['over_met']!r} "
+            f"completed={row['is_completed']}")
+    assert len(cases) == 320, f"the matrix shrank to {len(cases)}"
+
+
+def test_the_commentary_cell_is_the_picture_marc_sent():
+    """Details glyph, then the outcome arrow, then the strip — ESPN beneath."""
+    cell = today._commentary(_played(), _Scope())
+    for mark in ("cfdb-details", "cfdb-strip'", "espn.com"):
+        assert mark in cell, mark
+    assert cell.index("cfdb-details") < cell.index("cfdb-strip'") < cell.index("espn.com"), \
+        "order: affordance, then what happened, then the link out"
+    assert glyphs._WINNER["home"].glyph in cell, "the outcome arrow A144 shipped is still here"
+
+
+def test_neither_anchor_in_the_commentary_cell_is_inside_the_other():
+    """🚨 NESTED ANCHORS ARE INVALID HTML AND THE OUTER ONE WINS.
+
+    Two anchors in this cell — the details glyph to the matchup, ESPN out — and they must be
+    SIBLINGS. ⚠️ A presence assertion cannot see this: both are present either way.
+    """
+    cell = today._commentary(_played(), _Scope())
+    assert cell.count("<a ") == 2, cell
+    first_open = cell.index("<a ")
+    first_close = cell.index("</a>", first_open)
+    second_open = cell.index("<a ", first_open + 1)
+    assert second_open > first_close, "the second anchor opens inside the first"
+
+
+def test_the_strip_sits_outside_the_details_anchor():
+    """⚠️ SCHEDULE'S OWN RULE, CARRIED OVER: *"NOT inside the anchor: it is three states of
+    information, not a destination, and a pointer cursor over it would say otherwise."*"""
+    cell = today._commentary(_played(), _Scope())
+    anchor_end = cell.index("</a>")
+    assert cell.index("cfdb-strip'") > anchor_end, "the strip is inside the matchup link"
+
+
+def test_the_query_selects_the_three_columns_the_strip_reads():
+    """🚨 B119's LESSON: the harness stubs `query` and returns the fixture whatever the SELECT says,
+    so a behavioural test passes on a page that never asked for the column.
+
+    📊 AND THE RELATION WAS CHECKED RATHER THAN ASSUMED: the prompt said Schedule reads
+    `srv_schedule` and Looking Back a different relation. **There is no `srv_schedule`** — both read
+    `srv_game`, so these are the same columns Schedule already draws from.
+    """
+    sql = _sql_of("_completed_games")
+    for column in ("upset_level", "winner_covered_close", "over_met", "is_completed"):
+        assert column in sql, f"the strip reads {column} and the query does not select it"
+
+
+def test_the_legend_lists_the_strip_and_still_refuses_the_matchup_verdict():
+    """🚨 R-178 BOTH WAYS, and the expectation is derived from OUTSIDE the module — by rendering the
+    real cell and pulling the marks back out of it, not by reading `strip_entries()`.
+    """
+    drawn = set()
+    for level in ("upset", "big", "blowout", "none", None):
+        for cover in ("yes", "no", None):
+            for over in ("yes", "no", None):
+                html = today._commentary(
+                    _played(upset_level=level, winner_covered_close=cover, over_met=over),
+                    _Scope())
+                drawn |= set(re.findall(r"cfdb-ind cfdb-sh-(\w+) cfdb-ind-(\w+)", html))
+    listed = set()
+    for _title, rows in glyphs.strip_entries():
+        for swatch, _label in rows:
+            listed |= set(re.findall(r"cfdb-ind cfdb-sh-(\w+) cfdb-ind-(\w+)", swatch))
+    assert drawn, "the fixture drew no indicators; this test is not testing"
+    assert drawn <= listed, f"the page draws marks the legend does not explain: {drawn - listed}"
+    assert "Matchup" not in today.LEGEND_GROUPS_DRAWN, \
+        "there is no outlook column on srv_game; listing it would explain an undrawable mark"

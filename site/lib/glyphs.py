@@ -55,6 +55,8 @@ from typing import NamedTuple, Optional
 
 import pandas as pd
 
+from lib import fmt
+
 
 class Mark(NamedTuple):
     """One drawable mark: what it is, what it looks like, and what it means.
@@ -172,6 +174,164 @@ def outlook(value) -> Mark:
     return Mark(str(value) if known and isinstance(value, str) else UNCLASSIFIED_KEY,
                 _OUTLOOK_SHAPES[(shape, filled)], colour,
                 str(value) if isinstance(value, str) else "not classified")
+
+
+# ── THE RESULT STRIP — A SECOND VOCABULARY, DELIBERATELY NOT MERGED WITH THE FIRST ──────────
+#
+# A147, cfdb-main-R-951. Moved out of `schedule.py` because Today's Commentary cell now draws the
+# same three indicators — Marc answered "which outlook?" with a PICTURE of Schedule's own *Game*
+# column cell, so what he wanted was the details glyph and this strip, not the matchup verdict.
+#
+# 🚨 TWO VOCABULARIES IN ONE MODULE, AND THEY MUST NOT BECOME ONE LIST. `entries()` above answers
+# *what did we expect* (Matchup) and *who won* (Outcome). These answer *what did the market make of
+# it* — upset, cover, over. **A flat list would let either page's legend inherit groups its rows
+# cannot draw**, which is R-178's law broken in the "invents a mark" direction: Today cannot draw
+# the Matchup outlook (no outlook column on `srv_game` at any grain — A144 measured it), and
+# Schedule does not draw the winner ARROWS (it has its own `WINNER_GLYPH`/`TIE_GLYPH`).
+#
+# ✅ SO THERE ARE TWO ENUMERATORS AND EACH LEGEND ASKS FOR THE GROUPS IT DRAWS. Both are built from
+# the same dictionaries the producers read, which is the property that makes either legend unable
+# to omit a mark a row can draw.
+#
+# ⚠️ R-141's FOOTPRINT RULE TRAVELS WITH `indicator` AND IS THE REASON THE MOVE IS A MOVE RATHER
+# THAN A REWRITE: *"a mark that sized itself differently would take that alignment out from under a
+# whole column of cards."* The emitted string is unchanged to the byte.
+
+# R-141. THE UPSET LEVELS DIFFER ONLY BY COLOUR, and that is a decision rather than an oversight.
+# It is the third deliberate exception to the site's glyph-plus-label convention after R-026's
+# neutral-site icon, taken for the same reason: a small known user base, a legend that explains it
+# once, and a dense row where three labelled indicators would cost more width than the whole rest
+# of the cell.
+UPSET_LEVEL_CLASS = {"upset": "cfdb-u1", "big": "cfdb-u2", "blowout": "cfdb-u3"}
+UPSET_LEVEL_TITLE = {
+    "": "no closing line, so nothing named a favorite",
+    "none": "the favorite won",
+    "upset": "upset",
+    "big": "upset by more than a touchdown",
+    "blowout": "upset by more than two touchdowns",
+}
+# R-181. ONE BASIS, so the tooltip states it rather than naming which of two produced the verdict.
+UPSET_AGAINST = "the closing spread"
+
+# R-171. "No closing line held" is a DASH, not a shape. It was a dotted outline, which still reads
+# as a value being shown — a reader pulling in lower-division games that carry no spread or total
+# saw three faint outlines with nothing saying why. A dash is the site's existing mark for "we hold
+# nothing here".
+NO_DATA_MARK = "\u2013"
+
+_COVER_FILLS = {"yes": "fill", "no": "open", "push": "push"}
+_COVER_TITLES = {"yes": "the winner also covered the closing spread",
+                 "no": "the winner did not cover the closing spread",
+                 "push": "the closing spread pushed"}
+_OVER_TITLES = {"yes": "over the closing total",
+                "no": "under the closing total",
+                "push": "landed on the closing total"}
+
+
+def upset_title(level: str) -> str:
+    """The upset tooltip, with its basis named."""
+    verdict = UPSET_LEVEL_TITLE.get(level, level)
+    return f"{verdict}, against {UPSET_AGAINST}" if level else verdict
+
+
+def indicator(shape: str, state: str, title: str, extra: str = "") -> str:
+    """One indicator. SHAPES, NOT EMOJI — and a different shape per POSITION.
+
+    Marc's three states mixed emoji-presentation characters with text-presentation ones, which do
+    not share a baseline, do not size together and vary by platform. A span with a background, a
+    border and a radius gives one rule for size, baseline and colour.
+
+    THE SHAPE IS WHAT MAKES EACH ONE SELF-IDENTIFYING. All three were circles, so they could only be
+    told apart by their position in the strip — and position is unreadable the moment one of them is
+    invisible, which is most of the time. Circle, square, diamond: a reader can match any single
+    indicator to its legend entry without counting its neighbours.
+
+    🚨 THE DASH KEEPS THE SHAPE CLASS AND THEREFORE THE BOX. R-141 aligns every card's strip by
+    giving the indicators identical footprints; a mark that sized itself differently would take that
+    alignment out from under a whole column of cards. **A147 moved this function and changed not one
+    character of what it emits** — `test_the_result_strip_moved_without_changing_a_byte`.
+    """
+    mark = NO_DATA_MARK if state == "nodata" else ""
+    return (f"<span class='cfdb-ind cfdb-sh-{shape} cfdb-ind-{state} {extra}' "
+            f"title='{title}'>{mark}</span>")
+
+
+def result_strip(row) -> str:
+    """R-141. Three indicators, populated only for a completed game.
+
+    THE WIDTH IS RESERVED ON EVERY ROW, PLAYED OR NOT. An indicator set that appears only on
+    completed games shifts the columns beside it the moment a week is half played — the alignment
+    failure Schedule has fixed three times.
+
+    "NOT AN UPSET" IS AN ANSWER, AND IT USED TO RENDER AS NOTHING. That made it identical to "not
+    played yet", which is a different fact. It draws a quiet outline: present, answered,
+    unremarkable. Only a game nobody has played renders truly nothing.
+
+    ⚠️ R-172. NULL IS NOT "none". `is_upset` is null when neither side was ranked, and `or "none"`
+    turned that absence into an assessment — a quiet circle claiming we had looked.
+
+    ⚠️ EVERY COLUMN IT READS IS ON `srv_game`, WHICH BOTH CALLERS ALREADY SELECT FROM — checked
+    against `information_schema` rather than against a query (§2.2.1c.2): `is_completed`,
+    `upset_level`, `winner_covered_close`, `over_met`.
+    """
+    if not row.get("is_completed"):
+        return ("<span class='cfdb-strip'>"
+                + indicator("upset", "none", "not played yet")
+                + indicator("cover", "none", "not played yet")
+                + indicator("over", "none", "not played yet")
+                + "</span>")
+    upset = fmt.text(row.get("upset_level"))
+    cover, over = fmt.text(row.get("winner_covered_close")), fmt.text(row.get("over_met"))
+    parts = [
+        indicator("upset",
+                  "fill" if upset in UPSET_LEVEL_CLASS
+                  else "quiet" if upset == "none" else "nodata",
+                  upset_title(upset),
+                  UPSET_LEVEL_CLASS.get(upset, "")),
+        indicator("cover", _COVER_FILLS.get(cover, "nodata"),
+                  _COVER_TITLES.get(cover, "no closing spread held"), "cfdb-acc"),
+        indicator("over", _COVER_FILLS.get(over, "nodata"),
+                  _OVER_TITLES.get(over, "no closing total held"), "cfdb-acc"),
+    ]
+    return f"<span class='cfdb-strip'>{''.join(parts)}</span>"
+
+
+def strip_entries(bands=None) -> list:
+    """The strip's inventory, as `(group, [(swatch_html, label), …])`. A147.
+
+    🚨 BUILT FROM THE SAME DICTIONARIES `result_strip` READS, never a parallel list — R-178's law,
+    and the reason this module is the right home for a legend's source.
+
+    ⚠️ `bands` IS A PARAMETER BECAUSE THE UPSET THRESHOLDS ARE DATA, NOT A CONSTANT. R-224: they are
+    columns on `srv_game`, so the labels are a function of the frame. A caller with no frame gets
+    the level names; Schedule substitutes the measured bands it already computes.
+    """
+    labels = dict(bands or {})
+    return [
+        ("Against the line", [
+            (indicator("upset", "quiet", ""), "The favorite won"),
+            (indicator("upset", "fill", "", "cfdb-u1"), labels.get("upset", "Upset")),
+            (indicator("upset", "fill", "", "cfdb-u2"), labels.get("big", UPSET_LEVEL_TITLE["big"])),
+            (indicator("upset", "fill", "", "cfdb-u3"),
+             labels.get("blowout", UPSET_LEVEL_TITLE["blowout"])),
+            (indicator("cover", "fill", "", "cfdb-acc"), "Winner covered"),
+            (indicator("cover", "open", "", "cfdb-acc"), "Winner did not cover"),
+            (indicator("over", "fill", "", "cfdb-acc"), "Over"),
+            (indicator("over", "open", "", "cfdb-acc"), "Under"),
+            (indicator("cover", "nodata", ""), "No closing line held"),
+            (indicator("upset", "nodata", ""), "No line, so no favorite"),
+            # 🚨 A147 FOUND A GAP IN SCHEDULE'S OWN LEGEND AND THIS ROW IS IT. `LEGEND_GROUPS`
+            # lists `cover/nodata` and `upset/nodata` and NOT `over/nodata` — but a row draws it
+            # whenever no closing total was held, which is every lower-division game. R-178's law
+            # broken in the "omits a mark a row can draw" direction, and it has been there since
+            # the strip was built.
+            #
+            # ⚠️ IT IS FIXED HERE AND NOT THERE, DELIBERATELY. Adding a row to `LEGEND_GROUPS`
+            # would change Schedule's rendered bytes, and A147's contract with that page is that
+            # it renders identically. **Reported for a later round rather than smuggled in.**
+            (indicator("over", "nodata", ""), "No closing total held"),
+        ]),
+    ]
 
 
 # ── the inventory a legend walks ────────────────────────────────────────────────────────────
