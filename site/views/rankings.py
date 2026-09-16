@@ -97,7 +97,7 @@ def _compare(season, week) -> None:
                 # most" is one click rather than an app-side calculation.
                 Col("disagreement_spread", "Spread", "num", dp=0),
         ]
-        df = table.apply_sort(df, compare_columns)
+        # A141: `table.render` applies the sort it draws — see its docstring.
         states.render_or_state(
             df, "srv_rankings_compare",
             "Poll disagreement would be here.",

@@ -475,7 +475,13 @@ def body(page) -> None:
             layout = table.column_layout(ordered, columns, unit="px",
                                          seed_from_label=False)
             table.render(
-                ordered, columns, caption="", layout=layout,
+                # ⚠️ `sortable="applied"` — A141. `_sorted_or_default` above has already sorted,
+                # and it has to: `_pairs_only` computes the row cap from the SORTED order so the
+                # cut never falls inside a game's two rows, and the column widths are measured
+                # from the same frame. Sorting again inside `render` would be idempotent here,
+                # but the third state is what makes "sorted twice" impossible rather than merely
+                # harmless.
+                ordered, columns, caption="", layout=layout, sortable="applied",
                 link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]),
                 max_rows=cap, scroll=True, sticky=len(FROZEN) + 1,
                 row_class=_band(ordered),

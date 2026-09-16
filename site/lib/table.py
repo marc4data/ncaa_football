@@ -100,8 +100,23 @@ def apply_sort(df: pd.DataFrame, columns: List[Col],
                           kind="mergesort")
 
 
-def _header_cell(column: Col, sortable: bool, freeze: str = "") -> str:
-    """A header, and a sort toggle where the column has something to sort by."""
+def _header_cell(column: Col, sortable: bool, freeze: str = "",
+                 fields: Optional[set] = None, anchor: Optional[str] = None) -> str:
+    """A header, and a sort toggle where the column has something to sort by.
+
+    🚨 `fields` IS THE FRAME'S OWN COLUMNS, AND IT IS THE GENERAL FORM OF THE LIST BELOW — A141.
+    That list is a hand-maintained proxy for *"this field is not in the frame, so `apply_sort`
+    will drop it and the link will do nothing"*, and a hand-maintained list goes stale the day
+    somebody adds a synthetic column. 📊 **A138 added two — `scoreboard` and `curve` — and
+    measured on the running page, Looking Back was offering 41 sort links of which 12 named a
+    field the frame does not have.** Asking the frame cannot go stale.
+
+    ⚠️ THE LIST STAYS AS WELL, and it is not redundant: it also excludes fields that ARE in the
+    frame but whose column renders something else entirely. Both tests have to pass, so this
+    strictly removes dead links and can never add one.
+    """
+    if fields is not None and column.field and column.field not in fields:
+        return f"<th class='{column.css}{freeze}'>{column.label}</th>"
     # A synthetic column has no field to sort by — "Spread · model" is two numbers in one
     # cell, and the details glyph is not data. Those render as plain headers rather than
     # as links that would do nothing.
@@ -131,6 +146,10 @@ def _header_cell(column: Col, sortable: bool, freeze: str = "") -> str:
     next_order = "desc" if (is_active and order == "asc") else "asc"
     arrow = ("▲" if order == "asc" else "▼") if is_active else "⇅"
     href = params.link_here(sort=column.field, order=next_order)
+    # THE FRAGMENT IS APPENDED, NEVER BUILT INTO `link_here`. That function's job is the QUERY,
+    # which is the linkable state; a fragment is a scroll position and is not state at all.
+    if anchor:
+        href = f"{href}#{anchor}"
     active = " cfdb-sorted" if is_active else ""
     return (f"<th class='{column.css}{active}{freeze}'>"
             f"<a class='cfdb-sort' href='{href}' target='_self'>{column.label}"
@@ -291,10 +310,72 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
            layout: Optional[List[str]] = None, sortable: bool = True,
            scroll: bool = False, sticky: int = 0,
            row_class: Optional[Callable] = None,
-           header_height: Optional[int] = None) -> None:
+           header_height: Optional[int] = None,
+           anchor: Optional[str] = None) -> None:
     """An HTML table, because Streamlit's dataframe cannot hold a chip or a link.
 
     AC-G.47: the table carries header semantics and a caption naming its source view.
+
+    🚨 THIS FUNCTION APPLIES THE SORT IT DRAWS — A141, cfdb-main-R-948, AND IT DID NOT USED TO.
+    `sortable=True` drew the header links; `apply_sort` was a SEPARATE call the view had to
+    remember. 📊 ELEVEN OF SIXTEEN VIEWS DID NOT MAKE IT, and `today.py` — thirteen tables across
+    nine calls — made it nowhere. Every header on those pages was a live-looking link that
+    changed the URL, cost a full page reload and re-sorted nothing.
+
+    Marc, three times under three different sections of his 2026-09-16 notes:
+
+        "Column sort isn't working.  The whole page reloads and end-user has to scroll down
+         to get to the same page s/he clicked from."
+
+    ⚠️ THE DEFAULT WAS THE DEFECT, WHICH IS THE PART WORTH FIXING RATHER THAN THE THIRTEEN CALLS.
+    A view opted OUT of drawing the links and had to opt IN to making them work: forgetting
+    produced something that LIES rather than something inert. This repository had already
+    written that lesson down — `params.py` on `?view=stacked`: *"the feature was inert and looked
+    fine"* (R-043). Same class, eleven views wide.
+
+    ✅ SO THE SORT MOVES INSIDE, AND THE VIEWS STOP CALLING `apply_sort` AT ALL. That is what
+    makes a double sort IMPOSSIBLE rather than merely harmless: there is one call site.
+    `test_no_view_applies_the_sort_itself` holds it there.
+
+    ⚠️ AND A TABLE WITH FEWER THAN TWO ROWS DRAWS NO SORT LINKS. A control that cannot change
+    anything is the dead-link class this round exists to end, and a per-view judgement about
+    which tables are one-row would be a list that goes stale. The frame answers it every render.
+
+    🚨 `sortable` IS TRI-STATE, AND THE THIRD STATE EXISTS BECAUSE ONE VIEW GENUINELY NEEDS THE
+    SORTED FRAME BEFORE IT RENDERS:
+
+        True         render applies the sort and draws the links. Every view but one.
+        False        no links and no sort.
+        "applied"    the caller has ALREADY sorted; draw the links, do not sort again.
+
+    🚨 `anchor` IS THE SECOND HALF OF WHAT MARC REPORTED — *"the whole page reloads and end-user
+    has to scroll down to get to the same page s/he clicked from."* A sort is a URL, deliberately
+    (AC-G.18: a sorted view has to survive a reload and be sendable), so the reload is the design
+    and the LOST POSITION is the defect.
+
+    📊 MEASURED IN A BROWSER AGAINST THE REAL PAGE, because Cowork had not verified it and it is
+    not obvious — this page does not scroll the document at all, it scrolls Streamlit's own
+    `stMain` container, so a fragment might well have been inert:
+
+        #leaderboards on a COLD load        stMain.scrollTop stays 0    ← the fragment does nothing
+        scrollIntoView() once rendered      stMain.scrollTop 5654       ← the container IS scrollable
+        a SORT navigation carrying it       stMain.scrollTop 3000 -> 5654  ✅ it works
+
+    ✅ AND THE CASE THAT WORKS IS EXACTLY THE ONE MARC IS IN. A sort click is a same-document
+    query change on an app that is already loaded, so the DOM survives and the browser applies
+    the fragment to an element that exists. A cold load with a fragment does not, because the
+    body arrives over the websocket after the browser has already looked — **so this is a
+    position restore, not a linkable deep link, and it is not sold as one.**
+
+    ⚠️ THE ANCHOR IS STREAMLIT'S OWN HEADING ID, not one this module invents: `st.subheader`
+    emits `<h3 id="most-exciting">`, and the ids were read off the rendered page rather than
+    assumed. A view passes the slug of the heading its table sits under.
+
+    ⚠️ `scores.py` IS THE ONE, AND IT IS NOT A STYLE PREFERENCE. It computes its row cap with
+    `_pairs_only`, which must not cut INSIDE a game's two rows — a question about the sorted
+    order — and it measures its column widths from the same frame. Sorting after that would
+    invalidate the cap it just computed. ✅ `test_only_scores_applies_its_own_sort` is what keeps
+    the third state from spreading: a view that adds an `apply_sort` call has to justify it.
 
     ROWS ARE LINKED WITH REAL ANCHORS, and that is a fix rather than a style choice. This
     used to put `onclick="window.location=..."` on the <tr>. Streamlit's markdown sanitiser
@@ -310,6 +391,15 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     anchor is display:block so the whole cell is the target, which makes the row clickable
     in effect while staying valid HTML that a browser can middle-click.
     """
+    # 🚨 THE SORT, APPLIED HERE AND NOWHERE ELSE. See the docstring.
+    #
+    # ⚠️ ORDER MATTERS BETWEEN THESE TWO LINES: the links are suppressed on the SAME condition
+    # that suppresses the sort, so a header can never offer something the table will not do.
+    if sortable is True and len(df) > 1:
+        df = apply_sort(df, columns)
+    elif len(df) < 2:
+        sortable = False
+
     # A colgroup rather than per-cell widths: one declaration the browser applies to the
     # whole table, and identical markup in every group when `layout` is shared.
     colgroup = ("<colgroup>"
@@ -340,7 +430,9 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
         css = " cfdb-sticky" + (" cfdb-sticky-edge" if index == edge else "")
         return f"{css}' style='left:{offsets[index]}px"
 
-    head = "".join(_header_cell(c, sortable, freeze(i))
+    # ⚠️ THE FRAME'S OWN COLUMNS, SO A HEADER CANNOT OFFER A SORT THE FRAME CANNOT SATISFY.
+    fields = set(df.columns)
+    head = "".join(_header_cell(c, sortable, freeze(i), fields, anchor)
                    for i, c in enumerate(columns))
     body = []
     for _, row in df.head(max_rows).iterrows():

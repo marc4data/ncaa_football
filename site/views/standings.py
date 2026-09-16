@@ -36,7 +36,9 @@ def body(page) -> None:
         # Default order is tiebreak_rank, which is dbt's business logic (AC-5.1). A reader
         # re-sorting by points-for is display, and the two do not conflict: the default is
         # the authored ordering, and any other is explicitly asked for.
-        df = table.apply_sort(df, COLUMNS)
+        # A141: `table.render` applies the sort it draws. `_by_conference` groups with
+        # `sort=True`, which preserves within-group order, so sorting each block gives
+        # exactly what sorting before the grouping used to.
         states.render_or_state(
             df, "srv_standings",
             "Conference standings would appear here.",

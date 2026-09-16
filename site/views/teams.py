@@ -35,8 +35,9 @@ def body(page) -> None:
         if search:
             df = df[df["school"].str.contains(search, case=False, na=False)]
 
-        df = table.apply_sort(df, [Col("abbreviation", "Abbr"),
-                                   Col("win_pct", "Win %", "num")])
+        # A141: `table.render` applies the sort it draws. ⚠️ AND THE COLUMN LIST THIS USED
+        # TO PASS WAS NOT THE ONE IT RENDERS — `apply_sort` never read it, validating the
+        # requested field against `df.columns` instead, so the two-column list was inert.
         states.render_or_state(
             df, "srv_teams_index",
             "Teams would be listed here.",
