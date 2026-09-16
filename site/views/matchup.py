@@ -2773,9 +2773,22 @@ def _box_row(row, side, caption: str, column, accent: str, frame=None, overlay: 
 #
 # ⚠️ AND IT CARRIES ALL SIX PER-GAME COLUMNS RATHER THAN ONE, because the three sections draw
 # three different strips off the same rows. Six columns in one read beats three reads.
+#
+# 🚨 cfdb-wta-R-994. `opponent_classification` IS THE SEVENTH AND IT IS WHAT MARC'S FILL RULE
+# READS: *"Can circles be team color filled with 90% black border (for FBS opponents). Non-FBS
+# opponenets should not be filled."* It is the classification of **that game's own opponent**,
+# already on the row the circle is drawn from — so the rule is a column this query selects and
+# **not a join, a second read or a lookup in the page** (G-2).
+#
+# ⚠️ IT DID NOT EXIST IN SERVING UNTIL A146 AND B121 STOPPED A ROUND ON IT (cfdb-main-R-1007):
+# `srv_game_team.sql:153` MENTIONS the name in a comment and line 156 consumes it inside
+# `is_fbs_game`, and live serving answered `UndefinedColumn`. **Checked against
+# `information_schema` this round before anything was keyed on it**, which is the rule that
+# mention cost.
 _CALENDAR_COLUMNS = """
     team_id, week, game_date, is_home, opponent_abbreviation,
-    opponent_team_display, opponent_rank, record_before_display,
+    opponent_team_display, opponent_rank, opponent_classification,
+    record_before_display,
     points_for, points_against,
     total_yards, rushing_yards, passing_yards,
     total_yards_allowed, rushing_yards_allowed, passing_yards_allowed,
@@ -3031,6 +3044,84 @@ def _circle_pitch(n: int, band: int = None) -> float:
     return min(_CIRCLE_PITCH_MAX, (band - _CIRCLE_D) / (n - 1))
 
 
+# 🚨 cfdb-wta-R-994. MARC'S FILL RULE, v16, VERBATIM:
+#
+# *"Can circles be team color filled with 90% black border (for FBS opponents). Non-FBS
+# opponenets should not be filled."*
+#
+# ⚠️ THE FILL IS THE ENCODING AND THE TEAM COLOUR IS DECORATION ON TOP OF IT, WHICH IS THE RIGHT
+# WAY ROUND AND WORTH SAYING BECAUSE THE NEXT READER WILL BE TEMPTED TO KEY SOMETHING ON THE HUE.
+# B121's render carries a greyscale column and **filled versus unfilled separates cleanly with
+# the colour removed** (AC-G.22). 10.89% of games have a side with no sourced colour at all
+# (B109), so a rule carried by the hue would be unreadable on one game in ten.
+_FBS = "fbs"
+
+# 🚨 *"90% BLACK"* IS A CONTRAST INSTRUCTION, NOT A HEX LITERAL, AND B121 RENDERED WHY —
+# `claude_work/renders/B121_fill_and_border_options.png`, three options x light, dark and
+# greyscale. A literal `rgba(0,0,0,.9)` ring around a team-filled circle on the dark page's
+# `#0e1117` **is in the DOM and not on the screen**: the circle reads as a plain dot.
+#
+# ✅ SO IT USES THE MECHANISM `_accent` ALREADY HAS RATHER THAN A SECOND ONE (§4.3). `light-dark()`
+# follows the `color-scheme` Streamlit sets — not `prefers-color-scheme`, which answers the
+# OPERATING SYSTEM and hands a reader on a dark Mac running the app in Light the wrong palette
+# (R-547, R-552). B109 measured the cost of getting this wrong on the other element: **18.6% of
+# teams publish `#000000`** as their on-light colour and it rendered invisible on a dark page.
+# ⚠️ THE DARK VARIANT IS 85% WHITE RATHER THAN PURE WHITE so the ring carries the same visual
+# weight as an unfilled circle's stroke, which is drawn at `opacity:.85` below.
+_CIRCLE_FILL_BORDER = "light-dark(rgba(0,0,0,.9), rgba(255,255,255,.85))"
+
+# ⚠️ THE DIVISION IN WORDS, FOR THE HOVER ONLY. Measured on live published serving this round:
+# `opponent_classification` takes **six states** across `srv_game_team` — `fbs` (149,528 rows),
+# `fcs` (34,017), `iii` (12,674), `ii` (12,150), `ii/iii` (4,330) and **NULL (12,651)**.
+# 🚨 B121 MEASURED FIVE VALUES ON `classification` AND THE OPPONENT COLUMN'S DOMAIN IS NOT THE
+# SAME SET — `ii/iii` is in it. **A `.get` with a fallback rather than a lookup that raises**, so
+# a seventh value someday degrades to its own raw name instead of an Error card over the panel.
+_DIVISIONS = {"fbs": "FBS", "fcs": "FCS", "ii": "Division II", "iii": "Division III",
+              "ii/iii": "Division II/III"}
+
+
+def _circle_paint(game, accent: str) -> tuple:
+    """`(fill, stroke)` for one game's circle, from **that game's own opponent**.
+
+    🚨 THE CLASSIFICATION IS THE ROW'S, AND THAT IS WHAT MAKES THE ALLOWED COLUMN CORRECT FOR
+    FREE. B120's allowed circles are **the opposing team's** games, so on that column the
+    opponent is the other team's opponent — *not* the team this panel is about. A rule written in
+    page code as *"is the opponent an FBS team"* would read the panel's own opponent and be wrong
+    on every allowed circle; `opponent_classification` sits on the calendar row the circle is
+    already drawn from, so there is nothing to get right twice.
+
+    🚨 NULL IS A THIRD STATE AND IT DRAWS UNFILLED — DELIBERATELY, AND THIS IS THE DECISION.
+    A fill ASSERTS *this opponent was an FBS team*, and a null cannot support that assertion, so
+    the fill requires positive evidence and absence falls to the unfilled side.
+
+    📊 MEASURED BEFORE THE RULE WAS WRITTEN (§2.5), on live published serving:
+
+    - **coverage is 99.496% on the population that draws circles** — 7,311 of 7,348 played
+      team-games carry a classification. The 37 that do not are **every one of them an FCS team
+      playing an unaffiliated or NAIA school** (Virginia Lynchburg, Kentucky Christian, Ave
+      Maria), and they are reachable here: **19 team-seasons** hold such a game AND an FBS
+      opponent, so an FBS-vs-that-team Matchup draws the null on its allowed column.
+    - ⚠️ **AND ONE OF THOSE 16 OPPONENT NAMES HAS CARRIED `fbs` IN SOME ERA — "Cumberland (TN)",
+      the 1916 Georgia Tech fixture.** That is a name collision across a century, and it is
+      precisely why nothing here infers a division from a NAME. Only the row's own column.
+
+    ⚠️ SO THE PICTURE SAYS *not FBS* AND THE HOVER SAYS *which* (AC-G.11). An unfilled circle
+    conflates *we know the opponent was FCS* with *we do not know what the opponent was*, which
+    are different facts — see `_circle_title`, where the division is named for exactly the
+    circles the fill cannot distinguish.
+
+    ⚠️ THE FILL COLOUR IS THE ACCENT THE COLUMN WAS ALREADY HANDED, never a colour fetched here.
+    `_gained_allowed` passes `opponent_accent` for the allowed column for the same reason the
+    stroke does — R-855, one producer, called twice.
+    """
+    classification = game.get("opponent_classification")
+    if classification is None or pd.isna(classification):
+        return "none", accent
+    if str(classification).strip().lower() == _FBS:
+        return accent, _CIRCLE_FILL_BORDER
+    return "none", accent
+
+
 def _circle_title(game, column) -> str:
     """Marc's hover: *"the Week #, Opponenet Rank, Name, Record, Final Score"*.
 
@@ -3062,6 +3153,23 @@ def _circle_title(game, column) -> str:
     scored, allowed = game.get("points_for"), game.get("points_against")
     bits = [f"Week {int(week)}" if week is not None and not pd.isna(week) else "Week ?"]
     bits.append(f"{'No. ' + str(int(rank)) + ' ' if ranked else 'unranked '}{where}{name}".strip())
+    # 🚨 cfdb-wta-R-994 / AC-G.11 — THE HOVER SAYS *WHICH* NON-FBS, BECAUSE THE FILL CANNOT.
+    #
+    # Marc's rule is binary and the picture is therefore binary: filled means FBS, unfilled means
+    # everything else. ⚠️ **"Everything else" is five states, and one of them is a NULL** — *we
+    # know the opponent was FCS* and *we do not know what the opponent was* are different facts,
+    # and an unfilled circle states the first while sometimes meaning the second.
+    #
+    # ✅ SO IT IS NAMED ON EXACTLY THE CIRCLES THE FILL LEAVES AMBIGUOUS, AND NOT ON THE OTHERS.
+    # An FBS opponent gets no phrase: the fill already says so and the section caption says what
+    # the fill means, so a sixth line on every tooltip would spend Marc's five-item hover spec
+    # (*"the Week #, Opponenet Rank, Name, Record, Final Score"*) restating what is on the screen.
+    division = game.get("opponent_classification")
+    if division is None or pd.isna(division):
+        bits.append("opponent's division not recorded")
+    elif str(division).strip().lower() != _FBS:
+        key = str(division).strip().lower()
+        bits.append(f"{_DIVISIONS.get(key, key.upper())} opponent")
     if record is not None and not pd.isna(record):
         bits.append(f"{record} going in")
     if not (scored is None or pd.isna(scored) or allowed is None or pd.isna(allowed)):
@@ -3077,8 +3185,9 @@ def _circle_title(game, column) -> str:
 
 
 def _circle_column(games, column, frame, accent, width, band: int = None) -> str:
-    """Marc's ordered jitter: one unfilled circle per played game, earliest at the top,
-    **drawn INSIDE the box-and-whisker's own band** (v16, cfdb-wta-R-993).
+    """Marc's ordered jitter: one circle per played game, earliest at the top, **drawn INSIDE
+    the box-and-whisker's own band** (v16, cfdb-wta-R-993) and **filled when that game's opponent
+    was an FBS team** (v16, cfdb-wta-R-994 — see `_circle_paint`).
 
     🚨 IT IS AN OVERLAY NOW, AND THAT CHANGES WHAT SAYS WHOSE GAMES THESE ARE. B119 and B120 spent
     two rounds making the column HUG its own row — 1.2px above against 15.2px below, a 12.7 : 1
@@ -3109,9 +3218,12 @@ def _circle_column(games, column, frame, accent, width, band: int = None) -> str
     to share its axis must be fixed too.** This is an `<svg>` with a declared width for that
     reason.
 
-    ⚠️ UNFILLED IS MARC's WORD AND IT IS ALSO THE FUNCTIONAL CHOICE: `fill='none'` means two
-    circles at the same yardage still read as two marks rather than one darker blob, which is the
-    whole point of a jitter.
+    🚨 *"UNFILLED"* WAS MARC's WORD IN v15 AND IT IS NO LONGER TRUE OF EVERY CIRCLE — v16 asks
+    for a team-colour fill on FBS opponents, so the two rules meet here. **B119's reason for
+    `fill='none'` survives for the unfilled half and is worth keeping written down:** two circles
+    at the same yardage still read as two marks rather than one darker blob, which is the whole
+    point of a jitter. ⚠️ **The overlap cost is therefore paid on the FILLED circles only**, and
+    B121 measured it at this pitch a round before the column to key it on existed.
     """
     # 🚨 `games is None` IS THE SAME ABSENCE AS "NO ROWS WITH FIGURES", AND BEFORE cfdb-wta-R-1000
     # IT WAS A DIFFERENT CODE PATH THAT DREW NOTHING AT ALL.
@@ -3190,11 +3302,19 @@ def _circle_column(games, column, frame, accent, width, band: int = None) -> str
                 f"opacity='.8'>{caret}</text>"
                 f"<text x='{at:.1f}' y='{y + 2.5:.1f}' text-anchor='{anchor}' font-size='7' "
                 f"fill='currentColor' opacity='.75'>{fmt.number(value, column, dp=0)}</text>")
+        # 🚨 cfdb-wta-R-994. THE FILL IS PER CIRCLE, FROM THAT GAME'S OWN OPPONENT — see
+        # `_circle_paint`, which carries the rule, the null decision and the measurement.
+        # ⚠️ B119's `fill='none'` WAS DELIBERATE AND ITS REASON SURVIVES FOR THE UNFILLED HALF:
+        # *"two circles at the same yardage still read as two marks rather than one darker
+        # blob"*. **Marc's rule overrides it for FBS opponents and only for them**, so the
+        # overlap cost is paid on the filled circles alone — which B121 measured at this pitch
+        # before the column existed.
+        fill, stroke = _circle_paint(game, accent)
         marks.append(
             f"<g data-cfdb='game-circle' data-week='{html.escape(str(game.get('week')))}'>"
             f"<title>{title}</title>"
-            f"<circle cx='{x:.1f}' cy='{y:.1f}' r='{_CIRCLE_D / 2:.1f}' fill='none' "
-            f"stroke='{accent}' stroke-width='1.2' opacity='.85'></circle>{extra}</g>")
+            f"<circle cx='{x:.1f}' cy='{y:.1f}' r='{_CIRCLE_D / 2:.1f}' fill='{fill}' "
+            f"stroke='{stroke}' stroke-width='1.2' opacity='.85'></circle>{extra}</g>")
     # ⚠️ AC-G.11 — THE SVG NARRATES ITSELF, because a screen reader gets only this string and a
     # column of circles is otherwise silent. It says how many and over what, which is the fact.
     reading = (f"{len(played)} game{'' if len(played) == 1 else 's'} played, each drawn at its "
@@ -3567,14 +3687,34 @@ def _yardage(row) -> None:
             # they are single games and that the colored rule is their average — **two different
             # kinds of quantity on one axis, which is legitimate and is exactly the thing that
             # must be said rather than left to be inferred.**
+            # 🚨 cfdb-wta-R-994. THIS SENTENCE IS WHERE THE FILL IS EXPLAINED, AND THE CHOICE
+            # WAS BETWEEN HERE AND THE HOVER.
+            #
+            # ⚠️ **A HOVER CANNOT INTRODUCE AN ENCODING, ONLY CONFIRM ONE.** A reader hovers a
+            # mark because they already wonder what it is; the reader this has to reach is the
+            # one who sees two kinds of circle and does not know a question is available. So the
+            # ENCODING is stated here, in the one sentence that already had to explain what a
+            # circle is, and the hover names the per-circle detail the picture cannot carry.
+            # ✅ AND IT COSTS NO NEW FURNITURE: the alternative was a legend, which would put a
+            # key beside all six charts to define one binary — and `_matchup_legend`'s own
+            # comment already argues against exactly that shape.
+            #
+            # 🚨 *"EACH OPEN CIRCLE BELOW IT"* WAS FALSE ON BOTH COUNTS AND THIS ROUND FIXES BOTH.
+            # **"Below it"** described B120's layout, where the column sat under the chart;
+            # **B122 overlaid the circles INSIDE the band** and left this sentence behind. **"Open"**
+            # stops being true here for every FBS opponent. ⚠️ This is the defect the comment
+            # forty lines up already names — *"a caption that survives the chart it describes"* —
+            # found in the same caption one round later, which is why it is worth saying twice.
             frame = (f"Each series is drawn against all {observations:,} team-games played in "
                      f"this season's first {weeks} week{'' if weeks == 1 else 's'}: the box is "
                      f"the middle half, the bold line inside it the median, and the whiskers "
                      f"run to the low and high boundaries, both labeled. The colored mark is "
-                     f"that team's average per game, and each open circle below it is one game "
-                     f"the team played, earliest at the top. ✅ Both rows are drawn against the "
-                     f"same spread, so the two sets of circles can be compared directly: the "
-                     f"same position means the same yardage whether it was gained or allowed.")
+                     f"that team's average per game, and each circle drawn on it is one game "
+                     f"the team played, earliest at the top — filled when that game's "
+                     f"opponent was an FBS team, open when it was not. ✅ Both rows are drawn "
+                     f"against the same spread, so the two sets of circles can be compared "
+                     f"directly: the same position means the same yardage whether it was gained "
+                     f"or allowed.")
             if weeks <= _THIN_SAMPLE:
                 # 🚨 A092 MEASURED THIS AND SAID TO SAY IT, AND B119 MOVED WHAT "THIN" MEANS.
                 # It used to read the least-played TEAM's game count, because the population was
