@@ -173,7 +173,32 @@ def describe(row) -> str:
             bits.append(f"n={int(row['n'])} of {int(total)} {noun}")
             break
     else:
-        bits.append(f"n={int(row['n'])}")
+        # 🚨 A145. THE FOURTH SIBLING PUBLISHES NO DENOMINATOR, AND `weeks_counted` IS NOT ONE.
+        #
+        # A143 built `srv_game_team_metric_distribution_through_prior_week` over a CUMULATIVE
+        # window and deliberately shipped no second count: its own header says `n` IS the number
+        # of team-games, because the window is built from observations, so a denominator column
+        # would be the same number twice under two names. ✅ That reasoning is right and stands.
+        #
+        # ⚠️ SO THE TOOLTIP LOST ITS NOUN — `n=370` where the siblings say `n=172 of 172
+        # team-games` — and B118, B119 and B120 each reported it. A145's prompt proposed adding
+        # `("weeks_counted", "weeks")` to the list above.
+        #
+        # 🚨 THAT WOULD HAVE PRINTED `n=370 of 2 weeks`, WHICH IS NOT A SMALLER VERSION OF THE
+        # RIGHT ANSWER — IT IS A FALSE RATIO. `n` counts team-games and `weeks_counted` counts
+        # weeks; they are not numerator and denominator, and "370 of 2" reads as a fraction that
+        # cannot be one. **A span is not a denominator, and the format string is what decides
+        # which this column becomes.**
+        #
+        # ✅ SO IT IS A SEPARATE CLAUSE WITH ITS OWN PREPOSITION. `n=370 over 2 weeks` says the
+        # thing a reader of a cumulative box actually needs — AC-G.33's rule that the denominator
+        # travels with the numerator, honouring what this relation's denominator really is.
+        span = row.get("weeks_counted")
+        if span is not None and not pd.isna(span):
+            weeks = int(span)
+            bits.append(f"n={int(row['n'])} over {weeks} week{'' if weeks == 1 else 's'}")
+        else:
+            bits.append(f"n={int(row['n'])}")
     for label, key in (("p25", "p25"), ("median", "p50"), ("p75", "p75")):
         value = row.get(key)
         if value is not None and not pd.isna(value):
@@ -322,6 +347,50 @@ TICK_BOUNDS = "bounds"
 TICK_NONE = "none"
 
 BOX_HEIGHT = 26
+
+# ── WHAT A TALLER BOX SCALES, AND WHAT IT MUST NOT ──────────────────────────────────────────
+#
+# A145, cfdb-main-R-992. Marc, v16: *"The circles need to be overlayed on top of the Box-Whisker
+# with same x and y-axis. **The box-whisker will have to be taller** to accommodate the circles
+# that will cover full regular season schedule (even with 50% overlap)."*
+#
+# 🚨 A TALLER BOX IS NOT A PROPORTIONALLY BIGGER BOX, AND THE TWO HALVES OF THAT SENTENCE HAVE
+# DIFFERENT ANSWERS:
+#
+#     the x axis   CARRIES DATA. Every x on this chart is a value through `_box_scale`, and
+#                  nothing here touches it — the height parameter cannot move a number sideways.
+#     the y axis   CARRIES NOTHING. A box plot has no y quantity: the rule sits at the middle
+#                  because it has to sit somewhere, and the box's THICKNESS is decoration.
+#
+# ✅ SO THE VERTICAL FURNITURE SCALES AND NO MEASUREMENT DOES. The box rect and the whisker
+# serifs keep their PROPORTION of the band — which is what makes a 56px chart read as the same
+# picture as a 26px one rather than as a thin rule stranded in a tall box.
+#
+# 🚨 AND THE ALTERNATIVE WAS RENDERED BEFORE IT WAS REJECTED — BY HOLDING THESE TWO RATIOS, NOT BY
+# EDITING THE OUTPUT, because a picture that argues against a design has to BE the design rather
+# than a rendering bug. `claude_work/renders/A145_what_a_taller_box_scales.png`, four bands.
+#
+# ⚠️ AND THE RASTER MADE A NARROWER CASE THAN THIS COMMENT FIRST CLAIMED, SO THE CLAIM MOVED.
+# **Neither version contains the circles**, and it was wrong to imply the scaled one does: at
+# height 56 the rect is 30.2px against a 56px stack, so marks extend past it either way. **That is
+# correct behaviour** — the rect marks p25..p75 on the X axis and has no vertical meaning to
+# contain anything with.
+#
+# ✅ THE ARGUMENT THAT SURVIVES IS CONSISTENCY, AND IT IS ENOUGH ON ITS OWN: a 26px box elsewhere
+# on the page and a 56px box here should read as the same species of chart. Holding the rect at a
+# literal 14px makes the taller one a thin slab stranded in a tall band — legible, but visibly a
+# different picture. Scaling keeps the proportions, so height becomes a size rather than a
+# redesign.
+#
+# ⚠️ THE RATIOS ARE DERIVED FROM THE EXISTING CONSTANTS RATHER THAN RETYPED, so the default is
+# byte-identical by construction rather than by a test that happens to agree:
+#
+#     _RECT_HALF_RATIO   7 / 26   the box rect's half-thickness
+#     _SERIF_HALF_RATIO  5 / 26   the whisker serif's half-height
+#
+# At `height=BOX_HEIGHT` these return exactly 7.0 and 5.0 and every emitted string is unchanged.
+_RECT_HALF_RATIO = 7.0 / BOX_HEIGHT
+_SERIF_HALF_RATIO = 5.0 / BOX_HEIGHT
 
 # ── HOW WIDE IS A LABEL, REALLY ─────────────────────────────────────────────────────────────
 #
@@ -603,7 +672,8 @@ def box(row, value=None, width: int = 240, label: str = "",
         value_below_color: Optional[str] = None,
         frame: Optional[tuple] = None, outliers: bool = False,
         value_title: Optional[str] = None,
-        value_below_title: Optional[str] = None) -> str:
+        value_below_title: Optional[str] = None,
+        height: Optional[int] = None) -> str:
     """A horizontal box-and-whisker for one measure, sized to the cell it is given.
 
     THE THIRD ENTRY POINT, over the SAME row as `thumbnail` and `panel`. One renderer, not two —
@@ -673,6 +743,9 @@ def box(row, value=None, width: int = 240, label: str = "",
     value_title        hover text for the value marker — a native SVG `<title>`, measured to
                        survive Streamlit's sanitiser. The words are the caller's (§4.2.1)
     value_below_title  as `value_title`, for the below side
+    height             the plot band in pixels, default `BOX_HEIGHT`. The vertical furniture
+                       scales with it and NO MEASUREMENT DOES — see the ratios above. A caller
+                       overlaying marks inside the band asks for the height those marks need
     """
     if row is None:
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
@@ -764,8 +837,11 @@ def box(row, value=None, width: int = 240, label: str = "",
             frame_hi = max(frame_hi, given_hi)
 
     pad = 10.0
-    height = BOX_HEIGHT
+    height = float(BOX_HEIGHT if height is None else height)
     mid = height / 2.0
+    # See the ratios' note above: the furniture keeps its proportion, the data keeps its x.
+    rect_half = height * _RECT_HALF_RATIO
+    serif_half = height * _SERIF_HALF_RATIO
     at = _box_scale(frame_lo, frame_hi, width, pad)
     parts = []
 
@@ -773,18 +849,24 @@ def box(row, value=None, width: int = 240, label: str = "",
     parts.append(f"<line x1='{at(lo):.1f}' y1='{mid:.1f}' x2='{at(hi):.1f}' y2='{mid:.1f}' "
                  f"stroke='currentColor' stroke-width='1' opacity='.55'></line>")
     for end in (lo, hi):
-        parts.append(f"<line x1='{at(end):.1f}' y1='{mid - 5:.1f}' x2='{at(end):.1f}' "
-                     f"y2='{mid + 5:.1f}' stroke='currentColor' stroke-width='1' "
+        parts.append(f"<line x1='{at(end):.1f}' y1='{mid - serif_half:.1f}' x2='{at(end):.1f}' "
+                     f"y2='{mid + serif_half:.1f}' stroke='currentColor' stroke-width='1' "
                      f"opacity='.55'></line>")
 
     # The box: p25 to p75.
-    parts.append(f"<rect x='{at(p25):.1f}' y='{mid - 7:.1f}' width='{max(at(p75) - at(p25), 1):.1f}' "
-                 f"height='14' fill='currentColor' fill-opacity='.14' stroke='currentColor' "
-                 f"stroke-width='1' stroke-opacity='.5'></rect>")
+    # ⚠️ THE HEIGHT IS EMITTED AT ZERO DECIMALS AND THE y AT ONE, WHICH IS NOT AN OVERSIGHT: it is
+    # what the pre-A145 literal `height='14'` did, and keeping it is what makes the default render
+    # byte-identical. A rect's thickness is decoration and a whole pixel is enough of it.
+    parts.append(f"<rect x='{at(p25):.1f}' y='{mid - rect_half:.1f}' "
+                 f"width='{max(at(p75) - at(p25), 1):.1f}' "
+                 f"height='{rect_half * 2:.0f}' fill='currentColor' fill-opacity='.14' "
+                 f"stroke='currentColor' stroke-width='1' stroke-opacity='.5'></rect>")
 
     # 🚨 THE MEDIAN IS BOLD — Marc said so explicitly, and it is the one line a reader looks for.
-    parts.append(f"<line x1='{at(p50):.1f}' y1='{mid - 7:.1f}' x2='{at(p50):.1f}' "
-                 f"y2='{mid + 7:.1f}' stroke='currentColor' stroke-width='1.8' "
+    # ⚠️ IT SPANS THE RECT RATHER THAN A CONSTANT, so it stays the box's own divider at any height.
+    # A 1.8px rule that stopped 7px either side of centre in a 56px band would read as a tick.
+    parts.append(f"<line x1='{at(p50):.1f}' y1='{mid - rect_half:.1f}' x2='{at(p50):.1f}' "
+                 f"y2='{mid + rect_half:.1f}' stroke='currentColor' stroke-width='1.8' "
                  f"opacity='{MEDIAN_OPACITY}'></line>")
 
     # ⚠️ THE RINGS GO DOWN BEFORE THE VALUE MARKERS, so a team figure that happens to sit on the
@@ -865,6 +947,11 @@ def box(row, value=None, width: int = 240, label: str = "",
     body = "".join(parts)
     if top_band:
         body = f"<g transform='translate(0,{top_band})'>{body}</g>"
+    # ⚠️ `:g` ON THE THREE PLACES THIS IS EMITTED, AND IT IS THE DIFFERENCE BETWEEN A
+    # BYTE-IDENTICAL DEFAULT AND 580 CHANGED RENDERS. `height` became a float so the ratios above
+    # could be computed from it, which turned `41` into `41.0` in the viewBox and both attributes
+    # — the ONLY thing A145's first draft changed at the default, and the hash comparison against
+    # the pre-change module is what found it. `:g` prints 41 for 41.0 and 71.5 for 71.5.
     total_height = top_band + height + 15
 
     # ⚠️ AC-G.11 — AN ABSENCE MUST SAY WHICH ABSENCE IT IS, AND A SCREEN READER GETS ONLY THIS
@@ -886,7 +973,8 @@ def box(row, value=None, width: int = 240, label: str = "",
         reading += (", two values" if drawn == 2 else
                     ", one value — the other side has none" if drawn == 1 else
                     ", neither side has a value")
-    svg = (f"<svg viewBox='0 0 {width} {total_height}' width='{width}' height='{total_height}' "
+    svg = (f"<svg viewBox='0 0 {width} {total_height:g}' width='{width}' "
+           f"height='{total_height:g}' "
            f"role='img' aria-label='{reading}' "
            f"style='display:block;max-width:100%'>{body}</svg>")
     return f"<span class='cfdb-dist' title='{describe(row)}'>{svg}</span>"
