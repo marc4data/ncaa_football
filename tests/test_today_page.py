@@ -1244,8 +1244,23 @@ def _scoreline_row(**overrides):
 
 
 def _scoreboard_team_order(html):
-    """The team names in the order the scoreboard actually emits them."""
-    return re.findall(r"cfdb-sb-team'>([^<]*)</th>", html)
+    """The team names in the order the scoreboard actually emits them.
+
+    🚨 A144 MOVED THE NAME INSIDE A CELL AND THIS EXTRACTOR HAD TO FOLLOW IT — the row header now
+    holds the shared team-identity cell (logo, rank badge, linked name, record) rather than a bare
+    string, so `cfdb-sb-team'>([^<]*)</th>` matched nothing and every assertion below compared two
+    empty lists. ⚠️ AN EXTRACTOR THAT STOPS FINDING ANYTHING IS THE WORST AVAILABLE FAILURE FOR A
+    TEST LIKE THIS: `[] == []` would have passed on a scoreboard with the two sides SWAPPED, which
+    is precisely R-522's law and precisely what B082 and B083 proved a presence assertion cannot
+    see. It failed loudly only because the expectation is the two real names.
+
+    ✅ SO IT READS THE NAME THE CELL ACTUALLY RENDERS — `.cfdb-team`, `table.team_cell`'s own span —
+    which is STRONGER than the old match: it now proves the identity cell drew a name at all, in
+    the right row, as well as proving the order.
+    """
+    cells = re.findall(r"cfdb-sb-team'>(.*?)</th>", html, re.S)
+    found = [re.search(r"cfdb-team'>([^<]*)</span>", cell) for cell in cells]
+    return [match.group(1) for match in found if match]
 
 
 def test_away_is_above_home_in_every_scoreboard_under_every_sort():

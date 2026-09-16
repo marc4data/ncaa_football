@@ -167,6 +167,44 @@ def number(value, column: str = "", dp: Optional[int] = None) -> str:
         return str(value)
 
 
+def percent(value, dp: int = 1) -> str:
+    """A 0–1 proportion as `##.#%`. A144.
+
+    > **MARC**, on Biggest Upsets: *"Market gave them should be ##.#%"*
+
+    🚨 §4.2.1 PUTS THIS ON THE RIGHT SIDE OF THE DISPLAY-ONLY LINE EXPLICITLY, and it is worth
+    naming because a `* 100` in `site/` is exactly what R-611 trained everyone to stop at:
+    *"scaling ONE column by a CONSTANT WRITTEN IN THE CODE — ×100 for a percent, :.1% —
+    RENDERING."* The test the charter gives is how many consumers the number can have, and this
+    one has none: it returns a string.
+
+    ⚠️ IT IS A FUNCTION BECAUSE THE SITE HAD NO PERCENT SHAPE AND WAS ABOUT TO GET ITS SECOND
+    INLINE ONE. `today.py`'s win-probability label already carries `f"{final * 100:.0f}%"`; a
+    second literal in a `Col` would have been two spellings of one convention, drifting from the
+    day they were written. **This is the one place a proportion becomes a percentage.**
+
+    ⚠️ AC-G.32 IS INHERITED RATHER THAN RESTATED: null renders an em dash and zero renders `0.0%`,
+    because the null check is `number()`'s and this defers to it.
+    """
+    if not _is_number(value):
+        return EM_DASH
+    return f"{number(float(value) * 100.0, dp=dp)}%"
+
+
+def _is_number(value) -> bool:
+    """Whether a proportion is there to scale.
+
+    ⚠️ AN UNPARSEABLE VALUE IS AN EM DASH HERE, WHICH IS NARROWER THAN `number()`'s OWN FALLBACK
+    AND DELIBERATELY SO. `number("x")` returns `"x"` — reasonable for a free-text column — but a
+    percentage of a non-number is not a percentage, and `"x%"` would be a unit asserted over a
+    value that has none.
+    """
+    try:
+        return not pd.isna(value) and float(value) == float(value)
+    except (TypeError, ValueError):
+        return False
+
+
 def signed(value, column: str = "", dp: Optional[int] = None) -> str:
     """A signed number, so a home-negative spread reads unambiguously."""
     if value is None or (isinstance(value, float) and pd.isna(value)):

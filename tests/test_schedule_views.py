@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 
 from views import schedule                          # noqa: E402
+from lib import table as table_module               # noqa: E402
 
 
 def _row(**overrides):
@@ -737,6 +738,14 @@ def test_the_card_vocabulary_matches_the_markup():
 
     source = Path(schedule.__file__).read_text()
     body = source[source.index('"""', source.index('"""') + 3):]   # past the docstring
+    # 🚨 A144. THE SEARCH FOLLOWS A PRODUCER THAT MOVED, AND NARROWING THE VOCABULARY WOULD HAVE
+    # BEEN THE WRONG FIX. `cfdb-team-record` is still rendered on every card — the body of
+    # `_record_span` now lives in `lib/table.py` so Today can draw the identical record, and
+    # `schedule._record_span` calls it. The class the reader points at did not move; the string
+    # did. ⚠️ SO THE ASSERTION IS WIDENED TO THE MODULES SCHEDULE DRAWS THROUGH rather than
+    # dropped from the table: deleting the row would have removed the NAME for a part that is
+    # still on the card, which is the failure the second half of this test exists to catch.
+    body += Path(table_module.__file__).read_text()
     for name, css in entries:
         assert css in body, f"'{name}' is documented as .{css}, which nothing renders"
 

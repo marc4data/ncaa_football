@@ -488,6 +488,46 @@ def team_cell(row, slug_field: str, display_field: str, logo_field: str,
     return f"{logo}{badge}<span class='cfdb-team'>{row.get(display_field) or '—'}</span>"
 
 
+def record_span(row, before_field: str, after_field: Optional[str] = None,
+                completed_field: str = "is_completed") -> str:
+    """The record, on its own — MOVED HERE FROM `schedule.py` BY A144, not reimplemented.
+
+    🚨 R-129 IS WHY THIS IS SEPARABLE FROM `team_cell` RATHER THAN PART OF IT. Schedule's own
+    comment: *"the record leaves the anchor entirely rather than being styled to look
+    non-clickable — styling cannot remove the pointer cursor, and dead text under a pointer is
+    worse than either state."* So a caller that links the team name puts THIS outside the anchor.
+    Folding it into `team_cell` would put it inside one on every page that links.
+
+    🚨 R-140 TRAVELS WITH IT, AND IT IS THE WHOLE REASON THIS IS A FUNCTION. *A COMPLETED GAME
+    SHOWS THE RECORD IT PRODUCED; A SCHEDULED ONE SHOWS THE RECORD THE TEAM CARRIES IN.* Two
+    columns, one slot, chosen by whether the game has been played — which is the only reading of
+    Marc's sentence that can be true, since a record "after the game" cannot exist for a game
+    nobody has played.
+
+    ⚠️ BOTH COLUMNS ARE POINT-IN-TIME AND NEITHER IS THE SEASON-FINAL RECORD. `srv_game`'s own
+    comment: *"R-084. THE RECORD AS IT STOOD GOING INTO THIS GAME'S WEEK"* — built on
+    `fct_team_record_week`'s `rows between unbounded preceding and 1 preceding` frame. 📊 A144
+    measured it rather than trusting the source column's NAME: across 2026 regular, all 453 week-1
+    games carry `0-0`, one distinct value. A current-as-of-now record could not do that.
+
+    ⚠️ `after_field` IS OPTIONAL BECAUSE NOT EVERY RELATION PUBLISHES THE PAIR.
+    `srv_game_team` carries `record_before_display` alone — and names it that way as its own
+    guard: *"on a game x team row a bare [record] is ambiguous"*. With no after-column the
+    before-record is shown whatever the state, which is the honest answer rather than a blank.
+
+    Renders NOTHING when the record is absent rather than substituting a season figure (R-084),
+    and after R-127 "absent" means a team we hold no results for, not a team whose season has not
+    started.
+    """
+    if after_field and row.get(completed_field):
+        record, title = row.get(after_field), "record after this game"
+    else:
+        record, title = row.get(before_field), "record going into this game"
+    if record is None or (not isinstance(record, str) and pd.isna(record)) or record == "":
+        return ""
+    return f"<span class='cfdb-team-record' title='{title}'>{record}</span>"
+
+
 def team_link(slug_field: str, season_field: str = "season") -> Callable:
     """An href to a team page, for use as a Col's `link`.
 

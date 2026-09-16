@@ -20,7 +20,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import filters, fmt, params, shell, states, tab, table
+from lib import filters, fmt, glyphs, params, shell, states, tab, table
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -187,6 +187,36 @@ def _completed_games(scope) -> pd.DataFrame:
     for a side that won 44-15 and nothing distinguishes it from a real collapse. ❌ SELECTING IT
     IS NOT RANKING ON IT — `MOST_EXCITING_ORDER` is untouched.
 
+    🚨 A144. SIX COLUMNS ARRIVED FOR THE SHARED TEAM-IDENTITY CELL, AND TWO OF THEM ARE THE
+    ANSWER TO A QUESTION THAT LOOKED LIKE A TRAP.
+
+    Marc, on four separate sections: *"Include Rank Team Name and record."*
+
+    📊 `home_rank` / `away_rank` — NULL MEANS UNRANKED, WHICH IS A PUBLISHED FACT RATHER THAN A
+    GAP (AC-G.11). Measured on 2026 regular: the values run 1..25 and stop there, because it is a
+    Top 25; 5.3% of PLAYED games carry a home rank. B118 established exactly this for the twin
+    `opponent_rank` on `srv_game_team` and measured 7.6%; the same query here returns 7.63%.
+    **So the cell says "unranked", never an em dash** — `table.team_cell` already draws no badge
+    at all, which is AC-1.5 and is the older, better answer.
+
+    🚨 THE RECORD PAIR, AND THE SOURCE COLUMN'S NAME IS MISLEADING RATHER THAN THE COLUMN.
+    `srv_game.sql` reads `rw_home.current_record as home_team_record_display`, and "current"
+    invites exactly one conclusion. **It is wrong.** Seventeen lines above it that file says, in
+    capitals, *"R-084. THE RECORD AS IT STOOD GOING INTO THIS GAME'S WEEK"*, and
+    `fct_team_record_week` builds it over `rows between unbounded preceding and 1 preceding`.
+    📊 MEASURED RATHER THAN REASONED: across 2026 regular, **all 453 week-1 games carry `0-0` —
+    one distinct value.** A current-as-of-now record could not do that after two weeks of play.
+
+    ✅ SO BOTH HALVES OF R-140's PAIR ARE SELECTED and `table.record_span` chooses between them:
+    a completed game shows the record it PRODUCED, a scheduled one the record it carried IN.
+    Looking Back is all completed games, so in practice this panel always shows the after-record
+    — but the rule is the shared one rather than a local shortcut, which is what stops the two
+    pages drifting.
+
+    ⚠️ `is_completed` IS SELECTED THOUGH THE `where` ALREADY FILTERS ON IT. `glyphs.winner` and
+    `table.record_span` both READ it off the row, and a column a page filters on is not a column
+    a page has. It was not in this select list before A144.
+
     ⚠️ R-558. `attribution` IS STILL SELECTED THOUGH body() NO LONGER CALLS
     model_attribution() — that is deliberate, not a leftover. See the note at the end of
     body(): attribution attaches to rendered model output, this page renders none yet, and
@@ -197,6 +227,10 @@ def _completed_games(scope) -> pd.DataFrame:
                home_team_display, away_team_display, home_team_slug, away_team_slug,
                home_abbreviation,
                home_logo_url, away_logo_url, home_conference, away_conference,
+               home_rank, away_rank,
+               home_team_record_display, away_team_record_display,
+               home_team_record_after_display, away_team_record_after_display,
+               is_completed,
                home_points, away_points, actual_margin,
                actual_margin_home_perspective, excitement_index,
                spread_at_close, spread_current, spread_open, spread_move_from_open,
@@ -230,10 +264,33 @@ def _completed_games(scope) -> pd.DataFrame:
 
 
 def _team_yardage(scope, depth: int) -> pd.DataFrame:
+    """The team yardage board. A144 MOVED IT FROM `srv_team_game_log` TO `srv_game_team`.
+
+    > **MARC**, on the leaderboards: *"Include Team Logo, Rank, Record."*
+
+    🚨 A RELATION SWITCH RATHER THAN A JOIN, AND THE SETTLED DECISION IS WHY. `srv_team_game_log`
+    carries `team_slug`, `team_display` and `logo_source_url` — and **no rank and no record**.
+    Both facts exist one relation over, at the SAME game x team grain, on `srv_game_team`:
+    `team_rank` and `record_before_display`. Enriching one frame from another is a JOIN, and
+    *"Streamlit is display-only: single-table SELECT + WHERE. No joins"* forbids it. Reading the
+    view that already holds every column is the same data in one pass (G-2).
+
+    📊 EVERY COLUMN THIS BOARD NEEDS WAS CHECKED AGAINST `information_schema` BEFORE THE SWITCH,
+    not against the model file: `team_display`, `team_slug`, `team_logo_url`, `team_rank`,
+    `record_before_display`, `opponent`, `total_yards`, `rushing_yards`, `passing_yards`,
+    `classification`, `conference`, `is_completed` — all present.
+
+    ⚠️ `record_before_display` IS THE ONLY RECORD THIS VIEW PUBLISHES, and its own comment says
+    why the name is the guard: *"on a game x team row a bare [record] is ambiguous"*. So this
+    board shows the record going INTO the game, where Looking Back's game-grain panels show the
+    record the game produced (R-140). **Two relations, two available facts, and the cell says
+    which through `record_span`'s `title` rather than leaving a reader to assume.**
+    """
     return query("""
-        select team_display, team_slug, conference, opponent, week,
+        select team_display, team_slug, team_logo_url, team_rank, record_before_display,
+               conference, opponent, week, is_completed,
                total_yards, rushing_yards, passing_yards, points_for, result, as_of_ts
-        from srv_team_game_log
+        from srv_game_team
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
           and is_completed
@@ -869,6 +926,97 @@ def _quarter_cells(row, side: str):
     return pairs
 
 
+# ── THE TWO CELLS FOUR SECTIONS SHARE ───────────────────────────────────────────────────────
+#
+# 🚨 MARC ASKED FOR THE SAME TWO THINGS UNDER FOUR HEADINGS — Most Exciting, Biggest Upsets,
+# Biggest Underdog Covers and Leaderboards — and Cowork's reading of the spec is the rule this
+# section exists to obey: **"Building them four times is four chances to diverge."**
+#
+# ✅ AND THE TEAM HALF WAS ALREADY BUILT. `table.team_cell` has drawn logo + rank badge + name
+# since Schedule, and `rankings.py`, `stats.py`, `standings.py` and `teams.py` all call it. A144
+# added NOTHING to it: what was missing was the RECORD, and R-129 says the record cannot live
+# inside it — *"the record leaves the anchor entirely rather than being styled to look
+# non-clickable"*. So the record moved to `table.record_span` beside it, out of `schedule.py`,
+# and these two functions are the composition rather than a third producer.
+
+def _team_identity(row, side: str, slug_field=None, display_field=None,
+                   logo_field=None, rank_field=None,
+                   record_field=None, record_after_field=None) -> str:
+    """Rank + logo + hyperlinked name + record, for one side of a row.
+
+    🚨 THE NAME IS THE LINK AND THE ROW IS NOT ONE, WHICH IS A CONSTRAINT AND NOT A STYLE.
+    `table.render` wraps a cell's content in the ROW's anchor when the table has a `link_builder`,
+    and nested anchors are invalid HTML with the OUTER one winning — so a reader would click the
+    team name and land on the game. **Every table using this cell therefore passes no
+    `link_builder`**, which `_espn_link`'s own comment already established for Most Exciting and
+    `test_no_table_with_a_linked_team_name_also_links_its_rows` now asserts for all four.
+
+    ⚠️ THE RECORD SITS OUTSIDE THE ANCHOR — R-129, and Schedule reaches the same layout the same
+    way. Inside it, the record would be dead text under a pointer cursor.
+
+    ⚠️ THE COLUMN NAMES ARE ARGUMENTS BECAUSE THE RELATIONS GENUINELY DISAGREE, and that is worth
+    one parameter rather than one copy: `srv_game` spells a side `home_team_slug` / `home_rank`,
+    `srv_game_team` spells the same facts `team_slug` / `team_rank` / `record_before_display`.
+    The defaults are `srv_game`'s, because three of the four call sites read that view.
+    """
+    prefix = f"{side}_" if side else ""
+    slug_field = slug_field or f"{prefix}team_slug"
+    display_field = display_field or f"{prefix}team_display"
+    logo_field = logo_field or f"{prefix}logo_url"
+    rank_field = rank_field or f"{prefix}rank"
+    record_field = record_field or f"{prefix}team_record_display"
+    if record_after_field is None and not side:
+        record_after_field = None
+    elif record_after_field is None:
+        record_after_field = f"{prefix}team_record_after_display"
+
+    cell = table.team_cell(row, slug_field, display_field, logo_field, rank_field)
+    href = table.team_link(slug_field)(row)
+    if href:
+        cell = f"<a class='cfdb-teamlink' href='{href}' target='_self'>{cell}</a>"
+    return f"{cell}{table.record_span(row, record_field, record_after_field)}"
+
+
+def _commentary(row) -> str:
+    """The outcome glyph over the ESPN link, in one cell.
+
+    > **MARC:** *"In the Commentary column, add the same Matchup and outcome glyphs as on the
+    > Schedule page.  Put them in the top row of the cell, the ESPN link below in the same cell."*
+
+    🚨 **ONE OF THE TWO GLYPH FAMILIES HE NAMED CANNOT BE DRAWN ON THIS PANEL, AND IT IS A GRAIN
+    FACT RATHER THAN A GAP.** `glyphs.entries()` offers exactly two groups, *Matchup* and
+    *Outcome*:
+
+        Outcome    `glyphs.winner(row, side)` — reads `is_completed` and the two scores, both of
+                   which are on `srv_game`. ✅ DRAWN HERE.
+        Matchup    R-722's favorable / contested / challenging verdict. 📊 MEASURED: there is NO
+                   outlook column on `srv_game` at all. All three live on `srv_game_team`
+                   — `total_`, `rushing_` and `passing_matchup_outlook` — at game x TEAM grain.
+
+    ⚠️ SO DRAWING IT HERE WOULD MEAN JOINING A SECOND RELATION INTO THIS FRAME, and the settled
+    decision forbids exactly that: *"Streamlit is display-only: single-table SELECT + WHERE. No
+    joins."* It is one dbt line away — publish a game-grain outlook on `srv_game` — and that is
+    `dbt/`, which this round does not own. **Reported rather than worked around.**
+
+    ⚠️ AND THE SECOND HALF OF THE CHOICE IS MEANING, NOT PLUMBING: the outlook is a PRE-GAME
+    verdict built from yardage going INTO the fixture, and there are three of them per side.
+    Which one belongs on a panel of finished games is Marc's call, not a round's.
+
+    ✅ `glyphs.winner` RETURNS `None` FOR FOUR REASONS AND ONLY ONE OF THEM CAN OCCUR HERE.
+    Its own header lists them — not completed, a missing score, a tie, and "this side did not
+    win". `_completed_games` filters on `is_completed`, so the first cannot happen; a completed
+    game with a null score cannot enter this panel either, because every ordering column is
+    derived from plays. **A TIE CAN.** So the cell draws nothing on both sides of a tie, which is
+    `winner()`'s absent-not-empty rule reading correctly — and R-762 is why no branch was written
+    for the two states this panel cannot produce.
+    """
+    marks = "".join(glyphs.render(glyphs.winner(row, side), size="font-size:.85rem")
+                    for side in ("away", "home"))
+    return (f"<span class='cfdb-commentary'>"
+            f"<span class='cfdb-commentary-marks'>{marks}</span>"
+            f"{_espn_link(row)}</span>")
+
+
 def _scoreboard(row) -> str:
     """One game as a scoreboard: away over home, quarter by quarter, final at the right.
 
@@ -934,10 +1082,16 @@ def _scoreboard(row) -> str:
     head = ("<tr><td class='cfdb-sb-team'></td>"
             + "".join(f"<th scope='col'>{label}</th>" for label in labels)
             + "<th scope='col' class='cfdb-sb-final'>F</th></tr>")
-    # AWAY FIRST, ALWAYS. The order of these two lines is the law, not a default.
-    body = (side_row(row.get("away_team_display"), row.get("away_points"), away_pairs,
+    # 🚨 A144. THE NAME CELL IS NOW THE SHARED TEAM-IDENTITY CELL — Marc: *"Add Logo, Rank,
+    # Record to Scoreboard section"* — and it is the SAME producer the three list panels call, so
+    # the four cannot drift. The scoreboard's own law is untouched: away first, always.
+    #
+    # ⚠️ IT GOES IN THE `<th scope='row'>` IT ALREADY HAD, so the grid's first-row column widths
+    # (see the header note below) are decided by the same cell that decided them before. A new
+    # column would have taken the alignment out from under every scoreboard on the page.
+    body = (side_row(_team_identity(row, "away"), row.get("away_points"), away_pairs,
                      "cfdb-sb-away")
-            + side_row(row.get("home_team_display"), row.get("home_points"), home_pairs,
+            + side_row(_team_identity(row, "home"), row.get("home_points"), home_pairs,
                        "cfdb-sb-home"))
     return (f"<table class='cfdb-scoreboard'><thead>{head}</thead>"
             f"<tbody>{body}</tbody></table>")
@@ -1092,7 +1246,11 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
             Col("lead_changes", "Lead changes, game", kind="num"),
             Col("excitement_index", "Excitement", kind="num", dp=1),
-            Col("espn", "Commentary", render=_espn_link),
+            # 🚨 A144. THE OUTCOME GLYPH JOINS THE LINK IN ONE CELL — Marc: *"Put them in the
+            # top row of the cell, the ESPN link below in the same cell."* `_commentary` says
+            # which of `glyphs.winner`'s four None-reasons can occur on a panel of completed
+            # games, and why the Matchup half of his sentence is not here.
+            Col("espn", "Commentary", render=_commentary),
         ], layout=layout, anchor="most-exciting",
             caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
                     "even win probability from the fourth quarter onward (lower is closer)."))
@@ -1117,6 +1275,78 @@ def _favorite_margin(row):
     """
     return (row.actual_margin_home_perspective if row.spread_favorite_side == "home"
             else row.actual_margin)
+
+
+# 🚨 THE GROUPS THIS PAGE CAN ACTUALLY DRAW. R-178's law, and it cuts BOTH ways: *"the legend
+# cannot draw a mark the row does not"* — and it must not omit one the row can.
+#
+# ⚠️ `glyphs.entries()` OFFERS TWO GROUPS AND TODAY DRAWS ONE. The Matchup verdict is not on
+# `srv_game` at any grain this page reads (see `_commentary`), so listing it would explain a mark
+# no row here can produce — which is the same defect as omitting one, pointed the other way.
+# **The day a Matchup outlook reaches this panel, this tuple is the one line that changes.**
+LEGEND_GROUPS_DRAWN = ("Outcome",)
+
+
+def _legend() -> None:
+    """The legend, as a popover button. A144.
+
+    > **MARC:** *"Need the legend button to help with the icons"*
+
+    ✅ **`st.popover` IS SCHEDULE'S OWN CHOICE AND IT IS ALREADY A BUTTON**, so this is the same
+    control on both pages rather than a fourth pattern (§4.3). Schedule's reasoning applies here
+    unchanged and is worth not restating badly: *"a legend is consulted WHILE looking at the thing
+    it explains, and a modal covers exactly what the reader is comparing against."*
+
+    🚨 IT ENUMERATES FROM THE MODULE, NEVER FROM A PARALLEL LIST. `glyphs.entries()` is built from
+    the same dictionaries `winner()` and `outlook()` read, which is what makes *cannot omit,
+    cannot invent* a property rather than a habit — B117 built it that way for exactly this
+    caller. Schedule earns the same property a different way, by delegating to `_indicator`.
+
+    ⚠️ AND THE TEST DOES NOT TRUST EITHER. `test_the_legend_lists_every_mark_today_can_draw`
+    derives its expectation by RENDERING the commentary cell over a fixture and pulling the
+    glyphs back out of the HTML — because a test that reads `entries()` to build its expectation
+    passes on any implementation of `entries()`, including a broken one.
+    """
+    groups = [(title, marks) for title, marks in glyphs.entries()
+              if title in LEGEND_GROUPS_DRAWN]
+    with st.popover("Legend", use_container_width=False,
+                    help="What every mark on this page means"):
+        for title, marks in groups:
+            st.markdown(
+                f"<div class='cfdb-legend-side'>"
+                f"<div class='cfdb-legend-title'>{title}</div>"
+                + "".join(
+                    f"<div class='cfdb-legend-row'>"
+                    f"<span class='cfdb-legend-key'>"
+                    f"{glyphs.render(mark, size='font-size:.95rem')}</span>"
+                    f"<span>{mark.title}</span></div>" for mark in marks)
+                + "</div>", unsafe_allow_html=True)
+
+
+def _favorite_side(row) -> str:
+    """Which side of the fixture the spread made favorite. `graded` guarantees it is one of two.
+
+    ⚠️ THE RECAP LISTS CARRY `favorite` AND `opponent` AS DISPLAY-NAME STRINGS, which is enough to
+    print a name and not enough to draw a team. Logo, rank, slug and record are all spelled
+    `home_*` / `away_*` on the row, so the cell needs the SIDE rather than the label — and the
+    side is already on the frame as `spread_favorite_side`, which is what `graded` filters on.
+    """
+    return "home" if row.get("spread_favorite_side") == "home" else "away"
+
+
+def _favorite_cell(row) -> str:
+    """The favorite, as the shared team-identity cell."""
+    return _team_identity(row, _favorite_side(row))
+
+
+def _underdog_cell(row) -> str:
+    """The other side. Named for what it IS on both lists rather than for a column.
+
+    ⚠️ ON THE UPSETS LIST THIS TEAM IS "Beaten by" AND ON THE COVERS LIST IT IS THE "Underdog" —
+    the same side of the same fixture under two headings, which is exactly why one producer draws
+    both and the heading is the caller's word.
+    """
+    return _team_identity(row, "away" if _favorite_side(row) == "home" else "home")
 
 
 def _recap_lists(df: pd.DataFrame, scope) -> None:
@@ -1200,10 +1430,21 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
         "favorite losing a coin-flip is not an upset; a heavy one losing is.")
     table.render(
         upsets,
-        [Col("favorite", "Lost"), Col("opponent", "Beaten by"),
+        # ⚠️ THE TWO TEAM COLUMNS ARE THE SHARED CELL, not the display-name strings `favorite`
+        # and `opponent` this function derives. Those stay on the frame because the SORT still
+        # keys on them — a rendered cell of HTML is not sortable, and `Col.field` is what
+        # `apply_sort` reads (A141).
+        [Col("favorite", "Lost", render=_favorite_cell),
+         Col("opponent", "Beaten by", render=_underdog_cell),
          Col("spread", "Favored by", kind="num", dp=1),
-         Col("fav_margin", "Margin", kind="num"),
-         Col("fav_win_prob", "Market gave them", kind="num", dp=3)],
+         # MARC: *"Margin should be integer."* `fmt.precision_for` matches the substring
+         # "margin" and returns 1, so this needed saying explicitly rather than by omission.
+         Col("fav_margin", "Margin", kind="num", dp=0),
+         # MARC: *"Market gave them should be ##.#%"* — `fmt.percent`, which A144 added because
+         # the site had no percent shape and was about to get its second inline f-string.
+         Col("fav_win_prob", "Market gave them",
+             render=lambda r: fmt.percent(r.get("fav_win_prob"))),
+         Col("espn", "Commentary", render=_commentary)],
         caption="Ranked by the loser's pregame market-implied win probability.",
         anchor="how-the-week-went-against-the-market")
 
@@ -1213,9 +1454,11 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
         "These are graded against the spread rather than the result, so a team here may still "
         "have lost the game.")
     table.render(covers.assign(underdog=covers["opponent"], beat=covers["ats"].abs()),
-                 [Col("underdog", "Underdog"), Col("favorite", "Favorite"),
+                 [Col("underdog", "Underdog", render=_underdog_cell),
+                  Col("favorite", "Favorite", render=_favorite_cell),
                   Col("spread", "Getting", kind="num", dp=1),
-                  Col("beat", "Covered by", kind="num", dp=1)],
+                  Col("beat", "Covered by", kind="num", dp=1),
+                  Col("espn", "Commentary", render=_commentary)],
                  caption="Ranked by points beyond the closing spread.",
                  anchor="how-the-week-went-against-the-market")
 
@@ -1341,8 +1584,8 @@ def _movers(scope, depth: int) -> None:
                         if r.get("line_movement_spans_snapshot_gap") else "complete")),
             ], caption=f"Spread and total in points; win probability in de-vigged "
                        f"probability points. Prices from {book}. A row marked "
-                       f"\u201chas a gap\u201d is a floor, not a measurement.{caveat}"),
-            anchor="the-weeks-movers")
+                       f"\u201chas a gap\u201d is a floor, not a measurement.{caveat}",
+                 anchor="the-weeks-movers"))
 
 
 def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380) -> str:
@@ -1513,20 +1756,33 @@ def _profile(scope, depth: int) -> None:
 def _leaderboards(scope, depth: int) -> None:
     st.subheader("Leaderboards")
 
-    with states.section("srv_team_game_log", dataset=DATASETS["srv_team_game_log"]):
+    # ⚠️ THE DECLARED VIEW FOLLOWED THE QUERY. `test_the_views_named_in_sections_are_exactly_the
+    # _views_the_module_reads` caught this the moment `_team_yardage` changed relation — the
+    # section still named `srv_team_game_log` while the module read `srv_game_team`, and a
+    # degraded-state card would have named a view this panel no longer touches.
+    with states.section("srv_game_team", dataset=DATASETS["srv_game_team"]):
         teams = _team_yardage(scope, depth)
         st.markdown("**Team yardage**")
         states.render_or_state(
-            teams, "srv_team_game_log",
+            teams, "srv_game_team",
             "The team yardage board would be here.",
             f"No completed team box scores for {scope.describe()}. Box scores start in 2024.",
             renderer=lambda d: table.render(d, [
-                Col("team_display", "Team"), Col("opponent", "Opponent"),
+                # 🚨 THE SAME CELL THE THREE GAME-GRAIN PANELS DRAW, reading this relation's
+                # spelling of the four facts. `srv_game_team` publishes no after-record, so the
+                # last argument is omitted and `record_span` shows the before-record — see
+                # `_team_yardage`.
+                Col("team_display", "Team",
+                    render=lambda r: _team_identity(
+                        r, "", slug_field="team_slug", display_field="team_display",
+                        logo_field="team_logo_url", rank_field="team_rank",
+                        record_field="record_before_display")),
+                Col("opponent", "Opponent"),
                 Col("total_yards", "Total", kind="num"),
                 Col("rushing_yards", "Rush", kind="num"),
                 Col("passing_yards", "Pass", kind="num"),
-            ], caption="Ranked by total offense."),
-            anchor="leaderboards")
+            ], caption="Ranked by total offense, with each team's record going into the game.", anchor="leaderboards"),
+        )
 
     with states.section("srv_player_game_log", dataset=DATASETS["srv_player_game_log"]):
         yards = _player_board(scope, depth, ("passing", "rushing", "receiving"), "YDS")
@@ -1539,8 +1795,8 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("player_name", "Player"), Col("team", "Team"),
                 Col("stat_category", "Category"),
                 Col("stat_value", "Yards", kind="num"),
-            ], caption="Passing, rushing and receiving yards in one board."),
-            anchor="leaderboards")
+            ], caption="Passing, rushing and receiving yards in one board.", anchor="leaderboards"),
+        )
 
         tds = _player_board(scope, depth, ("passing", "rushing", "receiving"), "TD")
         st.markdown("**Touchdowns**")
@@ -1553,8 +1809,8 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("player_name", "Player"), Col("team", "Team"),
                 Col("stat_category", "Category"),
                 Col("stat_value", "TD", kind="num"),
-            ], caption="Passing, rushing and receiving touchdowns."),
-            anchor="leaderboards")
+            ], caption="Passing, rushing and receiving touchdowns.", anchor="leaderboards"),
+        )
 
         st.markdown("**Defensive leaders**")
         defense = _player_board(scope, depth, ("defensive",), "TOT")
@@ -1566,8 +1822,8 @@ def _leaderboards(scope, depth: int) -> None:
                 Col("player_name", "Player"), Col("team", "Team"),
                 Col("opponent", "Opponent"),
                 Col("stat_value", "Tackles", kind="num"),
-            ], caption="Total tackles. TFL and sacks are separate stat types on the same view."),
-            anchor="leaderboards")
+            ], caption="Total tackles. TFL and sacks are separate stat types on the same view.", anchor="leaderboards"),
+        )
 
 
 # ⚠️ R-562. THE ONLY ALTAIR IN THE SITE, AND IT IS NOT A NEW DEPENDENCY.
@@ -1776,6 +2032,15 @@ def body(page) -> None:
                      key="today_depth", help="How many rows each leaderboard shows.")
 
     _tab_bar(slug)
+    # 🚨 A144. THE LEGEND BUTTON SITS UNDER THE TAB BAR, ABOVE THE PANELS THAT USE THE MARKS —
+    # Marc: *"Need the legend button to help with the icons"*. `st.popover` is Schedule's own
+    # control for the same job, so the site has one legend affordance rather than two (§4.3).
+    #
+    # ⚠️ IT IS DRAWN FOR EVERY TAB THOUGH ONLY SOME PANELS CARRY MARKS, and that is the cheaper
+    # of two wrongs: a legend that appears and disappears as a reader moves between tabs reads as
+    # a rendering fault, and `LEGEND_GROUPS_DRAWN` already guarantees it never explains a mark
+    # this page cannot produce.
+    _legend()
     for name in panels:
         globals()[name](scope, depth)
 
