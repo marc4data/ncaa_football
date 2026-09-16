@@ -170,10 +170,20 @@ def _calendar(team_games=None):
         (12, "2026-11-21", True, "SDSU", "San Diego State", None, "1-1",
          None, None, None, None, "scheduled"),
     ]
+    # 🚨 THE TWO TEAMS CARRY DIFFERENT FIGURES, AND B120 ADDED THAT BECAUSE WITHOUT IT A REAL
+    # DEFECT IS INVISIBLE (R-744 — know what the fixture's defaults make true).
+    #
+    # The ALLOWED circles are the OPPONENT's rows read through `*_yards_allowed`. **While both
+    # teams' calendars held identical numbers, a page that passed the TEAM's own calendar where
+    # the opponent's belonged would draw exactly the same marks** — and every assertion about the
+    # allowed column would pass on it. ⚠️ `_shift` is applied to the yardage only: the weeks, the
+    # dates, the opponents and the states stay shared, so nothing else in this file moves.
     rows = []
-    for team in (AWAY_ID, HOME_ID):
+    for team, _shift in ((AWAY_ID, 0), (HOME_ID, 37)):
         for (week, date, home, abbr, opponent, rank, record, scored, against,
              yards, allowed, state) in (team_games or real):
+            yards = None if yards is None else yards + _shift
+            allowed = None if allowed is None else allowed + _shift
             rows.append({
                 "team_id": team, "week": week,
                 "game_date": pd.Timestamp(date, tz="UTC"), "is_home": home,
@@ -471,6 +481,12 @@ def _both(**home_over):
     14,619 of 375,594 `srv_team_week` rows have no logo — 3.9% — so the fixture was modelling
     the exception for 100% of its assertions, and a defect in the COMMON path could not fail
     here. The two URLs are the real ones for team ids 2 and 96.
+
+    🚨 AND THE TWO SIDES CARRY DIFFERENT COLOURS SINCE B120, FOR THE SAME REASON THE LOGOS ARE
+    SET HERE. `_side` defaults both to Auburn's `#0C2340`, so **every assertion that an element
+    wears the OPPONENT's accent rather than the team's was unfalsifiable** — the two composed
+    strings were identical whichever the page picked, and B120's staged break on exactly that
+    came back green. Kentucky's published pair is `#0033A0`.
     """
     home = _side(HOME_ID, "Auburn", games_counted=8,
                  logo_url="https://cdn.collegefootballdata.com/logos/500/2.png",
@@ -481,6 +497,7 @@ def _both(**home_over):
                  total_yards_allowed_per_game=318.9)
     away = _side(AWAY_ID, "Kentucky", games_counted=7,
                  logo_url="https://cdn.collegefootballdata.com/logos/500/96.png",
+                 color_on_light="#0033A0", color_on_dark="#0033A0",
                  rushing_yards_for_per_game=154.4, passing_yards_for_per_game=207.0,
                  total_yards_for_per_game=361.4,
                  rushing_yards_allowed_per_game=132.6,
@@ -2703,8 +2720,15 @@ def test_THE_TWO_SERIES_SHARE_ONE_SCALE_and_the_page_SAYS_SO(panel):
         "the shared axis is off — if that is deliberate, this test and the page's caption should "
         "move back together, which is the pairing it exists to hold")
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    assert "share one scale" in _text(entries), (
-        "the caption no longer tells the reader the rows are on one scale")
+    # ⚠️ THE WORDING MOVED IN B120 AND THE ASSERTION MOVED WITH IT, not the other way round.
+    # With circles under BOTH rows the useful sentence is no longer *"they share one scale"* — it
+    # is what that buys the reader: **the two sets of circles can be compared directly.** A test
+    # pinned to the old phrase would have forced the page to keep a weaker sentence.
+    assert "compared directly" in _text(entries), (
+        "the caption no longer tells the reader the two sets of circles are comparable, which is "
+        "the whole gain from drawing both rows against one spread")
+    assert "same spread" in _text(entries), (
+        "the caption no longer says the two rows are drawn against the same spread")
     assert "framed on their OWN spreads" not in _text(entries), (
         "the caption still carries the pre-flip sentence, which is now false")
 
@@ -3452,3 +3476,202 @@ def test_THE_CIRCLE_TOOLTIPS_DO_NOT_SUPPRESS_THE_CHARTS_OWN(panel):
     assert column.count("<title>") == len(_circle_marks(column)) > 0, (
         "the circles carry no per-mark tooltips at all, so nothing was gained by keeping them "
         "outside the chart span")
+
+
+# --- cfdb-wta-R-986: the allowed circles, and whose games they are ---------------------------
+
+def _circle_columns(entries, metric="Total", side=0) -> list:
+    """Both circle columns of ONE side's metric block, in drawn order: [gained, allowed].
+
+    🚨 `side=0` IS THE AWAY BLOCK AND NAMING IT IS NOT PEDANTRY — the first draft of this helper
+    used `dict(_blocks(entries))[metric]`, which silently keeps the LAST block of that name.
+    **The panel emits away then home, so it was reading the HOME block** while the test around it
+    reasoned about the away one. `test_THE_ALLOWED_CIRCLES_ARE_THE_OPPONENTS_GAMES` caught it by
+    failing with the away team's own figures where the opponent's were expected — **which is the
+    same shape as the defect it was written to find, arriving from the test instead of the page.**
+    """
+    # 🚨 EACH COLUMN IS TRUNCATED AT ITS OWN `</svg>`, AND THE FIRST DRAFT WAS NOT — WHICH MADE
+    # TWO OF THE TESTS BELOW STRUCTURALLY UNABLE TO FAIL (R-760).
+    #
+    # Splitting on the opening div alone leaves the FIRST chunk running to the end of the block,
+    # so it contained the gained circles **plus the allowed box row plus the allowed circles.**
+    # ⚠️ Every comparison of *gained against allowed* was then a SUPERSET against a subset: the
+    # accent test asserted three stroke colours differ from one, and passed whatever the page
+    # drew. **Staging the break is what found it** — `opponent_accent` → `accent` came back green.
+    return [chunk.split("</svg>")[0]
+            for chunk in _of_metric(entries, metric)[side]
+            .split("<div data-cfdb='game-circles'")[1:]]
+
+
+def test_BOTH_SERIES_GET_A_CIRCLE_COLUMN(panel):
+    """🚨 Marc's second half: *"then we'll do the same for the opponent (allowed)"*. He asked and
+    this is it.
+
+    ⚠️ ASSERTED ON THE ORDER WITHIN THE BLOCK, not merely on there being two. The layout is
+    gained box → gained circles → allowed box → allowed circles, and **position is the only thing
+    that says which column belongs to which row** (AC-G.22 — there is no label and no reliable
+    colour on a circle column). A page that drew both columns at the bottom would satisfy "two
+    columns exist" and tell the reader nothing.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    block = dict(_blocks(entries))["total"]
+    order = [m.group(1) for m in re.finditer(
+        r"data-cfdb='(box-series|game-circles)'", block)]
+    assert order == ["box-series", "game-circles", "box-series", "game-circles"], (
+        f"the block is not gained box / gained circles / allowed box / allowed circles: {order}")
+
+
+def test_THE_ALLOWED_COLUMN_DRAWS_THE_ALLOWED_FIGURES_not_the_gained_ones(panel):
+    """🚨 THE BREAK THIS EXISTS FOR IS *gained drawn twice*, AND IT IS A ONE-WORD EDIT.
+
+    `_gained_allowed` takes `game_column` and `game_allowed_column`; passing the first where the
+    second belongs draws an identical column under both rows. ⚠️ **Every "there are two columns"
+    and "the circles are unfilled" assertion passes on that page.**
+
+    ✅ KEYED ON THE FIXTURE'S OWN NUMBERS (cfdb-wta-R-944). The calendar's gained and allowed
+    figures are deliberately different — 578/519 and 274/497 before the per-team shift — so the
+    two columns must land at different x positions, and the assertion is that they do.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    gained, allowed = _circle_columns(entries)
+    gx = [float(x) for x in re.findall(r"circle cx='([-\d.]+)'", gained)]
+    ax = [float(x) for x in re.findall(r"circle cx='([-\d.]+)'", allowed)]
+    assert gx and ax and len(gx) == len(ax)
+    assert gx != ax, (
+        f"the two circle columns are drawn at identical x positions {gx} — the allowed column is "
+        f"drawing the GAINED figures, which every other assertion in this file would accept")
+
+
+def test_THE_ALLOWED_CIRCLES_ARE_THE_OPPONENTS_GAMES(panel):
+    """🚨 WHOSE GAMES, WHICH IS A DIFFERENT QUESTION FROM WHICH COLUMN — AND THE ONE A SHARED
+    FIXTURE CANNOT ANSWER.
+
+    This half of the panel is *"<Team> offense against <Opponent>'s defense"*, so the allowed
+    circles are **the opponent's per-game yardage allowed**. ⚠️ Passing `games` where
+    `opponent_games` belongs is a plausible edit, and while both teams' calendars held identical
+    numbers it drew identical marks. **`_calendar` now shifts the home side's figures so the two
+    teams are distinguishable** — see its own comment.
+
+    ✅ THE EXPECTATION COMES FROM THE FIXTURE ROWS, not from a literal: the away block's allowed
+    column must carry the HOME team's allowed figures.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    _gained, allowed = _circle_columns(entries)
+    drawn = [re.search(r"(\d+) yards", t).group(1)
+             for t in re.findall(r"<title>(.*?)</title>", allowed, re.S)]
+    home_rows = sorted((r for r in _calendar()
+                        if r["team_id"] == HOME_ID and r["total_yards_allowed"] is not None),
+                       key=lambda r: r["game_date"])
+    away_rows = sorted((r for r in _calendar()
+                        if r["team_id"] == AWAY_ID and r["total_yards_allowed"] is not None),
+                       key=lambda r: r["game_date"])
+    expected = [str(r["total_yards_allowed"]) for r in home_rows]
+    wrong_team = [str(r["total_yards_allowed"]) for r in away_rows]
+    assert expected != wrong_team, (
+        "the two teams' allowed figures are identical in the fixture, so this test cannot tell "
+        "the opponent's calendar from the team's own")
+    assert drawn == expected, (
+        f"the allowed column drew {drawn}; the OPPONENT's allowed figures are {expected} and the "
+        f"team's own are {wrong_team}")
+
+
+def test_THE_ALLOWED_CIRCLES_CARRY_THE_OPPONENTS_ACCENT(panel):
+    """⚠️ COLOUR IS THE SECOND SIGNAL, NOT THE FIRST (AC-G.22) — and it must still be the right
+    one. The allowed row's rule is the opponent's colour, so the circles under it must match the
+    box they belong to rather than the team's.
+
+    🚨 ASSERTED AS *DIFFERENT FROM THE GAINED COLUMN*, NOT AS A HEX LITERAL. `_accent` composes a
+    `light-dark(...)` pair from published team colours and 10.89% of games have a side with no
+    sourced colour, so pinning a literal would be pinning this fixture's teams rather than the
+    property.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    gained, allowed = _circle_columns(entries)
+    g = set(re.findall(r"stroke='([^']+)'", gained))
+    a = set(re.findall(r"stroke='([^']+)'", allowed))
+    assert g and a, "a circle column draws no stroke at all"
+    assert g != a, (
+        f"both circle columns use the same accent {g} — the allowed column is taking the team's "
+        f"colour rather than the opponent's, which is the box it sits under")
+
+
+def test_A_CIRCLE_COLUMN_HUGS_THE_ROW_IT_BELONGS_TO(panel):
+    """🚨 cfdb-wta-R-986. POSITION IS THE ENTIRE SIGNAL, SO THE SPACING IS THE INTERFACE.
+
+    There is no label on a circle column and colour is the second signal at best (AC-G.22), so
+    **which row a circle belongs to is said by one thing: it is closer to its own box than to the
+    next one.** B119 found the first draft sat almost exactly halfway between the two and closed
+    the gap; Cowork read the result as still ambiguous and asked for a measurement.
+
+    📊 MEASURED IN THE BROWSER AT 1300px WITH `getBoundingClientRect()`, both columns:
+    **1.2px above, 15.2px below — a ratio of 12.7 to 1.** Before this round it was 4.2 / 8.0.
+
+    ⚠️ THIS TEST CANNOT MEASURE A BROWSER, AND SAYS SO. It asserts the two margins still point the
+    right way and by a wide margin — the cheap guard that stops the expensive measurement being
+    re-done every round. **The renders are the instrument; this is the memory of what they said.**
+    ✅ ASSERTED AS A RELATIONSHIP, NOT AS LITERALS, so a round that retunes both numbers for a good
+    reason is free to — it just cannot make the column equidistant.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    for column in _circle_columns(entries):
+        style = re.search(r"style='margin:([^']+)'", column)
+        assert style, f"the circle column declares no margin at all: {column[:120]}"
+        top, _side, bottom = style.group(1).split()
+        top_px = float(top.replace("px", ""))
+        bottom_px = (float(bottom.replace("rem", "")) * 16 if "rem" in bottom
+                     else float(bottom.replace("px", "")))
+        # ⚠️ THE TWO MARGINS ARE NOT COMPARABLE TO EACH OTHER AND THE FIRST DRAFT OF THIS TEST
+        # COMPARED THEM ANYWAY. A negative top margin is a PULL from a natural position, not a
+        # gap: -6px yields a MEASURED 1.2px gap, so `bottom > 3 * |top|` was asserting a
+        # relationship between two quantities that do not share a meaning. **The browser
+        # measurement is the only thing that knows the gaps; this checks the two levers that
+        # produce them still point the right way.**
+        assert top_px <= 0, (
+            f"the column does not pull up towards its own box (top margin {top}), so it sits at "
+            f"its natural distance from both rows")
+        assert bottom_px >= 12, (
+            f"the gap below the column is only {bottom_px}px of margin — measured at 1300px a "
+            f".95rem bottom produced 15.2px against 1.2px above, and anything much smaller puts "
+            f"the column back near the halfway point B119 found and fixed")
+
+
+def test_THE_ALLOWED_COLUMN_IS_DRAWN_ON_THE_ALLOWED_ROWS_OWN_FRAME(panel):
+    """🚨 THIS TEST EXISTS BECAUSE A STAGED BREAK CAME BACK GREEN (R-744), AND THE PROMPT SAID THE
+    THING THE BREAK WAS TESTING WAS TRUE.
+
+    B120's prompt: *"the frame — 🚨 **the same one.**"* ✅ The distribution ROW is the same one.
+    ❌ **The FRAME is not.** `box()` frames on the row's whiskers widened by ITS OWN value marker,
+    and the two rows carry different markers — this team's gained average and the opponent's
+    allowed average. When either falls outside the week's whiskers, that row alone re-widens.
+
+    📊 MEASURED ON LIVE PUBLISHED SERVING: the two effective frames differ on **147 of 24,759
+    sides — 0.594%** across 2025 and 2026, all three metrics. ⚠️ **Rare is not never, and those 147
+    are exactly the sides a reader would be misled on** — a circle drawn on the other row's frame
+    sits at the wrong yardage on the axis its own box defines.
+
+    🚨 AND THE DEFAULT FIXTURE CANNOT SEE IT, WHICH IS WHY THE BREAK PASSED. Every value in
+    `_both()` sits inside the week's whiskers, so `frame == allowed_frame` and swapping one for
+    the other moves nothing. **This test pushes the opponent's allowed average past the ceiling**
+    — 900 against a `whisker_high` of 681 — so the two frames genuinely differ and the swap has
+    somewhere to show.
+
+    ⚠️ ASSERTED ON DRAWN POSITIONS, NOT ON A RECOMPUTATION (R-768): it compares where the circles
+    land against where they land when the frame is NOT widened, which is a comparison of two real
+    renders rather than of the page against a copy of its own arithmetic.
+    """
+    narrow, _ = panel(_game(), _both(), deltas=_deltas())
+    wide, _ = panel(_game(), _both(total_yards_allowed_per_game=900.0), deltas=_deltas())
+
+    def positions(entries, index):
+        return [float(x) for x in
+                re.findall(r"circle cx='([-\d.]+)'", _circle_columns(entries)[index])]
+
+    # The GAINED column must be untouched: its own row's value did not move.
+    assert positions(narrow, 0) == positions(wide, 0), (
+        "widening the ALLOWED row's frame moved the GAINED circles, so the two columns are "
+        "sharing one frame when each should be on its own row's")
+    # The ALLOWED column must move, because its own row's frame just got wider.
+    assert positions(narrow, 1) != positions(wide, 1), (
+        f"the opponent's allowed average was pushed to 900 against a whisker_high of 681, so the "
+        f"Allowed row re-frames and its circles must move. They did not: "
+        f"{positions(narrow, 1)} — the column is drawn on the GAINED row's frame")
