@@ -2687,7 +2687,7 @@ def _matchup_legend(team, opponent, for_column, allowed_column, delta, outlook) 
         f"<span style='font-weight:700'>{_signed_delta(delta)}</span></div></div>")
 
 
-def _box_row(row, side, caption: str, column, accent: str, frame=None) -> str:
+def _box_row(row, side, caption: str, column, accent: str, frame=None, overlay: str = "") -> str:
     """One series: its label, then `box()`'s SVG.
 
     ⚠️ THE LABEL IS DRAWN HERE BECAUSE `box()`'s OWN `label` IS NOT DRAWN AT ALL — it goes into
@@ -2713,9 +2713,13 @@ def _box_row(row, side, caption: str, column, accent: str, frame=None) -> str:
     # ✅ `frame=` IS A139's PARAMETER AND IT ONLY WIDENS. Both series on a metric are handed the
     # SAME week union, so they are drawn on one scale — and each row keeps its own whisker serifs
     # and its own boundary labels, because `lo`/`hi` draw and `frame_lo`/`frame_hi` scale.
+    # ✅ `height=_BOX_BAND` IS A145's PARAMETER AND THIS IS THE CALL SITE IT WAS BUILT FOR.
+    # Marc: *"The box-whisker will have to be taller to accommodate the circles."* A145 proved
+    # `height=None` renders today's bytes exactly and that **Matchup is the only consumer of
+    # `box()`**, so the whole blast radius of passing it is this page.
     chart = distribution.box(
         row, value=value, width=_BOX_ROW_WIDTH, label=caption, value_color=accent,
-        frame=frame,
+        frame=frame, height=_BOX_BAND,
         value_label=(None if value is None or pd.isna(value)
                      else fmt.number(value, column, dp=1)))
     return (
@@ -2731,7 +2735,32 @@ def _box_row(row, side, caption: str, column, accent: str, frame=None) -> str:
         f"text-overflow:ellipsis'>"
         f"{html.escape(name)} "
         f"<span style='font-weight:600'>{html.escape(caption)}</span></div>"
-        f"{chart}</div>")
+        # 🚨 THE RELATIVE WRAPPER IS THE WHOLE OVERLAY MECHANISM, AND IT IS ONE LINE. The chart's
+        # SVG and the circles' SVG are the same width and the same height and both sit at this
+        # box's origin, so **they share one coordinate system and nothing computes an offset.**
+        # ⚠️ An offset would be a second copy of `box()`'s internal layout, which is exactly the
+        # coupling `_AXIS_PAD` declares once and guards with a test rather than spreading.
+        # ⚠️ THE WRAPPER IS WIDTH-BOUNDED so the absolute child cannot escape it; `box()` emits
+        # `max-width:100%` and the overlay matches, so both scale together if the slot narrows.
+        #
+        # 🚨 AND IT IS AN `inline-block` SPAN RATHER THAN A `div`, WHICH THE BROWSER TAUGHT ME.
+        # The first draft used a block `div`, and `getBoundingClientRect()` measured the GAINED
+        # row's overlay **40.3px above its own chart** while the Allowed row was exact.
+        # ⚠️ **`_matchup_legend` is `float:right`.** A block wrapper's LINE BOXES flow around that
+        # float, so the chart — an inline `span` from `box()` — was pushed down by the legend's
+        # height, while the absolutely-positioned overlay ignored the float and stayed at the
+        # wrapper's top. **Two elements that must share a coordinate system, in two different
+        # ones.**
+        # ✅ An `inline-block` participates in the line flow exactly as `box()`'s own span did, so
+        # the float interaction is unchanged — and it is a positioned ancestor, so the overlay
+        # measures from the chart rather than from a box the float moved.
+        # 🚨 NO TEST COULD HAVE SEEN THIS. The markup was identical for both rows and every
+        # assertion about structure passed; only `getBoundingClientRect()` on a real page could
+        # tell the two apart. **B119 changed its code for a render, B120 for a measurement, and
+        # this is the third.**
+        f"<span style='position:relative;display:inline-block;"
+        f"width:{_BOX_ROW_WIDTH}px;max-width:100%'>"
+        f"{chart}{overlay}</span></div>")
 
 
 # 🚨 R-899. THE CALENDAR, ONE READ FOR BOTH SIDES AND ALL THREE METRICS.
@@ -2903,6 +2932,58 @@ _CIRCLE_D = 7
 _CIRCLE_PITCH = 8
 _CIRCLE_MAX_GAMES = 15
 
+# 🚨 cfdb-wta-R-993 / v16. THE BAND THE CIRCLES ARE OVERLAID ON — A145's `box(height=)`.
+#
+# **Marc:** *"The circles need to be overlayed on top of the Box-Whisker with same x and y-axis.
+# The box-whisker will have to be taller to accommodate the circles that will cover full regular
+# season schedule (even with 50% overlap)."*
+#
+# 📐 THE ARITHMETIC HE AUTHORISED. At `_CIRCLE_D` = 7 a 50% vertical overlap is a pitch of 3.5, so
+# the centres of *n* circles span `(n-1) × 3.5` and the column needs `7 + (n-1) × 3.5`:
+#
+#     15 games (the longest MODERN regular season)   7 + 14 × 3.5 =  56px
+#     22 games (the longest in serving — 1894)       7 + 21 × 3.5 =  80.5px
+#
+# 📊 **56 IS THE NUMBER, AND THE BLOCK IS WHY.** B120 measured the whole two-box metric block at
+# **218.3px against a 354.5px three-card block** beside it, and a taller box multiplies by two per
+# block. Measured in the browser this round at 1300px: the overlay REMOVES the two separate circle
+# columns from the flow and adds `2 × (band − 26)`, which lands the block at **250.5px at band 56**
+# and **298.5px at band 80** — both inside 354.5, and 56 is the one Marc's own sentence names.
+#
+# 🚨 AND IT IS A CEILING RATHER THAN A FIXED PITCH, WHICH IS THE CLAMP BELOW. B120 measured the
+# longest regular-season calendar in serving at **22 games (team 80, 1894)**, not 15. At band 56 a
+# 22-game column would need a pitch of 2.33 and **overflow the band at 3.5** — circles clipped by
+# the viewBox, silently. `_circle_pitch` compresses instead, so nothing is ever clipped and the
+# compression engages on exactly one season in the whole archive.
+_BOX_BAND = 56
+_CIRCLE_PITCH_MAX = 3.5
+
+
+def _circle_pitch(n: int, band: int = None) -> float:
+    """The vertical gap between successive circles — Marc's ceiling, compressed only if it must be.
+
+    🚨 A CEILING, NOT A FIXED PITCH, AND cfdb-wta-R-976 IS WHY. Marc authorised *"tight to the
+    point the circle marks overlap vertically by 50%"*, which at `_CIRCLE_D` = 7 is a pitch of
+    3.5. **B120 then measured that the longest regular-season calendar in serving is 22 games
+    (team 80, 1894), not the 15 two earlier rounds had assumed** — and 22 circles at 3.5 need
+    80.5px of an band that is 56.
+
+    ⚠️ **THE ALTERNATIVE IS SILENT CLIPPING.** An SVG does not complain when a mark falls outside
+    its viewBox; the last games of the season would simply not be there, and every test asserting
+    *"one circle per played game"* reads the markup rather than the viewport, so all of them would
+    still pass. **That is the failure mode this function exists to make impossible.**
+
+    ✅ SO THE PITCH IS `min(ceiling, what fits)` — the ceiling for every modern season, and a
+    compression that engages on exactly one season in the archive. ⚠️ **It is stated rather than
+    hidden: at 22 games the overlap is 67% rather than 50%, which is past what Marc authorised,
+    and the honest reading is that his sentence was written about a modern schedule.**
+    """
+    band = _BOX_BAND if band is None else band
+    if n <= 1:
+        return _CIRCLE_PITCH_MAX
+    # The centres span `band - _CIRCLE_D`, so the whole circle stays inside the band.
+    return min(_CIRCLE_PITCH_MAX, (band - _CIRCLE_D) / (n - 1))
+
 
 def _circle_title(game, column) -> str:
     """Marc's hover: *"the Week #, Opponenet Rank, Name, Record, Final Score"*.
@@ -2949,8 +3030,21 @@ def _circle_title(game, column) -> str:
     return " · ".join(bits)
 
 
-def _circle_column(games, column, frame, accent, width) -> str:
-    """Marc's ordered jitter: one unfilled circle per played game, earliest at the top.
+def _circle_column(games, column, frame, accent, width, band: int = None) -> str:
+    """Marc's ordered jitter: one unfilled circle per played game, earliest at the top,
+    **drawn INSIDE the box-and-whisker's own band** (v16, cfdb-wta-R-993).
+
+    🚨 IT IS AN OVERLAY NOW, AND THAT CHANGES WHAT SAYS WHOSE GAMES THESE ARE. B119 and B120 spent
+    two rounds making the column HUG its own row — 1.2px above against 15.2px below, a 12.7 : 1
+    ratio — because **position was the only signal**. ✅ **Overlaid, the box says it**: the circles
+    are inside the row's own chart, which is a stronger statement than proximity and one a reader
+    cannot misread. ⚠️ `test_A_CIRCLE_COLUMN_HUGS_THE_ROW_IT_BELONGS_TO` asserted the old property
+    and is retired with its reason recorded — see its replacement,
+    `test_THE_CIRCLES_ARE_DRAWN_INSIDE_THEIR_OWN_ROWS_CHART`.
+
+    ⚠️ THE SVG MATCHES `box()`'s OWN BOX EXACTLY — same width, same total height (`band + 15`) —
+    and is positioned at the same origin, so **the two share one coordinate system and no offset
+    arithmetic is needed.** `_box_row` supplies the `position:relative` wrapper.
 
     🚨 THE ORDER IS THE QUERY's AND IS NOT RE-SORTED HERE. `_game_calendar` asks for
     `order by game_date asc`, so re-sorting in the page would be a second opinion about the same
@@ -2982,13 +3076,29 @@ def _circle_column(games, column, frame, accent, width) -> str:
                 "style='font-size:.58rem;opacity:.45;padding:.2rem 0'>"
                 "No games played yet, so there is nothing to plot against the spread.</div>")
     lo, hi = frame
-    height = _CIRCLE_PITCH * (len(played) - 1) + _CIRCLE_D + 2
+    band = _BOX_BAND if band is None else band
+    # 🚨 THE SVG IS THE SAME BOX AS `box()`'s, WHICH IS WHAT MAKES THE OVERLAY EXACT. `box()`
+    # returns `height + 15` — the band plus its label strip — so matching that and sitting at the
+    # same origin puts both drawings in one coordinate space. **Any other height would need an
+    # offset, and an offset is a second copy of `box()`'s internal layout** (the coupling
+    # `_AXIS_PAD` already declares once and guards with a test).
+    height = band + 15
+    pitch = _circle_pitch(len(played), band)
+    # ⚠️ CENTRED ON THE BAND'S MIDLINE, WHICH IS WHERE `box()` DRAWS ITS WHISKER RULE (`mid =
+    # height / 2`). A top-anchored column would hang the season off the top of the box and leave
+    # the rule bare underneath; centring puts the games either side of the line they are measured
+    # against. **Chosen from the raster, not from the arithmetic** — see the round's report.
+    # ✅ AND THE PITCH IS STILL FIXED WITHIN A SEASON LENGTH, so B115's property survives: two
+    # teams with the same number of games get the same spacing, and the column's EXTENT is an
+    # honest reading of how long the season is.
+    span = pitch * (len(played) - 1)
+    top = band / 2.0 - span / 2.0
     marks = []
     for index, game in enumerate(played):
         value = float(game.get(column))
         inside = lo <= value <= hi
         x = _axis_x(min(max(value, lo), hi), frame, width)
-        y = _CIRCLE_D / 2 + 1 + index * _CIRCLE_PITCH
+        y = top + index * pitch
         title = html.escape(_circle_title(game, column))
         # 🚨 A VALUE BEYOND THE SHARED FRAME IS PINNED AND SAYS SO — B115's rule, and the one
         # place this element cannot follow `box()`. `box()` widens its frame around an
@@ -3017,14 +3127,27 @@ def _circle_column(games, column, frame, accent, width) -> str:
     # column of circles is otherwise silent. It says how many and over what, which is the fact.
     reading = (f"{len(played)} game{'' if len(played) == 1 else 's'} played, each drawn at its "
                f"own figure on the same scale as the distribution above")
-    # 🚨 THE COLUMN HUGS THE ROW ABOVE IT, AND THE 1300px RENDER IS WHY. Drawn with default
-    # margins the circles sat almost exactly halfway between the Gained box's boundary labels and
-    # the Allowed row's own label — **equidistant from both, which is the one thing position must
-    # not be** when position is what says whose games these are (AC-G.22; see `_gained_allowed`).
-    # ⚠️ A negative top margin closes the gap `box()`'s 15px label band leaves below itself, and
-    # the bottom margin then separates the pair from the next series.
+    # 🚨 `pointer-events:none` IS THE TOOLTIP DECISION AND IT IS THE WHOLE OF cfdb-wta-R-993.
+    #
+    # B119 closed this by geometry: *"the circles are a sibling of the chart, not a child… nesting
+    # is impossible, so suppression is impossible."* ⚠️ **Overlaying removes that impossibility** —
+    # an element drawn on top of the chart takes the pointer, and the tooltip it would suppress is
+    # `box()`'s own `title='{describe(row)}'`, **the one that has named the week's tail since
+    # B118** and the only place a reader can read n, the quartiles and the outlier count.
+    #
+    # ✅ **THE CHART'S TOOLTIP WINS, BECAUSE IT IS THE ONE A READER CANNOT GET ANY OTHER WAY.**
+    # The circle's own facts — week, opponent, record, score — are all on the page or one click
+    # away on the Schedule; the distribution's are not written anywhere else.
+    # ⚠️ **AND THE ALTERNATIVE FAILS A TEST THE PROMPT SET: *"a hover that works everywhere except
+    # on the marks is not the same as one that works."* With fifteen circles over a 240px chart
+    # the marks cover a real share of it, so keeping the per-circle tooltip would punch holes in
+    # the chart's own.
+    # 🚨 THE `<title>` ELEMENTS STAY IN THE MARKUP DELIBERATELY. They are not dead weight: a
+    # screen reader reads them, and `pointer-events:none` suppresses only the POINTER. **So the
+    # per-game facts are still there for anyone not using a mouse** — which is the half of AC-G.11
+    # that a purely visual decision would have thrown away.
     return (f"<div data-cfdb='game-circles' data-games='{len(played)}' "
-            f"style='margin:-6px 0 .95rem'>"
+            f"style='position:absolute;top:0;left:0;pointer-events:none'>"
             f"<svg viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
             f"role='img' aria-label='{html.escape(reading)}' "
             f"style='display:block;max-width:100%'>{''.join(marks)}</svg></div>")
@@ -3136,10 +3259,13 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
         # ✅ AND IT IS THE SHAPE THE ALLOWED HALF WILL NEED: gained box, gained circles, allowed
         # box, allowed circles. The alternative — both boxes, then both columns of circles —
         # separates every mark from the distribution it is drawn against.
-        f"{_box_row(week_row, team, 'Gained', for_column, accent, union)}"
-        f"{circles}"
-        f"{_box_row(week_row, opponent, 'Allowed', allowed_column, opponent_accent, union)}"
-        f"{allowed_circles}"
+        # 🚨 v16: EACH COLUMN IS NOW OVERLAID ON ITS OWN ROW'S CHART rather than emitted beneath
+        # it. Marc: *"The circles need to be overlayed on top of the Box-Whisker with same x and
+        # y-axis."* ✅ **The association that B119 and B120 spent two rounds encoding in PROXIMITY
+        # is now structural** — a circle is inside its row's chart — which is why B120's hug test
+        # is retired rather than re-tuned.
+        f"{_box_row(week_row, team, 'Gained', for_column, accent, union, circles)}"
+        f"{_box_row(week_row, opponent, 'Allowed', allowed_column, opponent_accent, union, allowed_circles)}"
         f"<div style='clear:both'></div></div>")
 
 

@@ -1038,8 +1038,20 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
     # ✅ AND `_CIRCLE_D / 2` IS DERIVED RATHER THAN WRITTEN AS 3.5 FOR R-804's REASON, PAID ONCE
     # ALREADY: that round moved `_CHART_SIDE` and a hard-coded block silently became 58% of the
     # plot. A round that changes the circle size must not have to find a 3.5 somewhere else.
+    # 🚨 cfdb-wta-R-993's TWO ENTRIES, AND THEY ARE THE SAME KIND AS EVERY ONE ABOVE: SCREEN-PIXEL
+    # GEOMETRY INSIDE ONE `<svg>`. Finishing the required sentence: **this page divides here, and
+    # the warehouse cannot do it, because the quantities are a PITCH IN PIXELS and a VERTICAL
+    # CENTRING OFFSET.** `_BOX_BAND`, `_CIRCLE_D` and `_CIRCLE_PITCH_MAX` are layout constants in
+    # this file; serving has never heard of any of them, there is no column they could disagree
+    # with and no export reads them.
+    # ⚠️ `(band - _CIRCLE_D) / (n - 1)` divides by a COUNT, which looks closer to a metric than the
+    # others — it is not. It answers *how far apart do n marks sit inside a band of pixels*, and
+    # its only consumer is a `cy` attribute. **The test §4.2.1 actually sets is how many consumers
+    # the number can have, and this one has exactly one by construction** (R-741, and the
+    # formulation B099 was told not to license: "is the result a pixel" is NOT the rule).
     allowed = {"_ANNOTATION_BLOCK = _CHART_SIDE // 2 - 10",
-               "y = _CIRCLE_D / 2 + 1 + index * _CIRCLE_PITCH",
+               "return min(_CIRCLE_PITCH_MAX, (band - _CIRCLE_D) / (n - 1))",
+               "top = band / 2.0 - span / 2.0",
                "f\"<circle cx='{x:.1f}' cy='{y:.1f}' r='{_CIRCLE_D / 2:.1f}' fill='none' \"",
                "return _AXIS_PAD + (float(value) - lo) / span * (width - 2 * _AXIS_PAD)",
                "return (inner - _METRIC_CELL_GAP * _REM) / 2",
@@ -2585,7 +2597,13 @@ def test_the_CIRCLES_and_the_BOX_agree_about_WHERE_A_VALUE_GOES(panel):
     width = _module_constant("_BOX_ROW_WIDTH")
     row = _distribution()[0]
     frame = (float(row["whisker_low"]), float(row["whisker_high"]))
-    svg = dist.box(row, value=None, width=width, show_value=False)
+    # 🚨 RENDERED AT THE BAND THE PAGE ACTUALLY USES (cfdb-wta-R-993). Until B122 this probed the
+    # DEFAULT 26px box while the page drew the same default, so the two agreed by construction.
+    # **The page now passes `height=_BOX_BAND`, and a guard still probing the default would be
+    # measuring a chart the reader never sees.** A145 states that height moves no value sideways;
+    # ✅ this is the assertion that holds it to that, at the one height that matters here.
+    svg = dist.box(row, value=None, width=width, show_value=False,
+                   height=_module_constant("_BOX_BAND"))
     drawn = re.search(r"<line x1='([\d.]+)'[^>]*stroke-width='1.8'", svg)
     assert drawn, f"no median line in box()'s output — this probe has gone blind: {svg[:300]}"
 
@@ -3466,41 +3484,48 @@ def test_AN_UNRANKED_OPPONENT_SAYS_SO_and_never_draws_an_EM_DASH(panel):
 
 
 def test_THE_CIRCLE_TOOLTIPS_DO_NOT_SUPPRESS_THE_CHARTS_OWN(panel):
-    """🚨 THE BOUNDARY QUESTION, DECIDED AND THEN ASSERTED RATHER THAN ARGUED.
+    """🚨 cfdb-wta-R-993. **FLIPPED, NOT DELETED — AND IT WAS PASSING FOR THE WRONG REASON.**
 
-    `box()` wraps every chart in `<span class='cfdb-dist' title='{describe(row)}'>`, and B118
-    measured **18 of 18 charts carrying it** — and since B118 it is the tooltip that names the
-    week's tail. ⚠️ **A `<title>` on an element INSIDE that span would win wherever the pointer
-    is**, so the reader would lose a working whole-chart tooltip to gain a per-mark one. **A
-    regression nobody would report, because both states look like "a tooltip appeared".**
+    B119 closed this by geometry: *"the circles are a sibling of the chart, not a child… **nesting
+    is impossible, so suppression is impossible.**"* This test asserted that structure — no
+    `<title>` element inside a `cfdb-dist` span.
 
-    ✅ THE DECISION: the circles are a SIBLING of the chart, not a child of it. That falls out of
-    the geometry rather than being bolted on — `distribution.BOX_HEIGHT` is 26px and the whole
-    one-value SVG is 41px, which cannot hold fifteen circles at any spacing, so the column was
-    always going to be its own `<svg>`. **Nesting is impossible, so suppression is impossible.**
+    ⚠️ **v16 OVERLAYS THE CIRCLES, AND THE OVERLAY IS STILL A SIBLING — so the old assertion STILL
+    PASSES while the thing it protected is gone.** Suppression no longer needs nesting: an element
+    drawn ON TOP takes the pointer wherever it covers. **A test that survives the change it was
+    written to notice is worse than no test**, which is why this is rewritten rather than left
+    green.
 
-    ⚠️ THIS ASSERTS THE STRUCTURE, WHICH IS WHAT A UNIT TEST CAN SEE: no `<title>` element occurs
-    inside a `cfdb-dist` span. A future round that "tidied" the circles into `box()`'s SVG — the
-    obvious-looking simplification — turns this red and says why.
+    ✅ **THE DECISION: the chart's tooltip wins, via `pointer-events:none` on the overlay.**
+    `box()`'s `title='{describe(row)}'` is the only place a reader can get n, the quartiles and the
+    outlier count; a circle's facts — week, opponent, record, score — are on the page already.
+    ⚠️ **And the prompt's own test settles the alternative:** *"a hover that works everywhere except
+    on the marks is not the same as one that works."* Fifteen circles over a 240px chart cover a
+    real share of it.
+
+    ✅ **THE `<title>` ELEMENTS STAY, AND THAT IS THE HALF A PURELY VISUAL DECISION WOULD HAVE
+    THROWN AWAY.** `pointer-events` suppresses the POINTER, not the accessibility tree — so a
+    screen reader still reads each game. AC-G.11 both ways round.
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    block = _blocks(entries)[0][1]
+    block = _of_metric(entries, "Total")[0]
     assert block.count("class='cfdb-dist'") >= 2, (
         "the two box rows' own tooltips are gone, so this test's subject has vanished")
     for chunk in block.split("<span class='cfdb-dist'")[1:]:
-        chart = chunk.split("</span>")[0]
-        assert "title='" in chart.split(">")[0], (
+        assert "title='" in chunk.split(">")[0], (
             "a chart span lost its whole-chart tooltip, which is the thing this protects")
-        assert "<title>" not in chart, (
-            "a <title> element sits INSIDE the chart's own tooltipped span — it will suppress "
-            "the chart tooltip wherever the pointer is over it")
-    _metric, column = _circles(entries)[0]
-    assert column.count("<title>") == len(_circle_marks(column)) > 0, (
-        "the circles carry no per-mark tooltips at all, so nothing was gained by keeping them "
-        "outside the chart span")
+    # 🚨 THE ASSERTION THAT ACTUALLY HOLDS THE DECISION NOW.
+    for column in _circle_columns(entries):
+        assert "pointer-events:none" in column, (
+            "the circle overlay takes the pointer, so it suppresses the chart's own tooltip "
+            "wherever it covers — and that tooltip is the only place the week's spread is read")
+    # ⚠️ AND THE PER-GAME FACTS MUST SURVIVE FOR A SCREEN READER, which is why the decision is
+    # `pointer-events` and not deleting the titles.
+    titles = sum(c.count("<title>") for c in _circle_columns(entries))
+    assert titles > 0, (
+        "the per-circle <title> elements were removed rather than made pointer-transparent — a "
+        "screen reader has lost the week, the opponent, the record and the score")
 
-
-# --- cfdb-wta-R-986: the allowed circles, and whose games they are ---------------------------
 
 def _circle_columns(entries, metric="Total", side=0) -> list:
     """Both circle columns of ONE side's metric block, in drawn order: [gained, allowed].
@@ -3617,44 +3642,62 @@ def test_THE_ALLOWED_CIRCLES_CARRY_THE_OPPONENTS_ACCENT(panel):
         f"colour rather than the opponent's, which is the box it sits under")
 
 
-def test_A_CIRCLE_COLUMN_HUGS_THE_ROW_IT_BELONGS_TO(panel):
-    """🚨 cfdb-wta-R-986. POSITION IS THE ENTIRE SIGNAL, SO THE SPACING IS THE INTERFACE.
+# 🚨 `test_A_CIRCLE_COLUMN_HUGS_THE_ROW_IT_BELONGS_TO` WAS RETIRED HERE IN B122, DELIBERATELY.
+#
+# It asserted that a circle column sat closer to its own box than to the next row — 1.2px above
+# against 15.2px below, a 12.7 : 1 ratio B120 measured in the browser — because **proximity was
+# the only thing saying whose games those were** (AC-G.22: no label, and colour is the second
+# signal at best).
+#
+# ✅ **v16 OVERLAYS THE CIRCLES ON THE BOX, SO THE PROPERTY IS GONE AND ITS JOB IS DONE BETTER.**
+# A circle is now INSIDE its row's own chart, which is a structural statement rather than a
+# spatial hint, and no margin can weaken it. ⚠️ **A test asserting the old margins would now fail
+# on correct code and read as evidence the overlay was wrong** — R-762's shape, one layer up.
+#
+# ✅ **REPLACED BY `test_THE_CIRCLES_ARE_DRAWN_INSIDE_THEIR_OWN_ROWS_CHART` below**, which asserts
+# the thing that now carries the meaning. **Retired with a named replacement rather than deleted
+# into silence**, which is B114's rule applied a fourth time.
 
-    There is no label on a circle column and colour is the second signal at best (AC-G.22), so
-    **which row a circle belongs to is said by one thing: it is closer to its own box than to the
-    next one.** B119 found the first draft sat almost exactly halfway between the two and closed
-    the gap; Cowork read the result as still ambiguous and asked for a measurement.
 
-    📊 MEASURED IN THE BROWSER AT 1300px WITH `getBoundingClientRect()`, both columns:
-    **1.2px above, 15.2px below — a ratio of 12.7 to 1.** Before this round it was 4.2 / 8.0.
+def test_THE_CIRCLES_ARE_DRAWN_INSIDE_THEIR_OWN_ROWS_CHART(panel):
+    """🚨 cfdb-wta-R-993. THE REPLACEMENT FOR THE HUG TEST, AND IT ASSERTS THE STRONGER PROPERTY.
 
-    ⚠️ THIS TEST CANNOT MEASURE A BROWSER, AND SAYS SO. It asserts the two margins still point the
-    right way and by a wide margin — the cheap guard that stops the expensive measurement being
-    re-done every round. **The renders are the instrument; this is the memory of what they said.**
-    ✅ ASSERTED AS A RELATIONSHIP, NOT AS LITERALS, so a round that retunes both numbers for a good
-    reason is free to — it just cannot make the column equidistant.
+    **Marc, v16:** *"The circles need to be overlayed on top of the Box-Whisker with same x and
+    y-axis."*
+
+    ⚠️ ASSERTED AS *INSIDE ITS OWN `box-series`*, WHICH IS WHAT "WHOSE GAMES" NOW RESTS ON. Two
+    columns drawn at the bottom of the block, or both inside the Gained row, would each satisfy
+    "there are two overlays" — so the assertion is that the Gained row's chart contains exactly
+    one, the Allowed row's contains exactly one, **and nothing sits between the two rows.**
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
-    for column in _circle_columns(entries):
-        style = re.search(r"style='margin:([^']+)'", column)
-        assert style, f"the circle column declares no margin at all: {column[:120]}"
-        top, _side, bottom = style.group(1).split()
-        top_px = float(top.replace("px", ""))
-        bottom_px = (float(bottom.replace("rem", "")) * 16 if "rem" in bottom
-                     else float(bottom.replace("px", "")))
-        # ⚠️ THE TWO MARGINS ARE NOT COMPARABLE TO EACH OTHER AND THE FIRST DRAFT OF THIS TEST
-        # COMPARED THEM ANYWAY. A negative top margin is a PULL from a natural position, not a
-        # gap: -6px yields a MEASURED 1.2px gap, so `bottom > 3 * |top|` was asserting a
-        # relationship between two quantities that do not share a meaning. **The browser
-        # measurement is the only thing that knows the gaps; this checks the two levers that
-        # produce them still point the right way.**
-        assert top_px <= 0, (
-            f"the column does not pull up towards its own box (top margin {top}), so it sits at "
-            f"its natural distance from both rows")
-        assert bottom_px >= 12, (
-            f"the gap below the column is only {bottom_px}px of margin — measured at 1300px a "
-            f".95rem bottom produced 15.2px against 1.2px above, and anything much smaller puts "
-            f"the column back near the halfway point B119 found and fixed")
+    block = _of_metric(entries, "Total")[0]
+    rows = block.split("<div data-cfdb='box-series'")[1:]
+    assert len(rows) == 2, f"expected a Gained row and an Allowed row, got {len(rows)}"
+    for name, row in zip(("gained", "allowed"), rows):
+        assert row.count("data-cfdb='game-circles'") == 1, (
+            f"the {name} row's chart does not contain exactly one circle overlay")
+        assert "position:relative" in row, (
+            f"the {name} row has no positioned wrapper, so an absolutely-placed overlay would "
+            f"escape to the nearest positioned ancestor and land anywhere")
+        wrapper = row.split("position:relative")[1]
+        assert wrapper.index("<svg") < wrapper.index("data-cfdb='game-circles'"), (
+            f"the {name} row draws its circles BEFORE the chart, so they would sit under it")
+    # 🚨 AND EVERY OVERLAY IS INSIDE A ROW — nothing loose in the block.
+    #
+    # ⚠️ THE FIRST DRAFT TRIED TO ASSERT "nothing BETWEEN the rows" AND COULD NOT: splitting on
+    # `box-series` makes the first row's chunk run all the way to the second row's opening tag, so
+    # a column emitted between them lands INSIDE that chunk and reads as belonging to row one.
+    # **The check was structurally incapable of seeing what it was written for** — R-760's shape,
+    # caught because it failed on correct code rather than passing on broken code.
+    # ✅ The honest form: the block holds exactly two overlays, and none of them sits before the
+    # first row. Counting per row (above) plus counting the whole block pins every position.
+    assert block.count("data-cfdb='game-circles'") == 2, (
+        f"the block draws {block.count(chr(39).join(['data-cfdb=', 'game-circles', '']))} "
+        f"overlays; one per row is two")
+    prefix = block.split("<div data-cfdb='box-series'")[0]
+    assert "game-circles" not in prefix, (
+        "an overlay is emitted before the first box row, so it belongs to no chart")
 
 
 def test_THE_ALLOWED_COLUMN_IS_DRAWN_ON_THE_ALLOWED_ROWS_OWN_FRAME(panel):
@@ -3697,3 +3740,62 @@ def test_THE_ALLOWED_COLUMN_IS_DRAWN_ON_THE_ALLOWED_ROWS_OWN_FRAME(panel):
         f"the opponent's allowed average was pushed to 900 against a whisker_high of 681, so the "
         f"Allowed row re-frames and its circles must move. They did not: "
         f"{positions(narrow, 1)} — the column is drawn on the GAINED row's frame")
+
+
+def test_THE_OVERLAY_IS_THE_SAME_BOX_AS_THE_CHART(panel):
+    """🚨 cfdb-wta-R-993. THE OVERLAY AND THE CHART MUST BE ONE COORDINATE SYSTEM, AND THE ONLY
+    THING THAT MAKES THAT TRUE IS THAT THEIR SVGs ARE THE SAME BOX AT THE SAME ORIGIN.
+
+    `box()` returns `height + 15` — A145's band plus its label strip. The overlay declares the
+    same, so no offset arithmetic exists anywhere. ⚠️ **Drop `height=_BOX_BAND` from the `box()`
+    call and the chart reverts to 41px tall under a 71px overlay**: every circle lands at the
+    wrong y, the markup still looks reasonable, and the structural tests above still pass.
+
+    📊 Measured in the browser at 1300px, 1700px and dark, both rows:
+    `left, top, width, height` deltas all **0.0** — but that is a raster, run once. This is the
+    cheap guard that keeps it true.
+    """
+    band = _module_constant("_BOX_BAND")
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    block = _of_metric(entries, "Total")[0]
+    for name, row in zip(("gained", "allowed"),
+                         block.split("<div data-cfdb='box-series'")[1:]):
+        chart = re.search(r"class='cfdb-dist'[^>]*>\s*<svg[^>]*height='(\d+)'", row)
+        over = re.search(r"data-cfdb='game-circles'.*?<svg[^>]*height='(\d+)'", row, re.S)
+        assert chart and over, f"the {name} row is missing a chart or an overlay"
+        assert int(chart.group(1)) == int(over.group(1)) == band + 15, (
+            f"the {name} row's chart is {chart.group(1)}px and its overlay {over.group(1)}px; "
+            f"both must be the band ({band}) plus box()'s 15px label strip. They are drawn at the "
+            f"same origin, so a height mismatch puts every circle at the wrong y")
+
+
+@pytest.mark.parametrize("games", (2, 15, 22))
+def test_NO_CIRCLE_IS_EVER_CLIPPED_BY_THE_BAND(games):
+    """🚨 SILENT CLIPPING IS THE FAILURE THIS GUARDS, AND IT IS SILENT IN BOTH DIRECTIONS.
+
+    An SVG does not complain when a mark falls outside its viewBox — **the last games of a long
+    season would simply not be drawn**, and every test asserting *one circle per played game*
+    reads the markup rather than the viewport, so all of them would still pass.
+
+    📊 B120 measured the longest regular-season calendar in serving at **22 games (team 80,
+    1894)**, not the 15 two earlier rounds assumed. At `_CIRCLE_PITCH_MAX` a 22-game column needs
+    80.5px of a 56px band. ✅ `_circle_pitch` compresses instead of overflowing.
+
+    ⚠️ ASSERTED ON THE GEOMETRY THE MODULE COMPUTES, at three lengths: the common case, Marc's
+    stated case, and the archive's worst. **22 is the one that fails without the clamp.**
+    """
+    import importlib
+    matchup = importlib.import_module("views.matchup")
+    band = _module_constant("_BOX_BAND")
+    diameter = _module_constant("_CIRCLE_D")
+    pitch = matchup._circle_pitch(games, band)
+    span = pitch * (games - 1)
+    top = band / 2.0 - span / 2.0
+    assert top - diameter / 2 >= -0.01, (
+        f"{games} games at pitch {pitch} start at y={top:.2f}, so the first circle's edge is "
+        f"above the band and is clipped")
+    assert top + span + diameter / 2 <= band + 0.01, (
+        f"{games} games at pitch {pitch} end at y={top + span:.2f}, so the last circle's edge "
+        f"falls past the {band}px band and is clipped — silently")
+    assert pitch <= _module_constant("_CIRCLE_PITCH_MAX") + 1e-9, (
+        f"the pitch {pitch} is looser than Marc's 50% ceiling")
