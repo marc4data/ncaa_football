@@ -1383,6 +1383,61 @@ def test_A_THIN_WEEK_SAYS_SO_and_a_normal_one_does_not(panel):
         f"the shape: {text[-600:]}")
 
 
+def test_A_STRADDLING_WEEK_NAMES_THE_THIN_MEASURES_and_does_not_libel_the_panel(panel):
+    """🚨 cfdb-main-R-1091. B130 TOOK `low` OFF THE SORTED LIST AND USED IT FOR TWO JOBS.
+
+    The *over* clause states the RANGE and is right — *"196 to 200 team-games, depending on the
+    measure"*. The *thin* clause then stated **`low` alone**, as though it described the panel.
+    🚨 **So in a week where ONE measure's coverage drops and the rest do not, the panel would
+    have said *"with only 8 team-games, the box and the whiskers are drawn between a handful of
+    numbers"* beside SEVENTEEN charts drawn over 172** — a false statement about the panel, made
+    by the sentence written to prevent a false impression.
+
+    ✅ **THE CASE IS UNREACHABLE IN TODAY'S DATA AND THAT IS EXACTLY WHY IT IS A TEST.** B130's
+    buckets are exhaustive over all 648 published rows — 486 at n >= 100, 90 at 51–100, 36 at
+    11–25, 36 at <= 2 — and **nothing sits between 3 and 10**, so every week is currently
+    all-thin or all-fat. ⚠️ **A defect that cannot be reached by the data cannot be caught by a
+    fixture built from the data**, so this one constructs the straddle. **It becomes reachable
+    the first time one endpoint's coverage slips, and nothing guarantees it will not.**
+
+    ⚠️ **THIS ADDS TO B130's BOTH-DIRECTIONS TEST RATHER THAN REPLACING IT** — that one asserts a
+    warning fires when the whole panel is thin and NOT when it is fat, because a warning that
+    always fires is decoration (R-762). **This asserts the third state neither of those two can
+    see.**
+    """
+    import copy
+    run, _ = panel
+    floor = _module_constant_pg("_THIN_DISTRIBUTION")
+    fat = min(int(r["n"]) for r in _SPREAD)
+    assert fat > floor, (
+        f"`_SPREAD`'s smallest n is {fat}, at or under the {floor} threshold, so the seventeen "
+        f"'fat' measures in this fixture are not actually fat and the straddle is not staged")
+
+    straddle = copy.deepcopy(_SPREAD)
+    victim = straddle[0]["metric"]
+    straddle[0]["n"] = 2
+    assert len(straddle) > 1, "a one-metric fixture cannot straddle anything"
+    text = _text(run(_both(), spread=straddle)[0])
+
+    # ✅ THE THIN MEASURE IS NAMED, BY THE LABEL A READER SEES ON THE ROW ABOVE IT.
+    label = _module_constant_pg("_ROW_LABELS")[victim]
+    assert label in text, (
+        f"the caption warns about a thin measure without naming it, so a reader cannot tell "
+        f"which of the charts to distrust: {text[-700:]}")
+    assert "(2)" in text, (
+        f"the caption names the thin measure without its count — the number is what lets a "
+        f"reader judge the shape: {text[-700:]}")
+    # 🚨 AND THE SENTENCE MUST NOT DESCRIBE THE PANEL BY ITS WORST MEASURE. This is the whole
+    # defect: the all-thin wording asserts the box and whiskers ARE drawn between a handful of
+    # numbers, which is false of the other seventeen charts.
+    assert "the box and the whiskers are drawn between a handful of numbers" not in text, (
+        f"the panel-wide thin wording fired on a week where only one measure is thin, so the "
+        f"caption libels seventeen charts drawn over {fat}: {text[-700:]}")
+    assert "The rest are drawn over the full week" in text, (
+        f"the caption names the thin measure but does not say the others are fine, which leaves "
+        f"a reader no better off than the panel-wide warning did: {text[-700:]}")
+
+
 def test_a_COUNT_DRAWS_AN_INTEGER_AXIS_even_in_a_section_full_of_rates(panel):
     """🚨 cfdb-wta-R-1153. THE DEFECT B128 FOUND ON THE LIVE PAGE AND CORRECTLY DID NOT PATCH.
 
