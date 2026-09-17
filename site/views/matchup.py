@@ -14,6 +14,7 @@ import html
 import re
 from collections import namedtuple
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -5935,101 +5936,546 @@ def _travel(game_id) -> None:
 _SOURCED_COLOR_RUNGS = ("primary", "alternate")
 
 
+# ── MARC'S DRIVES OVERHAUL v01 (cfdb-main-R-1201…R-1204) ───────────────────────────────────
+#
+# 🚨 THE COORDINATE FRAME IS THE WHOLE DECISION AND IT IS MEASURED, NOT ARGUED.
+#
+# **Marc: one field, goal line to goal line, both teams on it.** The panel this replaces drew
+# each drive in the OFFENSE-RELATIVE frame, and its docstring warned that keying a bar off
+# `yardline` *"mirrors the away band and reads as a rendering fault"*. ✅ **THAT WARNING IS
+# ABOUT MIXING THE TWO FRAMES, AND IT IS CORRECT. It is not an argument against the absolute
+# frame, which is what one shared field requires.**
+#
+# 📊 MEASURED ON ALL 84,838 PUBLISHED `srv_drive` ROWS, live serving:
+#
+#     home offense:  start_yardline == start_yards_from_own_goal        42,233 / 42,233  100%
+#     away offense:  start_yardline == 100 - start_yards_from_own_goal  42,605 / 42,605  100%
+#
+# **So `yardline` IS a single absolute frame — exactly one — and the relative frame maps into
+# it by `100 - x` for the away side.** ⚠️ **Nothing here is mirrored: the two sides ATTACK
+# OPPOSITE ENDS, which is what a shared field means.** 📊 The proof, on drives that gained
+# ground and ended on the field:
+#
+#     away gaining drives:  end_yardline <  start_yardline   35,123 / 36,058   97.4%
+#     home gaining drives:  end_yardline >  start_yardline   35,934 / 36,932   97.3%
+#
+# ⚠️ **AND THE ~2.6% THAT GO THE OTHER WAY ARE NOT A FRAME ERROR — they are the return drives
+# of `_DRIVE_GAIN_NOTE` below**, where the offense gained yards and the END coordinate is where
+# somebody else finished. In the relative frame BOTH bands increase, which is why that frame can
+# share an axis and cannot draw two teams attacking opposite ends.
+#
+# 📊 **THE FIELD IS 120 AND THE DATA IS 0–100, SO THE DATA IS INSET BY TEN.** The coordinates
+# never leave 0–100, and the goal lines ARE reached — home touchdowns end at `yardline` 100 on
+# 9,236 drives, away at 0 on 6,193 — so the end zones are drawn as real space that the data
+# arrives at rather than as decoration.
+_DRIVE_FIELD_YARDS = 120
+_DRIVE_ENDZONE = 10             # yards of end zone at each end; data sits at 10…110
+# 📊 MARC's 20/60/20, ON A TOTAL THE TABLES CAN ACTUALLY HOLD. The first render used
+# 190/560/190 and the five columns overprinted each other; his own sentence settles the trade
+# — *"Away Team Drive and Home Team Drive tables will always be the same width, Drives graph
+# should adjust accordingly"* — so the TABLE is the fixed thing and the field takes the rest.
+_DRIVE_FIELD_WIDTH = 708        # 236/708/236 = 20/60/20 of 1180
+_DRIVE_TABLE_WIDTH = 236
+_DRIVE_ROW_HEIGHT = 17
+_DRIVE_ROW_FONT = 10
+_DRIVE_HEADER_FONT = 10
+_DRIVE_BAR_WIDTH = 7
+
+
+def _drive_field_x(yardline):
+    """A published `yardline` placed on the 120-yard field. ONE expression, one home.
+
+    ⚠️ §4.2.1: this is ONE column shifted by a CONSTANT WRITTEN IN THE CODE, which the rule
+    names as rendering. It is not arithmetic between two published columns.
+    """
+    return None if yardline is None or pd.isna(yardline) else float(yardline) + _DRIVE_ENDZONE
+
+
+# 🚨 AC-G.22 — SHAPE FIRST, COLOUR SECOND, AND HERE IT IS NOT OPTIONAL: Marc asked for the
+# drive to be **coloured by the team**, so colour is already spent on identity and the result
+# icon may not carry meaning in colour at all. **Every one of these is distinguishable in
+# greyscale.**
+#
+# 📊 THE VOCABULARY IS KEYED ON `drive_result_category`, WHICH IS WHY IT IS SEVEN AND NOT
+# TWENTY-THREE. Counted at this base rather than trusted: `drive_result_key` carries **23
+# distinct values** across **7 categories** on 84,838 rows. ⚠️ **The panel this replaces said
+# *"ten drive_result values"* in two docstrings and a test file — that was true of an earlier
+# and smaller population and is now wrong by more than a factor of two.**
+#
+#     punt 30,351 · offensive score 30,369 · turnover 14,191 · clock 5,137
+#     kick 2,680 · defensive score 1,209 · unknown 904
+#
+# ⚠️ **`unknown` DOES NOT BORROW ONE OF THE SIX LOOKS (AC-G.11).** It is a bare stroke — the
+# same answer `glyphs.NO_DATA_MARK` gives — so it reads as *not classified* rather than as a
+# seventh verdict.
+#
+# ❌ **AND THIS VOCABULARY BELONGS IN `site/lib/glyphs.py`, WHICH IS SESSION A's (§3 rule 3,
+# R-980). CHECKED BEFORE INVENTING IT, WHICH THE PROMPT ASKED FOR:** `glyphs.indicator()` emits
+# CSS-class shapes for the three-item result strip and `_OUTLOOK_MARKS` is a three-verdict
+# outlook scale — **neither carries a drive-result concept, and extending either means editing
+# A's file.** ✅ **So it is built here in the same spirit and REPORTED rather than reached for.**
+_DRIVE_RESULT_SHAPES = {
+    "offensive score": "triangle-right",
+    "defensive score": "triangle-left",
+    "turnover": "cross",
+    "punt": "circle",
+    "kick": "diamond",
+    "clock": "square",
+    "unknown": "stroke",
+}
+_DRIVE_RESULT_UNKNOWN = "stroke"
+
+# 🚨 THE QUARTER IS ALREADY IN THE CLOCK STRING, AND THIS ROUND BUILT A SECOND RENDERER FOR IT
+# BEFORE LOOKING — MY OWN §2.2.1c, CAUGHT BY THE RASTER RATHER THAN BY READING.
+#
+# **The prompt's column table maps *Qtr #* to `start_period` and *Game Clock at Start* to
+# `start_clock_display`, as two separate columns. THEY OVERLAP.** 📊 Measured on all 84,838
+# published rows:
+#
+#     start_clock_display starts with `Qn …`     84,461
+#     starts with `OT` / `2OT` … `8OT`              252
+#     NULL                                           24   <- exactly the start_period = 0 rows
+#     anything else                                   0
+#
+# ✅ **SO SERVING ALREADY PUBLISHES THE COMPOSED STRING, OVERTIME NAMING INCLUDED.** A
+# `_drive_period_label` helper that turned period 5 into `OT` was written here, shipped a
+# *"Q1 Q1 5:07"* into the first render, and is deleted: **a second renderer for one published
+# string is the R-574 drift, and this one could not even agree with the column it duplicated.**
+#
+# ⚠️ **`start_period` IS STILL READ — for the ABSENCE, which is the one thing the clock cannot
+# say.** 📊 24 of 84,838 rows carry period `0`, which `_models.yml` calls *"a defect rather than
+# a period"*, and **all 24 are exactly the rows with no clock** — one absence, not two. AC-G.11:
+# it renders as an em dash, never as a quarter zero.
+
+
+def _drive_when(row) -> str:
+    """Marc's *"Qtr #: Game Clock at Start (Duration m:ss)"*, composed into one cell.
+
+    ✅ §4.2.1 — joining published values into a string creates no quantity. **And the quarter
+    comes from `start_clock_display` itself rather than from a second formatter**: the column
+    already reads `Q1 15:00` and `2OT` (measured above).
+    """
+    clock = fmt.text(row.get("start_clock_display"))
+    elapsed = fmt.text(row.get("elapsed_display")) or fmt.EM_DASH
+    if not clock:
+        # The 24 period-0 rows. An em dash, and the duration still stands on its own.
+        return f"{fmt.EM_DASH} ({elapsed})"
+    return f"{clock} ({elapsed})"
+
+
+# 🚨 SCORE IMPACT IS SIGNED, IT READS **BOTH** SIDES, AND A COLUMN THAT READS ONLY THE OFFENSE
+# SHOWS `0` ON A PICK-SIX.
+#
+# 📊 MEASURED, mean delta per drive over 84,838 rows — the two columns disagree exactly where
+# `srv_drive`'s own comment says they will (*"a `TD` suffix on a turnover means the DEFENSE
+# scored"*):
+#
+#     drive_result_key            offense delta   defense delta      n
+#     touchdown                        +6.70          +0.23      22,870
+#     interception_return_td           +0.06          +6.49         486
+#     punt_return_td                   +0.18          +7.37         215
+#     safety                           +0.07          +1.65         201
+#
+# ⚠️ **2,845 drives (3.35%) put points on the DEFENSE's board.** So the figure is the NET swing
+# from the offense's point of view, and a pick-six reads `-7` in the driving team's own row.
+#
+# 🚨🚨 **AND THIS IS A DECLARED, TIME-BOXED §4.2.1 EXCEPTION — SAID OUT LOUD RATHER THAN
+# SMUGGLED.** §4.2.1 names *a difference between two published columns* as NOT rendering, and
+# this is two of them. **`srv_drive` publishes no score-impact column — checked against
+# `information_schema`, not against the model** — and the alternative was to ship Marc's spec
+# without the column he asked for.
+#
+# ✅ **THE PRECEDENT IS THE CHARTER'S OWN WORKED EXAMPLE AND IT POINTS THIS WAY:** B099's usage
+# dots divided two published columns, shipped as a time-boxed exception, and
+# `usage_share_of_max` was published upstream on the next round (R-725, then R-740). The charter
+# calls that *"right to ship and right to ask rather than guess"*, because the alternative
+# *"would have blocked a layout round on a model round"*.
+#
+# 📋 **SO: `score_impact` IS REQUESTED ON `srv_drive`, AND THIS EXPRESSION IS THE ONE PLACE TO
+# DELETE WHEN IT LANDS.** ⚠️ **Nothing else in this file may compute it — a second copy is the
+# drift §4.2.1 exists to stop.**
+#
+# 🚨 **AND THE UPSTREAM COLUMN MUST BE COMPUTED FROM THE PLAYS RATHER THAN FROM THESE
+# SNAPSHOTS, WHICH THE RENDER PROVED UNRELIABLE — see `_drive_score_impact`'s own docstring for
+# the three drives that disproved them and the 2.72% the guard suppresses.**
+# 📊 WHAT ONE SCORING PLAY CAN PUT ON A BOARD, FROM THE OFFENSE'S POINT OF VIEW: a safety (2),
+# a field goal (3), a touchdown alone (6), with a kick (7) or with a two-point conversion (8) —
+# and the same values NEGATIVE where the defense scored them instead. **Zero is a real answer
+# and is in the set**: most drives change nothing.
+_DRIVE_LEGAL_IMPACTS = frozenset({0.0, 2.0, 3.0, 6.0, 7.0, 8.0, -2.0, -3.0, -6.0, -7.0, -8.0})
+
+
+def _drive_score_impact(row):
+    """The net points this drive put on the board, from the OFFENSE's point of view — or None
+    where the score snapshots contradict the drive's own result.
+
+    🚨🚨 **THE GUARD IS NOT DEFENSIVE PROGRAMMING. THE RENDER CAUGHT THE COLUMN LYING.**
+    The first version of this panel printed the bare delta, and the Jacksonville State at Ohio
+    overtime render showed **a PUNT worth `+7`, a MISSED FG worth `+13`, and a TOUCHDOWN worth
+    `0`** — all three from the published columns, none of them a formula error here.
+
+    📊 **MEASURED ON THAT GAME: the score snapshots are INCOHERENT ACROSS 3 OF ITS POSSESSION
+    FLIPS.** Possession alternates, so drive N's offense is drive N+1's defense and
+    `end_offense_score(N)` must equal `start_defense_score(N+1)`. On drive 5 an Ohio punt runs
+    `start_offense_score 0 → end 31`; on drive 9 a Jacksonville State touchdown runs `17 → 17`.
+    **The window some snapshots cover is not the drive.**
+
+    ✅ **SO THE DELTA IS CROSS-CHECKED AGAINST `is_scoring_drive`, WHICH IS PUBLISHED
+    SEPARATELY AND DERIVED FROM THE RESULT RATHER THAN FROM THE SCOREBOARD.** Two independent
+    facts about one drive; where they disagree, this returns `None` and the cell reads `—`.
+
+    📊 **THE RATE, ON ALL 84,838 PUBLISHED ROWS:**
+
+        a SCORING drive whose net delta is 0        1,213 / 31,409 scoring   3.86%
+        a NON-scoring drive with a nonzero delta    1,093 / 53,429           2.05%
+        ── guard 1, the two facts disagree          2,306 / 84,838           2.72%
+        ── guard 2, they agree on an ILLEGAL value    699 / 84,838           0.82%
+        ══ suppressed in total                      3,005 / 84,838           3.54%
+           so a figure is PRINTED on                                        96.46%
+
+    ⚠️ **AC-G.11, AND IT IS THE WHOLE POINT: a wrong number and a missing number are different,
+    and only one of them misleads.** §2.5's asymmetry says a null renders as an honest-looking
+    zero and the reader is told something false about the world — this is that rule applied to a
+    column that HAS data and is sometimes wrong.
+
+    📋 **AND IT STRENGTHENS THE UPSTREAM ASK RATHER THAN REPLACING IT: `score_impact` on
+    `srv_drive` should be computed FROM THE PLAYS, not from these snapshots.** A round that
+    published a snapshot delta would publish this defect with a nicer name.
+    """
+    values = [row.get(k) for k in ("end_offense_score", "start_offense_score",
+                                   "end_defense_score", "start_defense_score")]
+    if any(v is None or pd.isna(v) for v in values):
+        return None
+    end_off, start_off, end_def, start_def = (float(v) for v in values)
+    delta = (end_off - start_off) - (end_def - start_def)
+    # THE FIRST CROSS-CHECK. `is_scoring_drive` is null-safe here: a null reads as "not
+    # scoring", which is the conservative direction — it suppresses a figure rather than
+    # inventing one.
+    scored = bool(row.get("is_scoring_drive")) and not pd.isna(row.get("is_scoring_drive"))
+    if scored != (delta != 0):
+        return None
+    # 🚨 AND THE SECOND, WHICH THE RENDER DEMANDED AFTER THE FIRST ONE SHIPPED. The overtime
+    # picture still carried **a FIELD GOAL worth `-4`**: the two facts agreed that the drive
+    # scored, so the first check passed it, and `-4` is not a number any scoring play can
+    # produce. 📊 Measured: where the two facts agree, **99.15%** of deltas are a legal value,
+    # so this suppresses the remaining **0.85%** rather than printing arithmetic nobody can
+    # defend. ⚠️ A multi-score window would also land here, and that is the right outcome —
+    # those ARE the incoherent snapshots.
+    if delta not in _DRIVE_LEGAL_IMPACTS:
+        return None
+    return delta
+
+
+def _drive_impact_label(value) -> str:
+    """`+7`, `-7`, or `0` — and `—` only where a score column is genuinely absent (AC-G.32)."""
+    if value is None or pd.isna(value):
+        return fmt.EM_DASH
+    return "0" if float(value) == 0 else f"{float(value):+.0f}"
+
+
+# ⚠️ THE BAR IS A POSITION AND `yards` IS A GAIN, AND MARC'S LAYOUT PUTS THEM SIDE BY SIDE.
+#
+# 🚨 **RE-MEASURED AT THIS BASE RATHER THAN CARRIED FORWARD, AND THE POPULATION HAS MOVED.**
+# The bar spans `|end_yardline - start_yardline|`; the `Yrds` column is what the offense gained;
+# they disagree because the end coordinate is where a RETURN finished:
+#
+#     all drives ending on the field   15,296 / 84,720   18.1%   (the old docstring said 15%)
+#     touchdowns only                   7,385 / 22,836   32.3%   (the old docstring said 34%)
+#     worst categories: defensive score 29.5% · offensive score 26.8% · turnover 17.2%
+#
+# ✅ **BOTH NUMBERS ARE CORRECT AND THEY ANSWER DIFFERENT QUESTIONS**, which is §2.4 turning up
+# as a layout consequence. ⚠️ **The old panel put them in different parts of a row; v01 puts the
+# `Yrds` cell directly beside the bar, so on nearly one row in five a reader can see them
+# disagree and has nothing to tell them why.**
+#
+# 🚨 **THE ANSWER CHOSEN IS THE CAPTION, AND THE BETTER ANSWER IS DECLINED ON PURPOSE.**
+#
+# ⚠️ **A TICK WHERE THE OFFENSE'S OWN GAIN ENDED IS THE BEST READER ANSWER** — it is per-row
+# rather than generic, and B124's finding rules a hover out (*a hover cannot introduce an
+# encoding, only confirm one*). ❌ **IT IS NOT SHIPPED, BECAUSE IT WOULD BE A SECOND §4.2.1
+# EXCEPTION IN ONE ROUND.** `start_yardline + yards` is arithmetic between two published
+# columns, and the charter warns in its own words that B099's *"scaling one published number by
+# another to size a shape is rendering"* **must not become the rule** — *"it licenses the delta
+# chip, `ats`, and every other thing this contract exists to stop"*.
+#
+# ✅ **THE ASYMMETRY IS DELIBERATE AND IS THE WHOLE ARGUMENT: Score Impact is a column MARC
+# ASKED FOR BY NAME, so withholding it fails to deliver his spec. The tick answers a problem
+# COWORK RAISED, and a caption answers it too.** One declared exception is a trade; two is a
+# rule eroding.
+#
+# 📋 **SO THE UPSTREAM ASK IS TWO COLUMNS ON `srv_drive`, ONE ROUND, A's FILE:** `score_impact`
+# (which deletes the exception above) and a gain-end coordinate (which buys the tick). **Both
+# are reported, neither is reached for.**
+_DRIVE_GAIN_NOTE = (
+    "A drive's bar spans where the ball actually went, so a drive that ended in a return "
+    "reaches past what the offense gained — on 18.1% of drives, and 32.3% of touchdowns. "
+    "The Yrds column is the offense's own gain; the bar is where the ball finished."
+)
+
+
+# 🚨 THE FIELD IS THE ONLY PANEL THAT PINS THE y DOMAIN, AND THAT IS THE ENTIRE ALIGNMENT
+# DESIGN — A156's rule, transferred whole (cfdb-main-R-1105).
+#
+# > **MARC:** *"I would think about the tables as features of a graph on the same axis system,
+# > using coordinates to align everything - instead of 3 different elements trying to be
+# > aligned."*
+#
+# ✅ **A156 SHIPPED EXACTLY THIS FOR POLL MOVEMENT AND ITS FIRST INSTRUMENT WAS WORTHLESS:** it
+# pinned the same domain on BOTH halves, and the `independent` negative control AGREED, because
+# two independent scales over one domain at one height produce identical pixels. 🚨 **R-760's
+# class, in the measuring rig.** ✅ **What makes it discriminating is what makes it correct: one
+# panel pins, the others INHERIT through `resolve_scale(y="shared")`.** ⚠️ **A domain literal
+# repeated on a table half is one number with three homes, and three homes drift.**
+def _drive_y_shared():
+    """The inherited y — no scale, no domain, no axis. Used by BOTH table panels."""
+    return alt.Y("drive_number:Q", axis=None)
+
+
+def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Chart:
+    """One field, goal line to goal line, both teams on it. THE PANEL THAT PINS y.
+
+    ⚠️ `reverse=True` PUTS DRIVE 1 AT THE TOP, so the sequence reads downward the way a
+    reader scans. The domain is padded by half a drive at each end so the first and last bars
+    are not clipped by the plotting edge.
+    """
+    last = int(frame["drive_number"].max())
+    y = alt.Y("drive_number:Q", axis=None,
+              scale=alt.Scale(reverse=True, domain=[0.5, last + 0.5], nice=False))
+    # ⚠️ THE FIELD'S OWN FURNITURE IS BUILT FROM CONSTANTS, NOT FROM THE DATA — so an empty or
+    # one-sided game still draws a field rather than a blank strip.
+    gridlines = pd.DataFrame({"x": list(range(0, _DRIVE_FIELD_YARDS + 1, 10))})
+    gridlines["kind"] = ["goal" if x in (_DRIVE_ENDZONE,
+                                         _DRIVE_FIELD_YARDS - _DRIVE_ENDZONE)
+                         else "edge" if x in (0, _DRIVE_FIELD_YARDS)
+                         else "ten" for x in gridlines["x"]]
+    # ⚠️ FOOTBALL NUMBERING, NOT COORDINATES: 10 at each 10, 50 at midfield. Derived from the
+    # constants above so it cannot disagree with where the lines are drawn.
+    mid = _DRIVE_FIELD_YARDS / 2
+    ticks = [x for x in range(_DRIVE_ENDZONE, _DRIVE_FIELD_YARDS - _DRIVE_ENDZONE + 1, 10)]
+    labels = {x: int(50 - abs(x - mid)) for x in ticks}
+    x = alt.X("x:Q", title=None,
+              scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False),
+              axis=alt.Axis(values=ticks, grid=False,
+                            labelExpr=" : ".join(f"datum.value == {k} ? '{v}'"
+                                                 for k, v in labels.items()) + " : ''"))
+    field = alt.Chart(gridlines).mark_rule(strokeDash=[2, 2]).encode(
+        x=x,
+        opacity=alt.Opacity("kind:N", scale=alt.Scale(
+            domain=["edge", "goal", "ten"], range=[0.45, 0.55, 0.18]), legend=None),
+        strokeWidth=alt.StrokeWidth("kind:N", scale=alt.Scale(
+            domain=["edge", "goal", "ten"], range=[1.5, 1.5, 1]), legend=None))
+
+    drawn = frame[frame["has_position"]]
+    # 🚨 THE BAR IS A `mark_rule` WITH x AND x2 RATHER THAN A `mark_bar`, because y here is a
+    # CONTINUOUS drive index: a bar mark on a quantitative y has no natural thickness and
+    # Vega-Lite sizes it from the scale's step, which a 0.5-padded domain does not have.
+    bars = alt.Chart(drawn).mark_rule(
+        strokeWidth=_DRIVE_BAR_WIDTH, strokeCap="butt").encode(
+        x=x, x2="x_end:Q", y=y,
+        color=alt.Color("accent:N", scale=None, legend=None),
+        tooltip=[alt.Tooltip("offense_team_display:N", title="Offense"),
+                 alt.Tooltip("when:N", title="Start"),
+                 alt.Tooltip("yards:Q", title="Yards gained", format="d"),
+                 alt.Tooltip("drive_result:N", title="Result"),
+                 alt.Tooltip("impact_label:N", title="Score impact"),
+                 alt.Tooltip("field_note:N", title="On the field")])
+    # 🚨 AC-G.22. THE ICON IS A SHAPE AND ITS COLOUR IS THE TEAM's, SO THE SHAPE CARRIES ALL
+    # THE MEANING. `filled=False` keeps it legible on top of its own bar.
+    icons = alt.Chart(drawn).mark_point(
+        size=52, filled=False, strokeWidth=1.6).encode(
+        x="x_end:Q", y=y,
+        shape=alt.Shape("result_shape:N", scale=None, legend=None),
+        color=alt.Color("accent:N", scale=None, legend=None),
+        tooltip=[alt.Tooltip("drive_result:N", title="Result"),
+                 alt.Tooltip("drive_result_category:N", title="Kind")])
+
+    layers = [field, bars, icons]
+    # ⚠️ THE HONEST-ABSENCE BRANCH, KEPT DELIBERATELY THROUGH A REWRITE THAT COULD HAVE LOST IT
+    # SILENTLY (R-141's family). 📊 118 of 84,838 drives — 0.139% — carry an end coordinate off
+    # the field. **The row stays and says so; a missing possession is a worse lie than a drive
+    # that admits it does not know where it finished.**
+    missing = frame[~frame["has_position"]]
+    if not missing.empty:
+        layers.append(alt.Chart(missing).mark_text(
+            align="center", baseline="middle", fontSize=_DRIVE_ROW_FONT, opacity=0.55).encode(
+            x=alt.value(width / 2), y=y, text=alt.value("position unavailable"),
+            tooltip=[alt.Tooltip("offense_team_display:N", title="Offense"),
+                     alt.Tooltip("field_note:N", title="On the field")]))
+    return alt.layer(*layers).properties(width=width, height=height)
+
+
+def _drive_table_chart(frame: pd.DataFrame, band: str, height: int,
+                       width: int) -> alt.Chart:
+    """One side's table, drawn as text marks that INHERIT the field's y scale.
+
+    🚨 IT DECLARES NO SCALE AND NO DOMAIN. That is what ties it to the field, and a domain
+    repeated here would be the §4.2.1 question in a chart spec — plus it would make this
+    round's own verification worthless, because two halves pinned to one domain land on
+    identical pixels whether the scale is shared or not (A156, cfdb-main-R-1105).
+
+    ⚠️ `axis=None` IS NOT COSMETIC. Without it this half draws its OWN drive-index axis, and
+    A156 measured that failure as six "row collisions" that were not rows — the picture said
+    the table was too tight while it was drawing a second axis on top of itself.
+
+    ⚠️ **THE ROWS ARE SPARSE AND THAT IS THE POINT.** A side's table holds only that side's
+    drives, at the y of their own drive in the FULL sequence — so a gap is the other team
+    having the ball, which is exactly *"aligned vertically with the drive in the graph that
+    the table row represents"*.
+
+    🚨 **BOTH TABLES READ LEFT TO RIGHT IN THE SAME ORDER, AND THE FIRST RENDER MIRRORED THE
+    HOME ONE.** Mirroring put `#` on the far right and printed the row backwards — *"+7 TD 75
+    Q1 15:00 (9:53) 1"*. **It looked symmetrical and read as noise**, and Marc asked for the two
+    tables to be the same WIDTH, not for one to be reversed. The raster is what said so.
+
+    ⚠️ **EVERY COLUMN CARRIES A PIXEL `limit`, WHICH THE FIRST RENDER DID NOT.** `MISSED FG`
+    and `END OF 4TH QUARTER` (18 characters, 138 rows) ran straight through the Impact column
+    and over the header beside it. **A text mark with no limit does not wrap and does not
+    clip — it overprints**, which is R-755's lesson in a chart rather than in a flex row.
+    """
+    side = frame[frame["band"] == band]
+    # (x pixel, align, pixel limit, heading, text) — x is a PIXEL through `alt.value`, which
+    # bypasses the x scale entirely: this half has no x quantity, only gutters.
+    # ⚠️ THE HEADER GETS ITS OWN LIMIT, AND THE FIRST FIX FORGOT THAT. Sharing the cell's limit
+    # clipped `Impact` to `Im…` — a heading narrower than its own word, which the raster showed
+    # and no assertion would. **A heading is chrome on an empty row; only its NEIGHBOUR
+    # constrains it**, so the two limits are different numbers for different reasons.
+    columns = (
+        (0.0, "left", 14, 16, "#", alt.Text("team_drive:Q", format="d")),
+        (17.0, "left", 78, 40, "When", alt.Text("when:N")),
+        (128.0, "right", 26, 30, "Yrds", alt.Text("yards:Q", format="d")),
+        (134.0, "left", 58, 40, "Result", alt.Text("drive_result:N")),
+        (float(width), "right", 42, 44, "Impact", alt.Text("impact_label:N")),
+    )
+    layers = []
+    for x_px, align, limit, head_limit, heading, text in columns:
+        layers.append(alt.Chart(side).mark_text(
+            align=align, fontSize=_DRIVE_ROW_FONT, baseline="middle", limit=limit).encode(
+            x=alt.value(x_px), y=_drive_y_shared(), text=text,
+            color=alt.Color("accent:N", scale=None, legend=None)
+            if heading == "Result" else alt.value("currentColor")))
+        # The heading sits at a NEGATIVE pixel y for A156's reason: it is chrome, not a drive.
+        layers.append(alt.Chart(side.head(1)).mark_text(
+            align=align, fontSize=_DRIVE_HEADER_FONT, fontWeight="bold",
+            baseline="bottom", opacity=0.75, limit=head_limit).encode(
+            x=alt.value(x_px), y=alt.value(-7), text=alt.value(heading)))
+    return alt.layer(*layers).properties(width=width, height=height)
+
+
 def _drive_colors(df) -> dict:
-    """Each band's own colour, recovered from the OTHER band's `opponent_color_*`.
+    """Each band's own colour, read off that band's OWN rows.
 
-    ⚠️ srv_drive HAS NO `offense_color_*` COLUMNS. Verified against information_schema on the
-    serving instance, not read off the model: the identity pair is asymmetric — `offense_*`
-    carries team_id, slug, display, mascot and logo_url, and the three contrast colours exist
-    on `opponent_*` alone.
+    🚨 **THIS USED TO RECOVER A BAND'S COLOUR FROM THE *OTHER* BAND'S `opponent_color_*`, AND
+    ITS DOCSTRING SAID `srv_drive` HAD NO `offense_color_*` COLUMNS — *"verified against
+    information_schema on the serving instance"*.** ✅ **THAT WAS TRUE WHEN B066 WROTE IT AND IS
+    NOT TRUE NOW.** 📊 Re-checked against `information_schema` at this base, which is the only
+    instrument that answers this (§2.2.1c.2): **`offense_color_on_light`, `offense_color_on_dark`
+    and `offense_color_source` all exist on `srv_drive`, at 100.00% coverage over 84,838 rows.**
+    The *"honest fix upstream"* that docstring asked for was shipped; nothing told this function.
+    ⚠️ **§2.2.1d — the claim had not become false, it had been OVERTAKEN.**
 
-    It is still recoverable from ONE game's rows without a join, because possession
-    alternates: the home team is the opponent on every away-band drive, and vice versa. So a
-    band's colour is read off the complementary band. That is a lookup within the single
-    result set this panel already fetched, not a join and not a metric.
-
-    It is also a workaround, and the honest fix is upstream — `offense_color_on_light` /
-    `_on_dark` / `_source` on srv_drive, mirroring what opponent_* already has. That is a
-    data-layer change and gets its own round; recorded in the B066 report rather than
-    smuggled in here.
+    ✅ **AND THE WORKAROUND HAD A REAL FAILURE MODE THE NEW PATH DOES NOT:** it read
+    `other.iloc[0]` and did `if other.empty: continue`, so **a game in which only one side ever
+    had the ball got no colour at all** — possession alternating is an assumption about football,
+    not a property of the frame.
     """
     colors = {}
     for band in ("home", "away"):
-        other = df[df["band"] == ("away" if band == "home" else "home")]
-        if other.empty:
+        own = df[df["band"] == band]
+        if own.empty:
             continue
-        row = other.iloc[0]
-        colors[band] = {"color_on_light": row.get("opponent_color_on_light"),
-                        "color_on_dark": row.get("opponent_color_on_dark"),
-                        "color_source": row.get("opponent_color_source")}
+        row = own.iloc[0]
+        colors[band] = {"color_on_light": row.get("offense_color_on_light"),
+                        "color_on_dark": row.get("offense_color_on_dark"),
+                        "color_source": row.get("offense_color_source")}
     return colors
 
 
-def _drive_bar(row) -> str:
-    """The drive drawn on the field, 0 = the offense's own goal line, 100 = the opponent's.
+def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
+    """Everything the three panels plot, computed ONCE on the frame the panel already has.
 
-    ⚠️ `start_yards_from_own_goal` and `end_yards_from_own_goal` are the ONLY coordinates both
-    bands can share. `yardline` is absolute in the HOME team's frame, so a bar keyed off it
-    mirrors the away band and reads as a rendering fault — it disagrees with the
-    offense-relative frame on roughly half of all drives.
-
-    ⚠️ AND THE BAR IS NOT `yards` LONG. yards is what the offense gained; the end coordinate
-    is where a RETURN finished, and the two disagree on 15% of drives (34% of touchdowns). The
-    bar is drawn from the coordinates because the bar is a position, not a gain.
-
-    An off-field end coordinate suppresses the bar and keeps the row: 0.15% of drives carry a
-    broken end coordinate, and a missing possession is a worse lie than a bar that admits it
-    does not know where it ended.
+    ⚠️ ONE PASS, ONE HOME FOR EACH DERIVED FIELD. Three panels reading the same rows must not
+    each re-derive a label — that is the two-renderers-for-one-number drift (R-574) at chart
+    grain, and here it would let the table and the tooltip disagree about the same drive.
     """
-    start, end = row.get("start_yards_from_own_goal"), row.get("end_yards_from_own_goal")
-    if not row.get("is_end_on_field") or pd.isna(start) or pd.isna(end):
-        return ("<div style='opacity:.5;font-size:.75rem' "
-                "title='CFBD's end coordinate for this drive falls off the field'>"
-                "position unavailable</div>")
-    lo, hi = sorted((float(start), float(end)))
-    backwards = float(end) < float(start)
-    fill = "#b45309" if backwards else "#334155"
-    return (
-        "<div style='position:relative;height:8px;background:rgba(128,128,128,.18);"
-        "border-radius:4px' title='own "
-        f"{start:g} to {end:g}{' — lost yards' if backwards else ''}'>"
-        f"<div style='position:absolute;left:{lo}%;width:{max(hi - lo, 0.8)}%;"
-        f"height:8px;background:{fill};border-radius:4px'></div></div>")
+    frame = df.copy()
+    frame["band"] = frame["band"].astype(str)
+    # 🚨 MARC ASKED FOR *"Drive # for the team"* AND `drive_number` IS PER GAME — MEASURED, NOT
+    # ASSUMED, WHICH IS WHAT THE PROMPT ASKED FOR. 📊 On 84,838 rows the per-game maximum equals
+    # the drive count and the distinct count on every game checked, so `drive_number` runs
+    # 1…N across BOTH teams. ⚠️ **AND `band_order` IS NOT THE ALTERNATIVE: it is constant per
+    # band — home 2, away 1 on every drive of every game — a band ORDERING, not a counter.**
+    #
+    # ✅ SO THE TEAM'S OWN NUMBER IS THIS ROW'S POSITION IN THE TABLE IT IS IN, and that is what
+    # it is computed as: a row index within a band, over rows already ordered by `drive_number`.
+    # **It is not a new quantity — it is the ordinal of a row in a rendered table** (§4.2.1).
+    # 📋 A published `offense_drive_number` would be better and is reported, not reached for.
+    frame = frame.sort_values("drive_number")
+    frame["team_drive"] = frame.groupby("band").cumcount() + 1
+    frame["accent"] = frame["band"].map(
+        lambda band: identity.text_on(colors.get(band)))
+    frame["when"] = frame.apply(_drive_when, axis=1)
+    frame["impact"] = frame.apply(_drive_score_impact, axis=1)
+    frame["impact_label"] = frame["impact"].map(_drive_impact_label)
+    frame["result_shape"] = frame["drive_result_category"].map(
+        lambda c: _DRIVE_RESULT_SHAPES.get(c, _DRIVE_RESULT_UNKNOWN))
+    # ⚠️ THE ABSENCE IS DECIDED ONCE, HERE, AND EVERY PANEL READS THE SAME BOOLEAN. Deciding it
+    # per panel is how a rewrite loses it in one place and keeps it in another.
+    frame["has_position"] = [
+        bool(row.get("is_end_on_field"))
+        and not pd.isna(row.get("start_yardline"))
+        and not pd.isna(row.get("end_yardline"))
+        for _i, row in frame.iterrows()]
+    frame["x"] = frame["start_yardline"].map(_drive_field_x)
+    frame["x_end"] = frame["end_yardline"].map(_drive_field_x)
+    frame["field_note"] = [
+        "yes" if ok else "CFBD's end coordinate for this drive falls off the field"
+        for ok in frame["has_position"]]
+    return frame
 
 
 def _drives(game_id, season) -> None:
-    """The alternating possession sequence — how the game actually went.
+    """Marc's Drives Overhaul v01: three panels, ONE axis system, one field.
 
-    THE SINGLE MOST LEGIBLE "how did this game go" ARTEFACT (matchup post-game spec §1.4),
-    and it was the blocker there: stg_drive had landed and nothing read it. fct_drive and
-    srv_drive now exist and are published, so this is the thing that reads them.
+    > **MARC, 2026-09-17:** *"3-column layout: Away Team Drive (Table), Drives (graph
+    > representing drives on the field), Home Team Drive (Table)… The tables on the outside
+    > should be aligned vertically with the drive in the graph that the table row represents."*
 
-    ⚠️ SCORING IS READ FROM `scoring_side`, NEVER FROM THE RESULT TEXT. A `TD` suffix on a
-    turnover or a kick means the DEFENSE scored — 908 drives across ten drive_result values,
-    measured. Keying an offensive-touchdown mark off the substring "TD" puts every one of
-    them on the wrong side of the game.
+    🚨 THE ALIGNMENT IS A PROPERTY OF THE ENCODING, NOT OF ARITHMETIC ANYBODY MAINTAINS. All
+    three panels share one `drive_number` scale through `resolve_scale(y="shared")`, and only
+    the field pins its domain. A table row therefore CANNOT drift from its drive.
+
+    ⚠️ AND THE COST IS REAL AND IS MARC's TO WEIGH — reported, not decided (R-980, §2). A156
+    measured that Vega-Lite IGNORES the `autosize: fit` Streamlit imposes on an `hconcat`
+    (*"fit only works for single views and layered views"*), so **this panel is a FIXED width
+    and `use_container_width` is inert.** His *"20/60/20, the graph adjusts accordingly"* and
+    his *"one axis system"* pull against each other; this is the second, and the round renders
+    both for him.
+
+    ⚠️ SCORING IS READ FROM `scoring_side` AND `drive_result_category`, NEVER FROM THE RESULT
+    TEXT. A `TD` suffix on a turnover or a kick means the DEFENSE scored. 📊 Re-counted at this
+    base: **1,209 drives carry `scoring_side = 'defense'` and 2,845 (3.35%) put points on the
+    defense's board**, across 23 `drive_result_key` values in 7 categories — **not the "ten
+    drive_result values" this docstring claimed for four months.**
     """
     st.subheader("Drives")
     with states.section("srv_drive", dataset=DATASETS["srv_drive"]):
-        # Single table, single WHERE, always by game_id — srv_drive is 81,433 rows and the
-        # rule that governs srv_matchup governs this.
-        #
-        # THE LIMIT IS THE CONTRACT, NOT DECORATION. lib.query rejects an unbounded select
-        # outright (AC-G.39) and rejected this one while it was being written: "an unbounded
-        # select is a defect even where today's filter happens to make it small". 200 is far
-        # above the measured ceiling — the longest game in 81,433 rows carries 38 drives,
-        # p99.9 is 37, the mean 23.5 — so it bounds the blast radius without ever truncating
-        # a real game.
+        # Single table, single WHERE, always by game_id. THE LIMIT IS THE CONTRACT, NOT
+        # DECORATION — lib.query rejects an unbounded select outright (AC-G.39). 200 is far
+        # above the measured ceiling: the longest game in 84,838 rows carries 38 drives.
         df = query("""
             select drive_number, band, band_order, is_home_offense,
                    offense_team_display, offense_logo_url,
+                   offense_color_on_light, offense_color_on_dark, offense_color_source,
                    opponent_team_display,
-                   opponent_color_on_light, opponent_color_on_dark, opponent_color_source,
-                   drive_result, drive_result_category, scoring_side, is_scoring_drive,
+                   drive_result, drive_result_key, drive_result_category,
+                   scoring_side, is_scoring_drive,
                    plays, yards, elapsed_display,
+                   start_period, start_clock_display,
+                   start_yardline, end_yardline,
                    start_yards_from_own_goal, end_yards_from_own_goal,
+                   start_offense_score, end_offense_score,
+                   start_defense_score, end_defense_score,
                    is_end_on_field, is_negative_drive,
-                   end_offense_score, end_defense_score,
                    as_of_ts
             from srv_drive
             where game_id = :game_id
@@ -6040,11 +6486,6 @@ def _drives(game_id, season) -> None:
         if df.empty:
             # EMPTY, NOT DEGRADED. Drives are collected from 2024 onward, so a 2023 game has
             # none and never will — that is the scope of the data, not a fault in it.
-            #
-            # 🚨 THE SECOND CLAUSE USED TO READ "and a game that has not kicked off yet has
-            # none", WHICH IS FALSE HERE IN EVERY CASE: this panel is only reachable from the
-            # after tab, which an unplayed game does not have. A112 rendered it on a game
-            # that had finished six hours earlier.
             states.empty(
                 "The drive-by-drive sequence would be here.",
                 _absence_note(
@@ -6056,55 +6497,64 @@ def _drives(game_id, season) -> None:
             return
 
         colors = _drive_colors(df)
+        frame = _drive_frame(df, colors)
 
-        # DEGRADED IS A SEPARATE STATE FROM EMPTY, and this is the one that produces it: the
-        # drives are all here, but a side's colour is cfdb's rather than the team's, so the
-        # band reads in a neutral grey. Said once, above the sequence, rather than on every row.
+        # DEGRADED IS A SEPARATE STATE FROM EMPTY: the drives are all here, but a side's colour
+        # is cfdb's rather than the team's. Said once, above the sequence, not on every row.
+        # ⚠️ IT READS `offense_color_source` NOW — the side's OWN row — so the sentence names
+        # the team whose colour fell back rather than that team's opponent.
         fell_back = sorted({
-            str(row.get("opponent_team_display"))
-            for _, row in df.iterrows()
-            if row.get("opponent_color_source")
-            and row["opponent_color_source"] not in _SOURCED_COLOR_RUNGS})
+            str(row.get("offense_team_display"))
+            for _i, row in df.iterrows()
+            if row.get("offense_color_source")
+            and row["offense_color_source"] not in _SOURCED_COLOR_RUNGS})
         if fell_back:
             st.caption(
                 "Color for " + ", ".join(fell_back) + " is cfdb's rather than the team's, "
                 "so that side is banded in a neutral tone. Every drive below is present.")
 
-        scored = int(df["is_scoring_drive"].fillna(False).astype(bool).sum())
-        st.caption(f"{len(df)} drives · {scored} scoring")
+        height = max(len(frame) * _DRIVE_ROW_HEIGHT, _DRIVE_ROW_HEIGHT * 4)
+        away_name = _drive_band_name(frame, "away")
+        home_name = _drive_band_name(frame, "home")
+        # ⚠️ `configure_view` AND `configure_axis` GO AT THE TOP LEVEL ONLY. A `configure_*` on
+        # a sub-chart of a concat is invalid Vega-Lite and Altair raises on it.
+        chart = alt.hconcat(
+            _drive_table_chart(frame, "away", height, _DRIVE_TABLE_WIDTH),
+            _drive_field_chart(frame, height, _DRIVE_FIELD_WIDTH),
+            _drive_table_chart(frame, "home", height, _DRIVE_TABLE_WIDTH),
+            spacing=10,
+        ).resolve_scale(y="shared").configure_view(stroke=None)
+        st.altair_chart(chart, use_container_width=True)
 
-        for _, row in df.iterrows():
-            # identity.text_on defaults to the on-LIGHT variant, which is what team.py
-            # does and the only precedent in the app — there is no theme detection here.
-            # Both contrast-safe variants are selected above so the helper chooses, and
-            # a missing colour falls to its neutral rather than to anything computed.
-            accent = identity.text_on(colors.get(row.get("band")))
-            logo = identity.logo_or_monogram(
-                row.get("offense_logo_url"), row.get("offense_team_display") or "?", 18)
-            # The score AFTER the drive, from the offense's own perspective, so a scoring
-            # drive shows what it made the scoreboard say.
-            side = row.get("scoring_side")
-            mark = ("<span style='font-weight:600'>▲ offense</span>" if side == "offense"
-                    else "<span style='font-weight:600'>▼ defense</span>" if side == "defense"
-                    else "")
-            yards = row.get("yards")
-            yards_text = "—" if pd.isna(yards) else f"{int(yards):+d} yd"
-            body_row = (
-                f"<div style='border-left:4px solid {accent};padding:.35rem .6rem;"
-                f"margin-bottom:.25rem;"
-                f"background:{'rgba(120,160,120,.13)' if row.get('is_scoring_drive') else 'transparent'}'>"
-                f"<div style='display:flex;align-items:center;gap:.5rem;flex-wrap:wrap'>"
-                f"<span style='opacity:.55;font-size:.75rem;min-width:1.6rem'>"
-                f"{'' if pd.isna(row.get('drive_number')) else int(row['drive_number'])}</span>"
-                f"{logo}<span style='font-weight:600'>{row.get('offense_team_display') or '?'}</span>"
-                f"<span style='opacity:.85'>{row.get('drive_result') or '—'}</span>{mark}"
-                f"<span style='opacity:.6;font-size:.8rem;margin-left:auto'>"
-                f"{'' if pd.isna(row.get('plays')) else int(row['plays'])} plays · {yards_text}"
-                f" · {row.get('elapsed_display') or '—'}</span></div>"
-                f"<div style='margin-top:.25rem'>{_drive_bar(row)}</div></div>")
-            st.markdown(body_row, unsafe_allow_html=True)
+        scored = int(df["is_scoring_drive"].fillna(False).astype(bool).sum())
+        st.caption(
+            f"{len(df)} drives · {scored} scoring. **{away_name} drives right to left, "
+            f"{home_name} left to right** — one field, both directions, so a bar moves the way "
+            f"the game did. Drive 1 is at the top. " + _DRIVE_GAIN_NOTE)
+        st.caption(_drive_result_legend())
 
         table.as_of_caption(df)
+
+
+def _drive_band_name(frame: pd.DataFrame, band: str) -> str:
+    """The team on one side, for the captions that explain the direction."""
+    side = frame[frame["band"] == band]
+    if side.empty:
+        return band
+    return str(side.iloc[0].get("offense_team_display") or band)
+
+
+def _drive_result_legend() -> str:
+    """The seven shapes, named — because an encoding a reader cannot decode is decoration.
+
+    ⚠️ AC-G.22: the shapes are listed WITHOUT colour, because colour is the team's and carries
+    nothing about the result. A reader in greyscale loses nothing here.
+    """
+    shapes = {"offensive score": "▶", "defensive score": "◀", "turnover": "✚",
+              "punt": "○", "kick": "◇", "clock": "□", "unknown": "–"}
+    return ("The mark at the end of each drive is its result: "
+            + " · ".join(f"{glyph} {name}" for name, glyph in shapes.items())
+            + ". The color is the team's, so the shape carries the outcome.")
 
 
 def render() -> None:

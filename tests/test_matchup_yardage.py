@@ -1386,7 +1386,21 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
                "return _AXIS_PAD + (float(value) - lo) / span * (width - 2 * _AXIS_PAD)",
                "return (inner - _METRIC_CELL_GAP * _REM) / 2",
                "_TABLE_VALUE_PX = ((_TABLE_CELL_BUDGET // 3) if _TABLE_CELLS_EQUAL",
-               "_TABLE_VALUE_WIDTH = _TABLE_VALUE_PX / _REM    # rem, for the cell CSS"}
+               "_TABLE_VALUE_WIDTH = _TABLE_VALUE_PX / _REM    # rem, for the cell CSS",
+               # ── B133's drives field. BOTH ARE A CONSTANT OVER A LITERAL, WHICH IS THE ONE
+               # SHAPE §4.2.1 NAMES AS RENDERING — "scaling ONE column by a CONSTANT WRITTEN
+               # IN THE CODE". Neither reads a published column at all, so neither can
+               # disagree with the Excel export, which is the failure this guard is for.
+               #
+               # ⚠️ `_DRIVE_FIELD_YARDS / 2` is the field's MIDPOINT, and it exists so the
+               # football yard numbering (10…50…10) is derived from where the lines are drawn
+               # rather than typed a second time beside them — a literal `60` here would be
+               # the two-homes drift this file keeps paying for.
+               "mid = _DRIVE_FIELD_YARDS / 2",
+               # ⚠️ And this one centres the `position unavailable` text in its own panel.
+               # `width` is the panel width passed in, a page constant; the division is
+               # pixel geometry with exactly one consumer — this text mark's x.
+               'x=alt.value(width / 2), y=y, text=alt.value("position unavailable"),'}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "

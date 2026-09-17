@@ -35,7 +35,32 @@ KNOWN_CHART_CALLS = {
     ("today.py", "altair_chart"),
     ("movement.py", "line_chart"),
     ("performance.py", "altair_chart"),
-    # 🚨 matchup.py's ENTRY IS GONE — cfdb-wta-R-900. Marc replaced the Gained vs Allowed
+    # ✅ matchup.py IS BACK, AND IT IS AN `hconcat`, WHICH IS THE ONE SHAPE THIS FILE'S WHOLE
+    # PREMISE DOES NOT REACH — B133, Marc's Drives Overhaul v01.
+    #
+    # 📊 MEASURED RATHER THAN ASSUMED, by running the spec through Streamlit's OWN
+    # `_prepare_vega_lite_spec` exactly as `test_the_calibration_chart_declares_its_own_autosize`
+    # insists on doing:
+    #
+    #     our spec's autosize                      None
+    #     after Streamlit prepares it              {'type': 'fit', 'contains': 'padding'}
+    #     top level                                hconcat
+    #     declared heights honoured                425 / 425 / 425
+    #     declared widths honoured                 190 / 560 / 190
+    #
+    # 🚨 **SO THE `fit` IS IMPOSED AND THEN IGNORED.** Vega-Lite warns in its own console that
+    # *"Autosize `fit` only works for single views and layered views"*, and an `hconcat` is
+    # neither (A156, cfdb-main-R-1106). ⚠️ **The declared height is therefore real, which is the
+    # SAFE direction — R-603's collapse is a chart shrinking inside a box it does not control,
+    # and this cannot shrink at all. What it can do is leave whitespace on a wide viewport or
+    # overflow a narrow one: a layout cost, visible rather than silent.**
+    #
+    # ⚠️ AND `use_container_width=True` IS INERT HERE FOR THE SAME REASON. It is passed because
+    # every other chart call on the site passes it and a reader of this line should not have to
+    # wonder whether this one was forgotten — but it does nothing, and Marc is being shown both
+    # width readings before the ratio is settled.
+    ("matchup.py", "altair_chart"),
+    # 🚨 matchup.py's ENTRY WAS REMOVED ONCE — cfdb-wta-R-900. Marc replaced the Gained vs Allowed
     # scatter with a box-and-whisker, which `distribution.box` emits as an inline SVG, so the
     # page makes no `st.altair_chart` call at all. ⚠️ **Removed rather than left as a stale
     # allowance**: this registry's whole job is that a chart call nobody measured cannot appear
