@@ -84,7 +84,19 @@ POLLS = ("AP Top 25", "Coaches Poll")
 # **2026 week 2's top ten is IDENTICAL under both columns — same ten games, same order.** Across
 # all 35 season-weeks the correction moves 2 games into the top ten and 2 out, in 2 weeks, and
 # reorders 14 rows within it, in 3 weeks. Marc's Texas–Ohio State game does not move at all.
-MOST_EXCITING_ORDER = ("lead_changes_fourth_quarter_by_clock desc nulls last, "
+# 🚨 A153. THE FIRST KEY IS THE SCOREBOARD'S OWN LEAD CHANGES — §3.3's MIGRATE, and Marc chose it
+# with A152's numbers in front of him: *"Show actual scoreboard lead changes instead."*
+#
+# 📊 HE CHOSE IT KNOWING THE TIEBREAK WOULD DO MOST OF THE SORTING. In the fourth quarter the
+# scoreboard measure tops out at 3 this season and most of the top ten tie at 2, so
+# `mean_distance_from_even_fourth_quarter_onward` decides the order between them. ✅ That is what a
+# tiebreak is FOR — *changed hands twice, then stayed within a score* is a good definition of
+# exciting — and it is a deliberate trade rather than a property nobody noticed.
+#
+# ⚠️ THE TIEBREAK IS UNCHANGED AND SO IS THE POPULATION. 📊 Measured before the switch: the old key
+# and the new one are NULL on the same 3 games of 1,898 and disagree on none, so the panel shows
+# the same games in a different order rather than a different set.
+MOST_EXCITING_ORDER = ("scoreboard_lead_changes_fourth_quarter desc nulls last, "
                        "mean_distance_from_even_fourth_quarter_onward asc nulls last, "
                        "game_id")
 
@@ -258,6 +270,24 @@ def _completed_games(scope) -> pd.DataFrame:
                    as largest_single_play_swing_fourth_quarter,
                home_win_probability_range_fourth_quarter,
                lead_changes_overtime_by_clock as lead_changes_overtime,
+               -- ── A153, §3.3's MIGRATE ────────────────────────────────────────────────
+               -- The panel now RANKS, FILTERS and DISPLAYS on these three.
+               --
+               -- 🚨 AND THE FIVE ALIASES ABOVE ARE NOW READ BY NOTHING — said here because the
+               -- CONTRACT round needs it and a later reader would otherwise have to re-derive it.
+               -- 📊 Counted by reading the lines rather than by a match count (§2.2.1c.1): after
+               -- this round `lead_changes`, `lead_changes_fourth_quarter`, `lead_changes_overtime`
+               -- and both `largest_single_play_swing*` appear in this module only in their own
+               -- alias and in prose, and in **no other view module at all**.
+               --
+               -- ⚠️ THEY ARE LEFT IN PLACE DELIBERATELY. §3.3.2 gates CONTRACT on the DEPLOY, not
+               -- the merge: until this page is the one production is serving, the old columns
+               -- still have a live consumer. **CONTRACT is the next A round's, and it is now
+               -- unblocked** — the win-probability measure stays published either way, because it
+               -- is a real thing that no longer has to pretend to be lead changes.
+               scoreboard_lead_changes,
+               scoreboard_lead_changes_fourth_quarter,
+               scoreboard_lead_changes_overtime,
                plays_with_win_probability_fourth_quarter,
                mean_distance_from_even_fourth_quarter_onward,
                win_probability_curve_reaches_final_score,
@@ -1288,33 +1318,31 @@ def _espn_link(row) -> str:
 
 def _most_exciting(df: pd.DataFrame, scope) -> None:
     st.subheader("Most exciting")
-    # 🚨 A152. THIS CAPTION SAID *"Ranked by lead changes in the fourth quarter"* AND THE PANEL
-    # DOES NOT RANK ON THAT. `MOST_EXCITING_ORDER`'s first key is
-    # `lead_changes_fourth_quarter_by_clock`, which counts the MODEL'S WIN PROBABILITY crossing
-    # 0.5 — see the column's own header: *"LEAD CHANGES ARE COUNTED ON THE WIN PROBABILITY
-    # CROSSING 0.5, not on the scoreboard changing hands."*
+    # ✅ A153. THE CAPTION SAYS "lead changes" AGAIN AND IT IS TRUE THIS TIME — the whole point of
+    # the two-round sequence.
     #
-    # 🚨 MARC READ THIS CAPTION AND REPORTED THE DEFECT FROM IT: *"Lead changes in 4th quarter
-    # doesn't seem accurate… Math isn't mathin'."* **He was reading a true label on a different
-    # number**, which is §4.3's worst form — and the caption is where he met it.
+    # 🚨 MARC MET THE ORIGINAL DEFECT AT THIS SENTENCE. It said *"Ranked by lead changes in the
+    # fourth quarter"* while `MOST_EXCITING_ORDER` ranked on `lead_changes_fourth_quarter_by_clock`
+    # — the MODEL'S WIN PROBABILITY crossing 0.5, per that column's own header. His report was
+    # *"Lead changes in 4th quarter doesn't seem accurate… Math isn't mathin'."* **A true-sounding
+    # label on a different number, which is §4.3's worst form.**
     #
-    # ✅ A152 PUBLISHES THE REAL COUNT (`scoreboard_lead_changes*`) BUT DOES NOT RANK ON IT YET —
-    # §3.3, EXPAND only, because switching the first key re-ranks a panel Marc has already
-    # adjudicated once (cfdb-main-R-902). 📊 Measured on 2026 completed games, the two top tens
-    # share **4 of 10**. **So the caption is corrected to describe what the panel ACTUALLY does
-    # today**; when the ranking moves, this sentence moves with it and says "lead changes" again
-    # — truthfully that time.
+    # ⚠️ A152 REWROTE IT TO DESCRIBE THE CROSSINGS HONESTLY, *because the ranking had not moved
+    # yet* — a caption must describe what the panel does today, not what it is about to do.
+    # ✅ **A153 moves the ranking, so the sentence moves back.** Neither round left it false.
     #
-    # ⚠️ AND THE CHART SENTENCE CARRIED THE SAME AMBIGUITY, which is why the whole caption was
-    # re-read rather than the clause I came for (cfdb-wta-R-1024, R-1043): *"above the line the
-    # home side was ahead"* means ahead IN THE MODEL'S ESTIMATE, and a reader who had just been
-    # told the panel ranks on lead changes would read it as ahead on the scoreboard.
+    # ⚠️ AND THE CHART SENTENCE IS RE-READ AGAIN RATHER THAN ASSUMED SETTLED (cfdb-wta-R-1024,
+    # R-1043 — this class has bitten four rounds running). A152 changed *"above the line the home
+    # side was ahead"* to *"the model gave the home side the better chance"* precisely to stop a
+    # reader carrying "lead" across from the ranking sentence. 🚨 **That fix is MORE necessary now,
+    # not less**: the ranking sentence says "lead changes" again, so "ahead" one clause later would
+    # read as the scoreboard when the chart plots a probability. **It stays as A152 wrote it.**
     st.caption(
-        "Ranked by **how often the model's win probability crossed even in the fourth "
+        "Ranked by **how many times the lead actually changed hands in the fourth "
         "quarter**, then by how close the game stayed after it — not by CFBD's excitement "
-        "index, which ranked the week's best fourth quarter 31st of 86. That is a measure of "
-        "how often the game turned, and it is not the same as the lead changing hands on the "
-        "scoreboard. Each scoreboard reads away over home, quarter by "
+        "index, which ranked the week's best fourth quarter 31st of 86. A tie is not a lead, "
+        "so a game that drew level and went ahead again changed hands once. Each scoreboard "
+        "reads away over home, quarter by "
         "quarter, with overtime shown separately and the final at the right. The chart "
         "is the home side's win probability on every play against the game clock, "
         "unsmoothed and filled from even — above the line the model gave the home side the "
@@ -1330,7 +1358,7 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     # ⚠️ FILTERED ON THE COLUMN IT RANKS ON, not on excitement_index. A game whose
     # win-probability feed never reached the fourth quarter cannot be placed in this ordering
     # at all, and showing it at the bottom would say it was dull rather than unmeasured.
-    top = df[df["lead_changes_fourth_quarter"].notna()].head(10)
+    top = df[df["scoreboard_lead_changes_fourth_quarter"].notna()].head(10)
 
     # ONE READ for every curve on the panel, then sliced per row. See _win_probability_curves.
     #
@@ -1371,7 +1399,9 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             games with a fourth-quarter lead-change count but no curve rows      0
             games that can enter this panel at all                           1,895, 2024-2026
 
-        The panel filters on `lead_changes_fourth_quarter` being non-null, and that column and
+        The panel filters on `scoreboard_lead_changes_fourth_quarter` being non-null (A153; it
+        was `lead_changes_fourth_quarter` and the two are NULL on the same 3 games of 1,898,
+        measured — the ranking moved, the population did not), and that column and
         the curve are built from the SAME staging model — so a game that can be ranked here
         always has a curve, and a pre-2024 game can never be ranked here at all. Two carefully
         worded sentences for states that cannot occur are decoration, and decoration in an
@@ -1419,10 +1449,15 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # what the ordering claims, so it belongs where a reader looking at the outcome
             # already is — and Marc asked for it in exactly that place.
             Col("curve", "Win probability", render=curve_cell),
-            Col("lead_changes_fourth_quarter", "4th-qtr lead changes", kind="num"),
-            Col("lead_changes_overtime", "OT lead changes", kind="num"),
+            # 🚨 A153. THE PANEL SHOWS THE NUMBER IT RANKS ON, which is the whole of Marc's
+            # sentence: *"Show actual scoreboard lead changes instead."* Ranking on the scoreboard
+            # count while still DISPLAYING the win-probability crossings under a column headed
+            # "lead changes" would have left the false label he reported exactly where it was, on
+            # a panel ordered by a number he could not see.
+            Col("scoreboard_lead_changes_fourth_quarter", "4th-qtr lead changes", kind="num"),
+            Col("scoreboard_lead_changes_overtime", "OT lead changes", kind="num"),
             Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
-            Col("lead_changes", "Lead changes, game", kind="num"),
+            Col("scoreboard_lead_changes", "Lead changes, game", kind="num"),
             Col("excitement_index", "Excitement", kind="num", dp=1),
             # 🚨 A144. THE OUTCOME GLYPH JOINS THE LINK IN ONE CELL — Marc: *"Put them in the
             # top row of the cell, the ESPN link below in the same cell."* `_commentary` says

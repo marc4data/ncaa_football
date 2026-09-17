@@ -119,5 +119,16 @@ def test_the_page_reads_the_corrected_columns_and_keeps_its_own_vocabulary():
             f"{old} is not read from {new} — the page is still ranking on the feed's order")
 
     order = re.search(r"MOST_EXCITING_ORDER = \((.*?)\)\n", body, re.S).group(1)
-    assert "lead_changes_fourth_quarter_by_clock desc" in order, (
-        "the panel's first sort key is still the feed-ordered column")
+    # ✅ A153 MOVED THE FIRST KEY OFF THIS COLUMN ENTIRELY (§3.3 MIGRATE, Marc's call): the panel
+    # now ranks on `scoreboard_lead_changes_fourth_quarter`, the number its caption promises.
+    # **The five aliases above are still asserted and still matter** — the page keeps reading the
+    # corrected win-probability columns, and CONTRACT has not happened.
+    #
+    # 🚨 THIS TEST'S OWN PROPERTY SURVIVES INTACT: the panel must never rank on a FEED-ordered
+    # column. A140 asserted that by naming the clock-ordered one; this asserts it by refusing the
+    # feed-ordered ones, which holds for whatever key Marc picks next.
+    assert "scoreboard_lead_changes_fourth_quarter desc" in order, (
+        "the panel's first sort key is not the scoreboard lead-change count")
+    for feed_ordered in ("lead_changes_fourth_quarter", "lead_changes"):
+        assert not re.search(rf"(?<![a-z_]){feed_ordered} desc", order), (
+            f"{feed_ordered!r} ranks on the feed's play_number — cfdb-main-R-916")
