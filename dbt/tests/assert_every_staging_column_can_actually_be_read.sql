@@ -62,6 +62,7 @@
     'stg_conference_change',
     'stg_conferences',
     'stg_dbt_test_result',
+    'stg_pipeline_heartbeat',
     'stg_deploy_status',
     'stg_draft_pick',
     'stg_draft_position',

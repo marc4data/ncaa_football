@@ -87,3 +87,14 @@ notebooks/.ipynb_checkpoints/
 # claude_code/ and wt-b/ separately, it names hosts and commands, and until this line it
 # showed as untracked beside every `git add`. One `git add .` away from being public.
 .claude/settings.local.json
+
+# ── A162, cfdb-main-R-1127: COMPOSE BACKUPS NEVER REACH THIS PUBLIC REPOSITORY ──────────────
+#
+# A `cp docker-compose.yml docker-compose.yml.bak-<stamp>` is the right habit before a hand-edit
+# — the serving host has carried one since 2026-09-05. ⚠️ BUT THE HABIT AND `git add -A` COMBINE
+# BADLY: on 2026-09-17 a backup taken in this working copy (a recreate block run on the laptop
+# instead of on the serving host) was swept into a local commit. It never left the machine and
+# was byte-identical to the tracked file, so nothing was exposed — and neither of those is a
+# reason to leave the class open in a repository that is PUBLIC.
+docker-compose*.yml.bak*
+docker-compose*.yaml.bak*

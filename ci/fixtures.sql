@@ -4681,3 +4681,33 @@ INSERT INTO raw.raw_ppa_teams (filename, content, status_code, params, fetched_a
  ]
 }', 200, '{"year": "2024"}',
   '2026-01-01T00:00:38Z', now());
+
+-- ── A162: ops.pipeline_heartbeat, SO THE HEALTH SIGNAL CAN BUILD IN CI ──────────────────────
+--
+-- 🚨 §2.3.3's CLASS, CAUGHT BY CI ON THE FIRST PUSH: `stg_pipeline_heartbeat` reads
+-- `ops.pipeline_heartbeat`, which is written on the droplet by `src/heartbeat.py` and which no
+-- fixture created — so `dbt build` failed with `relation "ops.pipeline_heartbeat" does not
+-- exist` and SKIPPED the mart and `srv_system_health` behind it. **A model that cannot build on
+-- the fixture blocks every PR**, which is exactly what A152 paid for.
+--
+-- 🚨 AND ONE CADENCE IS DELIBERATELY STALE, BECAUSE THIS PROJECT'S CI DEMANDS IT.
+-- My first version seeded every row fresh so the signal would build green, and the
+-- `Assert every health signal fires` job rejected it in exactly the right words:
+--     'pipeline' never escalates in the fixture (only ['ok'])
+--     — add a fixture row that trips its warn or error threshold
+-- ✅ **That job is R-744 built into the pipeline**: a health signal that has never been seen
+-- red is a signal nobody can trust, and a fixture that can only produce 'ok' cannot prove
+-- otherwise. `weekly_results` is therefore 9 days old against its 8-day budget, so the
+-- `pipeline` signal emits both 'ok' and 'error' on every CI run.
+CREATE SCHEMA IF NOT EXISTS ops;
+CREATE TABLE IF NOT EXISTS ops.pipeline_heartbeat (
+  heartbeat_name text NOT NULL,
+  beat_at        timestamptz NOT NULL
+);
+INSERT INTO ops.pipeline_heartbeat (heartbeat_name, beat_at) VALUES
+  ('scores_refresh', now() - interval '1 hour'),
+  ('lines_snapshot', now() - interval '2 hours'),
+  ('weekly_pregame', now() - interval '3 days'),
+  ('weekly_midweek', now() - interval '1 day'),
+  -- past its 8-day budget: this is the row that makes the signal provably able to go red
+  ('weekly_results', now() - interval '9 days');

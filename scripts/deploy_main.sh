@@ -120,6 +120,10 @@ trap '[ "$LOCK_HELD" = 1 ] && ssh "${SSH_OPTS[@]}" "$SERVING_SSH_HOST" "rm -rf $
       ssh -O exit -o ControlPath="$SSH_SOCKET" "$SERVING_SSH_HOST" >/dev/null 2>&1 || true' EXIT
 
 PIPELINE_DIR=/opt/cfdb-pipeline
+# The warehouse Postgres container, named rather than discovered: the compose project is
+# `cfdb-pipeline` and the service is `warehouse`, so the name is stable. See
+# check_warehouse_shm() for why this script cares about it at all.
+WAREHOUSE_CONTAINER=cfdb-pipeline-warehouse-1
 SITE_DIR=/opt/cfdb/site
 DO_PIPELINE=1
 FORCE_SITE=0
@@ -146,9 +150,118 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
 fi
 
 # ---------------------------------------------------------------- pipeline ---
+# ── A162: THE WAREHOUSE'S /dev/shm FLOOR, AND WHY A CHECK RATHER THAN A FIX ─────────────────
+#
+# 🚨 ON 2026-09-16 THE MIDWEEK CADENCE WENT RED ON
+#     could not resize shared memory segment "/PostgreSQL.*" to 16777216 bytes:
+#     No space left on device        CONTEXT: parallel worker
+# The warehouse container had Docker's DEFAULT 64 MB of /dev/shm, Postgres allocates
+# parallel-query segments from there (`dynamic_shared_memory_type = posix`), and a full
+# production build needs more than that. A161 sampled the real demand at **62.5 MB — 98% of
+# the old ceiling** (cfdb-main-R-1130), so the margin was never there at all.
+#
+# ⚠️ THE FIX IS `shm_size: 1gb` ON THE WAREHOUSE SERVICE, AND IT LIVES IN A FILE THIS
+# REPOSITORY DOES NOT CONTAIN: `/opt/cfdb-pipeline/docker-compose.yml`, hand-merged on the
+# serving host. A deploy cannot reproduce it and `git diff` cannot show it, so **a rebuild of
+# that host silently restores the 64 MB ceiling and the whole failure returns** — with nothing
+# in git to explain it (cfdb-main-R-1126).
+#
+# ✅ SO THIS IS A CHECK, NOT A FIX, AND THE DISTINCTION IS THE POINT. It does not put the
+# compose file in git and does not pretend to. **It makes the silent regression LOUD**, which
+# is the property that was missing — the first failure cost five rounds and a working day
+# precisely because nothing announced it.
+#
+# ⚠️ THE FLOOR IS 256 MiB AND IT IS A DELIBERATE CHOICE BETWEEN TWO NUMBERS:
+#   - the measured demand is 62.5 MB, so a floor at 64 MiB would pass the very configuration
+#     that failed;
+#   - the configured value is 1 GiB, so a floor at 1 GiB would fail on any deliberate,
+#     reasonable reduction.
+# 256 MiB is ~4x the measured demand and well under what is set, so it catches a regression to
+# the Docker default — the actual failure mode — without being brittle about the exact value.
+SHM_FLOOR_BYTES=268435456     # 256 MiB
+
+check_warehouse_shm() {
+  local shm
+  shm=$("${SSH[@]}" "docker inspect $WAREHOUSE_CONTAINER --format '{{.HostConfig.ShmSize}}'" \
+        2>/dev/null | tr -d '\r')
+  if ! [ "$shm" -eq "$shm" ] 2>/dev/null; then
+    echo "::error::could not read ShmSize from $WAREHOUSE_CONTAINER — is it running?" >&2
+    return 1
+  fi
+  if [ "$shm" -lt "$SHM_FLOOR_BYTES" ]; then
+    echo "::error::THE WAREHOUSE'S /dev/shm IS BELOW THE FLOOR AND A FULL BUILD WILL FAIL." >&2
+    echo "  ShmSize : $shm bytes ($((shm / 1048576)) MiB)" >&2
+    echo "  floor   : $SHM_FLOOR_BYTES bytes ($((SHM_FLOOR_BYTES / 1048576)) MiB)" >&2
+    echo "  measured demand: ~62.5 MB, which is 98% of Docker's 64 MiB default" >&2
+    echo >&2
+    echo "  This regresses if /opt/cfdb-pipeline/docker-compose.yml is rebuilt or replaced —" >&2
+    echo "  it is NOT in git. Restore \`shm_size: 1gb\` on the \`warehouse\` service, then:" >&2
+    echo "      cd /opt/cfdb-pipeline && docker compose up -d warehouse" >&2
+    echo "  The data is on the named volume \`warehouse_pg\`, so recreating is safe." >&2
+    return 1
+  fi
+  echo "  /dev/shm on the warehouse: $((shm / 1048576)) MiB (floor $((SHM_FLOOR_BYTES / 1048576)))"
+  return 0
+}
+
+# ── A162: THE DEPLOY AND THE CADENCE MUST NOT BUILD AT THE SAME TIME (cfdb-main-R-1115) ─────
+#
+# 🚨 THREE ROUNDS LOST THE WAREHOUSE TO THIS IN ONE DAY. The lock above excludes other DEPLOYS
+# and nothing else, and this script runs dbt INSIDE `airflow-scheduler` — the very container
+# where the cadences run. On 2026-09-17 a deploy started while a cleared `dbt_run` was going;
+# the deploy's `alter table ... rename` queued for AccessExclusive, a pending exclusive blocks
+# every new reader (§5.2), and the reader that would have released the locks was throttled by
+# the waiters. **Not a formal deadlock, so Postgres never broke it.** It took a hand-run
+# `pg_cancel_backend` and about two hours.
+#
+# ⚠️ A WAIT RATHER THAN A `dags pause`, AND THE REASON IS WHAT HAPPENS WHEN THIS SCRIPT DIES.
+# A156 proved an EXIT trap does not survive `kill -9` — that is exactly how the deploy lock was
+# stranded for two hours, and how A159's orphaned backend outlived its client. So:
+#
+#     a pause that dies   leaves every cadence STOPPED until a human notices
+#     a wait that dies    leaves the system in its normal state
+#
+# ✅ **The failure mode of a wait is the benign one**, and that asymmetry is the whole argument.
+# A pause would also have to be undone by the same trap that has already been shown not to run.
+#
+# ⚠️ AND IT IS BOUNDED, BECAUSE A WAIT THAT NEVER GIVES UP IS ITS OWN OUTAGE. It refuses rather
+# than queueing forever — the same choice the deploy lock makes above, for the same reason: a
+# deploy that eventually runs against a tree something else has moved is worse than one that
+# tells you no.
+WAREHOUSE_QUIET_TIMEOUT=900      # 15 minutes; a full cadence build is ~10 and dbt_test ~14
+WAREHOUSE_QUIET_POLL=10
+
+wait_for_quiet_warehouse() {
+  local waited=0 busy
+  while :; do
+    busy=$("${SSH[@]}" "docker exec -i $WAREHOUSE_CONTAINER psql -U cfdb -d cfdb -tAc \
+             \"select count(*) from pg_stat_activity where datname = 'cfdb' \
+               and application_name = 'dbt' and state = 'active'\"" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$busy" ] || busy=0
+    if [ "$busy" -eq 0 ] 2>/dev/null; then
+      [ "$waited" -gt 0 ] && echo "  warehouse quiet after ${waited}s"
+      return 0
+    fi
+    if [ "$waited" -ge "$WAREHOUSE_QUIET_TIMEOUT" ]; then
+      echo "::error::A CADENCE IS STILL BUILDING AFTER ${waited}s. Refusing rather than racing it." >&2
+      echo "  $busy active dbt session(s) on the warehouse." >&2
+      echo "  Deploying now would queue this script's ALTER TABLE ... RENAME behind them, and a" >&2
+      echo "  pending AccessExclusive blocks every new reader — which wedged the box on" >&2
+      echo "  2026-09-17 and needed pg_cancel_backend by hand (cfdb-main-R-1115, CLAUDE.md §5.2)." >&2
+      echo "  Wait for the DAG to finish, or pause it, then re-run." >&2
+      return 1
+    fi
+    [ "$waited" -eq 0 ] && echo "  waiting for the cadence to finish ($busy dbt session(s))..."
+    sleep "$WAREHOUSE_QUIET_POLL"
+    waited=$((waited + WAREHOUSE_QUIET_POLL))
+  done
+}
+
 pipeline_half() {
   echo "[pipeline] $PIPELINE_DIR/repo"
   local before after errors
+  check_warehouse_shm || return 1
+  wait_for_quiet_warehouse || return 1
   before=$("${SSH[@]}" "git -C $PIPELINE_DIR/repo rev-parse --short HEAD")
   "${SSH[@]}" "git -C $PIPELINE_DIR/repo fetch --quiet origin && \
                git -C $PIPELINE_DIR/repo reset --hard --quiet origin/main"
