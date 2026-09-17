@@ -4686,6 +4686,69 @@ def _metric_distribution(season, season_type, week) -> dict:
     return {str(r["metric"]): r for _, r in df.iterrows()}
 
 
+# 🚨 cfdb-wta-R-1159. WHAT THE CHARTS ARE DRAWN OVER, WHICH THIS PANEL HAS NEVER SAID.
+#
+# ⚠️ **AC-G.33 IS ALREADY SATISFIED FOR THE FIGURES AND NOT FOR THE CHARTS, IN THE SAME
+# CAPTION.** The Advanced caption ends *"Every rate is over that side's own offensive plays,
+# which are counted on the last row"* — the rate's denominator, named. **The CHART beside it has
+# a completely different denominator — `n` team-games in the week — and nothing on the panel
+# names it.** AC-G.33's own words: *a hit rate without an `n` is a defect, not a style choice.*
+#
+# 📊 **AND THE WEEKS WHERE IT MATTERS ARE MEASURED, NOT IMAGINED.** Across all 648 published
+# rows at this call site:
+#
+#     n >= 100      486 rows    27 weeks
+#     n 51-100       90 rows     5 weeks
+#     n 11-25        36 rows     2 weeks   <- 2024 wk15, 2025 wk15 (n=18)
+#     n <= 2         36 rows     2 weeks   <- 2024 wk16, 2025 wk16 (n=2)
+#
+# 🚨 **36 CHARTS — 5.6% — DRAW A BOX, A MEDIAN, TWO WHISKERS, TWO EXTREME LINES AND A RING OVER
+# TWO OBSERVATIONS.** Their quartiles are interpolations between two numbers. **That is the
+# picture claiming a shape it cannot support**, and it is a strictly worse version of the
+# zero-width box B130 went looking for and did not find.
+#
+# ✅ **THE 240px PANEL ALREADY DOES THIS AND ITS WORDING IS THE PRECEDENT (§4.3 — not a new
+# pattern, the same one):** *"Yards per game leading into week N, over X completed games"*, plus
+# `_THIN_SAMPLE`'s *"Early in the season this is thin…"*. This is that sentence for the other
+# call site, which is the one that actually gets thin samples — the cumulative window never
+# does (846 of 846 rows at n > 100).
+#
+# ⚠️ **`n` IS PER METRIC AND IS NOT UNIFORM WITHIN A WEEK — 29 of 36 weeks yes, 7 no** (it is
+# coverage: `n < team_games_in_week` on 40 of 648 rows). **So the caption states the RANGE it
+# actually saw rather than one number**, and each chart's own exact `n` stays where
+# `distribution.describe()` already puts it, in that chart's hover.
+_THIN_DISTRIBUTION = 10
+
+
+def _distribution_note(spread) -> str:
+    """One sentence naming what the eighteen charts are drawn over, and saying when it is thin.
+
+    ⚠️ **READ FROM THE ROWS THE PANEL ALREADY HOLDS**, so this costs no query — `spread` is
+    `_metric_distribution`'s dict and every row carries its own `n`.
+
+    🚨 **AND IT RETURNS `""` RATHER THAN A SENTENCE WHEN THERE ARE NO CHARTS**, because a
+    caption describing charts that were not drawn is the R-875 class this page keeps finding.
+    """
+    counts = sorted(int(row["n"]) for row in spread.values()
+                    if row.get("n") is not None and not pd.isna(row.get("n")))
+    if not counts:
+        return ""
+    low, high = counts[0], counts[-1]
+    over = (f"{low:,} team-games" if low == high
+            else f"{low:,} to {high:,} team-games, depending on the measure")
+    note = (f"The charts draw each measure against every team-game played in this game's own "
+            f"week — {over}, with each chart's own count in its hover.")
+    # 🚨 AC-G.11 / AC-G.33. THE THIN CASE IS NAMED SPECIFICALLY RATHER THAN LEFT TO THE READER
+    # TO NOTICE. A box-and-whisker over two observations has quartiles that are interpolations
+    # between two numbers, and the picture says nothing about that on its own.
+    if low <= _THIN_DISTRIBUTION:
+        note += (f" ⚠️ This week is too thin for that shape to mean much: with only "
+                 f"{low:,} team-game{'' if low == 1 else 's'}, the box and the whiskers are drawn "
+                 f"between a handful of numbers "
+                 f"rather than across a population.")
+    return note
+
+
 def _metric_chart(row, away_value, home_value, dp, accents, metric: str = "") -> str:
     """ONE chart for the measure, carrying BOTH teams — Marc, v10, and it replaces two.
 
@@ -5648,6 +5711,13 @@ def _post_game(game_id, season) -> None:
         # cards in vertical register with each section, which is exactly what v11 dissolves.
         slots = _post_game_columns()
         slots["table"].markdown("".join(parts), unsafe_allow_html=True)
+        # ⚠️ INSIDE THE TABLE COLUMN AND BEFORE THE `advanced < 2` RETURN BELOW, because the
+        # Box score section draws charts too and that early exit would skip the sentence that
+        # describes them (cfdb-wta-R-1159).
+        note = _distribution_note(spread)
+        if note:
+            with slots["table"]:
+                st.caption(note)
         # ⚠️ THE CARD REGION IS ONE BLOCK AND IS DRAWN ONCE — every group appears exactly once,
         # top to bottom, with no vertical association to the table beside it.
         slots["cards"].markdown(
