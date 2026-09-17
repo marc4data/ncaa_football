@@ -367,6 +367,28 @@ def _text(entries):
         for _, body in entries)
 
 
+def _distribution_caption(entries) -> str:
+    """THE DISTRIBUTION CAPTION ALONE — not the whole panel's text.
+
+    🚨 **`_text(entries)` CANNOT ANSWER *DOES THE CAPTION NAME THIS MEASURE*, AND B131's TEST
+    ASKED IT THAT WAY.** Every measure's label is already on the panel as its own table ROW, so
+    `labels[metric] in _text(entries)` is **true whether or not the caption mentions it** — the
+    assertion passes on a caption that names nothing. R-768's class: it asserted that the page
+    renders its own row labels.
+
+    ✅ The panel emits four captions and this is the one that starts with the distribution
+    sentence, so it is selected by its own opening words rather than by position — a caption
+    added or reordered above it cannot silently change which one is read.
+    """
+    opening = "The charts draw each measure against"
+    captions = [_text([(kind, body)]) for kind, body in entries
+                if kind == "caption" and opening in _text([(kind, body)])]
+    assert len(captions) == 1, (
+        f"expected exactly one distribution caption, found {len(captions)} — the selector is "
+        f"stale, so every assertion built on it is answering about the wrong string")
+    return captions[0]
+
+
 # --- ⚠️ AC-G.6: the trap ---------------------------------------------------------------------
 
 def test_a_pre_2024_game_renders_empty_not_a_table_of_em_dashes(panel):
@@ -1417,7 +1439,11 @@ def test_A_STRADDLING_WEEK_NAMES_THE_THIN_MEASURES_and_does_not_libel_the_panel(
     victim = straddle[0]["metric"]
     straddle[0]["n"] = 2
     assert len(straddle) > 1, "a one-metric fixture cannot straddle anything"
-    text = _text(run(_both(), spread=straddle)[0])
+    # 🚨 SCOPED TO THE CAPTION SINCE B132. This read `_text(...)` — the WHOLE panel — and every
+    # measure's label is already on it as a table row, so the `label in text` assertion below
+    # was true whether or not the caption named anything. The assertion is unchanged; the
+    # string it reads is now the one the assertion is about (cfdb-main-R-1170).
+    text = _distribution_caption(run(_both(), spread=straddle)[0])
 
     # ✅ THE THIN MEASURE IS NAMED, BY THE LABEL A READER SEES ON THE ROW ABOVE IT.
     label = _module_constant_pg("_ROW_LABELS")[victim]
@@ -1436,6 +1462,82 @@ def test_A_STRADDLING_WEEK_NAMES_THE_THIN_MEASURES_and_does_not_libel_the_panel(
     assert "The rest are drawn over the full week" in text, (
         f"the caption names the thin measure but does not say the others are fine, which leaves "
         f"a reader no better off than the panel-wide warning did: {text[-700:]}")
+
+
+def test_MANY_THIN_MEASURES_ARE_BOUNDED_not_listed_one_by_one(panel):
+    """🚨 cfdb-main-R-1093. B131 FIXED THE CLAUSE THAT LIBELLED THE PANEL AND LEFT ITS TWIN.
+
+    Its naming branch fires from one thin measure up to SEVENTEEN and is LONGEST at seventeen —
+    one short of the all-thin branch, which does not grow at all. 📊 **MEASURED in characters of
+    finished caption, worst labels first: unbounded 671 · bounded 396 · all-thin 315.** ⚠️ **So
+    B131 traded *a caveat that libels the panel* for *a caveat too long to finish reading*,
+    which is R-762's decoration from the other end.**
+
+    🚨 **THIS TEST MUST NOT READ `_THIN_NAMED_MAX` AS ITS EXPECTATION, AND THAT IS THE WHOLE
+    CARE IN IT.** A test that asks the module how many names to expect passes under the one
+    break that matters — raising the bound back to eighteen — because the expectation moves with
+    the defect. **R-768's class: it would assert that the page agrees with itself.** So the
+    assertions are on the SHAPE of the sentence: fewer labels named than there are thin
+    measures, and the shortfall stated as a number.
+
+    ⚠️ **ADDS TO B130's BOTH-DIRECTIONS TEST AND B131's ONE-STRADDLER TEST; REPLACES NEITHER.**
+    Those two assert the warning fires when the panel is thin, stays silent when it is fat, and
+    names the measure when exactly one is thin. **This is the fourth state: several thin, not
+    all.**
+    """
+    import copy
+    run, _ = panel
+    floor = _module_constant_pg("_THIN_DISTRIBUTION")
+    labels = _module_constant_pg("_ROW_LABELS")
+    fat = min(int(r["n"]) for r in _SPREAD)
+    assert fat > floor, (
+        f"`_SPREAD`'s smallest n is {fat}, at or under the {floor} threshold, so nothing in "
+        f"this fixture is fat and the straddle is not staged")
+
+    # FIVE thin of nine, so the panel straddles AND there are more thin measures than any
+    # sane bound would name. The counts are distinct so `thin`'s thinnest-first sort is total.
+    straddle = copy.deepcopy(_SPREAD)
+    assert len(straddle) >= 5, f"need >=5 metrics to over-fill a bound, have {len(straddle)}"
+    thin_n = [1, 2, 3, 4, 5]
+    for row, n in zip(straddle, thin_n):
+        row["n"] = n
+    thin_metrics = [r["metric"] for r in straddle[:len(thin_n)]]
+    fat_metrics = [r["metric"] for r in straddle[len(thin_n):]]
+    assert fat_metrics, "every measure is thin, so this is the all-thin case, not a straddle"
+    # 🚨 THE CAPTION, NOT THE PANEL. Every label is on the panel already as its own table row.
+    text = _distribution_caption(run(_both(), spread=straddle)[0])
+
+    # 1 — IT IS STILL A STRADDLE, so the panel-wide wording must stay away (B131's assertion,
+    #     restated here because this fixture is a different shape and must not regress it).
+    assert "the box and the whiskers are drawn between a handful of numbers" not in text, (
+        f"the panel-wide thin wording fired on a week where only five of nine measures are "
+        f"thin, so the caption libels the four drawn over {fat}: {text[-700:]}")
+
+    # 2 — FEWER NAMED THAN THIN. This is the bound, asserted without asking what it is.
+    named = [m for m in thin_metrics if labels[m] in text]
+    assert len(named) < len(thin_metrics), (
+        f"all {len(thin_metrics)} thin measures are named in one caption — the clause is "
+        f"unbounded, which is the 671-character sentence this test exists to stop: "
+        f"{text[-700:]}")
+
+    # 3 — AND THE THINNEST ARE THE ONES KEPT. A bound that named an arbitrary three would pass
+    #     assertion 2 while dropping the chart a reader would most over-trust.
+    assert labels[thin_metrics[0]] in text, (
+        f"the THINNEST measure ({labels[thin_metrics[0]]}, n={thin_n[0]}) is not named, so the "
+        f"bound dropped the one chart a reader would most over-trust: {text[-700:]}")
+
+    # 4 — THE UNNAMED ONES ARE COUNTED, NOT SILENTLY DROPPED (AC-G.11 — an absence says which
+    #     absence it is). A bound that just truncated the list would pass 2 and 3 and tell a
+    #     reader there were only three thin measures.
+    missing = len(thin_metrics) - len(named)
+    assert f"and {missing:,} other" in text, (
+        f"{missing} thin measure(s) were dropped from the caption without being counted, so "
+        f"the sentence understates how much of the panel is thin: {text[-700:]}")
+
+    # 5 — and the fat measures are still vouched for.
+    assert "The rest are drawn over the full week" in text, (
+        f"the caption names the thin measures but does not say the others are fine: "
+        f"{text[-700:]}")
 
 
 def test_a_COUNT_DRAWS_AN_INTEGER_AXIS_even_in_a_section_full_of_rates(panel):
