@@ -1080,7 +1080,13 @@ def test_the_default_height_renders_the_same_bytes_as_before_the_parameter():
 
     ✅ THE PROPERTY IS THE HALF THAT CAN LIVE IN CI: passing the default explicitly must be
     indistinguishable from not passing it, across the whole parameter space. That is what a
-    default MEANS, and it is what breaks first if the ratios stop returning 7.0 and 5.0 at 26px.
+    default MEANS, and it is what breaks first if the ratios stop returning their literals at 26px.
+
+    ⚠️ A155 MOVED THE SERIF LITERAL FROM 5.0 TO 7.5 — Marc's v19, *"increase the size of the
+    whisker outer boundary lines by 50%"* — and this test is the ONLY thing in the suite that went
+    red on it. 🚨 THAT IS WORTH KNOWING RATHER THAN QUIETLY FIXING: bytes moved on every chart on
+    the site and one assertion noticed, because nothing else pins the serif's y at all. The
+    inverted proof lives in `test_the_serif_is_the_only_thing_that_moved` below.
     """
     for width in (120, 240, 300, 448):
         for value in (None, 180.0, 900.0):
@@ -1096,7 +1102,11 @@ def test_the_default_height_renders_the_same_bytes_as_before_the_parameter():
                             f"below={below}: the explicit default is not the implicit one")
     # And the two ratios still land on the literals they replaced.
     assert distribution.BOX_HEIGHT * distribution._RECT_HALF_RATIO == 7.0
-    assert distribution.BOX_HEIGHT * distribution._SERIF_HALF_RATIO == 5.0
+    # ⚠️ `approx`, AND ONLY ON THIS ONE. `5.0 / 26 * 26` came back exactly 5.0; A155's
+    # `7.5 / 26 * 26` is 7.500000000000001, which is a property of the binary representation and
+    # not of the change. It reaches the SVG through `:.1f`, so nothing printed can see it — but an
+    # exact comparison here would read as a defect in the ratio rather than in the assertion.
+    assert distribution.BOX_HEIGHT * distribution._SERIF_HALF_RATIO == pytest.approx(7.5)
 
 
 def test_a_taller_box_is_taller_by_exactly_what_was_asked_for():
@@ -1408,3 +1418,119 @@ def test_the_value_label_leaves_the_axis_row_only_when_asked():
     assert f"font-size='{distribution.VALUE_LABEL_FONT:g}'" in after, "the value label is not larger"
     assert f"font-size='{distribution.VALUE_LABEL_FONT:g}'" not in before, (
         "the default must not enlarge anything")
+
+
+# ── A155: THE BYTE-IDENTITY PROOF, INVERTED ─────────────────────────────────────────────────
+#
+# 🚨 EVERY PREVIOUS CHANGE TO THIS MODULE SHIPPED A CAPABILITY AND PROVED NOTHING MOVED. Marc's
+# v19 asks for the opposite: the serif is 50% taller on EVERY chart, globally, exactly as v18's
+# darkening was. ✅ So the proof inverts — not *nothing moved*, but *ONLY the serif moved*.
+#
+# ⚠️ AND IT IS NOT CIRCULAR, WHICH IS THE OBJECTION WORTH ANSWERING. The constant could reach the
+# viewBox, the rect, the median's span, the label placer's collision arithmetic or the frame — it
+# is multiplied by `height` and nothing in the signature stops it propagating. The test flips it
+# back and diffs the WHOLE string, so any leak anywhere shows up as a difference that is not a
+# serif y.
+#
+# 🚨 THE CROSS-COMMIT HALF CANNOT LIVE HERE and saying so is the point (the note on
+# `test_the_default_height_renders_the_same_bytes_as_before_the_parameter` above says why): the
+# real comparison needs `distribution.py` at `d9c8caf` imported alongside this one, and the report
+# carries that measurement. This carries the PROPERTY, which is the half CI can run.
+
+def _without_serifs(svg: str) -> str:
+    """Everything but the whisker caps.
+
+    🚨 KEYED ON `y1 != y2`, NOT ON THE STROKE ATTRIBUTES, and this round got it wrong once before
+    getting it right. The whisker's own HORIZONTAL RULE carries the identical `stroke-width='1'`
+    and `opacity`, so a pattern matching only those strips the rule out of BOTH sides — which
+    flatters the comparison by removing content it should be checking, and divides by zero the
+    moment anything asks that content how tall it is.
+    """
+    return _SERIF_LINE.sub(lambda m: "" if m.group(2) != m.group(3) else m.group(0), svg)
+
+
+_SERIF_LINE = re.compile(r"<line x1='([\d.-]+)' y1='([\d.-]+)' x2='[\d.-]+' y2='([\d.-]+)'"
+                         r" stroke='currentColor' stroke-width='1' opacity='0\.6875'></line>")
+
+
+def _serif_ys(svg: str):
+    """The serif's two y coordinates: the vertical whisker caps, and only those.
+
+    ⚠️ `y1 != y2` IS LOAD-BEARING — it excludes the whisker's own horizontal rule, whose `x1` is
+    the same whisker end. Counting that would make every figure here twice what it should be, and
+    it is the mistake this round made once against the live page before catching it.
+    """
+    out = []
+    for x1, y1, y2 in re.findall(
+            r"<line x1='([\d.-]+)' y1='([\d.-]+)' x2='[\d.-]+' y2='([\d.-]+)'"
+            r" stroke='currentColor' stroke-width='1' opacity", svg):
+        if y1 != y2 and float(y1) > 0:
+            out.append((x1, y1, y2))
+    return out
+
+
+def test_the_serif_is_the_only_thing_that_moved(monkeypatch):
+    """🚨 ACCEPTANCE 4. Across the parameter space, flipping the ratio back to 5/26 changes the
+    serif's two y coordinates and NOTHING ELSE.
+
+    ✅ THE CORPUS IS THE ONE THE HEIGHT TEST USES, plus the three A154 parameters that did not
+    exist when that corpus was written — because a proof taken over a subset of the callers is a
+    proof about that subset (R-843's family: an anchor has to come from the population under test).
+    """
+    compared = 0
+    for width in (118, 240, 420):
+        for height in (None, 56):
+            for ticks in (distribution.TICK_PERCENTILES, distribution.TICK_EXTREMES,
+                          distribution.TICK_NONE):
+                for outliers in (False, True):
+                    for extras in ({},
+                                   {"extreme_lines": True},
+                                   {"value_labels_own_row": True},
+                                   {"metric": "total_yards"}):
+                        for below in ({}, {"value_below": 90.0}):
+                            kw = dict(value=367.0, width=width, height=height, ticks=ticks,
+                                      outliers=outliers, label="T", **extras, **below)
+                            new = distribution.box(_tall_row(), **kw)
+                            with monkeypatch.context() as patch:
+                                patch.setattr(distribution, "_SERIF_HALF_RATIO",
+                                              5.0 / distribution.BOX_HEIGHT)
+                                old = distribution.box(_tall_row(), **kw)
+                            compared += 1
+                            if new == old:
+                                # A degenerate row draws no serif at all; that is not a leak.
+                                assert _serif_ys(new) == [], f"{kw}: identical yet serifs drawn"
+                                continue
+                            # Strip the serif lines from both and the remainder must be equal.
+                            assert _without_serifs(new) == _without_serifs(old), (
+                                f"{kw}: something OTHER than the serif moved")
+                            # 🚨 AND THE COUNT, because stripping alone would also pass if the
+                            # serif had VANISHED — a different claim from "only the serif moved".
+                            assert len(_serif_ys(new)) == len(_serif_ys(old)) > 0, kw
+                            # And the serifs that did move, moved to 50% taller about the middle.
+                            for (_x, ny1, ny2), (_ox, oy1, oy2) in zip(_serif_ys(new),
+                                                                       _serif_ys(old)):
+                                mid = (float(oy1) + float(oy2)) / 2
+                                assert abs((float(ny2) - float(ny1))
+                                           - 1.5 * (float(oy2) - float(oy1))) < 0.11, kw
+                                assert abs((float(ny1) + float(ny2)) / 2 - mid) < 0.11, (
+                                    f"{kw}: the serif grew off-centre")
+    assert compared == 3 * 2 * 3 * 2 * 4 * 2, compared
+
+
+def test_the_serif_now_outranks_the_box_rect(monkeypatch):
+    """🚨 THE HIERARCHY INVERSION, AS AN ASSERTION — the thing Marc has not seen.
+
+    ⚠️ IT IS THE CONSEQUENCE RATHER THAN THE REQUEST, so it is pinned separately: v19 asked for
+    50% and this is what 50% does to the picture. If a later round tunes the number, THIS is the
+    test that should make it think.
+    """
+    svg = distribution.box(_tall_row(), width=420, value=367.0)
+    _y, rect_h = _rect(svg)
+    serifs = _serif_ys(svg)
+    assert serifs, "no serif drawn — the corpus is wrong, not the chart"
+    serif_h = float(serifs[0][2]) - float(serifs[0][1])
+    assert serif_h == 15.0, f"7.5/26 of a 26px band, both ends: {serif_h}"
+    assert rect_h == 14.0, f"the rect is unchanged at 7/26: {rect_h}"
+    assert serif_h > rect_h, (
+        "A155 inverted the hierarchy deliberately: the whisker ends are now the taller mark. "
+        "If this went red, the serif ratio moved back below the rect's and Marc's v19 is undone.")
