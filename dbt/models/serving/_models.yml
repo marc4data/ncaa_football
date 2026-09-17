@@ -3109,16 +3109,6 @@ models:
       - name: excitement_index
         description: >
           CFBD's excitement index for the game; null until it has been computed.
-      - name: lead_changes
-        description: >
-          How many times the win-probability leader changed during the game. The excitement
-          card's plain-language companion to excitement_index — "4 lead changes" is a
-          sentence a reader can check against their memory of the game; an index is not.
-          Derived from play-level win probability; null for games with no play data.
-      - name: largest_single_play_swing
-        description: >
-          The biggest change in home win probability produced by one play, in probability
-          points. Identifies the game's turning point. Null for games with no play data.
       - name: home_win_probability_range
         description: >
           Highest minus lowest home win probability across the game, in probability points.
@@ -3126,8 +3116,8 @@ models:
           with no play data.
       - name: lead_changes_by_clock
         description: >
-          The same crossings as lead_changes, counted in the order the plays HAPPENED rather than
-          the order the feed lists them. cfdb-main-R-916: stg_game_win_probability.play_number is
+          How many times the win-probability leader changed during the game — crossings of 0.5,
+          counted in the order the plays HAPPENED rather than the order the feed lists them. cfdb-main-R-916: stg_game_win_probability.play_number is
           not chronological — 795 consecutive pairs step backwards on the game clock across 336 of
           1,898 games (17.7%), worst back-step 3,567 seconds.
           THE FEED'S ORDER DOES NOT SHUFFLE THIS NUMBER, IT MANUFACTURES IT. Memphis at Georgia
@@ -3136,38 +3126,44 @@ models:
           Ordered by the regulation clock with nulls last, then by play_number, which is the one
           place play_number is still right: inside an overtime period it is the only order a play
           has. Same definition as the curve the Looking Back page draws (A138).
-          lead_changes is unchanged and is still what the page ranks on; moving it is a separate
-          step (A141).
+          The feed-ordered lead_changes it was published beside was removed in A155, once A153 had
+          moved the page off it and that page had been deployed. The _by_clock suffix is kept: it
+          names how the measure is computed, which is still worth saying.
       - name: largest_single_play_swing_by_clock
         description: >
           The biggest change in home win probability between two CONSECUTIVE plays, consecutive
           meaning on the clock rather than in the feed's listing. See lead_changes_by_clock.
-          THE WORST AFFECTED COLUMN OF THE FIVE: it disagrees with largest_single_play_swing on 76
-          of 1,898 games against that column's 64, worst by 0.4303 — 43 probability points, which
-          is a bigger move than most real plays produce. Memphis at Georgia State publishes 0.6704
-          and had 0.2401.
+          THE WORST AFFECTED OF THE FIVE THIS REPLACED: it disagreed with the removed
+          largest_single_play_swing on 76 of 1,898 games against that column's 64, worst by
+          0.4303 — 43 probability points, a bigger move than most real plays produce. Memphis at
+          Georgia State published 0.6704 and had 0.2401.
       - name: lead_changes_fourth_quarter_by_clock
         description: >
-          Fourth-quarter crossings counted along the clock. Disagrees with
-          lead_changes_fourth_quarter on 13 of 1,898 games, worst by 4. Null on the same three
-          games, and for the same reason: a feed that never reached the fourth quarter was not
-          counted and found none, it was not looked at.
+          Win-probability crossings of 0.5 in the FOURTH QUARTER ONLY (period 4 exactly; overtime
+          is a separate column), counted along the clock. The period comes from stg_play joined on
+          play_id, because the win-probability feed carries no period at all. NULL — never zero —
+          for the three games of 1,898 whose feed stops before the fourth quarter begins: we did
+          not count none, we had nothing to count. It disagreed with the feed-ordered column A155
+          removed on 13 of 1,898 games, worst by 4.
       - name: largest_single_play_swing_fourth_quarter_by_clock
         description: >
           The fourth quarter's biggest consecutive-play swing, counted along the clock. Null where
           the feed never reached it.
       - name: lead_changes_overtime_by_clock
         description: >
-          Overtime crossings counted along the clock. Disagrees with lead_changes_overtime on 6 of
-          1,898 games. Inside overtime the ordering falls back to play_number, which is the only
-          order an overtime play has, so the two differ only where regulation plays were
-          interleaved with overtime ones in the feed — 10 of the 70 overtime games.
+          Win-probability crossings of 0.5 in overtime (period 5 and beyond), counted along the
+          clock and carried SEPARATELY from the fourth quarter rather than folded into it.
+          Jacksonville State @ Ohio is why: 19 crossings whole-game, 2 in the fourth quarter, 11
+          in overtime. Zero is a fact for a game that ended in regulation; NULL where the feed
+          never reached the fourth quarter and so cannot say whether overtime happened. Inside
+          overtime the ordering falls back to play_number, the only order an overtime play has,
+          so it disagreed with the feed-ordered column A155 removed on just 6 of 1,898 games.
       - name: scoreboard_lead_changes
         description: >
           How many times the lead actually changed hands on the SCOREBOARD, whole game, counted
           along the clock. This is the number the word "lead" promises, and it is a different
-          measure from lead_changes, which counts the model's win-probability estimate crossing
-          0.5 — a real thing, and not this. Across 1,898 games the crossings mean 6.69 and reach
+          measure from lead_changes_by_clock, which counts the model's win-probability estimate
+          crossing 0.5 — a real thing, and not this. Across 1,898 games the crossings mean 6.69 and reach
           38; these mean 1.06 and reach 10. A tie is not a lead, so it is passed through: ahead,
           tied, then ahead the other way is ONE change. Counting a tie as its own state gives
           North Texas at Western Michigan (2025 week 2) sixty-eight, against 2. Taking the lead
@@ -3180,24 +3176,14 @@ models:
         description: >
           Scoreboard lead changes in the FOURTH QUARTER ONLY (period 4 exactly; overtime is its
           own column). NULL rather than zero where the feed carries no fourth quarter, the same
-          rule lead_changes_fourth_quarter uses: we did not count none, we could not count.
+          rule lead_changes_fourth_quarter_by_clock uses: we did not count none, we could not
+          count.
       - name: scoreboard_lead_changes_overtime
         description: >
           Scoreboard lead changes in overtime (period 5 and beyond), NULL where the feed carries
           no fourth quarter. In college overtime each side gets a possession, so the lead changes
           hands more freely than in regulation and a high count here is normal rather than
           remarkable.
-      - name: lead_changes_fourth_quarter
-        description: >
-          Win-probability crossings of 0.5 in the FOURTH QUARTER ONLY (period 4 exactly; overtime
-          is a separate column). The period comes from stg_play joined on play_id, because the
-          win-probability feed carries no period at all. NULL — never zero — for the three games
-          of 1,898 whose feed stops before the fourth quarter begins: we did not count none, we
-          had nothing to count.
-      - name: largest_single_play_swing_fourth_quarter
-        description: >
-          The biggest single-play change in home win probability within the fourth quarter
-          (period 4 exactly). Null where the feed never reached it.
       - name: home_win_probability_range_fourth_quarter
         description: >
           Highest minus lowest home win probability within the fourth quarter (period 4 exactly).
@@ -3208,13 +3194,6 @@ models:
           How many fourth-quarter plays carry a win probability. Zero means the feed stopped
           before the fourth quarter, which is why the other period-scoped counts are null there —
           this column is the evidence that distinguishes "no data" from "nothing happened".
-      - name: lead_changes_overtime
-        description: >
-          Win-probability crossings of 0.5 in overtime (period 5 and beyond), carried SEPARATELY
-          from the fourth quarter rather than folded into it. Jacksonville State @ Ohio is why:
-          19 lead changes whole-game, 2 in the fourth quarter, 11 in overtime. Zero is a fact for
-          a game that ended in regulation; NULL where the feed never reached the fourth quarter
-          and so cannot say whether overtime happened.
       - name: plays_with_win_probability_overtime
         description: Overtime plays carrying a win probability. Zero for a game decided in regulation.
       - name: mean_distance_from_even
