@@ -4724,6 +4724,33 @@ def _metric_distribution(season, season_type, week) -> dict:
 # `distribution.describe()` already puts it, in that chart's hover.
 _THIN_DISTRIBUTION = 10
 
+# 🚨 cfdb-main-R-1093. THE NAMING CLAUSE HAS AN UPPER BOUND, AND THE BOUND IS CHOSEN AGAINST A
+# CAPTION MARC HAS ALREADY SEEN.
+#
+# **B131 fixed the clause that LIBELLED the panel and left its twin.** Its naming branch fires
+# from one thin measure up to SEVENTEEN, and it is LONGEST at seventeen — one short of the
+# all-thin case `len(thin) == len(counted)` already handles, which does not grow at all.
+#
+# 📊 **MEASURED in characters of finished caption, on a constructed spread at
+# `_THIN_DISTRIBUTION = 10`, giving the LONGEST row labels the LOWEST counts so the three that
+# get named are the three worst cases available:**
+#
+#      unbounded, 17 named ......  671        <- what B131 shipped
+#      bounded, 3 named + count .  396        <- this
+#      the all-thin branch ......  315        <- B130's wording, already on the page
+#
+# ⚠️ **SO THE NAMING BRANCH WAS THE ONLY ONE THAT COULD GROW WITHOUT LIMIT**, and at 671
+# characters under twelve charts it is R-762's decoration from the other end: B131 replaced *a
+# caveat that libels the panel* with *a caveat too long to finish reading*, and a caveat nobody
+# finishes tells a reader nothing.
+#
+# ✅ **THREE, AND THE NUMBER IS MEASURED RATHER THAN TASTED.** `thin` is sorted THINNEST FIRST,
+# so the three named are the three charts a reader would most over-trust. Three-plus-a-count
+# cuts the worst case by **275 characters (41%)** and lands it within ~80 of the all-thin
+# caption, instead of 2.1x it. ⚠️ **The figures above are the WORST case, not the typical one:
+# with ordinary labels the bounded clause sits near 363.**
+_THIN_NAMED_MAX = 3
+
 
 def _distribution_note(spread) -> str:
     """One sentence naming what the eighteen charts are drawn over, and saying when it is thin.
@@ -4782,8 +4809,14 @@ def _distribution_note(spread) -> str:
     # ⚠️ THE LABEL A READER SEES, NOT THE COLUMN NAME. `_ROW_LABELS` is built from the same two
     # tuples the table's rows come from, so a measure cannot be named here under a spelling that
     # appears nowhere on the panel.
+    # ⚠️ NAME THE THINNEST `_THIN_NAMED_MAX` AND COUNT THE REST. The slice is safe unbounded —
+    # `thin[:3]` on a list of one is a list of one — and `rest` is what keeps the sentence
+    # honest about how many it did not name.
     named = ", ".join(f"{_ROW_LABELS.get(metric, metric)} ({counted[metric]:,})"
-                      for metric in thin)
+                      for metric in thin[:_THIN_NAMED_MAX])
+    rest = len(thin) - _THIN_NAMED_MAX
+    if rest > 0:
+        named += f" and {rest:,} other{'' if rest == 1 else 's'}"
     return note + (f" ⚠️ {'One measure rests' if len(thin) == 1 else 'Some measures rest'}"
                    f" on too few for that shape to mean much: {named}. The rest are drawn over "
                    f"the full week.")
