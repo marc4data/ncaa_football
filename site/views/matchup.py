@@ -1494,18 +1494,86 @@ def _signed_delta(value) -> str:
     """
     if value is None or pd.isna(value):
         return fmt.EM_DASH
-    return f"{float(value):+,.1f}"
+    # 🚨 cfdb-main-R-1070, AND THE DOCSTRING ABOVE ARGUES FOR A NUMBER RATHER THAN FOR A DECIMAL
+    # — which is why this is a format change and not a rewrite. `+0` is still a number and still
+    # not an em dash, so AC-G.32 and the `+0` reasoning both survive intact.
+    #
+    # ⚠️ **`-0` IS NOW REACHABLE AND IT IS HONEST RATHER THAN A DEFECT.** A delta of −0.4 yards
+    # per game rounds to `-0`, which says *fractionally behind* — the sign is the fact and the
+    # magnitude genuinely is under half a yard. 📊 Measured on live serving: it occurs on
+    # **14 of 8,892 published sides (0.16%)**, against 15 that round to `+0`.
+    # **The alternative — keeping a decimal for one of the three numbers Marc named in the
+    # legend — is the thing he asked against.**
+    return f"{float(value):+,.0f}"
 
 
-def _yardage_side_heading(offense, defense) -> str:
+def _yardage_side_heading(offense, defense, season=None) -> str:
     """Whose half this is: the team, and whose defense its figures are measured against.
 
     🚨 THIS IS WHAT SURVIVED R-756. The three metric rows under it are gone; without this line a
     reader cannot tell the two halves apart except by reading the logos inside a 180px chart.
+
+    ## cfdb-wta-R-1071 — THE NAME IS A LINK, AND THE DESTINATION IS A DECISION
+
+    > **MARC, v18:** *"Team Name is hyperlink to Teams page filtered to the Team"*
+
+    🚨 **THERE ARE TWO PAGES AND ONLY ONE OF THEM CAN BE REACHED BY URL.** Read rather than
+    assumed:
+
+        teams.py    "Teams — page 7. The index: find a team, see its shape, click through."
+                    a LIST. Its team filter is `st.text_input("Search teams")` — WIDGET STATE,
+                    not a query parameter. **There is no `/teams?team=…` to link to.**
+        team.py     "Team page — page 8. One team, tabs, everything cfdb knows this season."
+                    takes `?team=<slug>&season=<n>`, which is what `table.team_link` builds.
+
+    ✅ **SO THE LINK GOES TO `/team`, AND IT IS THE DESTINATION HIS SENTENCE DESCRIBES EVEN
+    THOUGH IT IS NOT THE PAGE HE NAMED** — *Teams filtered to one team* and *the Team page* show
+    the same thing, and only the second exists. ⚠️ **The literal reading would need a query
+    parameter on `teams.py`, which is session A's file (§3 rule 3.1) — reported, not reached
+    for.** If Marc meant the index with a row highlighted, that is a different round.
+
+    ✅ **AND IT REUSES `table.team_link`, THE ONE BUILDER** — `today.py` and `scores.py` already
+    do (§4.3: a second builder for one destination is the drift). ⚠️ **The SEASON is passed in
+    rather than read off the row**: `_YARDAGE_COLUMNS` selects `team_slug` and NOT `season`, so
+    `team_link`'s default `season_field` would find nothing and send a reader to the CURRENT
+    season from a 2024 game. The game's own row has it; this takes it as an argument.
+
+    ⚠️ **NESTED ANCHORS — CHECKED, NOT ASSUMED.** `today.py:_team_identity` records the rule
+    (*"a table whose team name is a link passes NO `link_builder`"*), and it does not apply here:
+    this string is written by `head_left.markdown(...)` straight into a Streamlit column, with no
+    outer anchor anywhere above it. **Verified in Chromium, not by reading** — see the round's
+    render.
+
+    ⚠️ **`.cfdb-team` CARRIES `margin-left:.4rem` FOR THE TABLE CELLS IT WAS WRITTEN FOR**, and
+    this row already spaces itself with `gap:.45rem`. The inline override is that one difference
+    and nothing else; the colour and the hover underline stay the stylesheet's.
     """
     accent = identity.text_on(offense)
     logo = identity.logo_or_monogram(
         offense.get("logo_url"), str(offense.get("team_display") or "?"), 20)
+    name = offense.get("team_display") or "?"
+    # ⚠️ A DICT RATHER THAN THE SERIES, BECAUSE THE SEASON IS NOT ON THE SERIES. `team_link`
+    # reads its two fields with `.get`, so this is the row it needs rather than a second builder.
+    # ✅ AND IT RETURNS `None` FOR A MISSING SLUG — *"a link to nowhere is worse than a cell that
+    # was never clickable"* — so the unlinked heading is the fallback, not a broken href.
+    href = table.team_link("team_slug")({"team_slug": offense.get("team_slug"),
+                                         "season": season})
+    # 🚨 `flex:none` IS NOT TIDYING — WITHOUT IT A LONG NAME OVERPRINTS THE SENTENCE BESIDE IT,
+    # AND ONLY THE RASTER SAW IT. `.cfdb-teamlink` carries `display:flex; min-width:0` (theme.py,
+    # written for the table cells it was built for), so as a flex ITEM in this row the anchor can
+    # shrink BELOW its own text — which then spills out of it and draws straight over
+    # *"offense against …'s defense"*. **The plain `<span>` this replaced could not shrink**
+    # (`min-width:auto`), so the row simply overflowed and R-755's `overflow:hidden` clipped it
+    # at the block edge, which is the designed behaviour.
+    # 📊 **AND MY OWN MEASUREMENT SAID IT WAS FINE**: the anchor's right edge stayed inside the
+    # heading box — because the anchor had shrunk. That is B108's lesson exactly (*a width
+    # reading reports the SLOT rather than the GLYPHS*) and §2.4's: the command answered a
+    # different question from the one asked. **The 412px two-long-names render is what found it.**
+    label = f"<span class='cfdb-team' style='font-weight:600;margin-left:0'>{name}</span>"
+    style = "flex:none"
+    if href:
+        label = (f"<a class='cfdb-teamlink' href='{href}' target='_self' "
+                 f"style='{style}'>{label}</a>")
     # ⚠️ `overflow:hidden` STAYS — R-755. One line of two team names is narrower than the rows
     # that used to sit under it, but a long pair still exceeds a 412px half, and the failure mode
     # without this is drawing over the column beside it rather than clipping inside this one.
@@ -1513,7 +1581,7 @@ def _yardage_side_heading(offense, defense) -> str:
         f"<div style='border-left:4px solid {accent};padding:.4rem .7rem;"
         f"margin-bottom:.5rem;overflow:hidden'>"
         f"<div style='display:flex;align-items:center;gap:.45rem;white-space:nowrap'>"
-        f"{logo}<span style='font-weight:600'>{offense.get('team_display') or '?'}</span>"
+        f"{logo}{label}"
         f"<span style='opacity:.6;font-size:.85rem'>offense against "
         f"{defense.get('team_display') or '?'}'s defense</span></div></div>")
 
@@ -2632,6 +2700,51 @@ _BOX_TICKS = distribution.TICK_EXTREMES
 # add a mark and take nothing.**
 _BOX_OUTLIERS = True
 
+# 🚨 cfdb-main-R-1070 / cfdb-wta-R-1071. MARC'S v18, AND THE CLAUSE IS THE REQUIREMENT:
+#
+# > **MARC, v18:** *"MIN/MAX should extend full height of the plot (to the exten of the Box).
+# > Plot MIN/MAX below (underneath in the Z) so that if IQR and MIN/MAX are equal, should be
+# > able to discern both on the chart."*
+#
+# 📊 **AND IT IS THE COMMON CASE ON THE CHARTS HE LOOKS AT, NOT AN EDGE.** A154 measured the
+# coincidence at **10.5% of 846 rows** — but 846 is every row of
+# `srv_game_team_metric_distribution_through_prior_week`, **18 metrics × 47 weeks**, and the
+# 240px chart draws **three** of those metrics. On the 141 rows it actually draws:
+#
+#     at least one end coincides   130 of 141   92.2%
+#     both ends coincide             6 of 141    4.3%
+#
+# **On nine rows in ten of Marc's own yardage charts the whisker serif lands on the extreme**,
+# which is exactly the picture he could not read (cfdb-main-R-1065). A154's number is not wrong;
+# it answers *how often across the relation* and this answers *how often on this chart* (§2.4).
+_BOX_EXTREME_LINES = True
+
+# 🚨 THE VALUE LABEL LEAVES THE AXIS ROW — Marc, v18: *"Move the label for the box-whisker line
+# for displyaing for the team to be either a) above the box, or below but inside the chart area
+# (so that it doesn't compete for real estate with the the min, p25, p75, max axis labels and we
+# get axis labels for MIN, p25, p75, MAX on all the box-whisker charts.)"*
+#
+# ⚠️ **IT CHANGES THE SVG's HEIGHT, AND THAT IS WHY IT IS A CONSTANT RATHER THAN A LITERAL.**
+# `box()` adds a `top_band` and wraps its body in `translate(0, top_band)` once this is set, so
+# **`_circle_column` — which matches `box()`'s box EXACTLY so the overlay needs no offset — has
+# to follow it.** Three things in this file must agree about it: the two call sites and the
+# overlay. A literal at each is three chances to move two, which is `_BOX_TICKS`' own reason.
+_BOX_VALUE_OWN_ROW = True
+
+# 🚨 THE PAGE'S OWN `wants_extremes`, AND IT EXISTS BECAUSE B126 WATCHED THE LAST ONE GO STALE.
+#
+# `box()` widens its frame to the published extremes when ANY of four arguments asks
+# (`outliers`, `frame_extremes`, `ticks == TICK_EXTREMES`, and now `extreme_lines`). `_box_frame`
+# copies that frame for the circle overlay, and B126's finding was that **a copy of a function's
+# INPUTS is only safe while the input list is CLOSED** — A150 added a fourth way to ask and
+# nothing failed. ⚠️ A154 has now added a FIFTH.
+#
+# ✅ So the page states the question once, over its own flags, instead of naming one of them.
+# Today all three are True and the answer is unchanged; the point is that it stays right on the
+# day one of them goes back to False.
+_BOX_WANTS_EXTREMES = (_BOX_OUTLIERS or _BOX_EXTREME_LINES
+                       or _BOX_TICKS == distribution.TICK_EXTREMES)
+
 
 def _box_frame(row, value):
     """The span `box()` will frame this row on: its whiskers, widened by the value marker — and,
@@ -2659,10 +2772,18 @@ def _box_frame(row, value):
     deliberate.**
 
     ✅ **SO THE COPY STAYS — the module exposes no way to ASK what frame it used — BUT IT IS
-    SINGLE-SOURCED TO `_BOX_TICKS` AND PROBED AT THE PAGE'S OWN CONFIGURATION.** See
+    SINGLE-SOURCED TO `_BOX_WANTS_EXTREMES` AND PROBED AT THE PAGE'S OWN CONFIGURATION.** See
     `test_the_CIRCLES_and_the_BOX_agree_about_WHERE_A_VALUE_GOES`, which now renders a real
     `box()` with the page's ticks rather than with the module's default — **that guard existed
     through A150 and was blind for exactly this reason.**
+
+    🚨 **B128: A154 ADDED THE FIFTH WAY TO ASK (`extreme_lines`) AND THIS DOCSTRING'S OWN LESSON
+    CAME DUE AGAIN.** B126 wrote *"a copy of a function's INPUTS is only safe while the input
+    list is CLOSED"* and then keyed the guard on ONE input. ✅ **The condition is now the page's
+    own disjunction over its own flags (`_BOX_WANTS_EXTREMES`), so adding a sixth way costs one
+    line in one place** — and the honest answer to *what would keep this honest next time* is
+    that it cannot be kept honest from here at all: **only `distribution` can say what frame it
+    used, and until it does this is a mirror that has to be re-checked every time A moves.**
     """
     if row is None:
         return None
@@ -2674,9 +2795,10 @@ def _box_frame(row, value):
         lo, hi = min(lo, float(value)), max(hi, float(value))
     # 🚨 THE HALF A150 ADDED. `box()` does this unconditionally once `wants_extremes` is true, so
     # a frame computed here without it is an axis the box is not drawn on.
-    # ⚠️ GUARDED ON `_BOX_TICKS` RATHER THAN ALWAYS, so the day the page goes back to `TICK_NONE`
-    # this follows it instead of silently widening a chart nothing labels.
-    if _BOX_TICKS == distribution.TICK_EXTREMES:
+    # ⚠️ GUARDED ON `_BOX_WANTS_EXTREMES` RATHER THAN ON ONE FLAG. B126 keyed it on `_BOX_TICKS`
+    # alone, which was right that day and would have gone silently wrong the moment the page kept
+    # `extreme_lines` and dropped the labels — the same shape as the drift B126 itself found.
+    if _BOX_WANTS_EXTREMES:
         for name, pick in (("min_value", min), ("max_value", max)):
             edge = row.get(name)
             if edge is not None and not pd.isna(edge):
@@ -2731,7 +2853,11 @@ def _legend_line(side, caption: str, column) -> str:
             f"justify-content:flex-end;white-space:nowrap'>"
             f"{logo}<span style='opacity:.8'>{html.escape(caption)}</span>"
             f"<span style='font-weight:600;min-width:3.2rem;text-align:right'>"
-            f"{fmt.number(side.get(column), column, dp=1)}</span></div>")
+            # 🚨 cfdb-main-R-1070. **THE COLUMN WAS ALREADY BEING PASSED AND THEN OVERRIDDEN.**
+            # Marc, v18: *"Don't use decimal points when displaying Yards. That includes …
+            # legend Gained/Allowed/Delta"*. `fmt.precision_for` answers 0 for every column this
+            # line receives; the `dp=1` was the only thing holding `154.4` on screen.
+            f"{fmt.number(side.get(column), column)}</span></div>")
 
 
 def _matchup_legend(team, opponent, for_column, allowed_column, delta, outlook) -> str:
@@ -2806,11 +2932,30 @@ def _box_row(row, side, caption: str, column, accent: str, frame=None, overlay: 
     # ⚠️ THE VALUE LABEL STAYS AND THAT IS MARC'S OWN SPLIT: the ticks are the percentile and
     # boundary numbers, **the marker is the team's own figure and is the one they came for**.
     # `box()` places the marker's label BEFORE the `ticks` gate, so the two are independent.
+    # 🚨 cfdb-main-R-1070, MARC'S v18, AND THE `dp=1` BELOW WAS THE ONE THAT MATTERED MOST.
+    #
+    # > **MARC, v18:** *"Don't use decimal points when displaying Yards. That includes
+    # > Box/Whisker marks, axis labels, legend Gained/Allowed/Delta, Player Cards. Exception is
+    # > YDS/CARRY (#.#)"*
+    #
+    # ⚠️ **THE LINE ALREADY PASSED THE COLUMN AND THEN OVERRODE IT WITH A LITERAL.**
+    # `fmt.number(value, column, dp=1)` — the column name is right there and `dp=1` outranks it,
+    # so the team's own figure, the number a reader came for, printed `413.5` while every other
+    # yardage on this page printed `413`. **Dropping the override is the whole change**; the rule
+    # itself is `fmt.precision_for`'s and has been since R-555 (§4.2.1 — one place, not two).
+    #
+    # ✅ `metric=column` ASKS THE SAME TABLE FOR THE AXIS LABELS. 📊 Measured on the 141 rows this
+    # call site draws: all four axis labels survived on **42 (29.8%)** and now survive on
+    # **141 (100%)** — and the DECIMAL alone does it, before the label move is counted.
+    # ⚠️ A154's 70.8% baseline is the 846-row relation, 15 of whose metrics this chart never
+    # draws; both numbers are right about different populations (§2.4).
     chart = distribution.box(
         row, value=value, width=_BOX_ROW_WIDTH, label=caption, value_color=accent,
         frame=frame, height=_BOX_BAND, ticks=_BOX_TICKS, outliers=_BOX_OUTLIERS,
+        metric=column, extreme_lines=_BOX_EXTREME_LINES,
+        value_labels_own_row=_BOX_VALUE_OWN_ROW,
         value_label=(None if value is None or pd.isna(value)
-                     else fmt.number(value, column, dp=1)))
+                     else fmt.number(value, column)))
     return (
         f"<div data-cfdb='box-series' data-series='{caption.lower()}' "
         f"style='margin:.1rem 0 .45rem'>"
@@ -3290,6 +3435,19 @@ def _circle_title(game, column) -> str:
     return "\n".join(bits)
 
 
+def _shifted(body: str, top_band: int) -> str:
+    """`box()`'s own translate, applied to the overlay so the two stay in one coordinate space.
+
+    ⚠️ **THIS IS A COPY OF `box()`'s WRAPPER AND THE COPY IS THE POINT, NOT AN OVERSIGHT.** The
+    overlay is a SIBLING `<svg>` at the same origin; there is no way to ask the module where it
+    put its body, so the only alternative to mirroring the transform is arithmetic on every
+    circle's `y` — which is the same copy spread over a loop instead of stated once.
+    ✅ Emitted only when there IS a band, so a page that turns `_BOX_VALUE_OWN_ROW` off renders
+    the pre-B128 bytes exactly.
+    """
+    return f"<g transform='translate(0,{top_band})'>{body}</g>" if top_band else body
+
+
 def _circle_column(games, column, frame, accent, width, band: int = None) -> str:
     """Marc's ordered jitter: one circle per played game, earliest at the top, **drawn INSIDE
     the box-and-whisker's own band** (v16, cfdb-wta-R-993) and **filled when that game's opponent
@@ -3303,9 +3461,12 @@ def _circle_column(games, column, frame, accent, width, band: int = None) -> str
     and is retired with its reason recorded — see its replacement,
     `test_THE_CIRCLES_ARE_DRAWN_INSIDE_THEIR_OWN_ROWS_CHART`.
 
-    ⚠️ THE SVG MATCHES `box()`'s OWN BOX EXACTLY — same width, same total height (`band + 15`) —
-    and is positioned at the same origin, so **the two share one coordinate system and no offset
-    arithmetic is needed.** `_box_row` supplies the `position:relative` wrapper.
+    ⚠️ THE SVG MATCHES `box()`'s OWN BOX EXACTLY — same width, same total height, same top-band
+    translate — and is positioned at the same origin, so **the two share one coordinate system
+    and no offset arithmetic is needed.** `_box_row` supplies the `position:relative` wrapper.
+    🚨 **B128: `box()`'s total height stopped being `band + 15`.** `value_labels_own_row` adds a
+    `top_band` above the plot, so the match is now `top_band + band + 15` with the marks under
+    the same translate — see `_shifted`, and `_BOX_VALUE_OWN_ROW`, which both ends read.
 
     🚨 THE ORDER IS THE QUERY's AND IS NOT RE-SORTED HERE. `_game_calendar` asks for
     `order by game_date asc`, so re-sorting in the page would be a second opinion about the same
@@ -3372,7 +3533,17 @@ def _circle_column(games, column, frame, accent, width, band: int = None) -> str
     # same origin puts both drawings in one coordinate space. **Any other height would need an
     # offset, and an offset is a second copy of `box()`'s internal layout** (the coupling
     # `_AXIS_PAD` already declares once and guards with a test).
-    height = band + 15
+    # 🚨 B128, AND THIS IS THE LINE THAT WOULD HAVE BROKEN SILENTLY. `box()`'s total height is
+    # `top_band + height + 15`, and `top_band` is ZERO only while nothing has asked for a label
+    # row above the plot. **`value_labels_own_row=True` asks**, so from this round the chart is
+    # 15px taller AND its whole body is wrapped in `translate(0, top_band)`.
+    #
+    # ⚠️ **AN OVERLAY THAT DID NOT FOLLOW WOULD BE SHORT BY 15px AND HIGH BY 15px** — every
+    # circle floating above its own box, on a chart that still looked composed. That is the
+    # defect this panel has already paid for twice (B119's float, B122's band), and it is why
+    # `_BOX_VALUE_OWN_ROW` is a shared constant rather than a literal at the call site.
+    top_band = distribution.LABEL_BAND if _BOX_VALUE_OWN_ROW else 0
+    height = top_band + band + 15
     pitch = _circle_pitch(len(played), band)
     # ⚠️ CENTRED ON THE BAND'S MIDLINE, WHICH IS WHERE `box()` DRAWS ITS WHISKER RULE (`mid =
     # height / 2`). A top-anchored column would hang the season off the top of the box and leave
@@ -3448,7 +3619,8 @@ def _circle_column(games, column, frame, accent, width, band: int = None) -> str
             f"style='position:absolute;top:0;left:0;pointer-events:none'>"
             f"<svg viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
             f"role='img' aria-label='{html.escape(reading)}' "
-            f"style='display:block;max-width:100%'>{''.join(marks)}</svg></div>")
+            f"style='display:block;max-width:100%'>{_shifted(''.join(marks), top_band)}"
+            f"</svg></div>")
 
 
 def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
@@ -3711,8 +3883,12 @@ def _yardage(row) -> None:
         # while each column owned the whole run of metrics; with the metric loop outside, a
         # per-column heading would repeat three times down the page.
         head_left, head_right = st.columns(2)
-        head_left.markdown(_yardage_side_heading(away, home), unsafe_allow_html=True)
-        head_right.markdown(_yardage_side_heading(home, away), unsafe_allow_html=True)
+        # ⚠️ THE SEASON IS THE GAME'S, NOT TODAY'S (cfdb-wta-R-1071). `_YARDAGE_COLUMNS` has no
+        # `season`, and a team link without one lands on the current season from a 2024 page.
+        head_left.markdown(_yardage_side_heading(away, home, row.get("season")),
+                           unsafe_allow_html=True)
+        head_right.markdown(_yardage_side_heading(home, away, row.get("season")),
+                            unsafe_allow_html=True)
 
         # 🚨 cfdb-wta-R-900. ONE TABLE, THREE SECTIONS, EACH HEADER SPANNING THE PAGE — Marc,
         # v14. The heading is emitted OUTSIDE the `st.columns` pair beneath it, and that is the
@@ -3741,8 +3917,11 @@ def _yardage(row) -> None:
         missing_week = _metrics_without_a_week(distribution)
         if missing_week:
             st.caption("  ·  ".join(
-                f"{label} {fmt.number(away.get(for_column), for_column, dp=1)} gained vs "
-                f"{fmt.number(home.get(allowed_column), allowed_column, dp=1)} allowed"
+                # ⚠️ THE SAME TWO FIGURES THE LEGEND PRINTS, SO THEY FOLLOW THE SAME RULE
+                # (cfdb-main-R-1070). A caption that said `154.4` beside a legend saying `154`
+                # would be two spellings of one measurement on one panel.
+                f"{label} {fmt.number(away.get(for_column), for_column)} gained vs "
+                f"{fmt.number(home.get(allowed_column), allowed_column)} allowed"
                 for label, for_column, allowed_column, _d, _o in _YARDAGE_DIMENSIONS
                 if label in missing_week)
                 + " — not drawn against the week, because this week has no distribution "
@@ -3827,14 +4006,29 @@ def _yardage(row) -> None:
             # describing a chart that no longer exists — **found only by re-reading the whole
             # sentence rather than the clause this round came to edit.** That is now the standing
             # instruction for this caption, and the guard list below holds all three phrases.
+            #
+            # 🚨 B128 — FOURTH PHRASE, AND THIS ONE WAS THE SENTENCE MARC HIMSELF DISAGREED WITH.
+            # It read *"the chart itself RUNS PAST THEM to the lowest and highest single game"*.
+            # 📊 **On 130 of the 141 rows this chart draws (92.2%) a whisker end IS an extreme,
+            # so the chart runs past nothing** — and the caption told the reader otherwise. That
+            # is exactly what he reported at v17: *"Looks like we just have box-whisker IQRs and
+            # do not have the min and the max as the true boundaries."* **The picture was right
+            # and the words promised a gap that is usually not there.**
+            # ✅ The replacement names the MARK rather than a gap — a lighter full-height line at
+            # each extreme, which is drawn whether or not a whisker reaches it — and then says
+            # what the coincident case LOOKS like, because that is the case nine readers in ten
+            # are looking at. **Marc's v18 sentence is the acceptance and it is now also the
+            # caption: *"if IQR and MIN/MAX are equal, should be able to discern both."***
             frame = (f"Each series is drawn against all {observations:,} team-games played in "
                      f"the {weeks} week{'' if weeks == 1 else 's'} before this game's own — "
                      f"every game those weeks held, counted cumulatively rather than week by "
                      f"week, and not the teams' averages. The box is the middle half, the bold "
                      f"line inside it the median, and the whiskers run to the low and high "
-                     f"boundaries — while the chart itself runs past them to the lowest and "
-                     f"highest single game anywhere in that population, labeled where there is "
-                     f"room and ringed when they fall beyond a whisker. The colored mark is "
+                     f"boundaries. A lighter full-height line stands at the lowest and at the "
+                     f"highest single game anywhere in that population, each labeled below — "
+                     f"where a whisker reaches that far the two stand together, with the "
+                     f"whisker's short serif drawn over the line, and where it does not, a ring "
+                     f"marks the game beyond it. The colored mark is "
                      f"that team's average per game, and each circle drawn on it is one game "
                      f"the team played, earliest at the top — filled when that game's "
                      f"opponent was an FBS team, open when it was not. ✅ Both rows are drawn "
@@ -4492,7 +4686,7 @@ def _metric_distribution(season, season_type, week) -> dict:
     return {str(r["metric"]): r for _, r in df.iterrows()}
 
 
-def _metric_chart(row, away_value, home_value, dp, accents) -> str:
+def _metric_chart(row, away_value, home_value, dp, accents, metric: str = "") -> str:
     """ONE chart for the measure, carrying BOTH teams — Marc, v10, and it replaces two.
 
     ❌ `site/lib/distribution.py` IS SESSION A's AND IS NOT EDITED HERE (§3 rule 3.1). A131
@@ -4579,10 +4773,41 @@ def _metric_chart(row, away_value, home_value, dp, accents) -> str:
     # IT READS AS THOUGH IT DOES. `box()` falls back to `fmt.number(value, dp=dp)` when the
     # override is `None`, so **both sides' own figures are printed and both survive this change**
     # — away above the axis, home below it. What `TICK_NONE` removes here is the boundary pair.
+    # 🚨 cfdb-main-R-1070, AND THE PROMPT ASKED ME TO SAY WHICH OF TWO THINGS THE `dp` WAS.
+    # **IT IS A THIRD.** It is not `fmt.precision_for` and it is not a careless literal: it is
+    # `dp_band`, chosen PER SECTION and measured — 0 for Box Score because all six are integer
+    # counts, 2 for Advanced because R-829 found that one decimal COLLAPSES the quartiles on
+    # eleven 0–1 rates.
+    #
+    # ✅ **SO `dp=None` MEANS *ASK THE COLUMN* AND THE BOX SCORE HALF NOW DOES.** 📊 Verified
+    # rather than assumed: `fmt.precision_for` returns 0 for all six of `_BOX_SCORE_ROWS`, so
+    # that section's bytes do not move and the literal it used to carry is gone (§4.2.1 — the
+    # decimal rule in one place).
+    #
+    # 🚨 **THE ADVANCED HALF KEEPS ITS 2 AND THAT IS A REFUSAL WITH A NUMBER BEHIND IT.**
+    # 📊 Measured on all 648 published rows, counting rows where two of the four axis labels
+    # print the SAME string — a box labelled as if it spanned nothing:
+    #
+    #     metric                                dp_band=2   precision_for
+    #     offense_stuff_rate                      1/36          7/36   (rate -> 1)
+    #     defense_havoc_rate                      1/36          5/36   (rate -> 1)
+    #     offense_success_rate                    0/36          3/36   (rate -> 1)
+    #     offense_standard_downs_success_rate     0/36          3/36   (rate -> 1)
+    #     offense_passing_downs_success_rate      0/36          2/36   (rate -> 1)
+    #
+    # **Marc's v18 sentence is about YARDS.** Pointing this half at `precision_for` would trade a
+    # measured decision for one he did not ask for — so `metric=` is passed and `dp` still wins,
+    # which is `box()`'s own documented precedence. ⚠️ **THE PRICE IS REAL AND IT IS REPORTED:**
+    # four-label survival here is **31.2%** with `dp_band=2` against **75.2%** if this half asked
+    # the column. That is a look call with a measured cost on both sides, which is R-895's shape
+    # — **Marc's, not this round's.** The lever is one word: `dp_band=None` at line ~5351.
+    band = {} if dp is None else {"dp": dp}
     return distribution.box(
-        row, width=_TABLE_CHART_WIDTH, dp=dp, ticks=_BOX_TICKS, outliers=_BOX_OUTLIERS,
+        row, width=_TABLE_CHART_WIDTH, ticks=_BOX_TICKS, outliers=_BOX_OUTLIERS,
+        metric=metric, extreme_lines=_BOX_EXTREME_LINES,
+        value_labels_own_row=_BOX_VALUE_OWN_ROW,
         value=away_value, value_color=away_accent, value_label=None,
-        value_below=home_value, value_below_color=home_accent)
+        value_below=home_value, value_below_color=home_accent, **band)
 
 
 def _accent_pair(colors) -> tuple:
@@ -4624,9 +4849,13 @@ def _comparison(away, home, rows, glossary=None, spread=None,
         # string would be drawing from text.
         lines.append(_metric_cell(
             _figure(away, field, dp), marked, _figure(home, field, dp),
+            # ⚠️ `dp_band=None` NOW MEANS *ASK THE COLUMN*, WHICH IS A REPURPOSING RATHER THAN
+            # A NEW STATE: it used to fall back to the row tuple's own `dp`, and neither call
+            # site has ever passed `None`, so that branch was dead. **The row's `dp` still
+            # formats the two printed figures** through `_figure` — only the CHART defers.
             chart=_metric_chart((spread or {}).get(field),
                                 away.get(field), home.get(field),
-                                dp if dp_band is None else dp_band, accents)))
+                                dp_band, accents, metric=field)))
     return "".join(lines)
 
 
@@ -5306,11 +5535,15 @@ def _post_game(game_id, season) -> None:
         parts = [
             _section_heading("Box score"),
             _table_header(away, home, "Box score", colors),
-            # 🚨 `dp=0` FOR BOX SCORE, AND IT IS THE PANEL'S OWN NATURE RATHER THAN A PREFERENCE:
-            # all six measures are integer counts — first downs, yards, attempts. At `box()`'s
-            # default of 1 every label reads `22.0`, `5.0`, `38.0`, which is precision the
-            # measure does not have.
-            _comparison(away, home, _BOX_SCORE_ROWS, spread=spread, dp_band=0, colors=colors),
+            # 🚨 ZERO DECIMALS FOR BOX SCORE, AND IT IS THE PANEL'S OWN NATURE RATHER THAN A
+            # PREFERENCE: all six measures are integer counts — first downs, yards, attempts.
+            # At `box()`'s old default of 1 every label read `22.0`, `5.0`, `38.0`, which is
+            # precision the measure does not have.
+            # ✅ B128: `dp_band=None` is *ask the column*, and `fmt.precision_for` answers 0
+            # for all six — the same number this line used to state as a literal, now sourced
+            # from the one table that owns the rule (Marc's v18, R-555).
+            _comparison(away, home, _BOX_SCORE_ROWS, spread=spread, dp_band=None,
+                        colors=colors),
             _custom_row(away, home, "Third down",
                         lambda r: _fraction(r, "third_down_conversions",
                                             "third_down_attempts")),
