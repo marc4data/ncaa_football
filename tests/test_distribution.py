@@ -14,7 +14,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 
-from lib import distribution                       # noqa: E402
+from lib import distribution, fmt                  # noqa: E402
+# ⚠️ A154 imports `fmt` for `precision_for`: the decimal rule is keyed on the metric name
+# and lives in ONE table, so the test reads that table rather than restating its answers.
 
 
 def _row(**overrides):
@@ -901,7 +903,7 @@ def test_a_ring_marks_each_extreme_that_lies_beyond_its_whisker():
     serifs = sorted(float(x) for x in re.findall(r"<line x1='([-\d.]+)' y1='[\d.]+' "
                                                  r"x2='[-\d.]+' y2='[\d.]+' "
                                                  r"stroke='currentColor' stroke-width='1' "
-                                                 r"opacity='.55'", svg))
+                                                 rf"opacity='{distribution.WHISKER_OPACITY:g}'", svg))
     low_ring, high_ring = sorted(cx for cx, _r in rings)
     assert low_ring < min(serifs), "the low ring sits beyond the low whisker serif"
     assert high_ring > max(serifs), "the high ring sits beyond the high whisker serif"
@@ -1317,3 +1319,92 @@ def test_the_attribute_escaper_turns_the_break_into_a_numeric_reference():
                  distribution.thumbnail(_row()),
                  distribution.panel(_row())):
         assert "&#10;" in html, html[:120]
+
+
+# ── A154: the furniture — Marc's v18 ────────────────────────────────────────────────────────
+
+def test_the_structure_is_25_percent_darker_and_each_element_from_its_own_baseline():
+    """> **MARC, v18:** *"Increase the darknes of Whisker structure/outline by 25%"*
+
+    🚨 THE STRUCTURE HAS TWO WEIGHTS AND THE PROMPT SAID ONE. The whisker drew at `opacity='.55'`
+    and the box outline at `stroke-opacity='.5'` — a different value AND a different attribute.
+    Each darkens from its own baseline, which is what his sentence means when the thing being
+    darkened is not uniform.
+    """
+    assert distribution.WHISKER_OPACITY == pytest.approx(0.55 * 1.25)
+    assert distribution.BOX_OUTLINE_OPACITY == pytest.approx(0.5 * 1.25)
+    svg = distribution.box(_tall_row(), width=420, show_value=False)
+    assert f"opacity='{distribution.WHISKER_OPACITY:g}'" in svg
+    assert f"stroke-opacity='{distribution.BOX_OUTLINE_OPACITY:g}'" in svg
+    assert "opacity='.55'" not in svg and "stroke-opacity='.5'" not in svg
+
+
+def test_the_extreme_lines_are_full_height_and_drawn_UNDERNEATH_the_box():
+    """🚨 THE Z-ORDER AND THE HEIGHT ARE LOAD-BEARING, NOT STYLING.
+
+    > **MARC, v18:** *"MIN/MAX should extend full height of the plot (to the exten of the Box).
+    > Plot MIN/MAX below (underneath in the Z) so that if IQR and MIN/MAX are equal, should be
+    > able to discern both on the chart."*
+
+    A mark drawn at serif height, or appended after the box, fails that sentence exactly — so
+    both properties are asserted rather than the line's mere presence.
+    """
+    svg = distribution.box(_tall_row(), width=420, show_value=False, extreme_lines=True)
+    lines = re.findall(r"<line x1='([\d.]+)' y1='([\d.-]+)' x2='[\d.]+' y2='([\d.-]+)'[^>]*"
+                       r"opacity='([\d.]+)'", svg)
+    full = [ln for ln in lines if float(ln[1]) == 0.0]
+    assert full, f"no full-height line was drawn: {svg[:200]}"
+    # full height means the whole plot band, not the rect
+    assert float(full[0][2]) == pytest.approx(distribution.BOX_HEIGHT)
+    assert float(full[0][3]) == pytest.approx(distribution.EXTREME_LINE_OPACITY)
+    # 🚨 UNDERNEATH: the line's markup must come BEFORE the rect, or SVG paints it on top.
+    assert svg.index("y1='0'") < svg.index("<rect"), "the extreme line is not underneath the box"
+
+
+def test_both_of_marcs_candidate_weights_are_available_and_neither_is_chosen_for_him():
+    """R-895's pattern: he gave two numbers, so the module offers both and the round renders
+    the pair rather than picking."""
+    assert distribution.EXTREME_LINE_OPACITY == pytest.approx(0.55 * 0.75)
+    assert distribution.EXTREME_LINE_OPACITY_LIGHTER == pytest.approx(0.55 * 0.5)
+    light = distribution.box(_tall_row(), width=420, show_value=False, extreme_lines=True,
+                             extreme_line_opacity=distribution.EXTREME_LINE_OPACITY_LIGHTER)
+    assert f"opacity='{distribution.EXTREME_LINE_OPACITY_LIGHTER:g}'" in light
+
+
+def test_yards_lose_their_decimal_and_the_rate_metrics_keep_theirs():
+    """> **MARC, v18:** *"Don't use decimal points when displaying Yards … Exception is YDS/CARRY
+    > (#.#)"*
+
+    ✅ `fmt.precision_for` already encodes exactly this; the chart simply never asked it. The rule
+    is keyed on the METRIC NAME, which is something the code can see.
+    """
+    yards = distribution.box(_tall_row(), width=420, show_value=False,
+                             ticks=distribution.TICK_EXTREMES, metric="total_yards")
+    # ⚠️ ASSERTED ON THE EXTRACTED LABELS, not on a substring of the markup: `"57" in svg` is true
+    # of any coordinate that happens to contain those digits, which is R-859's class in a test.
+    labels = _label_texts(yards)
+    assert labels == ["57", "856", "256", "475"], labels
+    assert not any("." in text for text in labels), labels
+    # 🚨 AND THE RATES MUST NOT BE COLLATERAL — the two the 0-default would have flattened.
+    assert fmt.precision_for("offense_explosiveness") == 2
+    assert fmt.precision_for("offense_power_success") == 1
+    assert fmt.precision_for("offense_success_rate") == 1
+    assert fmt.precision_for("total_yards") == 0
+
+
+def test_the_value_label_leaves_the_axis_row_only_when_asked():
+    """A145's rule: the capability ships, the default does not move.
+
+    📊 The move is what buys the axis labels their room — measured on 846 published rows at the
+    240px one-sided call site, all four survive on 70.8% today and 99.1% with the value moved.
+    """
+    row = _tall_row()
+    before = distribution.box(row, width=240, height=56, value=367.0,
+                              ticks=distribution.TICK_EXTREMES, metric="total_yards")
+    after = distribution.box(row, width=240, height=56, value=367.0,
+                             ticks=distribution.TICK_EXTREMES, metric="total_yards",
+                             value_labels_own_row=True)
+    assert _svg_height(after) > _svg_height(before), "the value needs a row of its own"
+    assert f"font-size='{distribution.VALUE_LABEL_FONT:g}'" in after, "the value label is not larger"
+    assert f"font-size='{distribution.VALUE_LABEL_FONT:g}'" not in before, (
+        "the default must not enlarge anything")

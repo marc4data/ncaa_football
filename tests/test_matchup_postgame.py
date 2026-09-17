@@ -33,6 +33,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import render_harness  # noqa: E402
+# ⚠️ A154: imported for `WHISKER_OPACITY`. The whisker's weight is the module's to decide
+# (Marc, v18, +25%), so this file reads the constant instead of pinning a literal that has
+# now moved once and would move again.
+from lib import distribution  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
@@ -1201,7 +1205,8 @@ def _recovered_frame(cell, p25, p75):
     rect = re.search(r"<rect x='([\d.]+)' y='[\d.]+' width='([\d.]+)'", cell)
     serifs = sorted(float(x) for x in re.findall(
         r"<line x1='([\d.]+)' y1='[\d.]+' x2='[\d.]+' y2='[\d.]+' "
-        r"stroke='currentColor' stroke-width='1' opacity='.55'", cell))
+        rf"stroke='currentColor' stroke-width='1' "
+        rf"opacity='{distribution.WHISKER_OPACITY:g}'", cell))
     if rect is None or len(serifs) < 2:
         return None
     left, span = float(rect.group(1)), float(rect.group(2))

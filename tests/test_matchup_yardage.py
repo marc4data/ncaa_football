@@ -3077,7 +3077,8 @@ def test_THE_TWO_SERIES_SHARE_ONE_SCALE_and_the_page_SAYS_SO(panel):
             f"does not publish, `box(None)` is an em dash and every presence assertion passes")
         serifs = sorted(float(x) for x in re.findall(
             r"<line x1='([\d.]+)' y1='[\d.]+' x2='[\d.]+' y2='[\d.]+' "
-            r"stroke='currentColor' stroke-width='1' opacity='.55'", svg))
+            rf"stroke='currentColor' stroke-width='1' "
+            rf"opacity='{distribution.WHISKER_OPACITY:g}'", svg))
         assert len(serifs) >= 2, f"{side}: no whisker serifs in the svg to measure: {svg[:200]}"
         boundaries[side] = (serifs[0], serifs[-1])
         # 🚨 cfdb-main-R-1020: THIS WAS THE PRINTED BOUNDARY PAIR AND MARC REMOVED IT FROM THE

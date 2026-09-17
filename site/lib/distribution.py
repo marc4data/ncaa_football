@@ -478,6 +478,40 @@ def _text_width(text: str) -> float:
 # The label band under the box — and, in two-value mode, an identical one above it.
 LABEL_BAND = 15
 
+# 🚨 A154 — MARC, v18: *"Increase the font on the value being plotted for the team"*. The axis
+# labels stay at 9; the team's own figure goes to 11.
+#
+# ⚠️ AND IT COSTS WIDTH FROM THE BUDGET THE FOUR AXIS LABELS COMPETE FOR, which is why
+# `_text_width` is scaled by the ratio when the value is measured for collision. A label that
+# reserves a 9px-wide box and paints an 11px-wide one overlaps its neighbour silently — the same
+# class as B108's `scrollWidth` reading the slot rather than the glyphs.
+VALUE_LABEL_FONT = 11
+_VALUE_LABEL_SCALE = VALUE_LABEL_FONT / 9.0
+
+# ── A154: THE STRUCTURE'S WEIGHTS, AND MARC'S TWO CANDIDATES FOR THE EXTREME LINE ────────────
+#
+# > **MARC, v18:** *"Increase the darknes of Whisker structure/outline by 25%"* and *"Min/Max
+# > should have tickmarks reference lines that are 25% below what the whisker structure started in
+# > this round, or 50% lower than whisker structure started."*
+#
+# 🚨 THE STRUCTURE HAS TWO WEIGHTS, NOT ONE, AND THE PROMPT SAID ONE. Read at `4e59ee3`: the
+# whisker line and its serifs draw at **`opacity='.55'`**; the box rect's outline draws at
+# **`stroke-opacity='.5'`** — a different value AND a different attribute. Cowork's spec note said
+# *"the box and whisker structure draws at stroke-opacity='.5'"*, which is true of the rect alone.
+# ✅ SO EACH ELEMENT DARKENS 25% FROM ITS OWN BASELINE, which is what his sentence asks for when
+# the thing being darkened is not uniform.
+#
+# ⚠️ AND THE EXTREME LINE IS MEASURED FROM THE WHISKER'S START, because that is the noun he used —
+# *"what the whisker structure started in this round"* — and the whisker started at .55.
+_WHISKER_OPACITY_WAS = 0.55
+_BOX_OUTLINE_OPACITY_WAS = 0.5
+WHISKER_OPACITY = 0.6875            # .55 + 25%
+BOX_OUTLINE_OPACITY = 0.625         # .50 + 25%
+# 🚨 BOTH OF HIS CANDIDATES ARE HERE AND NEITHER IS CHOSEN FOR HIM (the R-895 pattern). The
+# default is the one he listed FIRST; the pair is rendered in the report for him to pick.
+EXTREME_LINE_OPACITY = 0.4125       # .55 − 25%, the default
+EXTREME_LINE_OPACITY_LIGHTER = 0.275   # .55 − 50%, the alternative
+
 # 🚨 A SENTINEL, BECAUSE `None` ALREADY MEANS SOMETHING ELSE HERE AND THE TWO CANNOT SHARE A
 # SPELLING. `value_below=None` means *this side has no figure for this measure*, which is a real
 # and common state; not passing `value_below` at all means *this is a one-value chart*. They draw
@@ -720,12 +754,14 @@ def _sided_marker(x: float, height: float, mid: float, above: bool, color: str) 
 
 def box(row, value=None, width: int = 240, label: str = "",
         ticks: str = TICK_PERCENTILES, show_value: bool = True,
-        value_label: Optional[str] = None, dp: int = 1,
+        value_label: Optional[str] = None, dp=_UNSET, metric: str = "",
         value_color: Optional[str] = None,
         value_below=_UNSET, value_below_label: Optional[str] = None,
         value_below_color: Optional[str] = None,
         frame: Optional[tuple] = None, outliers: bool = False,
-        frame_extremes: bool = False,
+        frame_extremes: bool = False, extreme_lines: bool = False,
+        extreme_line_opacity: float = EXTREME_LINE_OPACITY,
+        value_labels_own_row: bool = False,
         value_title: Optional[str] = None,
         value_below_title: Optional[str] = None,
         height: Optional[int] = None) -> str:
@@ -818,6 +854,22 @@ def box(row, value=None, width: int = 240, label: str = "",
     def as_number(raw):
         return None if raw is None or pd.isna(raw) else float(raw)
 
+    # ── A154: WHERE THE DECIMAL RULE LIVES ──────────────────────────────────────────────
+    #
+    # > **MARC, v18:** *"Don't use decimal points when displaying Yards. That includes Box/Whisker
+    # > marks, axis labels … Exception is YDS/CARRY (#.#)"*
+    #
+    # ✅ **`fmt.precision_for` ALREADY ENCODES EXACTLY THIS AND HAS SINCE R-555** — its default is
+    # 0 and a decimal is the keyed exception, which is Marc's sentence written as a table. 🚨 **The
+    # chart never asked it.** `dp` defaulted to the literal `1`, so every axis label and every mark
+    # was forced to one decimal whatever the metric was: `total_yards` printed `269.8`.
+    #
+    # ✅ SO THE KNOWLEDGE STAYS IN ONE PLACE (§4.2.1's question — how many places can a formatting
+    # decision live before they disagree). A caller passes the metric NAME and the module asks;
+    # a caller that passes `dp` explicitly still wins, and a caller that passes NEITHER gets the
+    # old literal 1, which is what keeps every existing render byte-identical.
+    if dp is _UNSET:
+        dp = fmt.precision_for(metric) if metric else 1
     p25, p50, p75 = num("p25"), num("p50"), num("p75")
     # See _whisker_pair: the three views spell this two ways and the column is not renamed.
     raw_lo, raw_hi = _whisker_pair(row)
@@ -877,7 +929,10 @@ def box(row, value=None, width: int = 240, label: str = "",
     # but they WIDEN only when one of the three asks. The reading and the widening were one
     # expression before, which is what welded the two features together.
     out_min, out_max = num("min_value"), num("max_value")
-    wants_extremes = outliers or frame_extremes or ticks == TICK_EXTREMES
+    # A154 adds the fourth way to ask: a full-height line AT min/max must be inside the
+    # viewBox for the same reason A142 gave for a ring and A150 for a label.
+    wants_extremes = (outliers or frame_extremes or ticks == TICK_EXTREMES
+                      or extreme_lines)
     if wants_extremes:
         if out_min is not None:
             frame_lo = min(frame_lo, out_min)
@@ -922,12 +977,42 @@ def box(row, value=None, width: int = 240, label: str = "",
     parts = []
 
     # The whisker rule, end to end, with serifs at the boundaries.
+    # ── A154: THE MIN/MAX REFERENCE LINES, AND THEY GO DOWN FIRST ────────────────────────
+    #
+    # > **MARC, v18:** *"MIN/MAX should extend full height of the plot (to the exten of the Box).
+    # > Plot MIN/MAX below (underneath in the Z) so that if IQR and MIN/MAX are equal, should be
+    # > able to discern both on the chart."*
+    #
+    # 🚨 THE LAST CLAUSE IS THE WHOLE POINT AND IT IS THE DEFECT HE REPORTED ONE ROUND AGO
+    # (cfdb-main-R-1065): on a row where `whisker_high == max_value` he could not tell which mark
+    # he was looking at, and the honest answer was *they are the same number*.
+    #
+    # ✅ **THE FIX IS GEOMETRY, NOT COLOUR.** A FULL-HEIGHT line drawn UNDERNEATH means that when
+    # the two coincide the short whisker serif sits on top of a taller, lighter line and both
+    # remain readable. ⚠️ **So the height and the z-order are load-bearing**: a mark drawn at serif
+    # height, or appended after the box, fails his sentence exactly — which is why this block is
+    # the FIRST thing in `parts` rather than the last.
+    #
+    # ⚠️ FULL HEIGHT IS THE PLOT BAND, `0..height`, not the rect. His parenthesis says *"to the
+    # exten of the Box"*, and the box IS the plot here — the rect is `mid ± rect_half`, a little
+    # over half the band, and a line stopping there would not clear the serifs it has to outlive.
+    if extreme_lines:
+        for extreme in (out_min, out_max):
+            if extreme is None:
+                continue
+            parts.append(
+                f"<line x1='{at(extreme):.1f}' y1='0' x2='{at(extreme):.1f}' "
+                f"y2='{height:g}' stroke='currentColor' stroke-width='1' "
+                f"opacity='{extreme_line_opacity:g}'></line>")
+
+    # ⚠️ A154: `.55` → `WHISKER_OPACITY`. Marc asked for the structure 25% darker, globally — this
+    # is not opt-in, because he asked for it on every chart rather than for a new capability.
     parts.append(f"<line x1='{at(lo):.1f}' y1='{mid:.1f}' x2='{at(hi):.1f}' y2='{mid:.1f}' "
-                 f"stroke='currentColor' stroke-width='1' opacity='.55'></line>")
+                 f"stroke='currentColor' stroke-width='1' opacity='{WHISKER_OPACITY:g}'></line>")
     for end in (lo, hi):
         parts.append(f"<line x1='{at(end):.1f}' y1='{mid - serif_half:.1f}' x2='{at(end):.1f}' "
                      f"y2='{mid + serif_half:.1f}' stroke='currentColor' stroke-width='1' "
-                     f"opacity='.55'></line>")
+                     f"opacity='{WHISKER_OPACITY:g}'></line>")
 
     # The box: p25 to p75.
     # ⚠️ THE HEIGHT IS EMITTED AT ZERO DECIMALS AND THE y AT ONE, WHICH IS NOT AN OVERSIGHT: it is
@@ -936,7 +1021,8 @@ def box(row, value=None, width: int = 240, label: str = "",
     parts.append(f"<rect x='{at(p25):.1f}' y='{mid - rect_half:.1f}' "
                  f"width='{max(at(p75) - at(p25), 1):.1f}' "
                  f"height='{rect_half * 2:.0f}' fill='currentColor' fill-opacity='.14' "
-                 f"stroke='currentColor' stroke-width='1' stroke-opacity='.5'></rect>")
+                 f"stroke='currentColor' stroke-width='1' "
+                 f"stroke-opacity='{BOX_OUTLINE_OPACITY:g}'></rect>")
 
     # 🚨 THE MEDIAN IS BOLD — Marc said so explicitly, and it is the one line a reader looks for.
     # ⚠️ IT SPANS THE RECT RATHER THAN A CONSTANT, so it stays the box's own divider at any height.
@@ -986,10 +1072,13 @@ def box(row, value=None, width: int = 240, label: str = "",
     # a band where nothing can displace it.
     bands = {}
 
-    def place(band: str, x: float, text: str, color: Optional[str] = None) -> None:
+    def place(band: str, x: float, text: str, color: Optional[str] = None,
+              scale: float = 1.0) -> None:
         # Half the label's MEASURED width each side is the exclusion zone — see _ADVANCE_9PX
         # for why this is summed per character rather than averaged over the length.
-        half = _text_width(text) / 2.0
+        # ⚠️ A154: `scale` is 1.0 for every axis label and for every caller that has not asked for
+        # the bigger value font, so the arithmetic below is unchanged for them to the bit.
+        half = _text_width(text) * scale / 2.0
         x = min(max(x, pad + half - 8), width - pad - half + 8)
         placed = bands.setdefault(band, [])
         for other_x, other_half, _, _ in placed:
@@ -999,11 +1088,35 @@ def box(row, value=None, width: int = 240, label: str = "",
         placed.append((x, half, text, color))
 
     # THE VALUE LABEL WINS, so it is placed into its band before anything else can take the room.
+    #
+    # 🚨 A154, AND IT IS THE FIX FOR A MEASUREMENT RATHER THAN A LOOK. > **MARC, v18:** *"Move the
+    # label for the box-whisker line for displyaing for the team to be either a) above the box, or
+    # below but inside the chart area (so that it doesn't compete for real estate with the the
+    # min, p25, p75, max axis labels and we get axis labels for MIN, p25, p75, MAX on all the
+    # box-whisker charts.)"*
+    #
+    # 📊 HE DIAGNOSED IT EXACTLY. `place()` is first-come-first-served and the value goes in FIRST,
+    # so on a one-sided chart it takes room in the `below` band and a percentile is dropped —
+    # which is why all four axis labels survived on only a third of rows (cfdb-main-R-1055).
+    #
+    # ✅ `value_labels_own_row` GIVES EACH VALUE ITS OWN ROW and leaves the axis row to the axis:
+    #     one-sided   the value goes ABOVE the box
+    #     two-sided   the above side stays above; the below side gets its own row BETWEEN the plot
+    #                 and the axis labels — *"below but inside the chart area"*, and the axis row
+    #                 moves down to make space rather than sharing
+    #
+    # ⚠️ OPT-IN, SO EVERY EXISTING CALLER RENDERS UNCHANGED (A145's rule). The page half is B128's;
+    # this ships the capability, not a new layout nobody asked for.
     for marker_value, marker_label, marker_color, side, _title in markers:
-        place("above" if side == "above" else "below", at(marker_value),
+        if value_labels_own_row:
+            band = "above" if side != "below" else "value-below"
+        else:
+            band = "above" if side == "above" else "below"
+        place(band, at(marker_value),
               marker_label if marker_label is not None
               else fmt.number(marker_value, dp=dp),
-              marker_color)
+              marker_color,
+              _VALUE_LABEL_SCALE if value_labels_own_row else 1.0)
     # ⚠️ THE WHISKER ENDS ARE NOT LABELLED UNDER `TICK_EXTREMES` — Marc, v17: *"the whisker
     # endpoints don't need to be labeled"*. Every other strategy prints them exactly as before.
     if ticks not in (TICK_NONE, TICK_EXTREMES):
@@ -1029,12 +1142,30 @@ def box(row, value=None, width: int = 240, label: str = "",
 
     # ⚠️ THE BOX KEEPS ITS OWN COORDINATES AND THE BAND IS ADDED AROUND IT, so every line above
     # this point is written once and the one-value SVG is unchanged to the byte.
-    top_band = LABEL_BAND if two_sided else 0
-    for band, baseline in (("above", -6.0), ("below", height + 11)):
+    #
+    # ⚠️ A154: a one-sided chart needs a top band too once its value label lives above the box —
+    # without it the label sits at y=-6 and the viewBox clips it.
+    top_band = LABEL_BAND if (two_sided or value_labels_own_row) else 0
+    # The second value's own row, between the plot and the axis labels. Only a two-sided chart
+    # asking for the move needs it; everything else keeps today's geometry exactly.
+    value_below_band = LABEL_BAND if (value_labels_own_row and two_sided) else 0
+    # 🚨 AND THE FONT — Marc: *"Increase the font on the value being plotted for the team"*. The
+    # axis labels stay at 9; the team's value goes to 11. ⚠️ A BIGGER LABEL CLAIMS MORE WIDTH from
+    # the same budget the four axis labels compete for, which is why `_text_width` is asked for
+    # the value at its OWN size below rather than at the axis size.
+    for band, baseline in (("above", -6.0),
+                           ("value-below", height + 11),
+                           ("below", height + 11 + value_below_band)):
         for x, _half, text, color in bands.get(band, []):
             fill = f"fill='{color}'" if color else "fill='currentColor' opacity='.65'"
+            # ⚠️ GATED ON THE FLAG, NOT ON `color`. A two-sided caller that has NOT asked for the
+            # move also draws a coloured label in the `above` band — keying the size off the
+            # colour would silently enlarge it and break A145's byte-identical default.
+            size = (VALUE_LABEL_FONT
+                    if value_labels_own_row and band in ("above", "value-below") and color
+                    else 9)
             parts.append(f"<text x='{x:.1f}' y='{baseline:.1f}' text-anchor='middle' "
-                         f"font-size='9' {fill}>{text}</text>")
+                         f"font-size='{size:g}' {fill}>{text}</text>")
 
     body = "".join(parts)
     if top_band:
@@ -1044,7 +1175,7 @@ def box(row, value=None, width: int = 240, label: str = "",
     # could be computed from it, which turned `41` into `41.0` in the viewBox and both attributes
     # — the ONLY thing A145's first draft changed at the default, and the hash comparison against
     # the pre-change module is what found it. `:g` prints 41 for 41.0 and 71.5 for 71.5.
-    total_height = top_band + height + 15
+    total_height = top_band + height + 15 + value_below_band
 
     # ⚠️ AC-G.11 — AN ABSENCE MUST SAY WHICH ABSENCE IT IS, AND A SCREEN READER GETS ONLY THIS
     # STRING. Two markers drawn and one marker drawn are different pictures; silently narrating
