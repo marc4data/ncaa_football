@@ -4797,10 +4797,20 @@ def _metric_chart(row, away_value, home_value, dp, accents, metric: str = "") ->
     #
     # **Marc's v18 sentence is about YARDS.** Pointing this half at `precision_for` would trade a
     # measured decision for one he did not ask for — so `metric=` is passed and `dp` still wins,
-    # which is `box()`'s own documented precedence. ⚠️ **THE PRICE IS REAL AND IT IS REPORTED:**
-    # four-label survival here is **31.2%** with `dp_band=2` against **75.2%** if this half asked
-    # the column. That is a look call with a measured cost on both sides, which is R-895's shape
-    # — **Marc's, not this round's.** The lever is one word: `dp_band=None` at line ~5351.
+    # which is `box()`'s own documented precedence.
+    #
+    # 🚨 **cfdb-wta-R-1153 / cfdb-main-R-1085 — B129: THE BAND THAT ARRIVES HERE IS NOW A ROW's
+    # PRECISION CAPPED BY ITS SECTION's, NOT THE SECTION's FLAT NUMBER.** The reasoning, the four
+    # candidates and the three measurements are at the ONE place that computes it, in
+    # `_comparison`; this function takes the answer and does not re-derive it. ⚠️ **What changed
+    # for this call site: `Offensive plays` stopped drawing `40.00` and the rates did not move.**
+    #
+    # 🚨 **AND B128's OWN 31.2% WAS WRONG — MINE, AND IN THE EXACT CLASS B128 CAUGHT IN A154.**
+    # It probed `dp=2` on ALL EIGHTEEN metrics, **including the six Box Score counts the page
+    # never draws at 2** — on which it scores **5.6% against the page's real 99.5%**. 📊 The
+    # page's true baseline was **62.5%**, and B129's rule takes it to **68.1%**. *A guard probing
+    # a configuration the page does not use is blind to the page*, one round after writing it
+    # down (cfdb-wta-R-1156).
     band = {} if dp is None else {"dp": dp}
     return distribution.box(
         row, width=_TABLE_CHART_WIDTH, ticks=_BOX_TICKS, outliers=_BOX_OUTLIERS,
@@ -4849,13 +4859,57 @@ def _comparison(away, home, rows, glossary=None, spread=None,
         # string would be drawing from text.
         lines.append(_metric_cell(
             _figure(away, field, dp), marked, _figure(home, field, dp),
-            # ⚠️ `dp_band=None` NOW MEANS *ASK THE COLUMN*, WHICH IS A REPURPOSING RATHER THAN
-            # A NEW STATE: it used to fall back to the row tuple's own `dp`, and neither call
+            # ⚠️ `dp_band=None` MEANS *ASK THE COLUMN*, WHICH IS A REPURPOSING RATHER THAN A
+            # NEW STATE: it used to fall back to the row tuple's own `dp`, and neither call
             # site has ever passed `None`, so that branch was dead. **The row's `dp` still
             # formats the two printed figures** through `_figure` — only the CHART defers.
+            #
+            # ── cfdb-wta-R-1153: THE BAND IS A CEILING, NOT A FLOOR ──────────────────────
+            #
+            # 🚨 THE DEFECT B128 FOUND AND CORRECTLY LEFT ALONE: `Offensive plays` printed its
+            # figure as `61` and its chart's axis as **`40.00 · 92.00 · 59.50`**. A COUNT AT TWO
+            # DECIMALS, LIVE — because `dp_band` is chosen per SECTION and the Advanced section
+            # holds eleven 0–1 rates and one integer count. **A per-section number cannot be
+            # right for both.**
+            #
+            # ✅ AND IT IS RIGHT FOR BOTH THE MOMENT IT STOPS BEING A FIXED WIDTH AND BECOMES A
+            # LIMIT. The row already declares what the measure has — it is the same `dp`
+            # `_figure` prints with. The section declares what a 118px cell can carry. **The
+            # chart takes the LESSER, so it never claims more precision than the figure beside
+            # it and never spends more than the cell affords.**
+            #
+            #     offense_plays    row 0, ceiling 2  ->  0   ✅ the defect, closed
+            #     the rates        row 3, ceiling 2  ->  2   ✅ exactly R-829's choice, unmoved
+            #     line_yards       row 2, ceiling 2  ->  2   ✅ unchanged
+            #     Box Score        no ceiling        ->  the column, as B128 shipped it
+            #
+            # 📊 MEASURED ON ALL 648 PUBLISHED ROWS AT THIS CALL SITE'S OWN CONFIGURATION,
+            # against the three numbers the round was set — and against `dp_band=2`'s baseline
+            # rather than against zero:
+            #
+            #     candidate                       counts w/    rate rows w/ two    four labels
+            #                                  decimal axis    identical labels      at 118px
+            #     today (per-section band)            1            28 / 396           62.5%
+            #     per-ROW band                        0            27 / 396           44.0%  ❌
+            #     max(precision_for, band)            1            28 / 396           56.8%  ❌
+            #     re-key fmt.precision_for            0         🚨 50 / 396           75.2%
+            #  ✅ min(row, band) — THIS ONE            0            28 / 396           68.1%
+            #
+            # ⚠️ **THE OTHER THREE EACH FAIL A NUMBER.** A per-ROW band gives the rates their
+            # tuple's 3 decimals and costs 18 points of survival; `max` does not fix the count at
+            # all; re-keying `fmt` buys the most survival and **doubles the rows where two of the
+            # four axis labels print the same string** — a box labelled as if it spanned nothing,
+            # which is the defect R-829 measured and is worse than a missing label. ✅ This one
+            # is the only candidate that improves all three at once, and it costs the rates
+            # NOTHING: 28 is today's 28.
+            #
+            # ⚠️ AND `min` IS WHY THE FIGURE AND THE CHART CANNOT DISAGREE AGAIN — see
+            # `test_a_ROWS_FIGURE_AND_ITS_AXIS_COME_FROM_ONE_DECISION`. It is a property of the
+            # arithmetic rather than a coincidence of two tables agreeing (§4.2.1).
             chart=_metric_chart((spread or {}).get(field),
                                 away.get(field), home.get(field),
-                                dp_band, accents, metric=field)))
+                                None if dp_band is None else min(dp, dp_band),
+                                accents, metric=field)))
     return "".join(lines)
 
 
@@ -5581,6 +5635,11 @@ def _post_game(game_id, season) -> None:
                 # 1 the quartiles COLLAPSE — a real week-1 passing-downs row goes p25 0.240 →
                 # `0.2` and p75 0.433 → `0.4`, so a box spanning a fifth of the scale is
                 # labelled as if it spanned two tenths. `dp=2` (R-829).
+                # 🚨 **AND *ELEVEN OF TWELVE* IS THE WHOLE OF cfdb-wta-R-1153: THE TWELFTH IS
+                # `Offensive plays`, AN INTEGER COUNT**, which this number drew as `40.00` for as
+                # long as the band was flat. **It is a CEILING now** — `_comparison` takes the
+                # lesser of it and the row's own precision — so the eleven keep their 2 and the
+                # one that never wanted it prints integers.
                 _comparison(away, home, rows, glossary, spread=spread, dp_band=2,
                             colors=colors),
             ]

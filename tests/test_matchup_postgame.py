@@ -36,7 +36,7 @@ import render_harness  # noqa: E402
 # ⚠️ A154: imported for `WHISKER_OPACITY`. The whisker's weight is the module's to decide
 # (Marc, v18, +25%), so this file reads the constant instead of pinning a literal that has
 # now moved once and would move again.
-from lib import distribution  # noqa: E402
+from lib import distribution, fmt  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
 
@@ -1272,6 +1272,185 @@ def test_the_BOX_SCORE_band_labels_carry_no_false_decimals(panel):
             f"a count's band is labelled with decimals it does not have: {labels}")
         return
     raise AssertionError("the first-downs row never rendered")
+
+
+_AXIS_LABEL = re.compile(
+    r"<text x='[-\d.]+' y='[\d.]+' text-anchor='middle' font-size='9' "
+    r"fill='currentColor' opacity='\.65'>([^<]*)</text>")
+
+
+def _axis_labels(cell: str) -> list:
+    """The axis row's own labels — NOT every `<text>` in the cell.
+
+    🚨 THE VALUE LABELS ARE ALSO `<text>` AND THEY CARRY DECIMALS LEGITIMATELY. `box()` prints
+    the axis at `font-size='9'` with `fill='currentColor' opacity='.65'`, and the two team
+    figures in their own colour at 11 since v18. **A test counting every `<text>` would read a
+    team's `0.153` as an axis label and pass on an axis that had none.**
+    """
+    return _AXIS_LABEL.findall(cell)
+
+
+def _decimals(text: str) -> int:
+    """How many digits this rendered figure shows after the point. `—` and `31.1%` included."""
+    match = re.search(r"\.(\d+)", text)
+    return len(match.group(1)) if match else 0
+
+
+def _named_cell(entries, label):
+    """One metric cell's MARKUP by its visible label — `_row_markup` returns text, and these
+    two tests need the `<text>` elements."""
+    for cell in _cells(entries):
+        if f">{label}<" in cell or f">{html.escape(label)}<" in cell:
+            return cell
+    return ""
+
+
+def test_a_COUNT_DRAWS_AN_INTEGER_AXIS_even_in_a_section_full_of_rates(panel):
+    """🚨 cfdb-wta-R-1153. THE DEFECT B128 FOUND ON THE LIVE PAGE AND CORRECTLY DID NOT PATCH.
+
+    📊 `Offensive plays` printed its figure as **`61`** and its chart's axis as
+    **`40.00 · 92.00 · 59.50`** — **a count at two decimals, in production** — because `dp_band`
+    was chosen per SECTION and the Advanced section holds eleven 0–1 rates and this one integer.
+
+    ✅ **`Offensive plays` IS THE ONLY NON-RATE IN THAT SECTION, WHICH IS WHY IT IS NAMED HERE
+    RATHER THAN ASSERTED GENERICALLY.** AC-G.33 put it there deliberately — *"every rate above is
+    over these plays"* — so it cannot be moved out to dodge the problem, and a section-wide
+    assertion would say nothing about the row that actually broke.
+
+    ⚠️ **AND IT IS ASSERTED ON THE AXIS, NOT ON THE FIGURE.** The figure was always `61`; the
+    round before this one could have "fixed" the row by reading the figure and concluded nothing
+    was wrong. **The two came from two different decisions and only the chart was wrong.**
+    """
+    run, _ = panel
+    cell = _named_cell(run(_both())[0], "Offensive plays")
+    assert cell, "the Offensive plays row is not on the panel at all (AC-G.33's denominator)"
+    labels = _axis_labels(cell)
+    assert labels, f"the Offensive plays chart drew no axis labels: {cell[:300]}"
+    assert all("." not in text for text in labels), (
+        f"a COUNT of plays is labelled with decimals — {labels}. The band its section declares "
+        f"is a CEILING on chart precision, not a width every row must spend")
+
+
+def test_A_RATE_KEEPS_ITS_SECTIONS_CEILING_and_is_not_rounded_to_the_columns_default(panel):
+    """🚨 THIS TEST EXISTS BECAUSE A STAGED BREAK CAME BACK GREEN (R-758).
+
+    B129 staged the candidate its own measurement had rejected — pointing the Advanced section
+    at `fmt.precision_for` by passing `dp_band=None` — and **all 1,479 tests passed.** The two
+    guards beside this one cannot see it: `precision_for` gives `offense_plays` its 0, so the
+    count test is satisfied, and it gives the rates FEWER decimals than their figures, so the
+    figure-vs-axis test is satisfied too. **The suite could not tell the shipped rule from the
+    one the numbers ruled out.**
+
+    📊 WHAT THE BREAK ACTUALLY COSTS, measured on all 648 published rows: the rate rows where
+    two of the four axis labels print the SAME STRING go **28 → 50 of 396** —
+    `offense_stuff_rate` 1/36 → 7/36, `defense_havoc_rate` 1/36 → 5/36, and three more from 0 to
+    2–3. **A box whose labels repeat reads as a box spanning nothing.**
+
+    ⚠️ **AND THIS FIXTURE ROW IS R-829's OWN EXAMPLE, WHICH IS WHY IT CAN CARRY THE ASSERTION**
+    — `offense_passing_downs_success_rate`, p25 **0.240**, p75 **0.433**. R-829's words: *"a real
+    week-1 passing-downs row goes p25 0.240 → `0.2` and p75 0.433 → `0.4`, so a box spanning a
+    fifth of the scale is labelled as if it spanned two tenths."*
+
+    ✅ **BOTH EXPECTED STRINGS ARE COMPUTED FROM THE FIXTURE'S OWN VALUE AT THE TWO CANDIDATE
+    PRECISIONS, NOT TYPED.** A pinned `"0.24"` would be a second copy of the formatting rule and
+    would go stale the day the fixture's numbers move (B128's lesson, one round old).
+    """
+    run, _ = panel
+    rate = {row["metric"]: row for row in _SPREAD}["offense_passing_downs_success_rate"]
+    ceiling, column_default = 2, fmt.precision_for("offense_passing_downs_success_rate")
+    assert column_default < ceiling, (
+        f"`precision_for` now answers {column_default} for this rate, so it no longer differs "
+        f"from the section's ceiling of {ceiling} and this test cannot tell the two rules apart")
+    cell = _named_cell(run(_both())[0], "Success rate, passing downs")
+    assert cell, "the passing-downs row is not on the panel"
+    labels = _axis_labels(cell)
+    for edge in ("p25", "p75"):
+        want = fmt.number(float(rate[edge]), dp=ceiling)
+        flat = fmt.number(float(rate[edge]), dp=column_default)
+        assert want in labels, (
+            f"the axis does not print {edge} as {want} — it reads {labels}. The section's "
+            f"ceiling is {ceiling} decimals and this quartile has the precision to spend it")
+        assert flat not in labels, (
+            f"the axis prints {edge} as {flat}, rounded to the column's default of "
+            f"{column_default} — R-829 measured exactly this: a box spanning a fifth of the "
+            f"scale labelled as if it spanned two tenths. Labels: {labels}")
+
+
+def test_a_ROWS_FIGURE_AND_ITS_AXIS_COME_FROM_ONE_DECISION(panel):
+    """🚨 THE DEFECT UNDERNEATH cfdb-wta-R-1153, AND IT IS §4.2.1's QUESTION IN ITS SMALLEST
+    FORM: **how many places decide this row's precision?**
+
+    Two, until B129. `_figure` printed with the row tuple's own `dp`; the chart printed with the
+    section's flat `dp_band`. **On `Offensive plays` they disagreed — `61` above `40.00` — and
+    nothing could see it**, because each half was internally consistent.
+
+    ✅ **THE PROPERTY, AND IT IS NOW TRUE BY ARITHMETIC RATHER THAN BY TWO TABLES AGREEING:** the
+    chart's precision is `min(the row's, the section's ceiling)`, so **an axis can never show
+    more decimals than the figure beside it.**
+
+    ⚠️ **ASSERTED AS `axis <= figure` RATHER THAN `axis == figure`, AND THE INEQUALITY IS THE
+    HONEST FORM** — a chart may round harder than the figure it sits beside; it may never round
+    softer.
+
+    🚨 **AND THE SIX PERCENT ROWS ARE EXCLUDED, WHICH I FOUND BY WRITING THE ASSERTION WITHOUT
+    THE EXCLUSION AND WATCHING IT FIRE.** `_DISPLAY_COLUMN`'s six print a serving-shipped
+    display string — `14.1%`, a PERCENTAGE at one decimal — while their chart is labelled in the
+    metric's own 0–1 PROPORTION at two. 📊 `0.24` is not less precise than `14.1%`; it is the
+    same precision in a unit a hundred times smaller. **Comparing their decimal counts is
+    comparing two different quantities, and the first draft of this test did exactly that and
+    called it a defect.** ⚠️ The exclusion is by the `%` a reader can actually see, not by a
+    lookup in `_DISPLAY_COLUMN` — a test that reads the page's INPUTS to decide what to assert
+    about its OUTPUT is R-768's shape.
+
+    🚨 AND A NULL FIGURE IS SKIPPED RATHER THAN SCORED AS ZERO DECIMALS. `fmt.number` renders an
+    em dash for a null (AC-G.32), `_decimals("—")` is 0, and **every axis would then have to be
+    integers on a row whose figures simply are not there** — an assertion that fires for the
+    wrong reason is worse than one that does not fire (R-758).
+    """
+    def who_of(cell):
+        found = re.search(r"cursor:help'>([^<]*)</span>|font-size:\.85rem[^>]*>([^<]*)<", cell)
+        return next((g for g in (found.groups() if found else ()) if g), "?")
+
+    run, _ = panel
+    checked, skipped = 0, []
+    for cell in _cells(run(_both())[0]):
+        labels = _axis_labels(cell)
+        if not labels:
+            continue
+        figures = re.findall(
+            r"white-space:nowrap'>([^<]{1,16})</span>", cell)[:2]
+        real = [f for f in figures if any(ch.isdigit() for ch in f)]
+        if not real:
+            continue
+        # ⚠️ A PERCENT FIGURE AND A PROPORTION AXIS ARE DIFFERENT UNITS — see the docstring.
+        if any("%" in f for f in real):
+            skipped.append(who_of(cell))
+            continue
+        allowed = max(_decimals(f) for f in real)
+        worst = max(_decimals(t) for t in labels)
+        who = who_of(cell)
+        assert worst <= allowed, (
+            f"{who}: the axis prints {worst} decimals ({labels}) above figures printing "
+            f"{allowed} ({real}) — the chart is claiming precision the measure does not have, "
+            f"which is the two-sources defect cfdb-wta-R-1153 was")
+        checked += 1
+    # 🚨 R-760: A LOOP THAT ITERATED TWICE AND REPORTED SUCCESS IS NOT A TEST — AND MY FIRST
+    # NUMBER HERE WAS WRONG, WHICH THIS ASSERTION IS WHY I KNOW.
+    #
+    # 📊 THE PANEL OFFERS 18 ROWS AND `_SPREAD` CARRIES **9 METRICS**, so nine rows draw a chart
+    # and nine draw R-141's reserved-but-empty cell. Of the nine, exactly one —
+    # `offense_passing_downs_success_rate` — prints a percentage. **8 compared, 1 skipped, and
+    # both are pinned**: a helper that stopped matching would shrink BOTH and satisfy any floor.
+    #
+    # ⚠️ **SO THIS TEST SEES HALF THE METRICS, AND THAT IS THE FIXTURE'S SHAPE RATHER THAN AN
+    # OVERSIGHT.** The other nine are covered by the round's live measurement over all 648
+    # published rows, which is in the report — **a unit test on a sampled fixture and a
+    # measurement on the real population answer different questions and this project needs
+    # both** (§2.4). If `_SPREAD` ever grows, this number moves WITH ITS REASON (B125's rule).
+    assert checked == 8 and len(skipped) == 1, (
+        f"compared {checked} rows and skipped {len(skipped)} ({skipped}); `_SPREAD` covers 9 of "
+        f"the 18 metrics and one of those nine prints a percentage. A different split means the "
+        f"helper stopped matching, not that the page changed")
 
 
 def test_THE_METRIC_CELLS_LABEL_MIN_AND_MAX_and_not_the_whisker_ends(panel):
