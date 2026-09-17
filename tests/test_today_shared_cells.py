@@ -398,13 +398,36 @@ def test_every_table_render_that_takes_an_anchor_is_the_one_that_draws():
 
     ⚠️ WITHOUT THIS, THE FIX FOR THE TEST ABOVE IS TO DELETE `anchor=` — which would pass both the
     TypeError guard and the suite, and silently undo A141's scroll restore on four panels.
+
+    🚨 A156 TOOK THE BOUND FROM NINE TO EIGHT, AND LOWERING IT IS EXACTLY WHAT THIS GUARD EXISTS
+    TO MAKE HARD — so the drop is pinned to its cause rather than just decremented. Poll movement
+    no longer renders an HTML table AT ALL: the table became a chart element so it could share the
+    bump chart's rank axis (Marc's ask), and a chart element has no anchor because it has no sort
+    links to return from. **The second assertion below is what keeps this honest** — if some later
+    round quietly drops an `anchor=` instead, `table.render` will still be there with the anchor
+    missing and the count will fall to seven against a bound of eight.
     """
-    anchored = [node.lineno for node in ast.walk(ast.parse(SOURCE))
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "render"
-                and any(kw.arg == "anchor" for kw in node.keywords)]
-    assert len(anchored) >= 9, (
-        f"A141 anchored nine table.render calls; only {len(anchored)} carry an anchor now")
+    # 🚨 THE RECEIVER IS CHECKED, NOT JUST THE METHOD NAME. `node.func.attr == "render"` also
+    # matches `glyphs.render(...)`, of which this page has two — invisible while the test only
+    # COUNTED anchored calls, and immediately visible the moment it asserted something about the
+    # unanchored ones. §2.2.1c.1's class inside a test: the name was found, and it was the wrong
+    # object's name.
+    calls = [node for node in ast.walk(ast.parse(SOURCE))
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+             and node.func.attr == "render"
+             and isinstance(node.func.value, ast.Name) and node.func.value.id == "table"]
+    anchored = [n.lineno for n in calls if any(kw.arg == "anchor" for kw in n.keywords)]
+    assert len(anchored) >= 8, (
+        f"A141 anchored nine table.render calls and A156 turned one of them into a chart "
+        f"element; only {len(anchored)} carry an anchor now")
+    # 🚨 AND THE COUNT ONLY MEANS SOMETHING IF EVERY REMAINING TABLE STILL CARRIES ONE. A page
+    # that grew a new unanchored table would otherwise hide a dropped anchor behind its own
+    # arrival — the bound would still be met and a panel would have lost its scroll restore.
+    unanchored = [n.lineno for n in calls
+                  if not any(kw.arg == "anchor" for kw in n.keywords)]
+    assert not unanchored, (
+        f"table.render without an anchor at lines {unanchored} — A141 anchored every one of "
+        f"them, so a new table needs an anchor or a reason written down here")
 
 
 # --- A147: the game strip in the commentary cell -------------------------------------------

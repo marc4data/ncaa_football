@@ -438,3 +438,60 @@ def test_the_SAME_SECTION_renders_its_table_when_there_are_plays():
     }])
     assert "2nd & 7" in text, f"the plays table did not render: {text[:400]}"
     assert render_harness.ERROR_CARD not in text
+
+
+# ── A156, cfdb-main-R-1089: THE SERIF CLASSIFIER, AND THE NEGATIVE CASE IT WAS MISSING ───────
+
+_TODAY_DIVIDER = (
+    "<svg viewBox='0 0 300 44'>"
+    "<line x1='150.0' y1='2' x2='150.0' y2='42' stroke='currentColor' stroke-width='1'"
+    " opacity='0.35'></line></svg>")
+
+
+def _box_markup(serif_y=(17.2, 38.8), opacity=None):
+    """A box() chart's own wrapper, with one whisker rule and one serif."""
+    from lib import distribution
+    op = f"{distribution.WHISKER_OPACITY:g}" if opacity is None else opacity
+    return (
+        "<span class='cfdb-dist' title='x'><svg viewBox='0 0 240 56'>"
+        f"<line x1='10.0' y1='28.0' x2='230.0' y2='28.0' stroke='currentColor'"
+        f" stroke-width='1' opacity='{op}'></line>"
+        f"<line x1='10.0' y1='{serif_y[0]}' x2='10.0' y2='{serif_y[1]}' stroke='currentColor'"
+        f" stroke-width='1' opacity='{op}'></line>"
+        "</svg></span>")
+
+
+def test_the_serif_classifier_finds_the_serif_and_not_the_whisker_rule():
+    """R-1101's half: the rule and the serif are identical but for y1 vs y2."""
+    found = render_harness.box_serifs(_box_markup())
+    assert found == [(10.0, 17.2, 38.8)], found
+
+
+def test_the_serif_classifier_reads_zero_where_there_is_no_box_chart():
+    """🚨 THE NEGATIVE CASE, AND IT IS THE WHOLE REASON THIS FUNCTION EXISTS.
+
+    A155's §6.1 run reported a 40.0px serif on Today, which draws no box chart at all — its
+    ad-hoc classifier had matched `_sparkline_svg`'s quarter dividers, vertical lines spanning
+    `pad .. height - pad` (44 - 2 - 2 = 40.0, which reconciles exactly). **A reading of zero was
+    never checked for, so a reading that could not be right was reported as a measurement.**
+
+    ⚠️ The third assertion is the one that pins condition 1 specifically: a vertical line at the
+    whisker's OWN opacity is still not a serif when nothing `distribution.py` produced is around
+    it. Without it this test passes on a classifier that has no scope at all.
+    """
+    assert render_harness.box_serifs(_TODAY_DIVIDER) == []
+    assert render_harness.box_serifs("") == []
+    from lib import distribution
+    bare = (f"<svg><line x1='5' y1='2' x2='5' y2='42' stroke='currentColor' stroke-width='1'"
+            f" opacity='{distribution.WHISKER_OPACITY:g}'></line></svg>")
+    assert render_harness.box_serifs(bare) == [], (
+        "a vertical line outside any cfdb-dist wrapper was counted as a serif — this is A155's "
+        "40.0px reading, reproduced")
+
+
+def test_the_serif_classifier_reads_the_opacity_rather_than_restating_it():
+    """A154 moved that number once already; a literal here would be its second home."""
+    stale = _box_markup(opacity="0.55")          # the pre-A154 weight
+    assert render_harness.box_serifs(stale) == [], (
+        "the classifier matched a weight the module no longer emits — it is pinning a literal")
+    assert render_harness.box_serifs(stale, opacity=0.55) == [(10.0, 17.2, 38.8)]
