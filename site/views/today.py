@@ -156,6 +156,27 @@ def _tab_bar(active: str) -> None:
                 unsafe_allow_html=True)
 
 
+# ── A153, §3.3's MIGRATE: WHAT `_completed_games` SELECTS AND WHO STILL READS IT ─────────────
+#
+# 🚨 A COMMENT INSIDE THE SQL STRING BREAKS `ci/check_page_queries.py`, WHICH IS WHY THIS IS HERE.
+# That checker executes every page query against CI's serving layer and normalises it with
+# `" ".join(raw.split())` (`check_page_queries.py:120`) — collapsing the statement onto ONE line,
+# where a `--` comment swallows everything after it. The symptom is
+# `today.py: syntax error at end of input`, and the SQL is perfectly valid in every other context.
+# **Python comments above the query, never SQL comments inside it.**
+#
+# ✅ The panel now RANKS, FILTERS and DISPLAYS on `scoreboard_lead_changes*` — Marc's call.
+#
+# 🚨 AND THE FIVE `*_by_clock` ALIASES BELOW ARE NOW READ BY NOTHING, said here because the
+# CONTRACT round needs it and would otherwise have to re-derive it. 📊 Counted by reading the
+# lines rather than by a match count (§2.2.1c.1): after this round `lead_changes`,
+# `lead_changes_fourth_quarter`, `lead_changes_overtime` and both `largest_single_play_swing*`
+# appear in this module only in their own alias and in prose, and in NO other view module at all.
+#
+# ⚠️ THEY ARE LEFT IN PLACE DELIBERATELY. §3.3.2 gates CONTRACT on the DEPLOY, not the merge:
+# until production serves this page, the old columns still have a live consumer. **CONTRACT is the
+# next A round's and it is now unblocked** — the win-probability measure stays published either
+# way, because it is a real thing that no longer has to pretend to be lead changes.
 def _completed_games(scope) -> pd.DataFrame:
     """Every completed game in scope. Feeds Most Exciting and all three recap lists.
 
@@ -270,21 +291,6 @@ def _completed_games(scope) -> pd.DataFrame:
                    as largest_single_play_swing_fourth_quarter,
                home_win_probability_range_fourth_quarter,
                lead_changes_overtime_by_clock as lead_changes_overtime,
-               -- ── A153, §3.3's MIGRATE ────────────────────────────────────────────────
-               -- The panel now RANKS, FILTERS and DISPLAYS on these three.
-               --
-               -- 🚨 AND THE FIVE ALIASES ABOVE ARE NOW READ BY NOTHING — said here because the
-               -- CONTRACT round needs it and a later reader would otherwise have to re-derive it.
-               -- 📊 Counted by reading the lines rather than by a match count (§2.2.1c.1): after
-               -- this round `lead_changes`, `lead_changes_fourth_quarter`, `lead_changes_overtime`
-               -- and both `largest_single_play_swing*` appear in this module only in their own
-               -- alias and in prose, and in **no other view module at all**.
-               --
-               -- ⚠️ THEY ARE LEFT IN PLACE DELIBERATELY. §3.3.2 gates CONTRACT on the DEPLOY, not
-               -- the merge: until this page is the one production is serving, the old columns
-               -- still have a live consumer. **CONTRACT is the next A round's, and it is now
-               -- unblocked** — the win-probability measure stays published either way, because it
-               -- is a real thing that no longer has to pretend to be lead changes.
                scoreboard_lead_changes,
                scoreboard_lead_changes_fourth_quarter,
                scoreboard_lead_changes_overtime,
