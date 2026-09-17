@@ -1279,6 +1279,17 @@ _AXIS_LABEL = re.compile(
     r"fill='currentColor' opacity='\.65'>([^<]*)</text>")
 
 
+def _module_constant_pg(name: str):
+    """A page constant, read off the imported module.
+
+    ⚠️ NOT `ast.literal_eval` OVER THE SOURCE — B126 found that cannot evaluate an attribute
+    reference, and a helper that works for an int and fails for `distribution.TICK_EXTREMES` is
+    one a later round will trip over. The module is already imported here.
+    """
+    import importlib
+    return getattr(importlib.import_module("views.matchup"), name)
+
+
 def _axis_labels(cell: str) -> list:
     """The axis row's own labels — NOT every `<text>` in the cell.
 
@@ -1303,6 +1314,73 @@ def _named_cell(entries, label):
         if f">{label}<" in cell or f">{html.escape(label)}<" in cell:
             return cell
     return ""
+
+
+def test_THE_PANEL_SAYS_WHAT_THE_CHARTS_ARE_DRAWN_OVER(panel):
+    """🚨 cfdb-wta-R-1159, AND AC-G.33 WAS HALF-SATISFIED IN A SINGLE CAPTION.
+
+    The Advanced caption already ends *"Every rate is over that side's own offensive plays,
+    which are counted on the last row"* — **the RATE's denominator, named.** ⚠️ **The CHART
+    beside it has a different denominator entirely — `n` team-games in the week — and nothing
+    on the panel named it.** AC-G.33: *a hit rate without an `n` is a defect, not a style
+    choice, and the only defense is rendering the two adjacently.*
+
+    ✅ **THE 240px PANEL HAS DONE THIS SINCE B119** — *"Yards per game leading into week N, over
+    X completed games"* — so this is §4.3 consistency rather than a new pattern, and it is the
+    call site that actually gets thin weeks (the cumulative window is 846 of 846 rows at
+    n > 100).
+    """
+    run, _ = panel
+    entries, _ = run(_both())
+    text = _text(entries)
+    assert "team-game" in text, (
+        f"the panel does not say what the eighteen charts are drawn over, so a reader sees "
+        f"quartiles with no denominator: {text[-500:]}")
+    assert "in its hover" in text, (
+        "the caption does not point at where each chart's own exact count is — `n` is not "
+        "uniform within a week (7 of 36 weeks vary), so the caption states a range and the "
+        "per-chart figure has to be findable")
+
+
+def test_A_THIN_WEEK_SAYS_SO_and_a_normal_one_does_not(panel):
+    """🚨 AC-G.11 ON THE SAMPLE RATHER THAN ON THE MARK, AND IT IS THE DEFECT B130 ACTUALLY
+    FOUND.
+
+    📊 **36 of 648 published rows — 5.6% — draw a box, a median, two whiskers, two full-height
+    extreme lines and a ring over `n = 2`.** Two weeks: 2024 wk16 and 2025 wk16. **Their
+    quartiles are interpolations between two numbers**, and the picture says nothing about that:
+    it is the same shape a 172-game week draws.
+
+    ⚠️ **THIS IS A STRICTLY WORSE VERSION OF THE ZERO-WIDTH BOX THIS ROUND WENT LOOKING FOR AND
+    DID NOT FIND** — 1 row of 648 has `p25 == p75`, and it is one of these same n=2 rows.
+
+    🚨 **BOTH DIRECTIONS ASSERTED, WHICH IS THE HALF A PRESENCE TEST CANNOT SEE.** A caption that
+    always warned would be decoration a reader learns to ignore, and R-762's rule is that
+    decoration in an absence branch is worse than none — so the normal week must NOT carry it.
+    ⚠️ **AND THE FIXTURE'S OWN `n` IS READ RATHER THAN ASSUMED**, so the test says which side of
+    the threshold it is exercising instead of trusting `_SPREAD` to stay where it is.
+    """
+    import copy
+    run, _ = panel
+    floor = _module_constant_pg("_THIN_DISTRIBUTION")
+    fat = [int(r["n"]) for r in _SPREAD]
+    assert min(fat) > floor, (
+        f"`_SPREAD`'s smallest n is {min(fat)}, at or under the {floor} threshold, so the "
+        f"'normal week' half of this test is exercising the thin branch")
+    assert "too thin" not in _text(run(_both())[0]), (
+        f"a week with n={min(fat)} is warned as thin; the threshold is {floor} and a caption "
+        f"that always fires is decoration (R-762)")
+
+    thin = copy.deepcopy(_SPREAD)
+    for row in thin:
+        row["n"] = 2
+    text = _text(run(_both(), spread=thin)[0])
+    assert "too thin" in text, (
+        f"a week of TWO team-games draws eighteen full box-and-whiskers and says nothing: "
+        f"{text[-600:]}")
+    assert "2 team-games" in text, (
+        f"the thin warning does not say HOW thin, which is the number a reader needs to judge "
+        f"the shape: {text[-600:]}")
 
 
 def test_a_COUNT_DRAWS_AN_INTEGER_AXIS_even_in_a_section_full_of_rates(panel):
