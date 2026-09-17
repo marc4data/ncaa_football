@@ -4681,3 +4681,26 @@ INSERT INTO raw.raw_ppa_teams (filename, content, status_code, params, fetched_a
  ]
 }', 200, '{"year": "2024"}',
   '2026-01-01T00:00:38Z', now());
+
+-- ── A162: ops.pipeline_heartbeat, SO THE HEALTH SIGNAL CAN BUILD IN CI ──────────────────────
+--
+-- 🚨 §2.3.3's CLASS, CAUGHT BY CI ON THE FIRST PUSH: `stg_pipeline_heartbeat` reads
+-- `ops.pipeline_heartbeat`, which is written on the droplet by `src/heartbeat.py` and which no
+-- fixture created — so `dbt build` failed with `relation "ops.pipeline_heartbeat" does not
+-- exist` and SKIPPED the mart and `srv_system_health` behind it. **A model that cannot build on
+-- the fixture blocks every PR**, which is exactly what A152 paid for.
+--
+-- ⚠️ THE ROWS ARE DELIBERATELY FRESH (`now()`), so the health signal builds GREEN here. CI is
+-- not the place to assert the red path — that is proved against the real warehouse with an aged
+-- COPY of the source, and `tests/test_health_budgets.py` is what holds the budgets in step.
+CREATE SCHEMA IF NOT EXISTS ops;
+CREATE TABLE IF NOT EXISTS ops.pipeline_heartbeat (
+  heartbeat_name text NOT NULL,
+  beat_at        timestamptz NOT NULL
+);
+INSERT INTO ops.pipeline_heartbeat (heartbeat_name, beat_at) VALUES
+  ('scores_refresh', now() - interval '1 hour'),
+  ('lines_snapshot', now() - interval '2 hours'),
+  ('weekly_results', now() - interval '2 days'),
+  ('weekly_pregame', now() - interval '3 days'),
+  ('weekly_midweek', now() - interval '1 day');
