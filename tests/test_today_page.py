@@ -413,6 +413,12 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
                # that overtime must never be folded into the fourth quarter.
                # (`game_id`, which the ESPN link reads, is already set further down.)
                "lead_changes_fourth_quarter": 6, "lead_changes_overtime": 3,
+               # A153: the panel ranks, filters and displays on these now. They sit BESIDE the
+               # win-probability counts rather than replacing them, because the page still
+               # selects both and a fixture that dropped the old ones would stop covering the
+               # aliases `test_the_page_reads_the_corrected_columns` pins.
+               "scoreboard_lead_changes_fourth_quarter": 2,
+               "scoreboard_lead_changes_overtime": 1, "scoreboard_lead_changes": 3,
                "largest_single_play_swing_fourth_quarter": 0.425,
                "home_win_probability_range_fourth_quarter": 0.60,
                "plays_with_win_probability_fourth_quarter": 39,
@@ -764,10 +770,26 @@ def test_most_exciting_orders_on_published_columns_and_does_no_arithmetic():
     # ⚠️ A140 POINTED THE SAME KEY AT THE CORRECTED COLUMN (cfdb-main-R-916). The weighting is
     # unchanged — same two keys, same directions, same tie-break — and the assertion below is the
     # one that would catch a key being added or removed, which IS Marc's call.
-    assert "lead_changes_fourth_quarter_by_clock desc" in order, (
-        "the first key must be the clock-ordered column: the feed's play_number is not "
-        "chronological on 336 of 1,898 games, so the old column counts crossings that did not "
-        "happen")
+    # ✅ A153, §3.3's MIGRATE: the first key is now the SCOREBOARD's own lead changes — Marc's
+    # call, with A152's numbers in front of him. **A140's property survives and is asserted
+    # separately below**: whatever the key is, it must never be a column built on the FEED's
+    # ordering, which is non-chronological on 336 of 1,898 games.
+    assert "scoreboard_lead_changes_fourth_quarter desc" in order, (
+        "the first key must be the scoreboard lead-change count — the number the panel's own "
+        "caption promises")
+    # 🚨 THE GUARD A140 LEFT AND A153 KEEPS. `scoreboard_lead_changes_fourth_quarter` is computed
+    # on the clock ordering in the mart, so pointing the key at a bare feed-ordered column would
+    # be a silent regression to exactly what cfdb-main-R-916 measured.
+    #
+    # ⚠️ THE BOUNDARY IS LOAD-BEARING AND THE FIRST DRAFT OF THIS LOOP DID NOT HAVE ONE:
+    # `"scoreboard_lead_changes_fourth_quarter desc"` CONTAINS `"lead_changes_fourth_quarter
+    # desc"`, so a plain `not in` failed on the very key it was meant to bless. `\b` after a
+    # non-word boundary is what separates a column name from a longer one that ends with it.
+    for feed_ordered in ("lead_changes_fourth_quarter", "lead_changes",
+                         "largest_single_play_swing"):
+        assert not re.search(rf"(?<![a-z_]){feed_ordered} desc", order), (
+            f"{feed_ordered!r} orders on the feed's play_number, which is non-chronological on "
+            f"336 of 1,898 games")
     assert order.count(",") == 2, (
         "two keys and a tie-break, as before — adding or removing one is a weighting change and "
         "is Marc's, not a round's")
@@ -1119,6 +1141,8 @@ def test_the_PANEL_passes_the_truncation_flag_and_not_just_the_helper(monkeypatc
         "home_q1": 7, "home_q2": 14, "home_q3": 13, "home_q4": 10,
         "away_q1": 0, "away_q2": 7, "away_q3": 8, "away_q4": 0,
         "lead_changes_fourth_quarter": 2, "lead_changes_overtime": 0,
+        "scoreboard_lead_changes_fourth_quarter": 1,
+        "scoreboard_lead_changes_overtime": 0, "scoreboard_lead_changes": 2,
         "mean_distance_from_even_fourth_quarter_onward": 0.31, "lead_changes": 3,
         "excitement_index": 6.1,
         # THE GAME THE FLAG EXISTS FOR: Coastal Carolina at UTSA's shape — the feed stops
@@ -1363,8 +1387,11 @@ def test_the_scoreboard_absorbed_four_columns_and_dropped_none():
     # whole-file grep answers "does this string appear" rather than "does THIS panel have that
     # column" — R-859's class, in a test.
     panel = source[source.index("def _most_exciting"):source.index("def _favorite_margin")]
-    for field in ("lead_changes_fourth_quarter", "lead_changes_overtime",
-                  "mean_distance_from_even_fourth_quarter_onward", "lead_changes",
+    # ⚠️ A153 MOVED THESE THREE TO THEIR SCOREBOARD SIBLINGS (§3.3 MIGRATE). The property this
+    # test protects is unchanged — the restructure must not silently DROP a column — so the names
+    # move with the panel rather than the assertion being deleted.
+    for field in ("scoreboard_lead_changes_fourth_quarter", "scoreboard_lead_changes_overtime",
+                  "mean_distance_from_even_fourth_quarter_onward", "scoreboard_lead_changes",
                   "excitement_index"):
         assert f'Col("{field}"' in panel, f"{field} lost its column in the restructure"
     assert 'Col("espn", "Commentary"' in panel, "the ESPN link is a column, not a row link"
@@ -1437,6 +1464,8 @@ def test_the_panel_survives_the_curve_view_being_unpublished(monkeypatch):
         "home_q1": 7, "home_q2": 3, "home_q3": 4, "home_q4": 10,
         "away_q1": 0, "away_q2": 10, "away_q3": 3, "away_q4": 10,
         "lead_changes_fourth_quarter": 6, "lead_changes_overtime": 0,
+        "scoreboard_lead_changes_fourth_quarter": 3,
+        "scoreboard_lead_changes_overtime": 0, "scoreboard_lead_changes": 4,
         "mean_distance_from_even_fourth_quarter_onward": 0.12, "lead_changes": 14,
         "excitement_index": 5.0, "win_probability_curve_reaches_final_score": True,
     }])
