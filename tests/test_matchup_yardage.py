@@ -1400,7 +1400,13 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
                # ⚠️ And this one centres the `position unavailable` text in its own panel.
                # `width` is the panel width passed in, a page constant; the division is
                # pixel geometry with exactly one consumer — this text mark's x.
-               'x=alt.value(width / 2), y=y, text=alt.value("position unavailable"),'}
+               'x=alt.value(width / 2), y=y, text=alt.value("position unavailable"),',
+               # ⚠️ v02's Result-cell glyph, centred in the cell it shares with the text.
+               # `_DRIVE_GLYPH_CELL` is a page constant over a literal — no published column
+               # is in the expression — and the quotient has exactly ONE consumer, this
+               # mark's x. **Its sibling, the text's start, is `left + _DRIVE_GLYPH_CELL`
+               # with no division at all**, which is why only this line appears here.
+               'x=alt.value(left + _DRIVE_GLYPH_CELL / 2), y=_drive_y_shared(),'}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "

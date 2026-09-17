@@ -11,9 +11,17 @@ covered. What it cannot see is whether the panel still DRAWS the drives, and tha
 these assertions are for — the frame is stubbed so they test rendering, not the database.
 
 THE ASSERTION THAT MATTERS MOST is the defense-touchdown one. A `TD` suffix on a turnover or
-a kick means the DEFENSE scored — 908 drives across ten drive_result values, measured on the
-built model — so a panel that reads the result TEXT rather than `scoring_side` puts every one
-of them on the wrong side of the game, and does it while looking entirely healthy.
+a kick means the DEFENSE scored — so a panel that reads the result TEXT rather than
+`scoring_side` puts every one of them on the wrong side of the game, and does it while looking
+entirely healthy.
+
+🚨 **THAT SENTENCE USED TO READ *"908 drives across ten drive_result values"* AND BOTH NUMBERS
+WERE STALE.** Re-counted on live published serving: **1,209 drives carry `scoring_side =
+'defense'`, 2,845 (3.35%) put points on the defense's board, and `drive_result_key` carries 23
+distinct values across 7 categories on 84,838 rows** — the display column `drive_result` has
+25 distinct strings. ⚠️ **The "ten" was true of an earlier and smaller population and had been
+copied into two docstrings and this header** (R-727's class: a stale count nobody re-measures
+gets inherited by whoever reads it next).
 """
 import html
 import re
@@ -60,15 +68,27 @@ def panel():
     with render_harness.streamlit_stubbed() as (_st, captured, charts):
         matchup = importlib.reload(importlib.import_module("views.matchup"))
 
-        def run(frame, season=2026):
+        def run(frame, season=2026, row=None, encoding=None):
             # R-730. The season decides WHICH absence the Empty state states, so the
             # fixture has to carry one. 2026 is a completed modern game — the case
             # nearly every test here means; the scope tests pass a pre-2024 season.
+            #
+            # 🚨 **AND v02's THIRD ARGUMENT IS THE `srv_game` ROW, WHICH IS NOT DECORATION.**
+            # The scoreboard header reads its SCORE from there because the drives frame's own
+            # end scores disagree with the published final on 214 of 3,607 games (5.93%).
             captured.clear()
+            # ⚠️ MARC'S TWO YARDLINE ENCODINGS ARE ONE IMPLEMENTATION BEHIND ONE CONSTANT, so
+            # a test picks one by name rather than by a second code path (R-574).
+            if encoding is not None:
+                matchup._DRIVE_YARDLINE_ENCODING = encoding
+            # ⚠️ AND THE CHARTS TOO. They used to accumulate across calls while `captured`
+            # was cleared, so a test that ran the panel twice and then read the spec got two
+            # hconcats and failed with `expected exactly one`. See `Charts.clear`.
+            charts.clear()
             original = matchup.query
             matchup.query = lambda *a, **k: frame
             try:
-                matchup._drives(9001, season)
+                matchup._drives(9001, season, _game_row() if row is None else row)
             finally:
                 matchup.query = original
             # 🚨 R-610. An Error state is not a passing state.
@@ -81,10 +101,24 @@ def panel():
         yield run
 
 
+def _game_row(away="Beta", home="Alpha", away_points=17, home_points=24):
+    """The `srv_game` row `_drives` heads its chart with (v02 PART 6).
+
+    ⚠️ **THE SCORES HERE ARE DELIBERATELY NOT THE FIXTURE DRIVES' SCORES.** That is what lets
+    `test_THE_SCOREBOARD_READS_THE_GAME_ROW_not_the_drives_frame` tell the two sources apart —
+    a header built from the frame would print the drives' numbers and pass a test that only
+    checked a scoreboard was present.
+    """
+    return pd.Series({"away_team": away, "home_team": home,
+                      "away_points": away_points, "home_points": home_points,
+                      "season": 2026})
+
+
 def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,
            start=25, end=60, on_field=True, color="#123456", source="primary",
            category="unknown", key=None, period=1, clock="12:00",
-           off_score=(0, 7), def_score=(0, 0)):
+           off_score=(0, 7), def_score=(0, 0),
+           logo="https://example.test/own.png", opponent_logo="https://example.test/opp.png"):
     """One srv_drive row, carrying the columns v01 actually reads.
 
     🚨 **THE COLOURS SIT ON `offense_color_*` NOW, AND THIS FIXTURE USED TO SAY THE OPPOSITE** —
@@ -103,7 +137,14 @@ def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,
     return {
         "drive_number": number, "band": band, "band_order": 2 if band == "home" else 1,
         "is_home_offense": band == "home",
-        "offense_team_display": offense, "offense_logo_url": None,
+        # 🚨 **THE LOGOS WERE `None` BY DEFAULT AND THAT MADE MARC'S LOGO ENCODING
+        # UNTESTABLE — R-744's class exactly.** `_drive_yardline_logo` returned None on every
+        # fixture row, so the image layer drew nothing and a test asserting the partition
+        # failed with an empty set rather than with the defect it was written for.
+        # ⚠️ **Both are parameters, so a test can still take one away**: measured coverage is
+        # 99.08% for `offense_logo_url` and 99.10% for `opponent_logo_url`, not 100%.
+        "offense_team_display": offense, "offense_logo_url": logo,
+        "opponent_logo_url": opponent_logo,
         "offense_color_on_light": color, "offense_color_on_dark": color,
         "offense_color_source": source,
         "opponent_team_display": "Other",
@@ -146,40 +187,137 @@ def _text(entries):
 # of ONE named layer, or ONE panel's encoding.**
 
 _AWAY, _FIELD, _HOME = 0, 1, 2          # hconcat panel order
-_GRID, _BARS, _ICONS = 0, 1, 2          # field layer order
 
 
 def _spec(charts):
-    """The one hconcat spec this panel draws, asserted to be one."""
-    specs = list(charts)
-    assert len(specs) == 1, f"expected exactly one chart, got {len(specs)}"
-    spec = specs[0]
-    assert len(spec.get("hconcat", [])) == 3, (
-        f"expected three panels (away table, field, home table), "
-        f"got {len(spec.get('hconcat', []))}")
-    return spec
+    """The one hconcat spec this panel draws, asserted to be one.
+
+    ⚠️ **v02 DRAWS A SECOND CHART — THE RESULT LEGEND — SO THIS PICKS THE PANEL BY SHAPE
+    RATHER THAN BY POSITION.** A helper that took `charts[0]` would silently start reading the
+    legend the day the order changed, and every assertion below would then be about the wrong
+    picture while still passing or failing for reasons nobody could trace.
+    """
+    hconcats = [s for s in charts if len(s.get("hconcat", [])) == 3]
+    assert len(hconcats) == 1, (
+        f"expected exactly one three-panel hconcat, got {len(hconcats)} "
+        f"among {len(list(charts))} charts")
+    return hconcats[0]
 
 
-def _layer_rows(spec, panel, layer):
-    """The DATA ROWS one named layer plots — not the whole spec, and not text."""
-    node = spec["hconcat"][panel]["layer"][layer]
-    name = node["data"]["name"]
-    return spec["datasets"][name]
+def _legend_spec(charts):
+    """The result legend, which is a layered chart rather than an hconcat."""
+    hits = [s for s in charts if "layer" in s and "hconcat" not in s]
+    assert len(hits) == 1, f"expected exactly one legend chart, got {len(hits)}"
+    return hits[0]
+
+
+# 🚨 **EVERY LOOKUP BELOW FINDS A LAYER BY WHAT IT IS, NEVER BY WHERE IT SITS.** v01's helpers
+# indexed layers positionally — `_GRID, _BARS, _ICONS = 0, 1, 2` — and v02 inserts a band layer
+# under all three panels, a fill under the field and a glyph inside the Result cell. **A
+# positional helper does not fail when the layer order moves; it reads a different layer and
+# goes on asserting.** That is the same class as cfdb-main-R-1170 one level down: an assertion
+# pointed at the wrong element is not a weaker assertion, it is a different one.
+def _layers(spec, panel):
+    return spec["hconcat"][panel].get("layer", [])
+
+
+def _rows(spec, node, parent=None):
+    """The data rows one layer node plots.
+
+    ⚠️ **ALTAIR HOISTS A DATASET SHARED BY EVERY LAYER UP TO THE PARENT SPEC**, so a layer can
+    legitimately carry no `data` of its own. The legend's two layers are built from one frame
+    and hit exactly that; a helper that assumed per-layer data raised `KeyError: 'data'`.
+    """
+    holder = node if "data" in node else (parent if parent is not None else spec)
+    return spec["datasets"][holder["data"]["name"]]
+
+
+def _mark_of(node):
+    mark = node.get("mark")
+    return mark if isinstance(mark, str) else (mark or {}).get("type")
+
+
+def _text_field_of(node):
+    return ((node.get("encoding", {}) or {}).get("text") or {}).get("field")
+
+
+def _text_value_of(node):
+    return ((node.get("encoding", {}) or {}).get("text") or {}).get("value")
+
+
+def _only(hits, what):
+    assert len(hits) == 1, f"expected exactly one {what}, found {len(hits)}"
+    return hits[0]
 
 
 def _field_rows(spec):
-    """The drives the FIELD draws a bar for. A row absent here is a row with no position."""
-    return _layer_rows(spec, _FIELD, _BARS)
+    """The drives the FIELD draws a bar for. A row absent here is a row with no position.
+
+    The bars are the one `rule` layer with a `y` — the gridlines are rules with no y at all.
+    """
+    return _rows(spec, _only(
+        [n for n in _layers(spec, _FIELD)
+         if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})],
+        "field bar layer"))
+
+
+def _field_icons(spec):
+    """The result glyphs on the field: the one `point` layer."""
+    return _only([n for n in _layers(spec, _FIELD) if _mark_of(n) == "point"],
+                 "field icon layer")
+
+
+def _field_grid(spec):
+    """The vertical reference lines: `rule` marks with no y encoding."""
+    return _only([n for n in _layers(spec, _FIELD)
+                  if _mark_of(n) == "rule" and "y" not in (n.get("encoding") or {})],
+                 "field gridline layer")
+
+
+def _endzone_layer(spec):
+    """v02's end-zone fill: a `rect` with an x span and NO y span."""
+    return _only([n for n in _layers(spec, _FIELD)
+                  if _mark_of(n) == "rect" and "y2" not in (n.get("encoding") or {})],
+                 "end-zone fill layer")
+
+
+def _band_layer(spec, panel):
+    """v02's alternating band in one panel: a `rect` that spans y, in every panel."""
+    return _only([n for n in _layers(spec, panel)
+                  if _mark_of(n) == "rect" and "y2" in (n.get("encoding") or {})],
+                 f"band layer in panel {panel}")
 
 
 def _absence_layers(spec):
-    """The field's extra text layers — the `position unavailable` branch, if it drew."""
-    return spec["hconcat"][_FIELD]["layer"][_ICONS + 1:]
+    """The field's `position unavailable` branch, if it drew."""
+    return [n for n in _layers(spec, _FIELD)
+            if _text_value_of(n) == "position unavailable"]
 
 
-def _table_rows(spec, panel):
-    """The rows one side's table draws. Its first layer is the `#` column."""
-    return _layer_rows(spec, panel, 0)
+def _table_rows(spec, panel, column="team_drive"):
+    """The rows one side's table draws, taken off one NAMED column's text layer.
+
+    ⚠️ **NOT LAYER 0 ANY MORE — THAT IS NOW THE BAND, AND THE BAND CARRIES THE WHOLE FRAME.**
+    v01 read `layer[0]` for "this side's rows"; in v02 that layer plots BOTH sides' drives on
+    purpose, so the old helper would have reported every drive as belonging to both tables and
+    `test_A_TABLE_ROW_SITS_AT_ITS_OWN_DRIVES_INDEX` would have passed while measuring nothing.
+    """
+    return _rows(spec, _only(
+        [n for n in _layers(spec, panel) if _text_field_of(n) == column],
+        f"{column} text layer in panel {panel}"))
+
+
+def _table_heading(spec, panel, heading):
+    """One table heading's layer, found by the literal it prints."""
+    return _only([n for n in _layers(spec, panel) if _text_value_of(n) == heading],
+                 f"{heading!r} heading in panel {panel}")
+
+
+def _table_glyph_rows(spec, panel):
+    """The rows that get Marc's glyph inside the Result cell."""
+    return _rows(spec, _only(
+        [n for n in _layers(spec, panel) if _mark_of(n) == "point"],
+        f"result glyph layer in panel {panel}"))
 
 
 def _row_for(rows, drive_number):
@@ -266,12 +404,12 @@ def test_a_defense_touchdown_is_not_credited_to_the_offense(panel):
         f"had the ball")
     # 🚨 AND THE SIGN IS THE HALF A SHAPE CANNOT CARRY. Score Impact reads BOTH sides, so a
     # drive that put seven on the OPPONENT's board must cost this offense seven.
-    assert pick_six["impact_label"].startswith("-"), (
-        f"a pick-six shows Score Impact {pick_six['impact_label']!r} in the DRIVING team's "
+    assert pick_six["impact_cell"].startswith("-"), (
+        f"a pick-six shows Score Impact {pick_six['impact_cell']!r} in the DRIVING team's "
         f"row — a column reading only the offense delta shows 0 or +7 here, which tells a "
         f"reader the drive helped them")
-    assert offensive["impact_label"] == "+7", (
-        f"an offensive touchdown shows {offensive['impact_label']!r}")
+    assert offensive["impact_cell"].startswith("+7"), (
+        f"an offensive touchdown shows {offensive['impact_cell']!r}")
 
 
 def test_each_band_takes_its_own_colour(panel):
@@ -323,12 +461,9 @@ def test_an_off_field_end_coordinate_keeps_the_row_and_drops_the_bar(panel):
     assert {r["drive_number"] for r in bars} == {2}, (
         "a drive with a broken end coordinate was given a bar, which draws a position cfdb "
         "does not know")
-    extra = _absence_layers(spec)
-    assert extra, "the drive with no position vanished from the field entirely"
-    said = [layer for layer in extra
-            if layer.get("encoding", {}).get("text", {}).get("value") == "position unavailable"]
-    assert said, f"no layer says the position is unavailable: {extra}"
-    drawn = _layer_rows(spec, _FIELD, _ICONS + 1)
+    said = _absence_layers(spec)
+    assert said, "no layer says the position is unavailable — the drive vanished entirely"
+    drawn = _rows(spec, said[0])
     assert {r["drive_number"] for r in drawn} == {1}, (
         "the absence layer drew the wrong drives")
     # AND THE ROW SURVIVES IN ITS OWN TABLE, which is the half that makes it a kept row rather
@@ -336,21 +471,79 @@ def test_an_off_field_end_coordinate_keeps_the_row_and_drops_the_bar(panel):
     assert 1 in {r["drive_number"] for r in _table_rows(spec, _HOME)}
 
 
-def test_a_fallback_colour_is_named_rather_than_silently_neutral(panel):
-    """Degraded is not Empty. The drives are all here; a side's colour is cfdb's.
+def test_AN_ADJUSTED_COLOUR_AND_A_NEUTRAL_ONE_DO_NOT_SHARE_A_SENTENCE(panel):
+    """🚨 **THE RENDER CAUGHT THIS SAYING THE WRONG THING ON 23.22% OF DRIVES.**
 
-    ⚠️ IT NAMES THE TEAM WHOSE COLOUR FELL BACK NOW, not that team's opponent — the sentence
-    reads `offense_color_source` off the side's own row.
+    v01 covered both unsourced rungs with one caption: *"is cfdb's rather than the team's, so
+    that side is banded in a neutral tone."* 📊 **The Jacksonville State at Ohio raster printed
+    it over bars that were plainly RED** — that game's rung is `adjusted`, and `adjusted` is the
+    team's own hue darkened or lightened for contrast (`#cc0000`, which is their red), not a
+    replacement. ⚠️ **The sentence was false twice: the colour IS the team's, and it is not
+    neutral.**
+
+    📊 **THE RUNGS, MEASURED ON ALL 84,838 ROWS:** `alternate` 66.620% · **`adjusted` 23.220%**
+    · `primary` 8.839% · **`fallback` 1.321%**. Only `fallback` is a neutral cfdb tone, and it
+    is the rarer of the two by a factor of eighteen — **so the wrong sentence was the one almost
+    every degraded game got.**
+
+    ✅ **ASSERTED AS A DIFFERENCE, NOT AS TWO PRESENCE CHECKS.** Two captions that both contain
+    the team's name and "Every drive below is present" would pass a presence check while saying
+    the same wrong thing; driving both rungs through and requiring the sentences to DIFFER is
+    what proves the rung decides it (the R-730 shape, one panel over).
     """
+    def caption_for(source):
+        frame = pd.DataFrame([
+            _drive(1, "home", "Alpha", "PUNT", category="punt",
+                   color="#cc0000", source=source),
+            _drive(2, "away", "Beta", "PUNT", category="punt")])
+        entries, charts = panel(frame)
+        assert len(_field_rows(_spec(charts))) == 2, "a degraded colour must not drop the drives"
+        return " ".join(b for k, b in entries if k == "caption" and b.startswith("Alpha"))
+
+    adjusted, neutral = caption_for("adjusted"), caption_for("fallback")
+    assert adjusted and neutral, (
+        f"a degraded rung drew no caption at all: adjusted={adjusted!r} neutral={neutral!r}")
+    assert adjusted != neutral, (
+        f"`adjusted` and `fallback` were given the SAME sentence: {adjusted!r}. One is the "
+        f"team's own colour moved for contrast and the other is cfdb's stand-in")
+    # AND EACH SAYS THE TRUE THING RATHER THAN MERELY A DIFFERENT THING.
+    assert "their own" in adjusted and "neutral" not in adjusted, (
+        f"the `adjusted` caption calls the team's own colour something else: {adjusted!r}")
+    assert "no color" in neutral and "neutral" in neutral, (
+        f"the `fallback` caption does not say the team publishes no colour: {neutral!r}")
+    # ⚠️ AND A SOURCED RUNG DRAWS NO CAPTION AT ALL — an indicator that fires on everything
+    # indicates nothing, which is `identity.color_source_hint`'s own recorded lesson.
     frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt",
-                                 color="#6b6b68", source="fallback"),
-                          _drive(2, "away", "Beta", "PUNT", category="punt")])
-    entries, charts = panel(frame)
-    captions = " ".join(b for k, b in entries if k == "caption")
-    assert "cfdb's rather than the team's" in captions
-    assert "Alpha" in captions, (
-        f"the caption must name the side whose colour fell back, not its opponent: {captions!r}")
-    assert len(_field_rows(_spec(charts))) == 2, "a degraded colour must not drop the drives"
+                                 source="alternate")])
+    entries, _charts = panel(frame)
+    assert not [b for k, b in entries
+                if k == "caption" and b.startswith("Alpha")], (
+        "a team using its own published colour was reported as degraded")
+
+
+def test_THE_SOURCED_RUNGS_ARE_READ_FROM_IDENTITY_not_copied():
+    """🚨 `matchup.py` CARRIED `_SOURCED_COLOR_RUNGS = ("primary", "alternate")` WITH A COMMENT
+    SAYING *"mirrored from lib.identity"* — **a second inventory of a tuple A's module already
+    publishes**, which is the same defect v02 fixed in the result legend.
+
+    ✅ `site/lib/identity.py` is session A's file and `SOURCED_RUNGS` is a public name on it, so
+    reading it costs nothing and cannot drift.
+    """
+    import importlib
+    module = importlib.import_module("views.matchup")
+    from lib import identity
+
+    # 🚨 ASKED OF THE MODULE, NOT OF ITS TEXT — AND THE FIRST DRAFT OF THIS TEST GOT IT WRONG
+    # IN THE EXACT WAY THE CHARTER NAMES. It asserted `"_SOURCED_COLOR_RUNGS" not in source`
+    # and went red, because **the name appears in the comment that explains why it was
+    # removed.** §2.2.1c.1: a grep locates, it does not tell you what a line IS. `hasattr`
+    # asks the only question that matters.
+    assert not hasattr(module, "_SOURCED_COLOR_RUNGS"), (
+        "the local copy of identity.SOURCED_RUNGS is back as a module attribute; read the "
+        "module's own name instead")
+    assert identity.SOURCED_RUNGS == ("primary", "alternate"), (
+        f"identity's rung list moved to {identity.SOURCED_RUNGS} — this panel's caption splits "
+        f"on what is NOT in it, so the split follows A's module by reading it")
 
 
 def test_SCORE_IMPACT_REFUSES_A_FIGURE_THAT_CONTRADICTS_THE_DRIVES_OWN_RESULT(panel):
@@ -390,9 +583,9 @@ def test_SCORE_IMPACT_REFUSES_A_FIGURE_THAT_CONTRADICTS_THE_DRIVES_OWN_RESULT(pa
         _drive(4, "home", "Alpha", "FG", key="field_goal", category="offensive score",
                scoring_side="offense", scoring=True, off_score=(0, 0), def_score=(0, 4))])
     rows = _table_rows(_spec(panel(frame)[1]), _HOME)
-    flat_td = _row_for(rows, 1)["impact_label"]
-    moving_punt = _row_for(rows, 2)["impact_label"]
-    honest_fg = _row_for(rows, 3)["impact_label"]
+    flat_td = _row_for(rows, 1)["impact_cell"]
+    moving_punt = _row_for(rows, 2)["impact_cell"]
+    honest_fg = _row_for(rows, 3)["impact_cell"]
 
     assert flat_td == fmt.EM_DASH, (
         f"a scoring drive whose snapshots did not move printed {flat_td!r} — a touchdown worth "
@@ -400,10 +593,10 @@ def test_SCORE_IMPACT_REFUSES_A_FIGURE_THAT_CONTRADICTS_THE_DRIVES_OWN_RESULT(pa
     assert moving_punt == fmt.EM_DASH, (
         f"a punt printed {moving_punt!r} — the snapshot window covered somebody else's score "
         f"and the column credited it to this drive")
-    assert honest_fg == "+3", (
+    assert honest_fg.startswith("+3"), (
         f"a field goal whose snapshots agree printed {honest_fg!r} — the guard must suppress "
         f"the contradictions, not the column")
-    illegal = _row_for(rows, 4)["impact_label"]
+    illegal = _row_for(rows, 4)["impact_cell"]
     assert illegal == fmt.EM_DASH, (
         f"a field goal printed {illegal!r} — both facts agreed the drive scored, so the "
         f"result cross-check passes it, and no scoring play produces that number")
@@ -548,11 +741,20 @@ def test_A_PERIOD_ZERO_IS_AN_ABSENCE_not_a_quarter(panel):
     rather than a period"*. **All 24 also carry a null `start_clock_display`** — one absence,
     measured, not two.
 
-    🚨 **AND THE QUARTER COMES OFF THE PUBLISHED CLOCK STRING, NOT OFF A FORMATTER.** This
-    round wrote a `_drive_period_label` that turned period 5 into `OT`, before measuring what
-    `start_clock_display` contains — **84,461 rows already start `Qn …` and 252 already say
-    `OT`/`2OT`** — and the first render printed *"Q1 Q1 5:07"*. The helper is deleted and this
-    test pins the column's own strings, so a second formatter cannot come back.
+    🚨 **AND THE QUARTER COMES OFF THE PUBLISHED CLOCK STRING, NOT OFF A FORMATTER.** v01 wrote
+    a `_drive_period_label` that turned period 5 into `OT`, before measuring what
+    `start_clock_display` contains, and its first render printed *"Q1 Q1 5:07"*. The helper is
+    deleted and this test pins the column's own strings, so a second formatter cannot come back.
+
+    📊 **THE EXACT PREFIX INVENTORY, RE-MEASURED IN v02 BECAUSE v01's COMMENT DID NOT ADD UP:**
+    `Q1` 21,413 · `Q2` 22,472 · `Q3` 21,117 · `Q4` 19,459 = **84,461**; the overtime family
+    `OT` 252 · `2OT` 61 · `3OT` 16 · `4OT` 10 · `5OT` 6 · `6OT` 4 · `7OT` 2 · `8OT` 2 = **353**;
+    null **24**. ⚠️ **v01 reported the overtime family as 252, which is the bare `OT` prefix
+    alone — so its three numbers summed to 84,737, 101 rows short of the population they
+    claimed to partition.** ✅ **A sum that misses its own total is the cheapest possible tell.**
+
+    ⚠️ **AND v02 SPLITS MARC'S `When` INTO TWO COLUMNS** — *"Split When into 2 columns: Clock,
+    Dur"* — so the absence now has to hold in `Clock` while `Dur` still stands on its own.
     """
     frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt",
                                  period=0, clock=None),
@@ -560,23 +762,29 @@ def test_A_PERIOD_ZERO_IS_AN_ABSENCE_not_a_quarter(panel):
                                  period=5, clock="OT"),
                           _drive(3, "home", "Alpha", "PUNT", category="punt",
                                  period=1, clock="Q1 5:07")])
-    rows = _table_rows(_spec(panel(frame)[1]), _HOME)
-    broken = _row_for(rows, 1)["when"]
-    overtime = _row_for(rows, 2)["when"]
-    regulation = _row_for(rows, 3)["when"]
+    spec = _spec(panel(frame)[1])
+    rows = _table_rows(spec, _HOME, column="clock")
+    broken, overtime, regulation = (_row_for(rows, n) for n in (1, 2, 3))
 
-    assert "Q0" not in broken and "0:" not in broken.split("(")[0], (
-        f"period 0 rendered as {broken!r} — a quarter zero is a defect, not a period")
-    assert broken.startswith(fmt.EM_DASH), (
-        f"period 0 must read as an absence, not as a number: {broken!r}")
-    assert "(" in broken, (
-        f"the absence dropped the duration too, which IS published here: {broken!r}")
-    # AND THE PERIOD IS NOT PRINTED TWICE — the defect the first render shipped.
-    assert regulation.count("Q1") == 1, (
-        f"the quarter is printed twice: {regulation!r}. `start_clock_display` already carries "
-        f"it, so prefixing a formatted period duplicates the column")
-    assert overtime.startswith("OT"), (
-        f"an overtime drive rendered as {overtime!r} — the published clock says OT")
+    assert broken["clock"] == fmt.EM_DASH, (
+        f"period 0 rendered as {broken['clock']!r} — a quarter zero is a defect, not a period")
+    # 🚨 THE DURATION IS PUBLISHED ON ALL 84,838 ROWS AND SURVIVES THE CLOCK'S ABSENCE. In v01
+    # the two shared one cell, so losing the clock could have taken the duration with it.
+    assert broken["duration"] == "2:00", (
+        f"the absent clock took the duration with it: {broken['duration']!r}, and "
+        f"`elapsed_display` is present on every published row")
+    # AND THE PERIOD IS NOT PRINTED TWICE — the defect v01's first render shipped.
+    assert regulation["clock"] == "Q1 5:07", (
+        f"the clock cell reads {regulation['clock']!r}. `start_clock_display` already carries "
+        f"the quarter, so prefixing a formatted period duplicates the column")
+    assert overtime["clock"] == "OT", (
+        f"an overtime drive rendered as {overtime['clock']!r} — the published clock says OT")
+
+    # 🚨 AND THE TWO COLUMNS ARE ACTUALLY TWO, WHICH IS THE HALF A FIELD READ CANNOT SEE.
+    # A frame carrying `clock` and `duration` proves nothing if the table still draws one
+    # cell; these are the headings Marc named, found by the literal each one prints.
+    for heading in ("Clock", "Dur"):
+        assert _table_heading(spec, _HOME, heading), f"no {heading!r} column heading"
 
 
 # --- and it says so when it cannot ---------------------------------------------------------
@@ -600,7 +808,7 @@ def test_no_drives_is_empty_not_a_blank_panel(panel):
 
 def test_the_query_is_one_table_scoped_to_a_game_and_bounded():
     """AC-G.3 and AC-G.39, asserted on the source so a rewrite cannot quietly widen it.
-    srv_drive is 81,433 rows; an unscoped read of it is the defect."""
+    srv_drive is 84,838 rows today; an unscoped read of it is the defect."""
     source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
     block = source[source.index("def _drives("):source.index("def render()")]
     sql = block[block.index("select drive_number"):block.index('""", {"game_id"')]
@@ -660,3 +868,644 @@ def test_a_pre_2024_game_is_still_told_it_is_out_of_SCOPE(panel):
     assert "not arrived yet" not in body, (
         "a 1999 game was told its drives have not arrived YET, which promises data that will "
         "never exist")
+
+
+# ── 🚨 v02 PART 1: THE STARTING YARDLINE, WHICH MARC FLAGGED THE TRAP ON HIMSELF ────────────
+
+def test_THE_YARDLINE_IS_THE_BROADCAST_YARDLINE_not_yards_to_goal(panel):
+    """> **MARC:** *"NOTE: This is the actually yardline on the field, not yards to goal, or
+    > any of the other tricky data points you worked through to make the graph display
+    > properly."*
+
+    🚨 **THREE PUBLISHED COLUMNS DESCRIBE THIS ONE FACT AND TWO ARE THE WRONG ANSWER.**
+    `start_yards_to_goal` is offense-relative and equals `100 - start_yards_from_own_goal` on
+    **84,838 of 84,838 rows** — measured — so reading it would put every drive on the wrong
+    yardline and the picture would look entirely healthy.
+
+    ✅ **THE NUMBER IS FRAME-INDEPENDENT AND THAT IS WHY THIS IS SAFE: `min(v, 100-v)` computed
+    from the relative frame and from the absolute frame agree on 84,838 / 84,838 rows.** The
+    SIDE is what needs the relative frame, because "own" is a fact about who has the ball.
+
+    📊 own side 74,027 (87.257%) · opponent side 10,177 (11.996%) · midfield 634 (0.747%).
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", start=25, end=40),
+        _drive(2, "home", "Alpha", "PUNT", category="punt", start=70, end=80),
+        _drive(3, "home", "Alpha", "PUNT", category="punt", start=50, end=60)])
+    rows = _table_rows(_spec(panel(frame)[1]), _HOME, column="yardline_mark")
+    own, opponent, midfield = (_row_for(rows, n) for n in (1, 2, 3))
+
+    # 🚨 PINNED TO LITERALS, AND THE 70 IS THE ONE THAT MATTERS. `start_yards_from_own_goal =
+    # 70` is the OPPONENT's 30. A panel reading `start_yards_to_goal` would print 30 with the
+    # wrong SIDE; one printing the raw column would say 70, which is not a yardline at all.
+    assert own["yardline_mark"] == "-25", (
+        f"a drive starting 25 yards from its own goal reads {own['yardline_mark']!r} — Marc's "
+        f"`-` means the offense's own half and the number is the yardline")
+    assert opponent["yardline_mark"] == "+30", (
+        f"a drive starting 70 yards from its own goal reads {opponent['yardline_mark']!r}. "
+        f"The broadcast yardline there is the OPPONENT's 30: `+30`. "
+        f"`+70` would be the raw column and `-30` would be the wrong half")
+    assert midfield["yardline_mark"] == "50", (
+        f"midfield reads {midfield['yardline_mark']!r} — it belongs to NEITHER side, so giving "
+        f"it a sign claims a half it does not have (634 drives start there)")
+
+
+def test_THE_GOAL_LINE_IS_NAMED_rather_than_printed_as_a_zero(panel):
+    """📊 **413 drives (0.487%) start ON a goal line** — 193 at own-goal `0` and 220 at `100`.
+
+    ⚠️ **A FOOTBALL FIELD CARRIES NO `0` MARKER**, so `-0` and `+0` would read as a formatting
+    fault rather than as a position. This is the one place in the vocabulary a letter appears.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", start=0, end=20),
+        _drive(2, "home", "Alpha", "TD", category="offensive score", start=100, end=100)])
+    rows = _table_rows(_spec(panel(frame)[1]), _HOME, column="yardline_mark")
+    own_goal, opponent_goal = _row_for(rows, 1), _row_for(rows, 2)
+    mark = _module_constant("_DRIVE_GOAL_MARK")
+    assert own_goal["yardline_mark"] == "-" + mark, (
+        f"a drive starting on its own goal line reads {own_goal['yardline_mark']!r}")
+    assert opponent_goal["yardline_mark"] == "+" + mark, (
+        f"a drive starting on the opponent's goal line reads "
+        f"{opponent_goal['yardline_mark']!r}")
+    for row in (own_goal, opponent_goal):
+        assert "0" not in row["yardline_mark"], (
+            f"{row['yardline_mark']!r} prints a zero yardline, which no field carries")
+
+
+def test_THE_TOOLTIP_NAMES_THE_SIDE_IN_WORDS_because_it_cannot_carry_a_logo(panel):
+    """🚨 **MARC ASKED FOR A LOGO IN THE TOOLTIP AND A VEGA TOOLTIP CANNOT RENDER ONE.**
+
+    > *"I like the tooltip on hover. Needs to include the yard the drive started on. Need to
+    > probably use a logo to indicate which side of the 50."*
+
+    📊 **MEASURED RATHER THAN ASSERTED (§2.4): a tooltip field whose value was
+    `<img src=…>` was hovered in Chromium and read back out of the DOM. `vega-tooltip`
+    escapes it — the text came through as `&lt;img src=…&gt;` with **0 `<img>` elements**
+    inside `#vg-tooltip-element`.** ✅ **So the team's NAME does the logo's job there**, which
+    is also what a broadcast caption says out loud.
+
+    ⚠️ **AND THE ASSERTION IS SCOPED TO THE TOOLTIP, NOT TO THE PANEL (cfdb-main-R-1170).**
+    Every team name is already on the panel in the scoreboard, the direction caption and the
+    degraded caption, so a text search for `"Alpha"` passes on a tooltip that names nothing.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", start=25, end=40),
+        _drive(2, "home", "Alpha", "PUNT", category="punt", start=70, end=80),
+        _drive(3, "home", "Alpha", "PUNT", category="punt", start=50, end=60)])
+    spec = _spec(panel(frame)[1])
+
+    # the tooltip is an ENCODING on the bar layer, so this reads the encoding rather than text
+    bars = _only([n for n in _layers(spec, _FIELD)
+                  if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})], "bar layer")
+    fields = [t.get("field") for t in bars["encoding"]["tooltip"]]
+    assert "yardline_words" in fields, (
+        f"the bar tooltip does not carry the starting yardline Marc asked for: {fields}")
+
+    rows = _field_rows(spec)
+    own, opponent, midfield = (_row_for(rows, n) for n in (1, 2, 3))
+    assert own["yardline_words"] == "Alpha the 25", (
+        f"the tooltip says {own['yardline_words']!r} — it must name the team whose half it is")
+    assert opponent["yardline_words"] == "Other the 30", (
+        f"the tooltip says {opponent['yardline_words']!r} — 70 yards from your own goal is the "
+        f"OPPONENT's 30, and the tooltip has room to say whose")
+    assert midfield["yardline_words"] == "Midfield 50", (
+        f"the tooltip says {midfield['yardline_words']!r} for a drive starting at the 50")
+
+
+# ── 🚨 v02 PART 3: THE BANDS, WHICH ARE WHAT MAKE THE SHARED AXIS VISIBLE ───────────────────
+
+def test_THE_BANDS_LINE_UP_ACROSS_ALL_THREE_PANELS(panel):
+    """> **MARC:** *"an alternating band (light gray/white) … a slightly darker border"*
+
+    🚨 **UNDER `hconcat` THE THREE PANELS ARE SEPARATE VIEWS, SO EACH DRAWS ITS OWN BAND —
+    AND THEY MUST COME FROM ONE COMPUTATION** (cfdb-wta-R-941). Three independently derived
+    parities drift the moment a drive is filtered, and the defect would read as a rendering
+    bug rather than a data one.
+
+    ✅ **THIS IS ALSO THE FIRST THING ON THE PAGE THAT SHOWS v01's SHARED AXIS.** The axis has
+    been exact since it shipped — worst disagreement 1.00px — and nothing displayed it.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt"),
+                          _drive(2, "away", "Beta", "PUNT", category="punt"),
+                          _drive(3, "away", "Beta", "TD", category="offensive score"),
+                          _drive(4, "home", "Alpha", "FG", category="offensive score")])
+    spec = _spec(panel(frame)[1])
+
+    seen = {}
+    for name, index in (("away", _AWAY), ("field", _FIELD), ("home", _HOME)):
+        layer = _band_layer(spec, index)
+        rows = _rows(spec, layer)
+        # 🚨 THE BAND LAYER CARRIES THE **WHOLE** FRAME IN EVERY PANEL, INCLUDING THE TABLES.
+        # A table draws only its own side's text; if its bands were filtered the same way the
+        # stripes would break wherever the other team had the ball, which is most rows.
+        assert {r["drive_number"] for r in rows} <= {1, 2, 3, 4}
+        seen[name] = {r["drive_number"]: (r["y_lo"], r["y_hi"]) for r in rows}
+        assert layer["encoding"]["y"]["field"] == "y_lo"
+        assert layer["encoding"]["y2"]["field"] == "y_hi"
+        # ⚠️ AND NO PANEL'S BAND MAY PIN A y DOMAIN — that is what ties it to the field's.
+        assert "scale" not in layer["encoding"]["y"], (
+            f"the {name} band declares its own y scale, so the stripes are placed by "
+            f"arithmetic rather than by the shared axis")
+
+    assert seen["away"] == seen["field"] == seen["home"], (
+        f"the three panels band DIFFERENT rows, so a stripe in one does not line up with the "
+        f"same drive in another: away={seen['away']} field={seen['field']} home={seen['home']}")
+    assert seen["field"], "no band was drawn at all"
+    # AND EACH STRIPE BRACKETS ITS OWN DRIVE — one row tall, centred on the drive it marks.
+    for drive_number, (lo, hi) in seen["field"].items():
+        assert lo < drive_number < hi and (hi - lo) == 1.0, (
+            f"drive {drive_number}'s stripe spans {lo}…{hi}, which is not the one row it owns")
+    # AND IT ALTERNATES rather than striping everything.
+    assert set(seen["field"]) == {2, 4}, (
+        f"the stripes are on drives {sorted(seen['field'])} — an alternating band puts them "
+        f"on every other row of the sequence")
+
+
+# ── 🚨 v02 PART 5: THE LEGEND IS THE VOCABULARY RENDERED, NOT A LIST BESIDE IT ──────────────
+
+def test_THE_LEGEND_IS_BUILT_FROM_THE_SHAPE_MAP_in_both_directions(panel):
+    """> **MARC:** *"the icons/glyphs … need to be bigger, and there should be a legenc"*
+
+    🚨 **v01's LEGEND WAS A SECOND INVENTORY AND THIS IS THE DEFECT v02 FIXES.** It carried its
+    own dict — `{"offensive score": "▶", …}` — seven hand-typed unicode characters beside the
+    seven Vega shape names they were meant to depict, with **nothing tying them together**. A
+    shape could be changed in `_DRIVE_RESULT_SHAPES` and the legend would go on showing the old
+    glyph, correctly spelled and wrong. **That is exactly what B117 exists to prevent.**
+
+    ✅ **BOTH DIRECTIONS, WHICH IS THE WHOLE POINT: every category appears, and nothing that is
+    not a category appears.** A legend asserted one way only can quietly grow an eighth entry.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    _entries, charts = panel(frame)
+    legend = _legend_spec(charts)
+
+    glyph_layer = _only([n for n in legend["layer"] if _mark_of(n) == "point"],
+                        "legend glyph layer")
+    rows = _rows(legend, glyph_layer, parent=legend)
+    shapes = _module_constant("_DRIVE_RESULT_SHAPES")
+
+    drawn = {r["category"]: r["result_shape"] for r in rows}
+    assert drawn == shapes, (
+        f"the legend and the shape map disagree — missing "
+        f"{set(shapes) - set(drawn)}, extra {set(drawn) - set(shapes)}, "
+        f"mismatched "
+        f"{dict((k, (drawn.get(k), v)) for k, v in shapes.items() if drawn.get(k) != v)}")
+    # AND THE SHAPE IS PASSED THROUGH RATHER THAN SCALED, so the legend draws the same mark the
+    # chart does instead of a look-alike Vega chose for it.
+    assert glyph_layer["encoding"]["shape"]["scale"] is None, (
+        "the legend's shape encoding has a scale, so Vega picks the marks and they can differ "
+        "from the ones on the field")
+    # AC-G.22: THE LEGEND NAMES THE SHAPES WITHOUT COLOUR, because colour is the team's.
+    assert "color" not in glyph_layer.get("encoding", {}), (
+        "the legend encodes colour, which belongs to the team and says nothing about a result")
+    labels = _only([n for n in legend["layer"] if _mark_of(n) == "text"], "legend label layer")
+    assert _text_field_of(labels) == "category"
+
+
+def test_THE_TABLE_GLYPH_IS_MARCS_THREE_CATEGORIES_and_a_subset_of_the_shape_map(panel):
+    """> **MARC:** *"In the table, If the Result is a FG, TD, or some kind of Turnover, include
+    > the icon/glyph"*
+
+    ✅ **FG and TD are `offensive score`; a pick-six is `defensive score`; "some kind of
+    turnover" is `turnover`.** ⚠️ **AND THE SET IS ASSERTED TO BE A SUBSET OF THE SHAPE MAP'S
+    KEYS** — a second hand-written list of category names is the same defect as a second
+    legend, one column over. **Punts, kicks, clock expiries and unclassified drives carry no
+    table glyph**, which is what makes his three legible at a glance.
+    """
+    wanted = _module_constant("_DRIVE_TABLE_GLYPH_CATEGORIES")
+    shapes = _module_constant("_DRIVE_RESULT_SHAPES")
+    assert set(wanted) <= set(shapes), (
+        f"the table glyph set names categories the shape vocabulary does not have: "
+        f"{set(wanted) - set(shapes)}")
+    assert set(wanted) == {"offensive score", "defensive score", "turnover"}, (
+        f"Marc named FG/TD, a defensive score and turnovers; this set is {sorted(wanted)}")
+
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt"),
+        _drive(2, "home", "Alpha", "TD", category="offensive score", scoring=True,
+               scoring_side="offense"),
+        _drive(3, "home", "Alpha", "INT", category="turnover"),
+        _drive(4, "home", "Alpha", "END OF HALF", category="clock")])
+    spec = _spec(panel(frame)[1])
+    marked = {r["drive_number"] for r in _table_glyph_rows(spec, _HOME)}
+    assert marked == {2, 3}, (
+        f"the table drew a glyph on drives {sorted(marked)} — Marc asked for FG/TD, defensive "
+        f"scores and turnovers, so a punt and a clock expiry must carry none")
+
+
+# ── 🚨 v02 PART 4: THE IMPACT COLUMN'S TWO ABSENCES, AND THE RUNNING SCORE ──────────────────
+
+def test_A_ZERO_IMPACT_IS_BLANK_AND_AN_UNTRUSTWORTHY_ONE_IS_A_DASH(panel):
+    """> **MARC:** *"Don't present a 0 in the Impact column"*
+
+    🚨 **DROPPING THE `0` PUTS TWO DIFFERENT ABSENCES IN ONE COLUMN AND AC-G.11 SAYS THEY MUST
+    NOT LOOK THE SAME.** `0` means *this drive scored nothing* — 52,336 of 84,838 rows (61.69%)
+    — and `—` means *no figure here can be trusted*, which is v01's two guards firing on 3,005
+    rows (3.54%). **Blank and an em dash are different marks AND the caption says which is
+    which**, because a reader cannot be expected to infer it.
+    """
+    frame = pd.DataFrame([
+        # scored nothing, and the snapshots agree it scored nothing → BLANK
+        _drive(1, "home", "Alpha", "PUNT", category="punt", scoring=False,
+               off_score=(0, 0), def_score=(0, 0)),
+        # a touchdown whose snapshots did not move → the guard fires → EM DASH
+        _drive(2, "home", "Alpha", "TD", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(17, 17), def_score=(14, 14)),
+        # and a real swing → a figure
+        _drive(3, "home", "Alpha", "FG", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(0, 3), def_score=(0, 0))])
+    entries, charts = panel(frame)
+    rows = _table_rows(_spec(charts), _HOME, column="impact_cell")
+
+    assert _row_for(rows, 1)["impact_cell"] == "", (
+        f"a drive that scored nothing printed {_row_for(rows, 1)['impact_cell']!r} — Marc asked "
+        f"for no zero in this column")
+    assert _row_for(rows, 2)["impact_cell"] == fmt.EM_DASH, (
+        f"an untrustworthy figure printed {_row_for(rows, 2)['impact_cell']!r} — it must not "
+        f"collapse into the same blank a real zero now uses")
+    assert _row_for(rows, 3)["impact_cell"].startswith("+3")
+
+    # 🚨 AND THE CAPTION IS WHAT MAKES THE TWO READABLE — SCOPED TO ITSELF, NOT TO THE PANEL
+    # (cfdb-main-R-1170). The words `blank` and `em dash` appear nowhere else on the panel, so
+    # this selects the one caption that opens with them rather than grepping everything.
+    note = [b for k, b in entries if k == "caption" and b.startswith("In Impact,")]
+    assert len(note) == 1, f"expected exactly one Impact caption, found {len(note)}"
+    assert "blank" in note[0] and "em dash" in note[0], (
+        f"the caption does not distinguish the two absences: {note[0]!r}")
+
+
+def test_THE_RUNNING_SCORE_IS_READ_NOT_ACCUMULATED(panel):
+    """> **MARC:** *"If there is a score Impact (table), then include the impact (running sum
+    > of teams points)"*
+
+    🚨 **A RUNNING SUM WOULD COMPOUND EVERY DEFECT IN THE SCORE SNAPSHOTS, AND THE COST IS
+    MEASURED:** 3,005 drives carry a wrong or suppressed impact (3.54%), and **a running sum
+    would carry a wrong total on 22,216 of 84,838 rows (26.19%)** — because one bad delta
+    shifts every row below it. ✅ **Reading the published scoreboard is wrong on ONE row.**
+
+    ⚠️ **THE FIXTURE IS BUILT SO THE TWO CANNOT AGREE, WHICH IS THE ONLY WAY THIS TEST CAN
+    FAIL.** Drive 2's published end score is 28 while its impact is +7 on top of drive 1's 7 —
+    **an accumulator prints 14 and a reader prints 28.** A fixture whose snapshots happened to
+    be self-consistent would pass either way, which is R-744's class.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(0, 7), def_score=(0, 0)),
+        _drive(2, "home", "Alpha", "TD", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(21, 28), def_score=(0, 0))])
+    rows = _table_rows(_spec(panel(frame)[1]), _HOME, column="impact_cell")
+    second = _row_for(rows, 2)["impact_cell"]
+    assert second == "+7 0-28", (
+        f"the second drive's Impact cell reads {second!r}. The published scoreboard after it "
+        f"is 0-28; an accumulated one would say 0-14, which is what this fixture exists to "
+        f"tell apart")
+    assert _row_for(rows, 1)["impact_cell"] == "+7 0-7"
+
+
+def test_THE_RUNNING_SCORE_IS_SUPPRESSED_WHERE_IT_WOULD_GO_BACKWARDS(panel):
+    """🚨 **A SCOREBOARD CANNOT GO DOWN. Points are never removed, so a running score lower
+    than the previous drive's is impossible rather than merely suspicious.**
+
+    📊 **1,549 of 81,231 within-game comparisons fall foul of it (1.91%), across 793 of 3,607
+    games (21.99%)** — and the same snapshots disagree with `srv_game`'s published final on
+    214 games (5.93%). ✅ **So the impossible rows print no score at all, and the impact beside
+    them still stands**: the swing came from `is_scoring_drive` and the legal-value check,
+    which are not the scoreboard.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(0, 7), def_score=(0, 0)),
+        _drive(2, "home", "Alpha", "TD", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(21, 28), def_score=(0, 0)),
+        # the home total drops 28 → 10, which no game can do
+        _drive(3, "home", "Alpha", "FG", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(7, 10), def_score=(0, 0))])
+    rows = _table_rows(_spec(panel(frame)[1]), _HOME, column="impact_cell")
+    backwards = _row_for(rows, 3)["impact_cell"]
+    assert backwards == "+3", (
+        f"a drive whose running score went BACKWARDS printed {backwards!r} — the scoreboard "
+        f"is impossible there and must be withheld, while the swing itself still stands")
+    assert "10" not in backwards, (
+        f"{backwards!r} still carries the impossible total")
+
+
+# ── 🚨 v02 PART 6: THE SCOREBOARD HEADER ────────────────────────────────────────────────────
+
+def test_THE_SCOREBOARD_READS_THE_GAME_ROW_not_the_drives_frame(panel):
+    """> **MARC:** *"Include the Scoreboard at the top/middle as a header to the chart."*
+
+    🚨 **THE DRIVES FRAME CANNOT SUPPLY IT, AND THAT IS MEASURED AGAINST AN INDEPENDENT
+    AUTHORITY.** The last drive's `end_offense_score` / `end_defense_score` agree with
+    `srv_game`'s published final on **3,393 of 3,607 games (94.07%)** and **disagree on 214
+    (5.93%)**, by up to 22 points. ⚠️ **A header built from the frame would be wrong on one
+    game in seventeen, in the one place a reader would never think to doubt.**
+
+    ✅ **THE FIXTURE'S TWO SOURCES DISAGREE ON PURPOSE** — the row says 17-24 and the drives
+    add up to something else — so a header taken from the wrong place fails here rather than
+    passing by coincidence.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score", scoring=True,
+               scoring_side="offense", off_score=(0, 7), def_score=(0, 0))])
+    entries, _charts = panel(frame, row=_game_row(away_points=17, home_points=24))
+    header = [b for k, b in entries
+              if k == "markdown" and isinstance(b, str) and "Drives</div>" in b]
+    assert len(header) == 1, f"expected exactly one scoreboard header, found {len(header)}"
+    head = header[0]
+    assert ">17<" in head and ">24<" in head, (
+        f"the header does not carry the published final score 17-24: {head!r}")
+    assert ">7<" not in head, (
+        "the header printed the drives frame's own score — those columns disagree with the "
+        "published final on 5.93% of games")
+
+
+def test_THE_SCOREBOARD_SEGMENTS_ARE_THE_PANELS_OWN_CONSTANTS(panel):
+    """🚨 **DO NOT USE `st.columns` — a proportional element cannot track an absolute one**, the
+    argument B115 lost at 1700px with a green suite and a pixel-perfect 1300px raster
+    (cfdb-wta-R-941).
+
+    ✅ **A156 MEASURED THAT `use_container_width` IS INERT UNDER `hconcat` AND THE PANEL IS A
+    FIXED WIDTH (cfdb-main-R-1106), WHICH MAKES THIS EASIER RATHER THAN HARDER** — an HTML
+    header whose segments ARE the chart's constants lines up by construction.
+
+    🚨 **AND THE PANEL IS 1200px WIDE, NOT 1180 — `spacing` IS REAL WIDTH.** The three panels
+    sum to 1180 and `hconcat` puts ten pixels between each neighbouring pair. **A header built
+    to 1180 would be twenty pixels narrow and the middle segment would sit off-centre**, which
+    is the arithmetic this assertion exists to keep honest.
+    """
+    table_w = _module_constant("_DRIVE_TABLE_WIDTH")
+    field_w = _module_constant("_DRIVE_FIELD_WIDTH")
+    spacing = _module_constant("_DRIVE_PANEL_SPACING")
+    panel_w = _module_constant("_DRIVE_PANEL_WIDTH")
+    assert panel_w == 2 * table_w + field_w + 2 * spacing, (
+        f"the declared panel width {panel_w} is not what hconcat draws: "
+        f"{table_w} + {spacing} + {field_w} + {spacing} + {table_w}")
+
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    entries, charts = panel(frame)
+    head = _only([b for k, b in entries
+                  if k == "markdown" and isinstance(b, str) and "Drives</div>" in b],
+                 "scoreboard header")
+    widths = [int(m) for m in re.findall(r"width:(\d+)px", head)]
+    assert widths == [panel_w, table_w, field_w, table_w], (
+        f"the header's segments are {widths}, which do not match the chart's "
+        f"{[panel_w, table_w, field_w, table_w]}")
+    assert f"gap:{spacing}px" in head, (
+        f"the header's gutters do not match hconcat's spacing of {spacing}px: {head!r}")
+
+    # AND THE CHART IT HEADS REALLY IS THOSE WIDTHS — the half a header-only test cannot see.
+    spec = _spec(charts)
+    drawn = [spec["hconcat"][i].get("width") for i in (_AWAY, _FIELD, _HOME)]
+    assert drawn == [table_w, field_w, table_w], (
+        f"the three panels are {drawn} wide, so the header is aligned to numbers the chart "
+        f"does not use")
+    assert spec.get("spacing") == spacing, (
+        f"the hconcat spacing is {spec.get('spacing')} and the header assumes {spacing}")
+
+
+def test_THE_COLUMN_PLAN_SUMS_TO_THE_TABLE_WIDTH():
+    """🚨 **v01 CARRIED FIVE LITERAL x POSITIONS AND v02 DERIVES THEM, WHICH NEEDS THIS GUARD.**
+
+    A literal x agrees with the widths beside it only until somebody edits one, and the failure
+    is silent: columns overprint, which is what v01's first render did. **This asserts the last
+    column's right edge is exactly `_DRIVE_TABLE_WIDTH`** — the one assertion that can catch a
+    plan whose parts no longer sum.
+
+    📊 **AND THE FIT IS MEASURED, NOT ASSUMED.** Each distinct string in each column was put
+    through a real Vega-Lite text mark at `fontSize` 10 in Chromium and read back with
+    `getComputedTextLength()`. Seven columns need **307px** and have **236**, so `Result`
+    absorbs the shortfall at 45px and clips on **9,107 of 84,838 drives (10.735%)**.
+    """
+    plan = _module_constant("_DRIVE_COLUMN_PLAN")
+    gap = _module_constant("_DRIVE_TABLE_GAP")
+    width = _module_constant("_DRIVE_TABLE_WIDTH")
+    glyph = _module_constant("_DRIVE_GLYPH_CELL")
+
+    total = sum(c[2] for c in plan) + gap * (len(plan) - 1)
+    assert total == width, (
+        f"the seven columns and their {len(plan) - 1} gutters come to {total}px inside a "
+        f"{width}px table — a plan that does not sum overprints, silently")
+    assert [c[6] for c in plan] == ["#", "Clock", "Dur", "Yard", "Yrds", "Result", "Impact"], (
+        f"the column order is {[c[6] for c in plan]}; Marc asked for the yardline between the "
+        f"clock group and Yrds")
+
+    layout = _module_constant("_drive_column_layout")()
+    last = layout[-1]
+    assert last[2] == float(width), (
+        f"the last column is anchored at {last[2]} rather than the table's right edge {width}")
+    # AND THE RESULT CELL RESERVES EXACTLY THE GLYPH'S WIDTH FOR THE GLYPH, which is why its
+    # column width and its text limit differ.
+    result = _only([c for c in plan if c[0] == "result"], "the Result column")
+    assert result[2] - result[4] == glyph, (
+        f"the Result column is {result[2]}px wide with a {result[4]}px text limit, a difference "
+        f"of {result[2] - result[4]} — the glyph cell is {glyph}px, so the text would overlap it")
+
+
+# ── 🚨 v02 PART 2: THE FIELD'S FURNITURE ────────────────────────────────────────────────────
+
+def test_THE_REFERENCE_LINES_ARE_SOLID_and_the_goal_lines_and_midfield_are_BOLDER(panel):
+    """> **MARC:** *"vertical reference lines should be solid instead of dashed. Would be ideal
+    > to make the 0,50,0 a bolder line."*
+
+    ⚠️ **HIS `0,50,0` IS THREE LINES AND THE OUTER TWO ARE THE GOAL LINES** — where the DATA's
+    0 and 100 sit, at field x 10 and 110 — **not the picture's edges**, which are the back of
+    each end zone. Emphasising the edges would put the weight on the one pair of lines that
+    means nothing to a reader.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    spec = _spec(panel(frame)[1])
+    grid = _field_grid(spec)
+
+    mark = grid["mark"]
+    assert "strokeDash" not in (mark if isinstance(mark, dict) else {}), (
+        f"the reference lines are still dashed: {mark}")
+
+    rows = _rows(spec, grid)
+    kinds = {r["x"]: r["kind"] for r in rows}
+    endzone = _module_constant("_DRIVE_ENDZONE")
+    yards = _module_constant("_DRIVE_FIELD_YARDS")
+    assert kinds[endzone] == "goal" and kinds[yards - endzone] == "goal", (
+        f"the goal lines are not marked as goal lines: {kinds}")
+    assert kinds[yards / 2] == "mid", f"midfield is not marked: {kinds}"
+    assert kinds[0] == "edge" and kinds[yards] == "edge", (
+        f"the back of the end zones is being treated as a goal line: {kinds}")
+
+    widths = dict(zip(grid["encoding"]["strokeWidth"]["scale"]["domain"],
+                      grid["encoding"]["strokeWidth"]["scale"]["range"]))
+    assert widths["goal"] > widths["ten"] and widths["mid"] > widths["ten"], (
+        f"the 0/50/0 lines are not bolder than the ten-yard lines: {widths}")
+    assert widths["goal"] > widths["edge"], (
+        f"the goal line is no bolder than the back of the end zone: {widths}")
+
+
+def test_THE_ENDZONES_ARE_FILLED_on_geometry_that_already_existed(panel):
+    """> **MARC:** *"Can we fill the endzone with a light/mid gray?"*
+
+    ✅ **v01 ALREADY DREW 120 YARDS WITH THE DATA INSET AT 10…110, so this is a fill on real
+    space rather than new decoration.**
+
+    🚨 **AND THE GRAY IS `currentColor` AT LOW OPACITY, NOT A LITERAL — AC-G.22 AND R-855.**
+    Streamlit sets the page's text colour per theme and the SVG inherits it, so the fill is the
+    theme's own ink. **A hex gray is the R-855 trap in a different property:** that round found
+    `identity.text_on(row)` defaulting to the on-light colour and rendering `rgb(0,0,0)` on a
+    `rgb(14,17,23)` page, invisible, and the raster is what caught it.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    spec = _spec(panel(frame)[1])
+    fill = _endzone_layer(spec)
+    mark = fill["mark"]
+    assert mark["fill"] == "currentColor", (
+        f"the end-zone fill is {mark.get('fill')!r} — a literal colour is right in one theme "
+        f"and wrong in the other")
+    assert 0 < mark["fillOpacity"] < 0.5, (
+        f"the end-zone fill opacity is {mark.get('fillOpacity')} — it must not compete with a "
+        f"team colour (AC-G.22)")
+
+    endzone = _module_constant("_DRIVE_ENDZONE")
+    yards = _module_constant("_DRIVE_FIELD_YARDS")
+    spans = sorted((r["x"], r["x2"]) for r in _rows(spec, fill))
+    assert spans == [(0.0, float(endzone)), (float(yards - endzone), float(yards))], (
+        f"the fill covers {spans} rather than the two end zones")
+    # AND IT SPANS THE WHOLE HEIGHT rather than one row — no y encoding at all.
+    assert "y" not in fill["encoding"], (
+        "the end-zone fill is bound to a drive, so it draws a band instead of a zone")
+
+
+# 📊 **MEASURED BOLD HEADING WIDTHS, AT `fontSize` 10 IN CHROMIUM'S `sans-serif`** — read back
+# with `getComputedTextLength()` off the node a real Vega-Lite text mark produced, with
+# `fontWeight: bold` set, which is how the panel draws them.
+#
+# 🚨 **THIS TABLE EXISTS BECAUSE THE FIRST v02 RENDER BROKE THREE HEADINGS AT ONCE AND NOTHING
+# IN THE SUITE COULD SEE IT.** `Result` clipped to `Res…` inside a 30px limit because bold
+# `Result` is 30.56px; `Impact` clipped to `Imp…` at 32 because bold is 32.23; and `Yard` and
+# `Yrds`, both right-aligned in adjacent ~17px cells, overlapped by 2.2px and rendered as the
+# single word `YardYr…`. ⚠️ **Every heading had been sized from its REGULAR width.**
+#
+# ✅ **A HEADING NOT IN THIS TABLE FAILS THE TEST BELOW**, which is deliberate: renaming a
+# column should cost a measurement, because a guessed width is what broke it.
+_BOLD_HEADING_PX = {
+    "#": 5.56, "Clock": 27.23, "Dur": 17.23, "Yard": 21.69,
+    "Yrds": 22.23, "Result": 30.56, "Impact": 32.23,
+}
+
+
+def test_NO_TWO_TABLE_HEADINGS_COLLIDE_and_none_is_clipped_by_its_own_limit():
+    """🚨 THE THREE DEFECTS THE FIRST v02 RASTER SHOWED, TURNED INTO AN ASSERTION.
+
+    ⚠️ **AND IT IS ABOUT THE BOLD WIDTH, WHICH IS THE WHOLE LESSON.** The limits were set from
+    regular widths and bold costs up to +2.22px — exactly the headroom they had. **§2.4: the
+    measurement answered *how wide is this string* when the question was *how wide is this
+    string AS DRAWN*.**
+
+    ✅ **THE COLLISION IS FIXED BY ALIGNMENT, NOT BY SHORTENING MARC'S WORDS.** A heading need
+    not share its cell's alignment: `Yrds` is left-aligned at its cell's left edge so it grows
+    away from `Yard` rather than back into it.
+    """
+    layout = _module_constant("_drive_column_layout")()
+    width = _module_constant("_DRIVE_TABLE_WIDTH")
+
+    spans = []
+    for entry in layout:
+        (_key, _field, _x, _left, _w, _align, _limit,
+         head_limit, heading, head_align, head_x) = entry
+        assert heading in _BOLD_HEADING_PX, (
+            f"heading {heading!r} has no measured bold width — measure it in a real Vega text "
+            f"mark at fontSize 10 with fontWeight bold and add it to _BOLD_HEADING_PX. "
+            f"A guessed width is what shipped `Res…` and `YardYr…`")
+        bold = _BOLD_HEADING_PX[heading]
+        # 1. NOTHING IS CLIPPED BY ITS OWN LIMIT — the `Res…` / `Imp…` defect.
+        assert bold <= head_limit, (
+            f"{heading!r} needs {bold}px bold and its limit is {head_limit} — Vega will clip "
+            f"the heading to fit, which is a word narrower than itself")
+        lo = head_x - bold if head_align == "right" else head_x
+        spans.append((heading, lo, lo + bold))
+
+    # 2. NO TWO HEADINGS OVERLAP — the `YardYr…` defect.
+    for (left_name, _l0, l1), (right_name, r0, _r1) in zip(spans, spans[1:]):
+        assert r0 >= l1, (
+            f"{left_name!r} ends at {l1:.2f} and {right_name!r} starts at {r0:.2f} — they "
+            f"overlap by {l1 - r0:.2f}px and render as one word, which is what the first v02 "
+            f"raster showed as `YardYr…`")
+
+    # 3. AND THE ROW STAYS INSIDE THE TABLE at both ends.
+    assert spans[0][1] >= 0, f"{spans[0][0]!r} starts off the left edge at {spans[0][1]}"
+    assert spans[-1][2] <= width, (
+        f"{spans[-1][0]!r} runs to {spans[-1][2]} past the table's {width}px right edge")
+
+
+def test_THE_LOGO_ENCODING_PARTITIONS_THE_ROWS_and_never_double_labels_a_cell(panel):
+    """🚨 **THE RASTER CAUGHT THIS AS `50 50` IN ONE CELL AND NO ASSERTION EXISTED FOR IT.**
+
+    Marc offered two encodings for the side of the 50 — a logo, or his `+`/`-` — and they are
+    one implementation behind `_DRIVE_YARDLINE_ENCODING`. In the logo reading a row with no
+    logo has to fall back to the mark, **and the first version filtered only the fallback
+    layer**: the number layer still drew every row, so a midfield drive printed the mark and
+    the number side by side.
+
+    📊 **THE ROWS WITH NO LOGO ARE NOT RARE: midfield is 634 drives (0.747%) and it has no side
+    at all, so it can never have one** — plus `offense_logo_url` covers 84,058 of 84,838 rows
+    (99.08%) and `opponent_logo_url` 84,076 (99.10%).
+
+    ⚠️ **A `notna()` FILTER ON ONE LAYER IS HALF A PARTITION.** The other half has to be told,
+    which is the shape of R-141's family: a branch that is right about what it draws and wrong
+    about what the other branch draws.
+    """
+    frame = pd.DataFrame([
+        # own side, with a logo
+        _drive(1, "home", "Alpha", "PUNT", category="punt", start=25, end=40),
+        # MIDFIELD — no side, so no logo, ever
+        _drive(2, "home", "Alpha", "PUNT", category="punt", start=50, end=60),
+        # opponent side, with a logo
+        _drive(3, "home", "Alpha", "PUNT", category="punt", start=70, end=80)])
+    spec = _spec(panel(frame, encoding="logo")[1])
+
+    images = _only([n for n in _layers(spec, _HOME) if _mark_of(n) == "image"],
+                   "yardline logo layer")
+    numbers = _only([n for n in _layers(spec, _HOME)
+                     if _text_field_of(n) == "yardline_number"], "yardline number layer")
+    marks = _only([n for n in _layers(spec, _HOME)
+                   if _text_field_of(n) == "yardline_mark"], "yardline fallback layer")
+
+    with_logo = {r["drive_number"] for r in _rows(spec, images)}
+    numbered = {r["drive_number"] for r in _rows(spec, numbers)}
+    fallen_back = {r["drive_number"] for r in _rows(spec, marks)}
+
+    assert with_logo == {1, 3}, f"the logo drew for drives {sorted(with_logo)}"
+    assert 2 in fallen_back, (
+        "a midfield drive has no side and so no logo — it must keep the +/- encoding")
+    # 🚨 THE PARTITION, WHICH IS THE WHOLE TEST. No drive may be labelled twice.
+    both = numbered & fallen_back
+    assert not both, (
+        f"drive(s) {sorted(both)} were labelled by BOTH the number layer and the fallback "
+        f"layer — that is the `50 50` the raster showed in one cell")
+    # AND THE OTHER NO-LOGO CASE — a team that publishes no logo url at all (~0.9% of rows).
+    # ⚠️ It is a SEPARATE cause from midfield and must land in the same fallback, not a hole.
+    bare = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt", start=25,
+                                logo=None, opponent_logo=None)])
+    bare_spec = _spec(panel(bare, encoding="logo")[1])
+    assert not [n for n in _layers(bare_spec, _HOME) if _mark_of(n) == "image"
+                and _rows(bare_spec, n)], "a row with no logo url drew an image anyway"
+    bare_marks = _only([n for n in _layers(bare_spec, _HOME)
+                        if _text_field_of(n) == "yardline_mark"], "fallback layer")
+    assert {r["drive_number"] for r in _rows(bare_spec, bare_marks)} == {1}, (
+        "a team with no published logo lost its yardline entirely rather than falling back")
+
+    assert numbered | fallen_back == {1, 2, 3}, (
+        f"the two layers together cover {sorted(numbered | fallen_back)} of three drives — a "
+        f"row labelled by neither is a blank cell where a yardline should be")
+
+
+def test_THE_MARK_ENCODING_DRAWS_NO_IMAGE_AT_ALL(panel):
+    """The other reading, asserted so the two cannot quietly become one.
+
+    ⚠️ **AND THIS IS WHAT SHIPS**, for two measured reasons rather than a preference: a Vega
+    tooltip cannot carry an image (hovered and read out of the DOM — 0 `<img>` elements), and
+    the mark covers 100% of rows against the logo's 99.08%.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt", start=25)])
+    spec = _spec(panel(frame, encoding="mark")[1])
+    assert not [n for n in _layers(spec, _HOME) if _mark_of(n) == "image"], (
+        "the default encoding drew a logo — the two readings have collapsed into one")
+    assert _module_constant("_DRIVE_YARDLINE_ENCODING") == "mark", (
+        "the shipped default is no longer the encoding that works in the tooltip and covers "
+        "every row; if that is deliberate it is Marc's call and this line should say so")

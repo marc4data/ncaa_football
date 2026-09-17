@@ -107,6 +107,22 @@ class Charts:
         self._objects.append(chart)
         self._specs = None
 
+    def clear(self):
+        """Forget every chart captured so far.
+
+        🚨 ADDED B134, BECAUSE THE ASYMMETRY WAS A TRAP. A fixture that drives one panel
+        several times inside one `streamlit_stubbed` block already calls `captured.clear()`
+        between runs — that is what makes each run a fresh capture — and **the charts went on
+        accumulating**, so the second run's spec lookup saw two panels and the assertion failed
+        with `expected exactly one … got 2`. ⚠️ **The failure is legible, which is the only
+        reason this was cheap**: a helper that silently returned the FIRST of two specs would
+        have asserted about the previous run's chart instead.
+
+        ⚠️ Purely additive — nothing that captures once is affected.
+        """
+        self._objects = []
+        self._specs = None
+
     def _materialise(self):
         if self._specs is None:
             specs = []

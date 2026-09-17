@@ -48,6 +48,18 @@ KNOWN_CHART_CALLS = {
     #     declared heights honoured                425 / 425 / 425
     #     declared widths honoured                 190 / 560 / 190
     #
+    # ⚠️ **THOSE WIDTHS ARE B133's FIRST DRAFT AND THE PANEL SHIPPED AT 236 / 708 / 236** —
+    # kept as the measurement they were, because the finding is about `fit` being ignored on an
+    # `hconcat` and that does not move with the ratio. 📊 **The drawn panel is 1200px, not 1180:
+    # the three widths sum to 1180 and `spacing=10` adds real width between each pair.**
+    #
+    # 🚨 **AND matchup.py MAKES TWO `st.altair_chart` CALLS SINCE B134, WHICH THIS ONE ENTRY
+    # COVERS** — this registry keys on (file, method), so the second call needs no second row
+    # and cannot appear unmeasured. The new one is v02's result legend, a LAYERED chart passed
+    # `use_container_width=False`: `fit` works on a layered view, so passing True there would
+    # have let Streamlit stretch a fixed-pitch row of glyphs and slide the labels off their
+    # marks. **The two calls pass opposite values on purpose, for reasons that differ.**
+    #
     # 🚨 **SO THE `fit` IS IMPOSED AND THEN IGNORED.** Vega-Lite warns in its own console that
     # *"Autosize `fit` only works for single views and layered views"*, and an `hconcat` is
     # neither (A156, cfdb-main-R-1106). ⚠️ **The declared height is therefore real, which is the
