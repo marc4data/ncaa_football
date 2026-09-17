@@ -58,6 +58,38 @@ select
     case when a.game_id is null then 'the game is not in the summary at all'
          else 'the published count is not the hand-counted one' end as rule
 from expected e
-left join actual a on a.game_id = e.game_id
-where a.game_id is null
-   or a.scoreboard_lead_changes is distinct from e.scoreboard_lead_changes
+join actual a on a.game_id = e.game_id
+where a.scoreboard_lead_changes is distinct from e.scoreboard_lead_changes
+
+union all
+
+-- ── AND THE HALF THAT ASSERTS SOMETHING WHEREVER IT RUNS ────────────────────────────────────
+--
+-- 🚨 THE ANCHORS ABOVE ARE `join`, NOT `left join`, AND THAT IS A CORRECTION CI MADE. The first
+-- draft failed an absent anchor, which is right in the warehouse and WRONG in CI: the fixture is
+-- a deliberate sample and holds neither game, so `dbt build` went red on a test that was working
+-- exactly as designed. **A guard that cannot run on the fixture is a guard that blocks every PR.**
+--
+-- ⚠️ BUT ANCHORS THAT SIMPLY VANISH WOULD LEAVE THIS TEST VACUOUS THERE (R-760), so this branch
+-- is the one that runs on any data at all: **a game whose lead never actually changed hands must
+-- publish 0**, recomputed from the plays rather than read back from the column (R-768).
+--
+-- A game qualifies when at most ONE side was ever ahead — a shutout, a wire-to-wire win, or a
+-- game that only ever drew level. There is no ordering in this branch and none is needed: if
+-- only one team was ever in front, no sequence of those plays can contain a change.
+select
+    q.game_id,
+    'a game where only one side was ever ahead must publish 0' as what,
+    0                          as expected_count,
+    a.scoreboard_lead_changes  as published_count,
+    'the lead never changed hands and the column says it did'  as rule
+from (
+    select w.game_id
+    from {{ ref('stg_game_win_probability') }} w
+    where w.home_win_probability is not null
+    group by w.game_id
+    having count(distinct sign(w.home_score - w.away_score))
+             filter (where sign(w.home_score - w.away_score) <> 0) <= 1
+) q
+join actual a on a.game_id = q.game_id
+where a.scoreboard_lead_changes <> 0
