@@ -25,43 +25,33 @@ on-run-start:
 models:
   cfdb_dbt:
     +materialized: view
-    # ── A157: NO PARALLEL QUERY FOR dbt's CONNECTIONS (cfdb-main-R-1110) ──────────────────
+    # ── A160: THE `pre_hook` IS GONE, BECAUSE THE CEILING IT COMPENSATED FOR IS GONE ────────
     #
-    # 🚨 WHY: `cfbd_midweek_results.dbt_run` failed twice on
-    #     could not resize shared memory segment "/PostgreSQL.*" to N bytes:
-    #     No space left on device   CONTEXT: parallel worker
-    # and the arithmetic closes exactly. MEASURED by sampling the warehouse container's
-    # /dev/shm every 0.25s THROUGH a real DAG run (a reading at rest proves nothing — the
-    # exhaustion happens inside the build):
+    # 🚨 A157 ADDED `set max_parallel_workers_per_gather = 0` HERE AND IT COST A WORKING DAY.
+    # The warehouse container ran Docker's default 64 MB of /dev/shm, Postgres allocates
+    # parallel-query segments from there (`dynamic_shared_memory_type = posix`), and a full
+    # production build peaked at 53.8 MB — so a 16 MB segment request failed and the midweek
+    # cadence went red. Disabling parallel query removed the allocation and the failure.
     #
-    #     /dev/shm ceiling        64.0 MB   Docker's default; ShmSize = 67108864
-    #     peak in use, measured   53.8 MB   84%, under the DAG's own 4-thread concurrency
-    #     headroom                10.2 MB
-    #     segment requested       16.0 MB   (8 MB on the first failure) -> cannot fit
+    # ⚠️ AND IT REMOVED THE QUERY PLANS WITH IT. MEASURED, same model, same data, same box:
     #
-    # ⚠️ IT FAILS ON A DIFFERENT MODEL EACH TIME — `fct_player_yardage_week` and
-    # `srv_player_game_log` once, `srv_game_team` the next — which is the signature of a
-    # RESOURCE RACE rather than a bad model. Rebuilding the three that failed, alone, peaks at
-    # 25.9 MB and passes; only the full production selector reaches 53.8.
+    #     fct_player_leader_week   27.05 s   with a parallel plan
+    #                             3,135 s+   at max_parallel_workers_per_gather = 0
     #
-    # ✅ THE LEVER: `dynamic_shared_memory_type` is `posix` here, so parallel query allocates
-    # its segments FROM /dev/shm. Turning parallel query off for dbt's own connections removes
-    # the allocation, and therefore the failure mode, deterministically.
+    # 🚨 ~95x, ON A MODEL THE WEEKLY CADENCE MUST BUILD (cfdb-main-R-1117). A158 narrowed it to
+    # `= 1` and refused to ship it unverified, which was right; A159 was to verify it and lost
+    # the box before it could.
     #
-    # 🚨 A `pre_hook` AND NOT `on-run-start`, AND THE DIFFERENCE IS THE WHOLE POINT.
-    # `on-run-start` runs ONCE, on ONE connection; dbt opens a connection PER THREAD, so a
-    # `SET` there binds the hook's connection and does nothing for the four that actually build.
-    # **A model's pre_hook runs on that model's own connection**, which is the one that fails.
+    # ✅ NEITHER VALUE IS NEEDED NOW. `shm_size: 1gb` on the warehouse service raises the ceiling
+    # to ~19x the measured peak, so the thing both values were compensating for does not exist.
+    # **The verified state is no hook at all — which is what this warehouse ran for months.**
     #
-    # ⚠️ THE COST, STATED RATHER THAN DISCOVERED: sequential plans for every dbt-built model on
-    # this warehouse. This box is I/O-bound rather than CPU-bound (load average ~0.4 through the
-    # build, the long pole being `DataFileRead`), so the trade is small here — but it IS a trade.
-    #
-    # 📋 AND IT IS A WORKAROUND, NOT THE CORRECT FIX. The correct fix is `shm_size` on the
-    # warehouse service, which lives in `/opt/cfdb-pipeline/docker-compose.yml` — hand-merged on
-    # the serving host and NOT IN GIT, so no round can see it and a deploy cannot reproduce it.
-    # **That makes it Marc's call (§2.1); this is the half that can live in the repository.**
-    +pre_hook: "set max_parallel_workers_per_gather = 0"
+    # 🚨 THE ONE THING A FUTURE ROUND MUST KNOW: `shm_size` LIVES IN
+    # `/opt/cfdb-pipeline/docker-compose.yml`, WHICH IS NOT IN GIT. A deploy cannot reproduce it
+    # and a `git diff` cannot show it, so **a rebuild of that host silently restores the 64 MB
+    # ceiling and this failure returns** — with no line in this repository to explain it.
+    # ⚠️ Bringing that file into git is its own decision; until then, this comment is the only
+    # place the dependency is written down.
     # Push schema.yml descriptions into the database as native comments. This is what makes
     # dim_field_metadata possible without a second document: descriptions are authored once
     # here, and the data dictionary is read back out of the warehouse's own catalogue.
