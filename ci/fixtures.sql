@@ -4690,9 +4690,15 @@ INSERT INTO raw.raw_ppa_teams (filename, content, status_code, params, fetched_a
 -- exist` and SKIPPED the mart and `srv_system_health` behind it. **A model that cannot build on
 -- the fixture blocks every PR**, which is exactly what A152 paid for.
 --
--- ⚠️ THE ROWS ARE DELIBERATELY FRESH (`now()`), so the health signal builds GREEN here. CI is
--- not the place to assert the red path — that is proved against the real warehouse with an aged
--- COPY of the source, and `tests/test_health_budgets.py` is what holds the budgets in step.
+-- 🚨 AND ONE CADENCE IS DELIBERATELY STALE, BECAUSE THIS PROJECT'S CI DEMANDS IT.
+-- My first version seeded every row fresh so the signal would build green, and the
+-- `Assert every health signal fires` job rejected it in exactly the right words:
+--     'pipeline' never escalates in the fixture (only ['ok'])
+--     — add a fixture row that trips its warn or error threshold
+-- ✅ **That job is R-744 built into the pipeline**: a health signal that has never been seen
+-- red is a signal nobody can trust, and a fixture that can only produce 'ok' cannot prove
+-- otherwise. `weekly_results` is therefore 9 days old against its 8-day budget, so the
+-- `pipeline` signal emits both 'ok' and 'error' on every CI run.
 CREATE SCHEMA IF NOT EXISTS ops;
 CREATE TABLE IF NOT EXISTS ops.pipeline_heartbeat (
   heartbeat_name text NOT NULL,
@@ -4701,6 +4707,7 @@ CREATE TABLE IF NOT EXISTS ops.pipeline_heartbeat (
 INSERT INTO ops.pipeline_heartbeat (heartbeat_name, beat_at) VALUES
   ('scores_refresh', now() - interval '1 hour'),
   ('lines_snapshot', now() - interval '2 hours'),
-  ('weekly_results', now() - interval '2 days'),
   ('weekly_pregame', now() - interval '3 days'),
-  ('weekly_midweek', now() - interval '1 day');
+  ('weekly_midweek', now() - interval '1 day'),
+  -- past its 8-day budget: this is the row that makes the signal provably able to go red
+  ('weekly_results', now() - interval '9 days');
