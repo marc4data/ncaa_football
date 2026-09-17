@@ -7,10 +7,24 @@
 -- compares two relations with different fetch times and measures the gap between them rather than
 -- the thing it is about. Full authority on the weekly `+tag:production` build, which rebuilds both.
 --
--- 🚨 A PRESENCE ASSERTION CANNOT SEE THIS DEFECT, WHICH IS WHY IT SURVIVED TO NOW. The old and the
--- new columns are integers on the same grain in the same range: every not-null, every accepted
--- range, every row count passes on both. The only thing that separates them is the ORDER, so the
--- test has to reach the order.
+-- 🚨 A PRESENCE ASSERTION CANNOT SEE THIS DEFECT, WHICH IS WHY IT SURVIVED TO A140. The old and
+-- the new columns were integers on the same grain in the same range: every not-null, every
+-- accepted range, every row count passed on both. The only thing that separated them was the
+-- ORDER, so the test has to reach the order.
+--
+-- ── A155: THE FEED-ORDERED ORIGINALS ARE GONE, AND ONLY CLAIM 3 CARED ────────────────────────
+--
+-- 🚨 CI CAUGHT THIS TEST, NOT THE CONTRACT ROUND'S OWN CONSUMER SEARCH, AND THE MISS IS WORTH
+-- RECORDING WHERE THE NEXT ONE WILL READ IT (cfdb-main-R-1104). That search excluded the
+-- surviving family with `grep -v "_by_clock"` — and `grep -rn` puts the PATH on every line, so
+-- **this file was filtered out of the results by its own FILENAME.** ⚠️ A `-v` on `grep -rn`
+-- output matches the path as well as the content; a term used to narrow a search silently
+-- excludes every file NAMED for it.
+--
+-- ✅ CLAIMS 1 AND 2 NEVER READ THE ORIGINALS and are untouched. Claim 3 compared the twin's null
+-- pattern against its now-removed original, so it is RE-KEYED onto the evidence column rather
+-- than deleted — `plays_with_win_probability_fourth_quarter` is what made the original's nulls
+-- correct in the first place, so this is the same claim anchored one step closer to the truth.
 --
 -- ✅ CLAIM 1 REACHES IT FROM A DIFFERENT RELATION, WHICH IS WHAT KEEPS IT FROM BEING A RESTATEMENT.
 -- The summary derives its ordering INLINE from `stg_play`'s period and clock, through
@@ -24,11 +38,11 @@
 -- hand, before either column existed:
 --
 --     401761598  Memphis at Georgia State, 2025 week 2
---                the feed publishes 25 lead changes and a 0.6704 largest swing
+--                the feed published 25 lead changes and a 0.6704 largest swing
 --                along the clock the game had 11 and 0.2401
 --     401635615  the game in the register: play_number 0-3 are fourth-quarter plays at
 --                3,528-3,590 seconds and play_number 4 is a first-quarter play at 23 seconds
---                the feed publishes 6 lead changes; along the clock it had 5
+--                the feed published 6 lead changes; along the clock it had 5
 --
 -- 🚨 R-843 — EACH ANCHOR MOVES UNDER THE BREAK IT IS WRITTEN FOR. Re-order the new windows by
 -- `play_number` and 11 becomes 25, 0.2401 becomes 0.6704, 5 becomes 6. ❌ AND NONE OF THEM IS
@@ -67,13 +81,10 @@ published as (
 
     select
         game_id,
-        lead_changes,
         lead_changes_by_clock,
-        largest_single_play_swing,
         largest_single_play_swing_by_clock,
-        lead_changes_fourth_quarter,
+        plays_with_win_probability_fourth_quarter,
         lead_changes_fourth_quarter_by_clock,
-        lead_changes_overtime,
         lead_changes_overtime_by_clock
     from {{ ref('fct_game_win_probability_summary') }}
 
@@ -134,15 +145,24 @@ where game_id = 401635615 and lead_changes_by_clock is distinct from 5
 
 union all
 
--- CLAIM 3 — NULL DISCIPLINE TRAVELS WITH THE TWIN. The period-scoped counts are null exactly
--- when the feed never reached the fourth quarter, and that fact is about the DATA rather than
--- about the ordering, so the new column must be null in exactly the same places. A twin that
--- coalesced them to zero would claim we counted a quarter whose data stops in the third.
+-- CLAIM 3 — NULL DISCIPLINE, ANCHORED ON THE EVIDENCE RATHER THAN ON A TWIN. The period-scoped
+-- counts are null exactly when the feed never reached the fourth quarter, which is a fact about
+-- the DATA rather than about the ordering. Until A155 this compared against the feed-ordered
+-- original; that column is gone, so it now compares against the column that made the original's
+-- nulls correct. A count that coalesced them to zero would claim we counted a quarter whose data
+-- stops in the third.
+--
+-- ⚠️ THE OVERTIME HALF IS WHY THIS WAS RE-KEYED RATHER THAN DROPPED.
+-- `assert_period_scoped_win_probability_agrees_with_the_whole_game` now asserts the same
+-- discipline for the FOURTH-QUARTER column against the same evidence — but it says nothing about
+-- overtime, and deleting this claim would have taken that half with it silently.
 select
     game_id,
     coalesce(lead_changes_fourth_quarter_by_clock::text, 'null'),
-    coalesce(lead_changes_fourth_quarter::text, 'null'),
-    'the fourth-quarter twin is null in a different place from its original'
+    plays_with_win_probability_fourth_quarter::text,
+    'a period-scoped count is null in a different place from the evidence for it'
 from published
-where (lead_changes_fourth_quarter is null) <> (lead_changes_fourth_quarter_by_clock is null)
-   or (lead_changes_overtime is null) <> (lead_changes_overtime_by_clock is null)
+where (plays_with_win_probability_fourth_quarter = 0)
+      <> (lead_changes_fourth_quarter_by_clock is null)
+   or (plays_with_win_probability_fourth_quarter = 0)
+      <> (lead_changes_overtime_by_clock is null)

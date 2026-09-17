@@ -343,9 +343,12 @@ select
     --
     -- ⚠️ MEASURED BEFORE IT WAS ARGUED FOR, and it is a better TIE-BREAK than lead key. On the 86
     -- games of 2026 week 2, ordering by it alone puts Ohio State @ Texas 1st and buries the other
-    -- two games Marc named at 27th and 30th; used behind `lead_changes_fourth_quarter` it improves
-    -- the worst rank of his seven from 21 to 18. A136's report carries the whole table. The page's
-    -- ordering constant is A137's to change, not this model's.
+    -- two games Marc named at 27th and 30th; used behind the then-published
+    -- `lead_changes_fourth_quarter` it improved the worst rank of his seven from 21 to 18. A136's
+    -- report carries the whole table. ⚠️ THAT MEASUREMENT IS HISTORY: A153 moved the page's lead
+    -- key to `scoreboard_lead_changes_fourth_quarter` and A155 removed the column it was measured
+    -- behind. It stays as the tie-break, and the ordering constant is the page's, not this
+    -- model's.
     wps.winner_mean_win_probability,
     -- The raw curve property the measure above is derived from, published so the derivation is
     -- auditable and so a chart can shade with it. ❌ A PAGE MUST NOT RE-DERIVE the winner mean

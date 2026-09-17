@@ -224,8 +224,10 @@ with plays as (
         --
         -- 🚨 MARC, Today v01: *"Lead changes in 4th quarter doesn't seem accurate… Math isn't
         -- mathin'."* Asked what to do about it: *"Show actual scoreboard lead changes instead."*
-        -- **He is right and this file's own header says so** — `lead_changes` counts the model's
-        -- estimate crossing 0.5, which is a real thing and is NOT what its name promises.
+        -- **He is right and this file's own header says so** — the `lead_changes*` family counts
+        -- the model's estimate crossing 0.5, which is a real thing and is NOT what that name
+        -- promises. ✅ A155 removed the feed-ordered five; `lead_changes_by_clock` survives under
+        -- a name that still oversells it, and the columns below are what the word means.
         --
         -- +1 home ahead · -1 away ahead · 0 tied. The carry-forward that makes a tie transparent
         -- is done in `flagged`, because it needs this value first.
@@ -398,8 +400,10 @@ select
 
     -- ── A152: THE SCOREBOARD LEAD CHANGES, WHICH IS THE NUMBER THE OLD NAME PROMISED ──────
     --
-    -- 🚨 EXPAND ONLY (§3.3). These arrive BESIDE `lead_changes*`, which keep their meaning and
-    -- their consumers; `today.py` still ranks on the win-probability measure this round.
+    -- ✅ §3.3 IS COMPLETE ON THESE AS OF A155. A152 EXPANDED them beside the feed-ordered
+    -- `lead_changes*`, A153 MIGRATED `today.py` onto them, A155's deploy satisfied §3.3.2 and
+    -- A155 CONTRACTED the old five away. **This is now the measure the page ranks, filters and
+    -- displays on**, and the win-probability crossings that remain are `*_by_clock`.
     --
     -- ⚠️ NO `_by_feed` TWIN, AND THAT IS NOT AN OVERSIGHT. A140's pairs exist because the PLAIN
     -- name was already published on the feed's ordering and `srv_game` had five consumers, so
