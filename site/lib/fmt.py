@@ -100,6 +100,20 @@ PRECISION = (
     ("brier", 3),
     ("mae", 2), ("error", 2), ("rating", 2),
     ("pct", 1), ("percent", 1), ("rate", 1),
+    # 🚨 A154. TWO METRICS THE 0-DEFAULT FLATTENS, FOUND BY POINTING `box()`'s AXIS LABELS AT THIS
+    # TABLE — Marc, v18: *"Don't use decimal points when displaying Yards … Exception is YDS/CARRY
+    # (#.#)"*. His rule is right and keyed on the right thing; these two simply never reached here
+    # before, because the chart forced `dp=1` on everything and nothing asked the column.
+    #
+    # 📊 MEASURED on `srv_game_team_metric_distribution_through_prior_week`:
+    #     offense_explosiveness   0.378 … 2.737, median 1.245   -> at 0 dp: "0", "1", "3"
+    #     offense_power_success   0.000 … 1.000, median 0.750   -> at 0 dp: "0" or "1", nothing else
+    # **A 0–1 rate rendered at zero decimals carries no information at all.**
+    #
+    # ⚠️ `power_success` TAKES 1 TO MATCH EVERY OTHER RATE IN THIS TABLE rather than inventing a
+    # second convention for the same kind of quantity; `explosiveness` takes 2 because it is a
+    # ratio around 1.2 where the first decimal alone would bucket most of the league together.
+    ("explosiveness", 2), ("power_success", 1),
     # ⚠️ R-555. `total_yards` MUST PRECEDE `total`, and this is the specificity rule in the
     # note above doing real work rather than describing itself. "total" is here for the
     # BETTING total — an over/under is 54.5 and needs its half-point. Yardage is a count, and
