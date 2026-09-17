@@ -1310,6 +1310,42 @@ def test_THE_METRIC_CELLS_LABEL_MIN_AND_MAX_and_not_the_whisker_ends(panel):
     raise AssertionError("the rushing-yards row never rendered")
 
 
+def test_A_RING_MARKS_AN_EXTREME_BEYOND_THE_WHISKER_in_the_metric_cells(panel):
+    """🚨 cfdb-main-R-974, THE SECOND CALL SITE. The rule is geometric — a ring is drawn at an
+    extreme only where it lies OUTSIDE the whisker end, never where the two coincide.
+
+    ✅ THE FIXTURE CARRIES BOTH CASES AND THEY ARE ON DIFFERENT ENDS, which is what makes this
+    more than a row count: `first_downs` runs 4 → 38 with fences 5 → 38, so its LOW end is beyond
+    and its high end is not; `rushing_yards` runs 2 → 569 with fences 2 → 365, so its HIGH end is
+    beyond and its low is not; `total_yards` has neither. **Three rows, three different answers.**
+    """
+    run, _ = panel
+    cells = _cells(run(_both())[0])
+    for metric, heading in (("first_downs", ">First downs<"),
+                            ("rushing_yards", ">Rushing yards<"),
+                            ("total_yards", ">Total yards<")):
+        row = {r["metric"]: r for r in _SPREAD}[metric]
+        expected = ((row["min_value"] < row["whisker_low"])
+                    + (row["max_value"] > row["whisker_high"]))
+        for cell in cells:
+            if heading not in cell:
+                continue
+            rings = re.findall(r"<circle cx='([-\d.]+)' cy='[-\d.]+' r='3.2'", cell)
+            assert len(rings) == expected, (
+                f"{metric}: {len(rings)} rings, {expected} extremes outside the whiskers "
+                f"(min {row['min_value']} vs {row['whisker_low']}; max {row['max_value']} vs "
+                f"{row['whisker_high']})")
+            break
+        else:
+            raise AssertionError(f"the {metric} row never rendered")
+    # 🚨 THE THREE ROWS MUST GIVE THREE DIFFERENT ANSWERS, or this is one assertion three times.
+    got = {m: ((r["min_value"] < r["whisker_low"]) + (r["max_value"] > r["whisker_high"]))
+           for m in ("first_downs", "rushing_yards", "total_yards")
+           for r in [{x["metric"]: x for x in _SPREAD}[m]]}
+    assert got["total_yards"] == 0 and got["first_downs"] and got["rushing_yards"], (
+        f"the fixture no longer separates the ringed cases from the unringed one: {got}")
+
+
 def test_the_band_draws_the_WHISKERS_and_not_the_MIN_MAX_it_could_have(panel):
     """🚨 BOTH PAIRS ARE PUBLISHED AND THEY ARE DIFFERENT NUMBERS, WHICH IS THE WHOLE EXPOSURE.
     `srv_game_team_metric_distribution` carries `whisker_low`/`whisker_high` AND
