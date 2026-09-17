@@ -199,6 +199,10 @@ with plays as (
         -- The time element, from stg_play. See the header: joined on play_id, which is unique in
         -- both models, so this cannot change the play grain.
         p.period,
+        -- ⚠️ CARRIED OUT OF THIS CTE BECAUSE A152's WINDOWS NEED IT DOWNSTREAM. The clock was
+        -- used only inside `curve_order(...)` here, where `p.` was still in scope; the lead
+        -- carry-forward re-orders two CTEs later, where it is not.
+        p.clock_seconds,
         -- ── TWO LAGS, IN TWO DIFFERENT ORDERS, AND THAT IS THE WHOLE EXPAND (A140) ──────────
         --
         -- 🚨 `previous_wp` IS THE FEED'S ORDER AND IT IS WRONG. cfdb-main-R-916 measured
@@ -211,7 +215,29 @@ with plays as (
         lag(w.home_win_probability) over (
             partition by w.game_id
             order by {{ curve_order('p.period', 'p.clock_seconds', 'w.play_number') }}
-        )                                                                                as previous_wp_by_clock
+        )                                                                                as previous_wp_by_clock,
+        -- ── A152: WHO IS ACTUALLY AHEAD, WHICH IS WHAT THE WORD "LEAD" MEANS ────────────────
+        --
+        -- 🚨 MARC, Today v01: *"Lead changes in 4th quarter doesn't seem accurate… Math isn't
+        -- mathin'."* Asked what to do about it: *"Show actual scoreboard lead changes instead."*
+        -- **He is right and this file's own header says so** — `lead_changes` counts the model's
+        -- estimate crossing 0.5, which is a real thing and is NOT what its name promises.
+        --
+        -- +1 home ahead · -1 away ahead · 0 tied. The carry-forward that makes a tie transparent
+        -- is done in `flagged`, because it needs this value first.
+        sign(w.home_score - w.away_score)                                                as leader,
+        -- 🚨 AND THIS IS WHY A TIE CANNOT BE ITS OWN STATE, MEASURED RATHER THAN ARGUED.
+        -- Counting every transition in `leader` — so ahead → tied → ahead-the-other-way is TWO —
+        -- gives **North Texas 33 at Western Michigan 30 (2025 week 2) SIXTY-EIGHT lead changes**,
+        -- against 2 when ties are passed through. 📊 Across all 1,898 games the tie-as-a-state
+        -- count means 2.21 and maxes at 68; the lead-swap count means 1.06 and maxes at 10.
+        -- **A reader of *Most Exciting* means the second one**: a tie is not a lead, so nobody
+        -- lost one when the game drew level.
+        count(case when sign(w.home_score - w.away_score) <> 0 then 1 end) over (
+            partition by w.game_id
+            order by {{ curve_order('p.period', 'p.clock_seconds', 'w.play_number') }}
+            rows between unbounded preceding and current row
+        )                                                                                as lead_spell
     from {{ ref('stg_game_win_probability') }} w
     left join {{ ref('stg_play') }} p
       on p.play_id = w.play_id
@@ -243,8 +269,44 @@ flagged as (
         case when previous_wp_by_clock is null then 0
              when (previous_wp_by_clock < 0.5 and home_win_probability >= 0.5)
                or (previous_wp_by_clock >= 0.5 and home_win_probability < 0.5) then 1
-             else 0 end                                                              as lead_change_by_clock
+             else 0 end                                                              as lead_change_by_clock,
+        -- ── A152: THE SCOREBOARD'S OWN LEAD, WITH TIES PASSED THROUGH ──────────────────────
+        --
+        -- `first_value` inside the spell is the carry-forward Postgres has no `ignore nulls` for:
+        -- `lead_spell` increments on every play where somebody is ahead, so each spell's FIRST
+        -- row is the team that took the lead, and every tied play that follows inherits it.
+        -- ⚠️ Before anyone has led, `lead_spell` is 0 and this is 0 — which is how **0-0 at
+        -- kickoff is not a lead**, and why the first score is not a lead CHANGE.
+        first_value(leader) over (
+            partition by game_id, lead_spell
+            order by {{ curve_order('period', 'clock_seconds', 'play_number') }}
+        )                                                                            as leader_held
     from plays
+
+),
+
+led as (
+
+    select
+        *,
+        lag(leader_held) over (
+            partition by game_id
+            order by {{ curve_order('period', 'clock_seconds', 'play_number') }}
+        )                                                                            as previous_leader_held
+    from flagged
+
+),
+
+scored as (
+
+    select
+        *,
+        -- 🚨 A LEAD CHANGE IS A CHANGE, SO IT NEEDS A PREVIOUS LEADER. `previous_leader_held = 0`
+        -- is the opening stretch where nobody has scored; taking the lead from 0-0 is not taking
+        -- it FROM anybody.
+        case when previous_leader_held is not null and previous_leader_held <> 0
+              and leader_held <> previous_leader_held then 1 else 0 end              as scoreboard_lead_change
+    from led
 
 ),
 
@@ -340,8 +402,42 @@ select
     -- play_number is not chronological, so anything reading "the last play" shares the defect
     -- it is supposed to detect.
     max(home_score)                                  as highest_home_score_on_the_curve,
-    max(away_score)                                  as highest_away_score_on_the_curve
-from flagged
+    max(away_score)                                  as highest_away_score_on_the_curve,
+
+    -- ── A152: THE SCOREBOARD LEAD CHANGES, WHICH IS THE NUMBER THE OLD NAME PROMISED ──────
+    --
+    -- 🚨 EXPAND ONLY (§3.3). These arrive BESIDE `lead_changes*`, which keep their meaning and
+    -- their consumers; `today.py` still ranks on the win-probability measure this round.
+    --
+    -- ⚠️ NO `_by_feed` TWIN, AND THAT IS NOT AN OVERSIGHT. A140's pairs exist because the PLAIN
+    -- name was already published on the feed's ordering and `srv_game` had five consumers, so
+    -- the corrected value could not take its name without a §3.3 window. **A new column has no
+    -- such constraint: it gets the right definition under the right name.** Shipping a
+    -- deliberately-wrong sibling nobody reads is what A140 deleted two columns for.
+    --
+    -- 🚨 AND THE SOURCE IS NOT CLEAN — SAID HERE BECAUSE A READER OF THIS NUMBER DESERVES IT.
+    -- 📊 `stg_game_win_probability`'s scoreboard RUNS BACKWARDS on **885 plays across 495 of
+    -- 1,898 games** in the clock ordering — 0.30% of plays — where the feed stamps a play from
+    -- elsewhere in the game with an early clock. 📊 The alternatives are worse, measured rather
+    -- than assumed: the play-by-play's own `offense_score`/`defense_score` reverses on **60.8%**
+    -- of games (and its `play_number` restarts per drive), the drives feed on **22.0%** with a
+    -- final that matches `fct_game` only 94.1% of the time against this feed's 96.5%. A running
+    -- max is worse still — one spurious HIGH poisons it forever, and it gets the final wrong on
+    -- **99 games against the raw feed's 66**, inventing Liberty 27 → 47.
+    --
+    -- ✅ SO THE COUNT IS PUBLISHED WITH ITS EXPOSURE NAMED: **89 of 2,012 counted lead changes
+    -- (4.4%) sit on a backwards row, in 76 games (4.0%).** The other 96% are the real thing, and
+    -- the column it replaces was not measuring lead changes at all.
+    sum(scoreboard_lead_change)                      as scoreboard_lead_changes,
+    -- The same two scopes the win-probability version carries, because that is the column Marc
+    -- was reading when he said the math was not mathing.
+    case when count(*) filter (where period = 4) > 0
+         then sum(case when period = 4 then scoreboard_lead_change else 0 end) end
+                                                     as scoreboard_lead_changes_fourth_quarter,
+    case when count(*) filter (where period = 4) > 0
+         then sum(case when period >= 5 then scoreboard_lead_change else 0 end) end
+                                                     as scoreboard_lead_changes_overtime
+from scored
 group by game_id
 
 )

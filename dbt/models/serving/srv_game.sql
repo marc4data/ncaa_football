@@ -315,6 +315,21 @@ select
     wps.plays_with_win_probability_fourth_quarter,
     wps.lead_changes_overtime,
     wps.lead_changes_overtime_by_clock,
+
+    -- ── A152: THE SCOREBOARD'S OWN LEAD CHANGES, EXPAND ONLY (§3.3) ───────────────────────
+    --
+    -- 🚨 MARC: *"Lead changes in 4th quarter doesn't seem accurate… Math isn't mathin'."* →
+    -- *"Show actual scoreboard lead changes instead."* **These are that number.** The five
+    -- `lead_changes*` columns above are unchanged and still have their consumers; nothing on the
+    -- page moves this round, which is what makes this an EXPAND rather than a swap.
+    --
+    -- 📊 THE TWO MEASURE DIFFERENT THINGS AND THE DISTRIBUTIONS SAY SO: across 1,898 games the
+    -- win-probability crossings mean **6.69** and reach **38**; the scoreboard lead changes mean
+    -- **1.06** and reach **10**. Louisville at Ole Miss (2026 wk1) publishes **16** crossings
+    -- against **5** actual changes of the lead. **A game cannot change hands 38 times.**
+    wps.scoreboard_lead_changes,
+    wps.scoreboard_lead_changes_fourth_quarter,
+    wps.scoreboard_lead_changes_overtime,
     wps.plays_with_win_probability_overtime,
     -- HOW CLOSE IT WAS, AND FOR HOW LONG — threshold-free, so no cutoff nobody measured gets
     -- baked into a published column. Lower is closer. This is what separates a genuine thriller

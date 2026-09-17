@@ -1288,14 +1288,37 @@ def _espn_link(row) -> str:
 
 def _most_exciting(df: pd.DataFrame, scope) -> None:
     st.subheader("Most exciting")
+    # 🚨 A152. THIS CAPTION SAID *"Ranked by lead changes in the fourth quarter"* AND THE PANEL
+    # DOES NOT RANK ON THAT. `MOST_EXCITING_ORDER`'s first key is
+    # `lead_changes_fourth_quarter_by_clock`, which counts the MODEL'S WIN PROBABILITY crossing
+    # 0.5 — see the column's own header: *"LEAD CHANGES ARE COUNTED ON THE WIN PROBABILITY
+    # CROSSING 0.5, not on the scoreboard changing hands."*
+    #
+    # 🚨 MARC READ THIS CAPTION AND REPORTED THE DEFECT FROM IT: *"Lead changes in 4th quarter
+    # doesn't seem accurate… Math isn't mathin'."* **He was reading a true label on a different
+    # number**, which is §4.3's worst form — and the caption is where he met it.
+    #
+    # ✅ A152 PUBLISHES THE REAL COUNT (`scoreboard_lead_changes*`) BUT DOES NOT RANK ON IT YET —
+    # §3.3, EXPAND only, because switching the first key re-ranks a panel Marc has already
+    # adjudicated once (cfdb-main-R-902). 📊 Measured on 2026 completed games, the two top tens
+    # share **4 of 10**. **So the caption is corrected to describe what the panel ACTUALLY does
+    # today**; when the ranking moves, this sentence moves with it and says "lead changes" again
+    # — truthfully that time.
+    #
+    # ⚠️ AND THE CHART SENTENCE CARRIED THE SAME AMBIGUITY, which is why the whole caption was
+    # re-read rather than the clause I came for (cfdb-wta-R-1024, R-1043): *"above the line the
+    # home side was ahead"* means ahead IN THE MODEL'S ESTIMATE, and a reader who had just been
+    # told the panel ranks on lead changes would read it as ahead on the scoreboard.
     st.caption(
-        "Ranked by **lead changes in the fourth quarter**, then by how close the game stayed "
-        "after it — not by CFBD's excitement index, which ranked the week's best "
-        "fourth quarter 31st of 86. Each scoreboard reads away over home, quarter by "
+        "Ranked by **how often the model's win probability crossed even in the fourth "
+        "quarter**, then by how close the game stayed after it — not by CFBD's excitement "
+        "index, which ranked the week's best fourth quarter 31st of 86. That is a measure of "
+        "how often the game turned, and it is not the same as the lead changing hands on the "
+        "scoreboard. Each scoreboard reads away over home, quarter by "
         "quarter, with overtime shown separately and the final at the right. The chart "
         "is the home side's win probability on every play against the game clock, "
-        "unsmoothed and filled from even — above the line the home side was ahead, below "
-        "it the away side was. Quarter marks fall at the same place on every chart, so a "
+        "unsmoothed and filled from even — above the line the model gave the home side the "
+        "better chance, below it the away side. Quarter marks fall at the same place on every chart, so a "
         "game that went to overtime is simply longer. A cut line at the end means CFBD's "
         "feed stopped before the game did, so there is no final value to show. "
         "Source: [CollegeFootballData.com](https://collegefootballdata.com); commentary links "
