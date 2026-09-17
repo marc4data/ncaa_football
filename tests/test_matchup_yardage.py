@@ -46,7 +46,7 @@ import render_harness  # noqa: E402
 # ⚠️ THE LIBRARY, NOT THE VIEW. `lib.distribution` imports streamlit but touches nothing at
 # import time, so it resolves here the way `render_harness` does — and cfdb-wta-R-968's tests
 # assert on ITS output rather than on the page's own column strings (cfdb-wta-R-944).
-from lib import distribution  # noqa: E402
+from lib import distribution, fmt  # noqa: E402
 
 # ⚠️ IMPORTED HERE, BEFORE ANY STUB IS INSTALLED, AND `_shipped` SAYS WHY. Inside
 # `streamlit_stubbed` the name `streamlit` is a plain module and this import cannot resolve.
@@ -689,17 +689,22 @@ def test_the_pairing_runs_across_sides_not_down_one(panel):
     assert len(rushing) == 2, f"expected one rushing block per side, got {len(rushing)}"
     away, home = rushing
     away_text = _legend(away)
-    assert "154.4" in away_text, f"Kentucky's rushing offense is missing: {away_text}"
-    assert "84.5" in away_text, (
+    # 🚨 cfdb-main-R-1070. MARC'S v18 TOOK THE DECIMAL OFF EVERY YARDAGE: *"Don't use
+    # decimal points when displaying Yards. That includes Box/Whisker marks, axis labels,
+    # legend Gained/Allowed/Delta, Player Cards. Exception is YDS/CARRY (#.#)"*. The
+    # FIXTURE still carries 154.4 and 84.5 — the stored figures are unchanged — and what
+    # moved is how the page PRINTS them. **The pins move with the rule and say so.**
+    assert "154" in away_text, f"Kentucky's rushing offense is missing: {away_text}"
+    assert "84" in away_text, (
         f"Kentucky's attack is not paired with AUBURN's rushing defense: {away_text}")
     assert "132.6" not in away_text, (
         f"the panel paired Kentucky's offense with Kentucky's own defense — one team "
         f"described as though it were a matchup: {away_text}")
 
     home_text = _legend(home)
-    assert "170.8" in home_text and "132.6" in home_text, (
+    assert "171" in home_text and "133" in home_text, (
         f"Auburn's attack is not paired with Kentucky's rushing defense: {home_text}")
-    assert "84.5" not in home_text, (
+    assert "84" not in home_text, (
         f"the panel paired Auburn's offense with Auburn's own defense: {home_text}")
 
 
@@ -717,7 +722,7 @@ def test_rushing_and_passing_are_both_present_and_separate(panel):
     body = _text(entries)
     assert "Rushing" in body and "Passing" in body
     drawn = " ".join(_legend(markup) for _metric, markup in _blocks(entries))
-    for figure in ("154.4", "84.5", "170.8", "132.6"):
+    for figure in ("154", "84", "171", "133"):
         assert figure in drawn, f"{figure} is on no block of the panel: {drawn}"
 
 
@@ -751,7 +756,11 @@ def test_nothing_played_yet_renders_empty_and_never_a_zero(panel):
     entries, _ = panel(_game(week=1), sides)
     body = _text(entries)
     assert "would be here" in body, "the Empty state did not render"
-    assert "0.0" not in body, "a null per-game figure was drawn as zero"
+    # ⚠️ cfdb-main-R-1070 TOOK THE DECIMAL OFF, so a null drawn as a zero would now read
+    # `Gained 0` rather than `Gained 0.0`. AC-G.32 is unchanged and so is this assertion's
+    # job — only the string it has to not-find moved.
+    assert "Gained 0" not in body and "Allowed 0" not in body, (
+        "a null per-game figure was drawn as zero")
     assert "not played" in body.lower() or "no per-game figure" in body.lower()
 
 
@@ -771,7 +780,7 @@ def test_no_box_scores_is_a_different_claim_from_nothing_played_yet(panel):
         "a pre-box-score game was explained as though nobody had played yet"
     assert "has played" not in body and "played a counted game" not in body, \
         "a game eight weeks into 1999 was described as though nobody had played yet"
-    assert "0.0" not in body
+    assert "Gained 0" not in body and "Allowed 0" not in body
 
 
 def test_one_side_missing_is_degraded_and_names_that_side(panel):
@@ -955,22 +964,217 @@ def test_THE_YARDAGE_CHARTS_LABEL_MIN_AND_MAX_and_not_the_whisker_ends(panel):
     assert low not in (mn, mx) and high not in (mn, mx), (
         f"the fixture's whisker pair {low}/{high} now coincides with its extremes {mn}/{mx}, so "
         f"this test can no longer tell a labelled whisker end from a labelled extreme")
+    # 🚨 B128, cfdb-main-R-1070. THE EXPECTED STRING ASKS THE SAME RULE THE PAGE ASKS.
+    #
+    # ⚠️ **IT USED TO BE `f"{figure}"` — the fixture's raw float — which spelled `42.0` and went
+    # red the moment Marc took the decimal off yardage.** A pin that hard-codes a FORMAT is a
+    # second copy of the formatting rule living in the test, and it disagrees with the page the
+    # first time the page is right. `fmt.number(figure, column)` is the page's own call, so this
+    # now fails when the chart prints the wrong NUMBER rather than when it prints it correctly.
+    shown = lambda figure: fmt.number(figure, "total_yards")  # noqa: E731
     # ✅ MARC'S TWO NEW NUMBERS, THE ONES THE CHART HAS NEVER SHOWN BEFORE.
     for figure in (mn, mx):
-        assert f"{figure}" in printed, (
-            f"the chart does not print {figure} — v17 asks for MIN and MAX labelled, and the "
-            f"frame is extended to them precisely so they can be: {printed}")
+        assert shown(figure) in printed, (
+            f"the chart does not print {shown(figure)} — v17 asks for MIN and MAX labelled, and "
+            f"the frame is extended to them precisely so they can be: {printed}")
     # ❌ AND THE TWO HE SAID NOT TO DRAW.
     for figure in (low, high):
-        assert f"{figure}" not in printed, (
-            f"the chart prints the whisker end {figure} — v17: *the whisker endpoints don't need "
-            f"to be labeled*: {printed}")
-    assert f"{p50}" not in printed, (
-        f"the chart prints the median {p50}, which is in no version of Marc's list: {printed}")
+        assert shown(figure) not in printed, (
+            f"the chart prints the whisker end {shown(figure)} — v17: *the whisker endpoints "
+            f"don't need to be labeled*: {printed}")
+    assert shown(p50) not in printed, (
+        f"the chart prints the median {shown(p50)}, which is in no version of Marc's list: "
+        f"{printed}")
     # 🚨 THE HALF THAT SURVIVED THE REVERSAL. The team's own figure is not a tick.
     assert printed, (
         "the chart prints nothing at all — the team's own figure went with the ticks, which is "
         "the opposite of what Marc asked for in either version")
+
+
+def _lines_at(svg: str, opacity: str) -> list:
+    """The x of every VERTICAL line drawn at one opacity, in markup order.
+
+    ⚠️ VERTICAL AND FULL-HEIGHT ARE DIFFERENT CLAIMS AND THIS RETURNS ENOUGH TO CHECK BOTH:
+    `(x, y1, y2)`. A mark drawn at serif height fails Marc's sentence exactly, and a filter that
+    only matched `x1 == x2` could not tell the two apart.
+    """
+    return [(float(x1), float(y1), float(y2)) for x1, y1, _x2, y2 in re.findall(
+        r"<line x1='([-\d.]+)' y1='([-\d.]+)' x2='([-\d.]+)' y2='([-\d.]+)' "
+        r"stroke='currentColor' stroke-width='1' opacity='"
+        + re.escape(opacity) + r"'", svg)]
+
+
+def test_THE_EXTREMES_CARRY_A_FULL_HEIGHT_LINE_drawn_UNDER_the_box(panel):
+    """🚨 cfdb-main-R-1070. MARC'S v18, AND THE PAGE HALF OF IT HAD NO GUARD AT ALL.
+
+    > **MARC, v18:** *"MIN/MAX should extend full height of the plot (to the exten of the Box).
+    > Plot MIN/MAX below (underneath in the Z) so that if IQR and MIN/MAX are equal, should be
+    > able to discern both on the chart."*
+
+    ⚠️ **A154 ASSERTED THIS INSIDE `distribution.py` AND THAT IS A DIFFERENT CLAIM.** The module
+    proves the capability draws correctly when asked; **only the page can prove it is asked.**
+    That gap is exactly §6.1's — an instrument that exists, answers correctly, and nothing on the
+    surface a reader meets ever calls it.
+
+    🚨 **THREE INDEPENDENT PROPERTIES, THREE ASSERTIONS, BECAUSE ANY ONE ALONE PASSES ON A BROKEN
+    CHART:** the line EXISTS, it runs the FULL BAND, and it comes FIRST in the markup. A mark at
+    serif height satisfies the first two-thirds and is invisible under the whisker; a mark
+    appended after the box is painted over by it, which is the failure his last clause names.
+    """
+    band = _module_constant("_BOX_BAND")
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    svg = _svg_of(_series(_of_metric(entries, "Total")[0])["gained"])
+    _n, _w, _p25, _p50, _p75, _lo, _hi, mn, mx = _METRICS["total_yards"][:9]
+    lines = _lines_at(svg, f"{distribution.EXTREME_LINE_OPACITY:g}")
+    assert len(lines) == 2, (
+        f"expected a line at MIN and at MAX; got {len(lines)}. Without them the span between a "
+        f"whisker end and the chart's boundary is empty and a reader cannot tell 'the whiskers "
+        f"reach the extremes' from 'the chart continues past them to something unmarked'")
+    for _x, y1, y2 in lines:
+        assert (y1, y2) == (0.0, float(band)), (
+            f"an extreme line runs {y1}..{y2} in a {band}px band — Marc asked for FULL height "
+            f"'to the exten of the Box', and a line stopping at serif height cannot outlive the "
+            f"serif it has to be distinguishable from")
+    # 🚨 THE Z-ORDER, WHICH IS THE CLAUSE THE WHOLE FEATURE TURNS ON. SVG paints in document
+    # order, so *underneath* means *earlier*.
+    first_rect = svg.index("<rect")
+    assert svg.index(f"opacity='{distribution.EXTREME_LINE_OPACITY:g}'") < first_rect, (
+        "the extreme lines are drawn AFTER the box, so the box paints over them — which is "
+        "precisely the case Marc asked to be able to discern")
+    # ✅ AND THEY STAND AT THE PUBLISHED EXTREMES rather than at some other pair of numbers.
+    printed = re.findall(r"<text[^>]*>([^<]*)</text>", svg)
+    for figure in (mn, mx):
+        assert fmt.number(figure, "total_yards") in printed, (
+            f"the chart draws two extreme lines but never labels {figure}, so the mark has no "
+            f"number a reader can attach to it: {printed}")
+
+
+def test_THE_COINCIDENT_CASE_DRAWS_BOTH_MARKS_so_a_reader_can_tell_them_apart(panel):
+    """🚨 THIS IS MARC'S SENTENCE AS A TEST, AND IT IS THE ROUND'S REASON FOR EXISTING.
+
+    > *"if IQR and MIN/MAX are equal, should be able to discern both on the chart."*
+
+    📊 **AND IT IS THE COMMON CASE, NOT THE EDGE.** Measured on live serving across the 141 rows
+    this call site actually draws: **130 (92.2%) have at least one whisker end sitting exactly on
+    an extreme.** A154's 10.5% is the same question asked of all 846 rows of the relation, 15 of
+    whose metrics this chart never draws — both numbers are right about different populations.
+
+    🚨 **THE FIXTURE MAKES THE TWO COINCIDE ON PURPOSE**, because the default `_METRICS` row
+    deliberately keeps them apart so a neighbouring test can tell a labelled whisker end from a
+    labelled extreme. ⚠️ **Without moving them this test would assert nothing** — it would pass on
+    a chart with two marks at two different places, which is not the case under test (R-843: a
+    pinned value is only a pin if the break moves it).
+    """
+    band = _module_constant("_BOX_BAND")
+    _n, _w, _p25, _p50, _p75, _lo, _hi, mn, mx = _METRICS["total_yards"][:9]
+    entries, _ = panel(_game(), _both(), deltas=_deltas(),
+                       distribution=_distribution(spans={"total_yards": (mn, mx)}))
+    svg = _svg_of(_series(_of_metric(entries, "Total")[0])["gained"])
+    extremes = _lines_at(svg, f"{distribution.EXTREME_LINE_OPACITY:g}")
+    serifs = [m for m in _lines_at(svg, f"{distribution.WHISKER_OPACITY:g}")
+              if m[1] != m[2]]
+    assert len(extremes) == 2, f"the coincident row drew {len(extremes)} extreme lines, not 2"
+    assert len(serifs) >= 2, (
+        f"the coincident row drew {len(serifs)} whisker serifs; with the whiskers AT the "
+        f"extremes there must still be two: {svg[:300]}")
+    # 🚨 THE SAME x, WHICH IS THE PREMISE — and TWO DIFFERENT HEIGHTS, WHICH IS THE ANSWER.
+    for edge in (extremes[0][0], extremes[1][0]):
+        same_x = [m for m in serifs if abs(m[0] - edge) < 0.6]
+        assert same_x, (
+            f"no whisker serif at x={edge}, so the fixture is not actually coincident and this "
+            f"test proves nothing about the case it is named for")
+        for _x, y1, y2 in same_x:
+            assert (y2 - y1) < band, (
+                "the whisker serif is as tall as the extreme line, so the two coincide "
+                "completely and Marc's 'discern both' is unsatisfiable by geometry")
+    assert [round(m[1], 1) for m in extremes] == [0.0, 0.0], (
+        "an extreme line does not start at the top of the band, so the taller-underneath "
+        "arrangement that makes both readable is not what is drawn")
+
+
+def test_THE_YARDAGE_FIGURES_CARRY_NO_DECIMAL_anywhere_on_the_panel(panel):
+    """🚨 cfdb-main-R-1070. MARC, v18, AND HE NAMED FOUR SURFACES.
+
+    > *"Don't use decimal points when displaying Yards.  That includes Box/Whisker marks, axis
+    > labels, legend Gained/Allowed/Delta, Player Cards.  Exception is YDS/CARRY (#.#)"*
+
+    ⚠️ **ASSERTED AS AN ABSENCE ACROSS THE WHOLE PANEL RATHER THAN PER CALL SITE**, because the
+    defect is a decimal SURVIVING somewhere — and a per-site assertion passes on the site it
+    names while a fifth one goes on printing `154.4`. 📊 Four separate producers had to move:
+    `_box_row`'s value label, `box()`'s axis labels, `_legend_line`, and `_signed_delta`.
+
+    ✅ **`YDS/CARRY` IS THE EXCEPTION AND IT IS PUBLISHED, NOT DECIDED HERE.** The player cards
+    read `stat_N_format` off the mart — measured on live serving, `Yards` is `integer` on all
+    78,063 rows and `Yds/Carry` is `decimal_1` on all 28,997 — so this asserts the one-decimal
+    figures are still ALLOWED rather than scrubbing every decimal off the panel.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    for metric, block in _blocks(entries):
+        for side, series in _series(block).items():
+            svg = _svg_of(series)
+            for label in re.findall(r"<text[^>]*>([^<]*)</text>", svg):
+                assert "." not in label, (
+                    f"the {metric} {side} chart prints {label!r} with a decimal — Marc's v18 "
+                    f"names 'Box/Whisker marks' and 'axis labels' explicitly")
+        assert not re.search(r"\b\d+\.\d\b", _legend(block)), (
+            f"the {metric} legend still prints a decimal: {_legend(block)!r}")
+
+
+def test_THE_TEAM_NAME_IN_THE_HEADING_IS_A_LINK_to_that_team_and_that_season(panel):
+    """🚨 cfdb-wta-R-1071. MARC, v18: *"Team Name is hyperlink to Teams page filtered to the
+    Team"*.
+
+    ⚠️ **THE SEASON IS THE HALF THAT CAN BE WRONG AND LOOK RIGHT.** `_YARDAGE_COLUMNS` selects
+    `team_slug` and NOT `season`, so `table.team_link`'s default `season_field` finds nothing and
+    builds `/team?team=kentucky` — a link that works, opens, and shows the CURRENT season from a
+    2025 game. **A test asserting only that an href exists passes on exactly that.**
+
+    🚨 **AND NESTED ANCHORS ARE THE OTHER FAILURE, WHICH IS INVALID MARKUP RATHER THAN A WRONG
+    DESTINATION** — `today.py`'s `_team_identity` carries the rule for tables. This heading is
+    written straight into a Streamlit column, so it should be free of it; asserted rather than
+    assumed, because "should be" is how the last one got in.
+    """
+    entries, _ = panel(_game(season=2025), _both(), deltas=_deltas())
+    markup = _markup(entries)
+    heading = markup[:markup.index("data-cfdb='gained-allowed'")]
+    hrefs = re.findall(r"<a class='cfdb-teamlink' href='([^']*)'", heading)
+    assert len(hrefs) == 2, (
+        f"expected one team link per side heading, got {hrefs} — the heading is the only place "
+        f"either team is named above the charts")
+    for href in hrefs:
+        assert href.startswith("/team?team="), (
+            f"{href!r} does not go to the Team page. `teams.py` filters with a text_input rather "
+            f"than a query parameter, so the index cannot be linked to a single team at all")
+        assert "season=2025" in href, (
+            f"{href!r} carries no season, so a 2025 game links a reader to the CURRENT season's "
+            f"page — the link works and shows the wrong year")
+    # ⚠️ SCOPED TO THE HEADING'S OWN `<div>`, NOT TO EVERYTHING ABOVE THE CHARTS. The dataset
+    # caption a few lines up is an anchor too and always has been; asserting over the whole
+    # prefix would fail on a page that is entirely correct, which is a guard that cries wolf.
+    for block in re.findall(r"<div style='border-left:4px solid[^>]*>.*?cfdb-teamlink", markup,
+                            re.S):
+        assert "<a" not in block[:block.index("cfdb-teamlink") - 10], (
+            f"something wraps the side heading in an anchor, so the team link nests inside it "
+            f"and the outer one wins: {block[:200]}")
+    # 🚨 `flex:none` ON THE ANCHOR, AND THIS ONE IS A DEFECT THE SUITE COULD NOT SEE.
+    #
+    # `.cfdb-teamlink` carries `display:flex; min-width:0` (theme.py — right for the table cells
+    # it was written for), and as a flex ITEM in this heading that lets the anchor shrink BELOW
+    # its own text, which then spills out and draws over *"offense against …'s defense"* beside
+    # it. **The plain `<span>` it replaced could not shrink**, so the row overflowed and R-755's
+    # `overflow:hidden` clipped it at the block edge — the designed behaviour.
+    #
+    # 📊 **FOUND BY A RASTER OF TWO LONG NAMES IN A 412px HALF, AFTER A BOUNDING-BOX CHECK HAD
+    # SAID THE LAYOUT WAS FINE** — the anchor's box really was inside the heading, because the
+    # box had shrunk. B108's lesson (a width reading reports the SLOT, not the GLYPHS) and
+    # §2.4's (say what question the command actually answered), in one line of CSS.
+    #
+    # ⚠️ ASSERTED AS MARKUP BECAUSE NOTHING IN CI HAS A LAYOUT ENGINE. It is the cheap guard that
+    # keeps a browser finding true, which is this file's standing pattern.
+    for anchor in re.findall(r"<a class='cfdb-teamlink'[^>]*>", markup):
+        assert "flex:none" in anchor, (
+            f"the heading's team link can shrink below its own text, so a long team name "
+            f"overprints the sentence beside it rather than being clipped: {anchor}")
 
 
 def test_the_FRAME_comes_from_the_WEEKS_ROW_and_not_from_the_two_teams(panel):
@@ -1344,16 +1548,30 @@ def test_the_FRAME_CAPTION_describes_the_CHART_THAT_IS_DRAWN(panel):
     # team. ⚠️ **Same shape, near-identical size** — AC-G.22 says shape comes first and here the
     # shapes agree, so the words have to carry it. *"anywhere in that population"* is what
     # separates them from *"one game the team played"* two clauses later.
-    assert "ringed when they fall beyond a whisker" in text, (
+    # 🚨 B128, cfdb-main-R-1070. THE FULL-HEIGHT EXTREME LINE, AND THE COINCIDENT CASE.
+    #
+    # ⚠️ **A MARK DRAWN AND NOT EXPLAINED IS THE DEFECT; A MARK EXPLAINED ONLY IN ITS RARE CASE
+    # IS THE SAME DEFECT NARROWED.** On 92.2% of the rows this chart draws a whisker end IS an
+    # extreme, so the sentence a reader needs is not *"the chart runs past the whiskers"* — it is
+    # what the picture looks like when it does NOT. Marc's v18 asks to *"discern both"*; this
+    # asserts the caption says how.
+    assert "full-height line" in text, (
+        f"the caption does not say what the lighter line at each end of the chart IS, so the "
+        f"round's headline mark is drawn and never named: {text[:600]}")
+    assert "stand together" in text, (
+        f"the caption does not describe the COINCIDENT case, which is 92.2% of the rows this "
+        f"chart draws and the one Marc reported as unreadable: {text[:600]}")
+    assert "ringed when they fall beyond a whisker" in text or (
+        "a ring" in text and "beyond it" in text), (
         f"the caption does not say what the outlier RING is, so the chart draws an open circle "
         f"whose meaning a reader cannot distinguish from the game marks beside it: {text[:600]}")
     assert "anywhere in that population" in text, (
         f"the caption does not separate the population's extremes from the team's own games, "
         f"and both are drawn as open circles: {text[:600]}")
-    assert "lowest and highest single game" in text, (
-        f"the caption does not say what the chart's ENDS are. Under v17 the frame runs past the "
-        f"whiskers to the extremes, so a reader sees an axis wider than the whisker serifs with "
-        f"nothing saying what the extra span is: {text[:500]}")
+    assert "highest single game anywhere in that population" in text, (
+        f"the caption does not say what the chart's ENDS are. The frame reaches the extremes, so "
+        f"a reader sees an axis wider than the whisker serifs with nothing saying what the extra "
+        f"span is: {text[:500]}")
     # 🚨 cfdb-main-R-1017. THE WINDOW, WHICH THE PICTURE CANNOT CARRY.
     assert "before this game's own" in text, (
         f"the caption does not say WHICH weeks the box is built from, so a reader cannot tell a "
@@ -1367,7 +1585,13 @@ def test_the_FRAME_CAPTION_describes_the_CHART_THAT_IS_DRAWN(panel):
                  # 🚨 cfdb-main-R-1020 DELETED THE TICK AND BOUNDARY LABELS, so a caption saying
                  # the whiskers are "both labeled" describes a chart that no longer exists.
                  # ⚠️ THIRD PHRASE IN THIS LIST PUT THERE BY THE SAME CLASS IN THREE ROUNDS.
-                 "both labeled", "first {weeks}"):
+                 "both labeled", "first {weeks}",
+                 # 🚨 B128, cfdb-main-R-1070. *"the chart itself RUNS PAST THEM"* was true of
+                 # 11 of the 141 rows this chart draws and false of the other 130 — the case
+                 # Marc reported at v17 and could not read. The extremes are now MARKED rather
+                 # than described as a gap, so the phrase describes a chart that never was.
+                 # ⚠️ FOURTH PHRASE IN THIS LIST FROM THE SAME CLASS IN FOUR ROUNDS.
+                 "runs past them", "labeled where there is room"):
         assert gone not in text, (
             f"the caption still describes a chart or a population it replaced — {gone!r}: "
             f"{text[:400]}")
@@ -1400,7 +1624,7 @@ def test_NO_DISTRIBUTION_draws_no_charts_and_says_WHICH_absence(panel, week, exp
     assert expected in text, f"week {week} did not name its own absence: {text[:400]}"
     assert forbidden not in text, (
         f"week {week} was given the OTHER absence's wording — {forbidden!r}: {text[:400]}")
-    assert "154.4" in text, "the panel stopped drawing its figures along with its charts"
+    assert "154" in text, "the panel stopped drawing its figures along with its charts"
 
 
 # --- 🚨 R-594: the POINT, which B084 never asserted ---------------------------------------------
@@ -1424,11 +1648,11 @@ def test_the_VALUE_MARK_is_the_TEAMS_OWN_FIGURE_not_zero(panel):
     """
     entries, _ = panel(_game(), _both())
     gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
-    assert _value_marks(gained) == ["154.4"], (
-        f"the rushing gained marker is not Kentucky's own 154.4: {_value_marks(gained)}")
+    assert _value_marks(gained) == ["154"], (
+        f"the rushing gained marker is not Kentucky's own 154: {_value_marks(gained)}")
     allowed = _series(_of_metric(entries, "Rushing")[0])["allowed"]
-    assert _value_marks(allowed) == ["84.5"], (
-        f"the rushing allowed marker is not Auburn's own 84.5: {_value_marks(allowed)}")
+    assert _value_marks(allowed) == ["84"], (
+        f"the rushing allowed marker is not Auburn's own 84: {_value_marks(allowed)}")
 
 
 def test_every_one_of_the_SIX_BLOCKS_draws_BOTH_of_its_values(panel):
@@ -1451,7 +1675,7 @@ def test_a_GENUINE_zero_still_draws_because_it_is_a_datum(panel):
     """AC-G.32. A team held to zero is a measurement, not an absence, and it gets a marker."""
     entries, _ = panel(_game(), _away_over(rushing_yards_for_per_game=0.0))
     gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
-    assert _value_marks(gained) == ["0.0"], (
+    assert _value_marks(gained) == ["0"], (
         f"a genuine zero was dropped rather than drawn: {_value_marks(gained)}")
 
 
@@ -1511,7 +1735,7 @@ def test_a_FIGURE_BEYOND_THE_WHISKERS_IS_STILL_DRAWN_where_it_is(panel):
     """
     entries, _ = panel(_game(), _away_over(rushing_yards_for_per_game=900.0))
     gained = _series(_of_metric(entries, "Rushing")[0])["gained"]
-    assert _value_marks(gained) == ["900.0"], (
+    assert _value_marks(gained) == ["900"], (
         f"a figure beyond the whiskers was dropped rather than drawn: {_value_marks(gained)}")
     text = _text(entries)
     assert "not plotted" not in text, (
@@ -1529,7 +1753,7 @@ def test_a_WEEK_WITH_NO_DISTRIBUTION_says_so_and_prints_the_figures(panel):
     entries, _ = panel(_game(), _both(), distribution=thin)
     text = _text(entries)
     assert "Rushing" in text and "not drawn against the week" in text, text[:400]
-    assert "154.4" in text and "84.5" in text, (
+    assert "154" in text and "84" in text, (
         f"the figures the chart could not draw are not printed: {text[:400]}")
 
 
@@ -1782,7 +2006,8 @@ def test_the_delta_is_READ_from_the_column_and_never_subtracted_in_the_page(pane
         passing_yards_for_minus_opponent_allowed_per_game=2.0,
         total_yards_for_minus_opponent_allowed_per_game=3.0))
     seen = {metric: _legend(markup) for metric, markup in _blocks(entries)}
-    for metric, stored in (("total", "3.0"), ("rushing", "1.0"), ("passing", "2.0")):
+    # ⚠️ cfdb-main-R-1070: a stored 3.0 yards-per-game delta now prints `+3`.
+    for metric, stored in (("total", "+3"), ("rushing", "+1"), ("passing", "+2")):
         assert stored in seen[metric], f"{metric} does not print the stored delta: {seen[metric]}"
 
 
@@ -1790,7 +2015,7 @@ def test_a_NEGATIVE_delta_carries_its_sign_without_relying_on_colour(panel):
     """AC-G.22: the sign is the signal, and it survives greyscale."""
     entries, _ = panel(_game(), _both(),
                        deltas=_deltas(rushing_yards_for_minus_opponent_allowed_per_game=-24.5))
-    assert "-24.5" in _legend(_of_metric(entries, "Rushing")[0]).replace("\u2212", "-")
+    assert "-24" in _legend(_of_metric(entries, "Rushing")[0]).replace("\u2212", "-")
 
 
 def test_the_leaders_are_drawn_in_RANK_ORDER(panel):
@@ -3188,13 +3413,13 @@ def test_the_LEGEND_is_a_worked_SUBTRACTION_in_three_rows(panel):
     entries, _ = panel(_game(), _both())
     text = _legend(_of_metric(entries, "Rushing")[0])
     assert "Gained" in text and "Allowed" in text, text
-    assert "154.4" in text and "84.5" in text, text
+    assert "154" in text and "84" in text, text
     # 🚨 `+38.0`, NOT `69.9`, AND THE DIFFERENCE IS THE WHOLE POINT. 154.4 gained minus 84.5
     # allowed IS 69.9 — and `_deltas()` carries the STORED column, which reads 38.0. **The first
     # draft of this test asserted 69.9 and the fixture caught it**: an assertion that recomputes
     # the figure is an assertion that the page may subtract, which is the one thing §4.2.1
     # forbids here. The stored number is the claim.
-    assert "+38.0" in text, f"the stored difference is not on the block: {text}"
+    assert "+38" in text, f"the stored difference is not on the block: {text}"
 
 
 def test_the_LEGEND_is_anchored_to_the_TOP_RIGHT(panel):
@@ -3262,7 +3487,7 @@ def test_the_LEGEND_reads_A106s_COLUMN_and_subtracts_nothing(panel):
     entries, _ = panel(_game(), _both(),
                        deltas=_deltas(rushing_yards_for_minus_opponent_allowed_per_game=1.0))
     text = _legend(_of_metric(entries, "Rushing")[0])
-    assert "1.0" in text, f"the stored delta is not on the block: {text}"
+    assert "+1" in text, f"the stored delta is not on the block: {text}"
     assert "69.9" not in text, (
         f"the page subtracted its own inputs instead of reading A106's column: {text}")
 
@@ -3275,7 +3500,9 @@ def test_a_NULL_delta_renders_an_em_dash_and_a_ZERO_renders_a_number(panel):
     entries, _ = panel(_game(), _both(),
                        deltas=_deltas(rushing_yards_for_minus_opponent_allowed_per_game=0.0))
     text = _legend(_of_metric(entries, "Rushing")[0])
-    assert "0.0" in text and "\u2014" not in text, text
+    # ⚠️ `+0` RATHER THAN `0.0` — cfdb-main-R-1070. `_signed_delta`'s own docstring argues
+    # for a NUMBER and not for a decimal, so the zero case survives the format change intact.
+    assert "+0" in text and "\u2014" not in text, text
 
 
 def test_the_delta_no_longer_carries_a_COLOUR_of_its_own(panel):
@@ -4175,16 +4402,32 @@ def test_THE_OVERLAY_IS_THE_SAME_BOX_AS_THE_CHART(panel):
     """🚨 cfdb-wta-R-993. THE OVERLAY AND THE CHART MUST BE ONE COORDINATE SYSTEM, AND THE ONLY
     THING THAT MAKES THAT TRUE IS THAT THEIR SVGs ARE THE SAME BOX AT THE SAME ORIGIN.
 
-    `box()` returns `height + 15` — A145's band plus its label strip. The overlay declares the
-    same, so no offset arithmetic exists anywhere. ⚠️ **Drop `height=_BOX_BAND` from the `box()`
-    call and the chart reverts to 41px tall under a 71px overlay**: every circle lands at the
-    wrong y, the markup still looks reasonable, and the structural tests above still pass.
+    `box()` returns `top_band + height + 15`. The overlay declares the same, so no offset
+    arithmetic exists anywhere. ⚠️ **Drop `height=_BOX_BAND` from the `box()` call and the chart
+    reverts to 41px tall under a 71px overlay**: every circle lands at the wrong y, the markup
+    still looks reasonable, and the structural tests above still pass.
 
     📊 Measured in the browser at 1300px, 1700px and dark, both rows:
     `left, top, width, height` deltas all **0.0** — but that is a raster, run once. This is the
     cheap guard that keeps it true.
+
+    🚨 **B128 — THIS GUARD DID ITS JOB AND THE NUMBER IT WAS PINNED TO WAS THE STALE THING.**
+    `value_labels_own_row=True` (Marc's v18) makes `box()` add a `top_band` above the plot and
+    wrap its body in `translate(0, top_band)`, so the total went 71 → 86. **The two SVGs still
+    agreed; the LITERAL `band + 15` did not.** ✅ So the expectation now reads the page's own
+    two constants instead of restating one of them — a guard whose number is bumped without a
+    reason is worse than no guard (B125), and a guard that restates a formula the page owns is
+    a second copy waiting to disagree.
+
+    🚨 **AND THE `translate` IS ASSERTED SEPARATELY, BECAUSE THE HEIGHTS ALONE CANNOT SEE IT.**
+    An overlay that grew to 86px and left its circles at the old origin matches on every height
+    in this test and draws every circle 15px high. **Two independent mistakes, two assertions**
+    — the lesson A131 proved on colour-versus-side one panel over.
     """
     band = _module_constant("_BOX_BAND")
+    own_row = _module_constant("_BOX_VALUE_OWN_ROW")
+    top_band = distribution.LABEL_BAND if own_row else 0
+    expected = top_band + band + 15
     entries, _ = panel(_game(), _both(), deltas=_deltas())
     block = _of_metric(entries, "Total")[0]
     for name, row in zip(("gained", "allowed"),
@@ -4192,10 +4435,25 @@ def test_THE_OVERLAY_IS_THE_SAME_BOX_AS_THE_CHART(panel):
         chart = re.search(r"class='cfdb-dist'[^>]*>\s*<svg[^>]*height='(\d+)'", row)
         over = re.search(r"data-cfdb='game-circles'.*?<svg[^>]*height='(\d+)'", row, re.S)
         assert chart and over, f"the {name} row is missing a chart or an overlay"
-        assert int(chart.group(1)) == int(over.group(1)) == band + 15, (
+        assert int(chart.group(1)) == int(over.group(1)) == expected, (
             f"the {name} row's chart is {chart.group(1)}px and its overlay {over.group(1)}px; "
-            f"both must be the band ({band}) plus box()'s 15px label strip. They are drawn at the "
-            f"same origin, so a height mismatch puts every circle at the wrong y")
+            f"both must be the top band ({top_band}) plus the band ({band}) plus box()'s 15px "
+            f"label strip. They are drawn at the same origin, so a height mismatch puts every "
+            f"circle at the wrong y")
+        shift = f"<g transform='translate(0,{top_band})'>"
+        overlay = re.search(r"data-cfdb='game-circles'.*?</div>", row, re.S).group(0)
+        chart_svg = row[:row.index("data-cfdb='game-circles'")]
+        if top_band:
+            assert shift in chart_svg, (
+                f"the {name} row's CHART does not carry box()'s {top_band}px translate, so the "
+                f"overlay is shifted against a plot that is not")
+            assert shift in overlay, (
+                f"the {name} row's overlay is {expected}px tall but draws its circles at the "
+                f"un-shifted origin, so every mark sits {top_band}px above its own box — a "
+                f"mistake the height assertion above cannot see")
+        else:
+            assert shift not in overlay, (
+                "the overlay shifts its circles while box() does not")
 
 
 @pytest.mark.parametrize("games", (2, 15, 22))
