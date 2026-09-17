@@ -420,6 +420,25 @@ def test_the_after_tab_panels_are_handed_the_games_season(page):
         assert run.args[name] == (401856679, 2026), (
             f"{name} was called with {run.args[name]!r} rather than (game_id, season) — the "
             f"Empty state cannot tell scope from latency without it")
+
+    # 🚨 AND THE THIRD SET, WHICH NEEDS THE ROW TOO (B134, v02 PART 6). `_drives` heads its
+    # chart with Marc's scoreboard, and **the score has to come from `srv_game`**: the last
+    # drive's own end scores disagree with the published final on 214 of 3,607 games (5.93%),
+    # by up to 22 points.
+    #
+    # ⚠️ **THE TWO SETS MUST STAY DISJOINT, AND THAT IS ASSERTED RATHER THAN ASSUMED.** The
+    # dispatch tries `_ROW_AND_SEASON_PANELS` first, so a panel in both would take this branch
+    # and its membership of the other set would be dead — deletable with nothing going red.
+    assert not (matchup._SEASON_PANELS & matchup._ROW_AND_SEASON_PANELS), (
+        f"a panel is in both season sets: "
+        f"{matchup._SEASON_PANELS & matchup._ROW_AND_SEASON_PANELS}. The dispatch checks one "
+        f"first, so the other membership is dead code that reads as live")
+    for name in sorted(matchup._ROW_AND_SEASON_PANELS):
+        args = run.args[name]
+        assert len(args) == 3 and args[:2] == (401856679, 2026), (
+            f"{name} was called with {args!r} rather than (game_id, season, row)")
+        assert args[2]["game_id"] == 401856679, (
+            f"{name} was handed a row for a different game: {args[2].get('game_id')}")
     # ⚠️ ON THE OTHER TAB, because a completed game opens on the after one and `_travel`
     # never runs there — which is the lazy guarantee this file is largely about.
     run({"is_completed": True, "season": 2026, "game_id": 401856679}, tab="before")
