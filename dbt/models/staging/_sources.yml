@@ -559,3 +559,31 @@ sources:
           - name: filename
             data_tests: [unique, not_null]
 
+
+  # ── A162: cfdb's OWN OPERATIONAL TELEMETRY, NOT A CFBD PAYLOAD ──────────────────────────────
+  #
+  # `ops.pipeline_heartbeat` is written by this project's own code (`src/heartbeat.py`), not
+  # landed from an API, which is why it sits beside `raw` rather than in it. It is declared as a
+  # SOURCE rather than modelled because dbt neither creates nor rebuilds it — the pipeline writes
+  # a row per cadence per run and dbt only reads it.
+  #
+  # 🚨 `srv_system_health` READS IT SO A STOPPED PUBLISH IS VISIBLE ON THE SITE. The beat is
+  # downstream of `publish_to_serving` in both DAGs (`... >> publish >> beat`), so a stale beat
+  # means the cadence is not reaching serving — which on 2026-09-16 nobody learned for twenty
+  # hours, because the alert could not leave the host.
+  - name: ops
+    description: >
+      cfdb's own pipeline telemetry, written directly to Postgres by src/*.py. Postgres-only:
+      there is no Databricks equivalent and the analytics build excludes what reads it.
+    schema: ops
+    tables:
+      - name: pipeline_heartbeat
+        description: >
+          One row per cadence per successful run, written by the DAG's final `beat` task.
+          Downstream of publish_to_serving, so the latest beat_at per heartbeat_name is the
+          last time that cadence actually reached serving.
+        columns:
+          - name: heartbeat_name
+            description: The cadence — scores_refresh, lines_snapshot, weekly_* .
+          - name: beat_at
+            description: When that cadence last completed its publish.

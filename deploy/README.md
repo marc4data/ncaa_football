@@ -78,6 +78,38 @@ propagates. Report it by fingerprint (`sha256`, first eight hex), never by value
 
 ## Operating it
 
+### 🚨 RE-RUNNING A FAILED CADENCE TASK — READ THIS BEFORE YOU CLEAR ANYTHING
+
+**The command that works:**
+
+```bash
+docker exec cfdb-pipeline-airflow-scheduler-1 \
+  airflow tasks clear <dag_id> -t "<task_regex>" -d -f -y
+```
+
+🚨 **IT CLEARS THAT FAILED TASK IN *EVERY* RUN OF THE DAG, NOT JUST THE LATEST ONE.** On
+2026-09-17 this woke `scheduled__2026-09-03` — a two-week-old run — which then executed a full
+backfill ahead of the current cadence and delayed it by ~20 minutes (cfdb-main-R-1129).
+
+⚠️ **AND THERE IS NO SCOPED ALTERNATIVE ON AIRFLOW 3.3.1.** The obvious one —
+
+```bash
+# DOES NOTHING. Exits 0, prints nothing, clears nothing. Verified on 3.3.1.
+airflow tasks clear <dag_id> -t "<task>" -d --start-date 2026-09-17 --end-date 2026-09-18 -y
+```
+
+— **is a silent no-op** (cfdb-main-R-1114). A round believed it had re-run a task, waited, and
+found the state unchanged.
+
+✅ **SO: expect older runs to wake, check `dag_run` afterwards, and never time a DAG across a
+clear** — the elapsed will include whatever historical runs came with it:
+
+```bash
+docker exec -i cfdb-pipeline-warehouse-1 psql -U cfdb -d airflow -c \
+  "select dag_id, run_id, state from dag_run where state = 'running'"
+```
+
+
 ```bash
 ssh $CFDB_DROPLET_HOST
 cd /opt/cfdb

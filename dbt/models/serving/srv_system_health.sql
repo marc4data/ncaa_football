@@ -10,8 +10,23 @@
 -- assigned here so the page sorts by it without knowing what any of the signals mean.
 --
 -- Airflow run history is deliberately absent: nothing outside Airflow should read Airflow's
--- metadata database, and task outcomes are already visible in its own UI and in the failure
--- alerts. This page is about data, not about the scheduler.
+-- metadata database, and task outcomes are visible in its own UI.
+--
+-- 🚨 A162: THAT PARAGRAPH USED TO END "and in the failure alerts", AND THAT HALF WAS FALSE.
+-- On 2026-09-16 `cfbd_midweek_results.dbt_run` failed at 13:56Z and the alert could not leave
+-- the host — "SMTP is blocked outbound here … NOTHING LEFT THIS HOST", with ALERT_WEBHOOK_URL
+-- unset. **The first human to learn of it was Marc, from a review, roughly twenty hours later**,
+-- and the five rounds that followed — a wedged warehouse, a 95x regression, a working day
+-- blocked — all rested on that silence. Detection worked; notification did not (§6).
+--
+-- ✅ SO THE `pipeline` SIGNAL BELOW EXISTS, AND IT DOES NOT BREAK THE BOUNDARY ABOVE. It reads
+-- `ops.pipeline_heartbeat` — **cfdb's own telemetry, written by this project's own code**,
+-- which is exactly what the first paragraph of this file says this model is made of. Airflow's
+-- metadata database is still untouched.
+--
+-- ⚠️ AND ITS LIMIT IS STATED ON THE PAGE, NOT ONLY HERE: **a page is PULL, NOT PUSH.** It
+-- shortens how long before someone who looks finds out. It does not wake anybody, and it is
+-- not a substitute for ALERT_WEBHOOK_URL.
 with freshness as (
     select
         'freshness'                                        as signal_type,
@@ -125,6 +140,51 @@ deployment as (
 -- ⚠️ AC-G.32: ZERO IS A REAL ANSWER. This block always emits exactly one row, so the count renders
 -- as `0` rather than vanishing when it is fine. A health metric that disappears when healthy is
 -- the same defect one level up.
+-- ── A162: HAS THE PIPELINE STOPPED PUBLISHING? ─────────────────────────────────────────────
+--
+-- 🚨 A STALE HEARTBEAT IS A STOPPED PUBLISH, AND THAT IS TRUE OF THE WIRING AS IT IS TODAY —
+-- verified in the DAGs rather than assumed: both `weekly_refresh_dag.py` and
+-- `scores_refresh_dag.py` end `... >> dbt_test >> publish >> beat`. **The beat is downstream of
+-- the publish**, so it cannot advance while the publish is failing.
+--
+-- ⚠️ THE CHARTER'S §2.3 STILL SAYS "heartbeat is not downstream of dbt_test, so the DAG kept
+-- beating throughout". That described the wiring of 2026-09-11 and no longer describes the
+-- code; the chain above is what is in the repository now. **Said here because a stale rule and
+-- a live model disagreeing is how the next reader gets it wrong.**
+--
+-- 📊 THE BUDGET AND THE LATEST BEAT BOTH COME FROM `fct_pipeline_heartbeat`, WHICH IS WHERE
+-- THE GRAIN CHANGE BELONGS (ci/check_layering.py rule 3: serving reads marts, never sources).
+-- That model carries the note on why the budgets are restated from `ci/check_heartbeats.py`
+-- and which test holds the two in step.
+pipeline as (
+    select
+        'pipeline'                                         as signal_type,
+        heartbeat_name                                     as subject,
+        case when extract(epoch from (now() - last_beat)) > budget_seconds then 'error'
+             when extract(epoch from (now() - last_beat)) > budget_seconds * 0.75 then 'warn'
+             else 'ok' end                                 as severity,
+        case when extract(epoch from (now() - last_beat)) > budget_seconds
+             then 'PUBLISH HAS STOPPED — last completed '
+                  || cast(round(extract(epoch from (now() - last_beat)) / 3600) as {{ dbt.type_string() }})
+                  || ' hours ago, past its '
+                  || cast(round(budget_seconds / 3600.0) as {{ dbt.type_string() }})
+                  || ' hour budget. The beat is downstream of publish_to_serving, so this '
+                  || 'cadence is not reaching serving.'
+             else 'published '
+                  || cast(round(extract(epoch from (now() - last_beat)) / 3600) as {{ dbt.type_string() }})
+                  || ' hours ago; budget '
+                  || cast(round(budget_seconds / 3600.0) as {{ dbt.type_string() }})
+                  || ' hours' end                          as detail,
+        last_beat                                          as observed_at
+    from (
+        select heartbeat_name, last_beat_at as last_beat, budget_seconds
+        from {{ ref('fct_pipeline_heartbeat') }}
+    ) beats
+    -- A cadence nobody has budgeted is not silently rated 'ok'; it is left out, and the
+    -- budget guard is what makes its absence a test failure rather than a quiet gap.
+    where budget_seconds is not null
+),
+
 orphan_market as (
     select
         'market_integrity'                                 as signal_type,
@@ -156,6 +216,7 @@ from (
     union all select * from documentation
     union all select * from deployment
     union all select * from orphan_market
+    union all select * from pipeline
 ) combined
 -- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
 -- underlying data was last loaded, never from now() in the app. Per-domain rather than
