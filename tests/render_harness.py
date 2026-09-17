@@ -628,3 +628,55 @@ def plain(html):
     text = re.sub(r"<[^>]+>", " ", html)
     text = text.replace("&nbsp;", " ").replace("&amp;", "&")
     return re.sub(r"\s+", " ", text).strip()
+
+
+# ── A156: THE BOX-WHISKER SERIF CLASSIFIER, AND WHY IT LIVES HERE (cfdb-main-R-1089) ─────────
+#
+# 🚨 A155 REPORTED `Today | serif 40.0px` IN ITS §6.1 TABLE AND TODAY DRAWS NO BOX CHART AT ALL.
+# `today.py` never imports `lib.distribution` — the two real `distribution.box(` call sites in
+# this repository are both in `matchup.py`. **What the ad-hoc classifier in that round's script
+# matched was `_sparkline_svg`'s quarter dividers**: vertical `<line>` marks at
+# `y1='{pad}' … y2='{height - pad}'`, which is `44 - 2 - 2 = 40.0` and reconciles exactly.
+#
+# ⚠️ AND THE PART WORTH LEARNING IS THAT THE FILTER WAS A155's OWN FIX. `y1 != y2` was added that
+# round to stop counting the whisker's HORIZONTAL rule (cfdb-main-R-1101). It is necessary and it
+# is not sufficient: it separates a serif from a rule, and does nothing at all to separate a serif
+# from any other vertical line on the page. **Three variants of one class in two rounds**, so this
+# is a function with a test rather than a comment in a scratch script.
+#
+# ✅ THE SCOPE IS THREE CONDITIONS, NOT ONE:
+#   1. the mark is inside a chart `distribution` PRODUCED — `<span class='cfdb-dist'>` is its own
+#      wrapper and nothing else in the site emits it;
+#   2. it carries the whisker's opacity, which no other mark in that chart uses at width 1;
+#   3. `y1 != y2`, which excludes the whisker rule (R-1101).
+#
+# 🚨 AND THE NEGATIVE CASE IS THE POINT: `test_the_serif_classifier_reads_zero_where_there_is_no
+# _box_chart` asserts it returns NOTHING for markup with vertical lines that are not serifs. That
+# is the property A155's run had and never checked, and checking it is what would have caught the
+# 40.0 before it reached a report.
+
+_DIST_CHART = re.compile(r"<span class='cfdb-dist'[^>]*>(.*?)</span>", re.S)
+
+
+def box_serifs(html: str, opacity: float = None):
+    """Every whisker-cap serif `distribution.box()` drew, as (x, y1, y2) triples.
+
+    `opacity` defaults to `lib.distribution.WHISKER_OPACITY`, read rather than restated — a
+    literal here would be a second home for a number Marc has already moved once (A154).
+    """
+    if opacity is None:
+        module = sys.modules.get("lib.distribution")
+        if module is None:
+            if str(SITE) not in sys.path:
+                sys.path.insert(0, str(SITE))
+            module = importlib.import_module("lib.distribution")
+        opacity = module.WHISKER_OPACITY
+    pattern = re.compile(
+        r"<line x1='([\d.-]+)' y1='([\d.-]+)' x2='[\d.-]+' y2='([\d.-]+)'"
+        r" stroke='currentColor' stroke-width='1' opacity='" + f"{opacity:g}" + r"'>")
+    out = []
+    for chart in _DIST_CHART.findall(html):
+        for x, y1, y2 in pattern.findall(chart):
+            if y1 != y2:                      # R-1101: not the whisker's horizontal rule
+                out.append((float(x), float(y1), float(y2)))
+    return out

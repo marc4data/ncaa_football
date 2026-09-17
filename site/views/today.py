@@ -167,19 +167,19 @@ def _tab_bar(active: str) -> None:
 #
 # ✅ The panel now RANKS, FILTERS and DISPLAYS on `scoreboard_lead_changes*` — Marc's call.
 #
-# 🚨 AND THE FIVE `*_by_clock` ALIASES BELOW ARE READ BY NOTHING. A153 said so; A155 CONTRACTED
-# on the strength of it and re-counted first, which is the rule (§2.2.1c.1) and which found one
-# consumer A153's count had not: `assert_period_scoped_win_probability_agrees_with_the_whole_game`
-# read all five feed-ordered columns and would have gone down with them. It was repointed onto
-# `_by_clock`, so the invariant survived the removal.
+# ✅ AND THE FIVE `*_by_clock` ALIASES ARE GONE AS OF A156 (cfdb-main-R-1103). A153 found them
+# unread, A155 contracted the feed-ordered columns they replaced, and this round removed the
+# selects themselves — five columns fetched on every load of this page and read by nothing.
 #
-# ⚠️ THE FEED-ORDERED COLUMNS ARE GONE FROM `srv_game` AS OF A155; the `_by_clock` ones this query
-# reads are what remain, and the win-probability measure stays published either way, because it is
-# a real thing that no longer has to pretend to be lead changes.
+# 🚨 THE COUNT WAS REDONE RATHER THAN INHERITED, AND A155's OWN R-1104 IS WHY: that round's
+# consumer search used `grep -v "_by_clock"` on `grep -rn` output, which filters on the PATH, so
+# it hid the one file NAMED for the term. **Redone here with no `-v` at all** — exact names, a
+# trailing boundary, and the LINES read rather than counted. Every surviving mention is prose, a
+# test fixture key, or a guard's own list; nothing reads the values.
 #
-# ⚠️ THE ALIASES THEMSELVES ARE LEFT ALONE DELIBERATELY. Removing the five selects is a page change
-# with its own §3.3 shape and its own test to move — `test_win_probability_order` asserts each
-# `X_by_clock as X` pair — so it is a round, not a tidy-up in passing (cfdb-main-R-1103).
+# ⚠️ THE COLUMNS THEMSELVES STAY PUBLISHED. This is a page query, not a serving contract: the
+# `*_by_clock` measures are real and `srv_game` still carries them. Nothing in `dbt/` moves, and
+# §2.3 row counts are not owed for removing a SELECT item.
 def _completed_games(scope) -> pd.DataFrame:
     """Every completed game in scope. Feeds Most Exciting and all three recap lists.
 
@@ -286,14 +286,8 @@ def _completed_games(scope) -> pd.DataFrame:
                favorite_covered, spread_favorite_side, moneyline_favorite_side,
                favorite_definitions_disagree,
                market_implied_home_win_probability, market_implied_away_win_probability,
-               lead_changes_by_clock as lead_changes,
-               largest_single_play_swing_by_clock as largest_single_play_swing,
                home_win_probability_range,
-               lead_changes_fourth_quarter_by_clock as lead_changes_fourth_quarter,
-               largest_single_play_swing_fourth_quarter_by_clock
-                   as largest_single_play_swing_fourth_quarter,
                home_win_probability_range_fourth_quarter,
-               lead_changes_overtime_by_clock as lead_changes_overtime,
                scoreboard_lead_changes,
                scoreboard_lead_changes_fourth_quarter,
                scoreboard_lead_changes_overtime,
@@ -2081,10 +2075,95 @@ def _leaderboards(scope, depth: int) -> None:
 # words. `st.line_chart`'s own docstring calls itself "syntax-sugar around st.altair_chart",
 # so this removes the sugar rather than adding a layer.
 _BUMP_HEIGHT = 420
+# ⚠️ THE PICTURE TAKES AN EXPLICIT WIDTH UNDER CONCAT. `use_container_width` sizes the
+# OUTER spec, and a concat divides that between its halves — so leaving the left half
+# to infer its width makes the split depend on how wide the table's text happens to
+# render, which is R-603's collapse wearing a different hat.
+_BUMP_CHART_WIDTH = 820
 
 
-def _bump_chart(frame: pd.DataFrame, poll: str) -> None:
-    """A bump chart: rank 1 at the top, one line per team, gaps where a team was unranked."""
+# ── A156: THE TABLE IS A CHART ELEMENT SO THAT THE AXIS CAN BE SHARED ───────────────────────
+#
+# > **MARC:** *"The chart and the Table need to share the same Y-axis. … consume that with the
+# > table (which might be better of as a chart element that's printed in something that is
+# > structured like a table)"*
+#
+# 🚨 TWO RENDERERS CANNOT SHARE A SCALE. The table was `table.render` — HTML, uniform row height
+# — and the chart is Altair, so rank 7 on the picture and rank 7 in the table sat at unrelated y
+# and no amount of CSS would have tied them together. **His parenthesis is the answer: inside
+# Altair, an `hconcat` whose second half is text marks on the SAME `alt.Y`.** One renderer, one
+# scale, and the alignment is a property of the encoding rather than of arithmetic anybody has
+# to keep in step.
+#
+# ✅ THE PRIMITIVE WAS MEASURED BEFORE IT WAS BUILT ON, and the first measurement was WORTHLESS.
+# A prototype pinned the same explicit `domain` on BOTH halves and compared rendered pixel y for
+# five teams: they agreed. **Then the negative control — the identical spec with
+# `y="independent"` — ALSO agreed**, because two independent scales over one domain at one
+# height produce identical pixels. 🚨 The instrument could not fail: R-760's class, in the
+# measuring rig rather than in a test.
+#
+# ✅ WHAT MAKES IT DISCRIMINATING IS ALSO WHAT MAKES IT CORRECT: **only the chart pins a domain,
+# and the table inherits one through the shared resolve.** Under `independent` the table then
+# scales its own narrower rank range across the full height and the halves disagree by ~100px;
+# under `shared` they cannot disagree at all. ⚠️ AND IT IS THE §4.2.1 QUESTION IN A CHART SPEC:
+# a domain literal repeated on both halves is one number with two homes, and the two homes drift.
+#
+#     measured, vega-lite 6.4.3, ranks 1-3 present in both halves:
+#         shared        60.5/60.5   144.5/144.5   228.5/228.5     agree
+#         independent   60.5/158.5  144.5/298.5   228.5/438.5     disagree
+#
+# ⚠️ WHAT IS LOST, SAID PLAINLY RATHER THAN DISCOVERED LATER: `table.render` applied the sort it
+# drew (A141) and a chart element cannot. **At a shared rank axis the row order IS rank**, so the
+# Rank, Team and delta sort links were already saying what the axis says — but **sorting by
+# POINTS is genuinely gone**, and that is the one a reader might have used.
+_BUMP_TABLE_WIDTH = 250
+_BUMP_ROW_FONT = 11
+
+
+def _bump_table_chart(current: pd.DataFrame) -> alt.Chart:
+    """The table, drawn as text marks that INHERIT the chart's y scale.
+
+    🚨 IT DECLARES NO SCALE AND NO DOMAIN, AND THAT IS THE WHOLE DESIGN. `resolve_scale(y=...)`
+    is what ties the halves together, and a domain repeated here would be a second copy of the
+    chart's own `worst` — the §4.2.1 question in a chart spec, and the exact drift this panel
+    exists to remove. **It would also make the round's own verification worthless**: two halves
+    pinned to one domain land on identical pixels whether the scale is shared or not, which is
+    how the first version of that measurement passed its own negative control.
+
+    ⚠️ `axis=None` IS NOT COSMETIC EITHER. Without it the table half draws its OWN rank axis, and
+    the first render did: 25 rank numbers plus 6 axis ticks at 1/5/10/15/20/25, each tick sitting
+    at the identical y as the rank it duplicates. **Measured as six "row collisions" that were
+    not rows at all** — the picture said the table was too tight when it was drawing a second
+    axis on top of itself.
+
+    ⚠️ AND THE COLUMNS ARE PLACED AT PIXEL x THROUGH `alt.value`, which bypasses the x scale
+    entirely — the table half has no x quantity, only four gutters. The header row sits at a
+    NEGATIVE pixel y for the same reason: it is chrome, not a rank.
+    """
+    y = alt.Y("rank:Q", axis=None)
+    columns = (
+        (34, "right", "Rank", alt.Text("rank:Q", format="d")),
+        (46, "left", "Team", alt.Text("team_display:N")),
+        (186, "right", "Points", alt.Text("points:Q", format=",d")),
+        (196, "left", "vs prev", alt.Text("delta:N")),
+    )
+    layers = []
+    for x_px, align, heading, text in columns:
+        layers.append(alt.Chart(current).mark_text(
+            align=align, fontSize=_BUMP_ROW_FONT, baseline="middle").encode(
+                x=alt.value(x_px), y=y, text=text))
+        layers.append(alt.Chart(current.head(1)).mark_text(
+            align=align, fontSize=_BUMP_ROW_FONT, fontWeight="bold", baseline="bottom",
+            opacity=0.75).encode(x=alt.value(x_px), y=alt.value(-6),
+                                 text=alt.value(heading)))
+    return alt.layer(*layers).properties(width=_BUMP_TABLE_WIDTH, height=_BUMP_HEIGHT)
+
+
+def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
+    """A bump chart: rank 1 at the top, one line per team, gaps where a team was unranked.
+
+    `current` is the latest week, drawn beside it as a table on the SAME y scale.
+    """
     weeks = sorted(int(w) for w in frame["week"].unique())
     teams = list(frame["team_display"].unique())
 
@@ -2146,30 +2225,52 @@ def _bump_chart(frame: pd.DataFrame, poll: str) -> None:
         x=x, y=y, text="team_display:N",
         opacity=alt.condition(hover, alt.value(1.0), alt.value(0.75)))
 
-    chart = (lines + points + labels).add_params(hover).properties(
-        height=_BUMP_HEIGHT, padding={"right": 96}).configure_view(stroke=None)
-    # ⚠️ R-659: THIS CHART IS SQUEEZED BY STREAMLIT'S AUTOSIZE AND DELIBERATELY NOT "FIXED".
+    # ── THE CONCAT, AND THE THREE THINGS IT CHANGES ────────────────────────────────────
     #
-    # `_prepare_vega_lite_spec` imposes `autosize: fit` on any spec that declares none, which
-    # makes `height` the OUTER BOX rather than the plot — the defect that collapsed Matchup's
-    # 150px charts (R-603). Measured in a real browser (A100), plot height drawn against the
-    # 420 asked for, as the axis font grows:
+    # ⚠️ `configure_view` MOVES TO THE TOP LEVEL. A `configure_*` on a sub-chart of a concat is
+    # invalid Vega-Lite and Altair raises on it; the setting is global by nature anyway.
+    #
+    # ⚠️ AND THE RIGHT PADDING GOES WITH IT. It existed so the endpoint labels beside each line
+    # were not clipped; under a concat the table half is what sits to the right of them, so the
+    # allowance belongs to the LEFT half's own width rather than to the whole spec.
+    picture = (lines + points + labels).add_params(hover).properties(
+        width=_BUMP_CHART_WIDTH, height=_BUMP_HEIGHT)
+    chart = alt.hconcat(
+        picture, _bump_table_chart(current), spacing=18,
+    ).resolve_scale(y="shared").configure_view(stroke=None)
+    # ── A156: R-659's SQUEEZE DOES NOT APPLY TO A CONCAT, AND THE OPPOSITE IS TRUE ──────
+    #
+    # ⚠️ R-659 MEASURED THIS PANEL AS A SINGLE VIEW and its table is kept below as history,
+    # because the numbers were real and they describe a chart this no longer is. **Re-measured
+    # under the concat, in Chromium, reproducing BOTH of Streamlit's steps from its source
+    # rather than from memory** — `_prepare_vega_lite_spec` imposing autosize, and the frontend
+    # setting `spec.width` to the container:
+    #
+    #     container   600   700   900   1100   1300   1600
+    #     svg drawn   1173 at every one of them        plot group h = 420.0, exactly as asked
+    #
+    # 🚨 AND VEGA-LITE SAYS WHY, IN ITS OWN CONSOLE: `WARN Autosize "fit" only works for single
+    # views and layered views.` An `hconcat` is neither, so the `fit` Streamlit imposes is
+    # IGNORED — which is why the plot keeps the full 420 instead of losing ~35px to it, and why
+    # `use_container_width=True` is now INERT here. **The panel is a fixed 1173px.**
+    #
+    # ✅ THAT IS THE SAFE DIRECTION AND IT IS WORTH SAYING WHICH RISK IT RETIRES: R-603's
+    # collapse is a chart SHRINKING to nothing inside a box it does not control. This cannot
+    # shrink at all. What it can do is leave whitespace on a very wide viewport, or overflow a
+    # narrow one — a layout cost, not a legibility one, and visible rather than silent.
+    #
+    # ⚠️ THE HISTORIC SINGLE-VIEW MEASUREMENT (A100), KEPT SO NOBODY RE-DERIVES IT:
     #
     #     axis font    10px   13px   16px   20px   24px   28px
     #     plot drawn     388    381    375    366    355    345
-    #
-    # 🚨 IT LOSES A NEAR-CONSTANT ~35px, NOT A PROPORTION, because its axis labels are short
-    # and horizontal — so it degrades gracefully and cannot reach a collapse at any font a
-    # reader will set. `performance.py`'s calibration curve loses ~6.5px PER pixel of font and
-    # was fixed for exactly that reason; this one would need a 100px axis font to break.
-    #
-    # ⚠️ THE DELIVERABLE HERE IS THE MEASUREMENT, NOT A NEW CHART. If this is ever given a
-    # smaller height, or labels that rotate, re-measure before trusting it.
     st.altair_chart(chart, use_container_width=True)
     st.caption(
         f"{poll}, full season. **Rank 1 is at the top.** Every ranked team is drawn; a line "
         "stops where a team left the poll and restarts where it returned, so a gap is a "
-        "week unranked rather than a rank held. Hover a line to follow one team.")
+        "week unranked rather than a rank held. Hover a line to follow one team. "
+        f"**The table beside it is week {int(frame['week'].max())} and shares the chart's rank "
+        "axis**, so a team's row sits at the same height as its line — a team on the picture "
+        "with no row beside it was ranked earlier in the season and is not ranked now.")
 
 
 def _bump(scope, depth: int) -> None:
@@ -2186,8 +2287,6 @@ def _bump(scope, depth: int) -> None:
             states.empty("The poll chart would be here.", f"No {poll} rows for this season.")
             return
 
-        _bump_chart(one, poll)
-
         latest_week = int(one["week"].max())
         current = one[one["week"] == latest_week].copy()
         previous = one[one["week"] == latest_week - 1][["team_display", "rank"]]
@@ -2203,14 +2302,10 @@ def _bump(scope, depth: int) -> None:
             return "—" if change == 0 else (f"▲ {change}" if change > 0 else f"▼ {abs(change)}")
 
         current["delta"] = current.apply(_delta, axis=1)
-        table.render(current.sort_values("rank"), [
-            Col("rank", "Rank", kind="num"),
-            Col("team_display", "Team"),
-            Col("points", "Points", kind="num"),
-            Col("delta", "vs previous week"),
-        ], caption=f"{poll}, week {latest_week}. Points are the poll total; first-place votes "
-                   "are carried separately on the view.",
-            anchor="poll-movement")
+        # 🚨 THE TABLE IS DRAWN INSIDE THE CHART NOW (A156), so it is passed in rather than
+        # rendered after. `sort_values` stays and is not decoration: text marks are emitted in
+        # data order, and a stable order is what makes a staged break legible.
+        _bump_chart(one, poll, current.sort_values("rank"))
 
 
 def _recap(scope, depth: int) -> None:

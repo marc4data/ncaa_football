@@ -141,25 +141,43 @@ def test_the_page_reads_the_corrected_columns_and_keeps_its_own_vocabulary():
     only place a reader has to look to see which column is which**, and when A141 CONTRACTS the
     old ones it is the alias that disappears.
 
-    ⚠️ SO BOTH HALVES ARE ASSERTED. Reading the `_by_clock` column without the alias would break
-    every consumer loudly; keeping the alias while reading the OLD column would be silent, and is
-    the failure this test is for.
+    ── A156: THE ALIASES ARE GONE, SO THE ASSERTION MOVED TO WHAT REPLACED THE FACT ──────────
+
+    🚨 THE SUBJECT OF THE FIRST HALF NO LONGER EXISTS, AND DELETING IT WAS THE WRONG FIX.
+    A153 measured the five aliases unread, A155 contracted away the feed-ordered columns they
+    stood in for, and A156 removed the five SELECT items — so there is no longer an
+    `X_by_clock as X` pair to assert. **What the half was really protecting was never the alias:
+    it was that this page must not read a FEED-ORDERED column.** That property outlives the
+    aliases, and it is now asserted directly — no feed-ordered name may appear in the query at
+    all, which is a STRONGER claim than the alias pairing ever made.
+
+    ⚠️ AND IT CANNOT BE SATISFIED BY DELETING THE QUERY: the `_by_clock` reads that survive are
+    asserted to still be there.
     """
     body = TODAY.read_text()
-    for old, new in (("lead_changes", "lead_changes_by_clock"),
-                     ("largest_single_play_swing", "largest_single_play_swing_by_clock"),
-                     ("lead_changes_fourth_quarter", "lead_changes_fourth_quarter_by_clock"),
-                     ("largest_single_play_swing_fourth_quarter",
-                      "largest_single_play_swing_fourth_quarter_by_clock"),
-                     ("lead_changes_overtime", "lead_changes_overtime_by_clock")):
-        assert f"{new}\n                   as {old}" in body or f"{new} as {old}" in body, (
-            f"{old} is not read from {new} — the page is still ranking on the feed's order")
+    query = re.search(r"def _completed_games.*?\n\s*\"\"\"", body, re.S)
+    query = body[query.start():body.find("def ", query.end())] if query else body
+
+    # 🚨 NO FEED-ORDERED NAME MAY BE SELECTED. The trailing boundary is load-bearing for the
+    # same reason A153 found: `lead_changes` is a prefix of `lead_changes_by_clock`, and
+    # `scoreboard_lead_changes` ENDS with it, so an unanchored search matches the survivors.
+    for feed_ordered in ("lead_changes", "largest_single_play_swing",
+                         "lead_changes_fourth_quarter",
+                         "largest_single_play_swing_fourth_quarter", "lead_changes_overtime"):
+        assert not re.search(rf"(?<![a-z_]){feed_ordered}(?![a-z_])", query), (
+            f"{feed_ordered!r} is selected again — it was removed in A156 because nothing read "
+            f"it, and cfdb-main-R-916 is why nothing should")
+
+    # ✅ AND THE CORRECTED MEASURES ARE STILL READ, so the guard above cannot be met by emptying
+    # the query. These are what the page ranks and displays on.
+    for survivor in ("scoreboard_lead_changes", "scoreboard_lead_changes_fourth_quarter",
+                     "mean_distance_from_even_fourth_quarter_onward"):
+        assert re.search(rf"(?<![a-z_]){survivor}(?![a-z_])", query), (
+            f"{survivor!r} is no longer selected — the panel cannot rank without it")
 
     order = re.search(r"MOST_EXCITING_ORDER = \((.*?)\)\n", body, re.S).group(1)
     # ✅ A153 MOVED THE FIRST KEY OFF THIS COLUMN ENTIRELY (§3.3 MIGRATE, Marc's call): the panel
     # now ranks on `scoreboard_lead_changes_fourth_quarter`, the number its caption promises.
-    # **The five aliases above are still asserted and still matter** — the page keeps reading the
-    # corrected win-probability columns, and CONTRACT has not happened.
     #
     # 🚨 THIS TEST'S OWN PROPERTY SURVIVES INTACT: the panel must never rank on a FEED-ordered
     # column. A140 asserted that by naming the clock-ordered one; this asserts it by refusing the
