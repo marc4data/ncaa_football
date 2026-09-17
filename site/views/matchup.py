@@ -4198,6 +4198,11 @@ _ADVANCED_ROWS = (
 
 _GLOSSARY_FIELDS = tuple(field for _label, field, _dp in _ADVANCED_ROWS)
 
+# ⚠️ THE READER'S NAME FOR A COLUMN, BUILT FROM THE ROW TUPLES RATHER THAN RETYPED — so a
+# measure named in a caption is named the way the row above it is (cfdb-main-R-1091). A second
+# spelling of eighteen labels is a second thing to keep in step.
+_ROW_LABELS = {field: label for label, field, _dp in _BOX_SCORE_ROWS + _ADVANCED_ROWS}
+
 
 def _postgame_glossary() -> dict:
     """What each advanced metric means, FROM THE DICTIONARY RATHER THAN FROM THIS FILE.
@@ -4729,10 +4734,11 @@ def _distribution_note(spread) -> str:
     🚨 **AND IT RETURNS `""` RATHER THAN A SENTENCE WHEN THERE ARE NO CHARTS**, because a
     caption describing charts that were not drawn is the R-875 class this page keeps finding.
     """
-    counts = sorted(int(row["n"]) for row in spread.values()
-                    if row.get("n") is not None and not pd.isna(row.get("n")))
-    if not counts:
+    counted = {metric: int(row["n"]) for metric, row in spread.items()
+               if row.get("n") is not None and not pd.isna(row.get("n"))}
+    if not counted:
         return ""
+    counts = sorted(counted.values())
     low, high = counts[0], counts[-1]
     over = (f"{low:,} team-games" if low == high
             else f"{low:,} to {high:,} team-games, depending on the measure")
@@ -4741,12 +4747,46 @@ def _distribution_note(spread) -> str:
     # 🚨 AC-G.11 / AC-G.33. THE THIN CASE IS NAMED SPECIFICALLY RATHER THAN LEFT TO THE READER
     # TO NOTICE. A box-and-whisker over two observations has quartiles that are interpolations
     # between two numbers, and the picture says nothing about that on its own.
-    if low <= _THIN_DISTRIBUTION:
-        note += (f" ⚠️ This week is too thin for that shape to mean much: with only "
-                 f"{low:,} team-game{'' if low == 1 else 's'}, the box and the whiskers are drawn "
-                 f"between a handful of numbers "
-                 f"rather than across a population.")
-    return note
+    if low > _THIN_DISTRIBUTION:
+        return note
+    # ── cfdb-main-R-1091: THE CLAUSE HAS TO SAY WHAT IT IS DESCRIBING ────────────────────
+    #
+    # 🚨 B130 TOOK `low` FROM THE SAME SORTED LIST TWICE AND USED IT FOR TWO DIFFERENT JOBS.
+    # The *over* clause states the RANGE — correctly, *"196 to 200 team-games, depending on the
+    # measure"* — and the *thin* clause then stated **`low` alone**, as though it described the
+    # panel. **In a week where one measure's coverage drops and the rest do not, that sentence
+    # would read *"with only 8 team-games, the box and the whiskers are drawn between a handful
+    # of numbers"* beside seventeen charts drawn over 172** — a false statement about the panel,
+    # made by a sentence written to stop a false impression.
+    #
+    # ✅ **UNREACHABLE TODAY, BY THE DATA RATHER THAN BY THE CODE, WHICH IS WHY IT NEEDED A TEST
+    # AND NOT JUST A FIX.** B130's buckets are exhaustive over all 648 rows — 486 at n >= 100,
+    # 90 at 51–100, 36 at 11–25, 36 at <= 2 — and **nothing sits between 3 and 10**, so every
+    # week is currently all-thin or all-fat and the straddle cannot occur. ⚠️ **It becomes
+    # reachable the first time one endpoint's coverage slips**, and nothing about the data
+    # guarantees it will not.
+    #
+    # ✅ **NAMING THE MEASURES BEATS SUPPRESSING THE CLAUSE, AND THE REASON IS AC-G.11 ITSELF.**
+    # The alternative the prompt offered — fire only when `high <= _THIN_DISTRIBUTION` — is
+    # honest about the panel and **silent about the one chart a reader would over-trust**. An
+    # absence must say WHICH absence it is; a caveat must say which charts it is about.
+    thin = sorted((metric for metric, n in counted.items() if n <= _THIN_DISTRIBUTION),
+                  key=lambda metric: (counted[metric], metric))
+    if len(thin) == len(counted):
+        # THE WHOLE PANEL IS THIN — B130's wording, unchanged, because it is true here and
+        # naming eighteen measures would be a list where a sentence does.
+        return note + (f" ⚠️ This week is too thin for that shape to mean much: with "
+                       f"only {low:,} team-game{'' if low == 1 else 's'}, the box and the "
+                       f"whiskers are drawn between a handful of numbers rather than across a "
+                       f"population.")
+    # ⚠️ THE LABEL A READER SEES, NOT THE COLUMN NAME. `_ROW_LABELS` is built from the same two
+    # tuples the table's rows come from, so a measure cannot be named here under a spelling that
+    # appears nowhere on the panel.
+    named = ", ".join(f"{_ROW_LABELS.get(metric, metric)} ({counted[metric]:,})"
+                      for metric in thin)
+    return note + (f" ⚠️ {'One measure rests' if len(thin) == 1 else 'Some measures rest'}"
+                   f" on too few for that shape to mean much: {named}. The rest are drawn over "
+                   f"the full week.")
 
 
 def _metric_chart(row, away_value, home_value, dp, accents, metric: str = "") -> str:
