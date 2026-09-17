@@ -56,22 +56,59 @@ def test_the_clock_arithmetic_exists_in_exactly_one_place():
             f"from?")
 
 
-def test_the_summary_counts_crossings_in_clock_order_and_keeps_the_old_one_beside_it():
-    """§3.3's EXPAND, asserted at the source so a later round cannot collapse it by accident.
+# The five feed-ordered columns A155 contracted away. Named once, used by both tests below.
+CONTRACTED = ("lead_changes", "largest_single_play_swing", "lead_changes_fourth_quarter",
+              "largest_single_play_swing_fourth_quarter", "lead_changes_overtime")
 
-    ⚠️ BOTH WINDOWS HAVE TO BE THERE. The feed-ordered `lag` still feeds `lead_changes`, which
-    `srv_game` publishes and `today.py` ranks on; the clock-ordered one feeds the `_by_clock`
-    twins. Deleting either half turns an expand into a silent meaning change.
+
+def test_the_summary_counts_crossings_in_clock_order_AND_THE_FEED_ORDERED_ONES_ARE_GONE():
+    """§3.3 ALL THREE STEPS, asserted at the source — and this test used to assert the opposite.
+
+    🚨 IT WAS `..._and_keeps_the_old_one_beside_it` AND IT WENT RED ON A155, WHICH IS THE POINT.
+    While A140's EXPAND stood, deleting the feed-ordered `lag` would have been a silent meaning
+    change and this test said so. A153 MIGRATED the page, A155's PART 0 DEPLOYED it — which is
+    what §3.3.2 gates the last step on — and only then was the removal safe. **A guard that
+    fails when the thing it guards is deliberately undone is working; the fix is to move the
+    assertion, never to weaken it.**
+
+    ⚠️ SO IT NOW ASSERTS THE CONTRACT, in the shape `test_the_two_dead_columns_do_not_come_back`
+    below already uses: the clock-ordered window is there, the feed-ordered one is not, and
+    neither is anything built on it.
     """
     body = _code(SUMMARY.read_text())
-    assert "order by w.play_number) as previous_wp" in body, (
-        "the feed-ordered lag is gone — that is a CONTRACT, and it is gated on a deploy (§3.3.2)")
-    assert "curve_order(" in body, "the clock-ordered lag is gone — the expand was undone"
+    assert "curve_order(" in body, "the clock-ordered lag is gone — the measure has no order"
+    assert "order by w.play_number) as previous_wp" not in body, (
+        "the feed-ordered lag is back. cfdb-main-R-916 measured play_number non-chronological "
+        "on 336 of 1,898 games; nothing may be built on it again without a round saying why")
     for column in ("lead_changes_by_clock", "largest_single_play_swing_by_clock",
                    "lead_changes_fourth_quarter_by_clock",
                    "largest_single_play_swing_fourth_quarter_by_clock",
                    "lead_changes_overtime_by_clock"):
         assert f"as {column}" in body, f"{column} is not emitted"
+    # 🚨 AND THE CONTRACTED FIVE, CHECKED AS EMITTED NAMES RATHER THAN AS SUBSTRINGS. `as
+    # lead_changes` is a prefix of `as lead_changes_by_clock`, so a bare `in` test passes on
+    # the survivor and proves nothing — the trailing boundary is what separates them.
+    for column in CONTRACTED:
+        assert not re.search(rf"as {column}(?![a-z_])", body), (
+            f"{column} is back in the mart. It was contracted in A155 after A153 moved the page "
+            f"off it; if a round wants it, it is a NEW column somebody has asked for")
+
+
+def test_the_contracted_columns_are_gone_from_serving_and_its_docs():
+    """🚨 THE CONTRACT IS ONLY DONE WHERE THE READER LOOKS, WHICH IS SERVING — not the mart.
+
+    ⚠️ AND `_models.yml` IS PART OF IT: a documented column that no longer exists is worse than
+    an undocumented one, because `srv_data_dictionary` renders it to a reader as though it were
+    there. A116's lesson in the data dictionary rather than in a page.
+    """
+    serving = _code((ROOT / "dbt" / "models" / "serving" / "srv_game.sql").read_text())
+    for column in CONTRACTED:
+        assert not re.search(rf"wps\.{column}(?![a-z_])", serving), (
+            f"srv_game still publishes {column} — the contract did not finish")
+    docs = (ROOT / "dbt" / "models" / "serving" / "_models.yml").read_text()
+    for column in CONTRACTED:
+        assert f"- name: {column}\n" not in docs, (
+            f"_models.yml still documents {column}, which serving no longer publishes")
 
 
 def test_the_two_dead_columns_do_not_come_back():

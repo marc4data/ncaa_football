@@ -279,10 +279,8 @@ select
     -- GRAIN: the summary is one row per game and srv_game is one row per game, so this is a
     -- join, not an aggregate. assert_srv_game_is_still_one_row_per_game fails if it fans out,
     -- which is the defect this shape of change produces.
-    wps.lead_changes,
-    wps.largest_single_play_swing,
-    -- 🚨 A140, cfdb-main-R-916 — EXPAND. THE SAME TWO MEASURES, COUNTED IN THE ORDER THE PLAYS
-    -- HAPPENED IN RATHER THAN THE ORDER THE FEED LISTS THEM.
+    -- 🚨 A140, cfdb-main-R-916 — THE TWO MEASURES, COUNTED IN THE ORDER THE PLAYS HAPPENED IN
+    -- RATHER THAN THE ORDER THE FEED LISTS THEM.
     --
     -- `stg_game_win_probability.play_number` is not chronological: A136 measured 795 consecutive
     -- pairs stepping BACKWARDS on the clock across 336 of 1,898 games (17.7%). Everything above
@@ -290,9 +288,12 @@ select
     -- numbers, it MANUFACTURES them. Memphis at Georgia State (2025 week 2) publishes 25 lead
     -- changes and a 0.6704 largest swing; along the clock it had 11 and 0.2401.
     --
-    -- ⚠️ THE OLD COLUMNS ARE UNTOUCHED AND STILL RANKED ON. `today.py` reads all five and
-    -- `MOST_EXCITING_ORDER` leads on `lead_changes_fourth_quarter`; moving it is the MIGRATE
-    -- step and it is not this round's. Nothing here changes what any published number means.
+    -- ✅ A155 CONTRACTED THE FEED-ORDERED FIVE AWAY. A140 published these beside them, A153
+    -- moved `today.py` off them, PART 0 of A155 deployed that page, and only then did the five
+    -- come out — §3.3.2's order, which is gated on the DEPLOY rather than on the merge.
+    -- ⚠️ `_by_clock` KEEPS ITS SUFFIX EVEN THOUGH IT IS NOW THE ONLY ORDER. It names how the
+    -- measure is computed, which stays true and stays worth saying; renaming it would break
+    -- `today.py`'s aliases for nothing.
     wps.lead_changes_by_clock,
     wps.largest_single_play_swing_by_clock,
     wps.home_win_probability_range,
@@ -307,21 +308,17 @@ select
     -- here for the same reason: Jacksonville State @ Ohio had 19 lead changes, TWO of them in the
     -- fourth quarter and ELEVEN in overtime, so folding them together would say the drama happened
     -- somewhere it did not.
-    wps.lead_changes_fourth_quarter,
-    wps.largest_single_play_swing_fourth_quarter,
     wps.lead_changes_fourth_quarter_by_clock,
     wps.largest_single_play_swing_fourth_quarter_by_clock,
     wps.home_win_probability_range_fourth_quarter,
     wps.plays_with_win_probability_fourth_quarter,
-    wps.lead_changes_overtime,
     wps.lead_changes_overtime_by_clock,
 
     -- ── A152: THE SCOREBOARD'S OWN LEAD CHANGES, EXPAND ONLY (§3.3) ───────────────────────
     --
     -- 🚨 MARC: *"Lead changes in 4th quarter doesn't seem accurate… Math isn't mathin'."* →
-    -- *"Show actual scoreboard lead changes instead."* **These are that number.** The five
-    -- `lead_changes*` columns above are unchanged and still have their consumers; nothing on the
-    -- page moves this round, which is what makes this an EXPAND rather than a swap.
+    -- *"Show actual scoreboard lead changes instead."* **These are that number**, and since
+    -- A153 they are what the page ranks, filters and displays on.
     --
     -- 📊 THE TWO MEASURE DIFFERENT THINGS AND THE DISTRIBUTIONS SAY SO: across 1,898 games the
     -- win-probability crossings mean **6.69** and reach **38**; the scoreboard lead changes mean
@@ -346,9 +343,12 @@ select
     --
     -- ⚠️ MEASURED BEFORE IT WAS ARGUED FOR, and it is a better TIE-BREAK than lead key. On the 86
     -- games of 2026 week 2, ordering by it alone puts Ohio State @ Texas 1st and buries the other
-    -- two games Marc named at 27th and 30th; used behind `lead_changes_fourth_quarter` it improves
-    -- the worst rank of his seven from 21 to 18. A136's report carries the whole table. The page's
-    -- ordering constant is A137's to change, not this model's.
+    -- two games Marc named at 27th and 30th; used behind the then-published
+    -- `lead_changes_fourth_quarter` it improved the worst rank of his seven from 21 to 18. A136's
+    -- report carries the whole table. ⚠️ THAT MEASUREMENT IS HISTORY: A153 moved the page's lead
+    -- key to `scoreboard_lead_changes_fourth_quarter` and A155 removed the column it was measured
+    -- behind. It stays as the tie-break, and the ordering constant is the page's, not this
+    -- model's.
     wps.winner_mean_win_probability,
     -- The raw curve property the measure above is derived from, published so the derivation is
     -- auditable and so a chart can shade with it. ❌ A PAGE MUST NOT RE-DERIVE the winner mean

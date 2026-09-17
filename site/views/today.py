@@ -167,16 +167,19 @@ def _tab_bar(active: str) -> None:
 #
 # ✅ The panel now RANKS, FILTERS and DISPLAYS on `scoreboard_lead_changes*` — Marc's call.
 #
-# 🚨 AND THE FIVE `*_by_clock` ALIASES BELOW ARE NOW READ BY NOTHING, said here because the
-# CONTRACT round needs it and would otherwise have to re-derive it. 📊 Counted by reading the
-# lines rather than by a match count (§2.2.1c.1): after this round `lead_changes`,
-# `lead_changes_fourth_quarter`, `lead_changes_overtime` and both `largest_single_play_swing*`
-# appear in this module only in their own alias and in prose, and in NO other view module at all.
+# 🚨 AND THE FIVE `*_by_clock` ALIASES BELOW ARE READ BY NOTHING. A153 said so; A155 CONTRACTED
+# on the strength of it and re-counted first, which is the rule (§2.2.1c.1) and which found one
+# consumer A153's count had not: `assert_period_scoped_win_probability_agrees_with_the_whole_game`
+# read all five feed-ordered columns and would have gone down with them. It was repointed onto
+# `_by_clock`, so the invariant survived the removal.
 #
-# ⚠️ THEY ARE LEFT IN PLACE DELIBERATELY. §3.3.2 gates CONTRACT on the DEPLOY, not the merge:
-# until production serves this page, the old columns still have a live consumer. **CONTRACT is the
-# next A round's and it is now unblocked** — the win-probability measure stays published either
-# way, because it is a real thing that no longer has to pretend to be lead changes.
+# ⚠️ THE FEED-ORDERED COLUMNS ARE GONE FROM `srv_game` AS OF A155; the `_by_clock` ones this query
+# reads are what remain, and the win-probability measure stays published either way, because it is
+# a real thing that no longer has to pretend to be lead changes.
+#
+# ⚠️ THE ALIASES THEMSELVES ARE LEFT ALONE DELIBERATELY. Removing the five selects is a page change
+# with its own §3.3 shape and its own test to move — `test_win_probability_order` asserts each
+# `X_by_clock as X` pair — so it is a round, not a tidy-up in passing (cfdb-main-R-1103).
 def _completed_games(scope) -> pd.DataFrame:
     """Every completed game in scope. Feeds Most Exciting and all three recap lists.
 

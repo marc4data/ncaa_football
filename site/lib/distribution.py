@@ -418,12 +418,44 @@ BOX_HEIGHT = 26
 # ⚠️ THE RATIOS ARE DERIVED FROM THE EXISTING CONSTANTS RATHER THAN RETYPED, so the default is
 # byte-identical by construction rather than by a test that happens to agree:
 #
-#     _RECT_HALF_RATIO   7 / 26   the box rect's half-thickness
-#     _SERIF_HALF_RATIO  5 / 26   the whisker serif's half-height
+#     _RECT_HALF_RATIO   7   / 26   the box rect's half-thickness
+#     _SERIF_HALF_RATIO  7.5 / 26   the whisker serif's half-height
 #
-# At `height=BOX_HEIGHT` these return exactly 7.0 and 5.0 and every emitted string is unchanged.
+# ── A155: THE SERIF GETS 50% TALLER, AND IT OUTRANKS THE BOX NOW ─────────────────────────────
+#
+# > **MARC, v19, verbatim:** *"increase the size of the whisker outer boundary lines by 50%"*
+#
+# ✅ THE OUTER BOUNDARY LINES ARE THE SERIFS — the short verticals capping each whisker. They are
+# the only thing on this chart that answers to that description: the MIN/MAX reference lines A154
+# added are already the full band, so *"increase the size"* cannot mean those, and the whisker
+# RULE is horizontal — it has no size to increase in the direction this changes.
+#
+# ⚠️ *"SIZE"* IS READ AS LENGTH RATHER THAN STROKE WIDTH, and v18 is the reason rather than taste:
+# it asked the WEIGHT question one round earlier under its own word — *"increase the darknes of
+# Whisker structure/outline by 25%"* — and got `WHISKER_OPACITY`. A round that spent "darkness" on
+# weight is unlikely to spend "size" on it too. 📷 The stroke-width reading (`1` → `1.5`) is
+# rendered beside this one in `claude_work/renders/A155_serif_length_vs_stroke_width.png`, so the
+# other answer costs one word rather than another round.
+#
+# 🚨 AND IT INVERTS THE TWO MARKS' HIERARCHY, WHICH MARC HAS NOT SEEN AND SHOULD:
+#
+#     before   serif 5/26   SHORTER than the rect 7/26   — the box is the taller mark
+#     after    serif 7.5/26 TALLER   than the rect 7/26   — the whisker ends are
+#
+# ⚠️ That is a change to the picture's pecking order, not a size tweak. It may be exactly what he
+# wants — the ends are what he has been trying to see since v17 — but it is the kind of thing a
+# render decides and a comment cannot: `claude_work/renders/A155_the_serif_outranks_the_box.png`.
+#
+# 🚨 THIS ONE MOVES BYTES ON EVERY CHART AND THAT IS INTENDED. The ratios exist so the furniture
+# scales with `height`, and until now `5.0 / 26 * 26` returned exactly 5.0 so every emitted string
+# was unchanged. Marc asked for this globally, exactly as A154's darkening was asked for, so it is
+# not a new capability and there is no flag. ✅ THE BYTE-IDENTITY PROOF THEREFORE INVERTS: the test
+# is no longer *nothing moved* but *the ONLY thing that moved is the serif's two y coordinates* —
+# see `test_the_serif_is_the_only_thing_that_moved`.
+#
+# At `height=BOX_HEIGHT` these return exactly 7.0 and 7.5.
 _RECT_HALF_RATIO = 7.0 / BOX_HEIGHT
-_SERIF_HALF_RATIO = 5.0 / BOX_HEIGHT
+_SERIF_HALF_RATIO = 7.5 / BOX_HEIGHT
 
 # ── HOW WIDE IS A LABEL, REALLY ─────────────────────────────────────────────────────────────
 #
@@ -842,6 +874,28 @@ def box(row, value=None, width: int = 240, label: str = "",
     height             the plot band in pixels, default `BOX_HEIGHT`. The vertical furniture
                        scales with it and NO MEASUREMENT DOES — see the ratios above. A caller
                        overlaying marks inside the band asks for the height those marks need
+
+    ⚠️ THE FOUR BELOW ARE A154's AND WERE LEFT OUT OF THIS LIST — cfdb-main-R-1152, found by B128
+    reading it from the call site's side. The body comments explained all four; the list a caller
+    actually reads did not mention them, which is the half that matters.
+
+    metric             the metric's COLUMN NAME, used only to choose `dp` when `dp` is not given.
+                       ✅ `fmt.precision_for` owns that rule and has since R-555; passing the name
+                       asks it rather than restating it at the call site (§4.2.1). Passing NEITHER
+                       `dp` nor `metric` keeps the historic literal 1
+    extreme_lines      draw `min_value`/`max_value` as FULL-BAND reference lines UNDERNEATH the
+                       box — A154, Marc's v18. OFF BY DEFAULT. ⚠️ The height and the z-order are
+                       load-bearing rather than styling: they are what makes the coincident case
+                       (`whisker_high == max_value`) readable as two marks instead of one
+    extreme_line_opacity
+                       the weight of those lines. `EXTREME_LINE_OPACITY` (the default) or
+                       `EXTREME_LINE_OPACITY_LIGHTER` — Marc's two candidate weights, both shipped
+                       because he named two and picking one for him is not this module's call
+    value_labels_own_row
+                       move the team's value label OUT of the axis label row — above the box for a
+                       one-sided chart, into its own band below for two-sided — and draw it at
+                       `VALUE_LABEL_FONT` rather than 9. OFF BY DEFAULT. ✅ It is what lets all four
+                       of MIN/p25/p75/MAX survive, because the value label was displacing one
     """
     if row is None:
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
