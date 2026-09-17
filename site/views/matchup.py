@@ -2603,6 +2603,35 @@ def _week_union(week_rows, *columns):
 # for the circle overlay. ⚠️ **A literal at each of the three is three chances to move two.**
 _BOX_TICKS = distribution.TICK_EXTREMES
 
+# 🚨 cfdb-main-R-974, OPEN SIX ROUNDS, AND MARC'S OWN LOOK AT THE SHIPPED v17 IS WHAT CLOSED IT.
+#
+# **Marc, 2026-09-16, on the live Oregon at Oklahoma State panel:** *"Looks like we just have
+# box-whisker IQRs and do not have the min and the max as the true boundaries for that graph."*
+#
+# 🚨 IT WAS ALREADY CORRECT AND HE WAS STILL RIGHT, WHICH IS THE WHOLE ARGUMENT FOR THIS MARK.
+# 📊 On his panel's **Total** row — 2026 wk2, measured on live serving — `whisker_low` = 67.0 =
+# `min_value` and `whisker_high` = 762.0 = `max_value`, `outlier_count` **0**. The fences are
+# −126.5 and 862.8, so the extremes sit inside them and the whiskers legitimately reach the
+# chart's ends. **Nothing was wrong and nothing was visible.**
+#
+# ⚠️ AND WHEN THE EXTREMES *DO* LIE BEYOND THE FENCES, THE SPAN BETWEEN THE WHISKER END AND THE
+# CHART'S BOUNDARY IS EMPTY — A150 and B126 both left it so. **A reader cannot tell *the whiskers
+# reach the extremes* from *the chart continues past them to something unmarked*.** §4.3's family:
+# the picture carries a distinction it does not draw. ✅ **The ring is that distinction, drawn.**
+#
+# 📊 AND IT IS NOT A RARE CASE — MEASURED, BECAUSE B118 REFUSED THIS MARK AND THE REFUSAL DESERVED
+# CHECKING: a ring lands on **89.5% of the 846 rows the 240px chart draws** and **61.3% of the 648
+# the metric cells draw.** ⚠️ Marc's Total row is in the quiet minority; **`rushing_yards` on that
+# same panel carries `max_value` 569.0 against a whisker end of 365.0 and gets one.**
+#
+# 🚨 B118's MEASURED OBJECTION IS DEAD TWICE OVER. It cost **209 printed labels (6.3%)** — but
+# those were the WHISKER-END labels Marc has since asked not to see (cfdb-main-R-1020), and the
+# wider frame the rings need is the frame v17 already uses. 📊 **Confirmed rather than argued:
+# across all 1,494 rows at both widths, the SVG with rings is BYTE-IDENTICAL to the one without
+# once the ring groups and the aria narration are removed. The box does not compress; the rings
+# add a mark and take nothing.**
+_BOX_OUTLIERS = True
+
 
 def _box_frame(row, value):
     """The span `box()` will frame this row on: its whiskers, widened by the value marker — and,
@@ -2779,7 +2808,7 @@ def _box_row(row, side, caption: str, column, accent: str, frame=None, overlay: 
     # `box()` places the marker's label BEFORE the `ticks` gate, so the two are independent.
     chart = distribution.box(
         row, value=value, width=_BOX_ROW_WIDTH, label=caption, value_color=accent,
-        frame=frame, height=_BOX_BAND, ticks=_BOX_TICKS,
+        frame=frame, height=_BOX_BAND, ticks=_BOX_TICKS, outliers=_BOX_OUTLIERS,
         value_label=(None if value is None or pd.isna(value)
                      else fmt.number(value, column, dp=1)))
     return (
@@ -3804,7 +3833,8 @@ def _yardage(row) -> None:
                      f"week, and not the teams' averages. The box is the middle half, the bold "
                      f"line inside it the median, and the whiskers run to the low and high "
                      f"boundaries — while the chart itself runs past them to the lowest and "
-                     f"highest single game, labeled where there is room. The colored mark is "
+                     f"highest single game anywhere in that population, labeled where there is "
+                     f"room and ringed when they fall beyond a whisker. The colored mark is "
                      f"that team's average per game, and each circle drawn on it is one game "
                      f"the team played, earliest at the top — filled when that game's "
                      f"opponent was an FBS team, open when it was not. ✅ Both rows are drawn "
@@ -4550,7 +4580,7 @@ def _metric_chart(row, away_value, home_value, dp, accents) -> str:
     # override is `None`, so **both sides' own figures are printed and both survive this change**
     # — away above the axis, home below it. What `TICK_NONE` removes here is the boundary pair.
     return distribution.box(
-        row, width=_TABLE_CHART_WIDTH, dp=dp, ticks=_BOX_TICKS,
+        row, width=_TABLE_CHART_WIDTH, dp=dp, ticks=_BOX_TICKS, outliers=_BOX_OUTLIERS,
         value=away_value, value_color=away_accent, value_label=None,
         value_below=home_value, value_below_color=home_accent)
 

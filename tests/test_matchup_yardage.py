@@ -1338,6 +1338,18 @@ def test_the_FRAME_CAPTION_describes_the_CHART_THAT_IS_DRAWN(panel):
     # nothing went false: *"the whiskers run to the low and high boundaries"* is still true.
     # **What changed is that the chart's ENDS stopped being the whisker ends**, and the caption
     # had never said what they were, because until now they were the same thing.
+    # 🚨 cfdb-main-R-974. THE CHART NOW CARRIES **TWO KINDS OF OPEN CIRCLE** AND THEY MEAN
+    # DIFFERENT THINGS: a game mark (r 3.5, the team's own colour) is ONE GAME THIS TEAM PLAYED;
+    # an outlier ring (r 3.2, currentColor) is the POPULATION's extreme and belongs to neither
+    # team. ⚠️ **Same shape, near-identical size** — AC-G.22 says shape comes first and here the
+    # shapes agree, so the words have to carry it. *"anywhere in that population"* is what
+    # separates them from *"one game the team played"* two clauses later.
+    assert "ringed when they fall beyond a whisker" in text, (
+        f"the caption does not say what the outlier RING is, so the chart draws an open circle "
+        f"whose meaning a reader cannot distinguish from the game marks beside it: {text[:600]}")
+    assert "anywhere in that population" in text, (
+        f"the caption does not separate the population's extremes from the team's own games, "
+        f"and both are drawn as open circles: {text[:600]}")
     assert "lowest and highest single game" in text, (
         f"the caption does not say what the chart's ENDS are. Under v17 the frame runs past the "
         f"whiskers to the extremes, so a reader sees an axis wider than the whisker serifs with "
@@ -2791,6 +2803,44 @@ def test_THE_CIRCLE_TOOLTIP_BREAKS_LIKE_THE_CHARTS_and_in_the_element_way(panel)
             f"where `html.escape` turns it into the literal text a reader then sees: {title!r}")
         assert " · " not in title, (
             f"a circle tooltip still joins statements with the old separator: {title!r}")
+
+
+def test_A_RING_MARKS_AN_EXTREME_BEYOND_THE_WHISKER_and_never_one_that_is_not(panel):
+    """🚨 cfdb-main-R-974, open six rounds and closed by Marc looking at the shipped v17 and not
+    being able to see it: *"Looks like we just have box-whisker IQRs and do not have the min and
+    the max as the true boundaries for that graph."*
+
+    📊 **HE WAS LOOKING AT A ROW WHERE THE TWO COINCIDE.** On his panel's Total series the
+    extremes sit inside the fences, so the whiskers legitimately reach the chart's ends and there
+    is nothing to draw. **The ring is what tells those two cases apart** — without it the empty
+    span between a short whisker and the chart's boundary reads as nothing at all.
+
+    🚨 THE RULE IS GEOMETRIC, NOT `outlier_count > 0`, AND `_outlier_marks` SAYS SO IN ITS OWN
+    DOCSTRING: *"A week with every outlier on the high side has `min_value == whisker_low`, and a
+    ring drawn there would sit exactly on the serif claiming to be beyond it. The count narrates;
+    the comparison decides what is drawn."* ✅ **So this asserts per END, not per row** — and the
+    fixture is built for it: `total_yards` has both extremes outside its whiskers, while
+    `rushing` and `passing` both carry `whisker_low == min_value` and only the high end outside.
+    ⚠️ **A test keyed on the row count would pass on a page that drew rings at both ends of every
+    chart.**
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    for metric, key in (("Total", "total_yards"), ("Rushing", "rushing_yards"),
+                        ("Passing", "passing_yards")):
+        _n, _w, _p25, _p50, _p75, low, high, mn, mx = _METRICS[key][:9]
+        expected = (mn < low) + (mx > high)
+        svg = _svg_of(_series(_of_metric(entries, metric)[0])["gained"])
+        rings = re.findall(r"<circle cx='([-\d.]+)' cy='[-\d.]+' r='3.2'", svg)
+        assert len(rings) == expected, (
+            f"{metric}: {len(rings)} rings drawn, {expected} extremes lie outside the whiskers "
+            f"(min {mn} vs whisker_low {low}; max {mx} vs whisker_high {high}). A ring on an "
+            f"extreme that equals its whisker end sits on the serif and claims to be beyond it")
+    # 🚨 AND THE TWO CASES MUST DIFFER IN THIS FIXTURE, or the loop above is one assertion twice.
+    both = _METRICS["total_yards"]
+    one = _METRICS["rushing_yards"]
+    assert (both[7] < both[5]) and not (one[7] < one[5]), (
+        "the fixture no longer carries one metric with a low extreme beyond its whisker and one "
+        "without, so this test cannot tell a per-end rule from a per-row one")
 
 
 def test_the_CIRCLES_and_the_BOX_agree_about_WHERE_A_VALUE_GOES(panel):
