@@ -101,6 +101,33 @@ def panel():
         yield run
 
 
+@pytest.fixture
+def themed_panel():
+    """The panel rendered under a NAMED THEME — v04's PART 1 needs both.
+
+    🚨 **THE THEME IS FIXED WHEN `streamlit_stubbed` IS ENTERED**, because that is when the stub
+    builds `st.context.theme`, so a theme cannot be changed inside the `panel` fixture's block.
+    This enters a fresh stub per call instead. ⚠️ **It is a separate fixture rather than a
+    parameter on `panel` for that reason** — and `panel`'s own block is what the other 50 tests
+    are written against.
+    """
+    import importlib
+
+    def run(frame, theme="light", season=2026, row=None):
+        with render_harness.streamlit_stubbed(theme=theme) as (_st, captured, charts):
+            matchup = importlib.reload(importlib.import_module("views.matchup"))
+            original = matchup.query
+            matchup.query = lambda *a, **k: frame
+            try:
+                matchup._drives(9001, season, _game_row() if row is None else row)
+            finally:
+                matchup.query = original
+            render_harness.assert_no_error_card(captured, "the drives panel")
+            return list(captured.events), list(charts)
+
+    return run
+
+
 def _game_row(away="Beta", home="Alpha", away_points=17, home_points=24):
     """The `srv_game` row `_drives` heads its chart with (v02 PART 6).
 
@@ -268,10 +295,39 @@ def _field_icons(spec):
 
 
 def _field_grid(spec):
-    """The vertical reference lines: `rule` marks with no y encoding."""
+    """The vertical reference lines: the `rule` layer that encodes a stroke weight.
+
+    ⚠️ **`rule` WITH NO y STOPPED BEING UNIQUE IN v04.** The top x axis is carried by an
+    invisible `rule` layer which has no y either, so the gridlines are identified by the
+    `strokeWidth` encoding that gives them their hierarchy. **`_only` is what turned that from a
+    silent wrong-layer read into a failure.**
+    """
     return _only([n for n in _layers(spec, _FIELD)
-                  if _mark_of(n) == "rule" and "y" not in (n.get("encoding") or {})],
+                  if _mark_of(n) == "rule" and "y" not in (n.get("encoding") or {})
+                  and "strokeWidth" in (n.get("encoding") or {})],
                  "field gridline layer")
+
+
+def _field_x_encodings(spec):
+    """Every FIELD layer's x encoding, split into those that draw an axis, those that
+    explicitly decline, and those that say nothing.
+
+    🚨 **UNDER `resolve_axis(x="independent")` A LAYER'S SILENCE IS A DECISION.** A shorthand
+    encoding like `x="x_end:Q"` declares no axis and therefore gets the DEFAULT one — which is
+    how v04's first draft drew a third axis of 26 ticks beneath the field's own 11.
+    """
+    drawing, declined, silent = [], [], []
+    for node in _layers(spec, _FIELD):
+        enc = (node.get("encoding") or {}).get("x")
+        if not isinstance(enc, dict) or "value" in enc:
+            continue          # a pixel, not a scaled quantity — no axis is possible
+        if "axis" not in enc:
+            silent.append(_mark_of(node))
+        elif enc["axis"] is None:
+            declined.append(_mark_of(node))
+        else:
+            drawing.append(enc["axis"].get("orient", "bottom"))
+    return drawing, declined, silent
 
 
 def _endzone_layer(spec):
@@ -708,32 +764,201 @@ def test_THE_TWO_SIDES_ATTACK_OPPOSITE_ENDS_so_the_away_band_is_not_mirrored(pan
 
 # --- 🚨 PART 4: THE RESULT ICON COVERS EVERY PUBLISHED CATEGORY ----------------------------
 
-def test_EVERY_DRIVE_RESULT_CATEGORY_HAS_ITS_OWN_SHAPE(panel):
-    """Marc: *"Use an icon on the end to indicate the result (outcome)"*.
+def test_EVERY_GLYPH_CLASS_HAS_ITS_OWN_SHAPE(panel):
+    """Marc, v01: *"Use an icon on the end to indicate the result (outcome)"*.
 
-    📊 **Counted at this base rather than trusted: `drive_result_key` carries 23 distinct values
-    across 7 `drive_result_category` values on 84,838 rows.** ⚠️ **The panel this replaced said
-    *"ten drive_result values"* in two docstrings and this file's own header — wrong by more
-    than a factor of two.**
+    🚨 **v04 REPLACED THE KEY, WHICH IS MARC'S FIRST v04 ASK: *"Glyphs for FG, TD, INT TD"*.**
+    v01–v03 keyed on `drive_result_category`, where **`TD` and `FG` are BOTH `offensive score`**
+    — so a field goal and a touchdown drew the same triangle on 30,369 drives. The key is now
+    what happened, which is finer.
 
     🚨 **AC-G.22: the shapes must differ from EACH OTHER, because the colour is the team's and
-    carries nothing about the result.** A vocabulary with two categories sharing a shape is a
-    reader unable to tell a turnover from a punt in greyscale.
+    carries nothing about the result.**
     """
-    shapes = _module_constant("_DRIVE_RESULT_SHAPES")
-    published = {"punt", "offensive score", "turnover", "clock",
-                 "kick", "defensive score", "unknown"}
-    assert set(shapes) == published, (
-        f"the icon vocabulary and the published categories disagree: "
-        f"missing {published - set(shapes)}, extra {set(shapes) - published}")
-    assert len(set(shapes.values())) == len(shapes), (
-        f"two categories share a shape, so they are indistinguishable without colour: {shapes}")
+    shapes = _module_constant("_DRIVE_GLYPH_SHAPES")
+    assert set(shapes) == {"touchdown", "kick", "safety", "turnover", "punt", "clock",
+                           "unknown"}, f"the glyph vocabulary is {sorted(shapes)}"
+    # 🚨 `touchdown` IS DIRECTIONAL and supplies its shape per row; the rest are fixed.
+    # ⚠️ **The first v04 draft called this class `score` and put a made FIELD GOAL in it, so a
+    # field goal drew the same triangle as a touchdown — the exact ask v04 opened with. A test
+    # caught it.** The arrow says where the POINTS went, and only a touchdown needs that.
+    fixed = {k: v for k, v in shapes.items() if v is not None}
+    assert shapes["touchdown"] is None, (
+        "`touchdown` carries a fixed shape, so it cannot point at the end zone that got the "
+        "points")
+    assert len(set(fixed.values())) == len(fixed), (
+        f"two classes share a shape, so they are indistinguishable without colour: {fixed}")
+    left = _module_constant("_DRIVE_SCORE_LEFT")
+    right = _module_constant("_DRIVE_SCORE_RIGHT")
+    assert left != right and left not in fixed.values() and right not in fixed.values(), (
+        f"the score arrows {left!r}/{right!r} collide with a fixed shape {fixed}")
+
     # and an unrecognised category falls to the unclassified mark rather than borrowing a look
     frame = pd.DataFrame([_drive(1, "home", "Alpha", "???", category="something new")])
     row = _row_for(_field_rows(_spec(panel(frame)[1])), 1)
     assert row["result_shape"] == _module_constant("_DRIVE_RESULT_UNKNOWN"), (
-        f"an unknown category drew {row['result_shape']!r}, borrowing one of the seven looks "
-        f"instead of reading as unclassified (AC-G.11)")
+        f"an unknown category drew {row['result_shape']!r}, borrowing one of the looks instead "
+        f"of reading as unclassified (AC-G.11)")
+
+
+def test_A_FIELD_GOAL_AND_A_TOUCHDOWN_NO_LONGER_DRAW_THE_SAME_MARK(panel):
+    """🚨 **MARC'S FIRST v04 ASK, AND IT WAS A REAL GAP: *"Glyphs for FG, TD, INT TD"*.**
+
+    📊 Both `TD` and `FG` are `drive_result_category = 'offensive score'`, so v01–v03 gave them
+    the same triangle on **30,369 drives**. `INT TD` was already distinct as `defensive score`.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score",
+               scoring_side="offense", scoring=True),
+        _drive(2, "home", "Alpha", "FG", category="offensive score",
+               scoring_side="offense", scoring=True),
+        _drive(3, "home", "Alpha", "INT TD", key="interception_return_td",
+               category="defensive score", scoring_side="defense", scoring=True)])
+    rows = _field_rows(_spec(panel(frame)[1]))
+    td, fg, pick_six = (_row_for(rows, n) for n in (1, 2, 3))
+
+    assert td["result_shape"] != fg["result_shape"], (
+        f"a touchdown and a field goal both drew {td['result_shape']!r} — the ask Marc opened "
+        f"v04 with, on 30,369 drives")
+    assert len({td["result_shape"], fg["result_shape"], pick_six["result_shape"]}) == 3, (
+        f"TD {td['result_shape']!r}, FG {fg['result_shape']!r} and INT TD "
+        f"{pick_six['result_shape']!r} are not three distinct marks")
+    # and all three SCORED, so all three are filled — his second ask
+    assert td["result_filled"] and fg["result_filled"] and pick_six["result_filled"], (
+        f"a scoring drive is not filled: TD {td['result_filled']}, FG {fg['result_filled']}, "
+        f"INT TD {pick_six['result_filled']}")
+
+
+def test_THE_SCORE_ARROW_POINTS_AT_THE_END_ZONE_THAT_GOT_THE_POINTS(panel):
+    """> **MARC:** *"Feel like TD arrow for Away should point to the left instead of to the
+    > right."*
+
+    🚨 **HE IS REPORTING A DEFECT, NOT A PREFERENCE, AND IT HAD BEEN THERE SINCE v01.** v01–v03
+    drew `triangle-right` for every offensive score regardless of band — so on the away table
+    the arrow pointed back up its own bar. 📊 **An away offensive touchdown travels LEFT on
+    12,663 of 12,978 (97.6%); a home one travels RIGHT on 16,735 of 17,158 (97.5%).**
+
+    🚨 **AND THE OBVIOUS FIX — read the direction off the BAR's coordinates — DOES NOT WORK.**
+    📊 Measured: for DEFENSIVE scores the net runs both ways almost evenly (away 330 right / 368
+    left; home 199 right / 187 left), because the coordinates are the offense's drive plus the
+    return. ✅ **So the direction is the END ZONE THE POINTS WENT INTO** — away scores left, home
+    scores right, verified on 6,193 and 9,236 touchdowns — which is the same geometry v04's
+    end-zone colours are painted from.
+
+    ⚠️ **THE MIRROR IS THE WHOLE TEST. A glyph pointing the wrong way on one band is B133's
+    mirrored-table defect wearing a new hat**, and it is invisible in a suite that only ever
+    drives the home band — which is exactly what v01's tests did.
+    """
+    left = _module_constant("_DRIVE_SCORE_LEFT")
+    right = _module_constant("_DRIVE_SCORE_RIGHT")
+    frame = pd.DataFrame([
+        _drive(1, "away", "Beta", "TD", category="offensive score",
+               scoring_side="offense", scoring=True),
+        _drive(2, "home", "Alpha", "TD", category="offensive score",
+               scoring_side="offense", scoring=True),
+        _drive(3, "away", "Beta", "INT TD", key="interception_return_td",
+               category="defensive score", scoring_side="defense", scoring=True),
+        _drive(4, "home", "Alpha", "INT TD", key="interception_return_td",
+               category="defensive score", scoring_side="defense", scoring=True)])
+    rows = _field_rows(_spec(panel(frame)[1]))
+    away_td, home_td, away_pick, home_pick = (_row_for(rows, n) for n in (1, 2, 3, 4))
+
+    # 🚨 PINNED TO THE TWO CONSTANTS, ALL FOUR COMBINATIONS. A difference test would survive a
+    # swap — which is how B133's break 6 came back green (cfdb-wta-R-1180).
+    assert away_td["result_shape"] == left, (
+        f"an AWAY touchdown points {away_td['result_shape']!r}. Away scores in the LEFT end "
+        f"zone, and this is the arrow Marc said was backwards")
+    assert home_td["result_shape"] == right, (
+        f"a HOME touchdown points {home_td['result_shape']!r}")
+    assert away_pick["result_shape"] == right, (
+        f"a pick-six against the AWAY team points {away_pick['result_shape']!r} — the HOME team "
+        f"scored, and home scores in the RIGHT end zone")
+    assert home_pick["result_shape"] == left, (
+        f"a pick-six against the HOME team points {home_pick['result_shape']!r}")
+
+    # AND THE OFFENSE/DEFENSE DISTINCTION SURVIVES ON BOTH BANDS, which is what B133 calls the
+    # assertion that matters — it now reads correctly on the away band too, which it did not.
+    for band, own, other in (("away", away_td, away_pick), ("home", home_td, home_pick)):
+        assert own["result_shape"] != other["result_shape"], (
+            f"on the {band} band an offensive score and a defensive one draw the same arrow, "
+            f"so the picture credits the points to whoever had the ball")
+
+
+def test_EVERY_DRAWN_DRIVE_IS_FILLED_OR_HOLLOW_AND_NEVER_BOTH(panel):
+    """> **MARC:** *"Can anything that is a touchdown be filled."*
+
+    🚨 **`filled` IS A MARK PROPERTY IN VEGA-LITE, NOT AN ENCODING, SO A PER-ROW FILL NEEDS TWO
+    LAYERS — AND TWO LAYERS NEED A PARTITION.** ⚠️ **A filter on one layer only is half a
+    partition, which is the defect v02's logo variant shipped as `50 50` in one cell
+    (cfdb-wta-R-1192).**
+
+    ⚠️ **AND FILL IS GENERALISED FROM HIS WORDS, DELIBERATELY: filled = SCORED**, so a made
+    field goal is filled and a missed one is hollow — the same diamond, differing only by fill,
+    which is the pair a reader most needs to tell apart. 📋 **Narrowing it to touchdowns alone
+    is one predicate if he prefers that.**
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score",
+               scoring_side="offense", scoring=True),
+        _drive(2, "home", "Alpha", "FG", category="offensive score",
+               scoring_side="offense", scoring=True),
+        _drive(3, "home", "Alpha", "MISSED FG", category="kick"),
+        _drive(4, "home", "Alpha", "PUNT", category="punt")])
+    spec = _spec(panel(frame)[1])
+    points = [n for n in _layers(spec, _FIELD) if _mark_of(n) == "point"]
+    assert len(points) == 2, (
+        f"the field draws {len(points)} point layers; a per-row fill needs exactly two — one "
+        f"filled, one hollow")
+
+    by_fill = {}
+    for node in points:
+        by_fill[bool(node["mark"].get("filled"))] = {
+            r["drive_number"] for r in _rows(spec, node)}
+    assert by_fill.get(True) == {1, 2}, (
+        f"the FILLED layer drew {sorted(by_fill.get(True) or [])} — a touchdown and a made "
+        f"field goal put points on the board")
+    assert by_fill.get(False) == {3, 4}, (
+        f"the HOLLOW layer drew {sorted(by_fill.get(False) or [])}")
+    assert not (by_fill.get(True, set()) & by_fill.get(False, set())), (
+        "a drive is drawn in BOTH layers, so its glyph is stamped twice")
+    assert by_fill.get(True, set()) | by_fill.get(False, set()) == {1, 2, 3, 4}, (
+        "a drive is in NEITHER layer, so it has a bar and no result mark")
+
+    # AND A MADE AND A MISSED KICK ARE THE SAME SHAPE, differing only by fill.
+    rows = _field_rows(spec)
+    assert _row_for(rows, 2)["result_shape"] == _row_for(rows, 3)["result_shape"], (
+        "a made and a missed field goal draw different shapes, so fill is carrying nothing")
+
+
+def test_THE_TOUCHDOWNS_ARE_ENUMERATED_not_matched_on_a_substring():
+    """🚨 **THE PROMPT'S WARNING, AND IT IS THE RIGHT ONE: *touchdown* CUTS ACROSS CATEGORIES.**
+
+    📊 Eleven published values are touchdowns — `TD` 22,870 · `INT TD` 486 ·
+    `FUMBLE RETURN TD` 207 · `PUNT TD` 129 · `PUNT RETURN TD` 86 · `FUMBLE TD` 70 ·
+    `MISSED FG TD` 15 · `DOWNS TD` 7 · `END OF HALF TD` 5 · `FG TD` 2 · `END OF GAME TD` 1 —
+    **23,878 drives across THREE `drive_result_category` values.**
+
+    ⚠️ **A SUBSTRING MATCH ON `TD` HAPPENS TO AGREE TODAY — checked against
+    `drive_result_key`, zero disagreements — BUT IT AGREES BY LUCK.** A future `TD ATTEMPT` or
+    `NO TD` would break it and the enumeration cannot. ✅ **And every one of the eleven must be a
+    published value**, or the set is guarding something that does not exist (§6's decoration).
+    """
+    touchdowns = _module_constant("_DRIVE_TOUCHDOWNS")
+    others = _module_constant("_DRIVE_OTHER_SCORES")
+    assert touchdowns <= _PUBLISHED_RESULTS, (
+        f"these are not published `drive_result` values: "
+        f"{sorted(touchdowns - _PUBLISHED_RESULTS)}")
+    assert others <= _PUBLISHED_RESULTS, (
+        f"these are not published: {sorted(others - _PUBLISHED_RESULTS)}")
+    assert not (touchdowns & others), (
+        f"a result is both a touchdown and an other-score: {sorted(touchdowns & others)}")
+    assert len(touchdowns) == 11, (
+        f"{len(touchdowns)} touchdowns enumerated; eleven published values are touchdowns")
+    # every published value ending in TD is one of them — the property a substring match has
+    # and an enumeration must not silently lose
+    assert {r for r in _PUBLISHED_RESULTS if r.endswith("TD")} == touchdowns, (
+        f"the enumeration and the published values ending in `TD` disagree: "
+        f"{sorted({r for r in _PUBLISHED_RESULTS if r.endswith('TD')} ^ touchdowns)}")
 
 
 def test_A_PERIOD_ZERO_IS_AN_ABSENCE_not_a_quarter(panel):
@@ -1039,25 +1264,37 @@ def test_THE_LEGEND_IS_BUILT_FROM_THE_SHAPE_MAP_in_both_directions(panel):
     _entries, charts = panel(frame)
     legend = _legend_spec(charts)
 
-    glyph_layer = _only([n for n in legend["layer"] if _mark_of(n) == "point"],
-                        "legend glyph layer")
-    rows = _rows(legend, glyph_layer, parent=legend)
-    shapes = _module_constant("_DRIVE_RESULT_SHAPES")
+    # 🚨 TWO GLYPH LAYERS NOW, BECAUSE `filled` IS A MARK PROPERTY — the same reason the field
+    # needs two. **Both are read, or half the legend is unasserted.**
+    glyph_layers = [n for n in legend["layer"] if _mark_of(n) == "point"]
+    assert len(glyph_layers) == 2, (
+        f"the legend draws {len(glyph_layers)} point layers; it needs one filled and one hollow "
+        f"or it cannot show what fill means")
+    shapes = _module_constant("_DRIVE_GLYPH_SHAPES")
+    rows = [r for n in glyph_layers for r in _rows(legend, n, parent=legend)]
 
-    drawn = {r["category"]: r["result_shape"] for r in rows}
-    assert drawn == shapes, (
-        f"the legend and the shape map disagree — missing "
-        f"{set(shapes) - set(drawn)}, extra {set(drawn) - set(shapes)}, "
-        f"mismatched "
-        f"{dict((k, (drawn.get(k), v)) for k, v in shapes.items() if drawn.get(k) != v)}")
-    # AND THE SHAPE IS PASSED THROUGH RATHER THAN SCALED, so the legend draws the same mark the
-    # chart does instead of a look-alike Vega chose for it.
-    assert glyph_layer["encoding"]["shape"]["scale"] is None, (
-        "the legend's shape encoding has a scale, so Vega picks the marks and they can differ "
-        "from the ones on the field")
-    # AC-G.22: THE LEGEND NAMES THE SHAPES WITHOUT COLOUR, because colour is the team's.
-    assert "color" not in glyph_layer.get("encoding", {}), (
-        "the legend encodes colour, which belongs to the team and says nothing about a result")
+    # 🚨 EVERY CLASS IN THE MAP IS NAMED, AND NOTHING THAT IS NOT IN IT IS. The directional
+    # `touchdown` and the made/missed `kick` each expand to TWO entries, which is why this
+    # compares the SHAPES drawn against the shapes the map holds rather than counting rows.
+    drawn_shapes = {r["result_shape"] for r in rows}
+    expected = {s for s in shapes.values() if s is not None} | {
+        _module_constant("_DRIVE_SCORE_LEFT"), _module_constant("_DRIVE_SCORE_RIGHT")}
+    assert drawn_shapes == expected, (
+        f"the legend and the vocabulary disagree — missing {sorted(expected - drawn_shapes)}, "
+        f"extra {sorted(drawn_shapes - expected)}")
+    # AND BOTH FILL STATES APPEAR, or the channel is undocumented on the panel that uses it.
+    assert {bool(n["mark"].get("filled")) for n in glyph_layers} == {True, False}
+
+    for layer in glyph_layers:
+        # THE SHAPE IS PASSED THROUGH RATHER THAN SCALED, so the legend draws the same mark the
+        # chart does instead of a look-alike Vega chose for it.
+        assert layer["encoding"]["shape"]["scale"] is None, (
+            "the legend's shape encoding has a scale, so Vega picks the marks and they can "
+            "differ from the ones on the field")
+        # AC-G.22: THE LEGEND NAMES THE SHAPES WITHOUT COLOUR, because colour is the team's.
+        assert "color" not in layer.get("encoding", {}), (
+            "the legend encodes colour, which belongs to the team and says nothing about a "
+            "result")
     labels = _only([n for n in legend["layer"] if _mark_of(n) == "text"], "legend label layer")
     assert _text_field_of(labels) == "category"
 
@@ -1072,13 +1309,17 @@ def test_THE_TABLE_GLYPH_IS_MARCS_THREE_CATEGORIES_and_a_subset_of_the_shape_map
     legend, one column over. **Punts, kicks, clock expiries and unclassified drives carry no
     table glyph**, which is what makes his three legible at a glance.
     """
-    wanted = _module_constant("_DRIVE_TABLE_GLYPH_CATEGORIES")
-    shapes = _module_constant("_DRIVE_RESULT_SHAPES")
+    wanted = _module_constant("_DRIVE_TABLE_GLYPH_CLASSES")
+    shapes = _module_constant("_DRIVE_GLYPH_SHAPES")
     assert set(wanted) <= set(shapes), (
-        f"the table glyph set names categories the shape vocabulary does not have: "
+        f"the table glyph set names classes the shape vocabulary does not have: "
         f"{set(wanted) - set(shapes)}")
-    assert set(wanted) == {"offensive score", "defensive score", "turnover"}, (
-        f"Marc named FG/TD, a defensive score and turnovers; this set is {sorted(wanted)}")
+    # ⚠️ **A SUPERSET OF HIS THREE, ASSERTED AS ONE.** He named *"a FG, TD, or some kind of
+    # Turnover"*; `kick` covers a MISSED field goal too, so a missed kick gets a glyph he did
+    # not ask for. **Fill tells them apart, and the alternative is a class that exists only to
+    # exclude one case.**
+    assert set(wanted) == {"touchdown", "kick", "turnover"}, (
+        f"Marc named FG/TD and turnovers; this set is {sorted(wanted)}")
 
     frame = pd.DataFrame([
         _drive(1, "home", "Alpha", "PUNT", category="punt"),
@@ -1246,12 +1487,23 @@ def test_THE_SCOREBOARD_SEGMENTS_ARE_THE_PANELS_OWN_CONSTANTS(panel):
     head = _only([b for k, b in entries
                   if k == "markdown" and isinstance(b, str) and "Drives</div>" in b],
                  "scoreboard header")
-    widths = [int(m) for m in re.findall(r"width:(\d+)px", head)]
-    assert widths == [panel_w, table_w, field_w, table_w], (
-        f"the header's segments are {widths}, which do not match the chart's "
-        f"{[panel_w, table_w, field_w, table_w]}")
-    assert f"gap:{spacing}px" in head, (
-        f"the header's gutters do not match hconcat's spacing of {spacing}px: {head!r}")
+    # 🚨 **v04 MAKES IT TWO ROWS — heading + linescore, then a team card over each table — and
+    # BOTH must carry the panel's geometry.** ⚠️ A flat list of widths would pass on a header
+    # whose SECOND row used different numbers, and that row is the one Marc asked to sit above
+    # the tables.
+    rows = ["width:" + seg
+            for seg in head.split("<div style='display:flex;width:")[1:]]
+    assert len(rows) == 2, (
+        f"the header has {len(rows)} full-width rows; v04 needs two — the scoreboard line and "
+        f"the team cards above the tables")
+    for i, seg in enumerate(rows):
+        # the 22px is the logo's own footprint from `identity.logo_or_monogram`, not geometry
+        widths = [int(m) for m in re.findall(r"width:(\d+)px", seg) if int(m) != 22]
+        assert widths[:4] == [panel_w, table_w, field_w, table_w], (
+            f"header row {i + 1}'s segments are {widths[:4]}, which do not match the chart's "
+            f"{[panel_w, table_w, field_w, table_w]}")
+    assert head.count(f"gap:{spacing}px") == 2, (
+        f"the header's gutters do not match hconcat's spacing of {spacing}px on both rows")
 
     # AND THE CHART IT HEADS REALLY IS THOSE WIDTHS — the half a header-only test cannot see.
     spec = _spec(charts)
@@ -1338,37 +1590,109 @@ def test_THE_REFERENCE_LINES_ARE_SOLID_and_the_goal_lines_and_midfield_are_BOLDE
         f"the goal line is no bolder than the back of the end zone: {widths}")
 
 
-def test_THE_ENDZONES_ARE_FILLED_on_geometry_that_already_existed(panel):
-    """> **MARC:** *"Can we fill the endzone with a light/mid gray?"*
+def test_THE_ENDZONES_CARRY_THE_TEAM_THAT_SCORES_IN_THEM_opaquely(panel):
+    """> **MARC:** *"Can we fill in the endzones with team colors? Left side = Away color, Right
+    > side = Home color. Don't want transparency b/c want it to override the horizontal
+    > banding."*
 
-    ✅ **v01 ALREADY DREW 120 YARDS WITH THE DATA INSET AT 10…110, so this is a fill on real
-    space rather than new decoration.**
+    🚨 **THE DIRECTION IS THE HALF THAT COULD BE SILENTLY BACKWARDS — B133's mirrored-band
+    defect wearing a new hat.** 📊 Verified on all 84,838 drives and on Alabama 45 at Kentucky
+    17 by name: **away touchdowns end at yardline 0 (field x 10, the LEFT goal line) on 6,193
+    drives; home at yardline 100 (field x 110, the RIGHT) on 9,236.** So the away band scores in
+    the left end zone, which is the colour he asked for there.
 
-    🚨 **AND THE GRAY IS `currentColor` AT LOW OPACITY, NOT A LITERAL — AC-G.22 AND R-855.**
-    Streamlit sets the page's text colour per theme and the SVG inherits it, so the fill is the
-    theme's own ink. **A hex gray is the R-855 trap in a different property:** that round found
-    `identity.text_on(row)` defaulting to the on-light colour and rendering `rgb(0,0,0)` on a
-    `rgb(14,17,23)` page, invisible, and the raster is what caught it.
+    ⚠️ **AND OPAQUE IS HIS INSTRUCTION, WHICH IS WHY THIS COULD NOT HAVE SHIPPED BEFORE v04's
+    PART 1.** With no transparency there is nothing left to soften a near-black on a near-black
+    page — a `#0b1315` end zone on a `#0e1117` page is a rectangle nobody can see.
     """
-    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    frame = pd.DataFrame([
+        _drive(1, "away", "Beta", "PUNT", category="punt", color="#aa0000"),
+        _drive(2, "home", "Alpha", "PUNT", category="punt", color="#0000bb")])
     spec = _spec(panel(frame)[1])
     fill = _endzone_layer(spec)
-    mark = fill["mark"]
-    assert mark["fill"] == "currentColor", (
-        f"the end-zone fill is {mark.get('fill')!r} — a literal colour is right in one theme "
-        f"and wrong in the other")
-    assert 0 < mark["fillOpacity"] < 0.5, (
-        f"the end-zone fill opacity is {mark.get('fillOpacity')} — it must not compete with a "
-        f"team colour (AC-G.22)")
 
-    endzone = _module_constant("_DRIVE_ENDZONE")
+    assert fill["mark"]["fillOpacity"] == 1.0, (
+        f"the end zones are {fill['mark'].get('fillOpacity')} transparent — Marc asked for "
+        f"opaque so they override the horizontal banding")
+    assert fill["encoding"]["color"]["scale"] is None, (
+        "the end-zone colour goes through a scale, so Vega picks it rather than the team")
+
     yards = _module_constant("_DRIVE_FIELD_YARDS")
-    spans = sorted((r["x"], r["x2"]) for r in _rows(spec, fill))
-    assert spans == [(0.0, float(endzone)), (float(yards - endzone), float(yards))], (
-        f"the fill covers {spans} rather than the two end zones")
+    zone = _module_constant("_DRIVE_ENDZONE")
+    rows = sorted(_rows(spec, fill), key=lambda r: r["x"])
+    assert [(r["x"], r["x2"]) for r in rows] == [
+        (0.0, float(zone)), (float(yards - zone), float(yards))], (
+        f"the fill covers {[(r['x'], r['x2']) for r in rows]} rather than the two end zones")
+
+    # 🚨 LEFT IS AWAY, RIGHT IS HOME — pinned, because a swap is invisible in a green suite.
+    left, right = rows
+    assert left["band"] == "away", (
+        f"the LEFT end zone is painted for the {left['band']!r} band. Away touchdowns end at "
+        f"field x {zone}, the left goal line, on 6,193 drives — so left is the away team's")
+    assert right["band"] == "home", (
+        f"the RIGHT end zone is painted for the {right['band']!r} band")
+
+    # AND THE COLOURS ARE THE TWO BANDS' OWN ACCENTS, not one colour twice.
+    zones = {r["band"]: r["accent"] for r in rows}
+    bars = {r["band"]: r["accent"] for r in _field_rows(spec)}
+    assert zones == bars, (
+        f"the end zones {zones} do not match the bars' accents {bars}, so the field's two ends "
+        f"disagree with the drives drawn on it")
+    assert len(set(zones.values())) == 2, f"both end zones are the same colour: {zones}"
+
     # AND IT SPANS THE WHOLE HEIGHT rather than one row — no y encoding at all.
     assert "y" not in fill["encoding"], (
         "the end-zone fill is bound to a drive, so it draws a band instead of a zone")
+
+
+def test_A_BAND_WITH_NO_DRIVES_STILL_GETS_AN_END_ZONE(panel):
+    """⚠️ **A ONE-SIDED FRAME IS A REAL CASE.** `_drive_colors` refuses to invent a colour for a
+    band that never had the ball — possession alternating is an assumption about football, not a
+    property of the frame (B133) — so that band's end zone has nothing to read.
+
+    ✅ **It falls back to `identity.FALLBACK`: a neutral that reads on both themes, rather than a
+    hole where a rectangle should be (AC-G.11).** A missing fill would be indistinguishable from
+    a team whose colour happens to match the page.
+    """
+    from lib import identity
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt", color="#0000bb"),
+                          _drive(2, "home", "Alpha", "PUNT", category="punt", color="#0000bb")])
+    spec = _spec(panel(frame)[1])
+    zones = {r["band"]: r["accent"] for r in _rows(spec, _endzone_layer(spec))}
+    assert zones["away"] == identity.FALLBACK, (
+        f"a band with no drives drew end-zone colour {zones['away']!r} rather than the neutral "
+        f"fallback")
+    assert zones["home"] and zones["home"] != identity.FALLBACK, (
+        f"the band that DID have the ball lost its colour: {zones['home']!r}")
+
+
+def test_THE_YARD_NUMBERS_ARE_ON_THE_TOP_AND_THE_BOTTOM(panel):
+    """> **MARC:** *"Missing the yardlines labels, include on top and bottom."*
+
+    ⚠️ **THE REASON IS HEIGHT: a 32-drive panel is ~550px tall, so a reader at the last drive is
+    half a screen from a single axis.**
+
+    🚨🚨 **AND ADDING A SECOND AXIS IS THE EXACT OPERATION THAT SILENTLY DELETED THE FIRST IN
+    v02 (cfdb-wta-R-1251).** Vega-Lite resolves axes ACROSS a layered chart's layers, so two x
+    axes MERGE by default and one orientation wins. **`resolve_axis(x="independent")` is what
+    makes them two**, and it changes what `axis=None` means everywhere else in the chart — see
+    `test_THE_FIELDS_AXIS_RULE_MATCHES_ITS_OWN_RESOLUTION`.
+
+    📊 **Confirmed in Chromium: 2 rendered axis groups, 11 labels each,
+    `0 10 20 30 40 50 40 30 20 10 0` top and bottom.** This test pins the spec property that
+    produces that, because a unit test has no browser.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    spec = _spec(panel(frame)[1])
+    drawing, _declined, _silent = _field_x_encodings(spec)
+
+    assert sorted(drawing) == ["bottom", "top"], (
+        f"the field draws x axes at {sorted(drawing)} — Marc asked for the numbers on both "
+        f"edges, and EXACTLY ONE layer may declare each or the same axis is drawn on itself")
+    resolve = spec["hconcat"][_FIELD].get("resolve", {}).get("axis", {})
+    assert resolve.get("x") == "independent", (
+        f"the field's axes resolve as {resolve!r}, so Vega-Lite merges the two and one "
+        f"orientation wins")
 
 
 # 📊 **MEASURED BOLD HEADING WIDTHS, AT `fontSize` 10 IN CHROMIUM'S `sans-serif`** — read back
@@ -1725,59 +2049,255 @@ def test_THE_BAND_IS_A_LIGHT_GRAY_AND_ITS_BORDER_IS_ONLY_SLIGHTLY_DARKER():
     """
     band = _module_constant("_DRIVE_BAND_OPACITY")
     border = _module_constant("_DRIVE_BAND_BORDER_OPACITY")
-    endzone = _module_constant("_DRIVE_ENDZONE_OPACITY")
 
     assert band > 0.055, (
         f"the band is still {band} — that is v02's weight, the one Marc could not see")
     assert border > band, (
         f"the border ({border}) must be darker than the band ({band}) — he asked for a border, "
         f"not an outline round nothing")
-    assert border < 2 * band, (
-        f"the border is {border} against a {band} band, more than twice it — he asked for "
-        f"*slightly* darker, and v02's 3x is what made the edge the dominant mark")
     assert band < 0.2, (
         f"a band at {band} competes with the team colour on the bars (AC-G.22)")
-    # 🚨 AND THE CEILING IS NOT AC-G.22 — IT IS THE FIELD'S OWN STRUCTURE, WHICH THE RENDER
-    # REVEALED AND THE ARITHMETIC DID NOT. At band 0.16 the row stripe is heavier than a 0.10
-    # end-zone fill, and **the field's boundary then reads as weaker than its rows** — the end
-    # zones stop reading as zones. A boundary must outweigh a guide.
-    assert endzone > band, (
-        f"the end-zone fill ({endzone}) is no heavier than the row band ({band}), so the "
-        f"field's boundary reads as weaker than its rows and the zones stop reading as zones")
-    assert endzone < 2 * band, (
-        f"the end-zone fill ({endzone}) is more than twice the band ({band}) — it has become "
-        f"the loudest thing on a field whose point is the drives")
+
+    # 🚨 **v04 RAISED THE BORDER ON MARC'S SECOND LOOK — *"can you increase the darkness off the
+    # bouders on the banding?"*** — so the *slightly darker* ceiling v03 asserted is gone as an
+    # instruction. ⚠️ **What replaces it is the one relationship that still has to hold: the
+    # border is an EDGE on the band, so it must be darker than the band and lighter than the
+    # ink the page writes text in.** A border at full strength is a table rule, not a guide.
+    assert border > band, (
+        f"the border ({border}) must be darker than the band ({band}) — he asked for a border, "
+        f"not an outline round nothing")
+    # 🚨 **v04 RAISED IT AND A STAGED BREAK CAUGHT THIS TEST NOT NOTICING (R-744).** Putting the
+    # border back to v03's 0.18 left every assertion green, because `border > band` and
+    # `border <= 0.5` are both true there. ⚠️ **He LOOKED at 0.18 and asked for more, so the
+    # weight he rejected is the floor** — the same shape as `band > 0.055` above.
+    # 📊 Measured off the PNG at the band's edge: 0.18 → 24.77/27.89, 0.30 → 32.77/37.42.
+    assert border > 0.18, (
+        f"the border is {border} — that is v03's weight, the one Marc looked at before asking "
+        f"to *increase the darkness off the bouders on the banding*")
+    assert border <= 0.5, (
+        f"the border is {border} of the theme's ink — past about half it reads as a table rule "
+        f"and starts competing with the drives it is supposed to guide the eye to")
+
+    # 🚨 AND B135's HIERARCHY STILL HOLDS, NOW BY CONSTRUCTION RATHER THAN BY A CONSTANT.
+    # v03 kept an END-ZONE OPACITY above the band's, because a boundary reading as weaker than a
+    # guide stops being a boundary. **v04 makes the end zones OPAQUE team colour on Marc's
+    # instruction (*"Don't want transparency"*), so `zone > band` is true by definition and
+    # `_DRIVE_ENDZONE_OPACITY` is gone.** This asserts the constant did not quietly come back
+    # at a value nothing reads — B134's dead-membership lesson, one shape down.
+    import importlib
+    module = importlib.import_module("views.matchup")
+    assert not hasattr(module, "_DRIVE_ENDZONE_OPACITY"), (
+        "`_DRIVE_ENDZONE_OPACITY` is back. The end zones are opaque now, so a fill opacity is "
+        "either unused — dead code that reads as live — or it is softening the one thing Marc "
+        "asked not to be transparent")
 
 
-def test_NO_FIELD_LAYER_SUPPRESSES_THE_SHARED_X_AXIS(panel):
-    """🚨🚨 **v02 SILENTLY LOST THE FIELD'S YARD NUMBERS AND ITS OWN RASTER DID NOT CATCH IT.**
+def test_THE_FIELDS_AXIS_RULE_MATCHES_ITS_OWN_RESOLUTION(panel):
+    """🚨🚨 **`axis=None` MEANS TWO OPPOSITE THINGS DEPENDING ON ONE LINE, AND BOTH HAVE NOW
+    SHIPPED AS DEFECTS.**
 
-    v02 added the end-zone fill with `axis=None` on a private copy of the x encoding.
-    **In a LAYERED chart Vega-Lite resolves axes across the layers, so one explicit `null`
-    suppressed the axis for ALL of them.** 📊 Measured in Chromium: the rendered SVG carried
-    **0 `g.role-axis` groups and 0 label texts**, while the axis definition sat correctly on two
-    other layers. v01 drew `0 10 20 30 40 50 40 30 20 10 0`; v02 drew nothing.
+    📊 **v02 (cfdb-wta-R-1251):** axes MERGED, and the end-zone layer declared `axis=None`. With
+    one shared axis that is an argument about it, and the null won — **0 rendered axis groups and
+    0 labels, for two rounds**, while two other layers declared a correct axis.
 
-    🚨 **AND THE SPEC WAS RIGHT, WHICH IS WHY THIS TEST IS SHAPED THE WAY IT IS.** Asserting
-    *"the field declares an axis"* passes on the broken version — v02 declared one, twice. **The
-    defect is a CONFLICT between layers, so the assertion has to be about the set of them.**
+    📊 **v04's first draft:** axes INDEPENDENT, so every layer draws its own — and the icons
+    layer's shorthand `x="x_end:Q"` declared no axis, which means the DEFAULT one. **A third
+    axis of 26 ticks at 0, 5, 10 … appeared beneath the field's own 11**, and only the render
+    showed it.
 
-    ⚠️ **AND IT IS THE FAILURE A PICTURE IS WORST AT: a reader notices a wrong mark and does not
-    notice an absent one.** Five defects in v01 and three headings in v02 were caught by looking;
-    this one survived two rounds of looking.
+    ✅ **SO THE TEST IS CONDITIONAL ON THE RESOLUTION, WHICH IS THE ACTUAL RULE.** Asserting
+    either half unconditionally forbids a correct design: **B135's version of this test, kept as
+    written, goes red on the very change v04 needed** — which is how it was found to be encoding
+    a rule rather than the rule.
     """
     frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
     spec = _spec(panel(frame)[1])
+    drawing, declined, silent = _field_x_encodings(spec)
+    resolution = spec["hconcat"][_FIELD].get("resolve", {}).get("axis", {}).get("x", "shared")
 
-    declared, suppressed = [], []
-    for node in _layers(spec, _FIELD):
-        enc = (node.get("encoding") or {}).get("x")
-        if not isinstance(enc, dict) or "axis" not in enc:
-            continue
-        (suppressed if enc["axis"] is None else declared).append(_mark_of(node))
+    assert drawing, "no field layer draws an x axis at all, so the yard numbers cannot appear"
 
-    assert declared, "no field layer declares an x axis at all, so the yard numbers cannot draw"
-    assert not suppressed, (
-        f"these field layers set `x.axis = null` while {declared} declare an axis: "
-        f"{suppressed}. Vega-Lite resolves axes across a layer, so the explicit null wins and "
-        f"the field's yard numbers are not drawn — which is exactly what v02 shipped")
+    if resolution == "independent":
+        # every layer is its own axis, so silence is a decision and the default is wrong
+        assert not silent, (
+            f"axes resolve INDEPENDENT and these layers encode a scaled x with no `axis`: "
+            f"{silent}. Vega-Lite gives each of them the DEFAULT axis — measured as 26 extra "
+            f"ticks beneath the field's 11")
+        assert len(drawing) == len(set(drawing)), (
+            f"two layers draw the same orientation {drawing}, so one axis is rendered on top "
+            f"of itself")
+    else:
+        # one shared axis, so a single null is an argument about it — and it wins
+        assert not declined, (
+            f"axes resolve {resolution!r} (shared) and these layers set `x.axis = null`: "
+            f"{declined}. With a merged axis the explicit null wins and the field's yard "
+            f"numbers are not drawn — which is exactly what v02 shipped")
+
+
+# ── 🚨🚨 v04 PART 1: THE ACCENT FOLLOWS THE VIEWER'S THEME ──────────────────────────────────
+
+def test_THE_DRIVE_ACCENT_FOLLOWS_THE_VIEWERS_THEME(themed_panel):
+    """🚨🚨 **cfdb-wta-R-1256, MEASURED BY B135 AND FIXED HERE.** `_drive_frame` called
+    `identity.text_on(colors.get(band))` with no `dark_theme` argument, so every drive's accent
+    was the ON-LIGHT colour in both themes:
+
+        teams below 3:1 on the dark page       267 / 351     76.1%
+        DRIVES below 3:1 on the dark page   66,776 / 84,838  78.71%
+        worst  Kennesaw State #0b1315 → 1.01:1 · UConn #000e2f → 1.01:1
+
+    ✅ **THE MATERIAL WAS ALREADY PUBLISHED** — `srv_drive` carries `offense_color_on_dark`
+    beside `offense_color_on_light`, and `identity.text_on` has always taken the argument.
+    📊 **AFTER: 0 of 351 teams below 3:1, in BOTH themes** — cfdb's ladder guarantees 3:1
+    against the RIGHT page, so the whole defect was asking the wrong one.
+
+    ⚠️ **AND A MIS-DETECTED THEME IS BAD IN BOTH DIRECTIONS (192/351 teams the other way), so
+    this asserts BOTH themes.** A test that only drove light would pass on the broken version.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    # the fixture paints both variants the same by default, so give them different ones —
+    # otherwise this test cannot fail (R-744: a fixture whose defaults make it true)
+    frame.loc[:, "offense_color_on_light"] = "#000e2f"     # UConn's, 1.01:1 on the dark page
+    frame.loc[:, "offense_color_on_dark"] = "#ffffff"      # 18.90:1 on the dark page
+
+    light = _row_for(_field_rows(_spec(themed_panel(frame, "light")[1])), 1)["accent"]
+    dark = _row_for(_field_rows(_spec(themed_panel(frame, "dark")[1])), 1)["accent"]
+
+    assert light == "#000e2f", (
+        f"in LIGHT the accent is {light!r}; the on-light variant is what reads on a white page")
+    assert dark == "#ffffff", (
+        f"in DARK the accent is {dark!r}. If it is the on-LIGHT value the panel is drawing "
+        f"#000e2f on a #0e1117 page — 1.01:1, the defect on 78.71% of drives")
+    assert light != dark, (
+        "the accent is the same in both themes, so one of them is wrong by construction")
+
+
+def test_AN_UNKNOWN_THEME_READS_AS_LIGHT_which_is_what_shipped_before(themed_panel):
+    """🚨 **THE FALLBACK IS *TODAY'S BEHAVIOUR*, DELIBERATELY, SO THIS CANNOT REGRESS LIGHT.**
+
+    ⚠️ Streamlit's own docstring warns `st.context.theme.type` "may be incorrect … when the app
+    is first loaded within a session", and a reader reaches this panel by URL. 📊 **Measured
+    against a real Streamlit server in a fresh browser context per scheme — `run=1 type='light'`
+    and `run=1 type='dark'`, so it is right on the first script run** — but the caveat is real
+    for a theme changed mid-session, and `None` is documented when there is no context.
+
+    ✅ **So an unknown theme lands on the variant that is already correct 100% of the time on
+    the light page.** A fix that traded one theme for the other would not be a fix.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    frame.loc[:, "offense_color_on_light"] = "#000e2f"
+    frame.loc[:, "offense_color_on_dark"] = "#ffffff"
+    unknown = _row_for(_field_rows(_spec(themed_panel(frame, None)[1])), 1)["accent"]
+    assert unknown == "#000e2f", (
+        f"with no theme the accent is {unknown!r} — it must fall to the ON-LIGHT variant, "
+        f"which is exactly what shipped before v04 and is never worse than it")
+
+
+def test_THE_TOOLTIP_SPLITS_THE_SWING_FROM_THE_SCORE(panel):
+    """> **MARC:** *"add a new line after Score Impact as Score and split the score to that
+    > line, leave the +/- value on the score impact line."*
+
+    ⚠️ **THE TABLE CELL KEEPS THEM TOGETHER AND THAT IS NOT AN INCONSISTENCY** — the cell has 47
+    measured pixels and one line; the tooltip has room for two. **Both read the same two
+    published facts, so they cannot disagree.**
+
+    🚨 **AND `On the field` IS GONE FROM THIS TOOLTIP BECAUSE IT COULD ONLY EVER SAY `yes`.**
+    The bars are drawn from `frame[frame["has_position"]]`, so every row with a tooltip here is
+    on the field by construction — **a line whose value cannot vary is not information**, which
+    is why Marc had to ask what it meant. ✅ **It survives on the absence layer, the one place
+    it is a fact.**
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score",
+               scoring_side="offense", scoring=True, off_score=(0, 7), def_score=(0, 0))])
+    spec = _spec(panel(frame)[1])
+    bars = _only([n for n in _layers(spec, _FIELD)
+                  if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})], "bar layer")
+    titles = {t.get("title"): t.get("field") for t in bars["encoding"]["tooltip"]}
+
+    assert titles.get("Score impact") == "impact_swing", (
+        f"`Score impact` reads {titles.get('Score impact')!r} — the +/- stays on its own line")
+    assert titles.get("Score") == "score_line", (
+        f"there is no `Score` line: {sorted(titles)}")
+    assert "On the field" not in titles, (
+        f"`On the field` is still on the bar tooltip, where it can only say `yes`: "
+        f"{sorted(titles)}")
+
+    row = _row_for(_field_rows(spec), 1)
+    assert row["impact_swing"] == "+7", f"the swing reads {row['impact_swing']!r}"
+    assert row["score_line"] == "0-7", f"the score reads {row['score_line']!r}"
+    # AND THE TABLE CELL STILL CARRIES BOTH, from the same two facts
+    cell = _row_for(_table_rows(spec, _HOME, column="impact_cell"), 1)["impact_cell"]
+    assert cell == "+7 0-7", f"the table cell reads {cell!r}"
+
+
+def test_THE_ABSENCE_LAYER_EXPLAINS_ITSELF_in_a_readers_words(panel):
+    """🚨 **MARC ASKED WHAT `On the field` MEANT, WHICH IS THE STRONGEST EVIDENCE IT DID NOT
+    SAY.** 📊 It is `is_end_on_field` — B133's honest-absence branch for the **118 of 84,838
+    drives (0.139%)** whose end coordinate falls off the field and whose BAR is suppressed.
+
+    ✅ **AC-G.11: the absence must say WHICH absence it is.** *"On the field: no"* does not tell
+    a reader that the BAR is missing rather than the drive. 📋 **The wording is a proposal — it
+    is his panel and his word that it was unclear.**
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "TD", category="offensive score",
+                                 end=93, on_field=False),
+                          _drive(2, "away", "Beta", "PUNT", category="punt")])
+    spec = _spec(panel(frame)[1])
+    said = _absence_layers(spec)
+    assert said, "the drive with no position vanished from the field entirely"
+    titles = {t.get("title") for t in said[0]["encoding"]["tooltip"]}
+    assert "On the field" not in titles, (
+        f"the absence layer still uses the flag's name: {sorted(titles)}")
+    note = _rows(spec, said[0])[0]["field_note"]
+    assert "no bar" in note, (
+        f"the note reads {note!r} — it must tell a reader the BAR is missing rather than the "
+        f"drive, which is the distinction Marc's question exposed")
+
+
+def test_THE_HEADER_CALLS_LINE_SCORE_rather_than_printing_its_own(panel):
+    """> **MARC:** *"Can we use this scoreboard in the header line of the Drives section?"*
+
+    🚨 **A STAGED BREAK CAUGHT THIS GAP (R-744): stubbing `_line_score` out so the header fell
+    back to the plain `Tulane 3 at Duke 17` line left all 148 tests green.** Nothing asserted
+    that the quarter scoreboard Marc pointed at was there at all.
+
+    ✅ **AND THE ASSERTION IS THAT THE PRODUCER'S OWN OUTPUT IS IN THE HEADER, not that the
+    header contains something scoreboard-shaped.** That is what tells a CALL from a COPY (§4.3):
+    a forked implementation would drift from this string the first time either changed.
+
+    ⚠️ **`_line_score` RETURNS AN EMPTY STRING WHEN ALL FOUR QUARTERS ARE NULL** — 26 of the
+    3,831 completed 2025 games, by its own measurement — so the fallback is asserted too, and it
+    must not be silence.
+    """
+    import importlib
+    matchup = importlib.import_module("views.matchup")
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+
+    row = _game_row()
+    row["away_q1"], row["away_q2"], row["away_q3"], row["away_q4"] = 0, 0, 0, 3
+    row["home_q1"], row["home_q2"], row["home_q3"], row["home_q4"] = 7, 3, 0, 7
+    row["away_overtime_points"] = row["home_overtime_points"] = None
+    entries, _charts = panel(frame, row=row)
+    head = _only([b for k, b in entries
+                  if k == "markdown" and isinstance(b, str) and "Drives</div>" in b],
+                 "scoreboard header")
+
+    produced = matchup._line_score(row)
+    assert produced, "the fixture does not exercise `_line_score` at all"
+    assert produced in head, (
+        "the header does not contain `_line_score`'s own output, so it is printing its own "
+        "scoreboard rather than calling the producer Marc pointed at (§4.3)")
+
+    # AND THE NULL CASE DEGRADES TO THE FINAL SCORE RATHER THAN TO SILENCE.
+    bare = _game_row()
+    for side in ("away", "home"):
+        for q in ("q1", "q2", "q3", "q4"):
+            bare[f"{side}_{q}"] = None
+    entries, _charts = panel(frame, row=bare)
+    fallback = _only([b for k, b in entries
+                      if k == "markdown" and isinstance(b, str) and "Drives</div>" in b],
+                     "scoreboard header")
+    assert not matchup._line_score(bare), "the fixture does not exercise the null case"
+    assert ">17<" in fallback and ">24<" in fallback, (
+        f"with no quarters the header shows neither team's final score: {fallback!r}. 26 of "
+        f"3,831 completed games carry no first quarter and they must not get silence")
