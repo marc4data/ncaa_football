@@ -1266,3 +1266,88 @@ def test_the_poll_disagreement_table_selects_the_slug_it_links_with():
         assert re.search(rf"\b{column}\b", select), (
             f"the compare query does not select {column!r}, so team_link cannot build an href "
             f"— the cell renders as plain text and nothing else fails")
+
+
+def test_accent_color_composes_BOTH_theme_variants():
+    """🚨 A171 (cfdb-main-R-1601). THE DARK VARIANT IS THE WHOLE REASON THIS FUNCTION EXISTS,
+    and a staged break that dropped it came back GREEN across the suite.
+
+    📊 **B109 MEASURED THE COST (R-855):** `identity.text_on(row)` defaults to the ON-LIGHT
+    colour, which renders `rgb(0,0,0)` against a `rgb(14,17,23)` page — **invisible — for the
+    18.6% of teams that publish `#000000` there.** A function that returned only the light
+    variant would look perfectly correct in every light-theme render and every screenshot in
+    this repository, and be invisible for one team in five on dark.
+
+    ✅ `light-dark()` is resolved by the BROWSER, so it is also correct on a mid-session theme
+    flip with no Python in the loop — which is what the Vega-based drives panel cannot do
+    (cfdb-main-R-1236).
+    """
+    from lib import identity as ident
+    row = {"home_color_on_light": "#111111", "home_color_on_dark": "#eeeeee"}
+    value = ident.accent_color(row, "home")
+    assert value.startswith("light-dark(") and value.endswith(")"), value
+    inner = value[len("light-dark("):-1]
+    light, dark = [part.strip() for part in inner.split(",")]
+    assert light == "#111111", f"the on-light variant is missing: {value}"
+    assert dark == "#eeeeee", (
+        f"THE ON-DARK VARIANT IS MISSING — this is R-855, where the light colour was used in "
+        f"both themes and went invisible for 18.6% of teams: {value}")
+    assert light != dark, "a single colour in both slots is the defect this guards"
+
+    # A missing or NaN colour falls back rather than reaching the SVG as `nan`.
+    import math
+    for bad in (None, float("nan")):
+        fallback = ident.accent_color({"home_color_on_light": bad,
+                                       "home_color_on_dark": bad}, "home")
+        assert "nan" not in fallback.lower(), fallback
+        assert ident.FALLBACK in fallback, fallback
+    assert math.isnan(float("nan"))     # the value the guard exists for is a real float nan
+
+
+def test_the_curve_cell_passes_BOTH_teams_colours_from_a_query_that_selects_them():
+    """🚨 A171 (cfdb-main-R-1602). Two halves that are useless apart, and a break in EITHER came
+    back green: nothing asserted that the page passes the colours, or that it selects them.
+
+    ⚠️ **AND THE SILENT-FAILURE SHAPE IS THE POINT.** `sparkline_svg` defaults both colours to
+    `""`, so a page that stops passing them draws the OLD single-colour chart — correct-looking,
+    no error, no test. Likewise a query that stops selecting the columns yields `None`, which
+    `accent_color` turns into the neutral fallback: a grey chart that looks deliberate.
+
+    🚨 BY AST, NOT BY SUBSTRING. This round already had a guard fooled by its own comment
+    (cfdb-main-R-1321's family), and `today.py`'s docstring discusses these column names at
+    length — a `"home_color_on_light" in source` check passes on the prose alone.
+    """
+    tree = ast.parse(SOURCE)
+
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "sparkline_svg"]
+    assert len(calls) == 1, f"expected one chart call site in today.py, found {len(calls)}"
+    keywords = {kw.arg for kw in calls[0].keywords}
+    assert {"home_color", "away_color"} <= keywords, (
+        f"the curve cell must pass both teams' colours; it passes {sorted(keywords)} — "
+        f"without them the chart silently falls back to one neutral fill")
+
+    # And the frame it reads must actually carry them: the SQL literal, not the docstring.
+    sql = [n.args[0] for n in ast.walk(tree)
+           if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "query" and n.args]
+    texts = []
+    for arg in sql:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            texts.append(arg.value)
+        elif isinstance(arg, ast.JoinedStr):
+            texts.append("".join(v.value for v in arg.values
+                                 if isinstance(v, ast.Constant) and isinstance(v.value, str)))
+    game_query = [t for t in texts if "from srv_game" in t and "home_abbreviation" in t]
+    assert len(game_query) == 1, f"expected one srv_game query, found {len(game_query)}"
+    for column in ("home_color_on_light", "home_color_on_dark",
+                   "away_color_on_light", "away_color_on_dark"):
+        assert re.search(rf"\b{column}\b", game_query[0]), (
+            f"{column} is not selected, so the chart would fall back to neutral grey and "
+            f"nothing else would fail")
+
+    # ⚠️ AND NOTHING GOES BETWEEN THE TRIPLE QUOTES BUT SQL. A171's first draft put this note
+    # in the query as a `--` comment; ci/check_page_queries.py normalises to one line, so it
+    # would have swallowed every column after it. A165 paid for this once already.
+    for text in texts:
+        assert "--" not in text, "a `--` comment inside a query string swallows the rest of it"
