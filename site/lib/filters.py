@@ -102,6 +102,65 @@ def _weeks(season: int, season_type: str) -> list:
     return df["week"].tolist()
 
 
+@st.cache_data(ttl=3600)
+def _latest_played_week(season: int, season_type: str):
+    """The week the site opens on: the latest week that has actually HAPPENED.
+
+    > **MARC:** *"Can we also have the site default to current week?"*
+
+    🚨 **DERIVED FROM THE DATA, NEVER FROM THE CLOCK.** AC-G.35 is explicit that the page's
+    "as of" is a COLUMN sourced from when the data was loaded, *"never from `now()` in the
+    app"* — and a "current week" read off the wall clock is that same violation wearing a
+    different name. It would disagree with the site the moment a load ran late, which is the
+    exact failure the rule exists to prevent.
+
+    ── TWO CANDIDATE DEFINITIONS WERE MEASURED AND BOTH WERE WRONG ────────────────────────
+
+    ❌ **`min(week) where NOT is_completed`** — *"the week with games scheduled next"*.
+    📊 For season **2024, long finished, it returns WEEK 5**: five games were never played and
+    never will be, so the expression is not *next week*, it is *the earliest week still
+    holding an abandoned game*, permanently. **A default built on it opens a finished season
+    on week 5.**
+
+    ❌ **`max(week) where is_completed`** — *"the last week with a completed game"*. Simple,
+    and it **opens the site on a week that has barely started**. 📊 Caught by rendering rather
+    than by reasoning: 2026 week 3 had **2 completed games of 311**, so this returned 3 and
+    Scores went from 301 rows to **3**. ⚠️ *A default that silently empties a panel is worse
+    than the panel being broad.*
+
+    ✅ **WHAT SHIPPED: the latest week whose games are MOSTLY PLAYED** — more completed than
+    pending. It is the honest reading of *"has this week happened yet"*, and it survives both
+    failure modes: a handful of abandoned games cannot drag it backwards, and a Thursday
+    opener cannot drag it forwards.
+
+    📊 **AND IT AGREES WITH THE SIMPLE RULE WHENEVER THE SIMPLE RULE IS RIGHT** — every
+    finished season, 2020 through 2025: 16 · 15 · 15 · 15 · 16 · 16, identical. **It differs
+    only inside a live season, which is the only place a default matters.** For 2026 it
+    returns week 2 (300 of 303 played) rather than week 3 (2 of 311).
+
+    ⚠️ **IT RETURNS `None` FOR A SEASON WITH NOTHING PLAYED YET**, and the caller falls back to
+    "All" — a pre-season page must not open on a week that has no results in it.
+    """
+    df = query("""select week,
+                         count(*) filter (where is_completed) as done,
+                         count(*) filter (where not is_completed) as pending
+                  from srv_game
+                  where season = :season and season_type = :season_type
+                  group by week
+                  order by week
+                  limit 40""",
+               {"season": season, "season_type": season_type})
+    if df.empty:
+        return None
+    # ⚠️ The comparison is in PYTHON rather than a `having` clause, because the site reads one
+    # relation with a WHERE and does no arithmetic in SQL it does not have to (§4.2.1). Picking
+    # the largest of a list of weeks is not a metric.
+    played = df[df["done"] > df["pending"]]
+    if played.empty:
+        return None
+    return int(played["week"].max())
+
+
 # R-165. THE CACHE KEY CARRIES `division` BECAUSE THE RESULT NOW DEPENDS ON IT.
 # A key that misses a dependency is a stale option list, and a stale option list looks like a
 # data bug and gets debugged as one.
@@ -191,7 +250,21 @@ def game_scope(show_week: bool = True, show_conference: bool = True,
 
     weeks = _weeks(season, season_type)
     week_options = ["All"] + [str(w) for w in weeks]
-    current_week = str(params.get("week"))
+    # 🚨 A168 (cfdb-main-R-1317). THE SITE OPENS ON THE LATEST PLAYED WEEK, NOT ON THE WHOLE
+    # SEASON — Marc: *"Can we also have the site default to current week?"*
+    #
+    # ⚠️ **A URL PARAMETER STILL WINS, AND THAT ORDER IS THE WHOLE CARE HERE.** A deep link
+    # naming a week is a promise; this only decides what happens when nothing was asked for.
+    # ⚠️ **AND IT CHANGES A DEFAULT, NOT THE OPTIONS.** "All" is still the first entry and one
+    # click away — a reader who wants the season still has it.
+    requested_week = params.get("week")
+    if requested_week is None:
+        default_week = _latest_played_week(season, season_type)
+        # `None` means nothing has been played in this season yet, and a pre-season page must
+        # fall back to "All" rather than open on a week with no games in it.
+        current_week = "All" if default_week is None else str(default_week)
+    else:
+        current_week = str(requested_week)
     current_conf = params.get("conference")
     division_labels = list(DIVISIONS)
     current_division = params.get("division") or DEFAULT_DIVISION

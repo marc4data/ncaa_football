@@ -770,3 +770,41 @@ def test_the_deploy_ships_the_monitors_forced_command():
     assert "cfdb_heartbeat.sh" in code, (
         "the forced command is not deployed, so the watcher and the box it watches can drift")
     assert "/usr/local/bin/cfdb_heartbeat.sh" in code
+
+
+def test_srv_player_play_publishes_the_drive_key_it_was_given():
+    """🚨 A168 (cfdb-main-R-1316). ONE COLUMN, AND TWO PIECES OF WORK WERE BLOCKED ON IT.
+
+    `fct_play_stat` has carried `drive_id` all along and `srv_player_play` simply did not
+    select it, so nothing downstream could scope a play to a drive without a join the site is
+    not allowed to make (§4.2.1). ✅ **B137's per-play borders** (Marc, v19: *"add borders
+    around the yards gained by plays > 10 yards … what type and who gained the yards in the
+    tooltip"*) and **`cfdb-wta-R-1177`'s `score_impact`** both needed exactly this.
+
+    📊 MEASURED BEFORE PUBLISHING, both of §2.5's questions: `drive_id` is null on **0 of
+    409,846** rows — 100.00%, and 100.00% in each of 2024, 2025 and 2026 — and **100.00% of
+    them join to a drive `srv_drive` actually publishes.** So a play-level border draws on
+    every play rather than on a subset nobody measured.
+
+    ⚠️ **A LOCAL GUARD, BECAUSE THE dbt TEST THAT WOULD CATCH THIS ONLY RUNS IN CI.** Removing
+    the column from the select list leaves the suite green on a laptop and fails a PR check
+    minutes later; this fails where the edit is made.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    view = (root / "dbt" / "models" / "serving" / "srv_player_play.sql").read_text()
+    assert "p.drive_id," in view, (
+        "srv_player_play no longer selects drive_id — B137's play borders and R-1177's "
+        "score_impact both read it")
+
+    documented = (root / "dbt" / "models" / "serving" / "_models.yml").read_text()
+    block = documented[documented.index("- name: srv_player_play"):]
+    block = block[:block.index("  - name: srv_", 10)]
+    # 🚨 LINE-ANCHORED. A staged break renaming the column to `drive_id_XX` came back GREEN
+    # against a bare substring check, because `- name: drive_id_XX` CONTAINS `- name: drive_id`
+    # (R-744). A YAML key is a whole line; match it as one.
+    import re
+    assert re.search(r"^ *- name: drive_id$", block, re.M), (
+        "drive_id is selected but undocumented; assert_serving_columns_are_documented would "
+        "fail the build, and a reader of the data dictionary would not know it exists")

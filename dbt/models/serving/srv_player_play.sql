@@ -16,6 +16,17 @@
 select
     p.play_stat_sk,
     p.play_id,
+    -- A168 (cfdb-main-R-1316). THE DRIVE KEY, WHICH fct_play_stat HAS CARRIED ALL ALONG AND
+    -- THIS VIEW SIMPLY DID NOT SELECT. Two pieces of work were blocked on its absence:
+    -- B137's per-play borders on the Drives panel (Marc, v19: "add borders around the yards
+    -- gained by plays > 10 yards ... what type and who gained the yards in the tooltip"), and
+    -- cfdb-wta-R-1177's score_impact, researched by A158 and unbuilt since.
+    --
+    -- MEASURED BEFORE PUBLISHING, both of §2.5's questions: drive_id is NULL on 0 of 409,846
+    -- rows (100.00%, and 100.00% in each of 2024, 2025 and 2026), and 100.00% of them join to
+    -- a drive srv_drive actually publishes. So a play-level border draws on every play rather
+    -- than on a subset nobody measured.
+    p.drive_id,
     p.game_id,
     p.season,
     p.week,

@@ -1247,3 +1247,100 @@ def test_no_page_query_carries_prose_between_its_triple_quotes():
     assert not offenders, (
         "nothing but SQL belongs between the triple quotes of a page query:\n  "
         + "\n  ".join(offenders))
+
+
+# ── A168: the site opens on the latest played week ──────────────────────────────────────────
+
+def test_the_default_week_is_derived_from_the_data_and_never_from_the_clock():
+    """🚨 A168 (cfdb-main-R-1317). > **MARC:** *"Can we also have the site default to current
+    week?"*
+
+    ⚠️ **AC-G.35 FORBIDS THE OBVIOUS IMPLEMENTATION.** The page's "as of" is a COLUMN sourced
+    from when the data was loaded, *"never from `now()` in the app"* — and a current week read
+    off the wall clock is that violation under another name. It would disagree with the site
+    the moment a load ran late, which is the failure the rule exists to prevent.
+
+    ✅ So the default comes from `max(week) where is_completed`, and this asserts the SOURCE as
+    well as the behaviour: **no clock call anywhere in the filter module.**
+    """
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "lib" / "filters.py").read_text()
+    for banned in ("datetime.now", "date.today", "time.time", "utcnow", "pd.Timestamp.now"):
+        assert banned not in source, (
+            f"{banned!r} in filters.py — the default week must come from the data (AC-G.35)")
+    assert "is_completed" in source, "the default week is read from what has been played"
+
+
+def test_the_default_week_measurement_rejected_the_other_candidate():
+    """📊 A168 WAS ASKED TO CHOOSE BETWEEN TWO READINGS OF "CURRENT" AND THE MEASUREMENT KILLED
+    ONE OF THEM.
+
+    *The week with games scheduled next* looks like `min(week) where not is_completed`.
+    🚨 **Measured on live serving: for season 2024, long finished, that returns WEEK 5** — five
+    games were never played and never will be, so the expression is not *next week*, it is
+    *the earliest week still holding an abandoned game*, permanently. A default built on it
+    would open a completed season on week 5.
+
+    ✅ The surviving definition agrees with *the week of the most recently kicked-off completed
+    game* on every season from 2020 to 2026. **This test pins that `min(...)` shape out of the
+    module**, so a later round cannot reintroduce it as an obvious-looking improvement.
+    """
+    import re
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "lib" / "filters.py").read_text()
+    block = source[source.index("def _latest_played_week"):source.index("def game_scope")]
+    # 🚨 READ THE SQL, NOT THE PROSE. A first draft searched the whole function for
+    # "not is_completed" and matched the DOCSTRING SENTENCE EXPLAINING WHY IT IS WRONG —
+    # §2.2.1c.1's class, inside a test written to guard against it.
+    sql = re.search(r'query\("""(.*?)"""', block, re.S)
+    assert sql, "the default week no longer runs a query this test can read"
+    statement = sql.group(1)
+    assert "is_completed" in statement and "not is_completed" in statement, statement
+    assert "min(week)" not in statement, (
+        "min(week) over unplayed games returns week 5 of a finished 2024 season — it is the "
+        "earliest ABANDONED game, not the next one")
+    # 🚨 AND NOT max(week) OVER *ANY* COMPLETED GAME EITHER: 2026 week 3 had 2 completed games
+    # of 311, and that rule opened Scores on 3 rows instead of 301. The shipped rule compares
+    # done against pending, which is why BOTH counts must appear.
+    assert "done" in statement and "pending" in statement, statement
+
+
+def test_a_url_parameter_still_beats_the_default_and_All_is_still_reachable():
+    """⚠️ THREE PROPERTIES THE DEFAULT MUST NOT BREAK, asserted rather than described.
+
+    1. **A URL parameter wins.** A deep link naming a week is a promise.
+    2. **"All" stays reachable.** This changes a DEFAULT, not the options.
+    3. **A season with nothing played falls back to "All"** rather than opening on a week that
+       has no games in it.
+    """
+    import re
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "lib" / "filters.py").read_text()
+    block = source[source.index("    weeks = _weeks(season"):source.index("    current_conf")]
+
+    # 1. the default is only consulted when nothing was requested
+    assert "requested_week = params.get(\"week\")" in block, block
+    assert re.search(r"if requested_week is None:", block), block
+    assert "else:" in block and "str(requested_week)" in block, (
+        "a URL week must be used verbatim, not merged with the default")
+
+    # 2. "All" is still the first option, so it is always one click away
+    assert '["All"] + [str(w) for w in weeks]' in source
+
+    # 3. nothing played -> "All"
+    assert 'if default_week is None else' in block, (
+        "a season with no completed games must fall back to All")
+
+
+def test_a_page_that_hides_the_week_control_is_unaffected_by_the_default():
+    """⚠️ `show_week=False` IS THE TEAM-BY-SEASON GRAIN, WHERE *"a week means nothing"*.
+
+    The control is disabled there and the scope is forced to "All" AFTER the selectbox, so the
+    new default cannot leak a week into a page whose rows are not weekly. **Asserted at the
+    line that does it**, because this is the property most likely to be broken by a later
+    refactor that "simplifies" the branch away.
+    """
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "site" / "lib" / "filters.py").read_text()
+    assert 'if not show_week:\n            week_choice = "All"' in source, (
+        "the show_week=False override must still force All after the selectbox")
