@@ -1950,23 +1950,9 @@ _GAME_YARDS_ALLOWED = {"Total": "total_yards_allowed",
 # more, which the round reported rather than inventing a place for.
 
 
-def _split_name(value) -> tuple:
-    """A player's name as (first line, bold line). 🚨 AN ASSUMPTION, NOT A FORMAT.
-
-    `player_name` is ONE STRING; the view does not carry the parts. **First token as the first
-    name and the remainder as the last** is the rule, and it renders *Emmett Mosley V* and
-    *Ray Davis Jr.* the way a reader expects — the remainder keeps the suffix with the surname
-    rather than stranding it on its own line.
-
-    ⚠️ A SINGLE-TOKEN NAME HAS NO FIRST LINE AND RENDERS AS THE BOLD LINE ALONE. An empty first
-    line would still occupy its line-height and shift that one card's header down relative to
-    the others — a hole reserved for something that does not exist (AC-G.11), and the same
-    mistake as an em dash for an absent measure.
-    """
-    parts = str(value or "?").split()
-    if len(parts) < 2:
-        return "", (parts[0] if parts else "?")
-    return parts[0], " ".join(parts[1:])
+# ⚠️ A167: `_split_name` moved to `identity.split_name` with the card row that was its only
+# caller. No alias is left behind — an alias with no callers is a name to keep in step for
+# nothing.
 
 
 # 🚨 R-735. MARC: "Reduce Player Card width by 50%. The Player Card and Yard scatterplot
@@ -2061,9 +2047,13 @@ _CARD_KPI_SLOTS = 3
 # this size. At `.95` it truncates again. **The constant is the measurement.**
 #
 # 🚨 THE BAR THIS HAD TO BEAT: 7 of 18 rendered names truncated at B106's one-line `Last, First`.
-_CARD_JERSEY_SIZE = 1.15
-_CARD_LAST_SIZE = 0.92
-_CARD_FIRST_SIZE = 0.7
+# 🚨 A167 MOVED THESE THREE VALUES TO `identity.py` AS `CARD_JERSEY_SIZE`, `CARD_LAST_SIZE` AND
+# `CARD_FIRST_SIZE` (cfdb-main-R-1308), because Marc asked for this card on Today as well and a
+# shared vocabulary cannot live in one of the two views that draw it.
+# ⚠️ **THE DERIVATION ABOVE STAYS HERE, WHERE THE MEASUREMENT WAS TAKEN** — B107 counted those
+# truncations on THIS card at ITS 150px — and `identity` carries a short pointer back to it.
+# ✅ **NO ALIAS IS LEFT BEHIND.** Nothing in this file reads them any more, and a second name
+# kept in step for no caller is a maintenance cost with no benefit.
 
 # 🚨 R-848. *"'#' font needs to be a little bigger"*, AND IT IS ONE OF TWO LITERALS — SAY WHICH.
 # The `#` is a RATIO of the jersey (R-806, `em` not `rem`, so it follows whatever the jersey is).
@@ -2074,19 +2064,11 @@ _CARD_FIRST_SIZE = 0.7
 # widens its column and takes those pixels straight out of the name, which would put
 # truncations back on a panel that measured 0 of 32. **Growing the ratio costs the name nothing:
 # the `#` is 5px of a 26px jersey block and the block is `min-width`-bounded either way.**
-_CARD_HASH_RATIO = 0.62
+# A167: `identity.CARD_HASH_RATIO` now. Same reasoning as the three sizes above.
 
 
-def _card_text(value) -> str:
-    """A card field as text, with NULL meaning ABSENT rather than the string `nan`.
-
-    🚨 `str(value or "")` DOES NOT DO THIS AND THAT IS THE WHOLE REASON THIS EXISTS: NaN is
-    truthy, so the `or` never fires and the page prints `nan`. `pd.isna` is the only test that
-    answers for None, NaN and NaT alike.
-    """
-    if value is None or (not isinstance(value, str) and pd.isna(value)):
-        return ""
-    return str(value).strip()
+# ⚠️ A167: the body moved to `identity.card_text`. Same reasoning as `_split_name`.
+_card_text = identity.card_text
 
 
 # 🚨 R-733. THE LABELS ARE DATA NOW, AND B098 SAID WHY IT HAD TO CHANGE. That round shipped
@@ -2379,85 +2361,16 @@ def _leader_card(row, usage=None, accent: str = None) -> str:
     not a zero and not a blank that reads as one. It renders as an em dash in the same slot,
     which keeps the cards aligned and says "we do not hold this" rather than "#0".
     """
-    jersey = row.get("jersey")
-    # 🚨 R-806. THE `#` GLYPH AT HALF THE DIGITS' SIZE. Marc: *"Reduce font of the # in Jersey #
-    # to .5 of current value."* — the `#` alone, not the number, so `em` rather than `rem`: it
-    # halves whatever the jersey is set to and cannot drift if that constant moves.
-    # ⚠️ AC-G.32: NO JERSEY STILL RENDERS `—`, and it carries NO `#` — a hash with nothing after
-    # it reads as a broken number rather than as an absence. B104 judged the doubled em dash an
-    # absence rather than a defect; at this size it is the same em dash without the hash.
-    number = (f"<span style='font-size:{_CARD_HASH_RATIO}em;opacity:.65'>#</span>{int(jersey)}"
-              if pd.notna(jersey) else "—")
-    first, last = _split_name(row.get("player_name"))
-    # 🚨 R-753. THREE COLUMNS, AND THE RANK IS GONE. Marc: *"Don't include the rank. The header
-    # row should have 3 columns: 1 - Jersey number · 2 - Present player name on 2 lines. First
-    # name on top, not bold and small. Bold last name. · 3 - Position on top, year on bottom."*
+    # 🚨 A167: THE IDENTITY ROW IS `identity.player_row`, CALLED — NOT REIMPLEMENTED.
+    # Marc asked for this card on Today (*"Prefer the player card from the Matchup"*), so the
+    # jersey, the two-line name and the year/position column now live in `lib/` and BOTH pages
+    # draw the same one. **Ten rounds of his corrections travelled with it and are recorded
+    # there**: R-753, R-800, R-801, R-806, R-848, R-835, B103, B104, B107.
     #
-    # ⚠️ `_ORDINAL` AND THE `T-1st` TIE MARKER WENT WITH IT, AND SOMETHING WAS LOST. The cards
-    # are drawn in rank order, so the ORDER still carries the rank — but nothing now carries a
-    # TIE. Two players sharing second place render as second and third. **Reported rather than
-    # solved in passing: inventing a new place for it is a look decision.**
-    # 🚨 R-800. THE JERSEY IS 2x AND FILLS BOTH ROWS THE NAME BLOCK MAKES. Marc, v05: *"Make the
-    # Jersey Number 2x in size. Fill the 2 rows First/Last creates."* So it is one glyph
-    # spanning the header's full height rather than a small label on the first line.
-    # ⚠️ AC-G.32 GETS LOUDER HERE: no jersey renders `—` at the same 2x size, which is a big em
-    # dash. The round rendered it and reports whether it reads as an absence or as a defect.
-    #
-    # 🚨 R-801. COLUMN 3 IS COLUMN 2's MIRROR: year on top in the small faded line, POSITION in
-    # the last name's treatment below it. Marc: *"Flip Position and Year, then apply last name
-    # formatting to Position."* — the same SIZE AND WEIGHT as the surname, not `font-weight`
-    # bolted onto a faded line, which is what makes the header read as a grid rather than as
-    # three unrelated stacks.
-    # 🚨 R-835. THE NAME IS TWO LINES AGAIN AND SHARES THE ROW — see `_CARD_JERSEY_SIZE` for
-    # Marc's words and for why splitting the name is what makes it fit.
-    small = "font-size:.66rem;opacity:.6;line-height:1.1"
-    strong = "font-weight:700;font-size:.78rem;line-height:1.15"
-    # 🚨 `nan` WAS REACHING THE PAGE, AND `or ""` IS EXACTLY WHY. A null arrives out of the
-    # frame as `float('nan')`, and **NaN IS TRUTHY IN PYTHON** — so `row.get(…) or ""` returns
-    # the NaN rather than the fallback and `str()` renders the three characters `nan`. B106's
-    # own live render of Arkansas vs North Alabama is where this was seen; it is not new, and
-    # it is not rare: 13,431 of 75,283 preview leader rows (17.8%) and 3,734 of 53,873
-    # post-game rows (6.9%) carry no position and no class year.
-    # ⚠️ AC-G.32, AND THE TWO SLOTS TAKE DIFFERENT ANSWERS ON PURPOSE. The position is a VALUE
-    # and an absent value is an em dash — the same statement the jersey already makes one line
-    # above. The year is the small faded line and it is the surname block's mirror (R-801), so
-    # an absent year is an absent LINE, not a dash: B103 settled that a missing first name
-    # renders the bold line alone rather than an empty row that shifts the card's height.
-    year = _card_text(row.get("class_year_display"))
-    position = _card_text(row.get("position"))
-    tie = _card_tie(row)
-    # ⚠️ `min-width:0` ON EVERY FLEX CHILD THAT CAN OVERFLOW, and it is what makes the ellipsis
-    # work at all: without it a flex child refuses to shrink below its content and the name
-    # pushes the year/position column off the card instead of truncating — the R-745 class,
-    # five rounds old now.
-    # ⚠️ THE JERSEY'S `min-width` CAME DOWN WITH ITS FONT, AND THE SECOND CUT WAS MEASURED.
-    # 2.4rem was set for a 1.5rem jersey. At 1.25rem `#14` draws ~26px, so 2.4rem (38px) was
-    # reserving 12px the NAME column needed — and the name column is the one that runs out.
-    # 1.7rem (27px) still clears the widest real jersey, `#99` at ~26px, with a pixel to spare.
-    # 🚨 MEASURED, NOT PICKED: at 2.0rem the name column was 68px and `Singleton` needed 74.
-    clip = "min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
-    name_block = (
-        f"<div style='flex:1;{clip}'>"
-        # 🚨 THE FIRST NAME IS OMITTED, NOT BLANKED, WHEN THERE IS NONE — B103's ruling, and it
-        # survives the reshape unchanged. An empty first line would still take its line-height
-        # and drop that one card's surname below its neighbours': a hole reserved for something
-        # that does not exist (AC-G.11).
-        + (f"<div style='font-size:{_CARD_FIRST_SIZE}rem;opacity:.6;line-height:1.15;{clip}'>"
-           f"{html.escape(first)}</div>" if first else "")
-        + f"<div style='font-weight:700;font-size:{_CARD_LAST_SIZE}rem;line-height:1.15;"
-          f"{clip}'>{html.escape(last)}</div></div>")
-    top = [
-        # 🚨 `align-items:center` IS MARC'S OWN ARGUMENT MADE MECHANICAL: the jersey spans the
-        # two-line block, so it is centred against BOTH lines rather than sitting on the first.
-        # That vertical room is his stated reason it may be the largest of the three.
-        f"<div style='min-width:1.7rem;font-weight:700;font-size:{_CARD_JERSEY_SIZE}rem;"
-        f"line-height:1;display:flex;align-items:center'>{number}</div>",
-        name_block,
-        "<div style='text-align:right;min-width:0'>"
-        + (f"<div style='{small}'>{html.escape(year)}</div>" if year else "")
-        + f"<div style='{strong};white-space:nowrap'>"
-          f"{html.escape(position) if position else fmt.EM_DASH}{tie}</div></div>",
-    ]
+    # ⚠️ `_card_tie` STAYED HERE AND IS PASSED IN, because it reads `tied_players` — a column
+    # `srv_game_team_leader_in_this_game` carries and Today's `srv_player_game_log` does not.
+    # **A promoted function must not read a column one of its callers cannot supply** (§2.5).
+    top_row = identity.player_row(row, _card_tie(row))
     # 🚨 ONLY THE SLOTS THAT EXIST ARE DRAWN, AND AN EM DASH WOULD BE THE WRONG ABSENCE.
     # AC-G.32 puts a dash where a VALUE is missing; a slot with no label is a MEASURE that does
     # not exist, which is a different statement (AC-G.11). B098 argued this when two of three
@@ -2496,8 +2409,7 @@ def _leader_card(row, usage=None, accent: str = None) -> str:
             f"style='border:1px solid {accent or 'rgba(128,128,128,.22)'};"
             f"border-radius:6px;"
             f"padding:.28rem .45rem;margin-bottom:.3rem'>"
-            f"<div style='display:flex;align-items:stretch;gap:.4rem'>"
-            f"{''.join(top)}</div>"
+            f"{top_row}"
             f"<div style='display:grid;grid-template-columns:repeat({_CARD_KPI_SLOTS},1fr);"
             f"gap:.3rem;margin-top:.25rem;text-align:center'>{''.join(cells)}</div>"
             f"{_card_dots(row, usage)}</div>")

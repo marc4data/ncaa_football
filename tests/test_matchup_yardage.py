@@ -2200,6 +2200,11 @@ def _lone_card(entries):
 
 
 GLYPHS_SOURCE = (Path(__file__).resolve().parents[1] / "site" / "lib" / "glyphs.py").read_text()
+# ⚠️ A167: the card's three header sizes and the `#` ratio moved to `lib/identity.py`, because
+# Marc asked for this card on Today too and both pages must draw ONE of it. The test follows the
+# constants to their new home rather than being deleted — `_module_constant` already takes a
+# `source`, which is exactly this case (it was built for `glyphs.py`).
+IDENTITY_SOURCE = (Path(__file__).resolve().parents[1] / "site" / "lib" / "identity.py").read_text()
 
 
 def _module_constant(name, source=None):
@@ -2215,7 +2220,8 @@ def _module_constant(name, source=None):
             return ast.literal_eval(node.value)
     raise AssertionError(
         f"no module-level {name} in "
-        f"{'glyphs.py' if source is GLYPHS_SOURCE else 'matchup.py'}")
+        f"{'glyphs.py' if source is GLYPHS_SOURCE else
+           'identity.py' if source is IDENTITY_SOURCE else 'matchup.py'}")
 
 
 def test_the_KPI_row_puts_the_MEASURE_NAME_ABOVE_the_number(panel):
@@ -3734,9 +3740,9 @@ def test_the_THREE_HEADER_SIZES_keep_MARCS_ORDERING():
     then changed the shape rather than the number; what survives a reshape is the ordering. A
     round that wants different sizes may have them — it may not invert the rule silently.
     """
-    jersey = _module_constant("_CARD_JERSEY_SIZE")
-    last = _module_constant("_CARD_LAST_SIZE")
-    first = _module_constant("_CARD_FIRST_SIZE")
+    jersey = _module_constant("CARD_JERSEY_SIZE", IDENTITY_SOURCE)
+    last = _module_constant("CARD_LAST_SIZE", IDENTITY_SOURCE)
+    first = _module_constant("CARD_FIRST_SIZE", IDENTITY_SOURCE)
     assert jersey > last > first, (
         f"the header sizes are jersey={jersey} last={last} first={first}, which breaks Marc's "
         f"ordering jersey > last > first")

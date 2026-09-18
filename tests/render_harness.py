@@ -696,3 +696,31 @@ def box_serifs(html: str, opacity: float = None):
             if y1 != y2:                      # R-1101: not the whisker's horizontal rule
                 out.append((float(x), float(y1), float(y2)))
     return out
+
+
+def page_html(body: str, theme: str = "light", padding: str = "1rem 3rem") -> str:
+    """A standalone HTML page carrying the site's real stylesheets, for a browser measurement.
+
+    🚨 A167 ADDED THIS BECAUSE EVERY ROUND SINCE A164 HAND-ROLLED IT AND GOT IT WRONG THE SAME
+    WAY (cfdb-main-R-1314). `theme.CSS` and `theme.TABLE_CSS` **already contain their own
+    `<style>` tags** — `theme.inject()` passes them straight to `st.markdown`. Wrapping them in
+    another `<style>` produces `<style><style>…`, the first `</style>` closes the element early,
+    and **the `:root` block that declares every colour token is lost.**
+
+    📊 MEASURED: through the wrapped page `--cfdb-link` resolves to `''` and an SVG asking for
+    `var(--cfdb-link)` silently inherits `currentColor`. A167 spent two passes concluding the
+    page had no blue on it. **The page was correct; the ruler was bent.**
+
+    ⚠️ **GEOMETRY MEASUREMENTS THROUGH THE BROKEN PAGE WERE STILL SOUND** — the rules that set
+    widths and paddings parse fine, which is why A164, A165 and A166 measured correctly. **Only
+    a token-valued property could see the difference**, which is exactly how it survived.
+    """
+    from lib import theme as _theme
+    ground = ("#0e1117", "#fafafa") if theme == "dark" else ("#ffffff", "#31333f")
+    return (f"<!doctype html><html><head><meta charset='utf-8'>"
+            f"{_theme.CSS}{_theme.TABLE_CSS}"
+            f"<style>:root{{color-scheme:{theme}}}"
+            f"body{{margin:0;background:{ground[0]};color:{ground[1]};"
+            f"font-family:'Source Sans Pro',sans-serif;font-size:14px}}"
+            f".block-container{{padding:{padding}}}</style></head>"
+            f"<body class='cfdb-app'><div class='block-container'>{body}</div></body></html>")

@@ -20,7 +20,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import filters, fmt, glyphs, params, shell, states, tab, table, theme
+from lib import (filters, fmt, glyphs, identity, params, shell, states, tab, table,
+                 theme)
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -604,6 +605,31 @@ _CURVE_OT_BAND_UNITS = 900
 # via `getComputedTextLength()`: `M`, `i` and `%` all return **5.422px**, and `MICH 100%`
 # returns 48.781 for nine characters — 5.4201 each. That uniformity IS the property being
 # relied on, so it is recorded rather than assumed.
+# 🚨 A167 (cfdb-main-R-1311). THE QUARTER LABELS SIT INSIDE THE PLOT, AND THE REASON IS A
+# NUMBER MARC GAVE THIS PROJECT ONE ROUND AGO.
+#
+# > **MARC, v06:** *"label the x-axis with the quarters (1Q, 2Q, etc)."*
+#
+# ⚠️ **LABELS BELOW THE PLOT MAKE THE CHART TALLER, AND A165 SPENT A ROUND MAKING THIS ROW
+# SHORTER AT HIS OWN REQUEST** — 94.2px -> 79.8px, because he asked for *"things more dense
+# vertically"*. 📊 Measured both ways and reported to him: **inside costs 0px; below costs 14px
+# per row, ~140px per panel**, which gives back most of what that round returned.
+#
+# ✅ **THE BOUNDARIES WERE ALREADY DRAWN AND HE IS ASKING FOR THEM TO BE NAMED** — the rules at
+# 0/900/1800/2700/3600 have been there since A138. This adds the word, not the line.
+#
+# ⚠️ **AND OVERTIME IS NOT A QUARTER.** The label reads `OT`, `2OT`, `3OT` … per band, because
+# the CHART draws a band per overtime period even though the SCOREBOARD collapses them into one
+# column (`_quarter_cells`: *"one overtime column, not one per period"* — the data has no
+# per-overtime breakdown, but the chart's x axis genuinely has the time). **A sequence reading
+# `1Q 2Q 3Q 4Q 5Q` would be wrong and this is what stops it.**
+# 🚨 A167: the final percentage is bigger than the 9px label it sits in — Marc's *"Increase the
+# font of the final win %"*. 11.5 against 9 is a visible step without the number outgrowing the
+# 64px chart it has to sit inside; it is anchored at its right edge so it costs no width.
+_CURVE_FINAL_SIZE = 11.5
+_CURVE_QUARTER_LABEL_SIZE = 6.5
+_CURVE_QUARTER_LABEL_OPACITY = .45
+
 _CURVE_LABEL_CHAR_PX = 5.4219
 # The gap between the last point and the first glyph, and a little air after the last one.
 _CURVE_LABEL_OFFSET = 4.0
@@ -636,6 +662,36 @@ def _curve_axis_units(points: pd.DataFrame) -> pd.Series:
         elapsed.notna(),
         _CURVE_REGULATION_UNITS + offset * _CURVE_OT_BAND_UNITS)
 
+
+# 🚨 A167 (cfdb-main-R-1310). THE SCOREBOARD COLUMN IS SIZED TO THE SCOREBOARD, NOT TO A
+# PERCENTAGE — and A165's 40% is the whitespace Marc is pointing at.
+#
+# > **MARC, Today v06:** *"Scoreboard - unneccessary white space to the right of the scoreboard."*
+#
+# ⚠️ **A165 WIDENED THIS COLUMN 26% -> 40% TO FIX A TRUNCATION THAT WAS NEVER IN IT**, and its
+# own measurement said so at the time: *"+54% width, ellipsised count UNCHANGED at eleven"*. The
+# clip was `.cfdb-sb-team`'s fixed width inside the nested table, which the same round fixed
+# separately at 13rem (cfdb-main-R-1301). **The percentage bought nothing and the whitespace is
+# what is left of it.**
+#
+# 📊 MEASURED IN CHROMIUM by rendering `_scoreboard` at 4, 5, 6, 9 and 13 periods:
+#
+#     4 periods (regulation)   425.6px   5 thead cells
+#     5 periods (overtime)     463.2px   6 thead cells
+#     6, 9, 13 periods         463.2px   ← IDENTICAL. It does not keep growing.
+#
+# 🚨 **AND THAT CAP IS THE DATA'S SHAPE, NOT A COINCIDENCE**: `_quarter_cells` draws ONE overtime
+# column because `{side}_overtime_points` is a single total with no per-overtime breakdown
+# published. Real games reach **13 periods** (Illinois at Penn State, 2021, nine overtimes) and
+# the scoreboard is the same width for all of them. **So the natural width has exactly TWO
+# values and the column can be derived rather than guessed.**
+#
+# ✅ THIS IS `layout[1]`'s OWN PATTERN, APPLIED TO THE COLUMN BESIDE IT: derived from the frame,
+# because a constant *"would be wrong the first week nothing goes to overtime"* — and equally
+# wrong the first week something does.
+_SCOREBOARD_REGULATION_PX = 426
+_SCOREBOARD_OVERTIME_PX = 464
+_SCOREBOARD_GUTTER_PX = 12
 
 _CURVE_PAD = 2
 # 🚨 A164 (cfdb-main-R-1142). THE HEIGHT IS A MEASUREMENT OF THE CELL BESIDE IT, NOT A TASTE.
@@ -959,6 +1015,22 @@ def _sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
     # ✅ IT IS STILL DRAWN — the first four fifths of the curve are real and dropping them would
     # lose more than it protects — and the end of the line is cut with a dashed rule and the word
     # so the absence says WHICH absence it is.
+    # 🚨 A167: NAME THE QUARTERS. Centred in each band, on the floor of the plot, at low opacity
+    # so the curve stays the thing being read. `dominant-baseline` is not used — it is
+    # inconsistently supported in older renderers — so the baseline is placed explicitly.
+    for index in range(4):
+        centre = sx(_CURVE_REGULATION_UNITS / 8 * (2 * index + 1))
+        parts.append(
+            f"<text x='{centre:.1f}' y='{height - pad - 1.0:.1f}' text-anchor='middle' "
+            f"font-size='{_CURVE_QUARTER_LABEL_SIZE}' font-family='{_CURVE_LABEL_FONT}' "
+            f"fill='currentColor' opacity='{_CURVE_QUARTER_LABEL_OPACITY}'>{index + 1}Q</text>")
+    for band in range(bands):
+        centre = sx(_CURVE_REGULATION_UNITS + _CURVE_OT_BAND_UNITS * (band + 0.5))
+        parts.append(
+            f"<text x='{centre:.1f}' y='{height - pad - 1.0:.1f}' text-anchor='middle' "
+            f"font-size='{_CURVE_QUARTER_LABEL_SIZE}' font-family='{_CURVE_LABEL_FONT}' "
+            f"fill='currentColor' opacity='{_CURVE_QUARTER_LABEL_OPACITY}'>"
+            f"{'' if band == 0 else band + 1}OT</text>")
     last_x, last_y = segments[-1][-1] if segments and segments[-1] else (right, zero)
     # ⚠️ CLAMPED INTO THE BOX. A game that ends at 100% puts its last point on the top edge, and
     # a baseline placed 3px below it still hangs the glyphs above the viewBox — where they are
@@ -985,9 +1057,53 @@ def _sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
         # ⚠️ `text-anchor='end'` RATHER THAN SUBTRACTING A MEASURED WIDTH. The glyphs are
         # monospace at a known pitch, so both would work — but an anchor cannot drift out of
         # step with `_CURVE_LABEL_CHAR_PX` the way a second width calculation could.
+        # 🚨 A167 (cfdb-main-R-1312). THE PERCENTAGE POPS; THE ABBREVIATION DOES NOT.
+        #
+        # > **MARC, v06:** *"Increase the font of the final win % and make it blue to help it
+        # > pop out."*
+        #
+        # ⚠️ **HE SAID "the final win %", NOT "the label"** — so the team abbreviation keeps the
+        # size and the muted opacity it has, and only the number grows and takes the colour.
+        # **Two `tspan`s in one `<text>`, which keeps the whole thing anchored at one x** and
+        # therefore keeps A165's `text-anchor='end'` geometry intact.
+        #
+        # 🚨 **"BLUE" IS A TOKEN, NOT A HEX.** `var(--cfdb-link)` is the site's link colour and
+        # it is theme-aware; a literal like `#1f77b4` is a blue that is wrong on one of the two
+        # pages, which is the class of mistake A165 measured on the poll ladder.
+        #
+        # ⚠️ **AND `_curve_width` MUST NOT START BUYING WIDTH AGAIN.** The label is anchored at
+        # its RIGHT edge and grows LEFTWARD into the plot, so a bigger number costs the chart
+        # nothing — A165 took the regulation chart 224px -> 182px as Marc's *"tighten up the
+        # horizontal space"* and this must not give it back.
+        #
+        # ⚠️ **THE `cut` BRANCH IS NOT A VALUE AND IS NOT STYLED AS ONE.** It is the word "cut",
+        # meaning the feed stopped — colouring it like a win probability would dress an absence
+        # as a measurement.
+        abbreviation, _, percentage = label.rpartition(" ")
+        if is_cut or not percentage.endswith("%"):
+            # ⚠️ NO `tspan` HERE. The cut branch is one run of plain text at the base size, and
+            # wrapping it changes markup that other assertions read for no visual gain.
+            body = label
+        else:
+            body = ((f"<tspan>{abbreviation} </tspan>" if abbreviation else "")
+                    # 📊 `fill='var(...)'` ON A PRESENTATION ATTRIBUTE WORKS, AND THAT WAS
+                    # CHECKED RATHER THAN ASSUMED BOTH WAYS (cfdb-main-R-1313). Measured in
+                    # Chromium with the sheets injected as the app injects them:
+                    # `fill='var(--cfdb-link)'` and `style='fill:var(--cfdb-link)'` BOTH resolve
+                    # to `rgb(31,111,235)` on light and `rgb(88,166,255)` on dark. The attribute
+                    # form is kept because it is what every other mark in this SVG uses.
+                    #
+                    # 🚨 AND A MEASUREMENT SAID OTHERWISE FIRST, BECAUSE THE INSTRUMENT WAS
+                    # WRONG. A render harness wrapped `theme.CSS` and `theme.TABLE_CSS` in an
+                    # extra `<style>` — **both strings already carry their own** — which broke
+                    # the `:root` block where `--cfdb-link` is declared, so the token resolved
+                    # to nothing and the percentage inherited `currentColor`. **The page was
+                    # correct and the ruler was bent** (§2.4: say what the command answered).
+                    + f"<tspan font-size='{_CURVE_FINAL_SIZE}' fill='var(--cfdb-link)' "
+                      f"font-weight='700'>{percentage}</tspan>")
         parts.append(f"<text x='{last_x - _CURVE_LABEL_OFFSET:.1f}' y='{label_y:.1f}' "
                      f"text-anchor='end' font-size='9' font-family='{_CURVE_LABEL_FONT}' "
-                     f"fill='currentColor' opacity='.75'>{label}</text>")
+                     f"fill='currentColor' opacity='.75'>{body}</text>")
 
     return (f"<svg viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
             f"role='img' aria-label='{described}' "
@@ -1119,95 +1235,6 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
     return f"<span class='cfdb-identity'>{cell}{record}</span>"
 
 
-def _player_identity(row) -> str:
-    """Jersey, name and class year at the left; position at the right. One cell, two ends.
-
-    > **MARC, Today v01, verbatim:** *"Player Yardage, Touchdowns, Defensive Leaders include
-    > [Jersey #, Name, Year (left aligned)], Position (right aligned within the Player cell)"*
-
-    ⚠️ THE BRACKET IS THE SPEC. Three things travel together on the left because they identify
-    ONE player; the position is the one fact about what he does, so it takes the other end. A
-    four-column version would spend three columns of table width on two characters each.
-
-    🚨 EVERY PART IS OPTIONAL AND THE ABSENCES ARE NOT THE SAME ABSENCE (AC-G.11).
-
-    ⚠️ **THE NUMBER THAT USED TO BE QUOTED HERE — 40.9% of 2026 rows carrying a jersey — IS NO
-    LONGER TRUE.** A166 re-measured it against live published serving at **92.9%**, because the
-    2026 roster was refetched on 2026-09-16; see `_player_board`, which carries the whole
-    correction (cfdb-main-R-1306). **The shape of the absences is unchanged and is what this
-    function is for** — all three parts arrive together or not at all, so the common absence is
-    not a missing jersey but no roster row:
-
-        2026, when they are missing, they are missing together
-        position present, jersey absent            rare
-        jersey present, position absent            not observed
-
-    ✅ SO THE CELL HAS ONE ABSENCE WORTH NAMING AND TWO WORTH OMITTING. With nothing at all, the
-    name stands alone under a title that says WHY — *not* an em dash, which would read as a player
-    with no name. With one part missing the part is simply left out: a jersey-shaped gap before a
-    name is noise, and R-084's rule holds here as it does for a record — **render nothing rather
-    than substitute something.**
-
-    ⚠️ AND NO EM DASH MAY LAND INSIDE THE NAME. `Col.format`'s default returns `fmt.EM_DASH` for a
-    null, which is right for a standalone value column and wrong for a fragment of a composed
-    cell — the prompt's own words, *"none of them may render as an em dash in the middle of a
-    name"*. This function never calls that path; it reads the fields itself.
-
-    🚨 THE NAME ELLIPSISES AND THE POSITION DOES NOT, WHICH IS THE WHOLE REASON THE TWO ENDS ARE
-    SEPARATE ELEMENTS. `.cfdb-table .cfdb-team` already does exactly this for a team name
-    (theme.py:460) and `.cfdb-player-name` reuses that treatment, so the name gives up pixels
-    first and a two-character position is never the thing that wraps.
-
-    ⚠️ NOT `table.team_cell`'s SHAPE AND NOT `matchup.py`'s CARD. R-855 — read the existing path,
-    then test it for the case at hand. Matchup's player block is a **150px two-line preview card**
-    (`_CARD_JERSEY_SIZE` and friends, B107's counted-truncation set) and it is session B's file;
-    `team.py:322` spends a whole `Col("jersey", "#")` column on the roster table. **Neither is a
-    table cell with two ends, so this is a third shape rather than a fourth copy of a second one.**
-    """
-    name = row.get("player_name")
-    if name is None or (not isinstance(name, str) and pd.isna(name)) or name == "":
-        # The one thing the cell cannot do without. Every board filters `stat_value is not null`
-        # and the view is keyed on the player, so this is unreachable today — it returns the
-        # dash rather than raising because a leaderboard row is not worth a page state.
-        return fmt.EM_DASH
-
-    def _part(field):
-        value = row.get(field)
-        if value is None or (not isinstance(value, str) and pd.isna(value)) or value == "":
-            return None
-        return fmt.text(value)
-
-    jersey, position, year = _part("jersey"), _part("position"), _part("class_year_display")
-    # 🚨 THE JERSEY IS A NUMBER WORN, NOT A QUANTITY — `#7`, never `#7.0` and never `#7,000`.
-    #
-    # ⚠️ AND THE FIRST VERSION OF THIS LINE SHIPPED `#2.0` TO A LIVE RENDER. `srv_player_game_log`
-    # publishes `jersey` as an **integer** (`information_schema`, checked), and pandas has no
-    # integer that holds a null — so a frame where 59% of the column is missing comes back
-    # `float64` and every jersey is a float. **The unit tests could not see it: the fixture used
-    # the string `"14"`, which is R-763's exact class — a fixture whose dtype cannot hold the
-    # case the column actually carries.** §6.1's live render is what caught it.
-    #
-    # `Col.format`'s `plain` kind already states the rule for this — "A NUMERIC LABEL: no decimal
-    # point and NO THOUSANDS SEPARATOR. A season is 2025 and a game id is 401752817" — and a
-    # jersey is the same kind of thing, so it gets the same treatment rather than a new one.
-    if jersey is not None:
-        try:
-            jersey = f"{int(float(jersey))}"
-        except (TypeError, ValueError):
-            # A relation that publishes it as text keeps whatever it published. Not reachable
-            # from this view today; left honest rather than assuming one spelling forever.
-            pass
-    badge = f"<span class='cfdb-player-jersey'>#{jersey}</span>" if jersey else ""
-    year_span = f"<span class='cfdb-player-year'>{year}</span>" if year else ""
-    pos_span = f"<span class='cfdb-player-pos'>{position}</span>" if position else ""
-    title = ("" if (jersey or position or year) else
-             " title='cfdb holds no roster row for this player&#39;s team this season'")
-    return (f"<span class='cfdb-player'{title}>"
-            f"<span class='cfdb-player-who'>{badge}"
-            f"<span class='cfdb-player-name'>{fmt.text(name)}</span>{year_span}</span>"
-            f"{pos_span}</span>")
-
-
 # ── A166: THE PLAYER CARD, AND WHY IT IS A FOURTH SHAPE RATHER THAN A COPY ────────────────
 #
 # > **MARC, Today v04:** *"Swtich to player cards. 3 columns for Yardage (QB, Receiving,
@@ -1231,32 +1258,40 @@ def _player_identity(row) -> str:
 #     team.py's `Col("jersey","#")` ❌ THE OPPOSITE TRADE — a whole column per fact. A board of
 #                                     ninety cards cannot spend a column on two characters.
 def _player_card(row, stat_label: str) -> str:
-    """One player, as a card: who, then what he did, then who he did it for.
+    """One player, as MATCHUP's card — plus the team line Today needs and Matchup does not.
 
-    ⚠️ **THE ORDER IS THE SPEC, NOT A LAYOUT PREFERENCE.** The stat is the reason the card is on
-    the board at all, so it reads second — immediately after the name — and the team sits under
-    it. Marc named only one requirement for the card itself (*"needs to indicate the Team
-    logo/name"*) and it is the line that cannot be dropped.
+    > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
+    > logo/name for this Today page b/c there's no context about what team they play for on the
+    > Today page."*
 
-    🚨 **THE ABSENCE RISK THIS ROUND WAS ASKED TO DESIGN AROUND DOES NOT EXIST ANY MORE, AND
-    THAT IS MEASURED (cfdb-main-R-1306).** `_player_board`'s docstring and A166's prompt both
-    say 2026 carries a jersey on **40.9%** of rows because the roster was a single FBS-only
-    fetch from 2026-08-15. 📊 **Re-measured on live published serving: 92.9% of rows, and
-    `marts.dim_athlete` holds 306 teams for 2026 against the docstring's 138.** The roster was
-    refetched on **2026-09-16**; both numbers predate it.
+    🚨 **A166 BUILT A DIFFERENT SHAPE ON INSTRUCTION AND HE PREFERS THIS ONE.** Its prompt said of
+    Matchup's card *"Read it for its proportions; do not import from it and do not edit it"*, and
+    the round obeyed and recorded it as READ AND NOT USED. **He has seen both.** ✅ The identity
+    row is now `identity.player_row` — promoted to `lib/`, called by both pages, **not copied and
+    not imported across views** (cfdb-main-R-1308).
 
-    ✅ **AND ON THE POPULATION THAT ACTUALLY REACHES A CARD IT IS BETTER STILL** — of the ninety
-    players in the nine top-10 columns, **jersey, position and class year are present on 90 of
-    90** and a team logo on 89. At depth 25 it is 98.2%, at 50 it is 96.9%. **So the card is not
-    designed around a mostly-empty case, because the mostly-empty case is not what renders.**
-    ⚠️ It is still built from `_player_identity`, which handles every absence properly — the
-    measurement changes what is TYPICAL, not what is POSSIBLE.
+    ⚠️ **THE TEAM LINE IS THE HALF HE SAYS IS MISSING AND IT IS THE REASON HE ASKED**, so it goes
+    through `_team_identity` -> `table.team_cell` -> `identity.logo_or_monogram`. **A card that
+    builds its own `<img>` re-opens R-121's NaN bug that cost this site two teams in a
+    screenshot** — A166 established that and it has not changed.
+
+    🚨 **THE BORDER STAYS NEUTRAL, AND THAT IS DECIDED BY DATA RATHER THAN TASTE
+    (cfdb-main-R-1309).** Matchup's card borders in the team's colour through `_accent`, and the
+    prompt's recommendation was to promote that too. 📊 **`srv_player_game_log` publishes NO
+    colour column at all** — checked against `information_schema` on live published serving, not
+    against a model file (§2.2.1c.2). The page reads one relation with a single-table SELECT and
+    no join (§4.2.1), **so there is no colour here to draw with.** ✅ **`_accent` was therefore
+    NOT promoted**: moving a function to `lib/` for a caller that cannot yet use it is
+    speculative, and the real prerequisite is a model change. **Reported, not worked around.**
     """
     # The same formatter the tables use — `Col(kind="num")` calls exactly this, so a card and a
     # row can never disagree about how many decimal places a stat has.
     value = fmt.number(row.get("stat_value"), "stat_value")
     return (f"<div class='cfdb-card'>"
-            f"<div class='cfdb-card-who'>{_player_identity(row)}</div>"
+            f"{identity.player_row(row)}"
+            # ⚠️ THE STAT READS SECOND, straight after the name: it is the reason the card is on
+            # the board. The team line follows it — Marc asked for the team as CONTEXT, which is
+            # a thing you check after you have read who and what.
             f"<div class='cfdb-card-stat'>"
             f"<span class='cfdb-card-value'>{value}</span>"
             f"<span class='cfdb-card-unit'>{fmt.text(stat_label)}</span></div>"
@@ -1611,7 +1646,15 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     # pins the floor: at 56, 52, 50 and 46px the header stays 44.4px and does NOT wrap, so the
     # binding constraint is the ask rather than the label. The freed 157px goes to the
     # scoreboard rather than being shared out.
-    layout = ["40%", f"{widest + 12}px", "52px", "52px", "52px", "auto", "auto", "auto"]
+    # 🚨 A167: THE SCOREBOARD COLUMN IS NOW DERIVED TOO — see `_SCOREBOARD_REGULATION_PX`.
+    # ⚠️ `home_periods` RATHER THAN A LEAD-CHANGE COUNT: overtime lead changes can be 0 in a game
+    # that went to overtime, so the column that decides the WIDTH must be the one that decides
+    # whether an overtime CELL is drawn, which is what `_quarter_cells` reads.
+    periods = pd.to_numeric(top.get("home_periods"), errors="coerce")
+    scoreboard_px = (_SCOREBOARD_OVERTIME_PX if periods is not None and (periods > 4).any()
+                     else _SCOREBOARD_REGULATION_PX)
+    layout = [f"{scoreboard_px + _SCOREBOARD_GUTTER_PX}px", f"{widest + 12}px",
+              "52px", "52px", "52px", "auto", "auto", "auto"]
 
     states.render_or_state(
         top, "srv_game",

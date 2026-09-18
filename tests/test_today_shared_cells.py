@@ -314,6 +314,7 @@ def test_the_card_names_the_team_because_that_is_the_one_thing_marc_required():
     """
     card = today._player_card(_card_row(), "yards")
     assert "cfdb-card" in card
+    assert "Riley Warzynski" in _plain(card), "the promoted row draws the whole name"
     assert "Drake" in card, "the team NAME is required"
     assert "cfdb-logo" in card, "the team LOGO is required"
     assert "cfdb-identity" in card, "the team line must be the shared identity cell"
@@ -335,15 +336,15 @@ def test_the_card_survives_the_absences_the_view_actually_carries():
     """
     bare = today._player_card(
         _card_row(jersey=None, position=None, class_year_display=None), "yards")
-    assert "Riley Warzynski" in bare
-    # ⚠️ ASSERT ON THE BADGE'S CLASS, NOT ON A "#" — the title attribute carries `&#39;` for the
-    # apostrophe in "player's", so a bare hash test matches the very branch it is checking.
-    assert "cfdb-player-jersey" not in bare, "no empty jersey badge"
-    assert "cfdb-player-pos" not in bare, "no empty position"
-    assert "cfdb-player-year" not in bare, "no empty class year"
-    assert "roster row" in bare, "the one absence worth naming is still named"
-    assert today.fmt.EM_DASH not in bare.split("cfdb-card-stat")[0], \
-        "no em dash inside the name"
+    assert "Riley Warzynski" in _plain(bare)
+    # 🚨 A167: THE ABSENCE TREATMENT CHANGED BECAUSE MARC CHOSE THE OTHER CARD. Today's own cell
+    # OMITTED a missing jersey and named the whole-row absence in a `title`; Matchup's renders an
+    # em dash in the slot so the cards stay aligned (AC-G.32, B104). **Both are defensible and he
+    # picked one** — so this asserts the one that shipped rather than the one that did not.
+    header = bare.split("cfdb-card-stat")[0]
+    assert "—" in header, "an absent jersey is an em dash in its slot"
+    assert "#" not in header, "and it carries no hash"
+    assert "Riley Warzynski" in _plain(header)
     # A missing logo still draws a monogram, so the card keeps its shape.
     no_logo = today._player_card(_card_row(team_logo_url=None), "yards")
     assert "Drake" in no_logo and "cfdb-card-team" in no_logo
@@ -357,9 +358,10 @@ def test_the_jersey_is_a_number_worn_not_a_quantity_on_a_card_too():
     it because the fixture used the string `"14"` (R-763: a fixture whose dtype cannot hold the
     case). **This fixture uses a float on purpose.**
     """
+    import re as _re
     card = today._player_card(_card_row(jersey=7.0), "yards")
-    assert "#7<" in card or "#7</span>" in card, card[:200]
-    assert "#7.0" not in card
+    assert _re.search(r">#</span>7\b", card), card[:160]
+    assert "7.0" not in _plain(card)
 
 
 def test_the_position_is_grouped_with_its_own_name_on_a_card():
@@ -881,56 +883,111 @@ def _player(**over):
     return row
 
 
-def test_the_player_cell_is_marcs_bracket():
-    """> **MARC, Today v01:** *"[Jersey #, Name, Year (left aligned)], Position (right aligned
-    > within the Player cell)"*
+def _plain(markup: str) -> str:
+    """Markup stripped to its visible text. ⚠️ A167: assertions about what a card SAYS should not
+    depend on how it is marked up — three of this file's broke on the promotion for that reason
+    alone, while the rendered text was correct throughout."""
+    import re
+    # ⚠️ A SPACE, NOT AN EMPTY STRING: the card splits a name across two divs, so
+    # stripping tags to nothing renders "RileyWarzynski" and every name assertion
+    # fails on markup rather than on meaning.
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", markup)).strip()
 
-    The bracket is one group and the position is the other end — asserted as ORDER, not merely
-    as presence, because a cell containing all four facts in the wrong arrangement passes every
-    `in` check and is not what he asked for.
+
+def test_the_card_header_is_matchups_and_there_is_exactly_one_of_it():
+    """🚨 A167 (cfdb-main-R-1308). MARC CHOSE MATCHUP'S CARD, SO TODAY'S OWN CELL IS GONE.
+
+    > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
+    > logo/name for this Today page…"*
+
+    ⚠️ **THREE TESTS WERE DELETED HERE RATHER THAN ADAPTED, AND THAT IS THE HONEST OUTCOME.**
+    They asserted `_player_identity` — Today's own *"[Jersey #, Name, Year], Position"* cell from
+    v01, which was the right shape for a TABLE ROW. A166 turned the boards into cards and A167
+    replaced the header with Matchup's, so the function had no caller and its properties were
+    properties of a shape the page no longer draws. **Keeping tests for a deleted function is
+    how a suite comes to describe a site that does not exist.**
+
+    ✅ **WHAT THEY GUARDED THAT STILL APPLIES IS ASSERTED BELOW AND IN THE THREE TESTS THAT
+    FOLLOW** — the four facts, the absences, and the jersey that is a number worn rather than a
+    quantity. **What changed is the ABSENCE TREATMENT, and it changed because he picked the
+    other card**: Today's cell OMITTED a missing jersey and named the whole-row absence in a
+    `title`; Matchup's renders an em dash in the slot (AC-G.32, B104's ruling) so the cards stay
+    aligned. Both are defensible; he chose one.
     """
-    cell = today._player_identity(_player())
-    assert "cfdb-player-who" in cell and "cfdb-player-pos" in cell
-    for earlier, later in (("#14", "Steven Robinson"), ("Steven Robinson", "JR"),
+    import pathlib
+    import re
+    site = pathlib.Path(today.__file__).parent.parent
+    producers = []
+    for f in sorted(site.rglob("*.py")):
+        for m in re.finditer(r"^def (player_row|_player_identity|_leader_card)\b", f.read_text(), re.M):
+            producers.append(f"{f.name}:{m.group(1)}")
+    assert "today.py:_player_identity" not in producers, (
+        "Today's own player cell must be GONE, not left dead beside the promoted one")
+    assert producers.count("identity.py:player_row") == 1, producers
+    assert "matchup.py:_leader_card" in producers, (
+        "Matchup still owns its card; only the identity ROW was promoted")
+
+
+def test_both_pages_draw_the_promoted_row_and_neither_reimplements_it():
+    """🚨 §4.3. A COPY IS THE DEFECT THIS PROJECT HAS BEEN BITTEN BY THREE TIMES, and a view
+    importing another view is the coupling A166 rejected.
+
+    ✅ **The third time in three rounds the answer has been *the shared thing belongs in lib*** —
+    `theme.viewer_is_dark` (A165), the `.cfdb-identity` wrapper (A164), this.
+    """
+    import pathlib
+    import re
+    site = pathlib.Path(today.__file__).parent.parent
+    callers = {f.name for f in site.rglob("*.py")
+               if re.search(r"identity\.player_row\(", f.read_text())}
+    assert {"today.py", "matchup.py"} <= callers, callers
+    # 🚨 AND NEITHER VIEW MAY IMPORT THE OTHER — that is the coupling this promotion avoids.
+    assert "from views" not in (site / "views" / "today.py").read_text()
+    assert "import matchup" not in (site / "views" / "today.py").read_text()
+
+
+def test_the_promoted_row_carries_all_four_facts_and_marcs_ordering():
+    """The four facts Marc named, asserted as ORDER rather than presence — a header containing
+    all of them in the wrong arrangement passes every `in` check and is not his card.
+
+    R-753 (three columns, no rank) · R-800 (the jersey spans both name lines) · R-801 (year over
+    position) · R-835 (the two-line name).
+    """
+    from lib import identity as ident
+    row = _player()
+    header = ident.player_row(row)
+    for earlier, later in (("#", "Steven"), ("Steven", "Robinson"), ("Robinson", "JR"),
                            ("JR", "RB")):
-        assert cell.index(earlier) < cell.index(later), (
-            f"{earlier!r} must come before {later!r} in {cell!r}")
-    # The position sits OUTSIDE the left group, or `justify-content:space-between` has nothing
-    # to push apart and Marc's "right aligned within the Player cell" cannot happen.
-    assert cell.index("cfdb-player-pos") > cell.index("</span></span>")
+        assert header.index(earlier) < header.index(later), (earlier, later, header)
+    assert "rank" not in header.lower(), "R-753: Marc removed the rank and it stays removed"
 
 
-def test_no_part_of_the_player_cell_ever_renders_an_em_dash():
-    """🚨 THE PROMPT'S OWN WORDS: *"none of them may render as an em dash in the middle of a
-    name"*, and `Col.format`'s default does exactly that for a null.
+def test_the_promoted_row_keeps_matchups_absence_treatment():
+    """🚨 AC-G.32 AND B104, WHICH CAME ACROSS WITH THE CARD MARC PICKED.
 
-    Every combination of the three optional parts, including all of them missing.
+    A missing jersey renders an em dash in the same slot — **with NO `#`**, because a hash with
+    nothing after it reads as a broken number rather than as an absence. A missing first name is
+    OMITTED rather than blanked (B103): an empty line would still take its line-height and drop
+    that one card's surname below its neighbours'.
+
+    📊 **AND THE NUMBER BEHIND THE BRANCH HAS MOVED.** `_leader_card` said *"0 of 8,447 non-FBS
+    leader rows carry one"*; re-measured on its own relation, 2026 is **8,129 of 8,563 — 94.9%**,
+    with 2024 at 95.3% and 2025 at 97.1%. **The branch stays because it is still right for the
+    rows that lack one; it is simply no longer the common case** (cfdb-main-R-1306's third copy).
     """
-    for jersey in ("14", None):
-        for position in ("RB", None):
-            for year in ("JR", None):
-                cell = today._player_identity(
-                    _player(jersey=jersey, position=position, class_year_display=year))
-                assert fmt.EM_DASH not in cell, (jersey, position, year, cell)
-                assert "Steven Robinson" in cell
-
-
-def test_each_absence_in_the_player_cell_says_which_absence_it_is():
-    """AC-G.11. A missing jersey is omitted; a missing ROSTER ROW is named.
-
-    📊 The distinction is measured rather than invented: for 2026 all three are null TOGETHER on
-    106,645 rows and jersey-alone on 121, because the season's roster covers FBS only. So the
-    case worth explaining is the one that happens.
-    """
-    partial = today._player_identity(_player(jersey=None))
-    assert "cfdb-player-jersey" not in partial, "an absent jersey leaves a gap, not a marker"
-    assert "RB" in partial and "JR" in partial
-    assert "title=" not in partial, "a partial row is not the absence worth explaining"
-
-    nothing = today._player_identity(
-        _player(jersey=None, position=None, class_year_display=None))
-    assert "roster" in nothing, "the whole-row absence must say WHY, not render a bare name"
-    assert "Steven Robinson" in nothing
+    from lib import identity as ident
+    bare = ident.player_row(_player(jersey=None, position=None, class_year_display=None))
+    assert "—" in bare, "an absent jersey is an em dash in the slot, not a gap"
+    assert "#" not in bare, "and it carries no hash — a hash with nothing after it is broken"
+    assert "Steven" in bare and "Robinson" in bare
+    one_token = ident.player_row(_player(player_name="Cher"))
+    assert "Cher" in one_token
+    # 🚨 B103: the FIRST-NAME div is the one that must not exist. Its size is the tell — an
+    # assertion counting line-heights matched the position block too and proved nothing.
+    assert f"font-size:{ident.CARD_FIRST_SIZE}rem" not in one_token, (
+        "a single-token name draws the BOLD line alone, not an empty first line")
+    assert f"font-size:{ident.CARD_FIRST_SIZE}rem" in ident.player_row(_player()), (
+        "and a two-token name DOES draw it, or the assertion above passes on anything")
 
 
 def test_all_three_leaderboards_draw_the_shared_player_and_team_cells():
@@ -997,9 +1054,16 @@ def test_the_jersey_is_a_worn_number_and_never_a_float():
     `srv_player_game_log.jersey` is an `integer` and pandas floats it wherever the column has a
     null — which is 59% of the live season. Every jersey on the page was `#7.0`.
     """
-    assert "#14<" in today._player_identity(_player())
-    assert "#7<" in today._player_identity(_player(jersey=7.0))
+    from lib import identity as ident
+    # 🚨 TWO SEPARATE PROPERTIES, ASSERTED SEPARATELY, BECAUSE ONE STRING CANNOT CARRY BOTH.
+    # R-806 puts the `#` in its OWN span at a ratio of the digits' size, so the hash and the
+    # number are adjacent in the MARKUP and separated by `_plain`'s tag boundary. The float
+    # guard is about the TEXT. Testing either through the other is what cost this file two runs.
+    import re as _re
+    for value, expected in ((14, "14"), (7.0, "7"), (float("23"), "23")):
+        markup = ident.player_row(_player(jersey=value))
+        assert _re.search(rf">#</span>{expected}\b", markup), markup[:160]
+        assert ".0" not in _plain(markup).split()[1], f"{value!r} rendered with a decimal"
     # The value pandas actually hands a page for a present jersey in a nullable column.
-    assert "#23<" in today._player_identity(_player(jersey=float("23")))
-    for cell in (today._player_identity(_player(jersey=j)) for j in (14.0, 7.0, 99.0)):
+    for cell in (ident.player_row(_player(jersey=j)) for j in (14.0, 7.0, 99.0)):
         assert ".0" not in cell, cell

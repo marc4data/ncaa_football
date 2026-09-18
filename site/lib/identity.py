@@ -1,15 +1,22 @@
-"""Team identity: chrome, never encoding (§0.6, AC-G.24 to AC-G.29).
+"""Identity: how the site says WHO something is — a team, and since A167 a player too.
 
-Two hard rules, both easy to break under deadline pressure and both the difference between
-a data site and a misleading one:
+Two hard rules about team colour, both easy to break under deadline pressure and both the
+difference between a data site and a misleading one:
 
   1. Colour identifies a team; it never carries a value. A bar whose fill is a team colour
      invites the reader to compare colours, which mean nothing.
   2. Contrast is computed in dbt, never here. dim_team ships color_on_light and
      color_on_dark already solved for WCAG; the app reads them.
+
+⚠️ A167 ADDED THE PLAYER CARD'S IDENTITY ROW AT THE BOTTOM OF THIS FILE, because Marc asked for
+Matchup's card on Today and the two pages must not each own a copy of it. The module's subject
+did not change — it is still "how an entity is presented" — it gained a second kind of entity.
 """
+import html
 import math
 from typing import Optional
+
+import pandas as pd
 
 
 FALLBACK = "#6b7280"
@@ -95,3 +102,127 @@ def color_source_hint(row) -> str:
     if not source or source in SOURCED_RUNGS:
         return ""
     return f"<span class='cfdb-hint' title='color {source} rather than sourced'>◦</span>"
+
+
+# ── THE PLAYER CARD'S IDENTITY ROW ─────────────────────────────────────────────────────────
+#
+# 🚨 A167 PROMOTED THIS OUT OF `matchup.py` (cfdb-main-R-1308), AND MARC IS WHY.
+#
+# > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
+# > logo/name for this Today page b/c there's no context about what team they play for on the
+# > Today page."*
+#
+# ⚠️ **HE IS REVERSING A DECISION A166 MADE ON INSTRUCTION.** That round's prompt said of this
+# card *"Read it for its proportions; do not import from it and do not edit it"*, and the round
+# obeyed and built a different shape. **He has seen both and prefers the one he was not given.**
+#
+# ✅ **SO THE SHARED VOCABULARY MOVES TO `lib/` RATHER THAN BEING COPIED OR IMPORTED ACROSS
+# VIEWS.** Copying is §4.3's drift; a view importing another view couples two pages. This is the
+# third time in three rounds the answer has been *the shared thing belongs in lib*
+# (`theme.viewer_is_dark`, A165; the `.cfdb-identity` wrapper, A164), and `identity.py` is the
+# module named for exactly this question — it already owns `logo_or_monogram` and `text_on`.
+#
+# 🚨 **ONLY THE IDENTITY ROW MOVED. THE KPI GRID AND THE USAGE DOTS DID NOT** — Matchup's card
+# carries three stat slots and a usage frame Today has neither of. **A promotion that dragged
+# those across would have made Today depend on columns it does not select.**
+#
+# ⚠️ **THIS CARRIES TEN ROUNDS OF MARC'S OWN CORRECTIONS AND NONE OF THEM MAY REGRESS** —
+# R-753 (three columns, no rank), R-800 (jersey 2x, filling both name lines), R-801 (year over
+# position, the surname's treatment on the position), R-806 and R-848 (the `#` as a RATIO of the
+# jersey, .5 -> .62), R-835 (the two-line name), B103 (a missing first name is OMITTED, not
+# blanked), B104 (the em-dash jersey), B107 (the sizes, measured by counting truncations).
+# **The values below are those measurements; they are not taste and they are not round numbers.**
+
+# 🚨 B107 MEASURED THESE BY RENDERING THREE COMPLETE SETS AT THE CARD'S REAL 150px AND COUNTING
+# THE TRUNCATIONS — set C shipped at 0 of 10, against 2 and 3 for the alternatives. `.92` is a
+# CEILING rather than a round number: `Sanders II` is the longest surname the game holds and
+# needs 70.8px of a 72px column at that size, and truncates at `.95`. **The constant IS the
+# measurement.** The full derivation stays in `matchup.py` beside the card that commissioned it.
+CARD_JERSEY_SIZE = 1.15
+CARD_LAST_SIZE = 0.92
+CARD_FIRST_SIZE = 0.7
+# R-848: the `#` is a RATIO of the jersey, in `em` not `rem`, so it follows whatever the jersey
+# is set to and cannot drift if that constant moves. The RATIO went .5 -> .62; the jersey did not.
+CARD_HASH_RATIO = 0.62
+
+
+def split_name(value) -> tuple:
+    """A player's name as (first line, bold line). 🚨 AN ASSUMPTION, NOT A FORMAT.
+
+    `player_name` is ONE STRING; no view carries the parts. **First token as the first name and
+    the remainder as the last** is the rule, and it renders *Emmett Mosley V* and *Ray Davis Jr.*
+    the way a reader expects — the remainder keeps the suffix with the surname rather than
+    stranding it on its own line.
+
+    ⚠️ A SINGLE-TOKEN NAME HAS NO FIRST LINE AND RENDERS AS THE BOLD LINE ALONE. An empty first
+    line would still occupy its line-height and shift that one card's header down relative to
+    the others — a hole reserved for something that does not exist (AC-G.11).
+    """
+    parts = str(value or "?").split()
+    if len(parts) < 2:
+        return "", (parts[0] if parts else "?")
+    return parts[0], " ".join(parts[1:])
+
+
+def card_text(value) -> str:
+    """A card field as text, with NULL meaning ABSENT rather than the string `nan`.
+
+    🚨 `str(value or "")` DOES NOT DO THIS AND THAT IS THE WHOLE REASON THIS EXISTS: NaN is
+    truthy, so the `or` never fires and the page prints `nan`. `pd.isna` is the only test that
+    answers for None, NaN and NaT alike.
+    """
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    return str(value).strip()
+
+
+def player_row(row, tie: str = "") -> str:
+    """Jersey · two-line name · year over position — the card header Marc asked both pages for.
+
+    `tie` is an optional marker appended to the position, because **Matchup carries
+    `tied_players` and Today's view does not.** It is a parameter rather than a lookup so the
+    promoted row does not read a column one of its two callers cannot supply (§2.5).
+
+    ⚠️ **AC-G.32 ON THE JERSEY, AND THE NUMBER BEHIND IT HAS MOVED.** `_leader_card`'s docstring
+    said *"0 of 8,447 non-FBS leader rows carry one, because the roster load covers 138 of 305
+    teams (R-693)"*. 📊 **A167 re-measured that on the card's OWN relation,
+    `srv_game_team_leader_in_this_game`: 8,563 rows for 2026 and 8,129 carry a jersey — 94.9%**,
+    with 2024 at 95.3% and 2025 at 97.1%. **The roster was refetched on 2026-09-16** (A166,
+    cfdb-main-R-1306), and this is the third copy of that stale figure to be corrected.
+    ✅ **THE ABSENCE BRANCH STAYS**: it is still right for the rows that have no jersey — it is
+    simply no longer the common case. A missing jersey renders as an em dash in the same slot,
+    with NO `#`, because a hash with nothing after it reads as a broken number.
+    """
+    jersey = row.get("jersey")
+    number = (f"<span style='font-size:{CARD_HASH_RATIO}em;opacity:.65'>#</span>{int(jersey)}"
+              if pd.notna(jersey) else "—")
+    first, last = split_name(row.get("player_name"))
+    year = card_text(row.get("class_year_display"))
+    position = card_text(row.get("position"))
+    small = "font-size:.66rem;opacity:.6;line-height:1.1"
+    strong = "font-weight:700;font-size:.78rem;line-height:1.15"
+    # ⚠️ `min-width:0` ON EVERY FLEX CHILD THAT CAN OVERFLOW is what makes the ellipsis work at
+    # all: without it a flex child refuses to shrink below its content and the name pushes the
+    # year/position column off the card instead of truncating (the R-745 class).
+    clip = "min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+    name_block = (
+        f"<div style='flex:1;{clip}'>"
+        # 🚨 THE FIRST NAME IS OMITTED, NOT BLANKED, WHEN THERE IS NONE — B103's ruling. An empty
+        # first line would still take its line-height and drop that one card's surname below its
+        # neighbours': a hole reserved for something that does not exist (AC-G.11).
+        + (f"<div style='font-size:{CARD_FIRST_SIZE}rem;opacity:.6;line-height:1.15;{clip}'>"
+           f"{html.escape(first)}</div>" if first else "")
+        + f"<div style='font-weight:700;font-size:{CARD_LAST_SIZE}rem;line-height:1.15;"
+          f"{clip}'>{html.escape(last)}</div></div>")
+    return (
+        # 🚨 `align-items:center` IS MARC'S OWN ARGUMENT MADE MECHANICAL: the jersey spans the
+        # two-line block, so it is centred against BOTH lines rather than sitting on the first.
+        f"<div style='display:flex;align-items:stretch;gap:.4rem'>"
+        f"<div style='min-width:1.7rem;font-weight:700;font-size:{CARD_JERSEY_SIZE}rem;"
+        f"line-height:1;display:flex;align-items:center'>{number}</div>"
+        f"{name_block}"
+        f"<div style='text-align:right;min-width:0'>"
+        + (f"<div style='{small}'>{html.escape(year)}</div>" if year else "")
+        + f"<div style='{strong};white-space:nowrap'>"
+          f"{html.escape(position) if position else '—'}{tie}</div></div>"
+        f"</div>")
