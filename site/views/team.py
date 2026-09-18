@@ -13,6 +13,55 @@ from lib.query import query
 from lib.table import Col
 
 
+# ── THE UNIT SPLIT, AS DATA (A172, cfdb-main-R-1650) ──────────────────────────────────────
+#
+# > **MARC, v07:** *"Roster — table format Columns, split by offense, defense, special teams —
+# > Number, Name, Position, Ht, Wt, Class, Hometown"*
+#
+# 🚨 THERE IS NO UNIT COLUMN. `position` is the only thing `srv_team_roster` publishes, so the
+# split is a VOCABULARY decision rather than a lookup — Marc approved this map
+# (cfdb-main-R-1421) and it lives here, once, as a literal.
+#
+# 🚨 ENUMERATED, NOT MATCHED — B136's rule. A `startswith` would sort `DB` and `DL` correctly
+# today by luck and break on the first new abbreviation; a substring test on `S` would swallow
+# every position containing the letter. **The map is data and the grouping is driven from it.**
+ROSTER_UNITS = (
+    ("Offense",       ("OL", "WR", "RB", "TE", "QB", "OT", "G", "C", "FB")),
+    ("Defense",       ("LB", "DL", "DB", "S", "CB", "DE", "DT", "EDGE", "NT")),
+    ("Special teams", ("PK", "LS", "P")),
+)
+UNLISTED_UNIT = "Unlisted"
+
+_UNIT_BY_POSITION = {position: unit for unit, positions in ROSTER_UNITS
+                     for position in positions}
+
+
+def roster_unit(position) -> str:
+    """Which section a roster row belongs in. Total — every row lands somewhere.
+
+    🚨 TWO DIFFERENT ABSENCES ARE DELIBERATELY MERGED HERE, AND THE MERGE IS STATED RATHER THAN
+    SILENT (AC-G.11). A NULL position is *cfdb holds no position field for this player*; the
+    literal string `?` is *the source published that it does not know*. **The distinction is the
+    SOURCE's, not the reader's** — a roster does not become more useful for splitting "unknown"
+    into two headings — so both read `Unlisted`.
+
+    🚨 AND AN UNMAPPED VALUE MUST NOT VANISH. `EDGE` and `NT` were added by the source after
+    this map was first written; the next one will be too. An unknown abbreviation lands in
+    `Unlisted`, where it shows up as a NUMBER a reader can see, rather than being filtered out
+    of every section and disappearing from the roster entirely — which is cfdb-wta-R-1192's
+    defect, and is why this is a PARTITION rather than four filters.
+
+    📊 MEASURED ON LIVE PUBLISHED SERVING, all 83,985 rows: Offense 38,286 · Defense 36,841 ·
+    Special teams 4,995 · Unlisted 3,863 (4.60%). The four sum to the total exactly.
+    ⚠️ Live carries two values the sample analysis did not — `ATH` (5 rows) and `KR` (1) — and
+    both currently land in `Unlisted`. `KR` is plainly a special-teams position; extending the
+    map is a football judgement and therefore Marc's, so A172 reported it rather than taking it.
+    """
+    if position is None or (isinstance(position, float) and pd.isna(position)):
+        return UNLISTED_UNIT
+    return _UNIT_BY_POSITION.get(str(position).strip(), UNLISTED_UNIT)
+
+
 def body(page) -> None:
     seasons = query("select distinct season from srv_team_overview order by season desc limit 200")
     options = seasons["season"].tolist()
@@ -65,13 +114,26 @@ def body(page) -> None:
         _overview(row)
     with tabs[1]:
         _game_log(season, row.get('team_display'))
-        _roster(season, row.get("team_slug"))
     with tabs[2]:
         _ratings(season, row.get("team_display"))
     with tabs[3]:
-        states.degraded("dim_athlete",
-                        "Rosters need the athlete dimension and the player facts.",
-                        scheduled="Track B8 — after the other blocked pages")
+        # 🚨 A172 (cfdb-main-R-1654). THE ROSTER TAB SAID "NOT BUILT YET" WHILE THE ROSTER WAS
+        # RENDERING ONE TAB TO THE LEFT, UNDER THE GAME LOG.
+        #
+        # 📊 Measured on the live page before this round touched it: `tabs[3]` drew
+        # `states.degraded("dim_athlete", "Rosters need the athlete dimension and the player
+        # facts.")` — and `_roster` was called from `tabs[1]`, where it drew 119 players for
+        # Ohio State 2026. **A reader who clicked the tab named Roster was told the feature did
+        # not exist; the feature was two inches lower on a different tab.**
+        #
+        # ⚠️ AND THE FILE ALREADY KNEW: eight lines below, the Trends tab carries *"a site that
+        # explains why it cannot do something it CAN now do teaches the reader to stop looking,
+        # which is a worse failure than saying nothing."* Written for Elo on 2026-09-02, true of
+        # the Roster tab ever since. **A comment recording a trap does not prevent the trap
+        # (R-768); only rendering the page and reading it does.**
+        #
+        # ✅ The degraded card is GONE rather than reworded — the thing it waits on has arrived.
+        _roster(season, row.get("team_slug"))
     with tabs[4]:
         # THE DATA EXISTS NOW. This tab said, until 2026-09-02, that Elo "has only been
         # fetched by season" and that a weekly series needed a backfill. Both statements
@@ -296,39 +358,94 @@ def _game_log(season, team_display) -> None:
                                                    season=season)))
 
 
+# Marc's column order, verbatim: "Number, Name, Position, Ht, Wt, Class, Hometown".
+#
+# 🚨 THE HEIGHT COLUMN SORTS ON A DIFFERENT FIELD FROM THE ONE IT SHOWS, AND THAT IS THE WHOLE
+# REASON IT IS WRITTEN THIS WAY. `height_display` is a STRING like `6-3`, so a column sorting on
+# it puts `6-10` before `6-3` — lexical order on a number that is not one. `table.render` sorts
+# on the Col's own `field`, so the field is `height_inches` (an integer) and `render` draws
+# `height_display`. ⚠️ The next reader will otherwise assume the two are the same column.
+ROSTER_COLUMNS = [
+    Col("jersey", "#", "num", dp=0),
+    Col("full_name", "Name"),
+    Col("position", "Pos"),
+    Col("height_inches", "Ht",
+        render=lambda r: fmt.EM_DASH if r.get("height_display") is None
+        or (isinstance(r.get("height_display"), float) and pd.isna(r.get("height_display")))
+        else str(r.get("height_display"))),
+    Col("weight_pounds", "Wt", "num", dp=0),
+    Col("class_year_display", "Class"),
+    Col("hometown_display", "Hometown"),
+]
+
+
 def _roster(season, team_slug) -> None:
-    """The roster, from srv_team_roster.
+    """The roster, from srv_team_roster, split into units (A172, cfdb-main-R-1650).
 
     Rosters are `recent` scope — 2024 onward — so a 2019 team page has none. The Empty state
     says which, because "no roster recorded" and "we do not collect rosters for that season"
     are different statements and only one of them is true here.
+
+    🚨 FOUR SECTIONS, AND `Unlisted` APPEARS ONLY IF IT HAS ROWS. An empty `Unlisted` heading on
+    a fully-listed roster is a hole reserved for something that does not exist — B103's ruling
+    on the omitted first name, and AC-G.11's rule that an absence must say which absence it is.
+    A heading with nothing under it says neither.
+
+    ⚠️ THE PLAYER NAME IS NOT A LINK, AND THE REASON IS NOT THE ONE THE PROMPT GAVE.
+    A172's prompt said to drop it because *"there is no player page"* — **there is**, and this
+    function used to link to it: `players.py:81` reads `params.get("player")` and queries
+    `srv_player_stats` by `player_slug`. 📊 **The real reason is coverage, measured on live
+    serving: only 38.89% of 2026 roster players have a row in `srv_player_stats`** (2025 45.38%,
+    2024 56.84%). **So for the current season three names in five led to a page with nothing on
+    it**, which is the "link to nowhere" `table.team_link` already refuses to build.
+
+    ✅ THE FIX WORTH HAVING IS A PUBLISHED FLAG, NOT A JOIN. The site reads one relation per
+    query (G-2), so this page cannot ask whether a player has stats; a `has_player_stats`
+    boolean on `srv_team_roster` would let the name link for the players it resolves for and
+    stay plain for the rest. That is a dbt round, and it is named in A172's report.
     """
     st.subheader("Roster")
     with states.section("srv_team_roster"):
         df = query("""
-            select player_slug, full_name, position, jersey, class_year_display,
-                   height_display, weight_pounds, hometown_display, as_of_ts
+            select full_name, position, jersey, class_year_display,
+                   height_display, height_inches, weight_pounds, hometown_display, as_of_ts
             from srv_team_roster
             where season = :season and team_slug = :team_slug
             order by position, jersey
             limit 250
         """, {"season": season, "team_slug": team_slug})
+
+        def sections(frame):
+            """⚠️ THIS WRITES; IT DOES NOT RETURN MARKUP. `table.render` renders to Streamlit
+            and returns None — the first draft concatenated its result into a heading and got
+            `TypeError: can only concatenate str (not "NoneType") to str`, caught by
+            `states.section` and drawn as a handled error card. **Which is A141's shape exactly:
+            the page returned 200, one section had died, and it looked considered.** It was
+            found by §6.1's error-card count on the very first render, which is what that count
+            is for.
+            """
+            # The unit is derived ONCE, here, and every section reads it — so the four groups
+            # are a partition of the frame rather than four independent filters that could
+            # between them drop a row or claim one twice.
+            frame = frame.copy()
+            frame["unit"] = frame["position"].map(roster_unit)
+            for unit in [name for name, _ in ROSTER_UNITS] + [UNLISTED_UNIT]:
+                block = frame[frame["unit"] == unit]
+                if block.empty:
+                    # A unit with nobody in it is left out for the same reason Unlisted is:
+                    # a team with no listed kickers has no Special teams heading, rather than
+                    # an empty one that reads as a rendering failure.
+                    continue
+                st.markdown(f"<h4 class='cfdb-roster-unit'>{unit}</h4>",
+                            unsafe_allow_html=True)
+                table.render(block, ROSTER_COLUMNS, caption="")
+
         states.render_or_state(
             df, "srv_team_roster",
             "This team's roster would be here.",
             f"Rosters are collected from 2024 onward, so there is none for {season}."
             if season < 2024 else "No roster recorded for this team-season.",
-            renderer=lambda d: table.render(d, [
-                Col("jersey", "#", "num", dp=0),
-                Col("full_name", "Player"),
-                Col("position", "Pos"),
-                Col("class_year_display", "Class"),
-                Col("height_display", "Ht"),
-                Col("weight_pounds", "Wt", "num", dp=0),
-                Col("hometown_display", "Hometown"),
-            ], caption="srv_team_roster",
-                link_builder=lambda r: params.link("players", q=r["full_name"],
-                                                   player=r["player_slug"], season=season)))
+            renderer=sections)
 
 
 def render() -> None:
