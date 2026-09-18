@@ -461,16 +461,21 @@ def _yardage_profile(scope) -> pd.DataFrame:
 
 def _rankings(scope) -> pd.DataFrame:
     """Full season of AP and Coaches, for the bump chart and its companion table."""
+    # ⚠️ A165 SELECTS THE CONTRAST-SAFE PAIR, NOT `color_primary`. R-855's lesson, measured:
+    # nearly a fifth of teams publish #000000 as their on-light value, so the raw brand colour
+    # can be invisible against the page it is drawn on. The ladder already answers "what is safe
+    # against THIS background" and is what the drives panel reads.
+    #
+    # 🚨 **THIS NOTE IS A PYTHON COMMENT AND NOT A SQL ONE, AND THAT COST TWO CI RUNS.**
+    # `ci/check_page_queries.py` normalises a query to a single line before executing it, so
+    # every `--` comment swallows the rest of the statement — `syntax error at end of input`.
+    # An earlier draft also carried a literal per-cent, which the driver reads as a parameter
+    # marker — `dict is not a sequence`. **Two different failures from prose inside a query
+    # string, neither visible locally because the unit tests stub `query` (R-538's class).**
+    # ✅ Nothing goes between the triple quotes but SQL.
     return query("""
         select season, week, poll_name, rank, team_display, team_slug,
                first_place_votes, points, as_of_ts,
-               -- A165: the contrast-safe pair, not color_primary. R-855's lesson, measured:
-               -- nearly a fifth of teams publish #000000 as their on-light value, so the raw
-               -- brand color can be invisible against the page it is drawn on. The ladder
-               -- answers "what is safe against THIS background"; the drives panel uses it too.
-               -- NO PER-CENT SIGN IN THIS STRING. The driver reads one as a parameter marker
-               -- and fails with "dict is not a sequence" — a comment, in a query, taking the
-               -- page down. CI's `check_page_queries` caught it; nothing local did.
                color_on_light, color_on_dark
         from srv_rankings
         where season = :season and season_type = :season_type

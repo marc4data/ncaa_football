@@ -1205,7 +1205,7 @@ def test_the_boundary_check_does_not_flag_a_url_that_happens_to_contain_a_direct
     assert module.violations() == []
 
 
-def test_no_page_query_contains_a_bare_percent_sign():
+def test_no_page_query_carries_prose_between_its_triple_quotes():
     """🚨 A165 (cfdb-main-R-1305). A COMMENT, INSIDE A QUERY, TOOK A PANEL DOWN — AND THE WHOLE
     LOCAL SUITE PASSED ON IT.
 
@@ -1218,9 +1218,15 @@ def test_no_page_query_contains_a_bare_percent_sign():
     it on the first push. **This is R-538's class — the one the charter says the unit tests
     cannot reach — so the cheap half of it comes home as a string check.**
 
-    ✅ A literal per-cent belongs in a docstring or a Python comment, never between the triple
-    quotes of a query. If one is ever genuinely needed in SQL it is written `%%`, and this test
-    should be taught that exception by the round that needs it rather than deleted.
+    🚨 **AND THE SECOND CI RUN FAILED A DIFFERENT WAY FOR THE SAME REASON.** With the per-cent
+    removed, the explanatory `--` comment that replaced it produced `syntax error at end of
+    input`: `check_page_queries` normalises a query to ONE LINE before executing it, so a `--`
+    swallows every character after it — the whole rest of the statement.
+
+    ✅ **SO THE RULE IS WIDER THAN THE PER-CENT: nothing but SQL goes between the triple quotes.**
+    Explanation belongs in a Python comment above the call, where it is just as readable and
+    cannot reach the driver. If a literal per-cent is ever genuinely needed in SQL it is written
+    `%%`, and this test should be taught that exception by the round that needs it.
     """
     import pathlib
     import re
@@ -1229,9 +1235,15 @@ def test_no_page_query_contains_a_bare_percent_sign():
     for f in sorted(views.glob("*.py")):
         for m in re.finditer(r'query\(\s*"""(.*?)"""', f.read_text(), re.S):
             sql = m.group(1)
-            if "%" in sql.replace("%%", ""):
-                where = sql.find("%")
-                offenders.append(f"{f.name}: ...{sql[max(0, where - 60):where + 20]!r}")
+            for token, why in (("%", "a parameter marker to the driver"),
+                               ("--", "swallows the rest of the line once the query is "
+                                      "normalised to one line")):
+                probe = sql.replace("%%", "") if token == "%" else sql
+                if token in probe:
+                    where = probe.find(token)
+                    offenders.append(
+                        f"{f.name}: {token!r} is {why} — ..."
+                        f"{probe[max(0, where - 60):where + 20]!r}")
     assert not offenders, (
-        "a bare % inside a page query is a parameter marker to the driver:\n  "
+        "nothing but SQL belongs between the triple quotes of a page query:\n  "
         + "\n  ".join(offenders))
