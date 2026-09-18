@@ -51,24 +51,39 @@ def _module_constant(name):
 
 _PLAY_COLUMNS = ["drive_id", "play_id", "stat_type", "play_type",
                  "player_name", "yards_gained"]
+_CURVE_COLUMNS = ["game_id", "play_number", "period", "is_overtime",
+                  "elapsed_from_kickoff_seconds", "overtime_period",
+                  "overtime_axis_offset_periods", "home_win_probability",
+                  "home_score", "away_score", "play_text"]
 
 
-def _query_stub(frame, plays):
-    """The panel makes TWO selects now, so a stub that ignores the SQL answers the wrong one.
+def _query_stub(frame, plays, curve=None):
+    """The panel makes THREE selects now, so a stub that ignores the SQL answers the wrong one.
 
     🚨 Handing the drives frame to the play grain would give it no `play_id` at all, and every
     big-play assertion would pass on an empty attachment rather than on the thing it names —
-    R-744's class, which this file has already paid for twice.
+    R-744's class, which this file has already paid for twice. ⚠️ **B139 proved the same trap
+    a third time from the other side:** before this dispatch learned about
+    `srv_game_win_probability_play`, the win-probability fetch received the DRIVES frame and
+    56 tests failed with `KeyError: 'elapsed_from_kickoff_seconds'`.
 
-    ⚠️ **THE DEFAULT IS AN EMPTY PLAY FRAME RATHER THAN THE DRIVES FRAME, AND THAT IS THE
-    HONEST DEFAULT**: 1,546 of 3,607 games publish no play rows at all (cfdb-wta-R-1274), so
-    "this game has no plays" is the single commonest case on the site.
+    ⚠️ **BOTH EXTRA DEFAULTS ARE EMPTY FRAMES, AND BOTH ARE THE HONEST DEFAULT.** 1,546 of
+    3,607 games publish no play rows (cfdb-wta-R-1274) and **3,028 of 3,831 completed 2025
+    games publish no win-probability rows** (cfdb-wta-R-1284) — so "this game has neither" is
+    the commonest game on the site, and it is what a test gets unless it asks otherwise.
     """
     play_frame = (pd.DataFrame(columns=_PLAY_COLUMNS) if plays is None
                   else pd.DataFrame(plays))
+    curve_frame = (pd.DataFrame(columns=_CURVE_COLUMNS) if curve is None
+                   else pd.DataFrame(curve))
 
     def _dispatch(sql, *a, **k):
-        return play_frame if "srv_player_play" in str(sql) else frame
+        text = str(sql)
+        if "srv_player_play" in text:
+            return play_frame
+        if "srv_game_win_probability_play" in text:
+            return curve_frame
+        return frame
 
     return _dispatch
 
@@ -92,7 +107,7 @@ def panel():
     with render_harness.streamlit_stubbed() as (_st, captured, charts):
         matchup = importlib.reload(importlib.import_module("views.matchup"))
 
-        def run(frame, season=2026, row=None, encoding=None, plays=None):
+        def run(frame, season=2026, row=None, encoding=None, plays=None, curve=None):
             # R-730. The season decides WHICH absence the Empty state states, so the
             # fixture has to carry one. 2026 is a completed modern game — the case
             # nearly every test here means; the scope tests pass a pre-2024 season.
@@ -110,7 +125,7 @@ def panel():
             # hconcats and failed with `expected exactly one`. See `Charts.clear`.
             charts.clear()
             original = matchup.query
-            matchup.query = _query_stub(frame, plays)
+            matchup.query = _query_stub(frame, plays, curve)
             try:
                 matchup._drives(9001, season, _game_row() if row is None else row)
             finally:
@@ -137,11 +152,11 @@ def themed_panel():
     """
     import importlib
 
-    def run(frame, theme="light", season=2026, row=None, plays=None):
+    def run(frame, theme="light", season=2026, row=None, plays=None, curve=None):
         with render_harness.streamlit_stubbed(theme=theme) as (_st, captured, charts):
             matchup = importlib.reload(importlib.import_module("views.matchup"))
             original = matchup.query
-            matchup.query = _query_stub(frame, plays)
+            matchup.query = _query_stub(frame, plays, curve)
             try:
                 matchup._drives(9001, season, _game_row() if row is None else row)
             finally:
@@ -160,8 +175,14 @@ def _game_row(away="Beta", home="Alpha", away_points=17, home_points=24):
     a header built from the frame would print the drives' numbers and pass a test that only
     checked a scoreboard was present.
     """
+    # 🚨 **THE TWO SIDES CARRY DIFFERENT COLOURS, AND B139 LEARNED WHY THE HARD WAY.** Without
+    # them both accents resolve to `identity.FALLBACK` — the SAME grey — so a staged break that
+    # swapped home for away came back GREEN. **A fixture whose defaults make the assertion true
+    # is R-744's class, and this file has now paid for it four times.**
     return pd.Series({"away_team": away, "home_team": home,
                       "away_points": away_points, "home_points": home_points,
+                      "home_color_on_light": "#101010", "home_color_on_dark": "#101010",
+                      "away_color_on_light": "#efefef", "away_color_on_dark": "#efefef",
                       "season": 2026})
 
 
@@ -1126,16 +1147,20 @@ def test_the_query_is_one_table_scoped_to_a_game_and_bounded():
     # `srv_player_play` — 409,846 rows — ship without a word.
     selects = [seg.split('"""', 1)[0]
                for seg in block.split("query(\"\"\"")[1:]]
-    assert len(selects) == 2, (
-        f"expected the drives select and the play select, found {len(selects)}. A new query "
-        f"in this panel is a new thing to bound (AC-G.39)")
+    # 🚨 THE COUNT IS PINNED AND IT HAS ALREADY EARNED ITS KEEP TWICE. B138 added the play
+    # select and B139 the win-probability one, and BOTH were caught here first — an unbounded
+    # or joined read of a 409,846-row relation would otherwise have shipped without a word.
+    assert len(selects) == 3, (
+        f"expected the win-probability, drives and play selects, found {len(selects)}. A new "
+        f"query in this panel is a new thing to bound (AC-G.39)")
     for sql in selects:
         assert sql.lower().count(" from ") == 1 and "join" not in sql.lower(), sql
         assert "where game_id = :game_id" in sql, sql
         assert re.search(r"\blimit\s+\d+", sql, re.I), (
             f"an unbounded select is a defect (AC-G.39): {sql}")
-    assert "from srv_drive" in selects[0] and "from srv_player_play" in selects[1], (
-        "the two selects must read the two relations this panel is built from")
+    read = {sql.split(" from ")[1].split()[0] for sql in selects}
+    assert read == {"srv_game_win_probability_play", "srv_drive", "srv_player_play"}, (
+        f"this panel is built from three relations and reads {sorted(read)}")
 
 
 # --- 🚨 R-730: WHICH absence is this? ------------------------------------------------------
@@ -1591,12 +1616,43 @@ def test_THE_SCOREBOARD_SEGMENTS_ARE_THE_PANELS_OWN_CONSTANTS(panel):
     assert len(rows) == 2, (
         f"the header has {len(rows)} full-width rows; v04 needs two — the scoreboard line and "
         f"the team cards above the tables")
-    for i, seg in enumerate(rows):
+    # 🚨🚨 **B139: THE TWO ROWS ARE DELIBERATELY NO LONGER IDENTICAL, AND THE DIFFERENCE IS THE
+    # FIX FOR A CLIPPED CHART (cfdb-wta-R-1288).**
+    #
+    # 📊 **Measured in the RUNNING APP — not in a harness, which is how the wrong number got
+    # inherited in the first place:** the header wrapper is `width:1200px;max-width:100%`, and
+    # the second half wins. At viewport 1300 the main block is 1000px and the wrapper is
+    # **840px**, so three `flex:none` slots totalling 1180 OVERFLOW it — and the
+    # win-probability chart in the middle slot was clipped at the block's right edge.
+    #
+    # ✅ **ROW 1's SIDE SLOTS ARE EMPTY, SO THEY MAY SHRINK.** The MIDDLE keeps its 650px, so
+    # the scoreboard and the chart stay centred on the field they head. **ROW 2's cards may
+    # NOT** — they sit above the two 265px tables and that alignment is the whole property v02
+    # was built to guarantee.
+    #
+    # ⚠️ **SO THIS ASSERTS THE TWO ROWS SEPARATELY RATHER THAN IN A LOOP.** A loop over both is
+    # what made the rows interchangeable, and interchangeable is exactly what they must not be.
+
+    def widths_of(seg):
         # the 22px is the logo's own footprint from `identity.logo_or_monogram`, not geometry
-        widths = [int(m) for m in re.findall(r"width:(\d+)px", seg) if int(m) != 22]
-        assert widths[:4] == [panel_w, table_w, field_w, table_w], (
-            f"header row {i + 1}'s segments are {widths[:4]}, which do not match the chart's "
-            f"{[panel_w, table_w, field_w, table_w]}")
+        return [int(m) for m in re.findall(r"width:(\d+)px", seg) if int(m) != 22]
+
+    scoreboard_row, cards_row = widths_of(rows[0]), widths_of(rows[1])
+    assert scoreboard_row[:2] == [panel_w, field_w], (
+        f"the scoreboard row's segments are {scoreboard_row[:2]}; it must still declare the "
+        f"panel width and the FIELD's own {field_w}px, so the linescore and the chart stay "
+        f"centred on the field below them")
+    assert table_w not in scoreboard_row, (
+        f"the scoreboard row still pins a {table_w}px side slot: {scoreboard_row}. Both its "
+        f"sides are empty and must be able to shrink, or the row overflows an 840px header "
+        f"at 1300px and clips the chart")
+    assert "flex:1 1 0" in rows[0], (
+        "the scoreboard row's empty sides are not shrinkable")
+    assert cards_row[:4] == [panel_w, table_w, field_w, table_w], (
+        f"the cards row's segments are {cards_row[:4]}, which do not match the chart's "
+        f"{[panel_w, table_w, field_w, table_w]} — those two cards sit above those two tables")
+    assert "flex:1 1 0" not in rows[1], (
+        "the cards row's slots became shrinkable; they must track the tables below them")
     assert head.count(f"gap:{spacing}px") == 2, (
         f"the header's gutters do not match hconcat's spacing of {spacing}px on both rows")
 
@@ -2833,3 +2889,191 @@ def test_THE_BIG_PLAY_LINE_IS_TITLED_THE_WAY_MARC_ASKED(panel):
         assert fact in note, (
             f"the note reads {note!r} and does not carry {fact!r} — Marc asked for the "
             f"yards, the type and the player")
+
+
+# ── 🚨 v20 / v08 PART 1: THE WIN % CHART BESIDE THE SCOREBOARD ──────────────────────────────
+#
+# > **MARC, v20:** *"Add the Win % chart to the right of the Scoreboard in the header"*
+# > **MARC, v08:** *"Was expecting to see the Win Percentage chart next to Scoreboard in the
+# > header. Not there yet."*
+#
+# **A170 promoted the chart into `lib/winprob.py` and A171 flipped its axis so home sits low.
+# These tests are about the CALLER — that it calls rather than copies, that it does not flip
+# anything a second time, and that a game with no curve looks exactly like it did before.**
+
+def _curve_rows(n=8, home_first=0.5, home_last=0.9, game_id=9001):
+    """A win-probability frame shaped like `srv_game_win_probability_play`."""
+    step = (home_last - home_first) / max(n - 1, 1)
+    return [{"game_id": game_id, "play_number": i + 1, "period": 1 + i // 4,
+             "is_overtime": False,
+             "elapsed_from_kickoff_seconds": 60.0 * (i + 1),
+             "overtime_period": None, "overtime_axis_offset_periods": None,
+             "home_win_probability": home_first + step * i,
+             "home_score": 0, "away_score": 0, "play_text": f"play {i + 1}"}
+            for i in range(n)]
+
+
+def _header_html(entries):
+    """The header markdown the panel emitted — the first block, before the chart."""
+    blocks = [body for _kind, body in entries
+              if isinstance(body, str) and "cfdb-section-heading" in body]
+    if not blocks:
+        blocks = [body for _kind, body in entries if isinstance(body, str) and "Drives" in body]
+    assert blocks, "the panel emitted no header block at all"
+    return blocks[0]
+
+
+def test_THE_HEADER_DRAWS_THE_WIN_PROBABILITY_CHART_when_the_game_publishes_one(panel):
+    """✅ Marc's ask, asserted on the rendered header rather than on the producer.
+
+    🚨 **AND IT ASSERTS THE MODULE'S OWN OUTPUT IS PRESENT, NOT MERELY THAT AN `<svg>` IS.**
+    A hand-drawn chart would satisfy "there is an svg here" and would be the second copy §4.3
+    exists to prevent — so this compares against what `winprob.sparkline_svg` actually returns
+    for the same frame.
+    """
+    frame = pd.DataFrame([_drive(1, "away", "Beta", "PUNT", category="punt")])
+    rows = _curve_rows()
+    entries, _charts = panel(frame, curve=rows)
+    header = _header_html(entries)
+
+    assert "<svg" in header, "the header carries no chart at all"
+    import importlib
+    matchup = importlib.import_module("views.matchup")
+    expected = matchup._drive_curve(_game_row(), pd.DataFrame(rows))
+    assert expected, "the producer returned nothing for a frame that has rows"
+    assert expected in header, (
+        "the header does not contain `winprob.sparkline_svg`'s own output, so it is drawing "
+        "its own chart rather than calling the promoted module (§4.3, B117)")
+
+
+def test_A_GAME_WITH_NO_WIN_PROBABILITY_LEAVES_THE_HEADER_EXACTLY_AS_IT_WAS(panel):
+    """🚨 79.04% OF COMPLETED 2025 GAMES, SO THIS IS THE COMMON CASE (cfdb-wta-R-1284).
+
+    📊 The whole gap is non-FBS — 803 of 934 completed 2025 FBS games are covered (85.97%),
+    and 0 of 2,835 non-FBS ones. ⚠️ **So the absence is the data's scope rather than a fault,
+    and it must render as the header that shipped before this round — not as a hole, a
+    placeholder or a card (R-084, AC-G.11).**
+    """
+    frame = pd.DataFrame([_drive(1, "away", "Beta", "PUNT", category="punt")])
+    with_none = _header_html(panel(frame, curve=None)[0])
+    with_empty = _header_html(panel(frame, curve=[])[0])
+
+    assert "<svg" not in with_none, (
+        "a game with no win-probability rows drew a chart anyway")
+    assert with_none == with_empty, (
+        "an empty frame and an absent one produce different headers")
+    render_harness.assert_no_error_card  # the panel fixture already asserts this per render
+
+
+def test_THE_CHART_SITS_BESIDE_THE_LINESCORE_not_in_the_empty_right_slot(panel):
+    """📊 **THE MEASUREMENT DECIDED THIS AND THE TEST PINS IT** (cfdb-wta-R-1283).
+
+    B138 measured the header at 265 / 650 / 265, the linescore using 153.58px of the middle.
+    🚨 **The empty 265px right slot cannot hold the chart: `chart_width` is 270px at two
+    overtimes and 314px at three** — and the right slot starts 248px past the end of a centred
+    linescore, so a chart there is *in the header* but beside nothing.
+
+    ✅ **So the chart goes in the MIDDLE slot, after the linescore.** This asserts the order
+    and the container rather than a pixel, because the pixel is the browser's to decide.
+    """
+    frame = pd.DataFrame([_drive(1, "away", "Beta", "PUNT", category="punt")])
+    # ⚠️ the quarters have to be present or `_line_score` returns "" and this test would be
+    # asserting about the fallback line instead of the scoreboard (26 of 3,831 games).
+    row = _game_row()
+    row["away_q1"], row["away_q2"], row["away_q3"], row["away_q4"] = 0, 0, 0, 3
+    row["home_q1"], row["home_q2"], row["home_q3"], row["home_q4"] = 7, 3, 0, 7
+    row["away_overtime_points"] = row["home_overtime_points"] = None
+    header = _header_html(panel(frame, row=row, curve=_curve_rows())[0])
+
+    import importlib
+    matchup = importlib.import_module("views.matchup")
+    line = matchup._line_score(row)
+    assert line and line in header, "the fixture does not exercise `_line_score`"
+    assert header.index(line) < header.index("<svg"), (
+        "the chart is drawn BEFORE the linescore; Marc asked for it beside/after it")
+
+    # 🚨 **THE TWO MUST SHARE ONE SLOT, AND THIS IS ASSERTED AS A SLOT BOUNDARY RATHER THAN AS
+    # A WIDTH.** ⚠️ **B139's first version looked for the 265px side slot between them and came
+    # back GREEN under the staged break** — because the same round made those sides shrinkable,
+    # so `width:265px` was no longer in the markup for the guard to find. **A test keyed on a
+    # literal that another change removes is a test that quietly stops testing (R-744).**
+    between = header[header.index(line) + len(line):header.index("<svg")]
+    assert "</div>" not in between, (
+        f"a slot boundary sits between the linescore and the chart, so the chart is in a "
+        f"different slot rather than beside the scoreboard: {between[:120]!r}")
+    # and the chart must still be inside the FIELD-width slot, which is what centres it
+    before = header[:header.index(line)]
+    assert f"width:{matchup._DRIVE_FIELD_WIDTH}px" in before, (
+        "the linescore and chart are not inside the field-width middle slot, so they are no "
+        "longer centred on the field they head")
+
+
+def test_THE_CURVE_IS_NOT_FLIPPED_A_SECOND_TIME_by_this_caller(panel):
+    """🚨 A171 PUT HOME AT THE FLOOR AND THIS FILE MUST NOT ARGUE WITH IT.
+
+    > **MARC:** *"Win probability y-axis needs to be reversed… the Home team's Win Probability
+    > is positive on the bottom (b/c that team is represented on bottom on the Scoreboard)."*
+
+    ⚠️ **IN THE DRIVES HEADER THE SCOREBOARD IS RIGHT BESIDE THE CHART**, so a second flip
+    would be visible in one glance. **The assertion is on the module's own geometry: a frame
+    where home's probability RISES must have its polyline DESCEND** — greater y is lower on
+    screen in SVG.
+    """
+    import importlib
+    winprob = importlib.import_module("lib.winprob")
+    matchup = importlib.import_module("views.matchup")
+    rising = pd.DataFrame(_curve_rows(home_first=0.10, home_last=0.95))
+
+    svg = matchup._drive_curve(_game_row(), rising)
+    assert svg, "no chart was produced for a frame with rows"
+    assert svg == winprob.sparkline_svg(
+        rising, label=winprob.curve_label(_game_row(), rising)[0],
+        is_cut=winprob.curve_label(_game_row(), rising)[1],
+        home_color=matchup._accent(matchup.row_for_side(_game_row(), "home")),
+        away_color=matchup._accent(matchup.row_for_side(_game_row(), "away"))), (
+        "the caller's output differs from the module's for the same frame — something here "
+        "is transforming the points, the axis or the colours on the way through")
+
+    # and the geometry itself, read off the module's output: home rising must descend
+    import re as _re
+    points = _re.findall(r"points='([^']+)'", svg) or _re.findall(r'points="([^"]+)"', svg)
+    assert points, f"no polyline in the chart: {svg[:200]}"
+    ys = [float(pair.split(",")[1]) for pair in points[0].split() if "," in pair]
+    assert ys[-1] > ys[0], (
+        f"home's probability rises from .10 to .95 and the curve went UP the screen "
+        f"(y {ys[0]:.1f} -> {ys[-1]:.1f}). A171 put home certain at the FLOOR, so a rising "
+        f"home probability must DESCEND")
+
+
+def test_THE_CHART_TAKES_THE_PAGES_OWN_TEAM_COLOURS_not_a_second_source(panel):
+    """✅ R-855: `_accent` is this file's single home for a finished team colour.
+
+    ⚠️ **`lib/winprob` holds no team colours and must not reach for one** — its own docstring
+    says the caller supplies them. **The fill under the curve and the rule under the team name
+    in the same header therefore cannot disagree**, which is the drift a second colour path
+    would introduce.
+    """
+    import importlib
+    winprob = importlib.import_module("lib.winprob")
+    matchup = importlib.import_module("views.matchup")
+    row = _game_row()
+    points = pd.DataFrame(_curve_rows())
+    home = matchup._accent(matchup.row_for_side(row, "home"))
+    away = matchup._accent(matchup.row_for_side(row, "away"))
+    assert home != away, (
+        "the fixture gives both sides the same colour, so this test cannot see a swap — "
+        "which is exactly the R-744 defect it exists to catch")
+
+    svg = matchup._drive_curve(row, points)
+    text, is_cut = winprob.curve_label(row, points)
+    right = winprob.sparkline_svg(points, label=text, is_cut=is_cut,
+                                  home_color=home, away_color=away)
+    swapped = winprob.sparkline_svg(points, label=text, is_cut=is_cut,
+                                    home_color=away, away_color=home)
+    assert right != swapped, (
+        "the module draws the same chart either way round, so no caller-side assertion about "
+        "the colours can mean anything")
+    assert svg == right, "the caller's chart is not the one the correct assignment produces"
+    assert svg != swapped, (
+        f"the caller produced the SWAPPED chart — home {home!r} is being handed to the away "
+        f"side. The fill under the curve would name the wrong team")
