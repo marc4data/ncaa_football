@@ -885,7 +885,31 @@ def _sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
         return pad + float(axis_units) * _CURVE_PX_PER_UNIT
 
     def sy(probability) -> float:
-        # −1…1 with zero in the middle, which is arithmetically the same mapping 0…1 had.
+        # 🚨 A169 (cfdb-main-R-1318). THIS COMMENT SAID "−1…1 with zero in the middle" AND THE
+        # FUNCTION HAS NEVER TAKEN −1. It takes `home_win_probability`, straight off
+        # `srv_game_win_probability_play`, on **0…1**: `sy(1)` is the top, `sy(0)` the floor,
+        # `sy(0.5)` the midline. Fed −1 it would return `pad + 2*ph` — a whole band BELOW the
+        # chart. The −1…1 framing is what the FILLED-FROM-MIDLINE picture says to a reader; it
+        # is not this function's domain, and the two were written as if they were the same.
+        # **Seventh wrong-or-expired comment found in seven rounds.**
+        #
+        # ⚠️ **AND THE AXIS IS FIXED, WHICH IS THE THING MARC ASKED ABOUT (Site v07):** *"It
+        # looks like it's auto-adjusting to fill the vertical space."* 📊 **It is not, and that
+        # was measured rather than argued.** Two 2026 games rendered side by side:
+        #
+        #     401858447  win probability 0.747 … 1.000   curve spans 30.0px
+        #     401862702  win probability 0.006 … 0.970   curve spans 57.9px
+        #     midline in BOTH                            y = 32.0
+        #
+        # **An auto-fitting axis would stretch the first to fill the band and both spans would
+        # match. They do not.** Nothing here reads the series' min or max — `sy` is a pure
+        # function of one probability, pinned by
+        # `test_the_win_probability_axis_is_fixed_and_reads_no_data`.
+        #
+        # 📊 **WHAT HE IS SEEING IS HIS OWN TWO ASKS.** `ph = height − 2*pad`, and `height` grew
+        # twice at his request — A165 44 → 67 to match the scoreboard's two rows, A167 → 64 for
+        # the quarter labels. **The band went 40px → 60px, so the same swing now draws 1.50× the
+        # pixels it did three rounds ago** (measured on one game: 38.6px → 57.9px).
         return pad + (1.0 - float(probability)) * ph
 
     right = sx(span_units)
