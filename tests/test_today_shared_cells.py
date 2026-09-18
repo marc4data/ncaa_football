@@ -152,6 +152,63 @@ def test_the_record_sits_outside_the_anchor():
     assert cell.index("cfdb-team-record") > anchor.end() - 1, "and it trails the cluster"
 
 
+def test_the_identity_row_aligns_on_centre_because_one_child_has_no_baseline():
+    """🚨 A165 (cfdb-main-R-1300). CSS-ONLY, SO A CSS ASSERTION IS THE ONLY GUARD THERE IS.
+
+    > **MARC, Today v05:** *"The teams (logo, name, record) are not aligned vertically. Review
+    > the image. Record needs to move up."*
+
+    📊 MEASURED ACROSS 160 identity cells in Chromium: the record's alphabetic baseline sat
+    **9.5–10px BELOW** the team name's, because `.cfdb-identity` baseline-aligns a text span
+    against `.cfdb-teamlink` — a flex container whose first item is an EMPTY 28px logo box, and
+    which therefore synthesises its baseline from its bottom edge.
+
+    ⚠️ **THE OBVIOUS FIX WAS MEASURED AND REJECTED**: `.cfdb-teamlink{align-items:baseline}`
+    brings the record to +0.2px **and moves the logo 5–6px off the name**. Centre brings it to
+    −0.5/−1px and moves nothing. **This test pins the property AND the reason**, so a future
+    round that "tidies" it back to `baseline` has to read why first.
+    """
+    from lib import theme as T
+    import re
+    rule = re.search(r"^\.cfdb-identity \{([^}]*)\}", T.TABLE_CSS, re.M)
+    assert rule, "`.cfdb-identity` has no rule at all — that was A164's original defect"
+    body = rule.group(1)
+    assert "align-items:center" in body.replace(" ", ""), (
+        f"the identity row must align on CENTRE, not baseline: {body.strip()}")
+    assert "display:flex" in body.replace(" ", ""), body
+
+
+def test_the_scoreboard_team_cell_is_wide_enough_to_stop_clipping_and_still_fixed():
+    """🚨 A165 (cfdb-main-R-1301). BOTH HALVES MATTER AND THEY PULL AGAINST EACH OTHER.
+
+    > **MARC:** *"We need to grant Scoreboard more horizontal space because with the Record
+    > added its truncating team name."*
+
+    📊 **WIDENING THE OUTER COLUMN FIXES NOTHING** — 288px to 443px, +54%, left the ellipsised
+    count at 11. The clip is this cell's own fixed width. Swept at 1300px and 1600px with the
+    logo untouched: 9.5rem → 10 clipped · 11rem → 3 · 12rem → 2 · **13rem → 0**.
+
+    ⚠️ **AND IT MUST STAY *FIXED*, WHICH IS THE HALF A WIDTH CHANGE COULD QUIETLY LOSE.** The
+    rule's own comment says why: a content-sized cell makes every scoreboard a different width,
+    so the quarter columns stop lining up down the page and a reader has to re-find the "4" on
+    every row. **`width` and `max-width` must agree, or the cell is no longer fixed.**
+    """
+    from lib import theme as T
+    import re
+    rule = re.search(r"\.cfdb-sb-team \{([^}]*)\}", T.TABLE_CSS, re.S)
+    assert rule, "the scoreboard team cell lost its rule"
+    body = rule.group(1).replace(" ", "").replace("\n", "")
+    width = re.search(r"[^-]width:([\d.]+)rem", body)
+    maxw = re.search(r"max-width:([\d.]+)rem", body)
+    assert width and maxw, f"both width and max-width must be declared: {body}"
+    assert width.group(1) == maxw.group(1), (
+        f"width {width.group(1)}rem and max-width {maxw.group(1)}rem disagree — the cell is no "
+        f"longer FIXED, and the quarter columns will stop lining up")
+    assert float(width.group(1)) >= 13, (
+        f"{width.group(1)}rem clips team names once the record shares the cell; 13rem was the "
+        f"first width measured at zero clipped, at both 1300px and 1600px")
+
+
 def test_the_identity_wrapper_puts_the_record_on_the_name_s_line_without_crossing_the_anchor():
     """🚨 A164. MARC ASKED THREE TIMES — *"Records should be inline with the Team Name, not line
     below it"* (Upsets, Underdogs) and *"Team - Ranks inline with team name, not below"* (Team
