@@ -465,9 +465,12 @@ def _rankings(scope) -> pd.DataFrame:
         select season, week, poll_name, rank, team_display, team_slug,
                first_place_votes, points, as_of_ts,
                -- A165: the contrast-safe pair, not color_primary. R-855's lesson, measured:
-               -- 18.6% of teams publish #000000 as their on-light value, so the raw brand color
-               -- can be invisible against the page it is drawn on. The ladder already answers
-               -- "what is safe against THIS background" and is what the drives panel uses.
+               -- nearly a fifth of teams publish #000000 as their on-light value, so the raw
+               -- brand color can be invisible against the page it is drawn on. The ladder
+               -- answers "what is safe against THIS background"; the drives panel uses it too.
+               -- NO PER-CENT SIGN IN THIS STRING. The driver reads one as a parameter marker
+               -- and fails with "dict is not a sequence" — a comment, in a query, taking the
+               -- page down. CI's `check_page_queries` caught it; nothing local did.
                color_on_light, color_on_dark
         from srv_rankings
         where season = :season and season_type = :season_type
