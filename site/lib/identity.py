@@ -40,6 +40,44 @@ def accent_style(row, dark_theme: bool = False) -> str:
     return f"border-left:4px solid {text_on(row, dark_theme)};padding-left:.6rem"
 
 
+def accent_color(row, prefix: str = "") -> str:
+    """ONE team colour as a finished CSS string, BOTH variants, resolved by the browser.
+
+    🚨 A171 (cfdb-main-R-1601). PROMOTED FROM `matchup.py:_accent`, WHOSE OWN DOCSTRING SAYS
+    IT IS "written HERE and nowhere else" — and which lives in session B's file, so Today
+    could not call it and would have had to write the second copy that docstring warns about.
+    §3 rule 3.1: the shared module ships the function; **B consumes it on its own round**, and
+    until it does, `matchup.py:_accent` is a duplicate that this one is the successor to.
+
+    ⚠️ `text_on(row)` ALONE IS NOT THE ANSWER AND B109 MEASURED WHY (R-855). It defaults to
+    the ON-LIGHT variant, which renders `rgb(0,0,0)` against a `rgb(14,17,23)` page —
+    invisible — for the **18.6% of teams that publish `#000000` there.**
+
+    ✅ `light-dark()` follows the `color-scheme` property Streamlit sets, so the BROWSER
+    resolves it: correct on a mid-session theme flip, with no Python in the loop. That works
+    in inline SVG and in CSS; it does NOT work inside a Vega spec, which rejects the string
+    and falls back to `#ddd` (B135/B136, cfdb-main-R-1236). **Use this for markup, never for
+    a Vega mark.**
+
+    `prefix` reads a SIDE off a wide game row — `home_color_on_light` / `home_color_on_dark`
+    for `prefix="home"`. Unprefixed, it reads a narrow row that already carries the pair.
+
+    ⚠️ AND IT GUARDS NaN, WHICH `text_on` DOES NOT. `read_sql` gives a NULL colour as
+    `float('nan')`, and `value or FALLBACK` keeps it because **NaN is truthy** — the R-121
+    defect, one layer along. A NaN reaching an SVG `fill` is an invalid colour the browser
+    drops silently. Measured on the 1,898 games this chart can draw: **0 nulls in either
+    theme**, so this is a guard against the case rather than a fix for a live one.
+    """
+    def one(dark: bool) -> str:
+        key = f"{prefix}_color_on_dark" if dark else f"{prefix}_color_on_light"
+        key = key.lstrip("_")
+        value = row.get(key) if (row is not None and hasattr(row, "get")) else None
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return FALLBACK
+        return str(value).strip() or FALLBACK
+    return f"light-dark({one(False)}, {one(True)})"
+
+
 def logo_or_monogram(logo_url: Optional[str], display_name: str,
                      size_px: int = 28, color: str = FALLBACK) -> str:
     """A logo, or a monogram at the IDENTICAL footprint (AC-G.28).

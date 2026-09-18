@@ -197,16 +197,26 @@ def curve_label(row, points) -> tuple:
 
         label the WINNER          ❌ DISQUALIFIED BY THE GEOMETRY. The curve is home-perspective
                                   and the label sits at the last point's own height, so when the
-                                  away side won the number would read 96% while sitting at the
-                                  BOTTOM of the chart, where the home curve ended at 4%. A label
-                                  that contradicts its own position is worse than a bare one.
+                                  away side won the number would read 96% while sitting in the
+                                  away half, where the home curve ended at 4%. A label that
+                                  contradicts its own position is worse than a bare one.
+                                  ⚠️ A171 FLIPPED WHICH HALF THAT IS — it used to be the bottom
+                                  and is now the top — and the disqualification is unaffected,
+                                  because it turns on the label contradicting its own height
+                                  rather than on which end of the band that height is at.
         anchor it to the home row ❌ Moves the label away from the point it labels, and vertical
                                   alignment is not something a reader decodes as "this is the
                                   home team's number" while scanning ten rows.
         the abbreviation          ✅ Same glyph run as the number, so it survives greyscale and
-                                  thumbnailing; agrees with the geometry (above the even line is
-                                  home); and agrees with the `aria-label`, which now names the
-                                  team rather than the role.
+                                  thumbnailing; agrees with the geometry — 🚨 A171: BELOW the
+                                  even line is home now, not above it, matching the scoreboard
+                                  beside it (cfdb-main-R-1600) — and agrees with the
+                                  `aria-label`, which names the team rather than the role.
+                                  📊 CHECKED AGAINST THE RENDER, not against this sentence:
+                                  `WMU 99%` draws at y=61 on a game the home side won, and
+                                  `OU 0%` at y=9 on one it lost 9-35. Both name the HOME side
+                                  and both sit in the half belonging to the side that is
+                                  actually ahead.
 
     📊 COVERAGE MEASURED IN PUBLISHED SERVING RATHER THAN ASSUMED: `home_abbreviation` is null on
     **0 of the 1,895 games that can enter this panel**, longest **4 characters**, mean 3.3. It is
@@ -264,7 +274,7 @@ def chart_width(points: pd.DataFrame) -> int:
 
 
 def sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
-                  height: int = HEIGHT) -> str:
+                  height: int = HEIGHT, home_color: str = "", away_color: str = "") -> str:
     """One game's win-probability curve, as inline SVG sized for a table cell.
 
     🚨 A CHART CANNOT LIVE INSIDE `table.render`, WHICH IS WHY THIS IS SVG AND NOT ALTAIR.
@@ -333,12 +343,38 @@ def sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
         return pad + float(axis_units) * _CURVE_PX_PER_UNIT
 
     def sy(probability) -> float:
-        # 🚨 A169 (cfdb-main-R-1318). THIS COMMENT SAID "−1…1 with zero in the middle" AND THE
-        # FUNCTION HAS NEVER TAKEN −1. It takes `home_win_probability`, straight off
-        # `srv_game_win_probability_play`, on **0…1**: `sy(1)` is the top, `sy(0)` the floor,
-        # `sy(0.5)` the midline. Fed −1 it would return `pad + 2*ph` — a whole band BELOW the
-        # chart. The −1…1 framing is what the FILLED-FROM-MIDLINE picture says to a reader; it
-        # is not this function's domain, and the two were written as if they were the same.
+        # 🚨 A171 (cfdb-main-R-1600). THE AXIS POINTS DOWN-IS-HOME, AND THAT IS THE WHOLE
+        # POINT OF IT. > **MARC:** *"Win probability y-axis needs to be reversed. It should be
+        # aligned so that the Home team's Win Probability is positive on the bottom (b/c that
+        # team is represented on bottom on the Scoreboard)."*
+        #
+        # 📊 HE IS RIGHT AND IT WAS A CORRECTNESS DEFECT, NOT A PREFERENCE. `_scoreboard` emits
+        # `side_row(away…)` then `side_row(home…)` — R-522's away-over-home law — so the cell
+        # BESIDE this chart puts home on the bottom. The chart put home on top. Measured on two
+        # real games before the change:
+        #
+        #     home dominated  401778306   160 of 160 points ABOVE the midline
+        #     away dominated  401628396   146 of 147 points BELOW it
+        #
+        # **Two elements of one table row disagreeing about which team is "up".** A reader who
+        # learns the scoreboard's order reads the curve upside down.
+        #
+        # ⚠️ SO `sy(1)` — home certain — IS THE FLOOR, `sy(0)` the ceiling, `sy(0.5)` unchanged
+        # at the midline. The midline is the fixed point of the flip, which is why the overtime
+        # shading, the quarter labels and the reference rules are untouched by it: they are
+        # positioned from `pad`, `height` and `zero`, never from a probability.
+        #
+        # ⚠️ AND THE LABEL STILL READS THE HOME TEAM'S NUMBER. `_curve_final_value` returns
+        # `home_win_probability` and `curve_label` names a team from it; flipping the axis does
+        # not change what the number means, and A171 checked the rendered label against the
+        # picture on a game each side won rather than against this comment.
+        #
+        # ── A169 (cfdb-main-R-1318), KEPT BECAUSE IT IS STILL TRUE OF THE SCALE ──────────────
+        # THIS COMMENT SAID "−1…1 with zero in the middle" AND THE FUNCTION HAS NEVER TAKEN −1.
+        # It takes `home_win_probability`, straight off `srv_game_win_probability_play`, on
+        # **0…1**. Fed −1 it would return a whole band outside the chart. The −1…1 framing is
+        # what the FILLED-FROM-MIDLINE picture says to a reader; it is not this function's
+        # domain, and the two were written as if they were the same.
         # **Seventh wrong-or-expired comment found in seven rounds.**
         #
         # ⚠️ **AND THE AXIS IS FIXED, WHICH IS THE THING MARC ASKED ABOUT (Site v07):** *"It
@@ -358,11 +394,14 @@ def sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
         # twice at his request — A165 44 → 67 to match the scoreboard's two rows, A167 → 64 for
         # the quarter labels. **The band went 40px → 60px, so the same swing now draws 1.50× the
         # pixels it did three rounds ago** (measured on one game: 38.6px → 57.9px).
-        return pad + (1.0 - float(probability)) * ph
+        return pad + float(probability) * ph
 
     right = sx(span_units)
     zero = sy(0.5)
     parts = []
+    # A171: one <defs> per chart, not one per segment — an overtime game draws several
+    # segments and they all share the same two half-band clips.
+    emitted_clips = set()
 
     # ── REFERENCE LINES ───────────────────────────────────────────────────────────────────
     #
@@ -465,8 +504,53 @@ def sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
         area = (f"M{coords[0][0]:.1f},{zero:.1f} "
                 + " ".join(f"L{x:.1f},{y:.1f}" for x, y in coords)
                 + f" L{coords[-1][0]:.1f},{zero:.1f} Z")
-        parts.append(f"<path d='{area}' fill='currentColor' "
-                     f"opacity='{_CURVE_FILL_OPACITY}' stroke='none'></path>")
+        # 🚨 A171 (cfdb-main-R-1602). TWO FILLS WHERE THERE WAS ONE — Marc's second ask, and
+        # his own choice of the three he offered.
+        #
+        # > **MARC:** *"shade the area with the color of team favored at that point."*
+        # > **MARC, choosing:** *"1 - start with your preference, the fill."*
+        #
+        # ✅ THE SHAPE ALREADY EXISTED. The path above has always been filled FROM THE MIDLINE,
+        # so the two lobes are already on their own sides; they were simply both
+        # `currentColor`. This colours them and changes no geometry.
+        #
+        # ⚠️ THE STROKE STAYS NEUTRAL, DELIBERATELY. He chose the fill and a 1.1px stroke is
+        # the harder contrast case — two similar colours on a thin line CLAIM a distinction a
+        # reader cannot make. A second coloured element is a second thing to get wrong on the
+        # games where the two colours are close.
+        #
+        # 📊 AND THEY ARE CLOSE MORE OFTEN THAN THE LADDER SUGGESTS. Over the 1,898 games this
+        # panel can draw: on DARK, 100 games (5.27%) have the two sides EXACTLY equal and 156
+        # (8.22%) are within a just-noticeable distance — `#ffffff` alone is 458 of the home
+        # colours. ✅ **It still ships, because POSITION is the encoding and colour is
+        # decoration on top of it (AC-G.22):** after this round's flip the home lobe is ALWAYS
+        # the lower one, so a reader loses nothing on a collision that they did not already
+        # have.
+        #
+        # ⚠️ CLIPPED, NOT RECOMPUTED. One path drawn twice through two half-band clips keeps a
+        # single source of geometry — splitting the coordinates at every midline crossing
+        # would be a second implementation of the same curve, and the two would disagree at
+        # the crossing points.
+        if home_color or away_color:
+            clip = f"wpclip{int(zero)}x{int(right)}x{height}"
+            if clip not in emitted_clips:
+                emitted_clips.add(clip)
+                parts.append(
+                    f"<defs>"
+                    f"<clipPath id='{clip}-home'>"
+                    f"<rect x='0' y='{zero:.1f}' width='{right:.1f}' "
+                    f"height='{height - zero:.1f}'></rect></clipPath>"
+                    f"<clipPath id='{clip}-away'>"
+                    f"<rect x='0' y='0' width='{right:.1f}' height='{zero:.1f}'></rect>"
+                    f"</clipPath></defs>")
+            for side, colour in (("home", home_color), ("away", away_color)):
+                parts.append(
+                    f"<path d='{area}' fill='{colour or 'currentColor'}' "
+                    f"clip-path='url(#{clip}-{side})' "
+                    f"opacity='{_CURVE_FILL_OPACITY}' stroke='none'></path>")
+        else:
+            parts.append(f"<path d='{area}' fill='currentColor' "
+                         f"opacity='{_CURVE_FILL_OPACITY}' stroke='none'></path>")
         is_overtime_segment = index > 0
         parts.append(
             f"<polyline points='{line}' fill='none' stroke='currentColor' "

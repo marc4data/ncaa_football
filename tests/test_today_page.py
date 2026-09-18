@@ -2124,3 +2124,94 @@ def test_ats_still_has_a_reader_after_the_collapse():
     code = _code_only(SOURCE)
     assert 'covers["ats"].abs()' in code, "the underdog covers list reads `ats`"
     assert code.count('graded["ats"] = ') == 1, "computed once"
+
+
+def test_the_home_side_draws_below_the_midline():
+    """🚨 A171 (cfdb-main-R-1600). THE AXIS AND THE SCOREBOARD BESIDE IT MUST AGREE ABOUT WHICH
+    TEAM IS "UP", AND FOR THE WHOLE LIFE OF THE PANEL THEY DID NOT.
+
+    > **MARC:** *"Win probability y-axis needs to be reversed. It should be aligned so that the
+    > Home team's Win Probability is positive on the bottom (b/c that team is represented on
+    > bottom on the Scoreboard)."*
+
+    📊 **HE WAS RIGHT, AND IT WAS A CORRECTNESS DEFECT RATHER THAN A PREFERENCE.** `_scoreboard`
+    emits `side_row(away…)` then `side_row(home…)` — R-522's away-over-home law — so the cell
+    beside this chart puts home on the bottom. Measured on two real games before the fix:
+
+        home dominated  401778306   160 of 160 points ABOVE the midline
+        away dominated  401628396   146 of 147 points BELOW it
+
+    ⚠️ **THE ASSERTION IS ON A PROBABILITY WELL AWAY FROM 0.5, BECAUSE 0.5 IS THE FIXED POINT OF
+    THE FLIP** (R-843: a pinned value must MOVE under the break). A fixture sitting at the
+    midline passes both orientations and proves nothing.
+    """
+    winprob = _winprob()
+
+    def y_at(probability):
+        frame = _curve(n=12)
+        frame["home_win_probability"] = probability
+        svg = winprob.sparkline_svg(frame)
+        ys = [float(y) for y in re.findall(r"[ML][\d.]+,([\d.]+)", svg)]
+        mid = float(re.search(
+            r"<line x1='[\d.]+' y1='([\d.]+)'[^>]*stroke-dasharray='2 2'", svg).group(1))
+        return sum(ys) / len(ys), mid
+
+    home_y, mid = y_at(0.9)
+    away_y, _ = y_at(0.1)
+    assert home_y > mid, (
+        f"home at 90% must draw BELOW the midline (larger y is lower on screen); "
+        f"got y={home_y:.1f} against a midline of {mid:.1f} — the axis is back to front")
+    assert away_y < mid, (
+        f"home at 10% means the AWAY side is winning, which draws ABOVE the midline; "
+        f"got y={away_y:.1f} against {mid:.1f}")
+
+    # The midline is the fixed point: 0.5 lands on it in either orientation, which is exactly
+    # why it cannot be the thing asserted on.
+    even_y, _ = y_at(0.5)
+    assert abs(even_y - mid) < 0.5, f"0.5 must sit on the midline; got {even_y} vs {mid}"
+
+
+def test_the_curve_lobes_take_their_own_teams_colour_and_the_line_stays_neutral():
+    """🚨 A171 (cfdb-main-R-1602). Marc's second ask, and his own pick of the three he offered.
+
+    > **MARC:** *"shade the area with the color of team favored at that point."*
+    > **MARC, choosing:** *"1 - start with your preference, the fill."*
+
+    ✅ **THE STROKE STAYS NEUTRAL DELIBERATELY** — a 1.1px line is the harder contrast case, and
+    on dark **100 of 1,898 games (5.27%) publish the two sides in exactly the same colour**.
+    Colouring the line as well would be a second thing to get wrong on those games.
+
+    📊 **CONFINEMENT WAS PROVED WITH PIXELS, NOT WITH THE MARKUP** — a midline-crossing game
+    rasterised at 8x gave 0 home-coloured pixels above the midline and 0 away-coloured below.
+    This test pins the structure that produced it, because a raster is not something CI can run.
+    """
+    winprob = _winprob()
+    svg = winprob.sparkline_svg(_curve(), home_color="#0000ff", away_color="#ff0000")
+
+    # Two clips, and the HOME one is the lower half — that is the half A171 moved home into.
+    clips = dict((cid, (float(y), float(h))) for cid, y, h in re.findall(
+        r"<clipPath id='([^']+)'>\s*<rect x='0' y='([\d.]+)' width='[\d.]+' "
+        r"height='([\d.]+)'", svg))
+    home_clip = [c for c in clips if c.endswith("-home")]
+    away_clip = [c for c in clips if c.endswith("-away")]
+    assert len(home_clip) == 1 and len(away_clip) == 1, clips
+    assert clips[home_clip[0]][0] > clips[away_clip[0]][0], (
+        "the home clip must start LOWER down the band than the away clip")
+
+    # Each colour is bound to its own clip, and not to the other one.
+    bindings = dict((cid, colour) for colour, cid in re.findall(
+        r"<path d='[^']*' fill='(#[0-9a-f]{6})' clip-path='url\(#([^)]+)\)'", svg))
+    assert bindings.get(home_clip[0]) == "#0000ff", bindings
+    assert bindings.get(away_clip[0]) == "#ff0000", bindings
+
+    # The line is NOT coloured.
+    assert not re.search(r"<polyline[^>]*stroke='(?!currentColor)", svg), (
+        "the polyline must stay currentColor — Marc chose the fill, not the line")
+
+    # One <defs> for the whole chart even when overtime splits it into several segments.
+    assert winprob.sparkline_svg(_curve(overtime_from=30), home_color="#0000ff",
+                                 away_color="#ff0000").count("<defs>") == 1
+
+    # And with no colours supplied, nothing changes: one neutral fill, no clips at all.
+    plain = winprob.sparkline_svg(_curve())
+    assert "<clipPath" not in plain and "fill='currentColor'" in plain

@@ -212,6 +212,20 @@ def _completed_games(scope) -> pd.DataFrame:
     above are the only place a reader has to look to see which column is which.** When A141
     CONTRACTS the old ones the alias is what disappears.
 
+    🚨 A171, cfdb-main-R-1602. THE FOUR COLOUR COLUMNS ARE SELECTED SO THE CURVE'S TWO LOBES CAN
+    TAKE THEIR OWN TEAM'S COLOUR. Marc: *"shade the area with the color of team favored at that
+    point"*, and asked to choose between the line, the fill and both, he picked the fill.
+    `lib/winprob.py` holds no team colours and looks none up — §4.2.1, `identity` owns that — so
+    the caller supplies them and `identity.accent_color` composes the `light-dark()` pair.
+    📊 Null on 0 of the 1,898 games this panel can draw, in BOTH themes, measured in serving.
+
+    ⚠️ AND THE NOTE LIVES HERE RATHER THAN IN THE QUERY BECAUSE OF THE PARAGRAPH BELOW, WHICH
+    A171 WALKED STRAIGHT INTO. The first draft put this as a `--` comment inside the string and
+    `test_no_user_facing_string_uses_british_spelling` caught it — but the spelling was the
+    lesser half: `ci/check_page_queries.py` normalises a query to ONE LINE, so a `--` comment
+    swallows every column after it. A165 paid for this exact mistake and wrote the warning that
+    is four lines further down.
+
     🚨 A139, cfdb-main-R-934. `home_abbreviation` IS SELECTED SO THE CURVE'S FINAL VALUE CAN NAME
     ITS SIDE. The bare percentage sat beside the AWAY team's name — the scoreboard puts away on
     the top line (R-522) — and told a reader the opposite of the truth while every label was
@@ -275,6 +289,8 @@ def _completed_games(scope) -> pd.DataFrame:
         select game_id, season, week, season_type, game_date,
                home_team_display, away_team_display, home_team_slug, away_team_slug,
                home_abbreviation,
+               home_color_on_light, home_color_on_dark,
+               away_color_on_light, away_color_on_dark,
                home_logo_url, away_logo_url, home_conference, away_conference,
                home_rank, away_rank,
                home_team_record_display, away_team_record_display,
@@ -994,6 +1010,25 @@ def _espn_link(row) -> str:
             "target='_blank' rel='noopener noreferrer'>ESPN &nearr;</a>")
 
 
+def _row_colors(row) -> tuple:
+    """`(home, away)` as finished CSS colour strings for one game row.
+
+    🚨 A171 (cfdb-main-R-1602). THE ADAPTER EXISTS BECAUSE OF THE ITERATOR, not because of the
+    colours. `table.render` hands a renderer an `itertuples` row, which is a namedtuple and has
+    **no `.get`** — and `identity.accent_color` reads its row with `.get` so it can accept the
+    wide game rows every other caller passes. One small mapping here is cheaper than teaching
+    the shared function about two row shapes.
+
+    ⚠️ AND IT IS NOT A SECOND THEME MECHANISM. Nothing here decides light or dark: the string
+    it returns is `light-dark(...)`, resolved by the BROWSER, which is the whole reason this
+    chart can do what the Vega-based drives panel could not (cfdb-main-R-1236).
+    """
+    fields = {key: getattr(row, key, None)
+              for key in ("home_color_on_light", "home_color_on_dark",
+                          "away_color_on_light", "away_color_on_dark")}
+    return (identity.accent_color(fields, "home"), identity.accent_color(fields, "away"))
+
+
 def _most_exciting(df: pd.DataFrame, scope) -> None:
     st.subheader("Most exciting")
     # ✅ A153. THE CAPTION SAYS "lead changes" AGAIN AND IT IS TRUE THIS TIME — the whole point of
@@ -1098,7 +1133,13 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
         # Python `False` singleton, so `reaches is not False` was True for every row and the whole
         # truncation branch would have been dead code that reads as handled.
         text, is_cut = labels.get(row.game_id, ("", False))
-        return winprob.sparkline_svg(points, label=text, is_cut=is_cut)
+        # 🚨 A171. THE COLOURS ARE THE CALLER'S TO SUPPLY, which is why they are composed here
+        # rather than inside the chart: `lib/winprob.py` holds no team colours and must not
+        # reach for one (§4.2.1 — `identity` owns that). ⚠️ `row` here is an itertuples row,
+        # so it has no `.get`; `_row_colors` adapts it.
+        home_fill, away_fill = _row_colors(row)
+        return winprob.sparkline_svg(points, label=text, is_cut=is_cut,
+                                     home_color=home_fill, away_color=away_fill)
 
     # 🚨 THE CURVE COLUMN IS SIZED TO THE WIDEST CHART IN THIS FRAME, AND IT HAS TO BE.
     # `.cfdb-table` is `table-layout:fixed`, so without a colgroup every column takes an equal
