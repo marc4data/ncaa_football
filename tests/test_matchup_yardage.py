@@ -1413,7 +1413,27 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
                # just past the bar's end. **Two code constants and a literal; no published
                # column is in the expression, and the quotient has exactly one consumer —
                # `xOffset` on the two icon layers.**
-               '(-1.0 if str(band) == "away" else 1.0) * (_DRIVE_GLYPH_SIZE ** 0.5) / 2.0'}
+               '(-1.0 if str(band) == "away" else 1.0) * (_DRIVE_GLYPH_SIZE ** 0.5) / 2.0',
+               # ── v19, five more, and every one is GEOMETRY OR COLOUR SCIENCE rather than a
+               # metric. None reads a published measure, so none can disagree with the Excel
+               # export — which is the failure this guard exists for.
+               #
+               # ⚠️ **THE TWO IN `_drive_endzone_ink` ARE WCAG's OWN sRGB TRANSFER FUNCTION**,
+               # and they are here because NOTHING IN `site/` COMPUTES A LUMINANCE — checked.
+               # Marc asked for *"white or black lettering"* on an opaque team-colour end zone,
+               # and `identity.text_on` does not answer that: its own docstring says *"AC-G.26.
+               # There is deliberately no contrast maths in this module."* The `/255` is a byte
+               # to a fraction; the `/12.92` and `/1.055` are the standard's constants.
+               'channels = [int(value[i:i + 2], 16) / 255 for i in (0, 2, 4)]',
+               'linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]',
+               # ⚠️ The drives table's CENTRE anchor — Marc's *"Horizontal center align the
+               # Result"*. A span halved to find its midpoint; one consumer, the text's x.
+               'return content + span / 2.0',
+               # ⚠️ The end-zone mascot's position and the panel's vertical centre. `span` is a
+               # count of end-zone widths and `_DRIVE_FIELD_YARDS / _DRIVE_ENDZONE` is 12 of
+               # them across the field — **both code constants, no published column.**
+               'x=alt.value(float(width) * span / (_DRIVE_FIELD_YARDS / _DRIVE_ENDZONE)),',
+               'y=alt.value(float(height) / 2.0),'}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "

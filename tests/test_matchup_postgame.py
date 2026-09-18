@@ -1874,15 +1874,22 @@ def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel)
         assert style.get("box-sizing") == "border-box", (
             "without border-box the padding is ADDED to the width and the row grows past its "
             "column")
-        # 🚨 NO PART OF THE ROW IS PROPORTIONAL, AND SINCE R-864 THAT INCLUDES THE CHART CELL.
-        # A `flex:1` chart cell would be the obvious way to fill the leftover room and it is the
-        # wrong one: `box()` emits `max-width:100%`, so an SVG whose declared width its cell
-        # cannot honour is SCALED rather than clipped — B108 squeezed a 432px viewBox into 216px
-        # and rendered its `18` four pixels tall. **The DOM was correct and the text was
-        # unreadable**, which no assertion on the markup could have caught.
+        # 🚨 NOTHING IN THE ROW MAY **SHRINK**, AND B108 IS WHY — the mechanism is unchanged.
+        # `box()` emits `max-width:100%`, so an SVG whose declared width its cell cannot honour
+        # is SCALED rather than clipped: **B108 squeezed a 432px viewBox into 216px and rendered
+        # its `18` four pixels tall. The DOM was correct and the text was unreadable**, which no
+        # assertion on the markup could have caught.
+        #
+        # ⚠️ **v19 AMENDED THIS FROM *nothing is proportional* TO *nothing shrinks*, AND THE
+        # REASON ABOVE IS EXACTLY WHY THE AMENDMENT IS SAFE.** Marc asked the chart to *"expand
+        # horizontally if there is available room"* while *"don't collapse smaller than it is
+        # now"* — so the chart cell is `flex:1 0 <basis>`: **grow factor 1, SHRINK FACTOR 0.**
+        # The cell can never fall below the width `box()` was handed, which is the only
+        # condition B108's defect needs. **A `flex:1 1` would reopen it and is still forbidden.**
         row_only = cell.split("</div>", 1)[0]
-        assert "flex:1" not in row_only, (
-            f"something in the measure row is proportional again: {row_only[:200]}")
+        assert "flex:1 1" not in row_only, (
+            f"a cell can SHRINK again — that is B108's unreadable chart, not Marc's growth: "
+            f"{row_only[:200]}")
         label, away, home, chart = _spans(cell)
         for part, wanted, what in ((label, label_w, "measure name"),
                                    (away, value_w, "away figure"),
@@ -1892,10 +1899,16 @@ def test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it(panel)
                 f"the {what} is {part.get('width')} rather than the {wanted}rem the table "
                 f"budgets for it")
         chart_w = _expected_chart_width()
-        assert chart.get("flex") == "none", "the chart column can grow or shrink"
-        assert chart.get("width") == f"{chart_w}px", (
-            f"the chart column is {chart.get('width')} rather than the {chart_w}px it declares "
-            f"— and `box()` is handed that same number, so the two cannot be allowed to drift")
+        # ✅ v19: THE CHART CELL GROWS AND NEVER SHRINKS. `flex:1 0 <basis>` with a matching
+        # `min-width` — the basis and the floor are the SAME number `box()` is handed, so the
+        # cell and the SVG still cannot drift, and spare row width now reaches the chart
+        # instead of going nowhere.
+        assert chart.get("flex") == f"1 0 {chart_w}px", (
+            f"the chart column is `flex:{chart.get('flex')}` — Marc asked it to expand into "
+            f"available room with grow 1, and B108 requires shrink 0")
+        assert chart.get("min-width") == f"{chart_w}px", (
+            f"the chart column floors at {chart.get('min-width')} rather than the {chart_w}px "
+            f"`box()` is handed — below that the SVG scales and its labels become unreadable")
 
 
 def test_the_COMMENTS_ABOUT_THE_CHART_WIDTH_AGREE_WITH_THE_CODE():
@@ -2253,9 +2266,16 @@ def test_the_COMPOSITE_rows_RESERVE_the_chart_column_and_draw_NO_PLACEHOLDER(pan
         assert len(spans) == 4, (
             f"a composite row has {len(spans)} cells against the metric rows' 4 — the chart "
             f"column was dropped rather than reserved, so every figure on this row shifts")
-        assert spans[3].get("width") == f"{chart_w}px", (
-            f"the composite row's chart column is {spans[3].get('width')} rather than "
-            f"{chart_w}px, so it does not line up with the metric rows above it")
+        # ✅ v19: THE RESERVATION IS THE SAME SIZE, EXPRESSED AS A FLOOR RATHER THAN A WIDTH.
+        # The chart cell grows into spare room now (`flex:1 0 <basis>`), so what R-141 needs —
+        # *the column is always there and always starts the same size* — is carried by the
+        # basis and the `min-width`, and a composite row reserves exactly what a metric row does.
+        assert spans[3].get("min-width") == f"{chart_w}px", (
+            f"the composite row's chart column floors at {spans[3].get('min-width')} rather "
+            f"than the {chart_w}px a metric row reserves, so the figures shift between them")
+        assert spans[3].get("flex") == f"1 0 {chart_w}px", (
+            f"the composite row's chart column is `flex:{spans[3].get('flex')}` and a metric "
+            f"row's is `1 0 {chart_w}px` — the two must reserve identically")
 
 
 def test_the_TABLE_is_the_LEFTMOST_block_and_the_cards_follow_it(panel):
@@ -2728,3 +2748,30 @@ def test_the_HEADER_ACCENT_names_BOTH_theme_variants_and_not_just_the_light_one(
 def identity_fallback():
     from lib import identity
     return identity.FALLBACK
+
+
+def test_THE_CARD_REGION_HAS_MARCS_SECTION_HEADING_from_the_same_producer(panel):
+    """> **MARC, v19:** *"Add a section header for Best Performances above the player card
+    > section (format like Box Score)"*
+
+    ✅ **`_section_heading` IS THE PRODUCER BOX SCORE AND ADVANCED ALREADY USE (R-885), AND IT
+    IS CALLED (§4.3).** *"format like Box Score"* is the whole instruction — a second heading
+    drawn to look similar is the drift this project has paid for three times (B117).
+
+    ⚠️ **IT SITS INSIDE THE CARDS COLUMN**, so its rule spans the card region the way Box
+    score's spans the table column. The two are siblings; a heading stretching over both was
+    the mistake R-885's own docstring records.
+    """
+    run, matchup = panel
+    entries, _seen = run(_both())
+    region = _card_region(entries)
+
+    produced = matchup._section_heading(matchup._BEST_PERFORMANCES_SECTION)
+    assert region, "the card region drew nothing at all"
+    assert produced in region, (
+        "the heading is not in the CARDS block — Marc asked for it above the player card "
+        "section, and its rule must span that region rather than the table beside it")
+    assert matchup._BEST_PERFORMANCES_SECTION == "Best Performances", (
+        f"the heading reads {matchup._BEST_PERFORMANCES_SECTION!r}; Marc named it")
+    assert matchup._SECTION_RULE in produced, (
+        "the heading carries no top rule, which is the *format like Box Score* half")
