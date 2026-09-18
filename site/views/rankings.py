@@ -87,9 +87,13 @@ def _poll_table(season, week, poll) -> None:
 def _compare(season, week) -> None:
     """AC-4.4: fed by the PRE-PIVOTED view. No pivot happens in Streamlit."""
     with states.section("srv_rankings_compare"):
+        # A170: `team_slug` and `season` are selected for the link — team_link reads the
+        # season off the row to carry it through to the team page, and a slug that is not
+        # selected cannot be linked. `season` is already in the WHERE; selecting it costs
+        # nothing and makes the row self-describing.
         df = query("""
-            select school, conference_name, ap_rank, coaches_rank, committee_rank,
-                   disagreement_spread, as_of_ts
+            select school, team_slug, season, conference_name, ap_rank, coaches_rank,
+                   committee_rank, disagreement_spread, as_of_ts
             from srv_rankings_compare
             where season = :season and week = :week
             order by disagreement_spread desc nulls last, ap_rank
@@ -100,7 +104,11 @@ def _compare(season, week) -> None:
         # text. F2-22. Sorting now happens through the URL like every other choice, so a
         # reader can send somebody "the week the polls disagreed most about Texas".
         compare_columns = [
-                Col("school", "Team"),
+                # A170 (cfdb-main-R-1322). The one team name on this page that could not be a
+                # link until this round, because the view published no slug. `Col.link` rather
+                # than a row link_builder, for A169's reason: it wins over the row link for
+                # that cell, so nothing nests, and it is the form the anchor guard reads as safe.
+                Col("school", "Team", link=table.team_link("team_slug")),
                 Col("conference_name", "Conf"),
                 Col("ap_rank", "AP", "num", dp=0),
                 Col("coaches_rank", "Coaches", "num", dp=0),

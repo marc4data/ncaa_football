@@ -1108,3 +1108,161 @@ def test_the_jersey_is_a_worn_number_and_never_a_float():
     # The value pandas actually hands a page for a present jersey in a nullable column.
     for cell in (ident.player_row(_player(jersey=j)) for j in (14.0, 7.0, 99.0)):
         assert ".0" not in cell, cell
+
+
+def test_the_win_probability_curve_has_exactly_one_producer():
+    """🚨 A170 (cfdb-main-R-1324). The chart was promoted to `lib/` so Matchup can draw it —
+    and the whole value of a promotion is that the SECOND caller does not become a second COPY.
+
+    > **MARC, v20:** *"Add the Win % chart to the right of the Scoreboard in the header"*
+
+    ⚠️ **THIS FILE'S OWN HEADER IS THE ARGUMENT: *"Building them four times is four chances to
+    diverge"*, and *"four correct copies pass every per-panel test"*.** A duplicated curve would
+    render identically the day it was copied, and the two would part company the first time
+    somebody tuned one — which is exactly what happened to the record cell this file exists for.
+
+    🚨 **THE TELL IS THE SCALE CONSTANT, NOT THE FUNCTION NAME.** A copy made by pasting the
+    body would carry `_CURVE_PX_PER_UNIT` and could easily be called something else, so the
+    assertion reads BOTH: one definition of the entry point, and the scale named in one module.
+    """
+    producers, scale_holders, checked = [], [], 0
+    for path in sorted((ROOT / "site").rglob("*.py")):
+        source = path.read_text()
+        checked += 1
+        if any(isinstance(node, ast.FunctionDef) and node.name == "sparkline_svg"
+               for node in ast.walk(ast.parse(source))):
+            producers.append(path.relative_to(ROOT).as_posix())
+        # The literal ASSIGNMENT, so a caller that merely reads the constant is not a copy.
+        if re.search(r"^_CURVE_PX_PER_UNIT\s*=", source, re.M):
+            scale_holders.append(path.relative_to(ROOT).as_posix())
+
+    assert checked >= 20, f"only {checked} modules walked — the glob stopped seeing site/"
+    assert producers == ["site/lib/winprob.py"], (
+        f"the curve must have exactly one producer; found {producers}")
+    assert scale_holders == ["site/lib/winprob.py"], (
+        f"_CURVE_PX_PER_UNIT is the curve's scale and belongs to one module; "
+        f"found {scale_holders}")
+
+
+def test_the_promoted_curve_exposes_its_width_rather_than_applying_it():
+    """🚨 A170 (cfdb-main-R-1324). `chart_width` is PUBLIC on purpose, and this pins why.
+
+    📊 **B138 flagged the one design decision in the promotion:** `_curve_width` exists because
+    **ten charts on Today share one `table-layout:fixed` column and the column must be sized to
+    the widest of them.** ⚠️ **A Matchup header has ONE chart and no column.**
+
+    ✅ **So the module reports a width and Today decides what to do with it.** Had the module
+    applied the shared width itself, Matchup would have inherited a constraint that was never
+    its own — and the bug would be a chart that is mysteriously too wide in a header, with
+    nothing in Matchup's own source to explain it.
+
+    ⚠️ **AND THE `max(...)` STAYS IN TODAY**, which is the half that proves the split is real.
+    """
+    winprob = _winprob()
+    assert callable(getattr(winprob, "chart_width", None)), (
+        "chart_width must be part of the promoted module's public surface")
+
+    # It reports a NUMBER, and a wider game reports a bigger one.
+    regulation = winprob.chart_width(None)
+    assert isinstance(regulation, int) and regulation > 0, regulation
+
+    # The shared-column decision is Today's, and Today still makes it.
+    assert "max(" in SOURCE and "winprob.chart_width(" in SOURCE, (
+        "Today must still compute the widest chart itself — that is the constraint the "
+        "promoted module deliberately does not impose")
+    # 🚨 BY AST, NOT BY SUBSTRING — and this test learned it the hard way on its first run.
+    # `chart_width`'s own comment says the column is `max(chart_width(...)) + 12`, describing
+    # what TODAY does with the number. A `"max(" in source` check reads that prose as code and
+    # fails a function that is correct. §2.2.1c.1's rule, inside the guard enforcing it.
+    tree = ast.parse((ROOT / "site" / "lib" / "winprob.py").read_text())
+    body = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "chart_width")
+    calls = {n.func.id for n in ast.walk(body)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "max" not in calls, (
+        "chart_width must report one chart's width, not reach for a shared maximum")
+
+
+def _winprob():
+    """The promoted curve module. Mirrors `test_today_page._winprob`."""
+    from lib import winprob
+    return winprob
+
+
+# The four team-name cells Marc asked to be links, as (module, the Col's field, why).
+# A169 did the first three; A170 added the fourth once the view finally published a slug.
+LINKED_TEAM_CELLS = [
+    ("standings.py", "team", "A169 — Standings"),
+    ("rankings.py", "team", "A169 — Rankings, the poll table"),
+    ("stats.py", "team", "A169 — Stats"),
+    ("rankings.py", "school", "A170 — Rankings, the poll-DISAGREEMENT table"),
+]
+
+
+def test_every_team_name_marc_asked_to_link_still_links():
+    """🚨 A170 (cfdb-main-R-1326). A169 made three team names links; A170 made the fourth.
+    NOTHING ASSERTED ANY OF THEM, and a staged break proved it.
+
+    📊 **MEASURED: removing the compare table's `link=` and removing `team_slug` from its query
+    BOTH came back GREEN across the whole suite.** There is no rankings test module at all, so
+    the feature Marc asked for twice could be deleted in a refactor and every instrument in this
+    project would stay quiet.
+
+    ⚠️ **A169's guard is the NEGATIVE of this rule** — *a table with a linked team name must not
+    also link its rows* — so it fires when a link is WRONG and says nothing when one is ABSENT.
+    AC-G.11's distinction, in a test suite: those are different failures and only one was
+    covered.
+
+    🚨 **AND THE AFFORDANCE IS THE POINT, NOT THE DESTINATION.** All three A169 pages already
+    routed to the right place through a row `link_builder`; what was missing was `Col.link`,
+    which is what makes the cell LOOK clickable. So this asserts the `link=` keyword
+    specifically — a row link_builder would satisfy "it navigates" and is exactly the state
+    Marc complained about.
+    """
+    for module, field, why in LINKED_TEAM_CELLS:
+        source = (ROOT / "site" / "views" / module).read_text()
+        cols = [node for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name) and node.func.id == "Col"
+                and node.args
+                and isinstance(node.args[0], ast.Constant) and node.args[0].value == field]
+        assert cols, f"{why}: no Col({field!r}) in {module} at all — the cell was renamed or lost"
+        linked = [c for c in cols if any(kw.arg == "link" for kw in c.keywords)]
+        assert linked, (
+            f"{why}: Col({field!r}) in {module} carries no `link=`. The cell may still "
+            f"navigate through a row link_builder — that is the state Marc complained about, "
+            f"because it does not LOOK like a link.")
+
+
+def test_the_poll_disagreement_table_selects_the_slug_it_links_with():
+    """🚨 A170 (cfdb-main-R-1322). `Col.link` builds an href from a column IN THE ROW, so a link
+    is only as real as the SELECT behind it.
+
+    ⚠️ **`table.team_link` returns None where the slug is missing rather than building
+    `/team?team=None`** — deliberately, and it is why dropping `team_slug` from the query is a
+    SILENT defect: every cell quietly stops being a link and the page still renders perfectly.
+    A staged break confirmed the whole suite stayed green.
+
+    📊 **The view could not publish the slug until this round** — `srv_rankings_compare` carried
+    `school` and `team_id` and nothing else, checked against `information_schema`. So this
+    asserts the two halves that had to arrive together.
+    """
+    # 🚨 THE SQL STRING BY AST, NOT THE FUNCTION'S TEXT — this test was written the lazy way
+    # first and the staged break came back GREEN, because the comment directly above the query
+    # says the words "team_slug" and "season" in prose. A grep cannot tell a comment from a
+    # select list (§2.2.1c.1), and the comment was one this very round added.
+    tree = ast.parse((ROOT / "site" / "views" / "rankings.py").read_text())
+    compare = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "_compare")
+    # "from srv_rankings_compare", not merely the view's name: `states.section` and
+    # `states.render_or_state` both take it as a plain string argument, so three constants
+    # in this function mention it and only one of them is a query.
+    sql = [n.value for n in ast.walk(compare)
+           if isinstance(n, ast.Constant) and isinstance(n.value, str)
+           and "from srv_rankings_compare" in n.value]
+    assert len(sql) == 1, f"expected one query against the view, found {len(sql)}"
+    select = sql[0].split("from srv_rankings_compare")[0]
+    for column in ("team_slug", "season"):
+        assert re.search(rf"\b{column}\b", select), (
+            f"the compare query does not select {column!r}, so team_link cannot build an href "
+            f"— the cell renders as plain text and nothing else fails")
