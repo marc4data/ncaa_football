@@ -1015,6 +1015,23 @@ def test_the_curve_is_filled_from_zero_and_the_zero_is_the_middle():
     assert "<polyline" in svg, "the line survives the fill — the spikes are the drama"
 
 
+def _svg_label(svg: str) -> str:
+    """The sparkline's end label as a READER sees it, tags stripped.
+
+    🚨 A167 SPLIT THE LABEL INTO TWO `tspan`s so the percentage could be bigger and blue — Marc:
+    *"Increase the font of the final win % and make it blue to help it pop out."* ⚠️ **Three
+    tests in this file asserted `"%</text>"` or `f">{text}</text>"`, which describe the MARKUP
+    and not the label.** The rendered text never changed; the assertions were reading the wrong
+    thing, and this is what they read now.
+    """
+    import re
+    # ⚠️ THE LEADING `.*` IS LOAD-BEARING: A167 also added `<text>` marks for the quarter
+    # labels, so a non-greedy match from the FIRST one swallows `1Q2Q3Q4Q` into the answer. The
+    # end label is the LAST text mark in the SVG.
+    match = re.search(r".*<text\b[^>]*>(.*?)</text>\s*</svg>", svg, re.S)
+    return re.sub(r"<[^>]+>", "", match.group(1)).strip() if match else ""
+
+
 def test_a_truncated_curve_is_never_labelled_with_a_final_value():
     """🚨 AC-G.11, AND IT IS ONE ROW IN NINE RATHER THAN A DEFENSIVE BRANCH.
 
@@ -1040,8 +1057,9 @@ def test_a_truncated_curve_is_never_labelled_with_a_final_value():
     complete = today._sparkline_svg(points, label=text, is_cut=is_cut)
     truncated = today._sparkline_svg(points, label=cut_text, is_cut=cut_is_cut)
 
-    assert "%</text>" in complete, "a complete curve labels its final value — Marc asked for it"
-    assert "%</text>" not in truncated, (
+    assert _svg_label(complete).endswith("%"), (
+        "a complete curve labels its final value — Marc asked for it")
+    assert not _svg_label(truncated).endswith("%"), (
         "a truncated curve must not print a final value: the number is not one")
     assert "cut</text>" in truncated, "the absence has to say which absence it is"
     assert "stroke-dasharray='1 2'" in truncated, "and be visible without reading the label"
@@ -1161,7 +1179,7 @@ def test_the_PANEL_passes_the_truncation_flag_and_not_just_the_helper(monkeypatc
     assert "cut</text>" in cell, (
         "the panel did not pass the truncation flag through to the chart — the helper honours "
         "it, which is a different claim")
-    assert "%</text>" not in cell, (
+    assert not _svg_label(cell).endswith("%"), (
         "a truncated curve must not print a final value even when the panel renders it")
 
     # ✅ AND THE OTHER DIRECTION, so the assertion above is not satisfied by a chart that never
@@ -1174,7 +1192,7 @@ def test_the_PANEL_passes_the_truncation_flag_and_not_just_the_helper(monkeypatc
     today._most_exciting(complete, _Scope())
     columns = {c.field: c for c in captured[-1]}
     cell = columns["curve"].format(complete.iloc[0])
-    assert "%</text>" in cell
+    assert _svg_label(cell).endswith("%")
     assert "HOME" in cell, "cfdb-main-R-934: the visible label names the home side"
 
 
@@ -1208,7 +1226,7 @@ def test_the_final_value_names_the_home_side_and_not_the_away_one():
     assert text.endswith("%"), "and the number is still the number"
 
     svg = today._sparkline_svg(points, label=text, is_cut=is_cut)
-    assert f">{text}</text>" in svg, "the visible label is the one that was measured"
+    assert _svg_label(svg) == text, "the visible label is the one that was measured"
     assert "home side" in svg, "the aria-label must not say less than the pixels"
 
 
@@ -1268,6 +1286,72 @@ def test_the_curve_label_sits_left_of_the_final_point_and_buys_no_width():
     assert label_x < last_x, f"label at {label_x} is not left of the final point at {last_x}"
 
 
+def test_the_quarters_are_named_and_overtime_is_not_a_fifth_quarter():
+    """🚨 A167 (cfdb-main-R-1311). > **MARC, v06:** *"label the x-axis with the quarters (1Q, 2Q,
+    etc)."*
+
+    ⚠️ **THE LABELS SIT INSIDE THE PLOT AND THAT IS A DENSITY DECISION, NOT A STYLE ONE.**
+    Measured both ways at 1300px: inside costs **0px** — row 81.8px, unchanged; below grows the
+    chart 64px -> 78px and the row to **91.4px**, which is **+110px per ten-row panel** and gives
+    back most of what A165 returned when Marc asked for *"things more dense vertically"*.
+
+    🚨 **AND OVERTIME IS NOT A QUARTER.** The chart draws a band per overtime period, so the
+    labels read `OT`, `2OT`, `3OT` — **verified on a real 3-overtime game** (`401866418`), which
+    renders `['1Q','2Q','3Q','4Q','OT','2OT','3OT']`. A sequence reading `5Q` would be wrong, and
+    a fixture with no overtime cannot tell the two apart.
+    """
+    import re
+    today = _today()
+
+    def labels(svg):
+        return re.findall(r"text-anchor='middle'[^>]*>([^<]*)</text>", svg)
+
+    regulation = today._sparkline_svg(_curve(), label="MICH 63%")
+    assert labels(regulation) == ["1Q", "2Q", "3Q", "4Q"], labels(regulation)
+
+    # 🚨 A CURVE WITH REAL OVERTIME BANDS, or the OT branch fires on nothing (R-760).
+    overtime = _curve(overtime_from=30)
+    assert today._curve_bands(overtime) > 0, "this fixture must actually reach overtime"
+    drawn = labels(today._sparkline_svg(overtime, label="PSU 51%"))
+    assert drawn[:4] == ["1Q", "2Q", "3Q", "4Q"], drawn
+    assert drawn[4] == "OT", f"the first overtime is OT, never 5Q: {drawn}"
+    assert all(d.endswith("OT") for d in drawn[4:]), drawn
+    assert "5Q" not in drawn
+
+
+def test_the_final_percentage_pops_and_the_abbreviation_does_not():
+    """🚨 A167. > **MARC, v06:** *"Increase the font of the final win % and make it blue to help
+    it pop out."*
+
+    ⚠️ **HE SAID "the final win %", NOT "the label"** — so the team abbreviation keeps its size
+    and the percentage alone grows and takes the colour.
+
+    📊 **"BLUE" IS A TOKEN AND ITS CONTRAST IS MEASURED**, in situ, with the stylesheets injected
+    the way `theme.inject()` injects them: `rgb(31,111,235)` on white at **4.63:1** and
+    `rgb(88,166,255)` on `#0e1117` at **7.48:1** — both AA for normal text.
+
+    🚨 **AND `_curve_width` MUST NOT HAVE GROWN.** The label is anchored at its RIGHT edge and
+    grows leftward into the plot, so a bigger number costs the chart nothing; A165 took the
+    regulation chart 224px -> 182px as Marc's *"tighten up the horizontal space"*.
+    """
+    import re
+    today = _today()
+    svg = today._sparkline_svg(_curve(), label="MICH 63%")
+    match = re.search(r"<tspan font-size='([\d.]+)' fill='([^']+)'[^>]*>([^<]+)</tspan>", svg)
+    assert match, f"the percentage is not in its own tspan: {svg[-240:]}"
+    size, fill, text = match.groups()
+    assert float(size) > 9, f"the percentage must be bigger than the label's 9px, not {size}"
+    assert fill == "var(--cfdb-link)", f"blue comes from the token, never a hex: {fill!r}"
+    assert text == "63%", text
+    assert "<tspan>MICH </tspan>" in svg, "the abbreviation keeps the base size and is not blue"
+    assert today._curve_width(_curve()) == 182, "the bigger label must buy no width"
+
+    # 🚨 THE `cut` BRANCH IS AN ABSENCE, NOT A VALUE, AND IS NOT DRESSED AS ONE.
+    cut = today._sparkline_svg(_curve(), label="cut", is_cut=True)
+    assert "<tspan" not in cut, "the truncation word must not be styled like a win probability"
+    assert "var(--cfdb-link)" not in cut
+
+
 def test_the_curve_is_as_tall_as_the_scoreboard_rows_it_sits_beside():
     """📊 A164. THE HEIGHT IS A MEASUREMENT OF THE CELL BESIDE IT.
 
@@ -1320,9 +1404,11 @@ def test_most_exciting_layout_has_one_entry_per_column_and_the_scoreboard_is_wid
     source = open(_today().__file__).read()
     body = source[source.index("def _most_exciting("):source.index("def _favorite_margin(")]
 
-    match = re.search(r'^    layout = (\[.+\])$', body, re.M)
+    match = re.search(r'^    layout = (\[.+?\])\n', body, re.M | re.S)
     assert match, "the layout line moved; this test cannot see what it is asserting about"
-    layout = eval(match.group(1), {}, {"widest": 170})       # noqa: S307 - a literal list
+    layout = eval(match.group(1), {},                        # noqa: S307 - a literal list
+                  {"widest": 170, "scoreboard_px": 426,
+                   "_SCOREBOARD_GUTTER_PX": 12})
 
     headers = re.findall(r'Col\("[a-z_]+", "([^"]+)"', body)
     assert headers == ["Scoreboard", "Win probability", "4th qtr", "OT", "Game",
@@ -1332,8 +1418,23 @@ def test_most_exciting_layout_has_one_entry_per_column_and_the_scoreboard_is_wid
     assert len(layout) == len(headers), (
         f"{len(layout)} widths for {len(headers)} columns — the colgroup is out of step")
 
-    # The scoreboard carries the widest share, because the team name lives inside it.
-    assert layout[0].endswith("%") and float(layout[0][:-1]) >= 35, layout[0]
+    # 🚨 A167: THE SCOREBOARD COLUMN IS DERIVED, NOT A PERCENTAGE (cfdb-main-R-1310).
+    #
+    # > **MARC, v06:** *"Scoreboard - unneccessary white space to the right of the scoreboard."*
+    #
+    # A165 set it to 40% to fix a truncation that was never in this column — its own measurement
+    # was *"+54% width, ellipsised count UNCHANGED at eleven"*. 📊 A167 measured the scoreboard's
+    # NATURAL width instead: 425.6px at four periods, 463.2px at five, and **identical at 6, 9
+    # and 13** because `_quarter_cells` draws one overtime column rather than one per period.
+    # **Leftover whitespace went 47.2px -> 8.8px at 1300px and 167.2px -> 8.8px at 1600px.**
+    #
+    # ⚠️ A PERCENTAGE IS WHAT MADE IT WORSE ON A WIDE SCREEN: 40% of a wider table is a wider
+    # gap. A px width derived from the content cannot do that, which is why this asserts the
+    # KIND and not just the number.
+    assert layout[0].endswith("px"), (
+        f"the scoreboard column must be derived from the scoreboard, not a share of the table: "
+        f"{layout[0]}")
+    assert 400 <= int(layout[0][:-2]) <= 500, layout[0]
     # The three lead-change columns are pinned, narrow and equal to each other.
     leads = layout[2:5]
     assert len(set(leads)) == 1, f"the three lead columns must share one width: {leads}"
