@@ -1351,3 +1351,116 @@ def test_the_curve_cell_passes_BOTH_teams_colours_from_a_query_that_selects_them
     # would have swallowed every column after it. A165 paid for this once already.
     for text in texts:
         assert "--" not in text, "a `--` comment inside a query string swallows the rest of it"
+
+
+def _rendered_legend(big=None, blowout=None):
+    """The REAL `_legend`, rendered, with a frame carrying the bands. A173.
+
+    ⚠️ RENDERED RATHER THAN READ, which is the whole R-178 family's rule: a test that inspects
+    `strip_subsections()` to build its expectation passes on any implementation of it.
+    """
+    import importlib
+    import pandas as pd
+    import render_harness
+    frame = None
+    if big is not None:
+        frame = pd.DataFrame([{"upset_margin_big": big, "upset_margin_blowout": blowout}])
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        page = importlib.reload(importlib.import_module("views.today"))
+        page._legend(frame)
+        return "\n".join(captured)
+
+
+def _legend_row_labels(html) -> list:
+    return re.findall(r"cfdb-legend-row'>.*?<span>([^<]+)</span>", html, re.S)
+
+
+def test_the_legend_reads_the_measured_upset_bands_rather_than_the_level_names():
+    """🚨 A173 (cfdb-main-R-1703). ONE UNPASSED ARGUMENT WAS THE WHOLE INCONSISTENCY.
+
+    > **MARC, v08:** *"Need the Legend to be more consistent across the pages. Model after
+    > Schedule and apply to Today (Before/After the Game)"*
+
+    📊 `glyphs.strip_entries()` with no `bands` renders the LEVEL NAMES — *"upset by more than
+    a touchdown"*. With bands it renders the NUMBERS — *"Upset by 8–14"*. Schedule passed its
+    frame; Today passed nothing. **The same three marks carried different words on two pages a
+    reader moves between, and the vaguer page was the one Marc was looking at.**
+
+    🚨 THE FIXTURE USES 10 AND 21, NOT THE SHIPPED DEFAULTS OF 7 AND 14 (R-843: a pinned value
+    must MOVE under the break). With the defaults, a legend that had silently stopped reading
+    the frame would print exactly the same words and this test would pass on the defect —
+    which is precisely how the defect survived: `metrics.from_frame` falls back to (7, 14) and
+    **the published values ARE 7 and 14**, so nothing on the page ever looked wrong.
+    """
+    labels = _legend_row_labels(_rendered_legend(big=10, blowout=21))
+    assert "Upset by 10 or fewer" in labels, labels
+    assert "Upset by 11–21" in labels, labels
+    assert "Upset by 22+" in labels, labels
+    for generic in ("Upset", "upset by more than a touchdown",
+                    "upset by more than two touchdowns"):
+        assert generic not in labels, (
+            f"{generic!r} is the no-bands label — the frame is not reaching strip_entries")
+
+
+def test_the_legend_carries_schedules_four_subsections_and_none_of_its_extra_marks():
+    """🚨 A173. *"Model after Schedule"* is the LAYOUT and the LABELS. **Never the inventory.**
+
+    📊 Schedule's Game group lists five marks — neutral site, dome, `@`, `vs`, details — and its
+    Result group two. `git grep` finds `NEUTRAL`, `DOME` and `MOVE_GLYPH` in `today.py` **zero**
+    times, and A164 removed the winner arrows. Borrowing Schedule's inventory would put seven
+    marks on this legend that no Today row can draw — the exact defect `LEGEND_GROUPS_DRAWN =
+    ()` was set to prevent, and R-178's law pointed the wrong way.
+    """
+    html = _rendered_legend(big=7, blowout=14)
+    assert re.findall(r"cfdb-legend-sub'>([^<]+)<", html) == [
+        "Outcome", "Against the Spread", "Against Over/Under", "Misc"], html[:200]
+
+    # Schedule's own extra marks, by their legend WORDS — absent because Today cannot draw them.
+    for absent in ("Neutral site", "Dome", "Line move", "Home win", "Away win"):
+        assert absent not in html, f"{absent!r} is on a legend for a page that cannot draw it"
+
+    # And the container-width popover Marc asked to be modelled on.
+    # ⚠️ BY AST. The first draft sliced the source on "def " and truncated at `_legend`'s own
+    # NESTED helpers, so the assertion read a fragment that stopped before the popover call —
+    # the same substring-versus-structure mistake this file has now caught three times.
+    legend = next(n for n in ast.walk(ast.parse(SOURCE))
+                  if isinstance(n, ast.FunctionDef) and n.name == "_legend")
+    popovers = [call for call in ast.walk(legend)
+                if isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute) and call.func.attr == "popover"]
+    assert len(popovers) == 1, "one popover"
+    width = {kw.arg: getattr(kw.value, "value", None) for kw in popovers[0].keywords}
+    assert width.get("use_container_width") is True, (
+        "Schedule's popover is use_container_width=True and Marc asked this to be modelled "
+        f"on it; this one is {width.get('use_container_width')!r}")
+
+
+def test_the_strip_subsections_and_schedules_are_the_declared_pair():
+    """⚠️ A173. The two subsection declarations could not be merged cheaply, so they are NAMED
+    as a pair — and this is what makes "named" mean something.
+
+    `glyphs.strip_subsections` keys `(swatch_html, label)` pairs; `schedule.LEGEND_SUBSECTIONS`
+    keys Schedule's own `("shape", "upset", "fill", "cfdb-u1")` tuples that `_legend_key`
+    resolves. **The formats differ all the way down**, and `schedule.py:560` warns that a third
+    level in its list *"would silently change what `e` is"*. So they stay two — and they must
+    gain and lose headings together.
+    """
+    from lib import glyphs as g
+    from views import schedule
+    ours = [heading for heading, _ in g.strip_subsections()]
+    theirs = [heading for heading, _ in schedule.LEGEND_SUBSECTIONS["Against the line"]]
+    assert ours == theirs, (
+        f"the paired subsection declarations disagree: glyphs {ours} vs schedule {theirs}")
+
+
+def test_flattening_the_subsections_is_exactly_what_strip_entries_returns():
+    """🚨 A173. `strip_entries` IS NOW BUILT FROM `strip_subsections`, and this is the property
+    that let that happen without moving Schedule: **the concatenation is the old flat order.**
+
+    ⚠️ If it were not, Schedule's rendered bytes would change and the six tests that walk
+    `LEGEND_GROUPS` two levels deep would be asserting against a different list.
+    """
+    from lib import glyphs as g
+    flat = [entry for _, rows in g.strip_subsections() for entry in rows]
+    assert g.strip_entries() == [("Against the line", flat)]
+    assert len(flat) == 11, f"the strip has 11 marks, not {len(flat)}"

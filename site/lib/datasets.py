@@ -49,5 +49,13 @@ DATASETS = {
     "srv_game_weather": "Kickoff weather",
     "srv_game_travel": "Travel and rest",
     "srv_drive": "Drive-by-drive log",
+    # --- shipped by the Excel export (A173, cfdb-main-R-1701) ----------------------------
+    # ⚠️ REGISTERED BECAUSE THE WORKBOOK SHIPS THEM, not because a page reads them. A sheet
+    # names its source view to the reader, and an unregistered view has no honest label —
+    # `srv_team_week` was already here and the other two were not, which is why Marc's four
+    # looked like four of a kind and were not.
+    "srv_team_stats": "Team season stats, with ranks",
+    "srv_player_stats": "Player season stats, with ranks",
+    "srv_standings": "Conference standings",
     "srv_data_dictionary": "The data dictionary",
 }

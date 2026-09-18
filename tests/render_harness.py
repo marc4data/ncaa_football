@@ -724,3 +724,81 @@ def page_html(body: str, theme: str = "light", padding: str = "1rem 3rem") -> st
             f"font-family:'Source Sans Pro',sans-serif;font-size:14px}}"
             f".block-container{{padding:{padding}}}</style></head>"
             f"<body class='cfdb-app'><div class='block-container'>{body}</div></body></html>")
+
+
+def save_theme_pair(body: str, out_dir, name: str, viewport=None, padding: str = "1rem 3rem",
+                    clip=None, full_page: bool = True) -> dict:
+    """Rasterise one body in BOTH themes, and REFUSE to return a pair that is not one.
+
+    🚨 A173 (cfdb-main-R-1430). THIS EXISTS BECAUSE A171 AND A172 EACH SHIPPED A `_dark.png`
+    THAT WAS BYTE-IDENTICAL TO ITS `_light.png`, AND BOTH ROUNDS REPORTED "both themes".
+
+    📊 MEASURED, `md5sum` over every session-A render pair on disk: clean through A169, then
+    `A171_axis_flip`, `A171_curve_colour_variants` and `A172_roster_tab` all IDENTICAL. B's
+    pairs were never affected.
+
+    🚨 THE CAUSE WAS NOT THE ONE PROPOSED, and this is worth recording. The suspicion was
+    `theme.py:169`'s note that `st.context.theme` lags one rerun — **that is about Streamlit's
+    own theme detection and a raster never runs it.** The real cause was in the two rounds'
+    OWN scripts:
+
+        page = page_html(body, theme="light")                    # built ONCE
+        pg.set_content(page.replace("data-theme='light'",         # a NO-OP …
+                                    "data-theme='dark'"))        # … page_html emits no such
+                                                                 #    attribute
+
+    `page_html` writes `:root{color-scheme:<theme>}` and a hardcoded ground, so the string
+    being replaced never existed and **both screenshots were the same light page.** Playwright's
+    `color_scheme=` could not save it either: an explicit `color-scheme` and a literal
+    background beat `prefers-color-scheme`.
+
+    ✅ SO THE PAGE IS BUILT ONCE PER THEME, WHICH IS WHAT `page_html`'s OWN ARGUMENT IS FOR.
+
+    🚨 AND THE PROOF IS TWO ASSERTIONS, BECAUSE EITHER ALONE PASSES ON A LIE. Bytes differing
+    would pass for two DIFFERENT light renders; a dark pixel alone would pass if both files
+    were dark. **The pair must differ AND the dark one must actually be dark** — the property,
+    not the difference.
+
+    Returns {"light": path, "dark": path}.
+    """
+    from playwright.sync_api import sync_playwright
+    from PIL import Image
+
+    out_dir = Path(out_dir)
+    viewport = viewport or {"width": 1200, "height": 900}
+    paths = {}
+    with sync_playwright() as play:
+        browser = play.chromium.launch()
+        for theme in ("light", "dark"):
+            page = browser.new_page(viewport=viewport, color_scheme=theme)
+            page.set_content(page_html(body, theme=theme, padding=padding),
+                             wait_until="load")
+            page.wait_for_timeout(350)
+            path = out_dir / f"{name}_{theme}.png"
+            shot = {"path": str(path)}
+            if clip is not None:
+                shot["clip"] = clip
+            elif full_page:
+                shot["full_page"] = True
+            page.screenshot(**shot)
+            paths[theme] = path
+        browser.close()
+
+    light_bytes = paths["light"].read_bytes()
+    dark_bytes = paths["dark"].read_bytes()
+    if light_bytes == dark_bytes:
+        raise AssertionError(
+            f"{name}: the light and dark renders are BYTE-IDENTICAL — this is A171/A172's "
+            f"defect (cfdb-main-R-1430) and the pair proves nothing")
+
+    # The property, not the difference: the dark file's own ground must be dark.
+    corner = Image.open(paths["dark"]).convert("RGB").getpixel((3, 3))
+    if sum(corner) > 210:                       # #0e1117 sums to 54; #ffffff to 765
+        raise AssertionError(
+            f"{name}: the file named _dark has a light background {corner} — a light render "
+            f"under a dark name is worse than no dark render")
+    light_corner = Image.open(paths["light"]).convert("RGB").getpixel((3, 3))
+    if sum(light_corner) < 600:
+        raise AssertionError(
+            f"{name}: the file named _light has a dark background {light_corner}")
+    return paths

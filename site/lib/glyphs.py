@@ -306,18 +306,54 @@ def strip_entries(bands=None) -> list:
     columns on `srv_game`, so the labels are a function of the frame. A caller with no frame gets
     the level names; Schedule substitutes the measured bands it already computes.
     """
+    return [("Against the line",
+             [entry for _, rows in strip_subsections(bands) for entry in rows])]
+
+
+def strip_subsections(bands=None) -> list:
+    """The same inventory, split into the headings Schedule shows it under. A173.
+
+    > **MARC, v08:** *"Need the Legend to be more consistent across the pages. Model after
+    > Schedule and apply to Today (Before/After the Game)"*
+
+    🚨 ONE DECLARATION, AND `strip_entries` IS NOW BUILT FROM IT. The flat order is unchanged —
+    Outcome, then Against the Spread, then Against Over/Under, then Misc, concatenated, is
+    exactly the order that list had — so **Schedule's rendered bytes do not move** and the six
+    tests that walk `LEGEND_GROUPS` two levels deep are untouched.
+
+    ⚠️ AND THE DUPLICATE IS NAMED RATHER THAN MERGED, because merging it is not cheap.
+    `schedule.py:LEGEND_SUBSECTIONS` declares the same four headings over SCHEDULE'S OWN entry
+    tuples — `("shape", "upset", "fill", "cfdb-u1")` — which `_legend_key` resolves. These are
+    `(swatch_html, label)` pairs. **The two formats are different all the way down**, and
+    `schedule.py:560` warns why its list must stay flat: *"a third level would silently change
+    what `e` is. Some of those comprehensions would raise; others would build a different set
+    and still pass."* ✅ **So the pair is: THIS function and `schedule.py`'s
+    `LEGEND_SUBSECTIONS`. They must gain and lose headings together.**
+
+    ⚠️ ONE DELIBERATE DIFFERENCE, AND IT IS R-178's LAW: Schedule's Misc carries `MOVE_GLYPH`
+    and this does not. **`git grep` finds MOVE_GLYPH in `today.py` zero times** — borrowing it
+    would put a mark on Today's legend that no Today row can draw, which is the exact defect
+    `LEGEND_GROUPS_DRAWN = ()` was set to prevent. **Copy the layout and the labels; never the
+    inventory.**
+    """
     labels = dict(bands or {})
     return [
-        ("Against the line", [
+        ("Outcome", [
             (indicator("upset", "quiet", ""), "The favorite won"),
             (indicator("upset", "fill", "", "cfdb-u1"), labels.get("upset", "Upset")),
             (indicator("upset", "fill", "", "cfdb-u2"), labels.get("big", UPSET_LEVEL_TITLE["big"])),
             (indicator("upset", "fill", "", "cfdb-u3"),
              labels.get("blowout", UPSET_LEVEL_TITLE["blowout"])),
+        ]),
+        ("Against the Spread", [
             (indicator("cover", "fill", "", "cfdb-acc"), "Winner covered"),
             (indicator("cover", "open", "", "cfdb-acc"), "Winner did not cover"),
+        ]),
+        ("Against Over/Under", [
             (indicator("over", "fill", "", "cfdb-acc"), "Over"),
             (indicator("over", "open", "", "cfdb-acc"), "Under"),
+        ]),
+        ("Misc", [
             (indicator("cover", "nodata", ""), "No closing line held"),
             (indicator("upset", "nodata", ""), "No line, so no favorite"),
             # ✅ A147 FOUND A GAP IN SCHEDULE'S OWN LEGEND AND A149 CLOSED IT. `LEGEND_GROUPS`
