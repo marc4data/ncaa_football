@@ -646,7 +646,12 @@ def test_the_record_does_not_inherit_the_link_colour():
     body text in both, and different from the name in both.
     """
     body = (Path(schedule.__file__).resolve().parents[1] / "lib" / "theme.py").read_text()
-    block = body[body.index(".cfdb-teamlink {"):body.index(".cfdb-logo-box")]
+    # ⚠️ A166: BOTH MARKERS ARE LINE-ANCHORED NOW, AND THAT IS A FIX TO THIS TEST RATHER THAN A
+    # CONCESSION TO THE ROUND THAT TRIPPED IT. `body.index(".cfdb-logo-box")` matched any
+    # SUBSTRING, so the moment another rule mentioned that class in a compound selector —
+    # A166's `.cfdb-card-team .cfdb-logo-box` — the window closed early and the assertion
+    # looked at the wrong `.cfdb-teamlink` block. **The rule being guarded never moved.**
+    block = body[body.index("\n.cfdb-teamlink {"):body.index("\n.cfdb-logo-box")]
     assert "color:inherit !important" in block, "the anchor must give up the link colour"
     assert ".cfdb-teamlink .cfdb-team { color:" in block, (
         "and the NAME must take the accent, or nothing is a link any more")
