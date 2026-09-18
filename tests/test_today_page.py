@@ -1283,40 +1283,67 @@ def test_the_curve_is_as_tall_as_the_scoreboard_rows_it_sits_beside():
     the scoreboard's own 80.8px would re-lay out every row on the panel.
     """
     today = _today()
-    assert today._CURVE_HEIGHT == 67, "the away-to-home span measured on the deployed panel"
+    # ⚠️ A165: 67 -> 64. The scoreboard's own vertical cell padding went to zero for density
+    # (cfdb-main-R-1302) and the span it is measured against shrank with it — re-measured by
+    # class in Chromium, NOT adjusted by the same amount the row changed.
+    assert today._CURVE_HEIGHT == 64, "the away-to-home span re-measured after the density pass"
     assert today._CURVE_HEIGHT > 44, "this is the stretch Marc asked for, not a no-op"
-    assert today._CURVE_HEIGHT < 80.8, (
+    # 🚨 THE UPPER BOUND MOVED WITH THE SCOREBOARD, WHICH IS THE POINT OF HAVING ONE. The
+    # scoreboard is 74.4px after the density pass; a chart taller than that starts driving the
+    # row height and every scoreboard on the panel re-lays out.
+    assert today._CURVE_HEIGHT < 74.4, (
         "taller than the scoreboard and the chart starts driving the row height")
     svg = today._sparkline_svg(_curve(), label="MICH 94%")
-    assert "height='67'" in svg, "the default must actually reach the drawn chart"
+    assert "height='64'" in svg, "the default must actually reach the drawn chart"
 
 
-def test_most_exciting_layout_pins_only_the_first_two_columns():
-    """🚨 A164. MARC MOVED A DISPLAYED COLUMN AND `layout` MUST NOT HAVE NOTICED.
+def test_most_exciting_layout_has_one_entry_per_column_and_the_scoreboard_is_widest():
+    """🚨 A165 REWROTE THIS TEST RATHER THAN DELETING IT, AND THE REASON IS WHY IT EXISTED.
 
-    > *"Re-order columns Move Lead Changes Game between OT Lead Changes and How Close Late."*
+    A164 wrote `test_most_exciting_layout_pins_only_the_first_two_columns` to hold *"layout is
+    `["26%", widest+12] + ["auto"]*6`"* — which pinned **an** arrangement rather than **the**
+    rule, so the first correct change to the arrangement turned it red. ⚠️ **A test that blocks
+    a correct change is encoding the wrong invariant**, and deleting it would have thrown away
+    the real one with it.
 
-    `layout` is `["26%", f"{widest + 12}px"] + ["auto"] * 6` — the two pinned widths belong to
-    Scoreboard and Win probability, and the six that follow are all `auto`. So swapping two of
-    those six is invisible to it.
+    ✅ **THE INVARIANT THAT ACTUALLY MATTERS** is the one whose violation is invisible: `layout`
+    becomes a `<colgroup>`, one `<col>` per entry, so a list that falls out of step with the
+    columns misaligns every width by one — and only on a viewport wide enough for the pinned
+    widths to bite.
 
-    ⚠️ **THIS IS ASSERTED RATHER THAN ASSUMED BECAUSE THE FAILURE IS INVISIBLE UNTIL IT IS NOT.**
-    A `layout` list silently out of step with the columns shows up only on a viewport wide
-    enough for the pinned widths to matter — which is not the one a test renders at, and not
-    necessarily the one anybody looks at.
+    📊 A165's arrangement, and each number is measured rather than chosen:
+    the scoreboard takes 40% because `.cfdb-sb-team` now needs 13rem inside it, and the three
+    lead-change columns are 56px because their values are single digits and their labels were
+    shortened to `4th qtr` / `OT` / `Game`.
     """
     import re
     source = open(_today().__file__).read()
     body = source[source.index("def _most_exciting("):source.index("def _favorite_margin(")]
 
-    match = re.search(r'^    layout = (.+)$', body, re.M)
+    match = re.search(r'^    layout = (\[.+\])$', body, re.M)
     assert match, "the layout line moved; this test cannot see what it is asserting about"
-    assert match.group(1) == '["26%", f"{widest + 12}px"] + ["auto"] * 6', match.group(1)
+    layout = eval(match.group(1), {}, {"widest": 170})       # noqa: S307 - a literal list
 
     headers = re.findall(r'Col\("[a-z_]+", "([^"]+)"', body)
-    assert headers == ["Scoreboard", "Win probability", "4th-qtr lead changes", "OT lead changes",
-                       "Lead changes, game", "How close, late", "Excitement", "Commentary"], headers
-    assert len(headers) == 2 + 6, "the pinned pair plus the six autos"
+    assert headers == ["Scoreboard", "Win probability", "4th qtr", "OT", "Game",
+                       "How close, late", "Excitement", "Commentary"], headers
+
+    # 🚨 ONE ENTRY PER COLUMN. This is the assertion that cannot be checked by looking.
+    assert len(layout) == len(headers), (
+        f"{len(layout)} widths for {len(headers)} columns — the colgroup is out of step")
+
+    # The scoreboard carries the widest share, because the team name lives inside it.
+    assert layout[0].endswith("%") and float(layout[0][:-1]) >= 35, layout[0]
+    # The three lead-change columns are pinned, narrow and equal to each other.
+    leads = layout[2:5]
+    assert len(set(leads)) == 1, f"the three lead columns must share one width: {leads}"
+    assert leads[0].endswith("px"), leads[0]
+    # 🚨 MARC'S NUMBER, HELD AS A NUMBER. *"Reduce by at least 50% horizontally."* These columns
+    # measured **104.3px** each at a 1300px viewport before this round, so anything above
+    # 52.15px fails his ask — and 56px, which looks close enough, is a 46% cut and does not.
+    assert int(leads[0][:-2]) <= 104.3 * 0.5, (
+        f"{leads[0]} is a {100 * (1 - int(leads[0][:-2]) / 104.3):.0f}% cut against the 104.3px "
+        f"these columns took before; Marc asked for at least 50%")
 
 
 def _rankings_frame():
@@ -1334,7 +1361,16 @@ def _rankings_frame():
         ("Delta", 1, 3),                                  # tied with Charlie at week 1
         ("Echo", 2, 4), ("Echo", 3, 4),                   # enters late
     ]
-    return pd.DataFrame(rows, columns=["team_display", "week", "rank"])
+    frame = pd.DataFrame(rows, columns=["team_display", "week", "rank"])
+    # ⚠️ A165: THE COLOUR PAIR, AND `Echo`'s IS NULL ON PURPOSE. A team with no published colour
+    # must fall back to the neutral this panel drew for everyone before — a fixture where every
+    # team has a colour cannot test the branch that exists for the ones that do not (R-744).
+    swatches = {"Alpha": ("#7a0019", "#c8102e"), "Bravo": ("#002b5c", "#4f86c6"),
+                "Charlie": ("#154734", "#2e7d5b"), "Delta": ("#862633", "#d05a6e"),
+                "Echo": (None, None)}
+    frame["color_on_light"] = frame["team_display"].map(lambda t: swatches[t][0])
+    frame["color_on_dark"] = frame["team_display"].map(lambda t: swatches[t][1])
+    return frame
 
 
 def _left_label_rows(spec):
@@ -1410,6 +1446,85 @@ def test_the_bump_chart_spec_serialises_and_keeps_its_gap_rule():
         "step-after is the only one whose vertical lands on the week the new rank was "
         "announced: measured at x=449 and 722.3 against week centres 175.7/449/722.3, while "
         "step-before turned at 175.7/449 (a week early) and step at 312/585 (on no tick)")
+
+
+def test_exactly_one_producer_answers_which_theme_the_viewer_is_in():
+    """🚨 A165 (cfdb-main-R-1303). A PROMOTION THAT LEAVES THE OLD COPY BEHIND IS THE §4.3 DEFECT
+    IT EXISTS TO PREVENT, and *"I removed the old one"* is not a measurement.
+
+    B136 built `_drive_dark_theme()` inside `matchup.py` for the drives accent. Today's poll
+    chart needs the identical answer, so it moved to `lib/theme.py` — session A's — and both
+    pages now call it. ⚠️ **This counts DEFINITIONS across the whole site**, because the failure
+    mode is a second `def` appearing later that answers the same question slightly differently.
+    """
+    import pathlib
+    import re
+    site = pathlib.Path(_today().__file__).parent.parent
+    defs, callers = [], []
+    for f in sorted(site.rglob("*.py")):
+        src = f.read_text()
+        for m in re.finditer(r"^def (\w*(?:dark_theme|viewer_is_dark)\w*)", src, re.M):
+            defs.append(f"{f.name}:{m.group(1)}")
+        if "viewer_is_dark()" in src and f.name != "theme.py":
+            callers.append(f.name)
+    assert defs == ["theme.py:viewer_is_dark"], f"one producer, and it is theme.py's: {defs}"
+    assert "matchup.py" in callers, "matchup.py must CALL it, not define its own"
+    assert "today.py" in callers, "today.py is the second caller this promotion was for"
+
+
+def test_the_poll_lines_carry_team_colour_and_a_missing_one_falls_back():
+    """📊 A165 (cfdb-main-R-1304). Marc: *"Team colors will help."*
+
+    🚨 **THE FALLBACK IS THE HALF A FIXTURE USUALLY CANNOT TEST**, so `Echo` publishes no colour
+    at all. A team with nothing published keeps the neutral this panel drew for everyone before
+    — it must not become invisible, and it must not silently take another team's swatch.
+
+    ⚠️ **AND THE SCALE IS AN EXPLICIT domain/range PAIR, NOT A SCHEME.** A Vega scheme recycles
+    once it runs out, which is the exact failure the panel's own design note warned about; a
+    domain/range says each team's colour by name and cannot wrap around.
+    """
+    import json
+    today = _today()
+    frame = _rankings_frame()
+    current = frame[frame["week"] == 3].assign(delta="—", points=1, first_place_votes=0)
+    captured = []
+    original = today.st
+    today.st = type("S", (), {"altair_chart": staticmethod(lambda c, **k: captured.append(c)),
+                              "caption": staticmethod(lambda *a, **k: None)})
+    try:
+        today._bump_chart(frame, "AP Top 25", current)
+    finally:
+        today.st = original
+    spec = json.loads(captured[0].to_json())
+
+    # 🚨 THE COLOUR MUST BE ON THE *LINE* MARK, AND A STAGED BREAK IS WHY THIS IS SPECIFIC.
+    # A first draft read the scale off "any layer with a colour encoding" — so deleting the
+    # colour from the LINES came back GREEN, because the points still carried one. **Marc asked
+    # for the lines** (*"Team colors will help"* about a bump chart), and a coloured dot on a
+    # grey line is not that (R-744).
+    layers = spec["hconcat"][0]["layer"]
+
+    def _mark(layer):
+        m = layer.get("mark")
+        return m.get("type") if isinstance(m, dict) else m
+    lines = [layer for layer in layers if _mark(layer) == "line"]
+    assert lines, "no line mark in the poll chart at all"
+    assert "color" in lines[0].get("encoding", {}), (
+        "the LINES carry no colour encoding — a coloured point on a grey line is not what was "
+        "asked for")
+    points = [layer for layer in layers if _mark(layer) == "circle"]
+    assert points and "color" in points[0].get("encoding", {}), (
+        "the points must match their line, or a line and its dots disagree")
+    scales = [layer["encoding"]["color"]["scale"] for layer in layers
+              if "color" in layer.get("encoding", {})]
+    dom, rng = scales[0]["domain"], scales[0]["range"]
+    assert len(dom) == len(rng), "domain and range must pair one-to-one"
+    by_team = dict(zip(dom, rng))
+    assert by_team["Alpha"] in ("#7a0019", "#c8102e"), by_team["Alpha"]
+    assert by_team["Bravo"] in ("#002b5c", "#4f86c6"), by_team["Bravo"]
+    # 🚨 Echo publishes nothing and must NOT come back as null, empty or another team's colour.
+    assert by_team["Echo"] not in (None, "", by_team["Alpha"]), by_team["Echo"]
+    assert by_team["Echo"].startswith("#"), f"the fallback must be a real colour: {by_team['Echo']}"
 
 
 def test_tied_teams_share_one_left_label_because_there_is_no_room_for_two():

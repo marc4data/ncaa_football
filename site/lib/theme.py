@@ -177,6 +177,57 @@ CSS = """
 # The tokens are built from `Canvas` and `CanvasText` instead, which follow the `color-scheme`
 # property Streamlit sets from that same active theme — live, in the same frame, with nothing
 # to synchronise. See TABLE_CSS.
+
+# ── THE THEME A CHART IS BEING DRAWN INTO ────────────────────────────────────────────────
+#
+# 🚨 A165 PROMOTED THIS OUT OF `matchup.py` (cfdb-main-R-1303). B136 built it for the drives
+# panel; the poll chart needs the identical answer, and **two copies of one question is the
+# drift this file opens by warning about (§4.3).** `site/lib/` is session A's, which is why the
+# promotion happens here rather than the second caller importing from a view.
+#
+# ⚠️ **IT IS A MOVE, NOT A COPY.** `matchup.py` now calls this and defines nothing of its own —
+# asserted by count in `test_exactly_one_producer_answers_which_theme_the_viewer_is_in`, because
+# "I removed the old one" is not a measurement.
+#
+# ## 🚨 HOW A VEGA SPEC LEARNS WHICH THEME IT IS IN — THE QUESTION B135 STOPPED ON
+#
+# ❌ **NOT `light-dark()`. B135 tested it inside a Vega mark and Vega rejected the string,
+# falling back to `#ddd` in BOTH themes.** The page's CSS mechanism is unavailable in a chart,
+# because the colour is baked into the spec before the browser ever sees it.
+#
+# ✅ **THE ANSWER IS `st.context.theme.type`, WHICH IS SERVER-SIDE AND PER SESSION.** Streamlit
+# 1.63 exposes the theme the VIEWER is actually in, inferred from the app's background colour —
+# so the spec can be built with the right colour already in it.
+#
+# ⚠️ **AND STREAMLIT'S OWN DOCSTRING WARNS THAT IT "MAY BE INCORRECT … WHEN THE APP IS FIRST
+# LOADED WITHIN A SESSION", WHICH WOULD HAVE BEEN FATAL HERE** — a reader reaches this panel by
+# URL, so the first load IS the common case. 📊 **SO IT WAS MEASURED RATHER THAN TRUSTED: a probe
+# app was run under a real Streamlit server and loaded in Chromium in a FRESH browser context
+# per scheme, which is a new session, so `run=1` is genuinely the first load:**
+#
+#     browser color-scheme: light   run=1 type='light'   page background rgb(255,255,255)
+#     browser color-scheme: dark    run=1 type='dark'    page background rgb(14,17,23)
+#
+# ✅ **Correct on the first script run in both schemes.** ⚠️ **The caveat is real for a theme
+# CHANGED mid-session, which is why the fallback below is what it is.**
+#
+# 🚨 **THE FALLBACK IS *TODAY'S BEHAVIOUR*, DELIBERATELY, SO THIS CANNOT REGRESS LIGHT.** Where
+# the theme is unknown — no script-run context, an older Streamlit, a stub that does not provide
+# it — this reads as LIGHT, which is exactly what shipped before. **A fix that traded one theme
+# for the other would not be a fix, and the only way to be sure is for the unknown case to land
+# on the variant that is already correct 100% of the time on the light page.**
+def viewer_is_dark() -> bool:
+    """Whether the viewer is in dark mode. **THE ONE PLACE THE SITE ASKS.**
+
+    ⚠️ **EVERY `getattr` HERE IS A REAL CASE, NOT DEFENSIVE PROGRAMMING.** `st.context` arrived
+    in a recent Streamlit; `theme.type` is documented as `None` when the runtime has no context
+    info; and a test stub may model neither. **Each of those falls to light, which is what this
+    panel already did — so an unknown theme costs nothing that was not already being paid.**
+    """
+    theme = getattr(getattr(st, "context", None), "theme", None)
+    return str(getattr(theme, "type", None) or "light").lower() == "dark"
+
+
 def inject() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     st.markdown(TABLE_CSS, unsafe_allow_html=True)
@@ -271,20 +322,64 @@ TABLE_CSS = """
     font-size:.88em; table-layout:fixed; }
 .cfdb-table td .cfdb-scoreboard th,
 .cfdb-table td .cfdb-scoreboard td { width:1.75rem; }
+/* 🚨 A165 (cfdb-main-R-1302). VERTICAL PADDING GOES TO ZERO HERE AND ONLY HERE.
+   > **MARC, Today v05:** *"Too much vertical padding below the Scoreboard and Win Probability.
+   > We need things more dense vertically."*
+
+   📊 THE ROW WAS DECOMPOSED BEFORE ANYTHING WAS CUT, because the obvious term was not the
+   largest. At a 1300px viewport the Most Exciting row is **94.2px**:
+
+       away row + home row        67.2px   <- driven by the 28px LOGO, the single largest term
+       scoreboard thead (1 2 3 4 F) 13.6px
+       .cfdb-table td padding x2  13.44px  <- EVERY TABLE ON THE SITE. Eighteen pages.
+
+   ✅ **THE TWO TERMS CUT HERE ARE THE ONLY ONES SCOPED TO THIS PANEL**: this rule's own
+   `.05rem` of vertical cell padding, and the thead's line-height. Together they take the row to
+   **87.8px** and a ten-row panel from **935.5px to 871.6px — 63.9px returned**, with the header
+   labels (`today.py`) returning a further 15px at that width.
+
+   ⚠️ **THE LOGO IS THE BIGGER LEVER AND IT IS NOT THIS ROUND'S TO PULL.** 28px -> 22px takes the
+   row to 82.2px and the panel to 815.5px — nearly twice this saving — but a logo is an identity
+   affordance on Marc's page (§2.1), so it is measured, rendered and handed to him rather than
+   changed. ❌ **And `.cfdb-table td`'s 6.72px is not touched**, for the reason A164 gave and was
+   right about: it is Schedule, Team, Odds and fifteen others.
+
+   ⚠️ HORIZONTAL PADDING IS UNCHANGED — `.3rem` still separates the quarter columns, and the
+   `border-spacing` was measured and returns nothing (0.0px), so it is left alone. */
 .cfdb-table td .cfdb-scoreboard th,
-.cfdb-table td .cfdb-scoreboard td { padding:.05rem .3rem; border:0; opacity:1;
+.cfdb-table td .cfdb-scoreboard td { padding:0 .3rem; border:0; opacity:1;
     text-align:right; white-space:nowrap; font-weight:400; }
-/* The quarter labels are a scale, not data: muted, so the numbers under them read first. */
+/* The quarter labels are a scale, not data: muted, so the numbers under them read first.
+   ⚠️ A165: `line-height:1` — these are five short glyphs and the leading above them was
+   3.2px of the row. They are the only text in the scoreboard that is not a number. */
 .cfdb-table td .cfdb-scoreboard thead th { font-size:.82em; opacity:.6;
-    letter-spacing:.02em; }
+    letter-spacing:.02em; line-height:1; }
 /* The team is the row's name and reads left; everything after it is a number and reads right. */
 /* A FIXED WIDTH, NOT A MAX, AND THE RASTER IS WHY. With the column sized to its content every
    scoreboard was a different width, so the quarter columns did not line up down the page and a
    reader scanning ten games had to re-find the "4" on every row. A scoreboard's whole value is
    that the same number is always in the same place. Long names ellipsise rather than widening
-   the grid. */
+   the grid.
+
+   🚨 A165 (cfdb-main-R-1301): 9.5rem -> 13rem, AND THIS IS WHERE MARC'S TRUNCATION ACTUALLY WAS.
+   > **MARC:** *"We need to grant Scoreboard more horizontal space because with the Record added
+   > its truncating team name."*
+
+   📊 **HIS DIAGNOSIS POINTED AT THE OUTER COLUMN AND THE MEASUREMENT SAYS OTHERWISE.** Widening
+   the Scoreboard column from 288px to 443px — **+54%** — left the ellipsised-name count at
+   **11, unchanged**, at both 1300px and 1600px. The name is clipped by THIS cell's fixed
+   152px, not by the column that contains it, so no amount of outer width could ever have
+   reached it. ⚠️ **The cause is real and his sentence names it exactly: A164 added the record
+   INTO this fixed cell**, and the room it needed came out of the name.
+
+   📊 SWEPT RATHER THAN GUESSED — clipped names at 1300px and 1600px, logo untouched at 28px:
+   9.5rem -> 10 · 11rem -> 3 · 12rem -> 2 · **13rem -> 0** · 14rem -> 0.
+
+   ✅ **13rem IS THE FIRST WIDTH THAT CLIPS NOTHING, AND IT IS STILL FIXED** — which is the whole
+   property the paragraph above protects. Every scoreboard on the page remains the same width and
+   the quarter columns still line up. **The rule changed its number, not its kind.** */
 .cfdb-table td .cfdb-scoreboard .cfdb-sb-team { text-align:left; padding-right:.5rem;
-    font-weight:500; width:9.5rem; max-width:9.5rem; overflow:hidden; text-overflow:ellipsis;
+    font-weight:500; width:13rem; max-width:13rem; overflow:hidden; text-overflow:ellipsis;
     white-space:nowrap; }
 /* THE FINAL SCORE IS THE ONE NUMBER A READER LOOKS FOR, and a scoreboard sets it apart from
    the quarters it is the sum of. A rule rather than bold: bold on both lines would compete
@@ -733,7 +828,40 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    a flex item defaults to `min-width:auto` and refuses to shrink below its content.
    ⚠️ R-129's BOUNDARY IS UNMOVED: the record stays OUTSIDE the anchor and the rank stays inside
    `team_cell`. This wraps both; it crosses neither. */
-.cfdb-identity { display:flex; align-items:baseline; gap:.4rem; min-width:0; }
+/* 🚨 A165 (cfdb-main-R-1300). `align-items:center`, NOT `baseline`, AND THE REASON IS THAT ONE
+   OF THESE TWO CHILDREN HAS NO TEXT TO TAKE A BASELINE FROM.
+   > **MARC, Today v05:** *"The teams (logo, name, record) are not aligned vertically. Review the
+   > image. Record needs to move up."*
+
+   📊 MEASURED IN CHROMIUM ON THE REAL PAGE, 160 identity cells across four panels: the record's
+   alphabetic baseline sat **9.5–10px BELOW the team name's**, identically at 1300px and 1600px.
+   ⚠️ A164 shipped this cell and reported `gapX 6.4px` — a HORIZONTAL fact, measured on the axis
+   it was asked about. **Both readings were true at once**: the record was on the line and sitting
+   a logo-height below it.
+
+   THE CAUSE: `.cfdb-identity` baseline-aligns two children. The second is the record's text; the
+   first is `.cfdb-teamlink`, itself a flex container whose first item is an EMPTY 28px logo box.
+   A flex container with no in-flow text synthesises its baseline from its BOTTOM MARGIN EDGE, so
+   the record was aligning to the bottom of the logo rather than to the name.
+
+   📊 THE CANDIDATES, MEASURED — and the obvious one was rejected on evidence:
+
+       control                                  record +9.5/+10   logo  0
+       negative control (a no-op rule)          record +9.5/+10   logo  0   <- instrument reads zero
+       A: teamlink align-items:baseline         record +0.2/+0.5  logo +5/+6.2   ❌ THE LOGO MOVES
+       B: this rule                             record −1/−0.5    logo  0        ✅
+
+   🚨 **A LOOKS BETTER ON THE NUMBER MARC COMPLAINED ABOUT AND IS THE WRONG FIX.** It trades the
+   record's misalignment for the logo's: baseline-aligning the anchor grows the flex line, and a
+   center-aligned 28px disc then sits 5-6px off the name it belongs to. **The logo is an identity
+   affordance on Marc's page and it is optically center-aligned to the name today.**
+
+   ✅ WHY CENTER IS RIGHT HERE RATHER THAN A COMPROMISE: both children are single-line text of
+   almost the same size (12.48px and 12px), so their centers and their baselines coincide to
+   within the font-size difference — which is the −0.5/−1px residual, and is the whole error.
+   ⚠️ A redundant `.cfdb-teamlink{align-items:center}` was tested alongside and changed nothing,
+   because that rule is already center; this is one property, not two. */
+.cfdb-identity { display:flex; align-items:center; gap:.4rem; min-width:0; }
 .cfdb-identity > .cfdb-teamlink { min-width:0; }
 .cfdb-identity > .cfdb-team-record { flex:0 0 auto; margin-left:0; }
 .cfdb-identity .cfdb-team { min-width:0; }

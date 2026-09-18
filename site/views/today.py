@@ -20,7 +20,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import filters, fmt, glyphs, params, shell, states, tab, table
+from lib import filters, fmt, glyphs, params, shell, states, tab, table, theme
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -461,9 +461,22 @@ def _yardage_profile(scope) -> pd.DataFrame:
 
 def _rankings(scope) -> pd.DataFrame:
     """Full season of AP and Coaches, for the bump chart and its companion table."""
+    # ⚠️ A165 SELECTS THE CONTRAST-SAFE PAIR, NOT `color_primary`. R-855's lesson, measured:
+    # nearly a fifth of teams publish #000000 as their on-light value, so the raw brand colour
+    # can be invisible against the page it is drawn on. The ladder already answers "what is safe
+    # against THIS background" and is what the drives panel reads.
+    #
+    # 🚨 **THIS NOTE IS A PYTHON COMMENT AND NOT A SQL ONE, AND THAT COST TWO CI RUNS.**
+    # `ci/check_page_queries.py` normalises a query to a single line before executing it, so
+    # every `--` comment swallows the rest of the statement — `syntax error at end of input`.
+    # An earlier draft also carried a literal per-cent, which the driver reads as a parameter
+    # marker — `dict is not a sequence`. **Two different failures from prose inside a query
+    # string, neither visible locally because the unit tests stub `query` (R-538's class).**
+    # ✅ Nothing goes between the triple quotes but SQL.
     return query("""
         select season, week, poll_name, rank, team_display, team_slug,
-               first_place_votes, points, as_of_ts
+               first_place_votes, points, as_of_ts,
+               color_on_light, color_on_dark
         from srv_rankings
         where season = :season and season_type = :season_type
           and poll_name = any(:polls)
@@ -629,7 +642,15 @@ _CURVE_PAD = 2
 # plus `.cfdb-table td`'s 6.72px of padding top and bottom. A chart at 67px sits inside that
 # content box with room to spare; a chart taller than 80.8 would re-lay out every scoreboard on
 # the page. ⚠️ The plotting band is `height - 2 * _CURVE_PAD`, so this takes it from 40.0 to 63.0.
-_CURVE_HEIGHT = 67
+# ⚠️ A165: 67 -> 64. The scoreboard's own vertical cell padding went to zero this round
+# (cfdb-main-R-1302), which took `.cfdb-sb-away` top to `.cfdb-sb-home` bottom from 67.2px to
+# **64.0px** — re-measured in Chromium by class, not adjusted by the same amount as the row.
+# 🚨 **THIS CONSTANT IS PINNED, NOT DERIVED, AND THAT IS THE THING TO KNOW ABOUT IT.** Nothing
+# computes it at render time, so any change to the scoreboard's geometry leaves it silently
+# wrong and a test is the only thing that can say so — which is why
+# `test_the_curve_is_as_tall_as_the_scoreboard_rows_it_sits_beside` carries the measured number
+# and an upper bound rather than a range.
+_CURVE_HEIGHT = 64
 
 
 def _curve_final_value(points: pd.DataFrame):
@@ -1493,7 +1514,19 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     widest = max((_curve_width(by_game[game_id])
                   for game_id in top["game_id"] if game_id in by_game),
                  default=_curve_width(None))
-    layout = ["26%", f"{widest + 12}px"] + ["auto"] * 6
+    # 🚨 A165. THE SCOREBOARD TAKES 40% AND THE THREE LEAD COLUMNS ARE PINNED NARROW.
+    # 📊 **THE WIDTH ALONE FIXES NOTHING AND THAT WAS MEASURED BEFORE IT WAS BUILT** — taking
+    # the Scoreboard column from 288px to 443px left the ellipsised-name count at 11, because
+    # the name is clipped by `.cfdb-sb-team`'s own fixed width inside the nested table. **That
+    # rule is where the truncation fix actually is** (`theme.py`, cfdb-main-R-1301); this
+    # layout is what gives the wider cell somewhere to sit.
+    # ⚠️ 52px IS MARC'S NUMBER, NOT A ROUND ONE. He asked to *"Reduce by at least 50%"*, and
+    # these columns measured 104.3px each at a 1300px viewport — so 52px is exactly that, and
+    # 56px (a 46% cut) would have missed it. 📊 Swept against the header row, which is what
+    # pins the floor: at 56, 52, 50 and 46px the header stays 44.4px and does NOT wrap, so the
+    # binding constraint is the ask rather than the label. The freed 157px goes to the
+    # scoreboard rather than being shared out.
+    layout = ["40%", f"{widest + 12}px", "52px", "52px", "52px", "auto", "auto", "auto"]
 
     states.render_or_state(
         top, "srv_game",
@@ -1515,8 +1548,17 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # count while still DISPLAYING the win-probability crossings under a column headed
             # "lead changes" would have left the false label he reported exactly where it was, on
             # a panel ordered by a number he could not see.
-            Col("scoreboard_lead_changes_fourth_quarter", "4th-qtr lead changes", kind="num"),
-            Col("scoreboard_lead_changes_overtime", "OT lead changes", kind="num"),
+            # 🚨 A165. THE LABELS CARRY THE NOUN ONCE, IN THE CAPTION, NOT THREE TIMES IN THE
+            # HEADER ROW. Marc: *"The Lead Change columns need to use less horizontal space.
+            # Reduce by at least 50% horizontally."*
+            # 📊 THESE COLUMNS WERE WIDE BECAUSE OF THEIR HEADER TEXT, NOT THEIR NUMBERS — every
+            # value is a single digit. `4TH-QTR LEAD CHANGES` wrapped to two lines, which made
+            # the HEADER ROW 59.4px at a 1300px viewport against 44.4px at 1600px where it did
+            # not wrap. ✅ Shortening the labels returns that 15px **and** lets the columns be
+            # pinned narrow without the header growing back — which is the trap: a density win
+            # in the body paid for by a taller header is not a win.
+            Col("scoreboard_lead_changes_fourth_quarter", "4th qtr", kind="num"),
+            Col("scoreboard_lead_changes_overtime", "OT", kind="num"),
             # ⚠️ A164. MARC MOVED A DISPLAYED COLUMN, NOT THE SORT — Today v04: *"Move Lead
             # Changes Game between OT Lead Changes and How Close Late."* `MOST_EXCITING_ORDER`
             # is untouched and the caption still describes the ordering, which is unchanged.
@@ -1525,7 +1567,7 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # invisible to it. `test_most_exciting_layout_pins_only_the_first_two_columns` holds
             # that property, because a `layout` silently out of step with the columns shows up
             # only on a wide viewport.
-            Col("scoreboard_lead_changes", "Lead changes, game", kind="num"),
+            Col("scoreboard_lead_changes", "Game", kind="num"),
             Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
             Col("excitement_index", "Excitement", kind="num", dp=1),
             # 🚨 A144. THE OUTCOME GLYPH JOINS THE LINK IN ONE CELL — Marc: *"Put them in the
@@ -1537,8 +1579,13 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # see `_commentary`, which measured all three before choosing.
             Col("espn", "Commentary", render=lambda r: _commentary(r, scope, stacked=True)),
         ], layout=layout, anchor="most-exciting",
-            caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
-                    "even win probability from the fourth quarter onward (lower is closer)."))
+            # ⚠️ PLAIN TEXT, NOT MARKDOWN. `table.render` puts this straight into an HTML
+            # `<caption>` element — it is not `st.caption` — so `**bold**` renders as four
+            # literal asterisks. Caught in the raster; every other `caption=` on this page is
+            # plain prose for the same reason.
+            caption="Lead changes: fourth quarter, overtime, whole game. Ordered by "
+                    "fourth-quarter lead changes, then by mean distance from an even win "
+                    "probability from the fourth quarter onward (lower is closer)."))
 
 
 def _favorite_margin(row):
@@ -2294,13 +2341,59 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     y_axis = alt.Axis(values=[v for v in (1, 5, 10, 15, 20, 25) if v <= worst], tickMinStep=1)
     y = alt.Y("rank:Q", title="Rank", scale=y_scale, axis=y_axis)
 
-    # ONE NEUTRAL COLOUR RATHER THAN TWENTY-FIVE, AND THIS IS A DELIBERATE CHOICE.
-    # A categorical palette runs out well before 25 and starts recycling, so two teams get the
-    # same colour and the reader has no way to know which. `currentColor` follows the theme,
-    # the hovered team is what gets emphasis, and the endpoint labels are what identify a
-    # line. Team BRAND colours would be the real answer and they are not available here:
-    # srv_rankings carries team_slug and no colour, and adding a join in the page is a model
-    # change wearing a page change. Logged, not built.
+    # ── TEAM COLOUR ON THE LINES (A165, cfdb-main-R-1304) ───────────────────────────────
+    #
+    # > **MARC, Today v05:** *"Team colors will help."*
+    #
+    # 🚨 THE COMMENT THAT USED TO SIT HERE SAID BRAND COLOURS WERE *"not available here:
+    # srv_rankings carries team_slug and no colour"*. **That was false against the model.**
+    # `srv_rankings.sql` has selected `color_on_light` and `color_on_dark` for some time, and
+    # A164 confirmed all three colour columns in live published serving via
+    # `information_schema`; only `_rankings`'s own SELECT omitted them. ⚠️ **A design decision
+    # defended by a measurement that had expired** — the third such comment found in three
+    # rounds (R-1230, R-1237, this).
+    #
+    # ✅ **THE REST OF THE OLD NOTE WAS RIGHT AND IS KEPT, BECAUSE IT NAMES THE RISK THIS TAKES
+    # ON:** *"a categorical palette runs out well before 25 and starts recycling, so two teams
+    # get the same colour and the reader has no way to know which."* **Team colours can
+    # reproduce exactly that failure**, so it was measured before it was shipped rather than
+    # assumed to be an improvement.
+    #
+    # 📊 THE 2026 AP FIELD, 26 ranked teams, distinct colours out of 26:
+    #
+    #     on light   23/26   three pairs share a colour
+    #     on dark    20/26   🚨 SEVEN COLLAPSE ONTO #ffffff — Alabama, Houston, Indiana,
+    #                        Oklahoma, Penn State, Texas A&M, Utah
+    #
+    # ⚠️ **THE DARK COLLAPSE IS REAL AND IS THE LADDER'S, NOT THIS PANEL'S** (B136 measured 44
+    # teams onto #ffffff across the whole league, cfdb-wta-R-1259). ✅ **IT STILL SHIPS, AND THE
+    # REASON IS THE BASELINE RATHER THAN THE IDEAL: today ALL TWENTY-FIVE lines are one colour.**
+    # Nineteen become distinguishable and seven stay exactly as distinguishable as they are now
+    # — there is no reader who can tell two lines apart today and cannot after this.
+    #
+    # ✅ **HOVER EMPHASIS AND BOTH ENDPOINT LABELS STAY**, because they are what still separates
+    # those seven, and the labels are what the caption's own case rests on.
+    dark = theme.viewer_is_dark()
+    swatch = "color_on_dark" if dark else "color_on_light"
+    # ⚠️ THE FALLBACK IS THE OLD BEHAVIOUR. A team with no published colour keeps the neutral
+    # this panel drew for everyone until now, rather than becoming invisible or a guess.
+    #
+    # 🚨 `pd.notna`, NOT `or`, AND A TEST FOUND THAT THE HARD WAY. A missing colour arrives out
+    # of a DataFrame as `NaN`, **and `float('nan')` is TRUTHY in Python** — so `palette[t] or
+    # neutral` passed the NaN straight through and a literal `NaN` reached the Vega spec, where
+    # it is not a colour and not an error either. The fixture's one colourless team is what
+    # caught it; a fixture where every team has a swatch could not have (R-744).
+    neutral = "#fafafa" if dark else "#31333f"
+    palette = (frame.dropna(subset=["team_display"])
+                    .drop_duplicates("team_display")
+                    .set_index("team_display")[swatch])
+
+    def _swatch(team):
+        value = palette.get(team)
+        return str(value) if pd.notna(value) and str(value).strip() else neutral
+    domain = [t for t in teams if t in palette.index]
+    scheme = alt.Scale(domain=domain, range=[_swatch(t) for t in domain])
+    colour = alt.Color("team_display:N", scale=scheme, legend=None)
     base = alt.Chart(data).encode(x=x, y=y, detail="team_display:N")
     # ⚠️ `invalid` IS SET EXPLICITLY AND MUST STAY THAT WAY. Vega-Lite's default for path
     # marks changed in 5.14 — before it, an invalid value was FILTERED, which joins the two
@@ -2310,11 +2403,13 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     # rests on it and a silent default is not something to rest it on.
     lines = base.mark_line(interpolate=_BUMP_INTERPOLATE, clip=True,
                            invalid="break-paths-filter-domains").encode(
+        color=colour,
         strokeWidth=alt.condition(hover, alt.value(3.0), alt.value(1.25)),
-        opacity=alt.condition(hover, alt.value(1.0), alt.value(0.35)))
+        opacity=alt.condition(hover, alt.value(1.0), alt.value(0.55)))
     points = base.mark_circle(clip=True).encode(
+        color=colour,
         size=alt.condition(hover, alt.value(70), alt.value(22)),
-        opacity=alt.condition(hover, alt.value(1.0), alt.value(0.45)),
+        opacity=alt.condition(hover, alt.value(1.0), alt.value(0.65)),
         tooltip=[alt.Tooltip("team_display:N", title="Team"),
                  alt.Tooltip("week:O", title="Week"),
                  alt.Tooltip("rank:Q", title="Rank", format="d")])

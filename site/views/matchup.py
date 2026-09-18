@@ -19,7 +19,7 @@ import pandas as pd
 import streamlit as st
 
 from lib import (attribution, chips, distribution, filters, fmt, glyphs, identity, params,
-                 shell, states, table)
+                 shell, states, table, theme)
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -7377,43 +7377,11 @@ def _drive_table_chart(frame: pd.DataFrame, band: str, height: int,
 # publish `#ffffff` on dark, which is 1.00:1 on a white page. **Getting the theme right matters
 # more than either variant does.**
 #
-# ## 🚨 HOW A VEGA SPEC LEARNS WHICH THEME IT IS IN — THE QUESTION B135 STOPPED ON
-#
-# ❌ **NOT `light-dark()`. B135 tested it inside a Vega mark and Vega rejected the string,
-# falling back to `#ddd` in BOTH themes.** The page's CSS mechanism is unavailable in a chart,
-# because the colour is baked into the spec before the browser ever sees it.
-#
-# ✅ **THE ANSWER IS `st.context.theme.type`, WHICH IS SERVER-SIDE AND PER SESSION.** Streamlit
-# 1.63 exposes the theme the VIEWER is actually in, inferred from the app's background colour —
-# so the spec can be built with the right colour already in it.
-#
-# ⚠️ **AND STREAMLIT'S OWN DOCSTRING WARNS THAT IT "MAY BE INCORRECT … WHEN THE APP IS FIRST
-# LOADED WITHIN A SESSION", WHICH WOULD HAVE BEEN FATAL HERE** — a reader reaches this panel by
-# URL, so the first load IS the common case. 📊 **SO IT WAS MEASURED RATHER THAN TRUSTED: a probe
-# app was run under a real Streamlit server and loaded in Chromium in a FRESH browser context
-# per scheme, which is a new session, so `run=1` is genuinely the first load:**
-#
-#     browser color-scheme: light   run=1 type='light'   page background rgb(255,255,255)
-#     browser color-scheme: dark    run=1 type='dark'    page background rgb(14,17,23)
-#
-# ✅ **Correct on the first script run in both schemes.** ⚠️ **The caveat is real for a theme
-# CHANGED mid-session, which is why the fallback below is what it is.**
-#
-# 🚨 **THE FALLBACK IS *TODAY'S BEHAVIOUR*, DELIBERATELY, SO THIS CANNOT REGRESS LIGHT.** Where
-# the theme is unknown — no script-run context, an older Streamlit, a stub that does not provide
-# it — this reads as LIGHT, which is exactly what shipped before. **A fix that traded one theme
-# for the other would not be a fix, and the only way to be sure is for the unknown case to land
-# on the variant that is already correct 100% of the time on the light page.**
-def _drive_dark_theme() -> bool:
-    """Whether the viewer is in dark mode. THE ONE PLACE THIS PANEL ASKS.
-
-    ⚠️ **EVERY `getattr` HERE IS A REAL CASE, NOT DEFENSIVE PROGRAMMING.** `st.context` arrived
-    in a recent Streamlit; `theme.type` is documented as `None` when the runtime has no context
-    info; and a test stub may model neither. **Each of those falls to light, which is what this
-    panel already did — so an unknown theme costs nothing that was not already being paid.**
-    """
-    theme = getattr(getattr(st, "context", None), "theme", None)
-    return str(getattr(theme, "type", None) or "light").lower() == "dark"
+# 🚨 A165 MOVED THE THEME QUESTION TO `lib/theme.py` (cfdb-main-R-1303). B136 built it here
+# for the drives accent; Today's poll chart needs the same answer, and one question deserves
+# one producer (§4.3). The reasoning — why not `light-dark()`, why `st.context.theme.type`, why
+# the fallback is LIGHT — travelled with it and is not restated here.
+# ⚠️ `theme.viewer_is_dark()` is the call. **This module defines no theme predicate of its own.**
 
 
 def _drive_colors(df) -> dict:
@@ -7473,10 +7441,10 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
     frame["band_parity"] = [i % 2 for i in range(len(frame))]
     frame["y_lo"] = frame["drive_number"].astype(float) - 0.5
     frame["y_hi"] = frame["drive_number"].astype(float) + 0.5
-    # 🚨 v04: THE THEME IS PASSED THROUGH. See `_drive_dark_theme` for the measurement — this
+    # 🚨 v04: THE THEME IS PASSED THROUGH. See `theme.viewer_is_dark` for the measurement — this
     # one argument is the whole of cfdb-wta-R-1256, and it takes 78.71% of drives from under
     # 3:1 to zero on the dark page without moving the light one at all.
-    dark = _drive_dark_theme()
+    dark = theme.viewer_is_dark()
     frame["accent"] = frame["band"].map(
         lambda band: identity.text_on(colors.get(band), dark_theme=dark))
     frame["clock"] = frame.apply(_drive_clock, axis=1)
@@ -7677,7 +7645,7 @@ def _drive_scoreboard(row) -> str:
     # 🚨 `_accent` IS CSS `light-dark()`, WHICH IS RIGHT HERE AND IMPOSSIBLE IN THE CHART.
     # The header is HTML, so the browser resolves the team colour against the `color-scheme`
     # Streamlit sets — immune to the first-load caveat in `st.context.theme` that the chart's
-    # accent has to live with (see `_drive_dark_theme`).
+    # accent has to live with (see `theme.viewer_is_dark`).
     away_accent = _accent(row_for_side(row, "away"))
     home_accent = _accent(row_for_side(row, "home"))
 
