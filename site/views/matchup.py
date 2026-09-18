@@ -6893,6 +6893,191 @@ _DRIVE_GAIN_NOTE = (
 # class, in the measuring rig.** ✅ **What makes it discriminating is what makes it correct: one
 # panel pins, the others INHERIT through `resolve_scale(y="shared")`.** ⚠️ **A domain literal
 # repeated on a table half is one number with three homes, and three homes drift.**
+# ── 🚨 v19 (HELD) PART 1: THE BIG PLAYS — THE HALF THAT IS PUBLISHED ────────────────────────
+#
+# > **MARC, v19:** *"Is there a way to add borders around the yards gained by plays > 10 yards
+# > long?  If so, can we add what type and who gained the yards in the tooltip?"*
+#
+# 🚨 **HIS SENTENCE IS TWO ASKS AND ONLY ONE OF THEM IS BUILDABLE AGAINST TODAY'S SERVING.**
+# The **tooltip** — *what type and who* — reads two published columns and ships here. The
+# **border** is a GEOMETRY, and the coordinate it needs is not published (cfdb-wta-R-1277,
+# below). ✅ **The tooltip is the half that does not need it, so it is the half that ships.**
+#
+# ── 📊 COVERAGE, AND IT IS NOT THE NUMBER A168 REPORTED (cfdb-wta-R-1274) ───────────────────
+#
+# A168 measured `drive_id` NULL on **0 of 409,846** play rows and every one joining to a drive
+# `srv_drive` publishes. ✅ **Re-confirmed here against `information_schema` on live published
+# serving: `drive_id` is present, `text`, 0 nulls.** ⚠️ **That is coverage of the KEY, and it
+# answers the FORWARD direction only — do the plays we have name a drive.** 🚨 **The panel's
+# question is the REVERSE one, and it has a very different answer:**
+#
+#     drives published                        84,838
+#     drives carrying at least one play row   46,992     55.39%
+#     drives carrying NONE                    37,846     44.61%
+#
+# 🚨 **AND THE GAP IS PER-GAME, NOT PER-DRIVE — which is the finding, because it decides what
+# an absent tooltip line MEANS.** Measured over the 3,607 games that publish drives:
+#
+#     games where EVERY drive has plays          975     27.03%
+#     games PARTIALLY covered                  1,086     30.11%   ← 95–97% of drives, typically
+#     games with NO play rows AT ALL           1,546     42.86%   ← the whole game is blank
+#
+# ⚠️ **It is uniform across seasons (44.08% / 45.18% / 44.36% for 2024 / 2025 / 2026) and
+# across every `drive_result_key`** — punts 44.0%, touchdowns 43.7%, field goals 37.5% — **so
+# it is not a play type that carries no player stat, and it is not a season scope.** A
+# touchdown drive declaring 7 plays and carrying 0 stat rows is a coverage gap.
+#
+# ✅ **SO AC-G.11 GOVERNS THE ABSENCE AND THERE ARE TWO OF THEM, NOT ONE:**
+#
+#     the drive has play rows and none exceeded ten yards   → say so: "None"
+#     the drive has NO play rows at all                     → SAY NOTHING. We do not know
+#
+# 🚨 **Printing "None" on a drive nobody recorded would be a confident false statement on
+# 44.61% of drives** — the R-084 failure wearing a tooltip. **The line is absent there.**
+_DRIVE_BIG_PLAY_YARDS = 10          # Marc's "> 10 yards long" — a STRICT greater-than
+# ⚠️ THE CEILING IS MEASURED, NOT GUESSED (AC-G.39): the heaviest game in 409,846 rows carries
+# **356** stat rows and the 99th percentile is 276. 1,000 clears it by ~2.8x, the way the
+# drives query's 200 clears its measured 38.
+_DRIVE_BIG_PLAY_LIMIT = 1000
+
+# ── 🚨 THE GRAIN, ESTABLISHED BY COUNTING RATHER THAN BY READING THE LINEAGE (cfdb-wta-R-1275) ─
+#
+# `srv_player_play` is **one row per player per stat per play**, so a single completed pass is
+# a `Completion` row for the passer AND a `Reception` row for the receiver. 📊 **Counted rows
+# per `play_id` over all 409,846 rows:**
+#
+#     1 row    146,640 plays          4 rows    4,900
+#     2 rows   112,461 plays          5 rows       50
+#     3 rows     6,140 plays          7 rows        2
+#
+#     270,193 distinct plays · mean 1.517 rows/play · **123,553 plays (45.73%) carry MORE THAN ONE**
+#
+# 🚨 **ANYTHING DRAWN OR COUNTED PER ROW WOULD DOUBLE ON NEARLY HALF THE PLAYS.** ✅ **The
+# collapse is `drop_duplicates` on `play_id`, and it is SAFE TO COLLAPSE because `yards_gained`
+# is constant within a play: 0 plays of 270,193 carry more than one distinct value.** So the
+# collapse loses no yardage — it only picks which player's name survives, which is the next
+# decision down.
+#
+# ── 🚨 WHO GAINED THE YARDS — A REAL CHOICE, WITH THE OTHER ANSWER NAMED (cfdb-wta-R-1278) ───
+#
+# 📊 **31,952 of the 55,602 ten-plus-yard plays carry TWO names**, and a worked example says
+# what they are: a 43-yard `Pass Reception` publishes `Completion → Athan Kaliakmanis` and
+# `Reception → Ben Black`, both stamped `yards_gained = 43`.
+#
+# ✅ **THE RECEIVER IS THE ANSWER, BECAUSE MARC ASKED WHO *GAINED* THE YARDS.** The ball
+# travelled in the receiver's hands; the passer threw it. ⚠️ **THE OTHER ANSWER, NAMED AS THE
+# PROMPT ASKS: the passer — `Completion` — which is what a passing-yards leaderboard would
+# credit.** Both are true of the same play and they answer different questions; this tooltip
+# answers his.
+_DRIVE_CARRIER_STATS = ("Reception", "Rush")
+
+# ── 🚨 THE PLAY-TYPE ALLOW-LIST, AND IT IS NOT DECORATION — A FIELD GOAL LIES (cfdb-wta-R-1276) ─
+#
+# 🚨 **ON A FIELD GOAL, `yards_gained` IS THE KICK DISTANCE, NOT A GAIN.** Measured on the
+# distinct plays:
+#
+#     Field Goal Good      4,692 plays   mean yards_gained 35.6   mean yards_to_goal 18.1
+#     Field Goal Missed    1,347         mean 42.6                mean 25.6
+#     Blocked Field Goal     142         mean 36.5                mean 21.2
+#
+# ⚠️ **A kick from the 18 cannot gain 35 yards** — and 1,344 of the made kicks sit at exactly
+# `yards_to_goal + 17`, which is the snap-and-hold geometry rather than a coincidence.
+# 🚨 **A bare `yards_gained > 10` would have called ~6,181 field goals a big play.**
+#
+# ⚠️ **AND THE RETURNS ARE THE DEFENCE'S YARDS, NOT THE OFFENCE'S** —
+# `Interception Return Touchdown` averages 46.7, `Pass Interception Return` 10.1. **A drive
+# whose offence lost the ball did not *gain* those yards.**
+#
+# ✅ **SO THE LIST IS ENUMERATED FROM THE PUBLISHED `play_type` VALUES, NOT MATCHED ON A
+# SUBSTRING** — B136's rule, after `TD` as a substring swept up six unrelated results. These
+# are the five that mean *the offence advanced the ball*, and they cover 47,639 of the 55,602
+# ten-plus plays:
+#
+#     Pass Reception  27,118 · Rush  14,258 · Passing Touchdown  3,880
+#     Rushing Touchdown  2,071 · Pass Completion  312
+_DRIVE_BIG_PLAY_TYPES = frozenset({
+    "Pass Reception",
+    "Rush",
+    "Passing Touchdown",
+    "Rushing Touchdown",
+    "Pass Completion",
+})
+_DRIVE_BIG_PLAY_NONE = "None"
+_DRIVE_BIG_PLAY_JOIN = "; "
+
+
+def _drive_big_play_rows(plays: pd.DataFrame) -> pd.DataFrame:
+    """The player-stat grain collapsed to ONE ROW PER PLAY, carrying the ball carrier.
+
+    ⚠️ **THE COLLAPSE IS THE POINT, NOT A TIDY-UP.** 45.73% of plays publish more than one
+    stat row (cfdb-wta-R-1275); a per-row read would count a 43-yard pass twice and name the
+    wrong player half the time.
+
+    ✅ The carrier is chosen by `_DRIVE_CARRIER_STATS` precedence and NOT by row order — row
+    order out of the database is not a fact about football.
+    """
+    if plays.empty:
+        return plays.iloc[0:0]
+    ranked = plays.copy()
+    order = {name: i for i, name in enumerate(_DRIVE_CARRIER_STATS)}
+    # 🚨 A stat_type outside the precedence sorts LAST rather than being dropped, so a play
+    # whose rows are all unfamiliar still names somebody instead of naming nobody.
+    ranked["_carrier_rank"] = [order.get(str(v), len(order)) for v in ranked["stat_type"]]
+    ranked = ranked.sort_values(["play_id", "_carrier_rank"], kind="stable")
+    return ranked.drop_duplicates(subset=["play_id"], keep="first")
+
+
+def _drive_big_play_note(drive_id, collapsed: pd.DataFrame, covered: set) -> str:
+    """One drive's big plays as the tooltip reads them, or `''` when nobody recorded the drive.
+
+    🚨 **THE EMPTY STRING AND `"None"` ARE DIFFERENT FACTS AND THAT IS AC-G.11** — see
+    cfdb-wta-R-1274. `''` means *this drive has no play rows at all*, which is 44.61% of
+    published drives and 42.86% of games entirely; `"None"` means *we have this drive's plays
+    and none of them exceeded ten yards*.
+    """
+    key = str(drive_id)
+    if key not in covered:
+        return ""
+    mine = collapsed[collapsed["drive_id"].astype(str) == key]
+    if mine.empty:
+        return _DRIVE_BIG_PLAY_NONE
+    parts = []
+    for _i, r in mine.iterrows():
+        who = r.get("player_name")
+        kind = str(r.get("play_type") or "").strip()
+        yards = r.get("yards_gained")
+        if yards is None or pd.isna(yards):
+            continue
+        # ⚠️ §4.2.1: composing published values into a string creates no quantity. Nothing here
+        # is computed — `yards_gained`, `play_type` and `player_name` are printed as published.
+        text = f"{int(yards)} yd {kind}" if kind else f"{int(yards)} yd"
+        if who and not pd.isna(who):
+            text = f"{text} ({str(who).strip()})"
+        parts.append(text)
+    return _DRIVE_BIG_PLAY_JOIN.join(parts) if parts else _DRIVE_BIG_PLAY_NONE
+
+
+def _drive_big_play_notes(frame: pd.DataFrame, plays: pd.DataFrame) -> list:
+    """The tooltip column, one entry per drive row, in the frame's own order.
+
+    ⚠️ **THIS IS THE PANDAS MATCH THE PROMPT ASKS ME TO DECLARE, AND IT IS A MATCH ON A
+    PUBLISHED KEY RATHER THAN A COMPUTATION.** Two single-table selects — `srv_drive` and
+    `srv_player_play`, each its own `SELECT … WHERE game_id`, neither joined in SQL (G-2
+    forbids it outright) — and the play rows are attached to the drive row whose `drive_id`
+    they already carry. **No quantity is created by the attachment**, which is the line
+    §4.2.1 actually draws; the alternative, inferring drive membership from coordinates, is
+    what B137 refused and what `drive_id` exists to make unnecessary.
+    """
+    if plays is None or plays.empty or "drive_id" not in frame.columns:
+        return ["" for _ in range(len(frame))]
+    covered = {str(v) for v in plays["drive_id"].dropna()}
+    big = plays[
+        (plays["yards_gained"].fillna(0) > _DRIVE_BIG_PLAY_YARDS)
+        & (plays["play_type"].isin(_DRIVE_BIG_PLAY_TYPES))]
+    collapsed = _drive_big_play_rows(big)
+    return [_drive_big_play_note(d, collapsed, covered) for d in frame["drive_id"]]
+
+
 def _drive_y_shared():
     """The inherited y — no scale, no domain, no axis. Used by BOTH table panels."""
     return alt.Y("drive_number:Q", axis=None)
@@ -7091,11 +7276,42 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
     # 📋 **AND THE WORDING IS A PROPOSAL, NOT A DECISION** — it is his panel and his word that it
     # was unclear. It now says what the READER sees rather than naming the flag: *"the end of
     # this drive is not on the field, so no bar is drawn"*.
-    bars = alt.Chart(drawn).mark_rule(
-        strokeWidth=_DRIVE_BAR_WIDTH, strokeCap="butt").encode(
-        x=x_plain, x2="x_end:Q", y=y,
-        color=alt.Color("accent:N", scale=None, legend=None),
-        tooltip=tooltip)
+    # ── 🚨 v19 (HELD) PART 1: THE BIG-PLAY LINE IS A PARTITION, NOT A FIELD ─────────────
+    #
+    # 🚨 **A VEGA TOOLTIP LIST IS PER-LAYER, SO AN EMPTY VALUE DRAWS AN EMPTY LINE.** The two
+    # absences this panel must keep apart (cfdb-wta-R-1274) cannot both live in one string
+    # field: *"no big plays"* is a fact, *"nobody recorded this drive"* is the lack of one,
+    # and printing either where the other is true is R-084's placeholder.
+    #
+    # ✅ **SO THE BARS PARTITION ON WHETHER THE DRIVE HAS PLAY ROWS AT ALL**, exactly as the
+    # icons partition on `result_filled` one block down. ⚠️ **AND IT IS A FULL PARTITION —
+    # `has_note` and `~has_note`, no `notna()` filter on one side only**, which is the defect
+    # v02's logo variant shipped as `50 50` (cfdb-wta-R-1192). A test asserts every drawn
+    # drive appears in exactly one of the two.
+    #
+    # 📊 **On a game with no play coverage — 1,546 of 3,607 — every drive lands in the second
+    # layer and the panel is byte-identical to the one that shipped without this.**
+    has_note = drawn["big_plays"].astype(str) != "" if "big_plays" in drawn.columns \
+        else pd.Series([False] * len(drawn), index=drawn.index)
+    told = tooltip + [alt.Tooltip("big_plays:N", title="Plays over 10 yards")]
+
+    def _bar(rows, tips):
+        return alt.Chart(rows).mark_rule(
+            strokeWidth=_DRIVE_BAR_WIDTH, strokeCap="butt").encode(
+            x=x_plain, x2="x_end:Q", y=y,
+            color=alt.Color("accent:N", scale=None, legend=None),
+            tooltip=tips)
+
+    # 🚨 AN EMPTY LAYER IS STILL A LAYER IN THE SERIALISED SPEC, AND IT CARRIES ITS TOOLTIP
+    # DEFINITION WITH IT. On a game nobody recorded — 1,546 of 3,607 — every drive lands in
+    # the first half, and emitting the second anyway would put a `Plays over 10 yards` line
+    # into the spec of a panel that can never fill it. ✅ **So a half with no rows is not
+    # drawn at all**, and the panel for an unrecorded game is the one that shipped before.
+    # ⚠️ The base layer survives even when empty, so the field always has a bar layer for a
+    # frame where nothing has a position.
+    quiet, telling = drawn[~has_note], drawn[has_note]
+    bars = [_bar(quiet, tooltip)] if len(quiet) or not len(telling) else []
+    bars += [_bar(telling, told)] if len(telling) else []
     # 🚨 AC-G.22. THE ICON IS A SHAPE AND ITS COLOUR IS THE TEAM's, SO THE SHAPE CARRIES ALL
     # THE MEANING. `filled=False` keeps it legible on top of its own bar.
     # 🚨 **`filled` IS A MARK PROPERTY IN VEGA-LITE, NOT AN ENCODING, SO A PER-ROW FILL NEEDS
@@ -7162,7 +7378,7 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
             text=alt.Text("m:N")))
 
     layers = _drive_bands(frame, float(width)) + [
-        zone_fill, field, top_axis] + mascots + [bars, icons, scored_icons]
+        zone_fill, field, top_axis] + mascots + bars + [icons, scored_icons]
     # ⚠️ THE HONEST-ABSENCE BRANCH, KEPT DELIBERATELY THROUGH TWO REWRITES THAT COULD HAVE LOST
     # IT SILENTLY (R-141's family). 📊 118 of 84,838 drives — 0.139% — carry an end coordinate
     # off the field. **The row stays and says so; a missing possession is a worse lie than a
@@ -7914,7 +8130,8 @@ def _drives(game_id, season, row) -> None:
         # DECORATION — lib.query rejects an unbounded select outright (AC-G.39). 200 is far
         # above the measured ceiling: the longest game in 84,838 rows carries 38 drives.
         df = query("""
-            select drive_number, band, band_order, is_home_offense,
+            select drive_id,
+                   drive_number, band, band_order, is_home_offense,
                    offense_team_display, offense_logo_url,
                    offense_color_on_light, offense_color_on_dark, offense_color_source,
                    opponent_team_display, opponent_logo_url,
@@ -7950,6 +8167,38 @@ def _drives(game_id, season, row) -> None:
 
         colors = _drive_colors(df)
         frame = _drive_frame(df, colors)
+
+        # ── 🚨 v19 (HELD) PART 1: THE SECOND SELECT, AT THE SECOND GRAIN ─────────────────
+        #
+        # ⚠️ **TWO SINGLE-TABLE SELECTS, NOT A JOIN.** `lib.query` rejects a join outright
+        # (G-2), and this asks `srv_player_play` the same question the drives select asks
+        # `srv_drive` — one relation, one `WHERE game_id`, one measured LIMIT. The rows are
+        # attached to their drive in pandas, on the `drive_id` both relations publish
+        # (cfdb-wta-R-1275); nothing is computed from the pairing.
+        #
+        # 🚨 **IT IS DELIBERATELY NOT FILTERED TO BIG PLAYS IN SQL, AND THAT IS AC-G.11 AGAIN.**
+        # The panel has to tell *"this drive had no big play"* apart from *"nobody recorded
+        # this drive"*, and 44.61% of published drives are the second. **A query that returned
+        # only the big plays could not see the difference** — the two absences would arrive
+        # looking identical (cfdb-wta-R-1274).
+        #
+        # ⚠️ **AND IT DEGRADES ON ITS OWN RATHER THAN TAKING THE PANEL WITH IT.** The drives
+        # are the content; the big plays are an enrichment. `srv_player_play` is not in
+        # `lib.datasets` (session A's file, §3), so a failure here has no honest dataset
+        # label to report — and reporting it under `srv_drive` would name the wrong relation.
+        # **So the enrichment is silent when it cannot be had, exactly as an unrecorded drive
+        # is silent.**
+        try:
+            plays = query("""
+                select drive_id, play_id, stat_type, play_type,
+                       player_name, yards_gained
+                from srv_player_play
+                where game_id = :game_id
+                limit 1000
+            """, {"game_id": game_id})
+        except Exception:
+            plays = None
+        frame["big_plays"] = _drive_big_play_notes(frame, plays)
 
         # DEGRADED IS A SEPARATE STATE FROM EMPTY: the drives are all here, but a side's colour
         # is not the one the team publishes. Said once, above the sequence, not per row.

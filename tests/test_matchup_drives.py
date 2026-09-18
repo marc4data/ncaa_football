@@ -49,6 +49,30 @@ def _module_constant(name):
     return getattr(importlib.import_module("views.matchup"), name)
 
 
+_PLAY_COLUMNS = ["drive_id", "play_id", "stat_type", "play_type",
+                 "player_name", "yards_gained"]
+
+
+def _query_stub(frame, plays):
+    """The panel makes TWO selects now, so a stub that ignores the SQL answers the wrong one.
+
+    🚨 Handing the drives frame to the play grain would give it no `play_id` at all, and every
+    big-play assertion would pass on an empty attachment rather than on the thing it names —
+    R-744's class, which this file has already paid for twice.
+
+    ⚠️ **THE DEFAULT IS AN EMPTY PLAY FRAME RATHER THAN THE DRIVES FRAME, AND THAT IS THE
+    HONEST DEFAULT**: 1,546 of 3,607 games publish no play rows at all (cfdb-wta-R-1274), so
+    "this game has no plays" is the single commonest case on the site.
+    """
+    play_frame = (pd.DataFrame(columns=_PLAY_COLUMNS) if plays is None
+                  else pd.DataFrame(plays))
+
+    def _dispatch(sql, *a, **k):
+        return play_frame if "srv_player_play" in str(sql) else frame
+
+    return _dispatch
+
+
 @pytest.fixture
 def panel():
     """The panel with streamlit captured and the query stubbed, ready to be handed a frame.
@@ -68,7 +92,7 @@ def panel():
     with render_harness.streamlit_stubbed() as (_st, captured, charts):
         matchup = importlib.reload(importlib.import_module("views.matchup"))
 
-        def run(frame, season=2026, row=None, encoding=None):
+        def run(frame, season=2026, row=None, encoding=None, plays=None):
             # R-730. The season decides WHICH absence the Empty state states, so the
             # fixture has to carry one. 2026 is a completed modern game — the case
             # nearly every test here means; the scope tests pass a pre-2024 season.
@@ -86,7 +110,7 @@ def panel():
             # hconcats and failed with `expected exactly one`. See `Charts.clear`.
             charts.clear()
             original = matchup.query
-            matchup.query = lambda *a, **k: frame
+            matchup.query = _query_stub(frame, plays)
             try:
                 matchup._drives(9001, season, _game_row() if row is None else row)
             finally:
@@ -113,11 +137,11 @@ def themed_panel():
     """
     import importlib
 
-    def run(frame, theme="light", season=2026, row=None):
+    def run(frame, theme="light", season=2026, row=None, plays=None):
         with render_harness.streamlit_stubbed(theme=theme) as (_st, captured, charts):
             matchup = importlib.reload(importlib.import_module("views.matchup"))
             original = matchup.query
-            matchup.query = lambda *a, **k: frame
+            matchup.query = _query_stub(frame, plays)
             try:
                 matchup._drives(9001, season, _game_row() if row is None else row)
             finally:
@@ -163,6 +187,11 @@ def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,
     """
     absolute = (lambda own: own) if band == "home" else (lambda own: 100 - own)
     return {
+        # ⚠️ v19 (HELD): `drive_id` is the key `srv_player_play` carries too, and it is `text`
+        # in BOTH relations — measured on live serving, 0 nulls of 409,846 play rows. A
+        # fixture that typed it as an int would match nothing against a real play frame and
+        # every big-play assertion would then pass on an empty attachment (R-744's class).
+        "drive_id": f"d{number}",
         "drive_number": number, "band": band, "band_order": 2 if band == "home" else 1,
         "is_home_offense": band == "home",
         # 🚨 **THE LOGOS WERE `None` BY DEFAULT AND THAT MADE MARC'S LOGO ENCODING
@@ -283,15 +312,65 @@ def _only(hits, what):
     return hits[0]
 
 
+def _field_bar_layers(spec):
+    """Every bar layer on the field.
+
+    The bars are the `rule` layers with a `y` — the gridlines are rules with no y at all.
+
+    🚨 **THERE ARE TWO SINCE B138, AND THE SPLIT IS LOAD-BEARING RATHER THAN COSMETIC.** The
+    bars partition on whether the drive has play rows at all, because a Vega tooltip list is
+    per-layer: the drives we can speak about carry a `Plays over 10 yards` line and the ones
+    nobody recorded carry none (cfdb-wta-R-1274). ⚠️ **This helper deliberately does NOT
+    assert how many layers there are** — `_EVERY_DRAWN_DRIVE_APPEARS_IN_EXACTLY_ONE_BAR_LAYER`
+    is the test that owns that, so a helper every other test depends on cannot silently become
+    the assertion too.
+    """
+    return [n for n in _layers(spec, _FIELD)
+            if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})]
+
+
 def _field_rows(spec):
     """The drives the FIELD draws a bar for. A row absent here is a row with no position.
 
-    The bars are the one `rule` layer with a `y` — the gridlines are rules with no y at all.
+    ⚠️ **THE UNION OF THE BAR LAYERS, NOT ONE OF THEM.** Reading a single layer here would
+    have quietly halved the population every caller measures, which is the shape of the
+    B135 near-miss where a green suite covered less than its pass count suggested.
     """
-    return _rows(spec, _only(
-        [n for n in _layers(spec, _FIELD)
-         if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})],
-        "field bar layer"))
+    layers = _field_bar_layers(spec)
+    assert layers, "the field draws no bars at all"
+    out = []
+    for node in layers:
+        out.extend(_rows(spec, node))
+    return out
+
+
+def _field_bar_tooltip_fields(spec):
+    """The tooltip FIELDS every bar layer carries.
+
+    🚨 **ACROSS ALL BAR LAYERS, NOT ONE OF THEM.** Since B138 the bars partition on whether a
+    drive has play rows, so reading one layer would let a tooltip line silently vanish from
+    the other half of the drives. **A field is returned only if EVERY bar layer carries it**,
+    which is the stronger claim and the one these tests were always making when there was
+    one layer.
+    """
+    per_layer = [[t.get("field") for t in n["encoding"]["tooltip"]]
+                 for n in _field_bar_layers(spec)]
+    assert per_layer, "the field draws no bars at all"
+    common = set(per_layer[0])
+    for fields in per_layer[1:]:
+        common &= set(fields)
+    return common
+
+
+def _field_bar_tooltip_titles(spec):
+    """`{title: field}` for the tooltip entries EVERY bar layer carries. See above."""
+    per_layer = [{t.get("title"): t.get("field") for t in n["encoding"]["tooltip"]}
+                 for n in _field_bar_layers(spec)]
+    assert per_layer, "the field draws no bars at all"
+    common = dict(per_layer[0])
+    for titles in per_layer[1:]:
+        common = {k: v for k, v in common.items() if titles.get(k) == v}
+    return common
 
 
 def _field_icons(spec):
@@ -1042,10 +1121,21 @@ def test_the_query_is_one_table_scoped_to_a_game_and_bounded():
     srv_drive is 84,838 rows today; an unscoped read of it is the defect."""
     source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
     block = source[source.index("def _drives("):source.index("def render()")]
-    sql = block[block.index("select drive_number"):block.index('""", {"game_id"')]
-    assert sql.lower().count(" from ") == 1 and "join" not in sql.lower()
-    assert "where game_id = :game_id" in sql
-    assert re.search(r"\blimit\s+\d+", sql, re.I), "an unbounded select is a defect (AC-G.39)"
+    # 🚨 BOTH SELECTS, NOT JUST THE FIRST. B138 added a second one at the play grain, and a
+    # test that measured only the drives select would have let an unbounded or joined read of
+    # `srv_player_play` — 409,846 rows — ship without a word.
+    selects = [seg.split('"""', 1)[0]
+               for seg in block.split("query(\"\"\"")[1:]]
+    assert len(selects) == 2, (
+        f"expected the drives select and the play select, found {len(selects)}. A new query "
+        f"in this panel is a new thing to bound (AC-G.39)")
+    for sql in selects:
+        assert sql.lower().count(" from ") == 1 and "join" not in sql.lower(), sql
+        assert "where game_id = :game_id" in sql, sql
+        assert re.search(r"\blimit\s+\d+", sql, re.I), (
+            f"an unbounded select is a defect (AC-G.39): {sql}")
+    assert "from srv_drive" in selects[0] and "from srv_player_play" in selects[1], (
+        "the two selects must read the two relations this panel is built from")
 
 
 # --- 🚨 R-730: WHICH absence is this? ------------------------------------------------------
@@ -1185,10 +1275,8 @@ def test_THE_TOOLTIP_NAMES_THE_SIDE_IN_WORDS_because_it_cannot_carry_a_logo(pane
         _drive(3, "home", "Alpha", "PUNT", category="punt", start=50, end=60)])
     spec = _spec(panel(frame)[1])
 
-    # the tooltip is an ENCODING on the bar layer, so this reads the encoding rather than text
-    bars = _only([n for n in _layers(spec, _FIELD)
-                  if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})], "bar layer")
-    fields = [t.get("field") for t in bars["encoding"]["tooltip"]]
+    # the tooltip is an ENCODING on the bar layers, so this reads the encoding rather than text
+    fields = _field_bar_tooltip_fields(spec)
     assert "yardline_words" in fields, (
         f"the bar tooltip does not carry the starting yardline Marc asked for: {fields}")
 
@@ -1957,10 +2045,8 @@ def test_THE_CELL_IS_ABBREVIATED_AND_THE_TOOLTIP_KEEPS_THE_WHOLE_WORD(panel):
         f"the cell reads {cell['result_label']!r}; the published string is 110.95px and the "
         f"cell is 66px, so the whole point is that it does not go there")
 
-    # THE TOOLTIP, READ OFF THE BAR LAYER'S ENCODING rather than out of the spec's text
-    bars = _only([n for n in _layers(spec, _FIELD)
-                  if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})], "bar layer")
-    fields = [t.get("field") for t in bars["encoding"]["tooltip"]]
+    # THE TOOLTIP, READ OFF THE BAR LAYERS' ENCODING rather than out of the spec's text
+    fields = _field_bar_tooltip_fields(spec)
     assert "drive_result" in fields, (
         f"the tooltip lost the published result: {fields}. A reader who wants the word must be "
         f"able to get it")
@@ -2217,9 +2303,7 @@ def test_THE_TOOLTIP_SPLITS_THE_SWING_FROM_THE_SCORE(panel):
         _drive(1, "home", "Alpha", "TD", category="offensive score",
                scoring_side="offense", scoring=True, off_score=(0, 7), def_score=(0, 0))])
     spec = _spec(panel(frame)[1])
-    bars = _only([n for n in _layers(spec, _FIELD)
-                  if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})], "bar layer")
-    titles = {t.get("title"): t.get("field") for t in bars["encoding"]["tooltip"]}
+    titles = _field_bar_tooltip_titles(spec)
 
     assert titles.get("Score impact") == "impact_swing", (
         f"`Score impact` reads {titles.get('Score impact')!r} — the +/- stays on its own line")
@@ -2552,3 +2636,200 @@ def test_THE_MASCOTS_INK_IS_BLACK_OR_WHITE_by_the_fills_own_luminance(panel):
     layer = _only(_mascot_layers(spec), "the mascot layer")
     assert layer["mark"]["color"] == dark, (
         f"a white end zone drew {layer['mark'].get('color')!r} lettering — white on white")
+
+
+# ── 🚨 v19 (HELD) PART 1: THE BIG PLAYS ─────────────────────────────────────────────────────
+#
+# > **MARC, v19:** *"Is there a way to add borders around the yards gained by plays > 10 yards
+# > long?  If so, can we add what type and who gained the yards in the tooltip?"*
+#
+# **The TOOLTIP half ships; the BORDER half is blocked on a coordinate serving does not
+# publish (cfdb-wta-R-1277 — see the report).** These tests are about the half that shipped.
+
+def _play(drive_id, play_id, stat_type, play_type, player_name, yards):
+    """One `srv_player_play` row — the PLAYER-STAT grain, one row per player per stat."""
+    return {"drive_id": drive_id, "play_id": play_id, "stat_type": stat_type,
+            "play_type": play_type, "player_name": player_name, "yards_gained": yards}
+
+
+def _told_layers(spec):
+    """The bar layers whose tooltip carries the big-play line."""
+    return [n for n in _field_bar_layers(spec)
+            if any(t.get("field") == "big_plays" for t in n["encoding"]["tooltip"])]
+
+
+def _note_for(spec, drive_number):
+    """One drive's big-play note, read off whichever bar layer actually drew it."""
+    for node in _field_bar_layers(spec):
+        for row in _rows(spec, node):
+            if row.get("drive_number") == drive_number:
+                return row.get("big_plays")
+    raise AssertionError(f"drive {drive_number} is on no bar layer at all")
+
+
+def test_EVERY_DRAWN_DRIVE_APPEARS_IN_EXACTLY_ONE_BAR_LAYER(panel):
+    """🚨 A FULL PARTITION, NOT A `notna()` FILTER ON ONE SIDE.
+
+    The bars split on whether the drive has play rows, because a Vega tooltip list is
+    per-layer. ⚠️ **Half a partition is what v02's logo variant shipped as `50 50`
+    (cfdb-wta-R-1192)** — one layer filtered, the other drawing everything, so the rows in
+    both drew twice. **This is the assertion that catches that, and it is why
+    `_field_bar_layers` deliberately refuses to make it.**
+    """
+    frame = pd.DataFrame([
+        _drive(1, "away", "Alpha", "TD", category="offensive score"),
+        _drive(2, "home", "Beta", "PUNT", category="punt"),
+        _drive(3, "away", "Alpha", "FG", category="offensive score")])
+    # drive 1 recorded and big, drive 2 recorded and quiet, drive 3 never recorded
+    plays = [_play("d1", "p1", "Reception", "Pass Reception", "Ben Black", 43),
+             _play("d2", "p2", "Rush", "Rush", "Slow Sam", 2)]
+    spec = _spec(panel(frame, plays=plays)[1])
+
+    seen = []
+    for node in _field_bar_layers(spec):
+        seen.extend(r.get("drive_number") for r in _rows(spec, node))
+    assert sorted(seen) == [1, 2, 3], (
+        f"the bar layers between them drew {sorted(seen)} — every drawn drive must appear "
+        f"exactly once, and a drive appearing twice is drawn twice")
+
+
+def test_A_PASS_IS_ONE_BIG_PLAY_AND_IT_NAMES_THE_RECEIVER(panel):
+    """🚨 THE GRAIN, AND THE `who` DECISION, IN ONE ASSERTION.
+
+    📊 A completed pass publishes TWO rows — `Completion` for the passer and `Reception` for
+    the receiver — both stamped with the SAME `yards_gained`. **45.73% of all plays carry more
+    than one stat row (cfdb-wta-R-1275), so a per-row read would list this play twice.**
+
+    ✅ **AND MARC ASKED WHO *GAINED* THE YARDS, WHICH IS THE RECEIVER** — the passer threw
+    them (cfdb-wta-R-1278). The other answer is named in the report, not hidden.
+    """
+    frame = pd.DataFrame([_drive(1, "away", "Alpha", "TD", category="offensive score")])
+    plays = [_play("d1", "p1", "Completion", "Pass Reception", "Athan Kaliakmanis", 43),
+             _play("d1", "p1", "Reception", "Pass Reception", "Ben Black", 43)]
+    note = _note_for(_spec(panel(frame, plays=plays)[1]), 1)
+
+    assert note.count("43 yd") == 1, (
+        f"the note reads {note!r} — two stat rows for one play drew it twice, which is the "
+        f"double-count the collapse exists to prevent")
+    assert "Ben Black" in note, f"the note reads {note!r} — the receiver gained the yards"
+    assert "Athan Kaliakmanis" not in note, (
+        f"the note reads {note!r} — the passer is the other answer, and naming both in one "
+        f"line answers neither question")
+
+
+def test_A_FIELD_GOAL_IS_NOT_A_BIG_PLAY_because_its_yards_are_the_kick(panel):
+    """🚨 THE MEASUREMENT THAT MADE THE ALLOW-LIST NECESSARY (cfdb-wta-R-1276).
+
+    📊 `Field Goal Good` publishes a mean `yards_gained` of **35.6** against a mean
+    `yards_to_goal` of **18.1** — it is the KICK DISTANCE, and a kick from the 18 cannot gain
+    35 yards. **A bare `yards_gained > 10` would have called ~6,181 field goals a big play.**
+    """
+    frame = pd.DataFrame([_drive(1, "away", "Alpha", "FG", category="offensive score")])
+    plays = [_play("d1", "p1", "Field Goal Made", "Field Goal Good", "Kicky Pete", 45)]
+    note = _note_for(_spec(panel(frame, plays=plays)[1]), 1)
+
+    assert "45" not in note, (
+        f"the note reads {note!r} — a 45-yard field goal is a 45-yard KICK, and printing it "
+        f"as yards gained tells the reader the offence advanced 45 yards")
+    assert note == _module_constant("_DRIVE_BIG_PLAY_NONE"), (
+        f"the note reads {note!r} — this drive WAS recorded and had no big play, so it says "
+        f"so rather than falling silent")
+
+
+def test_A_TURNOVER_RETURN_IS_NOT_YARDS_THE_OFFENCE_GAINED(panel):
+    """📊 `Interception Return Touchdown` averages 46.7 yards — the DEFENCE's.
+
+    ⚠️ Those yards belong to the drive (they are why it ended) and they are emphatically not
+    *"yards gained"* by the team whose bar this is.
+    """
+    frame = pd.DataFrame([_drive(1, "away", "Alpha", "INT TD", category="defensive score")])
+    plays = [_play("d1", "p1", "Interception", "Interception Return Touchdown", "Pick Six", 62)]
+    note = _note_for(_spec(panel(frame, plays=plays)[1]), 1)
+
+    assert "62" not in note and "Pick Six" not in note, (
+        f"the note reads {note!r} — a 62-yard interception return is not a gain by the "
+        f"offence whose drive this is")
+
+
+def test_EXACTLY_TEN_YARDS_IS_NOT_OVER_TEN(panel):
+    """⚠️ Marc wrote *"> 10 yards"*. A `>=` would be a different panel, silently.
+
+    🚨 **AND THE BOUNDARY IS WHERE THE ROWS ARE**, so this is not a pedantic test: ten- and
+    eleven-yard gains are among the commonest plays in football.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "away", "Alpha", "PUNT", category="punt"),
+        _drive(2, "away", "Alpha", "PUNT", category="punt")])
+    plays = [_play("d1", "p1", "Rush", "Rush", "Exactly Ten", 10),
+             _play("d2", "p2", "Rush", "Rush", "Just Eleven", 11)]
+    spec = _spec(panel(frame, plays=plays)[1])
+
+    assert "Exactly Ten" not in _note_for(spec, 1), (
+        f"a ten-yard rush was called a big play: {_note_for(spec, 1)!r}")
+    assert "Just Eleven" in _note_for(spec, 2), (
+        f"an eleven-yard rush was not: {_note_for(spec, 2)!r}")
+
+
+def test_A_QUIET_DRIVE_SAYS_NONE_AND_AN_UNRECORDED_ONE_SAYS_NOTHING(panel):
+    """🚨 AC-G.11, AND THE TWO ABSENCES ARE 44.61% OF ALL DRIVES (cfdb-wta-R-1274).
+
+    📊 **37,846 of 84,838 published drives carry no play rows at all**, and the gap is
+    per-GAME: 1,546 of 3,607 games are entirely blank. ⚠️ **Printing `None` there would be a
+    confident false statement — R-084's placeholder wearing a tooltip.** It says nothing, and
+    the bar carrying it has no big-play line on its tooltip at all.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "away", "Alpha", "PUNT", category="punt"),
+        _drive(2, "home", "Beta", "PUNT", category="punt")])
+    # drive 1 is recorded and quiet; drive 2 was never recorded at all
+    plays = [_play("d1", "p1", "Rush", "Rush", "Slow Sam", 3)]
+    spec = _spec(panel(frame, plays=plays)[1])
+
+    assert _note_for(spec, 1) == _module_constant("_DRIVE_BIG_PLAY_NONE"), (
+        f"a recorded drive with no big play reads {_note_for(spec, 1)!r}")
+    assert _note_for(spec, 2) == "", (
+        f"an UNRECORDED drive reads {_note_for(spec, 2)!r} — we do not know whether it had a "
+        f"big play, and saying `None` claims we do")
+
+    told = _told_layers(spec)
+    assert len(told) == 1, f"expected one layer to carry the big-play line, found {len(told)}"
+    numbers = [r.get("drive_number") for r in _rows(spec, told[0])]
+    assert numbers == [1], (
+        f"the layer carrying the `Plays over 10 yards` line drew {numbers} — the unrecorded "
+        f"drive must not carry a line it cannot fill")
+
+
+def test_A_GAME_NOBODY_RECORDED_RENDERS_EXACTLY_AS_IT_DID_BEFORE(panel):
+    """📊 **1,546 of 3,607 games publish no play rows at all — 42.86%.**
+
+    ✅ **On those the panel must be the one that shipped without this feature**: no big-play
+    line anywhere, every bar on the layer that carries no such tooltip. ⚠️ **This is the test
+    that says the 42.86% case is the DEFAULT rather than an edge** — the commonest game on
+    the site is one this feature can say nothing about.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "away", "Alpha", "TD", category="offensive score"),
+        _drive(2, "home", "Beta", "PUNT", category="punt")])
+    spec = _spec(panel(frame, plays=None)[1])
+
+    assert _told_layers(spec) == [], (
+        "a game with no play rows drew a `Plays over 10 yards` tooltip line, which can only "
+        "be empty")
+    assert all(_note_for(spec, n) == "" for n in (1, 2))
+
+
+def test_THE_BIG_PLAY_LINE_IS_TITLED_THE_WAY_MARC_ASKED(panel):
+    """⚠️ *what type and who gained the yards* — all three facts, published, unaltered."""
+    frame = pd.DataFrame([_drive(1, "away", "Alpha", "TD", category="offensive score")])
+    plays = [_play("d1", "p1", "Reception", "Pass Reception", "Ben Black", 43)]
+    spec = _spec(panel(frame, plays=plays)[1])
+
+    titles = {t.get("title"): t.get("field")
+              for t in _told_layers(spec)[0]["encoding"]["tooltip"]}
+    assert titles.get("Plays over 10 yards") == "big_plays", (
+        f"the big-play line is not on the tooltip: {sorted(titles)}")
+    note = _note_for(spec, 1)
+    for fact in ("43", "Pass Reception", "Ben Black"):
+        assert fact in note, (
+            f"the note reads {note!r} and does not carry {fact!r} — Marc asked for the "
+            f"yards, the type and the player")
