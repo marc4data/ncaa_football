@@ -124,9 +124,23 @@ select
     home_country,
     -- Null rather than a lone comma when the city is missing, so the page renders an em dash
     -- (AC-G.32) instead of stray punctuation.
-    case when home_city is not null and home_state is not null
-         then home_city || ', ' || home_state
-         else coalesce(home_city, home_state) end         as hometown_display,
+    --
+    -- 🚨 A172 (cfdb-main-R-1655). THE INTENT ABOVE WAS RIGHT AND THE GUARD WAS INCOMPLETE:
+    -- `is not null` does not catch an EMPTY STRING, and the source publishes plenty. So an
+    -- international player with a city and no state produced `'Pori, '` — city, comma, trailing
+    -- space — which is exactly the "stray punctuation" this expression exists to prevent.
+    --
+    -- 📊 MEASURED ON LIVE PUBLISHED SERVING BEFORE THE FIX: **834 of 83,985 roster rows (0.99%)
+    -- had a hometown ending in a comma.** Found by RASTERISING the Roster tab and reading it —
+    -- `Pori,` for Olaus Alinen — not by reading the SQL, which looked correct and said so.
+    --
+    -- ⚠️ `trim` AS WELL AS `nullif`, because a state of `' '` is the same defect wearing a
+    -- space. The em-dash fallback then does what the comment has always promised.
+    case when nullif(trim(home_city), '') is not null
+              and nullif(trim(home_state), '') is not null
+         then trim(home_city) || ', ' || trim(home_state)
+         else coalesce(nullif(trim(home_city), ''),
+                       nullif(trim(home_state), '')) end   as hometown_display,
     home_latitude,
     home_longitude,
     home_fips_code,
