@@ -616,6 +616,20 @@ def _curve_axis_units(points: pd.DataFrame) -> pd.Series:
 
 
 _CURVE_PAD = 2
+# 🚨 A164 (cfdb-main-R-1142). THE HEIGHT IS A MEASUREMENT OF THE CELL BESIDE IT, NOT A TASTE.
+# Marc, Today v04: *"Win Probability needs to take up more vertical space. Stretch the y-axis to
+# take up the same amount of space by the Away and Home lines in the Scoreboard."*
+#
+# 📊 MEASURED IN CHROMIUM ON THE REAL PANEL at a 1300px viewport, by class rather than by
+# position — `.cfdb-sb-away` top 767.7px to `.cfdb-sb-home` bottom 834.9px = **67.2px**. The
+# thead ("1 2 3 4 F") is NOT part of that span and an earlier reading that included it said 80.8.
+#
+# ⚠️ AND 67 IS THE ONE HEIGHT THAT CANNOT MAKE THE ROW GROW, which is why "the same space" is a
+# safe ask where "more space" would not have been. The row is 94.2px: the scoreboard's own 80.8
+# plus `.cfdb-table td`'s 6.72px of padding top and bottom. A chart at 67px sits inside that
+# content box with room to spare; a chart taller than 80.8 would re-lay out every scoreboard on
+# the page. ⚠️ The plotting band is `height - 2 * _CURVE_PAD`, so this takes it from 40.0 to 63.0.
+_CURVE_HEIGHT = 67
 
 
 def _curve_final_value(points: pd.DataFrame):
@@ -690,8 +704,8 @@ def _curve_bands(points: pd.DataFrame) -> int:
     return int(periods.max()) if periods.notna().any() else 0
 
 
-def _curve_width(points: pd.DataFrame, label: str = "") -> int:
-    """This game's chart width in pixels, at the shared scale, including room for its label.
+def _curve_width(points: pd.DataFrame) -> int:
+    """This game's chart width in pixels, at the shared scale.
 
     🚨 THE PANEL NEEDS THIS BEFORE IT RENDERS ANY ROW, which is why it is its own function.
     `.cfdb-table` is `table-layout:fixed`: with no colgroup every column takes an equal share,
@@ -700,19 +714,23 @@ def _curve_width(points: pd.DataFrame, label: str = "") -> int:
     and that is a fact about the FRAME, not about any one row.
 
     ⚠️ A139 MADE THE GUTTER DEPEND ON THE LABEL RATHER THAN ON A CONSTANT, because naming the
-    home side made the label variable. A fixed gutter would have had to be sized for the longest
-    label the data can produce — 9 characters plus " 100%" is 76px — and would have spent that on
-    every chart on the page forever. Sized per row it costs what it costs: `MICH 100%` is 55px
-    against the old constant's 30, and a `cut` row is 23 and gets NARROWER.
+    home side made the label variable. 🚨 **A164 REMOVED THE GUTTER ALTOGETHER AND WITH IT THAT
+    PARAMETER**: the label is now drawn INSIDE the plot, to the left of the final point, so no
+    width here depends on its length. A139's reasoning was right for a label in the margin and
+    stops applying the moment the label leaves the margin. 📊 The effect is the one Marc asked
+    for — a regulation chart goes from 224px to 182px, and the column is sized from the widest.
     """
     span = _CURVE_REGULATION_UNITS + _curve_bands(points) * _CURVE_OT_BAND_UNITS
-    gutter = (_CURVE_LABEL_OFFSET + len(label) * _CURVE_LABEL_CHAR_PX + _CURVE_LABEL_TRAIL
-              if label else _CURVE_LABEL_TRAIL)
-    return int(round(_CURVE_PAD * 2 + span * _CURVE_PX_PER_UNIT + gutter))
+    # 🚨 A164: THE LABEL NO LONGER BUYS A GUTTER, BECAUSE IT NO LONGER SITS IN ONE. It is drawn
+    # to the LEFT of the final point, inside the plot, so the width is the span plus the trailing
+    # margin and nothing else. ⚠️ A139's per-row gutter — sized from the label's own length — is
+    # what this removes, and removing it is the POINT rather than a side effect: Marc asked for
+    # the panel to get narrower and the column is `max(_curve_width(...)) + 12`.
+    return int(round(_CURVE_PAD * 2 + span * _CURVE_PX_PER_UNIT + _CURVE_LABEL_TRAIL))
 
 
 def _sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
-                   height: int = 44) -> str:
+                   height: int = _CURVE_HEIGHT) -> str:
     """One game's win-probability curve, as inline SVG sized for a table cell.
 
     🚨 A CHART CANNOT LIVE INSIDE `table.render`, WHICH IS WHY THIS IS SVG AND NOT ALTAIR.
@@ -774,7 +792,7 @@ def _sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
     # units; each overtime period adds a band. Nothing is padded out to match another row.
     bands = _curve_bands(plotted)
     span_units = _CURVE_REGULATION_UNITS + bands * _CURVE_OT_BAND_UNITS
-    width = _curve_width(plotted, label)
+    width = _curve_width(plotted)
     ph = height - 2 * pad
 
     def sx(axis_units) -> float:
@@ -930,8 +948,15 @@ def _sparkline_svg(points: pd.DataFrame, label: str = "", is_cut: bool = False,
         # is 5.4219px wide at this size, which is what lets `_curve_width` size the gutter
         # exactly rather than from an advance table. It also matches `.cfdb-num`, so the label
         # reads as one more figure on a page of figures.
-        parts.append(f"<text x='{last_x + _CURVE_LABEL_OFFSET:.1f}' y='{label_y:.1f}' "
-                     f"font-size='9' font-family='{_CURVE_LABEL_FONT}' "
+        # 🚨 A164: THE LABEL SITS TO THE LEFT OF THE FINAL POINT — Marc, Today v04, and his
+        # second sentence is an ACCEPTANCE CRITERION rather than a rationale: *"That will
+        # tighten up the horizontal space."* Moving it without shrinking `_curve_width` would
+        # have satisfied the words and failed the ask, so the gutter goes with it.
+        # ⚠️ `text-anchor='end'` RATHER THAN SUBTRACTING A MEASURED WIDTH. The glyphs are
+        # monospace at a known pitch, so both would work — but an anchor cannot drift out of
+        # step with `_CURVE_LABEL_CHAR_PX` the way a second width calculation could.
+        parts.append(f"<text x='{last_x - _CURVE_LABEL_OFFSET:.1f}' y='{label_y:.1f}' "
+                     f"text-anchor='end' font-size='9' font-family='{_CURVE_LABEL_FONT}' "
                      f"fill='currentColor' opacity='.75'>{label}</text>")
 
     return (f"<svg viewBox='0 0 {width} {height}' width='{width}' height='{height}' "
@@ -1025,6 +1050,21 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
     ⚠️ THE RECORD SITS OUTSIDE THE ANCHOR — R-129, and Schedule reaches the same layout the same
     way. Inside it, the record would be dead text under a pointer cursor.
 
+    🚨 A164: THE TWO ARE WRAPPED IN `.cfdb-identity` SO THEY SHARE A LINE — Marc asked three
+    times in Today v04 (*"Records should be inline with the Team Name, not line below it"*,
+    twice, and *"Team - Ranks inline with team name, not below"*). **One cell, seven tables, one
+    fix.**
+
+    📊 THE CAUSE WAS MEASURED AND IT IS NOT THE ONE IT LOOKS LIKE. `.cfdb-teamlink` is
+    `display:flex`, which is a BLOCK-LEVEL box, so the record sibling could never share its line
+    at any width. The suspected culprit — `.cfdb-table .cfdb-team`'s `max-width:100%` — was
+    tested in Chromium and exonerated: neutralising it left the record wrapped on 4 of 4 rows,
+    as did deleting that rule's whole ellipsis cluster, while inline-flex alone fixed 3 of 4.
+    ⚠️ **THE WRAPPER ADDS A LEVEL RATHER THAN EDITING EITHER RULE**, because `.cfdb-teamlink`,
+    `.cfdb-team` and `.cfdb-team-record` are all read outside this function — `schedule.py`
+    composes the record differently, and the game cards and the legend read the name. The
+    geometry belongs to the cell that has the problem.
+
     ⚠️ THE COLUMN NAMES ARE ARGUMENTS BECAUSE THE RELATIONS GENUINELY DISAGREE, and that is worth
     one parameter rather than one copy: `srv_game` spells a side `home_team_slug` / `home_rank`,
     `srv_game_team` spells the same facts `team_slug` / `team_rank` / `record_before_display`.
@@ -1045,7 +1085,8 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
     href = table.team_link(slug_field)(row)
     if href:
         cell = f"<a class='cfdb-teamlink' href='{href}' target='_self'>{cell}</a>"
-    return f"{cell}{table.record_span(row, record_field, record_after_field)}"
+    record = table.record_span(row, record_field, record_after_field)
+    return f"<span class='cfdb-identity'>{cell}{record}</span>"
 
 
 def _player_identity(row) -> str:
@@ -1152,12 +1193,31 @@ def _player_columns() -> list:
     ]
 
 
-def _commentary(row, scope) -> str:
-    """The game's own marks over the ESPN link, in one cell.
+def _commentary(row, scope, stacked: bool = False) -> str:
+    """The game's marks and the ESPN link, in one cell. `stacked` puts the link on its own line.
 
     > **MARC, Today v01:** *"In the Commentary column, add the same Matchup and outcome glyphs as
     > on the Schedule page. Put them in the top row of the cell, the ESPN link below in the same
     > cell."*
+
+    🚨 **THAT SECOND SENTENCE WAS NEVER IMPLEMENTED, AND THIS DOCSTRING QUOTED IT FOR FOUR ROUNDS
+    AS THOUGH IT HAD BEEN (cfdb-main-R-1230).** `.cfdb-commentary` had NO CSS RULE of any kind, so
+    the span was inline and the link fell below the marks only where the column happened to be too
+    narrow to hold both. 📊 A164 measured it in Chromium on the real page: **Most Exciting put
+    ESPN on its own line at a 1300px viewport and on the SAME line at 1600px** — the same markup,
+    the layout flipping on viewport alone — while the two recap panels kept it inline at both.
+    **A layout that is true by accident on one panel reads exactly like a layout that was chosen.**
+
+    ✅ **NOW IT IS A DECISION.** `.cfdb-commentary` is an inline flex row with a declared gap;
+    `stacked=True` adds `.cfdb-commentary-stacked` and makes it a column. ⚠️ **AND THE TWO ARE
+    DELIBERATELY DIFFERENT, because Marc asked for two different things in Today v04** — a
+    *"carriage return"* on Most Exciting, a *"Space"* on Upsets and Underdogs, whose measured gap
+    was exactly 0px. Averaging them into one rule would have satisfied neither sentence.
+
+    ⚠️ **THE WINNER TRIANGLE IS GONE — Marc, Today v04, in all three panels.** `glyphs.winner`
+    keeps its other caller — `matchup.py`'s `_winner_glyph`, asserted rather than assumed — so
+    nothing here orphans it. `glyphs.result_strip` STAYS: his *"diamond outcome glyph"* is the strip's, and he
+    was positioning the link relative to it rather than asking for it to go.
 
     🚨 *"THE SAME … GLYPHS AS ON THE SCHEDULE PAGE"* MEANT SCHEDULE'S *Game* COLUMN CELL, AND MARC
     SETTLED IT WITH A PICTURE — a column headed **Game**, then a lined rectangle, a filled circle, a
@@ -1197,11 +1257,10 @@ def _commentary(row, scope) -> str:
     details = (f"<a class='cfdb-cell-link-alt' href='{href}' target='_self' "
                f"title='Open the matchup'>"
                f"<span class='cfdb-details'>{table.DETAILS_GLYPH}</span></a>")
-    arrows = "".join(glyphs.render(glyphs.winner(row, side), size="font-size:.85rem")
-                     for side in ("away", "home"))
-    return (f"<span class='cfdb-commentary'>"
+    stack = " cfdb-commentary-stacked" if stacked else ""
+    return (f"<span class='cfdb-commentary{stack}'>"
             f"<span class='cfdb-commentary-marks'>{details}"
-            f"<span class='cfdb-strip-gap'></span>{arrows}{glyphs.result_strip(row)}</span>"
+            f"<span class='cfdb-strip-gap'></span>{glyphs.result_strip(row)}</span>"
             f"{_espn_link(row)}</span>")
 
 
@@ -1431,10 +1490,9 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     # shared extent — means the charts differ in width by design, so the column is the widest of
     # them and the narrower ones simply do not fill it. Computed from the data rather than from a
     # constant, because a constant would be wrong the first week nothing goes to overtime.
-    widest = max(
-        (_curve_width(by_game[game_id], labels.get(game_id, ("", False))[0])
-         for game_id in top["game_id"] if game_id in by_game),
-        default=_curve_width(None))
+    widest = max((_curve_width(by_game[game_id])
+                  for game_id in top["game_id"] if game_id in by_game),
+                 default=_curve_width(None))
     layout = ["26%", f"{widest + 12}px"] + ["auto"] * 6
 
     states.render_or_state(
@@ -1459,14 +1517,25 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # a panel ordered by a number he could not see.
             Col("scoreboard_lead_changes_fourth_quarter", "4th-qtr lead changes", kind="num"),
             Col("scoreboard_lead_changes_overtime", "OT lead changes", kind="num"),
-            Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
+            # ⚠️ A164. MARC MOVED A DISPLAYED COLUMN, NOT THE SORT — Today v04: *"Move Lead
+            # Changes Game between OT Lead Changes and How Close Late."* `MOST_EXCITING_ORDER`
+            # is untouched and the caption still describes the ordering, which is unchanged.
+            # ✅ `layout` DOES NOT MOVE AND THAT IS ASSERTED, NOT ASSUMED: it pins only the first
+            # two columns and the six that follow are all "auto", so two of them swapping is
+            # invisible to it. `test_most_exciting_layout_pins_only_the_first_two_columns` holds
+            # that property, because a `layout` silently out of step with the columns shows up
+            # only on a wide viewport.
             Col("scoreboard_lead_changes", "Lead changes, game", kind="num"),
+            Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
             Col("excitement_index", "Excitement", kind="num", dp=1),
             # 🚨 A144. THE OUTCOME GLYPH JOINS THE LINK IN ONE CELL — Marc: *"Put them in the
             # top row of the cell, the ESPN link below in the same cell."* `_commentary` says
             # which of `glyphs.winner`'s four None-reasons can occur on a panel of completed
             # games, and why the Matchup half of his sentence is not here.
-            Col("espn", "Commentary", render=lambda r: _commentary(r, scope)),
+            # ⚠️ `stacked=True` IS MARC'S "carriage return", AND IT IS THE ONLY PANEL THAT GETS
+            # IT. The two recap panels get the horizontal gap he asked for there instead —
+            # see `_commentary`, which measured all three before choosing.
+            Col("espn", "Commentary", render=lambda r: _commentary(r, scope, stacked=True)),
         ], layout=layout, anchor="most-exciting",
             caption="Ordered by fourth-quarter lead changes, then by mean distance from an "
                     "even win probability from the fourth quarter onward (lower is closer)."))
@@ -1508,7 +1577,16 @@ def _favorite_margin(row):
 # the line*, and it still cannot draw the Matchup outlook — there is no outlook column on
 # `srv_game` at any grain (A144 measured it). **Listing it would explain a mark no row here can
 # produce**, which is the same defect as omitting one, pointed the other way.
-LEGEND_GROUPS_DRAWN = ("Outcome",)
+# 🚨 A164 (cfdb-main-R-1143). THIS WENT FROM ("Outcome",) TO EMPTY, AND A TEST FORCED IT.
+# Marc removed the winner triangle from the Commentary cell in Today v04 — so `glyphs.winner` is
+# no longer called anywhere on this page, and "Outcome" became a group the legend explained and
+# no row could draw. ✅ **R-178's law caught it in the same run**:
+# `test_the_legend_lists_every_mark_today_can_draw_and_invents_none` builds its expectation by
+# RENDERING the real cell rather than by reading this tuple, so deleting the arrows turned it red
+# immediately. ⚠️ **A legend entry for a mark that is gone is not a harmless leftover: it tells a
+# reader to look for something the page will never show.**
+# **The day an outcome mark returns to this page, this tuple is the one line that changes.**
+LEGEND_GROUPS_DRAWN = ()
 
 
 def _legend() -> None:
@@ -2116,6 +2194,22 @@ _BUMP_CHART_WIDTH = 820
 # drew (A141) and a chart element cannot. **At a shared rank axis the row order IS rank**, so the
 # Rank, Team and delta sort links were already saying what the axis says — but **sorting by
 # POINTS is genuinely gone**, and that is the one a reader might have used.
+# 🚨 A164 (cfdb-main-R-1144). THE RIGHT-ANGLE LOOK MARC ASKED FOR, AND WHY THIS ONE OF THREE.
+# > *"Can we switch to a bump chart look where the changes to the lines are right angles instead
+# > of diagonal lines."*
+#
+# Vega-Lite offers three, and they put the vertical in three different places:
+#
+#     step         the vertical falls at the MIDPOINT between two weeks — on no tick at all
+#     step-before  the vertical falls at the EARLIER week, so the new rank is drawn a week EARLY
+#     step-after   the line HOLDS the rank across its own week and turns at the NEXT week's tick
+#
+# ✅ **`step-after` IS THE ONLY ONE THAT MATCHES WHAT A POLL IS.** A rank is announced FOR a week
+# and held through it, so the horizontal segment belongs over the week that rank was held and the
+# turn belongs on the tick where the new rank was published. ⚠️ **The other two draw a team at a
+# rank it did not hold** — `step-before` for a whole week, `step` for half of one — which is the
+# same class of quiet untruth the null grid below exists to prevent.
+_BUMP_INTERPOLATE = "step-after"
 _BUMP_TABLE_WIDTH = 250
 _BUMP_ROW_FONT = 11
 
@@ -2192,10 +2286,13 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
 
     x = alt.X("week:O", title="Week", axis=alt.Axis(labelAngle=0))
     # 🚨 reverse=True IS THE WHOLE POINT OF THIS PANEL. Rank 1 at the TOP.
-    y = alt.Y("rank:Q", title="Rank",
-              scale=alt.Scale(reverse=True, domain=[0.5, worst + 0.5], nice=False),
-              axis=alt.Axis(values=[v for v in (1, 5, 10, 15, 20, 25) if v <= worst],
-                            tickMinStep=1))
+    # ⚠️ THE SCALE AND THE AXIS ARE BOUND ONCE AND REUSED, NOT READ BACK OFF `y`. A164 built the
+    # left-label chart with `scale=y.scale` and the whole spec failed to serialise — those
+    # attributes are Altair PROPERTY SETTERS, not the values — and the panel would have rendered
+    # a handled error card, green in every test, because no test builds this chart.
+    y_scale = alt.Scale(reverse=True, domain=[0.5, worst + 0.5], nice=False)
+    y_axis = alt.Axis(values=[v for v in (1, 5, 10, 15, 20, 25) if v <= worst], tickMinStep=1)
+    y = alt.Y("rank:Q", title="Rank", scale=y_scale, axis=y_axis)
 
     # ONE NEUTRAL COLOUR RATHER THAN TWENTY-FIVE, AND THIS IS A DELIBERATE CHOICE.
     # A categorical palette runs out well before 25 and starts recycling, so two teams get the
@@ -2211,7 +2308,7 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     # that the null grid above exists to prevent. v6.4.1 defaults to breaking paths, so this
     # is currently redundant; it is written down because the whole correctness of the gap
     # rests on it and a silent default is not something to rest it on.
-    lines = base.mark_line(interpolate="monotone", clip=True,
+    lines = base.mark_line(interpolate=_BUMP_INTERPOLATE, clip=True,
                            invalid="break-paths-filter-domains").encode(
         strokeWidth=alt.condition(hover, alt.value(3.0), alt.value(1.25)),
         opacity=alt.condition(hover, alt.value(1.0), alt.value(0.35)))
@@ -2224,6 +2321,34 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     labels = alt.Chart(last).mark_text(align="left", dx=8, fontSize=11).encode(
         x=x, y=y, text="team_display:N",
         opacity=alt.condition(hover, alt.value(1.0), alt.value(0.75)))
+    # 🚨 A164. THE LEFT LABEL IS ADDED AND THE RIGHT ONE STAYS — Marc asked to *"Label the left
+    # of the line with the school name"*, which is an ADDITION and not a move. ⚠️ The caption
+    # tells a reader that *"a team on the picture with no row beside it was ranked earlier in
+    # the season and is not ranked now"* — those are precisely the teams the right-hand table
+    # does NOT name, so dropping the right label would make the caption's own case unreadable.
+    first = (data.dropna(subset=["rank"]).sort_values("week")
+                 .groupby("team_display", as_index=False).first())
+    # 🚨 A TIE PUTS TWO LABELS AT THE SAME HEIGHT, AND ONLY THE RASTER SHOWED IT
+    # (cfdb-main-R-1145). 2026 AP week 1 has two teams at rank 14, so `BYU` and `USC` were drawn
+    # at an identical y — measured 0.0px apart — and overstruck into an unreadable smear.
+    #
+    # ⚠️ **THE DENSITY FEAR WAS THE WRONG WORRY, WHICH IS WHY IT HAD TO BE RENDERED.** 25 teams
+    # over a 420px band is a 16.8px pitch against an 11px font; 24 of the 25 labels sit clear.
+    # **The only collision in the frame came from a TIE, and no amount of width fixes that.**
+    #
+    # ❌ **NUDGING THE TIED LABELS APART WAS TRIED AND MEASURED AND IT DOES NOT WORK.** Spreading
+    # them ∓0.45 of a rank separated BYU from USC and put BYU 9.2px from *Alabama* one rank up —
+    # the collision moved rather than cleared, because a 16.8px pitch against ~13px of text
+    # leaves under 4px of slack and there is simply nowhere to put a second label.
+    #
+    # ✅ **SO TIED TEAMS SHARE ONE LABEL, WHICH IS ALSO THE TRUER STATEMENT.** They hold the same
+    # rank that week; one mark naming both says exactly that, and it is legible. ⚠️ It is a
+    # STRING JOIN of two published values, not a computed quantity — §4.2.1's own example of
+    # rendering — and it changes no line and no point, which still sit on the real rank.
+    first = (first.groupby(["week", "rank"], as_index=False)
+                  .agg(team_display=("team_display", " · ".join)))
+    start_labels = alt.Chart(first).mark_text(align="right", dx=-8, fontSize=11).encode(
+        x=x, y=y, text="team_display:N", opacity=alt.value(0.75))
 
     # ── THE CONCAT, AND THE THREE THINGS IT CHANGES ────────────────────────────────────
     #
@@ -2233,7 +2358,7 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     # ⚠️ AND THE RIGHT PADDING GOES WITH IT. It existed so the endpoint labels beside each line
     # were not clipped; under a concat the table half is what sits to the right of them, so the
     # allowance belongs to the LEFT half's own width rather than to the whole spec.
-    picture = (lines + points + labels).add_params(hover).properties(
+    picture = alt.layer(lines, points, labels, start_labels).add_params(hover).properties(
         width=_BUMP_CHART_WIDTH, height=_BUMP_HEIGHT)
     chart = alt.hconcat(
         picture, _bump_table_chart(current), spacing=18,

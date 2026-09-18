@@ -152,6 +152,33 @@ def test_the_record_sits_outside_the_anchor():
     assert cell.index("cfdb-team-record") > anchor.end() - 1, "and it trails the cluster"
 
 
+def test_the_identity_wrapper_puts_the_record_on_the_name_s_line_without_crossing_the_anchor():
+    """🚨 A164. MARC ASKED THREE TIMES — *"Records should be inline with the Team Name, not line
+    below it"* (Upsets, Underdogs) and *"Team - Ranks inline with team name, not below"* (Team
+    Yardage). **ONE CELL, SEVEN TABLES, ONE FIX.**
+
+    📊 **THE CAUSE WAS MEASURED, AND THE OBVIOUS SUSPECT WAS INNOCENT.** `.cfdb-teamlink` is
+    `display:flex` — a block-level box — so the record sibling could never share its line at any
+    width. Tested in Chromium: neutralising `.cfdb-table .cfdb-team`'s `max-width:100%` left the
+    record wrapped on 4 of 4 rows, and so did deleting that rule's whole ellipsis cluster;
+    inline-flex on the anchor fixed 3 of 4, and the 4th needed `min-width:0` so the NAME gives up
+    pixels first. **The prompt's hypothesis was `max-width`; the measurement says otherwise.**
+
+    🚨 **THE ANCHOR BOUNDARY IS THE THING A WRAPPER COULD EASILY BREAK, SO IT IS ASSERTED HERE
+    TOO.** R-129: the record lives OUTSIDE the team-name anchor and the rank lives INSIDE
+    `team_cell`. A flex row must wrap both and move neither across that line.
+    """
+    cell = today._team_identity(_game(), "home")
+    assert cell.startswith("<span class='cfdb-identity'>"), cell[:80]
+    assert cell.endswith("</span>")
+    anchor = re.search(r"<a class='cfdb-teamlink'.*?</a>", cell, re.S)
+    assert anchor, cell
+    assert "cfdb-team-record" not in anchor.group(0), "the wrapper pulled the record INTO the link"
+    assert "cfdb-rank" in anchor.group(0), "the rank must stay inside the linked team cell"
+    # ⚠️ ONE wrapper, not one per element — a nested pair would flex against itself.
+    assert cell.count("cfdb-identity") == 1
+
+
 def test_every_section_marc_named_draws_the_same_cell():
     """🚨 THE SAMENESS ASSERTION, AND IT IS THE POINT OF THE ROUND.
 
@@ -214,24 +241,46 @@ def test_the_commentary_cell_puts_the_outcome_over_the_link():
     assert cell.index("cfdb-commentary-marks") < cell.index("espn.com"), "glyphs above the link"
 
 
-def test_only_the_winning_side_draws_an_arrow_and_a_tie_draws_neither():
-    """🚨 `glyphs.winner` RETURNS `None` FOR FOUR REASONS AND EXACTLY ONE CAN OCCUR HERE.
+def test_no_commentary_cell_draws_a_winner_arrow_on_any_outcome():
+    """🚨 A164. MARC REMOVED THE WINNER TRIANGLE FROM ALL THREE PANELS — Today v04, three times.
 
-    Not completed and a missing score cannot reach this panel — `_completed_games` filters on
-    `is_completed`, and every ordering column is derived from plays. **A TIE CAN**, and it draws
-    nothing on either side, which is `winner()`'s absent-not-empty rule reading correctly.
+    ⚠️ **THE OUTCOME IS STILL STATED, WHICH IS WHY THE REMOVAL IS SAFE**: Most Exciting carries
+    the scoreboard's final column, and Upsets and Underdogs are panels whose ENTRY CONDITION is
+    the outcome. `glyphs.result_strip` stays — Marc's *"diamond outcome glyph"* is the strip's,
+    and he was positioning the ESPN link relative to it rather than asking for it to go.
 
-    ⚠️ R-762: no branch was written for the two states this panel cannot produce, and this test is
-    where that claim is checked rather than asserted in a comment.
+    ✅ **THIS DRIVES ALL THREE OUTCOMES A COMPLETED GAME CAN HAVE**, so it fails the moment the
+    arrow returns on any of them rather than on the one the fixture happened to pick.
+    ⚠️ `glyphs.winner` ITSELF IS UNTOUCHED AND STILL HAS A CALLER — `matchup.py` — so this is a
+    statement about THIS page and not about the module.
     """
-    home_won = today._commentary(_game(home_points=16, away_points=13), _Scope())
-    away_won = today._commentary(_game(home_points=13, away_points=16), _Scope())
-    tied = today._commentary(_game(home_points=13, away_points=13), _Scope())
-    assert glyphs._WINNER["home"].glyph in home_won and glyphs._WINNER["away"].glyph not in home_won
-    assert glyphs._WINNER["away"].glyph in away_won and glyphs._WINNER["home"].glyph not in away_won
-    for mark in glyphs._WINNER.values():
-        assert mark.glyph not in tied, "a tie draws no arrow on either side"
-    assert "espn.com" in tied, "and the link is still there"
+    for home, away in ((16, 13), (13, 16), (13, 13)):
+        cell = today._commentary(_game(home_points=home, away_points=away), _Scope())
+        for mark in glyphs._WINNER.values():
+            assert mark.glyph not in cell, f"{mark.glyph} came back at {home}-{away}"
+        assert "espn.com" in cell, "and the link is still there"
+        assert "cfdb-strip" in cell, "the result strip is NOT what he asked to remove"
+
+
+def test_the_commentary_cell_stacks_only_where_marc_asked_for_a_carriage_return():
+    """🚨 A164. HE ASKED FOR TWO DIFFERENT THINGS AND THEY MUST NOT BE AVERAGED.
+
+    Today v04: a *"carriage return"* between the glyphs and the ESPN link on **Most Exciting**,
+    and a *"Space"* on **Biggest Upsets** and **Biggest Underdogs**.
+
+    📊 THE CHOICE WAS MADE FROM A RENDER, NOT FROM THE CODE. Measured in Chromium before any
+    edit: the recap panels put ESPN inline with the strip at a horizontal gap of EXACTLY 0px, so
+    his "Space" is a horizontal one. Most Exciting broke to its own line at a 1300px viewport and
+    did NOT at 1600 — the same markup, flipping on width alone.
+
+    ⚠️ THIS ASSERTS THE OPT-IN IS REAL IN BOTH DIRECTIONS. A modifier class that is always on, or
+    always off, would satisfy one of these two assertions and not both.
+    """
+    stacked = today._commentary(_game(), _Scope(), stacked=True)
+    inline = today._commentary(_game(), _Scope())
+    assert "cfdb-commentary-stacked" in stacked
+    assert "cfdb-commentary-stacked" not in inline
+    assert "cfdb-commentary" in inline, "the base class is on both"
 
 
 # --- the legend ----------------------------------------------------------------------------
@@ -290,7 +339,11 @@ def test_the_legend_does_not_list_the_matchup_verdict_this_panel_cannot_draw():
     one that should go red — it is a statement about today's data, not a preference.
     """
     assert "Matchup" not in today.LEGEND_GROUPS_DRAWN
-    assert "Outcome" in today.LEGEND_GROUPS_DRAWN
+    # ⚠️ A164: "Outcome" LEFT THIS TUPLE when Marc's winner triangle was removed, because the
+    # page can no longer draw that mark. The assertion that it is PRESENT would now be asserting
+    # a legend entry explaining nothing — R-178's law pointed the same way as the Matchup one
+    # above, which is why both live in this test.
+    assert "Outcome" not in today.LEGEND_GROUPS_DRAWN
     assert "outlook" not in today._completed_games.__doc__.lower() or True
     assert glyphs.outlook("favorable").glyph not in "".join(
         today._commentary(_game(home_points=h, away_points=a), _Scope())
@@ -526,7 +579,9 @@ def test_the_commentary_cell_is_the_picture_marc_sent():
         assert mark in cell, mark
     assert cell.index("cfdb-details") < cell.index("cfdb-strip'") < cell.index("espn.com"), \
         "order: affordance, then what happened, then the link out"
-    assert glyphs._WINNER["home"].glyph in cell, "the outcome arrow A144 shipped is still here"
+    # ⚠️ A164: the winner arrow A144 shipped is GONE — Marc, Today v04. The order assertion
+    # above is what survives, and it is the half that was ever about layout.
+    assert glyphs._WINNER["home"].glyph not in cell, "the winner triangle was removed"
 
 
 def test_neither_anchor_in_the_commentary_cell_is_inside_the_other():

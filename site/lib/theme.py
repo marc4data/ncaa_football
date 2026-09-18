@@ -690,6 +690,53 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    controls size, baseline and color for all six states; the semantics are unchanged. */
 .cfdb-strip { display:inline-flex; gap:.2rem; align-items:center; vertical-align:-.08em; }
 .cfdb-strip-gap { display:inline-block; width:.45rem; }
+/* A164 (cfdb-main-R-1140). THE COMMENTARY CELL HAD NO RULE AT ALL AND ITS LINE BREAK WAS AN
+   ACCIDENT OF COLUMN WIDTH. `_commentary` emits `<span class='cfdb-commentary'>` around the
+   marks and the ESPN link and an unstyled span is INLINE, so the link fell to its own line only
+   where the column happened to be too narrow to hold both. 📊 MEASURED IN CHROMIUM ON THE REAL
+   PAGE, before this rule existed: Most Exciting put ESPN on its OWN line at a 1300px viewport
+   (dy 23.5px) and on the SAME line at 1600px, while Biggest Upsets and Biggest Underdogs kept it
+   inline at both — butted against the strip at gapX EXACTLY 0. The same markup, three different
+   outcomes, decided by nothing anybody chose.
+
+   🚨 MARC ASKED FOR TWO DIFFERENT THINGS AND THEY ARE NOT AVERAGED HERE. Today v04: a
+   "carriage return" on Most Exciting, and a "Space" on the two recap panels. The measurement
+   says his "Space" is a HORIZONTAL one — those panels had no gap at all — so the default is an
+   inline row with a declared gap, and the stacked modifier is what Most Exciting opts into.
+   ⚠️ BOTH GAPS ARE DECLARED VALUES rather than whatever the line-height leaves over, which is
+   the property the cell was missing. */
+.cfdb-commentary { display:inline-flex; align-items:baseline; gap:.45rem; }
+.cfdb-commentary-marks { white-space:nowrap; }
+.cfdb-commentary-stacked { display:flex; flex-direction:column; align-items:flex-start;
+                           gap:.15rem; }
+/* A164 (cfdb-main-R-1141). THE RECORD WRAPPED BELOW THE TEAM NAME IN ALL SEVEN TABLES, AND THE
+   CAUSE IS NOT THE ONE IT LOOKS LIKE. `_team_identity` emits {name-anchor}{record} as siblings,
+   and `.cfdb-teamlink` above is `display:flex` — a BLOCK-LEVEL box — so the record could never
+   share its line whatever the column width.
+
+   🚨 THE OBVIOUS SUSPECT WAS TESTED AND EXONERATED. `.cfdb-table .cfdb-team`'s
+   `display:inline-block; max-width:100%` reads like the culprit and is not: forced to
+   `max-width:none` the record still wrapped 0/4, and removing that rule's whole ellipsis
+   cluster still wrapped 0/4. Switching `.cfdb-teamlink` to inline-flex fixed 3 of 4 in the same
+   frame. **The rule that looked wrong was innocent and the rule nobody suspected was the cause**
+   — which is why this is a wrapper rather than an edit to either of them.
+
+   ✅ A WRAPPER, NOT A CHANGE TO `.cfdb-teamlink`, BECAUSE THAT CLASS IS NOT ONLY TODAY'S.
+   `table.record_span` is also composed by `schedule.py` in a different shape, and `.cfdb-team`
+   is read by the game cards and the legend. A new class changes exactly the cells
+   `_team_identity` draws and nothing else.
+
+   ✅ AND IT IS `.cfdb-player`'s PATTERN (above), DELIBERATELY THE SAME IDEA AND NOT A SECOND
+   ONE: a flex row on a baseline, `min-width:0` on the part that must give up pixels first, so
+   the NAME ellipsises and the record — two characters and a hyphen — never does. The 4th of
+   those four rows is why the min-width matters: at inline-flex alone it still wrapped, because
+   a flex item defaults to `min-width:auto` and refuses to shrink below its content.
+   ⚠️ R-129's BOUNDARY IS UNMOVED: the record stays OUTSIDE the anchor and the rank stays inside
+   `team_cell`. This wraps both; it crosses neither. */
+.cfdb-identity { display:flex; align-items:baseline; gap:.4rem; min-width:0; }
+.cfdb-identity > .cfdb-teamlink { min-width:0; }
+.cfdb-identity > .cfdb-team-record { flex:0 0 auto; margin-left:0; }
+.cfdb-identity .cfdb-team { min-width:0; }
 .cfdb-ind { display:inline-block; width:.72em; height:.72em; box-sizing:border-box;
             border:1.5px solid transparent; }
 /* A SHAPE PER POSITION, so a single indicator can be matched to its legend entry without
