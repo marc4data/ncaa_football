@@ -67,21 +67,81 @@ COLUMNS = [
     # conference tiebreakers are dbt's job and a Python sort implementing them is a
     # defect, not a shortcut.
     Col("tiebreak_rank", "#", "num", dp=0),
+    # 🚨 A169 (cfdb-main-R-1320). THE TEAM NAME READS AS A LINK NOW — Marc, Site
+    # v07: *"Rankings/Stats/Standings — Team Names should be hyperlinks to the Teams
+    # page."*
+    #
+    # 📊 **IT WAS ALREADY CLICKABLE AND THAT IS THE POINT OF THE ASK.** All three of
+    # these tables already pass a `link_builder` to the team page, so `table.render`
+    # wrapped every cell in `<a class='cfdb-cell-link'>` — which is
+    # `color:inherit; text-decoration:none`. **The destination was right and the
+    # AFFORDANCE was missing**: nothing on the page said the name could be clicked.
+    #
+    # ✅ **`Col.link` IS THE MECHANISM THAT ALREADY EXISTS FOR THIS**, and its own
+    # comment says so: *"A column-specific destination, which WINS over the row link
+    # for that cell."* It yields `cfdb-cell-link-alt` — `var(--cfdb-link)`, bold —
+    # so the name now looks like what it has always been.
+    #
+    # ⚠️ **AND IT CANNOT NEST.** `table.render` uses the column's href INSTEAD of the
+    # row's for that cell, never both, so there is no `<a>` inside an `<a>` here. The
+    # row link still carries every other cell to the same place.
     Col("team", "Team", render=lambda r: table.team_cell(
-        r, "team_slug", "team_display", "logo_url")),
+        r, "team_slug", "team_display", "logo_url"),
+        link=table.team_link("team_slug")),
+    # 🚨 A169 (cfdb-main-R-1319). CONF THROUGH ATS ARE CENTRED — Marc, Site v07: *"Center align
+    # all the columns from CONF to ATS."*
+    #
+    # 📊 **THE RANGE HE READ OFF THE PAGE IS THESE EIGHT**: Conf · Conf % · Overall · Home ·
+    # Away · Streak · Last 5 · ATS. **Six of them are records that read as a pair** ("5-7"), one
+    # is a streak and one is a percentage — **no team name is inside the range**, which is the
+    # thing that would have been worth arguing about.
+    #
+    # ⚠️ **THE ONE PLACE IT COSTS LEGIBILITY, SAID PLAINLY: `Conf %`.** A numeric column is
+    # conventionally RIGHT-aligned so digits line up down the page, and centring `9%` against
+    # `100%` staggers them. **It is his page and he asked for the range; this is the cost, and
+    # it is one column.** The records lose nothing — they are short fixed-shape tokens and
+    # centring reads better than left for them.
+    #
+    # ⚠️ `kind="center"` CARRIES ALIGNMENT AND ALSO FORMATTING, so `Conf %` takes an explicit
+    # `render` — otherwise centring it would silently drop it out of the `num` formatting path.
     # AC-5.3: pre-formatted strings from the view. Nothing here assembles "5-7".
-    Col("conf_record", "Conf", render=lambda r: _conference_record(r)),
-    Col("conference_win_pct", "Conf %", "num"),
-    Col("overall", "Overall", render=lambda r: _overall_record(r)),
-    Col("home_record_display", "Home"),
-    Col("away_record_display", "Away"),
-    Col("current_streak_display", "Streak", render=lambda r: _streak(r)),
-    Col("last_5_display", "Last 5"),
-    Col("ats_record_display", "ATS"),
+    Col("conf_record", "Conf", "center", render=lambda r: _conference_record(r)),
+    Col("conference_win_pct", "Conf %", "center", render=lambda r: _conference_pct(r)),
+    Col("overall", "Overall", "center", render=lambda r: _overall_record(r)),
+    Col("home_record_display", "Home", "center"),
+    Col("away_record_display", "Away", "center"),
+    Col("current_streak_display", "Streak", "center", render=lambda r: _streak(r)),
+    Col("last_5_display", "Last 5", "center"),
+    Col("ats_record_display", "ATS", "center"),
     Col("points_for", "PF", "num", dp=0),
     Col("points_against", "PA", "num", dp=0),
     Col("point_differential", "Diff", "signed", dp=0),
 ]
+
+
+def _conference_pct(row) -> str:
+    """The conference win rate as a whole percent — Marc, Site v07: *"#% (no decimal points)"*.
+
+    🚨 **A ROUNDING CAN ASSERT SOMETHING FALSE, SO IT WAS CHECKED BEFORE IT SHIPPED.** A team
+    that has won a conference game must not read the same as one that has not, and an unbeaten
+    team must not share a reading with a beaten one. 📊 **Measured across all 18,653 published
+    rows that carry the column:**
+
+        rows that would read   0% having won a conference game     NONE
+        rows that would read 100% while holding a conference loss  NONE
+
+    ✅ **AND THE REASON IS STRUCTURAL RATHER THAN LUCK: a conference schedule is short.** The
+    extreme real values are **1-10 → 9%** and **10-1 → 91%**; you would need roughly two hundred
+    conference games for a single win to round to zero. **The rounding is safe here and would
+    not be on a season-long denominator.**
+
+    ⚠️ **NULL STAYS AN EM DASH** — a team with no conference games played has no rate, and
+    `0%` would be a measurement where there is an absence (AC-G.32).
+    """
+    value = row.get("conference_win_pct")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return fmt.EM_DASH
+    return f"{round(float(value) * 100)}%"
 
 
 def _record(wins, losses) -> str:

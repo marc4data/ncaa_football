@@ -1286,6 +1286,74 @@ def test_the_curve_label_sits_left_of_the_final_point_and_buys_no_width():
     assert label_x < last_x, f"label at {label_x} is not left of the final point at {last_x}"
 
 
+def test_the_win_probability_axis_is_fixed_and_reads_no_data():
+    """🚨 A169 (cfdb-main-R-1318). MARC'S DIAGNOSIS WAS WRONG AND THIS PINS WHY, so no later
+    round can quietly introduce the thing he feared.
+
+    > **MARC, Site v07:** *"Y-axis should be fixed at -1 to 1. It looks like it's auto-adjusting
+    > to fill the vertical space. That's a zoom that gives a false perception of the scale of
+    > momentum swings."*
+
+    📊 **IT IS ALREADY FIXED, MEASURED ON TWO REAL GAMES WITH VERY DIFFERENT RANGES:**
+
+        401858447   win probability 0.747 … 1.000    curve spans 30.0px
+        401862702   win probability 0.006 … 0.970    curve spans 57.9px
+        midline in BOTH                              y = 32.0
+
+    **An auto-fitting axis would stretch the narrow game to fill the band and both spans would
+    be equal.** They are not, and the midline does not move.
+
+    ⚠️ **WHAT HE IS ACTUALLY SEEING IS HIS OWN TWO ASKS**: the plotting band went 40px → 60px
+    across A165 and A167, so the same swing draws 1.50× the pixels it did three rounds ago.
+    **The scale did not change; the canvas did.**
+
+    ✅ **THIS TEST ASSERTS THE PROPERTY, NOT THE PIXELS** — that the mapping is a pure function
+    of one probability, so it cannot start consulting the series.
+    """
+    today = _today()
+    pad, height = today._CURVE_PAD, today._CURVE_HEIGHT
+    band = height - 2 * pad
+
+    def midline_of(frame):
+        svg = today._sparkline_svg(frame, label="X 50%")
+        import re
+        flat = [float(m) for m in re.findall(r"<line[^>]*y1='([\d.]+)'[^>]*y2='\1'", svg)]
+        return min(flat) if flat else None
+
+    # 🚨 TWO FRAMES THAT DIFFER ONLY IN THEIR RANGE. A single fixture cannot tell a fixed axis
+    # from an auto-fitting one — that is the whole point of the comparison (R-843).
+    base = _curve()
+    narrow = base.assign(home_win_probability=[0.75 + (i % 5) * 0.05
+                                               for i in range(len(base))])
+    wide = base.assign(home_win_probability=[(i % 20) / 19.0 for i in range(len(base))])
+    assert narrow["home_win_probability"].max() - narrow["home_win_probability"].min() < 0.3
+    assert wide["home_win_probability"].max() - wide["home_win_probability"].min() > 0.9
+
+    assert midline_of(narrow) == midline_of(wide), (
+        "the reference line moved between two games — the axis is fitting to the data")
+    assert midline_of(narrow) == pad + band / 2, (
+        "0.5 must land exactly on the band's midpoint")
+
+    # And the drawn extents must DIFFER, or the curves were rescaled to fill the band.
+    import re
+
+    def span(frame):
+        ys = [float(y) for y in re.findall(
+            r"[ML][\d.]+,([\d.]+)", today._sparkline_svg(frame, label="X 50%"))]
+        return max(ys) - min(ys)
+    assert span(wide) > span(narrow) * 1.4, (
+        f"a 0.95-range game must draw a much taller curve than a 0.25-range one; "
+        f"got {span(wide):.1f} vs {span(narrow):.1f} — that is an auto-fitting axis")
+
+    # 🚨 AND `sy` MUST NOT LEARN TO READ THE FRAME. This is the regression that would reintroduce
+    # exactly what Marc fears, and it would be invisible in a single-game render.
+    source = open(today.__file__).read()
+    body = source[source.index("    def sy(probability)"):source.index("    right = sx(")]
+    for forbidden in (".min()", ".max()", "points", "plotted"):
+        assert forbidden not in body.split("return")[-1], (
+            f"sy consults {forbidden!r} — the axis would fit itself to the data")
+
+
 def test_the_quarters_are_named_and_overtime_is_not_a_fifth_quarter():
     """🚨 A167 (cfdb-main-R-1311). > **MARC, v06:** *"label the x-axis with the quarters (1Q, 2Q,
     etc)."*

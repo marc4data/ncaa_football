@@ -266,26 +266,67 @@ def test_no_table_with_a_linked_team_name_also_links_its_rows():
     cell-level link. A144 put a linked team name on three more, so the guard has to cover all four
     or it protects the one table that was never going to regress.
     """
-    tree = ast.parse(SOURCE)
+    # 🚨 A169 EXTENDED THIS BEYOND `today.py` (cfdb-main-R-1321), AND THE GAP WAS THE POINT.
+    # This guard has always parsed `SOURCE` — Today alone — while the rule it enforces is about
+    # `table.render` everywhere. Marc asked for linked team names on Rankings, Stats and
+    # Standings, and **all three already passed a `link_builder`**, so they were exactly the
+    # tables this test exists for and exactly the ones it could not see.
+    #
+    # ⚠️ **A GUARD SCOPED TO THE FILE THAT PROMPTED IT PROTECTS THE CODE THAT ALREADY PASSED.**
+    import pathlib
+    views = pathlib.Path(today.__file__).parent
+    sources = {f.name: f.read_text() for f in sorted(views.glob("*.py"))
+               if f.name not in ("__init__.py",)}
     offenders = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "render"):
-            continue
-        rendered = ast.unparse(node)
+    checked = 0
+    for filename, text in sources.items():
+        for node in ast.walk(ast.parse(text)):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "render"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "table"):
+                continue
+            checked += 1
+            rendered = f"{filename}: " + ast.unparse(node)
+            # 🚨 RESOLVE A COLUMN LIST PASSED BY NAME, OR THE GUARD IS BLIND TO THE PAGES THAT
+            # USE ONE. `standings.py` calls `table.render(rows, COLUMNS, …)` — a module-level
+            # list — so the unparsed CALL mentions no team cell at all, and a staged break that
+            # removed its team link came back GREEN (R-744). **This is the same indirection
+            # this test's own docstring warned about for `_player_columns`, met again one round
+            # later through a different spelling.**
+            for arg in node.args:
+                if isinstance(arg, ast.Name):
+                    for top in ast.walk(ast.parse(text)):
+                        if (isinstance(top, ast.Assign)
+                                and any(isinstance(t, ast.Name) and t.id == arg.id
+                                        for t in top.targets)):
+                            rendered += " || " + ast.unparse(top.value)
         # 🚨 `_player_columns` IS IN THIS LIST OR THE GUARD PROTECTS ONLY THE TABLES THAT ALREADY
         # PASSED. A149's three leaderboards do not mention `_team_identity` in their own
         # `table.render` call — they spread `*_player_columns()`, which builds it one level down.
         # **A name-matching guard is blind to exactly the indirection that makes a change safe**,
         # which is this test's own docstring turned on the round that extended it: four tables
         # before, SEVEN now, and the three new ones arrive through a different spelling.
-        draws_a_team = any(name in rendered for name in
-                           ("_team_identity", "_favorite_cell", "_underdog_cell", "_scoreboard",
-                            "_player_columns"))
-        links_the_row = any(kw.arg == "link_builder" for kw in node.keywords)
-        if draws_a_team and links_the_row:
-            offenders.append(rendered[:90])
-    assert not offenders, f"these tables link the row AND a team name: {offenders}"
+            # ⚠️ `team_cell` JOINS THE LIST. A169's three pages draw a team through it
+            # directly rather than through one of Today's wrappers, and a name-matching guard
+            # that does not know the name is blind to exactly the change it should judge.
+            draws_a_team = any(name in rendered for name in
+                               ("_team_identity", "_favorite_cell", "_underdog_cell",
+                                "_scoreboard", "team_cell"))
+            links_the_row = any(kw.arg == "link_builder" for kw in node.keywords)
+            # ✅ A COLUMN-LEVEL `link` IS THE SAFE FORM AND IS NOT AN OFFENCE. `table.render`
+            # uses the column's href INSTEAD of the row's for that cell — never both — so the
+            # team anchor replaces the row anchor there rather than nesting inside it. That is
+            # precisely what `Col.link`'s own comment describes, and it is what A169 used.
+            links_the_cell = "link=table.team_link" in rendered or "link=team_link" in rendered
+            if draws_a_team and links_the_row and not links_the_cell:
+                offenders.append(rendered[:110])
+    assert checked >= 12, (
+        f"only {checked} table.render calls found across the views — this guard is supposed to "
+        f"see all of them, and a drop means the walk stopped working")
+    assert not offenders, (
+        f"these tables link the ROW and draw a team name without giving that column its own "
+        f"link, so the row anchor wraps the team: {offenders}")
 
 
 # --- A166: the player cards -----------------------------------------------------------------

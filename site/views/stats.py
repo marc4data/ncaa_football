@@ -149,8 +149,13 @@ def _percentile(row) -> str:
 def _leaderboard(df: pd.DataFrame, rank_field: str) -> None:
     table.render(df, [
         Col("rank", "#", render=lambda r: _rank_cell(r, rank_field)),
+        # 🚨 A169 (cfdb-main-R-1320). THE NAME READS AS A LINK — Marc, Site v07. Already
+        # clickable through the row link, which renders `cfdb-cell-link`
+        # (`color:inherit; text-decoration:none`); `Col.link` gives it `cfdb-cell-link-alt`
+        # and wins over the row link for this cell, so no anchor nests inside another.
         Col("team", "Team", render=lambda r: table.team_cell(
-            r, "team_slug", "team_display", "logo_url")),
+            r, "team_slug", "team_display", "logo_url"),
+            link=table.team_link("team_slug")),
         Col("conference", "Conference"),
         # stat_value_raw, not stat_value: the raw string is what CFBD published, and some
         # of these statistics are not numbers at all (time of possession is "32:41"). The

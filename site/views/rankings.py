@@ -62,13 +62,25 @@ def _poll_table(season, week, poll) -> None:
                 Col("rank", "#", render=lambda r: (
                     f"{int(r['rank'])}" if r.get("rank") == r.get("rank")
                     and r.get("rank") is not None else "RV")),
+                # 🚨 A169 (cfdb-main-R-1320). THE NAME READS AS A LINK — Marc, Site v07.
+                # It was already clickable via the row's `link_builder`, but that wraps every
+                # cell in `cfdb-cell-link`, which is `color:inherit; text-decoration:none`:
+                # **the destination was right and the affordance was missing.** `Col.link`
+                # wins over the row link for this cell, so nothing nests.
                 Col("team", "Team", render=lambda r: table.team_cell(
-                    r, "team_slug", "team_display", "logo_url")),
+                    r, "team_slug", "team_display", "logo_url"),
+                    link=table.team_link("team_slug")),
                 Col("conference", "Conf"),
                 Col("first_place_votes", "1st", "num", dp=0),
                 Col("points", "Points", "num", dp=0),
             ], caption="srv_rankings",
-                link_builder=lambda r: params.link("team", team=r["team_display"],
+                # ⚠️ A169: `team_slug`, NOT `team_display`. This was the only one of the three
+                # pages routing by DISPLAY NAME — `/team?team=Ohio State` against standings'
+                # `team=miami` — and it worked only because `team.py` carries a reverse lookup
+                # for *"a display name from an older link"*. **Relying on a compatibility
+                # branch is not the same as being right**, and the slug is already selected
+                # two lines up.
+                link_builder=lambda r: params.link("team", team=r["team_slug"],
                                                    season=season)))
 
 
