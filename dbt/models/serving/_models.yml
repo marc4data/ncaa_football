@@ -1605,6 +1605,13 @@ models:
         description: Surrogate key over (play, athlete, stat type) — the grain.
       - name: play_id
         description: CFBD play id, joining to the play spine.
+      - name: drive_id
+        description: >
+          CFBD drive id — the drive this play belongs to, so a play-level panel can be scoped
+          to one drive without a join in the page (G-2). A168 published it; fct_play_stat has
+          carried it all along and this view did not select it.
+          MEASURED AT PUBLICATION: null on 0 of 409,846 rows (100.00%, and 100.00% in each of
+          2024, 2025 and 2026), and 100.00% of them join to a drive srv_drive publishes.
       - name: game_id
         description: CFBD game id.
       - name: season

@@ -137,3 +137,41 @@ def test_the_rebuild_selects_on_state_so_it_cannot_miss_an_upstream_change():
                      if not ln.lstrip().startswith("#"))
     assert "dbt/models/serving/" not in code, (
         "the directory diff is still running in the deploy script")
+
+
+def test_the_deploy_watches_the_same_publish_lock_the_publisher_takes():
+    """🚨 A168 (cfdb-main-R-1315). TWO COPIES OF ONE CONSTANT, AND THIS IS THE GUARD THAT STOPS
+    THEM DRIFTING.
+
+    `wait_for_quiet_warehouse` now blocks on the publish advisory lock as well as on dbt
+    sessions, because for four rounds it could not see a running `publish_to_serving` —
+    `publish_marts.py` is not dbt, so the last task of every cadence was invisible to the thing
+    whose job is to wait for the cadence. **A164 hit it live: publish running, `active dbt = 0`.**
+
+    ⚠️ **THE DEPLOY IS A SHELL SCRIPT ASKING A REMOTE `psql` AND CANNOT IMPORT PYTHON**, so the
+    lock's low 32 bits are written there as a literal. 🚨 **A silently wrong objid would make the
+    interlock pass on a busy box every time and look exactly like a working one** — which is the
+    failure it was built to prevent, reintroduced one layer down.
+
+    ✅ This is §3.6's own pattern: a static value ships WITH a list-agreement guard.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    publisher = (root / "src" / "publish_marts.py").read_text()
+    key = int(re.search(r"^PUBLISH_LOCK_KEY = ([\d_]+)", publisher, re.M)
+              .group(1).replace("_", ""))
+
+    script = (root / "scripts" / "deploy_main.sh").read_text()
+    watched = re.search(r"^PUBLISH_LOCK_OBJID=(\d+)", script, re.M)
+    assert watched, "the deploy no longer names a publish lock to watch for"
+    assert int(watched.group(1)) == key % 2**32, (
+        f"the deploy watches advisory objid {watched.group(1)} and the publisher takes "
+        f"{key % 2**32} (key {key}). The interlock would wave a deploy into a running publish.")
+
+    # 🚨 AND IT MUST ACTUALLY BE USED, not merely declared. A constant nobody reads is the same
+    # defect wearing a different hat.
+    assert "objid = $PUBLISH_LOCK_OBJID" in script, (
+        "PUBLISH_LOCK_OBJID is declared but the quiet check does not read it")
+    assert "and granted" in script, "an ungranted lock request is not a held lock"

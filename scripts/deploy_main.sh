@@ -231,27 +231,64 @@ check_warehouse_shm() {
 WAREHOUSE_QUIET_TIMEOUT=900      # 15 minutes; a full cadence build is ~10 and dbt_test ~14
 WAREHOUSE_QUIET_POLL=10
 
+# 🚨 A168 (cfdb-main-R-1315). THE INTERLOCK COULD NOT SEE A RUNNING PUBLISH, AND FOUR ROUNDS
+# PAID FOR IT BY HAND.
+#
+# A162 built `wait_for_quiet_warehouse` filtering `application_name = 'dbt'`. **`publish_to_serving`
+# is `publish_marts.py`, not dbt**, so the last task of every cadence — the one that holds the
+# serving tables — was invisible to the thing whose job is to wait for the cadence. 📊 **A164 hit
+# it live**: `publish_to_serving` running, `active dbt = 0`, and the interlock would have waved the
+# deploy straight into it. A165, A166 and A167 each opened their round by running this query
+# manually, and A167 gave the verdict: *"a defect worked around four times is not a backlog item,
+# it is a decision to keep paying."*
+#
+# ✅ **THE PUBLISH ANNOUNCES ITSELF WITH AN ADVISORY LOCK AND THAT IS WHAT TO COUNT.**
+# `publish_marts.py` takes `pg_try_advisory_lock(PUBLISH_LOCK_KEY)` for the whole publish and the
+# lock dies with its connection — so there is no stale lock to skip past, ever, which is exactly
+# what makes it safe to block on.
+#
+# ⚠️ **THE OBJID IS THE LOW 32 BITS OF THAT KEY AND IS WRITTEN HERE AS A LITERAL**, because this
+# is a shell script asking a remote psql and cannot import Python. 🚨 **A second copy of a constant
+# is a copy that drifts, so it ships with a guard**:
+# `test_the_deploy_watches_the_same_publish_lock_the_publisher_takes` asserts this number IS
+# `src/publish_marts.py`'s `PUBLISH_LOCK_KEY % 2**32`. Change one and the suite says so.
+PUBLISH_LOCK_OBJID=3845960022
+
 wait_for_quiet_warehouse() {
-  local waited=0 busy
+  local waited=0 busy building publishing
   while :; do
+    # ⚠️ ONE ROUND TRIP FOR BOTH QUESTIONS, and they are reported separately so the refusal can
+    # say WHICH of the two is holding the box — "a cadence is building" and "a publish is running"
+    # want different things from the person reading it.
     busy=$("${SSH[@]}" "docker exec -i $WAREHOUSE_CONTAINER psql -U cfdb -d cfdb -tAc \
-             \"select count(*) from pg_stat_activity where datname = 'cfdb' \
-               and application_name = 'dbt' and state = 'active'\"" 2>/dev/null | tr -d '[:space:]')
-    [ -n "$busy" ] || busy=0
-    if [ "$busy" -eq 0 ] 2>/dev/null; then
+             \"select (select count(*) from pg_stat_activity where datname = 'cfdb' \
+                      and application_name = 'dbt' and state = 'active') \
+                 || '|' || \
+                 (select count(*) from pg_locks where locktype = 'advisory' \
+                      and objid = $PUBLISH_LOCK_OBJID and granted)\"" 2>/dev/null \
+           | tr -d '[:space:]')
+    building=${busy%%|*}
+    publishing=${busy##*|}
+    # ⚠️ AN UNREADABLE BOX IS TREATED AS QUIET, WHICH IS A162's CHOICE AND IS KEPT. The deploy
+    # has its own mkdir lock and its own failure modes; a wait that cannot see the warehouse must
+    # not become a deploy that never runs (A162 chose a bounded wait over `dags pause` for exactly
+    # this reason — "a pause that dies leaves every cadence stopped").
+    [ -n "$building" ] || building=0
+    [ -n "$publishing" ] || publishing=0
+    if [ "$building" -eq 0 ] 2>/dev/null && [ "$publishing" -eq 0 ] 2>/dev/null; then
       [ "$waited" -gt 0 ] && echo "  warehouse quiet after ${waited}s"
       return 0
     fi
     if [ "$waited" -ge "$WAREHOUSE_QUIET_TIMEOUT" ]; then
-      echo "::error::A CADENCE IS STILL BUILDING AFTER ${waited}s. Refusing rather than racing it." >&2
-      echo "  $busy active dbt session(s) on the warehouse." >&2
+      echo "::error::THE WAREHOUSE IS STILL BUSY AFTER ${waited}s. Refusing rather than racing it." >&2
+      echo "  $building active dbt session(s), $publishing publish lock(s) held." >&2
       echo "  Deploying now would queue this script's ALTER TABLE ... RENAME behind them, and a" >&2
       echo "  pending AccessExclusive blocks every new reader — which wedged the box on" >&2
       echo "  2026-09-17 and needed pg_cancel_backend by hand (cfdb-main-R-1115, CLAUDE.md §5.2)." >&2
       echo "  Wait for the DAG to finish, or pause it, then re-run." >&2
       return 1
     fi
-    [ "$waited" -eq 0 ] && echo "  waiting for the cadence to finish ($busy dbt session(s))..."
+    [ "$waited" -eq 0 ] && echo "  waiting for the warehouse: $building dbt session(s), $publishing publish lock(s)"
     sleep "$WAREHOUSE_QUIET_POLL"
     waited=$((waited + WAREHOUSE_QUIET_POLL))
   done
