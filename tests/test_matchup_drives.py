@@ -1509,3 +1509,275 @@ def test_THE_MARK_ENCODING_DRAWS_NO_IMAGE_AT_ALL(panel):
     assert _module_constant("_DRIVE_YARDLINE_ENCODING") == "mark", (
         "the shipped default is no longer the encoding that works in the tooltip and covers "
         "every row; if that is deliberate it is Marc's call and this line should say so")
+
+
+# ── 🚨 v03: THE DISPLAY MAP, THE DERIVED SPLIT AND THE BAND WEIGHT ──────────────────────────
+#
+# 📊 **THE 25 PUBLISHED `drive_result` VALUES, ENUMERATED ON LIVE PUBLISHED SERVING WITH THEIR
+# MEASURED WIDTHS AT `fontSize` 10.** Pinned here for the same reason the seven categories are
+# pinned in `test_EVERY_DRIVE_RESULT_CATEGORY_HAS_ITS_OWN_SHAPE`: CI has no warehouse, so the
+# population is a measurement carried into the suite rather than a query the suite can run.
+#
+#     PUNT 27.23 (30,345) · TD 13.34 (22,870) · FG 13.89 (7,499) · DOWNS 38.34 (6,094)
+#     INT 16.11 (5,028) · FUMBLE 40.56 (3,069) · MISSED FG 55.02 (2,669)
+#     END OF HALF 66.12 (2,600) · END OF GAME 70.02 (2,399) · Uncategorized 64.48 (904)
+#     INT TD 31.88 (486) · FUMBLE RETURN TD 100.94 (207) · SF 12.78 (201)
+#     END OF 4TH QUARTER 110.95 (138) · PUNT TD 42.98 (129) · PUNT RETURN TD 87.42 (86)
+#     FUMBLE TD 56.50 (70) · MISSED FG TD 70.94 (15) · KICKOFF 43.34 (8) · DOWNS TD 54.27 (7)
+#     END OF HALF TD 82.06 (5) · BLOCKED FG 64.47 (3) · BLOCKED PUNT 77.80 (3)
+#     FG TD 29.83 (2) · END OF GAME TD 85.94 (1)
+_PUBLISHED_RESULTS = {
+    "PUNT", "TD", "FG", "DOWNS", "INT", "FUMBLE", "MISSED FG", "END OF HALF",
+    "END OF GAME", "Uncategorized", "INT TD", "FUMBLE RETURN TD", "SF",
+    "END OF 4TH QUARTER", "PUNT TD", "PUNT RETURN TD", "FUMBLE TD", "MISSED FG TD",
+    "KICKOFF", "DOWNS TD", "END OF HALF TD", "BLOCKED FG", "BLOCKED PUNT", "FG TD",
+    "END OF GAME TD",
+}
+
+# 📊 **AND THE DISPLAY FORMS, MEASURED THE SAME WAY.** The widest is what sizes the cell.
+_DISPLAY_LABEL_PX = {
+    "PUNT RET TD": 65.59, "FUM RET TD": 60.20, "DOWNS TD": 54.27, "PUNT TD": 42.98,
+    "X-FG TD": 39.83, "DOWNS": 38.34, "EOG TD": 38.17, "EOH TD": 37.61,
+    "FUM TD": 37.59, "B-PUNT": 37.23, "INT TD": 31.88, "FG TD": 29.83,
+    "EOQ4": 27.80, "PUNT": 27.23, "X-FG": 23.89, "B-FG": 23.89, "EOG": 22.23,
+    "FUM": 21.67, "EOH": 21.67, "N/A": 16.67, "INT": 16.11, "KO": 14.45,
+    "FG": 13.89, "TD": 13.34, "SF": 12.78,
+}
+
+
+def test_EVERY_PUBLISHED_RESULT_HAS_A_DISPLAY_FORM_and_nothing_else_does():
+    """🚨 B117's RULE, AS THE LEGEND NEEDED IT (cfdb-wta-R-1189) — BOTH DIRECTIONS.
+
+    > **MARC:** *"I recommend a label change for "MISSED FG", present as "X-FG", "END OF HALF"
+    > as "EOH" or "Half". "Uncategorized" as N/A."*
+
+    🚨 **HE NAMED THREE AND THERE ARE 25.** A partial map leaves the column sized by whichever
+    long string he did not mention — and `END OF 4TH QUARTER`, the widest published string at
+    **110.95px**, is one he did not mention. **On a partial map it would still set the width and
+    the round would have bought nothing.**
+
+    ⚠️ **ASSERTED IN BOTH DIRECTIONS because one direction is not enough:** a map missing a
+    value lets a new feed string reach a reader unmapped, and a map with an EXTRA key is a
+    label for something that does not exist — dead code that reads as coverage.
+    """
+    labels = _module_constant("_DRIVE_RESULT_LABELS")
+    assert set(labels) == _PUBLISHED_RESULTS, (
+        f"the display map and the published results disagree: "
+        f"missing {sorted(_PUBLISHED_RESULTS - set(labels))}, "
+        f"extra {sorted(set(labels) - _PUBLISHED_RESULTS)}")
+
+    # 🚨 AND IT MUST BE INJECTIVE. `PUNT TD` and `PUNT RETURN TD` are different published
+    # results, as are `FUMBLE TD` and `FUMBLE RETURN TD` — **two collapsing onto one label
+    # would make a returned score indistinguishable from a scored one**, which is worse than
+    # the clipping this map exists to remove.
+    collisions = {v: [k for k in labels if labels[k] == v]
+                  for v in set(labels.values()) if list(labels.values()).count(v) > 1}
+    assert not collisions, (
+        f"the display map is not injective — these published results share a label: "
+        f"{collisions}")
+
+    # AND MARC'S OWN THREE ARE WHAT HE ASKED FOR, pinned so a later tidy-up cannot drift them.
+    assert labels["MISSED FG"] == "X-FG"
+    assert labels["END OF HALF"] == "EOH"
+    assert labels["Uncategorized"] == "N/A"
+
+
+def test_THE_DISPLAY_MAP_CANNOT_SILENTLY_SWALLOW_A_NEW_FEED_VALUE(panel):
+    """🚨 **A VALUE WITH NO DISPLAY FORM MUST NOT RENDER AS `N/A`, AND THAT IS THE OPPOSITE OF
+    WHAT IT LOOKS LIKE.**
+
+    `N/A` is already the display form of `Uncategorized` — a real, published, classified-as-
+    unknown result. **Routing an UNMAPPED value there would tell a reader cfdb knows the drive
+    was unclassified, when the truth is that cfdb has a result and this file has no word for
+    it.** ⚠️ **Two different absences, AC-G.11.**
+
+    ✅ **So it falls through to the published string: true, and LOUD — it is wider than the 66px
+    cell, so it clips with an ellipsis and announces itself.** The control against it reaching
+    production at all is the both-directions test above.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "SOME NEW CFBD RESULT", category="punt"),
+        _drive(2, "home", "Alpha", "Uncategorized", category="unknown")])
+    rows = _table_rows(_spec(panel(frame)[1]), _HOME, column="result_label")
+    unmapped, genuinely_unknown = _row_for(rows, 1), _row_for(rows, 2)
+
+    assert unmapped["result_label"] == "SOME NEW CFBD RESULT", (
+        f"an unmapped feed value rendered as {unmapped['result_label']!r} — it must keep the "
+        f"published string rather than borrow another result's label")
+    assert genuinely_unknown["result_label"] == "N/A", (
+        f"`Uncategorized` rendered as {genuinely_unknown['result_label']!r}")
+    assert unmapped["result_label"] != genuinely_unknown["result_label"], (
+        "an unmapped result and a published-as-unclassified one read identically, which tells "
+        "a reader cfdb knows something it does not (AC-G.11)")
+
+
+def test_THE_CELL_IS_ABBREVIATED_AND_THE_TOOLTIP_KEEPS_THE_WHOLE_WORD(panel):
+    """✅ **THE ABBREVIATION IS FOR A 66px CELL, NOT A REPLACEMENT FOR THE PUBLISHED WORD.**
+
+    🚨 **AND BOTH HALVES ARE ASSERTED, SCOPED TO THEIR OWN ELEMENT (cfdb-main-R-1170).** The
+    full string is on the panel in the tooltip and the abbreviation is in the cell, so a test
+    that searched the spec as text would pass with either one missing.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "END OF 4TH QUARTER", category="clock")])
+    spec = _spec(panel(frame)[1])
+
+    cell = _row_for(_table_rows(spec, _HOME, column="result_label"), 1)
+    assert cell["result_label"] == "EOQ4", (
+        f"the cell reads {cell['result_label']!r}; the published string is 110.95px and the "
+        f"cell is 66px, so the whole point is that it does not go there")
+
+    # THE TOOLTIP, READ OFF THE BAR LAYER'S ENCODING rather than out of the spec's text
+    bars = _only([n for n in _layers(spec, _FIELD)
+                  if _mark_of(n) == "rule" and "y" in (n.get("encoding") or {})], "bar layer")
+    fields = [t.get("field") for t in bars["encoding"]["tooltip"]]
+    assert "drive_result" in fields, (
+        f"the tooltip lost the published result: {fields}. A reader who wants the word must be "
+        f"able to get it")
+    assert "result_label" not in fields, (
+        "the tooltip carries the ABBREVIATION, which is the one place there is room for the "
+        "whole word")
+    drawn = _row_for(_field_rows(spec), 1)
+    assert drawn["drive_result"] == "END OF 4TH QUARTER", (
+        f"the tooltip's own row carries {drawn['drive_result']!r} rather than the published "
+        f"string, so the abbreviation has replaced the data rather than displayed it")
+
+
+def test_THE_RESULT_CELL_FITS_EVERY_DISPLAY_LABEL_with_no_truncation():
+    """🚨 **THE WHOLE POINT OF v03's WIDTH WORK: ZERO TRUNCATION, DERIVED RATHER THAN CHOSEN.**
+
+    📊 The widest display label is `PUNT RET TD` at **65.59px**, down from `END OF 4TH QUARTER`
+    at **110.95px** — a 40.9% fall in the number that sizes the column. **The cell is 66px
+    because the measurement says 65.59, not the other way round.**
+
+    ⚠️ **AND THE MAP'S VALUES MUST ALL BE MEASURED**, or a later rename could add a label wider
+    than the cell and this test would not know.
+    """
+    labels = _module_constant("_DRIVE_RESULT_LABELS")
+    plan = _module_constant("_DRIVE_COLUMN_PLAN")
+    result = _only([c for c in plan if c[0] == "result"], "the Result column")
+    limit = result[4]
+
+    unmeasured = set(labels.values()) - set(_DISPLAY_LABEL_PX)
+    assert not unmeasured, (
+        f"these display labels have no measured width: {sorted(unmeasured)} — measure them in "
+        f"a real Vega text mark at fontSize 10 and add them to _DISPLAY_LABEL_PX")
+
+    over = {v: _DISPLAY_LABEL_PX[v] for v in set(labels.values())
+            if _DISPLAY_LABEL_PX[v] > limit}
+    assert not over, (
+        f"these labels are wider than the {limit}px Result cell and will clip: {over}")
+    # AND THE CELL IS NOT WASTEFULLY WIDE EITHER — he is spending field pixels on it.
+    widest = max(_DISPLAY_LABEL_PX[v] for v in set(labels.values()))
+    assert limit - widest < 1.0, (
+        f"the Result cell is {limit}px for a widest label of {widest}px — {limit - widest}px "
+        f"of it comes straight out of the field, which Marc is paying for")
+
+
+def test_THE_SPLIT_IS_DERIVED_AND_THE_FIELD_TAKES_THE_REMAINDER():
+    """> **MARC:** *"Reduce the size of the field to gain the extra information I requested to be
+    > in the tables."*
+
+    ✅ **cfdb-main-R-895, OPEN SINCE B113, IS ANSWERED — as a priority rather than a number.**
+    So the assertion is not *"the split is 256/668/256"*; it is that **the table is the sum of
+    what its columns measure and the field is whatever is left**, which is the property that
+    makes the number a consequence rather than a preference.
+
+    📊 v02 was 236/708/236. v03 is 256/668/256 — **the field pays 40px (5.6%), and the label
+    abbreviations paid the other 45px**, which is why it is not the 301px the old labels needed.
+    """
+    table = _module_constant("_DRIVE_TABLE_WIDTH")
+    field = _module_constant("_DRIVE_FIELD_WIDTH")
+    panel_w = _module_constant("_DRIVE_PANEL_WIDTH")
+    spacing = _module_constant("_DRIVE_PANEL_SPACING")
+    plan = _module_constant("_DRIVE_COLUMN_PLAN")
+    gap = _module_constant("_DRIVE_TABLE_GAP")
+
+    # 1. THE TABLE IS EXACTLY ITS COLUMNS — nothing spare, nothing missing.
+    assert sum(c[2] for c in plan) + gap * (len(plan) - 1) == table
+
+    # 2. AND THE THREE PANELS STILL SUM TO THE SAME TOTAL, so growing the tables came OUT OF
+    #    THE FIELD rather than out of the page.
+    assert 2 * table + field == 1180, (
+        f"2x{table} + {field} = {2 * table + field}, not 1180 — the tables grew at the page's "
+        f"expense rather than the field's, which is not what Marc asked for")
+    assert panel_w == 2 * table + field + 2 * spacing == 1200
+
+    # 3. THE FIELD MUST STILL CARRY ITS FURNITURE. 120 yards, a gridline every ten, and a
+    #    2-digit axis label measured at 11.12px.
+    per_yard = field / _module_constant("_DRIVE_FIELD_YARDS")
+    assert per_yard * 10 > 3 * 11.12, (
+        f"at {per_yard:.3f} px/yard a ten-yard gap is {per_yard * 10:.1f}px, which is not "
+        f"comfortably more than the 11.12px axis label it has to hold")
+
+
+def test_THE_BAND_IS_A_LIGHT_GRAY_AND_ITS_BORDER_IS_ONLY_SLIGHTLY_DARKER():
+    """> **MARC:** *"I would use an alternating band (light gray/white). I would also include a
+    > slightly darker border"* · *"I don't see the row banding included"*
+
+    🚨 **v02 HAD THESE BACKWARDS: the band was 0.055 and the BORDER was 0.16 — three times the
+    band, so the thing he asked to be "slightly darker" was the dominant mark, and 5.5% of the
+    theme's ink is not a light gray.**
+
+    ⚠️ **THE UPPER BOUND IS AC-G.22 AND IT IS NOT DECORATION: the bars are full-strength team
+    colour, and a band that competes with them takes colour away from identity.** The weight
+    itself was settled by looking at four renders; this pins the RELATIONSHIPS that looking
+    cannot regress silently.
+    """
+    band = _module_constant("_DRIVE_BAND_OPACITY")
+    border = _module_constant("_DRIVE_BAND_BORDER_OPACITY")
+    endzone = _module_constant("_DRIVE_ENDZONE_OPACITY")
+
+    assert band > 0.055, (
+        f"the band is still {band} — that is v02's weight, the one Marc could not see")
+    assert border > band, (
+        f"the border ({border}) must be darker than the band ({band}) — he asked for a border, "
+        f"not an outline round nothing")
+    assert border < 2 * band, (
+        f"the border is {border} against a {band} band, more than twice it — he asked for "
+        f"*slightly* darker, and v02's 3x is what made the edge the dominant mark")
+    assert band < 0.2, (
+        f"a band at {band} competes with the team colour on the bars (AC-G.22)")
+    # 🚨 AND THE CEILING IS NOT AC-G.22 — IT IS THE FIELD'S OWN STRUCTURE, WHICH THE RENDER
+    # REVEALED AND THE ARITHMETIC DID NOT. At band 0.16 the row stripe is heavier than a 0.10
+    # end-zone fill, and **the field's boundary then reads as weaker than its rows** — the end
+    # zones stop reading as zones. A boundary must outweigh a guide.
+    assert endzone > band, (
+        f"the end-zone fill ({endzone}) is no heavier than the row band ({band}), so the "
+        f"field's boundary reads as weaker than its rows and the zones stop reading as zones")
+    assert endzone < 2 * band, (
+        f"the end-zone fill ({endzone}) is more than twice the band ({band}) — it has become "
+        f"the loudest thing on a field whose point is the drives")
+
+
+def test_NO_FIELD_LAYER_SUPPRESSES_THE_SHARED_X_AXIS(panel):
+    """🚨🚨 **v02 SILENTLY LOST THE FIELD'S YARD NUMBERS AND ITS OWN RASTER DID NOT CATCH IT.**
+
+    v02 added the end-zone fill with `axis=None` on a private copy of the x encoding.
+    **In a LAYERED chart Vega-Lite resolves axes across the layers, so one explicit `null`
+    suppressed the axis for ALL of them.** 📊 Measured in Chromium: the rendered SVG carried
+    **0 `g.role-axis` groups and 0 label texts**, while the axis definition sat correctly on two
+    other layers. v01 drew `0 10 20 30 40 50 40 30 20 10 0`; v02 drew nothing.
+
+    🚨 **AND THE SPEC WAS RIGHT, WHICH IS WHY THIS TEST IS SHAPED THE WAY IT IS.** Asserting
+    *"the field declares an axis"* passes on the broken version — v02 declared one, twice. **The
+    defect is a CONFLICT between layers, so the assertion has to be about the set of them.**
+
+    ⚠️ **AND IT IS THE FAILURE A PICTURE IS WORST AT: a reader notices a wrong mark and does not
+    notice an absent one.** Five defects in v01 and three headings in v02 were caught by looking;
+    this one survived two rounds of looking.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    spec = _spec(panel(frame)[1])
+
+    declared, suppressed = [], []
+    for node in _layers(spec, _FIELD):
+        enc = (node.get("encoding") or {}).get("x")
+        if not isinstance(enc, dict) or "axis" not in enc:
+            continue
+        (suppressed if enc["axis"] is None else declared).append(_mark_of(node))
+
+    assert declared, "no field layer declares an x axis at all, so the yard numbers cannot draw"
+    assert not suppressed, (
+        f"these field layers set `x.axis = null` while {declared} declare an axis: "
+        f"{suppressed}. Vega-Lite resolves axes across a layer, so the explicit null wins and "
+        f"the field's yard numbers are not drawn — which is exactly what v02 shipped")

@@ -6007,8 +6007,51 @@ _DRIVE_ENDZONE = 10             # yards of end zone at each end; data sits at 10
 # neighbouring pair, so the drawn plot area is 236+10+708+10+236. ⚠️ **v02's scoreboard header
 # has to line up with what is DRAWN rather than with what was declared, so every segment of it
 # is derived from these constants and the spacing is one of them.**
-_DRIVE_FIELD_WIDTH = 708        # 236/708/236 = 20/60/20 of 1180
-_DRIVE_TABLE_WIDTH = 236
+#
+# 🚨🚨 **v03: MARC ANSWERED THE WIDTH CALL WITH A PRIORITY RATHER THAN A NUMBER, AND THE SPLIT
+# BELOW IS DERIVED FROM A MEASUREMENT RATHER THAN CHOSEN (cfdb-main-R-895, open since B113).**
+#
+# > **MARC:** *"The field is where we started, with the goal of telling the story. We added the
+# > tables b/c the field didn't tell the story good enough by itself. We are still short of
+# > telling the story. Reduce the size of the field to gain the extra information I requested to
+# > be in the tables."*
+#
+# ✅ **SO THE TARGET IS THE SMALLEST TABLE AT WHICH TRUNCATION IS ZERO, AND THE FIELD TAKES THE
+# REST.** ⚠️ **NOT a tidy ratio — he asked for the field to pay only what the story costs.**
+#
+# 📊 **AND THE ORDER MATTERED. His label abbreviations shorten exactly the strings that set the
+# Result column's width, so pricing the field BEFORE applying them would have overpaid:**
+#
+#     widest Result label, published      `END OF 4TH QUARTER`   110.95px
+#     widest Result label, v03 display    `PUNT RET TD`           65.59px   −40.9%
+#
+#     table at zero truncation, OLD labels                        301px
+#     table at zero truncation, v03 labels                        256px     ← the labels paid 45px
+#     ── so the FIELD pays only the remainder                       40px
+#
+# 📊 **MEASURED PER COLUMN, every distinct string through a real Vega-Lite text mark at
+# `fontSize` 10 in Chromium, width from `getComputedTextLength()` on the node Vega drew:**
+#
+#     #   11.12 → 12      Yard    16.97 → 17      Result  65.59 → 66  (+11 glyph cell)
+#     Clock 41.16 → 42    Yrds    16.69 → 17      Impact  46.42 → 47
+#     Dur 25.03 → 26      six 3px gutters → 18
+#     ══ 227 + 11 glyph + 18 gutters = 256px per table, and TRUNCATION IS ZERO
+#
+# ⚠️ **AND WHAT THE FIELD LOSES, IN ITS OWN TERMS, BECAUSE THAT IS WHAT HE IS SPENDING:**
+#
+#     v02  708px / 120 yards = 5.900 px/yard   10 yards = 59.0px
+#     v03  668px / 120 yards = 5.567 px/yard   10 yards = 55.7px   (−40px, −5.6%)
+#
+# ✅ **A 2-digit axis label is 11.12px, so 55.7px of gridline spacing carries the 10-yard
+# furniture with room to spare — the field reads at the new width.** 📷 **Confirmed by looking,
+# not by that arithmetic alone.**
+#
+# 🚨 **AND B134's OWN `307px` FIGURE WAS WRONG, WHICH IS WORTH SAYING BECAUSE THIS ROUND WOULD
+# HAVE INHERITED IT (cfdb-wta-R-1250).** It priced the old labels at **4px gutters** while the
+# shipped plan uses **3px**. ⚠️ **The correct old-label figure is 301px.** §2.4 — a measurement
+# is a claim, and an arithmetic slip inside one is still a wrong number for the next round.
+_DRIVE_FIELD_WIDTH = 668        # 256/668/256 = 21.7/56.6/21.7 of 1180 — DERIVED, see above
+_DRIVE_TABLE_WIDTH = 256
 _DRIVE_PANEL_SPACING = 10
 _DRIVE_PANEL_WIDTH = (2 * _DRIVE_TABLE_WIDTH + _DRIVE_FIELD_WIDTH
                       + 2 * _DRIVE_PANEL_SPACING)
@@ -6041,7 +6084,13 @@ _DRIVE_GLYPH_SIZE = 132
 # no colour below is a literal.**
 _DRIVE_GRID_WIDTH = {"edge": 1.0, "goal": 2.0, "mid": 2.0, "ten": 1.0}
 _DRIVE_GRID_OPACITY = {"edge": 0.30, "goal": 0.60, "mid": 0.60, "ten": 0.16}
-_DRIVE_ENDZONE_OPACITY = 0.10
+# 🚨 v03: 0.10 → 0.16, BECAUSE THE ROW BAND OVERTOOK IT. See `_DRIVE_BAND_OPACITY` below —
+# raising the band to the weight Marc could actually see left the end-zone fill lighter than a
+# row stripe, and **a boundary that reads as weaker than a guide stops being a boundary.**
+# ⚠️ Measured: at band 0.12 the row contrast is 21.89/255 in light and 24.89 in dark, and moving
+# the end zone to 0.16 costs only 1.12 and 1.30 of that — **the rows still read, and the zones
+# read again.**
+_DRIVE_ENDZONE_OPACITY = 0.16
 # ── v02 PART 3: THE ALTERNATING BANDS ───────────────────────────────────────────────────────
 #
 # > **MARC:** *"We need light horizontal lines to help guild the eye to what facts in the table
@@ -6061,8 +6110,41 @@ _DRIVE_ENDZONE_OPACITY = 0.10
 # A table panel draws only its own side's text, but the banding has to exist on every drive or
 # the stripes break wherever the other team had the ball — which is most of them. **That is
 # also what makes the alignment legible: a table row sits inside the stripe its drive owns.**
-_DRIVE_BAND_OPACITY = 0.055
-_DRIVE_BAND_BORDER_OPACITY = 0.16
+#
+# 🚨🚨 **v03: MARC COULD NOT SEE THE BANDING, AND THE WEIGHTS WERE BACKWARDS.**
+#
+# > **MARC:** *"I don't see the row banding included"*
+#
+# ⚠️ **TWO CAUSES AND ONLY ONE IS THIS FILE'S.** B134 was merged and UNDEPLOYED when he looked,
+# so v02 was not on the live site at all — reported, not fixed here, because the deploy is A's
+# (§2.2.1a). ✅ **The half that IS this file's: 0.055 is 5.5% of `currentColor`, which is not a
+# "light gray" — it is almost nothing — and the 0.16 BORDER was three times the band, so the
+# thing he asked to be "slightly darker" was the dominant mark.**
+#
+# 📊 **RAISED BY LOOKING, AND THE DELIVERED CONTRAST MEASURED OFF THE PNG RATHER THAN INFERRED
+# FROM THE OPACITY.** Four weights rendered at 1300px in both themes; the instrument samples the
+# END-ZONE STRIP, which carries no bars and no text, and compares BANDED rows against the rows
+# between them — **the band alternates, so text and bars fall in both populations and cancel.**
+# ⚠️ **B134 got this wrong by sampling a table column and reading 154/255 out of what were
+# GLYPHS.**
+#
+#     band / border    light Δ/255   dark Δ/255   verdict
+#     0.055 / 0.16          10.00        11.59    v02 — what Marc could not see
+#     0.090 / 0.14          16.19        19.00    follows a row, still soft
+#     0.120 / 0.18          21.89        24.89    ← follows a row across the full 1200px
+#     0.160 / 0.22          29.77        33.18    overtakes the END-ZONE fill; see below
+#
+# 🚨 **AND THE CEILING TURNED OUT NOT TO BE AC-G.22 — IT IS THE FIELD'S OWN STRUCTURE.** At
+# 0.16 the row band is heavier than the 0.10 end-zone fill, so **the field's boundary reads as
+# weaker than its rows** and the end zones stop reading as zones at all. ✅ **A boundary must
+# outweigh a guide, so the end-zone fill goes to 0.16 and the band stays at 0.12** — the
+# hierarchy is zone > band > nothing, which is what the picture needs to stay a field.
+#
+# ✅ **AND THE BORDER IS NOW *SLIGHTLY* DARKER THAN THE BAND RATHER THAN TRIPLE IT** — 0.18
+# against 0.12, at 0.5px, which reads as an edge rather than as a rule. ⚠️ **v02 had 0.16
+# against 0.055, so the mark he asked to be "slightly darker" was three times the band.**
+_DRIVE_BAND_OPACITY = 0.12
+_DRIVE_BAND_BORDER_OPACITY = 0.18
 
 
 def _drive_field_x(yardline):
@@ -6219,6 +6301,92 @@ _DRIVE_RESULT_SHAPES = {
     "unknown": "stroke",
 }
 _DRIVE_RESULT_UNKNOWN = "stroke"
+
+# ── 🚨 v03: THE DISPLAY MAP. MARC'S ABBREVIATIONS, EXTENDED BY HIS OWN RULES ────────────────
+#
+# > **MARC:** *"I recommend a label change for "MISSED FG", present as "X-FG", "END OF HALF" as
+# > "EOH" or "Half". "Uncategorized" as N/A."*
+#
+# 🚨 **HE NAMED THREE AND THERE ARE 25, AND A PARTIAL MAP LEAVES THE COLUMN SIZED BY WHICHEVER
+# LONG STRING HE DID NOT HAPPEN TO MENTION.** `END OF 4TH QUARTER` is the widest published
+# string at 110.95px and he did not name it; on a partial map it would still set the width and
+# the round would have bought nothing.
+#
+# ✅ **SO THE WHOLE SET IS PROPOSED, AND THE RULES ARE HIS RATHER THAN NEW ONES:**
+#
+#     MISSED  → `X-`        his `MISSED FG` → `X-FG`
+#     BLOCKED → `B-`        the same shape, one modifier over
+#     END OF …→ initialism  his `END OF HALF` → `EOH`
+#     unknown → `N/A`       his `Uncategorized` → `N/A`
+#     FUMBLE  → `FUM`       · RETURN → `RET` · KICKOFF → `KO`
+#
+# ⚠️ **PROVENANCE, STATED, BECAUSE THREE OF THESE ARE HIS AND TWENTY-TWO ARE NOT:**
+#
+#     MARC          MISSED FG → X-FG · END OF HALF → EOH · Uncategorized → N/A
+#     COWORK        END OF GAME → EOG   (proposed in the prompt, not assumed here)
+#     THIS ROUND    the remaining 21, every one by a rule above
+#
+# 🚨 **`EOH` RATHER THAN `Half`, AND WIDTH DID NOT DECIDE IT.** Measured: `Half` is 17.80px and
+# `EOH` is 21.67px, so `Half` is the narrower of the two — **but its siblings are not.** The
+# family's widest is what sets the column, and that is `Game` 27.23px against `EOQ4` 27.80px —
+# **a 0.57px difference, which decides nothing.** ✅ **So it is decided on reading: `EOH` /
+# `EOG` / `EOQ4` are one visible family of initialisms, while `Half` / `Game` / `Q4` read as
+# nouns — and *"Game"* as a drive result is ambiguous in a way *"EOG"* is not.**
+#
+# 🚨 **THE MAP MUST BE INJECTIVE AND A TEST ASSERTS IT.** `PUNT TD` and `PUNT RETURN TD` are
+# different published results, as are `FUMBLE TD` and `FUMBLE RETURN TD` — **two of them
+# collapsing onto one label would make a returned score indistinguishable from a scored one**,
+# which is worse than the clipping this map exists to remove.
+#
+# ✅ **IT IS A DISPLAY MAP, NOT A DATA CHANGE. The published `drive_result` values stay, and the
+# TOOLTIP KEEPS THE FULL STRING** — the abbreviation is for a 66px cell, and a reader who wants
+# the word can hover for it.
+_DRIVE_RESULT_LABELS = {
+    # unchanged — already short enough for the cell
+    "PUNT": "PUNT", "TD": "TD", "FG": "FG", "DOWNS": "DOWNS", "INT": "INT",
+    "SF": "SF", "INT TD": "INT TD", "FG TD": "FG TD", "PUNT TD": "PUNT TD",
+    "DOWNS TD": "DOWNS TD",
+    # MARC's three
+    "MISSED FG": "X-FG",
+    "END OF HALF": "EOH",
+    "Uncategorized": "N/A",
+    # COWORK's proposal
+    "END OF GAME": "EOG",
+    # this round's, each by a rule above
+    "END OF 4TH QUARTER": "EOQ4",
+    "END OF HALF TD": "EOH TD",
+    "END OF GAME TD": "EOG TD",
+    "MISSED FG TD": "X-FG TD",
+    "BLOCKED FG": "B-FG",
+    "BLOCKED PUNT": "B-PUNT",
+    "FUMBLE": "FUM",
+    "FUMBLE TD": "FUM TD",
+    "FUMBLE RETURN TD": "FUM RET TD",
+    "PUNT RETURN TD": "PUNT RET TD",
+    "KICKOFF": "KO",
+}
+
+
+def _drive_result_label(value) -> str:
+    """The cell form of a published `drive_result`.
+
+    🚨 **AN UNMAPPED VALUE FALLS THROUGH TO THE PUBLISHED STRING, DELIBERATELY, AND THE CONTROL
+    IS A TEST RATHER THAN A RUNTIME MARKER.** B117's rule as the legend needed it
+    (cfdb-wta-R-1189): every published value has a display form, **asserted in BOTH directions
+    against live serving**, so a new feed string cannot reach a reader unmapped.
+
+    ⚠️ **AND THE FALLBACK IS THE RAW STRING RATHER THAN `N/A`, WHICH IS THE OPPOSITE OF WHAT IT
+    LOOKS LIKE.** `N/A` is already the display form of `Uncategorized` — a real, published,
+    classified-as-unknown result — so routing an UNMAPPED value there would tell a reader cfdb
+    knows the drive was unclassified when the truth is that cfdb has a result and this file has
+    no word for it. **Two different absences, AC-G.11.** ✅ **The raw string is true, and it is
+    also LOUD: it is wider than the cell, so it clips with an ellipsis and announces itself.**
+    """
+    text = fmt.text(value)
+    if not text:
+        return fmt.EM_DASH
+    return _DRIVE_RESULT_LABELS.get(text, text)
+
 
 # 🚨 v02: MARC'S GLYPH IN THE TABLE IS A SUBSET, AND IT IS **HIS** SUBSET, NOT A NEW ONE.
 #
@@ -6570,11 +6738,23 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
     endzones = pd.DataFrame({
         "x": [0.0, float(_DRIVE_FIELD_YARDS - _DRIVE_ENDZONE)],
         "x2": [float(_DRIVE_ENDZONE), float(_DRIVE_FIELD_YARDS)]})
+    # 🚨🚨 IT REUSES `x` RATHER THAN BUILDING ITS OWN, AND v02 PAID FOR THE DIFFERENCE.
+    #
+    # This layer used to declare `axis=None` on a private copy of the x encoding. **In a LAYERED
+    # chart Vega-Lite resolves axes across the layers, so one explicit `null` suppressed the
+    # axis for ALL of them — and the field's yard numbers stopped being drawn at all.**
+    #
+    # 📊 MEASURED, once the question was asked: the rendered SVG carried **0 `g.role-axis`
+    # groups and 0 label texts**, while the axis definition sat correctly on two other layers.
+    # ⚠️ **v01 drew `0 10 20 30 40 50 40 30 20 10 0` along the bottom of the field; v02 drew
+    # nothing, and its own raster did not catch it** (cfdb-wta-R-1251).
+    #
+    # 🚨 **THAT IS THE SHAPE OF THIS PANEL'S RECURRING FAILURE: a picture caught five defects in
+    # v01 and three headings in v02, and it MISSED this one — because a reader notices a wrong
+    # mark and does not notice an absent one.** ✅ **So it is asserted now, not just looked at:
+    # a test reads the rendered axis rather than the spec, because the spec was RIGHT.**
     zone_fill = alt.Chart(endzones).mark_rect(
-        fill="currentColor", fillOpacity=_DRIVE_ENDZONE_OPACITY).encode(
-        x=alt.X("x:Q", title=None,
-                scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False), axis=None),
-        x2="x2:Q")
+        fill="currentColor", fillOpacity=_DRIVE_ENDZONE_OPACITY).encode(x=x, x2="x2:Q")
     # 🚨 v02: SOLID, NOT DASHED — Marc's first sentence. `strokeDash` is simply gone; the
     # weights and opacities carry the hierarchy instead, which is what he asked for with
     # *"make the 0,50,0 a bolder line"*.
@@ -6701,9 +6881,12 @@ _DRIVE_COLUMN_PLAN = (
     ("team_drive", "team_drive:Q",    12.0, "left",  13.0, 16.0, "#",      "left"),
     ("clock",      "clock:N",         42.0, "left",  42.0, 30.0, "Clock",  "left"),
     ("duration",   "duration:N",      26.0, "left",  26.0, 20.0, "Dur",    "left"),
-    ("yardline",   "yardline_mark:N", 18.0, "right", 18.0, 24.0, "Yard",   "right"),
+    ("yardline",   "yardline_mark:N", 17.0, "right", 17.0, 24.0, "Yard",   "right"),
     ("yards",      "yards:Q",         17.0, "right", 17.0, 25.0, "Yrds",   "left"),
-    ("result",     "drive_result:N",  56.0, "left",  45.0, 34.0, "Result", "left"),
+    # 🚨 v03: THE CELL READS `result_label`, NOT `drive_result`. 77 = 11px glyph + 66px text,
+    # and 66 is the widest display label (`PUNT RET TD`, 65.59px) rounded up — **so the cell
+    # is sized by the measurement rather than the measurement squeezed into the cell.**
+    ("result",     "result_label:N",  77.0, "left",  66.0, 34.0, "Result", "left"),
     ("impact",     "impact_cell:N",   47.0, "right", 47.0, 35.0, "Impact", "right"),
 )
 
@@ -6904,6 +7087,9 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
         for impact, running in zip(frame["impact"], frame["running_score"])]
     frame["result_shape"] = frame["drive_result_category"].map(
         lambda c: _DRIVE_RESULT_SHAPES.get(c, _DRIVE_RESULT_UNKNOWN))
+    # 🚨 v03: THE CELL FORM. ⚠️ **`drive_result` ITSELF IS UNTOUCHED AND STAYS IN THE TOOLTIP** —
+    # the abbreviation is for a 66px cell, not a replacement for the published word.
+    frame["result_label"] = frame["drive_result"].map(_drive_result_label)
     # ⚠️ THE ABSENCE IS DECIDED ONCE, HERE, AND EVERY PANEL READS THE SAME BOOLEAN. Deciding it
     # per panel is how a rewrite loses it in one place and keeps it in another.
     frame["has_position"] = [
