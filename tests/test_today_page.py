@@ -1230,35 +1230,227 @@ def test_the_label_falls_back_to_the_bare_percentage_rather_than_printing_none()
     assert " " not in text, "with no side to name, the label is just the number"
 
 
-def test_the_label_gutter_is_measured_and_the_cut_row_gets_narrower():
-    """📊 THE WIDTH COST, ASSERTED RATHER THAN DESCRIBED.
+def test_the_curve_label_sits_left_of_the_final_point_and_buys_no_width():
+    """🚨 A164. MARC'S SECOND SENTENCE IS AN ACCEPTANCE CRITERION, NOT A RATIONALE.
 
-    The label is monospace, so every glyph is the same width and the gutter is exactly
-    `offset + len(text) * 5.4219 + trail`. Measured in the browser with
-    `getComputedTextLength()`: `MICH 100%` is 48.781px for nine characters.
+    > *"Can we change the label on the last data point to be on the left side of the data point
+    > instead of the right? **That will tighten up the horizontal space.**"*
 
-    ⚠️ AND THE `cut` ROW IS NARROWER THAN THE OLD FIXED GUTTER, which is the half that makes the
-    per-row sizing worth it rather than merely honest.
+    ⚠️ **SO MOVING THE LABEL WITHOUT SHRINKING THE CHART WOULD FAIL THIS ASK EVEN THOUGH THE
+    LABEL MOVED**, which is why the width is asserted here and not only the anchor.
+
+    📊 A139 sized the gutter from the label's own length — `offset + len(text) * 5.4219 + trail`
+    — which was right while the label sat in the margin. It no longer does, so a regulation chart
+    is `2*pad + 176 + trail` for EVERY label: **182px, against 224 for `MICH 94%` before.**
+
+    🚨 **THE LOAD-BEARING ASSERTION IS THAT TWO DIFFERENT LABELS PRODUCE THE SAME WIDTH.** That
+    is the property that fails the moment anyone reintroduces a per-label gutter — a pinned 182
+    alone would not, because a gutter sized for a short label could still land on it.
     """
     today = _today()
     points = _curve()
-    plain = today._curve_width(points, "94%")
-    named = today._curve_width(points, "MICH 94%")
-    cut = today._curve_width(points, "cut")
 
-    assert named > plain, "naming the side costs width and the cost is real"
-    assert named - plain == round(5 * today._CURVE_LABEL_CHAR_PX), (
-        "five more characters must cost exactly five monospace advances")
-    assert cut < named, "a cut row must not be padded out to match a named one"
-    # ⚠️ AND IT IS NARROWER THAN THE FIXED GUTTER A138 SHIPPED, which is the half that makes
-    # per-row sizing worth it rather than merely honest. That constant was 30px.
-    cut_gutter = (today._CURVE_LABEL_OFFSET + len("cut") * today._CURVE_LABEL_CHAR_PX
-                  + today._CURVE_LABEL_TRAIL)
-    assert cut_gutter < 30, f"the cut gutter is {cut_gutter:.1f}px against the old fixed 30"
-    # The chart itself must agree with what the column was sized for, or the label clips.
-    svg = today._sparkline_svg(points, label="MICH 94%")
-    assert f"width='{named}'" in svg, (
-        "the SVG and _curve_width disagree — the column would be sized for a different label")
+    assert today._curve_width(points) == 182, (
+        "a regulation chart is 2*_CURVE_PAD + 176px of clock + _CURVE_LABEL_TRAIL")
+
+    short = today._sparkline_svg(points, label="cut", is_cut=True)
+    long = today._sparkline_svg(points, label="MICH 100%")
+    assert "width='182'" in short and "width='182'" in long, (
+        "the label must not buy width any more — it is inside the plot")
+
+    # The anchor, and the side. `text-anchor='end'` with x BELOW the final point's x is what
+    # puts the glyphs to its left; either alone would not.
+    assert "text-anchor='end'" in long, "the label is anchored at its right edge"
+    import re
+    label_x = float(re.search(r"<text x='([\d.]+)'[^>]*text-anchor='end'", long).group(1))
+    last_x = max(float(x) for x in re.findall(r"L([\d.]+),", long)) if "L" in long else None
+    assert last_x is not None, "this test needs a drawn path to compare against"
+    assert label_x < last_x, f"label at {label_x} is not left of the final point at {last_x}"
+
+
+def test_the_curve_is_as_tall_as_the_scoreboard_rows_it_sits_beside():
+    """📊 A164. THE HEIGHT IS A MEASUREMENT OF THE CELL BESIDE IT.
+
+    > **MARC, Today v04:** *"Stretch the y-axis to take up the same amount of space by the Away
+    > and Home lines in the Scoreboard."*
+
+    Measured in Chromium on the real panel at a 1300px viewport, BY CLASS rather than by
+    position: `.cfdb-sb-away` top to `.cfdb-sb-home` bottom is **67.2px**. An earlier reading
+    that started at the `thead` said 80.8 and would have made the chart too tall.
+
+    🚨 **AND TOO TALL IS THE FAILURE THAT MATTERS**, which is why this pins an upper bound as
+    well as the value: the scoreboard cell is what sets the row height, so a chart taller than
+    the scoreboard's own 80.8px would re-lay out every row on the panel.
+    """
+    today = _today()
+    assert today._CURVE_HEIGHT == 67, "the away-to-home span measured on the deployed panel"
+    assert today._CURVE_HEIGHT > 44, "this is the stretch Marc asked for, not a no-op"
+    assert today._CURVE_HEIGHT < 80.8, (
+        "taller than the scoreboard and the chart starts driving the row height")
+    svg = today._sparkline_svg(_curve(), label="MICH 94%")
+    assert "height='67'" in svg, "the default must actually reach the drawn chart"
+
+
+def test_most_exciting_layout_pins_only_the_first_two_columns():
+    """🚨 A164. MARC MOVED A DISPLAYED COLUMN AND `layout` MUST NOT HAVE NOTICED.
+
+    > *"Re-order columns Move Lead Changes Game between OT Lead Changes and How Close Late."*
+
+    `layout` is `["26%", f"{widest + 12}px"] + ["auto"] * 6` — the two pinned widths belong to
+    Scoreboard and Win probability, and the six that follow are all `auto`. So swapping two of
+    those six is invisible to it.
+
+    ⚠️ **THIS IS ASSERTED RATHER THAN ASSUMED BECAUSE THE FAILURE IS INVISIBLE UNTIL IT IS NOT.**
+    A `layout` list silently out of step with the columns shows up only on a viewport wide
+    enough for the pinned widths to matter — which is not the one a test renders at, and not
+    necessarily the one anybody looks at.
+    """
+    import re
+    source = open(_today().__file__).read()
+    body = source[source.index("def _most_exciting("):source.index("def _favorite_margin(")]
+
+    match = re.search(r'^    layout = (.+)$', body, re.M)
+    assert match, "the layout line moved; this test cannot see what it is asserting about"
+    assert match.group(1) == '["26%", f"{widest + 12}px"] + ["auto"] * 6', match.group(1)
+
+    headers = re.findall(r'Col\("[a-z_]+", "([^"]+)"', body)
+    assert headers == ["Scoreboard", "Win probability", "4th-qtr lead changes", "OT lead changes",
+                       "Lead changes, game", "How close, late", "Excitement", "Commentary"], headers
+    assert len(headers) == 2 + 6, "the pinned pair plus the six autos"
+
+
+def _rankings_frame():
+    """A poll with a TIE, a team that leaves and returns, and a late entrant.
+
+    ⚠️ ALL THREE ARE REAL SHAPES, NOT DECORATION: 2026 AP week 1 has two teams at rank 14, the
+    gap is what `invalid="break-paths-filter-domains"` exists for, and a late entrant is what
+    puts a left label somewhere other than week 1.
+    """
+    import pandas as pd
+    rows = [
+        ("Alpha", 1, 1), ("Alpha", 2, 2), ("Alpha", 3, 1),
+        ("Bravo", 1, 2), ("Bravo", 2, 1), ("Bravo", 3, 2),
+        ("Charlie", 1, 3), ("Charlie", 3, 3),            # unranked in week 2 — the gap
+        ("Delta", 1, 3),                                  # tied with Charlie at week 1
+        ("Echo", 2, 4), ("Echo", 3, 4),                   # enters late
+    ]
+    return pd.DataFrame(rows, columns=["team_display", "week", "rank"])
+
+
+def _left_label_rows(spec):
+    """The rows behind the LEFT-hand team labels, resolved through Altair's `datasets` block.
+
+    🚨 A163 FOUND THAT A CHART'S DATA IS LIFTED OUT OF THE LAYER AND INTO A TOP-LEVEL `datasets`
+    BLOCK, so a layer's own `data` is a NAME and reading it returns nothing. That cost that round
+    a "rows: 0" it had to chase; resolving by name is the fix, once, here.
+
+    The left labels are the text layer aligned `right` — the right-hand ones are aligned `left`.
+    """
+    datasets = spec.get("datasets", {})
+    picture = spec["hconcat"][0]
+    for layer in picture.get("layer", []):
+        mark = layer.get("mark", {})
+        if isinstance(mark, dict) and mark.get("type") == "text" and mark.get("align") == "right":
+            data = layer.get("data", {})
+            if "name" in data:
+                return datasets[data["name"]]
+            return data.get("values", [])
+    raise AssertionError("no right-aligned text layer — the left labels are not in this spec")
+
+
+def test_the_bump_chart_spec_serialises_and_keeps_its_gap_rule():
+    """🚨 A164. THIS TEST EXISTS BECAUSE THE PANEL SHIPPED BROKEN FOR A FEW MINUTES AND NOTHING
+    ELSE COULD SEE IT.
+
+    Building the left-label layer with `scale=y.scale` read back a `_PropertySetter` rather than
+    a scale, and the WHOLE SPEC failed to serialise — which on the page is an exception inside
+    `states.section`, a handled Error card, and a green suite. **1,400 tests passed on it.**
+    ⚠️ No other test in this repository builds this chart, so `to_dict()` is the only instrument
+    that can fail here, and it now runs on every commit.
+
+    ✅ **AND IT GUARDS THE GAP RULE IN THE SAME PASS** — `invalid="break-paths-filter-domains"`
+    is what stops a line joining across a team's unranked weeks. Its own comment says the whole
+    correctness of the gap rests on it, and a step interpolation makes a joined gap look MORE
+    deliberate rather than less: a flat run at a rank the team did not hold.
+    """
+    import json
+    today = _today()
+    frame = _rankings_frame()
+    current = frame[frame["week"] == 3].assign(delta="—", points=1, first_place_votes=0)
+
+    captured = []
+    original = today.st
+    today.st = type("S", (), {"altair_chart": staticmethod(lambda c, **k: captured.append(c)),
+                              "caption": staticmethod(lambda *a, **k: None)})
+    try:
+        today._bump_chart(frame, "AP Top 25", current)
+    finally:
+        today.st = original
+
+    assert len(captured) == 1, "the bump chart drew nothing to serialise"
+    spec = json.loads(captured[0].to_json())          # <- the assertion that matters
+
+    blob = json.dumps(spec)
+    assert '"break-paths-filter-domains"' in blob, (
+        "the gap rule left the spec — a line would join across a team's unranked weeks")
+    assert f'"{today._BUMP_INTERPOLATE}"' in blob, "the interpolation did not reach the mark"
+    # 🚨 BOTH LABELS, AND THIS ASSERTION EXISTS BECAUSE A STAGED BREAK THAT DELETED THE RIGHT
+    # ONE CAME BACK GREEN. Marc asked to *"Label the left of the line with the school name"* —
+    # an ADDITION. ⚠️ The caption tells a reader that *"a team on the picture with no row beside
+    # it was ranked earlier in the season and is not ranked now"*, and those are exactly the
+    # teams the companion table does NOT name: drop the right label and the caption's own case
+    # becomes unreadable.
+    aligns = {layer["mark"]["align"] for layer in spec["hconcat"][0]["layer"]
+              if isinstance(layer.get("mark"), dict) and layer["mark"].get("type") == "text"
+              and "align" in layer["mark"]}
+    assert aligns == {"left", "right"}, (
+        f"the chart must carry BOTH endpoint labels; text aligns present: {aligns}")
+
+    assert today._BUMP_INTERPOLATE == "step-after", (
+        "step-after is the only one whose vertical lands on the week the new rank was "
+        "announced: measured at x=449 and 722.3 against week centres 175.7/449/722.3, while "
+        "step-before turned at 175.7/449 (a week early) and step at 312/585 (on no tick)")
+
+
+def test_tied_teams_share_one_left_label_because_there_is_no_room_for_two():
+    """📊 A164 (cfdb-main-R-1145). MEASURED IN THE RASTER, TWICE, AND THE FIRST FIX FAILED.
+
+    Two teams at the same rank get the same y. Drawn separately they overstrike exactly — 0.0px
+    apart. ❌ Spreading them ∓0.45 of a rank separated *them* and put one 9.2px from the team a
+    rank above: **the collision moved rather than cleared**, because a 16.8px rank pitch against
+    ~13px of text has under 4px of slack.
+
+    ✅ One label naming both is legible AND truer — they hold the same rank that week.
+    """
+    import json
+    today = _today()
+    frame = _rankings_frame()          # Charlie and Delta are both rank 3 in week 1
+    current = frame[frame["week"] == 3].assign(delta="—", points=1, first_place_votes=0)
+    captured = []
+    original = today.st
+    today.st = type("S", (), {"altair_chart": staticmethod(lambda c, **k: captured.append(c)),
+                              "caption": staticmethod(lambda *a, **k: None)})
+    try:
+        today._bump_chart(frame, "AP Top 25", current)
+    finally:
+        today.st = original
+    # 🚨 READ THE LEFT-LABEL LAYER ITSELF, NOT THE WHOLE SPEC. A first draft asserted
+    # `'"Echo"' in json.dumps(spec)` and **a staged break that dropped every late entrant came
+    # back GREEN** — because Echo also appears in the right-hand labels and in the companion
+    # table. R-744: a break that comes back green is rewritten until it can fail.
+    rows = _left_label_rows(json.loads(captured[0].to_json()))
+    names = {r["team_display"] for r in rows}
+
+    assert "Charlie · Delta" in names, (
+        f"the two teams tied at rank 3 in week 1 must share one left label; got {names}")
+    assert "Charlie" not in names and "Delta" not in names, (
+        "a tied team must not ALSO be labelled on its own")
+    # ⚠️ AND THE LATE ENTRANT IS LABELLED AT ITS OWN FIRST WEEK, not at week 1 — the half that
+    # makes this a "first ranked week" label rather than a "week 1" label.
+    echo = [r for r in rows if r["team_display"] == "Echo"]
+    assert echo, f"a team that enters in week 2 still gets a left label; got {names}"
+    assert echo[0]["week"] == 2, f"and it sits at ITS first week, not week 1: {echo[0]}"
+    assert len(rows) == 4, f"four labels for five teams, one of them shared: {rows}"
 
 
 # --- A138: the scoreboard (cfdb-main-R-906) ----------------------------------------------
