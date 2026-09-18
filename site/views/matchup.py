@@ -5524,23 +5524,38 @@ def _card_position_header(title: str) -> str:
             f"padding-bottom:.2rem;{_CARD_RULE}'>{html.escape(title)}</div>")
 
 
-def _card_team_header(away, home, accents) -> str:
-    """Team logo and name over each side's cards — Marc, v11: *"an overall header"*.
+def _team_header_card(display, logo_url, accent, sizing: str = "flex:1") -> str:
+    """ONE team header card — logo, name, and the 3px rule in the team's colour.
+
+    🚨 **EXTRACTED IN v04 SO THE DRIVES HEADER CAN REUSE IT RATHER THAN FORK IT (§4.3).** Marc
+    pointed at this card and asked for it *"above the tables on the outside of the drives
+    graph"* — and `_card_team_header` could not be called for that, because it emits the two
+    cards ADJACENT and the drives header needs the quarter linescore BETWEEN them.
+    ⚠️ **So the card became its own producer and both compositions call it.** A second copy of
+    this markup is a second thing to keep in step, and this project has paid for that three
+    times (B117).
 
     ⚠️ `identity.logo_or_monogram` IS THE ONE PRODUCER AND `_table_header` ALREADY USES IT — a
-    team with no logo gets a monogram at the identical footprint (AC-G.28), so the two halves
-    cannot fall out of register because one side has no crest.
+    team with no logo gets a monogram at the identical footprint (AC-G.28), so two halves cannot
+    fall out of register because one side has no crest.
+
+    ⚠️ **`sizing` IS THE ONLY DIFFERENCE BETWEEN THE TWO CALL SITES.** The post-game cards want
+    `flex:1` and share the row; the drives header wants a fixed pixel width that matches the
+    chart panel beneath it, because a proportional element cannot track an absolute one
+    (cfdb-wta-R-941).
     """
-    cells = []
-    for side, accent in zip((away, home), accents):
-        logo = identity.logo_or_monogram(
-            side.get("team_logo_url"), str(side.get("team_display") or "?"), 22)
-        cells.append(
-            f"<div style='flex:1;min-width:0;display:flex;align-items:center;gap:.35rem;"
+    logo = identity.logo_or_monogram(logo_url, str(display or "?"), 22)
+    return (f"<div style='{sizing};min-width:0;display:flex;align-items:center;gap:.35rem;"
             f"padding-bottom:.25rem;border-bottom:3px solid {accent}'>{logo}"
             f"<span style='font-weight:700;font-size:.9rem;overflow:hidden;"
             f"text-overflow:ellipsis;white-space:nowrap'>"
-            f"{html.escape(str(side.get('team_display') or '?'))}</span></div>")
+            f"{html.escape(str(display or '?'))}</span></div>")
+
+
+def _card_team_header(away, home, accents) -> str:
+    """Team logo and name over each side's cards — Marc, v11: *"an overall header"*."""
+    cells = [_team_header_card(side.get("team_display"), side.get("team_logo_url"), accent)
+             for side, accent in zip((away, home), accents)]
     return (f"<div style='display:flex;gap:{_CARD_COLUMN_GAP}rem;margin-bottom:.2rem'>"
             + "".join(cells) + "</div>")
 
@@ -6084,13 +6099,14 @@ _DRIVE_GLYPH_SIZE = 132
 # no colour below is a literal.**
 _DRIVE_GRID_WIDTH = {"edge": 1.0, "goal": 2.0, "mid": 2.0, "ten": 1.0}
 _DRIVE_GRID_OPACITY = {"edge": 0.30, "goal": 0.60, "mid": 0.60, "ten": 0.16}
-# 🚨 v03: 0.10 → 0.16, BECAUSE THE ROW BAND OVERTOOK IT. See `_DRIVE_BAND_OPACITY` below —
-# raising the band to the weight Marc could actually see left the end-zone fill lighter than a
-# row stripe, and **a boundary that reads as weaker than a guide stops being a boundary.**
-# ⚠️ Measured: at band 0.12 the row contrast is 21.89/255 in light and 24.89 in dark, and moving
-# the end zone to 0.16 costs only 1.12 and 1.30 of that — **the rows still read, and the zones
-# read again.**
-_DRIVE_ENDZONE_OPACITY = 0.16
+# 🚨 **`_DRIVE_ENDZONE_OPACITY` IS GONE IN v04, AND ITS HISTORY IS WORTH ONE LINE.** v03 moved it
+# 0.10 → 0.16 because the row band had overtaken it and a boundary reading as weaker than a guide
+# stops being a boundary. **v04 makes the end zones OPAQUE team colour on Marc's instruction —
+# *"Don't want transparency"* — so there is no opacity to tune and the hierarchy holds by
+# construction: an opaque fill is stronger than a 0.12 band by definition.**
+# ⚠️ **Deleted rather than left at a value nothing reads.** B134 found `_drives` sitting in two
+# dispatch sets where only one was consulted, and the lesson was that dead membership reads as
+# live — a constant nothing uses is the same defect one shape down.
 # ── v02 PART 3: THE ALTERNATING BANDS ───────────────────────────────────────────────────────
 #
 # > **MARC:** *"We need light horizontal lines to help guild the eye to what facts in the table
@@ -6140,11 +6156,43 @@ _DRIVE_ENDZONE_OPACITY = 0.16
 # outweigh a guide, so the end-zone fill goes to 0.16 and the band stays at 0.12** — the
 # hierarchy is zone > band > nothing, which is what the picture needs to stay a field.
 #
-# ✅ **AND THE BORDER IS NOW *SLIGHTLY* DARKER THAN THE BAND RATHER THAN TRIPLE IT** — 0.18
-# against 0.12, at 0.5px, which reads as an edge rather than as a rule. ⚠️ **v02 had 0.16
-# against 0.055, so the mark he asked to be "slightly darker" was three times the band.**
+# ✅ **v03 MADE THE BORDER *SLIGHTLY* DARKER THAN THE BAND RATHER THAN TRIPLE IT** — 0.18
+# against 0.12, at 0.5px. ⚠️ **v02 had 0.16 against 0.055, so the mark he asked to be "slightly
+# darker" was three times the band.**
+#
+# ── 🚨 v04: HE LOOKED AT 0.18 AND ASKED FOR MORE ────────────────────────────────────────────
+#
+# > **MARC:** *"Horizontal banding can you increase the darkness off the bouders on the
+# > banding?"*
+#
+# 📊 **MEASURED OFF THE PNG AT THE BAND'S EDGE, WHICH IS NOT WHERE THE BAND IS MEASURED.** The
+# border is a sub-pixel stroke ON the boundary, so its delivered contrast is the peak deviation
+# in a narrow window around each band edge — sampling the band's middle reports the FILL and
+# calls it the border.
+#
+#     border / width    light Δ/255   dark Δ/255
+#     0.18 @ 0.5px          24.77        27.89    v03 — what he looked at
+#     0.30 @ 0.5px          32.77        37.42    ← v04, +32% and +34%
+#     0.30 @ 1.0px          48.32        54.85    📋 available, see below
+#     0.45 @ 1.0px          75.88        87.84    📋 a rule rather than a guide
+#
+# ✅ **THE OPACITY IS RAISED AND THE WIDTH IS NOT, BECAUSE HE ASKED FOR *DARKNESS*.** Widening
+# the stroke is the other lever and it moves the number further, but it turns a hairline into a
+# rule between every row — **an alternating band with a border is what he specified, and a grid
+# is a different picture.** 📋 **The 1px numbers are reported so the next ask has a price.**
+#
+# 🚨🚨 **AND THE FIRST VERSION OF THAT INSTRUMENT RETURNED 0.00 FOR ALL FOUR VARIANTS WITHOUT
+# REFUSING.** It sampled 20px into the end zone — which v04 had just made an OPAQUE team-colour
+# block painted over the bands and their borders. ⚠️ **The quiet place B135 measured in stopped
+# being quiet in the same round that needed to measure there again.** ✅ **It samples eight
+# columns across the field now and takes the MEDIAN per boundary — the border spans every
+# column, text and bars hit a few — and it refuses a zero outright.**
 _DRIVE_BAND_OPACITY = 0.12
-_DRIVE_BAND_BORDER_OPACITY = 0.18
+_DRIVE_BAND_BORDER_OPACITY = 0.30
+# 🚨 v04: THE STROKE WIDTH BECOMES A NAMED CONSTANT BECAUSE MARC ASKED FOR A DARKER BORDER AND
+# *darkness* HAS TWO LEVERS AT SUB-PIXEL WIDTHS. A 0.5px stroke is antialiased to roughly half
+# its colour before opacity is applied at all, so raising opacity alone fights the renderer.
+_DRIVE_BAND_BORDER_WIDTH = 0.5
 
 
 def _drive_field_x(yardline):
@@ -6291,16 +6339,162 @@ def _drive_yardline_logo(row):
 # three-item result strip and `_OUTLOOK_MARKS` is a three-verdict outlook scale — **neither
 # carries a drive-result concept, and extending either means editing A's file.** ✅ **So it is
 # built here in the same spirit and REPORTED rather than reached for (cfdb-wta-R-1178).**
-_DRIVE_RESULT_SHAPES = {
-    "offensive score": "triangle-right",
-    "defensive score": "triangle-left",
+# 🚨 **`_DRIVE_RESULT_SHAPES` IS GONE IN v04 AND ITS REPLACEMENT IS `_DRIVE_GLYPH_SHAPES`
+# BELOW.** It keyed on `drive_result_category`, which Marc's first v04 ask identified as too
+# coarse: `TD` and `FG` are both `offensive score`, so a field goal and a touchdown drew the same
+# triangle on 30,369 drives. ⚠️ **Deleted rather than left beside its successor** — two shape
+# vocabularies is the drift B117 exists to stop, and a legend built from the stale one would have
+# named categories the field no longer draws.
+_DRIVE_RESULT_UNKNOWN = "stroke"
+
+# ── 🚨🚨 v04 PART 5: THE GLYPH GETS THREE CHANNELS, AND MARC'S ARROW WAS A BUG REPORT ────────
+#
+# > **MARC:** *"Glyphs for FG, TD, INT TD. Can anything that is a touchdown be filled. Feel like
+# > TD arrow for Away should point to the left instead of to the right."*
+#
+# 📊 **HIS FIRST ASK IS A GAP IN THE KEY, MEASURED: B133 keys shapes on `drive_result_category`,
+# where `TD` and `FG` are BOTH `offensive score` — so a field goal and a touchdown drew the same
+# triangle on 30,369 drives.** `INT TD` was already distinct as `defensive score`.
+#
+# ## 🚨 AND THE ARROW ASK IS A DEFECT REPORT, NOT A PREFERENCE
+#
+# 📊 **MEASURED: an away offensive touchdown travels LEFT on 12,663 of 12,978 (97.6%) and a home
+# one travels RIGHT on 16,735 of 17,158 (97.5%).** The bar already runs that way. **v01–v03 drew
+# `triangle-right` for every offensive score regardless of band, so on the away table the arrow
+# pointed back up its own bar.** ⚠️ **He is right, and it had been wrong since v01.**
+#
+# 🚨 **BUT THE OBVIOUS FIX — take the direction from the BAR's coordinates — DOES NOT WORK, AND
+# MEASURING IT IS WHAT SAVED THIS.** For a DEFENSIVE touchdown the coordinates are the offense's
+# drive plus the return, and the net runs both ways almost evenly:
+#
+#     away defensive scores   330 went right · 368 went left
+#     home defensive scores   199 went right · 187 went left
+#
+# ✅ **SO THE DIRECTION IS THE END ZONE THE POINTS WENT INTO, WHICH IS A FACT ABOUT THE SCORE
+# RATHER THAN ABOUT THE BALL'S PATH** — and it is the same geometry v04's end-zone colours are
+# painted from (away scores LEFT, home scores RIGHT, verified on 6,193 and 9,236 drives):
+#
+#     band   who scored   points went to   arrow
+#     away   offense      the away end zone, LEFT     ◀   ← Marc's ask
+#     away   defense      the home end zone, RIGHT    ▶
+#     home   offense      the home end zone, RIGHT    ▶
+#     home   defense      the away end zone, LEFT     ◀
+#
+# ✅ **THAT KEEPS THE DISTINCTION B133's TEST CALLS "THE ONE THAT MATTERS" — offense versus
+# defense is still readable — and it now reads correctly on BOTH bands rather than only the
+# home one.** ⚠️ **It also makes the glyph MIRRORED, so the mirror is asserted: a glyph pointing
+# the wrong way on one band is B133's mirrored-table defect wearing a new hat.**
+#
+# ## ✅ THREE CHANNELS, EACH CARRYING ONE FACT
+#
+#     SHAPE      what happened      triangle=score · diamond=kick · cross=turnover
+#                                   circle=punt · square=clock · stroke=unclassified
+#     DIRECTION  whose points       the end zone the points went into (above)
+#     FILL       did it score       filled = points on the board
+#
+# ⚠️ **FILL IS GENERALISED FROM HIS WORDS AND THAT IS SAID OUT LOUD.** He asked for *"anything
+# that is a touchdown"* filled; **filled = SCORED** also fills a made field goal and a safety,
+# and leaves a MISSED field goal hollow beside a made one — **a made and a missed kick are the
+# same shape and differ only by fill, which is the pair a reader most needs to tell apart.**
+# 📋 **If he wants fill to mean touchdown alone, it is one predicate.**
+#
+# 🚨 **AND `Downs` KEEPS ITS `+` — HIS `X` IS FLAGGED, NOT SILENTLY TAKEN.**
+# > *"Downs glyph should be an X instead of a +"*
+# ⚠️ **`X` already means something on this panel: v03 shipped `X-FG` for a missed field goal, on
+# his own instruction.** An `X` glyph for a turnover-on-downs beside an `X-` label for a missed
+# kick is two meanings for one mark. 📋 **It is also not a Vega built-in — `cross` IS the plus,
+# and an X needs a custom path or a 45° rotation.** **Reported for his call (§2, R-980).**
+#
+# 📊 **THE TOUCHDOWNS, ENUMERATED FROM THE PUBLISHED VALUES RATHER THAN MATCHED ON `TD`:**
+# `TD` 22,870 · `INT TD` 486 · `FUMBLE RETURN TD` 207 · `PUNT TD` 129 · `PUNT RETURN TD` 86 ·
+# `FUMBLE TD` 70 · `MISSED FG TD` 15 · `DOWNS TD` 7 · `END OF HALF TD` 5 · `FG TD` 2 ·
+# `END OF GAME TD` 1 — **11 values, 23,878 drives.** ⚠️ **A substring match on `TD` happens to
+# agree here (checked: zero disagreements against `drive_result_key`), but it agrees by luck —
+# a future `TD ATTEMPT` or `NO TD` would break it, and the enumeration cannot.**
+_DRIVE_TOUCHDOWNS = frozenset({
+    "TD", "INT TD", "FUMBLE RETURN TD", "PUNT TD", "PUNT RETURN TD", "FUMBLE TD",
+    "MISSED FG TD", "DOWNS TD", "END OF HALF TD", "FG TD", "END OF GAME TD"})
+
+# the non-touchdown results that still put points on the board
+_DRIVE_OTHER_SCORES = frozenset({"FG", "SF"})   # a made field goal and a safety
+
+# 🚨 KEYED ON THE THING THAT HAPPENED, FINER THAN `drive_result_category` — which is the whole
+# of Marc's first ask. **The direction of a `score` is supplied per row; every other shape is
+# fixed.** ⚠️ **`glyphs.py` is session A's and still does not carry a drive-result concept
+# (checked again at this base), so this stays here and is reported rather than reached for.**
+# 🚨🚨 **THE FIRST DRAFT PUT `FG` IN THE DIRECTIONAL `score` CLASS AND A TEST CAUGHT IT DRAWING
+# `triangle-right` — THE SAME MARK AS A TOUCHDOWN, WHICH IS THE EXACT ASK IT WAS BUILT FOR.**
+# ⚠️ **The mistake was conflating *scored* with *arrow*: the arrow says where the POINTS went,
+# and only a touchdown needs that. A field goal is a kick.** ✅ **So the class is `touchdown`,
+# not `score`, and fill carries *scored* on its own channel.**
+_DRIVE_GLYPH_SHAPES = {
+    "touchdown": None,          # directional — see `_drive_glyph_shape`
+    "kick": "diamond",          # made or missed; FILL says which
+    "safety": "triangle-up",
     "turnover": "cross",
     "punt": "circle",
-    "kick": "diamond",
     "clock": "square",
-    "unknown": "stroke",
+    "unknown": _DRIVE_RESULT_UNKNOWN,
 }
-_DRIVE_RESULT_UNKNOWN = "stroke"
+# the published results that are a MADE kick and a safety — the two scores that are not
+# touchdowns, enumerated for the same reason the touchdowns are
+_DRIVE_MADE_KICK = "FG"
+_DRIVE_SAFETY = "SF"
+_DRIVE_SCORE_LEFT = "triangle-left"
+_DRIVE_SCORE_RIGHT = "triangle-right"
+
+
+def _drive_glyph_class(row) -> str:
+    """Which of `_DRIVE_GLYPH_SHAPES` this drive is — the finer key v04 needed.
+
+    ⚠️ **IT READS `drive_result` FOR THE SCORES AND `drive_result_category` FOR THE REST**, so a
+    published value this file has never seen still lands somewhere honest: an unrecognised
+    category falls to `unknown` and draws a bare stroke rather than borrowing a verdict.
+    """
+    result = fmt.text(row.get("drive_result"))
+    if result in _DRIVE_TOUCHDOWNS:
+        return "touchdown"
+    # ⚠️ `FG`'s published CATEGORY is `offensive score`, not `kick` — so a made field goal has
+    # to be named here or it falls through to `unknown`. `MISSED FG` and `BLOCKED FG` already
+    # carry `kick`, which is how one diamond covers made and missed with fill telling them apart.
+    if result == _DRIVE_MADE_KICK:
+        return "kick"
+    if result == _DRIVE_SAFETY:
+        return "safety"
+    category = fmt.text(row.get("drive_result_category"))
+    if category in _DRIVE_GLYPH_SHAPES and category not in ("touchdown", "safety"):
+        return category
+    return "unknown"
+
+
+def _drive_glyph_shape(row) -> str:
+    """The mark. **Directional for a score, so it points at the end zone that got the points.**
+
+    📊 away scores LEFT and home scores RIGHT (6,193 / 9,236 touchdowns, measured), so a score
+    by the band that owns the drive points that band's way and a score by its OPPONENT points
+    the other way. ⚠️ **`scoring_side` is the published fact — never the result TEXT, where a
+    `TD` suffix on a turnover means the defense scored.**
+    """
+    kind = _drive_glyph_class(row)
+    if kind != "touchdown":
+        return _DRIVE_GLYPH_SHAPES[kind]
+    scored_by_defense = fmt.text(row.get("scoring_side")) == "defense"
+    away = str(row.get("band")) == "away"
+    # the away end zone is on the left; a defensive score sends the points the other way
+    points_left = away != scored_by_defense
+    return _DRIVE_SCORE_LEFT if points_left else _DRIVE_SCORE_RIGHT
+
+
+def _drive_glyph_filled(row) -> bool:
+    """Whether the mark is filled. **Filled = this drive put points on the board.**
+
+    ⚠️ Generalised from Marc's *"anything that is a touchdown"* — see the note above. A made and
+    a missed field goal are the same diamond and differ only by this, which is the pair a reader
+    most needs to tell apart.
+    """
+    result = fmt.text(row.get("drive_result"))
+    return result in _DRIVE_TOUCHDOWNS or result in _DRIVE_OTHER_SCORES
+
 
 # ── 🚨 v03: THE DISPLAY MAP. MARC'S ABBREVIATIONS, EXTENDED BY HIS OWN RULES ────────────────
 #
@@ -6398,8 +6592,14 @@ def _drive_result_label(value) -> str:
 # list** — the set below cannot name a category the shape map does not have, and a test asserts
 # exactly that. **Punts, kicks, clock expiries and unclassified drives carry no table glyph**,
 # which is what makes the three he named legible at a glance.
-_DRIVE_TABLE_GLYPH_CATEGORIES = frozenset({
-    "offensive score", "defensive score", "turnover"})
+# 🚨 v04: KEYED ON THE NEW GLYPH CLASS, NOT ON `drive_result_category`. Marc's table ask was
+# *"if the Result is a FG, TD, or some kind of Turnover"* — under the finer key those are
+# `score` (which is FG, TD and every defensive touchdown) and `turnover`. ⚠️ **These are KEYS OF
+# `_DRIVE_GLYPH_SHAPES` rather than a second list**, and a test asserts exactly that.
+# ⚠️ **A SUPERSET OF HIS THREE, SAID OUT LOUD:** `kick` covers a MISSED field goal as well as a
+# made one, so a missed kick gets a table glyph he did not ask for. **Fill tells them apart and
+# the alternative is a fourth class that exists only to exclude one case.**
+_DRIVE_TABLE_GLYPH_CLASSES = frozenset({"touchdown", "kick", "turnover"})
 
 # 🚨 THE QUARTER IS ALREADY IN THE CLOCK STRING, AND v01 BUILT A SECOND RENDERER FOR IT BEFORE
 # LOOKING — CAUGHT BY THE RASTER RATHER THAN BY READING (cfdb-wta-R-1176).
@@ -6700,7 +6900,7 @@ def _drive_bands(frame: pd.DataFrame, width: float) -> list:
     return [alt.Chart(striped).mark_rect(
         fill="currentColor", fillOpacity=_DRIVE_BAND_OPACITY,
         stroke="currentColor", strokeOpacity=_DRIVE_BAND_BORDER_OPACITY,
-        strokeWidth=0.5).encode(
+        strokeWidth=_DRIVE_BAND_BORDER_WIDTH).encode(
         y=alt.Y("y_lo:Q", axis=None), y2="y_hi:Q",
         x=alt.value(0), x2=alt.value(width))]
 
@@ -6728,16 +6928,81 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
     # constants above so it cannot disagree with where the lines are drawn.
     ticks = [x for x in range(_DRIVE_ENDZONE, _DRIVE_FIELD_YARDS - _DRIVE_ENDZONE + 1, 10)]
     labels = {x: int(50 - abs(x - mid)) for x in ticks}
+    label_expr = (" : ".join(f"datum.value == {k} ? '{v}'"
+                             for k, v in labels.items()) + " : ''")
+
+    def _axis(orient):
+        return alt.Axis(values=ticks, grid=False, orient=orient, labelExpr=label_expr)
+
     x = alt.X("x:Q", title=None,
               scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False),
-              axis=alt.Axis(values=ticks, grid=False,
-                            labelExpr=" : ".join(f"datum.value == {k} ? '{v}'"
-                                                 for k, v in labels.items()) + " : ''"))
+              axis=_axis("bottom"))
+    # ── 🚨 v04 PART 3.1: THE SAME NUMBERS ALONG THE TOP ──────────────────────────────────
+    #
+    # > **MARC:** *"Missing the yardlines labels, include on top and bottom."*
+    #
+    # ⚠️ **THE REASON IS THE PANEL'S HEIGHT: a 32-drive game is ~550px tall, so a reader at the
+    # last drive is half a screen away from a single axis at the bottom.**
+    #
+    # 🚨🚨 **AND THIS IS THE EXACT OPERATION THAT SILENTLY DELETED THE BOTTOM AXIS IN v02
+    # (cfdb-wta-R-1251). Vega-Lite resolves axes ACROSS a layered chart's layers**, so a second
+    # x axis does not simply appear — by default it MERGES with the first and one definition
+    # wins. ✅ **`resolve_axis(x="independent")` at the end of this function is what makes them
+    # two axes rather than one argument**, and the test asserts the RENDERED axes rather than
+    # the spec, because in v02 the spec was right and the picture was wrong.
+    x_top = alt.X("x:Q", title=None,
+                  scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False),
+                  axis=_axis("top"))
+    top_axis = alt.Chart(gridlines).mark_rule(opacity=0).encode(x=x_top)
+    # 🚨 **UNDER `resolve_axis(x="independent")` EVERY LAYER DRAWS ITS OWN AXIS, SO THE LAYERS
+    # THAT ARE NOT AN AXIS MUST SAY SO — AND THAT IS THE SAME `axis=None` THAT BROKE v02.**
+    #
+    # ⚠️ **THE DIFFERENCE IS THE RESOLUTION, AND IT IS THE WHOLE POINT.** With axes MERGED
+    # (Vega-Lite's default) a single `axis=None` is an argument about the ONE shared axis and it
+    # wins — that is cfdb-wta-R-1251, which deleted the field's yard numbers for two rounds.
+    # With axes INDEPENDENT it suppresses only its own layer's. **The same keyword means two
+    # different things depending on one line at the bottom of this function**, which is exactly
+    # why the companion test reads the RENDERED axes and not the spec.
+    #
+    # 📊 Measured: 4 layers declared the bottom axis before this, and `independent` drew the
+    # bottom axis FOUR TIMES on top of itself — identical pixels, triple the label nodes.
+    x_plain = alt.X("x:Q", title=None,
+                    scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False), axis=None)
     # 🚨 v02: MARC'S END-ZONE FILL. The geometry already existed — v01 drew 120 yards with the
     # data inset at 10…110 — so this is a fill on real space rather than new decoration.
+    # ── 🚨 v04 PART 3.2: THE END ZONES CARRY THE TEAM THAT SCORES IN THEM, OPAQUE ────────
+    #
+    # > **MARC:** *"Can we fill in the endzones with team colors? Left side = Away color, Right
+    # > side = Home color. Don't want transparency b/c want it to override the horizontal
+    # > banding."*
+    #
+    # ✅ **THE DIRECTION IS VERIFIED, NOT ASSUMED — getting it backwards would be B133's
+    # mirrored-band defect wearing a new hat.** 📊 Measured on all 84,838 drives, and on Alabama
+    # 45 at Kentucky 17 by name:
+    #
+    #     away touchdowns ending at yardline 0   (field x 10, the LEFT goal line)   6,193
+    #     away touchdowns ending at yardline 100 (field x 110, the RIGHT)               54
+    #     home touchdowns ending at yardline 100 (field x 110, the RIGHT)            9,236
+    #     home touchdowns ending at yardline 0   (field x 10, the LEFT)                147
+    #
+    # **So the AWAY band scores in the LEFT end zone and the HOME band in the RIGHT** — exactly
+    # the assignment he asked for. ⚠️ **The small counts going the other way are the return
+    # touchdowns `_DRIVE_GAIN_NOTE` describes: the defense scored, so the ball finished at the
+    # other end.** On the named game Alabama's four touchdowns end at 0/0/0/8, Kentucky's at 100.
+    #
+    # 🚨 **`fillOpacity=1` IS HIS INSTRUCTION AND IT IS WHY v04 COULD NOT SHIP WITHOUT PART 1.**
+    # With no transparency there is nothing left to soften a near-black on a near-black page — a
+    # `#0b1315` end zone on a `#0e1117` page is a rectangle nobody can see. **The accent is
+    # theme-correct now: 0 of 351 teams below 3:1, in both themes.**
+    #
+    # ⚠️ **AND IT IS DRAWN AFTER THE BANDS, WHICH IS THE POINT — *"want it to override the
+    # horizontal banding"*.** The bars and icons come after it, so a goal-line drive still reads
+    # on top of its own end zone.
     endzones = pd.DataFrame({
         "x": [0.0, float(_DRIVE_FIELD_YARDS - _DRIVE_ENDZONE)],
-        "x2": [float(_DRIVE_ENDZONE), float(_DRIVE_FIELD_YARDS)]})
+        "x2": [float(_DRIVE_ENDZONE), float(_DRIVE_FIELD_YARDS)],
+        "band": ["away", "home"],
+        "accent": [_drive_band_accent(frame, "away"), _drive_band_accent(frame, "home")]})
     # 🚨🚨 IT REUSES `x` RATHER THAN BUILDING ITS OWN, AND v02 PAID FOR THE DIFFERENCE.
     #
     # This layer used to declare `axis=None` on a private copy of the x encoding. **In a LAYERED
@@ -6753,8 +7018,10 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
     # v01 and three headings in v02, and it MISSED this one — because a reader notices a wrong
     # mark and does not notice an absent one.** ✅ **So it is asserted now, not just looked at:
     # a test reads the rendered axis rather than the spec, because the spec was RIGHT.**
-    zone_fill = alt.Chart(endzones).mark_rect(
-        fill="currentColor", fillOpacity=_DRIVE_ENDZONE_OPACITY).encode(x=x, x2="x2:Q")
+    zone_fill = alt.Chart(endzones).mark_rect(fillOpacity=1.0).encode(
+        x=x_plain, x2="x2:Q",
+        color=alt.Color("accent:N", scale=None, legend=None),
+        tooltip=[alt.Tooltip("band:N", title="End zone")])
     # 🚨 v02: SOLID, NOT DASHED — Marc's first sentence. `strokeDash` is simply gone; the
     # weights and opacities carry the hierarchy instead, which is what he asked for with
     # *"make the 0,50,0 a bolder line"*.
@@ -6779,23 +7046,71 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
                alt.Tooltip("yardline_words:N", title="Started on"),
                alt.Tooltip("yards:Q", title="Yards gained", format="d"),
                alt.Tooltip("drive_result:N", title="Result"),
-               alt.Tooltip("impact_cell:N", title="Score impact"),
-               alt.Tooltip("field_note:N", title="On the field")]
+               # ── 🚨 v04 PART 4.1: THE SWING AND THE SCOREBOARD ARE TWO LINES ──────────
+               #
+               # > **MARC:** *"add a new line after Score Impact as Score and split the score to
+               # > that line, leave the +/- value on the score impact line."*
+               #
+               # ⚠️ **THE TABLE CELL KEEPS THEM TOGETHER AND THAT IS NOT AN INCONSISTENCY** —
+               # the cell has 47 measured pixels and one line; the tooltip has room for two.
+               # **Both read the same two published facts, so they cannot disagree.**
+               alt.Tooltip("impact_swing:N", title="Score impact"),
+               alt.Tooltip("score_line:N", title="Score")]
+    # ── 🚨 v04 PART 4.2: `On the field` IS GONE FROM HERE, AND THE REASON IS STRUCTURAL ───
+    #
+    # > **MARC:** *"What does On the field mean?"*
+    #
+    # 🚨 **HE ASKED WHAT IT MEANS, WHICH IS THE ANSWER — AND IT WAS WORSE THAN UNCLEAR: ON THIS
+    # LAYER IT COULD ONLY EVER SAY `yes`.** The bars are drawn from `frame[frame["has_position"]]`,
+    # so **every row that has a tooltip here is on the field by construction.** ⚠️ **A tooltip
+    # line whose value cannot vary is not information**, and it was answering a question nobody
+    # asked on 100% of the rows that could see it.
+    #
+    # ✅ **IT SURVIVES WHERE IT CAN ACTUALLY BE `no` — the absence layer below**, which is the
+    # 118 of 84,838 drives (0.139%) whose end coordinate falls off the field. **That is the one
+    # place the fact is a fact rather than a constant** (AC-G.11: an absence must say which
+    # absence it is).
+    #
+    # 📋 **AND THE WORDING IS A PROPOSAL, NOT A DECISION** — it is his panel and his word that it
+    # was unclear. It now says what the READER sees rather than naming the flag: *"the end of
+    # this drive is not on the field, so no bar is drawn"*.
     bars = alt.Chart(drawn).mark_rule(
         strokeWidth=_DRIVE_BAR_WIDTH, strokeCap="butt").encode(
-        x=x, x2="x_end:Q", y=y,
+        x=x_plain, x2="x_end:Q", y=y,
         color=alt.Color("accent:N", scale=None, legend=None),
         tooltip=tooltip)
     # 🚨 AC-G.22. THE ICON IS A SHAPE AND ITS COLOUR IS THE TEAM's, SO THE SHAPE CARRIES ALL
     # THE MEANING. `filled=False` keeps it legible on top of its own bar.
-    icons = alt.Chart(drawn).mark_point(
+    # 🚨 **`filled` IS A MARK PROPERTY IN VEGA-LITE, NOT AN ENCODING, SO A PER-ROW FILL NEEDS
+    # TWO LAYERS.** ⚠️ **They partition `drawn` on `result_filled` — a `notna()`-style filter on
+    # one layer only is half a partition, which is the defect v02's logo variant shipped as
+    # `50 50` (cfdb-wta-R-1192).** A test asserts every drawn drive appears in exactly one.
+    icons = alt.Chart(drawn[~drawn["result_filled"]]).mark_point(
         size=_DRIVE_GLYPH_SIZE, filled=False, strokeWidth=1.6).encode(
-        x="x_end:Q", y=y,
+        # 🚨 `x="x_end:Q"` AS A BARE STRING DREW A THIRD AXIS, AND THE RENDER IS WHAT SAID SO.
+        # A shorthand encoding declares no axis, and under `resolve_axis(x="independent")` that
+        # means Vega-Lite gives it the DEFAULT one — **26 ticks at 0, 5, 10 … sitting on top of
+        # the field's own 11.** ⚠️ **Merged resolution had hidden it; independence made every
+        # layer's silence its own decision.** The rendered-axis test counts them for exactly this.
+        x=alt.X("x_end:Q", title=None,
+                scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False), axis=None),
+        y=y,
         shape=alt.Shape("result_shape:N", scale=None, legend=None),
         color=alt.Color("accent:N", scale=None, legend=None),
+        xOffset=alt.XOffset("glyph_dx:Q", scale=None),
+        tooltip=tooltip)
+    scored_icons = alt.Chart(drawn[drawn["result_filled"]]).mark_point(
+        size=_DRIVE_GLYPH_SIZE, filled=True, strokeWidth=1.6).encode(
+        x=alt.X("x_end:Q", title=None,
+                scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False), axis=None),
+        y=y,
+        shape=alt.Shape("result_shape:N", scale=None, legend=None),
+        color=alt.Color("accent:N", scale=None, legend=None),
+        xOffset=alt.XOffset("glyph_dx:Q", scale=None),
         tooltip=tooltip)
 
-    layers = _drive_bands(frame, float(width)) + [zone_fill, field, bars, icons]
+    layers = _drive_bands(frame, float(width)) + [
+        zone_fill, field, top_axis, bars, icons, scored_icons]
     # ⚠️ THE HONEST-ABSENCE BRANCH, KEPT DELIBERATELY THROUGH TWO REWRITES THAT COULD HAVE LOST
     # IT SILENTLY (R-141's family). 📊 118 of 84,838 drives — 0.139% — carry an end coordinate
     # off the field. **The row stays and says so; a missing possession is a worse lie than a
@@ -6806,8 +7121,27 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
             align="center", baseline="middle", fontSize=_DRIVE_ROW_FONT, opacity=0.55).encode(
             x=alt.value(width / 2), y=y, text=alt.value("position unavailable"),
             tooltip=[alt.Tooltip("offense_team_display:N", title="Offense"),
-                     alt.Tooltip("field_note:N", title="On the field")]))
-    return alt.layer(*layers).properties(width=width, height=height)
+                     alt.Tooltip("field_note:N", title="Why there is no bar")]))
+    # 🚨 `resolve_axis(x="independent")` IS WHAT MAKES THE TOP AND BOTTOM AXES TWO AXES.
+    # Without it Vega-Lite merges them and one orientation wins — the same resolution rule that
+    # let v02's single `axis=None` delete the bottom axis entirely.
+    return (alt.layer(*layers).properties(width=width, height=height)
+            .resolve_axis(x="independent"))
+
+
+def _drive_band_accent(frame: pd.DataFrame, band: str) -> str:
+    """One band's accent, for the furniture painted in a team's colour.
+
+    ⚠️ **A ONE-SIDED FRAME IS A REAL CASE AND IT IS WHY THIS IS A FUNCTION.** `_drive_colors`
+    refuses to invent a colour for a band with no rows (B133's finding — possession alternating
+    is an assumption about football, not a property of the frame), so an end zone for a band
+    that never had the ball falls back to `identity.FALLBACK`: a neutral that reads on both
+    themes, rather than a hole where a rectangle should be (AC-G.11).
+    """
+    side = frame[frame["band"] == band]
+    if side.empty:
+        return identity.FALLBACK
+    return str(side.iloc[0].get("accent") or identity.FALLBACK)
 
 
 # ── v02 PART 4: SEVEN COLUMNS IN 236px, AND THE FIT IS MEASURED BEFORE IT IS DESIGNED ───────
@@ -6992,8 +7326,7 @@ def _drive_table_chart(frame: pd.DataFrame, band: str, height: int,
             # It shares the cell, so it is drawn at the cell's left edge and the text starts
             # after it — which is why `Result`'s width (56) and its text limit (45) differ by
             # exactly `_DRIVE_GLYPH_CELL`.
-            marked = side[side["drive_result_category"].isin(
-                _DRIVE_TABLE_GLYPH_CATEGORIES)]
+            marked = side[side["glyph_class"].isin(_DRIVE_TABLE_GLYPH_CLASSES)]
             layers.append(alt.Chart(marked).mark_point(
                 size=_DRIVE_GLYPH_SIZE, filled=False, strokeWidth=1.4).encode(
                 x=alt.value(left + _DRIVE_GLYPH_CELL / 2), y=_drive_y_shared(),
@@ -7011,6 +7344,76 @@ def _drive_table_chart(frame: pd.DataFrame, band: str, height: int,
             baseline="bottom", opacity=0.75, limit=head_limit).encode(
             x=alt.value(head_x), y=alt.value(-7), text=alt.value(heading)))
     return alt.layer(*layers).properties(width=width, height=height)
+
+
+# ── 🚨🚨 v04 PART 1: THE ACCENT, AND IT IS THE BLOCKER FOUR OTHER ASKS RESTED ON ─────────────
+#
+# 📊 **B135 MEASURED THIS AND DID NOT FIX IT (cfdb-wta-R-1256).** `_drive_frame` called
+# `identity.text_on(colors.get(band))` **with no `dark_theme` argument**, so every drive's accent
+# was the ON-LIGHT colour in both themes:
+#
+#     teams below 3:1 on the dark page       267 / 351     76.1%
+#     DRIVES below 3:1 on the dark page   66,776 / 84,838  78.71%
+#     worst  Kennesaw State #0b1315 → 1.01:1 · UConn #000e2f → 1.01:1
+#
+# 🚨 **AND v04 PUT FOUR MORE THINGS ON THAT VALUE** — opaque end zones in team colours (*"Don't
+# want transparency"*, so there is no opacity left to soften a near-black on a near-black page),
+# the caption text, the team header rules, and the bars that already used it.
+#
+# ✅ **THE MATERIAL WAS ALREADY PUBLISHED, AND VERIFYING THAT IS WHAT MADE THIS A ONE-VALUE FIX
+# RATHER THAN AN UPSTREAM ROUND (§2.2.1c).** `srv_drive` carries `offense_color_on_dark` beside
+# `offense_color_on_light` at 100% coverage, and `identity.text_on` has taken a `dark_theme`
+# argument all along — **this panel simply never passed it.**
+#
+# 📊 **THE PAIRINGS, MEASURED OVER THE SAME 351 TEAMS B135 USED:**
+#
+#     on-light on the LIGHT page   (today, light)       0 / 351 teams   0.00% of drives
+#     on-dark  on the DARK page    (this fix)           0 / 351 teams   0.00% of drives
+#     ── so cfdb's colour ladder already guarantees 3:1 against the RIGHT page, both ways
+#     on-light on the DARK page    (what shipped)     267 / 351       78.71% of drives  🚨
+#     on-dark  on the LIGHT page   (a wrong guess)    192 / 351       60.70% of drives  🚨
+#
+# ⚠️ **SO A MIS-DETECTED THEME IS BAD IN BOTH DIRECTIONS** — Air Force, Arkansas and Utah all
+# publish `#ffffff` on dark, which is 1.00:1 on a white page. **Getting the theme right matters
+# more than either variant does.**
+#
+# ## 🚨 HOW A VEGA SPEC LEARNS WHICH THEME IT IS IN — THE QUESTION B135 STOPPED ON
+#
+# ❌ **NOT `light-dark()`. B135 tested it inside a Vega mark and Vega rejected the string,
+# falling back to `#ddd` in BOTH themes.** The page's CSS mechanism is unavailable in a chart,
+# because the colour is baked into the spec before the browser ever sees it.
+#
+# ✅ **THE ANSWER IS `st.context.theme.type`, WHICH IS SERVER-SIDE AND PER SESSION.** Streamlit
+# 1.63 exposes the theme the VIEWER is actually in, inferred from the app's background colour —
+# so the spec can be built with the right colour already in it.
+#
+# ⚠️ **AND STREAMLIT'S OWN DOCSTRING WARNS THAT IT "MAY BE INCORRECT … WHEN THE APP IS FIRST
+# LOADED WITHIN A SESSION", WHICH WOULD HAVE BEEN FATAL HERE** — a reader reaches this panel by
+# URL, so the first load IS the common case. 📊 **SO IT WAS MEASURED RATHER THAN TRUSTED: a probe
+# app was run under a real Streamlit server and loaded in Chromium in a FRESH browser context
+# per scheme, which is a new session, so `run=1` is genuinely the first load:**
+#
+#     browser color-scheme: light   run=1 type='light'   page background rgb(255,255,255)
+#     browser color-scheme: dark    run=1 type='dark'    page background rgb(14,17,23)
+#
+# ✅ **Correct on the first script run in both schemes.** ⚠️ **The caveat is real for a theme
+# CHANGED mid-session, which is why the fallback below is what it is.**
+#
+# 🚨 **THE FALLBACK IS *TODAY'S BEHAVIOUR*, DELIBERATELY, SO THIS CANNOT REGRESS LIGHT.** Where
+# the theme is unknown — no script-run context, an older Streamlit, a stub that does not provide
+# it — this reads as LIGHT, which is exactly what shipped before. **A fix that traded one theme
+# for the other would not be a fix, and the only way to be sure is for the unknown case to land
+# on the variant that is already correct 100% of the time on the light page.**
+def _drive_dark_theme() -> bool:
+    """Whether the viewer is in dark mode. THE ONE PLACE THIS PANEL ASKS.
+
+    ⚠️ **EVERY `getattr` HERE IS A REAL CASE, NOT DEFENSIVE PROGRAMMING.** `st.context` arrived
+    in a recent Streamlit; `theme.type` is documented as `None` when the runtime has no context
+    info; and a test stub may model neither. **Each of those falls to light, which is what this
+    panel already did — so an unknown theme costs nothing that was not already being paid.**
+    """
+    theme = getattr(getattr(st, "context", None), "theme", None)
+    return str(getattr(theme, "type", None) or "light").lower() == "dark"
 
 
 def _drive_colors(df) -> dict:
@@ -7070,8 +7473,12 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
     frame["band_parity"] = [i % 2 for i in range(len(frame))]
     frame["y_lo"] = frame["drive_number"].astype(float) - 0.5
     frame["y_hi"] = frame["drive_number"].astype(float) + 0.5
+    # 🚨 v04: THE THEME IS PASSED THROUGH. See `_drive_dark_theme` for the measurement — this
+    # one argument is the whole of cfdb-wta-R-1256, and it takes 78.71% of drives from under
+    # 3:1 to zero on the dark page without moving the light one at all.
+    dark = _drive_dark_theme()
     frame["accent"] = frame["band"].map(
-        lambda band: identity.text_on(colors.get(band)))
+        lambda band: identity.text_on(colors.get(band), dark_theme=dark))
     frame["clock"] = frame.apply(_drive_clock, axis=1)
     frame["duration"] = frame.apply(_drive_duration, axis=1)
     frame["yardline_mark"] = frame.apply(_drive_yardline_mark, axis=1)
@@ -7085,8 +7492,21 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
     frame["impact_cell"] = [
         _drive_impact_cell(impact, running)
         for impact, running in zip(frame["impact"], frame["running_score"])]
-    frame["result_shape"] = frame["drive_result_category"].map(
-        lambda c: _DRIVE_RESULT_SHAPES.get(c, _DRIVE_RESULT_UNKNOWN))
+    # 🚨 v04 PART 5: THREE CHANNELS, COMPUTED ONCE. shape = what happened · direction = whose
+    # points · fill = did it score. **v01–v03 keyed the shape on `drive_result_category` alone,
+    # which drew a field goal and a touchdown identically on 30,369 drives.**
+    frame["result_shape"] = frame.apply(_drive_glyph_shape, axis=1)
+    frame["result_filled"] = frame.apply(_drive_glyph_filled, axis=1)
+    frame["glyph_class"] = frame.apply(_drive_glyph_class, axis=1)
+    # ── v04 PART 5: *"can the glyph labels at the end of the line start at the end of the line
+    # instead of being centred at the end of the line?"* ──────────────────────────────────────
+    # 📊 `size` is AREA in px², so the mark's side is its square root: 132 → ~11.5px, and half
+    # of that is the offset that turns "centred on the end" into "starting at the end".
+    # ⚠️ **SIGNED BY THE BAND'S OWN DIRECTION**, so it sits PAST the end of the bar on both
+    # sides rather than back over the drive on one of them.
+    frame["glyph_dx"] = [
+        (-1.0 if str(band) == "away" else 1.0) * (_DRIVE_GLYPH_SIZE ** 0.5) / 2.0
+        for band in frame["band"]]
     # 🚨 v03: THE CELL FORM. ⚠️ **`drive_result` ITSELF IS UNTOUCHED AND STAYS IN THE TOOLTIP** —
     # the abbreviation is for a 66px cell, not a replacement for the published word.
     frame["result_label"] = frame["drive_result"].map(_drive_result_label)
@@ -7099,9 +7519,21 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
         for _i, row in frame.iterrows()]
     frame["x"] = frame["start_yardline"].map(_drive_field_x)
     frame["x_end"] = frame["end_yardline"].map(_drive_field_x)
+    # 🚨 v04: THE WORDING IS WHAT A READER SEES, NOT THE NAME OF A FLAG. Marc asked what *"On
+    # the field"* meant, and the old value — `yes` — was the answer to a question nobody asked.
+    # 📋 **A PROPOSAL: it is his panel and his word that it was unclear.**
     frame["field_note"] = [
-        "yes" if ok else "CFBD's end coordinate for this drive falls off the field"
+        "yes" if ok else
+        "the end of this drive is not on the field, so no bar is drawn"
         for ok in frame["has_position"]]
+    # ── v04 PART 4.1: the two tooltip lines, from the same two facts as the table cell ────
+    frame["impact_swing"] = [
+        fmt.EM_DASH if impact is None or pd.isna(impact)
+        else ("0" if float(impact) == 0 else f"{float(impact):+.0f}")
+        for impact in frame["impact"]]
+    frame["score_line"] = [
+        running if isinstance(running, str) and running else fmt.EM_DASH
+        for running in frame["running_score"]]
     return frame
 
 
@@ -7128,28 +7560,62 @@ _DRIVE_LEGEND_HEIGHT = 18
 
 
 def _drive_result_legend_chart() -> alt.Chart:
-    """The seven shapes, drawn from `_DRIVE_RESULT_SHAPES` and labelled from its keys."""
-    entries = list(_DRIVE_RESULT_SHAPES.items())
+    """The vocabulary, drawn by the renderer that draws the field.
+
+    🚨 **BUILT FROM `_DRIVE_GLYPH_SHAPES`, AND v04 HAD TO MOVE IT OR IT WOULD HAVE LIED.** The
+    chart stopped reading `_DRIVE_RESULT_SHAPES` when PART 5 keyed the marks on what happened
+    rather than on `drive_result_category` — **a legend left on the old map would have named
+    seven categories while the field drew six classes, which is exactly the B117 defect v02
+    fixed one round earlier.**
+
+    ✅ **These are not characters that resemble the marks — they ARE the marks**, `mark_point`
+    with `shape` taken straight off the map, so the legend cannot disagree with the chart.
+
+    ⚠️ **THE `score` ENTRY EXPANDS TO BOTH DIRECTIONS AND IS FILLED**, because the direction and
+    the fill are two of the three channels and a legend that showed one arrow would leave a
+    reader to guess what the other one meant.
+    """
+    entries = []
+    for name, shape in _DRIVE_GLYPH_SHAPES.items():
+        if name == "touchdown":
+            # both directions AND filled, because direction and fill are two of the three
+            # channels and one arrow would leave a reader guessing what the other meant
+            # ⚠️ SHORT ENOUGH FOR THE SLOT, WHICH THE RENDER SETTLED: *"touchdown, pointing at
+            # the end zone"* clipped to `touchdown, pointing at …` at the 114px label limit.
+            # **The two arrows sit side by side, so the pair explains the direction without a
+            # sentence** — and the caption already says which way each team drives.
+            entries.append(("touchdown", _DRIVE_SCORE_RIGHT, True))
+            entries.append(("opponent scored", _DRIVE_SCORE_LEFT, True))
+        elif name == "kick":
+            # the same diamond twice, which is the point: fill is what tells them apart
+            entries.append(("field goal", shape, True))
+            entries.append(("missed or blocked", shape, False))
+        else:
+            entries.append((name, shape, name == "safety"))
     frame = pd.DataFrame({
-        "category": [name for name, _shape in entries],
-        "result_shape": [shape for _name, shape in entries],
+        "category": [n for n, _s, _f in entries],
+        "result_shape": [s for _n, s, _f in entries],
+        "result_filled": [f for _n, _s, f in entries],
         "slot": [float(i) * _DRIVE_LEGEND_SLOT for i, _e in enumerate(entries)],
         "y": [0.0] * len(entries),
     })
     y = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[-1, 1], nice=False))
-    glyphs_layer = alt.Chart(frame).mark_point(
+    x = alt.X("slot:Q", axis=None,
+              scale=alt.Scale(domain=[0, len(entries) * _DRIVE_LEGEND_SLOT], nice=False))
+    # 🚨 TWO LAYERS AGAIN, FOR THE SAME REASON THE FIELD NEEDS TWO: `filled` is a mark property.
+    hollow = alt.Chart(frame[~frame["result_filled"]]).mark_point(
         size=_DRIVE_GLYPH_SIZE, filled=False, strokeWidth=1.5,
         color="currentColor").encode(
-        x=alt.X("slot:Q", axis=None,
-                scale=alt.Scale(domain=[0, len(entries) * _DRIVE_LEGEND_SLOT], nice=False)),
-        y=y, shape=alt.Shape("result_shape:N", scale=None, legend=None))
+        x=x, y=y, shape=alt.Shape("result_shape:N", scale=None, legend=None))
+    solid = alt.Chart(frame[frame["result_filled"]]).mark_point(
+        size=_DRIVE_GLYPH_SIZE, filled=True, strokeWidth=1.5,
+        color="currentColor").encode(
+        x=x, y=y, shape=alt.Shape("result_shape:N", scale=None, legend=None))
     labels = alt.Chart(frame).mark_text(
         align="left", baseline="middle", fontSize=_DRIVE_ROW_FONT, dx=9,
         color="currentColor", opacity=0.8, limit=_DRIVE_LEGEND_SLOT - 14).encode(
-        x=alt.X("slot:Q", axis=None,
-                scale=alt.Scale(domain=[0, len(entries) * _DRIVE_LEGEND_SLOT], nice=False)),
-        y=y, text=alt.Text("category:N"))
-    return alt.layer(glyphs_layer, labels).properties(
+        x=x, y=y, text=alt.Text("category:N"))
+    return alt.layer(hollow, solid, labels).properties(
         width=_DRIVE_PANEL_WIDTH, height=_DRIVE_LEGEND_HEIGHT)
 
 
@@ -7177,40 +7643,69 @@ def _drive_result_legend_chart() -> alt.Chart:
 
 
 def _drive_scoreboard(row) -> str:
-    """Marc's scoreboard, sized to the chart it heads, from the `srv_game` row ALONE.
+    """Marc's header for the Drives section: the quarter linescore, and a team card per table.
 
-    🚨 **BOTH THE NAMES AND THE POINTS COME FROM `row`, AND THAT IS THE WHOLE POINT.** The
-    drives frame could supply the names, but its scores disagree with `srv_game`'s published
-    final on **214 of 3,607 games (5.93%)**, by up to 22 points — so the one place a reader
-    would never think to doubt is fed from the authority rather than from the snapshots.
+    > **MARC:** *"Can we use this scoreboard in the header line of the Drives section?"*
+    > **MARC:** *"Also use these headers above the tables on the outside of the drives graph."*
 
-    ✅ **AND IT MAKES THE HEADER INDEPENDENT OF THE QUERY**, which is why it can be drawn above
-    an Empty or an Error card instead of disappearing with them.
+    ✅ **BOTH ARE CALLS, NOT COPIES (§4.3).** `_line_score(row)` is the quarter table the
+    post-game header already draws, and `_team_header_card` is the logo-name-rule card
+    `_card_team_header` draws over the player cards. ⚠️ **The second one had to be EXTRACTED to
+    be callable — `_card_team_header` emits the two cards adjacent and this header needs the
+    linescore between them** — so the card became its own producer and both compositions use it.
+    **A second copy of either would be a second thing to keep in step (B117).**
+
+    🚨 **TWO ROWS, BOTH 1200px, BOTH BUILT FROM THE PANEL'S OWN CONSTANTS.** Row one is the
+    heading and the scoreboard, *"inline with the Drives row"* as he asked; row two puts each
+    team's card directly above its own table. **`use_container_width` is inert under `hconcat`
+    (cfdb-main-R-1106), so the panel is a fixed width and these line up by construction rather
+    than by arithmetic** — no `st.columns`, which is the argument B115 lost at 1700px
+    (cfdb-wta-R-941).
+
+    ⚠️ **AND `_line_score` HAS A DOCUMENTED NULL CASE THAT THIS HEADER MUST SURVIVE: it returns
+    an EMPTY STRING when all four quarters are null.** 📊 Its own measurement: **3,805 of the
+    3,831 completed 2025 games carry a first quarter**, so 26 do not. ✅ **Those fall back to the
+    plain `Away 3 at Home 17` line v02 shipped** — the final score is still published, so the
+    reader loses the quarter breakdown and nothing else. **An unplayed game never reaches here
+    at all: `_available_tabs` gives it no After tab** (B133's note, proved in `test_matchup_tabs`).
 
     ⚠️ `_card_text` RATHER THAN `or` — a NaN is truthy, so `row.get(...) or fallback` never
-    fires on a DataFrame value. B132 paid for that one; the helper's docstring names the trap.
-    Where `srv_game` carries no score the figure is an em dash, never a zero (AC-G.32).
+    fires on a DataFrame value. B132 paid for that one.
     """
     away_name = _card_text(row.get("away_team")) or "Away"
     home_name = _card_text(row.get("home_team")) or "Home"
-    away_points = _card_text(row.get("away_points")) or fmt.EM_DASH
-    home_points = _card_text(row.get("home_points")) or fmt.EM_DASH
-    middle = (
-        f"<span style='font-weight:600'>{html.escape(away_name)}</span>"
-        f" <span style='font-variant-numeric:tabular-nums;font-weight:700'>"
-        f"{html.escape(away_points)}</span>"
-        f" <span style='opacity:.45;padding:0 .35rem'>at</span>"
-        f" <span style='font-weight:600'>{html.escape(home_name)}</span>"
-        f" <span style='font-variant-numeric:tabular-nums;font-weight:700'>"
-        f"{html.escape(home_points)}</span>")
-    return (
-        f"<div style='display:flex;width:{_DRIVE_PANEL_WIDTH}px;max-width:100%;"
-        f"align-items:flex-end;gap:{_DRIVE_PANEL_SPACING}px;margin:.1rem 0 .15rem'>"
-        f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none;font-weight:700;"
-        f"font-size:1.05rem'>Drives</div>"
-        f"<div style='width:{_DRIVE_FIELD_WIDTH}px;flex:none;text-align:center;"
-        f"font-size:.92rem'>{middle}</div>"
-        f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none'></div></div>")
+    # 🚨 `_accent` IS CSS `light-dark()`, WHICH IS RIGHT HERE AND IMPOSSIBLE IN THE CHART.
+    # The header is HTML, so the browser resolves the team colour against the `color-scheme`
+    # Streamlit sets — immune to the first-load caveat in `st.context.theme` that the chart's
+    # accent has to live with (see `_drive_dark_theme`).
+    away_accent = _accent(row_for_side(row, "away"))
+    home_accent = _accent(row_for_side(row, "home"))
+
+    linescore = _line_score(row)
+    if not linescore:
+        away_points = _card_text(row.get("away_points")) or fmt.EM_DASH
+        home_points = _card_text(row.get("home_points")) or fmt.EM_DASH
+        linescore = (
+            f"<span style='font-weight:600'>{html.escape(away_name)}</span>"
+            f" <span style='font-variant-numeric:tabular-nums;font-weight:700'>"
+            f"{html.escape(away_points)}</span>"
+            f" <span style='opacity:.45;padding:0 .35rem'>at</span>"
+            f" <span style='font-weight:600'>{html.escape(home_name)}</span>"
+            f" <span style='font-variant-numeric:tabular-nums;font-weight:700'>"
+            f"{html.escape(home_points)}</span>")
+
+    def row_of(left, middle, right):
+        return (f"<div style='display:flex;width:{_DRIVE_PANEL_WIDTH}px;max-width:100%;"
+                f"align-items:flex-end;gap:{_DRIVE_PANEL_SPACING}px;margin:.1rem 0 .15rem'>"
+                f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none'>{left}</div>"
+                f"<div style='width:{_DRIVE_FIELD_WIDTH}px;flex:none;text-align:center;"
+                f"display:flex;justify-content:center'>{middle}</div>"
+                f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none'>{right}</div></div>")
+
+    heading = "<div style='font-weight:700;font-size:1.05rem'>Drives</div>"
+    cards = (_team_header_card(away_name, row.get("away_logo_url"), away_accent, "width:100%"),
+             _team_header_card(home_name, row.get("home_logo_url"), home_accent, "width:100%"))
+    return row_of(heading, linescore, "") + row_of(cards[0], "", cards[1])
 
 
 # 🚨 THE TWO ABSENCES IN ONE COLUMN, NAMED FOR A READER (AC-G.11). Marc asked for the `0` to
@@ -7346,14 +7841,45 @@ def _drives(game_id, season, row) -> None:
         st.altair_chart(chart, use_container_width=True)
 
         scored = int(df["is_scoring_drive"].fillna(False).astype(bool).sum())
+        # ── 🚨 v04 PART 6: THE DIRECTION PHRASES CARRY THEIR OWN TEAM'S COLOUR ───────────
+        #
+        # > **MARC:** *"can you color the text for Away drives right to left, home left to
+        # > right. Use the respective team colors for that text."*
+        #
+        # 🚨 **THIS USES `_accent`, WHICH IS CSS `light-dark()`, AND NOT THE PYTHON THEME
+        # DETECTION PART 1 NEEDED — BECAUSE HERE IT DOES NOT HAVE TO.** A caption is HTML in the
+        # page, so the browser resolves the colour against the `color-scheme` Streamlit sets:
+        # **immune to the first-load caveat in `st.context.theme`, and correct even if the
+        # reader flips the theme without a rerun.** ⚠️ **The chart cannot do this — Vega rejects
+        # a `light-dark()` string (B135 measured it) — which is why the panel now has two
+        # mechanisms for one idea. That is not duplication: it is the same two VARIANTS from
+        # `identity`, chosen by whichever layer can do the choosing.**
+        #
+        # ✅ **AND `_accent` IS CALLED, NOT COPIED (§4.3).** It is the expression the team header
+        # underline and the yardage marker already use — R-855's own note on it says *"two
+        # copies that agree today are two copies that drift"*.
+        #
+        # ⚠️ **TEXT NEEDS MORE CONTRAST THAN A BLOCK, WHICH IS WHY THIS ASK WAS THE ONE MOST
+        # LIKELY TO FAIL.** `identity.text_on` is contrast-safe against the page by definition —
+        # measured this round at 0 of 351 teams below 3:1 in both themes — so the caption is as
+        # safe as the header rule that has shipped for weeks.
+        # ⚠️ KEYED BY THE BAND NAME RATHER THAN BY TWO LITERALS, AND THAT IS NOT ONLY STYLE:
+        # `ci/check_page_reads.py` reads `<x>.get('literal')` as a COLUMN read and flagged
+        # `colors.get('away')` as a column no query selects. **The guard is right to be
+        # suspicious and `colors` is the page's own dict, so the honest fix is to stop looking
+        # like a row read rather than to add an exception to the guard.**
+        styles = {band: f"color:{_accent(colors.get(band))};font-weight:600"
+                  for band in ("away", "home")}
         st.caption(
-            f"{len(df)} drives · {scored} scoring. **{away_name} drives right to left, "
-            f"{home_name} left to right** — one field, both directions, so a bar moves the way "
-            f"the game did. Drive 1 is at the top. The Yard column is the yardline the drive "
-            f"started on: **{_DRIVE_OWN_MARK} is the offense's own half, "
-            f"{_DRIVE_OPPONENT_MARK} is the opponent's**, "
+            f"{len(df)} drives · {scored} scoring. "
+            f"<span style='{styles['away']}'>{html.escape(away_name)} drives right to left</span>, "
+            f"<span style='{styles['home']}'>{html.escape(home_name)} left to right</span>"
+            f" — one field, both directions, so a bar moves the way the game did. Drive 1 is at "
+            f"the top. The Yard column is the yardline the drive started on: "
+            f"<strong>{_DRIVE_OWN_MARK} is the offense's own half, "
+            f"{_DRIVE_OPPONENT_MARK} is the opponent's</strong>, "
             f"{_DRIVE_MIDFIELD} is midfield and {_DRIVE_GOAL_MARK} is the goal line. "
-            + _DRIVE_GAIN_NOTE)
+            + _DRIVE_GAIN_NOTE, unsafe_allow_html=True)
         # 🚨 THE LEGEND IS THE SHAPE MAP RENDERED, NOT A LIST BESIDE IT (v02 PART 5).
         st.altair_chart(_drive_result_legend_chart().configure_view(stroke=None),
                         use_container_width=False)

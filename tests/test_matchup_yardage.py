@@ -1406,7 +1406,14 @@ def test_the_PAGE_contains_exactly_the_DIVISIONS_it_is_allowed_to(panel):
                # is in the expression — and the quotient has exactly ONE consumer, this
                # mark's x. **Its sibling, the text's start, is `left + _DRIVE_GLYPH_CELL`
                # with no division at all**, which is why only this line appears here.
-               'x=alt.value(left + _DRIVE_GLYPH_CELL / 2), y=_drive_y_shared(),'}
+               'x=alt.value(left + _DRIVE_GLYPH_CELL / 2), y=_drive_y_shared(),',
+               # ⚠️ v04's GLYPH OFFSET — Marc's *"start at the end of the line instead of being
+               # centred at the end of the line"*. `size` is AREA in px², so the mark's side is
+               # its square root and HALF of that is the offset that moves a centred glyph to
+               # just past the bar's end. **Two code constants and a literal; no published
+               # column is in the expression, and the quotient has exactly one consumer —
+               # `xOffset` on the two icon layers.**
+               '(-1.0 if str(band) == "away" else 1.0) * (_DRIVE_GLYPH_SIZE ** 0.5) / 2.0'}
     unexpected = {line: text for line, text in found.items() if text not in allowed}
     assert not unexpected, (
         f"site/views/matchup.py divides where nothing says it may: "
