@@ -288,6 +288,161 @@ def test_no_table_with_a_linked_team_name_also_links_its_rows():
     assert not offenders, f"these tables link the row AND a team name: {offenders}"
 
 
+# --- A166: the player cards -----------------------------------------------------------------
+
+def _card_row(**over):
+    """A player as `srv_player_game_log` publishes one. Defaults are the MEASURED common case."""
+    import pandas as pd
+    row = {"player_name": "Riley Warzynski", "player_slug": "riley-warzynski",
+           "jersey": 1, "position": "QB", "class_year_display": "SR",
+           "stat_value": 535.0, "stat_category": "passing", "stat_type": "YDS",
+           "team_display": "Drake", "team_slug": "drake",
+           "team_logo_url": "https://example.invalid/drake.png",
+           "team_rank": None, "record_before_display": "0-0"}
+    row.update(over)
+    return pd.Series(row)
+
+
+def test_the_card_names_the_team_because_that_is_the_one_thing_marc_required():
+    """> **MARC, Today v04:** *"The player card needs to indicate the Team logo/name"*
+
+    ⚠️ **THE ONLY REQUIREMENT HE STATED FOR THE CARD ITSELF**, so it is the one pinned hardest.
+    🚨 **AND THE LOGO COMES THROUGH `table.team_cell` -> `identity.logo_or_monogram`, NOT A NEW
+    `<img>`** — that path guarantees an identical footprint whether the logo resolves or not
+    (AC-G.28) and carries R-121's NaN guard. A card that built its own image tag would re-open a
+    bug that cost this site two teams in a screenshot.
+    """
+    card = today._player_card(_card_row(), "yards")
+    assert "cfdb-card" in card
+    assert "Drake" in card, "the team NAME is required"
+    assert "cfdb-logo" in card, "the team LOGO is required"
+    assert "cfdb-identity" in card, "the team line must be the shared identity cell"
+    # The stat is the reason the card is on the board, and it reads before the team.
+    assert card.index("cfdb-card-value") < card.index("cfdb-card-team")
+    assert "535" in card
+
+
+def test_the_card_survives_the_absences_the_view_actually_carries():
+    """🚨 R-084: RENDER NOTHING RATHER THAN SUBSTITUTE SOMETHING — on a card as in a cell.
+
+    📊 **THE ABSENCE RISK A166 WAS ASKED TO DESIGN AROUND HAS LARGELY GONE, AND THAT IS
+    MEASURED** (cfdb-main-R-1306): the prompt and `_player_board`'s docstring both say 2026
+    carries a jersey on 40.9% of rows; live serving says **92.9%**, and on the ninety players who
+    actually reach these nine columns it is **90 of 90**. The roster was refetched 2026-09-16.
+
+    ⚠️ **THAT CHANGES WHAT IS TYPICAL, NOT WHAT IS POSSIBLE**, so the branches are still tested —
+    and an em dash must never land inside a name.
+    """
+    bare = today._player_card(
+        _card_row(jersey=None, position=None, class_year_display=None), "yards")
+    assert "Riley Warzynski" in bare
+    # ⚠️ ASSERT ON THE BADGE'S CLASS, NOT ON A "#" — the title attribute carries `&#39;` for the
+    # apostrophe in "player's", so a bare hash test matches the very branch it is checking.
+    assert "cfdb-player-jersey" not in bare, "no empty jersey badge"
+    assert "cfdb-player-pos" not in bare, "no empty position"
+    assert "cfdb-player-year" not in bare, "no empty class year"
+    assert "roster row" in bare, "the one absence worth naming is still named"
+    assert today.fmt.EM_DASH not in bare.split("cfdb-card-stat")[0], \
+        "no em dash inside the name"
+    # A missing logo still draws a monogram, so the card keeps its shape.
+    no_logo = today._player_card(_card_row(team_logo_url=None), "yards")
+    assert "Drake" in no_logo and "cfdb-card-team" in no_logo
+
+
+def test_the_jersey_is_a_number_worn_not_a_quantity_on_a_card_too():
+    """🚨 `srv_player_game_log` publishes `jersey` as an INTEGER, and pandas has no integer that
+    holds a null — so a real frame comes back `float64` and every jersey is a float.
+
+    ⚠️ **A149 SHIPPED `#2.0` TO A LIVE RENDER FROM EXACTLY THIS**, and its fixture could not see
+    it because the fixture used the string `"14"` (R-763: a fixture whose dtype cannot hold the
+    case). **This fixture uses a float on purpose.**
+    """
+    card = today._player_card(_card_row(jersey=7.0), "yards")
+    assert "#7<" in card or "#7</span>" in card, card[:200]
+    assert "#7.0" not in card
+
+
+def test_the_position_is_grouped_with_its_own_name_on_a_card():
+    """🚨 A166 (cfdb-main-R-1307). CSS-ONLY, SO A CSS ASSERTION IS THE ONLY GUARD — AND A STAGED
+    BREAK IS WHAT PROVED IT WAS MISSING.
+
+    `.cfdb-player` is `justify-content:space-between`, which is exactly right for the table cell
+    Marc specified in Today v01: *"[Jersey #, Name, Year (left aligned)], Position (right aligned
+    within the Player cell)"*. **A table cell is narrow; a card column is 390px.**
+
+    📊 MEASURED IN THE RASTER, first card of the first board: the position sat **215.8px from its
+    own player's name and 24.0px from the NEXT COLUMN's cards** — nine times closer to a
+    different player than to the one it describes. ⚠️ **Every glyph was correct and the card
+    still said something false about which player it belonged to.** Grouped: 7.2px from its own
+    name, 232.7px of clear space before the next column.
+
+    ✅ **THE OVERRIDE LIVES ON `.cfdb-card`, NOT ON `.cfdb-player`** — the rule that is right in a
+    cell is wrong in a card, and only the card says so. R-855, caught in the act: read the
+    existing path, then TEST IT FOR THE CASE AT HAND.
+    """
+    from lib import theme as T
+    import re
+    rule = re.search(r"\.cfdb-card \.cfdb-player \{([^}]*)\}", T.TABLE_CSS)
+    assert rule, (
+        "`.cfdb-card .cfdb-player` has no rule, so the card inherits the table cell's "
+        "two-ends layout and the position drifts 215px from the name it belongs to")
+    body = rule.group(1).replace(" ", "")
+    assert "justify-content:flex-start" in body, body
+
+
+def test_no_anchor_inside_the_card_is_inside_another_one():
+    """🚨 THE EQUIVALENT OF `test_no_table_with_a_linked_team_name_also_links_its_rows`, NOW THAT
+    THE BOARDS ARE NOT TABLES.
+
+    That guard asks whether a `table.render` carries a `link_builder` while drawing a linked team
+    name — because a row anchor would WRAP the team anchor, nested anchors are invalid HTML, and
+    the OUTER one wins, so a reader clicks the team and lands somewhere else. ⚠️ **A card grid
+    has no `link_builder` to check**, so the property is asserted directly on the markup instead:
+    **no `<a>` inside another `<a>`.**
+
+    ✅ The original guard still runs and still covers the five tables that remain; this covers the
+    three boards that left it.
+    """
+    import re
+    card = today._player_card(_card_row(), "yards")
+    depth = 0
+    for token in re.findall(r"<a\b|</a>", card):
+        depth += 1 if token != "</a>" else -1
+        assert depth <= 1, f"nested anchor in the card: {card[:200]}"
+        assert depth >= 0, "unbalanced anchors"
+    assert depth == 0, "unbalanced anchors in the card"
+    assert card.count("<a ") >= 1, "the team name is still a link, or this test proves nothing"
+
+
+def test_the_three_boards_split_on_the_axis_each_one_actually_has():
+    """🚨 THE DEFENSIVE BOARD IS NOT THE YARDAGE BOARD WITH A DIFFERENT ARGUMENT, AND COPYING THE
+    CALL WOULD HAVE PRODUCED ONE COLUMN OR THREE EMPTY ONES.
+
+    Yardage and touchdowns split on `stat_category` at a fixed `stat_type`; defence is ONE
+    category split on THREE `stat_type`s.
+
+    📊 ENUMERATED FROM LIVE PUBLISHED SERVING (§2.2.1c.2) rather than taken from the caption that
+    claimed it — 2026, `stat_category='defensive'`, every type with 15,372 rows and 9,062
+    players: **PD · QB HUR · SACKS · SOLO · TD · TFL · TOT**. ⚠️ **It is `SACKS`, not `SACK`** —
+    the kind of thing a guess gets wrong and a query does not.
+    """
+    import ast
+    tree = ast.parse(SOURCE)
+    board = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_leaderboards")
+    calls = [ast.unparse(n) for n in ast.walk(board)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == "_player_board"]
+    assert len(calls) == 3, f"one call per board, each looped over its own three: {calls}"
+    joined = " ".join(calls)
+    # yardage and touchdowns vary the CATEGORY at a fixed type
+    assert "'YDS'" in joined and "'TD'" in joined
+    # defence varies the TYPE at a fixed category, and the values are the measured ones
+    for stat_type in ('"TOT"', '"TFL"', '"SACKS"'):
+        assert stat_type in SOURCE, f"{stat_type} is one of the three defensive types measured"
+    assert '"SACK"' not in SOURCE, "it is SACKS, measured against live serving, not SACK"
+
+
 # --- the commentary cell -------------------------------------------------------------------
 
 def test_the_commentary_cell_puts_the_outcome_over_the_link():
@@ -515,7 +670,15 @@ def test_every_table_render_that_takes_an_anchor_is_the_one_that_draws():
     bump chart's rank axis (Marc's ask), and a chart element has no anchor because it has no sort
     links to return from. **The second assertion below is what keeps this honest** — if some later
     round quietly drops an `anchor=` instead, `table.render` will still be there with the anchor
-    missing and the count will fall to seven against a bound of eight.
+    missing and the count will fall below the bound.
+
+    🚨 A166 TOOK IT FROM EIGHT TO FIVE, AND FOR THE SAME REASON A156's DROP WAS LEGITIMATE.
+    Marc's three player leaderboards stopped being tables: *"Swtich to player cards."* A card
+    grid is `st.markdown`, it has **no sortable headers and therefore no sort links**, so there
+    is nothing for an anchor to return the reader to. ⚠️ **The bound is lowered to what the
+    tables that still exist actually carry, and the SECOND assertion is what makes that safe** —
+    it fails on any `table.render` that lacks an anchor, whatever the count says, so a quietly
+    dropped `anchor=` on one of the five cannot hide behind this number.
     """
     # 🚨 THE RECEIVER IS CHECKED, NOT JUST THE METHOD NAME. `node.func.attr == "render"` also
     # matches `glyphs.render(...)`, of which this page has two — invisible while the test only
@@ -527,9 +690,9 @@ def test_every_table_render_that_takes_an_anchor_is_the_one_that_draws():
              and node.func.attr == "render"
              and isinstance(node.func.value, ast.Name) and node.func.value.id == "table"]
     anchored = [n.lineno for n in calls if any(kw.arg == "anchor" for kw in n.keywords)]
-    assert len(anchored) >= 8, (
-        f"A141 anchored nine table.render calls and A156 turned one of them into a chart "
-        f"element; only {len(anchored)} carry an anchor now")
+    assert len(anchored) >= 5, (
+        f"A141 anchored nine table.render calls; A156 turned one into a chart element and A166 "
+        f"turned three into card grids; only {len(anchored)} carry an anchor now")
     # 🚨 AND THE COUNT ONLY MEANS SOMETHING IF EVERY REMAINING TABLE STILL CARRIES ONE. A page
     # that grew a new unanchored table would otherwise hide a dropped anchor behind its own
     # arrival — the bound would still be met and a panel would have lost its scroll restore.
@@ -776,16 +939,30 @@ def test_all_three_leaderboards_draw_the_shared_player_and_team_cells():
     forget the next change.
 
     ⚠️ READ FROM THE SOURCE, because the drift this guards against is three correct copies.
+
+    🚨 A166 REWROTE THIS RATHER THAN DELETING IT, BECAUSE THE PROPERTY SURVIVED THE REDESIGN.
+    Marc's boards stopped being tables (*"Swtich to player cards"*), so `_player_columns` is
+    gone — but *"three boards, one producer"* is the same invariant it always was, now spelled
+    `_player_card_grid`. ⚠️ **A test that pinned the old SPELLING would have been deleted here
+    and the drift it prevented would have come back free.**
     """
     tree = ast.parse(SOURCE)
     board = next(n for n in ast.walk(tree)
                  if isinstance(n, ast.FunctionDef) and n.name == "_leaderboards")
-    spreads = [ast.unparse(n) for n in ast.walk(board)
-               if isinstance(n, ast.Starred) and "_player_columns" in ast.unparse(n)]
-    assert len(spreads) == 3, f"expected all three boards to share the cells, found {spreads}"
-    # And the old hand-written pair is gone from every one of them.
+    grids = [ast.unparse(n) for n in ast.walk(board)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == "_player_card_grid"]
+    assert len(grids) == 3, f"expected all three boards to share one card producer, found {grids}"
+    # 🚨 AND EVERY CARD COMES FROM ONE PLACE TOO — three boards calling one grid that built its
+    # own card three different ways would satisfy the count above and nothing else.
+    makers = [ast.unparse(n) for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+              and n.func.id == "_player_card"]
+    assert len(makers) == 1, f"one card producer, called once, in the grid: {makers}"
+    # And the old hand-written pair is gone.
     assert 'Col("player_name", "Player")' not in SOURCE
     assert 'Col("team", "Team")' not in SOURCE
+    assert "_player_columns" not in SOURCE, "the dead table-column pair must be gone, not kept"
 
 
 def test_the_player_board_selects_every_column_the_two_cells_read():

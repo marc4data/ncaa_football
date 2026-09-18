@@ -365,19 +365,28 @@ def _player_board(scope, depth: int, categories, stat_type: str) -> pd.DataFrame
     `UndefinedColumn: column "opponent_classification" does not exist` back from a column a model
     file appeared to publish. All eight are present; `srv_player_game_log` publishes 33.
 
-    🚨 AND §2.5's SECOND QUESTION — *how many rows carry it* — HAS A LOUD ANSWER FOR THE LIVE
-    SEASON, WHICH IS WHY `_player_identity` NAMES THE ABSENCE RATHER THAN DRAWING A DASH:
+    🚨 §2.5's SECOND QUESTION — *how many rows carry it* — ONCE HAD A LOUD ANSWER HERE, AND
+    A166 RE-ASKED IT AND FOUND THE ANSWER HAD MOVED (cfdb-main-R-1306).
 
-        season   rows      jersey / position / class_year_display
-        2024     605,076   94.8%  ✅
-        2025     624,474   96.3%  ✅
-        2026     180,781   40.9%  🚨
+    ⚠️ **THIS PARAGRAPH USED TO READ `2026 … 40.9% 🚨` AND `dim_athlete holds 138 teams for 2026,
+    every one of them FBS`, STATED AS CURRENT FACT.** Both were true when A149 measured them and
+    neither is true now:
 
-    📊 THE CAUSE IS NOT A JOIN AND NOT A PUBLISH. `marts.dim_athlete` holds **138 teams for 2026
-    and every one of them is FBS** — against 305 teams for 2025 — because `raw.raw_roster`'s 2026
-    payload was fetched ONCE, on 2026-08-15, before the season, at 5.1MB against 2025's 9.9MB.
-    **The boards are not FBS-filtered** (no classification column, above), so roughly half of any
-    top-N is a player whose team cfdb holds no 2026 roster for. Reported, not worked around.
+        measured by A149          2026   40.9% carry a jersey · 138 teams in dim_athlete
+        measured by A166 (live)   2026   92.9% carry a jersey · 306 teams, 31,070 athletes
+
+    📊 **THE CAUSE IS THAT THE ROSTER WAS REFETCHED ON 2026-09-16** — `raw.raw_roster` holds four
+    payloads totalling 7.5MB, last fetched that day, against the single pre-season pull of
+    2026-08-15 that A149 found. **The FBS-only gap closed itself.**
+
+    ✅ **AND ON THE POPULATION THAT ACTUALLY REACHES A CARD IT IS BETTER STILL**: of the ninety
+    players in the nine top-10 columns the cards draw, jersey, position and class year are
+    present on **90 of 90**, and a team logo on 89. At depth 25 it is 98.2%; at 50, 96.9%.
+
+    ⚠️ **THE ABSENCE HANDLING STAYS EXACTLY AS IT WAS.** `_player_identity` still names the one
+    absence worth naming and omits the rest — the measurement changes what is TYPICAL, not what
+    is POSSIBLE, and a view with no classification column can still serve a player whose team has
+    no roster row. **A number in a docstring is a claim with a date on it; this one is A166's.**
     """
     return query("""
         select player_name, player_slug, team, conference, opponent, week,
@@ -1120,14 +1129,18 @@ def _player_identity(row) -> str:
     ONE player; the position is the one fact about what he does, so it takes the other end. A
     four-column version would spend three columns of table width on two characters each.
 
-    🚨 EVERY PART IS OPTIONAL AND THE ABSENCES ARE NOT THE SAME ABSENCE (AC-G.11). For the live
-    season `srv_player_game_log` carries a jersey on **40.9%** of its rows — see `_player_board`,
-    which measured it and found the cause: 2026's roster is FBS-only. So the common case here is
-    not a missing jersey, it is **no roster row at all**:
+    🚨 EVERY PART IS OPTIONAL AND THE ABSENCES ARE NOT THE SAME ABSENCE (AC-G.11).
 
-        2026, all three null together          106,645 rows
-        position present, jersey absent            121 rows
-        jersey present, position absent              0 rows
+    ⚠️ **THE NUMBER THAT USED TO BE QUOTED HERE — 40.9% of 2026 rows carrying a jersey — IS NO
+    LONGER TRUE.** A166 re-measured it against live published serving at **92.9%**, because the
+    2026 roster was refetched on 2026-09-16; see `_player_board`, which carries the whole
+    correction (cfdb-main-R-1306). **The shape of the absences is unchanged and is what this
+    function is for** — all three parts arrive together or not at all, so the common absence is
+    not a missing jersey but no roster row:
+
+        2026, when they are missing, they are missing together
+        position present, jersey absent            rare
+        jersey present, position absent            not observed
 
     ✅ SO THE CELL HAS ONE ABSENCE WORTH NAMING AND TWO WORTH OMITTING. With nothing at all, the
     name stands alone under a title that says WHY — *not* an em dash, which would read as a player
@@ -1195,23 +1208,95 @@ def _player_identity(row) -> str:
             f"{pos_span}</span>")
 
 
-# 🚨 THE THREE LEADERBOARDS SHARE ONE COLUMN PAIR, BECAUSE THEY SHARE ONE SELECT LIST.
-# `_player_board` is called three times with different categories and stat types and returns the
-# same shape every time, so a per-board copy of these two columns is three places to forget the
-# next change. Marc's sentence names all three boards in one breath and this is that sentence.
+# ── A166: THE PLAYER CARD, AND WHY IT IS A FOURTH SHAPE RATHER THAN A COPY ────────────────
 #
-# ⚠️ NO `link_builder` ON ANY TABLE THAT DRAWS THESE — `_team_identity`'s own docstring is the
-# rule and `test_no_table_with_a_linked_team_name_also_links_its_rows` is the guard. The team
-# name is an anchor; a row anchor would nest inside it and the OUTER one wins, so a reader would
-# click the team and land on a game. **Four tables asserted before this round, seven after.**
-def _player_columns() -> list:
-    return [
-        Col("player_name", "Player", render=_player_identity),
-        Col("team_display", "Team", render=lambda r: _team_identity(
-            r, "", slug_field="team_slug", display_field="team_display",
-            logo_field="team_logo_url", rank_field="team_rank",
-            record_field="record_before_display")),
-    ]
+# > **MARC, Today v04:** *"Swtich to player cards. 3 columns for Yardage (QB, Receiving,
+# > Rushing). Include top 10 for each category. The player card needs to indicate the Team
+# > logo/name"* — and, in v05, *"Player Cards haven't made it in yet."* **He asked twice.**
+#
+# 📊 R-855 — READ THE EXISTING PATHS, THEN TEST THEM FOR THE CASE AT HAND. There were three
+# player renderings here and this takes something from each without copying any:
+#
+#     today.py `_player_identity`   ✅ TAKEN WHOLE. Jersey/name/year/position with every part
+#                                     optional and none substituted (R-084), the `#7.0` float
+#                                     guard, and the one absence worth naming. **Not
+#                                     reimplemented — called.**
+#     today.py `_team_identity`     ✅ TAKEN WHOLE, which is what carries `table.team_cell` ->
+#                                     `identity.logo_or_monogram` (AC-G.28) and R-121's NaN
+#                                     guard. **A card that built its own <img> would re-open a
+#                                     bug that cost this site two teams in a screenshot.**
+#     matchup.py's 150px card       ❌ READ AND NOT USED. It is a two-line PREVIEW card in
+#                                     session B's file; importing from a view would couple two
+#                                     pages, and editing it is not this round's to do.
+#     team.py's `Col("jersey","#")` ❌ THE OPPOSITE TRADE — a whole column per fact. A board of
+#                                     ninety cards cannot spend a column on two characters.
+def _player_card(row, stat_label: str) -> str:
+    """One player, as a card: who, then what he did, then who he did it for.
+
+    ⚠️ **THE ORDER IS THE SPEC, NOT A LAYOUT PREFERENCE.** The stat is the reason the card is on
+    the board at all, so it reads second — immediately after the name — and the team sits under
+    it. Marc named only one requirement for the card itself (*"needs to indicate the Team
+    logo/name"*) and it is the line that cannot be dropped.
+
+    🚨 **THE ABSENCE RISK THIS ROUND WAS ASKED TO DESIGN AROUND DOES NOT EXIST ANY MORE, AND
+    THAT IS MEASURED (cfdb-main-R-1306).** `_player_board`'s docstring and A166's prompt both
+    say 2026 carries a jersey on **40.9%** of rows because the roster was a single FBS-only
+    fetch from 2026-08-15. 📊 **Re-measured on live published serving: 92.9% of rows, and
+    `marts.dim_athlete` holds 306 teams for 2026 against the docstring's 138.** The roster was
+    refetched on **2026-09-16**; both numbers predate it.
+
+    ✅ **AND ON THE POPULATION THAT ACTUALLY REACHES A CARD IT IS BETTER STILL** — of the ninety
+    players in the nine top-10 columns, **jersey, position and class year are present on 90 of
+    90** and a team logo on 89. At depth 25 it is 98.2%, at 50 it is 96.9%. **So the card is not
+    designed around a mostly-empty case, because the mostly-empty case is not what renders.**
+    ⚠️ It is still built from `_player_identity`, which handles every absence properly — the
+    measurement changes what is TYPICAL, not what is POSSIBLE.
+    """
+    # The same formatter the tables use — `Col(kind="num")` calls exactly this, so a card and a
+    # row can never disagree about how many decimal places a stat has.
+    value = fmt.number(row.get("stat_value"), "stat_value")
+    return (f"<div class='cfdb-card'>"
+            f"<div class='cfdb-card-who'>{_player_identity(row)}</div>"
+            f"<div class='cfdb-card-stat'>"
+            f"<span class='cfdb-card-value'>{value}</span>"
+            f"<span class='cfdb-card-unit'>{fmt.text(stat_label)}</span></div>"
+            f"<div class='cfdb-card-team'>{_team_identity(
+                row, '', slug_field='team_slug', display_field='team_display',
+                logo_field='team_logo_url', rank_field='team_rank',
+                record_field='record_before_display')}</div>"
+            f"</div>")
+
+
+def _player_card_grid(columns, stat_label: str) -> None:
+    """Three columns of cards, one per category. `columns` is [(heading, frame), ...].
+
+    🚨 **THE TOP-N IS PER COLUMN, WHICH IS A DIFFERENT QUESTION FROM THE ONE THE TABLE ASKED.**
+    `_player_board` was called ONCE per board with three categories and `limit {DEPTH}`, so its
+    list was a BLENDED top-N — on the yardage board that is passing yards crowding out rushing,
+    because a passer gains more yards than a runner. Marc asked for *"top 10 for each
+    category"*, so each column runs its own query.
+
+    ⚠️ **NINE CALLS WHERE THERE WERE THREE, AND THE SAME SINGLE-TABLE SELECT EVERY TIME** — no
+    new SQL string, no join, and the display-only contract is untouched (§4.2.1). ✅ A window
+    function would collapse it to three and was NOT reached for: `@st.cache_data` already wraps
+    `query`, the nine differ only in two bind parameters, and adding a `row_number()` to dodge a
+    cost nobody has measured is the optimisation this project keeps writing rules about.
+
+    ⚠️ **EVERY PART IS OPTIONAL EXCEPT THE HEADING.** A column whose query returns nothing draws
+    its heading and an honest line rather than vanishing, because a missing column in a
+    three-column grid reads as a layout fault rather than as an absence (AC-G.11).
+    """
+    cells = []
+    for heading, frame in columns:
+        if frame is None or frame.empty:
+            body = "<div class='cfdb-card-none'>Nothing in this category yet.</div>"
+        else:
+            body = "".join(_player_card(row, stat_label)
+                           for _index, row in frame.iterrows())
+        cells.append(f"<div class='cfdb-cardcol'>"
+                     f"<div class='cfdb-cardcol-head'>{fmt.text(heading)}</div>{body}</div>")
+    st.markdown(f"<div class='cfdb-cardboard'>{''.join(cells)}</div>",
+                unsafe_allow_html=True)
 
 
 def _commentary(row, scope, stacked: bool = False) -> str:
@@ -2137,45 +2222,73 @@ def _leaderboards(scope, depth: int) -> None:
             ], caption="Ranked by total offense, with each team's record going into the game.", anchor="leaderboards"),
         )
 
+    # 🚨 A166: THREE CARD BOARDS, NINE COLUMNS, AND THE THIRD SPLITS ON A DIFFERENT AXIS.
+    #
+    # ⚠️ **THE DEFENSIVE BOARD IS NOT THE YARDAGE BOARD WITH A DIFFERENT ARGUMENT**, and copying
+    # the call would have silently produced one column or three empty ones. Yardage and
+    # touchdowns split on `stat_category` at a fixed `stat_type`; defence is ONE category
+    # (`defensive`) split on THREE `stat_type`s.
+    #
+    # 📊 ENUMERATED FROM LIVE PUBLISHED SERVING RATHER THAN FROM THE CAPTION THAT CLAIMED IT
+    # (§2.2.1c.2, and §2.5's second question — a value that exists is not a value that has rows).
+    # 2026, `stat_category = 'defensive'`, every type present with its row count:
+    #
+    #     PD 15,372 · QB HUR 15,372 · SACKS 15,372 · SOLO 15,372 · TD 15,372 · TFL 15,372 ·
+    #     TOT 15,372        (9,062 distinct players in each)
+    #
+    # ✅ So `TOT`/`TFL`/`SACKS` is the right trio and the old caption was right — **but it is
+    # `SACKS`, not `SACK`**, which is the sort of thing a guess gets wrong and a query does not.
+    # ⚠️ `SOLO`, `PD`, `QB HUR` and `TD` are equally populated and are NOT drawn: Marc named
+    # tackles, TFL and sacks, and a fourth column nobody asked for is a decision, not a freebie.
     with states.section("srv_player_game_log", dataset=DATASETS["srv_player_game_log"]):
-        yards = _player_board(scope, depth, ("passing", "rushing", "receiving"), "YDS")
         st.markdown("**Player yardage**")
+        st.caption("Top players by yards in each category, deepest first. "
+                   "\"QB\" is the passing column — it is not filtered on position, and the "
+                   "passing leader has been a quarterback in every week measured.")
+        yardage = [(label, _player_board(scope, depth, (category,), "YDS"))
+                   for label, category in (("QB", "passing"),
+                                           ("Receiving", "receiving"),
+                                           ("Rushing", "rushing"))]
         states.render_or_state(
-            yards, "srv_player_game_log",
+            # ⚠️ THE CONCATENATION DECIDES THE STATE, THE THREE FRAMES DRAW THE GRID. The state
+            # machinery asks one question — is there anything at all? — and three columns that
+            # are each separately empty is the same answer as one empty board. The renderer
+            # ignores the frame it is handed and reads the columns it closed over, which is why
+            # a column that IS empty still draws its heading.
+            pd.concat([frame for _label, frame in yardage]) if yardage else pd.DataFrame(),
+            "srv_player_game_log",
             "The player yardage board would be here.",
             f"No player box scores for {scope.describe()}. Box scores start in 2024.",
-            renderer=lambda d: table.render(d, [
-                *_player_columns(),
-                Col("stat_category", "Category"),
-                Col("stat_value", "Yards", kind="num"),
-            ], caption="Passing, rushing and receiving yards in one board.", anchor="leaderboards"),
+            renderer=lambda _d: _player_card_grid(yardage, "yards"),
         )
 
-        tds = _player_board(scope, depth, ("passing", "rushing", "receiving"), "TD")
         st.markdown("**Touchdowns**")
         st.caption("A different board from yardage, and mostly different names on it.")
+        touchdowns = [(label, _player_board(scope, depth, (category,), "TD"))
+                      for label, category in (("QB", "passing"),
+                                              ("Receiving", "receiving"),
+                                              ("Rushing", "rushing"))]
         states.render_or_state(
-            tds, "srv_player_game_log",
+            pd.concat([frame for _label, frame in touchdowns]) if touchdowns else pd.DataFrame(),
+            "srv_player_game_log",
             "The touchdown board would be here.",
             f"No player box scores for {scope.describe()}.",
-            renderer=lambda d: table.render(d, [
-                *_player_columns(),
-                Col("stat_category", "Category"),
-                Col("stat_value", "TD", kind="num"),
-            ], caption="Passing, rushing and receiving touchdowns.", anchor="leaderboards"),
+            renderer=lambda _d: _player_card_grid(touchdowns, "touchdowns"),
         )
 
         st.markdown("**Defensive leaders**")
-        defense = _player_board(scope, depth, ("defensive",), "TOT")
+        st.caption("Tackles, tackles for loss and sacks — three stat types on one category, "
+                   "which is a different split from the two boards above.")
+        defence = [(label, _player_board(scope, depth, ("defensive",), stat_type))
+                   for label, stat_type in (("Tackles", "TOT"),
+                                            ("Tackles for loss", "TFL"),
+                                            ("Sacks", "SACKS"))]
         states.render_or_state(
-            defense, "srv_player_game_log",
+            pd.concat([frame for _label, frame in defence]) if defence else pd.DataFrame(),
+            "srv_player_game_log",
             "The defensive board would be here.",
             f"No defensive box scores for {scope.describe()}.",
-            renderer=lambda d: table.render(d, [
-                *_player_columns(),
-                Col("opponent", "Opponent"),
-                Col("stat_value", "Tackles", kind="num"),
-            ], caption="Total tackles. TFL and sacks are separate stat types on the same view.", anchor="leaderboards"),
+            renderer=lambda _d: _player_card_grid(defence, ""),
         )
 
 
@@ -2577,7 +2690,28 @@ def body(page) -> None:
     # states its own, from its own states.section call.
     slug, _label, panels = _active_tab()
 
-    depth = st.radio("Leaderboard depth", DEPTHS, index=1, horizontal=True,
+    # 🚨 A166: `index=1` -> `index=0`, WHICH IS TEN. Both of Marc's sentences point here and
+    # they were pulling against each other at 25.
+    #
+    # > **Today v04:** *"Include top 10 for each category."*
+    # > **Today v05:** *"We need things more dense vertically."*
+    #
+    # 📊 MEASURED AT 1300px, the three player boards, before and after the switch to cards:
+    #
+    #     three 25-row tables (what shipped)      3,266px
+    #     cards at depth 10  — his sentence       2,286px   ✅ 30% SHORTER than the tables
+    #     cards at depth 25  — the old default    5,642px   🚨 73% TALLER
+    #     cards at depth 50                      11,236px
+    #
+    # ⚠️ **A CARD IS LESS DENSE THAN A ROW AND THE GRID IS WHAT PAYS FOR IT** — three columns
+    # means thirty cards are ten tall. At ten the redesign is a density WIN; at twenty-five it
+    # is a 73% regression against the thing he asked for one round earlier.
+    #
+    # ⚠️ **THIS ALSO MOVES THE TEAM YARDAGE BOARD TO TEN**, because it is one control for all
+    # four boards. That is a visible change he did not ask for in those words, and it is called
+    # out in the report rather than buried — **the radio is on the page and one click restores
+    # 25**, which is why this is a default rather than a constant.
+    depth = st.radio("Leaderboard depth", DEPTHS, index=0, horizontal=True,
                      key="today_depth", help="How many rows each leaderboard shows.")
 
     _tab_bar(slug)

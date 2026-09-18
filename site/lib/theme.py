@@ -589,6 +589,63 @@ TABLE_CSS = """
 /* R-088's argument, reused: a position is two characters and does not deserve a column. */
 .cfdb-player-pos { font-size:.75rem; font-weight:600; opacity:.7; white-space:nowrap; }
 
+/* ── A166: THE PLAYER CARD BOARDS ──────────────────────────────────────────────────────────
+   > **MARC:** *"Swtich to player cards. 3 columns for Yardage (QB, Receiving, Rushing)."*
+
+   🚨 **COMPACT BY REQUIREMENT, NOT BY TASTE.** Marc asked for *"things more dense vertically"*
+   in the round immediately before this one, and a card is inherently less dense than a table
+   row — ninety cards where thirty rows were. 📊 So the vertical cost was measured rather than
+   discovered: three 25-row tables were 3,266px at 1300px, and the three card grids are measured
+   in the report against that number at the same width.
+
+   ✅ **THE GRID IS WHAT PAYS FOR IT.** Three columns side by side means a board of thirty cards
+   is ten cards tall, not thirty — so the card can afford three lines and still cost less height
+   than the table it replaces. **A single-column card list would have been strictly worse than
+   the table on every axis Marc cares about.**
+
+   ⚠️ `minmax(0, 1fr)` RATHER THAN `1fr`: a grid track's default minimum is `auto`, which refuses
+   to shrink below its content, so a long team name would push the column wider and break the
+   three-up alignment instead of ellipsising. This is `.cfdb-player-who`'s `min-width:0` one
+   level up, and the same reason. */
+.cfdb-cardboard { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr));
+                  gap:.5rem 1rem; margin:.25rem 0 .75rem; }
+.cfdb-cardcol { min-width:0; display:flex; flex-direction:column; gap:.3rem; }
+.cfdb-cardcol-head { font-size:.72rem; font-weight:700; letter-spacing:.06em;
+                     text-transform:uppercase; opacity:.6; padding-bottom:.15rem;
+                     border-bottom:1px solid var(--cfdb-edge); }
+/* The card itself. A rule on one side rather than a box on four: thirty boxes on a page is a
+   grid of borders competing with the text inside them, and the reader is scanning a ranked
+   list down a column. */
+.cfdb-card { min-width:0; padding:.3rem .5rem; border-left:2px solid var(--cfdb-edge);
+             background:var(--cfdb-row-alt, transparent); border-radius:2px; }
+/* 🚨 A166 (cfdb-main-R-1307). THE POSITION FOLLOWS THE NAME IN A CARD, AND THIS IS R-855's
+   TRAP CAUGHT IN THE ACT: read the existing path, then TEST IT FOR THE CASE AT HAND.
+
+   `.cfdb-player` is `justify-content:space-between` — two ends — which is exactly right for the
+   table cell Marc specified in Today v01: *"[Jersey #, Name, Year (left aligned)], Position
+   (right aligned within the Player cell)"*. A table cell is narrow. **A card column is 390px.**
+
+   📊 MEASURED IN THE RASTER, first card of the first board: the position sat **215.8px from its
+   own player's name and 24.0px from the NEXT COLUMN's cards** — nine times closer to a
+   different player than to its own. ⚠️ **Every glyph was correct and the card still said
+   something false about which player it described.**
+
+   ✅ Grouped: 7.2px from the name it belongs to, 232.7px of clear space before the next column.
+   **The rule that was right in a cell is wrong in a card, and the card is where it is overridden
+   — `.cfdb-player` itself is untouched.** */
+.cfdb-card .cfdb-player { justify-content:flex-start; gap:.45rem; }
+.cfdb-card-who { min-width:0; }
+/* 🚨 THE STAT IS THE REASON THE CARD IS ON THE BOARD, so it reads second — straight after the
+   name — and it is the only thing on the card set in the row's own size. */
+.cfdb-card-stat { display:flex; align-items:baseline; gap:.35rem; line-height:1.15; }
+.cfdb-card-value { font-weight:700; font-variant-numeric:tabular-nums; }
+.cfdb-card-unit { font-size:.72rem; opacity:.6; }
+.cfdb-card-team { min-width:0; font-size:.78rem; opacity:.85; }
+/* ⚠️ THE TEAM LINE REUSES `.cfdb-identity`, so the logo, the rank badge and the record all
+   arrive with the treatment they have everywhere else — including A165's center alignment.
+   Only the logo is resized, because a 28px disc is a table-row affordance and this is a card. */
+.cfdb-card-team .cfdb-logo-box, .cfdb-card-team .cfdb-logo { width:18px; height:18px; }
+.cfdb-card-none { font-size:.78rem; opacity:.6; padding:.3rem .5rem; }
 .cfdb-team-record { font-size:.75rem; font-weight:400; opacity:.65; margin-left:.4rem;
                     white-space:nowrap; }
 /* R-027: weather is a glyph plus a temperature, or a dome glyph alone. */
