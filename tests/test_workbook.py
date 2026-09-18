@@ -521,8 +521,14 @@ def test_export_labels_agree_with_the_site(built):
     # to scrape and the two label sets are IDENTICAL BY CONSTRUCTION rather than merely in
     # agreement. Agreement can drift; one source cannot. So the assertion changes from "this
     # gap is known" to "this gap is closed by there being one list", which is checked below.
+    # A173 ADDED "Team form", AND ITS REASON IS A THIRD ONE — neither Scores' original gap
+    # nor Scores' current answer. `srv_team_week` HAS NO PAGE REGISTERED AGAINST IT AT ALL:
+    # Today and Matchup both read the view, and neither declares it as its own `page.view`,
+    # so there is no page for this test to scrape labels from. ⚠️ That is a fact about the
+    # registry rather than about the sheet, and it is why the sheet's headers are the only
+    # place those columns are named for a reader.
     uncovered = {name for name, n in compared.items() if n == 0}
-    assert uncovered == {"Scores"}, (
+    assert uncovered == {"Scores", "Team form"}, (
         f"sheets compared against no page: {uncovered or 'none'}")
 
     scores_source = (site / "views" / "scores.py").read_text()
@@ -1161,16 +1167,32 @@ def test_the_default_sort_is_the_order_by_and_it_is_stable():
     assert "order by start_date, game_id" in flat
 
 
-def test_three_sheets_ship_and_the_other_four_are_kept_not_deleted():
-    """Schedule, Scores and the Data dictionary (R-291). The four are real work and are converted one at a time;
-    deleting them would mean rewriting their SQL and column lists from scratch.
+def test_seven_sheets_ship_and_the_other_three_are_kept_not_deleted():
+    """A173 (cfdb-main-R-1702): 3 shipped -> 7, 4 pending -> 3.
 
-    Both halves matter: that the shipped list is exactly what we think, and that nothing
-    fell out of `_ALL_SHEETS` on the way. Seven in, seven accounted for.
+    > **MARC, v08:** *Excel Export / Add / srv_team_week / srv_team_stats / srv_player_stats
+    > / srv_standings*
+
+    🚨 AND `Standings` WAS NOT A NEW SHEET. It had been written, columned and noted since the
+    workbook was built, sitting in `PENDING_SHEETS` behind `PENDING_REASON`: *"not converted
+    to the new layout yet"*. 📊 A173 MEASURED WHAT THAT CONVERSION ACTUALLY IS by shipping it
+    in memory and reading the file back — **header row 3, a real Excel Table, 265 rows,
+    identical in structure to Schedule and Scores.** The conversion was already done: R-181
+    made the header address computed IN THE WRITER, for every sheet it writes, so a pending
+    sheet ships by being named. **The reason had been stale since R-182.**
+
+    ⚠️ SO ODDS, EDGES AND MODEL PERFORMANCE ARE ONE WORD EACH, and the only thing they lack is
+    the optional polish the shipped ones have — `freeze_before` and `link_fields`, both
+    defaulting safely. Marc did not ask for them and they are not shipped here.
+
+    Both halves still matter: that the shipped list is exactly what we think, and that nothing
+    fell out of `_ALL_SHEETS` on the way. Ten in, ten accounted for.
     """
-    assert [s.name for s in workbook.SHEETS] == ["Schedule", "Scores", "Data dictionary"]
+    assert [s.name for s in workbook.SHEETS] == [
+        "Schedule", "Scores", "Standings", "Team form", "Team stats", "Player stats",
+        "Data dictionary"]
     assert {s.name for s in workbook.PENDING_SHEETS} == {
-        "Odds", "Edges", "Standings", "Model performance"}
+        "Odds", "Edges", "Model performance"}
     assert len(workbook.SHEETS) + len(workbook.PENDING_SHEETS) == len(workbook._ALL_SHEETS)
 
 
@@ -3383,11 +3405,16 @@ def test_the_dictionary_scope_follows_the_sheets_that_ship(monkeypatch):
     """Five sheets were pending when this was written. A hardcoded list of views would be
     wrong the day one converts, and nothing would fail — so the scope is read from the sheets
     themselves and adding one extends it with no other edit."""
-    assert workbook.dictionary_tables() == ["srv_game", "srv_game_team"]
+    # A173 shipped four more sheets, and this list extended itself with no edit here — which
+    # is the property the test exists for. The dictionary now documents six views.
+    assert workbook.dictionary_tables() == [
+        "srv_game", "srv_game_team", "srv_player_stats", "srv_standings",
+        "srv_team_stats", "srv_team_week"]
 
     odds = next(s for s in workbook._ALL_SHEETS if s.name == "Odds")
     monkeypatch.setattr(workbook, "SHEETS", list(workbook.SHEETS) + [odds])
-    assert workbook.dictionary_tables() == ["srv_game", "srv_game_team", "srv_odds_board"]
+    assert "srv_odds_board" in workbook.dictionary_tables()
+    assert len(workbook.dictionary_tables()) == 7
 
     # And it never documents itself: a dictionary cataloguing its own presentation of the
     # layer is a mirror facing a mirror.

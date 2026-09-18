@@ -1741,6 +1741,111 @@ _ALL_SHEETS = [
         ("point_differential", "Diff"), ("tiebreak_basis", "Tiebreak"),
     ], note="Season-scoped: standings are a season figure, not a week one."),
 
+    # ======================================================================================
+    # A173 (cfdb-main-R-1700). THREE SHEETS MARC ASKED FOR IN v08, beside the Standings sheet
+    # that was written all along and simply not named in SHIPPED.
+    #
+    # 🚨 EVERY SCOPE HERE IS A DECISION AND EVERY ONE IS IN ITS OWN `note=`, because the three
+    # relations do not share a grain: srv_team_week is WEEK-grained cumulative form,
+    # srv_team_stats is a season total, srv_player_stats is a season total per stat. Marc's own
+    # words on the Team page are the rule they follow — *"If it's just current state:
+    # srv_team_stats. If it's week specific, it would be game_team_stat which we only have in
+    # staging now."*
+    #
+    # 📊 AND EVERY CUT WAS SIZED AGAINST `ROW_CAP` ON LIVE SERVING BEFORE IT WAS WRITTEN, because
+    # a sheet that silently stops at 5,000 rows is a sheet that lies by omission. For 2025:
+    #
+    #     srv_team_week     season+regular          10,688   -> FBS only               2,176 ✅
+    #     srv_team_stats    season                   8,568   -> stat_scope='team'       4,352 ✅
+    #     srv_player_stats  season                 139,100   -> top 50 per stat_type    3,539 ✅
+    #
+    # `count(*) over () as rows_in_scope` still travels on every one of them, so a scope that
+    # DOES overflow says so rather than being quietly clipped.
+    # ======================================================================================
+    Sheet("Team form", "srv_team_week", """
+        select season, week, team_display, conference, classification, games_counted,
+               total_yards_for, rushing_yards_for, passing_yards_for,
+               total_yards_allowed, rushing_yards_allowed, passing_yards_allowed,
+               total_yards_for_per_game, rushing_yards_for_per_game,
+               passing_yards_for_per_game, total_yards_allowed_per_game,
+               rushing_yards_allowed_per_game, passing_yards_allowed_per_game,
+               count(*) over () as rows_in_scope
+        from srv_team_week
+        where season = :season and season_type = :season_type and is_fbs
+          and (:week is null or week = :week)
+          and (:conference is null or conference = :conference)
+        order by week, conference, team_display
+        limit {ROW_CAP}
+    """, [
+        ("season", "Season"), ("week", "Wk"), ("team_display", "Team"),
+        ("conference", "Conference"), ("classification", "Division"),
+        ("games_counted", "Games"),
+        ("total_yards_for", "Yds for"), ("rushing_yards_for", "Rush for"),
+        ("passing_yards_for", "Pass for"),
+        ("total_yards_allowed", "Yds allowed"), ("rushing_yards_allowed", "Rush allowed"),
+        ("passing_yards_allowed", "Pass allowed"),
+        ("total_yards_for_per_game", "Yds for/g"),
+        ("rushing_yards_for_per_game", "Rush for/g"),
+        ("passing_yards_for_per_game", "Pass for/g"),
+        ("total_yards_allowed_per_game", "Yds allowed/g"),
+        ("rushing_yards_allowed_per_game", "Rush allowed/g"),
+        ("passing_yards_allowed_per_game", "Pass allowed/g"),
+    ], freeze_before="Conference",
+        note="Week-scoped and CUMULATIVE: each row is the form a team carried INTO that week, "
+             "not that week's game. Week 1 therefore has 0 games and blank yardage for every "
+             "team — 136 of 2,176 rows in 2025 — which is the honest zero rather than a gap. "
+             "FBS only, matching the site's spine; the full season is 10,688 rows."),
+
+    Sheet("Team stats", "srv_team_stats", """
+        select season, school, conference, classification, stat_base_name, stat_name,
+               stat_value, stat_value_raw, rank_desc, rank_asc, percentile,
+               count(*) over () as rows_in_scope
+        from srv_team_stats
+        where season = :season and stat_scope = 'team'
+          and (:conference is null or conference = :conference)
+        order by school, stat_base_name
+        limit {ROW_CAP}
+    """, [
+        ("season", "Season"), ("school", "Team"), ("conference", "Conference"),
+        ("classification", "Division"),
+        ("stat_base_name", "Stat"), ("stat_name", "Stat (full)"),
+        # AC-15.8: `stat_value_raw` is "Value" on stats.py, so IT keeps the site's word and
+        # the numeric twin takes the qualifier. Two columns headed "Value" would also be an
+        # illegal Excel Table (R-182 trap 2).
+        ("stat_value", "Value (numeric)"), ("stat_value_raw", "Value"),
+        ("rank_desc", "Rank high"), ("rank_asc", "Rank low"), ("percentile", "Percentile"),
+    ], freeze_before="Conference",
+        note="Season totals, NOT week-scoped — this view is current state, so the Week filter "
+             "does not narrow it. THE TEAM'S OWN stats only: the view also carries an "
+             "`opponent` scope (what opponents did against them), which is a further 4,216 "
+             "rows in 2025 and is not shipped here rather than truncating both halves at the "
+             "5,000-row cap."),
+
+    Sheet("Player stats", "srv_player_stats", """
+        select season, player_name, team, conference, position, stat_category, stat_type,
+               stat_value, rank_desc, rank_population, percentile,
+               class_year_display, height_display, weight_pounds, jersey,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by stat_category, stat_type, rank_desc
+        limit {ROW_CAP}
+    """, [
+        ("season", "Season"), ("player_name", "Player"), ("team", "Team"),
+        ("conference", "Conference"), ("position", "Pos"),
+        ("stat_category", "Category"), ("stat_type", "Statistic"),
+        ("stat_value", "Value"), ("rank_desc", "Rank"),
+        ("rank_population", "Ranked of"), ("percentile", "Percentile"),
+        ("class_year_display", "Class"), ("height_display", "Ht"),
+        ("weight_pounds", "Wt"), ("jersey", "#"),
+    ], freeze_before="Conference",
+        note="Season totals, NOT week-scoped. THE TOP 50 IN EACH STAT, because a full season is "
+             "139,100 player-stat rows against a 5,000-row cap — `rank_desc` ranks within one "
+             "stat type, so this is 50 per stat across 30 of them, 3,539 rows in 2025. "
+             "`Ranked of` is the population that rank was taken against (AC-G.33: a rank "
+             "without its denominator is not a measurement)."),
+
     # Not week-scoped, and deliberately so. These two describe the export rather than adding
     # to it: which models produced the predicted columns, and what every field means. Both
     # are small, and shipping predictions without either would be shipping numbers with no
@@ -1819,7 +1924,8 @@ _ALL_SHEETS = [
 
 # What the workbook writes, and what it does not write YET. Split rather than filtered, so
 # adding a converted sheet is moving one name and cannot be done by accident.
-SHIPPED = ("Schedule", "Scores", "Data dictionary")
+SHIPPED = ("Schedule", "Scores", "Standings", "Team form", "Team stats",
+           "Player stats", "Data dictionary")
 SHEETS = [s for s in _ALL_SHEETS if s.name in SHIPPED]
 PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name not in SHIPPED]
 PENDING_REASON = ("not converted to the new layout yet; it ships in a later pass rather "
@@ -1852,12 +1958,19 @@ def dictionary_tables() -> list:
 PAGE_FOR_SHEET = {
     "Schedule": "schedule", "Scores": "scores", "Odds": "odds", "Edges": "edges",
     "Standings": "standings", "Model performance": "performance",
+    # A173. ⚠️ "Team form" POINTS AT TODAY AND THAT IS THE HONEST ANSWER RATHER THAN A TIDY
+    # ONE: `srv_team_week` has NO page registered against it — Today and Matchup both read it
+    # and neither declares it — so the Index links to the page a reader actually meets those
+    # numbers on. The other two have real owners.
+    "Team form": "today", "Team stats": "stats", "Player stats": "players",
     "Data dictionary": "dictionary",
 }
 # The split is asserted at IMPORT, not in a test: moving a sheet between the two lists is a
 # one-word edit, and this is what makes "I shipped a sheet" and "I lost a sheet" different
 # events. Seven sheets exist; two ship.
-assert len(SHEETS) == 3 and len(PENDING_SHEETS) == 4
+# A173: 3 -> 7 shipped, 4 -> 3 pending. Odds, Edges and Model performance remain, and are
+# one word each — see the note above SHIPPED.
+assert len(SHEETS) == 7 and len(PENDING_SHEETS) == 3
 assert set(SHIPPED) <= {s.name for s in _ALL_SHEETS}
 
 # Conditional formatting goes on the columns a reader is scanning for outliers. Anything
@@ -2162,7 +2275,13 @@ COUNT_FIELDS = {
 # than re-implementing this pattern — a test that repeated the rule would have agreed with
 # it and missed the same column.
 PLAIN_INTEGER = {"season", "week", "tiebreak_rank", "game_id", "bin_index",
-                 "best_rank_in_game"}
+                 "best_rank_in_game",
+                 # A173: srv_team_stats and srv_player_stats carry "rank" as a PREFIX, so
+                 # PLAIN_INTEGER_SUFFIXES cannot see them — the same blind spot
+                 # `best_rank_in_game` is listed for. `rank_population` is the denominator a
+                 # rank was taken against and travels beside it (AC-G.33), so it reads as the
+                 # same kind of number and takes the same format.
+                 "rank_desc", "rank_asc", "rank_population"}
 # MARC OVERRULED THE SEPARATOR CALL, AND HE IS READING THE COLUMN. R-216's rule — "a comma is
 # for a quantity you might total" — put Elo with the labels on the argument that a rating is
 # not a count. He asked for `#,###` after seeing it: at four digits the group makes 1,543

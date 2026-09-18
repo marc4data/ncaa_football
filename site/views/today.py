@@ -20,8 +20,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import (filters, fmt, glyphs, identity, params, shell, states, tab, table,
-                 theme, winprob)
+from lib import (filters, fmt, glyphs, identity, metrics, params, shell, states, tab,
+                 table, theme, winprob)
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -291,6 +291,7 @@ def _completed_games(scope) -> pd.DataFrame:
                home_abbreviation,
                home_color_on_light, home_color_on_dark,
                away_color_on_light, away_color_on_dark,
+               upset_margin_big, upset_margin_blowout,
                home_logo_url, away_logo_url, home_conference, away_conference,
                home_rank, away_rank,
                home_team_record_display, away_team_record_display,
@@ -1280,7 +1281,19 @@ def _favorite_margin(row):
 LEGEND_GROUPS_DRAWN = ()
 
 
-def _legend() -> None:
+# A173: Schedule's layout, declared rather than derived — the same reasoning as R-622's
+# `LEGEND_SUBSECTION_COLUMNS`. ⚠️ NOT Schedule's INVENTORY: `Result` is absent because A164
+# removed the winner arrows, and `Examples` is absent because Today draws no result strip.
+LEGEND_COLUMN_WEIGHTS = [1, 2]
+LEGEND_LEFT_GROUPS = ["Game"]
+STRIP_GROUP = "Against the line"
+LEGEND_SUBSECTION_COLUMNS = [
+    ["Outcome", "Against the Spread"],
+    ["Against Over/Under", "Misc"],
+]
+
+
+def _legend(df=None) -> None:
     """The legend, as a popover button. A144, extended by A147.
 
     > **MARC:** *"Need the legend button to help with the icons"*
@@ -1306,17 +1319,72 @@ def _legend() -> None:
               for title, marks in glyphs.entries() if title in LEGEND_GROUPS_DRAWN]
     groups.append(("Game", [
         (f"<span class='cfdb-details'>{table.DETAILS_GLYPH}</span>", "Open the matchup")]))
-    groups += glyphs.strip_entries()
-    with st.popover("Legend", use_container_width=False,
-                    help="What every mark on this page means"):
-        for title, rows in groups:
-            st.markdown(
-                f"<div class='cfdb-legend-side'>"
+
+    # 🚨 A173 (cfdb-main-R-1703). THE BANDS ARE PASSED NOW, AND NOT PASSING THEM WAS THE WHOLE
+    # OF THE INCONSISTENCY MARC NAMED.
+    #
+    # 📊 `strip_entries()` with no argument renders the LEVEL NAMES — "Upset", "upset by more
+    # than a touchdown", "upset by more than two touchdowns". With bands it renders the
+    # NUMBERS — "Upset by 7 or fewer", "Upset by 8–14", "Upset by 15+". Schedule passed its
+    # frame and Today passed nothing, so **the same three marks carried different words on two
+    # pages a reader moves between, and the vaguer page was the one he was looking at.**
+    #
+    # ⚠️ AND THE FRAME HAS TO CARRY THE COLUMNS OR THIS IS THEATRE. `metrics.from_frame`
+    # degrades to `DEFAULTS` when they are absent — deliberately, *"because a page that raised
+    # because one row was null would be trading a wrong label for a blank screen"* — so a
+    # legend can show plausible numbers that were never read from anything.
+    # 📊 A173 MEASURED IT: before this round **no query on the site selected either column**,
+    # so SCHEDULE's numbers were the defaults too. They were right only because the shipped
+    # defaults (7, 14) happen to equal the published values. `_completed_games` now selects
+    # both, so Today's labels are read from the data (cfdb-main-R-1704).
+    bands = metrics.upset_bands(*metrics.from_frame(df))
+    band_labels = dict(zip(("upset", "big", "blowout"), bands))
+
+    # Schedule's layout, copied: one popover at container width, an outer 1:2 split, and the
+    # long group's four subsections across a nested pair. ⚠️ THE INVENTORY IS NOT COPIED —
+    # Schedule's Game group lists five marks and its Result group two, and `NEUTRAL`, `DOME`
+    # and `MOVE_GLYPH` appear in this file zero times. R-178 cuts both ways.
+    # ⚠️ THE STRIP RENDERS FROM `strip_subsections`, NOT FROM `strip_entries`, and the first
+    # draft appended BOTH — leaving a `groups += strip_entries(bands)` whose result nothing
+    # drew. A staged break that removed its `bands` argument came back GREEN, which is how the
+    # dead line was found: the rows a reader sees never came from it.
+    subsections = dict(glyphs.strip_subsections(band_labels))
+    by_title = dict(groups)
+
+    def block(title, rows) -> str:
+        return (f"<div class='cfdb-legend-side'>"
                 f"<div class='cfdb-legend-title'>{title}</div>"
                 + "".join(
                     f"<div class='cfdb-legend-row'>"
                     f"<span class='cfdb-legend-key'>{swatch}</span>"
                     f"<span>{label}</span></div>" for swatch, label in rows)
+                + "</div>")
+
+    def sub_block(heading) -> str:
+        return (f"<div class='cfdb-legend-sub'>{heading}</div>"
+                + "".join(
+                    f"<div class='cfdb-legend-row'>"
+                    f"<span class='cfdb-legend-key'>{swatch}</span>"
+                    f"<span>{label}</span></div>"
+                    for swatch, label in subsections[heading]))
+
+    with st.popover("Legend", use_container_width=True,
+                    help="What every mark on this page means"):
+        left, right = st.columns(LEGEND_COLUMN_WEIGHTS)
+        for title in LEGEND_LEFT_GROUPS:
+            if title in by_title:
+                left.markdown(block(title, by_title[title]), unsafe_allow_html=True)
+        # The spanning title, emitted ONCE above the nested pair — Schedule's own reason:
+        # `st.columns` has no colspan, so a heading inside one of them reads as a heading for
+        # that column alone.
+        right.markdown(f"<div class='cfdb-legend-side'>"
+                       f"<div class='cfdb-legend-title'>{STRIP_GROUP}</div></div>",
+                       unsafe_allow_html=True)
+        for column, headings in zip(right.columns(len(LEGEND_SUBSECTION_COLUMNS)),
+                                    LEGEND_SUBSECTION_COLUMNS):
+            column.markdown(
+                "<div class='cfdb-legend-side cfdb-legend-nested'>"
+                + "".join(sub_block(heading) for heading in headings)
                 + "</div>", unsafe_allow_html=True)
 
 
@@ -2282,7 +2350,12 @@ def body(page) -> None:
     # of two wrongs: a legend that appears and disappears as a reader moves between tabs reads as
     # a rendering fault, and `LEGEND_GROUPS_DRAWN` already guarantees it never explains a mark
     # this page cannot produce.
-    _legend()
+    # ⚠️ TODAY'S OWN FRAME, not a second query for two constant columns. `query` is
+    # cache-backed, so on the recap tab this is the same call the panels make and costs
+    # nothing; elsewhere it is one cached read of at most 400 rows. The alternative — a
+    # dedicated `select upset_margin_big …` — would be a second source for a number the page
+    # already has in hand, which is the drift §4.3 exists to stop.
+    _legend(_completed_games(scope))
     for name in panels:
         globals()[name](scope, depth)
 
