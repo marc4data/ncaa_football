@@ -145,7 +145,8 @@ def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,
            start=25, end=60, on_field=True, color="#123456", source="primary",
            category="unknown", key=None, period=1, clock="12:00",
            off_score=(0, 7), def_score=(0, 0),
-           logo="https://example.test/own.png", opponent_logo="https://example.test/opp.png"):
+           logo="https://example.test/own.png", opponent_logo="https://example.test/opp.png",
+           mascot=None, opponent_mascot="Others"):
     """One srv_drive row, carrying the columns v01 actually reads.
 
     🚨 **THE COLOURS SIT ON `offense_color_*` NOW, AND THIS FIXTURE USED TO SAY THE OPPOSITE** —
@@ -172,6 +173,11 @@ def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,
         # 99.08% for `offense_logo_url` and 99.10% for `opponent_logo_url`, not 100%.
         "offense_team_display": offense, "offense_logo_url": logo,
         "opponent_logo_url": opponent_logo,
+        # ⚠️ v19: the mascot DEFAULTS FROM THE TEAM NAME so the end-zone text draws at all —
+        # a fixture whose default is None makes Marc's whole PART 2 unreachable (R-744).
+        # **It is a parameter, so a test can still take it away: 38 of 3,607 games do.**
+        "offense_mascot": f"{offense} Mascot" if mascot is None else mascot,
+        "opponent_mascot": opponent_mascot,
         "offense_color_on_light": color, "offense_color_on_dark": color,
         "offense_color_source": source,
         "opponent_team_display": "Other",
@@ -1395,12 +1401,13 @@ def test_THE_RUNNING_SCORE_IS_READ_NOT_ACCUMULATED(panel):
         _drive(2, "home", "Alpha", "TD", category="offensive score", scoring=True,
                scoring_side="offense", off_score=(21, 28), def_score=(0, 0))])
     rows = _table_rows(_spec(panel(frame)[1]), _HOME, column="impact_cell")
+    gap = _module_constant("_DRIVE_IMPACT_GAP")
     second = _row_for(rows, 2)["impact_cell"]
-    assert second == "+7 0-28", (
+    assert second == f"+7{gap}(0-28)", (
         f"the second drive's Impact cell reads {second!r}. The published scoreboard after it "
         f"is 0-28; an accumulated one would say 0-14, which is what this fixture exists to "
         f"tell apart")
-    assert _row_for(rows, 1)["impact_cell"] == "+7 0-7"
+    assert _row_for(rows, 1)["impact_cell"] == f"+7{gap}(0-7)"
 
 
 def test_THE_RUNNING_SCORE_IS_SUPPRESSED_WHERE_IT_WOULD_GO_BACKWARDS(panel):
@@ -2226,8 +2233,9 @@ def test_THE_TOOLTIP_SPLITS_THE_SWING_FROM_THE_SCORE(panel):
     assert row["impact_swing"] == "+7", f"the swing reads {row['impact_swing']!r}"
     assert row["score_line"] == "0-7", f"the score reads {row['score_line']!r}"
     # AND THE TABLE CELL STILL CARRIES BOTH, from the same two facts
+    gap = _module_constant("_DRIVE_IMPACT_GAP")
     cell = _row_for(_table_rows(spec, _HOME, column="impact_cell"), 1)["impact_cell"]
-    assert cell == "+7 0-7", f"the table cell reads {cell!r}"
+    assert cell == f"+7{gap}(0-7)", f"the table cell reads {cell!r}"
 
 
 def test_THE_ABSENCE_LAYER_EXPLAINS_ITSELF_in_a_readers_words(panel):
@@ -2301,3 +2309,246 @@ def test_THE_HEADER_CALLS_LINE_SCORE_rather_than_printing_its_own(panel):
     assert ">17<" in fallback and ">24<" in fallback, (
         f"with no quarters the header shows neither team's final score: {fallback!r}. 26 of "
         f"3,831 completed games carry no first quarter and they must not get silence")
+
+
+# ── 🚨 v19: MARC COUNTED THE SPACES ─────────────────────────────────────────────────────────
+
+def test_THE_IMPACT_CELL_KEEPS_TWO_SPACES_that_a_renderer_cannot_collapse(panel):
+    """> **MARC:** *"Impact: +/- Change  (Score). 2 spaces and add the parenthesis"*
+
+    🚨 **HE COUNTED THEM, SO A PLAIN SPACE IS NOT AN OPTION — AND THIS CELL IS NOT HTML.** It is
+    an SVG `<text>` from a Vega mark, which is a different question with the same answer.
+    📊 Measured in Chromium at `fontSize` 10:
+
+        `+7 (0-7)`   one space          35.30px
+        `+7  (0-7)`  two plain spaces   35.30px   ← COLLAPSED, identical to one
+        two NBSP                        38.08px   ← PRESERVED
+        en space                        35.30px   ← also collapsed
+
+    ✅ **So the mechanism is two U+00A0**, and the render is where it is shown rather than
+    asserted. ⚠️ **This test pins the CHARACTERS, because a well-meaning tidy-up to `" "` would
+    look identical in the source and collapse in the picture.**
+    """
+    gap = _module_constant("_DRIVE_IMPACT_GAP")
+    assert gap == "  ", (
+        f"the Impact gap is {gap!r}. Two plain spaces collapse in a Vega text mark exactly as "
+        f"they do in HTML — measured at 35.30px either way — so Marc's two spaces need two "
+        f"non-breaking ones")
+
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score",
+               scoring_side="offense", scoring=True, off_score=(0, 7), def_score=(0, 0)),
+        _drive(2, "home", "Alpha", "PUNT", category="punt", scoring=False,
+               off_score=(7, 7), def_score=(0, 0))])
+    rows = _table_rows(_spec(panel(frame)[1]), _HOME, column="impact_cell")
+
+    scored = _row_for(rows, 1)["impact_cell"]
+    assert scored == "+7  (0-7)", f"the cell reads {scored!r}"
+    assert scored.count(" ") == 2, (
+        f"{scored!r} carries {scored.count(chr(0xa0))} non-breaking spaces, not two")
+    assert "(" in scored and ")" in scored, f"the score is not parenthesised: {scored!r}"
+
+    # ⚠️ AND A DRIVE THAT SCORED NOTHING IS STILL BLANK — v02's rule, which the new format must
+    # not quietly undo by printing an empty pair of brackets.
+    assert _row_for(rows, 2)["impact_cell"] == "", (
+        f"a drive that scored nothing reads {_row_for(rows, 2)['impact_cell']!r}")
+
+
+def test_THE_IMPACT_CELL_WAS_RE_MEASURED_for_the_new_format():
+    """🚨 **THE PROMPT ASKED, AND THE OLD NUMBER SURVIVED WHILE THE FORMAT DID NOT
+    (cfdb-wta-R-1269).**
+
+    📊 Every pairing the panel can print — the eleven legal swings against all **2,197**
+    published running scores, 21,970 strings — measured in a real Vega text mark:
+
+        v04 format `+7 0-7`        46.42px   ← B134's 47px cell was CORRECT
+        v19 format `+7  (0-7)`     55.86px   ← does NOT fit 47
+
+    ✅ **So the cell is 56 and the table follows the rule that set it in v03: the table is the
+    sum of what its columns measure.** ⚠️ **Said before shipping a wrap, which is what the
+    prompt asked for.**
+    """
+    plan = _module_constant("_DRIVE_COLUMN_PLAN")
+    impact = _only([c for c in plan if c[0] == "impact"], "the Impact column")
+    assert impact[2] >= 55.86, (
+        f"the Impact cell is {impact[2]}px and the widest v19 string measures 55.86px — the "
+        f"parentheses would clip")
+    assert impact[2] < 60, (
+        f"the Impact cell is {impact[2]}px for a 55.86px worst case; every spare pixel comes "
+        f"out of the field, which Marc is paying for")
+
+
+def test_THE_RESULT_COLUMN_IS_CENTRED_in_its_own_text_area(panel):
+    """> **MARC:** *"Horizontal center align the Result"*
+
+    ⚠️ **IT CENTRES ON THE TEXT AREA, NOT THE CELL.** The Result column's first 11px belong to
+    the glyph, so centring on the whole cell would push every word right by half a glyph.
+    📊 The longest label (`PUNT RET TD`, 65.59px) fills its 66px slot and does not move; `PUNT`
+    at 27.23px is the one that visibly changes.
+    """
+    plan = _module_constant("_DRIVE_COLUMN_PLAN")
+    result = _only([c for c in plan if c[0] == "result"], "the Result column")
+    assert result[3] == "center", f"the Result cell aligns {result[3]!r}"
+    assert result[7] == "center", f"the Result heading aligns {result[7]!r}"
+
+    layout = _module_constant("_drive_column_layout")()
+    entry = _only([c for c in layout if c[0] == "result"], "the Result column's layout")
+    _key, _field, x, left, width, _align, limit, _hl, _heading, _ha, _hx = entry
+    glyph = _module_constant("_DRIVE_GLYPH_CELL")
+    assert x == left + glyph + limit / 2.0, (
+        f"the Result text anchors at {x}, not the midpoint of its text area "
+        f"({left + glyph} … {left + glyph + limit})")
+
+    # AND THE LONGEST LABEL STILL FITS WITHOUT WRAPPING — centring changes the anchor, not the
+    # room, and a clipped centre would be worse than a clipped left.
+    widest = max(_DISPLAY_LABEL_PX[v]
+                 for v in _module_constant("_DRIVE_RESULT_LABELS").values())
+    assert widest <= limit, (
+        f"the widest display label is {widest}px in a {limit}px slot")
+
+
+def test_THE_DRIVES_HEADING_IS_THE_SECTION_PRODUCERS_not_a_second_copy(panel):
+    """> **MARC:** *"The Drives Header should be top-aligned and have some top border as Box and
+    > Advanced sections."*
+
+    🚨 **WHAT THIS REPLACED WAS A SECOND COPY.** The heading was
+    `<div style='font-weight:700;font-size:1.05rem'>Drives</div>` — hand-drawn, at a size no
+    other section uses, with no rule. **`_section_heading` has produced Box score's and
+    Advanced's since R-885**, and Marc asking for a top border *"as Box and Advanced sections"*
+    is the tell that the two had drifted.
+
+    ✅ **ASSERTED AS THE PRODUCER'S OWN OUTPUT BEING PRESENT**, which is what tells a CALL from a
+    COPY (§4.3) — a re-drawn heading would drift from this string the first time either moved.
+    """
+    import importlib
+    matchup = importlib.import_module("views.matchup")
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt")])
+    entries, _charts = panel(frame)
+    head = _only([b for k, b in entries
+                  if k == "markdown" and isinstance(b, str) and "Drives</div>" in b],
+                 "the drives header")
+
+    produced = matchup._section_heading(_module_constant("_DRIVE_SECTION"))
+    assert produced in head, (
+        "the drives header does not contain `_section_heading`'s own output, so it is drawing "
+        "its own title rather than calling the producer Box score and Advanced use (§4.3)")
+
+    # AND IT CARRIES THE TOP RULE MARC ASKED FOR, from the same constant those sections use.
+    assert _module_constant("_SECTION_RULE") in head, (
+        "the drives header has no top border; Box score and Advanced draw theirs from "
+        "`_SECTION_RULE` and he asked for the same")
+
+    # 🚨 AND IT IS TOP-ALIGNED — his other half of the same sentence.
+    assert "align-items:flex-start" in head, (
+        "the header's rows still hang from the bottom; a one-line linescore then sits level "
+        "with the BASE of a two-line team card rather than its top")
+    assert "align-items:flex-end" not in head, "a row is still bottom-aligned"
+
+
+# ── 🚨 v19 PART 2: THE MASCOT IN THE END ZONE ───────────────────────────────────────────────
+
+def _mascot_layers(spec):
+    """The end-zone mascot text layers — rotated text at a pixel x."""
+    return [n for n in _layers(spec, _FIELD)
+            if _mark_of(n) == "text" and (n.get("mark") or {}).get("angle") is not None]
+
+
+def test_THE_MASCOT_IS_THE_GAMES_not_the_drive_rows(panel):
+    """> **MARC:** *"Can we overlay the Team Mascot Name in the End Zone?"*
+
+    🚨 **`offense_mascot` NAMES WHOEVER HAD THE BALL, AND POSSESSION ALTERNATES.** Keying the
+    end-zone text off the drive row would put a different team's name in the same end zone on
+    consecutive drives — the shape of B133's mirrored-band defect, one column over.
+
+    ✅ **It is derived from the BAND's own first row, exactly as `_drive_colors` derives the
+    colour**, so the left end zone is the away team's for the whole game.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", mascot="Homers"),
+        _drive(2, "away", "Beta", "PUNT", category="punt", mascot="Visitors"),
+        _drive(3, "home", "Alpha", "PUNT", category="punt", mascot="Homers"),
+    ])
+    spec = _spec(panel(frame)[1])
+    layers = _mascot_layers(spec)
+    assert len(layers) == 2, f"expected one mascot per end zone, got {len(layers)}"
+
+    drawn = {}
+    for node in layers:
+        rows = _rows(spec, node)
+        assert len(rows) == 1, "an end zone drew more than one mascot"
+        drawn[(node.get("mark") or {}).get("angle")] = rows[0]["m"]
+
+    # 🚨 MARC'S SIGNS, PINNED — and his −90 is expressed as 270 because Vega-Lite's own
+    # `MarkDef.angle` is `minimum: 0, maximum: 360` and Altair rejects a negative outright
+    # (cfdb-wta-R-1271). **270 IS −90 as a rotation**; the picture is identical.
+    away_angle = _module_constant("_DRIVE_MASCOT_ANGLE_AWAY")
+    home_angle = _module_constant("_DRIVE_MASCOT_ANGLE_HOME")
+    assert away_angle % 360 == -90 % 360, (
+        f"the away rotation is {away_angle}, which is not Marc's −90 as a rotation")
+    assert home_angle == 90
+    assert drawn.get(away_angle) == "Visitors", (
+        f"the LEFT end zone carries {drawn.get(away_angle)!r}; the away team scores there "
+        f"(6,193 touchdowns measured) so it is the away mascot")
+    assert drawn.get(home_angle) == "Homers", (
+        f"the RIGHT end zone carries {drawn.get(home_angle)!r}")
+
+
+def test_A_MISSING_MASCOT_DRAWS_NOTHING_not_a_placeholder(panel):
+    """📊 **38 of 3,607 games (1.05%) are missing at least one side's mascot** — 37 away, 1 home.
+    Per drive the columns are 99.452% and 99.471% present.
+
+    ✅ **R-084: the fallback is NOTHING.** A blank end zone and an end zone carrying a
+    placeholder are different facts (AC-G.11), and only one of them is true.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", mascot="Homers"),
+        _drive(2, "away", "Beta", "PUNT", category="punt", mascot=""),
+    ])
+    spec = _spec(panel(frame)[1])
+    layers = _mascot_layers(spec)
+    assert len(layers) == 1, (
+        f"{len(layers)} mascot layers drew; the away side has none published, so its end zone "
+        f"must carry no text at all")
+    assert _rows(spec, layers[0])[0]["m"] == "Homers"
+    assert (layers[0].get("mark") or {}).get("angle") == _module_constant(
+        "_DRIVE_MASCOT_ANGLE_HOME"), "the wrong end zone survived"
+
+
+def test_THE_MASCOTS_INK_IS_BLACK_OR_WHITE_by_the_fills_own_luminance(panel):
+    """> **MARC:** *"just use white or black lettering"*
+
+    🚨 **THERE IS NO PRODUCER FOR THIS AND THE PROMPT SAID THERE WAS (cfdb-wta-R-1270).**
+    `identity.text_on` picks a published VARIANT OF THE TEAM'S OWN COLOUR for the PAGE — its
+    docstring: *"AC-G.26. There is deliberately no contrast maths in this module."* **It cannot
+    answer whether white or black reads on `#bf5700`**, and nothing else in `site/` computes a
+    luminance either.
+
+    ✅ **SO THE THRESHOLD IS DERIVED, WHICH IS WHAT *"do not invent a threshold"* WAS FOR.**
+    Black and white contrast equally at relative luminance `L` where
+    `(L + 0.05)² = 0.0525` → **L = 0.179129** — WCAG's own crossover.
+
+    📊 **Measured over all 351 teams in `srv_drive`: worst 4.59:1 in EACH theme** (Texas
+    `#bf5700` in light, Presbyterian `#5376b0` in dark), **0 of 351 below 4.5:1.**
+    """
+    ink = _module_constant("_drive_endzone_ink")
+    dark = _module_constant("_DRIVE_INK_DARK")
+    light = _module_constant("_DRIVE_INK_LIGHT")
+
+    # 🚨 THE sRGB TRANSFER FUNCTION IS THE PART A NAIVE AVERAGE GETS WRONG. `#bf5700` averages
+    # to 0.42 of 255 and would take BLACK on a mean; its relative luminance is 0.166 and it
+    # takes WHITE. **Pinned, because that is the case the gamma decoding exists for.**
+    assert ink("#bf5700") == light, "a mid orange took black; the channels are gamma-encoded"
+    assert ink("#ffffff") == dark, "white took white"
+    assert ink("#000000") == light, "black took black"
+    assert ink("#9e1b32") == light, "a deep crimson took black"
+    assert ink("#ebebeb") == dark, "a near-white took white"
+    # AND A MISSING OR MALFORMED FILL STILL RETURNS ONE OF THE TWO, never an empty attribute
+    assert ink(None) in (dark, light) and ink("nonsense") in (dark, light)
+
+    # AND THE LAYER ACTUALLY USES IT — a helper nothing calls is decoration.
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt",
+                                 color="#ffffff", mascot="Homers")])
+    spec = _spec(panel(frame)[1])
+    layer = _only(_mascot_layers(spec), "the mascot layer")
+    assert layer["mark"]["color"] == dark, (
+        f"a white end zone drew {layer['mark'].get('color')!r} lettering — white on white")

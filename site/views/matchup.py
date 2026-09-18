@@ -4423,8 +4423,63 @@ _TABLE_ROW_INNER = f"display:flex;align-items:center;gap:{_TABLE_GAP}rem"
 # exact and the DOM said nothing.** Centring the ROW put the two centres 0px apart. It was the
 # third time on this panel that a picture caught what the markup could not (B103's invisible
 # `mark_rule`, B108's 2:1 squash, that).
-_TABLE_CHART_CELL = (f"width:{_TABLE_CHART_WIDTH}px;flex:none;min-width:0;"
+# ── 🚨 v19 PART 3: THE CHART GROWS INTO SPARE ROOM AND STILL COLLAPSES ──────────────────────
+#
+# > **MARC:** *"Can the chart expand horizontally if there is available room, don't collapse
+# > smaller than it is now. I do like how it's handled when the browser is collapsed small now.
+# > That works good. Looking to making bigger when there is space available"*
+#
+# ✅ **HIS SECOND SENTENCE IS A CONSTRAINT, NOT A COMPLIMENT**, so this adds a growth path and
+# changes nothing about the collapse.
+#
+# 🚨 **AND THE PROMPT'S FRAMING DOES NOT APPLY — MEASURED FIRST, WHICH IS WHAT IT ASKED
+# (cfdb-wta-R-1272).** It warned that *"if this chart is an `hconcat`, Streamlit's autosize is
+# IGNORED and `use_container_width` is inert"*. **`distribution.box()` is not an Altair chart at
+# all: it returns a `str`.** The panel emits an inline `<svg>` — so there is no Vega spec, no
+# autosize, no `use_container_width`, and A156's `hconcat` finding is about a different object.
+#
+# 📊 **WHAT IT ACTUALLY EMITS, read off a real row:**
+#
+#     <svg viewBox='0 0 240 41' width='240' height='41' style='display:block;max-width:100%'>
+#
+# ✅ **`max-width:100%` IS THE COLLAPSE MARC LIKES** — the SVG shrinks inside a narrow cell and
+# the `viewBox` keeps it legible. ❌ **`width='240'` AND `flex:none` ARE WHY IT CANNOT GROW:**
+# the cell is pinned to `_TABLE_CHART_WIDTH` and the label and value cells are `flex:none` too,
+# so **spare width in the row went nowhere at all.**
+#
+# ✅ **SO THE GROWTH PATH IS `flex` ON B's OWN CELL, NOT A CHANGE TO A's MODULE.**
+#
+# 🚨🚨 **AND IT IS `flex:1 0`, NOT `flex:1 1`, BECAUSE A GUARD ALREADY FORBADE THE OBVIOUS ONE
+# AND ITS REASON IS REAL.** `test_the_TABLE_ROW_CLIPS_rather_than_drawing_over_the_cards_beside_it`
+# has asserted `flex:none` here since R-864, in these words:
+#
+# > *"A `flex:1` chart cell would be the obvious way to fill the leftover room and it is the
+# > wrong one: `box()` emits `max-width:100%`, so an SVG whose declared width its cell cannot
+# > honour is SCALED rather than clipped — B108 squeezed a 432px viewBox into 216px and rendered
+# > its `18` four pixels tall. **The DOM was correct and the text was unreadable.**"*
+#
+# ⚠️ **THAT FAILURE IS SHRINKING, AND MARC ASKED FOR THE OTHER DIRECTION** — *"don't collapse
+# smaller than it is now… looking to making bigger when there is space available"*. ✅ **So the
+# shrink factor is ZERO: the cell grows into spare room and can never go below the basis
+# `box()` was handed, which is the exact condition B108's defect needs.**
+# ⚠️ **`min-width` RESTATES IT RATHER THAN RELYING ON `flex-shrink:0` ALONE**, so the floor is
+# assertable from the markup rather than inferred from flex arithmetic.
+# 📊 **Measured at four container widths, before and after — growth proved AND the narrow end
+# proved unchanged.**
+_TABLE_CHART_CELL = (f"flex:1 0 {_TABLE_CHART_WIDTH}px;min-width:{_TABLE_CHART_WIDTH}px;"
                      f"display:flex;align-items:center")
+
+# 🚨 AND THE SVG ITSELF NEEDS TO FILL A CELL THAT HAS GROWN. `distribution.box` writes a fixed
+# `width` attribute, and `site/lib/` is SESSION A's (§3 rule 3) — **so this is one scoped CSS
+# rule from the page rather than an edit to A's module.** A CSS `width` beats a presentation
+# attribute, and the `viewBox` carries the aspect ratio, so the picture scales rather than
+# stretching. ⚠️ **Scoped to this table's own chart cells by `data-cfdb`, so nothing else that
+# draws a `cfdb-dist` — the Today panel, the yardage thumbnails — is touched by it.**
+# 📋 **REPORTED FOR A: `box()` emitting `width:100%` in its own style would make this rule
+# unnecessary for every caller, and is one line in the module that owns it.**
+_TABLE_CHART_FILL_CSS = (
+    "<style>[data-cfdb='metric-cell'] span:last-child > .cfdb-dist{width:100%}"
+    "[data-cfdb='metric-cell'] span:last-child .cfdb-dist svg{width:100%;height:auto}</style>")
 
 
 def _accent(pair) -> str:
@@ -4455,6 +4510,14 @@ def _accent(pair) -> str:
 # the heading, the table header row, and the glossary caption beneath. A rename that moves the
 # visible word and leaves the others is a rename that half happened.
 _ADVANCED_SECTION = "Advanced Team Stats"
+
+# ✅ v19 (a). Marc's own words for the card region's heading — a constant for the same reason
+# `_ADVANCED_SECTION` is one: the name is keyed in the heading and in the test that pins it.
+_BEST_PERFORMANCES_SECTION = "Best Performances"
+
+# ✅ v19 (b). The drives section's own name, for the same reason — and because the panel's
+# heading and the test that pins it must not drift apart.
+_DRIVE_SECTION = "Drives"
 
 # 🚨 R-885. THE BOLD RULE THAT DEFINES EACH SECTION — Marc, v11: *"should have a bold
 # underline to help define the section."*
@@ -5671,6 +5734,11 @@ def _post_game(game_id, season) -> None:
         # whitespace he is describing is the seam between those two Streamlit blocks — not a
         # margin this file sets. **Removing it means there is only one block.**
         parts = [
+            # 🚨 v19 PART 3: ONE SCOPED RULE, EMITTED ONCE WITH THE TABLE IT GOVERNS.
+            # It lets the box-and-whisker fill a chart cell that has grown — see
+            # `_TABLE_CHART_FILL_CSS` for why it is CSS here rather than a change to
+            # `distribution.box`, which lives in session A's `site/lib/`.
+            _TABLE_CHART_FILL_CSS,
             _section_heading("Box score"),
             _table_header(away, home, "Box score", colors),
             # 🚨 ZERO DECIMALS FOR BOX SCORE, AND IT IS THE PANEL'S OWN NATURE RATHER THAN A
@@ -5741,8 +5809,16 @@ def _post_game(game_id, season) -> None:
                 st.caption(note)
         # ⚠️ THE CARD REGION IS ONE BLOCK AND IS DRAWN ONCE — every group appears exactly once,
         # top to bottom, with no vertical association to the table beside it.
+        #
+        # 🚨 v19 (a): *"Add a section header for Best Performances above the player card section
+        # (format like Box Score)"*. ✅ **`_section_heading` IS THE PRODUCER Box score and
+        # Advanced already use, and it is CALLED rather than re-drawn (§4.3).** It was written
+        # for R-885 and has had two callers since; this is the third, and it needed no change.
+        # ⚠️ **It is prepended INSIDE the cards column**, so the rule spans the card region the
+        # way Box score's spans the table column — the two are siblings, not one over the other.
         slots["cards"].markdown(
-            _post_game_cards(leaders, away, home, colors), unsafe_allow_html=True)
+            _section_heading(_BEST_PERFORMANCES_SECTION)
+            + _post_game_cards(leaders, away, home, colors), unsafe_allow_html=True)
 
         if len(advanced) < 2:
             # ⚠️ INSIDE THE TABLE COLUMN, NOT FULL WIDTH — the absence belongs to the table's
@@ -5977,8 +6053,20 @@ _DRIVE_ENDZONE = 10             # yards of end zone at each end; data sits at 10
 # HAVE INHERITED IT (cfdb-wta-R-1250).** It priced the old labels at **4px gutters** while the
 # shipped plan uses **3px**. ⚠️ **The correct old-label figure is 301px.** §2.4 — a measurement
 # is a claim, and an arithmetic slip inside one is still a wrong number for the next round.
-_DRIVE_FIELD_WIDTH = 668        # 256/668/256 = 21.7/56.6/21.7 of 1180 — DERIVED, see above
-_DRIVE_TABLE_WIDTH = 256
+# ── 🚨 v19 (d) MOVED THE SPLIT, AND IT MOVED BY THE SAME RULE THAT SET IT ───────────────────
+#
+# **v03 derived the table as the sum of what its columns measure, and v19's Impact format makes
+# one of those columns wider** — `+7  (0-7)` with two NBSP and parentheses measures 55.86px at
+# its widest against the old format's 46.42, so the cell goes 47 → 56.
+#
+#     v03   12 + 42 + 26 + 17 + 17 + 77 + 47 + 18 gutters = 256   field 668
+#     v19   12 + 42 + 26 + 17 + 17 + 77 + 56 + 18 gutters = 265   field 650
+#
+# ⚠️ **WHAT THE FIELD LOSES, IN ITS OWN TERMS:** 668 → 650 is −18px (−2.7%), 5.567 → 5.417
+# px/yard, and a ten-yard gap of 54.2px against an 11.12px axis label. **The furniture still
+# reads**; the render is where that is confirmed rather than the arithmetic.
+_DRIVE_FIELD_WIDTH = 650        # 265/650/265 = 22.5/55.1/22.5 of 1180 — DERIVED, see above
+_DRIVE_TABLE_WIDTH = 265
 _DRIVE_PANEL_SPACING = 10
 _DRIVE_PANEL_WIDTH = (2 * _DRIVE_TABLE_WIDTH + _DRIVE_FIELD_WIDTH
                       + 2 * _DRIVE_PANEL_SPACING)
@@ -6592,6 +6680,11 @@ def _drive_duration(row) -> str:
 # and is in the set**: most drives change nothing.
 _DRIVE_LEGAL_IMPACTS = frozenset({0.0, 2.0, 3.0, 6.0, 7.0, 8.0, -2.0, -3.0, -6.0, -7.0, -8.0})
 
+# 🚨 v19 (d): MARC COUNTED THE SPACES — *"Impact: +/- Change  (Score). 2 spaces and add the
+# parenthesis"*. **Two U+00A0, because a Vega text mark collapses two plain spaces to one
+# exactly as HTML does** (measured: 35.30px either way; two NBSP render 38.08px).
+_DRIVE_IMPACT_GAP = "\u00a0\u00a0"
+
 
 def _drive_score_impact(row):
     """The net points this drive put on the board, from the OFFENSE's point of view — or None
@@ -6744,13 +6837,25 @@ def _drive_impact_cell(impact, running) -> str:
     if float(impact) == 0:
         return ""
     label = f"{float(impact):+.0f}"
+    # ── 🚨 v19 (d): `Impact: +/- Change  (Score)`. HE COUNTED THE SPACES. ─────────────────
+    #
+    # 📊 **TWO PLAIN SPACES COLLAPSE IN A VEGA TEXT MARK — MEASURED, NOT ASSUMED.** The prompt
+    # warned about HTML; this cell is an SVG `<text>` from a Vega mark, which is a different
+    # question with the same answer. Rendered in Chromium at `fontSize` 10:
+    #
+    #     `+7 (0-7)`   one space          35.30px
+    #     `+7  (0-7)`  two plain spaces   35.30px   ← COLLAPSED, identical to one
+    #     `+7\u00a0\u00a0(0-7)`  two NBSP  38.08px   ← PRESERVED, +2.78
+    #     `+7\u2002(0-7)`        en space  35.30px   ← also collapsed
+    #
+    # ✅ **SO THE MECHANISM IS TWO NON-BREAKING SPACES**, and the render is where it is shown.
     # 🚨 `if running` IS NOT ENOUGH AND A TEST CAUGHT IT PRINTING `+3 nan`. Assigning a list
     # of strings and Nones to a DataFrame column lets pandas store the gaps as NaN — **and
     # NaN IS TRUTHY**, so the falsy check passed it straight into the cell. ⚠️ **This is
     # exactly B132's trap (`row.get(x) or fallback` never firing) in the opposite direction,
     # and `_card_text`'s docstring names it.** The absence is tested for, never inferred.
     absent = running is None or (not isinstance(running, str) and pd.isna(running))
-    return label if absent or not running else f"{label} {running}"
+    return label if absent or not running else f"{label}{_DRIVE_IMPACT_GAP}({running})"
 
 
 # ⚠️ THE BAR IS A POSITION AND `yards` IS A GAIN, AND MARC'S LAYOUT PUTS THEM SIDE BY SIDE.
@@ -7021,8 +7126,43 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
         xOffset=alt.XOffset("glyph_dx:Q", scale=None),
         tooltip=tooltip)
 
+    # ── 🚨 v19 PART 2: THE MASCOT, ROTATED, INSIDE ITS OWN END ZONE ──────────────────────
+    #
+    # ⚠️ **MARC'S SIGNS ARE SPECIFIC — away −90, home +90 — and a sign error here is silently
+    # wrong rather than broken.** In Vega `angle` rotates clockwise, so −90 reads bottom-to-top
+    # on the left and +90 reads top-to-bottom on the right. **Confirmed in a render, both a
+    # regulation game and an overtime one.**
+    #
+    # 🚨 **BUT −90 IS NOT EXPRESSIBLE AND VEGA-LITE'S OWN SCHEMA IS WHY (cfdb-wta-R-1271).**
+    # `MarkDef.angle` carries `"minimum": 0, "maximum": 360`, so Altair rejects it outright —
+    # `SchemaValidationError: '-90' is an invalid value for 'angle'`, which `states.section`
+    # catches and turns into an error card. **It is a rotation, so −90 and 270 are the same
+    # rotation**; the constant below is Marc's number expressed in the range the schema allows,
+    # and the rendered result is identical. ⚠️ **Named rather than inlined, so nobody "fixes"
+    # 270 back to −90 and gets an error card.**
+    #
+    # ⚠️ **x AND y ARE PIXELS, NOT SCALED.** The end zones are geometry the constants define
+    # (0…10 and 110…120 of 120 yards), so the text centres at `width * 5/120` and
+    # `width * 115/120` — and a pixel encoding declares no axis, which under
+    # `resolve_axis(x="independent")` is the difference between no axis and Vega's default one.
+    mascots = []
+    for band, span, angle in (("away", 0.5, _DRIVE_MASCOT_ANGLE_AWAY),
+                              ("home", 11.5, _DRIVE_MASCOT_ANGLE_HOME)):
+        name = _drive_band_mascot(frame, band)
+        if not name:
+            # 38 of 3,607 games carry no mascot for a side. NOTHING, not a placeholder (R-084).
+            continue
+        fill = _drive_band_accent(frame, band)
+        mascots.append(alt.Chart(pd.DataFrame([{"m": name}])).mark_text(
+            angle=angle, fontSize=_DRIVE_ROW_FONT + 3, fontWeight="bold",
+            align="center", baseline="middle",
+            color=_drive_endzone_ink(fill), opacity=0.9).encode(
+            x=alt.value(float(width) * span / (_DRIVE_FIELD_YARDS / _DRIVE_ENDZONE)),
+            y=alt.value(float(height) / 2.0),
+            text=alt.Text("m:N")))
+
     layers = _drive_bands(frame, float(width)) + [
-        zone_fill, field, top_axis, bars, icons, scored_icons]
+        zone_fill, field, top_axis] + mascots + [bars, icons, scored_icons]
     # ⚠️ THE HONEST-ABSENCE BRANCH, KEPT DELIBERATELY THROUGH TWO REWRITES THAT COULD HAVE LOST
     # IT SILENTLY (R-141's family). 📊 118 of 84,838 drives — 0.139% — carry an end coordinate
     # off the field. **The row stays and says so; a missing possession is a worse lie than a
@@ -7039,6 +7179,95 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
     # let v02's single `axis=None` delete the bottom axis entirely.
     return (alt.layer(*layers).properties(width=width, height=height)
             .resolve_axis(x="independent"))
+
+
+# ── 🚨 v19 PART 2: THE MASCOT IN THE END ZONE ───────────────────────────────────────────────
+#
+# > **MARC:** *"Can we overlay the Team Mascot Name in the End Zone? If that's possible, just
+# > use white or black lettering. Away team should be rotated -90. Home team rotated 90."*
+#
+# ✅ **CONFIRMED AGAINST `information_schema` ON LIVE PUBLISHED SERVING (§2.2.1c.2), not the
+# model file** — B121 got `UndefinedColumn` back from a column a model appeared to publish:
+#
+#     srv_drive.offense_mascot    text      84,373 / 84,838 rows   99.452%
+#     srv_drive.opponent_mascot   text      84,389 / 84,838        99.471%
+#
+# ⚠️ **§2.5's SECOND QUESTION, PER GAME — which is the grain an end zone needs: 38 of 3,607
+# games (1.05%) are missing at least one side's mascot** (37 away, 1 home). ✅ **The fallback is
+# NOTHING — no text, no placeholder (R-084).** A blank end zone and an end zone with a
+# placeholder are different facts, and only one of them is true.
+#
+# 🚨 **AND IT IS DERIVED FROM THE GAME, NOT THE DRIVE ROW.** `offense_mascot` is the mascot of
+# whoever had the ball, and possession alternates — keying the end-zone text off the row would
+# put a different team's name in the same end zone on consecutive drives. **It reads the band's
+# own first row, exactly as `_drive_colors` reads the colour.**
+#
+# ## 🚨 "WHITE OR BLACK LETTERING" HAS NO PRODUCER, AND THE PROMPT SAID IT DID (cfdb-wta-R-1270)
+#
+# ⚠️ **The prompt: *"`identity.text_on` is the existing producer for exactly this question;
+# call it, do not invent a threshold."* IT IS NOT, AND ITS OWN DOCSTRING SAYS SO.**
+# `text_on(row, dark_theme)` picks a published VARIANT OF THE TEAM'S OWN COLOUR for the PAGE —
+# *"AC-G.26. There is deliberately no contrast maths in this module"*. **It cannot answer
+# whether white or black reads on `#bf5700`, and nothing else in `site/` computes a luminance
+# either** (searched: zero hits for luminance, contrast ratio or the sRGB coefficients).
+#
+# ✅ **SO THE THRESHOLD IS DERIVED RATHER THAN PICKED, WHICH IS WHAT THE INSTRUCTION WAS FOR.**
+# Black and white contrast equally against a background of relative luminance `L` when
+#
+#     1.05 / (L + 0.05) = (L + 0.05) / 0.05   →   (L + 0.05)² = 0.0525   →   L = 0.179129
+#
+# **That is WCAG's own crossover, not a number chosen by eye** — above it black wins, below it
+# white does, and the worst case the choice can ever produce is 4.54:1 at the crossover itself.
+#
+# 📊 **MEASURED OVER ALL 351 TEAMS THAT APPEAR IN `srv_drive`, BOTH THEMES:**
+#
+#     light   worst 4.59:1   Texas        fill #bf5700  ink #ffffff   ·  0 of 351 below 4.5:1
+#     dark    worst 4.59:1   Presbyterian fill #5376b0  ink #000000   ·  0 of 351 below 4.5:1
+#
+# ✅ **Every end zone clears WCAG AA, in both themes.** ⚠️ **And this is the case B136 made
+# live: the end zone is opaque team colour now, so white lettering on a white end zone was a
+# real possibility rather than a hypothetical — 44 teams publish `#ffffff` on dark.**
+# 🚨 MARC'S ROTATIONS, IN THE RANGE VEGA-LITE'S SCHEMA ALLOWS. He wrote *"Away team should be
+# rotated -90. Home team rotated 90."* — and `MarkDef.angle` is `minimum: 0, maximum: 360`, so
+# −90 is rejected by Altair before it reaches the browser. **270 IS −90 as a rotation.**
+_DRIVE_MASCOT_ANGLE_AWAY = 270      # Marc's −90
+_DRIVE_MASCOT_ANGLE_HOME = 90
+_DRIVE_INK_CROSSOVER = 0.179129
+_DRIVE_INK_DARK = "#000000"
+_DRIVE_INK_LIGHT = "#ffffff"
+
+
+def _drive_endzone_ink(fill: str) -> str:
+    """Black or white on this end zone, by WCAG relative luminance. Marc's own two choices.
+
+    ⚠️ **THE sRGB TRANSFER FUNCTION IS NOT OPTIONAL AND A NAIVE AVERAGE GETS IT WRONG.** The
+    channels are gamma-encoded, so the linearisation below is what makes `#bf5700` (a mid
+    orange) resolve to white rather than to black.
+    """
+    value = str(fill or "").lstrip("#")
+    if len(value) != 6:
+        return _DRIVE_INK_LIGHT
+    try:
+        channels = [int(value[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    except ValueError:
+        return _DRIVE_INK_LIGHT
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    return _DRIVE_INK_DARK if luminance > _DRIVE_INK_CROSSOVER else _DRIVE_INK_LIGHT
+
+
+def _drive_band_mascot(frame: pd.DataFrame, band: str) -> str:
+    """One band's mascot, read off that band's OWN first row — a fact about the GAME.
+
+    ⚠️ **NOT the drive row.** `offense_mascot` names whoever had the ball, and possession
+    alternates, so a per-row read would change the end zone's name every drive.
+    ✅ **Empty where the band has no drives or no published mascot** — 38 of 3,607 games carry
+    one of those, and the caller draws nothing rather than a placeholder (R-084).
+    """
+    side = frame[frame["band"] == band]
+    if side.empty:
+        return ""
+    return fmt.text(side.iloc[0].get("offense_mascot"))
 
 
 def _drive_band_accent(frame: pd.DataFrame, band: str) -> str:
@@ -7132,8 +7361,22 @@ _DRIVE_COLUMN_PLAN = (
     # 🚨 v03: THE CELL READS `result_label`, NOT `drive_result`. 77 = 11px glyph + 66px text,
     # and 66 is the widest display label (`PUNT RET TD`, 65.59px) rounded up — **so the cell
     # is sized by the measurement rather than the measurement squeezed into the cell.**
-    ("result",     "result_label:N",  77.0, "left",  66.0, 34.0, "Result", "left"),
-    ("impact",     "impact_cell:N",   47.0, "right", 47.0, 35.0, "Impact", "right"),
+    # 🚨 v19 (c): *"Horizontal center align the Result"*. The glyph keeps the cell's left edge
+    # and the TEXT centres in the 66px that remain — so `PUNT` (27.23px) sits in the middle of
+    # its column instead of hugging the gutter, and the longest label (`PUNT RET TD`, 65.59px)
+    # is unmoved because it already fills the slot.
+    ("result",     "result_label:N",  77.0, "center", 66.0, 34.0, "Result", "center"),
+    # 🚨 v19 (d): 47 → 56, AND THE RE-MEASUREMENT IS WHY (cfdb-wta-R-1269).
+    #
+    # 📊 **B134's 47px was CORRECT for its own format and this round confirmed it** — every
+    # `+7 0-7` pairing the panel can print, built from the eleven legal swings and all 2,197
+    # published running scores, measures **46.42px** at its widest. ✅ **The prompt was right to
+    # ask, and the number survived.**
+    #
+    # 🚨 **WHAT MOVED IS THE FORMAT, NOT THE MEASUREMENT.** The same 21,970 pairings with two
+    # NBSP and parentheses measure **55.86px** — so the parentheses do NOT fit in 47, and this
+    # cell is 56. ⚠️ **Said before shipping a wrap, which is what the prompt asked for.**
+    ("impact",     "impact_cell:N",   56.0, "right", 56.0, 35.0, "Impact", "right"),
 )
 
 # 🚨 MARC'S TWO ENCODINGS FOR THE SIDE OF THE 50, AND HE ASKED FOR BOTH TO BE CONSIDERED.
@@ -7168,11 +7411,23 @@ def _drive_column_layout() -> tuple:
         # wrong reasons. `pad` is the content inset, and everything downstream reads it.
         pad = _DRIVE_GLYPH_CELL if key == "result" else 0.0
         content, span = left + pad, width - pad
-        # A right-aligned cell is anchored on its RIGHT edge; a left-aligned one on its left.
-        x = content + span if align == "right" else content
+
+        def anchor(how):
+            # A right-aligned cell is anchored on its RIGHT edge, a left-aligned one on its
+            # left, and a CENTRED one on the midpoint of the content it is centred in.
+            # ⚠️ v19 (c): `center` is new, and it anchors on the TEXT area rather than on the
+            # whole cell — the Result column's glyph owns the first 11px, so centring on the
+            # cell would push the word right by half a glyph.
+            if how == "right":
+                return content + span
+            if how == "center":
+                return content + span / 2.0
+            return content
+
+        x = anchor(align)
         # ⚠️ AND THE HEADING GETS ITS OWN ANCHOR FROM ITS OWN ALIGNMENT, which is how `Yrds`
         # stops colliding with `Yard` without either word being shortened.
-        head_x = content + span if head_align == "right" else content
+        head_x = anchor(head_align)
         out.append((key, field, x, left, width, align, limit,
                     head_limit, heading, head_align, head_x))
         left += width + _DRIVE_TABLE_GAP
@@ -7575,17 +7830,37 @@ def _drive_scoreboard(row) -> str:
             f"{html.escape(home_points)}</span>")
 
     def row_of(left, middle, right):
+        # 🚨 v19 (b): `flex-start`, NOT `flex-end`. Marc: *"The Drives Header should be
+        # top-aligned"*. The cards and the linescore used to hang from the bottom of their row,
+        # so a one-line linescore sat level with the BASE of a two-line team card instead of
+        # its top.
         return (f"<div style='display:flex;width:{_DRIVE_PANEL_WIDTH}px;max-width:100%;"
-                f"align-items:flex-end;gap:{_DRIVE_PANEL_SPACING}px;margin:.1rem 0 .15rem'>"
+                f"align-items:flex-start;gap:{_DRIVE_PANEL_SPACING}px;margin:.1rem 0 .15rem'>"
                 f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none'>{left}</div>"
                 f"<div style='width:{_DRIVE_FIELD_WIDTH}px;flex:none;text-align:center;"
                 f"display:flex;justify-content:center'>{middle}</div>"
                 f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none'>{right}</div></div>")
 
-    heading = "<div style='font-weight:700;font-size:1.05rem'>Drives</div>"
     cards = (_team_header_card(away_name, row.get("away_logo_url"), away_accent, "width:100%"),
              _team_header_card(home_name, row.get("home_logo_url"), home_accent, "width:100%"))
-    return row_of(heading, linescore, "") + row_of(cards[0], "", cards[1])
+    # ── 🚨 v19 (b): THE HEADING IS THE PRODUCER'S NOW, AND WHAT IT REPLACED WAS A SECOND COPY
+    #
+    # > **MARC:** *"The Drives Header should be top-aligned and have some top border as Box and
+    # > Advanced sections."*
+    #
+    # 🚨 **THIS LINE USED TO READ `<div style='font-weight:700;font-size:1.05rem'>Drives</div>`
+    # — a hand-drawn heading at a size no other section uses, with no rule.** `_section_heading`
+    # has produced Box score's and Advanced's since R-885, and Marc is asking for the third
+    # caller. ✅ **Called, not copied (§4.3), and it needed no change to take a third caller.**
+    #
+    # ⚠️ **IT SPANS THE PANEL RATHER THAN THE LEFT TABLE**, because the section is the whole
+    # three-panel figure — the same relationship Box score's rule has to its own table column.
+    # 📷 **The scoreboard therefore sits UNDER the rule rather than beside the old title.** His
+    # v04 ask was that it be *"at the top/middle as a header to the chart… inline with the
+    # Drives row"*, and it still is: one continuous header block, nothing between them.
+    return (f"<div style='width:{_DRIVE_PANEL_WIDTH}px;max-width:100%'>"
+            + _section_heading(_DRIVE_SECTION) + "</div>"
+            + row_of("", linescore, "") + row_of(cards[0], "", cards[1]))
 
 
 # 🚨 THE TWO ABSENCES IN ONE COLUMN, NAMED FOR A READER (AC-G.11). Marc asked for the `0` to
@@ -7643,6 +7918,7 @@ def _drives(game_id, season, row) -> None:
                    offense_team_display, offense_logo_url,
                    offense_color_on_light, offense_color_on_dark, offense_color_source,
                    opponent_team_display, opponent_logo_url,
+                   offense_mascot, opponent_mascot,
                    drive_result, drive_result_key, drive_result_category,
                    scoring_side, is_scoring_drive,
                    plays, yards, elapsed_display,
