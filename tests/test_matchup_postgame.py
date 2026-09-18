@@ -2775,3 +2775,114 @@ def test_THE_CARD_REGION_HAS_MARCS_SECTION_HEADING_from_the_same_producer(panel)
         f"the heading reads {matchup._BEST_PERFORMANCES_SECTION!r}; Marc named it")
     assert matchup._SECTION_RULE in produced, (
         "the heading carries no top rule, which is the *format like Box Score* half")
+
+
+# ── 🚨 v08 PART 2: THE ZOOM IS WITHDRAWN AND THE CHART IS DRAWN WIDER ───────────────────────
+#
+# > **MARC, v08:** *"Box/Whisker size change acted like a zoom in/out instead of better filling
+# > the horizontal space. This method increases the vertical spacing between the rows (bad)
+# > whild filling the horizontal space. The previous version was better. Want to take another
+# > stab at it?"*
+
+def _recomputed_widths():
+    """`(cell budget, one value cell, the chart)` — recomputed from the module's LITERALS.
+
+    ⚠️ `_module_constant` deliberately refuses a constant computed from others, so the two
+    that matter here are rebuilt the way the page builds them. **Reading `_TABLE_CHART_WIDTH`
+    back would only prove the file agrees with whatever arithmetic it happens to contain**,
+    which is the trap `test_the_COMMENTS_ABOUT_THE_CHART_WIDTH_AGREE_WITH_THE_CODE` names.
+    """
+    rem = _module_constant("_REM")
+    budget = (_module_constant("_TABLE_ROW_BUDGET")
+              - int(_module_constant("_TABLE_LABEL_WIDTH") * rem)
+              - 3 * int(_module_constant("_TABLE_GAP") * rem))
+    value = ((budget // 3) if _module_constant("_TABLE_CELLS_EQUAL")
+             else _module_constant("_TABLE_VALUE_CONTENT_PX"))
+    return budget, value, budget - 2 * value
+
+
+def test_THE_CHART_IS_NOT_SCALED_TO_FILL_ITS_CELL_because_that_was_the_zoom():
+    """🚨 THE RULE MARC SAW, ASSERTED GONE — AND BY WHAT IT DID, NOT BY ITS NAME.
+
+    📊 **Measured in the running app before it was withdrawn**, chart authored 118×71:
+
+        viewport 1300   chart cell   118   drawn 118 x 71     median row  75.8px
+        viewport 1600   chart cell 300.4   drawn 300 x 181    median row 185.5px
+        viewport 1920   chart cell 495.9   drawn 496 x 298    median row 303.2px
+
+    ⚠️ **`box()` emits both a `width` and a `height` attribute, so the element has an intrinsic
+    ratio; `width:100%` with `height:auto` makes the browser keep it.** Filling the width cost
+    the height in exact proportion — his *"increases the vertical spacing between the rows"*.
+
+    🚨 **THE ASSERTION IS ON THE CSS THE PAGE EMITS, not on a constant name**, because deleting
+    the constant and inlining the same two declarations would pass a name check and ship the
+    zoom.
+    """
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
+    # ⚠️ COMMENTS ARE STRIPPED FIRST, because the block that WITHDREW the rule quotes it in
+    # full — and a test that cannot tell a quotation from an instruction would fail on the
+    # explanation of its own subject.
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("#"))
+    for banned in ("height:auto", ".cfdb-dist svg{width:100%"):
+        assert banned not in code, (
+            f"{banned!r} is back in the page's CODE. A fixed-aspect SVG that carries text "
+            f"cannot fill more width by being scaled — it gains height in exact proportion, "
+            f"which is the zoom Marc reported")
+
+
+def test_THE_CHART_CLEARS_B108s_MEASURED_FLOOR_for_the_first_time():
+    """📊 B108 measured the minimum useful plot width at **200px**; A131's sweep agrees.
+
+    ⚠️ **`_TABLE_CELLS_EQUAL = True` gave the chart 118px — 41% under that floor**, and the
+    only width available to it is width the value cells are not using, because the row has no
+    spare at all: measured in the running app, at 1300px the row is 509.2px against a 510px
+    minimum.
+
+    🚨 **RECOMPUTED FROM THE MODULE's OWN LITERALS**, never read back from
+    `_TABLE_CHART_WIDTH` — which would only prove the file agrees with itself.
+    """
+    budget, value, chart = _recomputed_widths()
+    assert chart >= 200, (
+        f"the chart is {chart}px, under B108's measured 200px floor for a useful plot "
+        f"(cell budget {budget}px, value cells {value}px each)")
+
+
+def test_WIDENING_THE_CHART_DID_NOT_MOVE_THE_ROWS_MINIMUM_WIDTH():
+    """🚨 B108's LAW, AND MARC'S OWN CONSTRAINT: *"don't collapse smaller than it is now."*
+
+    📊 **The row's minimum is the sum of its fixed parts, and widening the chart took its
+    width from the value cells rather than from the row** — so the floor is arithmetically
+    unchanged at **510px**, which is what `_TABLE_ROW_BUDGET` is. Measured in the running app
+    at three viewports, before and after: `scrollWidth` 510 in both.
+
+    ⚠️ **This is the assertion that would fail if a later round raised the chart by raising the
+    budget instead**, which is the change that would break the narrow end Marc likes.
+    """
+    label = int(_module_constant("_TABLE_LABEL_WIDTH") * _module_constant("_REM"))
+    gaps = 3 * int(_module_constant("_TABLE_GAP") * _module_constant("_REM"))
+    _budget, value, chart = _recomputed_widths()
+    total = label + 2 * value + chart + gaps
+    assert total == _module_constant("_TABLE_ROW_BUDGET"), (
+        f"the row's parts sum to {total}px against a budget of "
+        f"{_module_constant('_TABLE_ROW_BUDGET')}px — the narrow end has moved")
+
+
+def test_THE_TWO_VALUE_CELLS_ARE_STILL_EQUAL_TO_EACH_OTHER():
+    """⚠️ MARC'S SENTENCE HAS TWO HALVES AND THIS IS THE ONE THAT SURVIVES INTACT.
+
+    > *"That will allow the Box Score to reduce width of the measure value cells. Measure Cells
+    > and graph cells should be equal horizontal widths."*
+
+    📊 **At `False` the value cells are 60px and 60px — still equal to each other.** What
+    changed is that they are sized to their CONTENT rather than to a third of the budget, which
+    is the *reduction* he named as his reason and which `True` never delivered.
+
+    ✅ **AND THE CONTENT FITS, MEASURED WITH A RANGE RATHER THAN `scrollWidth`:** the widest
+    value string on the rendered table is **54px** (`-0.259`), the turnovers format `5 (2/3)` is
+    53.4px, and **0 of 46 values exceed the 60px cell**.
+    """
+    _budget, value, _chart = _recomputed_widths()
+    assert value >= 54, (
+        f"the value cell is {value}px and the widest measured value string is 54px — a "
+        f"narrower cell would clip a real number rather than merely tighten the column")

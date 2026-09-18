@@ -19,7 +19,7 @@ import pandas as pd
 import streamlit as st
 
 from lib import (attribution, chips, distribution, filters, fmt, glyphs, identity, params,
-                 shell, states, table, theme)
+                 shell, states, table, theme, winprob)
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -4293,8 +4293,48 @@ _REM = 16
 # 🚨 THE FLOOR IS THE REASON IT MATTERS: B108 measured the minimum useful plot width at 200px
 # and A131's sweep agrees. B111 shipped 110px and said so. **One of these two options clears
 # that floor for the first time and the other does not.**
-# 🚨 SHIPPED `True` — MARC'S LITERAL WORDS — AND THE ARITHMETIC IS IN THE REPORT RATHER THAN
-# THE DECISION BEING TAKEN HERE. Measured at 1300px, both rendered:
+# 🚨🚨 **B139 SHIPPED `False`, AND MARC'S v08 IS WHY — THE EARLIER `True` IS SUPERSEDED, NOT
+# OVERRULED (cfdb-wta-R-1287).**
+#
+# > **MARC, v08:** *"Box/Whisker size change acted like a zoom in/out instead of better filling
+# > the horizontal space… The previous version was better. Want to take another stab at it?"*
+#
+# 📊 **AND THE MEASUREMENT IS WHAT DECIDED IT, BECAUSE IT CLOSED EVERY OTHER DOOR.** B139 ran
+# the real app and measured the row in a browser at four viewports:
+#
+#     viewport 1100   block  800   row 387 (scrollWidth 510 — ALREADY OVERFLOWING)
+#     viewport 1300   block 1000   row 509.2 (scrollWidth 510 — EXACTLY AT THE FLOOR)
+#     viewport 1600   block 1300   row 692.4   chart cell 300.4
+#     viewport 1920   block 1620   row 887.9   chart cell 495.9
+#
+# 🚨 **AT 1300px THE ROW HAS NO SPARE WIDTH AT ALL** — `_TABLE_ROW_BUDGET = 510` is still exact,
+# eight rounds after it was measured. **So a fixed raise of `_TABLE_CHART_WIDTH` against the
+# `True` budget is impossible: there is nothing to take it from.** The only width available to
+# the chart is width the value cells are not using, which is precisely what this flag governs.
+#
+# ✅ **AND `False` HONOURS THE HALF OF HIS OWN SENTENCE THAT `True` NEVER DID** — see the
+# paragraph below: *"reduce width of the measure value cells"* does not happen at `True`, where
+# they stay 116px around a 46px number. ⚠️ **THE TWO VALUE CELLS REMAIN EQUAL TO EACH OTHER —
+# 60px and 60px.** What changes is that they are sized to their CONTENT rather than to a third
+# of the budget, which is the reduction he named as his reason.
+#
+# 📊 **MEASURED IN A BROWSER, `True` vs `False`, on the same game and the same table:**
+#
+#     chart drawn          118 x 71  ->  230 x 71      +95% width
+#     median row height       75.8   ->     75.8       UNCHANGED — his "(bad)" is not re-paid
+#     table height          1664.2   ->   1664.2       UNCHANGED
+#     row minimum width        510   ->      510       UNCHANGED — B108's floor is untouched
+#     value cells clipping   0 / 46  ->   0 / 46       widest value 54px in a 60px cell
+#
+# ✅ **AND IT CLEARS B108's FLOOR FOR THE FIRST TIME SINCE THE CHART EXISTED** — 200px measured
+# minimum useful plot width; `True` is 118px (41% under), `False` is 230px.
+#
+# ⚠️ **THE OLD NOTE BELOW SAID THIS WAS *"Marc's trade, not this round's to settle"*, AND THAT
+# WAS RIGHT WHEN NOTHING HAD BEEN ASKED. He has now asked.** The arithmetic that used to sit
+# in a report sits here, with the render beside it in B139's.
+#
+# 🚨 SHIPPED `True` ORIGINALLY — MARC'S LITERAL WORDS — AND THE ARITHMETIC WAS IN THE REPORT
+# RATHER THAN THE DECISION BEING TAKEN THERE. Measured at 1300px, both rendered:
 #
 #     True   label 136 | value 116 | value 116 | chart 118     the three cells are equal
 #     False  label 136 | value  60 | value  60 | chart 230     the values are at their content
@@ -4309,7 +4349,7 @@ _REM = 16
 # 📊 AND THE FLOOR IS WHAT IT COSTS: B108 measured the minimum useful plot width at 200px and
 # A131's sweep agrees. **`True` is 118px — 41% under it, and barely better than B111's 110px.
 # `False` is 230px, over it for the first time since the chart existed.**
-_TABLE_CELLS_EQUAL = True     # True = Marc's literal reading; False = values at their content
+_TABLE_CELLS_EQUAL = False    # B139, v08: values at their content, so the chart gets 230px
 
 # 📊 THE ROW BUDGET, MEASURED RATHER THAN ASSUMED. At 1300px with the sidebar open the content
 # area runs 380 → 1220 = 840px. v11 makes it two Streamlit columns instead of three and halves
@@ -4469,17 +4509,45 @@ _TABLE_ROW_INNER = f"display:flex;align-items:center;gap:{_TABLE_GAP}rem"
 _TABLE_CHART_CELL = (f"flex:1 0 {_TABLE_CHART_WIDTH}px;min-width:{_TABLE_CHART_WIDTH}px;"
                      f"display:flex;align-items:center")
 
-# 🚨 AND THE SVG ITSELF NEEDS TO FILL A CELL THAT HAS GROWN. `distribution.box` writes a fixed
-# `width` attribute, and `site/lib/` is SESSION A's (§3 rule 3) — **so this is one scoped CSS
-# rule from the page rather than an edit to A's module.** A CSS `width` beats a presentation
-# attribute, and the `viewBox` carries the aspect ratio, so the picture scales rather than
-# stretching. ⚠️ **Scoped to this table's own chart cells by `data-cfdb`, so nothing else that
-# draws a `cfdb-dist` — the Today panel, the yardage thumbnails — is touched by it.**
-# 📋 **REPORTED FOR A: `box()` emitting `width:100%` in its own style would make this rule
-# unnecessary for every caller, and is one line in the module that owns it.**
-_TABLE_CHART_FILL_CSS = (
-    "<style>[data-cfdb='metric-cell'] span:last-child > .cfdb-dist{width:100%}"
-    "[data-cfdb='metric-cell'] span:last-child .cfdb-dist svg{width:100%;height:auto}</style>")
+# ── 🚨 v08: THE FILL RULE IS WITHDRAWN. MARC SAW WHAT IT DID AND IT WAS A ZOOM ──────────────
+#
+# > **MARC, v08:** *"Box/Whisker size change acted like a zoom in/out instead of better filling
+# > the horizontal space. This method increases the vertical spacing between the rows (bad)
+# > whild filling the horizontal space. The previous version was better. Want to take another
+# > stab at it?"*
+#
+# 🚨 **HIS DIAGNOSIS IS EXACTLY RIGHT AND THE MECHANISM IS MEASURED (cfdb-wta-R-1285).** The
+# withdrawn rule was:
+#
+#     [data-cfdb='metric-cell'] span:last-child > .cfdb-dist{width:100%}
+#     [data-cfdb='metric-cell'] span:last-child .cfdb-dist svg{width:100%;height:auto}
+#
+# `box()` emits BOTH a `width` and a `height` attribute (`distribution.py:1253`), so the element
+# carries an intrinsic ratio; `width:100%` with `height:auto` tells the browser to keep it.
+# 📊 **Measured in a browser on the real table, chart authored at 118×71:**
+#
+#     container 1300px    drawn   876 x 527px      7.4x
+#     container 1600px    drawn  1176 x 708px     10.0x
+#
+# **Every row grew half a thousand pixels tall to fill width the chart could not otherwise
+# use.** That is his *"increases the vertical spacing between the rows (bad)"*, and it is not a
+# tuning problem: a fixed-aspect SVG cannot gain width without gaining height.
+#
+# ❌ **AND THE TWO OBVIOUS FIXES ARE BOTH WRONG, WHICH IS WHY THE ANSWER IS TO REDRAW INSTEAD.**
+#   1. `preserveAspectRatio='none'` would stretch width without height — but **`box()` draws
+#      `<text>` labels and `<circle>` outlier marks**, unlike `thumbnail()` and `panel()` which
+#      draw only rects and a line. At ~7x every label would be smeared seven times as wide and
+#      every outlier ring would become a flat ellipse. **The legibility R-1082, R-1083 and
+#      R-1086 were spent on would go.**
+#   2. 🚨 **B137's OWN HAND-BACK TO SESSION A IS WITHDRAWN HERE, BY ME, BECAUSE IT WAS WRONG.**
+#      It read: *"REPORTED FOR A: `box()` emitting `width:100%` in its own style would make this
+#      rule unnecessary for every caller."* **That is the identical zoom one level deeper, for
+#      every caller, where no page could scope it away** (cfdb-main-R-1428).
+#      ✅ **`site/lib/distribution.py` needs no edit at all for this.**
+#
+# ✅ **THE HONEST STATEMENT: A FIXED-ASPECT SVG THAT CARRIES TEXT CANNOT FILL MORE WIDTH BY
+# BEING SCALED — IT HAS TO BE DRAWN AT THE WIDER WIDTH.** `box(width=…)` already takes the
+# number and `_TABLE_CHART_WIDTH` supplies it; see the measurement beside that constant.
 
 
 def _accent(pair) -> str:
@@ -5734,11 +5802,9 @@ def _post_game(game_id, season) -> None:
         # whitespace he is describing is the seam between those two Streamlit blocks — not a
         # margin this file sets. **Removing it means there is only one block.**
         parts = [
-            # 🚨 v19 PART 3: ONE SCOPED RULE, EMITTED ONCE WITH THE TABLE IT GOVERNS.
-            # It lets the box-and-whisker fill a chart cell that has grown — see
-            # `_TABLE_CHART_FILL_CSS` for why it is CSS here rather than a change to
-            # `distribution.box`, which lives in session A's `site/lib/`.
-            _TABLE_CHART_FILL_CSS,
+            # ✅ v08: v19's `_TABLE_CHART_FILL_CSS` USED TO BE EMITTED HERE AND IS WITHDRAWN.
+            # Marc: *"The previous version was better."* The chart is drawn at its width now
+            # rather than scaled into the cell — see the block above the withdrawn constant.
             _section_heading("Box score"),
             _table_header(away, home, "Box score", colors),
             # 🚨 ZERO DECIMALS FOR BOX SCORE, AND IT IS THE PANEL'S OWN NATURE RATHER THAN A
@@ -6068,6 +6134,9 @@ _DRIVE_ENDZONE = 10             # yards of end zone at each end; data sits at 10
 _DRIVE_FIELD_WIDTH = 650        # 265/650/265 = 22.5/55.1/22.5 of 1180 — DERIVED, see above
 _DRIVE_TABLE_WIDTH = 265
 _DRIVE_PANEL_SPACING = 10
+# ⚠️ v08: the gap between the linescore and the win-probability chart beside it. The same
+# value as the panel's own slot spacing, so the header has one rhythm rather than two.
+_DRIVE_CURVE_GAP = 10
 _DRIVE_PANEL_WIDTH = (2 * _DRIVE_TABLE_WIDTH + _DRIVE_FIELD_WIDTH
                       + 2 * _DRIVE_PANEL_SPACING)
 _DRIVE_ROW_HEIGHT = 17
@@ -7993,7 +8062,43 @@ def _drive_result_legend_chart() -> alt.Chart:
 # and a header is the one place on the panel a reader would never think to doubt.
 
 
-def _drive_scoreboard(row) -> str:
+def _drive_curve(row, points) -> str:
+    """The win-probability curve for THIS game, as inline SVG, or `""` when there is none.
+
+    ✅ **EVERY MARK HERE IS `lib/winprob`'s — CALLED, NOT COPIED (§4.3).** A170 promoted the
+    chart out of `today.py` for exactly this caller, and B138 refused to build it precisely
+    because a view may not import a view. **This function composes; it draws nothing.**
+
+    🚨 **THE AXIS FLIP IS A171's AND IS NOT RE-DERIVED HERE.** `sy(1)` — home certain — is the
+    FLOOR, because the scoreboard beside this chart puts home on the bottom row (R-522's
+    away-over-home law). ⚠️ **In the Drives header the two sit side by side in one glance, so a
+    second flip anywhere in this file would be immediately visible and immediately wrong.**
+    **Nothing here reverses the frame, reverses the axis, or reorders the points.**
+
+    ✅ **THE COLOURS COME FROM THE HEADER'S OWN PRODUCER.** `_accent` is this file's single
+    home for a finished team colour (R-855) and the scoreboard's team rules already use it, so
+    the fill under the curve and the rule under the team name cannot disagree. ⚠️ **`winprob`
+    holds no team colours and must not reach for one** — its docstring says so; the caller
+    supplies them, which is what A171 designed.
+
+    ⚠️ **AN EMPTY OR ABSENT FRAME RETURNS THE EMPTY STRING, NOT A PLACEHOLDER (R-084).** 79.04%
+    of completed 2025 games have no rows here and the whole of that gap is non-FBS
+    (cfdb-wta-R-1284) — **so "no chart" is by far this header's commonest state and it must
+    read as the header that shipped before, not as a failure.**
+    """
+    if points is None or getattr(points, "empty", True):
+        return ""
+    # 🚨 `curve_label` OWNS THE `is False` TRAP — a pandas boolean is `numpy.bool_`, which is
+    # not the `False` singleton, so `is not False` is True for every row. A138's panel test
+    # caught it on Today; this call site inherits the fix by calling rather than re-writing.
+    text, is_cut = winprob.curve_label(row, points)
+    return winprob.sparkline_svg(
+        points, label=text, is_cut=is_cut,
+        home_color=_accent(row_for_side(row, "home")),
+        away_color=_accent(row_for_side(row, "away")))
+
+
+def _drive_scoreboard(row, curve: str = "") -> str:
     """Marc's header for the Drives section: the quarter linescore, and a team card per table.
 
     > **MARC:** *"Can we use this scoreboard in the header line of the Drives section?"*
@@ -8045,17 +8150,47 @@ def _drive_scoreboard(row) -> str:
             f" <span style='font-variant-numeric:tabular-nums;font-weight:700'>"
             f"{html.escape(home_points)}</span>")
 
-    def row_of(left, middle, right):
-        # 🚨 v19 (b): `flex-start`, NOT `flex-end`. Marc: *"The Drives Header should be
-        # top-aligned"*. The cards and the linescore used to hang from the bottom of their row,
-        # so a one-line linescore sat level with the BASE of a two-line team card instead of
-        # its top.
+    def row_of(left, middle, right, sides_may_shrink=False):
+        """One header row of three slots, aligned to the three panels of the figure below.
+
+        🚨 v19 (b): `flex-start`, NOT `flex-end`. Marc: *"The Drives Header should be
+        top-aligned"*. The cards and the linescore used to hang from the bottom of their row,
+        so a one-line linescore sat level with the BASE of a two-line team card.
+
+        🚨🚨 **`sides_may_shrink` EXISTS BECAUSE THE HEADER IS NOT 1200px WIDE, AND B139
+        MEASURED THAT IN THE RUNNING APP RATHER THAN IN A HARNESS (cfdb-wta-R-1288).**
+
+        📊 **The wrapper carries `width:1200px;max-width:100%`, and the second half wins:**
+
+            viewport 1300   main block 1000   header wrapper  840   ← the slots need 1180
+            viewport 1600   main block 1300   header wrapper 1140
+            viewport 1920   main block 1620   header wrapper 1200   ← only here is it 1200
+
+        ⚠️ **B138 MEASURED THIS HEADER AT 1200px AND THAT NUMBER IS A FACT ABOUT A STANDALONE
+        HARNESS, NOT ABOUT THE PAGE** — it gave the header the whole viewport, which Streamlit
+        does not. **At 1300px three `flex:none` slots totalling 1180 overflow an 840px row**,
+        and the win-probability chart added to the middle slot was CLIPPED at the block's right
+        edge (measured: the chart ended at x=1305 against a block edge of 1300).
+
+        ✅ **THE SCOREBOARD ROW's SIDE SLOTS ARE EMPTY, SO THEY MAY SHRINK.** The middle keeps
+        its 650px, so the linescore and the chart stay centred on the FIELD they head — the
+        alignment v04 asked for — and the row fits whatever width it is given.
+
+        ⚠️ **THE CARDS ROW MUST NOT SHRINK AND DOES NOT.** Its two 265px slots sit above the
+        two 265px tables of the figure, and that alignment is the property v02 was built to
+        guarantee. 📋 **IT DOES STILL OVERFLOW BELOW ~1200px, AND THAT IS PRE-EXISTING, NOT
+        THIS ROUND's** — measured at 1300px and 1600px on `origin/main` before any edit here.
+        **Reported rather than fixed in passing: it is a layout question about the whole
+        figure, which is 1180px wide by construction** (cfdb-wta-R-1289).
+        """
+        edge = ("flex:1 1 0;min-width:0" if sides_may_shrink
+                else f"width:{_DRIVE_TABLE_WIDTH}px;flex:none")
         return (f"<div style='display:flex;width:{_DRIVE_PANEL_WIDTH}px;max-width:100%;"
                 f"align-items:flex-start;gap:{_DRIVE_PANEL_SPACING}px;margin:.1rem 0 .15rem'>"
-                f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none'>{left}</div>"
+                f"<div style='{edge}'>{left}</div>"
                 f"<div style='width:{_DRIVE_FIELD_WIDTH}px;flex:none;text-align:center;"
                 f"display:flex;justify-content:center'>{middle}</div>"
-                f"<div style='width:{_DRIVE_TABLE_WIDTH}px;flex:none'>{right}</div></div>")
+                f"<div style='{edge}'>{right}</div></div>")
 
     cards = (_team_header_card(away_name, row.get("away_logo_url"), away_accent, "width:100%"),
              _team_header_card(home_name, row.get("home_logo_url"), home_accent, "width:100%"))
@@ -8074,9 +8209,40 @@ def _drive_scoreboard(row) -> str:
     # 📷 **The scoreboard therefore sits UNDER the rule rather than beside the old title.** His
     # v04 ask was that it be *"at the top/middle as a header to the chart… inline with the
     # Drives row"*, and it still is: one continuous header block, nothing between them.
+    # ── 🚨 v20 / v08: THE WIN % CHART, BESIDE THE SCOREBOARD ────────────────────────────
+    #
+    # > **MARC, v20:** *"Add the Win % chart to the right of the Scoreboard in the header"*
+    # > **MARC, v08:** *"Was expecting to see the Win Percentage chart next to Scoreboard in
+    # > the header. Not there yet."*
+    #
+    # ✅ **IT GOES IN THE MIDDLE SLOT, BESIDE THE LINESCORE — NOT IN THE EMPTY RIGHT SLOT, AND
+    # THE MEASUREMENT IS WHY (cfdb-wta-R-1283).** B138 measured this header in a browser: three
+    # slots of 265 / 650 / 265, with the linescore using **153.58px** of the middle one. The
+    # right slot is empty and 265px, which is where a first reading of *"to the right of"* puts
+    # the chart — and it is the wrong place twice over:
+    #
+    #   🚨 **IT DOES NOT FIT.** `chart_width` is 182px for regulation but **270px at two
+    #      overtimes and 314px at three** — measured on real frames, not inherited. **8 of 803
+    #      covered 2025 games overflow a 265px slot.**
+    #   🚨 **AND IT IS NOT *NEXT TO* ANYTHING.** The right slot begins 248px past the end of a
+    #      centred linescore. Marc asked for the chart *next to* the scoreboard; a chart at the
+    #      far edge of a 1200px row is in the same header and beside nothing.
+    #
+    # ✅ **THE MIDDLE SLOT SOLVES BOTH AND HAS THE ROOM MEASURED FOR IT.** 153.58px of
+    # linescore + this gap + the widest chart the module can produce (358px, four overtime
+    # bands) is **~528px inside a 650px slot** — so even the case no 2025 game reached fits,
+    # and the pair stays centred as a group because the slot is already
+    # `display:flex;justify-content:center`.
+    #
+    # ⚠️ **THE CARDS ROW IS UNTOUCHED AND MUST STAY SO.** Its three slots align to the three
+    # panels of the figure below by construction; widening a slot there would break the one
+    # alignment v02 was built to guarantee.
+    beside = (f"<span style='display:inline-flex;align-items:center;"
+              f"margin-left:{_DRIVE_CURVE_GAP}px'>{curve}</span>") if curve else ""
     return (f"<div style='width:{_DRIVE_PANEL_WIDTH}px;max-width:100%'>"
             + _section_heading(_DRIVE_SECTION) + "</div>"
-            + row_of("", linescore, "") + row_of(cards[0], "", cards[1]))
+            + row_of("", linescore + beside, "", sides_may_shrink=True)
+            + row_of(cards[0], "", cards[1]))
 
 
 # 🚨 THE TWO ABSENCES IN ONE COLUMN, NAMED FOR A READER (AC-G.11). Marc asked for the `0` to
@@ -8124,7 +8290,49 @@ def _drives(game_id, season, row) -> None:
     # rather than sitting under one — and drawing it outside `states.section` keeps a heading
     # above an Empty or an Error card, which a heading inside the section would lose.
     # ⚠️ **The row is also the only trustworthy source for the score** (94.07% vs the frame).
-    st.markdown(_drive_scoreboard(row), unsafe_allow_html=True)
+    # ── 🚨 v08: THE WIN-PROBABILITY CURVE THE HEADER DRAWS ──────────────────────────────
+    #
+    # 🚨 **THE HEADER IS EMITTED OUTSIDE `states.section` ON PURPOSE (see below), SO THE POINTS
+    # HAVE TO BE FETCHED BEFORE IT.** A query inside `_drive_scoreboard` would put a database
+    # read inside a string builder and undo the property the comment below protects.
+    #
+    # ✅ **`points` IS BOUND BEFORE THE BLOCK, WHICH IS TODAY's OWN PATTERN AND IS LOAD-BEARING
+    # RATHER THAN TIDY:** `states.section` swallows the exception and the code after it still
+    # runs, so an unbound name here would turn a handled degradation into a crash — R-748's
+    # *assert upstream, degrade downstream*, applied to a header instead of a column.
+    #
+    # ⚠️ **AN EMPTY FRAME DRAWS NOTHING AND RAISES NOTHING, AND THAT IS THE COMMON CASE.**
+    # 📊 Measured on live published serving: **3,028 of 3,831 completed 2025 games publish no
+    # `srv_game_win_probability_play` rows at all — 79.04%** (cfdb-wta-R-1284). ✅ **The gap is
+    # entirely non-FBS**: of the 934 completed 2025 FBS games **803 are covered (85.97%)**, and
+    # of the 2,835 non-FBS games **zero** are. **So the absence is the data's scope, not a
+    # fault** — and a scoreboard with no chart beside it must look exactly like the one that
+    # shipped before this round, not like a hole where a chart failed.
+    #
+    # 🚨 **IT DOES NOT CARRY `degraded_if_missing`, AND THAT IS DELIBERATE.** This header sits
+    # above the Drives figure; a card reading *"win probability has not been published"* would
+    # render ABOVE the Drives heading, on a section that is not about win probability, for a
+    # state that is normal on four games in five. **A missing RELATION still raises into the
+    # Error card — that is a real fault and stays visible.**
+    points = pd.DataFrame()
+    with states.section("srv_game_win_probability_play",
+                        dataset=DATASETS["srv_game_win_probability_play"]):
+        # Single relation, single WHERE, bounded (AC-G.39). 📊 The limit is measured, not
+        # guessed: the heaviest single game in this relation carries 255 rows and the widest
+        # case the module can draw is four overtime bands; 1,000 clears both by ~4x.
+        points = query("""
+            select game_id, play_number, period, is_overtime,
+                   elapsed_from_kickoff_seconds, overtime_period,
+                   overtime_axis_offset_periods,
+                   home_win_probability, home_score, away_score, play_text
+            from srv_game_win_probability_play
+            where game_id = :game_id
+            order by elapsed_from_kickoff_seconds nulls last, play_number
+            limit 1000
+        """, {"game_id": game_id})
+
+    st.markdown(_drive_scoreboard(row, curve=_drive_curve(row, points)),
+                unsafe_allow_html=True)
     with states.section("srv_drive", dataset=DATASETS["srv_drive"]):
         # Single table, single WHERE, always by game_id. THE LIMIT IS THE CONTRACT, NOT
         # DECORATION — lib.query rejects an unbounded select outright (AC-G.39). 200 is far
