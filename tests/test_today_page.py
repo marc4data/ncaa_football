@@ -570,6 +570,21 @@ def _today():
     return today
 
 
+def _winprob():
+    """The win-probability curve, promoted to `lib/` by A170 so Matchup can draw it too.
+
+    Same sys.path dance as `_today()` and for the same reason. The chart's tests live here
+    rather than moving with it: they assert what TODAY's panel renders, and that is still
+    the thing Marc is looking at.
+    """
+    import sys
+    site_path = str(ROOT / "site")
+    if site_path not in sys.path:
+        sys.path.insert(0, site_path)
+    from lib import winprob
+    return winprob
+
+
 def _row(**over):
     import pandas as pd
     base = dict(VT_VMI)
@@ -865,15 +880,15 @@ def test_the_curve_is_plotted_in_clock_order_and_the_assertion_can_actually_fire
     ✅ SO THE SECOND HALF IS THE PROOF: the same frame, sorted the way the break would sort it,
     must make the assertion FAIL. A guard that cannot be shown failing is decoration.
     """
-    today = _today()
+    winprob = _winprob()
 
     ordered = _curve()
-    xs = _polyline_xs(today._sparkline_svg(ordered))
+    xs = _polyline_xs(winprob.sparkline_svg(ordered))
     assert xs == sorted(xs), "a frame in play order must plot left to right"
 
     # The break, reproduced: same points, ordered by probability.
     scrambled = ordered.sort_values("home_win_probability").reset_index(drop=True)
-    broken_xs = _polyline_xs(today._sparkline_svg(scrambled))
+    broken_xs = _polyline_xs(winprob.sparkline_svg(scrambled))
     assert broken_xs != sorted(broken_xs), (
         "the assertion above cannot fail, so it proves nothing — a frame ordered by probability "
         "must plot out of order")
@@ -912,10 +927,10 @@ def test_overtime_breaks_the_line_and_regulation_does_not():
     pixels at the right-hand edge. The break is what survives that, so the break is what is
     asserted.
     """
-    today = _today()
-    assert today._sparkline_svg(_curve()).count("<polyline") == 1, \
+    winprob = _winprob()
+    assert winprob.sparkline_svg(_curve()).count("<polyline") == 1, \
         "a game with no overtime is one continuous line"
-    assert today._sparkline_svg(_curve(overtime_from=30)).count("<polyline") == 2, \
+    assert winprob.sparkline_svg(_curve(overtime_from=30)).count("<polyline") == 2, \
         "overtime must be a separate segment, not a continuation"
 
 
@@ -926,11 +941,11 @@ def test_an_unknown_period_is_never_read_as_regulation():
     Read as regulation it would draw a break that did not happen; read as overtime it would
     suppress a real one. `is True` does neither.
     """
+    winprob = _winprob()
     import pandas as pd
-    today = _today()
     frame = _curve(overtime_from=30)
     frame.loc[frame["play_number"] == 29, "is_overtime"] = None
-    svg = today._sparkline_svg(frame)
+    svg = winprob.sparkline_svg(frame)
     assert svg.count("<polyline") == 2, "a null play must not add or remove a break"
     assert pd.isna(frame.loc[frame["play_number"] == 29, "is_overtime"]).all()
 
@@ -941,9 +956,9 @@ def test_the_curve_is_never_smoothed():
     The spikes ARE the drama and this panel exists to show them; a smoothed win-probability
     curve is a different claim about the game and a reader cannot tell the two apart.
     """
-    today = _today()
+    winprob = _winprob()
     frame = _curve(n=40)
-    plotted = _polyline_xs(today._sparkline_svg(frame))
+    plotted = _polyline_xs(winprob.sparkline_svg(frame))
     assert len(plotted) == 40, (
         f"{len(plotted)} points plotted from a 40-play frame — something is resampling")
 
@@ -962,8 +977,8 @@ def test_the_chart_positions_on_the_clock_and_not_on_play_number():
     which is R-744's family: a fixture whose defaults make the assertion true. This one builds
     a frame where they DISAGREE, so it fires on exactly the defect that shipped.
     """
+    winprob = _winprob()
     import pandas as pd
-    today = _today()
     rows = []
     # Four fourth-quarter plays first by play_number, then the rest of the game.
     for play_number, elapsed in enumerate([3528, 3534, 3584, 3590]):
@@ -981,13 +996,13 @@ def test_the_chart_positions_on_the_clock_and_not_on_play_number():
 
     # The page receives the frame in the order the SQL returns it — by the clock.
     in_clock_order = frame.sort_values("elapsed_from_kickoff_seconds").reset_index(drop=True)
-    xs = _polyline_xs(today._sparkline_svg(in_clock_order))
+    xs = _polyline_xs(winprob.sparkline_svg(in_clock_order))
     assert xs == sorted(xs), "a frame in clock order must plot left to right"
 
     # ✅ AND THE PROOF THAT IT CAN FAIL: the same points in `play_number` order — which is what
     # the old query returned — must NOT plot left to right.
     by_play_number = frame.sort_values("play_number").reset_index(drop=True)
-    broken = _polyline_xs(today._sparkline_svg(by_play_number))
+    broken = _polyline_xs(winprob.sparkline_svg(by_play_number))
     assert broken != sorted(broken), (
         "play_number order must plot backwards on this frame, or the assertion above proves "
         "nothing about which axis the chart uses")
@@ -1001,8 +1016,8 @@ def test_the_curve_is_filled_from_zero_and_the_zero_is_the_middle():
     path STARTS AND ENDS on the zero line — an area hung off the top or the bottom of the box
     would still look like an area chart and would say something else entirely.
     """
-    today = _today()
-    svg = today._sparkline_svg(_curve())
+    winprob = _winprob()
+    svg = winprob.sparkline_svg(_curve())
     paths = re.findall(r"<path d='([^']*)'", svg)
     assert paths, "an area chart has a filled path"
     for d in paths:
@@ -1042,8 +1057,8 @@ def test_a_truncated_curve_is_never_labelled_with_a_final_value():
     Printing "0%" beside that line is a confident wrong number a reader cannot tell from a real
     collapse — so the label is withheld and the end of the line is cut and named instead.
     """
+    winprob = _winprob()
     import pandas as pd
-    today = _today()
     points = _curve()
     row = pd.Series({"win_probability_curve_reaches_final_score": True,
                      "home_abbreviation": "MICH"})
@@ -1052,10 +1067,10 @@ def test_a_truncated_curve_is_never_labelled_with_a_final_value():
 
     # ⚠️ A139 MOVED THE DECISION INTO `_curve_label`, so the label is built ONCE per row and
     # handed to the renderer. Exercising it through that function is exercising what ships.
-    text, is_cut = today._curve_label(row, points)
-    cut_text, cut_is_cut = today._curve_label(cut_row, points)
-    complete = today._sparkline_svg(points, label=text, is_cut=is_cut)
-    truncated = today._sparkline_svg(points, label=cut_text, is_cut=cut_is_cut)
+    text, is_cut = winprob.curve_label(row, points)
+    cut_text, cut_is_cut = winprob.curve_label(cut_row, points)
+    complete = winprob.sparkline_svg(points, label=text, is_cut=is_cut)
+    truncated = winprob.sparkline_svg(points, label=cut_text, is_cut=cut_is_cut)
 
     assert _svg_label(complete).endswith("%"), (
         "a complete curve labels its final value — Marc asked for it")
@@ -1082,16 +1097,16 @@ def test_overtime_is_wider_and_the_scale_is_shared():
     that makes reading B true — a quarter boundary lands at the SAME pixel on both charts, and
     the overtime one is longer because it contains more game.
     """
-    today = _today()
-    regulation = today._sparkline_svg(_curve())
-    overtime = today._sparkline_svg(_curve(overtime_from=30))
+    winprob = _winprob()
+    regulation = winprob.sparkline_svg(_curve())
+    overtime = winprob.sparkline_svg(_curve(overtime_from=30))
 
     def width(svg):
         return float(re.search(r"viewBox='0 0 ([\d.]+) ", svg).group(1))
 
     assert width(overtime) > width(regulation), (
         "an overtime game's chart is physically longer — that is Marc's second sentence")
-    expected = today._CURVE_OT_BAND_UNITS * today._CURVE_PX_PER_UNIT
+    expected = winprob._CURVE_OT_BAND_UNITS * winprob._CURVE_PX_PER_UNIT
     assert abs((width(overtime) - width(regulation)) - expected) < 1.5, (
         "one overtime period must add exactly one band at the shared scale")
 
@@ -1213,19 +1228,19 @@ def test_the_final_value_names_the_home_side_and_not_the_away_one():
     ✅ THE ASSERTION IS THAT THE ABBREVIATION IS THE HOME SIDE'S, which is the half a break can
     invert without changing anything else on the chart.
     """
+    winprob = _winprob()
     import pandas as pd
-    today = _today()
     points = _curve()
     row = pd.Series({"win_probability_curve_reaches_final_score": True,
                      "home_abbreviation": "IOWA", "away_abbreviation": "ISU"})
 
-    text, is_cut = today._curve_label(row, points)
+    text, is_cut = winprob.curve_label(row, points)
     assert not is_cut
     assert text.startswith("IOWA "), f"the label must lead with the HOME abbreviation: {text!r}"
     assert "ISU" not in text, "the away side's abbreviation must never appear on this label"
     assert text.endswith("%"), "and the number is still the number"
 
-    svg = today._sparkline_svg(points, label=text, is_cut=is_cut)
+    svg = winprob.sparkline_svg(points, label=text, is_cut=is_cut)
     assert _svg_label(svg) == text, "the visible label is the one that was measured"
     assert "home side" in svg, "the aria-label must not say less than the pixels"
 
@@ -1238,10 +1253,10 @@ def test_the_label_falls_back_to_the_bare_percentage_rather_than_printing_none()
     unreachable here today and is still the honest fallback: a chart label is no place for a
     twenty-character team name, and `None 94%` is worse than `94%`.
     """
+    winprob = _winprob()
     import pandas as pd
-    today = _today()
     points = _curve()
-    text, _ = today._curve_label(
+    text, _ = winprob.curve_label(
         pd.Series({"win_probability_curve_reaches_final_score": True,
                    "home_abbreviation": None}), points)
     assert text.endswith("%") and "None" not in text, text
@@ -1265,14 +1280,14 @@ def test_the_curve_label_sits_left_of_the_final_point_and_buys_no_width():
     is the property that fails the moment anyone reintroduces a per-label gutter — a pinned 182
     alone would not, because a gutter sized for a short label could still land on it.
     """
-    today = _today()
+    winprob = _winprob()
     points = _curve()
 
-    assert today._curve_width(points) == 182, (
+    assert winprob.chart_width(points) == 182, (
         "a regulation chart is 2*_CURVE_PAD + 176px of clock + _CURVE_LABEL_TRAIL")
 
-    short = today._sparkline_svg(points, label="cut", is_cut=True)
-    long = today._sparkline_svg(points, label="MICH 100%")
+    short = winprob.sparkline_svg(points, label="cut", is_cut=True)
+    long = winprob.sparkline_svg(points, label="MICH 100%")
     assert "width='182'" in short and "width='182'" in long, (
         "the label must not buy width any more — it is inside the plot")
 
@@ -1310,12 +1325,13 @@ def test_the_win_probability_axis_is_fixed_and_reads_no_data():
     ✅ **THIS TEST ASSERTS THE PROPERTY, NOT THE PIXELS** — that the mapping is a pure function
     of one probability, so it cannot start consulting the series.
     """
-    today = _today()
-    pad, height = today._CURVE_PAD, today._CURVE_HEIGHT
+    winprob = _winprob()
+    pad, height = winprob.PAD, winprob.HEIGHT
     band = height - 2 * pad
 
     def midline_of(frame):
-        svg = today._sparkline_svg(frame, label="X 50%")
+        winprob = _winprob()
+        svg = winprob.sparkline_svg(frame, label="X 50%")
         import re
         flat = [float(m) for m in re.findall(r"<line[^>]*y1='([\d.]+)'[^>]*y2='\1'", svg)]
         return min(flat) if flat else None
@@ -1338,8 +1354,9 @@ def test_the_win_probability_axis_is_fixed_and_reads_no_data():
     import re
 
     def span(frame):
+        winprob = _winprob()
         ys = [float(y) for y in re.findall(
-            r"[ML][\d.]+,([\d.]+)", today._sparkline_svg(frame, label="X 50%"))]
+            r"[ML][\d.]+,([\d.]+)", winprob.sparkline_svg(frame, label="X 50%"))]
         return max(ys) - min(ys)
     assert span(wide) > span(narrow) * 1.4, (
         f"a 0.95-range game must draw a much taller curve than a 0.25-range one; "
@@ -1347,7 +1364,7 @@ def test_the_win_probability_axis_is_fixed_and_reads_no_data():
 
     # 🚨 AND `sy` MUST NOT LEARN TO READ THE FRAME. This is the regression that would reintroduce
     # exactly what Marc fears, and it would be invisible in a single-game render.
-    source = open(today.__file__).read()
+    source = open(winprob.__file__).read()
     body = source[source.index("    def sy(probability)"):source.index("    right = sx(")]
     for forbidden in (".min()", ".max()", "points", "plotted"):
         assert forbidden not in body.split("return")[-1], (
@@ -1368,19 +1385,19 @@ def test_the_quarters_are_named_and_overtime_is_not_a_fifth_quarter():
     renders `['1Q','2Q','3Q','4Q','OT','2OT','3OT']`. A sequence reading `5Q` would be wrong, and
     a fixture with no overtime cannot tell the two apart.
     """
+    winprob = _winprob()
     import re
-    today = _today()
 
     def labels(svg):
         return re.findall(r"text-anchor='middle'[^>]*>([^<]*)</text>", svg)
 
-    regulation = today._sparkline_svg(_curve(), label="MICH 63%")
+    regulation = winprob.sparkline_svg(_curve(), label="MICH 63%")
     assert labels(regulation) == ["1Q", "2Q", "3Q", "4Q"], labels(regulation)
 
     # 🚨 A CURVE WITH REAL OVERTIME BANDS, or the OT branch fires on nothing (R-760).
     overtime = _curve(overtime_from=30)
-    assert today._curve_bands(overtime) > 0, "this fixture must actually reach overtime"
-    drawn = labels(today._sparkline_svg(overtime, label="PSU 51%"))
+    assert winprob._curve_bands(overtime) > 0, "this fixture must actually reach overtime"
+    drawn = labels(winprob.sparkline_svg(overtime, label="PSU 51%"))
     assert drawn[:4] == ["1Q", "2Q", "3Q", "4Q"], drawn
     assert drawn[4] == "OT", f"the first overtime is OT, never 5Q: {drawn}"
     assert all(d.endswith("OT") for d in drawn[4:]), drawn
@@ -1402,9 +1419,9 @@ def test_the_final_percentage_pops_and_the_abbreviation_does_not():
     grows leftward into the plot, so a bigger number costs the chart nothing; A165 took the
     regulation chart 224px -> 182px as Marc's *"tighten up the horizontal space"*.
     """
+    winprob = _winprob()
     import re
-    today = _today()
-    svg = today._sparkline_svg(_curve(), label="MICH 63%")
+    svg = winprob.sparkline_svg(_curve(), label="MICH 63%")
     match = re.search(r"<tspan font-size='([\d.]+)' fill='([^']+)'[^>]*>([^<]+)</tspan>", svg)
     assert match, f"the percentage is not in its own tspan: {svg[-240:]}"
     size, fill, text = match.groups()
@@ -1412,10 +1429,10 @@ def test_the_final_percentage_pops_and_the_abbreviation_does_not():
     assert fill == "var(--cfdb-link)", f"blue comes from the token, never a hex: {fill!r}"
     assert text == "63%", text
     assert "<tspan>MICH </tspan>" in svg, "the abbreviation keeps the base size and is not blue"
-    assert today._curve_width(_curve()) == 182, "the bigger label must buy no width"
+    assert winprob.chart_width(_curve()) == 182, "the bigger label must buy no width"
 
     # 🚨 THE `cut` BRANCH IS AN ABSENCE, NOT A VALUE, AND IS NOT DRESSED AS ONE.
-    cut = today._sparkline_svg(_curve(), label="cut", is_cut=True)
+    cut = winprob.sparkline_svg(_curve(), label="cut", is_cut=True)
     assert "<tspan" not in cut, "the truncation word must not be styled like a win probability"
     assert "var(--cfdb-link)" not in cut
 
@@ -1434,18 +1451,18 @@ def test_the_curve_is_as_tall_as_the_scoreboard_rows_it_sits_beside():
     well as the value: the scoreboard cell is what sets the row height, so a chart taller than
     the scoreboard's own 80.8px would re-lay out every row on the panel.
     """
-    today = _today()
+    winprob = _winprob()
     # ⚠️ A165: 67 -> 64. The scoreboard's own vertical cell padding went to zero for density
     # (cfdb-main-R-1302) and the span it is measured against shrank with it — re-measured by
     # class in Chromium, NOT adjusted by the same amount the row changed.
-    assert today._CURVE_HEIGHT == 64, "the away-to-home span re-measured after the density pass"
-    assert today._CURVE_HEIGHT > 44, "this is the stretch Marc asked for, not a no-op"
+    assert winprob.HEIGHT == 64, "the away-to-home span re-measured after the density pass"
+    assert winprob.HEIGHT > 44, "this is the stretch Marc asked for, not a no-op"
     # 🚨 THE UPPER BOUND MOVED WITH THE SCOREBOARD, WHICH IS THE POINT OF HAVING ONE. The
     # scoreboard is 74.4px after the density pass; a chart taller than that starts driving the
     # row height and every scoreboard on the panel re-lays out.
-    assert today._CURVE_HEIGHT < 74.4, (
+    assert winprob.HEIGHT < 74.4, (
         "taller than the scoreboard and the chart starts driving the row height")
-    svg = today._sparkline_svg(_curve(), label="MICH 94%")
+    svg = winprob.sparkline_svg(_curve(), label="MICH 94%")
     assert "height='64'" in svg, "the default must actually reach the drawn chart"
 
 

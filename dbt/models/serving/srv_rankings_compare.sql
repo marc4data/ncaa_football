@@ -18,26 +18,39 @@ with ranked as (
     group by season, season_type, week, team_id, school, conference_name
 )
 select
-    {{ surrogate_key(['season', 'season_type', 'week', 'team_id']) }} as rankings_compare_sk,
-    season,
-    season_type,
-    week,
-    team_id,
-    school,
-    conference_name,
-    ap_rank,
-    coaches_rank,
-    committee_rank,
+    {{ surrogate_key(['r.season', 'r.season_type', 'r.week', 'r.team_id']) }} as rankings_compare_sk,
+    r.season,
+    r.season_type,
+    r.week,
+    r.team_id,
+    r.school,
+    -- A170 (cfdb-main-R-1322). THE SLUG, SO THE TEAM NAME ON THIS TAB CAN BE A LINK LIKE EVERY
+    -- OTHER TEAM NAME ON THE PAGE. A169 made the name a link on Standings, Rankings and Stats
+    -- and this tab was the one it could not reach: the view carried `school` and `team_id` and
+    -- no slug, checked against information_schema rather than against the model file.
+    --
+    -- The macro, not a hand-rolled join, and its fallback is the reason: /games knows who
+    -- played, /teams knows who is an FBS program, and the first set is larger. srv_rankings
+    -- measured 662 of 49,798 rows (1.3%) with no dim_team row. A null slug is a link to
+    -- nowhere, which is worse than a name that was never clickable.
+    {{ team_identity('t', 'r.school') }},
+    r.conference_name,
+    r.ap_rank,
+    r.coaches_rank,
+    r.committee_rank,
     -- greatest/least ignore nulls in both dialects, so a team ranked in only one poll
     -- yields a zero spread rather than a null row.
-    greatest(coalesce(ap_rank, coaches_rank, committee_rank),
-             coalesce(coaches_rank, ap_rank, committee_rank),
-             coalesce(committee_rank, ap_rank, coaches_rank))
-      - least(coalesce(ap_rank, coaches_rank, committee_rank),
-              coalesce(coaches_rank, ap_rank, committee_rank),
-              coalesce(committee_rank, ap_rank, coaches_rank)) as disagreement_spread,
+    greatest(coalesce(r.ap_rank, r.coaches_rank, r.committee_rank),
+             coalesce(r.coaches_rank, r.ap_rank, r.committee_rank),
+             coalesce(r.committee_rank, r.ap_rank, r.coaches_rank))
+      - least(coalesce(r.ap_rank, r.coaches_rank, r.committee_rank),
+              coalesce(r.coaches_rank, r.ap_rank, r.committee_rank),
+              coalesce(r.committee_rank, r.ap_rank, r.coaches_rank)) as disagreement_spread,
     ao_src.as_of_ts
-from ranked
+from ranked r
+-- Same join as srv_rankings uses, on the same two columns, so the two tabs of one page cannot
+-- resolve the same team to different identities.
+left join {{ ref('dim_team') }} t on t.season = r.season and t.team_id = r.team_id
 -- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
 -- underlying data was last loaded, never from now() in the app. Per-domain rather than
 -- global: a betting line and a 1936 poll have very different notions of fresh.

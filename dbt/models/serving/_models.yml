@@ -87,6 +87,17 @@ models:
         description: CFBD team id, stable across seasons and the join key to dim_team.
       - name: school
         description: School name as the poll published it.
+      - name: team_slug
+        description: >
+          URL-safe team key, so this tab's team name can link to the team page like every
+          other team name on the site (A170). Falls back to a slug derived from the poll's
+          own school name where the team has no dim_team row — /games knows who played and
+          /teams knows who is an FBS program, and the first set is larger.
+      - name: team_display
+        description: >
+          Display name from dim_team where it exists, falling back to the poll's school
+          name. Paired with team_slug by the same macro so a name and its link cannot
+          disagree.
       - name: conference_name
         description: Conference affiliation as recorded on the poll fact for that season.
       - name: ap_rank
@@ -1651,7 +1662,41 @@ models:
       - name: distance
         description: Yards needed for a first down.
       - name: yards_to_goal
-        description: Distance to the opponent's goal line — the unambiguous field position.
+        description: >
+          Distance to the opponent's goal line at the SNAP — the unambiguous field position,
+          and the start measurement the position columns below pair with. Published under
+          this name since the view was built, which is why no `start_yards_to_goal` synonym
+          was added beside it (A170).
+      - name: start_yardline
+        description: >
+          Where the play started, in the ABSOLUTE STADIUM frame — 0 is the home team's own
+          goal line. Measured over 629,892 plays with zero exceptions: home-offense plays
+          satisfy yardline + yards_to_goal = 100 and away-offense plays yardline =
+          yards_to_goal. Not the coordinate to draw on; see start_yards_from_own_goal.
+      - name: start_yards_from_own_goal
+        description: >
+          Where the play started, measured from the OFFENSE's own goal line. THIS IS THE
+          DRAWING COORDINATE — the only frame on which both bands of the drives chart run
+          left to right, and the same one srv_drive's bar uses. A play segment drawn on
+          start_yardline instead would mirror on the away band.
+      - name: end_yardline
+        description: End of the play in the absolute stadium frame, paired with start_yardline.
+      - name: end_yards_to_goal
+        description: >
+          Distance to the opponent's goal line where the play ended — yards_to_goal less
+          yards_gained, computed upstream because arithmetic between two published columns
+          does not belong in the page.
+      - name: end_yards_from_own_goal
+        description: >
+          End of the play in the offense's own-goal frame. With start_yards_from_own_goal
+          this is the segment Marc's ">10 yards" border is drawn from.
+      - name: is_end_on_field
+        description: >
+          Whether the end coordinate is meaningful at all. False on 13,270 of 409,846 rows
+          (3.24%), and they are categories rather than bad data: on a field goal
+          yards_gained is the KICK DISTANCE (12,234 rows), and on an interception or kickoff
+          return the yards belong to the other team. A page draws the row and suppresses the
+          SEGMENT, exactly as the Drives panel does with srv_drive.is_end_on_field.
       - name: down_distance_display
         description: >
           "3rd and 7", or "1st and Goal" where the distance reaches the end zone. Assembled

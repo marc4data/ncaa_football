@@ -121,5 +121,51 @@ select
     case when yards_to_goal is null then null
          when yards_to_goal <= 20 then 'red zone'
          when yards_to_goal <= 50 then 'opponent territory'
-         else 'own territory' end                         as field_zone
+         else 'own territory' end                         as field_zone,
+
+    -- ==========================================================================================
+    -- WHERE THE PLAY ENDED. A170 (cfdb-main-R-1323), for Marc's v19 ask: "borders around the
+    -- yards gained by plays > 10 yards long". A border is a SEGMENT, and a segment needs two
+    -- ends; this view published one. The subtraction lives here rather than in the page because
+    -- §4.2.1 says arithmetic between two columns goes upstream, and because the frame conversion
+    -- below is band-dependent and getting it backwards is B133's mirrored-band defect.
+    --
+    -- THE COORDINATE DECISION IS fct_drive's, RE-MEASURED AT PLAY GRAIN RATHER THAN INHERITED.
+    -- fct_drive proved `yardline` is an absolute STADIUM coordinate in the HOME team's frame
+    -- over 78,502 drives. The same invariant holds over these plays with ZERO exceptions:
+    --
+    --     offense = home_team    yardline + yards_to_goal = 100   (317,520 of 317,520)
+    --     offense = away_team    yardline = yards_to_goal         (312,372 of 312,372)
+    --
+    -- The 8,140 plays satisfying both are at the 50, where the formulas coincide.
+    --
+    -- SO `yards_from_own_goal` IS THE ONLY COORDINATE BOTH BANDS CAN BE DRAWN ON DRIVING RIGHT,
+    -- exactly as it is for drives. Drawn on `yardline`, the away band mirrors. A play segment
+    -- and the drive bar it sits inside MUST share this coordinate or the border will not land
+    -- on the bar.
+    -- ==========================================================================================
+    100 - yards_to_goal                                   as start_yards_from_own_goal,
+    yards_to_goal - yards_gained                          as end_yards_to_goal,
+    100 - (yards_to_goal - yards_gained)                  as end_yards_from_own_goal,
+    case when offense = home_team
+         then 100 - (yards_to_goal - yards_gained)
+         else       (yards_to_goal - yards_gained) end    as end_yardline,
+
+    -- 🚨 `yards_gained` IS A FIELD-POSITION DELTA ON SCRIMMAGE PLAYS AND SOMETHING ELSE ENTIRELY
+    -- ON KICKS AND TURNOVERS, so the end coordinate is not always meaningful — and this flag is
+    -- what lets a page say so instead of drawing a lie. Named and shaped after srv_drive's
+    -- `is_end_on_field`, which suppresses the BAR and keeps the ROW for the same reason.
+    --
+    -- MEASURED over all 629,892 plays: 12,067 (1.9%) land off the field, and they are not a
+    -- scatter of bad rows — they are CATEGORIES:
+    --
+    --     Field Goal Good      7,497 of 7,558   99.2%   yards_gained is the KICK DISTANCE
+    --     Field Goal Missed    2,394 of 2,425   98.7%   (which includes the end zone)
+    --     Pass Interception Return 234 of 3,462  6.8%   the yards belong to the DEFENSE
+    --     Kickoff / returns / penalties          the rest, all small
+    --
+    -- Rush is 83 of ~200,000 and Pass Reception 81 — so the coordinate is sound for precisely
+    -- the plays Marc's border is about, and honest about the ones it is not.
+    coalesce(yards_to_goal - yards_gained between 0 and 100, false)
+                                                          as is_end_on_field
 from resolved

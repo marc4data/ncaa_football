@@ -55,6 +55,17 @@ resolved as (
         p.down_distance_display,
         p.distance_bucket,
         p.field_zone,
+        -- A170 (cfdb-main-R-1323). Derived in fct_play from fct_play's own copy of
+        -- yards_to_goal, so they come across with the other derived situation columns rather
+        -- than being recomputed here from the stat row's copy. Two sources for one fact is
+        -- exactly what assert_play_stat_situation_agrees_with_the_play already watches, and
+        -- recomputing would put this view on the OTHER side of that guard.
+        p.yardline                as start_yardline,
+        p.start_yards_from_own_goal,
+        p.end_yardline,
+        p.end_yards_to_goal,
+        p.end_yards_from_own_goal,
+        p.is_end_on_field,
         p.play_type,
         p.play_text,
         p.yards_gained,
@@ -121,6 +132,15 @@ select
     yards_gained,
     is_scoring_play,
     ppa,
+    -- A170: where the play STARTED and ENDED. See fct_play's coordinate block — the drawing
+    -- coordinate is yards_from_own_goal, and `yards_to_goal` above IS the start measurement
+    -- under the name this model has always published it as.
+    start_yardline,
+    start_yards_from_own_goal,
+    end_yardline,
+    end_yards_to_goal,
+    end_yards_from_own_goal,
+    is_end_on_field,
     offense_team_id,
     defense_team_id
 from resolved
