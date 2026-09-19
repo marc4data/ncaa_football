@@ -82,9 +82,19 @@ CSS = """
 .cfdb-scatter { margin:.2rem 0 .1rem; }
 .cfdb-scatter svg { display:block; width:100%; height:auto; color:inherit; }
 .cfdb-sc-grid { stroke:currentColor; stroke-opacity:.14; stroke-width:1; }
-/* Semi-transparent so overlapping teams read as denser rather than hiding each other —
-   136 points on one chart WILL overlap, and a solid fill would silently drop them. */
-.cfdb-sc-pt { fill:currentColor; fill-opacity:.45; }
+/* A176. UNFILLED, IN THE TEAM'S OWN COLOR, AND THIS RULE IS WHY IT NEEDED A RASTER.
+   > MARC, v09: "Make these unfilled circles. Color by Team color"
+   The mark carries `fill='none' stroke='<the team color>'` as PRESENTATION ATTRIBUTES, and a
+   CSS declaration BEATS a presentation attribute — so `fill:currentColor` here drew every
+   circle filled with the page's text color while the SVG source said `fill='none'` and the
+   test asserting that source PASSED. R-855's lesson exactly: the picture caught what reading
+   the code could not.
+   (American spelling throughout: this string IS `theme.CSS` and ships to the browser, so the
+   spelling guard reads it as user-facing — it caught this comment's first draft.)
+   The old rule's reason still holds and is now served by the stroke instead: 138 marks on one
+   chart WILL overlap, and a ring at .85 lets an overlapped team stay visible through it where
+   a solid disc hid it. */
+.cfdb-sc-pt { fill:none; stroke-opacity:.85; }
 .cfdb-sc-tick { fill:currentColor; fill-opacity:.55; font-size:10px;
     font-variant-numeric:tabular-nums; }
 .cfdb-sc-axis { fill:currentColor; fill-opacity:.7; font-size:11px; }

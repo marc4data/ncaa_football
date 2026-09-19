@@ -1628,10 +1628,33 @@ def test_the_bump_chart_spec_serialises_and_keeps_its_gap_rule():
     assert aligns == {"left", "right"}, (
         f"the chart must carry BOTH endpoint labels; text aligns present: {aligns}")
 
-    assert today._BUMP_INTERPOLATE == "step-after", (
-        "step-after is the only one whose vertical lands on the week the new rank was "
-        "announced: measured at x=449 and 722.3 against week centres 175.7/449/722.3, while "
-        "step-before turned at 175.7/449 (a week early) and step at 312/585 (on no tick)")
+    # 🚨 A176 (cfdb-main-R-1760). THIS PINNED `step-after` ON A164's MEASUREMENT AND NOW PINS
+    # `linear` ON A176's. Both are real measurements and they answer DIFFERENT questions, which
+    # is why this is a change of value rather than a correction of reasoning.
+    #
+    # 📊 A164 measured WHERE THE VERTICAL LANDS: step-after's turn is on the tick where the new
+    # rank was published (x=449 and 722.3 against week centres 175.7/449/722.3), while
+    # step-before turned a week early and step on no tick at all.
+    #
+    # 📊 A176 measured WHAT THE CHART COSTS TO READ, which A164 never did. Over AP Top 25, 2025
+    # regular — 48 teams, 16 weeks:
+    #
+    #     coincident segments (two teams on one line)   0 of 335    <- the stated cause is not one
+    #     step-after   590 segments   868 crossings     1.47 each
+    #     linear       335 segments   389 crossings     1.16 each
+    #
+    # ⚠️ A step splits every rank change into a horizontal hold AND a vertical turn, and the
+    # vertical crosses every horizontal between the two ranks. **The diagonal crosses 55% less
+    # ink.** And Marc reversed his own v04 instruction to ask for it.
+    #
+    # ⚠️ THE COST IS REAL AND IS NOT HIDDEN: a diagonal draws a team at a rank it never held
+    # BETWEEN ticks — the same objection A164 raised against `step-before`. The ticks stay
+    # exact; the space between them is interpolated, and that trade is Marc's.
+    assert today._BUMP_INTERPOLATE == "linear", (
+        "linear halves the segment count and cuts crossings 55% (868 -> 389) on the real "
+        "frame, and Marc asked for it in v09 after asking for right angles in v04; a step "
+        "manufactures crossings by turning every rank change into a vertical through every "
+        "rank between")
 
 
 def test_exactly_one_producer_answers_which_theme_the_viewer_is_in():
@@ -2321,3 +2344,174 @@ def test_the_spark_denominator_comes_from_the_rendered_frame_and_degrades():
     # And the denominator really does follow the frame it is handed.
     assert today._spark_max(_yardage_frame().head(2)) == 800
     assert today._spark_max(_yardage_frame().tail(1)) == 200
+
+
+def _scatter_rows():
+    """Two teams at opposite extremes, so every direction claim has a detectable answer."""
+    return [{"team": "Best", "x": 100.0, "y": 600.0, "games": 3,
+             "accent": "light-dark(#111111, #eeeeee)"},
+            {"team": "Worst", "x": 500.0, "y": 200.0, "games": 3,
+             "accent": "light-dark(#222222, #dddddd)"}]
+
+
+def test_the_scatter_puts_more_gained_at_the_top_and_fewer_allowed_at_the_right():
+    """🚨 A176 (cfdb-main-R-1761). > **MARC, v09:** *"Switch Y and X axis, so that Y is Yards
+    gained (top is better), and X is yards allowed (right is smaller and better)."*
+
+    ⚠️ **BOTH AXES RUN AGAINST THE NAIVE MAPPING AND THAT PAIR IS THE POINT.** Y is gained and
+    more is better, so it increases UPWARD — an inversion, because SVG's y grows downward. X is
+    allowed and fewer is better, so it decreases RIGHTWARD — also an inversion. Either one
+    alone would break *"up and to the right is stronger"*, which is how a scatter is read
+    before a word of it.
+
+    📊 PROVED ON THE REAL PANEL TOO, week 3 2026: Miami's 702.5 gained draws at cy=47 (top) and
+    LSU's 142.5 allowed at cx=501 (right).
+    """
+    today = _today()
+    svg = today._scatter_svg(_scatter_rows(), (100.0, 500.0), (200.0, 600.0))
+    marks = dict((t, (float(cx), float(cy))) for cx, cy, t in re.findall(
+        r"<circle class='cfdb-sc-pt' cx='([\d.]+)' cy='([\d.]+)'[^>]*>"
+        r"<title>([A-Za-z]+)", svg))
+    assert set(marks) == {"Best", "Worst"}, marks
+
+    assert marks["Best"][1] < marks["Worst"][1], (
+        "600 yards gained must draw ABOVE 200 — Y is the offence now and up is more")
+    assert marks["Best"][0] > marks["Worst"][0], (
+        "100 yards allowed must draw RIGHT of 500 — X is the defence now and right is fewer")
+
+
+def test_the_scatter_captions_moved_with_their_axes():
+    """⚠️ A176. A caption left on the old axis is `cfdb-main-R-1082`'s defect, and it cost a
+    round. The x caption is the DEFENCE now and the y caption is the OFFENCE."""
+    today = _today()
+    svg = today._scatter_svg(_scatter_rows(), (100.0, 500.0), (200.0, 600.0))
+    captions = re.findall(r"cfdb-sc-axis[^>]*>([^<]+)<", svg)
+    assert len(captions) == 2, captions
+    horizontal, vertical = captions
+    assert "allowed" in horizontal and "gained" not in horizontal, horizontal
+    assert "gained" in vertical and "allowed" not in vertical, vertical
+    assert "↑" in vertical, "the vertical caption keeps its direction arrow"
+
+
+def test_the_scatter_marks_are_unfilled_and_carry_the_teams_own_colour():
+    """> **MARC, v09:** *"Make these unfilled circles. Color by Team color"*
+
+    🚨 THE CHART LOOKS NO COLOUR UP. It receives a finished `light-dark(...)` string from the
+    caller (`identity.accent_color`), which the BROWSER resolves — so a mid-session theme flip
+    is correct with no Python in the loop (cfdb-main-R-1601). 📊 `color_on_light` and
+    `color_on_dark` are 0.00% null across the 1,932 team-weeks this panel can draw.
+    """
+    today = _today()
+    svg = today._scatter_svg(_scatter_rows(), (100.0, 500.0), (200.0, 600.0))
+    circles = re.findall(r"<circle class='cfdb-sc-pt'[^>]*>", svg)
+    assert len(circles) == 2
+    for circle in circles:
+        assert "fill='none'" in circle, "Marc asked for unfilled circles"
+        assert "stroke='light-dark(" in circle, circle
+
+    # And a row with no colour falls back rather than emitting an empty stroke.
+    plain = today._scatter_svg([{"team": "X", "x": 300.0, "y": 300.0, "games": 1}],
+                               (100.0, 500.0), (200.0, 600.0))
+    assert "stroke='currentColor'" in plain, plain
+
+
+def test_the_real_profile_panel_puts_the_strong_team_top_right_and_says_so(monkeypatch):
+    """🚨 A176 (cfdb-main-R-1763). MY FIRST FIVE SCATTER TESTS ALL CALLED `_scatter_svg`
+    DIRECTLY, AND A NINTH STAGED BREAK CAME BACK GREEN THROUGH ALL OF THEM.
+
+    📊 The break swapped `_profile`'s two source lines back — `xs` to yards FOR, `ys` to yards
+    ALLOWED — which is the whole feature Marc asked for, and **67 tests passed.** The drawing
+    knows which direction each axis runs; only the caller knows which MEASURE is on it, and
+    nothing was asserting the caller.
+
+    ✅ SO THIS DRIVES THE REAL `_profile` and reads what it actually emitted. R-768's trap is
+    the reason it invokes the panel instead of rebuilding the row list: a test that assembles
+    its own `rows` and calls the drawing asserts that this test can swap two names.
+
+    ⚠️ AND IT CAUGHT A SECOND DEFECT THE SVG TESTS COULD NOT SEE. `_profile` writes a THIRD
+    caption, in prose, through `st.caption` — it read *"the vertical axis runs downward so
+    fewer yards allowed is higher"*, which is a description of the chart before the swap.
+    `cfdb-main-R-1082`'s defect exactly, in the one place I had not looked.
+    """
+    import contextlib          # local, matching the two other panel-driving tests in this file
+
+    today = _today()
+
+    frame = pd.DataFrame([
+        # Strong: most yards gained AND fewest allowed -> must land top-right.
+        {"team_display": "Strong", "team_slug": "strong", "team_id": 1, "conference": "SEC",
+         "week": 9, "games_counted": 4, "total_yards_for_per_game": 600.0,
+         "total_yards_allowed_per_game": 100.0, "color_on_light": "#111111",
+         "color_on_dark": "#eeeeee", "logo_url": "l.png", "as_of_ts": None},
+        # Weak: the mirror image -> bottom-left.
+        {"team_display": "Weak", "team_slug": "weak", "team_id": 2, "conference": "SEC",
+         "week": 9, "games_counted": 4, "total_yards_for_per_game": 200.0,
+         "total_yards_allowed_per_game": 500.0, "color_on_light": "#222222",
+         "color_on_dark": "#dddddd", "logo_url": "w.png", "as_of_ts": None},
+    ])
+
+    written = []
+
+    class _Quiet:
+        def markdown(self, body, *a, **k):
+            written.append(("markdown", str(body)))
+
+        def caption(self, body, *a, **k):
+            written.append(("caption", str(body)))
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(today, "st", _Quiet())
+    monkeypatch.setattr(today.states, "section", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(today.table, "as_of_caption", lambda *a, **k: None)
+    monkeypatch.setattr(today, "_yardage_profile", lambda scope: frame)
+
+    today._profile(_Scope(), 25)
+
+    svg = next(body for kind, body in written if kind == "markdown" and "cfdb-sc-pt" in body)
+    marks = dict((t, (float(cx), float(cy))) for cx, cy, t in re.findall(
+        r"<circle class='cfdb-sc-pt' cx='([\d.]+)' cy='([\d.]+)'[^>]*>"
+        r"<title>([A-Za-z]+)", svg))
+    assert set(marks) == {"Strong", "Weak"}, marks
+
+    # The whole feature, asserted through the real panel: gained on Y, allowed on X.
+    assert marks["Strong"][1] < marks["Weak"][1], (
+        "the team gaining 600 must draw ABOVE the one gaining 200 — Y is yards GAINED")
+    assert marks["Strong"][0] > marks["Weak"][0], (
+        "the team allowing 100 must draw RIGHT of the one allowing 500 — X is yards ALLOWED")
+
+    # And the hover reads gained first, in the order Marc named the axes.
+    assert "Strong — 600.0 gained, 100.0 allowed" in svg, svg[:400]
+
+    # 🚨 The prose caption is the third place the orientation is stated, and it was wrong.
+    note = next(body for kind, body in written if kind == "caption")
+    assert "runs downward" not in note, (
+        "this sentence described the chart before A176's swap")
+    assert "yards GAINED, so higher is more" in note, note
+    assert "further right is FEWER yards" in note, note
+
+
+def test_nothing_in_the_stylesheet_fills_the_scatter_marks_back_in():
+    """🚨 A176 (cfdb-main-R-1764). MY OWN TEST ASSERTED `fill='none'` IN THE SVG SOURCE AND
+    PASSED, AND THE BROWSER DREW EVERY MARK FILLED.
+
+    📊 `theme.CSS` carried `.cfdb-sc-pt { fill:currentColor; fill-opacity:.45; }` — and **a CSS
+    declaration beats a presentation attribute**, so the `fill='none'` on the mark lost to a
+    stylesheet written when the marks WERE filled. Only the raster showed it; that is R-855 and
+    B109's finding, third instance.
+
+    ⚠️ SO THE GUARD IS ON THE STYLESHEET, NOT ON THE MARK. Asserting the attribute again would
+    re-assert the thing that was already true. **The two have to agree, and the one that can
+    silently win is the one to pin.**
+    """
+    _today()                     # puts `site/` on sys.path, as every test in this file does
+    from lib import theme
+
+    rules = [ln.strip() for ln in theme.CSS.splitlines() if ".cfdb-sc-pt" in ln]
+    assert rules, "the scatter mark rule has gone — find out why before deleting this test"
+    body = " ".join(rules)
+    assert "fill:none" in body.replace(" ", ""), (
+        f"the stylesheet must not fill a mark Marc asked to be unfilled: {body}")
+    assert "fill:currentcolor" not in body.replace(" ", "").lower(), (
+        f"this is the exact declaration that beat the mark's own fill='none': {body}")
