@@ -1928,8 +1928,20 @@ SHIPPED = ("Schedule", "Scores", "Standings", "Team form", "Team stats",
            "Player stats", "Data dictionary")
 SHEETS = [s for s in _ALL_SHEETS if s.name in SHIPPED]
 PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name not in SHIPPED]
-PENDING_REASON = ("not converted to the new layout yet; it ships in a later pass rather "
-                  "than mixing two header layouts in one file")
+# 🚨 A174 (cfdb-main-R-1436). THE OLD SENTENCE WAS DISPROVED BY A173 AND LEFT IN THE FILE —
+# where `_write_index` prints it into the workbook Marc downloads, for all three sheets.
+#
+# It read: *"not converted to the new layout yet; it ships in a later pass rather than mixing
+# two header layouts in one file"*. 📊 A173 shipped Standings in memory and read the file back:
+# header row 3, a real Excel Table, identical in structure to Schedule and Scores. **R-181 made
+# the header address computed IN THE WRITER, so there has been nothing per-sheet to convert
+# since R-182.** The conversion was done; the sentence outlived it.
+#
+# ⚠️ AND AN EXPLANATION THAT IS NO LONGER TRUE IS `cfdb-main-R-1654`'s DEFECT ON A NEW SURFACE
+# — the Roster tab saying "not built yet" while the roster rendered one tab over. **This one
+# ships in a file that leaves the building.**
+PENDING_REASON = ("built and tested, and not requested — these sheets ship the day they are "
+                  "asked for rather than by default")
 
 # Which page each sheet came from, for the Index's link back. Held here rather than on Sheet
 # because it is a fact about the SITE, and the pending sheets need it the day they ship.

@@ -1453,3 +1453,76 @@ def test_the_page_query_carries_the_named_cap_and_no_literal_limit():
     # a few hundred rows per season, and it is not what a reader scrolls.
     unexpected = [x for x in limits if x.isdigit() and x not in ("1", "4000")]
     assert not unexpected, f"unexplained numeric limit(s): {unexpected}"
+
+
+def test_the_legend_reads_the_thresholds_from_the_row_and_the_query_selects_them():
+    """🚨 A174 (cfdb-main-R-1704). SCHEDULE'S UPSET LABELS WERE CORRECT BY COINCIDENCE.
+
+    📊 A173 measured that `upset_margin_big` and `upset_margin_blowout` appeared in **no query
+    on the site**, so `metrics.from_frame` returned `DEFAULTS` on every page — and the shipped
+    defaults `(7, 14)` happen to equal the published values. **R-141 is the row where exactly
+    these labels were wrong by one for months**, and R-224's whole argument is that the
+    thresholds are DATA.
+
+    🚨 TWO HALVES, AND EITHER ALONE PROVES NOTHING HERE:
+
+    1. **The render**, on a frame whose thresholds are NOT the defaults — 10 and 21. With the
+       defaults the labels would be identical whether the frame was read or ignored, which is
+       exactly how this survived (R-843: the pinned value must MOVE).
+    2. **The SELECT**, because a synthetic frame always carries the columns. B119's lesson:
+       the harness returns whatever the fixture holds *whatever the select list says*, so a
+       behavioural test passes on a page that never asked for the column.
+    """
+    frame = pd.DataFrame([{"upset_margin_big": 10, "upset_margin_blowout": 21}])
+    groups = dict(schedule._legend_groups(frame))
+    labels = [entry[-1] for entry in groups["Against the line"]]
+    assert "Upset by 10 or fewer" in labels, labels
+    assert "Upset by 11–21" in labels, labels
+    assert "Upset by 22+" in labels, labels
+
+    # The defaults must NOT be what it rendered — that is the whole point of 10 and 21.
+    assert "Upset by 8–14" not in labels, (
+        "the frame is being ignored and metrics.from_frame fell back to DEFAULTS")
+
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "schedule.py").read_text()
+    for column in ("upset_margin_big", "upset_margin_blowout"):
+        assert re.search(rf"\b{column}\b", source), (
+            f"{column} is not selected, so production frames carry the defaults and the "
+            f"labels are right only while the published values happen to match them")
+
+
+def test_both_legends_list_the_same_three_absences_in_the_same_order():
+    """🚨 A174 (cfdb-main-R-1438). Marc's word was *consistent*, and the two `Misc` blocks
+    listed the same three absences in different orders.
+
+    📊 Schedule had line · total · favorite; Today's `glyphs.strip_subsections` had
+    line · favorite · total. ⚠️ **A173 had a good reason** — it preserved `strip_entries`'
+    flat order byte-for-byte so this file's 131 tests could not move — **and it named its
+    other deliberate difference (`MOVE_GLYPH`) and not this one.**
+
+    ✅ Schedule moved, because it is the cheaper side: two rows, one page.
+    ⚠️ `MOVE_GLYPH` stays Schedule-only and is asserted here so the pair cannot quietly
+    converge on the thing Today genuinely cannot draw.
+    """
+    from lib import glyphs
+
+    ours = [heading for heading, _ in glyphs.strip_subsections()]
+    theirs = [heading for heading, _ in schedule.LEGEND_SUBSECTIONS["Against the line"]]
+    assert ours == theirs, f"subsection headings differ: {ours} vs {theirs}"
+
+    today_misc = [label for label, rows in glyphs.strip_subsections() if label == "Misc"]
+    assert today_misc, "Misc must exist on Today's side"
+    today_rows = [label for heading, rows in glyphs.strip_subsections() if heading == "Misc"
+                  for _swatch, label in rows]
+    schedule_rows = [entry[-1] if isinstance(entry[-1], str) else entry
+                     for entry in schedule.LEGEND_SUBSECTIONS["Against the line"][-1][1]]
+
+    # Today's three, in order — and Schedule's first three keys must describe the same three
+    # in the same order. Schedule's fourth is MOVE_GLYPH, which Today cannot draw.
+    assert today_rows == ["No closing line held", "No line, so no favorite",
+                          "No closing total held"], today_rows
+    shapes = [entry[1] for entry in schedule.LEGEND_SUBSECTIONS["Against the line"][-1][1]
+              if entry[0] == "shape"]
+    assert shapes == ["cover", "upset", "over"], (
+        f"Schedule's Misc order {shapes} no longer matches Today's line/favorite/total")
+    assert len(schedule_rows) == 4, "Schedule keeps MOVE_GLYPH; Today cannot draw it"
