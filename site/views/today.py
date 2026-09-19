@@ -494,6 +494,7 @@ def _yardage_profile(scope) -> pd.DataFrame:
         select team_id, team_display, team_slug, conference, week,
                games_counted,
                total_yards_for_per_game, total_yards_allowed_per_game,
+               color_on_light, color_on_dark, logo_url,
                as_of_ts
         from srv_team_week
         where season = :season and season_type = :season_type
@@ -1757,15 +1758,20 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380
     """The scatter itself. Inline SVG in currentColor, following lib/distribution.py's
     precedent — one series, one hue, no legend, hairline axes (the chart standard's §7).
 
-    ⚠️ THE DEFENSE AXIS RUNS THE OTHER WAY, AND THAT IS THE WHOLE DESIGN DECISION.
-    Low yards allowed is GOOD. Plotted the obvious way — value increasing upward, as a reader
-    trained on cartesian axes expects — the best defenses land at the bottom and the chart
-    reads backwards to anyone scanning for "up and right is good", which is how everyone scans
-    a scatter before reading a word of it.
-    So yards allowed increases DOWNWARD: the strongest defenses are at the TOP, the strongest
-    offenses at the RIGHT, and the top-right corner is unambiguously the good one. In SVG this
-    needs no flip — y already grows downward — which is precisely why it is easy to ship the
-    wrong orientation without noticing you chose one.
+    🚨 A176 (cfdb-main-R-1761). MARC TRANSPOSED IT, AND THE DIRECTION LOGIC MOVED WITH THE AXIS
+    RATHER THAN BEING REWRITTEN.
+
+    > **MARC, v09:** *"Switch Y and X axis, so that Y is Yards gained (top is better), and X is
+    > yards allowed (right is smaller and better)."*
+
+    ⚠️ BOTH AXES NOW RUN AGAINST THE NAIVE MAPPING, and that is the whole design decision.
+    **Y is yards gained and MORE is better, so it must increase UPWARD** — which in SVG means
+    inverting, because y grows downward. **X is yards allowed and FEWER is better, so it must
+    decrease RIGHTWARD** — also an inversion. The pair is what keeps "up and to the right is
+    stronger" true, which is how everyone scans a scatter before reading a word of it.
+
+    ⚠️ THE CAPTIONS MOVED WITH THEM. A caption left on the old axis is `cfdb-main-R-1082`'s
+    defect, and it cost a round.
 
     An axis label alone would not carry this, so the direction is stated three ways: arrows on
     both axis titles, the words "better" on each, and a corner marker. No colour scale, no
@@ -1777,11 +1783,14 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380
     y0, y1 = y_dom
 
     def sx(v):
-        return pad_l + (float(v) - x0) / (x1 - x0) * pw
+        # A176: X is yards ALLOWED and right is SMALLER, so x DECREASES rightward.
+        return pad_l + (x1 - float(v)) / (x1 - x0) * pw
 
     def sy(v):
-        # NOT flipped: small "allowed" -> small y -> top of the plot. See the docstring.
-        return pad_t + (float(v) - y0) / (y1 - y0) * ph
+        # A176: Y is yards GAINED and top is MORE, so y INCREASES upward — an inversion,
+        # because SVG's y grows downward. See the docstring: both axes now run against the
+        # naive mapping, and that pair is what keeps "up and to the right is stronger" true.
+        return pad_t + (y1 - float(v)) / (y1 - y0) * ph
 
     def esc(t):
         return (str(t).replace("&", "&amp;").replace("<", "&lt;")
@@ -1814,21 +1823,41 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380
         parts.append(f"<text class='cfdb-sc-tick' x='{pad_l - 8}' y='{gy + 3:.1f}' "
                      f"text-anchor='end'>{v:.0f}</text>")
 
+    # 🚨 A176. UNFILLED CIRCLES IN THE TEAM'S OWN COLOUR — Marc: *"Make these unfilled circles.
+    # Color by Team color"*. The colour arrives COMPOSED from the caller as a `light-dark()`
+    # string (`identity.accent_color`), so this function looks nothing up and the browser
+    # resolves the theme (cfdb-main-R-1601).
+    #
+    # 📊 THE COLUMNS WERE CHECKED BEFORE THIS WAS BUILT: `srv_team_week` publishes
+    # `color_on_light`, `color_on_dark` and `logo_url` at 0.00% null over the 1,932 team-weeks
+    # this panel can draw — and publishes **no rank, no record and no percentile at all**.
+    # Three of the six facts his hover names are not in the relation, and a join is what G-2
+    # forbids. **Named as a gap in A176's report rather than worked around.**
+    #
+    # ⚠️ AND THE COLOURS COLLIDE: 138 teams resolve to 109 distinct light colours and 96 dark,
+    # so roughly a fifth of marks share a hue with another. **Position is the encoding here and
+    # colour is identification on top of it** — the same ruling A171 made for the win-
+    # probability fill.
     for r in rows:
         cx, cy = sx(r["x"]), sy(r["y"])
+        colour = r.get("accent") or "currentColor"
         parts.append(
-            f"<circle class='cfdb-sc-pt' cx='{cx:.1f}' cy='{cy:.1f}' r='3.5'>"
-            f"<title>{esc(r['team'])} — {r['x']:.1f} gained, {r['y']:.1f} allowed "
+            f"<circle class='cfdb-sc-pt' cx='{cx:.1f}' cy='{cy:.1f}' r='4' "
+            f"fill='none' stroke='{colour}' stroke-width='1.4'>"
+            f"<title>{esc(r['team'])} — {r['y']:.1f} gained, {r['x']:.1f} allowed "
             f"per game over {int(r['games'])} game(s)</title></circle>")
 
     # The good corner, named. A reader scans the shape first, so this is a mark and not prose.
     parts.append(f"<text class='cfdb-sc-corner' x='{pad_l + pw - 2}' y='{pad_t + 12}' "
                  f"text-anchor='end'>better \u2197</text>")
+    # A176: the captions moved WITH their axes. X is now the defence and reads right-is-fewer;
+    # Y is now the offence and reads up-is-more.
     parts.append(f"<text class='cfdb-sc-axis' x='{pad_l + pw / 2:.0f}' y='{height - 8}' "
-                 f"text-anchor='middle'>Yards gained per game \u2192 better</text>")
+                 f"text-anchor='middle'>"
+                 f"fewer yards allowed per game \u2192 better</text>")
     parts.append(f"<text class='cfdb-sc-axis' transform='rotate(-90 12 {pad_t + ph / 2:.0f})' "
                  f"x='12' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>"
-                 f"\u2191 better \u2014 fewer yards allowed per game</text>")
+                 f"\u2191 better \u2014 more yards gained per game</text>")
 
     return (f"<div class='cfdb-scatter'><svg viewBox='0 0 {width} {height}' "
             f"role='img' aria-label='Yards gained per game against yards allowed per game; "
@@ -1886,8 +1915,13 @@ def _profile(scope, depth: int) -> None:
                 f"team carries INTO the week.")
             return
 
-        xs = playable["total_yards_for_per_game"].astype(float)
-        ys = playable["total_yards_allowed_per_game"].astype(float)
+        # 🚨 A176 (cfdb-main-R-1761). X AND Y SWAPPED AT THE SOURCE, not inside the drawing.
+        # > **MARC, v09:** *"Switch Y and X axis, so that Y is Yards gained (top is better),
+        # > and X is yards allowed (right is smaller and better)."*
+        # The scale functions carry the DIRECTION; this carries which measure is which axis,
+        # and keeping the two separate is what let the swap be a two-line change.
+        xs = playable["total_yards_allowed_per_game"].astype(float)
+        ys = playable["total_yards_for_per_game"].astype(float)
 
         # Domain rounded OUT to a whole tick, per the chart standard §0.2, so the bounds ARE
         # ticks and every render of this chart lands on the same round numbers.
@@ -1896,9 +1930,16 @@ def _profile(scope, depth: int) -> None:
             hi = math.ceil(series.max() / step) * step
             return (lo, hi if hi > lo else lo + step), step
 
-        rows = [{"team": t, "x": x, "y": y, "games": g}
-                for t, x, y, g in zip(playable["team_display"], xs, ys,
-                                      playable["games_counted"])]
+        # 🚨 THE COLOUR IS COMPOSED HERE, NOT IN THE CHART (cfdb-main-R-1601). `_scatter_svg`
+        # holds no team colours and looks none up; it receives a finished `light-dark(...)`
+        # string the BROWSER resolves, so a mid-session theme flip is correct with no Python
+        # in the loop. 📊 `color_on_light`/`color_on_dark` are 0.00% null on this population.
+        rows = [{"team": t, "x": x, "y": y, "games": g,
+                 "accent": identity.accent_color(
+                     {"color_on_light": cl, "color_on_dark": cd})}
+                for t, x, y, g, cl, cd in zip(
+                    playable["team_display"], xs, ys, playable["games_counted"],
+                    playable["color_on_light"], playable["color_on_dark"])]
 
         x_dom, x_step = domain(xs)
         y_dom, y_step = domain(ys)
@@ -1907,11 +1948,19 @@ def _profile(scope, depth: int) -> None:
 
         # ⚠️ SAY WHAT WAS DROPPED AND WHY. A silently shorter chart is the same defect as a
         # silently shorter list — the reader cannot tell 130 teams from 130 of 136.
+        # 🚨 A176. THIS PROSE DESCRIBED THE OLD ORIENTATION AND HAD TO MOVE WITH THE AXES.
+        # It read *"the vertical axis runs downward so fewer yards allowed is higher"* — true of
+        # the chart before the swap and false of the one below it. ⚠️ `cfdb-main-R-1082`'s defect
+        # is a caption left on the axis it used to describe, and the SVG's own two captions are
+        # not the only ones on this panel: **this `st.caption` is a third, and my first pass
+        # tested the two inside the SVG and missed it.** A test now drives the real `_profile`
+        # and reads this string (cfdb-main-R-1763).
         note = (f"{len(playable)} teams. Each point is one team as it stood ENTERING "
                 f"{scope.describe()} — every figure is over completed games in earlier weeks, "
-                f"never the selected week's own game. Up and to the right is stronger on "
-                f"both sides: "
-                f"the vertical axis runs downward so fewer yards allowed is higher.")
+                f"never the selected week's own game. Up and to the right is stronger on both "
+                f"sides: the vertical axis is yards GAINED, so higher is more, and the "
+                f"horizontal axis runs right-to-left, so further right is FEWER yards "
+                f"allowed.")
         if dropped:
             note += (f" {dropped} teams are not plotted because they had no completed game "
                      f"before the selected week.")
@@ -2167,22 +2216,52 @@ _BUMP_CHART_WIDTH = 820
 # drew (A141) and a chart element cannot. **At a shared rank axis the row order IS rank**, so the
 # Rank, Team and delta sort links were already saying what the axis says — but **sorting by
 # POINTS is genuinely gone**, and that is the one a reader might have used.
-# 🚨 A164 (cfdb-main-R-1144). THE RIGHT-ANGLE LOOK MARC ASKED FOR, AND WHY THIS ONE OF THREE.
-# > *"Can we switch to a bump chart look where the changes to the lines are right angles instead
-# > of diagonal lines."*
+# 🚨 A176 (cfdb-main-R-1760). MARC REVERSED HIS OWN v04 INSTRUCTION, AND THE MEASUREMENT SAYS
+# HE IS RIGHT — FOR A REASON NEITHER HE NOR THE PROMPT NAMED.
 #
-# Vega-Lite offers three, and they put the vertical in three different places:
+# > **v04:** *"Can we switch to a bump chart look where the changes to the lines are right
+# > angles instead of diagonal lines."*
+# > **v09:** *"Think we need to go to diagonal/straight lines instead of right angles b/c I
+# > can't see what's going on with the overlaps."*
+#
+# 🚨 HIS STATED CAUSE IS NOT THE CAUSE, AND THAT MATTERED — the cure is the same either way, but
+# only because the measurement went looking. A176 asked the three questions before touching
+# this constant (cfdb-main-R-1249's rule), over AP Top 25, 2025 regular, 48 teams × 16 weeks:
+#
+#     teams sharing a rank with another (a poll tie)     4 team-weeks of 400   1.0%
+#     drawn segments EXACTLY coincident with another     0 of 335              0.0%
+#
+# **There are no overlapping lines. Not one.** So "I can't see what's going on with the
+# overlaps" cannot mean two teams drawn on top of each other — and a round that had flipped
+# this constant to fix THAT would have been right by accident.
+#
+# 📊 WHAT IT DOES MEAN IS CROSSINGS, AND `step-after` MANUFACTURES THEM:
+#
+#     step-after   590 segments   868 crossings   1.47 per segment
+#     linear       335 segments   389 crossings   1.16 per segment
+#
+# ⚠️ **A step splits every rank change into TWO segments — a horizontal hold and a vertical
+# turn — and each vertical crosses every horizontal run between the two ranks.** A team falling
+# from 5th to 20th draws a line straight through fifteen other teams' weeks. **The diagonal
+# crosses 55% less ink and halves the segment count.**
+#
+# ⚠️ AND A164's ARGUMENT DOES NOT DIE QUIETLY; IT IS ANSWERED RATHER THAN DELETED.
+# It rejected `step` and `step-before` because they *"draw a team at a rank it did not hold"* —
+# `step-before` for a whole week, `step` for half of one. 🚨 **A DIAGONAL DOES THE SAME THING
+# BETWEEN TICKS**, and that is a real cost, not a technicality: at week 6.5 a falling team is
+# drawn at a rank no poll ever gave it.
+#
+# ✅ **THE TRADE IS MARC'S AND HE HAS MADE IT TWICE OVER.** The untruth is confined to the space
+# BETWEEN two ticks, where no poll exists to contradict it, and the ticks themselves are still
+# exact. What he gets back is a chart he can follow. **A164 was right about what the old
+# constant meant and this is not a reversal of its reasoning — it is the same reasoning applied
+# to a cost A164 never measured.**
 #
 #     step         the vertical falls at the MIDPOINT between two weeks — on no tick at all
 #     step-before  the vertical falls at the EARLIER week, so the new rank is drawn a week EARLY
 #     step-after   the line HOLDS the rank across its own week and turns at the NEXT week's tick
-#
-# ✅ **`step-after` IS THE ONLY ONE THAT MATCHES WHAT A POLL IS.** A rank is announced FOR a week
-# and held through it, so the horizontal segment belongs over the week that rank was held and the
-# turn belongs on the tick where the new rank was published. ⚠️ **The other two draw a team at a
-# rank it did not hold** — `step-before` for a whole week, `step` for half of one — which is the
-# same class of quiet untruth the null grid below exists to prevent.
-_BUMP_INTERPOLATE = "step-after"
+#     linear       one diagonal per change — exact at every tick, interpolated between them
+_BUMP_INTERPOLATE = "linear"
 _BUMP_TABLE_WIDTH = 250
 _BUMP_ROW_FONT = 11
 

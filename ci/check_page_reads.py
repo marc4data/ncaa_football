@@ -69,6 +69,11 @@ PROVIDED_BY_THE_PAGE = {
     "rows_in_scope": "the same — `count(*) over ()` in the Scores sheet.",
     "won": "derived in scores.py from `result`; never selected, and workbook.py says so.",
     "team_rank": "assembled by the page from the rank columns rather than read from one.",
+    "accent": "A176: the scatter's mark colour, COMPOSED by `_profile` from the published "
+              "`color_on_light`/`color_on_dark` pair through `identity.accent_color`. It is "
+              "a finished `light-dark(...)` CSS string the browser resolves, so it cannot be "
+              "a column — no relation publishes one, and the chart deliberately looks no "
+              "colour up (cfdb-main-R-1601).",
 }
 
 

@@ -726,8 +726,9 @@ def page_html(body: str, theme: str = "light", padding: str = "1rem 3rem") -> st
             f"<body class='cfdb-app'><div class='block-container'>{body}</div></body></html>")
 
 
-def save_theme_pair(body: str, out_dir, name: str, viewport=None, padding: str = "1rem 3rem",
-                    clip=None, full_page: bool = True) -> dict:
+def save_theme_pair(body, out_dir, name: str, viewport=None, padding: str = "1rem 3rem",
+                    clip=None, full_page: bool = True, wait_ms: int = 350,
+                    require: str = None) -> dict:
     """Rasterise one body in BOTH themes, and REFUSE to return a pair that is not one.
 
     🚨 A173 (cfdb-main-R-1430). THIS EXISTS BECAUSE A171 AND A172 EACH SHIPPED A `_dark.png`
@@ -759,10 +760,28 @@ def save_theme_pair(body: str, out_dir, name: str, viewport=None, padding: str =
     were dark. **The pair must differ AND the dark one must actually be dark** — the property,
     not the difference.
 
+    🚨 AND A THIRD ASSERTION, ADDED BY A176 AFTER THIS FUNCTION PASSED A BLANK PICTURE.
+    Candidate E of the poll set rendered an EMPTY chart — vega-embed rejected the spec with
+    `Duplicate signal name` — and **both existing assertions were satisfied**: the page ground
+    was right in each theme, and the two files differed because the heading text is a different
+    colour in dark. 📊 The delivered `_light.png` was a title on white. **The pair was a pair;
+    it was a pair of nothing.**
+
+    ⚠️ `require` IS A CSS SELECTOR THAT MUST MATCH IN BOTH THEMES BEFORE THE SHOT — pass
+    `require="#c svg path"` for a Vega body, or any selector naming the thing the render exists
+    to show. It defaults to None, so no existing caller changes (§3 rule 3.1), and it is the
+    only one of the three assertions that can see an empty CONTENT rather than an empty PAGE.
+
     Returns {"light": path, "dark": path}.
     """
     from playwright.sync_api import sync_playwright
     from PIL import Image
+
+    # A176 (cfdb-main-R-1801): a `Capture` renders through `body_html`, so headings are
+    # headings and `**bold**` is bold. A plain string is passed through, which is what every
+    # caller that assembles its own comparison markup hands us.
+    if not isinstance(body, str):
+        body = body_html(body)
 
     out_dir = Path(out_dir)
     viewport = viewport or {"width": 1200, "height": 900}
@@ -773,7 +792,18 @@ def save_theme_pair(body: str, out_dir, name: str, viewport=None, padding: str =
             page = browser.new_page(viewport=viewport, color_scheme=theme)
             page.set_content(page_html(body, theme=theme, padding=padding),
                              wait_until="load")
-            page.wait_for_timeout(350)
+            # A176: `wait_ms` because a VEGA body fetches vega/vega-lite/vega-embed from a
+            # CDN and then renders — 350ms screenshots an empty div. ⚠️ It ships with the
+            # old value as its default, so no existing caller changes (§3 rule 3.1).
+            page.wait_for_timeout(wait_ms)
+            if require is not None:
+                found = page.eval_on_selector_all(require, "els => els.length")
+                if not found:
+                    browser.close()
+                    raise AssertionError(
+                        f"{name}: nothing matched {require!r} in the {theme} render — the "
+                        f"page loaded and drew NOTHING, which the ground and byte-difference "
+                        f"assertions below cannot see")
             path = out_dir / f"{name}_{theme}.png"
             shot = {"path": str(path)}
             if clip is not None:
@@ -802,3 +832,74 @@ def save_theme_pair(body: str, out_dir, name: str, viewport=None, padding: str =
         raise AssertionError(
             f"{name}: the file named _light has a dark background {light_corner}")
     return paths
+
+
+# ── A176 (cfdb-main-R-1801). THE HARNESS DID NOT RENDER STREAMLIT'S MARKDOWN ────────────────
+#
+# 📊 SEEN IN A175's OWN DELIVERED RENDER: the board headings read `**Team yardage**` — asterisks
+# drawn as characters — and `Leaderboards`, an `st.subheader`, rendered as plain body text.
+#
+# ✅ THE PAGE WAS FINE. `today.py` calls `st.markdown("**Team yardage**")` and Streamlit bolds
+# it; the harness captured the string and `page_html` wrapped it raw.
+#
+# 🚨 IT MATTERS BECAUSE §4.1.1 MAKES A RENDER ACCEPTANCE RATHER THAN DECORATION. It is the same
+# class B140 named about width — *"a header given the whole viewport is a picture of a layout
+# the site never shows"* — and that one cost a clipping defect (cfdb-wta-R-1288).
+#
+# ⚠️ WHAT THIS IS NOT: a CommonMark implementation. It converts what these pages actually emit
+# — headings by their `st.*` call, and inline bold / italic / code / links — and **passes any
+# chunk that already contains markup through untouched**, which is most of what this project
+# draws. ❌ Lists, tables, block quotes and nested emphasis are NOT converted; a page that
+# starts using them will render them literally and this comment is the warning.
+_INLINE_MARKDOWN = (
+    (re.compile(r"\*\*(.+?)\*\*", re.S), r"<strong>\1</strong>"),
+    (re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", re.S), r"<em>\1</em>"),
+    (re.compile(r"`([^`]+)`"), r"<code>\1</code>"),
+    (re.compile(r"\[([^\]]+)\]\(([^)]+)\)"), r"<a href='\2'>\1</a>"),
+)
+
+# Which `st.*` call becomes which element. Anything not named here is a paragraph.
+_BLOCK_FOR = {"title": "h1", "header": "h2", "subheader": "h3"}
+
+
+def _markdown_inline(text: str) -> str:
+    for pattern, replacement in _INLINE_MARKDOWN:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def body_html(captured) -> str:
+    """The captured render, as HTML that looks like the page rather than like its source.
+
+    🚨 TAKES A `Capture` — not a list of strings — BECAUSE THE `st.*` CALL IS THE ONLY THING
+    THAT KNOWS A SUBHEADER FROM A PARAGRAPH. `Capture.events` keeps `(kind, body)` pairs
+    (R-613) while still behaving as the list of strings every existing caller sees, which is
+    exactly why this could be added without touching any of them.
+
+    ⚠️ A CHUNK THAT ALREADY CARRIES MARKUP IS PASSED THROUGH UNTOUCHED. Every table, card, SVG
+    and chip on this site arrives as HTML from `table.render` or a view's own f-string, and
+    running an inline-emphasis pass over `<td>` content is how a `*` inside a team name becomes
+    an `<em>`. The test is the presence of a tag, not the absence of an asterisk.
+    """
+    events = getattr(captured, "events", None)
+    if events is None:                       # a plain list — no kinds to read, old behaviour
+        return "\n".join(str(x) for x in captured)
+
+    out = []
+    for kind, body in events:
+        text = str(body)
+        if "<" in text and ">" in text:      # already markup; do not touch it
+            out.append(text)
+            continue
+        tag = _BLOCK_FOR.get(kind)
+        if tag:
+            out.append(f"<{tag}>{_markdown_inline(text)}</{tag}>")
+        elif kind == "caption":
+            out.append(f"<div class='cfdb-render-caption' "
+                       f"style='font-size:.78rem;opacity:.65'>"
+                       f"{_markdown_inline(text)}</div>")
+        elif kind == "divider":
+            out.append("<hr style='border:0;border-top:1px solid var(--cfdb-edge)'>")
+        else:
+            out.append(f"<div>{_markdown_inline(text)}</div>")
+    return "\n".join(out)

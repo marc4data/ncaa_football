@@ -495,3 +495,54 @@ def test_the_serif_classifier_reads_the_opacity_rather_than_restating_it():
     assert render_harness.box_serifs(stale) == [], (
         "the classifier matched a weight the module no longer emits — it is pinning a literal")
     assert render_harness.box_serifs(stale, opacity=0.55) == [(10.0, 17.2, 38.8)]
+
+
+def test_the_harness_renders_headings_and_emphasis_rather_than_their_source():
+    """🚨 A176 (cfdb-main-R-1801). A175's OWN DELIVERED RENDER SHOWED `**Team yardage**` WITH
+    THE ASTERISKS DRAWN AS CHARACTERS, and `Leaderboards` — an `st.subheader` — as body text.
+
+    ✅ **The page was never wrong.** `today.py` calls `st.markdown("**Team yardage**")` and
+    Streamlit bolds it; the harness captured the string and `page_html` wrapped it raw.
+
+    🚨 IT MATTERS BECAUSE §4.1.1 MAKES A RENDER ACCEPTANCE RATHER THAN DECORATION, and Marc
+    judges the site by looking. Same class as B140's width finding — *"a header given the whole
+    viewport is a picture of a layout the site never shows"* — which cost a clipping defect.
+
+    ⚠️ THE `st.*` CALL IS THE ONLY THING THAT KNOWS A SUBHEADER FROM A PARAGRAPH, which is why
+    this reads `Capture.events` and not the list of strings.
+    """
+    with render_harness.streamlit_stubbed() as (st, captured, _charts):
+        st.subheader("Leaderboards")
+        st.markdown("**Team yardage**")
+        st.markdown("plain words")
+        st.caption("a caption")
+
+    html = render_harness.body_html(captured)
+    assert "<h3>Leaderboards</h3>" in html, html
+    assert "<strong>Team yardage</strong>" in html, html
+    assert "**" not in html, "the source markers must not survive into the picture"
+    assert "cfdb-render-caption" in html
+    assert "<div>plain words</div>" in html
+
+
+def test_markup_a_page_already_produced_is_passed_through_untouched():
+    """🚨 A176. EVERY TABLE, CARD, SVG AND CHIP ON THIS SITE ARRIVES AS HTML, and running an
+    inline-emphasis pass over `<td>` content is how a `*` inside a team name becomes an `<em>`.
+
+    ⚠️ The test is the PRESENCE OF A TAG, not the absence of an asterisk — a chunk that is
+    already markup is the page's own output and the harness has no business editing it.
+    """
+    with render_harness.streamlit_stubbed() as (st, captured, _charts):
+        st.markdown("<table><tr><td>A*B*C</td></tr></table>", unsafe_allow_html=True)
+
+    html = render_harness.body_html(captured)
+    assert "<td>A*B*C</td>" in html, "already-markup chunks must survive byte-for-byte"
+    assert "<em>" not in html
+
+
+def test_a_plain_list_still_renders_the_old_way():
+    """⚠️ A176: `body_html` takes a `Capture`, and a caller holding a plain list of strings —
+    a hand-assembled comparison page, which several rounds build — gets the old join. **The
+    addition cannot break a caller that never had kinds to read** (§3 rule 3.1)."""
+    assert render_harness.body_html(["<div>one</div>", "<div>two</div>"]) == (
+        "<div>one</div>\n<div>two</div>")
