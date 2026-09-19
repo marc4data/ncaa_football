@@ -1062,6 +1062,23 @@ def test_the_navigation_never_collapses_behind_a_disclosure():
     assert "st.navigation(nav, expanded=True)" in source
 
 
+def _draws_a_legend(node) -> bool:
+    """Does this subtree RENDER a legend — a call named for one, or legend markup?
+
+    A174: the classes are `glyphs`' own, so a page cannot write legend rows without one.
+    """
+    import ast
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Call):
+            name = getattr(inner.func, "attr", getattr(inner.func, "id", "")) or ""
+            if "legend" in name.lower():
+                return True
+        if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+            if "cfdb-legend" in inner.value:
+                return True
+    return False
+
+
 def test_nothing_writes_a_legend_into_the_sidebar():
     """The legend lived under the nav for one round and pushed Streamlit's nav past its
     collapse threshold, hiding eight pages behind "View 8 more". It is a popover now, which
@@ -1069,11 +1086,39 @@ def test_nothing_writes_a_legend_into_the_sidebar():
 
     `expanded=True` stays regardless: it is cheap, and it stops the next thing anyone adds to
     the sidebar from silently costing the nav again.
+
+    🚨 A174 (cfdb-main-R-1707). THIS WAS A SUBSTRING MATCH AND IT FIRED ON PROSE.
+
+    It flagged any view containing `st.sidebar` AND the word "legend" ANYWHERE in the file.
+    A174 added a docstring to `team.py`'s Schedule tab explaining **why that tab needs no
+    legend** — and `team.py` has a sidebar, so a comment about an ABSENCE tripped a guard
+    about a PRESENCE. ⚠️ §2.2.1c.1's rule in a test: *a grep locates, it does not count*, and
+    this codebase's prose about a symbol reliably outnumbers the code using it.
+
+    ✅ NOW STRUCTURAL: it asks whether a legend is RENDERED INSIDE a sidebar context, by AST.
+    A real regression — moving the popover back under the nav — still fails it; a sentence
+    about legends does not.
     """
+    import ast
+
     views = (Path(__file__).resolve().parents[1] / "site" / "views")
-    writers = sorted(p.stem for p in views.glob("*.py")
-                     if "st.sidebar" in p.read_text() and "legend" in p.read_text().lower())
-    assert writers == [], writers
+    writers = []
+    for path in sorted(views.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            # `with st.sidebar:` — anything drawn inside it lands in the sidebar.
+            if isinstance(node, ast.With):
+                targets = [i.context_expr for i in node.items]
+                in_sidebar = any(isinstance(t, ast.Attribute) and t.attr == "sidebar"
+                                 for t in targets)
+                if in_sidebar and _draws_a_legend(node):
+                    writers.append(path.stem)
+            # `st.sidebar.markdown(...)` and friends, called directly.
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Attribute)
+                    and node.func.value.attr == "sidebar" and _draws_a_legend(node)):
+                writers.append(path.stem)
+    assert sorted(set(writers)) == [], sorted(set(writers))
 
 
 def test_the_query_checker_actually_scans_the_pages():

@@ -25,7 +25,7 @@ def _player(position, **over):
     base = {"full_name": "A Player", "position": position, "jersey": 7,
             "class_year_display": "SR", "height_display": "6-3", "height_inches": 75,
             "weight_pounds": 210, "hometown_display": "Somewhere, XX",
-            "as_of_ts": pd.Timestamp("2026-09-18")}
+            "as_of_ts": pd.Timestamp("2026-09-18", tz="UTC")}
     base.update(over)
     return base
 
@@ -258,3 +258,200 @@ def test_the_roster_lives_on_the_roster_tab_and_nothing_claims_it_is_unbuilt():
             break
     else:
         raise AssertionError("no `with tabs[...]` block contains the _roster call")
+
+
+def test_no_dataset_label_names_a_view_no_panel_reads():
+    """🚨 A174 (cfdb-main-R-1706). A LABEL FOR A VIEW NOTHING READS IS A LABEL THAT CANNOT BE
+    WRONG, WHICH IS WHY NOTHING WOULD EVER CATCH IT.
+
+    📊 A174 replaced the Schedule tab's `srv_team_game_log` read with the two relations the
+    Scores and Schedule layouts actually use — and that left `DATASETS["srv_team_game_log"]`
+    labelling a view **no panel reads any more**. Measured: 1 orphan before, 0 after.
+
+    ⚠️ AND THIS IS THE *ONLY* REGISTRY CLAIM A174 MAKES, deliberately. The prompt asked for
+    `lib/datasets.py` to "name the pages that read" each relation; **its own docstring forbids
+    exactly that**: *"THIS IS A LABEL TABLE, NOT A PANEL-TO-VIEW TABLE, and the distinction is
+    load-bearing. Which view a panel reads is declared exactly once, in that panel's own
+    `states.section(...)` call."* 📊 And readership is many-to-many — `srv_game` is read by six
+    views — while `registry.PAGES` maps a page to ONE view. **A hand-maintained readership map
+    would be a second source for something derivable from the SQL, which is this project's
+    most expensive failure mode.** So this asserts the one thing that IS cheap and true.
+    """
+    from lib.datasets import DATASETS
+    read = set()
+    views = Path(__file__).resolve().parents[1] / "site" / "views"
+    for path in views.glob("*.py"):
+        read |= set(re.findall(r"from\s+(srv_\w+)", path.read_text()))
+    orphans = sorted(set(DATASETS) - read)
+    assert not orphans, (
+        f"these relations carry a reader-facing label and no panel reads them: {orphans}")
+    assert len(DATASETS) >= 12, "the label table emptied out; this test would pass on nothing"
+
+
+def _schedule_tab(played_rows, upcoming_rows, season=2026, slug="a-team"):
+    """The REAL `_schedule_tab`, with each section's query stubbed by relation.
+
+    ⚠️ STUBBED BY WHICH RELATION THE SQL NAMES, not by call order. The two sections read two
+    different views, and a stub that answered by position would pass if they were swapped —
+    which is the defect the section is built to avoid in the first place.
+    """
+    import importlib
+    import pandas as pd
+    with render_harness.streamlit_stubbed() as (_st, captured, _charts):
+        team = importlib.reload(importlib.import_module("views.team"))
+
+        def fake(sql, params=None):
+            if "from srv_game_team" in sql:
+                return pd.DataFrame(played_rows)
+            if "from srv_game" in sql:
+                return pd.DataFrame(upcoming_rows)
+            raise AssertionError(f"unexpected relation in: {sql[:80]}")
+
+        team.query = fake
+        team._schedule_tab(season, slug, "A Team")
+        render_harness.assert_no_error_card(captured, "the team schedule tab")
+        return "\n".join(captured)
+
+
+def _played(**over):
+    # ⚠️ TZ-AWARE ON PURPOSE. `fmt._local` REFUSES a naive timestamp — R-643: "guessing a zone
+    # for it is what rendered every kickoff four hours early" — and serving publishes instants.
+    # A fixture carrying a naive one holds a value production never produces, and the first
+    # draft of this file did exactly that and drew an error card.
+    base = {"week": 3, "game_id": 1, "game_date": pd.Timestamp("2026-09-12", tz="UTC"),
+            "opponent": "Rival", "opponent_team_slug": "rival", "opponent_logo_url": None,
+            "opponent_rank": None, "opponent_conference": "SEC", "is_home": True,
+            "is_neutral_site": False, "result": "W", "points_for": 31,
+            "points_against": 17, "margin": 14, "is_completed": True,
+            "as_of_ts": pd.Timestamp("2026-09-18", tz="UTC")}
+    base.update(over)
+    return base
+
+
+def _upcoming(**over):
+    base = {"week": 4, "game_id": 2, "start_date": pd.Timestamp("2026-09-19", tz="UTC"),
+            "venue": "A Stadium", "is_neutral_site": False,
+            "home_team_slug": "a-team", "away_team_slug": "other",
+            "home_team_display": "A Team", "away_team_display": "Other",
+            "home_rank": None, "away_rank": None, "spread_at_close": -6.5,
+            "spread_current": -7.0, "over_under": 52.5, "network_abbreviation": "ESPN",
+            "is_completed": False, "as_of_ts": pd.Timestamp("2026-09-18", tz="UTC")}
+    base.update(over)
+    return base
+
+
+def test_the_schedule_tab_draws_two_continuous_sections_in_marcs_order():
+    """🚨 A174 (cfdb-main-R-1705). > **MARC, v07:** *"Schedule tab — Layout from Scores/Schedule
+    page, but 2 continuous sections. Completed games use Score layout. Future games use
+    Schedule layout"*
+
+    **Completed above, upcoming below, one scroll — no tabs, no expander.**
+    """
+    html = _schedule_tab([_played()], [_upcoming()])
+    assert _sections(html) == ["Completed", "Upcoming"], _sections(html)
+    # The Scores layout's own words, from workbook.SCORES_COLUMNS — the one declaration the
+    # Scores page and its sheet both read (AC-15.8).
+    assert "Pts for" in html and "Pts against" in html
+    # The Schedule layout's market columns.
+    assert "Spread (home)" in html and "Total" in html
+
+
+def test_each_section_is_absent_rather_than_empty_and_the_three_shapes_are_real():
+    """🚨 AC-G.11. A heading over nothing says neither *"no games"* nor *"none yet"*.
+
+    📊 ALL THREE SHAPES EXIST IN LIVE SERVING and A174 rendered each:
+
+        Alabama 2026   2 played, 10 upcoming   -> BOTH sections
+        Alabama 2025  15 played,  0 upcoming   -> Completed only
+        Harvard 2026   0 played, 10 upcoming   -> Upcoming only
+    """
+    assert _sections(_schedule_tab([_played()], [])) == ["Completed"]
+    assert _sections(_schedule_tab([], [_upcoming()])) == ["Upcoming"]
+
+    both_empty = _schedule_tab([], [])
+    assert _sections(both_empty) == []
+    assert "No games recorded" in both_empty, both_empty[:200]
+
+
+def test_the_opponent_cell_reads_is_home_and_marks_a_neutral_site():
+    """AC-8.3 in one cell, and the neutral site is the case that earns it: *"vs"* rather than a
+    bare name is the difference between a bowl game and a home game read at a glance.
+
+    ⚠️ A174 REPLACED `_opponent`, which read the game log's `venue_role`. `srv_game_team`
+    spells the same fact `is_home`, and the old helper had no other caller — so it was deleted
+    rather than left as a second opponent cell nobody calls.
+    """
+    import importlib
+    with render_harness.streamlit_stubbed() as (_st, _cap, _charts):
+        team = importlib.reload(importlib.import_module("views.team"))
+        assert not hasattr(team, "_opponent"), (
+            "the game-log opponent helper still exists with no caller")
+        assert team._opponent_cell(_played(is_home=True)) == "Rival"
+        assert team._opponent_cell(_played(is_home=False)) == "@ Rival"
+        assert team._opponent_cell(_played(is_home=False, is_neutral_site=True)) == "vs Rival"
+        # And the upcoming side picks the OTHER team, from srv_game's two-sided row.
+        assert team._upcoming_opponent(_upcoming(), "a-team") == "Other"
+        assert team._upcoming_opponent(_upcoming(), "other") == "@ A Team"
+
+
+def test_each_section_reads_one_relation_and_the_tab_never_joins():
+    """🚨 G-2: one relation per query. **Two SECTIONS are two tables, not one table stitched
+    from two reads** — which is what the prompt forbade and what a join would be.
+
+    📊 THE GATING MEASUREMENT, on live published serving, is why there are two relations at
+    all: `srv_team_game_log` carries neither the market nor the opponent's slug, logo or rank;
+    `srv_game_team` is complete for the Scores layout; `srv_game` is complete for the Schedule
+    layout. **No single relation carries both layouts' inputs.**
+    """
+    import ast
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "team.py").read_text()
+    node = next(n for n in ast.walk(ast.parse(source))
+                if isinstance(n, ast.FunctionDef) and n.name == "_schedule_tab")
+    sqls = [a.value for c in ast.walk(node) if isinstance(c, ast.Call)
+            for a in c.args if isinstance(a, ast.Constant) and isinstance(a.value, str)
+            and "select" in a.value.lower()]
+    assert len(sqls) == 2, f"expected two queries, found {len(sqls)}"
+    for sql in sqls:
+        relations = set(re.findall(r"\bfrom\s+(srv_\w+)", sql))
+        assert len(relations) == 1, f"a query names {relations}; G-2 allows one"
+        assert " join " not in sql.lower(), "no joins on a page"
+        assert "limit" in sql.lower(), "AC-G.39: every query is bounded"
+    assert {r for sql in sqls for r in re.findall(r"\bfrom\s+(srv_\w+)", sql)} == {
+        "srv_game_team", "srv_game"}
+
+
+def test_one_sections_failure_does_not_cascade_into_the_other():
+    """🚨 A174 (cfdb-main-R-1708). AC-8.2's rule — *a blocked TAB does not block the PAGE* —
+    at SECTION grain, and §6.1's calibration step is what found it.
+
+    📊 `states.section` CATCHES a raise and draws a card, so when the completed query failed,
+    `played` was never bound — and the upcoming section's own `played.empty` check then raised
+    `UnboundLocalError` and drew a SECOND card. **One section's failure corrupted the other.**
+
+    ⚠️ **IT CANNOT APPEAR IN A HEALTHY RENDER**, which is why no ordinary test would have seen
+    it: the calibration broke the first query deliberately and the cascade showed up as 2 error
+    cards where 1 was expected. **A counter that is only ever checked at zero cannot tell you
+    it is counting the wrong thing.**
+    """
+    import importlib
+    import pandas as pd
+    # ⚠️ `allow_error_state=True` BECAUSE THIS TEST IS ABOUT THE CARD. It deliberately fails
+    # one section, so exactly one card is the PASSING state — the harness's strict default is
+    # right everywhere else and would refuse this render on sight.
+    with render_harness.streamlit_stubbed(allow_error_state=True) as (_st, captured, _charts):
+        team = importlib.reload(importlib.import_module("views.team"))
+
+        def fake(sql, params=None):
+            if "from srv_game_team" in sql:
+                raise RuntimeError("A174: the completed section's query fails")
+            return pd.DataFrame([_upcoming()])
+
+        team.query = fake
+        team._schedule_tab(2026, "a-team", "A Team")
+        html = "\n".join(captured)
+
+    assert html.count("cfdb-error") == 1, (
+        f"one failing section must draw ONE card; got {html.count('cfdb-error')} — the "
+        f"failure is cascading into the other section")
+    # And the healthy section still renders.
+    assert "Upcoming" in html, "the surviving section must still draw"

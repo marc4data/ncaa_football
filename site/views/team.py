@@ -113,7 +113,7 @@ def body(page) -> None:
     with tabs[0]:
         _overview(row)
     with tabs[1]:
-        _game_log(season, row.get('team_display'))
+        _schedule_tab(season, row.get("team_slug"), row.get("team_display"))
     with tabs[2]:
         _ratings(season, row.get("team_display"))
     with tabs[3]:
@@ -286,18 +286,6 @@ def _ratings(season, team_display) -> None:
             st.caption(str(note))
 
 
-def _opponent(row) -> str:
-    """AC-8.3 in one cell: "@ Ohio State" away, "Ohio State" home, "vs Ohio State" neutral.
-
-    A neutral site is neither, and marking it "vs" rather than leaving it bare is the
-    difference between a bowl game and a home game on a schedule read at a glance.
-    """
-    name = row.get("opponent") or fmt.EM_DASH
-    if row.get("is_neutral_site"):
-        return f"vs {name}"
-    return f"@ {name}" if str(row.get("venue_role") or "").lower() == "away" else name
-
-
 def _rating_rank(row) -> str:
     """CFBD's own rank where it publishes one, ours otherwise, and the difference is said
     rather than hidden — Elo and PPA publish no ranking, so those are cfdb's ordering."""
@@ -326,36 +314,166 @@ def _percentile(row) -> str:
     return f"{float(value) * 100:.0f}%{suffix}"
 
 
-def _game_log(season, team_display) -> None:
-    with states.section("srv_team_game_log"):
-        df = query("""
-            select week, game_id, game_date, opponent, opponent_conference, venue_role,
-                   is_neutral_site, result, points_for, points_against, margin,
+# 🚨 A174 (cfdb-main-R-1705). TWO SECTIONS, TWO RELATIONS, AND THE RELATIONS FOLLOW THE LAYOUTS
+# MARC NAMED RATHER THAN THE OTHER WAY ROUND.
+#
+# > **MARC, v07:** *"Schedule tab — Layout from Scores/Schedule page, but 2 continuous sections.
+# > Completed games use Score layout. Future games use Schedule layout"*
+#
+# 📊 THE GATING MEASUREMENT, against `information_schema` on live published serving, because the
+# tab this replaced read a THIRD relation and no layout's inputs are all in one place:
+#
+#     srv_team_game_log   42 cols   the score half only — NO upset/cover/over, NO spread,
+#                                   NO opponent slug, logo or rank, NO is_home
+#     srv_game_team      242 cols   the Scores page's own view. Score half + opponent identity
+#                                   + ranks + is_home. ✅ COMPLETE for the completed section
+#     srv_game           184 cols   the Schedule page's own view. Both sides' identity, every
+#                                   spread, `over_under`, venue. ✅ COMPLETE for the upcoming one
+#
+# ✅ SO EACH SECTION READS THE RELATION ITS OWN SOURCE PAGE READS. That is one relation per
+# query (G-2) and no join — two SECTIONS are two tables, not one table stitched from two reads.
+# ⚠️ AND `srv_team_game_log` IS NOT THE POORER CHOICE BY ACCIDENT: it is a BOX-SCORE log, and
+# its 42 columns are yardage and turnovers this tab does not show. Nothing here regresses; the
+# view keeps its own job.
+#
+# 🚨 THE TOTAL IS `over_under`, NOT `over_under_close`. The first sweep looked for the latter and
+# reported it missing from all three relations, which would have been a finding about a column
+# that does not exist under that name.
+
+def _schedule_tab(season, team_slug, team_display) -> None:
+    """Completed games above, upcoming below — one scroll, no tabs, no expander.
+
+    🚨 EACH SECTION'S ABSENCE IS ITS OWN (AC-G.11), AND THE THREE SHAPES ARE REAL:
+    a team before week 1 has **no completed section**, not an empty one; a team whose season
+    has ended has **no upcoming section**; a bowl-bound team in December has both. **A heading
+    over nothing says neither**, which is B103's ruling and A172's `Unlisted` rule one tab over.
+
+    ⚠️ NO MARK ON THIS TAB NEEDS A LEGEND, AND THAT IS A DECISION (R-178). The Scores layout
+    draws none — `srv_game_team` does not publish `upset_level`, `winner_covered_close` or
+    `over_met`, which is why the Scores PAGE has no result strip either. The upcoming section
+    shows `@`/`vs`, which is text a reader already knows rather than a glyph needing a key.
+    ✅ **So the Team page gains no legend**: the alternative was importing Today's, and a legend
+    explaining marks this tab cannot draw is the defect R-178 forbids in the other direction.
+    """
+    st.subheader("Schedule")
+
+    # 🚨 A174 (cfdb-main-R-1708). BOTH FRAMES ARE BOUND BEFORE EITHER SECTION RUNS, AND THE
+    # CALIBRATION RENDER IS WHAT FOUND WHY. `states.section` CATCHES a raise and draws a card,
+    # so when the completed query failed, `played` was never assigned — and the second
+    # section's own `played.empty` check then raised `UnboundLocalError` and drew a SECOND
+    # card. **One section's failure was corrupting the other**, which is AC-8.2's rule — *a
+    # blocked TAB does not block the PAGE* — at section grain.
+    #
+    # ⚠️ IT WOULD NEVER APPEAR IN A HEALTHY RENDER, which is exactly why §6.1's calibration
+    # step exists: it broke the first query on purpose and the cascade showed up as 2 error
+    # cards where 1 was expected.
+    played = upcoming = pd.DataFrame()
+
+    with states.section("srv_game_team"):
+        played = query("""
+            select week, game_id, game_date, opponent, opponent_team_slug,
+                   opponent_logo_url, opponent_rank, opponent_conference,
+                   is_home, is_neutral_site, result, points_for, points_against, margin,
                    is_completed, as_of_ts
-            from srv_team_game_log
-            where season = :season and team = :team_display
+            from srv_game_team
+            where season = :season and team_slug = :team_slug and is_completed
             order by game_date, week
             limit 60
-        """, {"season": season, "team_display": team_display})
-        states.render_or_state(
-            df, "srv_team_game_log",
-            "This team's games would be listed here.",
-            "No games recorded for this team-season.",
-            renderer=lambda d: table.render(d, [
+        """, {"season": season, "team_slug": team_slug})
+        if not played.empty:
+            st.markdown("<h4 class='cfdb-roster-unit'>Completed</h4>",
+                        unsafe_allow_html=True)
+            table.as_of_caption(played)
+            table.render(played, [
                 Col("week", "Wk", "num", dp=0),
                 Col("game_date", "Date", "date"),
-                # "@ Opponent" rather than an H/A column. The universal convention in every
-                # printed schedule, and it saves a column on a table that needed the width.
-                Col("opponent", "Opponent", render=_opponent),
+                # "@ Opponent" rather than an H/A column — the convention in every printed
+                # schedule, and it saves a column. ⚠️ A174 REPLACED `_opponent`, which read the
+                # game log's `venue_role`; `srv_game_team` spells the same fact `is_home`, and
+                # the old helper had no other caller so it went rather than becoming dead code.
+                Col("opponent", "Opponent", render=_opponent_cell),
                 Col("result", "Result"),
-                Col("points_for", "PF", "num", dp=0),
-                Col("points_against", "PA", "num", dp=0),
+                # The labels are the Scores page's own, taken from `workbook.SCORES_COLUMNS`
+                # — the ONE declaration that page and its sheet both read (AC-15.8). A third
+                # spelling of "Pts for" is exactly R-177's drift.
+                Col("points_for", "Pts for", "num", dp=0),
+                Col("points_against", "Pts against", "num", dp=0),
                 # AC-8.3: oriented to the SUBJECT team, not to home.
                 Col("margin", "Margin", "signed", dp=0),
             ], caption="",
-                # AC-8.7: game log rows click through to the Matchup.
                 link_builder=lambda r: params.link("matchup", game_id=r["game_id"],
-                                                   season=season)))
+                                                   season=season))
+
+    with states.section("srv_game"):
+        upcoming = query("""
+            select week, game_id, start_date, venue, is_neutral_site,
+                   home_team_slug, away_team_slug, home_team_display, away_team_display,
+                   home_rank, away_rank, spread_at_close, spread_current, over_under,
+                   network_abbreviation, is_completed, as_of_ts
+            from srv_game
+            where season = :season and not is_completed
+              and (home_team_slug = :team_slug or away_team_slug = :team_slug)
+            order by start_date, week
+            limit 60
+        """, {"season": season, "team_slug": team_slug})
+        if not upcoming.empty:
+            st.markdown("<h4 class='cfdb-roster-unit'>Upcoming</h4>",
+                        unsafe_allow_html=True)
+            table.as_of_caption(upcoming)
+            table.render(upcoming, [
+                Col("week", "Wk", "num", dp=0),
+                Col("start_date", "Date", "date"),
+                Col("home_team_slug", "Opponent",
+                    render=lambda r: _upcoming_opponent(r, team_slug)),
+                # The market, as the Schedule page words it. A spread is the HOME side's
+                # number on both pages; it is not re-oriented here, and the column says so
+                # rather than a reader having to know.
+                Col("spread_at_close", "Spread (home)", "signed", dp=1),
+                Col("over_under", "Total", "num", dp=1),
+                Col("network_abbreviation", "TV"),
+            ], caption="",
+                link_builder=lambda r: params.link("matchup", game_id=r["game_id"],
+                                                   season=season))
+
+        # 🚨 BOTH EMPTY IS THE ONLY STATE THAT NEEDS A CARD, and it is a different sentence
+        # from either section being absent. A team with games played and none left is not
+        # missing anything.
+        if played.empty and upcoming.empty:
+            states.empty(
+                "This team's schedule would be here.",
+                f"No games recorded for {team_display} in {season}.")
+
+
+def _opponent_cell(row) -> str:
+    """"@ Opponent" for a road game, "Opponent" at home, "vs Opponent" on a neutral field.
+
+    ⚠️ A174: the job the deleted `_opponent` did off the game log's `venue_role`, reading
+    `srv_game_team`'s `is_home` instead. Two helpers rather than one that guesses which column
+    it was handed — that indirection is what has beaten a guard twice in this project.
+    """
+    name = row.get("opponent")
+    if name is None or (isinstance(name, float) and pd.isna(name)):
+        return fmt.EM_DASH
+    if row.get("is_neutral_site"):
+        return f"vs {name}"
+    return str(name) if row.get("is_home") else f"@ {name}"
+
+
+def _upcoming_opponent(row, team_slug) -> str:
+    """The other side of a scheduled game, from `srv_game`'s two-sided row.
+
+    ⚠️ THIS IS A SELECTION, NOT A COMPUTATION. It picks one of two PUBLISHED columns using a
+    published key — the same shape the opponent cell has always had — rather than deriving a
+    quantity, so §4.2.1 is not engaged. **A team-perspective NUMBER would be a different
+    matter and is why `srv_game_team` exists**; this section shows no such number.
+    """
+    at_home = row.get("home_team_slug") == team_slug
+    name = row.get("away_team_display") if at_home else row.get("home_team_display")
+    if name is None or (isinstance(name, float) and pd.isna(name)):
+        return fmt.EM_DASH
+    if row.get("is_neutral_site"):
+        return f"vs {name}"
+    return str(name) if at_home else f"@ {name}"
 
 
 # Marc's column order, verbatim: "Number, Name, Position, Ht, Wt, Class, Hometown".

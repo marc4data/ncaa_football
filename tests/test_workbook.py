@@ -1203,7 +1203,10 @@ def test_the_index_names_the_six_that_are_not_here_rather_than_dropping_them(bui
     text = "\n".join(str(c.value) for r in book["Index"].iter_rows() for c in r)
     for sheet in workbook.PENDING_SHEETS:
         assert sheet.name in text, sheet.name
-    assert "not converted to the new layout yet" in text
+    # A174 (cfdb-main-R-1436): the old sentence was disproved by A173 and printed into the
+    # file Marc downloads. The Index still has to SAY why each absence is an absence — that is
+    # what this test is for — it just says something true now.
+    assert "not requested" in text and "built and tested" in text
 
 
 def test_nothing_in_the_file_is_a_fault_excel_would_refuse_to_open(built):

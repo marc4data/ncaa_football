@@ -192,6 +192,7 @@ def _rows(season: int, week, season_type: str, conference,
                total_at_close, total_at_close_basis,
                total_points, actual_margin,
                upset_level, winner_covered_close, over_met,
+               upset_margin_big, upset_margin_blowout,
                home_team_record_after_display, away_team_record_after_display,
                excitement_index,
                is_indoors, temperature_f, weather_condition_code, weather_condition,
@@ -597,9 +598,16 @@ LEGEND_SUBSECTIONS = {
         # `cover/nodata` and `upset/nodata` were already here. **An absence is not a result**, so
         # "no closing total held" does not belong under *Against Over/Under* beside Over and
         # Under — it belongs with the other two statements that cfdb held no line.
+        # 🚨 A174 (cfdb-main-R-1438). REORDERED TO MATCH `glyphs.strip_subsections`, WHICH IS
+        # TODAY'S. The two listed the same three absences in different orders — Schedule had
+        # line · total · favorite, Today had line · favorite · total — and Marc's word was
+        # *consistent*. ⚠️ A173 had a good reason (it preserved `strip_entries`' flat order
+        # byte-for-byte so these 131 tests could not move) and named its OTHER deliberate
+        # difference, `MOVE_GLYPH`, and not this one. **Either order is defensible; two is
+        # not.** Schedule's is the cheaper side to move: two rows, on this page only.
         ("Misc", [("shape", "cover", "nodata", ""),
-                  ("shape", "over", "nodata", ""),
                   ("shape", "upset", "nodata", ""),
+                  ("shape", "over", "nodata", ""),
                   ("glyph", "cfdb-legend-ch", MOVE_GLYPH)]),
     ],
 }

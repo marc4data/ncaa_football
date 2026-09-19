@@ -38,7 +38,6 @@ DATASETS = {
     # --- read by Today (A089) -----------------------------------------------------------
     "srv_game": "Game results and market lines",
     "srv_team_week": "Team form, by week",
-    "srv_team_game_log": "Team box scores",
     "srv_player_game_log": "Player box scores",
     "srv_rankings": "AP and Coaches polls",
     "srv_game_win_probability_play": "Win probability, play by play",
