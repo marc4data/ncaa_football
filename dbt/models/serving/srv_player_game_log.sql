@@ -123,6 +123,23 @@ select
     dt.team_slug,
     dt.team_display,
     dt.logo_source_url                                         as team_logo_url,
+    -- ── THE TEAM COLOUR (A177, cfdb-main-R-1767) ───────────────────────────────────────────
+    -- 🚨 SIX ROUNDS REFUSED THIS AND NONE OF THEM WAS WRONG. A166 asked for the player card's
+    -- team name in the team's colour, the page could not join to get it (G-2), and every round
+    -- since reported it as a published gap. **The model change is two lines off a join that
+    -- was already here for the logo** — `dim_team` has been in this query since A146.
+    --
+    -- ⚠️ THE NAMES ARE `srv_team_week`'s, DELIBERATELY. That relation publishes exactly this
+    -- pair at 0.00% null, and `identity.accent_color` reads `color_on_light`/`color_on_dark`
+    -- off a row by those names with an optional prefix. A third spelling for the same fact is
+    -- the drift §4.3 exists to prevent, so this is the second publisher of one vocabulary
+    -- rather than a new one.
+    --
+    -- ⚠️ ON-LIGHT / ON-DARK, NOT THE RAW BRAND COLOUR (R-855). Nearly a fifth of teams publish
+    -- #000000 as their on-light value; the contrast-safe pair is what a page can actually draw
+    -- against either ground, and the browser picks between them through `light-dark()`.
+    dt.color_on_light,
+    dt.color_on_dark,
     -- ⚠️ THE RANK IS THE GAME'S, NOT THE SEASON'S, and it comes from the same place
     -- `srv_game_team.team_rank` does — `fct_game`'s two rank columns, picked by side. A season
     -- rank would be a different fact wearing this name.

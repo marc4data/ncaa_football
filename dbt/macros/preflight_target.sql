@@ -57,6 +57,64 @@
       {% endif %}
     {% endif %}
 
+    {#
+      ── A177 (cfdb-main-R-1773): A LOCAL BUILD MUST NOT REACH PRODUCTION ──────────────────
+      A170 found this and nobody had scheduled the fix. The chain is ordinary and every link
+      is correct on its own: a round builds a model against the warehouse to verify it (the
+      charter calls that a read-and-build path); `dbt run` writes into the warehouse's OWN
+      `serving` schema; and the scheduled publish copies that schema to the SERVING DATABASE
+      the site reads, on its own cadence, WITHOUT ASKING WHETHER THE CODE IS MERGED.
+      `srv_rankings_compare` went live that way inside the hour, before any PR.
+
+      Nothing reconciles the publish against the deployed manifest -- verified by reading
+      `src/publish_marts.py` and all three publishing DAGs. The deploy's single-flight lock
+      does not cover it, because no deploy runs.
+
+      ⚠️ WHAT SEPARATES A LAPTOP FROM PRODUCTION IS THE HOST, NOT THE TARGET NAME, and that was
+      measured rather than assumed. Production runs `target: airflow` with
+      `host: {{ '{{ env_var(\'PG_HOST\') }}' }}` = `warehouse` (read from the scheduler's own
+      DBT_PROFILES_DIR). A laptop reaches the same database over an SSH local-forward, so its
+      host is loopback. **Keying this on loopback means it CANNOT fire in production**, which
+      matters more than the guard itself: this macro runs on every pipeline dbt invocation.
+
+      ⚠️ AND ONLY FOR COMMANDS THAT BUILD. `dbt test`, `compile`, `parse`, `docs` and `ls` read
+      or write nothing in `serving`, and a guard that blocked them would be routed around
+      within a day.
+
+      ✅ THE ESCAPE IS EXPLICIT AND NAMED: CFDB_ALLOW_LOCAL_SERVING=1. Deliberately awkward,
+      because the point is to make publishing-by-accident impossible while leaving
+      publishing-on-purpose one variable away.
+    #}
+    {#
+      ⚠️ `flags` AND `selected_resources` ARE dbt's, NOT JINJA's, and this macro is rendered in
+      a bare Jinja environment by tests/test_preflight_macro.py. Reaching for either
+      unguarded raises `'flags' is undefined` and takes the whole on-run-start with it — which
+      is how the existing tunnel test found this. Absent context means "not a build", which is
+      the safe reading in both places.
+    #}
+    {% set which = flags.WHICH if flags is defined else none %}
+    {% if target.name not in managed and host in loopback
+          and which in ('run', 'build', 'seed', 'snapshot') %}
+      {% set serving_selected = [] %}
+      {% for uid in (selected_resources if selected_resources is defined else []) %}
+        {% if uid.startswith('model.') and '.srv_' in uid %}
+          {% do serving_selected.append(uid.split('.')[-1]) %}
+        {% endif %}
+      {% endfor %}
+      {% if serving_selected and env_var('CFDB_ALLOW_LOCAL_SERVING', '0') != '1' %}
+        {% do exceptions.raise_compiler_error(
+          "cfdb preflight: REFUSING to build " ~ serving_selected | length ~ " serving model(s)"
+          ~ " from a local target over an SSH tunnel (" ~ host ~ ":" ~ port ~ ") -- "
+          ~ (serving_selected | sort | join(', ')) ~ ". THIS WOULD REACH PRODUCTION: dbt writes"
+          ~ " into the warehouse's serving schema and the SCHEDULED PUBLISH copies that schema"
+          ~ " to the live serving database on its own cadence, without asking whether the code"
+          ~ " is merged (cfdb-main-R-1327, found by A170). Build it through a PR and the deploy"
+          ~ " instead -- scripts/deploy_main.sh reconciles against the deployed manifest. To"
+          ~ " verify SQL without building, use `dbt compile` and run the compiled SELECT."
+          ~ " If you truly mean to publish from here, set CFDB_ALLOW_LOCAL_SERVING=1.") %}
+      {% endif %}
+    {% endif %}
+
     {% set via = 'ssh tunnel -> droplet warehouse' if (host in loopback) else 'direct' %}
     {% do log('cfdb | target=' ~ target.name ~ ' host=' ~ host ~ ':' ~ port
               ~ ' db=' ~ target.dbname ~ ' schema=' ~ target.schema
