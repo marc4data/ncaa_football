@@ -81,7 +81,17 @@ CSS = """
    no quadrant shading. */
 .cfdb-scatter { margin:.2rem 0 .1rem; }
 .cfdb-scatter svg { display:block; width:100%; height:auto; color:inherit; }
-.cfdb-sc-grid { stroke:currentColor; stroke-opacity:.14; stroke-width:1; }
+/* A178 (cfdb-main-R-1853). "Mute (lighter by 50%) down the current gridlines" — .14 -> .07,
+   which is his 50% exactly, and with the ladder now at 100-yard steps there are half as many
+   of them as well. */
+.cfdb-sc-grid { stroke:currentColor; stroke-opacity:.07; stroke-width:1; }
+/* The median lines are the ones meant to be READ, so they are the only strokes on this chart
+   that are not hairlines. Dashed rather than solid: a solid rule at this weight reads as an
+   axis, and the axes are hairlines — the reader would have the hierarchy upside down. */
+.cfdb-sc-median { stroke:currentColor; stroke-opacity:.45; stroke-width:1.5;
+                  stroke-dasharray:5 3; }
+.cfdb-sc-median-label { fill:currentColor; fill-opacity:.55; font-size:9.5px;
+                        letter-spacing:.02em; }
 /* A176. UNFILLED, IN THE TEAM'S OWN COLOR, AND THIS RULE IS WHY IT NEEDED A RASTER.
    > MARC, v09: "Make these unfilled circles. Color by Team color"
    The mark carries `fill='none' stroke='<the team color>'` as PRESENTATION ATTRIBUTES, and a
@@ -617,8 +627,48 @@ TABLE_CSS = """
    to shrink below its content, so a long team name would push the column wider and break the
    three-up alignment instead of ellipsising. This is `.cfdb-player-who`'s `min-width:0` one
    level up, and the same reason. */
+/* ── A178 (cfdb-main-R-1857): WHERE A SORT ANCHOR LANDS ───────────────────────────────────
+   > MARC, v10: "It looks like the reloads the whold page then scrolls down to the section
+   > link, but it's at the bottom of the page. Can we make it so that the header scrolls to be
+   > the bottomw of the page? To make it better for the end-user?"
+
+   ✅ BUILT AS READING (1): the sorted heading ends at the TOP of the viewport with its table
+   below it, because "to make it better for the end-user" only makes sense if the thing he
+   sorted is the thing he then sees. 📋 The other reading — the header literally at the BOTTOM
+   of the viewport — is one word from him and one constant from here.
+
+   🚨 AND THE MEASUREMENT CORRECTED THE STATED CAUSE. The premise was that Leaderboards sits
+   too near the bottom for the browser to scroll that far. Measured on the real page at 1300 x
+   900, 2025 week 8:
+
+       Most exciting                  top 598    7470px below it   reaches the top
+       How the week went ...          top 1632   6436px below it   reaches the top
+       The week's movers              top 2739   5329px below it   reaches the top
+       Offense and defense            top 3276   4792px below it   reaches the top
+       Leaderboards                   top 4217   3852px below it   reaches the top
+       Poll movement                  top 7934    134px below it   766px SHORT
+
+   🚨 **ALL FOUR SECTIONS THAT CARRY A SORT ANCHOR ALREADY REACHED THE TOP** — Most exciting,
+   the market, the movers and Leaderboards, the last of which has 3,852px of page beneath it.
+   The prompt's premise was that Leaderboards sits too low for the browser to scroll that far;
+   it does not.
+
+   ❌ **A TRAILING SPACER WAS BUILT, MEASURED AND REMOVED.** 70vh of `::after` room took the
+   one unreachable heading from 766px short to 136px, and ~85vh would have closed it — but
+   **that heading is Poll movement, which carries NO anchor**, so the only thing the spacer
+   bought was two-thirds of a blank screen at the foot of every page on the site. Measuring
+   before shipping is the whole point; this is what it looked like when it paid.
+
+   ✅ SO WHAT SHIPS IS THE HALF THAT COSTS NOTHING. `scroll-margin-top` keeps the heading from
+   landing flush against the viewport edge, which reads as clipped rather than as placed, and
+   it is inert on every page that never receives a fragment. */
+[id] { scroll-margin-top: .75rem; }
+
 .cfdb-cardboard { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr));
-                  gap:.5rem 1rem; margin:.25rem 0 .75rem; }
+                  gap:.5rem 2rem; margin:.25rem 0 .75rem; }
+/* A178: "Add decent amount of horizontal spacing between the player cards" — the gap is on
+   the BOARD (between the three columns) rather than on the card, because that is the
+   horizontal space he is pointing at; a card's own margin would only indent it. */
 .cfdb-cardcol { min-width:0; display:flex; flex-direction:column; gap:.3rem; }
 .cfdb-cardcol-head { font-size:.72rem; font-weight:700; letter-spacing:.06em;
                      text-transform:uppercase; opacity:.6; padding-bottom:.15rem;
@@ -644,10 +694,43 @@ TABLE_CSS = """
    ⚠️ THE LEFT RULE STAYS THICKER THAN THE OTHER THREE. It is what gives a scanned column its
    left edge, and dropping to a uniform hairline made the grid read as a table of boxes in a
    4x zoom rather than as a stack of cards. */
-.cfdb-card { min-width:0; padding:.45rem .6rem; border:1px solid var(--cfdb-edge);
+/* ── A178 (cfdb-main-R-1856): THE v10 CARD IS ONE ROW, LEFT TO RIGHT ──────────────────────
+   > MARC, v10: "move the team name and logo to the far left, Jersey #, Player Name, Class/Pos
+   > … Move the metrics to the right side of the cards and have them more densely populated.
+   > The metrics should align up/down across all cards in the column. Add a column on the far
+   > left that indicates the overall rank of the player card."
+
+   🚨 "ALIGN UP/DOWN ACROSS ALL CARDS" IS THE HARD ONE AND IT IS WHY THIS IS A GRID AND NOT A
+   FLEX ROW. Cards are independent boxes: under flex, every card sizes its own columns, so a
+   long team name in card 3 moves that card's metrics and nothing else — which is exactly the
+   misalignment he is asking to remove. `grid-template-columns` with FIXED tracks makes every
+   card lay its four cells on the same four x-positions by construction, whatever is in them.
+   ⚠️ The measurement in A178's report is the evidence: maximum deviation in pixels, target 0.
+
+   ⚠️ THE MIDDLE TRACK IS THE ONLY FLEXIBLE ONE (`minmax(0, 1fr)`), so a long player name
+   ellipsises INSIDE its own cell instead of pushing the metrics out of line. `min-width:0` is
+   what makes that possible at all (the R-745 class). */
+.cfdb-card { min-width:0; padding:.4rem .45rem; border:1px solid var(--cfdb-edge);
              border-left:2px solid var(--cfdb-edge);
              background:var(--cfdb-row-alt, transparent); border-radius:3px;
-             margin-bottom:.4rem; }
+             margin-bottom:.4rem;
+             display:grid; align-items:center; gap:.4rem;
+             grid-template-columns:1.1rem 5.75rem minmax(0, 1fr) 7.25rem; }
+/* The rank Marc asked for, far left. Tabular figures so 1 and 10 occupy the same width and
+   the column below stays a column. */
+.cfdb-card-rank { font-size:.72rem; font-weight:700; opacity:.45;
+                  font-variant-numeric:tabular-nums; text-align:right; }
+
+/* 🚨 A178: THE TEAM NAME IN THE TEAM'S COLOR, WITH THE UNDERLINE KEPT — Marc's own
+   constraint, and a real one: color alone is not an affordance, and a colored-but-unstyled
+   name reads as emphasis rather than as a link. Both declarations live in one rule so
+   neither can be dropped without the other.
+   ⚠️ THE VALUE ARRIVES AS A `light-dark()` PAIR FROM `identity.accent_color`, set on the
+   wrapper as a custom property by the page. The BROWSER resolves it, so a mid-session theme
+   flip is correct with no Python in the loop — and the pair is the CONTRAST-SAFE one, not the
+   raw brand color, which is what stops a #000000 team vanishing on the dark page (B109). */
+.cfdb-card-team a { color:var(--cfdb-card-accent, inherit); text-decoration:underline;
+                    text-underline-offset:2px; }
 
 /* A175: three metrics on one line, sharing the width evenly so the eye can compare down a
    column. ⚠️ `min-width:0` on the children, or a long value stops the flex row shrinking and
@@ -656,14 +739,19 @@ TABLE_CSS = """
    space in this layout, can we fit team info on an existing line?" The who grows, the team
    takes what it needs, and `min-width:0` on both lets long names ellipsise instead of pushing
    the team off the card. */
+/* A175's head row is retained for any caller still drawing the stacked card; A178's grid
+   supersedes it on the Today boards. */
 .cfdb-card-head { display:flex; align-items:center; justify-content:space-between;
                   gap:.6rem; min-width:0; }
 .cfdb-card-head-who { min-width:0; flex:1 1 auto; }
 .cfdb-card-head .cfdb-card-team { flex:0 1 auto; min-width:0; margin-top:0; }
 
-.cfdb-card-metrics { display:flex; gap:.5rem; align-items:baseline;
-                     margin:.15rem 0 .1rem; }
-.cfdb-card-metric { display:flex; flex-direction:column; min-width:0; flex:1 1 0; }
+/* A178: "more densely populated" — the gap halves and the vertical margin goes, because the
+   metrics now sit in their own grid track rather than on a line of their own. */
+.cfdb-card-metrics { display:flex; gap:.25rem; align-items:baseline; margin:0;
+                     justify-content:flex-end; }
+.cfdb-card-metric { display:flex; flex-direction:column; min-width:0; flex:1 1 0;
+                    text-align:right; }
 .cfdb-card-metric .cfdb-card-value { font-size:1.05rem; font-weight:700; line-height:1.15; }
 .cfdb-card-metric .cfdb-card-unit { font-size:.68rem; opacity:.6; text-transform:uppercase;
                                     letter-spacing:.02em; }
@@ -689,7 +777,17 @@ TABLE_CSS = """
 .cfdb-card-stat { display:flex; align-items:baseline; gap:.35rem; line-height:1.15; }
 .cfdb-card-value { font-weight:700; font-variant-numeric:tabular-nums; }
 .cfdb-card-unit { font-size:.72rem; opacity:.6; }
-.cfdb-card-team { min-width:0; font-size:.78rem; opacity:.85; }
+/* A178: the team rides a FIXED track now, so it must clip inside it rather than push the
+   player out. Without `overflow:hidden` a long name ("Florida International") widens the
+   cell and the name beside it loses the space — which is what the first render showed. */
+.cfdb-card-team { min-width:0; font-size:.72rem; opacity:.85;
+                  overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+/* ⚠️ THE ELLIPSIS HAS TO BE ON THE ELEMENT THAT ACTUALLY OVERFLOWS. The rule above clips the
+   WRAPPER; the name lives in an inner span, so without this a long team name was cut mid-glyph
+   ("Texas Sta") rather than ellipsised ("Texas Sta…") — which reads as a rendering fault
+   instead of as a deliberate truncation. Only the render showed the difference. */
+.cfdb-card-team .cfdb-team { min-width:0; overflow:hidden; white-space:nowrap;
+                             text-overflow:ellipsis; }
 /* ⚠️ THE TEAM LINE REUSES `.cfdb-identity`, so the logo, the rank badge and the record all
    arrive with the treatment they have everywhere else — including A165's center alignment.
    Only the logo is resized, because a 28px disc is a table-row affordance and this is a card. */
@@ -986,8 +1084,30 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    are the same measure at three scales — so a hue would imply a distinction that is not
    there, and `currentColor` inherits the theme both ways with no light-dark() to maintain. */
 .cfdb-spark { position:relative; display:block; text-align:right; }
+/* A178 (cfdb-main-R-1852). THE BORDER MARC ASKED FOR, AND THE TWO THINGS THAT MADE IT MORE
+   THAN ONE DECLARATION.
+   > MARC, v10: "Can you add a 50% dark gray border to the bars to make them pop."
+
+   🚨 1. `opacity` WOULD HAVE EATEN IT. The fill used to be `background:currentColor` plus
+   `opacity:.15` on the ELEMENT, and element opacity multiplies everything the element paints
+   — border included. A 50% border under a 0.15 element is a 7.5% border, which is not a
+   border. So the fill's transparency moves into the background COLOR via color-mix (used
+   sixteen times elsewhere in this file), and opacity comes off entirely. The fill is
+   unchanged at 15%; only where the 15% is applied moved.
+
+   🚨 2. "DARK GRAY" IS INVISIBLE ON THE DARK PAGE. This site renders on #ffffff and on
+   #0e1117, and a literal dark gray disappears into the second — B109's finding, and the same
+   class that cost cfdb-wta-R-1291 a wrong team color on 10.89% of games. `light-dark()` is
+   the site's existing mechanism for exactly this and follows the same `color-scheme` property
+   Streamlit sets, so the browser resolves it with no Python in the loop.
+
+   ⚠️ `box-sizing:border-box` IS LOAD-BEARING. The width is an inline percentage of the cell
+   (`today.py`'s `_spark_cell`); without it a 1px border on each side makes every bar 2px
+   wider than the share it encodes, which is a quantity being misdrawn rather than a style. */
 .cfdb-spark-bar { position:absolute; left:0; top:50%; transform:translateY(-50%);
-                  height:1.05em; background:currentColor; opacity:.15;
+                  height:1.05em; box-sizing:border-box;
+                  background:color-mix(in srgb, currentColor 15%, transparent);
+                  border:1px solid light-dark(rgba(0,0,0,.5), rgba(255,255,255,.5));
                   border-radius:2px; pointer-events:none; }
 .cfdb-spark-value { position:relative; }
 .cfdb-identity > .cfdb-teamlink { min-width:0; }

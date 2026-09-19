@@ -94,9 +94,9 @@ def _by_conference(df, scope) -> None:
         Col("yards_for", "Yds", "num", dp=0),
         Col("rushing_yards_for", "Rush", "num", dp=0),
         Col("passing_yards_for", "Pass", "num", dp=0),
-        Col("yards_allowed", "Yds all", "num", dp=0),
-        Col("rushing_yards_allowed", "Rush all", "num", dp=0),
-        Col("passing_yards_allowed", "Pass all", "num", dp=0),
+        Col("yards_allowed", "Yds all", "num", dp=0, opens="asc"),
+        Col("rushing_yards_allowed", "Rush all", "num", dp=0, opens="asc"),
+        Col("passing_yards_allowed", "Pass all", "num", dp=0, opens="asc"),
     ]
     # F2-06/F2-27: computed over every conference at once, so the grid does not reflow
     # per group.

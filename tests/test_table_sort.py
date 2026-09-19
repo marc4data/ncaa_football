@@ -241,3 +241,117 @@ def test_no_view_silently_opts_out_of_drawing_what_it_will_not_do(table_module):
         "render must apply the sort itself; the separate call is what eleven views forgot")
     assert 'sortable = False' in source, (
         "render must also stop DRAWING the links whenever it will not sort")
+
+
+# --- A178: which way a column OPENS (cfdb-main-R-1850 / cfdb-main-R-1851) -------------------
+
+def _first_href(stub, label):
+    """The URL the header for `label` would send a cold reader to."""
+    html = stub.markup[-1]
+    head = html[:html.index("<tbody>")]
+    match = re.search(r"<a class='cfdb-sort' href='([^']+)'[^>]*>" + label, head)
+    assert match, f"no sort link for {label!r} in\n{head}"
+    return match.group(1)
+
+
+def test_a_measure_opens_descending_and_a_name_still_opens_ascending(table_module):
+    """🚨 cfdb-main-R-1850.
+
+    > **MARC, v10:** *"When I choose a column header to force a sort, it shift to sort asc, but
+    > end-user will generally want to see the best performers for the metric (desc). Can you
+    > make desc the first sort."*
+
+    ⚠️ AND IT IS PER COLUMN, NOT ONE CONSTANT. `table.render` is the site's only table
+    producer, so a global flip reaches Schedule, Scores, Standings, Rankings, every Team tab,
+    every Matchup table and every Leaderboard at once.
+    """
+    table, stub = table_module
+    # ⚠️ `squad`, not `team`: `_header_cell` refuses a sort link on a hand-listed set of
+    # synthetic field names — `team`, `rank`, `record`, `winner` and a dozen more — because
+    # those columns render something the frame has no single field for. A fixture using one
+    # of them tests the exclusion list, not the opening direction.
+    columns = [table.Col("squad", "Squad"), table.Col("yards", "Yards", "num", dp=0)]
+    frame = _frame().rename(columns={"team": "squad"})
+
+    stub.query_params = {}
+    table.render(frame, columns)
+
+    assert "order=desc" in _first_href(stub, "Yards"), (
+        "a numeric measure must open on its best performers")
+    assert "order=asc" in _first_href(stub, "Squad"), (
+        "a name has no best end — it reads from the top down")
+
+
+def test_clicking_the_active_column_still_toggles_both_ways(table_module):
+    """⚠️ MARC ASKED FOR A BETTER STARTING POINT, NOT FOR THE TOGGLE TO GO. A change that made
+    a measure *always* sort descending would satisfy the sentence above and take away the
+    control — and every assertion about the opening direction would still pass.
+    """
+    table, stub = table_module
+
+    stub.query_params = {"sort": "yards", "order": "desc"}
+    table.render(_frame(), _columns(table))
+    assert "order=asc" in _first_href(stub, "Yards"), (
+        "the active column must offer the other direction")
+
+    stub.query_params = {"sort": "yards", "order": "asc"}
+    table.render(_frame(), _columns(table))
+    assert "order=desc" in _first_href(stub, "Yards")
+
+
+def test_a_rank_column_opens_ascending_because_one_is_best(table_module):
+    """🚨 cfdb-main-R-1850. THE COLUMN THAT MAKES `kind` INSUFFICIENT.
+
+    📊 Measured across the site: of 193 `Col` call sites, FOUR ranks carry `kind="num"` —
+    `ap_rank`, `coaches_rank` and `committee_rank` on Rankings, `tiebreak_rank` on Standings.
+    **Defaulting every number to `desc` and stopping there would open the Rankings page on the
+    136th-best team in the country**, which is the opposite of what Marc asked for.
+    """
+    table, stub = table_module
+    # `ap_rank`, which is the real field name on the Rankings page — `rank` alone is on
+    # `_header_cell`'s synthetic-field exclusion list and would draw no link at all.
+    columns = [table.Col("squad", "Squad"),
+               table.Col("ap_rank", "AP", "num", dp=0, opens="asc"),
+               table.Col("yards", "Yards", "num", dp=0)]
+    frame = _frame().rename(columns={"team": "squad"}).assign(ap_rank=[3, 1, 2])
+
+    stub.query_params = {}
+    table.render(frame, columns)
+    assert "order=asc" in _first_href(stub, "AP"), "1 is the best rank"
+    assert "order=desc" in _first_href(stub, "Yards"), "and the measure beside it is unchanged"
+
+
+def test_no_column_on_the_site_opens_a_rank_at_its_worst_end():
+    """🚨 THE GUARD FOR THE CLASS, NOT FOR THE FOUR. A rank added tomorrow with `kind="num"`
+    and no `opens=` would silently open on last place, and nothing on the page would look
+    wrong — the header draws, the link works, the rows sort. This reads every `Col` on the
+    site by AST and refuses that.
+
+    ⚠️ BY AST, NOT BY GREP: this codebase's prose about `Col` outnumbers its calls, and a
+    `grep -c` here has been wrong three times (2.2.1c.1).
+    """
+    import ast
+
+    offenders = []
+    for path in sorted(SITE.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            if (getattr(node.func, "attr", None)
+                    or getattr(node.func, "id", None)) != "Col":
+                continue
+            args = [a.value if isinstance(a, ast.Constant) else None for a in node.args]
+            kw = {k.arg: (k.value.value if isinstance(k.value, ast.Constant) else None)
+                  for k in node.keywords}
+            field = args[0] if args else kw.get("field")
+            label = args[1] if len(args) > 1 else kw.get("label")
+            kind = args[2] if len(args) > 2 else kw.get("kind", "text")
+            opens = kw.get("opens") or ("desc" if kind in ("num", "signed") else "asc")
+            looks_like_a_rank = any(
+                "rank" in str(v).lower() for v in (field, label) if v is not None)
+            if looks_like_a_rank and opens == "desc":
+                offenders.append(f"{path.name}:{node.lineno} {field!r} ({label!r})")
+
+    assert not offenders, (
+        "these columns read as a rank and would open on their WORST end — give them "
+        "opens='asc':\n  " + "\n  ".join(offenders))

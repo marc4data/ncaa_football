@@ -118,10 +118,10 @@ def body(page) -> None:
             Col("split", "Split"),
             Col("season", "Season", "num", dp=0),
             Col("games", "n", "num", dp=0),
-            Col("mean_absolute_margin_error", "Margin MAE", "num"),
+            Col("mean_absolute_margin_error", "Margin MAE", "num", opens="asc"),
             Col("winner", "SU", render=_winner),
             Col("ats", "ATS", render=_ats),
-            Col("brier_score", "Brier", "num"),
+            Col("brier_score", "Brier", "num", opens="asc"),
         ]
         table.render(df, columns, caption="srv_model_performance")
 
@@ -220,10 +220,10 @@ def _segment_table(df: pd.DataFrame, label: str) -> None:
     table.render(df, [
         Col("segment_value", label),
         Col("games", "n", "num", dp=0),
-        Col("mean_absolute_margin_error", "Margin MAE", "num"),
+        Col("mean_absolute_margin_error", "Margin MAE", "num", opens="asc"),
         Col("winner", "SU", render=_winner),
         Col("ats", "ATS", render=_ats),
-        Col("brier_score", "Brier", "num"),
+        Col("brier_score", "Brier", "num", opens="asc"),
     ], caption="srv_model_performance", max_rows=100)
 
 
@@ -324,7 +324,7 @@ def _calibration(model: str) -> None:
         Col("games", "n", "num", dp=0),
         Col("mean_predicted_home_win_probability", "Model says", "num"),
         Col("actual_home_win_rate", "Actually happened", "num"),
-        Col("brier_score", "Brier", "num"),
+        Col("brier_score", "Brier", "num", opens="asc"),
     ], caption="srv_model_performance", max_rows=20)
     # AC-G.33 applies hardest here: a bucket holding one game is not evidence of anything,
     # and a calibration chart makes every point look equally weighted.

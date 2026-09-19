@@ -15,6 +15,7 @@ a cover in Streamlit would be metric maths in the app, which is the rule those c
 to keep.
 """
 import math
+import statistics
 
 import altair as alt
 import pandas as pd
@@ -422,12 +423,26 @@ def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
     #
     # ⚠️ ONE RELATION, ONE QUERY, NO JOIN (G-2). The fold is a reshape of rows already fetched,
     # which is what `augment` does for the workbook — not arithmetic between two columns.
+    # 🚨 A178 (cfdb-main-R-1855). `color_on_light` / `color_on_dark` ARE A177's, PUBLISHED
+    # YESTERDAY, AND THIS IS THEIR FIRST CONSUMER. Marc asked for the team name in the team's
+    # colour on this card in v10 — reversing his own v09 *"don't necessary need the color on
+    # this page"* after looking at it. `cfdb-main-R-1309` refused it correctly for six rounds
+    # because the column did not exist; it exists now at 0.30% null, and the page reads it
+    # from the one relation it was already reading (no join, G-2).
+    #
+    # 🚨 AND THIS NOTE IS A PYTHON COMMENT RATHER THAN A SQL ONE, WHICH COST ONE CI-EQUIVALENT
+    # RUN TO RELEARN. `ci/check_page_queries.py` normalises a query to a SINGLE LINE before
+    # executing it, so a `--` comment swallows the rest of the statement — the first draft put
+    # these six lines inside the triple quotes and the checker returned `dict is not a
+    # sequence`. `_rankings` carries the identical warning fifteen hundred lines up: **nothing
+    # goes between the triple quotes but SQL.**
     primary = stat_types[0]
     return query("""
         select player_name, player_slug, team, conference, opponent, week,
                stat_category, stat_type, stat_value, as_of_ts,
                jersey, position, class_year_display,
-               team_slug, team_display, team_logo_url, team_rank, record_before_display
+               team_slug, team_display, team_logo_url, team_rank, record_before_display,
+               color_on_light, color_on_dark
         from srv_player_game_log
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
@@ -806,7 +821,7 @@ def _fold_metrics(frame, stat_types, depth: int) -> pd.DataFrame:
     return out
 
 
-def _player_card(row, stat_label: str, metric_types=()) -> str:
+def _player_card(row, stat_label: str, metric_types=(), rank=None) -> str:
     """One player, as MATCHUP's card — plus the team line Today needs and Matchup does not.
 
     > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
@@ -862,10 +877,29 @@ def _player_card(row, stat_label: str, metric_types=()) -> str:
         stat_block = (f"<div class='cfdb-card-stat'>"
                       f"<span class='cfdb-card-value'>{value}</span>"
                       f"<span class='cfdb-card-unit'>{fmt.text(stat_label)}</span></div>")
-    team_block = (f"<div class='cfdb-card-team'>{_team_identity(
-        row, '', slug_field='team_slug', display_field='team_display',
-        logo_field='team_logo_url', rank_field='team_rank',
-        record_field='record_before_display')}</div>")
+    # ── A178 (cfdb-main-R-1855): THE TEAM NAME IN THE TEAM'S COLOUR ────────────────────────
+    #
+    # > **MARC, v10:** *"Color Team Name with Team Color while retaining the underlyine to
+    # > indicate the hyperlink."*
+    #
+    # ✅ **v10 REVERSES v09's *"don't necessary need the color on this page"*, and that is the
+    # loop working rather than a mistake** — the neutral card shipped, he looked at it, and he
+    # asked for the colour. `cfdb-main-R-1309` refused it for six rounds because the column did
+    # not exist; **A177 published it yesterday** and this is its first consumer.
+    #
+    # ⚠️ THE COLOUR IS SET ON A WRAPPER, NOT PASSED INTO THE SHARED CELL. `_team_identity` ->
+    # `table.team_cell` serves Schedule, Scores and the Team page as well; giving it a colour
+    # parameter would be a change to every caller for one caller's benefit. A CSS custom
+    # property on the wrapper reaches the anchor inside it and reaches nothing else.
+    #
+    # ⚠️ AND THE UNDERLINE IS HIS OWN CONSTRAINT, which is a real one: colour alone is not an
+    # affordance, and a coloured-but-unstyled name reads as emphasis rather than as a link.
+    # The rule in `theme.py` sets both together so neither can be removed without the other.
+    accent = identity.accent_color(row)
+    team_block = (f"<div class='cfdb-card-team' style='--cfdb-card-accent:{accent}'>"
+                  f"{_team_identity(
+                      row, '', slug_field='team_slug', display_field='team_display',
+                      logo_field='team_logo_url', rank_field='team_rank')}</div>")
 
     # 🚨 A175 (cfdb-main-R-1756). THE REFLOW, AND IT IS IN TODAY'S WRAPPER BECAUSE MOVING THE
     # SHARED ROW WOULD MOVE MATCHUP.
@@ -884,13 +918,40 @@ def _player_card(row, stat_label: str, metric_types=()) -> str:
     # is a change to session B's page that A175 was not asked to make and could not verify.
     # ✅ So the flex row is HERE, wrapping the shared cell rather than altering it — Matchup's
     # card is byte-identical.
+    # ── A178 (cfdb-main-R-1856): THE v10 REFLOW — ONE ROW, LEFT TO RIGHT ───────────────────
+    #
+    # > **MARC, v10:** *"make these different, move the team name and logo to the far left,
+    # > Jersey #, Player Name, Class/Pos. … Move the metrics to the right side of the cards and
+    # > have them more densely populated. … Add a column on the far left that indicates the
+    # > overall rank of the player card."*
+    #
+    # rank · team · [jersey · name · year/position] · metrics —— and the middle bracket is
+    # `identity.player_row` UNCHANGED, which already emits those three in that order.
+    #
+    # 🚨 `identity.player_row` IS SHARED WITH MATCHUP (`matchup.py:2374`, cfdb-main-R-1308), SO
+    # THE REFLOW IS AGAIN IN TODAY'S WRAPPER AND NOT IN THE SHARED ROW — A175 made exactly this
+    # call for exactly this reason, and the report proves Matchup's card byte-identical rather
+    # than asserting it. **The order Marc asked for is the order that function already
+    # produces**, so wrapping is not a workaround here; it is the whole change.
+    #
+    # ⚠️ THE RANK IS THE CARD'S POSITION IN ITS OWN COLUMN, and it is passed in rather than
+    # computed here — `_player_card_grid` knows the ordering because it is the thing that
+    # ordered them. Inventing a second ranking inside the card is how two numbers that should
+    # agree stop agreeing.
+    # 🚨 THE CELL IS ALWAYS EMITTED, EMPTY IF THERE IS NO RANK, AND A TEST CAUGHT WHY. The card
+    # is a four-track CSS grid; a missing first child does not leave a hole, it shifts every
+    # remaining cell one track to the LEFT — so a card drawn without a rank would put the team
+    # where the rank belongs and the metrics where the player belongs, silently, on a page
+    # whose whole point this round is that the columns line up.
+    rank_block = (f"<div class='cfdb-card-rank'>"
+                  f"{int(rank) if rank is not None else ''}</div>")
     return (f"<div class='cfdb-card'>"
-            f"<div class='cfdb-card-head'>"
-            f"<div class='cfdb-card-head-who'>{identity.player_row(row)}</div>"
-            f"{team_block}</div>"
-            # ⚠️ THE STAT READS SECOND, straight after the name: it is the reason the card is on
-            # the board. The team now rides the same line as the name rather than following the
-            # stat — which is the horizontal space Marc asked to be used.
+            f"{rank_block}"
+            f"{team_block}"
+            f"<div class='cfdb-card-who'>{identity.player_row(row)}</div>"
+            # ⚠️ THE METRICS ARE LAST IN THE MARKUP AND RIGHT-ALIGNED IN THE LAYOUT, which is
+            # the same thing said twice on purpose: a reader scanning for the number finds it
+            # at a fixed x, and a screen reader meets it after the player it belongs to.
             f"{stat_block}"
             f"</div>")
 
@@ -919,8 +980,16 @@ def _player_card_grid(columns, stat_label: str) -> None:
         if frame is None or frame.empty:
             body = "<div class='cfdb-card-none'>Nothing in this category yet.</div>"
         else:
-            body = "".join(_player_card(row, stat_label, metric_types)
-                           for _index, row in frame.iterrows())
+            # 🚨 A178 (cfdb-main-R-1856). THE RANK IS THE ROW'S POSITION IN THIS COLUMN, and
+            # it is counted HERE because this is where the ordering is. `_player_board`
+            # ordered the frame by the column's own primary stat descending and the query's
+            # `limit` cut whole players from the bottom — so position in this frame IS the
+            # overall rank Marc asked for. ⚠️ **Not a second ranking**: recomputing it inside
+            # the card from `stat_value` would disagree with the frame the moment two players
+            # tie, because the query's tiebreak is `player_name` and a card cannot see it.
+            body = "".join(_player_card(row, stat_label, metric_types, rank=position)
+                           for position, (_index, row)
+                           in enumerate(frame.iterrows(), start=1))
         cells.append(f"<div class='cfdb-cardcol'>"
                      f"<div class='cfdb-cardcol-head'>{fmt.text(heading)}</div>{body}</div>")
     st.markdown(f"<div class='cfdb-cardboard'>{''.join(cells)}</div>",
@@ -1754,7 +1823,7 @@ def _movers(scope, depth: int) -> None:
                  anchor="the-weeks-movers"))
 
 
-def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380) -> str:
+def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=380) -> str:
     """The scatter itself. Inline SVG in currentColor, following lib/distribution.py's
     precedent — one series, one hue, no legend, hairline axes (the chart standard's §7).
 
@@ -1822,6 +1891,41 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=50, y_step=50, width=560, height=380
                      f"x2='{pad_l + pw}' y2='{gy:.1f}'/>")
         parts.append(f"<text class='cfdb-sc-tick' x='{pad_l - 8}' y='{gy + 3:.1f}' "
                      f"text-anchor='end'>{v:.0f}</text>")
+
+    # ── A178 (cfdb-main-R-1853): THE MEDIAN LINES ──────────────────────────────────────────
+    #
+    # > MARC, v10: "Add bolder lines for the median values and label."
+    #
+    # ✅ §4.2.1 IS NOT ENGAGED, AND THE TEST IS THE ONE THAT DECIDES THE HARD CASES: "how many
+    # consumers can this number have?" A median OF THE ROWS ON SCREEN has exactly one — this
+    # drawing. It is a property of the rendered frame, like `_spark_max` (cfdb-main-R-1750),
+    # not a published quantity a second panel could disagree with.
+    #
+    # 🚨 AND IT MOVES WITH THE FRAME, WHICH IS WHY THE LABEL CARRIES ITS POPULATION. The panel
+    # is week-scoped and conference-filtered, so "median" is the median of whatever Marc is
+    # looking at. A median line whose scope silently changed would be worse than no line —
+    # AC-G.33 — so the count is in the label and the hover says what it counted.
+    values_x = [float(r["x"]) for r in rows if r.get("x") is not None]
+    values_y = [float(r["y"]) for r in rows if r.get("y") is not None]
+    if values_x and values_y:
+        mid_x, mid_y = statistics.median(values_x), statistics.median(values_y)
+        gx, gy = sx(mid_x), sy(mid_y)
+        parts.append(
+            f"<line class='cfdb-sc-median' x1='{gx:.1f}' y1='{pad_t}' "
+            f"x2='{gx:.1f}' y2='{pad_t + ph}'><title>Median yards allowed per game: "
+            f"{mid_x:.1f}, over {len(values_x)} teams shown</title></line>")
+        parts.append(
+            f"<line class='cfdb-sc-median' x1='{pad_l}' y1='{gy:.1f}' "
+            f"x2='{pad_l + pw}' y2='{gy:.1f}'><title>Median yards gained per game: "
+            f"{mid_y:.1f}, over {len(values_y)} teams shown</title></line>")
+        # The labels sit INSIDE the plot against their own line, because a label in the margin
+        # would compete with the axis ticks that are already there.
+        parts.append(
+            f"<text class='cfdb-sc-median-label' x='{gx + 4:.1f}' y='{pad_t + 11}'>"
+            f"median {mid_x:.0f}</text>")
+        parts.append(
+            f"<text class='cfdb-sc-median-label' x='{pad_l + pw - 4:.1f}' "
+            f"y='{gy - 4:.1f}' text-anchor='end'>median {mid_y:.0f}</text>")
 
     # 🚨 A176. UNFILLED CIRCLES IN THE TEAM'S OWN COLOUR — Marc: *"Make these unfilled circles.
     # Color by Team color"*. The colour arrives COMPOSED from the caller as a `light-dark()`
@@ -1925,7 +2029,10 @@ def _profile(scope, depth: int) -> None:
 
         # Domain rounded OUT to a whole tick, per the chart standard §0.2, so the bounds ARE
         # ticks and every render of this chart lands on the same round numbers.
-        def domain(series, step=50):
+        # A178: 100-yard increments (Marc, v10), so the DOMAIN rounds out to 100s too —
+        # otherwise the bounds stop being ticks and the chart standard's §0.2 argument
+        # ("every render lands on the same round numbers") quietly stops holding.
+        def domain(series, step=100):
             lo = math.floor(series.min() / step) * step
             hi = math.ceil(series.max() / step) * step
             return (lo, hi if hi > lo else lo + step), step
@@ -2174,7 +2281,17 @@ def _leaderboards(scope, depth: int) -> None:
 # requirement here is an inverted ordinal axis, and `alt.Scale(reverse=True)` is that in three
 # words. `st.line_chart`'s own docstring calls itself "syntax-sugar around st.altair_chart",
 # so this removes the sugar rather than adding a layer.
-_BUMP_HEIGHT = 420
+# ── A178 (cfdb-main-R-1854): +25% VERTICAL SPACE, AND THE FONTS WITH IT ─────────────────────
+#
+# > MARC, v10: "diagonal/straight lines, look much better. Give it 25% more vertial space.
+# > Increase fonts accordingly."
+#
+# 420 -> 525 is his 25% exactly. ⚠️ **The fonts are scaled by the SAME factor rather than
+# nudged**, because the thing he is buying is the ratio of ink to space: 25 ranks over 420px
+# is a 16.8px pitch against an 11px font, and raising only the height would make the labels
+# look smaller rather than the chart look roomier. At 525 the pitch is 21.0px and the font
+# 13.75 -> 14, so the ratio is very nearly preserved (0.65 -> 0.67).
+_BUMP_HEIGHT = 525
 # ⚠️ THE PICTURE TAKES AN EXPLICIT WIDTH UNDER CONCAT. `use_container_width` sizes the
 # OUTER spec, and a concat divides that between its halves — so leaving the left half
 # to infer its width makes the split depend on how wide the table's text happens to
@@ -2262,8 +2379,11 @@ _BUMP_CHART_WIDTH = 820
 #     step-after   the line HOLDS the rank across its own week and turns at the NEXT week's tick
 #     linear       one diagonal per change — exact at every tick, interpolated between them
 _BUMP_INTERPOLATE = "linear"
+# A178: the endpoint labels on the picture scale with the height, same 1.25.
+_BUMP_LABEL_FONT = 14
 _BUMP_TABLE_WIDTH = 250
-_BUMP_ROW_FONT = 11
+# A178: 11 * 1.25 = 13.75, taken to 14 — see _BUMP_HEIGHT.
+_BUMP_ROW_FONT = 14
 
 
 def _bump_table_chart(current: pd.DataFrame) -> alt.Chart:
@@ -2418,7 +2538,8 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
         tooltip=[alt.Tooltip("team_display:N", title="Team"),
                  alt.Tooltip("week:O", title="Week"),
                  alt.Tooltip("rank:Q", title="Rank", format="d")])
-    labels = alt.Chart(last).mark_text(align="left", dx=8, fontSize=11).encode(
+    labels = alt.Chart(last).mark_text(align="left", dx=8,
+                                       fontSize=_BUMP_LABEL_FONT).encode(
         x=x, y=y, text="team_display:N",
         opacity=alt.condition(hover, alt.value(1.0), alt.value(0.75)))
     # 🚨 A164. THE LEFT LABEL IS ADDED AND THE RIGHT ONE STAYS — Marc asked to *"Label the left
@@ -2447,7 +2568,8 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     # rendering — and it changes no line and no point, which still sit on the real rank.
     first = (first.groupby(["week", "rank"], as_index=False)
                   .agg(team_display=("team_display", " · ".join)))
-    start_labels = alt.Chart(first).mark_text(align="right", dx=-8, fontSize=11).encode(
+    start_labels = alt.Chart(first).mark_text(align="right", dx=-8,
+                                              fontSize=_BUMP_LABEL_FONT).encode(
         x=x, y=y, text="team_display:N", opacity=alt.value(0.75))
 
     # ── THE CONCAT, AND THE THREE THINGS IT CHANGES ────────────────────────────────────
