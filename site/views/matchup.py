@@ -1865,7 +1865,8 @@ def _yardage_row(offense, defense, week_rows, dimension, deltas=None,
     # ✅ cfdb-wta-R-901 / R-855. ONE PRODUCER, CALLED TWICE HERE — the series rule beside each
     # box and the card borders beside it are the SAME string, so a reader cannot be shown two
     # different colours for one team on one row.
-    accent, opponent_accent = _accent(offense), _accent(defense)
+    accent, opponent_accent = (identity.accent_color(offense),
+                               identity.accent_color(defense))
     # ⚠️ TWO CALENDARS, ONE READ. `_game_calendar` already fetches BOTH teams — its `where` is
     # `team_id in (:away_team_id, :home_team_id)` — and returns them keyed by `team_id`, so the
     # opponent's rows were fetched all along and simply were not passed down. **No new query and
@@ -4550,27 +4551,38 @@ _TABLE_CHART_CELL = (f"flex:1 0 {_TABLE_CHART_WIDTH}px;min-width:{_TABLE_CHART_W
 # number and `_TABLE_CHART_WIDTH` supplies it; see the measurement beside that constant.
 
 
-def _accent(pair) -> str:
-    """ONE team colour, as the finished CSS string — and it is written HERE and nowhere else.
-
-    🚨 R-855, AND THIS ROUND IS THE THIRD TO TOUCH IT. `_table_header` built this expression
-    inline; B111 needs the identical string for the chart marker. **Two copies that agree today
-    are two copies that drift**, and the header underline and the marker naming the same team in
-    different colours is precisely the kind of quiet disagreement this file has paid for.
-
-    ⚠️ `identity.text_on(pair)` ALONE IS NOT THE ANSWER, AND B109 MEASURED WHY. It defaults to
-    the ON-LIGHT variant, which rendered `rgb(0,0,0)` against a `rgb(14,17,23)` page — invisible
-    — for the **18.6% of teams that publish `#000000` there**. `light-dark()` follows the
-    `color-scheme` property Streamlit sets, where `prefers-color-scheme` answers the OPERATING
-    SYSTEM and hands a reader on a dark Mac with the app in Light the wrong palette (R-547,
-    R-552). **Nothing here computes a colour; both variants come straight from `identity`.**
-
-    ⚠️ A SIDE WITH NO SOURCED COLOUR GETS `identity.FALLBACK` from `text_on` — neutral grey, in
-    both modes. **10.89% of games have one** (B109), and the marker must still draw: position is
-    the encoding and colour is decoration on top (AC-G.22).
-    """
-    return (f"light-dark({identity.text_on(pair)}, "
-            f"{identity.text_on(pair, dark_theme=True)})")
+# ── 🚨 `_accent` IS GONE: THE PROMOTED PRODUCER IS CALLED INSTEAD, AND IT IS A FIX ─────────
+#
+# 📊 **A171 promoted this function into `site/lib/identity.py` as `accent_color(row, prefix="")`
+# because `lib/winprob.py` needed a finished team colour and a module may not reach into a
+# view.** The private copy stayed because `matchup.py` is session B's and A171 could not edit
+# it (§3 rule 3.1). **B140 consumes the promotion, which is what its own docstring asked for:**
+# *"Two copies that agree today are two copies that drift"* (R-855).
+#
+# 🚨🚨 **AND THEY DID NOT AGREE. THE PRIVATE COPY WAS THE BROKEN ONE, ON 10.89% OF GAMES**
+# (cfdb-wta-R-1291). Both were rendered over **every published `srv_game` row, both sides,
+# 225,350 pairs** — each string carries both theme variants, so this is both themes at once:
+#
+#     DIFFERENCES   12,650 of 225,350   5.61%
+#     _accent        light-dark(nan, nan)
+#     accent_color   light-dark(#6b7280, #6b7280)
+#
+# ⚠️ **EVERY DIFFERENCE IS THE NaN CASE, AND IT IS R-121's CLASS ONE LAYER ALONG.**
+# `identity.text_on` ends `return value or FALLBACK`, and **NaN is truthy**, so a NULL colour
+# arriving from `read_sql` as `float('nan')` sails through. `accent_color` guards it.
+#
+# 🚨 **AND THE OLD DOCSTRING CLAIMED THE OPPOSITE — IT SAID THE FALLBACK HAPPENED:** *"A SIDE
+# WITH NO SOURCED COLOUR GETS `identity.FALLBACK` from `text_on` — neutral grey, in both
+# modes. 10.89% of games have one."* **The percentage was right and the behaviour was not.**
+#
+# 📊 **WHAT IT COST, MEASURED IN A BROWSER RATHER THAN REASONED:**
+#
+#     border-bottom:3px solid light-dark(nan, nan)          -> rgb(102,51,153)  the INHERITED colour
+#     border-bottom:3px solid light-dark(#6b7280,#6b7280)   -> rgb(107,114,128) the intended grey
+#
+# **An invalid colour is dropped, so the rule fell back to `currentColor`** — the team rule and
+# the chart marker drew in the page's text colour on **12,266 of 112,675 games (10.89%)**, and
+# **11.9% of completed FBS games**. ⚠️ **It looked deliberate, which is why nobody saw it.**
 
 
 # ✅ R-885. THE SECOND SECTION'S NAME — Marc, v11. He typed *"Advances"*; the section is
@@ -4685,7 +4697,7 @@ def _table_header(away, home, title: str, colors=None) -> str:
         logo = identity.logo_or_monogram(
             side.get("team_logo_url"), str(side.get("team_display") or "?"), 20)
         pair, abbr = (colors or {}).get(key) or (None, "")
-        accent = _accent(pair)
+        accent = identity.accent_color(pair)
         # 🚨 R-856. THE ABBREVIATION, FALLING BACK TO THE FULL NAME. `North Alabama` did not
         # fit this cell and drew `North Ala…`; `UNA` fits with room to spare, and the LOGO
         # beside it is doing the identifying work that a clipped word was failing at. The
@@ -5026,11 +5038,13 @@ def _accent_pair(colors) -> tuple:
     🚨 A DICT WOULD LET A SWAP PASS A PRESENCE TEST. The pair is unpacked positionally at every
     call site, so away's colour cannot reach home's marker without the unpacking changing too —
     which is the same reason `_metric_cell` takes its two figures positionally (R-522, B082,
-    B083). ⚠️ A side with no entry still yields a string: `_accent(None)` is `identity.FALLBACK`
+    B083). ⚠️ A side with no entry still yields a string: `identity.accent_color(None)`
+    is `identity.FALLBACK`
     in both themes, and 10.89% of games need it.
     """
     lookup = colors or {}
-    return tuple(_accent((lookup.get(side) or (None, ""))[0]) for side in ("away", "home"))
+    return tuple(identity.accent_color((lookup.get(side) or (None, ""))[0])
+                 for side in ("away", "home"))
 
 
 def _comparison(away, home, rows, glossary=None, spread=None,
@@ -6137,6 +6151,13 @@ _DRIVE_PANEL_SPACING = 10
 # ⚠️ v08: the gap between the linescore and the win-probability chart beside it. The same
 # value as the panel's own slot spacing, so the header has one rhythm rather than two.
 _DRIVE_CURVE_GAP = 10
+
+# 🚨 THE SCOREBOARD AND THE CHART ARE ONE GROUP, AND THE WRAPPER IS WHAT MAKES THEM ONE.
+# A shrink-to-fit box has no free space, so `_line_score`'s `margin:0 auto` cannot absorb any
+# and `_DRIVE_CURVE_GAP` becomes the whole distance between them (cfdb-wta-R-1290). The slot
+# around it still centres the group on the field below.
+_DRIVE_HEADER_GROUP = ("<span style='display:inline-flex;align-items:flex-start'>"
+                       "{inner}</span>")
 _DRIVE_PANEL_WIDTH = (2 * _DRIVE_TABLE_WIDTH + _DRIVE_FIELD_WIDTH
                       + 2 * _DRIVE_PANEL_SPACING)
 _DRIVE_ROW_HEIGHT = 17
@@ -7439,7 +7460,7 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
             continue
         fill = _drive_band_accent(frame, band)
         mascots.append(alt.Chart(pd.DataFrame([{"m": name}])).mark_text(
-            angle=angle, fontSize=_DRIVE_ROW_FONT + 3, fontWeight="bold",
+            angle=angle, fontSize=_DRIVE_MASCOT_FONT, fontWeight="bold",
             align="center", baseline="middle",
             color=_drive_endzone_ink(fill), opacity=0.9).encode(
             x=alt.value(float(width) * span / (_DRIVE_FIELD_YARDS / _DRIVE_ENDZONE)),
@@ -7515,6 +7536,37 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
 # 🚨 MARC'S ROTATIONS, IN THE RANGE VEGA-LITE'S SCHEMA ALLOWS. He wrote *"Away team should be
 # rotated -90. Home team rotated 90."* — and `MarkDef.angle` is `minimum: 0, maximum: 360`, so
 # −90 is rejected by Altair before it reaches the browser. **270 IS −90 as a rotation.**
+# ── 🚨 v09: "Increase the Font size on the endzone" — AND THE BAND CANNOT GROW WITH IT ─────
+#
+# 📊 **THE END ZONE IS TEN YARDS OF A FIXED FIGURE.** `_DRIVE_FIELD_WIDTH / _DRIVE_FIELD_YARDS`
+# is 5.417px per yard, so the band is **54.17px wide** — and `use_container_width` is inert
+# under `hconcat` (cfdb-main-R-1106), so it cannot grow. ⚠️ **The text is ROTATED, so the font
+# size is measured against that 54.17px and the string's LENGTH is measured against the chart's
+# HEIGHT**, which is `max(len(frame) * _DRIVE_ROW_HEIGHT, _DRIVE_ROW_HEIGHT * 4)`.
+#
+# 📊 **MEASURED IN A BROWSER OVER ALL 7,176 PUBLISHED END ZONES** — each one's own name against
+# its own chart height, not a worst case against a best case (cfdb-wta-R-1293):
+#
+#                                        13px            16px
+#     mascot alone (what shipped)     0 overflow      2 overflow
+#     name + mascot, ONE line         9 overflow     13 overflow
+#     name + mascot, TWO lines        2 overflow      6 overflow
+#
+# ✅ **SO BOTH OF HIS ASKS FIT: adding the name costs ELEVEN of 7,176 end zones (0.15%)**, and
+# they are the shortest games on the site — the worst is a TWO-DRIVE game, whose chart is 68px
+# tall and which already cannot hold a long mascot on its own.
+#
+# 📋 **THE TWO-LINE VARIANT IS MEASURABLY BETTER ON FIT — 6 overflows against 13 — AND IT IS A
+# LOOK CALL, SO IT IS RENDERED FOR MARC RATHER THAN PICKED HERE (§2.1).** This ships his literal
+# words: *"add the Team Name TO the Mascot"*, one string.
+#
+# ⚠️ **AND THE FONT DOES NOT MOVE THE CONTRAST.** `_drive_endzone_ink` chooses black or white
+# from the fill's own luminance (B137's WCAG crossover at L = 0.179129), and a larger glyph of
+# the same colour has the same ratio — **worst 4.59:1 in each theme, 0 of 351 below 4.5:1.**
+# A bigger font makes a contrast failure *more visible*, which is an argument for the measure
+# rather than against the size.
+_DRIVE_MASCOT_FONT = 16
+
 _DRIVE_MASCOT_ANGLE_AWAY = 270      # Marc's −90
 _DRIVE_MASCOT_ANGLE_HOME = 90
 _DRIVE_INK_CROSSOVER = 0.179129
@@ -7542,17 +7594,34 @@ def _drive_endzone_ink(fill: str) -> str:
 
 
 def _drive_band_mascot(frame: pd.DataFrame, band: str) -> str:
-    """One band's mascot, read off that band's OWN first row — a fact about the GAME.
+    """One band's TEAM NAME and mascot, read off that band's OWN first row — about the GAME.
+
+    > **MARC, v09:** *"Add the Team Name to the Mascot in the end zone. Increase the Font size
+    > on the endzone. Looks good!"*
 
     ⚠️ **NOT the drive row.** `offense_mascot` names whoever had the ball, and possession
     alternates, so a per-row read would change the end zone's name every drive.
+
+    ✅ **NO JOIN, AND THAT WAS CONFIRMED RATHER THAN INHERITED (cfdb-wta-R-1292).** §4.2/R-551
+    forbids the page joining to fetch the mascot, and the same applies to the name.
+    **`offense_team_display` is already in the drives select** — read at this base, in the query
+    twenty lines above — so both halves come off the frame in hand.
+
+    ⚠️ **THE NAME GOES FIRST, WHICH IS MARC'S OWN ORDER:** *"add the Team Name TO the Mascot"*.
+
     ✅ **Empty where the band has no drives or no published mascot** — 38 of 3,607 games carry
-    one of those, and the caller draws nothing rather than a placeholder (R-084).
+    one of those, and the caller draws nothing rather than a placeholder (R-084). ⚠️ **A team
+    with a mascot but no display name still draws the mascot**, because the absence of one half
+    is not a reason to drop the other.
     """
     side = frame[frame["band"] == band]
     if side.empty:
         return ""
-    return fmt.text(side.iloc[0].get("offense_mascot"))
+    mascot = fmt.text(side.iloc[0].get("offense_mascot"))
+    if not mascot:
+        return ""
+    name = fmt.text(side.iloc[0].get("offense_team_display"))
+    return f"{name} {mascot}" if name else mascot
 
 
 def _drive_band_accent(frame: pd.DataFrame, band: str) -> str:
@@ -8094,8 +8163,8 @@ def _drive_curve(row, points) -> str:
     text, is_cut = winprob.curve_label(row, points)
     return winprob.sparkline_svg(
         points, label=text, is_cut=is_cut,
-        home_color=_accent(row_for_side(row, "home")),
-        away_color=_accent(row_for_side(row, "away")))
+        home_color=identity.accent_color(row, "home"),
+        away_color=identity.accent_color(row, "away"))
 
 
 def _drive_scoreboard(row, curve: str = "") -> str:
@@ -8134,8 +8203,8 @@ def _drive_scoreboard(row, curve: str = "") -> str:
     # The header is HTML, so the browser resolves the team colour against the `color-scheme`
     # Streamlit sets — immune to the first-load caveat in `st.context.theme` that the chart's
     # accent has to live with (see `theme.viewer_is_dark`).
-    away_accent = _accent(row_for_side(row, "away"))
-    home_accent = _accent(row_for_side(row, "home"))
+    away_accent = identity.accent_color(row, "away")
+    home_accent = identity.accent_color(row, "home")
 
     linescore = _line_score(row)
     if not linescore:
@@ -8237,11 +8306,49 @@ def _drive_scoreboard(row, curve: str = "") -> str:
     # ⚠️ **THE CARDS ROW IS UNTOUCHED AND MUST STAY SO.** Its three slots align to the three
     # panels of the figure below by construction; widening a slot there would break the one
     # alignment v02 was built to guarantee.
+    # ── 🚨 v08 FOLLOW-THROUGH: *NEXT TO* MEANS NEXT TO, AND IT DID NOT (cfdb-wta-R-1290) ──
+    #
+    # > **MARC, v08:** *"Was expecting to see the Win Percentage chart **next to** Scoreboard
+    # > in the header."*
+    #
+    # 🚨 **B139 PUT THE CHART IN THIS SLOT AND IT LANDED 168.4px AWAY, WITH THE CONSTANT BELOW
+    # SET TO 10.** Measured in the running app at 1300px, before the wrapper below existed:
+    #
+    #     middle slot   x 475 → 1125   650px, display:flex, justify-content:center
+    #       TABLE       x 633.3 → 774.6   141.3px   ← `_line_score`, a DIRECT flex child
+    #       SPAN        x 943   → 1125   182px      ← the chart, pinned to the slot's edge
+    #     gap table.right → chart.x                    🚨 168.4px
+    #
+    # 🚨 **THE CAUSE IS `margin:0 auto` ON A FLEX ITEM, AND IT IS NOT THE MECHANISM THAT WAS
+    # PROPOSED.** The guess was that the linescore sits in a full-width BLOCK and centres
+    # inside it. **It does not — the `<table>` is a direct child of this flex slot.** But
+    # `_line_score` emits `margin:0 auto`, and **an auto margin on a flex item absorbs the
+    # container's free space** rather than merely centring the element.
+    #
+    # 📊 **THE ARITHMETIC MATCHES THE MEASUREMENT TO 0.05px, which is what makes it the cause
+    # rather than a story:**
+    #
+    #     free space = 650 − 141.3 − 182 − 10          =  316.7
+    #     each auto margin takes half                   =  158.35
+    #     table starts 475 + 158.35                     =  633.35   (measured 633.3)
+    #     chart starts 774.65 + 158.35 + 10             =  943.00   (measured 943.0)
+    #     so the gap is 158.35 + 10                     =  168.35   (measured 168.4)
+    #
+    # ✅ **THE FIX IS ONE WRAPPER, AND IT TREATS THE PAIR AS THE GROUP MARC IS DESCRIBING.**
+    # Inside a shrink-to-fit `inline-flex` there is no free space for an auto margin to
+    # absorb, so the table's own `margin:0 auto` collapses to nothing and the only distance
+    # left between them is `_DRIVE_CURVE_GAP`. ⚠️ **`_line_score` IS NOT EDITED — it is called
+    # from three places and its `margin:0 auto` is correct in the other two.**
+    #
+    # ⚠️ **`align-items:flex-start` IS MARC'S v19 (b) ASK, CARRIED THROUGH THE WRAPPER**: the
+    # chart is 64px tall and the linescore is taller, and he asked for the header to be
+    # top-aligned rather than hanging from a shared baseline.
     beside = (f"<span style='display:inline-flex;align-items:center;"
               f"margin-left:{_DRIVE_CURVE_GAP}px'>{curve}</span>") if curve else ""
     return (f"<div style='width:{_DRIVE_PANEL_WIDTH}px;max-width:100%'>"
             + _section_heading(_DRIVE_SECTION) + "</div>"
-            + row_of("", linescore + beside, "", sides_may_shrink=True)
+            + row_of("", _DRIVE_HEADER_GROUP.format(inner=linescore + beside), "",
+                     sides_may_shrink=True)
             + row_of(cards[0], "", cards[1]))
 
 
@@ -8481,7 +8588,7 @@ def _drives(game_id, season, row) -> None:
         # `colors.get('away')` as a column no query selects. **The guard is right to be
         # suspicious and `colors` is the page's own dict, so the honest fix is to stop looking
         # like a row read rather than to add an exception to the guard.**
-        styles = {band: f"color:{_accent(colors.get(band))};font-weight:600"
+        styles = {band: f"color:{identity.accent_color(colors.get(band))};font-weight:600"
                   for band in ("away", "home")}
         st.caption(
             f"{len(df)} drives · {scored} scoring. "

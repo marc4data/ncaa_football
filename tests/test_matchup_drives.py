@@ -2626,10 +2626,10 @@ def test_THE_MASCOT_IS_THE_GAMES_not_the_drive_rows(panel):
     assert away_angle % 360 == -90 % 360, (
         f"the away rotation is {away_angle}, which is not Marc's −90 as a rotation")
     assert home_angle == 90
-    assert drawn.get(away_angle) == "Visitors", (
+    assert drawn.get(away_angle) == "Beta Visitors", (
         f"the LEFT end zone carries {drawn.get(away_angle)!r}; the away team scores there "
-        f"(6,193 touchdowns measured) so it is the away mascot")
-    assert drawn.get(home_angle) == "Homers", (
+        f"(6,193 touchdowns measured) so it is the away side's name and mascot")
+    assert drawn.get(home_angle) == "Alpha Homers", (
         f"the RIGHT end zone carries {drawn.get(home_angle)!r}")
 
 
@@ -2649,9 +2649,49 @@ def test_A_MISSING_MASCOT_DRAWS_NOTHING_not_a_placeholder(panel):
     assert len(layers) == 1, (
         f"{len(layers)} mascot layers drew; the away side has none published, so its end zone "
         f"must carry no text at all")
-    assert _rows(spec, layers[0])[0]["m"] == "Homers"
+    assert _rows(spec, layers[0])[0]["m"] == "Alpha Homers"
     assert (layers[0].get("mark") or {}).get("angle") == _module_constant(
         "_DRIVE_MASCOT_ANGLE_HOME"), "the wrong end zone survived"
+
+
+def test_A_TEAM_WITH_NO_DISPLAY_NAME_STILL_DRAWS_ITS_MASCOT(panel):
+    """⚠️ **THE ABSENCE OF ONE HALF IS NOT A REASON TO DROP THE OTHER.**
+
+    v09 adds the team name to the mascot. **A row whose `offense_team_display` is missing must
+    still draw the mascot it does have** — dropping both would turn a partial absence into a
+    total one, which is the AC-G.11 distinction this panel keeps everywhere else.
+    """
+    frame = pd.DataFrame([_drive(1, "home", "Alpha", "PUNT", category="punt", mascot="Homers")])
+    frame.loc[:, "offense_team_display"] = None
+    spec = _spec(panel(frame)[1])
+    layers = _mascot_layers(spec)
+    assert len(layers) == 1, f"{len(layers)} mascot layers drew"
+    assert _rows(spec, layers[0])[0]["m"] == "Homers", (
+        "a team with no published display name lost its mascot too")
+
+
+def test_THE_ENDZONE_FONT_IS_BIGGER_THAN_THE_ROW_FONT_and_is_its_own_constant():
+    """> **MARC, v09:** *"Increase the Font size on the endzone."*
+
+    📊 **MEASURED OVER ALL 7,176 PUBLISHED END ZONES**, each name against its own chart height
+    (cfdb-wta-R-1293): at 16px, name + mascot on one line overflows **13** of them against
+    **2** for the mascot alone — so his two asks together cost eleven end zones, and they are
+    the shortest games on the site.
+
+    ⚠️ **IT IS ITS OWN CONSTANT RATHER THAN `_DRIVE_ROW_FONT + 3`**, because it is now sized
+    against the 54.17px end-zone band and the chart's height, not against the table's rows —
+    and a later change to the row font must not move it silently.
+    """
+    font = _module_constant("_DRIVE_MASCOT_FONT")
+    assert font > _module_constant("_DRIVE_ROW_FONT"), (
+        f"the end-zone font is {font}px against a row font of "
+        f"{_module_constant('_DRIVE_ROW_FONT')}px — Marc asked for it to be bigger")
+    # the rotated glyph's height must fit the band it sits in: 10 of 120 yards of the field
+    band = (_module_constant("_DRIVE_FIELD_WIDTH")
+            / _module_constant("_DRIVE_FIELD_YARDS")) * _module_constant("_DRIVE_ENDZONE")
+    assert font <= band, (
+        f"a {font}px glyph cannot sit in a {band:.1f}px end-zone band, and the band cannot "
+        f"grow: `use_container_width` is inert under `hconcat` (cfdb-main-R-1106)")
 
 
 def test_THE_MASCOTS_INK_IS_BLACK_OR_WHITE_by_the_fills_own_luminance(panel):
@@ -3021,6 +3061,7 @@ def test_THE_CURVE_IS_NOT_FLIPPED_A_SECOND_TIME_by_this_caller(panel):
     """
     import importlib
     winprob = importlib.import_module("lib.winprob")
+    identity = importlib.import_module("lib.identity")
     matchup = importlib.import_module("views.matchup")
     rising = pd.DataFrame(_curve_rows(home_first=0.10, home_last=0.95))
 
@@ -3029,8 +3070,8 @@ def test_THE_CURVE_IS_NOT_FLIPPED_A_SECOND_TIME_by_this_caller(panel):
     assert svg == winprob.sparkline_svg(
         rising, label=winprob.curve_label(_game_row(), rising)[0],
         is_cut=winprob.curve_label(_game_row(), rising)[1],
-        home_color=matchup._accent(matchup.row_for_side(_game_row(), "home")),
-        away_color=matchup._accent(matchup.row_for_side(_game_row(), "away"))), (
+        home_color=identity.accent_color(_game_row(), "home"),
+        away_color=identity.accent_color(_game_row(), "away")), (
         "the caller's output differs from the module's for the same frame — something here "
         "is transforming the points, the axis or the colours on the way through")
 
@@ -3055,11 +3096,12 @@ def test_THE_CHART_TAKES_THE_PAGES_OWN_TEAM_COLOURS_not_a_second_source(panel):
     """
     import importlib
     winprob = importlib.import_module("lib.winprob")
+    identity = importlib.import_module("lib.identity")
     matchup = importlib.import_module("views.matchup")
     row = _game_row()
     points = pd.DataFrame(_curve_rows())
-    home = matchup._accent(matchup.row_for_side(row, "home"))
-    away = matchup._accent(matchup.row_for_side(row, "away"))
+    home = identity.accent_color(row, "home")
+    away = identity.accent_color(row, "away")
     assert home != away, (
         "the fixture gives both sides the same colour, so this test cannot see a swap — "
         "which is exactly the R-744 defect it exists to catch")
@@ -3077,3 +3119,118 @@ def test_THE_CHART_TAKES_THE_PAGES_OWN_TEAM_COLOURS_not_a_second_source(panel):
     assert svg != swapped, (
         f"the caller produced the SWAPPED chart — home {home!r} is being handed to the away "
         f"side. The fill under the curve would name the wrong team")
+
+
+# ── 🚨 v08 FOLLOW-THROUGH: *NEXT TO* MEANS NEXT TO (cfdb-wta-R-1290) ────────────────────────
+
+def test_THE_SCOREBOARD_AND_THE_CHART_ARE_ONE_GROUP_not_two_things_in_a_slot(panel):
+    """🚨 **B139 PUT THE CHART IN THE RIGHT SLOT AND IT LANDED 168.4px AWAY.**
+
+    📊 **Measured in the running app at 1300px before the wrapper existed:** the middle slot is
+    650px and `display:flex`, `_line_score` emits `margin:0 auto`, and **an auto margin on a
+    flex item absorbs the container's free space** — 158.35px of it — rather than merely
+    centring the element. `158.35 + _DRIVE_CURVE_GAP` is the 168.4px Marc could see.
+
+    ✅ **THE ASSERTION IS THE RELATIONSHIP, NOT A PIXEL OR A CSS LITERAL.** `cfdb-wta-R-1288`'s
+    break 6 came back GREEN because it looked for a `width:265px` literal the same round had
+    removed — **so this keys on the two being siblings inside a shrink-to-fit wrapper**, which
+    is the property that makes the distance `_DRIVE_CURVE_GAP` and nothing else.
+
+    ⚠️ **CI HAS NO BROWSER, so the DISTANCE itself is asserted by the round's measurement and
+    reported there (10.0px, both games, three viewports). This is the structural guard that
+    survives in CI** — and it fails the moment anything puts a slot boundary back between them.
+    """
+    frame = pd.DataFrame([_drive(1, "away", "Beta", "PUNT", category="punt")])
+    row = _game_row()
+    row["away_q1"], row["away_q2"], row["away_q3"], row["away_q4"] = 0, 0, 0, 3
+    row["home_q1"], row["home_q2"], row["home_q3"], row["home_q4"] = 7, 3, 0, 7
+    row["away_overtime_points"] = row["home_overtime_points"] = None
+    header = _header_html(panel(frame, row=row, curve=_curve_rows())[0])
+
+    import importlib
+    matchup = importlib.import_module("views.matchup")
+    line = matchup._line_score(row)
+    assert line and line in header, "the fixture does not exercise `_line_score`"
+
+    # 🚨 **THE ORACLE IS THE RENDERED MARKUP, NOT THE CONSTANT.** ⚠️ **B140's first version
+    # built its expectation with `_DRIVE_HEADER_GROUP.format(...)` and a staged break that
+    # moved the chart OUTSIDE the wrapper came back GREEN** — because breaking the template
+    # broke the expectation in the same direction. **A test that derives its oracle from the
+    # thing under test cannot fail** (R-744). This walks the markup instead.
+    line_at, svg_at = header.index(line), header.index("<svg")
+    assert line_at < svg_at, "the chart is drawn before the scoreboard"
+
+    def open_ancestors(pos):
+        """The start indices of the `<span>` elements still open at `pos`."""
+        stack = []
+        for tag in re.finditer(r"<(/?)(span|div)\b", header[:pos]):
+            if tag.group(1):
+                if stack and stack[-1][1] == tag.group(2):
+                    stack.pop()
+            else:
+                stack.append((tag.start(), tag.group(2)))
+        return {start for start, name in stack if name == "span"}
+
+    shared = open_ancestors(line_at) & open_ancestors(svg_at)
+    assert shared, (
+        "the scoreboard and the chart share no open <span> ancestor, so they are two things "
+        "in a slot rather than one group — and `_line_score`'s `margin:0 auto` can absorb the "
+        "slot's free space again, which is the 168.4px Marc could see")
+    # and that shared wrapper must be inside the field slot rather than being it
+    assert min(shared) > header.index(f"width:{matchup._DRIVE_FIELD_WIDTH}px"), (
+        "the group is not inside the field-width slot, so it is no longer centred on the "
+        "field it heads")
+
+
+# ── 🚨 PART 2: THE PROMOTED PRODUCER, AND THE NaN IT FIXES (cfdb-wta-R-1291) ────────────────
+
+def test_A_SIDE_WITH_NO_PUBLISHED_COLOUR_GETS_THE_FALLBACK_not_a_nan():
+    """🚨 **THE PAGE EMITTED `light-dark(nan, nan)` ON 10.89% OF GAMES AND CALLED IT A
+    FALLBACK.**
+
+    📊 **Measured over every published `srv_game` row, both sides — 225,350 pairs, and each
+    string carries both theme variants:** the removed `matchup._accent` and
+    `identity.accent_color` disagreed on **12,650 (5.61%)**, every one of them the NaN case.
+
+    ⚠️ **`identity.text_on` ends `return value or FALLBACK`, and NaN IS TRUTHY** — R-121's
+    class, one layer along — so a NULL colour arriving from `read_sql` as `float('nan')` sailed
+    through. 🚨 **And the old docstring asserted the opposite:** *"A SIDE WITH NO SOURCED COLOUR
+    GETS `identity.FALLBACK` from `text_on`."*
+
+    📊 **What it cost, measured in a browser:** `light-dark(nan, nan)` is invalid, so the
+    declaration is DROPPED and the rule falls back to `currentColor` — the team rule drew in
+    the page's text colour rather than the neutral grey, on **12,266 of 112,675 games**.
+    """
+    import importlib
+    import math
+    identity = importlib.import_module("lib.identity")
+
+    for missing in (None, float("nan")):
+        row = pd.Series({"home_color_on_light": missing, "home_color_on_dark": missing})
+        got = identity.accent_color(row, "home")
+        assert "nan" not in got.lower(), (
+            f"a colourless side produced {got!r} — an invalid CSS colour the browser drops, "
+            f"which is the defect this round removed")
+        assert identity.FALLBACK in got, (
+            f"a colourless side produced {got!r} rather than the neutral fallback")
+    # and a real colour still comes through untouched, both variants
+    row = pd.Series({"home_color_on_light": "#101010", "home_color_on_dark": "#efefef"})
+    assert identity.accent_color(row, "home") == "light-dark(#101010, #efefef)"
+    assert math.isnan(float("nan"))     # the property this test exists for, stated
+
+
+def test_THE_PAGE_HAS_NO_SECOND_ACCENT_PRODUCER(panel):
+    """✅ §4.3 / R-855: *"Two copies that agree today are two copies that drift."*
+
+    ⚠️ **A171 promoted this function and could not delete the page's copy — `matchup.py` is
+    session B's (§3 rule 3.1). B140 is the round that consumes it.** This asserts the page
+    defines no private accent producer of its own, so the promotion cannot quietly grow a
+    twin again.
+    """
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
+    assert "def _accent(" not in source, (
+        "`matchup.py` defines a private accent producer again; `identity.accent_color` is the "
+        "one that owns this, and a second copy is what R-855 is about")
+    assert "identity.text_on(pair, dark_theme=True)" not in source, (
+        "the page is composing a `light-dark()` team colour itself rather than calling "
+        "`identity.accent_color`")
