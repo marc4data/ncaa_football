@@ -543,6 +543,25 @@ select
     -- games" on srv_standings — checked against both before settling this one.
     rw.current_record                                           as record_before_display,
 
+    -- THE OPPONENT'S RECORD LEADING INTO THIS GAME (A177, cfdb-main-R-1770).
+    --
+    -- 🚨 THE TEAM CELL SHOWED A RECORD AND THE OPPONENT CELL COULD NOT, which is the parity
+    -- gap A175 reported and correctly refused to close in the page — a second record is a
+    -- second relation from Streamlit's side (G-2) and a second LEFT JOIN from here.
+    --
+    -- ⚠️ IT IS THE SAME FACT AT THE SAME GRAIN, JOINED ON THE OTHER TEAM_ID, so it inherits
+    -- every property the column above was argued into: leading-into rather than including
+    -- (R-285's off-by-one lives in `fct_team_record_week`'s window frame, not here), null
+    -- where the record is not known rather than a lying 0-0, and the `_before_` in the name
+    -- doing the same guard work on a row where "record" alone would be ambiguous.
+    --
+    -- ⚠️ THE SPELLING IS THE EXISTING ONE WITH THE EXISTING PREFIX. `opponent_` is how this
+    -- view already names the other side (`opponent_rank`, `opponent_logo_url`,
+    -- `opponent_pregame_elo`), and `record_before_display` is the fact's name. Composing the
+    -- two is the rule; inventing `opponent_record` would be a second vocabulary for a column
+    -- sitting four lines from the first.
+    orw.current_record                                          as opponent_record_before_display,
+
     -- WHAT THIS GAME DID TO THE RATING (Marc, 2026-09-05: "Add a field for Delta ELO as
     -- Post - Pre"). Prompt 045 argued against a computed delta — two columns and a
     -- subtraction the reader can see beats a third column — and Marc overruled it after
@@ -687,6 +706,12 @@ left join {{ ref('fct_team_record_week') }} rw
       and rw.season_type = t.season_type
       and rw.week        = t.week
       and rw.team_id     = t.team_id
+-- A177: the same fact for the other side. Identical grain, identical join, `opponent_team_id`.
+left join {{ ref('fct_team_record_week') }} orw
+       on orw.season      = t.season
+      and orw.season_type = t.season_type
+      and orw.week        = t.week
+      and orw.team_id     = t.opponent_team_id
 
 -- R-686. THE SAME FOUR KEYS, TWICE — once for this team and once for its OPPONENT.
 --

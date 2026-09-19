@@ -1474,6 +1474,16 @@ models:
         description: Jersey number; null outside 2024-2026.
       - name: as_of_ts
         description: AC-G.35. Last load of the `stats` domain, rendered instead of now().
+      - name: is_top_50_in_category
+        description: >
+          A177. Is this player top 50 in ANY stat type of this category this season, which is
+          not the same question as rank_desc <= 50 on this row. A pivot by category wants every
+          statistic for every player the category admits: measured over 2025, rank_desc <= 50
+          yields 3,539 rows and a 28.79% full pivot, while this flag yields 12,292 rows and a
+          100% full one at the same shape. Largest flagged category is defensive at 2,821 rows,
+          inside the page's 5,000 ROW_CAP. Computed from rank_desc, so it inherits that
+          column's direction - in a category where a low value is the good one it flags the
+          worst players, and a consumer wanting the other end has rank_asc.
 
   # ---------------------------------------------------------------------------------------
   - name: srv_player_game_log
@@ -1598,6 +1608,20 @@ models:
           which is built on a `1 preceding` frame. The name is the guard - on a game x player row
           a bare "record" is ambiguous, and srv_game_team uses the same name for the same reason.
           There is no after-record here: this view has no completed/scheduled split to choose with.
+      - name: color_on_light
+        description: >
+          A177. The team's contrast-safe color for a LIGHT background, carried from dim_team -
+          the same pair srv_team_week publishes and the pair identity.accent_color reads off a
+          row. Not the raw brand color: nearly a fifth of teams publish #000000 as their
+          on-light value (R-855), so the ladder is what a page can actually draw against the
+          ground it is on. 0.24% null in 2024, 0.21% in 2025, 0.82% in 2026 - a player-game row
+          whose team has no dim_team row for that season - so a consumer must handle absence
+          rather than assume a color.
+      - name: color_on_dark
+        description: >
+          A177. The same color for a DARK background. Ships beside its sibling because a page
+          picks between them in the browser through light-dark(), which is what makes a
+          mid-session theme flip correct with no Python in the loop.
   - name: srv_player_play
     description: >
       Players page, the play-level drill-down — one row per play a player is credited on, and
@@ -1886,6 +1910,16 @@ models:
           lone comma, so the page renders an em dash rather than stray punctuation.
       - name: as_of_ts
         description: AC-G.35. Last load of the `team` domain, rendered instead of now().
+      - name: has_player_stats
+        description: >
+          A177. Does this roster place resolve to a row in srv_player_stats for the same
+          season? A boolean, so a page can link the names that go somewhere and leave the rest
+          as plain text - the question table.team_link refuses to answer blind, and a fact
+          about another relation the app may not join for (G-2). Measured true for 60.63% of
+          2024 roster rows, 48.04% of 2025 and 40.89% of 2026; the rate climbs as a season
+          fills, which is why it is published rather than assumed. Built as a join to a
+          DISTINCT (season, player_id) set rather than a correlated EXISTS - the correlated
+          form ran ten minutes and blocked a live pipeline rebuild.
 
   # ---------------------------------------------------------------------------------------
   - name: srv_game_travel
@@ -3075,6 +3109,15 @@ models:
         description: The same classification for passing yards. See rushing_matchup_outlook.
       - name: total_matchup_outlook
         description: The same classification for total yards. See rushing_matchup_outlook.
+      - name: opponent_record_before_display
+        description: >
+          A177. The OPPONENT's record going into this game's week, from the same
+          fct_team_record_week as record_before_display, joined on opponent_team_id. It
+          inherits every property of its sibling: leading-into rather than including (the
+          `1 preceding` frame lives upstream), null where the record is not known rather than a
+          lying 0-0, and the `_before_` doing the guard work. Closes the parity gap where the
+          Team cell showed a record and the Opponent cell could not. 100% populated across
+          2025, the same rate as the team's own.
 
   - name: srv_game
     description: >
@@ -4505,6 +4548,41 @@ models:
         description: passing_yards_allowed divided by games_counted, to one decimal.
       - name: as_of_ts
         description: "{{ doc('as_of_ts') }}"
+      - name: record_before_display
+        description: >
+          A177. The team's record LEADING INTO this week, from fct_team_record_week joined at
+          this view's own grain - both models are built on the dim_team_week spine, so the keys
+          are identical and the semantics already agree. Same name as srv_game_team and
+          srv_player_game_log publish for the same fact. Matched on 100% of rows for 2024-2026;
+          the record is KNOWN on 99.86% / 100.00% / 96.37% of them, null elsewhere because 0-0
+          for a team with no completed game anywhere would be a lie.
+      - name: ap_rank
+        description: >
+          A177. The AP Top 25 rank this team carried into this week, or null for unranked. THE
+          POLL IS IN THE NAME ON PURPOSE - fct_poll_rank holds six polls and a bare team_rank
+          would not say which, which is the ambiguity AC-G.33 exists to prevent. AP because
+          today.py's POLLS tuple already makes it the site's default. Null is the common case
+          and is a fact, not a gap: 25 teams of 136 FBS are ranked in a week, and every non-FBS
+          row is unranked by construction.
+      - name: total_yards_for_percentile
+        description: >
+          A177. Where this team's yards gained per game sits among FBS teams with at least one
+          counted game in the SAME season, season_type and week. HIGHER IS BETTER. Null outside
+          that population. THE DENOMINATOR IS FIXED AND IS NOT THE PAGE'S FILTERED POPULATION -
+          a published column is computed once and cannot follow a conference filter, so a page
+          must read this as "of FBS" (AC-G.33). percentile_population ships the n.
+      - name: total_yards_allowed_percentile
+        description: >
+          A177. The same for yards ALLOWED per game, and it DESCENDS so that higher is still
+          better - fewer yards allowed is a higher percentile. The direction is encoded here
+          rather than in a page because deciding which way a percentile reads is metric maths
+          in the app (4.2.1), and a raw ascending percentile would put the worst defense in the
+          country at p99.
+      - name: percentile_population
+        description: >
+          A177. The n both percentiles were computed over - FBS teams with a counted game in
+          that season, season_type and week, 136 in a typical 2025 week. Without it a percentile
+          is unreadable, the same reason srv_player_stats ships rank_population.
 
   # ⚠️ APPENDED AT THE END, TOUCHING NOTHING ABOVE — both sessions edit this file and the
   # charter's rule is that the non-owning session appends. A080/R-534.
