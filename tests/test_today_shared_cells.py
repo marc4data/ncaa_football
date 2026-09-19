@@ -370,10 +370,22 @@ def test_the_card_names_the_team_because_that_is_the_one_thing_marc_required():
     # ⚠️ THE EXISTING LINE IS THE PLAYER'S, so the team now necessarily precedes the stat in
     # document order. **The newer instruction wins and this asserts the new shape:** the team
     # rides the identity line, and the stat reads after both.
-    assert card.index("cfdb-card-head") < card.index("cfdb-card-team"), (
-        "the team must sit inside the card's head row, on the player's line")
-    assert card.index("cfdb-card-team") < card.index("cfdb-card-value"), (
-        "the stat reads after the name-and-team line")
+    # 🚨 A178 REVERSED IT AGAIN, ON MARC'S OWN v10 INSTRUCTION, and the two earlier shapes are
+    # kept above rather than deleted because each was right when it shipped.
+    #
+    # > **v10:** *"move the team name and logo to the far left, Jersey #, Player Name,
+    # > Class/Pos … Move the metrics to the right side of the cards … Add a column on the far
+    # > left that indicates the overall rank of the player card."*
+    #
+    # ⚠️ SO THE CARD IS NOW ONE ROW READ LEFT TO RIGHT, and the order IS the requirement:
+    # rank, then team, then the player, then the metrics. A test that only checked the parts
+    # were present would pass on any arrangement of them.
+    assert card.index("cfdb-card-rank") < card.index("cfdb-card-team"), (
+        "the rank is the far-left column")
+    assert card.index("cfdb-card-team") < card.index("cfdb-card-who"), (
+        "the team name and logo come before the player, per v10")
+    assert card.index("cfdb-card-who") < card.index("cfdb-card-value"), (
+        "the metrics are last, on the right")
     assert "535" in card
 
 
@@ -395,10 +407,14 @@ def test_the_card_survives_the_absences_the_view_actually_carries():
     # OMITTED a missing jersey and named the whole-row absence in a `title`; Matchup's renders an
     # em dash in the slot so the cards stay aligned (AC-G.32, B104). **Both are defensible and he
     # picked one** — so this asserts the one that shipped rather than the one that did not.
-    header = bare.split("cfdb-card-stat")[0]
-    assert "—" in header, "an absent jersey is an em dash in its slot"
-    assert "#" not in header, "and it carries no hash"
-    assert "Riley Warzynski" in _plain(header)
+    # ⚠️ A178 NARROWED THE SLICE, AND THE REASON IS THE REFLOW RATHER THAN THE RULE. This used
+    # to read everything before the stat block; v10 moved the TEAM to the far left, so that
+    # span now also contains the team's own rank badge — which legitimately renders `#12`.
+    # **The assertion is about the JERSEY slot**, so it reads the player row alone.
+    who = bare.split("cfdb-card-who")[1].split("cfdb-card-metrics")[0]
+    assert "—" in who, "an absent jersey is an em dash in its slot"
+    assert "#" not in who, "and it carries no hash"
+    assert "Riley Warzynski" in _plain(who)
     # A missing logo still draws a monogram, so the card keeps its shape.
     no_logo = today._player_card(_card_row(team_logo_url=None), "yards")
     assert "Drake" in no_logo and "cfdb-card-team" in no_logo
@@ -1563,7 +1579,9 @@ def test_the_reflow_stayed_in_todays_wrapper_so_matchups_card_cannot_move():
     from lib import identity as ident
     import pandas as pd
 
-    assert "cfdb-card-head-who" in SOURCE, "Today's own wrapper around the shared row"
+    # A178 renamed the wrapper when the card became one left-to-right row; the GUARD is
+    # unchanged and is the line below — the reflow must not reach `identity.py`.
+    assert "cfdb-card-who" in SOURCE, "Today's own wrapper around the shared row"
     shared = (ROOT / "site" / "lib" / "identity.py").read_text()
     assert "cfdb-card-head" not in shared, (
         "the reflow leaked into the shared producer — Matchup's cards would move with it")
@@ -1684,3 +1702,34 @@ def test_the_player_board_orders_by_each_players_primary_metric():
     assert "len(stat_types)" in body, (
         "the limit must scale with the number of metrics, or a trio board keeps a third of "
         "the players it was asked for")
+
+
+def test_a_card_with_no_rank_still_reserves_its_column():
+    """🚨 A178 (cfdb-main-R-1856). A MISSING GRID CELL DOES NOT LEAVE A HOLE — IT SHIFTS.
+
+    The v10 card is a four-track CSS grid: rank · team · player · metrics. If the rank cell is
+    omitted when there is no rank, the browser puts the TEAM in track 1, the player in track 2
+    and the metrics in track 3 — every cell one track left, at a different width, on a card
+    sitting in a column whose whole point is that the cells line up.
+
+    ⚠️ AND IT IS SILENT. Nothing errors, nothing is missing, and the card still contains every
+    fact it should. The only symptom is one card in a column of ten not lining up — which is
+    precisely the complaint the reflow exists to answer.
+
+    📊 A178's first draft had this defect: `rank_block` was `"" if rank is None`. A test
+    calling `_player_card` without a rank found it by raising on the absent class.
+    """
+    with_rank = today._player_card(_card_row(), "yards", rank=3)
+    without = today._player_card(_card_row(), "yards")
+
+    assert "cfdb-card-rank" in without, (
+        "the cell must exist even when empty, or every other cell shifts a track")
+    assert with_rank.count("cfdb-card-rank") == without.count("cfdb-card-rank") == 1
+
+    # The four cells in the one order the grid lays out, with and without a rank.
+    for card in (with_rank, without):
+        order = [card.index(c) for c in
+                 ("cfdb-card-rank", "cfdb-card-team", "cfdb-card-who", "cfdb-card-value")]
+        assert order == sorted(order), f"the four tracks are out of order: {card[:200]}"
+
+    assert ">3<" in with_rank, "the rank is drawn when there is one"

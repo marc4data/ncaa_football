@@ -69,6 +69,17 @@ PROVIDED_BY_THE_PAGE = {
     "rows_in_scope": "the same — `count(*) over ()` in the Scores sheet.",
     "won": "derived in scores.py from `result`; never selected, and workbook.py says so.",
     "team_rank": "assembled by the page from the rank columns rather than read from one.",
+    # A178 (cfdb-main-R-1853): the scatter's own two axis values, COMPOSED by `_profile` into
+    # the `rows` list it hands `_scatter_svg` — `x` is `total_yards_allowed_per_game` and `y`
+    # is `total_yards_for_per_game`, renamed at the source so the drawing carries the axis
+    # DIRECTION and the caller carries which measure is on it. They are read here by the
+    # median lines. Neither name is a column and neither is selected; the columns behind them
+    # are, and A177's own test drives the real `_profile` to prove the pairing.
+    "x": "A178: the scatter's horizontal value, COMPOSED by `_profile` from the published "
+         "`total_yards_allowed_per_game`. Not a column name — the rename is what lets the "
+         "drawing own the axis direction and the caller own the measure.",
+    "y": "A178: the scatter's vertical value, COMPOSED by `_profile` from the published "
+         "`total_yards_for_per_game`. See `x`.",
     "accent": "A176: the scatter's mark colour, COMPOSED by `_profile` from the published "
               "`color_on_light`/`color_on_dark` pair through `identity.accent_color`. It is "
               "a finished `light-dark(...)` CSS string the browser resolves, so it cannot be "

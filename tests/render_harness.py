@@ -862,6 +862,23 @@ _INLINE_MARKDOWN = (
 _BLOCK_FOR = {"title": "h1", "header": "h2", "subheader": "h3"}
 
 
+def _heading_id(text: str) -> str:
+    """Streamlit's own heading slug, which is what a `#fragment` sort link targets.
+
+    🚨 A178. THE HARNESS EMITTED HEADINGS WITH NO `id` AND SO COULD NOT SEE AN ANCHOR AT ALL.
+    A178's first scroll measurement found **zero** `h1[id],h2[id],h3[id]` on a page whose real
+    version carries one per section — `table.render`'s own docstring records reading
+    `<h3 id="most-exciting">` off the rendered page. A ruler that cannot see the thing being
+    measured reports a clean zero, which is the shape this project keeps paying for.
+
+    ⚠️ LOWERCASE, PUNCTUATION DROPPED, SPACES TO HYPHENS. Checked against the two ids already
+    written down in this repository: "Most exciting" -> `most-exciting` and "The week's movers"
+    -> `the-weeks-movers`, which is why the apostrophe is removed rather than replaced.
+    """
+    slug = re.sub(r"[^\w\s-]", "", str(text).lower())
+    return re.sub(r"[\s_]+", "-", slug).strip("-")
+
+
 def _markdown_inline(text: str) -> str:
     for pattern, replacement in _INLINE_MARKDOWN:
         text = pattern.sub(replacement, text)
@@ -893,7 +910,10 @@ def body_html(captured) -> str:
             continue
         tag = _BLOCK_FOR.get(kind)
         if tag:
-            out.append(f"<{tag}>{_markdown_inline(text)}</{tag}>")
+            # A178: with Streamlit's own id, so a `#fragment` in a sort link has something to
+            # land on and a scroll measurement is measuring the real thing.
+            out.append(f"<{tag} id='{_heading_id(text)}'>"
+                       f"{_markdown_inline(text)}</{tag}>")
         elif kind == "caption":
             out.append(f"<div class='cfdb-render-caption' "
                        f"style='font-size:.78rem;opacity:.65'>"

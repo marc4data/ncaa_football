@@ -66,7 +66,9 @@ COLUMNS = [
     # AC-5.1: tiebreak_rank is a COLUMN. The app never sorts by business logic —
     # conference tiebreakers are dbt's job and a Python sort implementing them is a
     # defect, not a shortcut.
-    Col("tiebreak_rank", "#", "num", dp=0),
+    # A178 (cfdb-main-R-1850): `opens="asc"` — a rank wearing `kind="num"`, so the new
+    # measure default would open it on last place. 1 is the best standing.
+    Col("tiebreak_rank", "#", "num", dp=0, opens="asc"),
     # 🚨 A169 (cfdb-main-R-1320). THE TEAM NAME READS AS A LINK NOW — Marc, Site
     # v07: *"Rankings/Stats/Standings — Team Names should be hyperlinks to the Teams
     # page."*
@@ -114,7 +116,7 @@ COLUMNS = [
     Col("last_5_display", "Last 5", "center"),
     Col("ats_record_display", "ATS", "center"),
     Col("points_for", "PF", "num", dp=0),
-    Col("points_against", "PA", "num", dp=0),
+    Col("points_against", "PA", "num", dp=0, opens="asc"),
     Col("point_differential", "Diff", "signed", dp=0),
 ]
 

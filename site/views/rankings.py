@@ -110,9 +110,15 @@ def _compare(season, week) -> None:
                 # that cell, so nothing nests, and it is the form the anchor guard reads as safe.
                 Col("school", "Team", link=table.team_link("team_slug")),
                 Col("conference_name", "Conf"),
-                Col("ap_rank", "AP", "num", dp=0),
-                Col("coaches_rank", "Coaches", "num", dp=0),
-                Col("committee_rank", "CFP", "num", dp=0),
+                # 🚨 A178 (cfdb-main-R-1850). `opens="asc"` — THESE ARE RANKS WEARING
+                # `kind="num"`, AND THE DEFAULT FOR A NUMBER IS NOW `desc`. Marc asked for
+                # "the best performers for the metric" first; on a poll the best performer is
+                # **1**, so without this line clicking AP would open the Rankings page on the
+                # worst-ranked team in the country. Three of the four such columns on the
+                # site are here.
+                Col("ap_rank", "AP", "num", dp=0, opens="asc"),
+                Col("coaches_rank", "Coaches", "num", dp=0, opens="asc"),
+                Col("committee_rank", "CFP", "num", dp=0, opens="asc"),
                 # AC-4.5: computed in dbt, sortable here, so "where do the polls disagree
                 # most" is one click rather than an app-side calculation.
                 Col("disagreement_spread", "Spread", "num", dp=0),

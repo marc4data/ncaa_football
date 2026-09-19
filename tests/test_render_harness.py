@@ -518,7 +518,10 @@ def test_the_harness_renders_headings_and_emphasis_rather_than_their_source():
         st.caption("a caption")
 
     html = render_harness.body_html(captured)
-    assert "<h3>Leaderboards</h3>" in html, html
+    # A178: the heading now carries Streamlit's own slug as an `id`, because a `#fragment`
+    # sort link needs something to land on and a scroll measurement through this harness was
+    # finding ZERO anchored headings on a page whose real version has one per section.
+    assert "<h3 id='leaderboards'>Leaderboards</h3>" in html, html
     assert "<strong>Team yardage</strong>" in html, html
     assert "**" not in html, "the source markers must not survive into the picture"
     assert "cfdb-render-caption" in html

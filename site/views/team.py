@@ -397,7 +397,7 @@ def _schedule_tab(season, team_slug, team_display) -> None:
                 # — the ONE declaration that page and its sheet both read (AC-15.8). A third
                 # spelling of "Pts for" is exactly R-177's drift.
                 Col("points_for", "Pts for", "num", dp=0),
-                Col("points_against", "Pts against", "num", dp=0),
+                Col("points_against", "Pts against", "num", dp=0, opens="asc"),
                 # AC-8.3: oriented to the SUBJECT team, not to home.
                 Col("margin", "Margin", "signed", dp=0),
             ], caption="",
@@ -484,7 +484,10 @@ def _upcoming_opponent(row, team_slug) -> str:
 # on the Col's own `field`, so the field is `height_inches` (an integer) and `render` draws
 # `height_display`. ⚠️ The next reader will otherwise assume the two are the same column.
 ROSTER_COLUMNS = [
-    Col("jersey", "#", "num", dp=0),
+    # A178 (cfdb-main-R-1851): `opens="asc"` — a jersey is an IDENTIFIER wearing
+    # `kind="num"`. There is no "best" #99, and opening on one would be a
+    # roster sorted from the back.
+    Col("jersey", "#", "num", dp=0, opens="asc"),
     Col("full_name", "Name"),
     Col("position", "Pos"),
     Col("height_inches", "Ht",

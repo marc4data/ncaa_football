@@ -2515,3 +2515,97 @@ def test_nothing_in_the_stylesheet_fills_the_scatter_marks_back_in():
         f"the stylesheet must not fill a mark Marc asked to be unfilled: {body}")
     assert "fill:currentcolor" not in body.replace(" ", "").lower(), (
         f"this is the exact declaration that beat the mark's own fill='none': {body}")
+
+
+def test_the_scatter_draws_its_median_lines_from_the_frame_it_was_given():
+    """🚨 A178 (cfdb-main-R-1853). > **MARC, v10:** *"Add bolder lines for the median values
+    and label."*
+
+    ✅ THE MEDIAN IS A PROPERTY OF THE RENDERED FRAME, NOT A PUBLISHED QUANTITY. §4.2.1's
+    deciding test is *how many consumers can this number have*, and the answer here is one —
+    this drawing. Same standing as `_spark_max` (cfdb-main-R-1750).
+
+    ⚠️ AND IT MUST MOVE WITH THE FRAME, which is the half a static assertion would miss: the
+    panel is week-scoped and conference-filtered, so a median computed once and reused would
+    be a number about teams that are not on screen.
+    """
+    today = _today()
+
+    rows = [{"team": "A", "x": 100.0, "y": 200.0, "games": 1},
+            {"team": "B", "x": 300.0, "y": 400.0, "games": 1},
+            {"team": "C", "x": 500.0, "y": 600.0, "games": 1}]
+    svg = today._scatter_svg(rows, (100.0, 500.0), (200.0, 600.0))
+    assert "median 300" in svg, svg[:300]
+    assert "median 400" in svg
+    assert svg.count("cfdb-sc-median'") == 2, "one vertical and one horizontal"
+
+    # The label names its population, so a reader is never told "median" without the n.
+    assert "over 3 teams shown" in svg
+
+    # 🚨 DROP THE MIDDLE TEAM AND THE MEDIAN MUST MOVE. Without this the test would pass on a
+    # constant (R-843: the value has to move under the thing it claims to measure).
+    fewer = today._scatter_svg(rows[:1] + rows[2:], (100.0, 500.0), (200.0, 600.0))
+    assert "median 300" in fewer, "median of 100 and 500 is still 300"
+    assert "over 2 teams shown" in fewer
+    moved = today._scatter_svg(
+        [{"team": "A", "x": 100.0, "y": 200.0, "games": 1},
+         {"team": "B", "x": 200.0, "y": 250.0, "games": 1}], (100.0, 500.0), (200.0, 600.0))
+    assert "median 150" in moved, moved[:300]
+
+
+def test_the_scatter_gridlines_are_every_hundred_yards_and_muted():
+    """⚠️ A178. > **MARC, v10:** *"Mute (lighter by 50%) down the current gridlines and reduce
+    them to every 100 yard increments."*
+
+    ⚠️ THE STEP IS AN ARGUMENT AND THE DOMAIN ROUNDS TO IT, so both had to move together — a
+    100-step ladder over a domain rounded to 50s puts the bounds off the ladder, which is the
+    chart standard §0.2 property that makes two renders comparable.
+    """
+    _today()
+    import inspect
+
+    from lib import theme
+    from views import today as t
+
+    signature = inspect.signature(t._scatter_svg)
+    assert signature.parameters["x_step"].default == 100
+    assert signature.parameters["y_step"].default == 100
+
+    svg = t._scatter_svg([{"team": "A", "x": 150.0, "y": 250.0, "games": 1}],
+                         (100.0, 500.0), (200.0, 600.0))
+    # 100..500 inclusive at a 100 step is five gridlines, not nine.
+    assert svg.count("cfdb-sc-grid") == 5 + 5, svg.count("cfdb-sc-grid")
+
+    rule = [ln for ln in theme.CSS.splitlines() if ".cfdb-sc-grid" in ln and "stroke" in ln]
+    assert rule and "stroke-opacity:.07" in rule[0], rule
+
+
+def test_the_card_grid_reaches_todays_cards_and_nothing_else():
+    """🚨 A178 (cfdb-main-R-1856). THE REFLOW IS A CHANGE TO A SHARED STYLESHEET, AND THE
+    PROMPT ASKED FOR MATCHUP TO BE PROVED UNTOUCHED RATHER THAN ASSERTED.
+
+    📊 `.cfdb-card` now carries `display:grid` with four fixed tracks. A CSS class selector is
+    global, so the question is which pages draw an element with that exact class:
+
+        matchup.py    ZERO references to any cfdb-card* class — its player card is built from
+                      `identity.player_row`, which this round does not touch
+        schedule.py   `cfdb-cardgrid` and `cfdb-gamecard` — neither is matched by `.cfdb-card`,
+                      because a class selector matches a whole class name and not a prefix
+        today.py      the only consumer
+
+    ⚠️ A PREFIX IS NOT A MATCH AND THAT IS THE WHOLE RISK HERE. `cfdb-cardgrid` LOOKS like it
+    would be caught by `.cfdb-card` to anyone reading quickly, which is exactly why this is a
+    test and not a sentence in a report.
+    """
+    views = ROOT / "site" / "views"
+    emitters = sorted(
+        path.name for path in views.glob("*.py")
+        if re.search(r"class='cfdb-card[' ]", path.read_text()))
+    assert emitters == ["today.py"], (
+        f"a second page now draws `.cfdb-card` and A178's four-track grid reaches it: "
+        f"{emitters}")
+
+    # And the shared row Matchup builds its own card from is untouched by this round.
+    assert "cfdb-card" not in (views / "matchup.py").read_text(), (
+        "matchup.py has started using the card classes — the grid would reflow session B's "
+        "page, which is the collision §3 exists to prevent")

@@ -19,9 +19,32 @@ class Col:
     def __init__(self, field: str, label: str, kind: str = "text",
                  dp: Optional[int] = None, width: Optional[str] = None,
                  render: Optional[Callable] = None,
-                 link: Optional[Callable] = None):
+                 link: Optional[Callable] = None,
+                 opens: Optional[str] = None):
         self.field, self.label, self.kind = field, label, kind
         self.dp, self.width, self.render = dp, width, render
+        # ── A178 (cfdb-main-R-1850): WHICH WAY THIS COLUMN OPENS ────────────────────────────
+        #
+        # > MARC, v10: "When I choose a column header to force a sort, it shift to sort asc,
+        # > but end-user will generally want to see the best performers for the metric (desc).
+        # > Can you make desc the first sort."
+        #
+        # 🚨 HIS REASON IS RIGHT AND IT DOES NOT GENERALISE, WHICH IS WHY THIS IS PER COLUMN
+        # AND NOT ONE CONSTANT. "The best performers" is `desc` for a yards column and `asc`
+        # for a RANK, where 1 is best. `table.render` is the site's ONLY table producer —
+        # Schedule, Scores, Standings, Rankings, every Team tab, every Matchup table and every
+        # Leaderboard — so a global flip would put 136th on top of the Rankings page.
+        #
+        # 🚨 AND `kind` ALONE CANNOT DECIDE IT, WHICH WAS MEASURED RATHER THAN ASSUMED. Of the
+        # 193 `Col` call sites on the site, FOUR ranks carry `kind="num"`: `ap_rank`,
+        # `coaches_rank` and `committee_rank` on Rankings, and `tiebreak_rank` on Standings.
+        # Defaulting `num` to `desc` and stopping there would have shipped exactly the defect
+        # the paragraph above describes. Those four declare `opens="asc"` at their call sites.
+        #
+        # ⚠️ `opens` IS THE OVERRIDE, NOT THE RULE. Left unset a column takes the default for
+        # its kind, so 75 measure columns get Marc's ask without 193 edits — and a column that
+        # needs the other answer says so where a reader is already looking at it.
+        self.opens = opens
         # A column-specific destination, which WINS over the row link for that cell.
         # AC-2.5 wants both on one row: the row goes to the game, the team name goes to the
         # team. Nested anchors are invalid HTML, so it has to be one or the other per cell.
@@ -55,6 +78,20 @@ class Col:
         if value is None or (isinstance(value, float) and pd.isna(value)):
             return fmt.EM_DASH
         return str(value)
+
+    @property
+    def first_order(self) -> str:
+        """The direction this column sorts in when it is clicked from cold.
+
+        ⚠️ ONLY THE FIRST CLICK. Clicking the ALREADY-ACTIVE column still flips whatever it is
+        showing — that toggle is what makes a header a control rather than a setting, and Marc
+        asked for a better starting point, not for the toggle to go.
+        """
+        if self.opens in ("asc", "desc"):
+            return self.opens
+        # A measure: bigger is the interesting end. Everything else — a name, a date, a chip,
+        # a display string — reads from the top down.
+        return "desc" if self.kind in ("num", "signed") else "asc"
 
     @property
     def css(self) -> str:
@@ -93,7 +130,12 @@ def apply_sort(df: pd.DataFrame, columns: List[Col],
         # A stale or hand-edited ?sort= names a column this table does not have. Ignore it
         # rather than raising: an unknown sort is noise, not a request (AC-G.11).
         return df
-    ascending = (params.get("order") or "asc") == "asc"
+    # A178: with no `order` in the URL, the column's own opening direction decides — otherwise
+    # a hand-edited or truncated link sorts one way while the header's arrow claims the other.
+    # Every link this module BUILDS carries both, so this is the edge case, not the path.
+    by_field = {c.field: c for c in columns if c.field}
+    fallback = by_field[field].first_order if field in by_field else "asc"
+    ascending = (params.get("order") or fallback) == "asc"
     # na_position last in both directions: a null is not the smallest value, it is the
     # absence of one, and burying them keeps the top of the table meaningful either way.
     return df.sort_values(field, ascending=ascending, na_position="last",
@@ -142,8 +184,9 @@ def _header_cell(column: Col, sortable: bool, freeze: str = "",
     current = params.get("sort")
     order = params.get("order") or "asc"
     is_active = current == column.field
-    # Clicking the active column flips it; clicking a new one starts ascending.
-    next_order = "desc" if (is_active and order == "asc") else "asc"
+    # A178. Clicking the ACTIVE column flips it; clicking a NEW one opens the way that column
+    # opens — `desc` for a measure, `asc` for a rank or a name. See `Col.first_order`.
+    next_order = ("desc" if order == "asc" else "asc") if is_active else column.first_order
     arrow = ("▲" if order == "asc" else "▼") if is_active else "⇅"
     href = params.link_here(sort=column.field, order=next_order)
     # THE FRAGMENT IS APPENDED, NEVER BUILT INTO `link_here`. That function's job is the QUERY,
