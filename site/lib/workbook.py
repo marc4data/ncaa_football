@@ -1326,6 +1326,48 @@ SQL_HOLES = {"ROW_CAP": str(ROW_CAP), "SCORES_GAME_ORDER": SCORES_GAME_ORDER}
 # Why not keep them shipping in the OLD layout: a workbook with one sheet whose header row is
 # computed and six whose header row is 4 is a file that contradicts itself about where its
 # data starts, which is exactly the thing R-181 exists to fix.
+def _pivot_player_stats(stat_types):
+    """Melted `srv_player_stats` -> one row per player, two columns per statistic. A175.
+
+    🚨 THE PIVOT IS IN THE WRITER, NOT IN THE QUERY, AND THAT IS THE ONLY PLACE IT CAN BE.
+    Postgres has no portable pivot, `crosstab` is an extension, and a hand-rolled
+    `max(case when stat_type = ...)` per statistic would put the STATISTIC LIST in the SQL —
+    where the sheet's column declaration already is, free to disagree with it.
+
+    ⚠️ `rows_in_scope` IS CARRIED THROUGH. `read_sheet` reads it AFTER `augment` runs, and it
+    is the MELTED count — which is the honest one: it is what the 5,000-row cap applied to.
+
+    ⚠️ AND THE RANK FIELDS END IN `_rank`, WHICH IS LOAD-BEARING. R-216 gives a numeric LABEL
+    no thousands separator, and `PLAIN_INTEGER_SUFFIXES` matches the SUFFIX `_rank`. A173 was
+    bitten by the same rule's blind spot on `rank_desc`, where "rank" is a PREFIX and the
+    suffix rule could not see it — so these are named to fall inside the rule rather than
+    beside it.
+    """
+    def pivot(df):
+        if df is None or df.empty:
+            return df
+        in_scope = df["rows_in_scope"].iloc[0] if "rows_in_scope" in df.columns else len(df)
+        identity = ["jersey", "player_name", "team", "conference", "class_year_display",
+                    "position", "height_display", "weight_pounds"]
+        keep = [c for c in identity if c in df.columns]
+        out = df[keep].drop_duplicates(subset=["player_name", "team"]).set_index(
+            ["player_name", "team"])
+        for stat in stat_types:
+            rows = df[df["stat_type"] == stat].drop_duplicates(
+                subset=["player_name", "team"]).set_index(["player_name", "team"])
+            field = stat.replace(" ", "_")
+            out[field] = rows["stat_value"]
+            out[f"{field}_rank"] = rows["rank_desc"]
+        out = out.reset_index()
+        # The identity columns in the order the sheet declares them, then the pairs.
+        ordered = [c for c in identity if c in out.columns] + [
+            c for c in out.columns if c not in identity]
+        out = out[ordered]
+        out["rows_in_scope"] = in_scope
+        return out
+    return pivot
+
+
 _ALL_SHEETS = [
     # ======================================================================================
     # THE SCHEDULE SHEET — FIFTY-SIX COLUMNS IN MARC'S ORDER (R-214, R-215).
@@ -1821,30 +1863,339 @@ _ALL_SHEETS = [
              "rows in 2025 and is not shipped here rather than truncating both halves at the "
              "5,000-row cap."),
 
-    Sheet("Player stats", "srv_player_stats", """
-        select season, player_name, team, conference, position, stat_category, stat_type,
-               stat_value, rank_desc, rank_population, percentile,
-               class_year_display, height_display, weight_pounds, jersey,
+    # ======================================================================================
+    # A175 (cfdb-main-R-1752). TEN PIVOTED SHEETS, ONE PER CATEGORY — AND THE SINGLE MELTED
+    # `Player stats` SHEET IS GONE, NOT KEPT BESIDE THEM.
+    #
+    # > **MARC, v09:** *"Player Stats is a melted dataset, too long for export. Pivot each
+    # > Category, with Statistic as columns. Include #, Player, Team, Conference, Class, Pos,
+    # > ht, wt on the rows. Also include the Rank. Value as the Value fields. Use that method
+    # > and have a different sheet for each stat Category: Player Stat - Defense, Player Stat -
+    # > Fumbles, Player Stat - Kicking, etc"*
+    #
+    # ⚠️ KEEPING THE THING HE CALLED "too long", NEXT TO ITS OWN FIX, WOULD BE CLUTTER. The
+    # melted sheet went; A175's report says so, so the change is visible rather than found.
+    #
+    # 📊 EVERY CATEGORY ENUMERATED AND SIZED ON LIVE SERVING BEFORE ANY OF THIS WAS WRITTEN
+    # (A173's rule, cfdb-main-R-1700). 2025, the `rank_desc <= 50` cut this sheet already
+    # shipped — pivoted rows, and the sheet name against Excel's 31-character cap:
+    #
+    #     defensive     403 rows  7 stats     kicking       183  7      passing    270  7
+    #     receiving     193       5           punting       171  6      rushing    175  5
+    #     interceptions 281       4           puntReturns   163  5      fumbles    280  3
+    #     kickReturns   131       5
+    #
+    # **The longest name is `Player Stat - Interceptions` at 27 characters, and the largest
+    # sheet is 403 rows against a 5,000 cap.** Nothing truncates.
+    #
+    # 🚨 AND THE BLANKS ARE REAL, MEASURED, AND IN EVERY NOTE. `rank_desc <= 50` means *the top
+    # 50 in each STAT*; pivoted, a player top-50 in YDS and not in TD gets a row with YDS
+    # filled and TD blank. **Overall fill is 28.8% — 3,539 of 12,292 cells.** Per category it
+    # runs 18.8% (defensive, 7 stats) to 39.7% (kickReturns).
+    #
+    # ⚠️ AND THE 100%-FILLED VERSION IS BLOCKED BY A RULE, NOT BY EFFORT, WHICH IS WORTH
+    # KNOWING BEFORE SOMEBODY TRIES IT AGAIN. Fetching every stat for any player who is top-50
+    # in that category gives **100.0% fill at the same row counts** — measured — but it needs
+    # either a self-join or a CTE, and `check_contract` counts both as extra relations and
+    # refuses (AC-G.3: *"Query names 3 relations; exactly one is allowed"*). Fetching the
+    # category unfiltered instead breaks the cap for **7 of the 10** (defensive alone is 60,445
+    # rows). ✅ **The real fix is a published flag — `is_top_50_in_category` — and that is a dbt
+    # round.** Until then the cut is the honest one and the note carries the number.
+    # ======================================================================================
+    Sheet("Player Stat - Defensive", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
                count(*) over () as rows_in_scope
         from srv_player_stats
-        where season = :season and rank_desc <= 50
+        where season = :season and stat_category = 'defensive' and rank_desc <= 50
           and (:conference is null or conference = :conference)
-        order by stat_category, stat_type, rank_desc
+        order by player_name, stat_type
         limit {ROW_CAP}
     """, [
-        ("season", "Season"), ("player_name", "Player"), ("team", "Team"),
-        ("conference", "Conference"), ("position", "Pos"),
-        ("stat_category", "Category"), ("stat_type", "Statistic"),
-        ("stat_value", "Value"), ("rank_desc", "Rank"),
-        ("rank_population", "Ranked of"), ("percentile", "Percentile"),
-        ("class_year_display", "Class"), ("height_display", "Ht"),
-        ("weight_pounds", "Wt"), ("jersey", "#"),
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("TOT", "TOT"), ("TOT_rank", "TOT rank"),
+        ("SOLO", "SOLO"), ("SOLO_rank", "SOLO rank"),
+        ("TFL", "TFL"), ("TFL_rank", "TFL rank"),
+        ("SACKS", "SACKS"), ("SACKS_rank", "SACKS rank"),
+        ("PD", "PD"), ("PD_rank", "PD rank"),
+        ("QB_HUR", "QB HUR"), ("QB_HUR_rank", "QB HUR rank"),
+        ("TD", "TD"), ("TD_rank", "TD rank"),
     ], freeze_before="Conference",
-        note="Season totals, NOT week-scoped. THE TOP 50 IN EACH STAT, because a full season is "
-             "139,100 player-stat rows against a 5,000-row cap — `rank_desc` ranks within one "
-             "stat type, so this is 50 per stat across 30 of them, 3,539 rows in 2025. "
-             "`Ranked of` is the population that rank was taken against (AC-G.33: a rank "
-             "without its denominator is not a measurement)."),
+        augment=_pivot_player_stats(['TOT', 'SOLO', 'TFL', 'SACKS', 'PD', 'QB HUR', 'TD']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 18.8% of the value "
+             "cells in this category are filled (403 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Fumbles", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'fumbles' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("FUM", "FUM"), ("FUM_rank", "FUM rank"),
+        ("LOST", "LOST"), ("LOST_rank", "LOST rank"),
+        ("REC", "REC"), ("REC_rank", "REC rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['FUM', 'LOST', 'REC']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 37.9% of the value "
+             "cells in this category are filled (280 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Interceptions", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'interceptions' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("INT", "INT"), ("INT_rank", "INT rank"),
+        ("YDS", "YDS"), ("YDS_rank", "YDS rank"),
+        ("TD", "TD"), ("TD_rank", "TD rank"),
+        ("AVG", "AVG"), ("AVG_rank", "AVG rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['INT', 'YDS', 'TD', 'AVG']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 34.9% of the value "
+             "cells in this category are filled (281 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Kicking", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'kicking' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("FGM", "FGM"), ("FGM_rank", "FGM rank"),
+        ("FGA", "FGA"), ("FGA_rank", "FGA rank"),
+        ("PCT", "PCT"), ("PCT_rank", "PCT rank"),
+        ("LONG", "LONG"), ("LONG_rank", "LONG rank"),
+        ("XPM", "XPM"), ("XPM_rank", "XPM rank"),
+        ("XPA", "XPA"), ("XPA_rank", "XPA rank"),
+        ("PTS", "PTS"), ("PTS_rank", "PTS rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['FGM', 'FGA', 'PCT', 'LONG', 'XPM', 'XPA', 'PTS']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 29.8% of the value "
+             "cells in this category are filled (183 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Kick returns", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'kickReturns' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("NO", "NO"), ("NO_rank", "NO rank"),
+        ("YDS", "YDS"), ("YDS_rank", "YDS rank"),
+        ("AVG", "AVG"), ("AVG_rank", "AVG rank"),
+        ("LONG", "LONG"), ("LONG_rank", "LONG rank"),
+        ("TD", "TD"), ("TD_rank", "TD rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['NO', 'YDS', 'AVG', 'LONG', 'TD']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 39.7% of the value "
+             "cells in this category are filled (131 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Passing", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'passing' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("YDS", "YDS"), ("YDS_rank", "YDS rank"),
+        ("TD", "TD"), ("TD_rank", "TD rank"),
+        ("INT", "INT"), ("INT_rank", "INT rank"),
+        ("COMPLETIONS", "COMPLETIONS"), ("COMPLETIONS_rank", "COMPLETIONS rank"),
+        ("ATT", "ATT"), ("ATT_rank", "ATT rank"),
+        ("PCT", "PCT"), ("PCT_rank", "PCT rank"),
+        ("YPA", "YPA"), ("YPA_rank", "YPA rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['YDS', 'TD', 'INT', 'COMPLETIONS', 'ATT', 'PCT', 'YPA']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 25.0% of the value "
+             "cells in this category are filled (270 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Punting", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'punting' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("NO", "NO"), ("NO_rank", "NO rank"),
+        ("YDS", "YDS"), ("YDS_rank", "YDS rank"),
+        ("YPP", "YPP"), ("YPP_rank", "YPP rank"),
+        ("LONG", "LONG"), ("LONG_rank", "LONG rank"),
+        ("In_20", "In 20"), ("In_20_rank", "In 20 rank"),
+        ("TB", "TB"), ("TB_rank", "TB rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['NO', 'YDS', 'YPP', 'LONG', 'In 20', 'TB']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 34.3% of the value "
+             "cells in this category are filled (171 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Punt returns", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'puntReturns' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("NO", "NO"), ("NO_rank", "NO rank"),
+        ("YDS", "YDS"), ("YDS_rank", "YDS rank"),
+        ("AVG", "AVG"), ("AVG_rank", "AVG rank"),
+        ("LONG", "LONG"), ("LONG_rank", "LONG rank"),
+        ("TD", "TD"), ("TD_rank", "TD rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['NO', 'YDS', 'AVG', 'LONG', 'TD']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 34.7% of the value "
+             "cells in this category are filled (163 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Receiving", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'receiving' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("REC", "REC"), ("REC_rank", "REC rank"),
+        ("YDS", "YDS"), ("YDS_rank", "YDS rank"),
+        ("TD", "TD"), ("TD_rank", "TD rank"),
+        ("YPR", "YPR"), ("YPR_rank", "YPR rank"),
+        ("LONG", "LONG"), ("LONG_rank", "LONG rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['REC', 'YDS', 'TD', 'YPR', 'LONG']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 29.8% of the value "
+             "cells in this category are filled (193 players). That is the cut, not a gap."),
+    Sheet("Player Stat - Rushing", "srv_player_stats", """
+        select jersey, player_name, team, conference, class_year_display, position,
+               height_display, weight_pounds, stat_type, stat_value, rank_desc,
+               count(*) over () as rows_in_scope
+        from srv_player_stats
+        where season = :season and stat_category = 'rushing' and rank_desc <= 50
+          and (:conference is null or conference = :conference)
+        order by player_name, stat_type
+        limit {ROW_CAP}
+    """, [
+        ("jersey", "#"),
+        ("player_name", "Player"),
+        ("team", "Team"),
+        ("conference", "Conference"),
+        ("class_year_display", "Class"),
+        ("position", "Pos"),
+        ("height_display", "Ht"),
+        ("weight_pounds", "Wt"),
+        ("CAR", "CAR"), ("CAR_rank", "CAR rank"),
+        ("YDS", "YDS"), ("YDS_rank", "YDS rank"),
+        ("TD", "TD"), ("TD_rank", "TD rank"),
+        ("YPC", "YPC"), ("YPC_rank", "YPC rank"),
+        ("LONG", "LONG"), ("LONG_rank", "LONG rank"),
+    ], freeze_before="Conference",
+        augment=_pivot_player_stats(['CAR', 'YDS', 'TD', 'YPC', 'LONG']),
+        note="Season totals, NOT week-scoped. One row per player, one column pair per "
+             "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
+             "who is top-50 in one and not another has that column BLANK: 29.9% of the value "
+             "cells in this category are filled (175 players). That is the cut, not a gap."),
 
     # Not week-scoped, and deliberately so. These two describe the export rather than adding
     # to it: which models produced the predicted columns, and what every field means. Both
@@ -1924,8 +2275,15 @@ _ALL_SHEETS = [
 
 # What the workbook writes, and what it does not write YET. Split rather than filtered, so
 # adding a converted sheet is moving one name and cannot be done by accident.
+# A175: `Player stats` (melted) REPLACED by ten pivoted per-category sheets — Marc called the
+# melted one "too long for export", and keeping it beside its own fix would be clutter.
 SHIPPED = ("Schedule", "Scores", "Standings", "Team form", "Team stats",
-           "Player stats", "Data dictionary")
+           "Player Stat - Defensive", "Player Stat - Fumbles",
+           "Player Stat - Interceptions", "Player Stat - Kicking",
+           "Player Stat - Kick returns", "Player Stat - Passing",
+           "Player Stat - Punting", "Player Stat - Punt returns",
+           "Player Stat - Receiving", "Player Stat - Rushing",
+           "Data dictionary")
 SHEETS = [s for s in _ALL_SHEETS if s.name in SHIPPED]
 PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name not in SHIPPED]
 # 🚨 A174 (cfdb-main-R-1436). THE OLD SENTENCE WAS DISPROVED BY A173 AND LEFT IN THE FILE —
@@ -1982,7 +2340,7 @@ PAGE_FOR_SHEET = {
 # events. Seven sheets exist; two ship.
 # A173: 3 -> 7 shipped, 4 -> 3 pending. Odds, Edges and Model performance remain, and are
 # one word each — see the note above SHIPPED.
-assert len(SHEETS) == 7 and len(PENDING_SHEETS) == 3
+assert len(SHEETS) == 16 and len(PENDING_SHEETS) == 3
 assert set(SHIPPED) <= {s.name for s in _ALL_SHEETS}
 
 # Conditional formatting goes on the columns a reader is scanning for outliers. Anything

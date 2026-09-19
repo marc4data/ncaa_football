@@ -2215,3 +2215,109 @@ def test_the_curve_lobes_take_their_own_teams_colour_and_the_line_stays_neutral(
     # And with no colours supplied, nothing changes: one neutral fill, no clips at all.
     plain = winprob.sparkline_svg(_curve())
     assert "<clipPath" not in plain and "fill='currentColor'" in plain
+
+
+def _yardage_frame():
+    """A board whose three columns have DIFFERENT maxima, so one denominator is detectable."""
+    import pandas as pd
+    return pd.DataFrame([
+        {"team_display": "Alpha", "total_yards": 800, "rushing_yards": 400,
+         "passing_yards": 400},
+        {"team_display": "Beta", "total_yards": 400, "rushing_yards": 100,
+         "passing_yards": 300},
+        {"team_display": "Gamma", "total_yards": 200, "rushing_yards": 50,
+         "passing_yards": 150},
+    ])
+
+
+def test_the_spark_bars_share_one_denominator_and_it_is_the_total_column():
+    """🚨 A175 (cfdb-main-R-1750). THE THING MARC ASKED FOR FIVE ROUNDS AGO, AND THE ONE CLAUSE
+    THAT IS EASY TO GET WRONG.
+
+    > **MARC, Today v04:** *"Can we add horizontal spark bars in the Total, Rush, and Pass
+    > cells. Make them all proportionate and relative to the max of the Total column. Bars from
+    > the left. The number in the cell right aligned, not at the end of the bar."*
+
+    🚨 **ONE DENOMINATOR FOR ALL THREE COLUMNS.** Scaled per column, Alpha's 400 rushing yards
+    and Alpha's 400 passing yards would BOTH draw full width — and so would a 90-yard rushing
+    game on a board whose best rusher had 90. **The bars would stop comparing anything.**
+
+    📊 The fixture's maxima differ on purpose — total 800, rush 400, pass 400 — so the two
+    readings are 50% and 100% and cannot be confused (R-843: the pinned value must MOVE).
+    """
+    today = _today()
+    frame = _yardage_frame()
+    assert today._spark_max(frame) == 800
+
+    def width(row, field):
+        cell = today._spark_cell(row, field, frame)
+        found = re.search(r"width:([\d.]+)%", cell)
+        return float(found.group(1)) if found else None
+
+    leader = frame.iloc[0]
+    assert width(leader, "total_yards") == 100.0
+    # 400 against TOTAL's 800 is 50%. Against rush's own max it would be 100%.
+    assert width(leader, "rushing_yards") == 50.0, (
+        "the rush bar is scaled to its own column's max — Marc asked for Total's")
+    assert width(leader, "passing_yards") == 50.0
+
+    # And a smaller row scales the same way.
+    assert width(frame.iloc[1], "total_yards") == 50.0
+    assert width(frame.iloc[2], "rushing_yards") == 6.2
+
+
+def test_the_spark_number_is_right_aligned_in_the_cell_not_at_the_bars_end():
+    """⚠️ MARC'S LAST CLAUSE, AND IT IS A SEPARATE REQUIREMENT: *"The number in the cell right
+    aligned, not at the end of the bar."*
+
+    A value riding the bar's end would encode the same quantity twice and line up with nothing
+    down the column. The bar is drawn BEHIND the number — absolutely positioned, out of the
+    text flow — so the digits sit at the cell's right edge whatever width the bar takes.
+    """
+    today = _today()
+    frame = _yardage_frame()
+    cell = today._spark_cell(frame.iloc[1], "total_yards", frame)
+
+    assert "cfdb-spark-bar" in cell and "cfdb-spark-value" in cell
+    # The bar element carries the width; the value element never does.
+    bar = re.search(r"<span class='cfdb-spark-bar'[^>]*></span>", cell).group(0)
+    value = re.search(r"<span class='cfdb-spark-value'>.*?</span>", cell).group(0)
+    assert "width:" in bar and "width:" not in value
+    # The bar is EMPTY — the number is not inside it, which is what "not at the end" means.
+    assert bar.endswith("></span>")
+
+    source = (ROOT / "site" / "lib" / "theme.py").read_text()
+    assert ".cfdb-spark { position:relative; display:block; text-align:right; }" in source, (
+        "the cell's own right alignment is what puts the number at the cell's edge")
+    assert "position:absolute" in source.split(".cfdb-spark-bar")[1][:200], (
+        "the bar must be out of the text flow, or it pushes the number off the right edge")
+
+
+def test_the_spark_denominator_comes_from_the_rendered_frame_and_degrades():
+    """⚠️ A175. THE MAX IS A PROPERTY OF WHAT IS ON SCREEN, not of the relation — the board is
+    `depth`-limited and scope-filtered, so the denominator MOVES with the depth radio and the
+    week. **That is correct: the bars compare the rows Marc is looking at.**
+
+    🚨 AND THE TWO DEGENERATE FRAMES MUST NOT DIVIDE BY ZERO. An empty or all-null board draws
+    NO bar rather than a full one — a full-width bar on no data is a picture of a number that
+    does not exist.
+    """
+    import pandas as pd
+    today = _today()
+
+    assert today._spark_max(pd.DataFrame()) == 0.0
+    assert today._spark_max(None) == 0.0
+    all_null = pd.DataFrame([{"total_yards": None}, {"total_yards": None}])
+    assert today._spark_max(all_null) == 0.0
+
+    # With no denominator the cell still renders its NUMBER, and draws no bar.
+    cell = today._spark_cell({"total_yards": 250}, "total_yards", pd.DataFrame())
+    assert "cfdb-spark-bar" not in cell and "250" in cell
+
+    # A single row is its own max — honest, because it is the max of what is shown.
+    single = _yardage_frame().head(1)
+    assert today._spark_max(single) == 800
+
+    # And the denominator really does follow the frame it is handed.
+    assert today._spark_max(_yardage_frame().head(2)) == 800
+    assert today._spark_max(_yardage_frame().tail(1)) == 200

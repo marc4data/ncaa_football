@@ -527,8 +527,20 @@ def test_export_labels_agree_with_the_site(built):
     # so there is no page for this test to scrape labels from. ⚠️ That is a fact about the
     # registry rather than about the sheet, and it is why the sheet's headers are the only
     # place those columns are named for a reader.
+    # 🚨 A175 ADDED TEN, AND THEIR REASON IS STRUCTURAL RATHER THAN AN OVERSIGHT: A PIVOTED
+    # SHEET AND A MELTED PAGE HAVE NO COMPARABLE LABELS.
+    #
+    # 📊 `players.py` declares Cols for `stat_category`, `stat_type`, `stat_value`, `rank_desc`
+    # and `percentile` — the MELTED shape — and renders the player's identity through a card
+    # rather than through columns. So NONE of the pivoted sheets' eight identity fields is a
+    # `Col` on that page, and their statistic columns (`YDS`, `TD`) are VALUES in a `stat_type`
+    # column there, not columns at all. **There is nothing for this test to compare, and that
+    # is a fact about the two shapes rather than a gap to close.**
+    PIVOTED = {f"Player Stat - {c}" for c in (
+        "Defensive", "Fumbles", "Interceptions", "Kicking", "Kick returns", "Passing",
+        "Punting", "Punt returns", "Receiving", "Rushing")}
     uncovered = {name for name, n in compared.items() if n == 0}
-    assert uncovered == {"Scores", "Team form"}, (
+    assert uncovered == {"Scores", "Team form"} | PIVOTED, (
         f"sheets compared against no page: {uncovered or 'none'}")
 
     scores_source = (site / "views" / "scores.py").read_text()
@@ -1167,7 +1179,7 @@ def test_the_default_sort_is_the_order_by_and_it_is_stable():
     assert "order by start_date, game_id" in flat
 
 
-def test_seven_sheets_ship_and_the_other_three_are_kept_not_deleted():
+def test_sixteen_sheets_ship_and_the_other_three_are_kept_not_deleted():
     """A173 (cfdb-main-R-1702): 3 shipped -> 7, 4 pending -> 3.
 
     > **MARC, v08:** *Excel Export / Add / srv_team_week / srv_team_stats / srv_player_stats
@@ -1189,8 +1201,11 @@ def test_seven_sheets_ship_and_the_other_three_are_kept_not_deleted():
     fell out of `_ALL_SHEETS` on the way. Ten in, ten accounted for.
     """
     assert [s.name for s in workbook.SHEETS] == [
-        "Schedule", "Scores", "Standings", "Team form", "Team stats", "Player stats",
-        "Data dictionary"]
+        "Schedule", "Scores", "Standings", "Team form", "Team stats",
+        "Player Stat - Defensive", "Player Stat - Fumbles", "Player Stat - Interceptions",
+        "Player Stat - Kicking", "Player Stat - Kick returns", "Player Stat - Passing",
+        "Player Stat - Punting", "Player Stat - Punt returns", "Player Stat - Receiving",
+        "Player Stat - Rushing", "Data dictionary"]
     assert {s.name for s in workbook.PENDING_SHEETS} == {
         "Odds", "Edges", "Model performance"}
     assert len(workbook.SHEETS) + len(workbook.PENDING_SHEETS) == len(workbook._ALL_SHEETS)
