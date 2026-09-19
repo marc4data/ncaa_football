@@ -1623,12 +1623,24 @@ def test_the_leaderboards_panel_itself_renders_without_an_error_card():
     # for the team yardage board and `srv_player_game_log` for the three card boards — and a
     # stub answering by position would hand the team board a player frame, which is how the
     # first draft of this test reported "no spark bars" on a page that draws them.
+    #
+    # 🚨 AND THE SCOPE IS A STUB, NOT `filters.game_scope()`. The first draft called the real
+    # one — which queries `srv_game` through `filters`' OWN `query`, not the one stubbed here —
+    # and it passed locally because a serving tunnel happened to be open. **CI has no database
+    # and went red.** A111 turned CI red the same way and this file's header says so in its
+    # first paragraph; the local pass is what made it invisible.
+    class _BoardScope(_Scope):
+        season, week, season_type, conference, division = 2026, 2, "regular", None, "fbs"
+
+        def describe(self):
+            return "2026 week 2"
+
     with render_harness.streamlit_stubbed(
             query_params={"season": "2026", "week": "2"}) as (_st, captured, _charts):
         page = importlib.reload(importlib.import_module("views.today"))
         page.query = lambda sql, params=None: (
             teams() if "from srv_game_team" in sql else frame(every_type))
-        page._leaderboards(page.filters.game_scope(), 10)
+        page._leaderboards(_BoardScope(), 10)
         render_harness.assert_no_error_card(captured, "the leaderboards panel")
         html = "\n".join(captured)
 
