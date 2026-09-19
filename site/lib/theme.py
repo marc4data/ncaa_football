@@ -616,8 +616,47 @@ TABLE_CSS = """
 /* The card itself. A rule on one side rather than a box on four: thirty boxes on a page is a
    grid of borders competing with the text inside them, and the reader is scanning a ranked
    list down a column. */
-.cfdb-card { min-width:0; padding:.3rem .5rem; border-left:2px solid var(--cfdb-edge);
-             background:var(--cfdb-row-alt, transparent); border-radius:2px; }
+/* 🚨 A175 (cfdb-main-R-1755). THE BORDER AND THE SEPARATION MARC ASKED FOR, AND THE COLOR
+   QUESTION IS CLOSED RATHER THAN BLOCKED.
+
+   > **MARC, v09:** *"I like the format on Matchup better. Needs a border, don't necessary need
+   > the color on this page, but need the seperation between the other cards."*
+
+   ✅ **HE HAS CLOSED A166's BLOCKED ITEM HIMSELF.** `_player_card`'s docstring records that
+   `srv_player_game_log` publishes NO color column, so the team accent could not be drawn and
+   `_accent` was not promoted (cfdb-main-R-1309). **He does not want it here** — so that is
+   DECIDED, not blocked, and no model change is owed for it.
+
+   ✅ WHAT HE WANTS IS THE SEPARATION THE COLOR WAS CARRYING. A full border on all four sides
+   rather than the single left rule, and real space between cards — the proportions are
+   Matchup's `.cfdb-card`, read and not imported (`matchup.py` is session B's).
+
+   ⚠️ THE LEFT RULE STAYS THICKER THAN THE OTHER THREE. It is what gives a scanned column its
+   left edge, and dropping to a uniform hairline made the grid read as a table of boxes in a
+   4x zoom rather than as a stack of cards. */
+.cfdb-card { min-width:0; padding:.45rem .6rem; border:1px solid var(--cfdb-edge);
+             border-left:2px solid var(--cfdb-edge);
+             background:var(--cfdb-row-alt, transparent); border-radius:3px;
+             margin-bottom:.4rem; }
+
+/* A175: three metrics on one line, sharing the width evenly so the eye can compare down a
+   column. ⚠️ `min-width:0` on the children, or a long value stops the flex row shrinking and
+   the third metric falls off the card. */
+/* A175: the player identity and the team share ONE line — Marc: "There is a lot of horizontal
+   space in this layout, can we fit team info on an existing line?" The who grows, the team
+   takes what it needs, and `min-width:0` on both lets long names ellipsise instead of pushing
+   the team off the card. */
+.cfdb-card-head { display:flex; align-items:center; justify-content:space-between;
+                  gap:.6rem; min-width:0; }
+.cfdb-card-head-who { min-width:0; flex:1 1 auto; }
+.cfdb-card-head .cfdb-card-team { flex:0 1 auto; min-width:0; margin-top:0; }
+
+.cfdb-card-metrics { display:flex; gap:.5rem; align-items:baseline;
+                     margin:.15rem 0 .1rem; }
+.cfdb-card-metric { display:flex; flex-direction:column; min-width:0; flex:1 1 0; }
+.cfdb-card-metric .cfdb-card-value { font-size:1.05rem; font-weight:700; line-height:1.15; }
+.cfdb-card-metric .cfdb-card-unit { font-size:.68rem; opacity:.6; text-transform:uppercase;
+                                    letter-spacing:.02em; }
 /* 🚨 A166 (cfdb-main-R-1307). THE POSITION FOLLOWS THE NAME IN A CARD, AND THIS IS R-855's
    TRAP CAUGHT IN THE ACT: read the existing path, then TEST IT FOR THE CASE AT HAND.
 
@@ -919,6 +958,28 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    ⚠️ A redundant `.cfdb-teamlink{align-items:center}` was tested alongside and changed nothing,
    because that rule is already center; this is one property, not two. */
 .cfdb-identity { display:flex; align-items:center; gap:.4rem; min-width:0; }
+
+/* ── A175 (cfdb-main-R-1750). THE SPARK BARS ───────────────────────────────────────────────
+   > MARC, Today v04: "Can we add horizontal spark bars in the Total, Rush, and Pass cells.
+   > Make them all proportionate and relative to the max of the Total column. Bars from the
+   > left. The number in the cell right aligned, not at the end of the bar."
+
+   🚨 EVERY CLAUSE OF THAT SENTENCE IS A RULE HERE, and the last one is the easy one to lose:
+   the NUMBER is right-aligned in the CELL, so it sits at the cell's right edge whatever the
+   bar does. A number riding the bar's end would encode the value twice and align nothing.
+
+   The bar is BEHIND the number rather than beside it — one cell, no second column, and no
+   width taken from a table that A165 spent a round tightening. `position:absolute` inside a
+   `position:relative` cell keeps it out of the text flow entirely.
+
+   ⚠️ `currentColor` AT LOW ALPHA, NOT A PALETTE COLOR. These bars carry no category — they
+   are the same measure at three scales — so a hue would imply a distinction that is not
+   there, and `currentColor` inherits the theme both ways with no light-dark() to maintain. */
+.cfdb-spark { position:relative; display:block; text-align:right; }
+.cfdb-spark-bar { position:absolute; left:0; top:50%; transform:translateY(-50%);
+                  height:1.05em; background:currentColor; opacity:.15;
+                  border-radius:2px; pointer-events:none; }
+.cfdb-spark-value { position:relative; }
 .cfdb-identity > .cfdb-teamlink { min-width:0; }
 .cfdb-identity > .cfdb-team-record { flex:0 0 auto; margin-left:0; }
 .cfdb-identity .cfdb-team { min-width:0; }

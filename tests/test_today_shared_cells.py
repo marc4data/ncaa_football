@@ -359,8 +359,21 @@ def test_the_card_names_the_team_because_that_is_the_one_thing_marc_required():
     assert "Drake" in card, "the team NAME is required"
     assert "cfdb-logo" in card, "the team LOGO is required"
     assert "cfdb-identity" in card, "the team line must be the shared identity cell"
-    # The stat is the reason the card is on the board, and it reads before the team.
-    assert card.index("cfdb-card-value") < card.index("cfdb-card-team")
+    # 🚨 A175 REVERSED THIS ORDER ON MARC'S OWN LATER INSTRUCTION, and the old assertion is
+    # kept here as the thing that changed rather than deleted.
+    #
+    # > **v06:** the team is CONTEXT — *"a thing you check after you have read who and what"*,
+    # > so the team line followed the stat.
+    # > **v09:** *"There is a lot of horizontal space in this layout, can we fit team info on
+    # > an existing line?"*
+    #
+    # ⚠️ THE EXISTING LINE IS THE PLAYER'S, so the team now necessarily precedes the stat in
+    # document order. **The newer instruction wins and this asserts the new shape:** the team
+    # rides the identity line, and the stat reads after both.
+    assert card.index("cfdb-card-head") < card.index("cfdb-card-team"), (
+        "the team must sit inside the card's head row, on the player's line")
+    assert card.index("cfdb-card-team") < card.index("cfdb-card-value"), (
+        "the stat reads after the name-and-team line")
     assert "535" in card
 
 
@@ -478,8 +491,20 @@ def test_the_three_boards_split_on_the_axis_each_one_actually_has():
              and n.func.id == "_player_board"]
     assert len(calls) == 3, f"one call per board, each looped over its own three: {calls}"
     joined = " ".join(calls)
-    # yardage and touchdowns vary the CATEGORY at a fixed type
-    assert "'YDS'" in joined and "'TD'" in joined
+    # 🚨 A175 MOVED THE YARDAGE BOARD'S TYPE INTO THE COMPREHENSION, so the CALL now reads
+    # `types` and a substring check on the call site stopped seeing `'YDS'` — R-1321's
+    # indirection class, third outing. The claim is unchanged; where it is read is not.
+    #
+    # ⚠️ Yardage still varies the CATEGORY, and its statistic is now a TRIO whose FIRST member
+    # is the primary and decides the ranking. That trio is declared in the loop's own tuple,
+    # so the loop is what gets read.
+    assert "'TD'" in joined, joined
+    trios = [ast.unparse(n) for n in ast.walk(board)
+             if isinstance(n, ast.Tuple)
+             and [e.value for e in n.elts if isinstance(e, ast.Constant)][:1] == ["YDS"]]
+    assert trios, "the yardage board must declare a trio led by YDS"
+    assert any("'TD'" in t and ("'REC'" in t or "'INT'" in t or "'CAR'" in t) for t in trios), (
+        f"each yardage column's trio is YDS + TD + a category-specific third: {trios}")
     # defence varies the TYPE at a fixed category, and the values are the measured ones
     for stat_type in ('"TOT"', '"TFL"', '"SACKS"'):
         assert stat_type in SOURCE, f"{stat_type} is one of the three defensive types measured"
@@ -1464,3 +1489,198 @@ def test_flattening_the_subsections_is_exactly_what_strip_entries_returns():
     flat = [entry for _, rows in g.strip_subsections() for entry in rows]
     assert g.strip_entries() == [("Against the line", flat)]
     assert len(flat) == 11, f"the strip has 11 marks, not {len(flat)}"
+
+
+def test_a_card_draws_three_metrics_and_the_single_metric_boards_still_draw_one():
+    """🚨 A175 (cfdb-main-R-1753). > **MARC, v09:** *"I want 3 metrics per card."*
+
+    ⚠️ **NOT A STYLING CHANGE.** `srv_player_game_log` is MELTED — one row per player ×
+    stat_type — so one card showing three numbers needed a different query, a fold, and a
+    different card contract.
+
+    ⚠️ AND THE OTHER TWO BOARDS STILL DRAW ONE, DELIBERATELY: the defensive board already
+    splits on three stat_types, one per COLUMN, so a trio there would print the same number
+    three times.
+    """
+    import pandas as pd
+    row = pd.Series({"player_name": "A Player", "team_display": "Team", "team_slug": "team",
+                     "team_logo_url": None, "team_rank": None,
+                     "record_before_display": "3-0", "jersey": 7, "position": "QB",
+                     "class_year_display": "SR", "stat_value": 485,
+                     "metric_YDS": 485, "metric_TD": 5, "metric_INT": 2})
+
+    three = today._player_card(row, "yards", ("YDS", "TD", "INT"))
+    units = re.findall(r"cfdb-card-unit'>([^<]+)<", three)
+    values = re.findall(r"cfdb-card-value'>([^<]+)<", three)
+    assert units == ["YDS", "TD", "INT"], units
+    assert values == ["485", "5", "2"], values
+    assert three.count("cfdb-card-metric'") == 3
+
+    one = today._player_card(row, "yards")
+    assert "cfdb-card-metrics" not in one
+    assert one.count("cfdb-card-stat") == 1
+    assert "485" in one
+
+
+def test_the_metric_parameter_is_not_named_after_the_metrics_module():
+    """🚨 A175 (cfdb-main-R-1757). A SHADOWED IMPORT IS AN UNDEFINED NAME THAT PASSES EVERY LINT.
+
+    📊 The first draft called `_player_card`'s parameter `metrics` — and `today.py` imports
+    `from lib import … metrics …` (A173, for the legend's upset bands). With no argument
+    passed, `if metrics:` resolved to **the MODULE**, which is always truthy, so **every card
+    would have taken the three-metric branch and iterated a module object.**
+
+    ⚠️ `flake8` CANNOT SEE IT: the name is legitimately bound at module scope, so there is no
+    undefined-name error to report. Only running the branch finds it.
+    """
+    import ast
+    import inspect
+    tree = ast.parse(SOURCE)
+    card = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "_player_card")
+    names = [a.arg for a in card.args.args + card.args.kwonlyargs]
+    assert "metrics" not in names, (
+        "`metrics` is a module this file imports — a parameter of that name shadows it and is "
+        "always truthy when omitted")
+    assert "metric_types" in names, names
+
+    # And the module really is imported, or this test is guarding nothing.
+    assert re.search(r"^from lib import \(.*\bmetrics\b", SOURCE, re.M | re.S), (
+        "if lib.metrics is no longer imported here, this guard has no subject")
+    assert inspect.isfunction(today._player_card)
+
+
+def test_the_reflow_stayed_in_todays_wrapper_so_matchups_card_cannot_move():
+    """🚨 A175 (cfdb-main-R-1756). `identity.player_row` IS CALLED BY BOTH PAGES.
+
+    📊 `matchup.py:2374` and `today.py` both call it — A167 promoted it to `lib/` precisely so
+    it is not copied (cfdb-main-R-1308). **Reflowing INSIDE it would have moved Matchup's
+    player cards**, a change to session B's page that A175 was not asked to make.
+
+    ✅ So Today wraps the shared cell in its own flex row instead. This asserts the wrapper
+    exists HERE and that the shared producer still emits what Matchup expects.
+    """
+    from lib import identity as ident
+    import pandas as pd
+
+    assert "cfdb-card-head-who" in SOURCE, "Today's own wrapper around the shared row"
+    shared = (ROOT / "site" / "lib" / "identity.py").read_text()
+    assert "cfdb-card-head" not in shared, (
+        "the reflow leaked into the shared producer — Matchup's cards would move with it")
+
+    # The shared row still renders standalone, which is what Matchup calls.
+    row = pd.Series({"player_name": "A Player", "jersey": 7, "position": "QB",
+                     "class_year_display": "SR"})
+    assert "A Player" in _plain(ident.player_row(row))
+
+
+def test_the_leaderboards_panel_itself_renders_without_an_error_card():
+    """🚨 A175 (cfdb-main-R-1758). THE TESTS DROVE THE CARD AND THE GRID; THE BUG WAS IN THE
+    PANEL THAT CALLS THEM, AND §6.1 FOUND IT FOR THE THIRD ROUND RUNNING.
+
+    📊 A175 made each board column a TRIPLE — `(heading, frame, metric_types)` — and updated
+    the grid's own loop. **Three other places unpacked a PAIR**: the `pd.concat([... for
+    _label, frame in ...])` that decides each board's empty state. `states.section` caught the
+    `ValueError`, drew a card, and **every test still passed** — because they call
+    `_player_card` and `_player_card_grid` directly and never the panel.
+
+    ⚠️ **A162's, A172's and A174's lesson in one sentence: a unit test of the pieces is not a
+    test of the assembly.** This drives the real panel with the query stubbed, which is the
+    cheapest thing that would have failed.
+    """
+    import importlib
+    import pandas as pd
+    import render_harness
+
+    def frame(stat_types):
+        rows = []
+        for i in range(3):
+            for stat in stat_types:
+                rows.append({
+                    "player_name": f"Player {i}", "player_slug": f"p{i}", "team": "Team",
+                    "team_display": "Team", "team_slug": "team", "team_logo_url": None,
+                    "team_rank": None, "record_before_display": "3-0", "conference": "SEC",
+                    "opponent": "Rival", "week": 2, "stat_category": "passing",
+                    "stat_type": stat, "stat_value": 100 - i,
+                    "jersey": 7, "position": "QB", "class_year_display": "SR",
+                    "as_of_ts": pd.Timestamp("2026-09-18", tz="UTC")})
+        return pd.DataFrame(rows)
+
+    def teams():
+        return pd.DataFrame([
+            {"team_display": f"Team {i}", "team_slug": f"t{i}", "team_logo_url": None,
+             "team_rank": None, "record_before_display": "3-0", "conference": "SEC",
+             "opponent": "Rival", "opponent_team_slug": "rival",
+             "opponent_team_display": "Rival", "opponent_logo_url": None,
+             "opponent_rank": None, "week": 2, "is_completed": True,
+             "total_yards": 800 - i * 200, "rushing_yards": 400 - i * 100,
+             "passing_yards": 400 - i * 100, "points_for": 30, "result": "W",
+             "as_of_ts": pd.Timestamp("2026-09-18", tz="UTC")} for i in range(3)])
+
+    every_type = ("YDS", "TD", "INT", "REC", "CAR", "TOT", "TFL", "SACKS")
+
+    # ⚠️ STUBBED BY RELATION, NOT BY CALL ORDER. This panel reads TWO views — `srv_game_team`
+    # for the team yardage board and `srv_player_game_log` for the three card boards — and a
+    # stub answering by position would hand the team board a player frame, which is how the
+    # first draft of this test reported "no spark bars" on a page that draws them.
+    #
+    # 🚨 AND THE SCOPE IS A STUB, NOT `filters.game_scope()`. The first draft called the real
+    # one — which queries `srv_game` through `filters`' OWN `query`, not the one stubbed here —
+    # and it passed locally because a serving tunnel happened to be open. **CI has no database
+    # and went red.** A111 turned CI red the same way and this file's header says so in its
+    # first paragraph; the local pass is what made it invisible.
+    class _BoardScope(_Scope):
+        season, week, season_type, conference, division = 2026, 2, "regular", None, "fbs"
+
+        def describe(self):
+            return "2026 week 2"
+
+    with render_harness.streamlit_stubbed(
+            query_params={"season": "2026", "week": "2"}) as (_st, captured, _charts):
+        page = importlib.reload(importlib.import_module("views.today"))
+        page.query = lambda sql, params=None: (
+            teams() if "from srv_game_team" in sql else frame(every_type))
+        page._leaderboards(_BoardScope(), 10)
+        render_harness.assert_no_error_card(captured, "the leaderboards panel")
+        html = "\n".join(captured)
+
+    assert "cfdb-card-metrics" in html, "the yardage board draws its three-metric cards"
+    assert "cfdb-spark-bar" in html, "the team yardage board draws its spark bars"
+
+
+def test_the_player_board_orders_by_each_players_primary_metric():
+    """🚨 A175 (cfdb-main-R-1759). THE ORDER IS WHAT KEEPS A PLAYER'S THREE ROWS TOGETHER, AND
+    A STAGED BREAK THAT REMOVED IT CAME BACK GREEN.
+
+    📊 The board fetches three `stat_type`s and applies a `limit`. **Ordering by `stat_value
+    desc` sorts a passer's 400 YDS above everyone's 3 TD**, so the limit would keep the yardage
+    rows and cut the touchdown rows *of the very players the board is about* — the cards would
+    show YDS and two em dashes, and nothing would fail.
+
+    ⚠️ **READ FROM THE SQL, BECAUSE A BEHAVIOURAL TEST CANNOT SEE AN `ORDER BY`.** B119's rule:
+    the harness returns whatever the fixture holds, in whatever order the fixture holds it, so
+    a fold test passes on a query that ordered wrongly. The window is the claim, so the window
+    is what gets asserted.
+    """
+    import ast
+    tree = ast.parse(SOURCE)
+    board = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_player_board")
+    sql = [n.value for n in ast.walk(board)
+           if isinstance(n, ast.Constant) and isinstance(n.value, str)
+           and "from srv_player_game_log" in n.value]
+    assert len(sql) == 1, f"expected one query, found {len(sql)}"
+    order = " ".join(sql[0].split()).split("order by")[1]
+
+    assert "over (partition by player_slug, team)" in order, (
+        "every row of a player must be ordered by THAT PLAYER's value, or the limit cuts "
+        "metrics instead of players")
+    assert ":primary" in order, "the partition must rank on the PRIMARY metric"
+    assert order.index("over (partition") < order.index("player_name"), (
+        "the window sorts first; player_name only breaks ties")
+
+    # And the limit must leave room for every metric of every player it keeps.
+    body = ast.unparse(board)
+    assert "len(stat_types)" in body, (
+        "the limit must scale with the number of metrics, or a trio board keeps a third of "
+        "the players it was asked for")

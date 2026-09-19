@@ -353,6 +353,7 @@ def _team_yardage(scope, depth: int) -> pd.DataFrame:
     return query("""
         select team_display, team_slug, team_logo_url, team_rank, record_before_display,
                conference, opponent, week, is_completed,
+               opponent_team_slug, opponent_team_display, opponent_logo_url, opponent_rank,
                total_yards, rushing_yards, passing_yards, points_for, result, as_of_ts
         from srv_game_team
         where season = :season and season_type = :season_type
@@ -368,7 +369,7 @@ def _team_yardage(scope, depth: int) -> pd.DataFrame:
          "conf": scope.conference, "division": scope.division})
 
 
-def _player_board(scope, depth: int, categories, stat_type: str) -> pd.DataFrame:
+def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
     """One leaderboard over srv_player_game_log.
 
     ⚠️ NO CLASSIFICATION COLUMN ON THIS VIEW, so `division` cannot be applied here the way it
@@ -406,6 +407,22 @@ def _player_board(scope, depth: int, categories, stat_type: str) -> pd.DataFrame
     is POSSIBLE, and a view with no classification column can still serve a player whose team has
     no roster row. **A number in a docstring is a claim with a date on it; this one is A166's.**
     """
+    # 🚨 A175 (cfdb-main-R-1753). THREE METRICS MEANS A DIFFERENT QUERY, NOT A DIFFERENT CARD.
+    #
+    # > **MARC, v09:** *"I want 3 metrics per card."*
+    #
+    # `srv_player_game_log` is MELTED — one row per player × stat_type — so one card showing
+    # three numbers needs three rows fetched and folded into one.
+    #
+    # 🚨 AND THE ORDER IS THE HARD PART. Ordering the fetch by `stat_value desc` across THREE
+    # types sorts a passer's 400 YDS above everyone's 3 TD, so a `limit` would keep the yardage
+    # rows and cut the touchdown rows **of the very players the board is about**. The window
+    # below orders every row of a player by THAT PLAYER'S PRIMARY value, so a player's three
+    # rows travel together and the limit cuts whole players rather than metrics.
+    #
+    # ⚠️ ONE RELATION, ONE QUERY, NO JOIN (G-2). The fold is a reshape of rows already fetched,
+    # which is what `augment` does for the workbook — not arithmetic between two columns.
+    primary = stat_types[0]
     return query("""
         select player_name, player_slug, team, conference, opponent, week,
                stat_category, stat_type, stat_value, as_of_ts,
@@ -414,15 +431,18 @@ def _player_board(scope, depth: int, categories, stat_type: str) -> pd.DataFrame
         from srv_player_game_log
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
-          and stat_type = :stat_type
+          and stat_type = any(:types)
           and stat_category = any(:cats)
           and (:conf is null or conference = :conf)
           and stat_value is not null
-        order by stat_value desc, player_name
+        order by max(case when stat_type = :primary then stat_value end)
+                 over (partition by player_slug, team) desc nulls last,
+                 player_name, stat_type
         limit {DEPTH}
-    """.replace("{DEPTH}", str(int(depth))),
+    """.replace("{DEPTH}", str(int(depth) * len(stat_types) * 2)),
         {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
-         "conf": scope.conference, "cats": list(categories), "stat_type": stat_type})
+         "conf": scope.conference, "cats": list(categories),
+         "types": list(stat_types), "primary": primary})
 
 
 def _line_movement(scope) -> pd.DataFrame:
@@ -749,7 +769,43 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
 #                                     pages, and editing it is not this round's to do.
 #     team.py's `Col("jersey","#")` ❌ THE OPPOSITE TRADE — a whole column per fact. A board of
 #                                     ninety cards cannot spend a column on two characters.
-def _player_card(row, stat_label: str) -> str:
+def _fold_metrics(frame, stat_types, depth: int) -> pd.DataFrame:
+    """Melted rows -> one row per player, with a column per statistic. A175.
+
+    🚨 THE SAME RESHAPE THE WORKBOOK NEEDED IN THE SAME SPEC, AND THAT IS NOT A COINCIDENCE.
+    > **MARC, v09:** *"I want 3 metrics per card"* — and, four lines later, *"Player Stats is a
+    > melted dataset, too long for export. Pivot each Category, with Statistic as columns."*
+    **One root cause — `stat_type` is a ROW — surfacing on a page and in a spreadsheet at once.**
+
+    ⚠️ AND THEY ARE DELIBERATELY NOT ONE SHARED HELPER, which §4.3 asks to be reasoned rather
+    than assumed. The workbook's pivot emits **two** columns per statistic (value AND rank),
+    keys on `(player_name, team)` across a whole season, and runs inside `Sheet.augment` on a
+    frame the writer owns. This one takes the **top `depth` players by the PRIMARY metric**
+    from a week-scoped frame and keeps the identity columns the card reads. **A single helper
+    would need a rank flag, a key list and a depth — and one caller would inherit the other's
+    defaults the first time somebody edited it**, which is R-744's shape exactly. Two small
+    reshapes, each legible where it is used, and this comment is the link between them.
+
+    ⚠️ THE PRIMARY DECIDES THE ORDER. The board is already sorted by it in SQL, so taking the
+    first `depth` rows of the primary's slice preserves the ranking the panel has always had.
+    """
+    if frame is None or frame.empty:
+        return frame
+    primary = stat_types[0]
+    leaders = frame[frame["stat_type"] == primary].drop_duplicates(
+        subset=["player_slug", "team"]).head(depth)
+    if leaders.empty:
+        return leaders
+    out = leaders.copy()
+    for stat in stat_types:
+        rows = frame[frame["stat_type"] == stat].drop_duplicates(
+            subset=["player_slug", "team"]).set_index(["player_slug", "team"])
+        key = out.set_index(["player_slug", "team"]).index
+        out[f"metric_{stat}"] = rows["stat_value"].reindex(key).values
+    return out
+
+
+def _player_card(row, stat_label: str, metric_types=()) -> str:
     """One player, as MATCHUP's card — plus the team line Today needs and Matchup does not.
 
     > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
@@ -776,21 +832,65 @@ def _player_card(row, stat_label: str) -> str:
     NOT promoted**: moving a function to `lib/` for a caller that cannot yet use it is
     speculative, and the real prerequisite is a model change. **Reported, not worked around.**
     """
-    # The same formatter the tables use — `Col(kind="num")` calls exactly this, so a card and a
-    # row can never disagree about how many decimal places a stat has.
-    value = fmt.number(row.get("stat_value"), "stat_value")
+    # 🚨 A175 (cfdb-main-R-1753). THREE METRICS WHERE THERE WAS ONE.
+    # > **MARC, v09:** *"I want 3 metrics per card."*
+    #
+    # ⚠️ AN EMPTY `metric_types` KEEPS THE SINGLE-VALUE CARD, and the defensive board still
+    # uses it deliberately: that board already splits on THREE stat_types, one per column, so
+    # handing it a trio would print the same number three times in three columns.
+    #
+    # 🚨 AND THE PARAMETER IS `metric_types` BECAUSE `metrics` IS A MODULE THIS FILE IMPORTS.
+    # A173 added `from lib import … metrics …` for the legend's upset bands. The first draft of
+    # this function called the parameter `metrics`, and with no argument passed the name
+    # resolved to the MODULE — which is always truthy, so **every card would have taken the
+    # three-metric branch and iterated a module object.** `flake8` cannot see it: the name is
+    # legitimately bound at module scope. **A shadowed import is an undefined name that passes
+    # every lint.**
+    if metric_types:
+        cells = "".join(
+            f"<div class='cfdb-card-metric'>"
+            f"<span class='cfdb-card-value'>"
+            f"{fmt.number(row.get(f'metric_{stat}'), 'stat_value')}</span>"
+            f"<span class='cfdb-card-unit'>{fmt.text(stat)}</span></div>"
+            for stat in metric_types)
+        stat_block = f"<div class='cfdb-card-metrics'>{cells}</div>"
+    else:
+        # The same formatter the tables use — `Col(kind="num")` calls exactly this, so a card
+        # and a row can never disagree about how many decimal places a stat has.
+        value = fmt.number(row.get("stat_value"), "stat_value")
+        stat_block = (f"<div class='cfdb-card-stat'>"
+                      f"<span class='cfdb-card-value'>{value}</span>"
+                      f"<span class='cfdb-card-unit'>{fmt.text(stat_label)}</span></div>")
+    team_block = (f"<div class='cfdb-card-team'>{_team_identity(
+        row, '', slug_field='team_slug', display_field='team_display',
+        logo_field='team_logo_url', rank_field='team_rank',
+        record_field='record_before_display')}</div>")
+
+    # 🚨 A175 (cfdb-main-R-1756). THE REFLOW, AND IT IS IN TODAY'S WRAPPER BECAUSE MOVING THE
+    # SHARED ROW WOULD MOVE MATCHUP.
+    #
+    # > **MARC, v09:** *"There is a lot of horizontal space in this layout, can we fit team info
+    # > on an existing line? (maybe move Yr/Position to a column close to the name, then add a
+    # > cell for Team Logo/Name/Record)"*
+    #
+    # ⚠️ HIS PARENTHESIS IS A SUGGESTION; THE SENTENCE BEFORE IT IS THE REQUIREMENT — use the
+    # horizontal space. The player identity and the team now share ONE line instead of
+    # occupying two, which is the space he is pointing at.
+    #
+    # 📊 MEASURED BEFORE CHOOSING WHERE TO PUT IT: `identity.player_row` is called by
+    # `matchup.py:2374` AND `today.py` (cfdb-main-R-1308, promoted by A167 precisely so it is
+    # not copied). **Reflowing INSIDE it would have moved Matchup's player cards too**, which
+    # is a change to session B's page that A175 was not asked to make and could not verify.
+    # ✅ So the flex row is HERE, wrapping the shared cell rather than altering it — Matchup's
+    # card is byte-identical.
     return (f"<div class='cfdb-card'>"
-            f"{identity.player_row(row)}"
+            f"<div class='cfdb-card-head'>"
+            f"<div class='cfdb-card-head-who'>{identity.player_row(row)}</div>"
+            f"{team_block}</div>"
             # ⚠️ THE STAT READS SECOND, straight after the name: it is the reason the card is on
-            # the board. The team line follows it — Marc asked for the team as CONTEXT, which is
-            # a thing you check after you have read who and what.
-            f"<div class='cfdb-card-stat'>"
-            f"<span class='cfdb-card-value'>{value}</span>"
-            f"<span class='cfdb-card-unit'>{fmt.text(stat_label)}</span></div>"
-            f"<div class='cfdb-card-team'>{_team_identity(
-                row, '', slug_field='team_slug', display_field='team_display',
-                logo_field='team_logo_url', rank_field='team_rank',
-                record_field='record_before_display')}</div>"
+            # the board. The team now rides the same line as the name rather than following the
+            # stat — which is the horizontal space Marc asked to be used.
+            f"{stat_block}"
             f"</div>")
 
 
@@ -814,11 +914,11 @@ def _player_card_grid(columns, stat_label: str) -> None:
     three-column grid reads as a layout fault rather than as an absence (AC-G.11).
     """
     cells = []
-    for heading, frame in columns:
+    for heading, frame, metric_types in columns:
         if frame is None or frame.empty:
             body = "<div class='cfdb-card-none'>Nothing in this category yet.</div>"
         else:
-            body = "".join(_player_card(row, stat_label)
+            body = "".join(_player_card(row, stat_label, metric_types)
                            for _index, row in frame.iterrows())
         cells.append(f"<div class='cfdb-cardcol'>"
                      f"<div class='cfdb-cardcol-head'>{fmt.text(heading)}</div>{body}</div>")
@@ -1818,6 +1918,48 @@ def _profile(scope, depth: int) -> None:
         st.caption(note)
 
 
+def _spark_max(frame) -> float:
+    """The ONE denominator every bar on the yardage board is drawn against.
+
+    🚨 A175 (cfdb-main-R-1750). > **MARC:** *"proportionate and relative to the max of the Total
+    column"* — so Total's max, for Total, Rush AND Pass alike.
+
+    ⚠️ IT IS A PROPERTY OF THE RENDERED FRAME, NOT OF THE RELATION. The board is `depth`-limited
+    and scope-filtered, so the denominator MOVES when Marc changes the depth radio or the week —
+    which is correct: the bars compare the rows he is looking at, not the rows that exist.
+
+    ⚠️ AND IT RETURNS 0 FOR AN EMPTY OR ALL-NULL FRAME, which `_spark_cell` reads as "draw no
+    bar" rather than dividing by it. A single-row frame gives that row a full-width bar, which
+    is honest — it is the max of what is shown.
+    """
+    if frame is None or getattr(frame, "empty", True) or "total_yards" not in frame.columns:
+        return 0.0
+    values = pd.to_numeric(frame["total_yards"], errors="coerce").dropna()
+    top = float(values.max()) if len(values) else 0.0
+    return top if top > 0 else 0.0
+
+
+def _spark_cell(row, field: str, frame) -> str:
+    """One yardage cell: a bar from the left, the number right-aligned in the CELL.
+
+    ⚠️ THE NUMBER IS NOT AT THE END OF THE BAR, and that is Marc's own last clause. A value
+    riding the bar's end would encode the same quantity twice and line up with nothing.
+
+    ⚠️ §4.2.1 IS NOT ENGAGED. A bar's width is a rendering proportion of one published number
+    against another published number in the SAME FRAME — exactly what `distribution.thumbnail`
+    already does — not a metric. **No percentage column is published for it.**
+    """
+    value = row.get(field)
+    text = fmt.number(value, field, None)
+    top = _spark_max(frame)
+    if top <= 0 or value is None or (isinstance(value, float) and pd.isna(value)):
+        return f"<span class='cfdb-spark'><span class='cfdb-spark-value'>{text}</span></span>"
+    share = max(0.0, min(1.0, float(value) / top))
+    return (f"<span class='cfdb-spark'>"
+            f"<span class='cfdb-spark-bar' style='width:{share * 100:.1f}%'></span>"
+            f"<span class='cfdb-spark-value'>{text}</span></span>")
+
+
 def _leaderboards(scope, depth: int) -> None:
     st.subheader("Leaderboards")
 
@@ -1842,10 +1984,32 @@ def _leaderboards(scope, depth: int) -> None:
                         r, "", slug_field="team_slug", display_field="team_display",
                         logo_field="team_logo_url", rank_field="team_rank",
                         record_field="record_before_display")),
-                Col("opponent", "Opponent"),
-                Col("total_yards", "Total", kind="num"),
-                Col("rushing_yards", "Rush", kind="num"),
-                Col("passing_yards", "Pass", kind="num"),
+                # 🚨 A175 (cfdb-main-R-1751). THE OPPONENT IS THE SAME CELL AS THE TEAM NOW.
+                # > **MARC, Today v04:** *"Opponent - should look the same as the Team column
+                # > layout."* It was a bare string beside a Team column carrying a logo, a rank
+                # badge and a record.
+                #
+                # ⚠️ ONE FACT SHORT OF PARITY, AND IT IS A PUBLISHED GAP RATHER THAN A CHOICE:
+                # `srv_game_team` carries `opponent_team_slug` (0 null), `opponent_logo_url`
+                # (6.1% null) and `opponent_rank` (99% null — unranked is a fact, AC-G.11) and
+                # **publishes NO opponent record column at all**, checked against
+                # information_schema. The Team cell shows a record; this one cannot, and a join
+                # to fetch one is the thing G-2 forbids. **Named in A175's report as the gap.**
+                Col("opponent", "Opponent",
+                    render=lambda r: _team_identity(
+                        r, "", slug_field="opponent_team_slug",
+                        display_field="opponent_team_display",
+                        logo_field="opponent_logo_url", rank_field="opponent_rank")),
+                # 🚨 ONE DENOMINATOR FOR ALL THREE COLUMNS, AND IT IS TOTAL'S MAX.
+                # > **MARC:** *"Make them all proportionate and relative to the max of the Total
+                # > column."* A per-column max would make a 90-yard rushing game draw as long as
+                # a 500-yard passing game, which is the opposite of what the bars are for.
+                Col("total_yards", "Total", kind="num",
+                    render=lambda r: _spark_cell(r, "total_yards", d)),
+                Col("rushing_yards", "Rush", kind="num",
+                    render=lambda r: _spark_cell(r, "rushing_yards", d)),
+                Col("passing_yards", "Pass", kind="num",
+                    render=lambda r: _spark_cell(r, "passing_yards", d)),
             ], caption="Ranked by total offense, with each team's record going into the game.", anchor="leaderboards"),
         )
 
@@ -1872,31 +2036,52 @@ def _leaderboards(scope, depth: int) -> None:
         st.caption("Top players by yards in each category, deepest first. "
                    "\"QB\" is the passing column — it is not filtered on position, and the "
                    "passing leader has been a quarterback in every week measured.")
-        yardage = [(label, _player_board(scope, depth, (category,), "YDS"))
-                   for label, category in (("QB", "passing"),
-                                           ("Receiving", "receiving"),
-                                           ("Rushing", "rushing"))]
+        # 🚨 A175 (cfdb-main-R-1754). THE TRIO PER CATEGORY, ENUMERATED FROM LIVE SERVING
+        # RATHER THAN GUESSED — A166 learned the hard way that it is `SACKS` and not `SACK`,
+        # and this relation is not the one the workbook reads. `srv_player_game_log`, 2026:
+        #
+        #     passing    AVG · C/ATT · INT · QBR · TD · YDS      <- C/ATT, not COMPLETIONS
+        #     receiving  AVG · LONG · REC · TD · YDS
+        #     rushing    AVG · CAR · LONG · TD · YDS             <- AVG, not YPC
+        #
+        # ✅ So Marc's obvious trios all exist here: YDS · TD · INT for a passer, YDS · TD · REC
+        # for a receiver, YDS · TD · CAR for a runner. 📋 **WHICH THREE IS A FOOTBALL QUESTION
+        # and §2.1 puts it with him** — these ship, and A175's report renders the alternatives
+        # so his answer picks between pictures rather than unblocking the work.
+        #
+        # ⚠️ THE FIRST IS THE PRIMARY and it decides the ORDER of the board. `YDS` keeps the
+        # ranking the panel has always had.
+        yardage = [(label, _fold_metrics(
+            _player_board(scope, depth, (category,), types), types, depth), types)
+            for label, category, types in (
+                ("QB", "passing", ("YDS", "TD", "INT")),
+                ("Receiving", "receiving", ("YDS", "TD", "REC")),
+                ("Rushing", "rushing", ("YDS", "TD", "CAR")))]
         states.render_or_state(
             # ⚠️ THE CONCATENATION DECIDES THE STATE, THE THREE FRAMES DRAW THE GRID. The state
             # machinery asks one question — is there anything at all? — and three columns that
             # are each separately empty is the same answer as one empty board. The renderer
             # ignores the frame it is handed and reads the columns it closed over, which is why
             # a column that IS empty still draws its heading.
-            pd.concat([frame for _label, frame in yardage]) if yardage else pd.DataFrame(),
+            pd.concat([frame for _label, frame, _types in yardage])
+            if yardage else pd.DataFrame(),
             "srv_player_game_log",
             "The player yardage board would be here.",
             f"No player box scores for {scope.describe()}. Box scores start in 2024.",
+            # ⚠️ THE PER-COLUMN TRIOS DIFFER, so the card reads its labels from the frame's
+            # own `metric_*` columns rather than from one list passed down here.
             renderer=lambda _d: _player_card_grid(yardage, "yards"),
         )
 
         st.markdown("**Touchdowns**")
         st.caption("A different board from yardage, and mostly different names on it.")
-        touchdowns = [(label, _player_board(scope, depth, (category,), "TD"))
+        touchdowns = [(label, _player_board(scope, depth, (category,), ("TD",)), ())
                       for label, category in (("QB", "passing"),
                                               ("Receiving", "receiving"),
                                               ("Rushing", "rushing"))]
         states.render_or_state(
-            pd.concat([frame for _label, frame in touchdowns]) if touchdowns else pd.DataFrame(),
+            pd.concat([frame for _label, frame, _types in touchdowns])
+            if touchdowns else pd.DataFrame(),
             "srv_player_game_log",
             "The touchdown board would be here.",
             f"No player box scores for {scope.describe()}.",
@@ -1906,12 +2091,13 @@ def _leaderboards(scope, depth: int) -> None:
         st.markdown("**Defensive leaders**")
         st.caption("Tackles, tackles for loss and sacks — three stat types on one category, "
                    "which is a different split from the two boards above.")
-        defence = [(label, _player_board(scope, depth, ("defensive",), stat_type))
+        defence = [(label, _player_board(scope, depth, ("defensive",), (stat_type,)), ())
                    for label, stat_type in (("Tackles", "TOT"),
                                             ("Tackles for loss", "TFL"),
                                             ("Sacks", "SACKS"))]
         states.render_or_state(
-            pd.concat([frame for _label, frame in defence]) if defence else pd.DataFrame(),
+            pd.concat([frame for _label, frame, _types in defence])
+            if defence else pd.DataFrame(),
             "srv_player_game_log",
             "The defensive board would be here.",
             f"No defensive box scores for {scope.describe()}.",
