@@ -32,7 +32,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -151,6 +150,34 @@ def _built_anything() -> bool:
                for entry in payload.get("results", []))
 
 
+def run_results_path() -> Path:
+    """Read TARGET_DIR at call time, not at import — tests monkeypatch it."""
+    return TARGET_DIR / "run_results.json"
+
+
+def manifest_path() -> Path:
+    return TARGET_DIR / "manifest.json"
+
+
+def _fingerprint(*artefacts):
+    """What each artefact looked like, for a before/after comparison.
+
+    ⚠️ `st_mtime_ns` AND SIZE TOGETHER, because either alone can miss. A filesystem with
+    one-second mtime granularity can rewrite a file within the same tick and report an
+    unchanged mtime; a rewrite that happens to produce the same byte count reports an
+    unchanged size. A stale directory changes neither, which is the case this detects.
+    """
+    out = {}
+    for artefact in artefacts:
+        try:
+            stat = artefact.stat()
+        except FileNotFoundError:
+            out[artefact] = None          # absent before the run: anything after it is fresh
+        else:
+            out[artefact] = (stat.st_mtime_ns, stat.st_size)
+    return out
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--full", action="store_true",
@@ -161,7 +188,21 @@ def main(argv=None) -> int:
     selector, why = choose_selector(args.full, previous)
     print(f"  selector: {selector}  ({why})")
 
-    started = time.time()
+    # 🚨 THE ARTEFACT FINGERPRINT, TAKEN BEFORE THE RUN — A186 (cfdb-main-R-1917).
+    #
+    # This used to be `started = time.time()`, compared afterwards against `st_mtime`. That is
+    # a RACE, not a check: `time.time()` carries microseconds and a filesystem may store mtime
+    # at coarser resolution, so a file written AFTER `started` can report an mtime BEFORE it.
+    # The failure window is however far into the current second the run begins, which is why
+    # it failed on `main` for A184's merge and passed on the identical tree in that PR's own
+    # run — a test that fails some of the time, and the worst kind, because it trains everyone
+    # to re-run it.
+    #
+    # ✅ Comparing the artefacts against THEMSELVES is resolution-independent and strictly
+    # more precise: the question was never "is this file newer than a clock reading", it was
+    # "did this run rewrite it". A stale TARGET_DIR leaves them untouched, and untouched is
+    # exactly what this detects.
+    before = _fingerprint(run_results_path(), manifest_path())
     completed = run_dbt(selector, previous)
     tail = "\n".join((completed.stdout or "").strip().splitlines()[-3:])
     if completed.returncode != 0:
@@ -179,8 +220,8 @@ def main(argv=None) -> int:
             return 1
     print(f"  {tail.splitlines()[-1] if tail else 'dbt finished'}")
 
-    run_results = TARGET_DIR / "run_results.json"
-    manifest = TARGET_DIR / "manifest.json"
+    run_results = run_results_path()
+    manifest = manifest_path()
     if not run_results.is_file() or not manifest.is_file():
         print("  ::error:: dbt left no artefacts to read; refusing to guess what to publish")
         return 1
@@ -191,8 +232,9 @@ def main(argv=None) -> int:
     # module did, and `<project>/target` on the droplet holds a manifest from five days
     # earlier. That would publish a plausible-looking set of tables chosen from stale
     # metadata, with nothing anywhere to say so. Cheap to rule out, impossible to spot later.
+    after = _fingerprint(run_results, manifest)
     for artefact in (run_results, manifest):
-        if artefact.stat().st_mtime < started:
+        if before.get(artefact) is not None and after.get(artefact) == before.get(artefact):
             print(f"  ::error:: {artefact} was not written by this run — "
                   f"DBT_TARGET_PATH is probably not what this module thinks it is")
             return 1
