@@ -180,7 +180,20 @@ SERVING_HOST="${CFDB_SERVING_HOST:-127.0.0.1}"
 SERVING_PORT="${CFDB_SERVING_PORT:-5433}"
 SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
       -h "$SERVING_HOST" -p "$SERVING_PORT"
-      -U "${CFDB_SERVING_USER:-cfdb}" -d "${CFDB_SERVING_DB:-cfdb}")
+      -U "${CFDB_SERVING_USER:-cfdb_read}" -d "${CFDB_SERVING_DB:-cfdb}")
+
+# 🚨 THE DEFAULT IS `cfdb_read`, NOT `cfdb`, AND THAT IS THE POINT — A183 (cfdb-main-R-1872).
+# A182 shipped this check and it could never have answered, because the monitor's `.pgpass`
+# carries a warehouse line and nothing for serving: every run emitted
+# `unboxed|MONITOR.cannot_read_published_serving|0|-` and `ci/check_heartbeats.py` reported BLIND.
+#
+# ⚠️ THE OBVIOUS FIX WAS THE WRONG ONE. Adding a `.pgpass` line for `cfdb` would have worked
+# first time and handed the MONITORING user SUPERUSER on the database the site reads — to run one
+# `count(*)`. An alarm must not be able to damage the thing it is watching.
+#
+# ✅ `cfdb_read` already existed and needed no new grant: measured on serving before relying on
+# it — SELECT on all 35 tables in the schema, and INSERT/UPDATE/DELETE all false on
+# `srv_game_team`. So this is a credential line and a default, not a new privilege.
 
 "${SERVING_PSQL[@]}" -c "
   select 'unboxed|' || count(*) || '|' ||
