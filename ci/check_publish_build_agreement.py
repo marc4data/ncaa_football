@@ -31,10 +31,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# (dag file, selector variable) — every gated, partial-rebuild DAG.
+# (dag file, selector variable, publish-list name) — every gated, partial-rebuild DAG.
+#
+# 🚨 A184 (cfdb-main-R-1904) ADDED THE THIRD COLUMN, AND IT CHECKS A DIFFERENT RULE FROM THE
+# ONE THIS FILE WAS WRITTEN FOR. The original question was about FRESHNESS: is every hot-shipped
+# table rebuilt often enough to be worth shipping? The new one is about the GATE: does each DAG
+# publish only what that same run built and tested?
+#
+# 📊 Both were needed, because the first passed while the second was false. Every unbuilt table
+# carried a `WEEKLY_BY_DESIGN` justification — "its data only changes weekly" — which is true
+# and does not address the gate at all: the weekly DAG's `dbt_run` mutates the warehouse before
+# its `dbt_test` decides whether to publish, so a failed weekly test leaves refused rows sitting
+# in the warehouse for a two-hourly publish to pick up. A183 measured five such `srv_drive` rows
+# live on the site.
 GATED = [
-    ("dags/scores_refresh_dag.py", "SCORES_SELECTOR"),
-    ("dags/lines_snapshot_dag.py", "DISTRIBUTION_SELECTOR"),
+    ("dags/scores_refresh_dag.py", "SCORES_SELECTOR", "SCORES_HOT"),
+    ("dags/lines_snapshot_dag.py", "DISTRIBUTION_SELECTOR", "DISTRIBUTION_HOT"),
 ]
 
 
@@ -93,9 +105,14 @@ def models_for(selector: str) -> set:
 def main() -> int:
     from src.publish_marts import HOT_SERVING, WEEKLY_BY_DESIGN
 
+    import src.publish_marts as pm
+
     built = set()
-    for path, name in GATED:
-        built |= models_for(selector_from(path, name))
+    per_dag = {}
+    for path, name, publish_name in GATED:
+        models = models_for(selector_from(path, name))
+        built |= models
+        per_dag[publish_name] = (path, name, models)
 
     unbuilt = [t for t in HOT_SERVING if t not in built]
     unjustified = [t for t in unbuilt if t not in WEEKLY_BY_DESIGN]
@@ -133,9 +150,37 @@ def main() -> int:
         for t in sorted(unknown):
             print(f"  - {t}", file=sys.stderr)
 
+    # ── THE GATE RULE: each DAG publishes only what that run built (cfdb-main-R-1904) ────────
+    print()
+    for publish_name, (path, selector_name, models) in sorted(per_dag.items()):
+        published = set(getattr(pm, publish_name))
+        expected = {t for t in HOT_SERVING if t in models}
+        print(f"{publish_name:<18} publishes {len(published):>2}  "
+              f"built by {selector_name} and hot: {len(expected):>2}")
+        ships_unbuilt = sorted(published - expected)
+        builds_unshipped = sorted(expected - published)
+        if ships_unbuilt:
+            problems = True
+            print(f"\n::error::{publish_name} publishes {len(ships_unbuilt)} table(s) that "
+                  f"{selector_name} does not build, so {path} would ship state its own tests "
+                  f"never gated:", file=sys.stderr)
+            for t in ships_unbuilt:
+                print(f"  - {t}", file=sys.stderr)
+            print("\n  A table is published only by a run whose tests covered it, against the "
+                  "state being published. Either add it to that DAG's selector or remove it "
+                  "from the publish list.", file=sys.stderr)
+        if builds_unshipped:
+            problems = True
+            print(f"\n::error::{selector_name} builds {len(builds_unshipped)} hot table(s) that "
+                  f"{publish_name} does not publish, so the rebuild never reaches the site:",
+                  file=sys.stderr)
+            for t in builds_unshipped:
+                print(f"  - {t}", file=sys.stderr)
+
     if problems:
         return 1
-    print("\nEvery hot-published table is either rebuilt by a gated DAG or justified as weekly.")
+    print("\nEvery hot-published table is either rebuilt by a gated DAG or justified as weekly,")
+    print("and every gated DAG publishes exactly what it builds.")
     return 0
 
 

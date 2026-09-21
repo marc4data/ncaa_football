@@ -266,14 +266,28 @@ def test_the_full_publish_still_ships_everything():
             == set(publish_marts.HOT_SERVING) | set(publish_marts.HEAVY_SERVING))
 
 
-def test_the_scores_dag_asks_for_the_hot_publish_and_the_weekly_one_does_not():
-    """The cadence split only works if the callers agree with it. Asserted on source because
-    both are lambdas inside a DAG definition."""
-    scores = Path(__file__).resolve().parents[1] / "dags" / "scores_refresh_dag.py"
+def test_the_scores_dag_never_ships_a_heavy_table_unconditionally():
+    """The cadence split only works if the callers agree with it.
+
+    🚨 A184 (cfdb-main-R-1904) REWROTE THIS, AND IT IS A STRENGTHENING RATHER THAN A RELAXATION.
+    It used to assert the literal string `hot=True` in the scores DAG's source — a PROXY for
+    the real requirement, which is that the two-hourly run must not drag the heavy player
+    tables over the wire. The DAG now names an explicit list instead of passing `hot=True`, so
+    the proxy went red while the property it stood for got stricter: `SCORES_HOT` is a subset
+    of `HOT_SERVING`, so no heavy table can appear in it by construction.
+
+    ⚠️ AND THE WORD *UNCONDITIONALLY* IS LOAD-BEARING. A181 deliberately publishes ONE heavy
+    table — `srv_player_game_log` — on the runs that actually loaded new player box scores,
+    because otherwise the player boards sit in the warehouse and off the site (A182 measured
+    exactly that). That exception is conditional, comes only through `relations_to_publish`,
+    and is asserted separately above.
+    """
     weekly = Path(__file__).resolve().parents[1] / "dags" / "weekly_refresh_dag.py"
-    scores_src = _code(scores.read_text())
-    assert "hot=True" in scores_src, (
-        "the two-hourly publish must ship only the hot tables")
+
+    assert not (set(publish_marts.SCORES_HOT) & set(publish_marts.HEAVY_SERVING)), (
+        "the two-hourly publish must not ship a heavy table on every run")
+    assert not (set(publish_marts.DISTRIBUTION_HOT) & set(publish_marts.HEAVY_SERVING))
+
     assert "hot=True" not in _code(weekly.read_text()), (
         "the weekly publish is where the heavy player tables reach the site; if it also "
         "asked for the hot set they would never be published at all")
@@ -301,3 +315,102 @@ def test_every_serving_model_in_the_project_is_published():
     stale = published - on_disk
     assert not stale, (
         f"published tables with no model: {sorted(stale)}")
+
+
+# ── THE GATE: A TABLE IS PUBLISHED ONLY BY A RUN THAT BUILT AND TESTED IT ────────────────────
+#
+# 🚨 A184 (cfdb-main-R-1904). A183 MEASURED THE FAILURE ON PRODUCTION DATA, WHICH IS WHY THESE
+# NAME A REAL TABLE RATHER THAN A FIXTURE. The weekly DAG refused to publish on three failing
+# tests; five `srv_drive` rows with a NULL `drive_result_key` were live on the site anyway,
+# because the two-hourly scores DAG published all 25 HOT tables while building 11 — and
+# `srv_drive` is one it publishes and never builds.
+
+def _publish_body():
+    """The real `_publish` from the scores DAG, without importing airflow.
+
+    ⚠️ AST RATHER THAN AN IMPORT, for the reason `test_box_refresh.py` already documents:
+    airflow is not installed in the test environment. 🚨 BUT THIS EXECS THE FUNCTION AND
+    ASSERTS WHAT IT PUBLISHES, rather than pattern-matching its source — a structural test
+    here would pass on a `_publish` that named the right list and shipped something else.
+    """
+    import ast
+    import textwrap
+    source = (Path(__file__).resolve().parents[1]
+              / "dags" / "scores_refresh_dag.py").read_text()
+    tree = ast.parse(source)
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "_publish")
+    return textwrap.dedent(ast.get_source_segment(source, fn))
+
+
+def _run_publish(loaded, published):
+    """Execute `_publish` with the publish call captured instead of performed."""
+    ns = {
+        "SCORES_HOT": list(publish_marts.SCORES_HOT),
+        "publish_gated": lambda tables, schema: published.append((list(tables), schema)),
+    }
+    exec(_publish_body(), ns)
+
+    class _TI:
+        def xcom_pull(self, task_ids, key):
+            return loaded
+
+    return ns["_publish"](**{"task_instance": _TI()})
+
+
+def test_the_scores_dag_does_not_publish_a_table_it_never_built():
+    """The A183 case, pinned by name.
+
+    🚨 THE ASSERTION IS TWO-SIDED ON PURPOSE. `srv_drive` must still be in HOT_SERVING — it is
+    a hot table and removing it from that list would satisfy "not published" while changing a
+    different thing entirely. What must be true is that the SCORES DAG does not ship it.
+    """
+    assert "srv_drive" in publish_marts.HOT_SERVING, (
+        "srv_drive left HOT_SERVING — this test is now asserting the wrong thing")
+    assert "srv_drive" not in publish_marts.SCORES_HOT
+    assert "srv_drive" not in publish_marts.DISTRIBUTION_HOT
+
+    published = []
+    _run_publish(["games_teams"], published)
+    (tables, schema), = published
+    assert schema == "serving"
+    assert "srv_drive" not in tables, (
+        f"the scores DAG would publish srv_drive, which it does not build or test: {tables}")
+
+
+def test_every_table_the_scores_dag_publishes_is_one_it_builds():
+    """No table ships from this DAG unless its own selector built it.
+
+    ⚠️ THE SELECTOR IS RESOLVED BY `ci/check_publish_build_agreement.py` WITH `dbt ls`, not
+    here — this pins the invariant that survives without a warehouse, and CI pins the list
+    against the selector itself. Two halves, because neither can run in both places.
+    """
+    assert set(publish_marts.SCORES_HOT) <= set(publish_marts.HOT_SERVING)
+    assert set(publish_marts.DISTRIBUTION_HOT) <= set(publish_marts.HOT_SERVING)
+    # The 14 hot tables no gated DAG rebuilds must be shipped by neither.
+    gated = set(publish_marts.SCORES_HOT) | set(publish_marts.DISTRIBUTION_HOT)
+    assert len(gated) == 13, f"expected 13 gated-published hot tables, got {sorted(gated)}"
+
+
+def test_the_box_relations_and_the_hot_subset_ship_in_one_locked_call():
+    """cfdb-main-R-1905. Two calls meant the second one held no lock.
+
+    A181 published the hot set through `publish_all()` — which takes the lock and releases it
+    — then called `publish_schema` for the box relations outside any lock.
+    """
+    published = []
+    _run_publish(["games_players"], published)
+    assert len(published) == 1, (
+        f"expected ONE locked publish, got {len(published)}: {published}")
+    tables, _schema = published[0]
+    assert "srv_player_game_log" in tables, (
+        "a run that loaded player box scores must republish the relation the boards read")
+    assert set(publish_marts.SCORES_HOT) <= set(tables)
+
+
+def test_a_run_that_loaded_no_player_box_still_publishes_the_hot_subset():
+    published = []
+    _run_publish([], published)
+    (tables, _), = published
+    assert set(tables) == set(publish_marts.SCORES_HOT)
+    assert "srv_player_game_log" not in tables

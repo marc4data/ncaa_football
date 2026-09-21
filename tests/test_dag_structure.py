@@ -623,13 +623,31 @@ def test_both_dbt_dags_name_the_project_directory_the_same_way():
     assert len(paths) == 1, paths
 
 
-def test_the_distribution_publish_ships_the_hot_set_only():
+def test_the_distribution_publish_ships_only_what_that_dag_built():
     """The heavy player tables are 608 MB of the serving schema and this link is the
     pipeline's failure point — 59 MB has taken 17 minutes when it is busy. A four-hourly job
-    must not put 182 MB on it."""
+    must not put 182 MB on it.
+
+    🚨 A184 (cfdb-main-R-1904) TIGHTENED THIS AND THE OLD ASSERTION WENT RED IN THE PROCESS.
+    It pinned the literal `publish_all(schemas=["serving"], hot=True)` — a size guard, correct
+    on its own terms, which quietly permitted shipping all 25 hot tables from a DAG that
+    builds TWO. A183 measured what that costs: rows the weekly gate had refused reached the
+    site through a partial-rebuild DAG's publish.
+
+    ⚠️ THE SIZE PROPERTY IS KEPT AND IS NOW IMPLIED RATHER THAN SPELLED: `DISTRIBUTION_HOT` is
+    a subset of `HOT_SERVING`, so no heavy table can appear in it by construction.
+    """
+    from src import publish_marts
+
     source = _lines_dag_source()
-    assert 'publish_all(schemas=["serving"], hot=True)' in source
-    assert "hot=False" not in source
+    assert "publish_gated(DISTRIBUTION_HOT" in source, (
+        "the four-hourly publish must ship its own built set, not the whole hot list")
+    assert 'hot=True' not in source, (
+        "publishing the full hot set from a DAG that builds two tables is what "
+        "cfdb-main-R-1904 removed")
+    assert not (set(publish_marts.DISTRIBUTION_HOT)
+                & set(publish_marts.HEAVY_SERVING)), (
+        "a four-hourly job must not put the heavy player tables on the wire")
 
 
 def test_no_test_straddles_the_gated_dags_refresh_boundary():

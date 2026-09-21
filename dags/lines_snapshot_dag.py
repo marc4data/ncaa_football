@@ -46,7 +46,7 @@ from src.dbt_artifacts import load_run_results
 from src.dbt_selectors import LINES_SNAPSHOT_TEST_EXCLUDE
 from src.lines_cadence import load_config, should_snapshot
 from src.load_raw_to_postgres import load_endpoint
-from src.publish_marts import publish_all
+from src.publish_marts import DISTRIBUTION_HOT, publish_gated
 from src.snapshot import snapshot_lines, snapshot_weather
 
 # Finest cadence, always. The gate below decides which runs actually do work.
@@ -238,12 +238,21 @@ with DAG(
                       f"{DISTRIBUTION_SELECTOR} {LINES_SNAPSHOT_TEST_EXCLUDE}"),
         retries=1,
     )
-    # HOT ONLY, for the reason the scores DAG documents at length: the heavy player tables
-    # are 608 MB of the serving schema and this link is the pipeline's failure point. The
-    # distribution views are a few hundred rows and ride the hot set.
+    # 🚨 A184 (cfdb-main-R-1904). THIS PUBLISHED ALL 25 HOT TABLES AND THIS DAG BUILDS TWO.
+    #
+    # ⚠️ THE COMMENT THAT USED TO SIT HERE WAS ABOUT THE RIGHT SUBJECT AND THE WRONG RISK. It
+    # said "HOT ONLY … the heavy player tables are 608 MB and this link is the pipeline's
+    # failure point" — a SIZE argument, correct on its own terms, which quietly licensed
+    # shipping twenty-three tables this run never rebuilt or tested. A183 measured what that
+    # costs: rows the weekly gate had refused reached the site through a partial-rebuild
+    # DAG's publish.
+    #
+    # ✅ `DISTRIBUTION_HOT` is exactly what `DISTRIBUTION_SELECTOR` builds, held equal by
+    # `ci/check_publish_build_agreement.py`. The size argument still holds and is now spent on
+    # a list a third the length.
     publish_distribution = PythonOperator(
         task_id="publish_distributions",
-        python_callable=lambda **_: publish_all(schemas=["serving"], hot=True),
+        python_callable=lambda **_: publish_gated(DISTRIBUTION_HOT, "serving"),
         retries=1,
     )
 

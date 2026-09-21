@@ -56,6 +56,7 @@ def read_ages(host: str) -> dict:
             f"could not read heartbeats from {host} (exit {result.returncode}): "
             f"{result.stderr.strip()[:400]}")
     ages, failures, failed_tests, unboxed = {}, {}, {}, None
+    unplayered = None
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line or "|" not in line:
@@ -81,6 +82,22 @@ def read_ages(host: str) -> dict:
         # down: an unknown `head` falls through to `int(rest)`, raises ValueError, and the line
         # is silently DISCARDED. A payload nothing reads is worse than no payload, because it
         # looks like coverage.
+        # 🚨 THE PLAYER HALF (A184, cfdb-main-R-1906). PARSED IN THE SAME BRANCH AS `unboxed`
+        # AND BEFORE THE HEARTBEAT BRANCH, for R-698's reason: an unknown `head` falls through
+        # to `int(rest)`, raises ValueError, and the line is silently discarded. A payload
+        # nothing reads is worse than no payload, because it looks like coverage — and this is
+        # the second line added to this parser for exactly that reason.
+        if head.strip() == "unplayered":
+            count, _, tail = rest.partition("|")
+            age, _, weeks = tail.partition("|")
+            if count.strip().startswith("MONITOR."):
+                unplayered = (-1, 0, count.strip())
+                continue
+            try:
+                unplayered = (int(count), int(age), weeks.strip() or "-")
+            except ValueError:
+                pass
+            continue
         if head.strip() == "unboxed":
             count, _, tail = rest.partition("|")
             age, _, weeks = tail.partition("|")
@@ -119,7 +136,7 @@ def read_ages(host: str) -> dict:
             ages[head.strip()] = int(rest)
         except ValueError:
             continue
-    return ages, failures, failed_tests, unboxed
+    return ages, failures, failed_tests, unboxed, unplayered
 
 
 def describe(seconds: int) -> str:
@@ -134,7 +151,7 @@ def main(argv=None) -> int:
     host = (argv or sys.argv[1:] or ["cfdb_monitor@localhost"])[0]
 
     try:
-        ages, failures, failed_tests, unboxed = read_ages(host)
+        ages, failures, failed_tests, unboxed, unplayered = read_ages(host)
     except Exception as error:                                           # noqa: BLE001
         # THE DROPLET BEING UNREACHABLE IS THE ALARM, not a reason to exit quietly.
         print(f"::error::the pipeline host is unreachable — {error}")
@@ -191,7 +208,16 @@ def main(argv=None) -> int:
         # that does not beat at all. Worth saying so it gets a budget.
         print(f"\n  note: beating but unmonitored — {', '.join(unknown)}")
 
-    unboxed_now = bool(unboxed and unboxed[0])
+    if unplayered and unplayered[0] == -1:
+        print(f"  BLIND   the player-box check could not read published serving "
+              f"({unplayered[2]}) — it cannot tell you whether the leaderboards have rows")
+    elif unplayered and unplayered[0]:
+        count, age, weeks = unplayered
+        print(f"  UNPLAYERED {count} FBS game(s) final with no player box score on the site "
+              f"— oldest {describe(age)}, week(s) {weeks}. Today's player leaderboards are "
+              f"empty for those games")
+
+    unboxed_now = bool(unboxed and unboxed[0]) or bool(unplayered and unplayered[0])
     if stale or missing or failures or failed_tests or unboxed_now:
         print()
         for line in stale + missing:
