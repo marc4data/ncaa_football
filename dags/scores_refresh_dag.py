@@ -288,6 +288,66 @@ def _load(**context):
     return {"loaded": endpoints}
 
 
+def _publish(**context):
+    """The hot views every run, plus anything this run's new box scores changed.
+
+    🚨 A181 (cfdb-main-R-1901). A182 PROVED THE FETCH IS NOT ENOUGH. It loaded week 3, the team
+    box reached the site on the next two-hourly publish, and the three player boards stayed
+    empty — because `srv_game_team` is HOT and `srv_player_game_log` is HEAVY_SERVING, which
+    publishes WEEKLY. Fetching player box scores every two hours without this would move the
+    day-late problem from the fetch to the publish and change nothing a reader sees.
+
+    ⚠️ CONDITIONAL, NOT ADDED TO `HOT_SERVING`. `srv_player_game_log` is 475 MB against
+    `srv_game_team`'s 121 MB; shipping it every two hours all week would make the quietest
+    Tuesday run the most expensive thing the pipeline does. This publishes it on the runs that
+    actually loaded new player box scores — none on a Tuesday, a handful on a Saturday.
+
+    🚨 AND A MISSING XCOM RAISES RATHER THAN PUBLISHING THE HOT SET QUIETLY (cfdb-main-R-1865).
+    `refresh_box_scores` is immediately upstream and always pushes; if its value is absent the
+    run has a shape nobody has reasoned about, and publishing a subset while reporting success
+    is the exact false green A180 found one task over.
+    """
+    from src.box_refresh import relations_to_publish
+    from src.publish_marts import publish_schema
+
+    summary = publish_all(schemas=["serving"], hot=True)
+
+    loaded = context["task_instance"].xcom_pull(task_ids="refresh_box_scores",
+                                                key="loaded_endpoints")
+    if loaded is None:
+        raise RuntimeError(
+            "refresh_box_scores pushed no `loaded_endpoints`, so this task cannot tell "
+            "whether new player box scores need publishing. Publishing only the hot views "
+            "and reporting success would leave them in the warehouse and off the site, "
+            "which is what A182 measured (cfdb-main-R-1901).")
+
+    extra = relations_to_publish(loaded)
+    if extra:
+        print(f"publishing box relations changed by this run: {extra}")
+        publish_schema(extra, "serving")
+        summary = {**summary, "box_relations": extra}
+    return summary
+
+
+def _refresh_boxes(**context):
+    """Fetch and load the box scores of games that have finished without one.
+
+    ⚠️ IT TAKES NO XCOM, AND THAT IS DELIBERATE (cfdb-main-R-1863). `_load` above pulls its
+    endpoint list from the fetch task, so when that task FAILS the list is absent, `or []`
+    makes the loop iterate zero times, and the task reports success having loaded nothing —
+    A180 found that shape waiting to produce a false green. This task derives its own work
+    from the warehouse every time it runs, so there is no upstream value for it to lose.
+    """
+    from src.box_refresh import box_refresh
+
+    summary = box_refresh()
+    print(f"box refresh: {summary}")
+    # The publish task needs to know WHAT changed, not merely that the task succeeded.
+    context["task_instance"].xcom_push(key="loaded_endpoints",
+                                       value=summary.get("endpoints", []))
+    return summary
+
+
 with DAG(
     dag_id="cfbd_scores_refresh",
     description="Game spine every 2h while games are settling; quiet otherwise",
@@ -319,6 +379,22 @@ with DAG(
     )
     fetch = PythonOperator(task_id="fetch_scores", python_callable=_fetch)
     load = PythonOperator(task_id="load_to_postgres", python_callable=_load)
+    # 🚨 A181 (cfdb-main-R-1900). BOX SCORES ON THE DAY THE GAME IS PLAYED.
+    #
+    # > **MARC, 2026-09-20:** *"The data has to load and it has to be presented on the site.
+    # > … all day, everyday."*
+    #
+    # Box scores used to arrive only through the WEEKLY results refresh, so a Saturday slate
+    # reached the site at Sunday 12:00 UTC on a good week and seven days later on a bad one.
+    # This task asks the warehouse which completed FBS games still have no box score and
+    # fetches only those — see `src/box_refresh.py` for the cost measurement.
+    #
+    # 🚨 IT SITS **AFTER** `load`, AND THAT PLACEMENT IS THE WHOLE DESIGN. The missing set is
+    # computed from the warehouse, so it has to be read AFTER this run's spine has landed —
+    # otherwise a game that finished in the last two hours is not yet known to be complete and
+    # its box score waits for the NEXT run. After the load, a game that went final at 7:50 PM
+    # is boxed by the 8 PM run rather than the 10 PM one.
+    boxes = PythonOperator(task_id="refresh_box_scores", python_callable=_refresh_boxes)
     dbt_run = BashOperator(
         task_id="dbt_run",
         bash_command=f"dbt run --project-dir {DBT_PROJECT_DIR} {SCORES_SELECTOR}",
@@ -341,10 +417,7 @@ with DAG(
     # The split is honest as well as cheap: this DAG exists to move scores and lines quickly,
     # and player season totals, box scores and play attributions are none of those. They
     # publish on the weekly DAG, which is also when they change.
-    publish = PythonOperator(
-        task_id="publish_to_serving",
-        python_callable=lambda **_: publish_all(schemas=["serving"], hot=True),
-    )
+    publish = PythonOperator(task_id="publish_to_serving", python_callable=_publish)
 
     # The dead-man's switch. Downstream of publish and left at the default all_success
     # trigger rule, so it beats only when the whole chain reached the site.
@@ -385,7 +458,7 @@ with DAG(
         trigger_rule="all_done",
     )
 
-    gate >> fetch >> load >> dbt_run >> dbt_test >> publish >> beat
+    gate >> fetch >> load >> boxes >> dbt_run >> dbt_test >> publish >> beat
     # A SEPARATE BRANCH OFF dbt_test, NOT ON THE PUBLISH CHAIN (R-412). Capture is
     # `all_done`, so putting it downstream of publish would make it a leaf that succeeds
     # whether or not publish ran -- the exact defect R-297 fixed. publish stays the leaf
