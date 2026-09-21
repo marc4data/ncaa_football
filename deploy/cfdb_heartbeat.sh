@@ -209,6 +209,35 @@ SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
   having count(*) > 0
 " || echo "unboxed|MONITOR.cannot_read_published_serving|0|-"
 
+# 🚨 THE PLAYER HALF, AND IT IS A SEPARATE LINE BECAUSE IT IS A SEPARATE FAILURE — A184
+# (cfdb-main-R-1906). The check above asks whether the TEAM box score is on the site. On
+# 2026-09-21 that was true of all 150 of week 3's team-games while THREE OF TODAY'S FOUR
+# LEADERBOARDS still read "Nothing to show", because the player tables publish weekly and the
+# team tables publish hot. **The alarm was quiet through the exact incident it exists to catch.**
+#
+# ⚠️ IT CANNOT BE A COLUMN ON THE QUERY ABOVE. Checked against information_schema rather than
+# the model file (§2.2.1c.2): `srv_game_team` publishes `has_box_score` and `has_box_advanced`
+# and NOTHING about player stats, so this has to ask `srv_player_game_log` directly.
+#
+# ⚠️ AND TWO LINES RATHER THAN ONE SUM, because "the team box is missing" and "the player box
+# is missing" have different causes and different fixes — folding them into one count would
+# have reported week 3 as healthy the moment the team half landed.
+"${SERVING_PSQL[@]}" -c "
+  select 'unplayered|' || count(*) || '|' ||
+         coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
+         coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
+  from (select distinct season, season_type, week, game_id, game_date
+        from serving.srv_game_team
+        where is_fbs_game
+          and is_completed
+          and points_for is not null
+          and season = (select max(season) from serving.srv_game_team where is_completed)
+          and game_date < (now() at time zone 'America/Los_Angeles')::date) g
+  where not exists (select 1 from serving.srv_player_game_log p
+                     where p.game_id = g.game_id)
+  having count(*) > 0
+" || echo "unplayered|MONITOR.cannot_read_published_serving|0|-"
+
 # One line per failing test: name, how many rows failed, how long ago. Not the log.
 # 6 hours matches the failure window above so the two signals describe the same period.
 "${PSQL[@]}" -c "

@@ -47,12 +47,41 @@ from src.load_raw_to_postgres import get_conn
 WEEK_SCOPED = ("games/teams", "games/players")
 PER_GAME = "game/box/advanced"
 
-# Which staging relation proves each layer arrived. Read rather than assumed: these are the
-# models `fct_game_team` actually joins to decide `has_box_score` and `has_box_advanced`.
+# Which staging relation proves each layer arrived.
+#
+# 🚨 A184 (cfdb-main-R-1907). ALL THREE OF THESE WERE WRONG, AND THE COMMENT THAT USED TO SIT
+# HERE SAID "Read rather than assumed: these are the models `fct_game_team` actually joins to
+# decide `has_box_score` and `has_box_advanced`." **It had not been read.** The map was shifted
+# by one relation the whole way across:
+#
+#     endpoint              A181 pointed at            actually fed by that endpoint
+#     games/teams           stg_game_box_team          stg_game_team_stat
+#     games/players         stg_game_box_player        stg_game_player_stat
+#     game/box/advanced     stg_game_team_advanced     stg_game_box_team
+#
+# ⚠️ `stg_game_box_team` and `stg_game_box_player` BOTH read `raw_game_box_advanced`, so two
+# endpoints were being proved by a THIRD endpoint's payload; and `stg_game_team_advanced` reads
+# `raw_stats_game_advanced` — `stats/game/advanced`, a different endpoint again, which this DAG
+# does not fetch at all.
+#
+# 🚨 AND THE FAILURE IS SILENT AND EXACTLY BACKWARDS FROM WHAT THE MODULE IS FOR. `PRESENCE`
+# decides *already boxed*, so a wrong relation makes a game look FETCHED when it is not, and
+# the incremental refresh then never asks for it again. A184 found a live instance: **Florida
+# State at Alabama, week 3 (401856685) — `stg_game_box_player` has 19 rows and
+# `stg_game_player_stat` has ZERO**, so the game has usage data, no player box score, is absent
+# from all three of Today's player boards, and A181's map would have called it done forever.
+#
+# ✅ VERIFIED BY FOLLOWING THE LINEAGE RATHER THAN THE NAMES, and pinned by
+# `test_presence_names_the_relation_that_endpoint_actually_feeds`, which reads the dbt manifest
+# so a plausible-looking name cannot drift back in:
+#
+#     has_box_score     fct_game_team          <- stg_game_team_stat   <- raw_games_teams
+#     has_box_advanced  fct_game_team_advanced <- stg_game_box_team    <- raw_game_box_advanced
+#     player boards     fct_player_game_stat   <- stg_game_player_stat <- raw_games_players
 PRESENCE = {
-    "games/teams": "staging.stg_game_box_team",
-    "games/players": "staging.stg_game_box_player",
-    PER_GAME: "staging.stg_game_team_advanced",
+    "games/teams": "staging.stg_game_team_stat",
+    "games/players": "staging.stg_game_player_stat",
+    PER_GAME: "staging.stg_game_box_team",
 }
 
 

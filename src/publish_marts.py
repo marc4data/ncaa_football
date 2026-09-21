@@ -404,6 +404,85 @@ HOT_SERVING = [t for t in DEFAULT_SERVING if t not in HEAVY_SERVING]
 DEFAULT_SERVING = DEFAULT_SERVING + HEAVY_SERVING
 
 
+# ── WHAT EACH GATED DAG PUBLISHES: EXACTLY WHAT THAT RUN BUILT AND TESTED ────────────────────
+#
+# 🚨 A184 (cfdb-main-R-1904). BOTH GATED DAGs CALLED `publish_all(hot=True)` AND SHIPPED ALL 25
+# HOT TABLES WHILE BUILDING A FRACTION OF THEM — the scores DAG builds 11, the lines DAG builds
+# 2. The other tables were copied out of whatever state the warehouse `serving` schema happened
+# to be in, gated by tests that had never looked at them.
+#
+# 📊 AND IT REACHED THE SITE, WHICH IS WHY THIS IS A FIX RATHER THAN A TIDY-UP. A183 measured
+# the weekly DAG refusing to publish on three failing tests, and found FIVE `srv_drive` rows
+# with a NULL `drive_result_key` live on published serving anyway — put there by the two-hourly
+# scores DAG, which publishes `srv_drive` and does not build or test it. The gate held and the
+# data walked around it.
+#
+# 🚨 THE MECHANISM, NAMED, BECAUSE THE OLD JUSTIFICATION MISSED IT. `WEEKLY_BY_DESIGN` argues
+# these tables are safe to ship hot because *their data only changes weekly*. That is an
+# argument about FRESHNESS and it is true. **The gate is a different question**: the weekly
+# DAG's `dbt_run` mutates the warehouse BEFORE its `dbt_test` decides whether to publish, so
+# between a failed weekly test and its fix the warehouse holds exactly the rows the gate
+# refused — and a two-hourly publish ships them.
+#
+# ✅ SO THE RULE IS: A TABLE IS PUBLISHED ONLY BY A RUN WHOSE TESTS COVERED IT, AGAINST THE
+# STATE BEING PUBLISHED. Keyed on *built*, not on *has a test of its own*: what makes the state
+# safe is that this run produced it and this run's test step gated it.
+#
+# ⚠️ AND IT COSTS NOTHING IN FRESHNESS, BY `WEEKLY_BY_DESIGN`'s OWN ARGUMENT. A table this run
+# does not rebuild cannot be made fresher by publishing it — the same sentence that made these
+# safe to ship hot is the sentence that makes shipping them pointless. `srv_system_health` is
+# the case worth naming: it is rebuilt ONLY by the weekly DAG's `dbt_catalogue`, so the
+# two-hourly publish has always been copying the same rows back.
+#
+# ⚠️ THE ALTERNATIVE — WIDENING EACH DAG's TESTS TO COVER ITS WHOLE PUBLISH LIST — WAS REJECTED
+# ON AN EXISTING GUARD, not on taste. Testing a table this run did not rebuild compares a fresh
+# source against a stale output, which is R-672 exactly and what
+# `test_no_test_straddles_the_gated_dags_refresh_boundary` already refuses. It would also add
+# minutes to a job that runs every two hours.
+#
+# 🚨 THESE LISTS ARE NOT MAINTAINED BY HAND — `ci/check_publish_build_agreement.py` resolves
+# each DAG's selector with `dbt ls` and fails if a list and its selector disagree. Two lists
+# that must agree and nothing checking them is the defect A078 found (R-492) and it is the
+# reason that guard exists at all.
+SCORES_HOT = [
+    "srv_game",
+    "srv_game_team",
+    "srv_game_weather",
+    "srv_line_movement",
+    "srv_odds_board",
+    "srv_standings",
+    "srv_team_game_log",
+    "srv_team_overview",
+    "srv_team_week",
+    "srv_team_week_metric_distribution",
+    "srv_teams_index",
+]
+
+# ⚠️ `srv_team_week_metric_distribution` IS DELIBERATELY NOT HERE. It looks like it belongs —
+# same family, adjacent name — and `DISTRIBUTION_SELECTOR` does not build it; SCORES_SELECTOR
+# does. Resolving the selector with `dbt ls` rather than reading the names is what caught that,
+# and the CI guard below re-checks it on every PR.
+DISTRIBUTION_HOT = [
+    "srv_week_metric_distribution",
+    "srv_week_metric_distribution_bin",
+]
+
+
+def publish_gated(tables: List[str], schema: str = SERVING_SCHEMA) -> dict:
+    """Publish exactly the tables a gated run built and tested, under ONE lock.
+
+    🚨 ONE LOCK FOR THE WHOLE PUBLISH, WHICH IS THE BUG THIS REPLACES (cfdb-main-R-1905).
+    A181 published the hot set through `publish_all()` — which takes the lock and RELEASES it —
+    and then called `publish_schema(extra, ...)` for the box relations OUTSIDE any lock. The
+    second half could interleave with a deploy or the other gated DAG, which is the precise
+    thing `publish_lock` exists to prevent, and it would have done so on exactly the busy
+    Saturday runs the box work was written for.
+    """
+    with publish_lock():
+        publish_schema(tables, schema)
+    return {"serving": len(tables), "tables": list(tables)}
+
+
 def local_pg_env() -> dict:
     env = os.environ.copy()
     env["PGPASSWORD"] = os.getenv("PG_PASSWORD", "cfdb")

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.box_refresh import (PER_GAME, WEEK_SCOPED, box_requests,   # noqa: E402
+from src.box_refresh import (PER_GAME, PRESENCE, WEEK_SCOPED, box_requests,   # noqa: E402
                              relations_to_publish)
 
 
@@ -26,14 +26,18 @@ class _Cursor:
 
     def execute(self, sql, params=None):
         # The relation name is what distinguishes the three queries.
-        if "stg_game_box_team" in sql:
-            self._rows = self._answers.get("games/teams", [])
-        elif "stg_game_box_player" in sql:
-            self._rows = self._answers.get("games/players", [])
-        elif "stg_game_team_advanced" in sql:
-            self._rows = self._answers.get(PER_GAME, [])
-        else:
-            self._rows = []
+        #
+        # ⚠️ DRIVEN FROM `PRESENCE` RATHER THAN FROM HARDCODED NAMES — A184
+        # (cfdb-main-R-1907). This used to name `stg_game_box_team`, `stg_game_box_player` and
+        # `stg_game_team_advanced` directly, so when the map was corrected every test in this
+        # file went silently to zero rows and four of them failed for a reason that had
+        # nothing to do with what they were testing. A fixture that restates the thing under
+        # test is a second copy that drifts.
+        self._rows = []
+        for endpoint, relation in PRESENCE.items():
+            if relation.split(".")[-1] in sql:
+                self._rows = self._answers.get(endpoint, [])
+                break
 
     def fetchall(self):
         return self._rows
@@ -268,3 +272,59 @@ def test_a_run_with_nothing_missing_asks_for_nothing_at_all(monkeypatch):
     result, asked = _run_box_refresh(monkeypatch, conn, loaded=loaded)
     assert asked == [] and loaded == []
     assert result["requests"] == 0 and result["endpoints"] == []
+
+
+# ── THE PRESENCE MAP IS LINEAGE, NOT NAMING (A184, cfdb-main-R-1907) ────────────────────────
+
+def test_presence_names_the_relation_that_endpoint_actually_feeds():
+    """🚨 ALL THREE ENTRIES WERE WRONG AND EVERY ONE OF THEM LOOKED RIGHT.
+
+    `stg_game_box_team`, `stg_game_box_player`, `stg_game_team_advanced` and
+    `stg_game_player_stat` are four plausible names for "the box score", and A181's map picked
+    the wrong one three times out of three — two endpoints proved by a THIRD endpoint's payload
+    and one by a fourth the pipeline does not even fetch here.
+
+    ⚠️ SO THIS ASSERTS LINEAGE FROM THE MANIFEST RATHER THAN COMPARING STRINGS. A name test
+    would have passed on the broken map — that is precisely how it shipped.
+
+    🚨 AND THE DEFECT IS SILENT AND INVERTED: `PRESENCE` decides *already boxed*, so a wrong
+    relation makes a missing game look fetched and the incremental refresh never asks again.
+    Live instance: Florida State at Alabama (401856685) had 19 `stg_game_box_player` rows and
+    ZERO `stg_game_player_stat` rows — no player box score, absent from all three player
+    boards, and marked done.
+    """
+    import json
+
+    manifest = (Path(__file__).resolve().parents[1]
+                / "dbt" / "target" / "manifest.json")
+    if not manifest.exists():
+        pytest.skip("no compiled manifest — run `dbt parse` (R-575)")
+    man = json.loads(manifest.read_text())
+
+    # model name -> the raw source tables it reads
+    sources = {}
+    for uid, node in man["nodes"].items():
+        if node["resource_type"] != "model":
+            continue
+        raw = {man["sources"][s]["name"]
+               for s in node.get("depends_on", {}).get("nodes", [])
+               if s in man.get("sources", {})}
+        if raw:
+            sources[node["name"]] = raw
+
+    for endpoint, relation in PRESENCE.items():
+        model = relation.split(".")[-1]
+        expected_raw = "raw_" + endpoint.replace("/", "_")
+        assert model in sources, (
+            f"{model} reads no raw source at all, so it cannot prove {endpoint} arrived")
+        assert expected_raw in sources[model], (
+            f"PRESENCE maps {endpoint!r} to {relation}, but that model reads "
+            f"{sorted(sources[model])} — not {expected_raw}. A relation fed by a DIFFERENT "
+            f"endpoint cannot prove this one arrived, and getting it wrong marks a missing "
+            f"game as already boxed.")
+
+
+def test_presence_covers_every_endpoint_the_refresh_fetches():
+    """A layer with no presence relation is a layer nothing can prove arrived."""
+    for endpoint in WEEK_SCOPED + (PER_GAME,):
+        assert endpoint in PRESENCE, f"{endpoint} is fetched but has no presence relation"

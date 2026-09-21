@@ -51,7 +51,7 @@ from src.dbt_artifacts import load_run_results
 from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
 from src.lines_cadence import load_config
 from src.load_raw_to_postgres import load_endpoint
-from src.publish_marts import publish_all
+from src.publish_marts import SCORES_HOT, publish_gated
 from src.scores_cadence import schedule_state, should_refresh_scores
 from src.weekly import scores_refresh
 
@@ -289,7 +289,17 @@ def _load(**context):
 
 
 def _publish(**context):
-    """The hot views every run, plus anything this run's new box scores changed.
+    """What THIS run built and tested, plus anything its new box scores changed.
+
+    🚨 A184 (cfdb-main-R-1904). THIS USED TO PUBLISH ALL 25 HOT TABLES WHILE THE DAG BUILT 11.
+    The other 14 were copied from whatever state the warehouse `serving` schema was in, gated
+    by tests that never looked at them — and A183 proved it reached the site: five `srv_drive`
+    rows with a NULL `drive_result_key`, live, after the WEEKLY gate had refused to publish
+    them. `srv_drive` is published here and built here by nothing.
+
+    ✅ Now: exactly `SCORES_HOT`, which `ci/check_publish_build_agreement.py` holds equal to
+    what `SCORES_SELECTOR` builds. See the block above that list for why this costs no
+    freshness and why widening the tests instead was rejected.
 
     🚨 A181 (cfdb-main-R-1901). A182 PROVED THE FETCH IS NOT ENOUGH. It loaded week 3, the team
     box reached the site on the next two-hourly publish, and the three player boards stayed
@@ -308,9 +318,6 @@ def _publish(**context):
     is the exact false green A180 found one task over.
     """
     from src.box_refresh import relations_to_publish
-    from src.publish_marts import publish_schema
-
-    summary = publish_all(schemas=["serving"], hot=True)
 
     loaded = context["task_instance"].xcom_pull(task_ids="refresh_box_scores",
                                                 key="loaded_endpoints")
@@ -324,9 +331,9 @@ def _publish(**context):
     extra = relations_to_publish(loaded)
     if extra:
         print(f"publishing box relations changed by this run: {extra}")
-        publish_schema(extra, "serving")
-        summary = {**summary, "box_relations": extra}
-    return summary
+    # ONE LOCKED PUBLISH FOR BOTH HALVES (cfdb-main-R-1905). The box relations used to ship in
+    # a second, UNLOCKED call after `publish_all` had already released the lock.
+    return publish_gated(SCORES_HOT + extra, "serving")
 
 
 def _refresh_boxes(**context):
