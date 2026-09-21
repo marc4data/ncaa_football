@@ -186,6 +186,34 @@ def _game_row(away="Beta", home="Alpha", away_points=17, home_points=24):
                       "season": 2026})
 
 
+# 🚨 THE PUBLISHED `drive_result_key` FOR EACH DISPLAY STRING — READ OFF LIVE SERVING, NOT
+# DERIVED (cfdb-wta-R-1295).
+#
+# ⚠️ **THE FIXTURE USED TO BUILD THE KEY AS `result.lower().replace(" ", "_")`, AND THAT IS NOT
+# WHAT THE WAREHOUSE PUBLISHES.** `TD` becomes `td`, not `touchdown`; `INT TD` becomes `int_td`,
+# not `interception_return_td`. **While the panel keyed on the display string the difference was
+# invisible; the moment B141 made it read the key, five tests went red** — and they were right
+# to, because the frames they were asserting on could not have come out of the database.
+#
+# 📊 **ENUMERATED FROM `srv_drive` — 28 distinct results over 87,859 drives.** ⚠️ **Two keys
+# carry two spellings each, which is the reason the panel stopped reading strings at all.**
+_PUBLISHED_KEY = {
+    "PUNT": "punt", "TD": "touchdown", "FG": "field_goal", "DOWNS": "downs",
+    "INT": "interception", "FUMBLE": "fumble", "MISSED FG": "missed_field_goal",
+    "END OF HALF": "end_of_half", "END OF GAME": "end_of_game",
+    "Uncategorized": "uncategorized", "INT TD": "interception_return_td",
+    "FUMBLE RETURN TD": "fumble_return_td", "SF": "safety",
+    "END OF 4TH QUARTER": "end_of_quarter", "PUNT TD": "punt_return_td",
+    "PUNT RETURN TD": "punt_return_td", "FUMBLE TD": "fumble_return_td",
+    "MISSED FG TD": "missed_field_goal_return_td", "KICKOFF": "kickoff",
+    "DOWNS TD": "downs_return_td", "BLOCKED FG": "blocked_field_goal",
+    "END OF HALF TD": "end_of_half_return_td", "2PT PASS FAILED": "two_point_failed",
+    "BLOCKED PUNT": "blocked_punt", "FG TD": "field_goal_return_td",
+    "END OF GAME TD": "end_of_game_return_td", "PENALTY": "penalty",
+    "KICKOFF RETURN TD": "kickoff_return_td",
+}
+
+
 def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,
            start=25, end=60, on_field=True, color="#123456", source="primary",
            category="unknown", key=None, period=1, clock="12:00",
@@ -231,7 +259,8 @@ def _drive(number, band, offense, result, *, scoring_side=None, scoring=False,
         "offense_color_on_light": color, "offense_color_on_dark": color,
         "offense_color_source": source,
         "opponent_team_display": "Other",
-        "drive_result": result, "drive_result_key": key or result.lower().replace(" ", "_"),
+        "drive_result": result, "drive_result_key": key or _PUBLISHED_KEY.get(
+            result, result.lower().replace(" ", "_")),
         "drive_result_category": category,
         "scoring_side": scoring_side, "is_scoring_drive": scoring,
         "plays": 5, "yards": end - start, "elapsed_display": "2:00",
@@ -1036,35 +1065,43 @@ def test_EVERY_DRAWN_DRIVE_IS_FILLED_OR_HOLLOW_AND_NEVER_BOTH(panel):
         "a made and a missed field goal draw different shapes, so fill is carrying nothing")
 
 
-def test_THE_TOUCHDOWNS_ARE_ENUMERATED_not_matched_on_a_substring():
-    """🚨 **THE PROMPT'S WARNING, AND IT IS THE RIGHT ONE: *touchdown* CUTS ACROSS CATEGORIES.**
+def test_THE_TOUCHDOWNS_ARE_ENUMERATED_not_matched_on_a_suffix():
+    """🚨 **THE ENUMERATION IS ON THE PUBLISHED KEY NOW, AND THAT IS THE ROUND'S POINT.**
 
-    📊 Eleven published values are touchdowns — `TD` 22,870 · `INT TD` 486 ·
-    `FUMBLE RETURN TD` 207 · `PUNT TD` 129 · `PUNT RETURN TD` 86 · `FUMBLE TD` 70 ·
-    `MISSED FG TD` 15 · `DOWNS TD` 7 · `END OF HALF TD` 5 · `FG TD` 2 · `END OF GAME TD` 1 —
-    **23,878 drives across THREE `drive_result_category` values.**
+    📊 **B141 re-enumerated live published serving: 28 distinct results over 87,859 drives, and
+    TEN published `drive_result_key` values are touchdowns** — `touchdown` 23,718 ·
+    `interception_return_td` 506 · `fumble_return_td` 289 · `punt_return_td` 223 ·
+    `missed_field_goal_return_td` 16 · `downs_return_td` 7 · `end_of_half_return_td` 5 ·
+    `field_goal_return_td` 2 · `end_of_game_return_td` 1 · `kickoff_return_td` 1.
 
-    ⚠️ **A SUBSTRING MATCH ON `TD` HAPPENS TO AGREE TODAY — checked against
-    `drive_result_key`, zero disagreements — BUT IT AGREES BY LUCK.** A future `TD ATTEMPT` or
-    `NO TD` would break it and the enumeration cannot. ✅ **And every one of the eleven must be a
-    published value**, or the set is guarding something that does not exist (§6's decoration).
+    🚨 **ELEVEN STRINGS, TEN KEYS — because the feed spells two outcomes two ways**
+    (`FUMBLE RETURN TD` / `FUMBLE TD`, `PUNT RETURN TD` / `PUNT TD`). **That is exactly why the
+    panel stopped reading strings: a set of spellings has to know them all** (cfdb-wta-R-1294).
+
+    ⚠️ **A `_td` SUFFIX MATCH AGREES TODAY AND WOULD AGREE BY LUCK.** A future `no_td` or
+    `td_attempt` breaks it and the enumeration cannot. ✅ **And every key here must be a
+    published one**, or the set guards something that does not exist (§6's decoration).
     """
-    touchdowns = _module_constant("_DRIVE_TOUCHDOWNS")
-    others = _module_constant("_DRIVE_OTHER_SCORES")
-    assert touchdowns <= _PUBLISHED_RESULTS, (
-        f"these are not published `drive_result` values: "
-        f"{sorted(touchdowns - _PUBLISHED_RESULTS)}")
-    assert others <= _PUBLISHED_RESULTS, (
-        f"these are not published: {sorted(others - _PUBLISHED_RESULTS)}")
+    touchdowns = _module_constant("_DRIVE_TOUCHDOWN_KEYS")
+    others = _module_constant("_DRIVE_OTHER_SCORE_KEYS")
+    assert touchdowns <= _PUBLISHED_KEYS, (
+        f"these are not published `drive_result_key` values: "
+        f"{sorted(touchdowns - _PUBLISHED_KEYS)}")
+    assert others <= _PUBLISHED_KEYS, (
+        f"these are not published: {sorted(others - _PUBLISHED_KEYS)}")
     assert not (touchdowns & others), (
-        f"a result is both a touchdown and an other-score: {sorted(touchdowns & others)}")
-    assert len(touchdowns) == 11, (
-        f"{len(touchdowns)} touchdowns enumerated; eleven published values are touchdowns")
-    # every published value ending in TD is one of them — the property a substring match has
-    # and an enumeration must not silently lose
-    assert {r for r in _PUBLISHED_RESULTS if r.endswith("TD")} == touchdowns, (
-        f"the enumeration and the published values ending in `TD` disagree: "
-        f"{sorted({r for r in _PUBLISHED_RESULTS if r.endswith('TD')} ^ touchdowns)}")
+        f"a key is both a touchdown and an other-score: {sorted(touchdowns & others)}")
+    assert len(touchdowns) == 10, (
+        f"{len(touchdowns)} touchdown keys enumerated; ten published keys are touchdowns")
+    # every published key that ends `_td` is one of them — the property a suffix match has and
+    # an enumeration must not silently lose. `touchdown` itself does not end `_td`.
+    suffixed = {k for k in _PUBLISHED_KEYS if k.endswith("_td")}
+    assert suffixed <= touchdowns, (
+        f"published keys ending `_td` that the panel does not draw as touchdowns: "
+        f"{sorted(suffixed - touchdowns)}")
+    assert "kickoff_return_td" in touchdowns, (
+        "A183 published `kickoff_return_td` and the panel must draw it as a touchdown — it "
+        "drew a bare `unknown` stroke until B141 (cfdb-main-R-1873)")
 
 
 def test_A_PERIOD_ZERO_IS_AN_ABSENCE_not_a_quarter(panel):
@@ -2007,10 +2044,26 @@ _PUBLISHED_RESULTS = {
     "END OF 4TH QUARTER", "PUNT TD", "PUNT RETURN TD", "FUMBLE TD", "MISSED FG TD",
     "KICKOFF", "DOWNS TD", "END OF HALF TD", "BLOCKED FG", "BLOCKED PUNT", "FG TD",
     "END OF GAME TD",
+    # ✅ B141, re-enumerated on live published serving: 28 distinct results over 87,859
+    # drives. These three were not in the set, and one of them is this round's subject.
+    "KICKOFF RETURN TD", "2PT PASS FAILED", "PENALTY",
 }
 
+# 📊 THE PUBLISHED KEYS, which is what the panel reads since B141 — the values of the mapping
+# above, so the two cannot drift apart.
+_PUBLISHED_KEYS = set(_PUBLISHED_KEY.values())
+
 # 📊 **AND THE DISPLAY FORMS, MEASURED THE SAME WAY.** The widest is what sizes the cell.
+#
+# ⚠️ **B141 ADDED THREE, AND MEASURED THEM ON AN INSTRUMENT CALIBRATED AGAINST THIS MAP'S OWN
+# VALUES RATHER THAN ON ITS OWN SETTINGS** — a fresh canvas at the site's font stack reads
+# ~1.7px HIGH against these numbers, and 10px plain sans reproduces six known entries to within
+# **0.52px**. **A ruler that disagrees with the marks already on the page is the wrong ruler**
+# (B134 got exactly this wrong by measuring a bold heading against regular widths).
 _DISPLAY_LABEL_PX = {
+    # B141, on the calibrated instrument: all three are well inside the 66px slot and none
+    # displaces `PUNT RET TD` as the widest, so the column does not move.
+    "KO RET TD": 53.33, "X-2PT": 28.34, "PEN": 20.56,
     "PUNT RET TD": 65.59, "FUM RET TD": 60.20, "DOWNS TD": 54.27, "PUNT TD": 42.98,
     "X-FG TD": 39.83, "DOWNS": 38.34, "EOG TD": 38.17, "EOH TD": 37.61,
     "FUM TD": 37.59, "B-PUNT": 37.23, "INT TD": 31.88, "FG TD": 29.83,
@@ -3234,3 +3287,51 @@ def test_THE_PAGE_HAS_NO_SECOND_ACCENT_PRODUCER(panel):
     assert "identity.text_on(pair, dark_theme=True)" not in source, (
         "the page is composing a `light-dark()` team colour itself rather than calling "
         "`identity.accent_color`")
+
+
+def test_A_KICKOFF_RETURN_TOUCHDOWN_DRAWS_AS_A_TOUCHDOWN(panel):
+    """🚨 **A183 PUBLISHED IT AND THE PANEL DREW A BARE STROKE** (cfdb-main-R-1873).
+
+    📊 **Jacksonville State at Ohio, `401866418`, drive 9: Ohio, 98 yards on one play,
+    `drive_result_key = 'kickoff_return_td'`, category `offensive score`,
+    `scoring_side = 'offense'`.** Before B141 the panel classed it `unknown` — an unfilled
+    stroke, the mark it uses for a result it has never seen — because `_DRIVE_TOUCHDOWNS` was a
+    set of display STRINGS and that string was not in it.
+
+    ✅ **THIS ASSERTS THROUGH THE PANEL, NOT ON THE CONSTANT.** `test_THE_TOUCHDOWNS_ARE_
+    ENUMERATED_not_matched_on_a_suffix` already pins the key's membership; a set can be right
+    while the glyph still comes out wrong, which is the gap between a list and a picture.
+
+    ⚠️ **AND THE ARROW IS THE HALF THAT COULD BE SUBTLY WRONG.** The scoring side is the
+    OFFENCE here — unlike every other `_return_td`, which are defensive scores — so the mark
+    must point at the band's OWN end zone. **A touchdown pointing the wrong way is B133's
+    mirrored-band defect, and it would look deliberate.**
+    """
+    frame = pd.DataFrame([
+        _drive(1, "away", "Beta", "PUNT", category="punt"),
+        _drive(2, "home", "Alpha", "KICKOFF RETURN TD", category="offensive score",
+               scoring_side="offense", scoring=True, off_score=(0, 7)),
+    ])
+    spec = _spec(panel(frame)[1])
+    row = _row_for(_field_rows(spec), 2)
+
+    assert row["result_label"] == "KO RET TD", (
+        f"the cell reads {row['result_label']!r}; the raw string is 17 characters against a "
+        f"66px slot and would have set the column's width")
+    assert row["result_filled"] is True, (
+        "a kickoff-return touchdown put seven points on the board and must be FILLED")
+    # the home band scores in the RIGHT end zone, and its own offence scored
+    assert row["result_shape"] == _module_constant("_DRIVE_SCORE_RIGHT"), (
+        f"the mark is {row['result_shape']!r}; the home band's own offence scored, so it "
+        f"points at the home end zone on the right")
+
+    # and the away band's identical result points the other way — the mirror, asserted
+    mirrored = pd.DataFrame([
+        _drive(1, "away", "Beta", "KICKOFF RETURN TD", category="offensive score",
+               scoring_side="offense", scoring=True, off_score=(0, 7)),
+        _drive(2, "home", "Alpha", "PUNT", category="punt"),
+    ])
+    away_row = _row_for(_field_rows(_spec(panel(mirrored)[1])), 1)
+    assert away_row["result_shape"] == _module_constant("_DRIVE_SCORE_LEFT"), (
+        f"the away band's kickoff-return touchdown points {away_row['result_shape']!r}; the "
+        f"away end zone is on the left")

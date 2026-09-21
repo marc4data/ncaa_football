@@ -6501,12 +6501,46 @@ _DRIVE_RESULT_UNKNOWN = "stroke"
 # `END OF GAME TD` 1 — **11 values, 23,878 drives.** ⚠️ **A substring match on `TD` happens to
 # agree here (checked: zero disagreements against `drive_result_key`), but it agrees by luck —
 # a future `TD ATTEMPT` or `NO TD` would break it, and the enumeration cannot.**
-_DRIVE_TOUCHDOWNS = frozenset({
-    "TD", "INT TD", "FUMBLE RETURN TD", "PUNT TD", "PUNT RETURN TD", "FUMBLE TD",
-    "MISSED FG TD", "DOWNS TD", "END OF HALF TD", "FG TD", "END OF GAME TD"})
+# ── 🚨 KEYED ON THE PUBLISHED `drive_result_key`, NOT ON THE RESULT STRING ─────────────────
+#
+# 🚨 **THIS USED TO BE A SET OF DISPLAY STRINGS AND THAT WAS THE DEFECT, NOT THE MISSING ROW**
+# (cfdb-wta-R-1294). A183 published `kickoff_return_td` on `fct_drive`; the panel drew it as
+# `unknown` — an unfilled stroke — because the string `KICKOFF RETURN TD` was not in the list.
+# **Adding one string would have fixed that drive and left the next one to fail the same way.**
+#
+# 📊 **ENUMERATED ON LIVE PUBLISHED SERVING — 28 distinct results over 87,859 drives — AND THE
+# STRING SET WAS ALREADY CARRYING THE FEED'S SYNONYMS:**
+#
+#     fumble_return_td   <- "FUMBLE RETURN TD"  AND  "FUMBLE TD"
+#     punt_return_td     <- "PUNT RETURN TD"    AND  "PUNT TD"
+#
+# **Two keys, four strings.** ⚠️ **A set of strings has to know every spelling CFBD uses; the
+# key is one value per outcome** — which is why §4.3 wants the published classification read
+# rather than re-derived.
+#
+# 📊 **AND THE KEY IS THERE TO READ: `drive_result_key` is NON-NULL on 87,859 of 87,859 rows**
+# (§2.5 — a column that exists is not a column that has data, so it was counted).
+#
+# ⚠️ **ENUMERATED, NOT MATCHED ON A SUFFIX.** B136's rule: a `_td` suffix test would be shorter
+# and would silently adopt whatever the feed invents next, which is the same fragility one
+# level along. **Every key here was read off published serving.**
+_DRIVE_TOUCHDOWN_KEYS = frozenset({
+    "touchdown",                    # 23,718 — the offence's own
+    "interception_return_td",       # 506
+    "fumble_return_td",             # 289 across two published spellings
+    "punt_return_td",               # 223 across two published spellings
+    "missed_field_goal_return_td",  # 16
+    "downs_return_td",              # 7
+    "end_of_half_return_td",        # 5
+    "field_goal_return_td",         # 2
+    "end_of_game_return_td",        # 1
+    "kickoff_return_td",            # 1 — A183's, and the reason this block moved
+})
 
-# the non-touchdown results that still put points on the board
-_DRIVE_OTHER_SCORES = frozenset({"FG", "SF"})   # a made field goal and a safety
+# the non-touchdown outcomes that still put points on the board
+_DRIVE_MADE_KICK_KEY = "field_goal"
+_DRIVE_SAFETY_KEY = "safety"
+_DRIVE_OTHER_SCORE_KEYS = frozenset({_DRIVE_MADE_KICK_KEY, _DRIVE_SAFETY_KEY})
 
 # 🚨 KEYED ON THE THING THAT HAPPENED, FINER THAN `drive_result_category` — which is the whole
 # of Marc's first ask. **The direction of a `score` is supplied per row; every other shape is
@@ -6526,10 +6560,10 @@ _DRIVE_GLYPH_SHAPES = {
     "clock": "square",
     "unknown": _DRIVE_RESULT_UNKNOWN,
 }
-# the published results that are a MADE kick and a safety — the two scores that are not
-# touchdowns, enumerated for the same reason the touchdowns are
-_DRIVE_MADE_KICK = "FG"
-_DRIVE_SAFETY = "SF"
+# ⚠️ `_DRIVE_MADE_KICK = "FG"` AND `_DRIVE_SAFETY = "SF"` LIVED HERE AND ARE GONE (B141).
+# They were display STRINGS; the classification they stood for is published as
+# `drive_result_key`, and `_DRIVE_MADE_KICK_KEY` / `_DRIVE_SAFETY_KEY` above are what the
+# glyph reads now. **Two names for one fact is what this round removed.**
 _DRIVE_SCORE_LEFT = "triangle-left"
 _DRIVE_SCORE_RIGHT = "triangle-right"
 
@@ -6537,19 +6571,24 @@ _DRIVE_SCORE_RIGHT = "triangle-right"
 def _drive_glyph_class(row) -> str:
     """Which of `_DRIVE_GLYPH_SHAPES` this drive is — the finer key v04 needed.
 
-    ⚠️ **IT READS `drive_result` FOR THE SCORES AND `drive_result_category` FOR THE REST**, so a
-    published value this file has never seen still lands somewhere honest: an unrecognised
+    ⚠️ **IT READS `drive_result_key` FOR THE SCORES AND `drive_result_category` FOR THE REST**,
+    so a published value this file has never seen still lands somewhere honest: an unrecognised
     category falls to `unknown` and draws a bare stroke rather than borrowing a verdict.
+
+    🚨 **IT READ THE RESULT *STRING* UNTIL B141, AND THAT IS WHY A183's `kickoff_return_td` DREW
+    AS `unknown`** (cfdb-wta-R-1294). **The key is the published classification; the string is
+    its display form, and the feed spells two of the outcomes two ways.**
     """
-    result = fmt.text(row.get("drive_result"))
-    if result in _DRIVE_TOUCHDOWNS:
+    key = fmt.text(row.get("drive_result_key"))
+    if key in _DRIVE_TOUCHDOWN_KEYS:
         return "touchdown"
-    # ⚠️ `FG`'s published CATEGORY is `offensive score`, not `kick` — so a made field goal has
-    # to be named here or it falls through to `unknown`. `MISSED FG` and `BLOCKED FG` already
-    # carry `kick`, which is how one diamond covers made and missed with fill telling them apart.
-    if result == _DRIVE_MADE_KICK:
+    # ⚠️ `field_goal`'s published CATEGORY is `offensive score`, not `kick` — so a made field
+    # goal has to be named here or it falls through to `unknown`. `missed_field_goal` and
+    # `blocked_field_goal` already carry `kick`, which is how one diamond covers made and
+    # missed with fill telling them apart.
+    if key == _DRIVE_MADE_KICK_KEY:
         return "kick"
-    if result == _DRIVE_SAFETY:
+    if key == _DRIVE_SAFETY_KEY:
         return "safety"
     category = fmt.text(row.get("drive_result_category"))
     if category in _DRIVE_GLYPH_SHAPES and category not in ("touchdown", "safety"):
@@ -6582,8 +6621,8 @@ def _drive_glyph_filled(row) -> bool:
     a missed field goal are the same diamond and differ only by this, which is the pair a reader
     most needs to tell apart.
     """
-    result = fmt.text(row.get("drive_result"))
-    return result in _DRIVE_TOUCHDOWNS or result in _DRIVE_OTHER_SCORES
+    key = fmt.text(row.get("drive_result_key"))
+    return key in _DRIVE_TOUCHDOWN_KEYS or key in _DRIVE_OTHER_SCORE_KEYS
 
 
 # ── 🚨 v03: THE DISPLAY MAP. MARC'S ABBREVIATIONS, EXTENDED BY HIS OWN RULES ────────────────
@@ -6648,6 +6687,18 @@ _DRIVE_RESULT_LABELS = {
     "FUMBLE RETURN TD": "FUM RET TD",
     "PUNT RETURN TD": "PUNT RET TD",
     "KICKOFF": "KO",
+    # ── ✅ B141: THREE PUBLISHED RESULTS THIS MAP DID NOT HAVE (cfdb-wta-R-1296) ──────────
+    #
+    # 🚨 **FOUND BY RE-ENUMERATING LIVE SERVING RATHER THAN BY A COMPLAINT.** The set this file
+    # was written against held 25 results; serving publishes **28** over 87,859 drives. ⚠️ **An
+    # unmapped result falls through to its RAW string** — `KICKOFF RETURN TD` is 17 characters
+    # against a cell whose content budget is 66px, and it would have set the column's width.
+    #
+    # **Each follows a rule already in this map rather than a new one:** `KICKOFF` is already
+    # `KO` and `… RETURN TD` is already `… RET TD`; `X-` already marks a failed kick.
+    "KICKOFF RETURN TD": "KO RET TD",
+    "2PT PASS FAILED": "X-2PT",
+    "PENALTY": "PEN",
 }
 
 
