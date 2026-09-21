@@ -170,15 +170,28 @@ def test_the_target_directory_comes_from_the_environment(monkeypatch):
 
 
 def test_stale_artefacts_are_an_error_rather_than_a_publish(tmp_path, monkeypatch, capsys):
-    """The freshness guard. If run_results predates the run we just launched, the module is
-    reading the wrong directory — and the wrong directory produces a believable answer."""
+    """The freshness guard. If the run did not rewrite run_results, the module is reading the
+    wrong directory — and the wrong directory produces a believable answer.
+
+    ⚠️ THE MECHANISM CHANGED IN A186 (cfdb-main-R-1917) AND THE PROPERTY DID NOT. The guard
+    used to compare `st_mtime` against a `time.time()` reading taken before the run, which is
+    a race whenever the filesystem stores mtime at coarser resolution than the clock — a file
+    written AFTER the reading can report an mtime BEFORE it. It now compares the artefacts
+    against a fingerprint of themselves taken before the run, so "untouched" is detected
+    directly rather than inferred from a clock.
+
+    The scenario here is unchanged: artefacts that exist, a run that does not write them.
+    """
+    import os as _os
+    import time as _time
+
     monkeypatch.setattr(dm, "TARGET_DIR", tmp_path)
     monkeypatch.setattr(dm, "DEPLOYED_STATE", tmp_path / "deployed")
     (tmp_path / "run_results.json").write_text('{"results": []}')
     (tmp_path / "manifest.json").write_text('{"nodes": {}}')
-    # Both artefacts predate the run by an hour.
-    import os as _os
-    old = dm.time.time() - 3600
+    # Both artefacts predate the run by an hour — realistic, though what the guard now keys on
+    # is that `run_dbt` below leaves them untouched.
+    old = _time.time() - 3600
     for name in ("run_results.json", "manifest.json"):
         _os.utime(tmp_path / name, (old, old))
 
@@ -314,3 +327,56 @@ def test_the_catalogue_models_are_the_two_no_selector_can_reach():
         assert model in dag, (
             f"{model} is not in the weekly DAG's second pass — the two places serving models "
             f"get built disagree about what needs cataloguing")
+
+
+def test_a_coarse_filesystem_timestamp_is_not_mistaken_for_a_stale_artefact(
+        tmp_path, monkeypatch, capsys):
+    """🚨 THE FLAKE, PINNED — A186 (cfdb-main-R-1917).
+
+    `main` used to take `started = time.time()` and then reject any artefact whose
+    `st_mtime` was less than it. `time.time()` carries microseconds; a filesystem may store
+    mtime at coarser resolution, so **a file written after the reading can report a timestamp
+    before it.** The failure window is however far into the current second the run begins —
+    which is why the push run for A184's merge (`25bad11`) went red on `main` while the
+    identical tree passed in that PR's own run (`0855247`).
+
+    ⚠️ A test that fails some of the time is the worst kind, because it trains everyone to
+    re-run it rather than read it. This reproduces the condition deterministically by
+    truncating the artefacts' mtimes to whole seconds — exactly what a coarse filesystem
+    does — and asserts the deploy proceeds.
+    """
+    import math
+    import os as _os
+
+    monkeypatch.setattr(dm, "TARGET_DIR", tmp_path)
+    monkeypatch.setattr(dm, "DEPLOYED_STATE", tmp_path / "deployed")
+    monkeypatch.setattr(dm, "previous_manifest", lambda: None)
+
+    nodes = {"model.c.srv_game_team": {"resource_type": "model", "schema": "serving",
+                                       "name": "srv_game_team"}}
+
+    class _Done:
+        returncode, stdout, stderr = 0, "Done. PASS=1", ""
+
+    def fake_run(_selector, _state):
+        (tmp_path / "run_results.json").write_text(json.dumps({"results": [
+            {"unique_id": "model.c.srv_game_team", "status": "success"}]}))
+        (tmp_path / "manifest.json").write_text(json.dumps({"nodes": nodes}))
+        # A FILESYSTEM THAT STORES mtime TO THE SECOND. The write still happened during
+        # this run; only its recorded precision is coarser.
+        for name in ("run_results.json", "manifest.json"):
+            f = tmp_path / name
+            whole = math.floor(f.stat().st_mtime)
+            _os.utime(f, (whole, whole))
+        return _Done()
+
+    monkeypatch.setattr(dm, "run_dbt", fake_run)
+
+    published = []
+    import src.publish_marts as pm
+    monkeypatch.setattr(pm, "publish_schema", lambda tables, _schema: published.extend(tables))
+    monkeypatch.setattr(pm, "DEFAULT_SERVING", ["srv_game_team"])
+
+    assert dm.main([]) == 0, capsys.readouterr().out
+    assert "not written by this run" not in capsys.readouterr().out
+    assert published == ["srv_game_team"]

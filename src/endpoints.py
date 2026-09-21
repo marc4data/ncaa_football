@@ -252,6 +252,43 @@ REGISTRY: List[Endpoint] = [
     Endpoint("passing/plays", SEASON_WEEK, BUCKET_IMMUTABLE_WK, include=False,
              min_season=2025, note="enriched pass attempts; 7,396 rows/week"),
 
+    # ---- The rushing mirror of the block above — A186 (cfdb-main-R-1918) ------------
+    #
+    # 🚨 THESE ARRIVED BY THEMSELVES, WHICH IS THE WHOLE REASON THE SPEC IS VENDORED. CFBD
+    # went 5.25.0 -> 5.27.1 and added five paths; nothing we did asked for them, and
+    # `test_new_upstream_endpoints_have_to_be_decided_on` refused the spec refresh until
+    # somebody said what they are. **That guard is the feature** — the same shape surfaced
+    # the five `passing/*` paths above.
+    #
+    # ✅ REGISTERED RATHER THAN SKIPPED, matching the passing set for its stated reason: a
+    # registered endpoint is visible in `docs/cfbd_coverage.md` and reachable from the
+    # backfill CLI, whereas `UNREGISTERED_ON_PURPOSE` (still empty) hides it from both.
+    #
+    # ⚠️ `include=False` FOR THE SAME REASON AS THE PASSING SET, AND IT IS ABOUT VOLUME, NOT
+    # VALUE. `passing/plays` alone returns 7,396 rows and 5.9 MB for one week; putting the
+    # rushing analogue in the default sweep would change what the weekly refresh costs
+    # without anybody deciding to. **Whether we WANT rushing analytics on the site is Marc's
+    # call (§2.1), and registering them costs nothing while that stays unasked.**
+    #
+    # 🚨 `min_season` IS DELIBERATELY ABSENT, AND THAT IS NOT AN OVERSIGHT. The passing set
+    # carries `min_season=2025` because A-round PROBED it against the live API — 2022-2024
+    # answer 200 with an EMPTY ARRAY rather than 404, so a backfill of those years writes
+    # files, records successes, and produces endpoints that look landed and hold nothing.
+    # **This round did not probe the rushing paths** (PART 2 is read-the-spec, and no CFBD
+    # request was authorised for it), so asserting a floor here would be a number nobody
+    # measured — §2.4. Probe before any backfill uses these.
+    Endpoint("rushing/players/season", SEASON, BUCKET_REVISIONIST, include=False,
+             note="rusher production by season; min_season UNPROBED"),
+    Endpoint("rushing/teams/season", SEASON, BUCKET_REVISIONIST, include=False,
+             note="team rushing production by season; min_season UNPROBED"),
+    Endpoint("rushing/players/games", SEASON_WEEK, BUCKET_IMMUTABLE_WK, include=False,
+             note="rusher production by game; min_season UNPROBED"),
+    Endpoint("rushing/teams/games", SEASON_WEEK, BUCKET_IMMUTABLE_WK, include=False,
+             note="team rushing production by game; min_season UNPROBED"),
+    # WEEK-SCOPED BECAUSE OF ITS SIZE, matching passing/plays, plays and plays/stats.
+    Endpoint("rushing/plays", SEASON_WEEK, BUCKET_IMMUTABLE_WK, include=False,
+             note="enriched rush attempts; min_season UNPROBED"),
+
     # ---- Per-game fan-out: opt-in only ---------------------------------------------
     # R-697. OPTED INTO THE WEEKLY REFRESH, reversing a documented decision deliberately —
     # see the note in weekly.py, which used to name this endpoint as one that stays

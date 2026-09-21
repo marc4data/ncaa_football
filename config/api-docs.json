@@ -4451,6 +4451,188 @@
         ],
         "type": "string"
       },
+      "PassingLocationProduction": {
+        "additionalProperties": false,
+        "description": "Production for analysis-eligible attempts in one location bucket.",
+        "properties": {
+          "airYardsAttemptsAvailable": {
+            "description": "Number of attempts with non-null air yards, including zero-yard values.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "airYardsPerAttempt": {
+            "description": "Total air yards / attempts with air yards available; null if unavailable.\nEquivalent to averageDepthOfTarget. Yardage averages use one decimal.",
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "averageDepthOfTarget": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "averageYardsAfterCatch": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "completionRate": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "completions": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "explosiveness": {
+            "description": "Average available PPA on successful eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
+          "incompletions": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "interceptions": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "ppa": {
+            "description": "Average available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
+          "ppaAttemptsAvailable": {
+            "description": "Eligible attempts with non-null PPA, including zero and negative values.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successAttemptsAvailable": {
+            "description": "Eligible attempts with non-null success. Missing success remains in the\nsuccess-rate denominator but does not count as successful.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successRate": {
+            "description": "Successful eligible attempts / all eligible attempts; zero if empty.",
+            "format": "double",
+            "type": "number"
+          },
+          "successfulAttempts": {
+            "description": "Eligible attempts with stored success equal to true.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successfulPpaAttemptsAvailable": {
+            "description": "Successful eligible attempts with non-null PPA; explosiveness denominator.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "totalAirYards": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "totalPpa": {
+            "description": "Sum of available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
+          "totalYards": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "totalYardsAfterCatch": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "totalYardsAttemptsAvailable": {
+            "description": "Number of attempts with non-null total yards, including zero-yard\nincompletions and interceptions.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "yardsAfterCatchAttemptsAvailable": {
+            "description": "Number of completed attempts with valid total yards and air yards to\ncalculate yards after catch, including zero-yard values.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "yardsPerAttempt": {
+            "description": "Total yards / attempts with total yards available; null if unavailable.",
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "attempts",
+          "completions",
+          "incompletions",
+          "interceptions",
+          "completionRate",
+          "airYardsAttemptsAvailable",
+          "totalAirYards",
+          "averageDepthOfTarget",
+          "totalYardsAttemptsAvailable",
+          "totalYards",
+          "yardsAfterCatchAttemptsAvailable",
+          "totalYardsAfterCatch",
+          "averageYardsAfterCatch",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "explosiveness",
+          "ppaAttemptsAvailable",
+          "successAttemptsAvailable",
+          "successfulAttempts",
+          "successfulPpaAttemptsAvailable",
+          "yardsPerAttempt",
+          "airYardsPerAttempt"
+        ],
+        "type": "object"
+      },
+      "PassingLocations": {
+        "additionalProperties": false,
+        "properties": {
+          "deep left": {
+            "$ref": "#/components/schemas/PassingLocationProduction"
+          },
+          "deep middle": {
+            "$ref": "#/components/schemas/PassingLocationProduction"
+          },
+          "deep right": {
+            "$ref": "#/components/schemas/PassingLocationProduction"
+          },
+          "short left": {
+            "$ref": "#/components/schemas/PassingLocationProduction"
+          },
+          "short middle": {
+            "$ref": "#/components/schemas/PassingLocationProduction"
+          },
+          "short right": {
+            "$ref": "#/components/schemas/PassingLocationProduction"
+          },
+          "unknown": {
+            "$ref": "#/components/schemas/PassingLocationProduction",
+            "description": "Eligible attempts without both recognized depth and direction."
+          }
+        },
+        "required": [
+          "short left",
+          "short middle",
+          "short right",
+          "deep left",
+          "deep middle",
+          "deep right",
+          "unknown"
+        ],
+        "type": "object"
+      },
       "PassingPlay": {
         "additionalProperties": false,
         "properties": {
@@ -4495,6 +4677,10 @@
             "type": "boolean"
           },
           "isThrowaway": {
+            "type": "boolean"
+          },
+          "locationAnalysisEligible": {
+            "description": "Excludes spikes, intentional grounding, and invalid parses. Throwaways,\npartial parses, and attempts with missing location or air yards qualify.",
             "type": "boolean"
           },
           "offense": {
@@ -4557,6 +4743,12 @@
             "nullable": true,
             "type": "string"
           },
+          "ppa": {
+            "description": "Stored offensive PPA, including zero and negative values.",
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
           "season": {
             "format": "int32",
             "type": "integer"
@@ -4571,6 +4763,11 @@
           "startYardsToGoal": {
             "format": "int32",
             "type": "integer"
+          },
+          "success": {
+            "description": "Stored success classification; null means unavailable.",
+            "nullable": true,
+            "type": "boolean"
           },
           "target": {
             "nullable": true,
@@ -4635,7 +4832,10 @@
           "isSpike",
           "isThrowaway",
           "isIntentionalGrounding",
-          "parseStatus"
+          "parseStatus",
+          "ppa",
+          "success",
+          "locationAnalysisEligible"
         ],
         "type": "object"
       },
@@ -4659,6 +4859,7 @@
       },
       "PassingProduction": {
         "additionalProperties": false,
+        "description": "Defense reports opponent production allowed without inverting PPA signs.",
         "properties": {
           "airYardsAttemptsAvailable": {
             "description": "Number of attempts with non-null air yards, including zero-yard values.",
@@ -4688,6 +4889,11 @@
             "format": "int32",
             "type": "integer"
           },
+          "explosiveness": {
+            "description": "Average available PPA on successful eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
           "incompletions": {
             "format": "int32",
             "type": "integer"
@@ -4696,10 +4902,59 @@
             "format": "int32",
             "type": "integer"
           },
+          "locationAvailableAttempts": {
+            "description": "Eligible attempts with both recognized source depth and direction.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "locationEligibleAttempts": {
+            "description": "Attempts eligible for advanced metrics and location analysis. Existing\noverall production includes ineligible attempts; location buckets do not.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "locations": {
+            "$ref": "#/components/schemas/PassingLocations",
+            "description": "All seven buckets are present, including empty buckets."
+          },
+          "ppa": {
+            "description": "Average available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
+          "ppaAttemptsAvailable": {
+            "description": "Eligible attempts with non-null PPA, including zero and negative values.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successAttemptsAvailable": {
+            "description": "Eligible attempts with non-null success. Missing success remains in the\nsuccess-rate denominator but does not count as successful.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successRate": {
+            "description": "Successful eligible attempts / all eligible attempts; zero if empty.",
+            "format": "double",
+            "type": "number"
+          },
+          "successfulAttempts": {
+            "description": "Eligible attempts with stored success equal to true.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successfulPpaAttemptsAvailable": {
+            "description": "Successful eligible attempts with non-null PPA; explosiveness denominator.",
+            "format": "int32",
+            "type": "integer"
+          },
           "totalAirYards": {
             "format": "int32",
             "nullable": true,
             "type": "integer"
+          },
+          "totalPpa": {
+            "description": "Sum of available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
           },
           "totalYards": {
             "format": "int32",
@@ -4735,7 +4990,18 @@
           "totalYards",
           "yardsAfterCatchAttemptsAvailable",
           "totalYardsAfterCatch",
-          "averageYardsAfterCatch"
+          "averageYardsAfterCatch",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "explosiveness",
+          "ppaAttemptsAvailable",
+          "successAttemptsAvailable",
+          "successfulAttempts",
+          "successfulPpaAttemptsAvailable",
+          "locationEligibleAttempts",
+          "locationAvailableAttempts",
+          "locations"
         ],
         "type": "object"
       },
@@ -5388,6 +5654,11 @@
             "nullable": true,
             "type": "string"
           },
+          "explosiveness": {
+            "description": "Average available PPA on successful eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
           "gameId": {
             "format": "int32",
             "type": "integer"
@@ -5400,6 +5671,20 @@
             "format": "int32",
             "type": "integer"
           },
+          "locationAvailableAttempts": {
+            "description": "Eligible attempts with both recognized source depth and direction.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "locationEligibleAttempts": {
+            "description": "Attempts eligible for advanced metrics and location analysis. Existing\noverall production includes ineligible attempts; location buckets do not.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "locations": {
+            "$ref": "#/components/schemas/PassingLocations",
+            "description": "All seven buckets are present, including empty buckets."
+          },
           "opponent": {
             "type": "string"
           },
@@ -5409,12 +5694,42 @@
           "playerId": {
             "type": "string"
           },
+          "ppa": {
+            "description": "Average available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
+          "ppaAttemptsAvailable": {
+            "description": "Eligible attempts with non-null PPA, including zero and negative values.",
+            "format": "int32",
+            "type": "integer"
+          },
           "season": {
             "format": "int32",
             "type": "integer"
           },
           "seasonType": {
             "$ref": "#/components/schemas/SeasonType"
+          },
+          "successAttemptsAvailable": {
+            "description": "Eligible attempts with non-null success. Missing success remains in the\nsuccess-rate denominator but does not count as successful.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successRate": {
+            "description": "Successful eligible attempts / all eligible attempts; zero if empty.",
+            "format": "double",
+            "type": "number"
+          },
+          "successfulAttempts": {
+            "description": "Eligible attempts with stored success equal to true.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successfulPpaAttemptsAvailable": {
+            "description": "Successful eligible attempts with non-null PPA; explosiveness denominator.",
+            "format": "int32",
+            "type": "integer"
           },
           "team": {
             "type": "string"
@@ -5423,6 +5738,11 @@
             "format": "int32",
             "nullable": true,
             "type": "integer"
+          },
+          "totalPpa": {
+            "description": "Sum of available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
           },
           "totalYards": {
             "format": "int32",
@@ -5463,6 +5783,17 @@
           "yardsAfterCatchAttemptsAvailable",
           "totalYardsAfterCatch",
           "averageYardsAfterCatch",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "explosiveness",
+          "ppaAttemptsAvailable",
+          "successAttemptsAvailable",
+          "successfulAttempts",
+          "successfulPpaAttemptsAvailable",
+          "locationEligibleAttempts",
+          "locationAvailableAttempts",
+          "locations",
           "gameId",
           "season",
           "week",
@@ -5510,6 +5841,11 @@
             "nullable": true,
             "type": "string"
           },
+          "explosiveness": {
+            "description": "Average available PPA on successful eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
           "incompletions": {
             "format": "int32",
             "type": "integer"
@@ -5518,13 +5854,57 @@
             "format": "int32",
             "type": "integer"
           },
+          "locationAvailableAttempts": {
+            "description": "Eligible attempts with both recognized source depth and direction.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "locationEligibleAttempts": {
+            "description": "Attempts eligible for advanced metrics and location analysis. Existing\noverall production includes ineligible attempts; location buckets do not.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "locations": {
+            "$ref": "#/components/schemas/PassingLocations",
+            "description": "All seven buckets are present, including empty buckets."
+          },
           "player": {
             "type": "string"
           },
           "playerId": {
             "type": "string"
           },
+          "ppa": {
+            "description": "Average available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
+          },
+          "ppaAttemptsAvailable": {
+            "description": "Eligible attempts with non-null PPA, including zero and negative values.",
+            "format": "int32",
+            "type": "integer"
+          },
           "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "successAttemptsAvailable": {
+            "description": "Eligible attempts with non-null success. Missing success remains in the\nsuccess-rate denominator but does not count as successful.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successRate": {
+            "description": "Successful eligible attempts / all eligible attempts; zero if empty.",
+            "format": "double",
+            "type": "number"
+          },
+          "successfulAttempts": {
+            "description": "Eligible attempts with stored success equal to true.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "successfulPpaAttemptsAvailable": {
+            "description": "Successful eligible attempts with non-null PPA; explosiveness denominator.",
             "format": "int32",
             "type": "integer"
           },
@@ -5535,6 +5915,11 @@
             "format": "int32",
             "nullable": true,
             "type": "integer"
+          },
+          "totalPpa": {
+            "description": "Sum of available PPA on eligible attempts; zero if unavailable.",
+            "format": "double",
+            "type": "number"
           },
           "totalYards": {
             "format": "int32",
@@ -5571,6 +5956,387 @@
           "yardsAfterCatchAttemptsAvailable",
           "totalYardsAfterCatch",
           "averageYardsAfterCatch",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "explosiveness",
+          "ppaAttemptsAvailable",
+          "successAttemptsAvailable",
+          "successfulAttempts",
+          "successfulPpaAttemptsAvailable",
+          "locationEligibleAttempts",
+          "locationAvailableAttempts",
+          "locations",
+          "season",
+          "playerId",
+          "player",
+          "team",
+          "conference"
+        ],
+        "type": "object"
+      },
+      "PlayerRushingGame": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "conference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "directionAvailableAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directionEligibleAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directions": {
+            "properties": {
+              "left": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "middle": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "right": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "unknown": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              }
+            },
+            "required": [
+              "unknown",
+              "right",
+              "middle",
+              "left"
+            ],
+            "type": "object"
+          },
+          "explosiveness": {
+            "format": "double",
+            "type": "number"
+          },
+          "gameId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "individualAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "kneels": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "lineYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "lineYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "multiCarrierAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "openFieldYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "openFieldYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "opponent": {
+            "type": "string"
+          },
+          "player": {
+            "type": "string"
+          },
+          "playerId": {
+            "type": "string"
+          },
+          "powerSuccess": {
+            "format": "double",
+            "type": "number"
+          },
+          "ppa": {
+            "format": "double",
+            "type": "number"
+          },
+          "rushingYardsAvailable": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "sacks": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seasonType": {
+            "$ref": "#/components/schemas/SeasonType"
+          },
+          "secondLevelYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "secondLevelYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "stuffRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "successRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "team": {
+            "type": "string"
+          },
+          "teamRushes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "totalPpa": {
+            "format": "double",
+            "type": "number"
+          },
+          "totalRushingYards": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "unattributedAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "week": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "yardsPerCarry": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "attempts",
+          "rushingYardsAvailable",
+          "totalRushingYards",
+          "yardsPerCarry",
+          "individualAttempts",
+          "unattributedAttempts",
+          "sacks",
+          "kneels",
+          "teamRushes",
+          "multiCarrierAttempts",
+          "directionEligibleAttempts",
+          "directionAvailableAttempts",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "lineYards",
+          "lineYardsTotal",
+          "secondLevelYards",
+          "secondLevelYardsTotal",
+          "openFieldYards",
+          "openFieldYardsTotal",
+          "stuffRate",
+          "powerSuccess",
+          "explosiveness",
+          "directions",
+          "gameId",
+          "season",
+          "week",
+          "seasonType",
+          "playerId",
+          "player",
+          "team",
+          "conference",
+          "opponent"
+        ],
+        "type": "object"
+      },
+      "PlayerRushingSeason": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "conference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "directionAvailableAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directionEligibleAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directions": {
+            "properties": {
+              "left": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "middle": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "right": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "unknown": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              }
+            },
+            "required": [
+              "unknown",
+              "right",
+              "middle",
+              "left"
+            ],
+            "type": "object"
+          },
+          "explosiveness": {
+            "format": "double",
+            "type": "number"
+          },
+          "individualAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "kneels": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "lineYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "lineYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "multiCarrierAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "openFieldYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "openFieldYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "player": {
+            "type": "string"
+          },
+          "playerId": {
+            "type": "string"
+          },
+          "powerSuccess": {
+            "format": "double",
+            "type": "number"
+          },
+          "ppa": {
+            "format": "double",
+            "type": "number"
+          },
+          "rushingYardsAvailable": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "sacks": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "secondLevelYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "secondLevelYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "stuffRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "successRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "team": {
+            "type": "string"
+          },
+          "teamRushes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "totalPpa": {
+            "format": "double",
+            "type": "number"
+          },
+          "totalRushingYards": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "unattributedAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "yardsPerCarry": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "attempts",
+          "rushingYardsAvailable",
+          "totalRushingYards",
+          "yardsPerCarry",
+          "individualAttempts",
+          "unattributedAttempts",
+          "sacks",
+          "kneels",
+          "teamRushes",
+          "multiCarrierAttempts",
+          "directionEligibleAttempts",
+          "directionAvailableAttempts",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "lineYards",
+          "lineYardsTotal",
+          "secondLevelYards",
+          "secondLevelYardsTotal",
+          "openFieldYards",
+          "openFieldYardsTotal",
+          "stuffRate",
+          "powerSuccess",
+          "explosiveness",
+          "directions",
           "season",
           "playerId",
           "player",
@@ -7207,6 +7973,304 @@
         ],
         "type": "object"
       },
+      "RushAttributionStatus": {
+        "enum": [
+          "individual",
+          "team",
+          "multi_carrier",
+          "unmatched",
+          "ambiguous",
+          "conflict",
+          "unlinked"
+        ],
+        "type": "string"
+      },
+      "RushDirection": {
+        "enum": [
+          "left",
+          "middle",
+          "right"
+        ],
+        "type": "string"
+      },
+      "RushParseStatus": {
+        "enum": [
+          "complete",
+          "partial",
+          "invalid"
+        ],
+        "type": "string"
+      },
+      "RushingDirectionProduction": {
+        "additionalProperties": false,
+        "properties": {
+          "carries": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "explosiveness": {
+            "format": "double",
+            "type": "number"
+          },
+          "lineYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "lineYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "openFieldYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "openFieldYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "powerSuccess": {
+            "format": "double",
+            "type": "number"
+          },
+          "ppa": {
+            "format": "double",
+            "type": "number"
+          },
+          "secondLevelYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "secondLevelYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "stuffRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "successRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "totalPpa": {
+            "format": "double",
+            "type": "number"
+          },
+          "yards": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "yardsPerCarry": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "carries",
+          "yards",
+          "yardsPerCarry",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "lineYards",
+          "lineYardsTotal",
+          "secondLevelYards",
+          "secondLevelYardsTotal",
+          "openFieldYards",
+          "openFieldYardsTotal",
+          "stuffRate",
+          "powerSuccess",
+          "explosiveness"
+        ],
+        "type": "object"
+      },
+      "RushingPlay": {
+        "additionalProperties": false,
+        "properties": {
+          "attributionStatus": {
+            "$ref": "#/components/schemas/RushAttributionStatus"
+          },
+          "clock": {
+            "$ref": "#/components/schemas/RushingPlayClock"
+          },
+          "defense": {
+            "type": "string"
+          },
+          "defenseConference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "defenseId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directionAnalysisEligible": {
+            "type": "boolean"
+          },
+          "distance": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "down": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "driveId": {
+            "type": "string"
+          },
+          "gameId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "isKneel": {
+            "type": "boolean"
+          },
+          "isRushingTouchdown": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "isSack": {
+            "type": "boolean"
+          },
+          "isTeamRush": {
+            "type": "boolean"
+          },
+          "offense": {
+            "type": "string"
+          },
+          "offenseConference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "offenseId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "parseStatus": {
+            "$ref": "#/components/schemas/RushParseStatus"
+          },
+          "period": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "playId": {
+            "type": "string"
+          },
+          "playText": {
+            "nullable": true,
+            "type": "string"
+          },
+          "ppa": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "rushDirection": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RushDirection"
+              }
+            ],
+            "nullable": true
+          },
+          "rusher": {
+            "nullable": true,
+            "type": "string"
+          },
+          "rusherId": {
+            "nullable": true,
+            "type": "string"
+          },
+          "rusherYards": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "rushingYards": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seasonType": {
+            "$ref": "#/components/schemas/SeasonType"
+          },
+          "startYardline": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "startYardsToGoal": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "success": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "week": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gameId",
+          "playId",
+          "driveId",
+          "season",
+          "week",
+          "seasonType",
+          "offenseId",
+          "offense",
+          "offenseConference",
+          "defenseId",
+          "defense",
+          "defenseConference",
+          "period",
+          "clock",
+          "down",
+          "distance",
+          "playText",
+          "startYardline",
+          "startYardsToGoal",
+          "rusherId",
+          "rusher",
+          "rushDirection",
+          "rushingYards",
+          "rusherYards",
+          "isRushingTouchdown",
+          "isSack",
+          "isKneel",
+          "isTeamRush",
+          "attributionStatus",
+          "directionAnalysisEligible",
+          "parseStatus",
+          "ppa",
+          "success"
+        ],
+        "type": "object"
+      },
+      "RushingPlayClock": {
+        "additionalProperties": false,
+        "properties": {
+          "minutes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seconds": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "minutes",
+          "seconds"
+        ],
+        "type": "object"
+      },
       "ScoreboardGame": {
         "additionalProperties": false,
         "properties": {
@@ -8389,6 +9453,248 @@
         ],
         "type": "object"
       },
+      "TeamRushingGame": {
+        "additionalProperties": false,
+        "properties": {
+          "conference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "defense": {
+            "$ref": "#/components/schemas/TeamRushingProduction"
+          },
+          "gameId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "offense": {
+            "$ref": "#/components/schemas/TeamRushingProduction"
+          },
+          "opponent": {
+            "type": "string"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seasonType": {
+            "$ref": "#/components/schemas/SeasonType"
+          },
+          "team": {
+            "type": "string"
+          },
+          "week": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gameId",
+          "season",
+          "week",
+          "seasonType",
+          "team",
+          "conference",
+          "opponent",
+          "offense",
+          "defense"
+        ],
+        "type": "object"
+      },
+      "TeamRushingProduction": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directionAvailableAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directionEligibleAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "directions": {
+            "properties": {
+              "left": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "middle": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "right": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              },
+              "unknown": {
+                "$ref": "#/components/schemas/RushingDirectionProduction"
+              }
+            },
+            "required": [
+              "unknown",
+              "right",
+              "middle",
+              "left"
+            ],
+            "type": "object"
+          },
+          "explosiveness": {
+            "format": "double",
+            "type": "number"
+          },
+          "individualAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "kneels": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "lineYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "lineYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "multiCarrierAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "openFieldYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "openFieldYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "powerSuccess": {
+            "format": "double",
+            "type": "number"
+          },
+          "ppa": {
+            "format": "double",
+            "type": "number"
+          },
+          "rushingTouchdowns": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "rushingYardsAvailable": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "sacks": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "secondLevelYards": {
+            "format": "double",
+            "type": "number"
+          },
+          "secondLevelYardsTotal": {
+            "format": "double",
+            "type": "number"
+          },
+          "stuffRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "successRate": {
+            "format": "double",
+            "type": "number"
+          },
+          "teamRushes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "totalPpa": {
+            "format": "double",
+            "type": "number"
+          },
+          "totalRushingYards": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "touchdownStatusAvailable": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "unattributedAttempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "yardsPerCarry": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "attempts",
+          "rushingYardsAvailable",
+          "totalRushingYards",
+          "yardsPerCarry",
+          "individualAttempts",
+          "unattributedAttempts",
+          "sacks",
+          "kneels",
+          "teamRushes",
+          "multiCarrierAttempts",
+          "directionEligibleAttempts",
+          "directionAvailableAttempts",
+          "successRate",
+          "ppa",
+          "totalPpa",
+          "lineYards",
+          "lineYardsTotal",
+          "secondLevelYards",
+          "secondLevelYardsTotal",
+          "openFieldYards",
+          "openFieldYardsTotal",
+          "stuffRate",
+          "powerSuccess",
+          "explosiveness",
+          "directions",
+          "touchdownStatusAvailable",
+          "rushingTouchdowns"
+        ],
+        "type": "object"
+      },
+      "TeamRushingSeason": {
+        "additionalProperties": false,
+        "properties": {
+          "conference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "defense": {
+            "$ref": "#/components/schemas/TeamRushingProduction"
+          },
+          "offense": {
+            "$ref": "#/components/schemas/TeamRushingProduction"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "team": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "season",
+          "team",
+          "conference",
+          "offense",
+          "defense"
+        ],
+        "type": "object"
+      },
       "TeamRushingStats": {
         "additionalProperties": false,
         "properties": {
@@ -9263,7 +10569,7 @@
       "name": "MIT"
     },
     "title": "College Football Data API",
-    "version": "5.25.0"
+    "version": "5.27.1"
   },
   "openapi": "3.0.0",
   "paths": {
@@ -10882,7 +12188,7 @@
     },
     "/live/plays": {
       "get": {
-        "description": "Returns live play-by-play data and advanced metrics for a game.",
+        "description": "Returns live play-by-play data and advanced metrics for a game.\nResults may be cached for up to five seconds after calculation.",
         "operationId": "GetLivePlays",
         "parameters": [
           {
@@ -11060,7 +12366,7 @@
     },
     "/passing/players/games": {
       "get": {
-        "description": "Returns passer production by game.",
+        "description": "Returns passer production, advanced metrics, and pass-location breakdowns by game.",
         "operationId": "GetPlayerPassingByGame",
         "parameters": [
           {
@@ -11156,7 +12462,7 @@
     },
     "/passing/players/season": {
       "get": {
-        "description": "Returns passer production by season.",
+        "description": "Returns passer production, advanced metrics, and pass-location breakdowns by season.",
         "operationId": "GetPlayerPassingBySeason",
         "parameters": [
           {
@@ -11242,7 +12548,7 @@
     },
     "/passing/plays": {
       "get": {
-        "description": "Returns enriched pass attempts.",
+        "description": "Returns enriched pass attempts with stored PPA, success, and location-analysis eligibility.",
         "operationId": "GetPassingPlays",
         "parameters": [
           {
@@ -11384,7 +12690,7 @@
     },
     "/passing/teams/games": {
       "get": {
-        "description": "Returns team passing production by game.",
+        "description": "Returns team passing production, advanced metrics, and pass-location\nbreakdowns by game for offense and defense.",
         "operationId": "GetTeamPassingByGame",
         "parameters": [
           {
@@ -11471,7 +12777,7 @@
     },
     "/passing/teams/season": {
       "get": {
-        "description": "Returns team passing production by season.",
+        "description": "Returns team passing production, advanced metrics, and pass-location\nbreakdowns by season for offense and defense.",
         "operationId": "GetTeamPassingBySeason",
         "parameters": [
           {
@@ -13648,6 +14954,539 @@
         ]
       }
     },
+    "/rushing/players/games": {
+      "get": {
+        "description": "Returns individually attributed rusher production by game.\n\nPlayer totals include only guarded rusher attribution, including\nindividually attributed sacks. They do not include team-only or unresolved\nattempts and therefore are not expected to sum to team totals.",
+        "operationId": "GetPlayerRushingByGame",
+        "parameters": [
+          {
+            "description": "Season year. Requires team or week; optional when rusherId is specified alone.",
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Week number. Requires year; either team or week is required with year.",
+            "in": "query",
+            "name": "week",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Season type.",
+            "in": "query",
+            "name": "seasonType",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SeasonType"
+            }
+          },
+          {
+            "description": "Team name; either team or week is required with year.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conference name or abbreviation.",
+            "in": "query",
+            "name": "conference",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rusher athlete ID. Required unless year is specified.",
+            "in": "query",
+            "name": "rusherId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Division classification. Defaults to `fbs`.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DivisionClassification"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerRushingGame"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Ok"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "rushing"
+        ]
+      }
+    },
+    "/rushing/players/season": {
+      "get": {
+        "description": "Returns individually attributed rusher production by season.\n\nPlayer totals include only guarded rusher attribution, including\nindividually attributed sacks. They do not include team-only or unresolved\nattempts and therefore are not expected to sum to team totals.",
+        "operationId": "GetPlayerRushingBySeason",
+        "parameters": [
+          {
+            "description": "Season year. Required unless rusherId is specified.",
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Season type.",
+            "in": "query",
+            "name": "seasonType",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SeasonType"
+            }
+          },
+          {
+            "description": "Team name.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conference name or abbreviation.",
+            "in": "query",
+            "name": "conference",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rusher athlete ID. Required unless year is specified.",
+            "in": "query",
+            "name": "rusherId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Division classification. Defaults to `fbs`.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DivisionClassification"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlayerRushingSeason"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Ok"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "rushing"
+        ]
+      }
+    },
+    "/rushing/plays": {
+      "get": {
+        "description": "Returns enriched rushing attempts.\n\nTeam results include sacks, kneels, team-only attempts, and unresolved\nattribution. Direction eligibility identifies the ordinary-rush analysis\npopulation; eligible attempts can still have an unknown direction.",
+        "operationId": "GetRushingPlays",
+        "parameters": [
+          {
+            "description": "Game ID.",
+            "in": "query",
+            "name": "gameId",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Season year. Requires team or week.",
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Week number. Requires year; either team or week is required with year.",
+            "in": "query",
+            "name": "week",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Season type.",
+            "in": "query",
+            "name": "seasonType",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SeasonType"
+            }
+          },
+          {
+            "description": "Team name on either side of the rush; either team or week is required with year.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rushing offense team name.",
+            "in": "query",
+            "name": "offense",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Defending team name.",
+            "in": "query",
+            "name": "defense",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conference name or abbreviation on either side of the rush.",
+            "in": "query",
+            "name": "conference",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rusher athlete ID.",
+            "in": "query",
+            "name": "rusherId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rushing direction.",
+            "in": "query",
+            "name": "rushDirection",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RushDirection"
+            }
+          },
+          {
+            "description": "Filters attempts by ordinary direction-analysis eligibility.",
+            "in": "query",
+            "name": "directionAnalysisEligible",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Rusher attribution status.",
+            "in": "query",
+            "name": "attributionStatus",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RushAttributionStatus"
+            }
+          },
+          {
+            "description": "Filters known rushing touchdown results.",
+            "in": "query",
+            "name": "isRushingTouchdown",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Filters sack attempts.",
+            "in": "query",
+            "name": "isSack",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Filters kneel attempts.",
+            "in": "query",
+            "name": "isKneel",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Filters team-only rushing attempts.",
+            "in": "query",
+            "name": "isTeamRush",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Division classification. Defaults to `fbs`.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DivisionClassification"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RushingPlay"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Ok"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "rushing"
+        ]
+      }
+    },
+    "/rushing/teams/games": {
+      "get": {
+        "description": "Returns team rushing production by game.\n\nTeam totals include sacks, kneels, team-only attempts, and unresolved\nattribution. Defense contains rushing production allowed.",
+        "operationId": "GetTeamRushingByGame",
+        "parameters": [
+          {
+            "description": "Season year. Required.",
+            "in": "query",
+            "name": "year",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Week number. Either team or week is required.",
+            "in": "query",
+            "name": "week",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Season type.",
+            "in": "query",
+            "name": "seasonType",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SeasonType"
+            }
+          },
+          {
+            "description": "Team name. Either team or week is required.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conference name or abbreviation.",
+            "in": "query",
+            "name": "conference",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Division classification. Defaults to `fbs`.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DivisionClassification"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TeamRushingGame"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Ok"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "rushing"
+        ]
+      }
+    },
+    "/rushing/teams/season": {
+      "get": {
+        "description": "Returns team rushing production by season.\n\nTeam totals include sacks, kneels, team-only attempts, and unresolved\nattribution. Defense contains rushing production allowed.",
+        "operationId": "GetTeamRushingBySeason",
+        "parameters": [
+          {
+            "description": "Season year. Required unless team is specified.",
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Season type.",
+            "in": "query",
+            "name": "seasonType",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SeasonType"
+            }
+          },
+          {
+            "description": "Team name. Required unless year is specified.",
+            "in": "query",
+            "name": "team",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conference name or abbreviation.",
+            "in": "query",
+            "name": "conference",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Division classification. Defaults to `fbs`.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DivisionClassification"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TeamRushingSeason"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Ok"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "rushing"
+        ]
+      }
+    },
     "/scoreboard": {
       "get": {
         "description": "Returns current scoreboard data.",
@@ -14961,6 +16800,11 @@
       "description": "Enriched pass attempts and player and team passing production.",
       "name": "passing",
       "x-displayName": "Passing"
+    },
+    {
+      "description": "Enriched rushing attempts and player and team rushing production.",
+      "name": "rushing",
+      "x-displayName": "Rushing"
     },
     {
       "description": "Teams, rosters, matchups, talent ratings, and ATS records.",
