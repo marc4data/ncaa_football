@@ -46,7 +46,16 @@ concurrency:
 jobs:
   heartbeat:
     name: Pipeline is still beating
-    runs-on: ubuntu-latest
+    # 🚨 A179 (cfdb-main-R-1809). PINNED, NOT `ubuntu-latest`. Every run of the dead-man's
+    # switch carries GitHub's own notice: "The ubuntu-latest label will migrate to Ubuntu 26
+    # beginning October 19, 2026." Six jobs across two workflows would have changed operating
+    # system on a date nobody chose — including the one that builds the site image and the one
+    # that runs dbt.
+    # 📊 `ubuntu-24.04` is what `ubuntu-latest` resolves to TODAY, read from a job log rather
+    # than guessed: "Operating System / Ubuntu / 24.04.5 / LTS", "Image: ubuntu-24.04". So this
+    # pin changes nothing now, which is the point — it makes the move deliberate rather than
+    # dated.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
