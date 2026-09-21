@@ -37,8 +37,14 @@
 --
 -- 🚨 THE X AXIS IS THE DESIGN DECISION, NOT THE Y, AND BOTH HALVES ARE CARRIED:
 --
---     play_number   MONOTONIC and always present. The chart POSITIONS on this — it has no gaps,
---                   no ties and no restarts, so a line drawn on it cannot fold back on itself.
+--     play_number   MONOTONIC, UNIQUE and dense within a game — a DERIVED ordinal, see the
+--                   column below. ⚠️ A183: it is no longer the feed's raw number, because the
+--                   feed's is not tie-free. The feed's own label is published beside it as
+--                   `source_play_number`.
+--                   🚨 AND THIS IS NO LONGER THE AXIS THE CHART POSITIONS ON — A136 moved that to
+--                   `elapsed_from_kickoff_seconds`, and `site/lib/winprob.py` says so in its own
+--                   docstring. This is the ORDER a play has, and inside an overtime period it is
+--                   still the only order there is.
 --     period        WHAT A READER RECOGNISES. The chart ANNOTATES with this — quarter boundaries,
 --                   and the overtime band. A reader does not think in play numbers.
 --     is_overtime   so a chart can shade or separate overtime rather than letting it read as a
@@ -100,8 +106,51 @@ select
     {{ surrogate_key(['w.game_id', 'w.play_id']) }}      as game_win_probability_play_sk,
     w.game_id,
     w.play_id,
-    -- POSITION: monotonic, always present, and what the line is drawn against.
-    w.play_number,
+    -- ── POSITION ───────────────────────────────────────────────────────────────────────────
+    --
+    -- 🚨 A183 (cfdb-main-R-1871). CFBD BROKE THE PROPERTY THIS COLUMN PROMISES, AND THE TEST
+    -- CAUGHT IT. `assert_the_win_probability_curve_is_ordered_by_play_number` failed on 52 rows:
+    -- 26 pairs across 14 games where two plays carry the SAME feed `playNumber`.
+    --
+    -- 📊 DIAGNOSED FIRST, BECAUSE THE TWO CASES NEED OPPOSITE FIXES. In all 26 pairs the two rows
+    -- have DIFFERENT `play_id`s — two real, different plays the feed numbered alike, not the same
+    -- play twice. Game 401856693 play 109 is a missed field goal AND a 2-yard rush. **A dedupe
+    -- would delete a real play and draw a different game**, so the fix has to keep both.
+    --
+    -- ⚠️ AND A MINIMAL TIE-BREAK WAS TRIED FIRST AND MEASURED IMPOSSIBLE, WHICH IS WHY THIS IS A
+    -- RENUMBER. Shifting the second row of each tie into the gap above it (`play_number + rank-1`)
+    -- would have touched 26 rows and left 1,947 games untouched — except the numbering is locally
+    -- dense around every tie, so **all 26 shifts collided with a real play**. There is no integer
+    -- tie-break that preserves the feed's values.
+    --
+    -- ✅ SO THE PUBLISHED NUMBER IS A DERIVED ORDINAL, AND THE FEED'S OWN LABEL IS KEPT BESIDE IT.
+    -- Ordering by (the feed's number, then `play_id`) means **every play keeps its position
+    -- relative to every other play** — this reorders nothing, it only makes the ties total. The
+    -- feed's number was never dense anyway: of 1,973 games, ZERO start at 1 and ZERO have
+    -- max = count, so no reader could have been reading it as "the Nth play".
+    --
+    -- 🚨 THE TIE-BREAK IS `play_id` AND IT IS COMPARED AS AN INTEGER, NOT LEXICALLY. `play_id` is
+    -- `text` in this feed and the ids are not fixed width — they run from -22856 to
+    -- 401858212104999901 — so `order by play_id` sorts play 10 before play 2. That is the EXACT
+    -- defect the ordering test was written against; doing it here would have reintroduced it as
+    -- the fix for it. ⚠️ It only decides the order WITHIN a tie, so it changes nothing else.
+    --
+    -- ⚠️ AND THE CAST WAS PROVEN TOTAL BEFORE BEING RELIED ON, because a cast that throws takes
+    -- the whole build down. All 303,073 rows cast; `play_id !~ '^-?[0-9]+$'` returns ZERO.
+    -- 📊 The first check used `^[0-9]+$` and reported 2,663 "non-numeric" ids — they are the
+    -- SYNTHETIC NEGATIVE ids (-1000, -1001, …) and the regex was catching the minus sign, not a
+    -- letter. A regex that answers a slightly different question than the one asked (§2.4).
+    --
+    -- ⚠️ NO TEST COVERAGE IS LOST BY RENUMBERING HERE. The ordering test's load-bearing branch
+    -- compares the VIEW against THIS MART, not against staging — it was moved off staging for
+    -- R-672's straddle — so it still proves the serving view did not resort or renumber. What it
+    -- never checked, and still does not, is this mart against the feed; `source_play_number`
+    -- below is what makes that checkable at all.
+    row_number() over (partition by w.game_id
+                       order by w.play_number, w.play_id::bigint)  as play_number,
+    -- THE FEED'S OWN LABEL, UNCHANGED, so the renumber above is auditable rather than lossy.
+    -- ⚠️ Not unique within a game — that is the whole finding. Do not order on it alone.
+    w.play_number                                                  as source_play_number,
     -- ANNOTATION: what a reader recognises. Null on the one play with no stg_play match.
     p.period,
     -- ⚠️ NULL, NOT FALSE, WHERE THE PERIOD IS UNKNOWN. "This play was not in overtime" and "we do
@@ -200,7 +249,8 @@ select
     case when p.period >= 5 then p.period - 4 end          as overtime_period,
     case when p.period >= 5
          then (p.period - 5)
-              + (row_number() over (partition by w.game_id, p.period order by w.play_number) - 1)
+              + (row_number() over (partition by w.game_id, p.period
+                                    order by w.play_number, w.play_id::bigint) - 1)
                 / (count(*) over (partition by w.game_id, p.period))::numeric
     end                                                   as overtime_axis_offset_periods,
     -- THE VALUE, exactly as published. See the header on why it is not scaled.
