@@ -360,7 +360,10 @@ def _failure_sql():
     script = (_Path(__file__).resolve().parents[1]
               / "deploy" / "cfdb_heartbeat.sh").read_text()
     import re as _re
-    match = _re.search(r"select 'failed\|'.*?order by dag_id, task_id", script, _re.S)
+    # A180: the columns are qualified now — the query joins `dag` to exclude paused and
+    # deleted DAGs, which makes a bare `dag_id` ambiguous.
+    match = _re.search(r"select 'failed\|'.*?order by ranked\.dag_id, ranked\.task_id",
+                       script, _re.S)
     assert match, "the failure query moved or changed shape"
     return match.group()
 
@@ -371,7 +374,7 @@ def _failure_sql():
 NOW_MINUTES = 100_000
 
 
-def _run_failure_sql(rows, sql=None):
+def _run_failure_sql(rows, sql=None, dags=None):
     """Execute it against sqlite over synthetic task_instance rows.
 
     `rows` are (dag, task, state, minutes_ago) and are converted to an increasing clock here.
@@ -384,20 +387,29 @@ def _run_failure_sql(rows, sql=None):
     import re as _re
     import sqlite3
     statement = sql or _failure_sql()
+    # A180: the window is eight days now (11,520 minutes), sized to the slowest DAG's weekly
+    # cadence rather than the two-hourly one's retries. See the script's own comment.
     statement = statement.replace(
-        "end_date > now() - interval '6 hours'", f"end_date > {NOW_MINUTES - 360}")
+        "end_date > now() - interval '8 days'", f"end_date > {NOW_MINUTES - 8 * 24 * 60}")
     statement = _re.sub(
-        r"floor\(extract\(epoch from \(now\(\) - end_date\)\)\)::bigint",
+        r"floor\(extract\(epoch from \(now\(\) - ranked\.end_date\)\)\)::bigint",
         # PARENTHESISED. In SQLite `||` binds TIGHTER than `*`, so a bare multiplication
         # parses as `('failed|…' || end_date) * 60` and every row collapses to the number 0 —
         # which reads as the query returning nothing rather than the substitution being wrong.
-        f"(({NOW_MINUTES} - end_date) * 60)", statement)
+        f"(({NOW_MINUTES} - ranked.end_date) * 60)", statement)
     connection = sqlite3.connect(":memory:")
     connection.execute("create table task_instance "
                        "(dag_id text, task_id text, state text, end_date int)")
     connection.executemany(
         "insert into task_instance values (?,?,?,?)",
         [(d, t, st, NOW_MINUTES - ago) for d, t, st, ago in rows])
+    # A180: the query joins `dag`, so the fixture needs one. Every dag in `rows` is live and
+    # unpaused unless `dags` says otherwise — {dag_id: (is_paused, is_stale)}.
+    connection.execute("create table dag (dag_id text, is_paused int, is_stale int)")
+    named = {d for d, _t, _s, _a in rows}
+    connection.executemany(
+        "insert into dag values (?,?,?)",
+        [(d, *(dags or {}).get(d, (0, 0))) for d in sorted(named)])
     return [r[0] for r in connection.execute(statement)]
 
 
@@ -433,8 +445,8 @@ def test_a_task_that_failed_and_then_recovered_is_not_reported():
     assert reported == ["failed|scores.publish|1200", "failed|sync.to_databricks|18000"], \
         reported
 
-    broken = _failure_sql().replace("where recency = 1 and state = 'failed'",
-                                    "where state = 'failed'")
+    broken = _failure_sql().replace("where ranked.recency = 1 and ranked.state = 'failed'",
+                                    "where ranked.state = 'failed'")
     assert broken != _failure_sql(), "the recency filter was not found to remove"
     without = _run_failure_sql(rows, broken)
     assert any("lines.dbt_test" in line for line in without), (
@@ -443,12 +455,19 @@ def test_a_task_that_failed_and_then_recovered_is_not_reported():
 
 
 def test_a_failure_outside_the_window_is_not_reported():
-    """The window still bounds it — an old failure with no run since scrolls out of view
-    rather than sitting on the alarm forever. Six hours covers a few runs of the two-hourly
-    DAG, which is the reasoning the script records."""
-    assert _run_failure_sql([("old", "task", "failed", 400)]) == []
-    assert _run_failure_sql([("recent", "task", "failed", 359)]) == \
-        ["failed|recent.task|21540"]
+    """The window still BOUNDS it, and A180 kept that on purpose.
+
+    ⚠️ Reporting the newest state for all time would match "nothing has shown it recovered"
+    most literally and would also keep a RENAMED task on the alarm forever — an always-on
+    alarm, which this file's own comments call the same failure wearing the opposite mask. A
+    finite window lets a task that no longer exists age out.
+
+    A180 moved it 6 hours -> 8 days, sized to the slowest DAG (weekly) plus a day of slack.
+    """
+    day = 24 * 60
+    assert _run_failure_sql([("old", "task", "failed", 9 * day)]) == []
+    assert _run_failure_sql([("recent", "task", "failed", 7 * day)]) == \
+        ["failed|recent.task|604800"]
 
 
 # === the ASSERTION, not just the task — R-698 ==============================================
@@ -515,3 +534,96 @@ def test_the_forced_command_and_the_watcher_agree_on_the_failed_test_shape():
     assert '"failed_test"' in watcher, (
         "the watcher does not parse the payload the script sends; this is exactly the gap "
         "R-698 closed, and it cost a twelve-hour game-day publish outage")
+
+
+# === A180: the alarm must not forget a WEEKLY failure (cfdb-main-R-1861) ====================
+
+def test_the_alarm_still_reports_a_weekly_failure_seven_hours_later():
+    """🚨 A179's INCIDENT, REPLAYED. THIS IS THE BUG, AND IT SHIPPED GREEN.
+
+    📊 `cfbd_results_refresh` is WEEKLY — `"0 12 * * 0"`, Sunday 12:00 UTC. On 2026-09-20 its
+    `fetch` failed at 12:48:38 after three attempts; `load_to_postgres`, `dbt_run`,
+    `dbt_catalogue`, `dbt_test`, `publish_to_serving` and `heartbeat` all sat at
+    `upstream_failed`, and **nothing ran after it**. The switch reported GREEN from 19:41 —
+    fifty-three minutes after the failure left the six-hour window — on a pipeline that had
+    published nothing and would not run again for seven days.
+
+    ✅ THE OLD QUERY IS SHOWN GREEN ON THIS EXACT TIMELINE FIRST, because a test that only
+    proves the new behaviour cannot show that the behaviour CHANGED (register rule 10).
+
+    ⚠️ AND THE SECOND HALF IS THE ONE A LONGER WINDOW MAKES NECESSARY: over eight days a DAG
+    can be paused or deleted, and a failure from one nobody runs any more is noise. The join
+    to `dag` is what drops those, and it is asserted here rather than assumed.
+    """
+    seven_hours = 7 * 60
+    timeline = [("cfbd_results_refresh", "fetch", "failed", seven_hours)]
+
+    # ── the bug, reproduced on the query as it was ──────────────────────────────────────
+    # The window is substituted straight to sqlite's clock here — six hours, as it was — so
+    # the helper's own 8-day replacement finds nothing and leaves this one alone.
+    old_query = _failure_sql().replace("end_date > now() - interval '8 days'",
+                                       f"end_date > {NOW_MINUTES - 360}")
+    assert old_query != _failure_sql(), "the window literal was not found to narrow"
+    old_style = _run_failure_sql(timeline, sql=old_query)
+    assert old_style == [], (
+        "the six-hour window was supposed to LOSE this failure — if it reports it, this "
+        "test is no longer reproducing A179's incident")
+
+    # ── and the fix ─────────────────────────────────────────────────────────────────────
+    assert _run_failure_sql(timeline) == ["failed|cfbd_results_refresh.fetch|25200"], (
+        "a weekly task that failed seven hours ago, with nothing run since, is still broken")
+
+    # Still reported the day before its next scheduled run, which is the point of eight days.
+    assert _run_failure_sql(
+        [("cfbd_results_refresh", "fetch", "failed", 6 * 24 * 60)]) != []
+
+    # ── a paused or deleted DAG is noise, not an alarm ──────────────────────────────────
+    assert _run_failure_sql(timeline, dags={"cfbd_results_refresh": (1, 0)}) == [], \
+        "a PAUSED dag's failure must not sit on the alarm"
+    assert _run_failure_sql(timeline, dags={"cfbd_results_refresh": (0, 1)}) == [], \
+        "a STALE dag — its file is gone — must not sit on the alarm"
+
+    # ⚠️ And recovery still silences it, which the longer window must not have broken.
+    assert _run_failure_sql([
+        ("cfbd_results_refresh", "fetch", "failed", seven_hours),
+        ("cfbd_results_refresh", "fetch", "success", 30),
+    ]) == []
+
+
+def test_every_scheduled_dag_runs_more_often_than_the_alarm_forgets():
+    """🚨 THE WINDOW IS A CONSTANT AND THE CADENCES ARE NOT — so this is the guard that keeps
+    them in agreement, and it is the reason A180 chose one window over a window per DAG.
+
+    📊 Five of the eight scheduled DAGs have a cadence longer than the old six hours: two
+    daily and three weekly. A DAG added tomorrow on a fortnightly schedule would be invisible
+    to the alarm between runs, and nothing else in this repository would say so.
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[1]
+    window = _re.search(r"end_date > now\(\) - interval '(\d+) (days|hours)'",
+                        (root / "deploy" / "cfdb_heartbeat.sh").read_text())
+    assert window, "the failure window moved or changed shape"
+    hours = int(window.group(1)) * (24 if window.group(2) == "days" else 1)
+
+    # cron -> the longest gap between two runs, for the shapes this project actually uses.
+    def longest_gap_hours(cron):
+        minute, hour, _dom, _mon, dow = cron.split()
+        if hour.startswith("*/"):
+            return int(hour[2:])
+        if dow != "*":                      # a named weekday: once a week
+            return 7 * 24
+        return 24                           # a fixed hour every day
+
+    schedules = {}
+    for path in (root / "dags").glob("*_dag.py"):
+        text = path.read_text()
+        for cron in _re.findall(r'"(\d+ [\d*/]+ \* \* [\d*]+)"', text):
+            schedules[f"{path.name}:{cron}"] = longest_gap_hours(cron)
+    assert schedules, "no schedules were found — this test is reading the wrong thing"
+
+    too_slow = {k: v for k, v in schedules.items() if v >= hours}
+    assert not too_slow, (
+        f"these DAGs run less often than the alarm's {hours}h window, so a failure would "
+        f"scroll out of view before the next run could clear it: {too_slow}")
