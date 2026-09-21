@@ -84,6 +84,14 @@ def read_ages(host: str) -> dict:
         if head.strip() == "unboxed":
             count, _, tail = rest.partition("|")
             age, _, weeks = tail.partition("|")
+            # 🚨 THE MONITOR SAYING IT CANNOT SEE IS ITSELF AN ALARM, NOT A LINE TO DISCARD.
+            # The forced command emits `unboxed|MONITOR.cannot_read_published_serving|0|-`
+            # when it cannot reach the serving database. `int()` on that raises, and the first
+            # draft of this branch swallowed it — which is R-698 exactly: a payload nothing
+            # reads looks like coverage. A check that cannot run is not a check that passed.
+            if count.strip().startswith("MONITOR."):
+                unboxed = (-1, 0, count.strip())
+                continue
             try:
                 unboxed = (int(count), int(age), weeks.strip() or "-")
             except ValueError:
@@ -169,7 +177,10 @@ def main(argv=None) -> int:
     # 🚨 THE OUTCOME LINE, REPORTED FIRST AMONG THE FAULTS BECAUSE IT IS THE ONLY ONE A READER
     # WOULD NOTICE. Everything above says the machinery ran; this says whether last night's
     # games are on the site (A182, cfdb-main-R-1866).
-    if unboxed and unboxed[0]:
+    if unboxed and unboxed[0] == -1:
+        print(f"  BLIND   the outcome check could not read published serving "
+              f"({unboxed[2]}) — it cannot tell you whether the site is current")
+    elif unboxed and unboxed[0]:
         count, age, weeks = unboxed
         print(f"  UNBOXED {count} FBS team-game(s) final with no box score on the site "
               f"— oldest {describe(age)}, week(s) {weeks}")

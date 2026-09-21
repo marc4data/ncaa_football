@@ -705,3 +705,26 @@ def test_the_forced_command_emits_the_unboxed_line_against_published_serving():
     assert "select max(season)" in code, (
         "without a season bound this fires on ~1,800 pre-2024 team-games forever, and an "
         "always-on alarm is the same failure as a silent one")
+
+
+def test_a_monitor_that_cannot_read_serving_says_so_rather_than_passing(monkeypatch, capsys):
+    """🚨 A CHECK THAT CANNOT RUN IS NOT A CHECK THAT PASSED — R-698, on the newest payload.
+
+    The forced command emits `unboxed|MONITOR.cannot_read_published_serving|0|-` when it
+    cannot reach the serving database. `int()` on that name raises, and the first draft of the
+    parser swallowed the line, leaving `unboxed` as None and the watcher green. **A monitor
+    that has lost sight of the site looks exactly like a site with nothing wrong.**
+    """
+    fresh = {name: 60 for name in chk.CADENCES}
+    lines = ("".join(f"{n}|60\n" for n in chk.CADENCES)
+             + "unboxed|MONITOR.cannot_read_published_serving|0|-\n")
+    import types as _types
+    monkeypatch.setattr(chk.subprocess, "run",
+                        lambda *a, **k: _types.SimpleNamespace(stdout=lines, returncode=0))
+    _ages, _f, _ft, unboxed = chk.read_ages("host")
+    assert unboxed is not None, "the sentinel must not be discarded"
+    assert unboxed[0] == -1
+
+    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}, {}, unboxed))
+    assert chk.main(["host"]) == 1, "a blind outcome check must fail the run"
+    assert "BLIND" in capsys.readouterr().out
