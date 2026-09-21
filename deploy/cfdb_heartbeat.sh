@@ -62,9 +62,42 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # user needed `*` in the database field of its .pgpass to read the airflow metadata; without
 # it this line is what says so.
 #
-# Six hours because the two-hourly DAG retries for roughly thirty minutes: a window shorter
-# than a few runs would let a failure scroll out of view between watcher runs, which are
-# themselves four hours apart in practice.
+# 🚨 A180 (cfdb-main-R-1861): THE WINDOW WAS SIX HOURS AND IT FORGOT A WEEKLY FAILURE.
+#
+# It used to read `interval '6 hours'`, and the reason given here was "the two-hourly DAG
+# retries for roughly thirty minutes". That is correct for the two-hourly DAG and wrong for
+# every slower one. A179 measured the cost: cfbd_results_refresh (WEEKLY, Sunday 12:00 UTC)
+# failed on 2026-09-20 at 12:48:38 UTC, nothing ran after it, and the switch reported GREEN
+# from 19:41 — fifty-three minutes after the failure left the window — on a pipeline whose
+# load, dbt, publish and heartbeat were all sitting at `upstream_failed`.
+#
+# 📊 FIVE OF THE EIGHT SCHEDULED DAGs HAVE A CADENCE LONGER THAN SIX HOURS, not the three the
+# incident suggested:
+#
+#     cfbd_scores_refresh     0 */2 * * *    every 2h   covered before
+#     cfbd_lines_snapshot     0 */4 * * *    every 4h   covered before
+#     cfbd_ops_metrics        0 13 * * *     daily      NOT covered
+#     cfbd_databricks_sync    0 14 * * *     daily      NOT covered
+#     cfbd_results_refresh    0 12 * * 0     weekly     NOT covered
+#     cfbd_pregame_refresh    0 12 * * 2     weekly     NOT covered
+#     cfbd_midweek_results    0 12 * * 4     weekly     NOT covered
+#
+# ✅ EIGHT DAYS: ONE WINDOW, SIZED TO THE SLOWEST CADENCE, NOT ONE PER DAG. A window per DAG
+# would have to be declared by every DAG added afterwards, and a DAG that forgot to declare
+# one would be this bug again — the alternative was considered and rejected for that reason.
+# Eight covers the weekly seven with a day of slack, so a weekly failure stays reported right
+# up to the run that would clear it.
+#
+# ⚠️ AND THE BOUND IS KEPT RATHER THAN REMOVED. Reporting the newest state for ALL TIME would
+# match "nothing has shown it recovered" most literally, and it would also mean a task that
+# was RENAMED while red stays on the alarm forever — an always-on alarm, which the paragraphs
+# below call the same failure wearing the opposite mask. A finite window lets a task that no
+# longer exists age out on its own.
+#
+# ⚠️ AND PAUSED OR DELETED DAGs ARE EXCLUDED, which the longer window makes necessary: over
+# eight days a DAG can be paused or removed, and a failure from one nobody is running any more
+# is noise. `is_stale` is Airflow's own marker for a DAG whose file is gone; the join to `dag`
+# drops a deleted one outright.
 #
 # ONLY WHERE THE TASK'S MOST RECENT RUN FAILED — "has failed" is not "is failing".
 #
@@ -83,18 +116,21 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # it only if the newest one failed. A task that failed five hours ago and has not run since
 # is still reported, which is correct — nothing has shown it recovered.
 "${PSQL[@]}" -d "${CFDB_AIRFLOW_DB:-airflow}" -c "
-  select 'failed|' || dag_id || '.' || task_id || '|' ||
-         floor(extract(epoch from (now() - end_date)))::bigint
+  select 'failed|' || ranked.dag_id || '.' || ranked.task_id || '|' ||
+         floor(extract(epoch from (now() - ranked.end_date)))::bigint
   from (
     select dag_id, task_id, state, end_date,
            row_number() over (partition by dag_id, task_id
                               order by end_date desc) as recency
     from task_instance
-    where end_date > now() - interval '6 hours'
+    where end_date > now() - interval '8 days'
       and state in ('failed', 'success')
   ) ranked
-  where recency = 1 and state = 'failed'
-  order by dag_id, task_id
+  join dag on dag.dag_id = ranked.dag_id
+  where ranked.recency = 1 and ranked.state = 'failed'
+    and not dag.is_paused
+    and not dag.is_stale
+  order by ranked.dag_id, ranked.task_id
 " || echo "failed|MONITOR.cannot_read_airflow_metadata|0"
 
 # AND WHICH TEST, BECAUSE "dbt_test failed" HAS NEVER ONCE BEEN ENOUGH (R-412).
