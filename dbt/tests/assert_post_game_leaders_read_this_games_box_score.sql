@@ -1,3 +1,11 @@
+{{ config(tags=['full_refresh_only']) }}
+-- 🚨 TAGGED BY A185 (cfdb-main-R-1913), AND THE STRADDLE IS THIS ROUND'S OWN DOING.
+-- Putting `srv_player_play` on the game-day selector pulled `dim_athlete` in with it, so
+-- this test began reading a FRESH `dim_athlete` against a `fct_player_game_stat` that the
+-- scores DAG does not rebuild. `publish_to_serving` sits downstream of `dbt_test`, so it
+-- would have STOPPED THE SITE UPDATING on a game day rather than merely gone red.
+-- ⚠️ Nothing about this was visible in the diff that caused it — the round added a
+-- serving model and inherited a mart's test three edges away.
 -- R-723. Every figure on a post-game card must come from THE GAME THE CARD IS ATTACHED TO.
 --
 -- 🚨 THIS IS THE LEAKAGE RULE'S MIRROR IMAGE, AND IT IS THE DEFECT THAT WOULD BE HARDEST TO SEE.

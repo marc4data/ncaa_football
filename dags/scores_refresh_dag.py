@@ -169,6 +169,20 @@ SCORES_SELECTOR = (
     # check_publish_build_agreement guard RED on the day it was written, which is a worse way
     # to end a round than spending three models.
     " +srv_standings +srv_team_overview +srv_teams_index"
+    # 🚨 A185 (cfdb-main-R-1909). THE REST OF SATURDAY — drives, plays and the win-probability
+    # curve, which until now were rebuilt only by the weekly Sunday refresh.
+    #
+    # ⚠️ THEY ARE HERE BECAUSE A184's GATE RULE REQUIRES IT, NOT AS A CONVENIENCE. The rule is
+    # that a run publishes only what it BUILT and TESTED; this DAG now fetches `drives`,
+    # `plays`, `plays/stats` and `metrics/wp` for completed games, so if the tables those feed
+    # are to reach the site on game day, this run has to build them and its `dbt_test` has to
+    # cover them.
+    #
+    # 📊 PRICED BEFORE IT WAS ADDED, on the droplet: +11 models (57 -> 68) and **121.5 s** at
+    # four threads. `fct_play` is 88.4 s over 652,406 rows and the curve 75.3 s over 303,073 —
+    # the two that matter. Against a two-hourly cadence and a run that already averages ~17
+    # minutes, that is ~2 minutes for the half of the site Saturday was missing.
+    " +srv_drive +srv_game_win_probability_play +srv_player_play"
 )
 
 # A TEST THIS DAG CANNOT SATISFY IS A TEST THIS DAG MUST NOT RUN.

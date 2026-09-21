@@ -45,6 +45,31 @@ CADENCES = {
 SSH_TIMEOUT_SECONDS = 60
 
 
+# ── THE OUTCOME LINES: what the site is missing, as opposed to what the pipeline did ───────
+#
+# Each entry is `<head>: (LABEL, what a non-zero count means to a reader)`. The monitor emits
+# `<head>|<count>|<oldest seconds>|<weeks>`, or `<head>|MONITOR.<why>|0|-` when it cannot read
+# published serving at all.
+#
+# 🚨 EVERY ONE OF THESE WAS ADDED AFTER THE SITE WAS WRONG AND NOTHING SAID SO. `unboxed` after
+# a full slate was absent for a day (A182); `unplayered` after the team half was fixed and three
+# of four leaderboards stayed empty (A184); `undriven` and `uncurved` after A185 measured that
+# drives and the curve were still a day late by design.
+OUTCOME_LINES = {
+    "unboxed": ("UNBOXED",
+                "FBS team-game(s) final with no box score on the site"),
+    "unplayered": ("UNPLAYERED",
+                   "FBS game(s) final with no player box score on the site — Today's player "
+                   "leaderboards are empty for those games"),
+    "undriven": ("UNDRIVEN",
+                 "FBS game(s) final with no drives on the site — Matchup's drive panel is "
+                 "empty for those games"),
+    "uncurved": ("UNCURVED",
+                 "FBS game(s) final with no win-probability curve on the site — Matchup's "
+                 "Win % chart and Today's sparklines are empty for those games"),
+}
+
+
 def read_ages(host: str) -> dict:
     """name -> seconds since last beat, via the forced command. Raises if unreachable."""
     result = subprocess.run(
@@ -55,8 +80,7 @@ def read_ages(host: str) -> dict:
         raise RuntimeError(
             f"could not read heartbeats from {host} (exit {result.returncode}): "
             f"{result.stderr.strip()[:400]}")
-    ages, failures, failed_tests, unboxed = {}, {}, {}, None
-    unplayered = None
+    ages, failures, failed_tests, outcomes = {}, {}, {}, {}
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line or "|" not in line:
@@ -87,30 +111,27 @@ def read_ages(host: str) -> dict:
         # to `int(rest)`, raises ValueError, and the line is silently discarded. A payload
         # nothing reads is worse than no payload, because it looks like coverage — and this is
         # the second line added to this parser for exactly that reason.
-        if head.strip() == "unplayered":
+        # 🚨 ONE BRANCH FOR EVERY OUTCOME LINE — A185 (cfdb-main-R-1915). There were two
+        # hand-written branches here and this round would have added two more, each a copy of
+        # the last with a different noun. **That shape is how R-698 happened**: an unknown
+        # `head` falls through to `int(rest)` below, raises ValueError, and the line is
+        # silently discarded — a payload nothing reads, which looks exactly like coverage.
+        #
+        # ✅ `OUTCOME_LINES` is now the single place a new check is registered, and
+        # `test_every_outcome_line_the_monitor_emits_is_parsed_here` reads the deployed shell
+        # script and fails if the script emits a line this dict does not know. Adding a check
+        # to the monitor and forgetting the watcher is no longer possible quietly.
+        if head.strip() in OUTCOME_LINES:
             count, _, tail = rest.partition("|")
             age, _, weeks = tail.partition("|")
+            # THE MONITOR SAYING IT CANNOT SEE IS ITSELF AN ALARM, NOT A LINE TO DISCARD.
+            # `int('MONITOR.cannot_read_published_serving')` raises; the first draft of the
+            # `unboxed` branch swallowed exactly that and reported a clean run.
             if count.strip().startswith("MONITOR."):
-                unplayered = (-1, 0, count.strip())
+                outcomes[head.strip()] = (-1, 0, count.strip())
                 continue
             try:
-                unplayered = (int(count), int(age), weeks.strip() or "-")
-            except ValueError:
-                pass
-            continue
-        if head.strip() == "unboxed":
-            count, _, tail = rest.partition("|")
-            age, _, weeks = tail.partition("|")
-            # 🚨 THE MONITOR SAYING IT CANNOT SEE IS ITSELF AN ALARM, NOT A LINE TO DISCARD.
-            # The forced command emits `unboxed|MONITOR.cannot_read_published_serving|0|-`
-            # when it cannot reach the serving database. `int()` on that raises, and the first
-            # draft of this branch swallowed it — which is R-698 exactly: a payload nothing
-            # reads looks like coverage. A check that cannot run is not a check that passed.
-            if count.strip().startswith("MONITOR."):
-                unboxed = (-1, 0, count.strip())
-                continue
-            try:
-                unboxed = (int(count), int(age), weeks.strip() or "-")
+                outcomes[head.strip()] = (int(count), int(age), weeks.strip() or "-")
             except ValueError:
                 pass
             continue
@@ -136,7 +157,7 @@ def read_ages(host: str) -> dict:
             ages[head.strip()] = int(rest)
         except ValueError:
             continue
-    return ages, failures, failed_tests, unboxed, unplayered
+    return ages, failures, failed_tests, outcomes
 
 
 def describe(seconds: int) -> str:
@@ -151,7 +172,7 @@ def main(argv=None) -> int:
     host = (argv or sys.argv[1:] or ["cfdb_monitor@localhost"])[0]
 
     try:
-        ages, failures, failed_tests, unboxed, unplayered = read_ages(host)
+        ages, failures, failed_tests, outcomes = read_ages(host)
     except Exception as error:                                           # noqa: BLE001
         # THE DROPLET BEING UNREACHABLE IS THE ALARM, not a reason to exit quietly.
         print(f"::error::the pipeline host is unreachable — {error}")
@@ -191,16 +212,26 @@ def main(argv=None) -> int:
     for name, (count, age) in sorted(failed_tests.items()):
         print(f"  FAILED  {name}: {count} row(s), last failed {describe(age)} ago")
 
-    # 🚨 THE OUTCOME LINE, REPORTED FIRST AMONG THE FAULTS BECAUSE IT IS THE ONLY ONE A READER
-    # WOULD NOTICE. Everything above says the machinery ran; this says whether last night's
-    # games are on the site (A182, cfdb-main-R-1866).
-    if unboxed and unboxed[0] == -1:
-        print(f"  BLIND   the outcome check could not read published serving "
-              f"({unboxed[2]}) — it cannot tell you whether the site is current")
-    elif unboxed and unboxed[0]:
-        count, age, weeks = unboxed
-        print(f"  UNBOXED {count} FBS team-game(s) final with no box score on the site "
-              f"— oldest {describe(age)}, week(s) {weeks}")
+    # 🚨 THE OUTCOME LINES, REPORTED FIRST AMONG THE FAULTS BECAUSE THEY ARE THE ONLY ONES A
+    # READER WOULD NOTICE. Everything above says the machinery ran; these say whether last
+    # night's games are actually on the site.
+    for head, (label, meaning) in OUTCOME_LINES.items():
+        value = outcomes.get(head)
+        if value is None:
+            # 🚨 A MISSING LINE IS BLIND, NOT QUIET — A185 (cfdb-main-R-1878). The monitor
+            # emits every outcome line unconditionally now, `<head>|0|0|-` included, so an
+            # absent one means the forced command on the droplet is an older copy that does
+            # not run this check at all. **Reading that as "nothing to report" is exactly the
+            # silence-is-not-success failure**, and it is indistinguishable from a clean site
+            # unless the watcher insists on hearing the answer.
+            print(f"  BLIND   the {head} check reported nothing — the deployed forced command "
+                  f"does not emit this line, so it cannot tell you whether the site is current")
+        elif value[0] == -1:
+            print(f"  BLIND   the {head} check could not read published serving "
+                  f"({value[2]}) — it cannot tell you whether the site is current")
+        elif value[0]:
+            count, age, weeks = value
+            print(f"  {label} {count} {meaning} — oldest {describe(age)}, week(s) {weeks}")
 
     unknown = sorted(set(ages) - set(CADENCES))
     if unknown:
@@ -208,16 +239,9 @@ def main(argv=None) -> int:
         # that does not beat at all. Worth saying so it gets a budget.
         print(f"\n  note: beating but unmonitored — {', '.join(unknown)}")
 
-    if unplayered and unplayered[0] == -1:
-        print(f"  BLIND   the player-box check could not read published serving "
-              f"({unplayered[2]}) — it cannot tell you whether the leaderboards have rows")
-    elif unplayered and unplayered[0]:
-        count, age, weeks = unplayered
-        print(f"  UNPLAYERED {count} FBS game(s) final with no player box score on the site "
-              f"— oldest {describe(age)}, week(s) {weeks}. Today's player leaderboards are "
-              f"empty for those games")
-
-    unboxed_now = bool(unboxed and unboxed[0]) or bool(unplayered and unplayered[0])
+    # A check that did not answer is a failure, the same as one that answered badly.
+    unboxed_now = (any(v and v[0] for v in outcomes.values())
+                   or any(h not in outcomes for h in OUTCOME_LINES))
     if stale or missing or failures or failed_tests or unboxed_now:
         print()
         for line in stale + missing:

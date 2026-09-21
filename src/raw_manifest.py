@@ -59,6 +59,39 @@ class RawManifest:
                 return True
         return False
 
+    def succeeded_since(self, endpoint: str, params: Dict[str, Any] | None,
+                        cutoff: "datetime") -> bool:
+        """Did THIS exact request already come back 200 at or after `cutoff`?
+
+        🚨 A185 (cfdb-main-R-1916). `exists()` ABOVE CANNOT ANSWER THIS AND MUST NOT BE USED
+        FOR IT: it matches on params alone and ignores `status_code`, so a request that came
+        back 429 counts as present. A retry keyed on `exists()` would skip precisely the
+        requests that failed — the exact inverse of what a retry is for.
+
+        ⚠️ AND THE CUTOFF IS THE OTHER HALF. Without it this would mean "ever fetched", and a
+        weekly refresh would stop re-fetching the REVISIONIST bucket, which exists because
+        that data revises. The window scopes the answer to the run in progress: retries are
+        minutes apart and runs are a week apart, so anything inside a few hours belongs to
+        this attempt's predecessors.
+        """
+        for e in self._load(endpoint):
+            if e.get("params") != (params or {}):
+                continue
+            if e.get("status_code") != 200:
+                continue
+            stamp = e.get("added_at")
+            if not stamp:
+                continue
+            try:
+                added = datetime.fromisoformat(stamp)
+            except ValueError:
+                continue
+            if added.tzinfo is None:
+                added = added.replace(tzinfo=timezone.utc)
+            if added >= cutoff:
+                return True
+        return False
+
     def list_entries(self, endpoint: str) -> List[Dict[str, Any]]:
         return self._load(endpoint)
 

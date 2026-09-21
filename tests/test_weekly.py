@@ -239,3 +239,112 @@ def test_every_weekly_per_game_endpoint_fans_out_under_its_own_id_param(monkeypa
         assert (path, {id_param: "111"}) in requests, (
             f"{path} must fan out per game under {id_param!r}; a wrong key asks CFBD about "
             f"nothing and succeeds while doing it")
+
+
+# ── A RETRY FETCHES ONLY WHAT IS STILL MISSING (A185, cfdb-main-R-1860 / R-1916) ────────────
+#
+# 🚨 MEASURED ON THE REAL INCIDENT, from the droplet's own manifests for 2026-09-20:
+#
+#     attempt  8 (12:00): issued 526  (1 failed)    new logic: 522
+#     attempt  9 (12:25): issued 522  (135 failed)  new logic:   1
+#     attempt 10 (12:43): issued 522  (1 failed)    new logic:   1
+#
+# Attempt 9's 135 failures were a 429 cascade caused by re-asking 522 questions to recover ONE
+# answer. Under this logic attempt 9 issues a single request, so the cascade has no fuel.
+
+def _fake_response(status):
+    class _R:
+        status_code = status
+    return _R()
+
+
+def test_a_retry_asks_only_for_what_failed(monkeypatch):
+    """The whole point, and the number that made it worth a round."""
+    from datetime import datetime, timezone
+
+    from src import weekly
+
+    asked = []
+    monkeypatch.setattr(weekly.ingest, "fetch",
+                        lambda e, p: (asked.append((e, p)), _fake_response(200))[1])
+    # Everything except `plays` already came back 200 a minute ago.
+    already = {("games_teams", '{"week": 3}'), ("drives", '{"week": 3}')}
+    monkeypatch.setattr(
+        weekly.ingest.manifest, "succeeded_since",
+        lambda ep, params, cutoff: (ep, __import__("json").dumps(params or {}, sort_keys=True))
+        in already)
+
+    requests = [("games/teams", {"week": 3}), ("drives", {"week": 3}),
+                ("plays", {"week": 3})]
+    summary = weekly._run(requests, now=datetime.now(timezone.utc))
+
+    assert [e for e, _ in asked] == ["plays"], (
+        f"a retry must re-ask only the missing request, not all three: {asked}")
+    assert summary["skipped"] == 2
+    assert summary["fetched"] == 1
+    assert summary["requests"] == 3, "the summary still reports the full intended scope"
+
+
+def test_the_run_still_fails_loudly_when_something_is_still_missing(monkeypatch):
+    """🚨 *RETRY LESS; NEVER FAIL QUIETER.* The rule this must not relax.
+
+    A partial refresh that reported success would let dbt and the publish run on a half-loaded
+    weekend — which is the failure A180 measured one task over.
+    """
+    from datetime import datetime, timezone
+
+    from src import weekly
+
+    monkeypatch.setattr(weekly.ingest.manifest, "succeeded_since",
+                        lambda ep, params, cutoff: ep == "games_teams")
+    monkeypatch.setattr(weekly.ingest, "fetch", lambda e, p: _fake_response(429))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        weekly._run([("games/teams", {"week": 3}), ("plays", {"week": 3})],
+                    now=datetime.now(timezone.utc))
+    assert "1 of 2 requests failed" in str(excinfo.value)
+    # and it says how much it did NOT re-ask, so the log explains the smaller number
+    assert "already had a 200" in str(excinfo.value)
+
+
+def test_the_skip_is_keyed_on_a_success_not_on_mere_presence(monkeypatch):
+    """🚨 `manifest.exists()` IGNORES `status_code`, AND KEYING ON IT INVERTS THE FEATURE.
+
+    A failed response is still written and still recorded — that is deliberate, the raw layer
+    keeps everything. So "have we got a file for these params?" is true for the 429s too, and a
+    retry built on it would skip exactly the requests it exists to re-ask.
+    """
+    from src import raw_manifest
+
+    m = raw_manifest.RawManifest.__new__(raw_manifest.RawManifest)
+    entries = [{"filename": "a.json", "params": {"week": 3}, "status_code": 429,
+                "added_at": "2026-09-20T12:25:00+00:00"}]
+    m._load = lambda endpoint: entries   # noqa: E731
+
+    from datetime import datetime, timezone
+    cutoff = datetime(2026, 9, 20, 6, 0, tzinfo=timezone.utc)
+    assert m.succeeded_since("plays", {"week": 3}, cutoff) is False, (
+        "a 429 must never count as already fetched")
+
+    entries.append({"filename": "b.json", "params": {"week": 3}, "status_code": 200,
+                    "added_at": "2026-09-20T12:43:00+00:00"})
+    assert m.succeeded_since("plays", {"week": 3}, cutoff) is True
+
+
+def test_a_success_older_than_the_window_is_re_fetched(monkeypatch):
+    """⚠️ THE WINDOW IS WHAT KEEPS THE WEEKLY REFRESH WEEKLY.
+
+    Without it this would mean "ever fetched", and the REVISIONIST bucket — which exists
+    because that data revises — would stop being re-asked entirely.
+    """
+    from datetime import datetime, timezone
+
+    from src import raw_manifest
+
+    m = raw_manifest.RawManifest.__new__(raw_manifest.RawManifest)
+    m._load = lambda endpoint: [                      # noqa: E731
+        {"filename": "old.json", "params": {"week": 3}, "status_code": 200,
+         "added_at": "2026-09-13T12:00:00+00:00"}]
+    cutoff = datetime(2026, 9, 20, 6, 0, tzinfo=timezone.utc)
+    assert m.succeeded_since("plays", {"week": 3}, cutoff) is False, (
+        "last week's 200 must not stop this week's refresh")

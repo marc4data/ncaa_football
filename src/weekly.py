@@ -14,7 +14,7 @@ Both force a re-fetch. The params match earlier requests by design — that is w
 them refreshes — so the manifest's skip-if-present logic is deliberately bypassed here,
 and staging's latest-file-per-params rule collapses the overlap.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from . import ingest
@@ -160,23 +160,61 @@ def _requests_for_bucket(bucket: str, season: str,
     return out
 
 
-def _run(requests: List[tuple]) -> Dict[str, Any]:
-    """Fetch each request, collecting failures rather than stopping at the first."""
-    fetched, failures, touched = 0, [], set()
+# How far back a 200 still counts as "this run already got that one".
+#
+# 📊 SIZED FROM THE TWO CADENCES IT HAS TO SEPARATE, not picked. Airflow retries are minutes
+# apart; weekly runs are seven days apart. Six hours is far larger than any retry chain and far
+# smaller than any legitimate re-fetch, so it cannot mask either.
+RETRY_WINDOW_HOURS = 6
+
+
+def _run(requests: List[tuple], now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Fetch each request, collecting failures rather than stopping at the first.
+
+    🚨 A185 (cfdb-main-R-1860 / cfdb-main-R-1916). A RETRY RE-ISSUES ONLY WHAT IS STILL MISSING.
+    Last Sunday this task ran three times, 522 requests each, because ONE request failed in the
+    first attempt and one in the third — and the retry re-asked for all 522 to recover one. That
+    is what produced the 429, and the weekend was discarded anyway.
+
+    ✅ Every response already lands as a file and the manifest records its params, status and
+    timestamp, so "did this attempt's predecessor already get this one?" is a question the raw
+    layer can answer for free. A request with a 200 inside `RETRY_WINDOW_HOURS` is skipped.
+
+    ⚠️ **THE LOUD-FAILURE RULE IS UNCHANGED, AND THAT IS THE POINT — *retry less, never fail
+    quieter*.** The run still raises if anything is missing after this attempt, so nothing
+    downstream publishes on a partial refresh. What changes is only how much is re-asked.
+
+    🚨 AND THE SKIP IS KEYED ON A **200 WITHIN THE WINDOW**, NOT ON `manifest.exists()`, which
+    ignores `status_code` — keying on that would skip exactly the requests that failed.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=RETRY_WINDOW_HOURS)
+
+    fetched, failures, touched, skipped = 0, [], set(), 0
     for endpoint, params in requests:
+        endpoint_key = endpoint.replace("/", "_")
+        if ingest.manifest.succeeded_since(endpoint_key, params, cutoff):
+            # An earlier attempt of this same run already has it. Its raw file is on disk and
+            # `load_endpoint` reads the directory, so nothing downstream loses the payload.
+            skipped += 1
+            touched.add(endpoint_key)
+            continue
         resp = ingest.fetch(endpoint, params)
-        touched.add(endpoint.replace("/", "_"))
+        touched.add(endpoint_key)
         if resp.status_code == 200:
             fetched += 1
         else:
             failures.append(f"{endpoint} {params} -> {resp.status_code}")
 
-    summary = {"requests": len(requests), "fetched": fetched,
+    summary = {"requests": len(requests), "fetched": fetched, "skipped": skipped,
                "failed": len(failures), "endpoints": sorted(touched)}
     if failures:
         summary["failures"] = failures
         # Loud: a partial refresh must not read as a success.
-        raise RuntimeError(f"{len(failures)} of {len(requests)} requests failed: {failures[:5]}")
+        raise RuntimeError(
+            f"{len(failures)} of {len(requests)} requests failed "
+            f"({skipped} already had a 200 from an earlier attempt and were not re-asked): "
+            f"{failures[:5]}")
     return summary
 
 

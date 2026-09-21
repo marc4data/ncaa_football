@@ -359,23 +359,44 @@ def _run_publish(loaded, published):
 
 
 def test_the_scores_dag_does_not_publish_a_table_it_never_built():
-    """The A183 case, pinned by name.
+    """The A183 case — re-aimed in A185, because the original subject was FIXED.
 
-    🚨 THE ASSERTION IS TWO-SIDED ON PURPOSE. `srv_drive` must still be in HOT_SERVING — it is
-    a hot table and removing it from that list would satisfy "not published" while changing a
-    different thing entirely. What must be true is that the SCORES DAG does not ship it.
+    🚨 THIS TEST NAMED `srv_drive` AND A185 MADE IT PASS FOR THE WRONG REASON. A183 measured
+    five `srv_drive` rows with a NULL `drive_result_key` live on the site after the weekly gate
+    had refused them, and A184 stopped the scores DAG publishing a table it did not build.
+    **A185 then put /drives on the game-day cadence, so the scores DAG now builds, tests AND
+    publishes `srv_drive` — correctly.** A test asserting "srv_drive is not published" would
+    still pass today only if someone deleted it from HOT_SERVING.
+
+    ✅ SO IT IS RE-AIMED AT A TABLE THAT IS STILL IN THE ORIGINAL POSITION: `srv_system_health`
+    is hot, and is rebuilt ONLY by the weekly DAG's `dbt_catalogue`.
+
+    🚨 THE ASSERTION IS TWO-SIDED ON PURPOSE. The subject must still be in HOT_SERVING —
+    removing it from that list would satisfy "not published" while changing a different thing
+    entirely. What must be true is that the SCORES DAG does not ship it.
     """
-    assert "srv_drive" in publish_marts.HOT_SERVING, (
-        "srv_drive left HOT_SERVING — this test is now asserting the wrong thing")
-    assert "srv_drive" not in publish_marts.SCORES_HOT
-    assert "srv_drive" not in publish_marts.DISTRIBUTION_HOT
+    subject = "srv_system_health"
+    assert subject in publish_marts.HOT_SERVING, (
+        f"{subject} left HOT_SERVING — this test is now asserting the wrong thing")
+    assert subject in publish_marts.WEEKLY_BY_DESIGN, (
+        f"{subject} is no longer justified as weekly; re-aim this test as A185 did")
+    assert subject not in publish_marts.SCORES_HOT
+    assert subject not in publish_marts.DISTRIBUTION_HOT
 
     published = []
     _run_publish(["games_teams"], published)
     (tables, schema), = published
     assert schema == "serving"
-    assert "srv_drive" not in tables, (
-        f"the scores DAG would publish srv_drive, which it does not build or test: {tables}")
+    assert subject not in tables, (
+        f"the scores DAG would publish {subject}, which it does not build or test: {tables}")
+
+    # ⚠️ AND THE GRADUATED CASE, ASSERTED FORWARD: srv_drive IS built by the scores DAG now,
+    # so it MUST be published by it. A184's fix and A185's are opposite in direction and both
+    # are the same rule — publish exactly what this run built and tested.
+    assert "srv_drive" in publish_marts.SCORES_HOT, (
+        "the scores DAG builds srv_drive since A185; not publishing it would leave the "
+        "Matchup drive panel a rebuild behind the site")
+    assert "srv_drive" in tables
 
 
 def test_every_table_the_scores_dag_publishes_is_one_it_builds():
@@ -389,7 +410,8 @@ def test_every_table_the_scores_dag_publishes_is_one_it_builds():
     assert set(publish_marts.DISTRIBUTION_HOT) <= set(publish_marts.HOT_SERVING)
     # The 14 hot tables no gated DAG rebuilds must be shipped by neither.
     gated = set(publish_marts.SCORES_HOT) | set(publish_marts.DISTRIBUTION_HOT)
-    assert len(gated) == 13, f"expected 13 gated-published hot tables, got {sorted(gated)}"
+    # 13 in A184; 14 since A185 added srv_drive to the game-day build.
+    assert len(gated) == 14, f"expected 14 gated-published hot tables, got {sorted(gated)}"
 
 
 def test_the_box_relations_and_the_hot_subset_ship_in_one_locked_call():
