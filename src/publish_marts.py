@@ -213,12 +213,30 @@ DEFAULT_SERVING = [
 # explicit table list, and the dump carries --clean --if-exists, which drops only the tables
 # IN the dump — so a hot publish leaves these three untouched rather than deleting them.
 # ==========================================================================================
-# WHY A TABLE MAY BE PUBLISHED HOT AND BUILT WEEKLY. A079/R-533.
+# WHY A HOT TABLE MAY BE REBUILT AND PUBLISHED WEEKLY. A079/R-533.
 #
-# HOT_SERVING is shipped on every gate-open run of cfbd_scores_refresh. A table in it that no
-# gated DAG REBUILDS is therefore re-published, unchanged, several times a day — arriving on
-# the site looking exactly as fresh as the rows beside it that genuinely moved. A078 found
-# srv_team_week doing that and then measured the list: 18 of 24.
+# 🚨 READ THIS FIRST — THE LIST'S MEANING CHANGED IN A184 AND THE PROSE DID NOT FOLLOW UNTIL
+# A185 (cfdb-main-R-1908). Every sentence below used to argue that a table was SAFE TO SHIP
+# HOT because its data only moves weekly. **Nothing ships these hot any anymore.** A184 gave each
+# gated DAG its own publish list — exactly what that run built and tested — so a table nobody
+# builds is a table nobody publishes on that cadence.
+#
+# ✅ SO WHAT THIS DICT NOW MEANS IS NARROWER AND STILL LOAD-BEARING: *this table is in
+# `HOT_SERVING`, and it is DELIBERATE that no gated DAG rebuilds it.* It is the difference
+# between a considered weekly cadence and a selector somebody forgot to extend, and
+# `ci/check_publish_build_agreement.py` reads it to tell those two apart. **The justifications
+# are still the evidence; they are just answering "why is this not in a gated selector?"
+# rather than "why is it safe to ship unchanged?"**
+#
+# ⚠️ AND A STALE ENTRY IS AN ERROR, NOT A COMMENT. The guard fails if a table listed here IS
+# rebuilt by a gated DAG — which is how A185 caught `srv_drive` the moment it joined
+# SCORES_SELECTOR.
+#
+# ── the original reasoning, kept because it is why the dict exists ─────────────────────────
+# HOT_SERVING was shipped whole on every gate-open run of cfbd_scores_refresh. A table in it
+# that no gated DAG REBUILDS was therefore re-published, unchanged, several times a day —
+# arriving on the site looking exactly as fresh as the rows beside it that genuinely moved.
+# A078 found srv_team_week doing that and then measured the list: 18 of 24.
 #
 # ⚠️ THE POINT IS NOT THAT WEEKLY IS WRONG. It is that "weekly" must be a DECISION rather than
 # an oversight, and until this dict existed there was no way to tell the two apart — the two
@@ -235,10 +253,13 @@ WEEKLY_BY_DESIGN = {
     "srv_data_dictionary":
         "Not endpoint-derived at all — it reads information_schema, so there is no fetch "
         "cadence to keep up with. Confirmed: zero raw sources in its lineage.",
-    "srv_drive":
-        "Its subject is /drives, fetched only by cfbd_results_refresh (Sunday) and "
-        "cfbd_midweek_results (Thursday). Rebuilding hot would rebuild from raw that has not "
-        "moved. `games` is in its lineage as the spine join, not as its subject.",
+    # 🚨 `srv_drive` WAS HERE AND A185 REMOVED IT, WHICH IS THE ENTRY WORTH REMEMBERING.
+    # Its justification read: "Its subject is /drives, fetched only by cfbd_results_refresh
+    # (Sunday) and cfbd_midweek_results (Thursday). Rebuilding hot would rebuild from raw
+    # that has not moved." **Every word was true, and the premise was the defect.** That /drives
+    # was fetched weekly is exactly what kept the Matchup drive panel off the site on a
+    # Saturday night, so A185 put it on the game-day cadence and this entry had to go. The
+    # guard failed the moment the selector changed, which is what it is for.
     "srv_rankings":
         "Its subject is /rankings, fetched by the Sunday and Tuesday weekly DAGs. Polls "
         "publish weekly; there is nothing between them to pick up.",
@@ -445,6 +466,9 @@ DEFAULT_SERVING = DEFAULT_SERVING + HEAVY_SERVING
 # that must agree and nothing checking them is the defect A078 found (R-492) and it is the
 # reason that guard exists at all.
 SCORES_HOT = [
+    # A185 (cfdb-main-R-1909): the scores DAG builds and tests this now, so by the gate rule
+    # above it publishes it. 47 MB, the smallest of the three tables that round added.
+    "srv_drive",
     "srv_game",
     "srv_game_team",
     "srv_game_weather",

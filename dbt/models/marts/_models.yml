@@ -113,15 +113,23 @@ models:
         description: The game this drive belongs to.
         data_tests:
           - not_null
-          # TAGGED `full_refresh_only` for the same reason as
-          # assert_no_drives_exist_before_the_scope_boundary: fct_game is refreshed by
-          # cfbd_scores_refresh and fct_drive is not, so this compares a fresh parent against a
-          # stale child every two hours, and a failure here would gate publish_to_serving.
+          # 🚨 THE `full_refresh_only` TAG CAME OFF IN A185 (cfdb-main-R-1912), AND THE OLD
+          # REASON IS WORTH KEEPING BECAUSE IT NAMES ITS OWN EXPIRY. It read: "fct_game is
+          # refreshed by cfbd_scores_refresh and fct_drive is not, so this compares a fresh
+          # parent against a stale child every two hours."
+          #
+          # ✅ `fct_drive` IS NOW REBUILT BY THAT SAME DAG — A185 put /drives on the game-day
+          # cadence — so both sides move together and the straddle is gone. Left tagged, this
+          # would have shipped drives to the site every two hours with their referential
+          # guard switched off.
           - relationships:
               to: ref('fct_game')
               field: game_id
+              # ⚠️ NARROW, NOT ABSENT. `cfbd_scores_refresh` rebuilds both sides now;
+              # `cfbd_lines_snapshot` rebuilds `fct_game` alone, so untagging outright
+              # would block the LINES publish instead. R-672's tag, not the blunt one.
               config:
-                tags: ['full_refresh_only']
+                tags: ['scores_refresh_only']
       - name: drive_number
         description: >
           Possession order within the game, 1..n. The chart's y-axis. Dense and gapless in all

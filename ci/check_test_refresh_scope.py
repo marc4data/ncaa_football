@@ -25,6 +25,7 @@ A straddling test is not wrong — it is usually the most valuable kind, compari
 independent derivations. It simply belongs on the build that refreshes both sides, which is
 what the tag means.
 """
+import ast
 import json
 import sys
 from pathlib import Path
@@ -37,35 +38,53 @@ MANIFEST = Path("dbt/target/manifest.json")
 # about half the pattern. cfbd_lines_snapshot is the same shape of job and its two roots were
 # missing, which is the same one-instance blindness that let the exclusion itself go unapplied
 # to that DAG for a day and a half.
-GATED_SELECTION = (
-                   # cfbd_scores_refresh — SCORES_SELECTOR
-                   "model.cfdb_dbt.srv_game",
-                   "model.cfdb_dbt.srv_team_game_log",
-                   "model.cfdb_dbt.srv_game_weather",
-                   # R-492. Added to SCORES_SELECTOR because the hot publish was already
-                   # shipping srv_team_week on every gate-open run without rebuilding it.
-                   # ⚠️ THIS MIRROR IS THE LIST test_dag_structure.py:120 WARNS ABOUT —
-                   # "a list nobody reads is a list nobody maintains", written after
-                   # assert_team_series_reconciles slipped through a two-entry tuple nobody
-                   # had updated. Changing the DAG's selector without changing this line
-                   # leaves the straddle check reasoning about the old selection, which fails
-                   # in the direction that looks fine.
-                   "model.cfdb_dbt.srv_team_week",
-                   # R-530 / R-532. Same round, same reason: both were published on the hot
-                   # publish and rebuilt only weekly. ⚠️ Updating this mirror is the step
-                   # test_dag_structure.py:120 warns about by name — A078 remembered it, and
-                   # the round before that is the one where a name nobody added to a tuple let
-                   # the seventh straddling test through.
-                   "model.cfdb_dbt.srv_game_team",
-                   "model.cfdb_dbt.srv_odds_board",
-                   "model.cfdb_dbt.srv_line_movement",
-                   # R-533. Three models marginal; all ancestors already selected.
-                   "model.cfdb_dbt.srv_standings",
-                   "model.cfdb_dbt.srv_team_overview",
-                   "model.cfdb_dbt.srv_teams_index",
-                   # cfbd_lines_snapshot — DISTRIBUTION_SELECTOR
-                   "model.cfdb_dbt.srv_week_metric_distribution",
-                   "model.cfdb_dbt.srv_week_metric_distribution_bin")
+# 🚨 DERIVED FROM THE DAGs, NOT MIRRORED — A185 (cfdb-main-R-1911). THIS WAS A HAND-KEPT LIST
+# AND IT WAS ALREADY WRONG.
+#
+# The block that used to sit here listed each gated DAG's selector roots by hand, and carried
+# its own warning twice over: *"Changing the DAG's selector without changing this line leaves
+# the straddle check reasoning about the old selection, which fails in the direction that looks
+# fine"* and *"a list nobody reads is a list nobody maintains"*.
+#
+# 📊 IT HAD DRIFTED EXACTLY AS PREDICTED. `srv_team_week_metric_distribution` has been in
+# SCORES_SELECTOR since A143 and was never added here, so this check had been reasoning about a
+# ten-root selection against an eleven-root DAG — and A185 was about to add three more.
+#
+# ✅ The selectors are read from the DAG files with `ast.literal_eval`, the same way
+# `ci/check_publish_build_agreement.py` reads them, so the two lists cannot disagree because
+# there is now only one list. ⚠️ AST rather than a regex for that file's own stated reason:
+# these are multi-line implicitly-concatenated strings with comments between the fragments.
+GATED = [
+    ("cfbd_scores_refresh", "dags/scores_refresh_dag.py", "SCORES_SELECTOR"),
+    ("cfbd_lines_snapshot", "dags/lines_snapshot_dag.py", "DISTRIBUTION_SELECTOR"),
+]
+
+
+def _selector_roots(path: str, name: str) -> list:
+    """The `+srv_x` roots of a DAG's selector, as manifest unique_ids."""
+    tree = ast.parse((Path(__file__).resolve().parents[1] / path).read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == name:
+            selector = ast.literal_eval(node.value)
+            break
+    else:
+        raise SystemExit(f"::error::{name} not found in {path}")
+    roots = []
+    for token in selector.replace("--select", "").split():
+        model = token.lstrip("+").strip()
+        if model:
+            roots.append(f"model.cfdb_dbt.{model}")
+    return roots
+
+
+# 🚨 BOTH STRUCTURES COME FROM THE SAME READ. A185 found TWO hand-kept mirrors here, not one:
+# `GATED_SELECTION` (the union, already stale) and `GATED_DAGS` (per DAG, which drives the
+# error messages and was current). Updating one and not the other is how this check reports a
+# straddle against a selection the DAG no longer has — which it did, naming
+# `fct_game_win_probability_play` as unrefreshed by a DAG that had just been given it.
+GATED_DAGS = {dag: tuple(_selector_roots(path, name)) for dag, path, name in GATED}
+
+GATED_SELECTION = tuple(root for roots in GATED_DAGS.values() for root in roots)
 
 EXEMPT_TAG = "full_refresh_only"
 # Also excluded by the DAG, so also not a risk to it.
@@ -130,28 +149,6 @@ def _ancestors(manifest: dict, node: str, seen=None) -> set:
 DAG_EXEMPT_TAGS = {
     "cfbd_scores_refresh": (),
     "cfbd_lines_snapshot": ("scores_refresh_only",),
-}
-
-GATED_DAGS = {
-    # cfbd_scores_refresh — SCORES_SELECTOR
-    "cfbd_scores_refresh": (
-        "model.cfdb_dbt.srv_game",
-        "model.cfdb_dbt.srv_team_game_log",
-        "model.cfdb_dbt.srv_game_weather",
-        "model.cfdb_dbt.srv_team_week",
-        "model.cfdb_dbt.srv_game_team",
-        "model.cfdb_dbt.srv_odds_board",
-        "model.cfdb_dbt.srv_line_movement",
-        "model.cfdb_dbt.srv_standings",
-        "model.cfdb_dbt.srv_team_overview",
-        "model.cfdb_dbt.srv_teams_index",
-        "model.cfdb_dbt.srv_team_week_metric_distribution",
-    ),
-    # cfbd_lines_snapshot — DISTRIBUTION_SELECTOR
-    "cfbd_lines_snapshot": (
-        "model.cfdb_dbt.srv_week_metric_distribution",
-        "model.cfdb_dbt.srv_week_metric_distribution_bin",
-    ),
 }
 
 

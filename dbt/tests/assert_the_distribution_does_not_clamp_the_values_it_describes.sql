@@ -1,4 +1,12 @@
-{{ config(tags=['full_refresh_only']) }}
+{{ config(tags=[]) }}
+-- 🚨 `full_refresh_only` REMOVED BY A185 (cfdb-main-R-1912). The tag means *no gated DAG
+-- rebuilds both sides*, and that stopped being true the moment `cfbd_scores_refresh` began
+-- fetching drives, plays and `metrics/wp` on the game-day cadence and building their models.
+-- ⚠️ THE TAG WAS NOT REMOVED BY JUDGEMENT — `test_single_sided_tests_keep_their_coverage_in
+-- _the_partial_rebuild_dags` FAILED and named this test, in its own words, as one whose tag
+-- now *"costs real coverage"*. Leaving it would have shipped drives and the curve to the site
+-- every two hours with their strongest guard switched off — which is the exact shape of
+-- cfdb-main-R-1819, the defect this round's sibling closed.
 -- TAGGED `full_refresh_only`, AND THE CHECK THAT DEMANDED IT WAS RIGHT. This test reconciles
 -- fct_team_week_metric_distribution against fct_team_yardage_week, and cfbd_scores_refresh
 -- rebuilds the SECOND of those every two hours without rebuilding the first. Between those two

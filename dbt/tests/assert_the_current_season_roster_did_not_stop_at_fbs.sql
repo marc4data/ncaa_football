@@ -1,4 +1,12 @@
-{{ config(severity='warn', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=[]) }}
+-- 🚨 `full_refresh_only` REMOVED BY A185 (cfdb-main-R-1912). The tag means *no gated DAG
+-- rebuilds both sides*, and that stopped being true the moment `cfbd_scores_refresh` began
+-- fetching drives, plays and `metrics/wp` on the game-day cadence and building their models.
+-- ⚠️ THE TAG WAS NOT REMOVED BY JUDGEMENT — `test_single_sided_tests_keep_their_coverage_in
+-- _the_partial_rebuild_dags` FAILED and named this test, in its own words, as one whose tag
+-- now *"costs real coverage"*. Leaving it would have shipped drives and the curve to the site
+-- every two hours with their strongest guard switched off — which is the exact shape of
+-- cfdb-main-R-1819, the defect this round's sibling closed.
 -- 🚨 THE ROSTER THAT STOPPED IN AUGUST — A151, cfdb-main-R-1035.
 --
 -- 📊 WHAT HAPPENED, AND IT IS §2.5's ASYMMETRY EXACTLY. `/roster` is fetched ONCE per season and

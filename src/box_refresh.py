@@ -38,14 +38,27 @@ from typing import Dict, List, Optional, Tuple
 
 from src.load_raw_to_postgres import get_conn
 
-# The three endpoints that make a game "boxed", and how each is addressed.
+# The endpoints that make a completed game COMPLETE ON THE SITE, and how each is addressed.
 #
-# ⚠️ THE SPLIT IS THE WHOLE COST STORY AND IT IS NOT OBVIOUS FROM THE NAMES. Two of these are
-# week-scoped and one is per game; treating all three as per-game would triple the request count
-# for no benefit, and treating all three as week-scoped would silently never fetch the advanced
-# box at all.
-WEEK_SCOPED = ("games/teams", "games/players")
-PER_GAME = "game/box/advanced"
+# 🚨 A185 (cfdb-main-R-1909) ADDED THE LAST FOUR, AND THE REASON IS THAT "BOXED" WAS NEVER THE
+# STANDARD. A181 and A184 scoped this module to box scores; Marc's standard is that the PAGES
+# show data. `drives`, `plays`, `plays/stats` and `metrics/wp` all sat in `BUCKET_IMMUTABLE_WK`
+# — fetched only by the weekly Sunday refresh — so after A184 a Saturday night still showed
+# every box score and NO Matchup drive panel, NO win-probability chart, and no Most Exciting
+# sparklines, until Sunday at the earliest and through the one fetch that had just lost a
+# weekend.
+#
+# ⚠️ THE SPLIT IS THE WHOLE COST STORY AND IT IS NOT OBVIOUS FROM THE NAMES. Four of these are
+# week-scoped — ONE request covers a whole Saturday — and three fan out per game. Treating the
+# week-scoped ones as per-game would multiply the request count for an identical payload;
+# treating the per-game ones as week-scoped silently truncates, which is a defect this registry
+# has already been bitten by: `plays/stats` caps at 2,000 rows per response and returned exactly
+# 2,000 with a 200 status, covering 11% of games while looking healthy.
+WEEK_SCOPED = ("games/teams", "games/players", "drives", "plays")
+
+# ⚠️ A TUPLE SINCE A185. It was a single string while `game/box/advanced` was the only per-game
+# endpoint, and every consumer indexed it as one.
+PER_GAME = ("game/box/advanced", "plays/stats", "metrics/wp")
 
 # Which staging relation proves each layer arrived.
 #
@@ -81,7 +94,14 @@ PER_GAME = "game/box/advanced"
 PRESENCE = {
     "games/teams": "staging.stg_game_team_stat",
     "games/players": "staging.stg_game_player_stat",
-    PER_GAME: "staging.stg_game_box_team",
+    "game/box/advanced": "staging.stg_game_box_team",
+    # A185. Resolved from the dbt manifest — for each endpoint, the staging model that reads
+    # `raw_<endpoint>` — rather than by choosing a plausible name, which is the mistake A184
+    # had to undo three times.
+    "drives": "staging.stg_drive",
+    "plays": "staging.stg_play",
+    "plays/stats": "staging.stg_play_stat",
+    "metrics/wp": "staging.stg_game_win_probability",
 }
 
 
@@ -105,7 +125,39 @@ PRESENCE = {
 # on every two-hourly run all week it would be the most expensive thing the pipeline does over
 # the link its own comments call the fragile step. Published only on runs that actually loaded
 # new player box scores, it costs nothing on a Tuesday and one extra transfer on a Saturday.
-PUBLISH_FOR = {"games/players": ["srv_player_game_log"]}
+# ⚠️ ONLY THE **HEAVY** RELATIONS NEED A LINE HERE. A185 (cfdb-main-R-1910). Everything the
+# scores DAG builds and that lives in `SCORES_HOT` is published on every gate-open run by
+# A184's gate rule; this map is for the ones deliberately kept OFF that list because of size,
+# so they ship only on the runs whose own fetch changed them.
+#
+# 📊 MEASURED BEFORE CHOOSING (A184's method): `srv_player_game_log` 517 MB / 60 s;
+# `srv_drive` + `srv_game_win_probability_play` + `srv_player_play` together 291.8 MB
+# compressed to 62.8 MB, **40 s**. `srv_drive` is small (47 MB) and goes in `SCORES_HOT`; the
+# other two are HEAVY and ride this map.
+PUBLISH_FOR = {
+    "games/players": ["srv_player_game_log"],
+    "metrics/wp": ["srv_game_win_probability_play"],
+    "plays/stats": ["srv_player_play"],
+}
+
+
+def _id_param(endpoint: str) -> str:
+    """The query parameter CFBD wants for this per-game endpoint, from the registry.
+
+    🚨 IT IS NOT THE SAME FOR ALL THREE, AND GUESSING IT FAILS SILENTLY. `game/box/advanced`
+    takes `id`; `plays/stats` and `metrics/wp` take `gameId`. A wrong parameter name is not
+    rejected — CFBD ignores it and answers 200 with the UNFILTERED payload, so the run looks
+    successful and the warehouse gets rows for the wrong games.
+
+    ⚠️ Read from `src/endpoints.py`, which is where fetch behaviour is declared (§4.3), so a
+    registry change cannot leave a second copy behind here.
+    """
+    from src.endpoints import REGISTRY
+
+    for entry in REGISTRY:
+        if entry.path == endpoint:
+            return entry.extra.get("id_param", "id")
+    raise KeyError(f"{endpoint} is not in the endpoint registry")
 
 
 def relations_to_publish(loaded_endpoints) -> List[str]:
@@ -194,10 +246,16 @@ def box_requests(season: str, weeks: List[dict],
             requests.append((endpoint, {"year": season, "week": week,
                                         "seasonType": season_type}))
 
-    per_game = missing.get(PER_GAME, [])
-    summary[PER_GAME] = len(per_game)
-    for game in per_game:
-        requests.append((PER_GAME, {"id": str(game["game_id"])}))
+    # ⚠️ THE ID PARAMETER IS PER ENDPOINT AND IS READ FROM THE REGISTRY, NOT ASSUMED.
+    # `game/box/advanced` takes `id`; `plays/stats` and `metrics/wp` take `gameId`, declared in
+    # `src/endpoints.py` as `extra["id_param"]`. Hardcoding `id` would send a parameter CFBD
+    # ignores and return the whole unfiltered payload — a 200, with the wrong rows.
+    for endpoint in PER_GAME:
+        games = missing.get(endpoint, [])
+        summary[endpoint] = len(games)
+        id_param = _id_param(endpoint)
+        for game in games:
+            requests.append((endpoint, {id_param: str(game["game_id"])}))
 
     return requests, summary
 

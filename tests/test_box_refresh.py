@@ -17,6 +17,11 @@ if str(ROOT) not in sys.path:
 from src.box_refresh import (PER_GAME, PRESENCE, WEEK_SCOPED, box_requests,   # noqa: E402
                              relations_to_publish)
 
+# ⚠️ THESE TESTS MEAN THE ADVANCED BOX SPECIFICALLY, NOT "whatever is per-game".
+# Until A185 those were the same thing and `PER_GAME` was a single string; it is a tuple
+# of three endpoints now, so using it as a dict key here would silently test nothing.
+ADVANCED = "game/box/advanced"
+
 
 class _Cursor:
     """A cursor that answers `missing_box_games`'s three queries from a script."""
@@ -73,12 +78,12 @@ def test_a_week_scoped_endpoint_is_asked_for_the_week_not_for_each_game():
     """
     # Rows come back as tuples, the way psycopg2 yields them.
     missing = [(100 + n, 3, "regular") for n in range(60)]
-    conn = _Conn({"games/teams": missing, "games/players": missing, PER_GAME: missing})
+    conn = _Conn({"games/teams": missing, "games/players": missing, ADVANCED: missing})
 
     requests, summary = box_requests("2026", WEEKS, conn=conn)
 
     week_scoped = [r for r in requests if r[0] in WEEK_SCOPED]
-    per_game = [r for r in requests if r[0] == PER_GAME]
+    per_game = [r for r in requests if r[0] == ADVANCED]
     assert len(week_scoped) == 2, (
         f"one request per week-scoped endpoint, not per game: {week_scoped}")
     assert len(per_game) == 60, "the advanced box really is one call per game"
@@ -93,7 +98,7 @@ def test_a_week_scoped_endpoint_is_asked_for_the_week_not_for_each_game():
 def test_two_weeks_with_gaps_cost_one_request_each_not_one_per_game():
     """⚠️ The results window covers the prior week too, so a Sunday run spans two."""
     missing = [(1, 2, "regular"), (2, 3, "regular"), (3, 3, "regular")]
-    conn = _Conn({"games/teams": missing, "games/players": [], PER_GAME: []})
+    conn = _Conn({"games/teams": missing, "games/players": [], ADVANCED: []})
     requests, _ = box_requests("2026", WEEKS, conn=conn)
     teams = [p["week"] for e, p in requests if e == "games/teams"]
     assert sorted(teams) == [2, 3], f"one per distinct week: {teams}"
@@ -103,7 +108,7 @@ def test_a_week_with_nothing_missing_costs_nothing():
     """✅ THE PROPERTY THAT LETS THIS SIT ON A TWO-HOURLY CADENCE. On a Tuesday every finished
     game is already boxed, so the request list is empty and the task is a no-op. A design that
     re-fetched regardless is the one `scores_cadence.py` rightly rejected."""
-    conn = _Conn({"games/teams": [], "games/players": [], PER_GAME: []})
+    conn = _Conn({"games/teams": [], "games/players": [], ADVANCED: []})
     requests, summary = box_requests("2026", WEEKS, conn=conn)
     assert requests == []
     assert set(summary.values()) == {0}
@@ -233,7 +238,7 @@ def test_a_failed_request_still_loads_what_arrived_and_still_fails_the_run(monke
     **Progress survives a failure; the alarm does not get quieter.**
     """
     missing = [(101, 3, "regular"), (102, 3, "regular"), (103, 3, "regular")]
-    conn = _Conn({"games/teams": [], "games/players": [], PER_GAME: missing})
+    conn = _Conn({"games/teams": [], "games/players": [], ADVANCED: missing})
     loaded = []
 
     with pytest.raises(RuntimeError) as exc:
@@ -256,7 +261,7 @@ def test_the_next_run_asks_only_for_what_is_still_missing(monkeypatch):
     its work from the warehouse again, so it asks for ONE game — not three, and not 522.
     """
     still_missing = [(102, 3, "regular")]
-    conn = _Conn({"games/teams": [], "games/players": [], PER_GAME: still_missing})
+    conn = _Conn({"games/teams": [], "games/players": [], ADVANCED: still_missing})
 
     result, asked = _run_box_refresh(monkeypatch, conn, failing=())
 
@@ -267,7 +272,7 @@ def test_the_next_run_asks_only_for_what_is_still_missing(monkeypatch):
 
 def test_a_run_with_nothing_missing_asks_for_nothing_at_all(monkeypatch):
     """✅ The Tuesday case, end to end: no requests, no load, no failure."""
-    conn = _Conn({"games/teams": [], "games/players": [], PER_GAME: []})
+    conn = _Conn({"games/teams": [], "games/players": [], ADVANCED: []})
     loaded = []
     result, asked = _run_box_refresh(monkeypatch, conn, loaded=loaded)
     assert asked == [] and loaded == []
@@ -326,5 +331,5 @@ def test_presence_names_the_relation_that_endpoint_actually_feeds():
 
 def test_presence_covers_every_endpoint_the_refresh_fetches():
     """A layer with no presence relation is a layer nothing can prove arrived."""
-    for endpoint in WEEK_SCOPED + (PER_GAME,):
+    for endpoint in WEEK_SCOPED + PER_GAME:
         assert endpoint in PRESENCE, f"{endpoint} is fetched but has no presence relation"

@@ -195,6 +195,17 @@ SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # it — SELECT on all 35 tables in the schema, and INSERT/UPDATE/DELETE all false on
 # `srv_game_team`. So this is a credential line and a default, not a new privilege.
 
+# 🚨 THE OUTCOME QUERIES ALWAYS EMIT A LINE, EVEN AT ZERO — A185 (cfdb-main-R-1878).
+#
+# They used to carry `having count(*) > 0`, so a clean site produced NO LINE AT ALL. ⚠️ That
+# made two very different states identical on the wire: *"I looked and everything is on the
+# site"* and *"this script is an older copy that does not run this check"*. A184 shipped the
+# player line and named the hole in its own report rather than leaving it to be discovered.
+#
+# ✅ Now every check says what it found — `unboxed|0|0|-` is an answer — and the watcher
+# REQUIRES a line from each registered check. **A missing line is BLIND, not quiet.** Silence
+# is not success, which is this project's oldest standing rule and the one that cost it four
+# days in August.
 "${SERVING_PSQL[@]}" -c "
   select 'unboxed|' || count(*) || '|' ||
          coalesce(max(floor(extract(epoch from (now() - (game_date + 1))))::bigint), 0) || '|' ||
@@ -206,7 +217,6 @@ SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
     and season = (select max(season) from serving.srv_game_team where is_completed)
     and game_date < (now() at time zone 'America/Los_Angeles')::date
     and (not has_box_score or not has_box_advanced)
-  having count(*) > 0
 " || echo "unboxed|MONITOR.cannot_read_published_serving|0|-"
 
 # 🚨 THE PLAYER HALF, AND IT IS A SEPARATE LINE BECAUSE IT IS A SEPARATE FAILURE — A184
@@ -235,8 +245,57 @@ SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
           and game_date < (now() at time zone 'America/Los_Angeles')::date) g
   where not exists (select 1 from serving.srv_player_game_log p
                      where p.game_id = g.game_id)
-  having count(*) > 0
 " || echo "unplayered|MONITOR.cannot_read_published_serving|0|-"
+
+# 🚨 THE REST OF SATURDAY — DRIVES AND THE WIN-PROBABILITY CURVE. A185 (cfdb-main-R-1914).
+#
+# The two checks above ask whether the BOX SCORES are on the site. They were both quiet on
+# 2026-09-20 while the Matchup drive panel and the win-probability chart had nothing for
+# Saturday's games, because /drives and /metrics/wp were fetched only by the weekly Sunday run.
+#
+# ⚠️ BOTH LINES ARE BOUNDED TO SEVEN DAYS, AND THAT IS A DELIBERATE TRADE RATHER THAN A DETAIL.
+# 📊 Measured on live published serving before writing them — completed FBS games with each:
+#
+#     season   games   drives            curve
+#     2024       919   100.00%           99.24%
+#     2025       934   100.00%           85.97%      <- B139's figure, confirmed
+#     2026       260   100.00%           99.23%
+#
+# 🚨 DRIVES ARE 100% AND THE CURVE IS NOT, SO AN UNBOUNDED CURVE ALARM WOULD NEVER GO QUIET.
+# The two 2026 games with no curve are Eastern Illinois at Minnesota and UTEP at Oklahoma, both
+# week 1, and CFBD has simply never published one for them — **nothing we do can fix those, and
+# an alarm nobody can act on is one everybody learns to ignore.** The window lets a permanent
+# gap age out while a Saturday failure still fires for seven days, which is many cadences.
+#
+# ⚠️ WHAT THE WINDOW COSTS, SAID PLAINLY: a gap that survives eight days goes quiet. That is
+# the price of not having a light that is always on, and it is why the bound is SEVEN days
+# rather than one — long enough that every recovery path has had several attempts first.
+"${SERVING_PSQL[@]}" -c "
+  select 'undriven|' || count(*) || '|' ||
+         coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
+         coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
+  from (select distinct week, game_id, game_date
+        from serving.srv_game_team
+        where is_fbs_game and is_completed and points_for is not null
+          and season = (select max(season) from serving.srv_game_team where is_completed)
+          and game_date < (now() at time zone 'America/Los_Angeles')::date
+          and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
+  where not exists (select 1 from serving.srv_drive d where d.game_id = g.game_id)
+" || echo "undriven|MONITOR.cannot_read_published_serving|0|-"
+
+"${SERVING_PSQL[@]}" -c "
+  select 'uncurved|' || count(*) || '|' ||
+         coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
+         coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
+  from (select distinct week, game_id, game_date
+        from serving.srv_game_team
+        where is_fbs_game and is_completed and points_for is not null
+          and season = (select max(season) from serving.srv_game_team where is_completed)
+          and game_date < (now() at time zone 'America/Los_Angeles')::date
+          and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
+  where not exists (select 1 from serving.srv_game_win_probability_play w
+                     where w.game_id = g.game_id)
+" || echo "uncurved|MONITOR.cannot_read_published_serving|0|-"
 
 # One line per failing test: name, how many rows failed, how long ago. Not the log.
 # 6 hours matches the failure window above so the two signals describe the same period.

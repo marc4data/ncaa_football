@@ -24,6 +24,19 @@ def _code(path: Path) -> str:
 
 # --- a beat must never come from a failed run ---------------------------------------------
 
+
+def _all_clear(**overrides):
+    """Every registered outcome check answered, and all of them are clean.
+
+    ⚠️ SINCE A185 (cfdb-main-R-1878) AN ABSENT LINE IS **BLIND**, not quiet, so a stub that
+    returns `{}` now means "the deployed script runs none of these checks" — which is a
+    failure, correctly. Tests that want a healthy site must say so for every check.
+    """
+    outcomes = {head: (0, 0, "-") for head in chk.OUTCOME_LINES}
+    outcomes.update(overrides)
+    return outcomes
+
+
 def test_the_heartbeat_is_the_last_task_on_the_success_path():
     """A heartbeat from a failed run is a lie: it says healthy at the moment the pipeline is
     not. In the DAGs that publish, the beat sits downstream of publish so it reports only a
@@ -102,7 +115,7 @@ def test_an_unreachable_host_is_the_alarm_not_an_error(monkeypatch, capsys):
 def test_a_stale_cadence_fails_and_names_itself(monkeypatch, capsys):
     fresh = {name: 60 for name in chk.CADENCES}
     fresh["scores_refresh"] = 7 * 3600            # budget is 5h
-    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}, {}, None, None))
+    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}, {}, _all_clear()))
     assert chk.main(["host"]) == 1
     out = capsys.readouterr().out
     assert "STALE" in out and "scores_refresh" in out
@@ -113,13 +126,13 @@ def test_a_cadence_that_never_beat_is_not_silently_ok(monkeypatch, capsys):
     """A missing key reads as "no news". It is the opposite."""
     monkeypatch.setattr(
         chk, "read_ages",
-        lambda _h: ({n: 60 for n in chk.CADENCES if n != "weekly_results"}, {}, {}, None, None))
+        lambda _h: ({n: 60 for n in chk.CADENCES if n != "weekly_results"}, {}, {}, _all_clear()))
     assert chk.main(["host"]) == 1
     assert "NEVER BEAT" in capsys.readouterr().out
 
 
 def test_all_fresh_passes(monkeypatch, capsys):
-    monkeypatch.setattr(chk, "read_ages", lambda _h: ({n: 60 for n in chk.CADENCES}, {}, {}, None, None))
+    monkeypatch.setattr(chk, "read_ages", lambda _h: ({n: 60 for n in chk.CADENCES}, {}, {}, _all_clear()))
     assert chk.main(["host"]) == 0
     assert "beating within budget" in capsys.readouterr().out
 
@@ -204,7 +217,7 @@ def test_the_watcher_reads_failed_tasks_as_well_as_missing_beats(monkeypatch):
     _fake_ssh(monkeypatch, module,
               "scores_refresh|600\nlines_snapshot|900\n"
               "failed|cfbd_scores_refresh.dbt_test|1200\n")
-    ages, failures, failed_tests, _unboxed, _unplayered = module.read_ages("host")
+    ages, failures, failed_tests, _outcomes = module.read_ages("host")
     assert ages == {"scores_refresh": 600, "lines_snapshot": 900}
     assert failures == {"cfbd_scores_refresh.dbt_test": 1200}
 
@@ -221,20 +234,47 @@ def test_a_failed_task_fails_the_watcher_even_when_every_beat_is_fresh(monkeypat
     assert "did not run" in printed, "it must say what the failure COST, not just that it was"
 
 
+def _healthy_stdout(module) -> str:
+    """What a CURRENT forced command prints when everything is fine.
+
+    ⚠️ Every registered outcome check answers, at zero. Since A185 (cfdb-main-R-1878) an
+    absent line is BLIND, so "healthy" means the checks ran and found nothing — not silence.
+    """
+    beats = [f"{n}|60" for n in module.CADENCES]
+    outcomes = [f"{head}|0|0|-" for head in module.OUTCOME_LINES]
+    return "\n".join(beats + outcomes)
+
+
 def test_a_clean_pipeline_still_passes(monkeypatch):
     module = _watcher()
-    _fake_ssh(monkeypatch, module, "\n".join(f"{n}|60" for n in module.CADENCES))
+    _fake_ssh(monkeypatch, module, _healthy_stdout(module))
     assert module.main(["host"]) == 0
 
 
-def test_an_older_forced_command_does_not_break_the_watcher(monkeypatch):
-    """The droplet's script and this checker deploy together but are separate files, and a
-    monitor that crashes on output it does not recognise is a monitor that is off."""
+def test_an_older_forced_command_reads_as_blind_rather_than_clean(monkeypatch):
+    """🚨 THIS TEST'S CONTRACT WAS REVERSED ON PURPOSE BY A185 (cfdb-main-R-1878).
+
+    It used to assert that a script emitting no outcome lines still passed — "a monitor that
+    crashes on output it does not recognise is a monitor that is off", which is still true and
+    is still asserted below: the watcher must PARSE the old output without raising.
+
+    ⚠️ WHAT CHANGED IS THE VERDICT. A184 named the hole: *"zero unboxed games" and "this script
+    is an old copy that emits nothing" are currently the same silence.* Passing on an older
+    script means the watcher reports a healthy site because nobody asked it anything — which is
+    the silence-is-not-success failure with extra steps. **It must still not crash, and it must
+    no longer pass.**
+    """
     module = _watcher()
     _fake_ssh(monkeypatch, module, "\n".join(f"{n}|60" for n in module.CADENCES))
-    ages, failures, failed_tests, _unboxed, _unplayered = module.read_ages("host")
+
+    # parses cleanly — no exception, heartbeats still read
+    ages, failures, failed_tests, outcomes = module.read_ages("host")
     assert failures == {} and len(ages) == len(module.CADENCES)
-    assert module.main(["host"]) == 0
+    assert outcomes == {}, "an older script emits no outcome lines at all"
+
+    # ...and reports BLIND rather than success
+    assert module.main(["host"]) == 1, (
+        "a forced command that runs none of the outcome checks must not report a healthy site")
 
 
 def test_the_watcher_asks_often_even_though_asking_does_not_help():
@@ -317,7 +357,7 @@ def test_the_watcher_and_the_forced_command_agree_on_the_failure_format(monkeypa
         returncode, stdout, stderr = 0, line + "\n", ""
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
-    _, failures, _, _unboxed, _unplayered = module.read_ages("host")
+    _, failures, _, _outcomes = module.read_ages("host")
     assert failures == {"cfbd_scores_refresh.dbt_test": 8100}
 
 
@@ -350,7 +390,7 @@ def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none(m
 
     # R-633. monkeypatch, for the reason written at the other patch site in this file.
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
-    _, failures, _, _unboxed, _unplayered = module.read_ages("host")
+    _, failures, _, _outcomes = module.read_ages("host")
     assert "MONITOR.cannot_read_airflow_metadata" in failures
 
 
@@ -491,7 +531,7 @@ def test_the_watcher_parses_the_failed_test_line(monkeypatch):
     _fake_ssh(monkeypatch, module,
               "scores_refresh|600\n"
               "failed_test|assert_every_serving_row_names_its_team|1|6583\n")
-    ages, failures, failed_tests, _unboxed, _unplayered = module.read_ages("host")
+    ages, failures, failed_tests, _outcomes = module.read_ages("host")
     assert ages == {"scores_refresh": 600}
     assert failures == {}
     assert failed_tests == {"assert_every_serving_row_names_its_team": (1, 6583)}
@@ -647,7 +687,7 @@ def test_the_watcher_parses_the_unboxed_line_and_fails_on_it(monkeypatch, capsys
     """
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(chk, "read_ages",
-                        lambda _h: (fresh, {}, {}, (150, 100_800, "w3"), None))
+                        lambda _h: (fresh, {}, {}, _all_clear(unboxed=(150, 100_800, "w3"))))
     assert chk.main(["host"]) == 1, "finished games missing from the site must FAIL the check"
     out = capsys.readouterr().out
     assert "UNBOXED 150" in out, out
@@ -660,7 +700,9 @@ def test_the_unboxed_line_is_silent_when_the_site_is_current(monkeypatch, capsys
     so a site with nothing outstanding must produce no line at all."""
     fresh = {name: 60 for name in chk.CADENCES}
     for payload in (None, (0, 0, "-")):
-        monkeypatch.setattr(chk, "read_ages", lambda _h, p=payload: (fresh, {}, {}, p, None))
+        outcomes = _all_clear() if payload is None else _all_clear(unboxed=payload)
+        monkeypatch.setattr(chk, "read_ages",
+                            lambda _h, o=outcomes: (fresh, {}, {}, o))
         assert chk.main(["host"]) == 0, payload
         assert "UNBOXED" not in capsys.readouterr().out
 
@@ -674,9 +716,9 @@ def test_an_older_forced_command_without_the_unboxed_line_still_parses(monkeypat
 
     monkeypatch.setattr(chk.subprocess, "run",
                         lambda *a, **k: _types.SimpleNamespace(stdout=lines, returncode=0))
-    ages, failures, failed_tests, unboxed, _unplayered = chk.read_ages("host")
+    ages, failures, failed_tests, outcomes = chk.read_ages("host")
     assert ages == {"scores_refresh": 120, "lines_snapshot": 300}
-    assert unboxed is None and not failures and not failed_tests
+    assert "unboxed" not in outcomes and not failures and not failed_tests
 
 
 def test_the_forced_command_emits_the_unboxed_line_against_published_serving():
@@ -721,11 +763,11 @@ def test_a_monitor_that_cannot_read_serving_says_so_rather_than_passing(monkeypa
     import types as _types
     monkeypatch.setattr(chk.subprocess, "run",
                         lambda *a, **k: _types.SimpleNamespace(stdout=lines, returncode=0))
-    _ages, _f, _ft, unboxed, _unplayered = chk.read_ages("host")
-    assert unboxed is not None, "the sentinel must not be discarded"
-    assert unboxed[0] == -1
+    _ages, _f, _ft, outcomes = chk.read_ages("host")
+    assert "unboxed" in outcomes, "the sentinel must not be discarded"
+    assert outcomes["unboxed"][0] == -1
 
-    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}, {}, unboxed, None))
+    monkeypatch.setattr(chk, "read_ages", lambda _h, o=outcomes: (fresh, {}, {}, o))
     assert chk.main(["host"]) == 1, "a blind outcome check must fail the run"
     assert "BLIND" in capsys.readouterr().out
 
@@ -746,7 +788,7 @@ def test_the_watcher_parses_the_unplayered_line_and_fails_on_it(monkeypatch, cap
     """
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(chk, "read_ages",
-                        lambda _h: (fresh, {}, {}, None, (126, 100_800, "w3")))
+                        lambda _h: (fresh, {}, {}, _all_clear(unplayered=(126, 100_800, "w3"))))
     assert chk.main(["host"]) == 1, (
         "finished games with no player box score on the site must FAIL the check")
     out = capsys.readouterr().out
@@ -763,7 +805,7 @@ def test_the_team_half_passing_does_not_excuse_the_player_half(monkeypatch, caps
     """
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(chk, "read_ages",
-                        lambda _h: (fresh, {}, {}, (0, 0, "-"), (126, 100_800, "w3")))
+                        lambda _h: (fresh, {}, {}, _all_clear(unplayered=(126, 100_800, "w3"))))
     assert chk.main(["host"]) == 1
     out = capsys.readouterr().out
     assert "UNPLAYERED 126" in out, out
@@ -776,7 +818,7 @@ def test_a_monitor_that_cannot_read_serving_says_so_for_the_player_half_too(monk
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(
         chk, "read_ages",
-        lambda _h: (fresh, {}, {}, None, (-1, 0, "MONITOR.cannot_read_published_serving")))
+        lambda _h: (fresh, {}, {}, _all_clear(unplayered=(-1, 0, "MONITOR.cannot_read_published_serving"))))
     assert chk.main(["host"]) == 1, "a check that cannot run is not a check that passed"
     assert "BLIND" in capsys.readouterr().out
 
@@ -785,8 +827,9 @@ def test_the_unplayered_line_is_silent_when_the_boards_have_rows(monkeypatch, ca
     """An always-on alarm is the same failure as a silent one."""
     fresh = {name: 60 for name in chk.CADENCES}
     for payload in (None, (0, 0, "-")):
+        outcomes = _all_clear() if payload is None else _all_clear(unplayered=payload)
         monkeypatch.setattr(chk, "read_ages",
-                            lambda _h, p=payload: (fresh, {}, {}, None, p))
+                            lambda _h, o=outcomes: (fresh, {}, {}, o))
         assert chk.main(["host"]) == 0, payload
         assert "UNPLAYERED" not in capsys.readouterr().out
 
@@ -827,12 +870,12 @@ def test_read_ages_actually_parses_an_unplayered_line(monkeypatch):
              "unplayered|126|100800|w3\n")
     monkeypatch.setattr(chk.subprocess, "run",
                         lambda *a, **k: _types.SimpleNamespace(stdout=lines, returncode=0))
-    ages, _f, _ft, unboxed, unplayered = chk.read_ages("host")
+    ages, _f, _ft, outcomes = chk.read_ages("host")
 
     assert ages == {"scores_refresh": 120}, (
         "the two outcome lines must not be mistaken for heartbeats")
-    assert unboxed == (0, 0, "-")
-    assert unplayered == (126, 100_800, "w3")
+    assert outcomes["unboxed"] == (0, 0, "-")
+    assert outcomes["unplayered"] == (126, 100_800, "w3")
 
 
 def test_read_ages_keeps_the_player_sentinel_instead_of_dropping_it(monkeypatch):
@@ -844,5 +887,122 @@ def test_read_ages_keeps_the_player_sentinel_instead_of_dropping_it(monkeypatch)
     lines = "unplayered|MONITOR.cannot_read_published_serving|0|-\n"
     monkeypatch.setattr(chk.subprocess, "run",
                         lambda *a, **k: _types.SimpleNamespace(stdout=lines, returncode=0))
-    _a, _f, _ft, _u, unplayered = chk.read_ages("host")
-    assert unplayered == (-1, 0, "MONITOR.cannot_read_published_serving")
+    _a, _f, _ft, outcomes = chk.read_ages("host")
+    assert outcomes["unplayered"] == (-1, 0, "MONITOR.cannot_read_published_serving")
+
+
+# ── THE REST OF SATURDAY: DRIVES AND THE CURVE (A185, cfdb-main-R-1914) ─────────────────────
+
+def test_every_outcome_line_the_monitor_emits_is_parsed_by_the_watcher():
+    """🚨 THE R-698 CLASS, CLOSED STRUCTURALLY INSTEAD OF ONE BRANCH AT A TIME.
+
+    R-698 was a line the monitor emitted and the watcher silently discarded, and it went
+    unnoticed for weeks because the discard is invisible: an unknown head falls through to
+    `int(rest)`, raises, and the run reports clean. A182 hit it, A184 added a second branch
+    that could have hit it again, and A185 was about to add two more copies of the same code.
+
+    ✅ So the watcher has ONE branch keyed on `OUTCOME_LINES`, and this reads the deployed
+    shell script to prove the two agree. **Adding a check to the monitor and forgetting the
+    watcher is now a red test rather than a quiet hole.**
+    """
+    import re
+    from pathlib import Path as _Path
+
+    script = (_Path(__file__).resolve().parents[1]
+              / "deploy" / "cfdb_heartbeat.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+
+    # every `select '<head>|' || ...` the script emits
+    emitted = set(re.findall(r"select\s+'([a-z_]+)\|'", code))
+    assert emitted, "found no outcome lines in the script — this test is not reading it"
+
+    # ⚠️ TWO EMITTED HEADS ARE **PROCESS** LINES, NOT OUTCOME LINES, AND THEY HAVE THEIR OWN
+    # BRANCHES. `failed|<dag>.<task>|<seconds>` and `failed_test|<name>|<rows>|<seconds>` say
+    # the machinery broke; the outcome lines say the SITE is wrong. They are named here rather
+    # than matched loosely, so a genuinely new head still fails this test.
+    PROCESS_HEADS = {"failed", "failed_test"}
+    for head in PROCESS_HEADS:
+        assert f'"{head}"' in _watcher_source(), (
+            f"{head} is emitted but the watcher has no branch for it")
+
+    unparsed = sorted(emitted - set(chk.OUTCOME_LINES) - PROCESS_HEADS)
+    assert not unparsed, (
+        f"the monitor emits {unparsed} and the watcher would discard them silently — "
+        f"add them to OUTCOME_LINES (R-698)")
+
+    # and the reverse: a registry entry for a line nothing emits is dead weight that reads
+    # as coverage.
+    unemitted = sorted(set(chk.OUTCOME_LINES) - emitted)
+    assert not unemitted, (
+        f"OUTCOME_LINES carries {unemitted}, which the monitor never emits")
+
+
+def _watcher_source() -> str:
+    from pathlib import Path as _Path
+    return (_Path(__file__).resolve().parents[1] / "ci" / "check_heartbeats.py").read_text()
+
+
+def test_the_drive_and_curve_lines_fail_the_run(monkeypatch, capsys):
+    """Saturday's drives and win-probability chart are half the Matchup page."""
+    fresh = {name: 60 for name in chk.CADENCES}
+    for head, label in (("undriven", "UNDRIVEN"), ("uncurved", "UNCURVED")):
+        outcomes = _all_clear(**{head: (12, 100_800, "w4")})
+        monkeypatch.setattr(chk, "read_ages", lambda _h, o=outcomes: (fresh, {}, {}, o))
+        assert chk.main(["host"]) == 1, f"{head} must fail the check"
+        out = capsys.readouterr().out
+        assert f"{label} 12" in out, out
+        assert "week(s) w4" in out
+
+
+def test_the_drive_and_curve_sentinels_report_blind(monkeypatch, capsys):
+    """A check that cannot run is not a check that passed."""
+    fresh = {name: 60 for name in chk.CADENCES}
+    for head in ("undriven", "uncurved"):
+        outcomes = _all_clear(**{head: (-1, 0, "MONITOR.cannot_read_published_serving")})
+        monkeypatch.setattr(chk, "read_ages", lambda _h, o=outcomes: (fresh, {}, {}, o))
+        assert chk.main(["host"]) == 1, head
+        assert "BLIND" in capsys.readouterr().out
+
+
+def test_the_curve_check_is_bounded_so_it_cannot_become_an_always_on_alarm():
+    """🚨 MEASURED BEFORE IT WAS WRITTEN, WHICH IS THE POINT.
+
+    Completed FBS games with a win-probability curve on live published serving: 99.24% (2024),
+    85.97% (2025), 99.23% (2026). The two 2026 games without one are Eastern Illinois at
+    Minnesota and UTEP at Oklahoma, both week 1 — **CFBD has never published a curve for them
+    and nothing we do will.** An unbounded "no curve" alarm therefore fires forever on games
+    nobody can fix, which is the always-on alarm this project forbids.
+
+    ⚠️ Drives are 100% across 2024-2026, so `undriven` needs no such tolerance — it is bounded
+    only for symmetry and for the same reason stated in the script.
+    """
+    from pathlib import Path as _Path
+
+    script = (_Path(__file__).resolve().parents[1]
+              / "deploy" / "cfdb_heartbeat.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+    curve = code[code.index("'uncurved|'"):]
+    assert "- 7" in curve.split("having")[0], (
+        "the curve check must be bounded to a recent window, or it fires forever on the two "
+        "week-1 games CFBD never covered")
+
+
+def test_one_missing_outcome_line_is_blind_and_fails(monkeypatch, capsys):
+    """🚨 cfdb-main-R-1878, THE PRECISE CASE: not "the script is ancient", but "one check
+    stopped answering".
+
+    That is the realistic failure — a query edited into a syntax error, a relation renamed, a
+    check commented out during a debug and not restored. The other three still answer, so the
+    output looks almost right, and under the old `having count(*) > 0` contract it was
+    INDISTINGUISHABLE from a clean site.
+    """
+    module = _watcher()
+    for dropped in module.OUTCOME_LINES:
+        beats = [f"{n}|60" for n in module.CADENCES]
+        lines = [f"{h}|0|0|-" for h in module.OUTCOME_LINES if h != dropped]
+        _fake_ssh(monkeypatch, module, "\n".join(beats + lines))
+
+        assert module.main(["host"]) == 1, (
+            f"dropping the {dropped} line must fail the run, not read as clean")
+        out = capsys.readouterr().out
+        assert "BLIND" in out and dropped in out, out
