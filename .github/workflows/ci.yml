@@ -25,7 +25,16 @@ concurrency:
 jobs:
   lint-and-test:
     name: flake8 + pytest
-    runs-on: ubuntu-latest
+    # 🚨 A179 (cfdb-main-R-1809). PINNED, NOT `ubuntu-latest`. Every run of the dead-man's
+    # switch carries GitHub's own notice: "The ubuntu-latest label will migrate to Ubuntu 26
+    # beginning October 19, 2026." Six jobs across two workflows would have changed operating
+    # system on a date nobody chose — including the one that builds the site image and the one
+    # that runs dbt.
+    # 📊 `ubuntu-24.04` is what `ubuntu-latest` resolves to TODAY, read from a job log rather
+    # than guessed: "Operating System / Ubuntu / 24.04.5 / LTS", "Image: ubuntu-24.04". So this
+    # pin changes nothing now, which is the point — it makes the move deliberate rather than
+    # dated.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -94,7 +103,7 @@ jobs:
     # and has nothing to do with the change under review. Failing someone's PR because CFBD
     # shipped a release, or because their API was briefly down, is noise.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04    # pinned — see the first job in this file
     steps:
       - uses: actions/checkout@v7
 
@@ -113,7 +122,7 @@ jobs:
     # Manual only: hitting the real API on every PR burns rate limit for no signal.
     # This is the acceptance test for the CFBD_API_KEY repo secret.
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04    # pinned — see the first job in this file
     steps:
       - uses: actions/checkout@v7
 
@@ -151,7 +160,7 @@ jobs:
 
   dbt:
     name: dbt build (models + tests)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04    # pinned — see the first job in this file
     # Transform correctness gets the same gate as Python. Without this, a model change
     # that breaks a reconciliation test is only caught by the weekly DAG — in production,
     # after merge.
@@ -289,7 +298,7 @@ jobs:
 
   site-image:
     name: site image builds and renders
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04    # pinned — see the first job in this file
     # THE ONLY JOB THAT LOOKS AT WHAT USERS LOOK AT.
     #
     # Until 30 August nothing in CI touched the site image at all — its Dockerfile and
