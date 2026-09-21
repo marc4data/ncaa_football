@@ -55,7 +55,7 @@ def read_ages(host: str) -> dict:
         raise RuntimeError(
             f"could not read heartbeats from {host} (exit {result.returncode}): "
             f"{result.stderr.strip()[:400]}")
-    ages, failures, failed_tests = {}, {}, {}
+    ages, failures, failed_tests, unboxed = {}, {}, {}, None
     for line in result.stdout.splitlines():
         line = line.strip()
         if not line or "|" not in line:
@@ -71,6 +71,24 @@ def read_ages(host: str) -> dict:
         # failing at 17:36 PDT and the scores publish stopped with it. The switch fired at 23:28
         # with four error lines and NOT ONE named the test — the name was in the payload the whole
         # time. A109 read it out of raw.raw_dbt_test_result by hand instead.
+        # 🚨 `unboxed|<count>|<oldest seconds>|<weeks>` — A182 (cfdb-main-R-1866), THE OUTCOME
+        # LINE, and it is the only one that speaks about the SITE rather than the pipeline.
+        # Every other signal here says the machinery ran; this says whether a reader can see
+        # last night's games. It was added because the 2026-09-19 slate was absent for over a
+        # day while every machinery check read green.
+        #
+        # ⚠️ PARSED BEFORE THE HEARTBEAT BRANCH, for the reason R-698 records one paragraph
+        # down: an unknown `head` falls through to `int(rest)`, raises ValueError, and the line
+        # is silently DISCARDED. A payload nothing reads is worse than no payload, because it
+        # looks like coverage.
+        if head.strip() == "unboxed":
+            count, _, tail = rest.partition("|")
+            age, _, weeks = tail.partition("|")
+            try:
+                unboxed = (int(count), int(age), weeks.strip() or "-")
+            except ValueError:
+                pass
+            continue
         if head.strip() == "failed_test":
             name, _, tail = rest.partition("|")
             count, _, age = tail.partition("|")
@@ -93,7 +111,7 @@ def read_ages(host: str) -> dict:
             ages[head.strip()] = int(rest)
         except ValueError:
             continue
-    return ages, failures, failed_tests
+    return ages, failures, failed_tests, unboxed
 
 
 def describe(seconds: int) -> str:
@@ -108,7 +126,7 @@ def main(argv=None) -> int:
     host = (argv or sys.argv[1:] or ["cfdb_monitor@localhost"])[0]
 
     try:
-        ages, failures, failed_tests = read_ages(host)
+        ages, failures, failed_tests, unboxed = read_ages(host)
     except Exception as error:                                           # noqa: BLE001
         # THE DROPLET BEING UNREACHABLE IS THE ALARM, not a reason to exit quietly.
         print(f"::error::the pipeline host is unreachable — {error}")
@@ -148,13 +166,22 @@ def main(argv=None) -> int:
     for name, (count, age) in sorted(failed_tests.items()):
         print(f"  FAILED  {name}: {count} row(s), last failed {describe(age)} ago")
 
+    # 🚨 THE OUTCOME LINE, REPORTED FIRST AMONG THE FAULTS BECAUSE IT IS THE ONLY ONE A READER
+    # WOULD NOTICE. Everything above says the machinery ran; this says whether last night's
+    # games are on the site (A182, cfdb-main-R-1866).
+    if unboxed and unboxed[0]:
+        count, age, weeks = unboxed
+        print(f"  UNBOXED {count} FBS team-game(s) final with no box score on the site "
+              f"— oldest {describe(age)}, week(s) {weeks}")
+
     unknown = sorted(set(ages) - set(CADENCES))
     if unknown:
         # Not a failure: a new DAG that beats before anyone adds it here is better than one
         # that does not beat at all. Worth saying so it gets a budget.
         print(f"\n  note: beating but unmonitored — {', '.join(unknown)}")
 
-    if stale or missing or failures or failed_tests:
+    unboxed_now = bool(unboxed and unboxed[0])
+    if stale or missing or failures or failed_tests or unboxed_now:
         print()
         for line in stale + missing:
             print(f"::error::heartbeat absent — {line}")

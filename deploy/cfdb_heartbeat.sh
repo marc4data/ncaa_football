@@ -148,6 +148,54 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # above. So the payload costs no new privilege at all -- specifically NOT filesystem access
 # to run_results.json, which would widen a forced command that is restricted on purpose.
 #
+# ── A182 (cfdb-main-R-1866): THE OUTCOME CHECK — ARE FINISHED GAMES ON THE SITE? ───────────
+#
+# > **MARC, 2026-09-20:** *"The data has to load and it has to be presented on the site. …
+# > Saturday into Sunday is an unacceptable time to fail to load a full slate of game results.
+# > Unacceptable."*
+#
+# 🚨 EVERY OTHER SIGNAL THIS SCRIPT EMITS MEASURES THE MACHINERY. The heartbeats say a cadence
+# ran; the failure lines say a task broke; the test lines say an assertion fired. **Not one of
+# them asks whether a reader can see last night's games** — which is why the 2026-09-19 slate
+# was absent for more than a day while every check read green.
+#
+# 🚨 AND IT IS THE ONLY QUERY HERE THAT RUNS AGAINST **PUBLISHED SERVING** RATHER THAN THE
+# WAREHOUSE. That distinction is the whole point: the warehouse having the data and the site
+# showing it are different facts, and this project has confused them twice (R-878, and again
+# in A179's first reading). The site reads the serving database, so the alarm must too.
+#
+# ⚠️ CURRENT SEASON ONLY, AND THAT IS A DELIBERATE BOUND. Box scores are `recent` scope, so
+# 2023 and earlier legitimately have none and would put ~1,800 team-games on the alarm forever;
+# and 2024 carries 8 team-games CFBD never produced an advanced box for. An always-on alarm is
+# the same failure as a silent one — this file already argues that two hundred lines up — so
+# the question is asked about the season being played.
+#
+# ⚠️ `> 3 hours` PAST THE GAME'S OWN DAY, not past kickoff: `srv_game_team.game_date` is a
+# DATE, so the bound is "its day is over and three hours have passed", which is comfortably
+# after the latest west-coast final and before the next morning.
+#
+# ✅ IT DEGRADES LOUDLY, like the airflow query above. If serving cannot be read, the line says
+# so rather than the check silently reporting nothing wrong.
+SERVING_HOST="${CFDB_SERVING_HOST:-127.0.0.1}"
+SERVING_PORT="${CFDB_SERVING_PORT:-5433}"
+SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
+      -h "$SERVING_HOST" -p "$SERVING_PORT"
+      -U "${CFDB_SERVING_USER:-cfdb}" -d "${CFDB_SERVING_DB:-cfdb}")
+
+"${SERVING_PSQL[@]}" -c "
+  select 'unboxed|' || count(*) || '|' ||
+         coalesce(max(floor(extract(epoch from (now() - (game_date + 1))))::bigint), 0) || '|' ||
+         coalesce(string_agg(distinct 'w' || week, ',' order by 'w' || week), '-')
+  from serving.srv_game_team
+  where is_fbs_game
+    and is_completed
+    and points_for is not null
+    and season = (select max(season) from serving.srv_game_team where is_completed)
+    and game_date < (now() at time zone 'America/Los_Angeles')::date
+    and (not has_box_score or not has_box_advanced)
+  having count(*) > 0
+" || echo "unboxed|MONITOR.cannot_read_published_serving|0|-"
+
 # One line per failing test: name, how many rows failed, how long ago. Not the log.
 # 6 hours matches the failure window above so the two signals describe the same period.
 "${PSQL[@]}" -c "
