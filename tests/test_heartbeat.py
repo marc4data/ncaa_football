@@ -102,7 +102,7 @@ def test_an_unreachable_host_is_the_alarm_not_an_error(monkeypatch, capsys):
 def test_a_stale_cadence_fails_and_names_itself(monkeypatch, capsys):
     fresh = {name: 60 for name in chk.CADENCES}
     fresh["scores_refresh"] = 7 * 3600            # budget is 5h
-    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}, {}))
+    monkeypatch.setattr(chk, "read_ages", lambda _h: (fresh, {}, {}, None))
     assert chk.main(["host"]) == 1
     out = capsys.readouterr().out
     assert "STALE" in out and "scores_refresh" in out
@@ -113,13 +113,13 @@ def test_a_cadence_that_never_beat_is_not_silently_ok(monkeypatch, capsys):
     """A missing key reads as "no news". It is the opposite."""
     monkeypatch.setattr(
         chk, "read_ages",
-        lambda _h: ({n: 60 for n in chk.CADENCES if n != "weekly_results"}, {}, {}))
+        lambda _h: ({n: 60 for n in chk.CADENCES if n != "weekly_results"}, {}, {}, None))
     assert chk.main(["host"]) == 1
     assert "NEVER BEAT" in capsys.readouterr().out
 
 
 def test_all_fresh_passes(monkeypatch, capsys):
-    monkeypatch.setattr(chk, "read_ages", lambda _h: ({n: 60 for n in chk.CADENCES}, {}, {}))
+    monkeypatch.setattr(chk, "read_ages", lambda _h: ({n: 60 for n in chk.CADENCES}, {}, {}, None))
     assert chk.main(["host"]) == 0
     assert "beating within budget" in capsys.readouterr().out
 
@@ -204,7 +204,7 @@ def test_the_watcher_reads_failed_tasks_as_well_as_missing_beats(monkeypatch):
     _fake_ssh(monkeypatch, module,
               "scores_refresh|600\nlines_snapshot|900\n"
               "failed|cfbd_scores_refresh.dbt_test|1200\n")
-    ages, failures, failed_tests = module.read_ages("host")
+    ages, failures, failed_tests, _unboxed = module.read_ages("host")
     assert ages == {"scores_refresh": 600, "lines_snapshot": 900}
     assert failures == {"cfbd_scores_refresh.dbt_test": 1200}
 
@@ -232,7 +232,7 @@ def test_an_older_forced_command_does_not_break_the_watcher(monkeypatch):
     monitor that crashes on output it does not recognise is a monitor that is off."""
     module = _watcher()
     _fake_ssh(monkeypatch, module, "\n".join(f"{n}|60" for n in module.CADENCES))
-    ages, failures, failed_tests = module.read_ages("host")
+    ages, failures, failed_tests, _unboxed = module.read_ages("host")
     assert failures == {} and len(ages) == len(module.CADENCES)
     assert module.main(["host"]) == 0
 
@@ -317,7 +317,7 @@ def test_the_watcher_and_the_forced_command_agree_on_the_failure_format(monkeypa
         returncode, stdout, stderr = 0, line + "\n", ""
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
-    _, failures, _ = module.read_ages("host")
+    _, failures, _, _unboxed = module.read_ages("host")
     assert failures == {"cfbd_scores_refresh.dbt_test": 8100}
 
 
@@ -350,7 +350,7 @@ def test_a_monitor_that_cannot_see_failures_says_so_rather_than_reporting_none(m
 
     # R-633. monkeypatch, for the reason written at the other patch site in this file.
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: Done())
-    _, failures, _ = module.read_ages("host")
+    _, failures, _, _unboxed = module.read_ages("host")
     assert "MONITOR.cannot_read_airflow_metadata" in failures
 
 
@@ -491,7 +491,7 @@ def test_the_watcher_parses_the_failed_test_line(monkeypatch):
     _fake_ssh(monkeypatch, module,
               "scores_refresh|600\n"
               "failed_test|assert_every_serving_row_names_its_team|1|6583\n")
-    ages, failures, failed_tests = module.read_ages("host")
+    ages, failures, failed_tests, _unboxed = module.read_ages("host")
     assert ages == {"scores_refresh": 600}
     assert failures == {}
     assert failed_tests == {"assert_every_serving_row_names_its_team": (1, 6583)}
@@ -627,3 +627,81 @@ def test_every_scheduled_dag_runs_more_often_than_the_alarm_forgets():
     assert not too_slow, (
         f"these DAGs run less often than the alarm's {hours}h window, so a failure would "
         f"scroll out of view before the next run could clear it: {too_slow}")
+
+
+# === A182: the OUTCOME line — are finished games on the site? (cfdb-main-R-1866) ============
+
+def test_the_watcher_parses_the_unboxed_line_and_fails_on_it(monkeypatch, capsys):
+    """🚨 A182. THE ONLY SIGNAL IN THIS SYSTEM THAT SPEAKS ABOUT THE SITE.
+
+    > **MARC, 2026-09-20:** *"The data has to load and it has to be presented on the site. …
+    > Saturday into Sunday is an unacceptable time to fail to load a full slate of game
+    > results. Unacceptable."*
+
+    📊 Every other line measures the machinery, and on 2026-09-19 every one of them read green
+    while the whole slate was missing from the site for over a day. This replays that: 150 FBS
+    team-games, oldest ~28 hours, week 3 — the real numbers A182 measured before the fix.
+
+    ⚠️ AND IT MUST BE A FAILURE, NOT A NOTE. R-698's lesson is that a payload nothing acts on
+    is worse than no payload, because it looks like coverage.
+    """
+    fresh = {name: 60 for name in chk.CADENCES}
+    monkeypatch.setattr(chk, "read_ages",
+                        lambda _h: (fresh, {}, {}, (150, 100_800, "w3")))
+    assert chk.main(["host"]) == 1, "finished games missing from the site must FAIL the check"
+    out = capsys.readouterr().out
+    assert "UNBOXED 150" in out, out
+    assert "week(s) w3" in out, "it must say WHICH weeks, not just how many (R-412)"
+
+
+def test_the_unboxed_line_is_silent_when_the_site_is_current(monkeypatch, capsys):
+    """⚠️ THE OTHER HALF, AND THE ONE THAT KEEPS THE ALARM CREDIBLE. An always-on alarm is the
+    same failure as a silent one — this file argues that at length about the failure window —
+    so a site with nothing outstanding must produce no line at all."""
+    fresh = {name: 60 for name in chk.CADENCES}
+    for payload in (None, (0, 0, "-")):
+        monkeypatch.setattr(chk, "read_ages", lambda _h, p=payload: (fresh, {}, {}, p))
+        assert chk.main(["host"]) == 0, payload
+        assert "UNBOXED" not in capsys.readouterr().out
+
+
+def test_an_older_forced_command_without_the_unboxed_line_still_parses(monkeypatch):
+    """⚠️ THE DROPLET AND THE WATCHER DEPLOY SEPARATELY, so for a window the watcher is newer
+    than the forced command. A missing line must read as "nothing to report", never as a crash
+    — the same property the `failed_test` line needed when it was added."""
+    lines = "scores_refresh|120\nlines_snapshot|300\n"
+    import types as _types
+
+    monkeypatch.setattr(chk.subprocess, "run",
+                        lambda *a, **k: _types.SimpleNamespace(stdout=lines, returncode=0))
+    ages, failures, failed_tests, unboxed = chk.read_ages("host")
+    assert ages == {"scores_refresh": 120, "lines_snapshot": 300}
+    assert unboxed is None and not failures and not failed_tests
+
+
+def test_the_forced_command_emits_the_unboxed_line_against_published_serving():
+    """🚨 THE QUERY MUST RUN AGAINST **PUBLISHED SERVING**, NOT THE WAREHOUSE, and that is the
+    distinction this whole incident turned on: the warehouse holding the data and the site
+    showing it are different facts (R-878, and again in A179's first reading).
+
+    ⚠️ Asserted on the script's text because there is no droplet in CI — the same limit the
+    other forced-command tests carry, and narrow on purpose.
+    """
+    from pathlib import Path as _Path
+
+    script = (_Path(__file__).resolve().parents[1]
+              / "deploy" / "cfdb_heartbeat.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+
+    assert "'unboxed|'" in code, "the forced command no longer emits the outcome line"
+    assert "SERVING_PSQL" in code, (
+        "the outcome query must use the serving connection, not the warehouse one — the "
+        "warehouse having the data is not the site showing it")
+    assert "has_box_score" in code and "has_box_advanced" in code
+    assert "cannot_read_published_serving" in code, (
+        "it must degrade LOUDLY, like the airflow query does — a monitor that cannot see is "
+        "not a monitor reporting nothing wrong")
+    # Current season only: 2023 and earlier legitimately have no box scores at all.
+    assert "select max(season)" in code, (
+        "without a season bound this fires on ~1,800 pre-2024 team-games forever, and an "
+        "always-on alarm is the same failure as a silent one")

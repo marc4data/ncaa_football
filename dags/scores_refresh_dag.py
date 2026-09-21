@@ -251,8 +251,38 @@ def _fetch(**context):
 
 
 def _load(**context):
+    """Load what the fetch task handed over.
+
+    🚨 A182 (cfdb-main-R-1865). AN ABSENT LIST IS A FAILED FETCH AND MUST NOT READ AS "NOTHING
+    TO DO". This used to end `or []`, which turned a missing endpoint list into an empty loop
+    and a GREEN task.
+
+    📊 A180 measured the cost of that shape. `_fetch` pushes its `endpoints` XCom only AFTER
+    `refresh_callable()` returns, so the 2026-09-20 run — whose fetch raised — pushed nothing:
+    the `xcom` table for `scheduled__2026-09-20T12:00:00+00:00` holds only
+    `capture_test_results.return_value`, while the successful `manual__2026-09-13` run holds
+    both `fetch.return_value` and `fetch.endpoints`. **Clearing that run from this task would
+    have loaded nothing, reported success, and let dbt and the publish run on unchanged data —
+    a green pipeline over an empty weekend.**
+
+    🚨 AND `None` IS NOT `[]`. THE TWO ABSENCES ARE DIFFERENT AND ONLY ONE IS A FAULT
+    (AC-G.11):
+
+        None  the key was never pushed        -> the fetch did not hand over its work. FAIL.
+        []    the fetch pushed an empty list  -> a legitimate skip (`week_window` returns
+                                                 nothing off-season, so `_run` is never
+                                                 reached and `endpoints` is []). Fine.
+
+    ⚠️ Collapsing them with `or []` is exactly what hid the first case behind the second.
+    """
     endpoints = context["task_instance"].xcom_pull(task_ids="fetch_scores",
-                                                   key="endpoints") or []
+                                                   key="endpoints")
+    if endpoints is None:
+        raise RuntimeError(
+            "fetch_scores pushed no `endpoints` list, so there is nothing to load. "
+            "That means the fetch task did not complete — a load that reported success "
+            "here would let dbt and the publish run on unchanged data (cfdb-main-R-1865). "
+            "An empty LIST is fine and means a legitimate skip; a MISSING key is not.")
     for endpoint in endpoints:
         load_endpoint(endpoint)
     return {"loaded": endpoints}

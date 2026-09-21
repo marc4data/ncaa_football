@@ -808,3 +808,83 @@ def test_srv_player_play_publishes_the_drive_key_it_was_given():
     assert re.search(r"^ *- name: drive_id$", block, re.M), (
         "drive_id is selected but undocumented; assert_serving_columns_are_documented would "
         "fail the build, and a reader of the data dictionary would not know it exists")
+
+
+# === A182: a load that reports success having loaded nothing (cfdb-main-R-1865) ============
+
+def _load_callables():
+    """The two `_load` functions, LIFTED BY AST rather than imported.
+
+    ⚠️ IMPORTING THE DAG MODULE PULLS IN AIRFLOW AND EVERY `src.` DEPENDENCY, which CI does
+    not have — the first draft of this test imported them, caught the ImportError, and would
+    have reported success having tested NOTHING. The assertion in the test below refused that,
+    which is the guard working on the guard.
+
+    So the function's own source is extracted and executed with `load_endpoint` stubbed. The
+    body under test is the `xcom_pull` and the refusal, and neither touches Airflow.
+    """
+    import ast
+
+    out = {}
+    for name in ("weekly_refresh_dag.py", "scores_refresh_dag.py"):
+        source = (DAGS / name).read_text()
+        tree = ast.parse(source)
+        fn = next((n for n in tree.body
+                   if isinstance(n, ast.FunctionDef) and n.name == "_load"), None)
+        assert fn is not None, f"{name}: no `_load` to test"
+        namespace = {"load_endpoint": lambda endpoint: None}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), name, "exec"), namespace)
+        out[name] = namespace["_load"]
+    return out
+
+
+class _TI:
+    def __init__(self, value, missing=False):
+        self._value, self._missing = value, missing
+
+    def xcom_pull(self, task_ids=None, key=None):
+        return None if self._missing else self._value
+
+
+def test_a_load_with_no_endpoint_list_fails_instead_of_reporting_success():
+    """🚨 A182 (cfdb-main-R-1865). THE FALSE GREEN A180 FOUND, CLOSED.
+
+    📊 `_fetch` pushes its `endpoints` XCom only AFTER the refresh returns, so a FAILED fetch
+    pushes nothing. With the old `xcom_pull(...) or []`, a cleared load pulled `None`, looped
+    zero times and returned **success** — and dbt and the publish would then run on unchanged
+    data. A180 confirmed it against the `xcom` table: the 2026-09-20 run holds only
+    `capture_test_results.return_value`.
+
+    🚨 AND THE TWO ABSENCES MUST STAY DISTINGUISHABLE (AC-G.11). An empty LIST is a legitimate
+    skip — `week_window` returns nothing off-season, so `_run` is never reached — and it must
+    still load nothing quietly. A MISSING key is a fetch that did not hand over its work.
+    """
+    loads = _load_callables()
+    assert loads, "neither DAG module could be imported — this test is reading nothing"
+
+    for name, load in loads.items():
+        # MISSING key -> loud failure
+        with pytest.raises(RuntimeError) as exc:
+            load(task_instance=_TI(None, missing=True))
+        assert "nothing to load" in str(exc.value), name
+        assert "cfdb-main-R-1865" in str(exc.value), (
+            f"{name}: the refusal must name the finding so a reader can look it up")
+
+        # EMPTY list -> quiet, and it loaded nothing
+        assert load(task_instance=_TI([])) == {"loaded": []}, name
+
+
+def test_restoring_or_empty_brings_the_false_green_back():
+    """⚠️ THE STAGED BREAK, AS A TEST RATHER THAN AS A NOTE. `or []` is a four-character edit
+    and it is exactly what shipped; this asserts that making it would be caught."""
+    import re
+
+    for path in ("dags/weekly_refresh_dag.py", "dags/scores_refresh_dag.py"):
+        source = (DAGS.parent / path).read_text()
+        pulled = re.search(r"endpoints = context\[.task_instance.\]\.xcom_pull\((.|\n)*?\)",
+                           source)
+        assert pulled, f"{path}: the xcom_pull moved or changed shape"
+        assert "or []" not in pulled.group(), (
+            f"{path}: `or []` is back — a missing endpoint list would load nothing and report "
+            f"success, which is the defect A180 found (cfdb-main-R-1865)")
+        assert "if endpoints is None:" in source, f"{path}: the guard is gone"
