@@ -355,7 +355,8 @@ def _team_yardage(scope, depth: int) -> pd.DataFrame:
         select team_display, team_slug, team_logo_url, team_rank, record_before_display,
                conference, opponent, week, is_completed,
                opponent_team_slug, opponent_team_display, opponent_logo_url, opponent_rank,
-               total_yards, rushing_yards, passing_yards, points_for, result, as_of_ts
+               total_yards, rushing_yards, passing_yards, points_for, points_against,
+               result, as_of_ts
         from srv_game_team
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
@@ -633,9 +634,26 @@ def _win_probability_curves(game_ids) -> pd.DataFrame:
 # ✅ THIS IS `layout[1]`'s OWN PATTERN, APPLIED TO THE COLUMN BESIDE IT: derived from the frame,
 # because a constant *"would be wrong the first week nothing goes to overtime"* — and equally
 # wrong the first week something does.
-_SCOREBOARD_REGULATION_PX = 426
-_SCOREBOARD_OVERTIME_PX = 464
-_SCOREBOARD_GUTTER_PX = 12
+# 🚨 A189 RE-MEASURED THESE AND BOTH WERE OVER-PROVISIONED — Marc: *"a lot of padding to the
+# right of the scoreboard."*
+#
+# 📊 MEASURED IN CHROMIUM against the real week-3 render, per row, not per constant:
+#
+#     the nine REGULATION rows       427px content   (constant said 426)
+#     the one OVERTIME row           458px content   (constant said 464)   <- Temple at Toledo
+#     the column it was given        476px = 464 + 12 gutter
+#
+# ⚠️ SO THE CONSTANT WAS 6px TOO WIDE AND THE GUTTER ADDED 12 MORE: the widest row carried
+# **18px** of slack and every regulation row carried **49px**. Correcting the constants returns
+# 6px to every row and the gutter drops to 6, which is still a visible separation at 0.9rem.
+#
+# 🚨 AND THE ANSWER TO MARC'S QUESTION IS HERE RATHER THAN IN A COMMIT MESSAGE: **the most
+# overtimes last week was ONE period**, in Temple at Toledo (48-49). One overtime game in the
+# rendered ten widens this column by 31px for the other nine, because a column has one width.
+# That is most of the padding he saw; the rest was these two numbers.
+_SCOREBOARD_REGULATION_PX = 427
+_SCOREBOARD_OVERTIME_PX = 458
+_SCOREBOARD_GUTTER_PX = 6
 
 
 def _quarter_cells(row, side: str):
@@ -943,10 +961,20 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None) -> str:
     # remaining cell one track to the LEFT — so a card drawn without a rank would put the team
     # where the rank belongs and the metrics where the player belongs, silently, on a page
     # whose whole point this round is that the columns line up.
-    rank_block = (f"<div class='cfdb-card-rank'>"
-                  f"{int(rank) if rank is not None else ''}</div>")
+    # 🚨 A189 (cfdb-main-R-1932). THE RANK IS NO LONGER IN THE CARD.
+    #
+    # > **MARC:** *"Could also save some horizontal real estate by not printing the rank in the
+    # > player card. Instead, have a row header with the rank so it's only printed once per row
+    # > instead printing in each card."*
+    #
+    # ⚠️ IT MOVED TO `_player_card_grid`, WHICH IS WHERE IT WAS ALWAYS COMPUTED — A178's comment
+    # on that loop says the position in the frame IS the rank, and warns against recomputing it
+    # inside the card. Lifting it to the row makes that structural rather than advisory: the
+    # card can no longer print a rank because it is no longer given one.
+    #
+    # ⚠️ `rank` IS KEPT IN THE SIGNATURE AND IGNORED so Matchup's caller — which passes it —
+    # does not have to change in the same round as a Today layout edit (§3 rule 3.1).
     return (f"<div class='cfdb-card'>"
-            f"{rank_block}"
             f"{team_block}"
             f"<div class='cfdb-card-who'>{identity.player_row(row)}</div>"
             # ⚠️ THE METRICS ARE LAST IN THE MARKUP AND RIGHT-ALIGNED IN THE LAYOUT, which is
@@ -975,24 +1003,42 @@ def _player_card_grid(columns, stat_label: str) -> None:
     its heading and an honest line rather than vanishing, because a missing column in a
     three-column grid reads as a layout fault rather than as an absence (AC-G.11).
     """
-    cells = []
+    # 🚨 A189 (cfdb-main-R-1932). THE BOARD IS ROWS NOW, NOT THREE INDEPENDENT STACKS.
+    #
+    # The rank is printed ONCE per row in a gutter to the left, instead of once per card —
+    # three times the ink and three times the horizontal space for one number that is the same
+    # in all three. ⚠️ **The rank still means position within its own column**, which is what
+    # A178 established and what the queries order by; the gutter shows it once because all
+    # three columns share the position, not because they share a ranking.
+    #
+    # ⚠️ COLUMNS CAN BE UNEQUAL — a category with fewer players leaves a hole in its column
+    # rather than pulling the row below it up, which would put rank 4 beside rank 3.
+    per_column, headings = [], []
     for heading, frame, metric_types in columns:
+        headings.append(fmt.text(heading))
         if frame is None or frame.empty:
-            body = "<div class='cfdb-card-none'>Nothing in this category yet.</div>"
+            per_column.append(None)
         else:
-            # 🚨 A178 (cfdb-main-R-1856). THE RANK IS THE ROW'S POSITION IN THIS COLUMN, and
-            # it is counted HERE because this is where the ordering is. `_player_board`
-            # ordered the frame by the column's own primary stat descending and the query's
-            # `limit` cut whole players from the bottom — so position in this frame IS the
-            # overall rank Marc asked for. ⚠️ **Not a second ranking**: recomputing it inside
-            # the card from `stat_value` would disagree with the frame the moment two players
-            # tie, because the query's tiebreak is `player_name` and a card cannot see it.
-            body = "".join(_player_card(row, stat_label, metric_types, rank=position)
-                           for position, (_index, row)
-                           in enumerate(frame.iterrows(), start=1))
-        cells.append(f"<div class='cfdb-cardcol'>"
-                     f"<div class='cfdb-cardcol-head'>{fmt.text(heading)}</div>{body}</div>")
-    st.markdown(f"<div class='cfdb-cardboard'>{''.join(cells)}</div>",
+            per_column.append([
+                _player_card(row, stat_label, metric_types)
+                for _index, row in frame.iterrows()])
+
+    depth = max((len(c) for c in per_column if c), default=0)
+    head = ("<div class='cfdb-cardrow-rank cfdb-cardrow-head'></div>"
+            + "".join(f"<div class='cfdb-cardcol-head'>{h}</div>" for h in headings))
+    rows = []
+    for position in range(depth):
+        cells_in_row = []
+        for cards in per_column:
+            if cards is None:
+                cells_in_row.append("<div class='cfdb-card-none'>"
+                                    "Nothing in this category yet.</div>"
+                                    if position == 0 else "<div></div>")
+            else:
+                cells_in_row.append(cards[position] if position < len(cards) else "<div></div>")
+        rows.append(f"<div class='cfdb-cardrow-rank'>{position + 1}</div>"
+                    + "".join(cells_in_row))
+    st.markdown(f"<div class='cfdb-cardboard'>{head}{''.join(rows)}</div>",
                 unsafe_allow_html=True)
 
 
@@ -1340,8 +1386,33 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     periods = pd.to_numeric(top.get("home_periods"), errors="coerce")
     scoreboard_px = (_SCOREBOARD_OVERTIME_PX if periods is not None and (periods > 4).any()
                      else _SCOREBOARD_REGULATION_PX)
+    # 🚨 A189 (cfdb-main-R-1928). THE LAST SIX ARE FIXED AND THE TABLE SCROLLS.
+    #
+    # > **MARC:** *"Can we do something where the last 6 columns get a fixed width and the table
+    # > will have a horizontal scroll instead of forcing them to be super narrow, and then their
+    # > headers take up a bunch of vertical space, making the table very wonky?"*
+    #
+    # 📊 THE HEADER TEXT IS THE BINDING CONSTRAINT ON ALL SIX, WHICH IS WHY `auto` WENT WRONG.
+    # Measured at 1600px with the table's own font — header on one line vs the widest body cell:
+    #
+    #     4th qtr           58px header   8px cell
+    #     OT                38px header   8px cell
+    #     Game              57px header   8px cell
+    #     How close, late  113px header  36px cell
+    #     Excitement        88px header  20px cell
+    #     Commentary        93px header  67px cell
+    #
+    # ⚠️ **EVERY CELL IS SMALLER THAN ITS OWN HEADER**, so `auto` sized them from the header and
+    # then, at a narrow viewport, collapsed them below it: measured at 1100px the three `auto`
+    # columns fell to 45px each and the header row grew 45px -> 60px. **That is the "wonky"** —
+    # a density loss in the body paid for by a taller header, which is the trap A165 named.
+    #
+    # ✅ Each width is the measured header plus 16px of padding, so the label cannot wrap at any
+    # viewport; the table scrolls instead of compressing. `sticky=2` keeps Scoreboard and Win
+    # probability in place while the six move, which is the half of Marc's sentence that says
+    # the first two are the ones he wants to keep looking at.
     layout = [f"{scoreboard_px + _SCOREBOARD_GUTTER_PX}px", f"{widest + 12}px",
-              "52px", "52px", "52px", "auto", "auto", "auto"]
+              "74px", "54px", "73px", "129px", "104px", "109px"]
 
     states.render_or_state(
         top, "srv_game",
@@ -1372,8 +1443,13 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # not wrap. ✅ Shortening the labels returns that 15px **and** lets the columns be
             # pinned narrow without the header growing back — which is the trap: a density win
             # in the body paid for by a taller header is not a win.
-            Col("scoreboard_lead_changes_fourth_quarter", "4th qtr", kind="num"),
-            Col("scoreboard_lead_changes_overtime", "OT", kind="num"),
+            # ⚠️ A189: THE TOOLTIPS CARRY WHAT THE REMOVED CAPTION CARRIED. Without them
+            # `4th qtr` / `OT` / `Game` are three bare nouns — the caption was the only thing
+            # saying they count LEAD CHANGES.
+            Col("scoreboard_lead_changes_fourth_quarter", "4th qtr", kind="num",
+                title="Lead changes in the fourth quarter"),
+            Col("scoreboard_lead_changes_overtime", "OT", kind="num",
+                title="Lead changes in overtime"),
             # ⚠️ A164. MARC MOVED A DISPLAYED COLUMN, NOT THE SORT — Today v04: *"Move Lead
             # Changes Game between OT Lead Changes and How Close Late."* `MOST_EXCITING_ORDER`
             # is untouched and the caption still describes the ordering, which is unchanged.
@@ -1382,7 +1458,8 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # invisible to it. `test_most_exciting_layout_pins_only_the_first_two_columns` holds
             # that property, because a `layout` silently out of step with the columns shows up
             # only on a wide viewport.
-            Col("scoreboard_lead_changes", "Game", kind="num"),
+            Col("scoreboard_lead_changes", "Game", kind="num",
+                title="Lead changes in the whole game"),
             Col("mean_distance_from_even_fourth_quarter_onward", "How close, late", kind="num", dp=3),
             Col("excitement_index", "Excitement", kind="num", dp=1),
             # 🚨 A144. THE OUTCOME GLYPH JOINS THE LINK IN ONE CELL — Marc: *"Put them in the
@@ -1394,13 +1471,42 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # see `_commentary`, which measured all three before choosing.
             Col("espn", "Commentary", render=lambda r: _commentary(r, scope, stacked=True)),
         ], layout=layout, anchor="most-exciting",
-            # ⚠️ PLAIN TEXT, NOT MARKDOWN. `table.render` puts this straight into an HTML
-            # `<caption>` element — it is not `st.caption` — so `**bold**` renders as four
-            # literal asterisks. Caught in the raster; every other `caption=` on this page is
-            # plain prose for the same reason.
-            caption="Lead changes: fourth quarter, overtime, whole game. Ordered by "
-                    "fourth-quarter lead changes, then by mean distance from an even win "
-                    "probability from the fourth quarter onward (lower is closer)."))
+            # 🚨 A189 (cfdb-main-R-1927). THE `caption=` IS GONE — Marc: *"The paragraph about
+            # methodology should be removed below the table showing the Most Exciting games."*
+            #
+            # ⚠️ WHAT IT SAID IS NOT LOST, IT MOVED: the three lead columns carry one-line
+            # `title` tooltips naming what they count, and the ORDERING sentence was already
+            # in the `st.caption` above this table — it was duplicated here, which is part of
+            # why it read as a paragraph of methodology.
+            #
+            # 🚨 AND THE TABLE NOW SCROLLS RATHER THAN COMPRESSING. `sticky=2` pins Scoreboard
+            # and Win probability, which are the two Marc said were "showing completely"; the
+            # six fixed columns scroll past them. See `layout` above for the measurements.
+            scroll=True, sticky=2))
+
+
+def _upset_score(row) -> str:
+    """The final, loser's score first — e.g. `24–31`. A189 (cfdb-main-R-1929).
+
+    > **MARC:** *"Add the scores"* (Biggest upsets)
+
+    🚨 READ, NOT RECOMPUTED. `home_points` and `away_points` are published on `srv_game` and are
+    what every other panel on this page shows; deriving the pair from `actual_margin` and one
+    side's score would be metric arithmetic in a page (§4.2.1) **and** a second source for a
+    number the frame already carries — the drift R-544 cost this module once already, on this
+    very frame, when `ats` was computed here and had its sign inverted on every graded game.
+
+    ⚠️ THE LOSER IS THE FAVORITE, WHICH IS WHY THIS PANEL CAN ORDER THE PAIR AT ALL. Every row
+    here satisfies `fav_margin < 0`, so the favorite lost; the favorite side column says which
+    side that was. An en dash, not a hyphen: it is a score pair, and the site uses `–`
+    for that everywhere else.
+    """
+    side = row.get("moneyline_favorite_side") or row.get("spread_favorite_side")
+    home, away = row.get("home_points"), row.get("away_points")
+    if home is None or away is None or pd.isna(home) or pd.isna(away):
+        return ""
+    loser, winner = (home, away) if side == "home" else (away, home)
+    return f"{int(loser)}–{int(winner)}"
 
 
 def _favorite_margin(row):
@@ -1624,7 +1730,17 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
         else r.home_team_display, axis=1)
     graded["fav_margin"] = graded.apply(_favorite_margin, axis=1)
     graded["spread"] = graded["spread_at_close"].fillna(graded["spread_current"]).abs()
-    graded["ats"] = graded["fav_margin"] - graded["spread"]
+    # 🚨 `ats` IS GONE WITH THE LIST THAT READ IT — A189 (cfdb-main-R-1929).
+    #
+    # It was `fav_margin - spread`: **metric arithmetic in a page**, which is the line §4.2.1
+    # draws, and R-544 records what it cost when the sign was inverted on every graded game.
+    # The underdog covers list was its only consumer; removing that section without removing
+    # this would have left a contract violation computed for nobody.
+    #
+    # ⚠️ IF IT IS EVER NEEDED AGAIN IT COMES FROM THE MODEL, NOT FROM HERE. `srv_game_team`
+    # already publishes `ats_margin_final` with `covered_final` beside it, at game x TEAM
+    # grain — the grain difference is why it was recomputed here rather than read, and that is
+    # a model round, not a page one.
     graded["fav_win_prob"] = graded.apply(
         lambda r: r.market_implied_home_win_probability if r.spread_favorite_side == "home"
         else r.market_implied_away_win_probability, axis=1)
@@ -1656,7 +1772,8 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
     # ⚠️ Nothing is deleted but a PRESENTATION — `ats` keeps a reader in the surviving list.
     upsets = graded[graded["fav_margin"] < 0].sort_values(
         "fav_win_prob", ascending=False, na_position="last").head(10)
-    covers = graded[graded["ats"] < 0].sort_values("ats").head(10)
+    # 🚨 A189: `covers` IS GONE — Marc: *"Biggest Underdog covers / Remove this section"*.
+    # `ats` is still computed above and still used by `_movers`; nothing else fed this list.
 
     st.markdown("**Biggest upsets**")
     st.caption(
@@ -1675,6 +1792,10 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
          # MARC: *"Margin should be integer."* `fmt.precision_for` matches the substring
          # "margin" and returns 1, so this needed saying explicitly rather than by omission.
          Col("fav_margin", "Margin", kind="num", dp=0),
+         # A189: the final, loser first — Marc: *"Add the scores"*. Its own column rather than
+         # folded into a team cell, so it reads as a score and stays where a reader expects.
+         Col("score", "Score", render=_upset_score,
+             title="Final score, the losing favorite first"),
          # MARC: *"Market gave them should be ##.#%"* — `fmt.percent`, which A144 added because
          # the site had no percent shape and was about to get its second inline f-string.
          Col("fav_win_prob", "Market gave them",
@@ -1683,26 +1804,12 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
         caption="Ranked by the loser's pregame market-implied win probability.",
         anchor="how-the-week-went-against-the-market")
 
-    st.markdown("**Biggest underdog covers**")
-    st.caption(
-        "Underdogs the market priced too low, ranked by how far past the number they finished. "
-        "These are graded against the spread rather than the result, so a team here may still "
-        "have lost the game.")
-    table.render(covers.assign(underdog=covers["opponent"], beat=covers["ats"].abs()),
-                 [Col("underdog", "Underdog", render=_underdog_cell),
-                  Col("favorite", "Favorite", render=_favorite_cell),
-                  Col("spread", "Getting", kind="num", dp=1),
-                  Col("beat", "Covered by", kind="num", dp=1),
-                  Col("espn", "Commentary", render=lambda r: _commentary(r, scope))],
-                 caption="Ranked by points beyond the closing spread.",
-                 anchor="how-the-week-went-against-the-market")
-
     disagree = int(graded["favorite_definitions_disagree"].fillna(False).sum())
     if disagree:
         st.caption(
             f"\u26a0\ufe0f In {disagree} of these games the spread and the moneyline named "
-            "different favorites. The upsets list uses the moneyline, because that is what an "
-            "implied win probability comes from; the covers list uses the spread.")
+            "different favorites. This list uses the moneyline, because that is what an "
+            "implied win probability comes from.")
 
 
 def _movers(scope, depth: int) -> None:
@@ -2074,6 +2181,67 @@ def _profile(scope, depth: int) -> None:
         st.caption(note)
 
 
+# Marc's number, held as a number rather than folded into the expression: *"1.15 of the table
+# MAX"*. See `_spark_max`, and `test_the_yardage_bars_leave_headroom_for_their_labels`.
+_SPARK_HEADROOM = 1.15
+
+
+def _week_average_row(scope) -> dict:
+    """The week's average yardage over **every team in an FBS game**, not just the rows shown.
+
+    🚨 A189 (cfdb-main-R-1931). > **MARC:** *"Can we add a row that is the average for the week
+    (all teams involved in an FBS game, not just the ones we are showing)"*
+
+    📊 HIS WORDS AND THE PAGE'S OWN FILTER ARE DIFFERENT POPULATIONS, AND THE DIFFERENCE IS
+    MATERIAL — measured on live published serving, 2026 week 3:
+
+        every team in an FBS game (his words)   150 team-games, 18 of them non-FBS   380 yards
+        FBS-classified teams only (the filter)  132 team-games,  0 non-FBS           399 yards
+
+    ⚠️ **HIS WORDS ARE APPLIED**: *"all teams involved"* includes the FCS side of an FBS game, and
+    those eighteen teams pull the average down nineteen yards. The board above may be filtered to
+    FBS by `scope`, so this row can describe a wider population than the rows it sits under —
+    **which is exactly what he asked for**, and the caption says so rather than leaving a reader
+    to assume the mean is of the visible rows.
+
+    ⚠️ ONE QUERY, ONE RELATION, NO JOIN (G-2), AND THE MEAN IS COMPUTED IN SQL. A mean is a
+    statistic of a stated population, not a rendering: computing it in the page would be the
+    metric arithmetic §4.2.1 forbids, and it could not see the rows the page never fetched.
+    """
+    frame = query("""
+        select count(*) as n,
+               avg(total_yards) as total_yards,
+               avg(rushing_yards) as rushing_yards,
+               avg(passing_yards) as passing_yards
+        from srv_game_team
+        where season = :season and season_type = :season_type
+          and (:week is null or week = :week)
+          and is_completed and is_fbs_game
+        limit 1
+    """, {"season": scope.season, "season_type": scope.season_type, "week": scope.week})
+    if frame is None or frame.empty or not int(frame.iloc[0]["n"] or 0):
+        return {}
+    row = frame.iloc[0]
+    return {"n": int(row["n"]), "total_yards": row["total_yards"],
+            "rushing_yards": row["rushing_yards"], "passing_yards": row["passing_yards"]}
+
+
+def _team_score(row) -> str:
+    """`W 38\u201317` / `L 17\u201338` — the result and the final, from published columns.
+
+    A189. > **MARC:** *"Include the scores next to the teams"*
+
+    ⚠️ `result` IS PUBLISHED AND IS NOT DERIVED HERE from comparing the two numbers: the view
+    already decides what a win is, and a page re-deciding it is a second definition that can
+    disagree (§4.2.1). The two points columns are read, not computed.
+    """
+    pf, pa, res = row.get("points_for"), row.get("points_against"), row.get("result")
+    if pf is None or pa is None or pd.isna(pf) or pd.isna(pa):
+        return ""
+    mark = (str(res)[:1].upper() if res else "")
+    return f"{mark} {int(pf)}\u2013{int(pa)}".strip()
+
+
 def _spark_max(frame) -> float:
     """The ONE denominator every bar on the yardage board is drawn against.
 
@@ -2092,7 +2260,17 @@ def _spark_max(frame) -> float:
         return 0.0
     values = pd.to_numeric(frame["total_yards"], errors="coerce").dropna()
     top = float(values.max()) if len(values) else 0.0
-    return top if top > 0 else 0.0
+    # 🚨 A189 (cfdb-main-R-1930). 1.15x THE TABLE MAX, NOT THE MAX ITSELF.
+    #
+    # > **MARC:** *"Can we change the fixed axis for the Total, Rush, Pass to be 1.15 of the
+    # > table MAX? That will push the size of the bars down a little bit so the label isn't in
+    # > the chart."*
+    #
+    # ⚠️ THE REASON IS THE LABEL, NOT THE BAR. `_spark_cell` right-aligns the number in the
+    # CELL while the bar grows from the left, so the longest bar reached full cell width and
+    # ran underneath its own value. Headroom keeps them apart without changing what a bar
+    # MEANS — every bar still shares one denominator, which is the property A175 established.
+    return top * _SPARK_HEADROOM if top > 0 else 0.0
 
 
 def _spark_cell(row, field: str, frame) -> str:
@@ -2125,6 +2303,27 @@ def _leaderboards(scope, depth: int) -> None:
     # degraded-state card would have named a view this panel no longer touches.
     with states.section("srv_game_team", dataset=DATASETS["srv_game_team"]):
         teams = _team_yardage(scope, depth)
+        # 🚨 A189 (cfdb-main-R-1931). THE WEEK AVERAGE IS APPENDED AS A ROW, PINNED LAST.
+        #
+        # ⚠️ PINNED RATHER THAN SORTED WITH THE REST, and it has to be: a mean is not a
+        # competitor. Sorting would drop it into the middle of the ranking as though it were a
+        # team, and on a sorted board it would land somewhere different every click.
+        # **Last rather than first** because the board is a ranking — a reader coming to see
+        # who led should meet the leader, and the benchmark reads naturally as the line the
+        # board is measured against once the rows above it are read.
+        #
+        # ⚠️ `sortable="applied"` IS WHAT KEEPS IT THERE. `table.render` would otherwise sort
+        # the frame including this row; "applied" means the caller has ordered it and render
+        # draws the links without re-sorting. The panel arrives ordered by the SQL already.
+        week_avg = _week_average_row(scope)
+        if week_avg:
+            teams = pd.concat([teams, pd.DataFrame([{
+                "team_display": f"Week average \u00b7 {week_avg['n']} teams",
+                "is_summary_row": True,
+                "total_yards": week_avg["total_yards"],
+                "rushing_yards": week_avg["rushing_yards"],
+                "passing_yards": week_avg["passing_yards"],
+            }])], ignore_index=True)
         st.markdown("**Team yardage**")
         states.render_or_state(
             teams, "srv_game_team",
@@ -2135,11 +2334,17 @@ def _leaderboards(scope, depth: int) -> None:
                 # spelling of the four facts. `srv_game_team` publishes no after-record, so the
                 # last argument is omitted and `record_span` shows the before-record — see
                 # `_team_yardage`.
+                # ⚠️ A189: THE SUMMARY ROW IS NOT A TEAM, so it does not get a team's cell —
+                # no logo, no rank badge, no record, and no link to a team page that does not
+                # exist. Styled as a label so it reads as the benchmark it is.
                 Col("team_display", "Team",
-                    render=lambda r: _team_identity(
-                        r, "", slug_field="team_slug", display_field="team_display",
-                        logo_field="team_logo_url", rank_field="team_rank",
-                        record_field="record_before_display")),
+                    render=lambda r: (
+                        f"<span class='cfdb-summary-row'>{r.get('team_display')}</span>"
+                        if r.get("is_summary_row") else
+                        _team_identity(
+                            r, "", slug_field="team_slug", display_field="team_display",
+                            logo_field="team_logo_url", rank_field="team_rank",
+                            record_field="record_before_display"))),
                 # 🚨 A175 (cfdb-main-R-1751). THE OPPONENT IS THE SAME CELL AS THE TEAM NOW.
                 # > **MARC, Today v04:** *"Opponent - should look the same as the Team column
                 # > layout."* It was a bare string beside a Team column carrying a logo, a rank
@@ -2156,6 +2361,10 @@ def _leaderboards(scope, depth: int) -> None:
                         r, "", slug_field="opponent_team_slug",
                         display_field="opponent_team_display",
                         logo_field="opponent_logo_url", rank_field="opponent_rank")),
+                # A189: the result and the final, beside the teams they belong to.
+                # Marc: *"Include the scores next to the teams"*.
+                Col("points_for", "Score", render=_team_score,
+                    title="Result and final score for this team's game"),
                 # 🚨 ONE DENOMINATOR FOR ALL THREE COLUMNS, AND IT IS TOTAL'S MAX.
                 # > **MARC:** *"Make them all proportionate and relative to the max of the Total
                 # > column."* A per-column max would make a 90-yard rushing game draw as long as
@@ -2166,7 +2375,14 @@ def _leaderboards(scope, depth: int) -> None:
                     render=lambda r: _spark_cell(r, "rushing_yards", d)),
                 Col("passing_yards", "Pass", kind="num",
                     render=lambda r: _spark_cell(r, "passing_yards", d)),
-            ], caption="Ranked by total offense, with each team's record going into the game.", anchor="leaderboards"),
+            ], caption=("Ranked by total offense, with each team's record going into the "
+                        "game. The Week average row is every team that played in an FBS game "
+                        "that week \u2014 including the FCS side of one \u2014 not only the "
+                        "teams shown above."),
+                anchor="leaderboards",
+                # A189: the frame is ordered by the SQL and carries a pinned summary row;
+                # re-sorting here would move the average into the middle of the ranking.
+                sortable="applied"),
         )
 
     # 🚨 A166: THREE CARD BOARDS, NINE COLUMNS, AND THE THIRD SPLITS ON A DIFFERENT AXIS.
@@ -2725,8 +2941,24 @@ def body(page) -> None:
     # four boards. That is a visible change he did not ask for in those words, and it is called
     # out in the report rather than buried — **the radio is on the page and one click restores
     # 25**, which is why this is a default rather than a constant.
-    depth = st.radio("Leaderboard depth", DEPTHS, index=0, horizontal=True,
-                     key="today_depth", help="How many rows each leaderboard shows.")
+    # 🚨 A189 (cfdb-main-R-1926). THE LEGEND SITS ON THE RADIO'S ROW, AT A QUARTER WIDTH.
+    #
+    # > **MARC:** *"Legend button is too big. Can you move it to be inline with the leaderboard
+    # > depth? and reduce size to 1/4 of page width, or some other method to constrain the size
+    # > to something reasonable."*
+    #
+    # ⚠️ A COLUMN RATIO, NOT A PIXEL GUESS. `st.popover(use_container_width=True)` is what made
+    # the button full-width; the flag is kept and the CONTAINER is narrowed instead, so the
+    # button fills a quarter of whatever the page is rather than a number that is right at one
+    # viewport. `[3, 1]` is the quarter Marc asked for.
+    depth_col, legend_col = st.columns([3, 1], vertical_alignment="bottom")
+    with depth_col:
+        depth = st.radio("Leaderboard depth", DEPTHS, index=0, horizontal=True,
+                         key="today_depth", help="How many rows each leaderboard shows.")
+    with legend_col:
+        # ⚠️ THE LEGEND MOVED UP FROM BELOW THE TAB BAR, which is a visible change to the page's
+        # order and is exactly what was asked for. Its CONTENTS are untouched.
+        _legend(_completed_games(scope))
 
     _tab_bar(slug)
     # 🚨 A144. THE LEGEND BUTTON SITS UNDER THE TAB BAR, ABOVE THE PANELS THAT USE THE MARKS —
@@ -2742,7 +2974,8 @@ def body(page) -> None:
     # nothing; elsewhere it is one cached read of at most 400 rows. The alternative — a
     # dedicated `select upset_margin_big …` — would be a second source for a number the page
     # already has in hand, which is the drift §4.3 exists to stop.
-    _legend(_completed_games(scope))
+    #
+    # ✅ A189: the call MOVED to the radio's row above; it is not drawn twice.
     for name in panels:
         globals()[name](scope, depth)
 

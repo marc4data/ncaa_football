@@ -444,6 +444,10 @@ TABLE_CSS = """
    looks fine until a row scrolls under it. */
 .cfdb-scroll .cfdb-table thead th.cfdb-sticky { z-index:4; }
 .cfdb-table-wide { width:max-content; min-width:100%; }
+/* A189: a scrolling table whose every column is a measured px takes exactly that width and no
+   more. `min-width:100%` would share the leftover out as cell padding — which is the "lot of
+   padding to the right of the scoreboard" Marc reported, reappearing on a wide screen. */
+.cfdb-table-wide.cfdb-table-exact { min-width:0; }
 .cfdb-table th.cfdb-sticky, .cfdb-table td.cfdb-sticky {
     position:sticky; background:var(--cfdb-sticky-bg); z-index:2; }
 /* The header's frozen cells sit above the body's, or a scrolled row paints over them at the
@@ -664,8 +668,19 @@ TABLE_CSS = """
    it is inert on every page that never receives a fragment. */
 [id] { scroll-margin-top: .75rem; }
 
-.cfdb-cardboard { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr));
-                  gap:.5rem 2rem; margin:.25rem 0 .75rem; }
+/* 🚨 A189 (cfdb-main-R-1932). A RANK GUTTER, THEN THE THREE CATEGORY COLUMNS.
+   Marc: "have a row header with the rank so it's only printed once per row instead printing
+   in each card." The board is rows now — the gutter is the first grid track and each card
+   row writes one rank cell followed by three cards, so the number is drawn once. */
+.cfdb-cardboard { display:grid;
+                  grid-template-columns:1.5rem repeat(3, minmax(0, 1fr));
+                  gap:.5rem 2rem; margin:.25rem 0 .75rem; align-items:start; }
+/* The rank, once per row. Tabular figures so 1 and 10 occupy the same width and the gutter
+   stays a gutter. Top-aligned with the cards beside it rather than centered on a tall row. */
+.cfdb-cardrow-rank { font-size:.72rem; font-weight:700; opacity:.45;
+                     font-variant-numeric:tabular-nums; text-align:right;
+                     padding-top:.55rem; }
+.cfdb-cardrow-head { padding-top:0; }
 /* A178: "Add decent amount of horizontal spacing between the player cards" — the gap is on
    the BOARD (between the three columns) rather than on the card, because that is the
    horizontal space he is pointing at; a card's own margin would only indent it. */
@@ -710,12 +725,25 @@ TABLE_CSS = """
    ⚠️ THE MIDDLE TRACK IS THE ONLY FLEXIBLE ONE (`minmax(0, 1fr)`), so a long player name
    ellipsises INSIDE its own cell instead of pushing the metrics out of line. `min-width:0` is
    what makes that possible at all (the R-745 class). */
+/* 🚨 A189 (cfdb-main-R-1933). THE TEAM STACKS: LOGO OVER NAME.
+   Marc: "Need to move the Team Name to be under the Logo b/c the card is too crowded
+   horizontally to present well." The team cell keeps `_team_identity`'s markup — the same
+   cell every other panel draws — and only its AXIS changes here, so nothing about what the
+   cell contains moves. The column narrows from 5.75rem to 3.6rem, which is the horizontal
+   space the stack buys back. */
+.cfdb-card-team > a, .cfdb-card-team > span { display:flex; flex-direction:column;
+                                              align-items:center; gap:.1rem;
+                                              text-align:center; line-height:1.15; }
+.cfdb-card-team .cfdb-team { font-size:.68rem; }
+
 .cfdb-card { min-width:0; padding:.4rem .45rem; border:1px solid var(--cfdb-edge);
              border-left:2px solid var(--cfdb-edge);
              background:var(--cfdb-row-alt, transparent); border-radius:3px;
              margin-bottom:.4rem;
              display:grid; align-items:center; gap:.4rem;
-             grid-template-columns:1.1rem 5.75rem minmax(0, 1fr) 7.25rem; }
+             /* A189: the rank track is GONE (it is the board's gutter now) and the team
+                track narrows because the name sits under the logo. */
+             grid-template-columns:3.6rem minmax(0, 1fr) 7.25rem; }
 /* The rank Marc asked for, far left. Tabular figures so 1 and 10 occupy the same width and
    the column below stays a column. */
 .cfdb-card-rank { font-size:.72rem; font-weight:700; opacity:.45;
@@ -793,6 +821,11 @@ TABLE_CSS = """
    Only the logo is resized, because a 28px disc is a table-row affordance and this is a card. */
 .cfdb-card-team .cfdb-logo-box, .cfdb-card-team .cfdb-logo { width:18px; height:18px; }
 .cfdb-card-none { font-size:.78rem; opacity:.6; padding:.3rem .5rem; }
+/* A189 (cfdb-main-R-1931). The Week average row on the yardage board: a BENCHMARK, not a
+   competitor. Italic and dimmed so it reads as a different kind of row at a glance, and it
+   carries no logo, rank badge or record — see `today._team_yardage`'s Team column. */
+.cfdb-summary-row { font-style:italic; opacity:.75; font-weight:600; }
+
 .cfdb-team-record { font-size:.75rem; font-weight:400; opacity:.65; margin-left:.4rem;
                     white-space:nowrap; }
 /* R-027: weather is a glyph plus a temperature, or a dome glyph alone. */
