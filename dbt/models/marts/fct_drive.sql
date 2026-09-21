@@ -279,17 +279,55 @@ select
         when 'FG TD'            then 'field_goal_return_td'
         when 'END OF HALF TD'   then 'end_of_half_return_td'
         when 'END OF GAME TD'   then 'end_of_game_return_td'
+        -- ── A183 (cfdb-main-R-1870): THREE STRINGS CFBD INVENTED AFTER THE FACT ────────────
+        --
+        -- 📊 All three arrived on 2026-09-20, when the Sunday refresh re-fetched the PRIOR
+        -- week (`include_prior=True`) and CFBD had revised it. Five drives, all in ONE game —
+        -- Jacksonville State at Ohio, 401866418 — and `assert_every_drive_result_maps_to_a_
+        -- known_key` is what caught them. **That test is the reason this mapping is written
+        -- out rather than pattern-matched, and it must keep catching the next one.**
+        --
+        -- 🚨 `KICKOFF RETURN TD` IS THE ONE THAT COULD HAVE GONE ON THE WRONG BOARD, AND THE
+        -- DRIVE ROW SETTLES IT: offense `Ohio`, **98 yards on 1 play**, period 2. That is a
+        -- kickoff returned the length of the field for a touchdown BY THE TEAM LISTED AS
+        -- OFFENSE — the opposite of `PUNT RETURN TD`, where the offense is the punting side
+        -- and the DEFENSE scores (measured: defense moved on 87 of 87). So this one is an
+        -- OFFENSIVE score, and the two `*_RETURN_TD` names sit on opposite sides.
+        --
+        -- ⚠️ THE SCORE DELTA — THE METHOD THAT PROVED EVERY MAPPING ABOVE — WAS SILENT HERE,
+        -- AND THE REPORT SAYS SO RATHER THAN IMPLYING IT AGREED. All five drives show 0-0
+        -- movement on both sides, because the revised snapshots did not carry the points
+        -- (14->14 with the return TD in between). **The yardage is what decides it**, and one
+        -- row is too few for the delta to settle anything anyway.
+        when 'KICKOFF RETURN TD' then 'kickoff_return_td'
+        -- 📊 Periods 7 and 8 — OVERTIME. From the third OT college football requires a
+        -- two-point try instead of a drive, and CFBD logs each attempt as its own one-play,
+        -- zero-yard drive. A failed one puts no points on either board.
+        when '2PT PASS FAILED'  then 'two_point_failed'
+        -- 📊 Period 8, ZERO plays, -5 yards: a drive that ended on a dead-ball penalty
+        -- without a snap. Distinct from `DOWNS` — nobody failed to convert; the possession
+        -- ended administratively.
+        when 'PENALTY'          then 'penalty'
     end                                                     as drive_result_key,
 
     -- The icon FAMILY, so pass 2 picks glyphs per category and only overrides where it wants
     -- to. Deliberately coarser than the key: eleven keys collapse to one 'defensive score'.
     case
-        when drive_result in ('TD', 'FG')                          then 'offensive score'
+        -- A183: `KICKOFF RETURN TD` joins the OFFENSIVE scores, not the defensive ones —
+        -- see the key mapping above. The drive's offense is the returning team.
+        when drive_result in ('TD', 'FG', 'KICKOFF RETURN TD')     then 'offensive score'
         when drive_result in ('INT TD', 'FUMBLE RETURN TD', 'FUMBLE TD', 'PUNT TD',
                               'PUNT RETURN TD', 'MISSED FG TD', 'DOWNS TD', 'FG TD',
                               'END OF HALF TD', 'END OF GAME TD', 'SF')
                                                                    then 'defensive score'
         when drive_result in ('INT', 'FUMBLE', 'DOWNS')            then 'turnover'
+        -- ⚠️ A183: `unknown` IS A DELIBERATE CHOICE, NOT A GAP. A failed two-point try is a
+        -- scoring ATTEMPT that failed and a penalty drive is an administrative end; neither is
+        -- a turnover (possession did not change by error), a kick, or a clock expiry. The
+        -- honest coarse family is the one the page already draws as a bare stroke — its own
+        -- comment: *"an unrecognised category falls to `unknown` and draws a bare stroke
+        -- rather than borrowing a verdict."* The KEY carries what actually happened.
+        when drive_result in ('2PT PASS FAILED', 'PENALTY')        then 'unknown'
         when drive_result in ('PUNT', 'BLOCKED PUNT')              then 'punt'
         when drive_result in ('MISSED FG', 'BLOCKED FG', 'KICKOFF') then 'kick'
         when drive_result in ('END OF HALF', 'END OF GAME', 'END OF 4TH QUARTER')
@@ -304,7 +342,11 @@ select
     -- subsequent score, which is why plain 'TD' shows 698 drives where the defense's score
     -- also moved. The vocabulary is the cleaner signal and the icon follows it.
     case
-        when drive_result in ('TD', 'FG')                          then 'offense'
+        -- A183: the returning team is this drive's OFFENSE (98 yards, 1 play), so the points
+        -- go on the offense's board. `2PT PASS FAILED` and `PENALTY` score nothing and are
+        -- left NULL rather than attributed — a null draws no arrow; a wrong side draws one
+        -- pointing at the wrong end zone.
+        when drive_result in ('TD', 'FG', 'KICKOFF RETURN TD')     then 'offense'
         when drive_result in ('INT TD', 'FUMBLE RETURN TD', 'FUMBLE TD', 'PUNT TD',
                               'PUNT RETURN TD', 'MISSED FG TD', 'DOWNS TD', 'FG TD',
                               'END OF HALF TD', 'END OF GAME TD', 'SF')
