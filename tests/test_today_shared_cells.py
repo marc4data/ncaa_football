@@ -380,8 +380,11 @@ def test_the_card_names_the_team_because_that_is_the_one_thing_marc_required():
     # ⚠️ SO THE CARD IS NOW ONE ROW READ LEFT TO RIGHT, and the order IS the requirement:
     # rank, then team, then the player, then the metrics. A test that only checked the parts
     # were present would pass on any arrangement of them.
-    assert card.index("cfdb-card-rank") < card.index("cfdb-card-team"), (
-        "the rank is the far-left column")
+    # ⚠️ A189: THE RANK IS NO LONGER IN THE CARD — Marc asked for it once per ROW instead of
+    # once per card, so the far-left column of the card is now the team. The order requirement
+    # survives intact for the three cells that remain; only the track that held the rank went.
+    assert "cfdb-card-rank" not in card, (
+        "the rank moved to the board's row gutter in A189")
     assert card.index("cfdb-card-team") < card.index("cfdb-card-who"), (
         "the team name and logo come before the player, per v10")
     assert card.index("cfdb-card-who") < card.index("cfdb-card-value"), (
@@ -774,9 +777,14 @@ def test_every_table_render_that_takes_an_anchor_is_the_one_that_draws():
              and node.func.attr == "render"
              and isinstance(node.func.value, ast.Name) and node.func.value.id == "table"]
     anchored = [n.lineno for n in calls if any(kw.arg == "anchor" for kw in n.keywords)]
-    assert len(anchored) >= 5, (
-        f"A141 anchored nine table.render calls; A156 turned one into a chart element and A166 "
-        f"turned three into card grids; only {len(anchored)} carry an anchor now")
+    # A141 anchored nine; A156 turned one into a chart element, A166 turned three into card
+    # grids, and A189 REMOVED the Biggest underdog covers table on Marc's instruction — which
+    # is why this is 4 and not 5. ⚠️ The floor is a floor: it catches an anchor quietly
+    # dropped from a table that still exists, which is the regression it was written for.
+    assert len(anchored) >= 4, (
+        f"A141 anchored nine table.render calls; A156 turned one into a chart element, A166 "
+        f"turned three into card grids and A189 removed the underdog covers table; only "
+        f"{len(anchored)} carry an anchor now")
     # 🚨 AND THE COUNT ONLY MEANS SOMETHING IF EVERY REMAINING TABLE STILL CARRIES ONE. A page
     # that grew a new unanchored table would otherwise hide a dropped anchor behind its own
     # arrival — the bound would still be met and a panel would have lost its scroll restore.
@@ -1635,6 +1643,11 @@ def test_the_leaderboards_panel_itself_renders_without_an_error_card():
              "passing_yards": 400 - i * 100, "points_for": 30, "result": "W",
              "as_of_ts": pd.Timestamp("2026-09-18", tz="UTC")} for i in range(3)])
 
+    def week_average():
+        """The single-row aggregate behind the Week average row (A189)."""
+        return pd.DataFrame([{"n": 150, "total_yards": 379.98,
+                              "rushing_yards": 159.07, "passing_yards": 220.91}])
+
     every_type = ("YDS", "TD", "INT", "REC", "CAR", "TOT", "TFL", "SACKS")
 
     # ⚠️ STUBBED BY RELATION, NOT BY CALL ORDER. This panel reads TWO views — `srv_game_team`
@@ -1656,8 +1669,15 @@ def test_the_leaderboards_panel_itself_renders_without_an_error_card():
     with render_harness.streamlit_stubbed(
             query_params={"season": "2026", "week": "2"}) as (_st, captured, _charts):
         page = importlib.reload(importlib.import_module("views.today"))
+        # 🚨 A189: THE PANEL READS `srv_game_team` TWICE, WITH TWO DIFFERENT SHAPES, so a stub
+        # keyed on the relation alone now answers the wrong one. The team board wants rows; the
+        # Week average row wants a single aggregate. Answering the aggregate with the row frame
+        # raises `KeyError: 'n'` inside `states.section`, which draws a card — the exact
+        # assembly failure this test exists to catch, caught by it.
         page.query = lambda sql, params=None: (
-            teams() if "from srv_game_team" in sql else frame(every_type))
+            week_average() if "count(*) as n" in sql
+            else teams() if "from srv_game_team" in sql
+            else frame(every_type))
         page._leaderboards(_BoardScope(), 10)
         render_harness.assert_no_error_card(captured, "the leaderboards panel")
         html = "\n".join(captured)
@@ -1722,14 +1742,31 @@ def test_a_card_with_no_rank_still_reserves_its_column():
     with_rank = today._player_card(_card_row(), "yards", rank=3)
     without = today._player_card(_card_row(), "yards")
 
-    assert "cfdb-card-rank" in without, (
-        "the cell must exist even when empty, or every other cell shifts a track")
-    assert with_rank.count("cfdb-card-rank") == without.count("cfdb-card-rank") == 1
+    # 🚨 A189 (cfdb-main-R-1932) REVERSED THIS, AND THE REASON THE OLD RULE EXISTED IS WHY THE
+    # NEW ONE IS SAFER.
+    #
+    # > **MARC:** *"Could also save some horizontal real estate by not printing the rank in the
+    # > player card. Instead, have a row header with the rank so it's only printed once per row
+    # > instead printing in each card."*
+    #
+    # A178's rule was "the rank CELL must always exist, even empty, or every other cell shifts
+    # a track". ✅ **The rank track is gone from the card entirely now**, so there is no cell to
+    # omit and nothing to shift — the failure mode this test was written for cannot occur. The
+    # rank lives in the board's own gutter (`cfdb-cardrow-rank`), drawn once per row.
+    #
+    # ⚠️ `rank=` IS STILL ACCEPTED AND MUST BE IGNORED, which is the new trap: Matchup passes it
+    # (§3 rule 3.1 — a shared change ships the default and the other session consumes it on its
+    # own round), and a card that quietly started printing it again would put the number back in
+    # every cell.
+    assert "cfdb-card-rank" not in without
+    assert "cfdb-card-rank" not in with_rank, (
+        "the rank moved to the board's row gutter; a card must not draw it again")
+    assert ">3<" not in with_rank, "passing rank= must not print a rank inside the card"
+    assert with_rank == without, (
+        "`rank=` is accepted for Matchup's sake and must make no difference to the markup")
 
-    # The four cells in the one order the grid lays out, with and without a rank.
+    # The three remaining cells, in the one order the grid lays out.
     for card in (with_rank, without):
         order = [card.index(c) for c in
-                 ("cfdb-card-rank", "cfdb-card-team", "cfdb-card-who", "cfdb-card-value")]
-        assert order == sorted(order), f"the four tracks are out of order: {card[:200]}"
-
-    assert ">3<" in with_rank, "the rank is drawn when there is one"
+                 ("cfdb-card-team", "cfdb-card-who", "cfdb-card-value")]
+        assert order == sorted(order), f"the three tracks are out of order: {card[:200]}"

@@ -64,6 +64,11 @@ NOT_A_ROW = {"params", "os", "environ", "st", "config", "session_state",
 # ⚠️ NAMES A PAGE LEGITIMATELY READS THAT NO QUERY SELECTS. One entry, one reason, no blanket.
 # To add one you must be able to finish "the page reads this and no query selects it because…".
 PROVIDED_BY_THE_PAGE = {
+    "is_summary_row": "A189. Today's team-yardage board appends a Week average row that is not "
+                      "a team and comes from no relation — `today._week_average_row` queries "
+                      "the mean separately and the page marks the appended row with this flag "
+                      "so the Team cell draws a label instead of a logo, rank and record. It "
+                      "is page-provided by construction: no SELECT can carry it.",
     "game_no": "a window function's alias in the Scores sheet SQL, which this parser drops "
                "along with the rest of the expression it is computed by.",
     "rows_in_scope": "the same — `count(*) over ()` in the Scores sheet.",

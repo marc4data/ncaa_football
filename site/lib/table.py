@@ -4,6 +4,7 @@ Formatting only. Every value arrives already computed — this decides how it lo
 what it is (G-3). A column spec is declarative so a page says what a column MEANS and the
 renderer decides precision, alignment and chip treatment from that.
 """
+import hashlib
 import re
 from typing import Callable, List, Optional
 
@@ -20,9 +21,19 @@ class Col:
                  dp: Optional[int] = None, width: Optional[str] = None,
                  render: Optional[Callable] = None,
                  link: Optional[Callable] = None,
-                 opens: Optional[str] = None):
+                 opens: Optional[str] = None,
+                 title: Optional[str] = None):
         self.field, self.label, self.kind = field, label, kind
         self.dp, self.width, self.render = dp, width, render
+        # 🚨 A189 (cfdb-main-R-1927). A HEADER TOOLTIP, BECAUSE A CAPTION WAS THE WRONG SHAPE.
+        #
+        # > **MARC:** *"The paragraph about methodology should be removed below the table."*
+        #
+        # ⚠️ REMOVING IT TAKES SOMETHING WITH IT: `4th qtr`, `OT` and `Game` are only legible
+        # as LEAD CHANGES because the caption said so. A one-line `title` puts that where the
+        # reader already is — on the column — instead of a paragraph under the table.
+        # **One short line per column. Anything longer belongs in the section caption above.**
+        self.title = title
         # ── A178 (cfdb-main-R-1850): WHICH WAY THIS COLUMN OPENS ────────────────────────────
         #
         # > MARC, v10: "When I choose a column header to force a sort, it shift to sort asc,
@@ -106,8 +117,51 @@ class Col:
         return ""
 
 
+def table_key(columns: List[Col]) -> str:
+    """A short, stable id for THIS table, derived from its own column shape.
+
+    🚨 A189 (cfdb-main-R-1925). `?sort=` WAS PAGE-WIDE, SO ONE TABLE'S HEADER RE-SORTED ANOTHER.
+    📊 Measured on Today, week 3: clicking **"Getting"** on *Biggest underdog covers* sets
+    `?sort=spread`, and *Biggest upsets* — which has its own `spread` column and sits directly
+    above — silently re-ordered from its stated ranking. Texas A&M at 84.1% fell from first to
+    below Wyoming at 47.8%, while the caption still read *"ranked by how likely the market
+    thought the loser was to win"*. **A panel contradicting its own caption is exactly the
+    true-sounding-label defect §4.3 exists to stop.**
+
+    ⚠️ THE ANCHOR CANNOT BE THE KEY, WHICH IS WHY THIS IS A HASH. `_recap_lists` passes the SAME
+    anchor to both tables — they share a section heading — so keying on it would have left the
+    two tables that actually collided still colliding. The COLUMN SHAPE is what differs.
+
+    ⚠️ AND IT IS DERIVED, NOT DECLARED, so no caller has to remember it. A `table_key=` argument
+    would be the opt-in this module already learned to distrust: `sortable=True` drew live links
+    that sorted nothing in eleven views because the working behaviour was the thing you had to
+    ask for (A141).
+
+    Two tables with an identical column shape on one page share a key, and that is correct
+    rather than a collision: sorting both the same way is what a reader asking for that sort
+    would mean.
+    """
+    shape = "|".join(c.field or f"?{c.label}" for c in columns)
+    return hashlib.sha1(shape.encode("utf-8")).hexdigest()[:6]
+
+
+def split_sort(raw: Optional[str]) -> tuple:
+    """`<key>.<field>` -> (key, field). A bare field -> (None, field).
+
+    The bare form is what a hand-edited or pre-A189 link carries. It is honoured for the table
+    that owns the field so an old bookmark still sorts something sensible, rather than being
+    dropped silently (AC-G.11) — but it cannot be produced by any link this module draws.
+    """
+    if not raw:
+        return None, None
+    if "." in raw:
+        key, _, field = raw.partition(".")
+        return key, field
+    return None, raw
+
+
 def apply_sort(df: pd.DataFrame, columns: List[Col],
-               default: Optional[str] = None) -> pd.DataFrame:
+               default: Optional[str] = None, key: Optional[str] = None) -> pd.DataFrame:
     """Sort the frame by whichever column the URL asks for. AC-2.8.
 
     SORTING IS DISPLAY, and doing it here is not the thing AC-5.1 forbids. That rule is
@@ -123,7 +177,12 @@ def apply_sort(df: pd.DataFrame, columns: List[Col],
     Applied BEFORE grouping so a grouped table sorts within each group and the groups
     themselves keep their own order — a day is still a day.
     """
-    field = params.get("sort") or default
+    asked_key, field = split_sort(params.get("sort"))
+    # 🚨 A189: A SORT ADDRESSED TO ANOTHER TABLE IS NOT THIS TABLE'S SORT. Before this, any
+    # `?sort=` applied to every table on the page that happened to carry a column of that name.
+    if asked_key is not None and key is not None and asked_key != key:
+        field = None
+    field = field or default
     if not field:
         return df
     if field not in df.columns:
@@ -142,8 +201,14 @@ def apply_sort(df: pd.DataFrame, columns: List[Col],
                           kind="mergesort")
 
 
+def _tip(column: Col) -> str:
+    """The header's `title` attribute, or nothing. A189 — see `Col.title`."""
+    return f" title='{column.title}'" if getattr(column, "title", None) else ""
+
+
 def _header_cell(column: Col, sortable: bool, freeze: str = "",
-                 fields: Optional[set] = None, anchor: Optional[str] = None) -> str:
+                 fields: Optional[set] = None, anchor: Optional[str] = None,
+                 key: Optional[str] = None) -> str:
     """A header, and a sort toggle where the column has something to sort by.
 
     🚨 `fields` IS THE FRAME'S OWN COLUMNS, AND IT IS THE GENERAL FORM OF THE LIST BELOW — A141.
@@ -158,7 +223,8 @@ def _header_cell(column: Col, sortable: bool, freeze: str = "",
     strictly removes dead links and can never add one.
     """
     if fields is not None and column.field and column.field not in fields:
-        return f"<th class='{column.css}{freeze}'>{column.label}</th>"
+        return (f"<th class='{column.css}{freeze}'{_tip(column)}>"
+                f"{column.label}</th>")
     # A synthetic column has no field to sort by — "Spread · model" is two numbers in one
     # cell, and the details glyph is not data. Those render as plain headers rather than
     # as links that would do nothing.
@@ -179,22 +245,27 @@ def _header_cell(column: Col, sortable: bool, freeze: str = "",
                                                             # since R-027 shipped.
                                                             "game", "weather",
                                                             "spread_and_model"):
-        return f"<th class='{column.css}{freeze}'>{column.label}</th>"
+        return (f"<th class='{column.css}{freeze}'{_tip(column)}>"
+                f"{column.label}</th>")
 
-    current = params.get("sort")
+    asked_key, asked_field = split_sort(params.get("sort"))
     order = params.get("order") or "asc"
-    is_active = current == column.field
+    # A189: the arrow lights only when the sort is addressed to THIS table.
+    is_active = (asked_field == column.field
+                 and (asked_key is None or key is None or asked_key == key))
     # A178. Clicking the ACTIVE column flips it; clicking a NEW one opens the way that column
     # opens — `desc` for a measure, `asc` for a rank or a name. See `Col.first_order`.
     next_order = ("desc" if order == "asc" else "asc") if is_active else column.first_order
     arrow = ("▲" if order == "asc" else "▼") if is_active else "⇅"
-    href = params.link_here(sort=column.field, order=next_order)
+    # A189: the link names the table as well as the column, so it cannot re-sort a neighbour.
+    href = params.link_here(sort=f"{key}.{column.field}" if key else column.field,
+                            order=next_order)
     # THE FRAGMENT IS APPENDED, NEVER BUILT INTO `link_here`. That function's job is the QUERY,
     # which is the linkable state; a fragment is a scroll position and is not state at all.
     if anchor:
         href = f"{href}#{anchor}"
     active = " cfdb-sorted" if is_active else ""
-    return (f"<th class='{column.css}{active}{freeze}'>"
+    return (f"<th class='{column.css}{active}{freeze}'{_tip(column)}>"
             f"<a class='cfdb-sort' href='{href}' target='_self'>{column.label}"
             f"<span class='cfdb-sort-arrow'>{arrow}</span></a></th>")
 
@@ -434,12 +505,15 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     anchor is display:block so the whole cell is the target, which makes the row clickable
     in effect while staying valid HTML that a browser can middle-click.
     """
+    # A189: this table's own sort identity, derived from its column shape. See `table_key`.
+    key = table_key(columns)
+
     # 🚨 THE SORT, APPLIED HERE AND NOWHERE ELSE. See the docstring.
     #
     # ⚠️ ORDER MATTERS BETWEEN THESE TWO LINES: the links are suppressed on the SAME condition
     # that suppresses the sort, so a header can never offer something the table will not do.
     if sortable is True and len(df) > 1:
-        df = apply_sort(df, columns)
+        df = apply_sort(df, columns, key=key)
     elif len(df) < 2:
         sortable = False
 
@@ -475,7 +549,7 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
 
     # ⚠️ THE FRAME'S OWN COLUMNS, SO A HEADER CANNOT OFFER A SORT THE FRAME CANNOT SATISFY.
     fields = set(df.columns)
-    head = "".join(_header_cell(c, sortable, freeze(i), fields, anchor)
+    head = "".join(_header_cell(c, sortable, freeze(i), fields, anchor, key)
                    for i, c in enumerate(columns))
     body = []
     for _, row in df.head(max_rows).iterrows():
@@ -498,7 +572,21 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
                     else f"<tr>{joined}</tr>")
     # Set on the ROW, not per cell: it is the row's height that has to hold every header.
     head_style = f" style='height:{header_height}px'" if header_height else ""
-    table_css = "cfdb-table" + (" cfdb-table-wide" if scroll else "")
+    # 🚨 A189 (cfdb-main-R-1934). A TABLE WHOSE COLUMNS ARE ALL FIXED HAS AN EXACT WIDTH, AND
+    # STRETCHING IT TO THE CONTAINER PUTS THE SLACK BACK.
+    #
+    # `.cfdb-table-wide` carries `min-width:100%`, which is right for a table whose columns are
+    # weights — it stops a narrow table looking lost. 📊 But when every column is a measured
+    # px, the extra width is shared out and lands as padding inside the cells: measured on
+    # Most Exciting at 1440px, the scoreboard's slack went 49px -> **71px** with the fixed
+    # widths in place, because the table grew to 1344px for columns summing to ~1250.
+    #
+    # ⚠️ DERIVED FROM THE LAYOUT, NOT A NEW ARGUMENT. A caller that has already said "every
+    # column is this many pixels" has said everything needed; asking it to also pass
+    # `stretch=False` is the opt-in this module distrusts (A141's eleven views).
+    exact = bool(scroll and layout and all(str(w).endswith("px") for w in layout))
+    table_css = ("cfdb-table" + (" cfdb-table-wide" if scroll else "")
+                 + (" cfdb-table-exact" if exact else ""))
     markup = ("<table class='" + table_css + "'>"
               + (f"<caption>{caption}</caption>" if caption else "")
               + colgroup

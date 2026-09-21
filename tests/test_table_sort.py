@@ -237,8 +237,15 @@ def test_no_view_silently_opts_out_of_drawing_what_it_will_not_do(table_module):
     table, _stub = table_module
     import inspect
     source = inspect.getsource(table.render)
-    assert 'sortable is True' in source and 'apply_sort(df, columns)' in source, (
+    # ⚠️ THE PROPERTY, NOT THE CALL TEXT — A189. This asserted the literal
+    # `apply_sort(df, columns)` and went red when that call gained the table key
+    # (cfdb-main-R-1925), which is a strengthening of the very thing it guards. A source test
+    # matching an exact call signature breaks on every improvement to that call; what has to
+    # hold is that `render` sorts rather than leaving it to the caller.
+    assert 'sortable is True' in source and 'apply_sort(' in source, (
         "render must apply the sort itself; the separate call is what eleven views forgot")
+    assert 'df = apply_sort(' in source, (
+        "render must assign the sorted frame back, or it sorts a copy and draws the original")
     assert 'sortable = False' in source, (
         "render must also stop DRAWING the links whenever it will not sort")
 
@@ -355,3 +362,73 @@ def test_no_column_on_the_site_opens_a_rank_at_its_worst_end():
     assert not offenders, (
         "these columns read as a rank and would open on their WORST end — give them "
         "opens='asc':\n  " + "\n  ".join(offenders))
+
+
+# --- A189: one table's sort must not move another (cfdb-main-R-1925) ------------------------
+
+def _other_columns(table):
+    """A DIFFERENT table that happens to share a column name — the collision in the wild."""
+    return [table.Col("team", "Squad"), table.Col("yards", "Getting", "num", dp=0),
+            table.Col("extra", "Extra")]
+
+
+def test_a_sort_aimed_at_one_table_leaves_the_others_alone(table_module):
+    """🚨 MEASURED ON THE REAL PAGE BEFORE IT WAS FIXED — A189, Today, week 3 2026.
+
+    `?sort=` was page-wide, so any table carrying a column of that name re-sorted. **Biggest
+    upsets** and **Biggest underdog covers** both have a `spread` column and sit directly above
+    one another; clicking *"Getting"* on the covers table set `?sort=spread` and silently
+    re-ordered the upsets panel. Texas A&M at 84.1% fell from first to below Wyoming at 47.8%
+    **while the caption still said the panel was ranked by the loser's win probability** —
+    a true-sounding label on a different order, which is §4.3's worst form and exactly what
+    Marc reported.
+
+    ⚠️ THE TWO TABLES SHARE AN ANCHOR, which is why the fix keys on the COLUMN SHAPE. Keying on
+    the anchor would have left the only two tables that actually collided still colliding.
+    """
+    table, stub = table_module
+    frame, mine, theirs = _frame(), _columns(table), _other_columns(table)
+
+    # the key the OTHER table's header would put in the URL
+    other_key = table.table_key(theirs)
+    my_key = table.table_key(mine)
+    assert other_key != my_key, "two different column shapes must not share a sort key"
+
+    stub.query_params = {"sort": f"{other_key}.team", "order": "asc"}
+    table.render(frame, mine)
+    assert _rendered_order(stub) == ["Cobras", "Aardvarks", "Badgers"], (
+        "a sort addressed to another table re-ordered this one — that is the defect")
+    assert "cfdb-sorted" not in stub.markup[-1], (
+        "and it must not light this table's arrow either")
+
+    # ...while its OWN key still sorts it
+    stub.query_params = {"sort": f"{my_key}.team", "order": "asc"}
+    table.render(frame, mine)
+    assert _rendered_order(stub) == ["Aardvarks", "Badgers", "Cobras"], (
+        "a table must still sort when the sort is addressed to it")
+
+
+def test_the_sort_link_names_its_own_table(table_module):
+    """The other half: a header must WRITE the scoped form, or nothing above holds in a browser."""
+    table, stub = table_module
+    stub.query_params = {}
+    table.render(_frame(), _columns(table))
+    links = re.findall(r"<a class='cfdb-sort' href='([^']*)'", stub.markup[-1])
+    assert links, "no sort links drawn"
+    key = table.table_key(_columns(table))
+    for href in links:
+        assert f"sort={key}." in href.replace("%2E", "."), (
+            f"the sort link is not scoped to this table: {href}")
+
+
+def test_a_bare_sort_param_still_works_for_the_table_that_owns_it(table_module):
+    """⚠️ AC-G.11 — an old bookmark or hand-edited URL carries `?sort=team` with no table key.
+
+    Dropping it silently would make a shared link stop working with no explanation. It is
+    honoured by any table that has the column, which is the pre-A189 behaviour and is the safe
+    direction: no link this module DRAWS can produce the bare form any more.
+    """
+    table, stub = table_module
+    stub.query_params = {"sort": "team", "order": "asc"}
+    table.render(_frame(), _columns(table))
+    assert _rendered_order(stub) == ["Aardvarks", "Badgers", "Cobras"]

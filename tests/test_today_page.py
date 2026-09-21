@@ -4,6 +4,7 @@ The page reads four serving views and does no arithmetic on the numbers it ranks
 pin the two things that would be silently wrong rather than loud: the grain under a summing
 leaderboard, and the poll delta for a team with no previous rank.
 """
+import pytest
 import re
 from pathlib import Path
 
@@ -1492,8 +1493,8 @@ def test_most_exciting_layout_has_one_entry_per_column_and_the_scoreboard_is_wid
     match = re.search(r'^    layout = (\[.+?\])\n', body, re.M | re.S)
     assert match, "the layout line moved; this test cannot see what it is asserting about"
     layout = eval(match.group(1), {},                        # noqa: S307 - a literal list
-                  {"widest": 170, "scoreboard_px": 426,
-                   "_SCOREBOARD_GUTTER_PX": 12})
+                  {"widest": 170, "scoreboard_px": 427,
+                   "_SCOREBOARD_GUTTER_PX": 6})
 
     headers = re.findall(r'Col\("[a-z_]+", "([^"]+)"', body)
     assert headers == ["Scoreboard", "Win probability", "4th qtr", "OT", "Game",
@@ -1520,16 +1521,38 @@ def test_most_exciting_layout_has_one_entry_per_column_and_the_scoreboard_is_wid
         f"the scoreboard column must be derived from the scoreboard, not a share of the table: "
         f"{layout[0]}")
     assert 400 <= int(layout[0][:-2]) <= 500, layout[0]
-    # The three lead-change columns are pinned, narrow and equal to each other.
-    leads = layout[2:5]
-    assert len(set(leads)) == 1, f"the three lead columns must share one width: {leads}"
-    assert leads[0].endswith("px"), leads[0]
-    # 🚨 MARC'S NUMBER, HELD AS A NUMBER. *"Reduce by at least 50% horizontally."* These columns
-    # measured **104.3px** each at a 1300px viewport before this round, so anything above
-    # 52.15px fails his ask — and 56px, which looks close enough, is a 46% cut and does not.
-    assert int(leads[0][:-2]) <= 104.3 * 0.5, (
-        f"{leads[0]} is a {100 * (1 - int(leads[0][:-2]) / 104.3):.0f}% cut against the 104.3px "
-        f"these columns took before; Marc asked for at least 50%")
+    # ── A189: THE LAST SIX ARE FIXED, AND EACH IS WIDE ENOUGH FOR ITS OWN HEADER ────────────
+    #
+    # 🚨 THIS REPLACES A165's `<= 52.15px` RULE, AND THE TWO INSTRUCTIONS GENUINELY CONFLICT.
+    #
+    #     v06: "The Lead Change columns need to use less horizontal space. Reduce by at least
+    #           50% horizontally."                                  -> pinned them at 52px
+    #     v11: "...the last 6 columns get a fixed width and the table will have a horizontal
+    #           scroll instead of forcing them to be super narrow, and then their headers take
+    #           up a bunch of vertical space, making the table very wonky?"
+    #
+    # 📊 AT 52px THOSE HEADERS CANNOT FIT ON ONE LINE — measured in Chromium with the table's
+    # own font: `4th qtr ⇅` is 58px and `Game ⇅` is 57px. **A165's width is the direct cause of
+    # v11's complaint**, and the fix for one is the other's defect.
+    #
+    # ✅ v11 WINS, AND THE REASON IS NOT ONLY THAT IT IS NEWER: A165's cut was made when the
+    # table had to fit the viewport, and v11 asks for a horizontal scroll, which removes the
+    # scarcity the 50% was rationing. Horizontal space is no longer the constraint it was.
+    #
+    # ⚠️ SO THE INVARIANT IS "NO HEADER CAN WRAP", held as measured numbers rather than as a
+    # ratio, because a ratio against a number nobody re-measures is how A165's rule outlived
+    # its reason.
+    fixed = layout[2:]
+    assert all(w.endswith("px") for w in fixed), (
+        f"the last six columns must be FIXED, not auto — that is the whole ask: {fixed}")
+    # header text measured at 1600px in the table's own font, one line, including the ⇅ arrow
+    header_px = {"4th qtr": 58, "OT": 38, "Game": 57,
+                 "How close, late": 113, "Excitement": 88, "Commentary": 93}
+    for label, width in zip(headers[2:], fixed):
+        need = header_px[label]
+        assert int(width[:-2]) >= need, (
+            f"{label!r} is {width} but its header needs {need}px on one line — it will wrap, "
+            f"which is the 'headers take up a bunch of vertical space' defect v11 reported")
 
 
 def _rankings_frame():
@@ -2126,16 +2149,20 @@ def test_the_recap_section_no_longer_ships_one_set_of_games_twice():
     `ats < 0` list survives.
     """
     code = _code_only(SOURCE)
-    assert code.count('graded[graded["ats"] < 0]') == 1, (
-        "two lists filtering on `ats < 0` is the duplicate R-711 removed — they cannot "
-        "differ, because the filter and the sort are the whole definition")
+    # 🚨 A189 REMOVED THE SURVIVOR TOO — Marc: *"Biggest Underdog covers / Remove this
+    # section"*. R-711 collapsed three lists to two; this takes the second, so ZERO `ats < 0`
+    # lists remain and the section is the upsets alone. The invariant is stronger, not weaker:
+    # it was "no duplicate", it is now "none at all".
+    assert code.count('graded[graded["ats"] < 0]') == 0, (
+        "the underdog covers list was removed in A189; an `ats < 0` list reappearing means it "
+        "came back")
     assert "Underperformers" not in code, (
         "Marc read that heading and asked for what was underneath it; the section leads with "
         "the upsets now")
     assert "**Biggest upsets**" in code
 
 
-def test_ats_still_has_a_reader_after_the_collapse():
+def test_ats_is_gone_now_that_its_only_reader_is():
     """⚠️ THE ROUND REMOVED A PRESENTATION, NOT A MEASURE.
 
     `ats` is computed in the page — `fav_margin - spread` — which is §4.2.1's line, and moving
@@ -2145,8 +2172,18 @@ def test_ats_still_has_a_reader_after_the_collapse():
     small it is.
     """
     code = _code_only(SOURCE)
-    assert 'covers["ats"].abs()' in code, "the underdog covers list reads `ats`"
-    assert code.count('graded["ats"] = ') == 1, "computed once"
+    # 🚨 A189 REMOVED `ats` ALTOGETHER, AND THIS TEST'S JOB IS NOW THE OPPOSITE ONE.
+    #
+    # It tracked how small the §4.2.1 violation was, so a later model round would know the
+    # cost of moving it upstream. Marc removed the only list that read it, so there is nothing
+    # left to move: computing `fav_margin - spread` in the page for NO consumer would be the
+    # violation with none of the benefit. **The test now holds it gone.**
+    assert '"ats"' not in code, (
+        "`ats` is metric arithmetic in a page (§4.2.1) and its only reader — the underdog "
+        "covers list — was removed in A189. If it is needed again it comes from "
+        "srv_game_team.ats_margin_final, not from here.")
+    assert code.count('graded["ats"] = ') == 0, (
+        "`ats` must not be computed for nobody — A189 removed its only reader")
 
 
 def test_the_home_side_draws_below_the_midline():
@@ -2270,7 +2307,11 @@ def test_the_spark_bars_share_one_denominator_and_it_is_the_total_column():
     """
     today = _today()
     frame = _yardage_frame()
-    assert today._spark_max(frame) == 800
+    # A189 (cfdb-main-R-1930): the denominator carries Marc's 1.15 headroom now — *"so the
+    # label isn't in the chart"*. The PROPERTY is unchanged: one denominator, from the Total
+    # column of the RENDERED frame. Asserted against the constant rather than a literal, so the
+    # test moves with the number instead of pinning a stale one.
+    assert today._spark_max(frame) == pytest.approx(800 * today._SPARK_HEADROOM)
 
     def width(row, field):
         cell = today._spark_cell(row, field, frame)
@@ -2278,15 +2319,30 @@ def test_the_spark_bars_share_one_denominator_and_it_is_the_total_column():
         return float(found.group(1)) if found else None
 
     leader = frame.iloc[0]
-    assert width(leader, "total_yards") == 100.0
-    # 400 against TOTAL's 800 is 50%. Against rush's own max it would be 100%.
-    assert width(leader, "rushing_yards") == 50.0, (
+    # 🚨 A189: THE LEADER NO LONGER FILLS THE CELL, AND THAT IS THE POINT OF THE CHANGE.
+    #
+    # > **MARC:** *"...1.15 of the table MAX? That will push the size of the bars down a little
+    # > bit so the label isn't in the chart."*
+    #
+    # At 100% the longest bar ran under its own right-aligned value. 1/1.15 = 87.0%, so the
+    # headroom is 13% of the cell — measured here rather than asserted as "less than 100",
+    # which would pass on any shrinkage including a broken one.
+    assert width(leader, "total_yards") == pytest.approx(100 / today._SPARK_HEADROOM, abs=0.1)
+    assert width(leader, "total_yards") < 100.0, (
+        "the leader's bar must leave room for its label — that is the whole ask")
+    # 🚨 THE RATIOS BETWEEN ROWS ARE UNCHANGED, which is the property that matters: every bar
+    # still shares ONE denominator. 400 against TOTAL's 800 is half of whatever the leader is.
+    assert width(leader, "rushing_yards") == pytest.approx(
+        width(leader, "total_yards") / 2, abs=0.1), (
         "the rush bar is scaled to its own column's max — Marc asked for Total's")
-    assert width(leader, "passing_yards") == 50.0
+    assert width(leader, "passing_yards") == pytest.approx(
+        width(leader, "total_yards") / 2, abs=0.1)
 
     # And a smaller row scales the same way.
-    assert width(frame.iloc[1], "total_yards") == 50.0
-    assert width(frame.iloc[2], "rushing_yards") == 6.2
+    assert width(frame.iloc[1], "total_yards") == pytest.approx(
+        width(leader, "total_yards") / 2, abs=0.1)
+    assert width(frame.iloc[2], "rushing_yards") == pytest.approx(
+        50 / 800 * 100 / today._SPARK_HEADROOM, abs=0.1)
 
 
 def test_the_spark_number_is_right_aligned_in_the_cell_not_at_the_bars_end():
@@ -2339,11 +2395,11 @@ def test_the_spark_denominator_comes_from_the_rendered_frame_and_degrades():
 
     # A single row is its own max — honest, because it is the max of what is shown.
     single = _yardage_frame().head(1)
-    assert today._spark_max(single) == 800
+    assert today._spark_max(single) == pytest.approx(800 * today._SPARK_HEADROOM)
 
     # And the denominator really does follow the frame it is handed.
-    assert today._spark_max(_yardage_frame().head(2)) == 800
-    assert today._spark_max(_yardage_frame().tail(1)) == 200
+    assert today._spark_max(_yardage_frame().head(2)) == pytest.approx(800 * today._SPARK_HEADROOM)
+    assert today._spark_max(_yardage_frame().tail(1)) == pytest.approx(200 * today._SPARK_HEADROOM)
 
 
 def _scatter_rows():
