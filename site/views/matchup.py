@@ -6653,6 +6653,46 @@ _DRIVE_GLYPH_SHAPES = {
 # 📊 **VERIFIED IN A BROWSER, NOT ASSUMED**: on a page whose text colour was `#123456`, the
 # rendered mark's computed `stroke` came back `rgb(18, 52, 86)`.
 _DRIVE_GLYPH_INK = "currentColor"
+
+# ── 🚨 B144 PART 3: THE ALTERNATIVE MARC HAS NOT BEEN SHOWN, BEHIND A CONSTANT ───────────
+#
+# 📊 **B143 MEASURED THE COST OF "BLACK" AND REPORTED IT: the outline reads 12.53:1 against
+# the light page, and 1.03:1 against a dark team FILL.** Nothing is invisible — the mark
+# still separates from the page — but on a dark-coloured team the outline stops being a
+# separate line. ⚠️ **That is inherent to "black outline + team fill", not to the code.**
+#
+# ✅ **SO THE ALTERNATIVE IS RENDERED RATHER THAN ARGUED, AND IT IS NOT SHIPPED.**
+# `"page"` is the shipped behaviour and a test pins it. `"fill"` picks black or white from
+# each mark's OWN fill by B137's WCAG crossover, so a dark fill gets a light outline.
+#
+# ⚠️ **AND THE UNFILLED CASE IS WHY THIS IS NOT JUST `_drive_endzone_ink`.** A non-scoring
+# mark's fill is `transparent`, which has no luminance to pick from; `_drive_endzone_ink`
+# answers WHITE for anything it cannot parse, and a white outline on a transparent fill is
+# invisible on the light page. **Those marks keep the page's ink** (cfdb-wta-R-1507).
+_DRIVE_GLYPH_INK_MODE = "page"
+
+
+def _drive_glyph_ink(fill: str) -> str:
+    """This mark's outline under `_DRIVE_GLYPH_INK_MODE == "fill"`. Not the shipped path."""
+    if not fill or fill == _DRIVE_NO_FILL:
+        return _DRIVE_GLYPH_INK
+    return _drive_endzone_ink(fill)
+
+
+def _drive_glyph_stroke():
+    """The outline encoding **both** surfaces use — the field's marks and the `Result`
+    column's.
+
+    🚨 **ONE PRODUCER, BECAUSE TWO COPIES IS THE DEFECT THIS ROUND EXISTS TO FIX
+    (cfdb-wta-R-1505).** B143 put Marc's ink on the field layer and left the table's glyph
+    drawing itself in the team's own colour, so one drive was drawn two ways on one screen.
+    **A second literal here is how that comes back.**
+    """
+    if _DRIVE_GLYPH_INK_MODE == "fill":
+        return alt.Stroke("glyph_ink:N", scale=None, legend=None)
+    return alt.value(_DRIVE_GLYPH_INK)
+
+
 # ⚠️ `_DRIVE_MADE_KICK = "FG"` AND `_DRIVE_SAFETY = "SF"` LIVED HERE AND ARE GONE (B141).
 # They were display STRINGS; the classification they stood for is published as
 # `drive_result_key`, and `_DRIVE_MADE_KICK_KEY` / `_DRIVE_SAFETY_KEY` above are what the
@@ -7633,7 +7673,7 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
         y=y,
         shape=alt.Shape("result_shape:N", scale=None, legend=None),
         fill=alt.Fill("glyph_fill:N", scale=None, legend=None),
-        stroke=alt.value(_DRIVE_GLYPH_INK),
+        stroke=_drive_glyph_stroke(),
         xOffset=alt.XOffset("glyph_dx:Q", scale=None),
         tooltip=tooltip)
 
@@ -8073,11 +8113,29 @@ def _drive_table_chart(frame: pd.DataFrame, band: str, height: int,
             # after it — which is why `Result`'s width (56) and its text limit (45) differ by
             # exactly `_DRIVE_GLYPH_CELL`.
             marked = side[side["glyph_class"].isin(_DRIVE_TABLE_GLYPH_CLASSES)]
+            # 🚨🚨 B144: THE SAME INK AND THE SAME FILL AS THE FIELD, FROM THE SAME COLUMN.
+            #
+            # ⚠️ **THIS LAYER USED TO READ `color=alt.Color("accent:N")` WITH
+            # `filled=False`, WHICH IS THE TEAM'S OWN COLOUR AND NO FILL AT ALL** — so a
+            # defensive score was outlined in the side that did NOT score, one row from a
+            # field mark filled with the side that did. **One drive, two answers, one
+            # screen** (cfdb-wta-R-1505 / cfdb-wta-R-1506).
+            #
+            # 🚨 **`filled=` IS GONE BECAUSE `fill` AND `stroke` ARE ENCODINGS.** B143
+            # verified that in a browser; `filled=False` here would fight the `fill` channel
+            # rather than complement it.
+            #
+            # ✅ **`glyph_fill` IS A COLUMN ON THE FRAME, NOT A SECOND CALL.**
+            # `_drive_frame` computes it once with `_drive_glyph_fill`, and BOTH surfaces
+            # read that one column — so `is_scoring_drive` as the authority, `scoring_side`
+            # for whose points, and `identity.FALLBACK` for the 143 side-less scoring
+            # drives are settled in one place and cannot disagree between the two.
             layers.append(alt.Chart(marked).mark_point(
-                size=_DRIVE_GLYPH_SIZE, filled=False, strokeWidth=1.4).encode(
+                size=_DRIVE_GLYPH_SIZE, strokeWidth=1.4).encode(
                 x=alt.value(left + _DRIVE_GLYPH_CELL / 2), y=_drive_y_shared(),
                 shape=alt.Shape("result_shape:N", scale=None, legend=None),
-                color=alt.Color("accent:N", scale=None, legend=None)))
+                fill=alt.Fill("glyph_fill:N", scale=None, legend=None),
+                stroke=_drive_glyph_stroke()))
         layers.append(alt.Chart(text_rows).mark_text(
             align=align, fontSize=_DRIVE_ROW_FONT, baseline="middle", limit=limit).encode(
             x=alt.value(x_px), y=_drive_y_shared(), text=text,
@@ -8218,6 +8276,8 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
                     for band in ("away", "home")}
     frame["glyph_fill"] = [
         _drive_glyph_fill(r, band_accents) for _i, r in frame.iterrows()]
+    # B144 PART 3's alternative reads this; the shipped `"page"` mode never encodes it.
+    frame["glyph_ink"] = [_drive_glyph_ink(f) for f in frame["glyph_fill"]]
     frame["glyph_class"] = frame.apply(_drive_glyph_class, axis=1)
     # ── v04 PART 5: *"can the glyph labels at the end of the line start at the end of the line
     # instead of being centred at the end of the line?"* ──────────────────────────────────────
