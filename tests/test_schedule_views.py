@@ -135,6 +135,23 @@ def counting_markdown(monkeypatch):
     return calls
 
 
+def _schedule_sql() -> str:
+    """Schedule's page source PLUS the shared table module its query now lives in.
+
+    🚨 A196 MOVED THE GAMES QUERY AND THE COLUMN LIST TO `lib/schedule_table.py`, so Today's
+    Looking Forward could render the SAME table rather than a copy of it. **The query did not
+    change — its file did.** Four tests here read `schedule.py` for the SQL and went red
+    against a page that is behaving identically.
+
+    ⚠️ THAT IS THE GUARD WORKING, NOT FAILING: a test that reads a file for a string is right
+    to notice the string has gone. The fix is to read where it is, not to weaken what is
+    asserted about it.
+    """
+    from lib import schedule_table
+    return (Path(schedule.__file__).read_text()
+            + "\n" + Path(schedule_table.__file__).read_text())
+
+
 def test_the_stacked_view_emits_one_card_per_row(counting_markdown):
     """Fifty-nine rows produced fifteen cards in production and raised nothing catchable."""
     df = pd.DataFrame([_row(game_id=i) for i in range(20)])
@@ -385,7 +402,7 @@ def test_the_kickoff_shares_row_one_with_the_box_score_header():
 def test_the_query_sorts_by_date_then_time_then_rank_then_home_name():
     """R-108's second half. `nulls last` IS the whole of "unranked last" — without it
     Postgres sorts NULL high and every unranked game leads its own time slot."""
-    sql = Path(schedule.__file__).read_text()
+    sql = _schedule_sql()
     # `limit 400` became `limit {ROW_CAP}` when the cap was named and raised (R-227), and
     # slicing on the old literal silently produced an empty string that every assertion below
     # then passed against. Anchored on the placeholder.
@@ -741,7 +758,7 @@ def test_the_card_vocabulary_matches_the_markup():
     entries = re.findall(r"^\s{4}([a-z][a-z ()]+?) \.{3,} (cfdb-[a-z-]+)", table, re.M)
     assert len(entries) >= 14, f"only parsed {len(entries)} names; the table shape changed"
 
-    source = Path(schedule.__file__).read_text()
+    source = _schedule_sql()
     body = source[source.index('"""', source.index('"""') + 3):]   # past the docstring
     # 🚨 A144. THE SEARCH FOLLOWS A PRODUCER THAT MOVED, AND NARROWING THE VOCABULARY WOULD HAVE
     # BEEN THE WRONG FIX. `cfdb-team-record` is still rendered on every card — the body of
@@ -1030,8 +1047,7 @@ def test_the_examples_block_is_placed_by_NAME_and_not_by_column_position():
     derived from the layout breaks the moment the layout moves, silently.
     """
     import ast
-    from pathlib import Path
-    source = Path(schedule.__file__).read_text()
+    source = _schedule_sql()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Compare) and isinstance(node.left, ast.Name) \
                 and node.left.id == "title":
@@ -1098,7 +1114,7 @@ def test_the_legend_is_rendered_exactly_once():
     Counted in the source because both calls were syntactically fine and neither test nor
     lint could see the duplication; it took looking at the rendered page.
     """
-    source = Path(schedule.__file__).read_text()
+    source = _schedule_sql()
     body = source[source.index("def body(page)"):]
     assert body.count("_legend(df)") == 1, "one legend, one button"
 
@@ -1406,7 +1422,7 @@ def test_the_games_query_asks_for_the_in_scope_count(monkeypatch):
     """
     # Read from the source rather than by calling `_rows`, which is `@st.cache_data`-wrapped
     # and has no cache to clear without a Streamlit runtime.
-    source = Path(schedule.__file__).read_text()
+    source = _schedule_sql()
     games_query = source[source.index("select game_id, season, week"):
                          source.index("limit {ROW_CAP}")]
     assert "count(*) over () as rows_in_scope" in " ".join(games_query.split()), (
@@ -1441,7 +1457,7 @@ def test_the_page_query_carries_the_named_cap_and_no_literal_limit():
     import re
     # COMMENTS STRIPPED FIRST. The comment explaining why the literal went says "limit 400",
     # so a bare substring search matches its own prose — the ninth time in this repo.
-    source = "\n".join(line for line in Path(schedule.__file__).read_text().splitlines()
+    source = "\n".join(line for line in _schedule_sql().splitlines()
                        if not line.lstrip().startswith("#"))
     # PARSED, NOT SUBSTRING-MATCHED. `"limit 400" in source` also matches `limit 4000` — the
     # distributions query's own cap — so the first version failed on a line it had no quarrel
@@ -1484,7 +1500,8 @@ def test_the_legend_reads_the_thresholds_from_the_row_and_the_query_selects_them
     assert "Upset by 8–14" not in labels, (
         "the frame is being ignored and metrics.from_frame fell back to DEFAULTS")
 
-    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "schedule.py").read_text()
+    # A196: the query moved to `lib/schedule_table.py`; the columns it selects did not change.
+    source = _schedule_sql()
     for column in ("upset_margin_big", "upset_margin_blowout"):
         assert re.search(rf"\b{column}\b", source), (
             f"{column} is not selected, so production frames carry the defaults and the "

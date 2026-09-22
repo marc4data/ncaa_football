@@ -48,8 +48,22 @@ VIEWS = SITE / "views"
 _RELOAD = ("lib.states", "lib.table", "lib.identity")
 
 
+# ⚠️ A196: A VIEW'S COLUMNS ARE NOT ALWAYS IN THE VIEW'S OWN FILE.
+#
+# Schedule's `Col(...)` declarations moved to `lib/schedule_table.py` so Today's Looking
+# Forward could render the SAME table rather than a copy of it. 🚨 **Left alone, this
+# parametrisation quietly began SKIPPING Schedule with "declares no Col() calls" — the
+# busiest table on the site, no longer checked, reported as nothing to check.** That is the
+# R-575 class exactly: a green run testing less than its pass count suggests.
+#
+# ✅ The module is added to the sweep so its columns stay covered, and `schedule.py`'s own
+# skip is then honest rather than a hole.
+SHARED_COLUMN_MODULES = [VIEWS.resolve().parents[0] / "lib" / "schedule_table.py"]
+
+
 def _view_modules():
-    return sorted(p for p in VIEWS.glob("*.py") if not p.name.startswith("_"))
+    views = sorted(p for p in VIEWS.glob("*.py") if not p.name.startswith("_"))
+    return views + [p for p in SHARED_COLUMN_MODULES if p.exists()]
 
 
 def _stub_streamlit():
@@ -87,7 +101,11 @@ def loaded():
     modules = {}
     failed = {}
     for path in _view_modules():
-        name = f"views.{path.stem}"
+        # ⚠️ A196: THE PACKAGE COMES FROM THE PATH, NOT FROM AN ASSUMPTION. Schedule's columns
+        # live in `lib/schedule_table.py` now, and importing it as `views.schedule_table`
+        # fails — which this harness reports as "the module would not import", a much more
+        # alarming statement than "the test was looking in the wrong package".
+        name = f"{path.parent.name}.{path.stem}"
         try:
             module = importlib.import_module(name)
             modules[path.stem] = importlib.reload(module)
@@ -102,8 +120,8 @@ def loaded():
         sys.modules.pop("streamlit", None)
     for name in _RELOAD:
         importlib.reload(importlib.import_module(name))
-    for stem in list(modules):
-        importlib.reload(sys.modules[f"views.{stem}"])
+    for stem, module in list(modules.items()):
+        importlib.reload(sys.modules[module.__name__])
     if added_path:
         sys.path.remove(str(SITE))
 

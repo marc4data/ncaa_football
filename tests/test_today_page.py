@@ -106,9 +106,18 @@ def test_the_week_floor_is_named_not_hardcoded_in_copy():
         "copy says 'this week' on a page whose week is chosen by the reader"
 
 
-def test_looking_forward_is_a_stub_that_says_so():
+def test_looking_forward_is_built_and_no_longer_says_it_is_not():
+    """A196. The stub is gone, and the assertion that guarded it has to go with it.
+
+    ⚠️ THE OLD TEST ASSERTED `"not built yet" in SOURCE`, which was exactly right while the
+    section was a placeholder — an empty frame would have implied it existed. Leaving it would
+    now demand the page keep saying it is unbuilt, which is the opposite of true. **A guard
+    whose subject has been built is not weakened by removal; it is finished.**
+    """
     assert "Looking forward" in SOURCE
-    assert "not built yet" in SOURCE, "an empty frame would imply it exists"
+    assert "not built yet" not in SOURCE, (
+        "the placeholder copy is still on the page after the section was built")
+    assert "def _looking_forward(" in SOURCE and "_high_value_games(" in SOURCE
 
 
 def test_the_slate_routes_to_schedule():
