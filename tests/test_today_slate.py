@@ -42,7 +42,7 @@ def _game(**over):
         "away_team_display": "Texas", "home_team_display": "Tennessee",
         "network_abbreviation": "ABC", "network": "ABC Sports",
         "spread_current": 5.5,
-        "is_top25_matchup": True, "is_undefeated_close": False,
+        "is_top25_matchup": True, "is_undefeated_entering": False,
     }
     row.update(over)
     return row
@@ -136,34 +136,69 @@ def test_the_bar_length_is_the_stated_allowance_and_the_caption_says_so():
 def test_the_bar_spans_kickoff_to_kickoff_plus_the_allowance():
     """The geometry, asserted rather than eyeballed.
 
-    ⚠️ A201 MOVED THE PLOT INTO ITS OWN CELL, so the bar's x is now a fraction of the day's
-    span inside a `_SLATE_PLOT`-unit viewBox — no label gutter to offset by. The assertion is
-    the same fact in the new coordinates: a 9:00 start on a 9a axis begins at 0, and the bar
-    is the allowance wide on that day's own scale.
+    ⚠️ A204 MADE THE BAR AN HTML BOX POSITIONED IN PERCENT, so the assertion is the same fact
+    in a third set of coordinates (A198 drew px in one SVG per day, A201 units in one SVG per
+    row). A 9:00 start on a 9a axis begins at 0%, and the bar is the allowance wide on that
+    day's own scale — 210 minutes of a 4-hour axis is 87.5%.
     """
     html = today._slate(_frame(_game()), esc=lambda s: str(s), scope=_SlateScope())
-    rect = re.search(r"<rect class='cfdb-slate-bar[^']*' x='([\d.]+)' y='[\d.]+' "
-                     r"width='([\d.]+)'", html)
-    assert rect, html[:400]
-    x, width = float(rect.group(1)), float(rect.group(2))
-    assert x == pytest.approx(0.0), "the first kickoff of the day starts at the left edge"
-    # one game: the axis spans 9a to 1p (kickoff hour to kickoff + 210 min, rounded up)
-    assert width == pytest.approx(today._SLATE_PLOT * 210 / (4 * 60), rel=0.01), width
+    bar = re.search(r"cfdb-slate-bar[^']*' style='left:([\d.]+)%;width:([\d.]+)%", html)
+    assert bar, html[:400]
+    left, width = float(bar.group(1)), float(bar.group(2))
+    assert left == pytest.approx(0.0), "the first kickoff of the day starts at the left edge"
+    assert width == pytest.approx(100 * 210 / (4 * 60), rel=0.01), width
 
 
 def test_the_bar_carries_the_outline_marc_asked_for():
     """> **MARC, v13:** *"Give the bars a thin medium graph outline to make them pop a bit."*
 
-    🚨 `vector-effect='non-scaling-stroke'` IS NOT DECORATION. The plot SVG is stretched to
-    its column with `preserveAspectRatio='none'`, so a plain stroke is scaled with the
-    geometry — a fat left edge against a hairline top. This keeps it one pixel on all four
-    sides.
+    ⚠️ A201 NEEDED `vector-effect='non-scaling-stroke'` because its bar was an SVG rect
+    stretched horizontally. A204's bar is an HTML box, so a 1px border is 1px on all four
+    sides by construction — the workaround went with the thing that needed it.
+    """
+    rule = THEME[THEME.index(".cfdb-slate .cfdb-slate-bar {"):]
+    rule = rule[:rule.index("}")]
+    assert "border:1px solid" in rule
+    assert "box-sizing:border-box" in rule, (
+        "without it the border would widen the bar and shift its right edge off the scale")
+
+
+def test_the_kickoff_is_labelled_inside_the_bar_and_flush_left():
+    """> **MARC, v13 addition 2:** *"label each bar with the start time (should be inside the
+    > bar and aligned to the far left)"*
+
+    ⚠️ AND IT CLIPS RATHER THAN OVERFLOWING: a bar too narrow to hold the label loses it
+    instead of spilling into the column before it.
     """
     html = today._slate(_frame(_game()), esc=lambda s: str(s), scope=_SlateScope())
-    assert "vector-effect='non-scaling-stroke'" in html
-    rule = THEME[THEME.index(".cfdb-slate-bar {"):]
-    rule = rule[:rule.index("}")]
-    assert "stroke:" in rule and "stroke-width:1" in rule
+    assert "cfdb-slate-clock" in html
+    # the label sits INSIDE the bar element, not beside it
+    bar = html[html.index("cfdb-slate-bar"):]
+    assert bar.index("cfdb-slate-clock") < bar.index("</div>")
+    rule = THEME[THEME.index(".cfdb-slate .cfdb-slate-bar {"):]
+    assert "overflow:hidden" in rule[:rule.index("}")]
+
+
+def test_the_hour_lines_run_behind_the_whole_day_rather_than_inside_each_row():
+    """> **MARC, v13 addition 2:** *"can the vertical bars/ticks for the time go the full
+    > vertical distance of the chart instead of breaking with each row? it's weird look.
+    > Distracting. Only need vertical lines on the hour."*
+
+    🚨 PER-ROW LINES CANNOT BE CONTINUOUS. Every row contributes its own cell padding and
+    border, so a line drawn inside the row restarts at each one — which is the break Marc saw.
+    The layer is absolutely positioned behind the day's table and inset by the fixed columns.
+    """
+    html = today._slate(_frame(_game()), esc=lambda s: str(s), scope=_SlateScope())
+    assert "cfdb-slate-grid" in html
+    # the layer is a sibling of the table, not a child of any row
+    assert html.index("cfdb-slate-grid") < html.index("<table")
+    assert f"left:{sum(today._SLATE_COL_PX)}px" in html
+    # hours only — one line per hour of the span, and no half-hours
+    # ⚠️ THE LAST TICK IS ANCHORED BY ITS RIGHT EDGE (a 1px box at left:100% overflowed the
+    # layer by exactly one pixel), so counting only `left:` would miss it and report four.
+    lines = html.count("<i style=")
+    assert lines == 5, f"9a..1p inclusive is five hourly lines, got {lines}"
+    assert "<i style='right:0'></i>" in html, "the last tick is anchored right"
 
 
 def test_the_slate_is_drawn_inside_the_gate_and_from_the_same_frame():

@@ -20,6 +20,14 @@ ENUM_PARAMS = {
     # of the URL like every other choice (AC-G.18) — a link to a leaderboard that arrives
     # sorted the other way is a link to a different claim.
     "order": {"desc", "asc"},
+    # 🚨 A204 (cfdb-main-R-2155). Today's Looking Forward close-line cutoff, as Marc asked:
+    # *"Can that be drop-down for end-users to manipulate on the fly?"* An ENUM rather than an
+    # INT, because the set of legal values is the dropdown's own and a URL carrying `cut=5`
+    # should be refused rather than quietly honoured — the caption states the rule the page is
+    # using, and it must never be able to state one nothing was measured for.
+    # ⚠️ REGISTERED, OR IT IS DROPPED ON THE NEXT CLICK. `link_here()` and `current()` filter
+    # to KNOWN, which is the `player`/`q` bug and then A199's `lf`.
+    "cut": {"3", "4", "6", "8"},
     # R-043. Which Schedule rendering is showing. THE REASON THE TAB IS A TAB: a tab is
     # URL-addressable and a toggle is not, and that is only true if the parameter is known
     # here. It was not, at first — unknown parameters are ignored silently (AC-G.11), so
