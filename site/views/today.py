@@ -14,6 +14,7 @@ that already exist (`spread_favorite_side`, `moneyline_favorite_side`, `actual_m
 a cover in Streamlit would be metric maths in the app, which is the rule those columns exist
 to keep.
 """
+import html
 import math
 import statistics
 
@@ -442,8 +443,8 @@ def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
         select player_name, player_slug, team, conference, opponent, week,
                stat_category, stat_type, stat_value, as_of_ts,
                jersey, position, class_year_display,
-               team_slug, team_display, team_logo_url, team_rank, record_before_display,
-               color_on_light, color_on_dark
+               team_slug, team_display, team_abbreviation, team_logo_url, team_rank,
+               record_before_display, color_on_light, color_on_dark
         from srv_player_game_log
         where season = :season and season_type = :season_type
           and (:week is null or week = :week)
@@ -914,9 +915,39 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None) -> str:
     # affordance, and a coloured-but-unstyled name reads as emphasis rather than as a link.
     # The rule in `theme.py` sets both together so neither can be removed without the other.
     accent = identity.accent_color(row)
-    team_block = (f"<div class='cfdb-card-team' style='--cfdb-card-accent:{accent}'>"
+    # ── A191 (cfdb-main-R-2006): THE SHORT NAME UNDER THE LOGO, AND THE FULL ONE ON HOVER ──
+    #
+    # > **MARC, 2026-09-21:** *"team name under the logo, readable. If the full name can't fit
+    # > at the card width, use the site's existing short/abbreviated team name and say which
+    # > field."*
+    #
+    # 📊 IT CANNOT FIT, MEASURED RATHER THAN ASSUMED. In Chromium on this page at 2026 week 3
+    # the team track is 57.6px and **15 of 40 names overflow it** (max 112.9px, "Mississippi
+    # Valley State"), and the track beside it is already short of room at 1100px — 90.9px with
+    # 56 of 150 player rows overflowing. ⚠️ **So widening this column pays for one truncation
+    # with another**, which is the trade A165 named and A189 repeated.
+    #
+    # ✅ THE FIELD IS `team_abbreviation`, PUBLISHED BY A191 ON `srv_player_game_log` FROM
+    # `dim_team.abbreviation` — the site's existing short name, the same one `srv_teams_index`,
+    # `srv_team_overview` and `srv_standings` publish. See that model for why it is a column
+    # rather than a page-side join (G-2).
+    #
+    # ⚠️ THE COLUMN IS ALL-OR-NOTHING ON PURPOSE. Showing the full name where it fits and an
+    # acronym where it does not would make a column that reads as a data fault; one form for
+    # every card reads as a choice. **The full name is not lost — it is the cell's `title`**,
+    # so the one reader who needs it hovers.
+    #
+    # ⚠️ AND THE FALLBACK IS THE DISPLAY NAME, NOT A BLANK. `abbreviation` is null for some
+    # teams (Chicago State, in 2026 week 3), and an empty cell beside a logo reads as a
+    # missing team rather than a missing abbreviation (AC-G.11).
+    short = fmt.text(row.get("team_abbreviation")) or None
+    full = fmt.text(row.get("team_display"))
+    team_block = (f"<div class='cfdb-card-team' style='--cfdb-card-accent:{accent}'"
+                  f"{f' title="{html.escape(full)}"' if short and full else ''}>"
                   f"{_team_identity(
-                      row, '', slug_field='team_slug', display_field='team_display',
+                      row, '',
+                      slug_field='team_slug',
+                      display_field='team_abbreviation' if short else 'team_display',
                       logo_field='team_logo_url', rank_field='team_rank')}</div>")
 
     # 🚨 A175 (cfdb-main-R-1756). THE REFLOW, AND IT IS IN TODAY'S WRAPPER BECAUSE MOVING THE
@@ -1267,20 +1298,35 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     # reader carrying "lead" across from the ranking sentence. 🚨 **That fix is MORE necessary now,
     # not less**: the ranking sentence says "lead changes" again, so "ahead" one clause later would
     # read as the scoreboard when the chart plots a probability. **It stays as A152 wrote it.**
+    # 🚨 A191 (cfdb-main-R-2003). ONE LINE, AND THE REST IS IN THE HEADERS.
+    #
+    # > **MARC, 2026-09-21:** *"cut it to one line on how the list is ranked. Any other
+    # > explanation it carried goes into header tooltips or is dropped. Keep the source credit
+    # > if the site's convention requires it, on the same line."*
+    #
+    # ⚠️ A189 REMOVED THE `caption=` BELOW THE TABLE AND LEFT THIS ONE, WHICH IS WHY IT STILL
+    # READS AS A PARAGRAPH OF METHODOLOGY: the fourteen lines above this one said what the
+    # ordering is, what a tie is, how the scoreboard reads, what the chart plots, what its
+    # axis does in overtime and what a cut line means — six explanations of five columns, in
+    # prose, above a table whose headers said nothing.
+    #
+    # ✅ EVERY SENTENCE IS ACCOUNTED FOR, NOT DELETED. The ranking sentence stays here because
+    # it is the one thing that is about the LIST rather than about a column. The other five
+    # moved onto the columns they describe as `title=` tooltips — see `Col("scoreboard", …)`,
+    # `Col("curve", …)`, `Col("scoreboard_lead_changes_fourth_quarter", …)` and
+    # `Col("espn", …)` below. **The excitement-index comparison is dropped**: it was a note
+    # about why A153 changed the ordering, which is history the register holds and a reader
+    # of the week's games does not need.
+    #
+    # ⚠️ AND THE SOURCE CREDIT GOES, BECAUSE THE SITE'S CONVENTION IS A FOOTER AND NOT A
+    # CAPTION — `lib/attribution.CFBD_CREDIT`, rendered by `shell.page` on EVERY page (AC-G.43)
+    # and asserted by `tests/test_footer.py`. This panel was the only one on the site carrying
+    # a second copy, so removing it brings Most Exciting into line rather than out of it. The
+    # ESPN half of that sentence was never attribution at all and is now the Commentary
+    # tooltip.
     st.caption(
         "Ranked by **how many times the lead actually changed hands in the fourth "
-        "quarter**, then by how close the game stayed after it — not by CFBD's excitement "
-        "index, which ranked the week's best fourth quarter 31st of 86. A tie is not a lead, "
-        "so a game that drew level and went ahead again changed hands once. Each scoreboard "
-        "reads away over home, quarter by "
-        "quarter, with overtime shown separately and the final at the right. The chart "
-        "is the home side's win probability on every play against the game clock, "
-        "unsmoothed and filled from even — above the line the model gave the home side the "
-        "better chance, below it the away side. Quarter marks fall at the same place on every chart, so a "
-        "game that went to overtime is simply longer. A cut line at the end means CFBD's "
-        "feed stopped before the game did, so there is no final value to show. "
-        "Source: [CollegeFootballData.com](https://collegefootballdata.com); commentary links "
-        "go to ESPN.")
+        "quarter**, then by how close the game stayed after it.")
     # ⚠️ THE ROWS ARRIVE IN ORDER. `_completed_games` orders by MOST_EXCITING_ORDER, so the
     # page does not sort and does not compute — §4.2. Changing what "most exciting" means is
     # one edit to that constant and nothing here moves.
@@ -1407,12 +1453,34 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
     # columns fell to 45px each and the header row grew 45px -> 60px. **That is the "wonky"** —
     # a density loss in the body paid for by a taller header, which is the trap A165 named.
     #
-    # ✅ Each width is the measured header plus 16px of padding, so the label cannot wrap at any
-    # viewport; the table scrolls instead of compressing. `sticky=2` keeps Scoreboard and Win
-    # probability in place while the six move, which is the half of Marc's sentence that says
-    # the first two are the ones he wants to keep looking at.
+    # 🚨 A191 (cfdb-main-R-2007). THE SIX WIDTHS ABOVE WERE WRONG AND THE HEADERS WRAPPED
+    # ANYWAY — the defect A189 reported fixed, under a test that certified it.
+    #
+    # 📊 A189 MEASURED WITH A CANVAS `measureText` ON `getComputedStyle(el).font`, AND THAT
+    # SHORTHAND CARRIES NEITHER `text-transform` NOR `letter-spacing`. This header row has
+    # both, so it measured `4th qtr` where the browser draws `4TH QTR`, tracked — and the
+    # padding it then added was 16px against an actual 17.6px. Measured in Chromium against a
+    # live render, as the whole `th` box including the sort glyph and both paddings:
+    #
+    #     4th qtr          shipped 74px    browser needs  82.9px   -> wrapped to 3 lines
+    #     OT               shipped 54px    browser needs  44.1px      fitted
+    #     Game             shipped 73px    browser needs  59.7px      fitted
+    #     How close, late  shipped 129px   browser needs 145.0px   -> wrapped to 3 lines
+    #     Excitement       shipped 104px   browser needs 106.2px      fitted (the table gave
+    #                                                                 it 106.2 regardless)
+    #     Commentary       shipped 109px   browser needs 109.5px      fitted
+    #
+    # ✅ THE NUMBERS NOW HAVE ONE HOME AND A WAY TO BE RE-PROVEN: `ci/measure_header_widths.py`
+    # holds them and re-measures them in a real browser on demand, and
+    # `test_the_last_six_columns_are_fixed_and_fit_their_own_headers` asserts these widths
+    # against that module rather than against a second copy. Read that file for why a `Range`
+    # over the live header cannot answer this question.
+    #
+    # ⚠️ +17px ACROSS THE SIX, AND IT COSTS NOTHING, which is the point of `scroll=True`:
+    # Marc asked for a horizontal scroll precisely so these columns would stop being rationed.
+    # `sticky=2` keeps Scoreboard and Win probability in place while the six move.
     layout = [f"{scoreboard_px + _SCOREBOARD_GUTTER_PX}px", f"{widest + 12}px",
-              "74px", "54px", "73px", "129px", "104px", "109px"]
+              "85px", "47px", "62px", "147px", "109px", "112px"]
 
     states.render_or_state(
         top, "srv_game",
@@ -1424,11 +1492,21 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # Home, each quarter, then final score, followed by the chart." Nothing was dropped
             # to make room: what were eleven columns are eight, and the four that went are all
             # inside this one.
-            Col("scoreboard", "Scoreboard", render=_scoreboard),
+            # A191: the caption's scoreboard sentence, on the column it describes.
+            Col("scoreboard", "Scoreboard", render=_scoreboard,
+                title="Away over home, quarter by quarter, with overtime shown separately "
+                      "and the final at the right"),
             # ⚠️ THE CURVE SITS BESIDE THE SCORE, not at the end of the row. It is the picture of
             # what the ordering claims, so it belongs where a reader looking at the outcome
             # already is — and Marc asked for it in exactly that place.
-            Col("curve", "Win probability", render=curve_cell),
+            # A191: the caption's three chart sentences, on the chart's own column.
+            Col("curve", "Win probability", render=curve_cell,
+                title="The home side's win probability on every play against the game clock, "
+                      "unsmoothed and filled from even \u2014 above the line the model gave "
+                      "the home side the better chance, below it the away side. Quarter marks "
+                      "fall at the same place on every chart, so a game that went to overtime "
+                      "is simply longer. A cut line at the end means CFBD's feed stopped "
+                      "before the game did."),
             # 🚨 A153. THE PANEL SHOWS THE NUMBER IT RANKS ON, which is the whole of Marc's
             # sentence: *"Show actual scoreboard lead changes instead."* Ranking on the scoreboard
             # count while still DISPLAYING the win-probability crossings under a column headed
@@ -1446,8 +1524,11 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # ⚠️ A189: THE TOOLTIPS CARRY WHAT THE REMOVED CAPTION CARRIED. Without them
             # `4th qtr` / `OT` / `Game` are three bare nouns — the caption was the only thing
             # saying they count LEAD CHANGES.
+            # A191: "A tie is not a lead" was in the caption and belongs here — it is the
+            # rule this column counts by, and it is the only one of the three that needs it.
             Col("scoreboard_lead_changes_fourth_quarter", "4th qtr", kind="num",
-                title="Lead changes in the fourth quarter"),
+                title="Lead changes in the fourth quarter. A tie is not a lead, so a game "
+                      "that drew level and went ahead again changed hands once"),
             Col("scoreboard_lead_changes_overtime", "OT", kind="num",
                 title="Lead changes in overtime"),
             # ⚠️ A164. MARC MOVED A DISPLAYED COLUMN, NOT THE SORT — Today v04: *"Move Lead
@@ -1469,7 +1550,9 @@ def _most_exciting(df: pd.DataFrame, scope) -> None:
             # ⚠️ `stacked=True` IS MARC'S "carriage return", AND IT IS THE ONLY PANEL THAT GETS
             # IT. The two recap panels get the horizontal gap he asked for there instead —
             # see `_commentary`, which measured all three before choosing.
-            Col("espn", "Commentary", render=lambda r: _commentary(r, scope, stacked=True)),
+            # A191: "commentary links go to ESPN" was the tail of the caption's source line.
+            Col("espn", "Commentary", render=lambda r: _commentary(r, scope, stacked=True),
+                title="Outcome marks for the game; the link goes to ESPN"),
         ], layout=layout, anchor="most-exciting",
             # 🚨 A189 (cfdb-main-R-1927). THE `caption=` IS GONE — Marc: *"The paragraph about
             # methodology should be removed below the table showing the Most Exciting games."*
@@ -1496,17 +1579,32 @@ def _upset_score(row) -> str:
     number the frame already carries — the drift R-544 cost this module once already, on this
     very frame, when `ats` was computed here and had its sign inverted on every graded game.
 
-    ⚠️ THE LOSER IS THE FAVORITE, WHICH IS WHY THIS PANEL CAN ORDER THE PAIR AT ALL. Every row
-    here satisfies `fav_margin < 0`, so the favorite lost; the favorite side column says which
-    side that was. An en dash, not a hyphen: it is a score pair, and the site uses `–`
-    for that everywhere else.
+    🚨 A191 (cfdb-main-R-2002). THE LOSER COMES FROM THE RESULT, NOT FROM A FAVORITE
+    DEFINITION — and A189 got that wrong in the one place it can be told apart.
+
+    📊 MEASURED ON LIVE SERVING, 2026 WEEK 3: Wyoming at Central Michigan rendered `24–10`,
+    winner first, while every other row read loser first. Wyoming (away) scored 10, Central
+    Michigan (home) 24, and the row carries **`spread_favorite_side = away` against
+    `moneyline_favorite_side = home`** — `favorite_definitions_disagree` is true. A189 read the
+    moneyline side first, so it named the WINNER as the favorite and printed the pair in that
+    order. The panel's own "Lost" label reads the SPREAD side, so one row said two things.
+
+    ⚠️ "THE LOSER IS THE FAVORITE" WAS TRUE OF EVERY OTHER ROW, WHICH IS WHAT MADE IT SURVIVE.
+    A definition that is right 85 times out of 86 reads as correct on any render anyone looks
+    at. **`min`/`max` over the two published scores cannot disagree with the scoreboard**, and
+    it needs neither favorite column — so the two definitions being in conflict stops being a
+    thing this cell has an opinion about.
+
+    ⚠️ THIS IS NOT METRIC ARITHMETIC (§4.2.1). Nothing is computed: both numbers are published
+    and both are printed, and the only decision is which of the two goes first — an ordering,
+    like the en dash beside it. An en dash, not a hyphen: it is a score pair, and the site uses
+    `–` for that everywhere else.
     """
-    side = row.get("moneyline_favorite_side") or row.get("spread_favorite_side")
     home, away = row.get("home_points"), row.get("away_points")
     if home is None or away is None or pd.isna(home) or pd.isna(away):
         return ""
-    loser, winner = (home, away) if side == "home" else (away, home)
-    return f"{int(loser)}–{int(winner)}"
+    home, away = int(home), int(away)
+    return f"{min(home, away)}–{max(home, away)}"
 
 
 def _favorite_margin(row):
@@ -1795,7 +1893,10 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
          # A189: the final, loser first — Marc: *"Add the scores"*. Its own column rather than
          # folded into a team cell, so it reads as a score and stays where a reader expects.
          Col("score", "Score", render=_upset_score,
-             title="Final score, the losing favorite first"),
+             # A191: the wording followed the fix. "The losing favorite" was the
+             # definition `_upset_score` no longer uses — and on the one row where the
+             # two favorite columns disagree it named the WINNER. See `_upset_score`.
+             title="Final score, the losing side first"),
          # MARC: *"Market gave them should be ##.#%"* — `fmt.percent`, which A144 added because
          # the site had no percent shape and was about to get its second inline f-string.
          Col("fav_win_prob", "Market gave them",
@@ -2324,6 +2425,26 @@ def _leaderboards(scope, depth: int) -> None:
                 "rushing_yards": week_avg["rushing_yards"],
                 "passing_yards": week_avg["passing_yards"],
             }])], ignore_index=True)
+            # 🚨 A191 (cfdb-main-R-2010). `pd.concat` FILLS THE MISSING FLAG WITH `NaN`, AND
+            # NaN IS TRUTHY — SO A189's `if r.get("is_summary_row")` FIRED ON EVERY ROW.
+            #
+            # 📊 MEASURED IN A REAL BROWSER AGAINST LIVE SERVING, 2026 week 3:
+            # `.cfdb-summary-row` matched **11 elements, not 1** — the benchmark row and all
+            # ten teams. Every team on the board was rendering as a plain italic label:
+            # **no logo, no rank badge, no record, and no link to its team page.** It is live
+            # in production at `a7c50bb` and the same count comes back from the A189 baseline
+            # render, so this shipped with A189 rather than arriving here.
+            #
+            # ⚠️ IT DID NOT LOOK BROKEN, WHICH IS WHY IT SURVIVED A RENDER REVIEW. Ten italic
+            # team names under a heading read as a deliberately plain table; the missing
+            # affordances are only visible if you know the cell is supposed to carry them.
+            # The `nan` in the Opponent column — the defect Cowork DID catch — was this same
+            # NaN one column to the right, where it happened to print.
+            #
+            # ✅ NORMALISED ONCE, HERE, RATHER THAN GUARDED AT EACH READER. Two columns read
+            # this flag and a third could; `fillna(False).astype(bool)` makes the column a
+            # real boolean so `r.get(...)` means what every reader assumes it means.
+            teams["is_summary_row"] = teams["is_summary_row"].fillna(False).astype(bool)
         st.markdown("**Team yardage**")
         states.render_or_state(
             teams, "srv_game_team",
@@ -2356,11 +2477,26 @@ def _leaderboards(scope, depth: int) -> None:
                 # **publishes NO opponent record column at all**, checked against
                 # information_schema. The Team cell shows a record; this one cannot, and a join
                 # to fetch one is the thing G-2 forbids. **Named in A175's report as the gap.**
+                # 🚨 A191 (cfdb-main-R-2000). THE SUMMARY ROW HAS NO OPPONENT AND MUST NOT
+                # BE GIVEN ONE. The Team column already branches on `is_summary_row`; this one
+                # did not, so the week-average row went through `_team_identity` with every
+                # opponent field absent.
+                #
+                # 📊 WHAT THAT DREW, AND WHY IT LOOKED LIKE A DATA FAULT RATHER THAN A BUG:
+                # `pd.concat` fills the missing columns with `NaN`, and `team_cell`'s
+                # `row.get(display_field) or "—"` **does not catch NaN — a float NaN is
+                # truthy** — so the literal string `nan` was printed, beside
+                # `logo_or_monogram(NaN, …)`'s grey placeholder disc. The em-dash fallback that
+                # exists for exactly this case was one truthiness test away from firing.
+                #
+                # ⚠️ BLANK, NOT "—". The Score column beside it already returns "" for this row
+                # (`_team_score`, on the same NaN), so a dash here would make the benchmark row
+                # read as two different kinds of absence in adjacent cells (AC-G.11).
                 Col("opponent", "Opponent",
-                    render=lambda r: _team_identity(
+                    render=lambda r: ("" if r.get("is_summary_row") else _team_identity(
                         r, "", slug_field="opponent_team_slug",
                         display_field="opponent_team_display",
-                        logo_field="opponent_logo_url", rank_field="opponent_rank")),
+                        logo_field="opponent_logo_url", rank_field="opponent_rank"))),
                 # A189: the result and the final, beside the teams they belong to.
                 # Marc: *"Include the scores next to the teams"*.
                 Col("points_for", "Score", render=_team_score,

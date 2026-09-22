@@ -5,6 +5,7 @@ what it is (G-3). A column spec is declarative so a page says what a column MEAN
 renderer decides precision, alignment and chip treatment from that.
 """
 import hashlib
+import html
 import re
 from typing import Callable, List, Optional
 
@@ -202,8 +203,26 @@ def apply_sort(df: pd.DataFrame, columns: List[Col],
 
 
 def _tip(column: Col) -> str:
-    """The header's `title` attribute, or nothing. A189 — see `Col.title`."""
-    return f" title='{column.title}'" if getattr(column, "title", None) else ""
+    """The header's `title` attribute, or nothing. A189 — see `Col.title`.
+
+    🚨 A191 (cfdb-main-R-2009). THE VALUE IS ESCAPED, BECAUSE AN APOSTROPHE ENDED THE
+    ATTRIBUTE AND SILENTLY TRUNCATED THE TOOLTIP.
+
+    📊 A191 moved Most Exciting's caption into header tooltips, and the Win probability one
+    begins *"The home side's win probability on every play…"*. Interpolated raw into
+    `title='…'` the apostrophe CLOSES the attribute: the browser kept `The home side`, and
+    the remaining 200 characters became stray markup inside the `<th>`.
+
+    ⚠️ IT LOOKED LIKE A WORKING TOOLTIP, WHICH IS WHY IT NEEDS A GUARD RATHER THAN CAREFUL
+    WORDING. Hovering the header showed a short sentence that reads as complete. Only reading
+    the rendered attribute back showed the cut — the same shape as every other defect this
+    round: an instrument that reports success on a truncated result.
+
+    ⚠️ AND TEAM NAMES MAKE THIS UNAVOIDABLE RATHER THAN HYPOTHETICAL — "Saint Mary's (CA)",
+    "East Texas A&M". `html.escape` handles the ampersand for the same reason.
+    """
+    title = getattr(column, "title", None)
+    return f" title='{html.escape(str(title))}'" if title else ""
 
 
 def _header_cell(column: Col, sortable: bool, freeze: str = "",
@@ -612,11 +631,22 @@ def team_cell(row, slug_field: str, display_field: str, logo_field: str,
     `team_link` for the href, which is passed as the column's own `link` so the team name
     goes to the team and the rest of the row goes to the game.
     """
-    logo = identity.logo_or_monogram(row.get(logo_field), row.get(display_field) or "?")
+    # 🚨 A191 (cfdb-main-R-2001). `or "—"` DOES NOT CATCH A MISSING VALUE IN A DataFrame,
+    # BECAUSE A FLOAT `NaN` IS TRUTHY. Today's week-average row printed the literal string
+    # `nan` in its Opponent cell for exactly this reason — the em-dash fallback written for
+    # the absent case was one truthiness test away from firing and never did.
+    #
+    # ⚠️ THE `rank` BRANCH ON THE NEXT LINE ALREADY GOT THIS RIGHT (`not pd.isna(rank)`), which
+    # is what makes the name branch a defect rather than a design: two absence tests in one
+    # function, disagreeing about what absence is.
+    display = row.get(display_field)
+    if display is None or (isinstance(display, float) and pd.isna(display)):
+        display = None
+    logo = identity.logo_or_monogram(row.get(logo_field), display or "?")
     rank = row.get(rank_field) if rank_field else None
     badge = (f"<span class='cfdb-rank'>#{int(rank)}</span>"
              if rank is not None and not pd.isna(rank) else "")
-    return f"{logo}{badge}<span class='cfdb-team'>{row.get(display_field) or '—'}</span>"
+    return f"{logo}{badge}<span class='cfdb-team'>{display or '—'}</span>"
 
 
 def record_span(row, before_field: str, after_field: Optional[str] = None,
