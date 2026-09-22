@@ -122,6 +122,27 @@ select
     -- spells them so one page-side producer serves both relations without a second adapter.
     dt.team_slug,
     dt.team_display,
+    -- 🚨 A191 (cfdb-main-R-2005). THE SHORT NAME, BECAUSE THE FULL ONE DOES NOT FIT ON A CARD.
+    --
+    -- > **MARC, 2026-09-21:** *"team name under the logo, readable. If the full name can't fit
+    -- > at the card width, use the site's existing short/abbreviated team name."*
+    --
+    -- 📊 MEASURED IN CHROMIUM ON THE REAL PAGE, 2026 week 3: the card's team track is 57.6px
+    -- and **15 of 40 names overflow it** — "South Dakota State" draws 94.4px, "Mississippi
+    -- Valley State" 112.9px. ⚠️ **AND THE WIDTH CANNOT BE BOUGHT FROM THE CARD**: at a 1100px
+    -- viewport the player-name track beside it is already down to 90.9px with 56 of 150 rows
+    -- overflowing, so widening the team column makes a worse defect than it fixes.
+    --
+    -- ✅ `abbreviation` IS THE SITE'S EXISTING SHORT NAME, NOT A NEW ONE — `srv_teams_index`,
+    -- `srv_team_overview` and `srv_standings` publish it under that name, `srv_game` as
+    -- `home_abbreviation`/`away_abbreviation` and `srv_game_team` as `opponent_abbreviation`.
+    -- It is at most 9 characters. **The page could not reach it (G-2 — one relation per query)
+    -- and `dim_team` has been in this join since A146**, so this is one line, exactly as the
+    -- colour was two rounds ago.
+    --
+    -- ⚠️ IT IS NULL FOR SOME TEAMS (Chicago State among this week's), so the page falls back to
+    -- `team_display` rather than drawing an empty cell — an absence must not read as a blank.
+    dt.abbreviation                                            as team_abbreviation,
     dt.logo_source_url                                         as team_logo_url,
     -- ── THE TEAM COLOUR (A177, cfdb-main-R-1767) ───────────────────────────────────────────
     -- 🚨 SIX ROUNDS REFUSED THIS AND NONE OF THEM WAS WRONG. A166 asked for the player card's

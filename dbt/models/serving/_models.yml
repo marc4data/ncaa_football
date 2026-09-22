@@ -1592,6 +1592,13 @@ models:
           srv_game_team spells it so one page-side producer serves both relations.
       - name: team_display
         description: The team's display name, from dim_team.
+      - name: team_abbreviation
+        description: >
+          The team's short name, from dim_team.abbreviation — at most 9 characters, and the
+          same field srv_teams_index, srv_team_overview and srv_standings publish as
+          `abbreviation`. A191 added it because the player card's team track is 57.6px and the
+          full display name overflows it on 15 of 40 cards. NULL for some teams, so a consumer
+          falls back to team_display.
       - name: team_logo_url
         description: >
           The team's logo, from dim_team.logo_source_url. Named team_logo_url to match
