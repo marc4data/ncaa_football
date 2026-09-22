@@ -19,6 +19,16 @@ sys.path.insert(0, str(ROOT / "site"))
 
 from views import today                                   # noqa: E402
 
+
+class _SlateScope:
+    """A201: `_slate` takes the scope now, because Marc's Matchup column needs `scope.link`."""
+    season, season_type, week, conference, division = 2026, "regular", 4, None, "fbs"
+
+    def link(self, page, **kw):
+        bits = "&".join(f"{k}={v}" for k, v in kw.items())
+        return f"/{page}?{bits}" if bits else f"/{page}"
+
+
 SOURCE = (ROOT / "site" / "views" / "today.py").read_text()
 SHARED = (ROOT / "site" / "lib" / "schedule_table.py").read_text()
 PARAMS = (ROOT / "site" / "lib" / "params.py").read_text()
@@ -297,5 +307,5 @@ def test_an_added_game_says_why_it_is_on_the_slate_too():
            "network_abbreviation": "ESPN", "spread_current": -13.5,
            "kickoff_time_known": True,
            "is_top25_matchup": False, "is_undefeated_close": False, "is_added_by_you": True}
-    svg = today._slate(pd.DataFrame([row]), esc=lambda t: t)
+    svg = today._slate(pd.DataFrame([row]), esc=lambda t: t, scope=_SlateScope())
     assert "Added by you" in svg, svg[:400]

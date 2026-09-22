@@ -71,6 +71,21 @@ def code_of_shared(name: str) -> str:
 THEME = (ROOT / "site" / "lib" / "theme.py").read_text()
 
 
+class _SlateScope:
+    """A201: `_slate` takes the scope now, because Marc's Matchup column needs `scope.link`."""
+    season, season_type, week, conference, division = 2026, "regular", 4, None, "fbs"
+
+    def link(self, page, **kw):
+        bits = "&".join(f"{k}={v}" for k, v in kw.items())
+        return f"/{page}?{bits}" if bits else f"/{page}"
+
+
+def slate(*rows):
+    """The SLATE for these games, with escaping off so assertions read the raw markup."""
+    return today._slate(pd.DataFrame(list(rows)), esc=lambda t: str(t),
+                        scope=_SlateScope())
+
+
 def _game(**kw):
     row = {"game_id": 1, "start_date": pd.Timestamp("2026-09-26T19:30:00Z"),  # 12:30 PM PT
            "away_team_display": "Oklahoma", "home_team_display": "Georgia",
@@ -200,13 +215,40 @@ def test_a_rank_renders_as_an_integer_not_a_float():
     assert "2.0" not in today._slate_matchup(_game(home_rank=2.0))
 
 
-def test_the_logos_are_drawn_and_a_missing_one_draws_nothing():
-    svg = today._slate(pd.DataFrame([_game()]), esc=lambda t: str(t))
-    assert svg.count("cfdb-slate-logo") == 2
-    bare = today._slate(pd.DataFrame([_game(away_logo_url=float("nan"),
-                                            home_logo_url=None)]), esc=lambda t: str(t))
-    assert "cfdb-slate-logo" not in bare, "a missing logo draws nothing, not a broken image"
-    assert "nan" not in bare.lower()
+def test_the_logos_come_from_schedules_own_team_cell_now():
+    """⚠️ A201 REPLACED THE SVG LABEL WITH SCHEDULE'S CELLS, so the logo is no longer drawn by
+    the SLATE at all — `team_with_record` draws it, exactly as it does in the list above.
+
+    🚨 THAT IS THE POINT OF THE REBUILD: Marc asked to *"re-use the layout from the inline
+    schedule"*, and a second logo renderer in this file would be the copy that drifts. A200's
+    `_slate_logos` was deleted rather than left unused.
+    """
+    assert "_slate_logos" not in SOURCE, "the SVG logo helper is dead code now"
+    html = slate(_game())
+    assert "cfdb-logo" in html, "the team cell still brings its logo"
+    assert "cfdb-slate-logo" not in html
+
+
+def test_the_left_of_the_row_is_schedules_cells_rather_than_new_markup():
+    """> **MARC, v13:** *"Re-use the layout from the inline schedule for the left side."*"""
+    body = code_of("_slate")
+    assert "schedule_table.team_with_record(row, 'away')" in body
+    assert "schedule_table.team_with_record(row, 'home')" in body
+    html = slate(_game())
+    for column in ("Away", "Home", "Spread", "TV", "Game", "Why"):
+        assert f">{column}</th>" in html, f"no {column} header"
+
+
+def test_the_two_columns_marc_asked_for_that_did_not_fit_are_named_as_dropped():
+    """🚨 MEASURED, NOT PREFERRED. At 1440 his seven columns need 745.2px of a 980px box,
+    leaving 176.8px of graph; dropping Wx leaves 244.7px and dropping O/U as well leaves
+    302.8px. ⚠️ Cowork's order was Wx then O/U and the round took exactly that and no more.
+    """
+    html = slate(_game())
+    assert ">Wx</th>" not in html and ">O/U</th>" not in html
+    reason = code_of("_slate") + today._slate.__doc__
+    assert "745.2" in reason and "302.8" in reason, (
+        "the measurement that justified the drop must travel with the code")
 
 
 # ── 4. the SLATE's reason is a mark, and the marks combine ────────────────────────────
@@ -220,16 +262,14 @@ def test_every_reason_has_its_own_mark_and_they_combine():
     def marks(svg):
         return svg.count("<g><title>")
 
-    one = today._slate(pd.DataFrame([_game(is_top25_matchup=True)]), esc=lambda t: str(t))
+    one = slate(_game(is_top25_matchup=True))
     assert marks(one) == 1
 
-    both = today._slate(pd.DataFrame([_game(is_top25_matchup=True,
-                                            is_undefeated_close=True)]), esc=lambda t: str(t))
+    both = slate(_game(is_top25_matchup=True, is_undefeated_close=True))
     assert marks(both) == 2, "a game on both rules shows both marks"
 
-    all_three = today._slate(pd.DataFrame([_game(is_top25_matchup=True,
-                                                 is_undefeated_close=True,
-                                                 is_added_by_you=True)]), esc=lambda t: str(t))
+    all_three = slate(_game(is_top25_matchup=True, is_undefeated_close=True,
+                            is_added_by_you=True))
     assert marks(all_three) == 3
 
 
@@ -253,7 +293,7 @@ def test_an_added_game_no_longer_draws_the_same_bar_as_an_undefeated_one():
 
 def test_the_legend_is_on_the_chart_and_names_every_mark():
     """🚨 ON THE CHART, NOT ONLY IN THE CAPTION (A198's version was caption-only)."""
-    svg = today._slate(pd.DataFrame([_game(is_top25_matchup=True)]), esc=lambda t: str(t))
+    svg = slate(_game(is_top25_matchup=True))
     assert "cfdb-slate-key" in svg
     for _flag, _kind, label in today._SLATE_MARKS:
         assert label in svg, f"the legend does not name {label!r}"
@@ -271,16 +311,82 @@ def test_the_key_swatch_cannot_inherit_the_full_width_chart_rule():
     assert "width:12px" in rule and "height:12px" in rule
 
 
-def test_the_reason_gutter_is_reserved_rather_than_taken_from_the_bars():
-    """The marks sit at a fixed x, so they line up; the plot must shrink to make room or the
-    bars would run underneath them."""
-    plot = next(line for line in code_of("_slate").splitlines()
-                if line.strip().startswith("plot ="))
-    assert "_SLATE_WHY_PX" in plot, f"the gutter must come out of the plot width: {plot}"
+def test_the_slate_spread_is_formatted_the_way_the_list_above_it_formats_it():
+    """🚨 THE SAME NUMBER, EIGHT ROWS APART, MUST LOOK THE SAME.
+
+    The first build of this cell used a local `f"{v:+g}"` and the SLATE printed `+1` and `-3`
+    beside a list printing `+1.0` and `-3.0`. ⚠️ Nothing was wrong with either number — but a
+    reader comparing the two reads a difference that is not there.
+
+    ✅ `fmt.signed(value, field)` is exactly what `Col(kind="signed")` calls, and passing the
+    FIELD is what lets it use that column's own decimal places.
+    """
+    from lib import fmt
+    from lib.table import Col
+
+    column = Col("spread_current", "Spread", "signed")
+    for value in (-13.5, 1.0, -3.0, 0.0, -9.0, 5.5):
+        row = {"spread_current": value}
+        assert today._slate_spread(row) == column.format(row), value
+    # a missing line is an em dash in both, and never the string "nan"
+    assert today._slate_spread({"spread_current": float("nan")}) == fmt.EM_DASH
+    assert today._slate_spread({"spread_current": None}) == fmt.EM_DASH
+    # 🚨 0.0 IS A REAL LINE AND IS FALSY — a pick-'em must not fall to the em dash
+    assert today._slate_spread({"spread_current": 0.0}) != fmt.EM_DASH
+
+
+def test_every_mark_of_a_type_sits_at_the_same_x_on_every_row():
+    """🚨 THE WHOLE OF PART 3, ASSERTED ARITHMETICALLY.
+
+    > **MARC, v13:** *"sometimes the leftmost element is a Circle, triangle, or a +. Make the
+    > same type vertically aligned… if a game isn't Top 25, replace the circle with a space."*
+
+    ⚠️ A200 packed the marks left, so the FIRST glyph on a row was whichever rule fired — a
+    circle on one row and a triangle on the next, at the same x. A slot per reason means the x
+    depends on the reason's INDEX and never on which others happen to be true.
+    """
+    import re as _re
+
+    def xs(html):
+        """Each mark's own x, by shape, from the rendered cell."""
+        found = {}
+        for block in html.split("<g><title>")[1:]:
+            label = block[:block.index("</title>")]
+            m = _re.search(r"c?x='([\d.]+)'|points='([\d.]+),|M([\d.]+),", block)
+            found[label] = float(next(g for g in m.groups() if g))
+        return found
+
+    only_top = xs(slate(_game(is_top25_matchup=True)))
+    only_added = xs(slate(_game(is_added_by_you=True)))
+    all_three = xs(slate(_game(is_top25_matchup=True, is_undefeated_close=True,
+                               is_added_by_you=True)))
+    # the same reason lands at the same x whether it is alone or in company
+    assert only_top["Top 25"] == all_three["Top 25"]
+    assert only_added["Added by you"] == all_three["Added by you"]
+    # and the three slots are distinct and in declaration order
+    order = [all_three[label] for _f, _k, label in today._SLATE_MARKS]
+    assert order == sorted(order) and len(set(order)) == 3, order
+
+
+def test_the_reason_is_its_own_column_with_a_header():
+    """Marc's second fallback, kept as the shape even though the first one landed: the cell
+    has a header and a width, so the slots cannot drift into a neighbour."""
+    html = slate(_game(is_top25_matchup=True))
+    assert ">Why</th>" in html
+    assert "cfdb-slate-why" in html
+    # ⚠️ THE WIDTH LIVES IN THE COLGROUP, NOT IN THE STYLESHEET. `table-layout:fixed` reads
+    # the first row's column widths, so a `<col>` is where a fixed column is actually fixed —
+    # a CSS width on the cell would be advisory and could drift under content.
+    assert f"width:{today._SLATE_WHY_PX}px" in html
+    # ⚠️ `html.count("<col")` READS 8 — `<colgroup` matches it too. Count the elements.
+    import re as _re
+    cols = _re.findall(r"<col(?:\s[^>]*)?>", html)
+    assert len(cols) == 7, f"six sized columns and the graph taking the remainder: {cols}"
+    assert cols[-1] == "<col>", "the graph column carries no width, so it gets the rest"
 
 
 @pytest.mark.parametrize("flag,kind", [(f, k) for f, k, _l in today._SLATE_MARKS])
 def test_each_mark_hovers_with_its_own_name(flag, kind):
-    svg = today._slate(pd.DataFrame([_game(**{flag: True})]), esc=lambda t: str(t))
+    svg = slate(_game(**{flag: True}))
     label = next(lb for f, _k, lb in today._SLATE_MARKS if f == flag)
     assert f"<title>{label}</title>" in svg

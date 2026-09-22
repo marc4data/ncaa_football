@@ -145,13 +145,43 @@ CSS = """
    for a link — a rank is the strongest signal on this chart and it earns one hue. */
 .cfdb-slate { margin:.3rem 0 .2rem; }
 .cfdb-slate svg { display:block; width:100%; height:auto; color:inherit; }
+/* A201. The SLATE is a schedule table whose last column holds the graph. The left cells are
+   Schedule's own, so they inherit `.cfdb-table`; only the graph column is new. */
+/* 🚨 A MINIMUM, SO THE GRAPH CANNOT BE SQUEEZED TO NOTHING. 📊 The six fixed columns are
+   642px; at 1100 with the sidebar open the scroll box is 640px, so without this the graph
+   column got 0px and all twelve hour labels piled up outside it — measured, in the browser.
+   940px keeps ~300px of axis and lets the row scroll sideways instead, which is exactly what
+   the list above it already does at that width. */
+.cfdb-slate-table { table-layout:fixed; width:100%; min-width:940px; }
+.cfdb-slate-table td, .cfdb-slate-table th { padding-top:.2rem; padding-bottom:.2rem; }
+.cfdb-slate-table .cfdb-slate-cell { padding-left:.5rem; padding-right:.2rem; }
+.cfdb-slate-table .cfdb-slate-tv { white-space:nowrap; }
+.cfdb-slate-table .cfdb-slate-why { padding-left:.2rem; padding-right:.2rem; }
+/* 🚨 SCOPED WITH THE PARENT, BECAUSE `.cfdb-slate svg` ABOVE OUT-SPECIFIES A BARE CLASS.
+   A200 hit this exact rule with the key swatch and wrote it down; the first build of A201 hit
+   it again with the plot, whose `height:auto` against a stretched viewBox drew a 26-unit row
+   several hundred pixels tall. Specificity here is 0-2-0 against that rule's 0-1-1. */
+.cfdb-slate .cfdb-slate-plot { display:block; width:100%; height:26px; }
+.cfdb-slate .cfdb-slate-slots { display:inline-block; width:auto; height:16px; }
+/* The axis is HTML: percent-positioned spans, so the glyphs are not stretched by the plot's
+   `preserveAspectRatio='none'`. */
+.cfdb-slate-axis { position:relative; height:14px; }
+.cfdb-slate-axis .cfdb-slate-hour { position:absolute; transform:translateX(-50%);
+                                    font-size:.62rem; opacity:.55; white-space:nowrap; }
+.cfdb-slate-axis .cfdb-slate-hour-first,
+.cfdb-slate-axis .cfdb-slate-hour-last { transform:none; }
 .cfdb-slate-day { font-size:.72rem; font-weight:700; letter-spacing:.04em;
                   text-transform:uppercase; opacity:.65; margin:.5rem 0 .1rem; }
 .cfdb-slate-grid { stroke:currentColor; stroke-opacity:.14; stroke-width:1; }
 .cfdb-slate-hour { fill:currentColor; fill-opacity:.5; font-size:9.5px; }
 .cfdb-slate-label { fill:currentColor; fill-opacity:.85; font-size:11px; }
 .cfdb-slate-net { fill:currentColor; fill-opacity:.55; font-size:10px; }
-.cfdb-slate-bar { fill:currentColor; fill-opacity:.28; }
+/* A201, Marc: "Give the bars a thin medium graph outline to make them pop a bit." The
+   stroke is `currentColor` at a middling opacity, so it reads in both themes without being a
+   second color to keep in step. `vector-effect` on the rect keeps it one pixel — the SVG is
+   stretched horizontally, so a scaled stroke would draw a fat left edge and a hairline top. */
+.cfdb-slate-bar { fill:currentColor; fill-opacity:.28;
+                  stroke:currentColor; stroke-opacity:.45; stroke-width:1; }
 .cfdb-slate-bar-top { fill:var(--cfdb-link); fill-opacity:.55; }
 /* A game whose kickoff is not announced gets NO bar — see `today._slate_rows`. It is named
    here instead, because a bar at a placeholder time is a fabricated slot on a run sheet. */
@@ -733,7 +763,24 @@ TABLE_CSS = """
    the three read as one line. */
 .cfdb-team, .cfdb-rank, .cfdb-team-record { vertical-align:baseline; line-height:1.25; }
 .cfdb-team { margin-left:.4rem; }
-.cfdb-table .cfdb-team { display:inline-block; max-width:100%; vertical-align:bottom;
+/* 🚨 A201 (cfdb-main-R-2091). `vertical-align:middle`, NOT `bottom`.
+   > **MARC:** *"Team Name isn't vertically aligned with the Logo, Rank and Record"*
+
+   📊 MEASURED before changing anything, by a Range over each text node at 1440 and 1100 with
+   the sidebar open: the NAME sat 4.5px below the logo's center, 5.5px below the rank and 5.0px
+   below the record — worst center spread 5.5px. ⚠️ The other three agree with each other to
+   within 1px, so the name was the one element out, not the record or the logo.
+
+   ⚠️ THE CAUSE IS THIS RULE'S OWN `display:inline-block`. An inline-block takes an explicit
+   alignment, `bottom` put its BOX bottom on the line-box bottom, and a 19px name box next to a
+   28px logo then hangs 4.5px low. The ellipsis cluster it travels with is unrelated and stays
+   — A164 tested that cluster for a different bug and exonerated it.
+
+   ✅ `middle` takes the worst spread to 1.0px, and the 0.5px that remains is the 28px logo
+   box's own half-pixel. Centering every element instead reaches 0.5px and was NOT taken: it
+   would have to touch `.cfdb-logo` and `.cfdb-logo-box`, which the cards, the legend and
+   Matchup all read, to buy half a pixel nobody can see. */
+.cfdb-table .cfdb-team { display:inline-block; max-width:100%; vertical-align:middle;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* R-132: no font-size — it sits in the row and reads at the row's size. */
 .cfdb-rank { font-weight:700; opacity:.7; margin-left:.3rem; }

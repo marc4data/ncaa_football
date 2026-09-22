@@ -3823,11 +3823,23 @@ _SLATE_ROW_PX = 26
 _SLATE_BAR_PX = 13
 _SLATE_LABEL_PX = 268
 _SLATE_NETWORK_PX = 46
-# 🚨 A200: THE REASON GETS ITS OWN GUTTER, AT A FIXED x, SO THE MARKS LINE UP IN A COLUMN.
-# ⚠️ Hanging them off the bar's END would scatter them across the width and put the latest
-# game's marks off the right edge — the bars are the one thing on this chart that move.
-_SLATE_WHY_PX = 58
+# 🚨 A201: THE REASON IS A COLUMN NOW, WITH A HEADER AND THREE FIXED SLOTS.
+#
+# > **MARC, v13:** *"sometimes the leftmost element is a Circle, triangle, or a +. Make the
+# > same type vertically aligned… if a game isn't Top 25, replace the circle with a space."*
+#
+# ⚠️ A200 drew the marks left-packed, so the FIRST mark on a row was whichever rule happened
+# to fire — a circle on one row, a triangle on the next, in the same x. ✅ A slot per reason,
+# always the same x whether or not it is filled, is the first option Marc named and the
+# cheapest of the three: the cell is a fixed-width SVG and the slot centres are constants, so
+# the alignment is arithmetic rather than a layout that could drift.
+_SLATE_WHY_PX = 54
+_SLATE_SLOT_PX = 16
 _SLATE_WIDTH = 900
+
+# The graph cell's own coordinate space. It is stretched to whatever width the column gets,
+# so this is a unit system rather than a pixel count.
+_SLATE_PLOT = 300
 _SLATE_PAD_TOP = 18
 
 
@@ -3902,37 +3914,6 @@ def _slate_matchup(row) -> str:
     return f"{side('away')} at {side('home')}"
 
 
-_SLATE_LOGO_PX = 15
-
-
-def _slate_logos(row, cy: float, esc) -> str:
-    """The two logos, in a fixed column at the left of the label gutter.
-
-    🚨 FIXED x, NOT BESIDE THE TEXT. The names are right-aligned against the axis, so a logo
-    placed before the text would sit at a different x on every row — and the server cannot
-    know the rendered text length to place it. A column of logos reads as a column; a ragged
-    scatter of them does not.
-
-    📊 THEY FIT, MEASURED: the gutter is 260 units and the widest label of the real week-4
-    slate, "#19 Missouri at #24 Mississippi State", is 164.2 of them — so the text begins at
-    95.8, well clear of the 36 units this column uses.
-
-    ⚠️ A MISSING LOGO DRAWS NOTHING RATHER THAN A BROKEN IMAGE. `NaN` is truthy, so the test
-    is `pd.isna`, not the value.
-    """
-    out = []
-    for index, side in enumerate(("away", "home")):
-        url = row.get(f"{side}_logo_url")
-        if url is None or pd.isna(url) or not str(url).strip():
-            continue
-        x = 2 + index * (_SLATE_LOGO_PX + 3)
-        out.append(f"<image class='cfdb-slate-logo' href='{esc(str(url))}' "
-                   f"x='{x}' y='{cy - _SLATE_LOGO_PX / 2:.1f}' "
-                   f"width='{_SLATE_LOGO_PX}' height='{_SLATE_LOGO_PX}' "
-                   f"preserveAspectRatio='xMidYMid meet'/>")
-    return "".join(out)
-
-
 def _slate_bar_class(row) -> str:
     """The bar's colour. ⚠️ ONE CLASS, BY PRECEDENCE — a bar has one fill, and the MARKS carry
     the whole truth when more than one rule fires."""
@@ -3958,15 +3939,69 @@ def _slate_mark_shape(kind: str, cx: float, cy: float) -> str:
             f"M{cx:.1f},{cy - 4.4:.1f} V{cy + 4.4:.1f}'/>")
 
 
-def _slate_marks(row, x: float, cy: float) -> list:
-    """Every mark this game earns, left to right, each with its own hover text."""
-    out = []
-    for index, (flag, kind, label) in enumerate(
-            [m for m in _SLATE_MARKS if bool(row.get(m[0]))]):
-        cx = x + index * _SLATE_MARK_PX + _SLATE_MARK_PX / 2
-        out.append(f"<g><title>{html.escape(label)}</title>"
-                   f"{_slate_mark_shape(kind, cx, cy)}</g>")
-    return out
+def _slate_marks(row, esc) -> str:
+    """The reason cell: three fixed slots, filled only where the rule fires.
+
+    🚨 EVERY MARK OF A GIVEN TYPE SITS AT THE SAME x ON EVERY ROW, and it does so by
+    arithmetic — slot *i* is always at `_SLATE_SLOT_PX * (i + 0.5)` in a fixed-width viewBox.
+    ⚠️ A200 packed them left, so the leftmost glyph was a circle on one row and a triangle on
+    the next and a reader could not scan the column.
+    """
+    parts = [f"<svg class='cfdb-slate-slots' viewBox='0 0 "
+             f"{_SLATE_SLOT_PX * len(_SLATE_MARKS)} {_SLATE_SLOT_PX}' "
+             f"width='{_SLATE_SLOT_PX * len(_SLATE_MARKS)}' height='{_SLATE_SLOT_PX}' "
+             f"role='img' aria-label='{esc(_slate_reason_text(row) or 'no reason')}'>"]
+    for index, (flag, kind, label) in enumerate(_SLATE_MARKS):
+        if not bool(row.get(flag)):
+            continue
+        cx = _SLATE_SLOT_PX * (index + 0.5)
+        parts.append(f"<g><title>{esc(label)}</title>"
+                     f"{_slate_mark_shape(kind, cx, _SLATE_SLOT_PX / 2)}</g>")
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _slate_reason_text(row) -> str:
+    """The reasons as words, for the hover and for the accessible label."""
+    return " \u00b7 ".join(label for flag, _kind, label in _SLATE_MARKS
+                           if bool(row.get(flag)))
+
+
+def _slate_spread(row) -> str:
+    """The market line, formatted the way the table above it formats the same column.
+
+    🚨 `fmt.signed` WITH THE FIELD NAME, NOT A LOCAL `:+g`. The first build used `:+g` and the
+    SLATE printed `+1` and `-3` beside a list printing `+1.0` and `-3.0` — the same number,
+    two ways, eight rows apart. `fmt.signed` is what `Col(kind="signed")` calls, and passing
+    the FIELD is what makes it pick that column's own decimal places.
+
+    ⚠️ `pd.isna`, not truthiness: a pick-'em line is 0.0, which is falsy and is a real number.
+    """
+    return fmt.signed(row.get("spread_current"), "spread_current")
+
+
+def _slate_link(row, esc, scope) -> str:
+    """Marc's "Matchup hyperlink" — the same glyph the Schedule row uses, so one icon means
+    one thing across the page.
+
+    ⚠️ THE HREF COMES FROM `scope.link`, NOT FROM `params.link_here`. `link_here` rewrites the
+    CURRENT page's url and has no page argument; Schedule's own Game cell uses `scope.link`,
+    and using anything else here would be a second way to build the same link.
+    """
+    game_id = row.get("game_id")
+    if game_id is None or pd.isna(game_id):
+        return ""
+    href = scope.link("matchup", game_id=int(game_id))
+    return (f"<a class='cfdb-cell-link-alt' href='{esc(href)}' target='_self' "
+            f"title='Open the matchup'><span class='cfdb-details'>"
+            f"{table.DETAILS_GLYPH}</span></a>")
+
+
+def _slate_tip(row, network: str) -> str:
+    """One hover string for the bar, unchanged in content from A198/A200."""
+    reason = _slate_reason_text(row)
+    return (f"{_slate_matchup(row)} \u2014 {fmt.clock(row.get('start_date'))} on {network}"
+            f" \u2014 {_slate_spread(row)}" + (f" \u2014 {reason}" if reason else ""))
 
 
 def _slate_legend(esc) -> str:
@@ -3981,12 +4016,31 @@ def _slate_legend(esc) -> str:
     return "<div class='cfdb-slate-key'>" + "".join(bits) + "</div>"
 
 
-def _slate(games: pd.DataFrame, esc) -> str:
-    """A gantt of the upcoming slate: one row per game, time across the x-axis.
+def _slate(games: pd.DataFrame, esc, scope) -> str:
+    """The SLATE: Schedule's own cells on the left, the day's time axis on the right.
 
-    ⚠️ ONE HOUR SCALE PER DAY, SHARED BY EVERY ROW IN IT, so two windows that overlap look
-    overlapping. A scale shared across DAYS would waste most of the width on the hours nobody
-    plays, and a per-ROW scale would make every bar the same length and say nothing.
+    > **MARC, v13:** *"Re-use the layout from the inline schedule for the left side of the
+    > SLATE table/graph (Away Logo, Rank Name, Record in column), same info for Home in a
+    > column. Columns for Spread, O/U, WX, TV, Matchup hyperlink. Then the graph element. Give
+    > the bars a thin medium graph outline to make them pop a bit. Remove the label b/c its on
+    > the left."*
+
+    🚨 TWO OF HIS SEVEN COLUMNS ARE NOT HERE, AND THE MEASUREMENT IS WHY (cfdb-main-R-2092).
+    📊 At 1440 with the sidebar open the scroll box is 980px and his seven columns need
+    **745.2px** of it, which leaves **176.8px** for the graph — an axis that cannot carry a
+    day. Dropping **Wx** leaves 244.7px; dropping **O/U** as well leaves **302.8px**, which
+    can. ⚠️ Cowork's own order was WX first then O/U, and the round took exactly that and no
+    more. **Both numbers are still one click away on Matchup**, which the Game cell links.
+
+    ⚠️ THE NETWORK IS IN THE TV COLUMN AND NOT BESIDE THE BAR. It was beside the bar when the
+    bar carried the only identity on the row; now the row names itself, and printing the
+    network twice would be the "not both" this was asked to avoid.
+
+    ⚠️ ONE SVG PER ROW, SHARING THE DAY'S SCALE, rather than one SVG per day. The left of the
+    row is HTML — those are Schedule's cells, reused rather than redrawn — so the graph has to
+    live in a cell beside them. The gridlines are drawn in every row's own SVG at the same
+    fractions, so they line up into continuous columns; the hour labels are drawn once, in the
+    header cell.
     """
     if games is None or games.empty:
         return ""
@@ -3994,7 +4048,6 @@ def _slate(games: pd.DataFrame, esc) -> str:
     if not timed and not untimed:
         return ""
 
-    plot = _SLATE_WIDTH - _SLATE_LABEL_PX - _SLATE_NETWORK_PX - _SLATE_WHY_PX
     out = ["<div class='cfdb-slate'>", _slate_legend(esc)]
 
     for day, entries in timed.items():
@@ -4003,62 +4056,95 @@ def _slate(games: pd.DataFrame, esc) -> str:
         start_hour = first.hour
         end_hour = last.hour + math.ceil((last.minute + _SLATE_GAME_MINUTES) / 60)
         span = max(end_hour - start_hour, 1)
-        height = _SLATE_PAD_TOP + _SLATE_ROW_PX * len(entries) + 6
 
-        def x_of(when) -> float:
+        def frac(when) -> float:
+            """Where an instant sits across the day's scale, 0..1."""
             minutes = (when.hour - start_hour) * 60 + when.minute
-            return _SLATE_LABEL_PX + plot * minutes / (span * 60)
+            return min(max(minutes / (span * 60), 0.0), 1.0)
 
-        parts = [f"<div class='cfdb-slate-day'>{esc(day)}</div>",
-                 f"<svg viewBox='0 0 {_SLATE_WIDTH} {height}' role='img' "
-                 f"aria-label='Kick-off times for {esc(day)}, Pacific'>"]
+        # ⚠️ EVERY HOUR WHEN THEY FIT, EVERY SECOND HOUR WHEN THEY DO NOT. 📊 The graph column
+        # is ~302px at 1440 and a Saturday spans 13 hours, so an hourly label would get ~23px
+        # for a ~14px glyph run — legible but touching. The step is computed from the span
+        # rather than chosen, so a short Friday still gets every hour.
+        step = 1 if span <= 8 else 2
+
+        # 🚨 THE AXIS IS HTML, NOT SVG TEXT. The plot is stretched to its column with
+        # `preserveAspectRatio='none'` so the bars keep the day's scale — and that same
+        # stretch distorts GLYPHS. The first build drew the hours inside the plot's SVG and
+        # they came out several times their size and horizontally smeared. Percent-positioned
+        # spans take the same fractions and render as ordinary text.
+        head = ["<div class='cfdb-slate-axis'>"]
         for hour in range(start_hour, end_hour + 1):
-            gx = _SLATE_LABEL_PX + plot * (hour - start_hour) * 60 / (span * 60)
-            parts.append(f"<line class='cfdb-slate-grid' x1='{gx:.1f}' y1='{_SLATE_PAD_TOP - 4}' "
-                         f"x2='{gx:.1f}' y2='{height - 4}'/>")
+            if (hour - start_hour) % step:
+                continue
+            pct = 100.0 * (hour - start_hour) / span
             label = f"{(hour - 1) % 12 + 1}{'a' if hour < 12 else 'p'}"
-            parts.append(f"<text class='cfdb-slate-hour' x='{gx:.1f}' y='{_SLATE_PAD_TOP - 8}' "
-                         f"text-anchor='middle'>{label}</text>")
+            # ⚠️ THE FIRST AND LAST LABELS ARE ANCHORED BY THEIR EDGE, NOT THEIR CENTRE. A
+            # centred span at 100% hangs half its width past the column and the render showed
+            # "9p" clipped to "9"; at 0% it would hang off the left into the Why column.
+            if pct >= 99.9:
+                css, cls = "right:0", "cfdb-slate-hour cfdb-slate-hour-last"
+            elif pct <= 0.1:
+                css, cls = "left:0", "cfdb-slate-hour cfdb-slate-hour-first"
+            else:
+                css, cls = f"left:{pct:.2f}%", "cfdb-slate-hour"
+            head.append(f"<span class='{cls}' style='{css}'>{label}</span>")
+        head.append("</div>")
 
-        for index, (local, row) in enumerate(entries):
-            y = _SLATE_PAD_TOP + index * _SLATE_ROW_PX
-            mid = y + _SLATE_ROW_PX / 2
-            x1 = x_of(local)
-            x2 = x_of(local + pd.Timedelta(minutes=_SLATE_GAME_MINUTES))
-            matchup = _slate_matchup(row)
-            # ⚠️ "TBA", NEVER BLANK — Marc asked for it by name, and a blank cell on a run
-            # sheet reads as "no broadcast" rather than "not announced".
+        rows_html = []
+        for local, row in entries:
+            x1 = _SLATE_PLOT * frac(local)
+            x2 = _SLATE_PLOT * frac(local + pd.Timedelta(minutes=_SLATE_GAME_MINUTES))
             network = (fmt.text(row.get("network_abbreviation"))
                        or fmt.text(row.get("network")) or "TBA")
-            # ⚠️ A199: "Added by you" BELONGS HERE TOO. The list and the SLATE are two views
-            # of one frame, and a game that says why it is on the list and nothing at all on
-            # the chart makes the reader wonder which of the two is wrong.
-            reason = " \u00b7 ".join(
-                t for t, on in (("Top 25", row.get("is_top25_matchup")),
-                                ("Undefeated, close", row.get("is_undefeated_close")),
-                                ("Added by you", row.get("is_added_by_you")))
-                if bool(on))
-            spread = row.get("spread_current")
-            spread_text = ("no line" if spread is None or pd.isna(spread)
-                           else f"{float(spread):+g}")
-            tip = (f"{matchup} \u2014 {fmt.clock(row.get('start_date'))} on {network}"
-                   f" \u2014 {spread_text}" + (f" \u2014 {reason}" if reason else ""))
-            parts.append(_slate_logos(row, mid, esc))
-            parts.append(
-                f"<text class='cfdb-slate-label' x='{_SLATE_LABEL_PX - 8}' y='{mid + 3.5:.1f}' "
-                f"text-anchor='end'>{esc(matchup)}</text>")
-            parts.append(
+            tip = _slate_tip(row, network)
+            bar = [f"<svg class='cfdb-slate-plot' viewBox='0 0 {_SLATE_PLOT} "
+                   f"{_SLATE_ROW_PX}' preserveAspectRatio='none' role='img' "
+                   f"aria-label='{esc(tip)}'>"]
+            for hour in range(start_hour, end_hour + 1):
+                gx = _SLATE_PLOT * (hour - start_hour) / span
+                bar.append(f"<line class='cfdb-slate-grid' x1='{gx:.1f}' y1='0' "
+                           f"x2='{gx:.1f}' y2='{_SLATE_ROW_PX}'/>")
+            # ⚠️ `vector-effect` KEEPS THE OUTLINE ONE PIXEL. The SVG is stretched to the
+            # column with `preserveAspectRatio='none'`, so a plain stroke-width would be
+            # scaled horizontally and draw a fat left edge against a hairline top.
+            bar.append(
                 f"<rect class='cfdb-slate-bar {_slate_bar_class(row)}' "
-                f"x='{x1:.1f}' y='{mid - _SLATE_BAR_PX / 2:.1f}' "
-                f"width='{max(x2 - x1, 2):.1f}' height='{_SLATE_BAR_PX}' rx='2'>"
+                f"x='{x1:.1f}' y='{(_SLATE_ROW_PX - _SLATE_BAR_PX) / 2:.1f}' "
+                f"width='{max(x2 - x1, 2):.1f}' height='{_SLATE_BAR_PX}' rx='2' "
+                f"vector-effect='non-scaling-stroke'>"
                 f"<title>{esc(tip)}</title></rect>")
-            net_x = min(x2 + 6, _SLATE_WIDTH - _SLATE_WHY_PX - _SLATE_NETWORK_PX + 40)
-            parts.append(
-                f"<text class='cfdb-slate-net' x='{net_x:.1f}' "
-                f"y='{mid + 3.5:.1f}'>{esc(network)}</text>")
-            parts.extend(_slate_marks(row, _SLATE_WIDTH - _SLATE_WHY_PX + 6, mid))
-        parts.append("</svg>")
-        out.extend(parts)
+            bar.append("</svg>")
+
+            rows_html.append(
+                "<tr>"
+                f"<td class='cfdb-slate-team'>{schedule_table.team_with_record(row, 'away')}</td>"
+                f"<td class='cfdb-slate-team'>{schedule_table.team_with_record(row, 'home')}</td>"
+                f"<td class='cfdb-num'>{_slate_spread(row)}</td>"
+                f"<td class='cfdb-slate-tv'>{esc(network)}</td>"
+                f"<td class='cfdb-center'>{_slate_link(row, esc, scope)}</td>"
+                f"<td class='cfdb-slate-why'>{_slate_marks(row, esc)}</td>"
+                f"<td class='cfdb-slate-cell'>{''.join(bar)}</td>"
+                "</tr>")
+
+        out.append(f"<div class='cfdb-slate-day'>{esc(day)}</div>")
+        # ⚠️ `table-layout:fixed` PLUS A COLGROUP, so the graph takes what is LEFT. With
+        # `auto` and a 100%-wide graph cell the browser gave the graph the whole table and
+        # pushed Schedule's columns off the left edge — measured, and visible in the first
+        # render of this build.
+        # 📊 The six widths are A201's own measurement of those same cells at 1440.
+        out.append(
+            "<div class='cfdb-scroll'><table class='cfdb-table cfdb-slate-table'>"
+            "<colgroup>"
+            "<col style='width:190px'><col style='width:222px'><col style='width:68px'>"
+            "<col style='width:56px'><col style='width:52px'>"
+            f"<col style='width:{_SLATE_WHY_PX}px'><col>"
+            "</colgroup>"
+            "<thead><tr>"
+            "<th>Away</th><th>Home</th><th class='cfdb-num'>Spread</th><th>TV</th>"
+            "<th class='cfdb-center'>Game</th><th class='cfdb-center'>Why</th>"
+            f"<th class='cfdb-slate-cell'>{''.join(head)}</th>"
+            "</tr></thead><tbody>" + "".join(rows_html) + "</tbody></table></div>")
 
     for day, rows in untimed.items():
         # AC-G.11: a named state, not an empty axis and not a bar at a made-up time.
@@ -4261,7 +4347,7 @@ def _looking_forward(scope, depth: int) -> None:
         # frame, so it cannot appear while the splash is showing and cannot disagree with the
         # table above it about which games qualify. An empty frame draws nothing at all —
         # `states.render_or_state` has already said the honest empty above.
-        slate = _slate(games, esc=html.escape)
+        slate = _slate(games, esc=html.escape, scope=scope)
         if slate:
             st.markdown("**Slate**")
             st.markdown(slate, unsafe_allow_html=True)

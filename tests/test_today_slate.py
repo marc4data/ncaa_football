@@ -18,7 +18,18 @@ sys.path.insert(0, str(ROOT / "site"))
 from lib import fmt                                       # noqa: E402
 from views import today                                   # noqa: E402
 
+
+class _SlateScope:
+    """A201: `_slate` takes the scope now, because Marc's Matchup column needs `scope.link`."""
+    season, season_type, week, conference, division = 2026, "regular", 4, None, "fbs"
+
+    def link(self, page, **kw):
+        bits = "&".join(f"{k}={v}" for k, v in kw.items())
+        return f"/{page}?{bits}" if bits else f"/{page}"
+
+
 SOURCE = (ROOT / "site" / "views" / "today.py").read_text()
+THEME = (ROOT / "site" / "lib" / "theme.py").read_text()
 
 
 def _game(**over):
@@ -87,7 +98,7 @@ def test_a_game_with_no_known_kickoff_gets_no_bar_at_all():
     assert sum(len(v) for v in timed.values()) == 1
     assert sum(len(v) for v in untimed.values()) == 1
 
-    html = today._slate(_frame(unknown), esc=lambda s: str(s))
+    html = today._slate(_frame(unknown), esc=lambda s: str(s), scope=_SlateScope())
     assert "cfdb-slate-bar" not in html, "an unannounced kickoff must not be drawn as a bar"
     assert "time TBA" in html and "Duke at Syracuse" in html
 
@@ -105,8 +116,11 @@ def test_the_network_falls_back_to_tba_and_never_to_blank(abbr, full, expected):
     render the string `nan` on a run sheet rather than falling through to TBA.
     """
     html = today._slate(_frame(_game(network_abbreviation=abbr, network=full)),
+                        scope=_SlateScope(),
                         esc=lambda s: str(s))
-    networks = re.findall(r"cfdb-slate-net[^>]*>([^<]*)<", html)
+    # ⚠️ A201 MOVED THE NETWORK OFF THE BAR AND INTO THE TV COLUMN. Marc asked for a TV
+    # column, and printing it in both places is the duplication the prompt forbade.
+    networks = re.findall(r"cfdb-slate-tv'>([^<]*)<", html)
     assert networks == [expected], networks
     assert "nan" not in html.lower()
 
@@ -120,21 +134,36 @@ def test_the_bar_length_is_the_stated_allowance_and_the_caption_says_so():
 
 
 def test_the_bar_spans_kickoff_to_kickoff_plus_the_allowance():
-    """The geometry, asserted rather than eyeballed: a 9:00 start on a 9a-axis begins at the
-    left edge of the plot, and the bar is the allowance wide on that day's own scale."""
-    html = today._slate(_frame(_game()), esc=lambda s: str(s))
+    """The geometry, asserted rather than eyeballed.
+
+    ⚠️ A201 MOVED THE PLOT INTO ITS OWN CELL, so the bar's x is now a fraction of the day's
+    span inside a `_SLATE_PLOT`-unit viewBox — no label gutter to offset by. The assertion is
+    the same fact in the new coordinates: a 9:00 start on a 9a axis begins at 0, and the bar
+    is the allowance wide on that day's own scale.
+    """
+    html = today._slate(_frame(_game()), esc=lambda s: str(s), scope=_SlateScope())
     rect = re.search(r"<rect class='cfdb-slate-bar[^']*' x='([\d.]+)' y='[\d.]+' "
                      r"width='([\d.]+)'", html)
     assert rect, html[:400]
     x, width = float(rect.group(1)), float(rect.group(2))
-    assert x == pytest.approx(today._SLATE_LABEL_PX), (
-        "the first kickoff of the day starts at the left edge of that day's scale")
-    # A200 reserved a right-hand gutter for the reason marks; the plot is what is left
-    # after the label gutter, the network label AND that gutter.
-    plot = (today._SLATE_WIDTH - today._SLATE_LABEL_PX - today._SLATE_NETWORK_PX
-            - today._SLATE_WHY_PX)
+    assert x == pytest.approx(0.0), "the first kickoff of the day starts at the left edge"
     # one game: the axis spans 9a to 1p (kickoff hour to kickoff + 210 min, rounded up)
-    assert width == pytest.approx(plot * 210 / (4 * 60), rel=0.01), width
+    assert width == pytest.approx(today._SLATE_PLOT * 210 / (4 * 60), rel=0.01), width
+
+
+def test_the_bar_carries_the_outline_marc_asked_for():
+    """> **MARC, v13:** *"Give the bars a thin medium graph outline to make them pop a bit."*
+
+    🚨 `vector-effect='non-scaling-stroke'` IS NOT DECORATION. The plot SVG is stretched to
+    its column with `preserveAspectRatio='none'`, so a plain stroke is scaled with the
+    geometry — a fat left edge against a hairline top. This keeps it one pixel on all four
+    sides.
+    """
+    html = today._slate(_frame(_game()), esc=lambda s: str(s), scope=_SlateScope())
+    assert "vector-effect='non-scaling-stroke'" in html
+    rule = THEME[THEME.index(".cfdb-slate-bar {"):]
+    rule = rule[:rule.index("}")]
+    assert "stroke:" in rule and "stroke-width:1" in rule
 
 
 def test_the_slate_is_drawn_inside_the_gate_and_from_the_same_frame():
@@ -157,5 +186,5 @@ def test_the_slate_is_drawn_inside_the_gate_and_from_the_same_frame():
 def test_an_empty_frame_draws_no_axis():
     """AC-G.11: the section's existing stated empty stands; an empty axis would be decoration
     implying a slate exists."""
-    assert today._slate(pd.DataFrame(), esc=str) == ""
-    assert today._slate(None, esc=str) == ""
+    assert today._slate(pd.DataFrame(), esc=str, scope=_SlateScope()) == ""
+    assert today._slate(None, esc=str, scope=_SlateScope()) == ""
