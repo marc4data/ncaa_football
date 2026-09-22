@@ -507,10 +507,31 @@ def _yardage_profile(scope) -> pd.DataFrame:
     The per-game columns are read AS PUBLISHED. Dividing here would be metric maths in the
     app; the view carries both the sums and the per-game figures for exactly that reason.
     """
+    # ── A190 (cfdb-main-R-1935): THE FOUR FACTS THE HOVER NAMES, NOW THAT THEY EXIST ──────
+    #
+    # > **MARC, v09 / v10 / v11 — he has asked three times:** *"The chart has to have hover
+    # > capabilities. Think I've described what should be in the hover."*
+    #
+    # 🚨 A176 REFUSED THIS AND WAS RIGHT TO: its own comment in `_scatter_svg` records that
+    # `srv_team_week` published **no rank, no record and no percentile at all**, and a join is
+    # what G-2 forbids. ✅ **A177/A178 published them since**, so the refusal has expired
+    # rather than been overruled.
+    #
+    # 📊 VERIFIED AGAINST `information_schema` ON LIVE PUBLISHED SERVING BEFORE THIS WAS
+    # WRITTEN (§2.2.1c.2), and then for ROWS rather than columns (§2.5) — 2026 week 3, FBS:
+    #
+    #     138 teams   record_before_display 138   both percentiles 138   logo_url 138
+    #                 percentile_population 138   ap_rank 25
+    #
+    # ⚠️ `ap_rank` AT 25 OF 138 IS THE CORRECT NUMBER, NOT A GAP — a poll ranks 25 teams. The
+    # other 113 are the "unranked" branch, and `NaN` is truthy (A191), so every reader of it
+    # tests with `pd.isna` rather than truthiness.
     return query("""
         select team_id, team_display, team_slug, conference, week,
                games_counted,
                total_yards_for_per_game, total_yards_allowed_per_game,
+               total_yards_for_percentile, total_yards_allowed_percentile,
+               percentile_population, ap_rank, record_before_display,
                color_on_light, color_on_dark, logo_url,
                as_of_ts
         from srv_team_week
@@ -522,6 +543,45 @@ def _yardage_profile(scope) -> pd.DataFrame:
         limit 400
     """, {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
           "conf": scope.conference, "division": scope.division})
+
+
+def _week_opponents(scope) -> pd.DataFrame:
+    """Who each team plays in the scoped week — for the scatter hover's last line only.
+
+    🚨 A190 (cfdb-main-R-1936). THE MARKS ARE FORM *ENTERING* THE WEEK, NOT A GAME, AND THAT
+    IS WHY THE OPPONENT IS A SEPARATE READ RATHER THAN A COLUMN ON THE POINT.
+
+    > **MARC, v10**, naming an opponent among the hover's contents.
+
+    ⚠️ `_yardage_profile` answers *how did this team stand coming in*; the opponent answers
+    *who are they playing*. They are different grains and different relations, so putting the
+    opponent on the point would either need a join in the page (G-2) or make the profile row
+    mean two things at once. **One more single-table SELECT is the cheaper honesty.**
+
+    ⚠️ AND IT RETURNS EMPTY WHEN NO SINGLE WEEK IS IN SCOPE. The panel's week filter accepts
+    "All", and under it `srv_team_week` returns every week for every team — there is no single
+    week to name, so the hover simply omits the line rather than picking one arbitrarily.
+
+    🚨 AC-G.39 — THE `limit` IS THE GRAIN RESTATED, AND THE FIRST ONE WAS A GUESS THAT CUT
+    REAL ROWS. It was `400`, copied from the profile query beside it, which is ONE ROW PER
+    TEAM. **This grain is one row per team-GAME, which is roughly double**: 2026 week 3 holds
+    **622 rows**, so 400 silently dropped 222 of them and 41 of the 138 plotted teams lost
+    their opponent line — Georgia, Ohio State, Clemson and Duke among them. ⚠️ **It looked
+    exactly like a bye**, which is a state this hover legitimately has, so nothing about the
+    page said it was wrong. It was found by counting: 97 lines against 138 marks.
+
+    ✅ 1,000 is the grain's own ceiling — ~134 FBS plus ~120 non-FBS teams in a week, at most
+    one row each per game, and a week has never exceeded 700.
+    """
+    if scope.week is None:
+        return pd.DataFrame()
+    return query("""
+        select team_id, opponent_team_display, opponent_logo_url, opponent_rank,
+               is_home
+        from srv_game_team
+        where season = :season and season_type = :season_type and week = :week
+        limit 1000
+    """, {"season": scope.season, "season_type": scope.season_type, "week": scope.week})
 
 
 def _rankings(scope) -> pd.DataFrame:
@@ -538,10 +598,28 @@ def _rankings(scope) -> pd.DataFrame:
     # marker — `dict is not a sequence`. **Two different failures from prose inside a query
     # string, neither visible locally because the unit tests stub `query` (R-538's class).**
     # ✅ Nothing goes between the triple quotes but SQL.
+    # ── A190 (cfdb-main-R-1943): THE GAME THAT EXPLAINS THE MOVE ──────────────────────────
+    #
+    # > **MARC, v11:** *"bring in srv_game as a left join… a hover that shows a simple
+    # > scoreboard look (away over home) with logo, name, record, and scores for the
+    # > corresponding week."*
+    #
+    # ⚠️ THE JOIN IS IN dbt AND NOT HERE — §4.2.1, and it is the clearest case of it: a
+    # page-side join is exactly what the display-only contract forbids. `srv_rankings` now
+    # carries the explaining game already resolved into away and home, so this stays a
+    # single-table SELECT and the page orders nothing.
+    #
+    # 📊 POLL WEEK N REFLECTS GAME WEEK N-1, established from the data rather than assumed —
+    # see the model for the measurement and for the competing alignment that was tested and
+    # refuted.
     return query("""
         select season, week, poll_name, rank, team_display, team_slug,
                first_place_votes, points, as_of_ts,
-               color_on_light, color_on_dark
+               color_on_light, color_on_dark,
+               explained_by_game_week,
+               game_away_display, game_away_record_after, game_away_points,
+               game_home_display, game_home_record_after, game_home_points,
+               game_result_for_team
         from srv_rankings
         where season = :season and season_type = :season_type
           and poll_name = any(:polls)
@@ -2050,6 +2128,167 @@ def _movers(scope, depth: int) -> None:
                  anchor="the-weeks-movers"))
 
 
+# 🚨 A190 (cfdb-main-R-1941). TEN, AND THE ANSWER TO MARC'S "10 OR 20" IS MEASURED.
+#
+# > **MARC, v11:** *"10 or 20"*.
+#
+# ⚠️ AN EARLIER DRAFT OF THIS COMMENT CITED 26.4px A ROW AND A 380px CHART, AND BOTH WERE
+# WRONG. 380 is the SVG's **viewBox** height, not what it draws — the chart scales to its
+# column, so it renders 673px at 1680 and 351px at 1100. The row figure was never measured at
+# all. 📊 Measured in Chromium with the sidebar open, after the row became two lines:
+#
+#     row 44.8px · header 22.1 · footnote 24.8  ->  ten rows draw 502px
+#
+#     1680px   chart 673px   table 502px   fits, 171px to spare
+#     1440px   chart 540px   table 502px   fits
+#     1280px   chart 451px   table 502px   51px past the chart
+#     1100px   chart 351px   table 502px   151px past the chart
+#
+# ✅ **TWENTY DOES NOT FIT AT ANY WIDTH TESTED** — 943px, against a 673px chart at the widest.
+# So ten it is, and the report puts the numbers to Marc rather than deciding his range for
+# him. ⚠️ Raising it is this one constant.
+_DISTANCE_TOP_N = 10
+
+
+def _distance_table(ranked, centre, population: int) -> str:
+    """The companion table: how far the strongest teams sit from the median intersection.
+
+    > **MARC, v11:** *"measures how far the top-right data points are from the intersection of
+    > the 2 means or medians showing the dotted line… the longest hypotenuse."*
+
+    ⚠️ THE RANK IS THE DISTANCE RANK AND THE HEADER SAYS SO. A column headed "#" beside team
+    logos on a page that also draws AP polls would be read as the AP rank by anyone not told
+    otherwise — and this panel's own hover shows the AP rank two inches away. **A true-looking
+    label on a different number is §4.3's worst form**, and it is the defect A153 was called in
+    to fix on Most Exciting.
+
+    ⚠️ THE DISTANCE COLUMN IS DROPPED, NOT SHRUNK. Marc allowed it *"only if it fits"*; at 18%
+    of the row a sixth numeric column pushes the team name to an ellipsis, and the name is the
+    thing being ranked. **The number is in the header tooltip's explanation and on the row's
+    own `title`, so it is one hover away rather than gone.**
+
+    🚨 AND THE ROW IS TWO LINES, BECAUSE SIX COLUMNS DO NOT FIT ON ONE AT THE WIDTH HE ASKED
+    FOR. 📊 Measured in Chromium at 1440 with the sidebar open, from clones in an off-screen
+    nowrap box (A191/A192's method — never a box that is already clipped):
+
+        rank 17.6 + logo 17.6 + name-and-record 130.7 + gained 32 + allowed 32 + gaps 16
+          = 245.9px needed, against 168.4px available at 18% of the row
+
+    **A first pass shipped one line and clipped 8 of 10 team names at 1440 and 10 of 10 at
+    1100** — the exact defect A192 had just spent a round removing from the player cards.
+    Marc's band is 15-20%; 25% would be needed for one line, so the row wraps instead: the
+    name gets the full width on line one and the three small facts sit under it.
+
+    ⚠️ AND BELOW ~1400px THE TABLE GOES UNDER THE CHART BY ITSELF. `.cfdb-far` carries a
+    `min-width` equal to what line one needs, and Streamlit's column row is `flex-wrap:wrap`,
+    so the column simply cannot shrink past it and drops to its own full-width line. **That is
+    Marc's "the table stacks below the chart" case, handled by the container rather than by a
+    breakpoint** — which matters because the board's width depends on the sidebar.
+    """
+    if not ranked:
+        # AC-G.11: say WHICH absence. An empty quadrant is a real state — a conference filter
+        # can leave nobody better than the median on both axes — and it is not a failure.
+        return ("<div class='cfdb-far'><div class='cfdb-far-head'>Furthest from the "
+                "median</div><div class='cfdb-far-none'>No team in this scope is better "
+                "than the median on both axes.</div></div>")
+
+    tip = ("Straight-line distance from the intersection of the two dotted median lines, "
+           "in yards per game, for teams better than the median on BOTH axes. "
+           "This is the distance rank, not the AP rank.")
+    out = [f"<div class='cfdb-far'><div class='cfdb-far-head' title='{html.escape(tip)}'>"
+           f"Furthest from the median</div>"]
+    for position, (distance, row) in enumerate(ranked, start=1):
+        logo = (f"<img class='cfdb-far-logo' src='{html.escape(str(row['logo_url']))}' alt=''/>"
+                if row.get("logo_url") and not pd.isna(row["logo_url"]) else
+                "<span class='cfdb-far-logo'></span>")
+        record = ("" if not row.get("record_before_display") or pd.isna(row["record_before_display"])
+                  else f"<span class='cfdb-far-rec'>{html.escape(str(row['record_before_display']))}</span>")
+        row_tip = (f"{row['team']} — {distance:.1f} yards per game from the median "
+                   f"intersection; {row['y']:.1f} gained, {row['x']:.1f} allowed")
+        out.append(
+            f"<div class='cfdb-far-row' title='{html.escape(row_tip)}'>"
+            f"<span class='cfdb-far-rank'>{position}</span>{logo}"
+            f"<span class='cfdb-far-team'>{html.escape(str(row['team']))}</span>"
+            # ⚠️ COMPACT, BECAUSE THE WORDS WRAPPED. "2-0 · 702 gained · 203 allowed" drew
+            # over two lines inside a 160px column, taking the row to 61.2px and the table
+            # past the bottom of the chart. The footnote below already says which number is
+            # which, so repeating it on all ten rows bought nothing and cost the layout.
+            f"<span class='cfdb-far-meta'>{record}"
+            f"<span class='cfdb-far-num'>{row['y']:.0f}</span>"
+            f"<span class='cfdb-far-slash'>/</span>"
+            f"<span class='cfdb-far-num'>{row['x']:.0f}</span></span></div>")
+    if centre:
+        out.append(f"<div class='cfdb-far-foot'>Gained / allowed per game. Median "
+                   f"{centre[1]:.0f} / {centre[0]:.0f} over {population} teams shown.</div>")
+    out.append("</div>")
+    return "".join(out)
+
+
+def _scatter_medians(rows):
+    """`(mid_x, mid_y, n_x, n_y)` for the rendered frame, or None. A190 (cfdb-main-R-1939).
+
+    🚨 ONE SOURCE, BECAUSE TWO THINGS NOW DEPEND ON THESE NUMBERS. The chart draws the dotted
+    lines from them and the distance table measures from their intersection — and Marc's ask
+    is explicitly about *"the intersection of the 2 means or medians showing the dotted
+    line"*. **If the table computed its own, the two could disagree and the table would be
+    measuring from a centre the reader cannot see.** That is R-645's class: one quantity, two
+    computations, eventual drift.
+
+    ⚠️ STILL NOT A SERVING METRIC, AND §4.2.1 IS STILL NOT ENGAGED. This is a statistic OF THE
+    ROWS ON SCREEN — the panel is week-scoped and conference-filtered, so it moves with what
+    is being looked at, exactly as `_spark_max` does (cfdb-main-R-1750). The test that decides
+    the hard cases is *how many consumers can this number have*, and the answer is **this
+    drawing and the table beside it, which are the same picture**.
+    """
+    values_x = [float(r["x"]) for r in rows if r.get("x") is not None]
+    values_y = [float(r["y"]) for r in rows if r.get("y") is not None]
+    if not values_x or not values_y:
+        return None
+    return (statistics.median(values_x), statistics.median(values_y),
+            len(values_x), len(values_y))
+
+
+def _distance_ranking(rows, limit: int = 10):
+    """The top-right teams, ordered by distance from the median intersection.
+
+    > **MARC, v11:** *"measures how far the top-right data points are from the intersection of
+    > the 2 means or medians showing the dotted line… the longest hypotenuse."*
+
+    🚨 THREE DECISIONS, EACH STATED BECAUSE EACH COULD REASONABLY HAVE GONE THE OTHER WAY:
+
+    **The centre is the MEDIAN intersection**, not the mean, because the dotted lines he is
+    pointing at are medians (`_scatter_medians`). Measuring from a centre the chart does not
+    draw would make the table's "distance" unverifiable by eye.
+
+    **Only the top-right quadrant qualifies** — better than the median on BOTH axes. On this
+    chart that is more yards gained (`y > mid_y`) and FEWER yards allowed (`x < mid_x`),
+    because the x axis runs right-to-left (A176). ⚠️ **Getting that inequality backwards would
+    rank the worst teams while looking entirely plausible**, which is why it is asserted.
+
+    **Distance is √(Δgained² + Δallowed²) in yards per game.** Both axes are already the same
+    unit, so no scaling is needed and none is applied — a normalised distance would be a
+    different, unstated statistic.
+
+    ⚠️ FEWER THAN `limit` TEAMS IS NORMAL, NOT AN ERROR. A conference filter can leave a
+    handful of teams, and a quadrant can hold two. The caller shows what there is and says how
+    many (AC-G.11).
+    """
+    medians = _scatter_medians(rows)
+    if not medians:
+        return [], None
+    mid_x, mid_y, _n_x, _n_y = medians
+    corner = []
+    for r in rows:
+        x, y = r.get("x"), r.get("y")
+        if x is None or y is None:
+            continue
+        if float(y) > mid_y and float(x) < mid_x:
+            dx, dy = mid_x - float(x), float(y) - mid_y
+            corner.append((math.hypot(dx, dy), r))
+    corner.sort(key=lambda pair: pair[0], reverse=True)
+    return corner[:limit], (mid_x, mid_y)
+
+
 def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=380) -> str:
     """The scatter itself. Inline SVG in currentColor, following lib/distribution.py's
     precedent — one series, one hue, no legend, hairline axes (the chart standard's §7).
@@ -2132,10 +2371,10 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=3
     # is week-scoped and conference-filtered, so "median" is the median of whatever Marc is
     # looking at. A median line whose scope silently changed would be worse than no line —
     # AC-G.33 — so the count is in the label and the hover says what it counted.
-    values_x = [float(r["x"]) for r in rows if r.get("x") is not None]
-    values_y = [float(r["y"]) for r in rows if r.get("y") is not None]
-    if values_x and values_y:
-        mid_x, mid_y = statistics.median(values_x), statistics.median(values_y)
+    medians = _scatter_medians(rows)
+    if medians:
+        mid_x, mid_y, n_x, n_y = medians
+        values_x, values_y = [0] * n_x, [0] * n_y
         gx, gy = sx(mid_x), sy(mid_y)
         parts.append(
             f"<line class='cfdb-sc-median' x1='{gx:.1f}' y1='{pad_t}' "
@@ -2169,14 +2408,31 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=3
     # so roughly a fifth of marks share a hue with another. **Position is the encoding here and
     # colour is identification on top of it** — the same ruling A171 made for the win-
     # probability fill.
+    # 🚨 A190 (cfdb-main-R-1937). THE MARKS, AND A RING ON THE ONES THE TABLE RANKS.
+    #
+    # > **MARC, v11:** the distance table should connect to the chart.
+    #
+    # The ring is drawn BEFORE the circle so the dot sits on top of it, and it is the team's
+    # own colour at low opacity rather than a second hue — the panel already rules that
+    # position is the encoding and colour is identification (A171/A176).
+    hotspots = []
     for r in rows:
         cx, cy = sx(r["x"]), sy(r["y"])
         colour = r.get("accent") or "currentColor"
+        if r.get("ranked_by_distance"):
+            parts.append(
+                f"<circle class='cfdb-sc-ring' cx='{cx:.1f}' cy='{cy:.1f}' r='8' "
+                f"fill='none' stroke='{colour}' stroke-width='1.2'/>")
         parts.append(
             f"<circle class='cfdb-sc-pt' cx='{cx:.1f}' cy='{cy:.1f}' r='4' "
             f"fill='none' stroke='{colour}' stroke-width='1.4'>"
+            # ⚠️ THE SVG `<title>` STAYS. It is what a screen reader announces and what a
+            # browser with the stylesheet unloaded still shows; the HTML layer below is an
+            # enhancement over it, not a replacement for it (AC-G.11's spirit — do not remove
+            # the accessible answer to add a prettier one).
             f"<title>{esc(r['team'])} — {r['y']:.1f} gained, {r['x']:.1f} allowed "
             f"per game over {int(r['games'])} game(s)</title></circle>")
+        hotspots.append(_scatter_hotspot(r, cx / width, cy / height, esc))
 
     # The good corner, named. A reader scans the shape first, so this is a mark and not prose.
     parts.append(f"<text class='cfdb-sc-corner' x='{pad_l + pw - 2}' y='{pad_t + 12}' "
@@ -2190,9 +2446,116 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=3
                  f"x='12' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>"
                  f"\u2191 better \u2014 more yards gained per game</text>")
 
+    # 🚨 A190 (cfdb-main-R-1938). AN HTML LAYER OVER THE SVG, BECAUSE AN SVG `<title>` IS
+    # PLAIN TEXT AND MARC'S HOVER NAMES A LOGO.
+    #
+    # ⚠️ AND IT IS CSS-ONLY, WHICH IS A CONSTRAINT RATHER THAN A PREFERENCE. Streamlit's
+    # `unsafe_allow_html` strips `<script>`, so there is no JS to position a tooltip with:
+    # every hotspot carries its own tooltip as a child, shown by `:hover` and `:focus-within`.
+    # **`:focus-within` with `tabindex` is what makes it work on a tap and on a keyboard** —
+    # `:hover` alone is a mouse-only feature, and Marc's ask says hover, not mouse.
+    #
+    # ⚠️ THE PERCENTAGES MAP ONTO THE viewBox, WHICH IS WHY THE SVG MUST FILL ITS BOX. The
+    # overlay is `inset:0` on a `position:relative` parent and each hotspot is placed at
+    # `cx/width%` — correct only while the SVG is `width:100%;height:auto` with the viewBox's
+    # own aspect ratio, so `theme.py` sets exactly that and a test asserts it.
+    #
+    # ⚠️ THE EDGE FLIP IS COMPUTED HERE, NOT IN CSS. A tooltip anchored left on a point in the
+    # right-hand third is clipped by the chart's own box; `data-side` says which way to open,
+    # from the point's own position, because CSS cannot ask where its element is.
     return (f"<div class='cfdb-scatter'><svg viewBox='0 0 {width} {height}' "
             f"role='img' aria-label='Yards gained per game against yards allowed per game; "
-            f"stronger teams sit toward the top right'>{''.join(parts)}</svg></div>")
+            f"stronger teams sit toward the top right'>{''.join(parts)}</svg>"
+            f"<div class='cfdb-sc-layer'>{''.join(hotspots)}</div></div>")
+
+
+def _scatter_hotspot(row, fx: float, fy: float, esc) -> str:
+    """One focusable hotspot over a mark, carrying the hover Marc described.
+
+    > **MARC, v09 + v10, combined:** logo, AP rank (or unranked), team, record, yards gained
+    > per game with percentile, yards allowed per game with percentile — and an opponent.
+
+    ⚠️ THE OPPONENT IS A LINE OF ITS OWN RATHER THAN PART OF THE TEAM'S, because the mark
+    is the team's form ENTERING the week and not a game. Presenting the opponent as though the
+    numbers described that matchup would be the R-1082 class — a label describing something
+    other than what it sits on. **It is omitted entirely when no single week is in scope.**
+
+    ⚠️ EVERY OPTIONAL FIELD IS TESTED WITH `pd.isna`, NOT FOR TRUTHINESS. `ap_rank` is null for
+    113 of 138 teams and `NaN` is truthy (A191), so `if rank` would print "nan" as a rank on
+    every unranked team — which is exactly the defect A191 spent a round removing from the
+    Week average row.
+    """
+    side = "left" if fx > 0.58 else "right"
+    vert = "up" if fy < 0.32 else "down"
+
+    def px(value) -> str:
+        """`p97` from a published percentile.
+
+        🚨 A190 (cfdb-main-R-1942). THE COLUMN IS A FRACTION IN [0, 1], NOT A 0-100 FIGURE,
+        AND THE FIRST DRAFT OF THIS SHIPPED `p1` FOR THE BEST OFFENCE IN THE COUNTRY.
+
+        📊 CAUGHT IN THE RENDER, NOT IN THE CODE: the hover for Georgia — 576.5 yards gained
+        per game, second most of 138 — read **`p1`**, and so did LSU's defence at 142.5
+        allowed, the best in the country. Measured on live serving: Miami's 702.5 is
+        `1.0000`, Washington State's 204.0 is `0.0000`. **`int(round(0.99))` is 1.**
+
+        ⚠️ AND IT WOULD HAVE READ AS A PLAUSIBLE NUMBER. `p1` is a percentile, it is in range,
+        and it appears next to a team that is genuinely at one extreme — nothing about it
+        looks like a bug except that it is exactly backwards.
+
+        ✅ THE DIRECTION WAS CHECKED SEPARATELY AND IS CORRECT: `_models.yml` records that
+        `total_yards_allowed_percentile` **descends**, so higher is better on both axes — "a
+        raw ascending percentile would put the worst defense in the country at p99". Verified
+        against the rows: LSU (fewest allowed) 1.0000, UL Monroe (most) 0.0000.
+
+        ⚠️ `x 100` IS RENDERING, NOT METRIC MATHS — §4.2.1 names this case exactly: "scaling
+        ONE column by a CONSTANT WRITTEN IN THE CODE". The population sits on its own line
+        below (AC-G.33), which is the site's own convention for a percentile.
+        """
+        if value is None or pd.isna(value):
+            return ""
+        return f"p{int(round(float(value) * 100))}"
+
+    rank = row.get("rank")
+    badge = ("" if rank is None or pd.isna(rank)
+             else f"<span class='cfdb-sc-rank'>#{int(rank)}</span>")
+    unranked = "" if badge else "<span class='cfdb-sc-unranked'>unranked</span>"
+    logo = (f"<img class='cfdb-sc-logo' src='{esc(row['logo_url'])}' alt=''/>"
+            if row.get("logo_url") and not pd.isna(row["logo_url"]) else "")
+    record = ("" if not row.get("record_before_display") or pd.isna(row["record_before_display"])
+              else f"<span class='cfdb-sc-record'>{esc(str(row['record_before_display']))}</span>")
+
+    gained_pct, allowed_pct = px(row.get("total_yards_for_percentile")), px(row.get("total_yards_allowed_percentile"))
+    pop = row.get("percentile_population")
+    pop_note = ("" if pop is None or pd.isna(pop)
+                else f"<div class='cfdb-sc-pop'>percentiles over {int(pop)} teams</div>")
+
+    opponent = row.get("opponent")
+    versus = ""
+    if opponent:
+        opp_logo = (f"<img class='cfdb-sc-logo' src='{esc(opponent['logo'])}' alt=''/>"
+                    if opponent.get("logo") else "")
+        opp_rank = (f"<span class='cfdb-sc-rank'>#{int(opponent['rank'])}</span>"
+                    if opponent.get("rank") is not None else "")
+        # ⚠️ THE WEEK IS NAMED BY NUMBER, NOT BY A DEICTIC. The panel's week is chosen by the
+        # reader (R-428), so a phrase like the one R-428 forbids means whatever he last
+        # clicked —
+        # `test_the_week_floor_is_named_not_hardcoded_in_copy` refuses the phrase outright.
+        # Printing the number is both allowed and more useful.
+        versus = (f"<div class='cfdb-sc-vs'>{esc(opponent['label'])}: {esc(opponent['prep'])} "
+                  f"{opp_logo}{opp_rank}{esc(opponent['name'])}</div>")
+
+    return (
+        f"<span class='cfdb-sc-hot' tabindex='0' "
+        f"style='left:{fx * 100:.2f}%;top:{fy * 100:.2f}%'>"
+        f"<span class='cfdb-sc-tip' data-side='{side}' data-vert='{vert}'>"
+        f"<span class='cfdb-sc-head'>{logo}{badge}{unranked}"
+        f"<span class='cfdb-sc-team'>{esc(row['team'])}</span>{record}</span>"
+        f"<span class='cfdb-sc-stat'><b>{row['y']:.1f}</b> yards gained per game"
+        f"{f' <i>{gained_pct}</i>' if gained_pct else ''}</span>"
+        f"<span class='cfdb-sc-stat'><b>{row['x']:.1f}</b> yards allowed per game"
+        f"{f' <i>{allowed_pct}</i>' if allowed_pct else ''}</span>"
+        f"{pop_note}{versus}</span></span>")
 
 
 def _profile(scope, depth: int) -> None:
@@ -2268,17 +2631,71 @@ def _profile(scope, depth: int) -> None:
         # holds no team colours and looks none up; it receives a finished `light-dark(...)`
         # string the BROWSER resolves, so a mid-session theme flip is correct with no Python
         # in the loop. 📊 `color_on_light`/`color_on_dark` are 0.00% null on this population.
+        # ── A190 (cfdb-main-R-1936): THE OPPONENT, LOOKED UP ONCE AND ATTACHED BY team_id ──
+        # ⚠️ EMPTY WHEN NO SINGLE WEEK IS IN SCOPE — see `_week_opponents`. `.get` on a dict
+        # built from an empty frame simply misses, so the hover omits the line with no branch.
+        opponents = {}
+        for _i, o in _week_opponents(scope).iterrows():
+            name = o.get("opponent_team_display")
+            if name is None or pd.isna(name):
+                continue
+            logo = o.get("opponent_logo_url")
+            rank = o.get("opponent_rank")
+            opponents[int(o["team_id"])] = {
+                "name": str(name),
+                # 🚨 `is_home` DECIDES THE PREPOSITION, and it is the team's own row: a home
+                # team hosts ("vs"), an away team visits ("at"). Printing "vs" for both would
+                # be wrong on half the rows and unnoticeable on any single hover.
+                "prep": "vs" if bool(o.get("is_home")) else "at",
+                "label": f"Week {int(scope.week)}",
+                # ⚠️ `logo`, NOT `logo_url`. A blanket rename of the SCATTER ROW's keys to
+                # their published column names swept this dict up too, and the reader still
+                # asked for `logo` — so every opponent logo silently vanished while the line
+                # itself kept rendering. 📊 Measured in the browser: 78 `.cfdb-sc-vs` lines,
+                # **0 images inside them**. This dict is the hover's own vocabulary (the
+                # receiver is in `check_page_reads.NOT_A_ROW` for exactly that reason), so
+                # its keys are deliberately NOT column names.
+                "logo": None if logo is None or pd.isna(logo) else str(logo),
+                "rank": None if rank is None or pd.isna(rank) else int(rank),
+            }
+
         rows = [{"team": t, "x": x, "y": y, "games": g,
                  "accent": identity.accent_color(
-                     {"color_on_light": cl, "color_on_dark": cd})}
-                for t, x, y, g, cl, cd in zip(
+                     {"color_on_light": cl, "color_on_dark": cd}),
+                 "rank": rk, "record_before_display": rec, "logo_url": lg,
+                 "total_yards_for_percentile": gp, "total_yards_allowed_percentile": ap, "percentile_population": pp,
+                 "team_id": int(tid), "opponent": opponents.get(int(tid))}
+                for t, x, y, g, cl, cd, rk, rec, lg, gp, ap, pp, tid in zip(
                     playable["team_display"], xs, ys, playable["games_counted"],
-                    playable["color_on_light"], playable["color_on_dark"])]
+                    playable["color_on_light"], playable["color_on_dark"],
+                    playable["ap_rank"], playable["record_before_display"],
+                    playable["logo_url"], playable["total_yards_for_percentile"],
+                    playable["total_yards_allowed_percentile"],
+                    playable["percentile_population"], playable["team_id"])]
+
+        # ── A190 (cfdb-main-R-1940): THE DISTANCE RANKING, AND THE RING THAT CONNECTS IT ───
+        # The ranking is computed BEFORE the chart is drawn so the top ten can be marked on
+        # the marks themselves — the table and the chart are one picture or they are two
+        # things the reader has to reconcile.
+        ranked, centre = _distance_ranking(rows, limit=_DISTANCE_TOP_N)
+        for _d, r in ranked:
+            r["ranked_by_distance"] = True
 
         x_dom, x_step = domain(xs)
         y_dom, y_step = domain(ys)
-        st.markdown(_scatter_svg(rows, x_dom, y_dom, x_step, y_step),
-                    unsafe_allow_html=True)
+
+        # 🚨 THE TABLE TAKES THE NARROW SIDE — Marc: *"Table on the right, 15-20% of the row
+        # width; the chart takes the rest."* 82/18 sits inside that band.
+        # ⚠️ Streamlit stacks columns itself below ~640px of container, so the "narrow
+        # viewport" case Marc asked about needs no breakpoint of ours: the table falls under
+        # the chart on its own.
+        chart_col, table_col = st.columns([82, 18], gap="small")
+        with chart_col:
+            st.markdown(_scatter_svg(rows, x_dom, y_dom, x_step, y_step),
+                        unsafe_allow_html=True)
+        with table_col:
+            st.markdown(_distance_table(ranked, centre, len(rows)),
+                        unsafe_allow_html=True)
 
         # ⚠️ SAY WHAT WAS DROPPED AND WHY. A silently shorter chart is the same defect as a
         # silently shorter list — the reader cannot tell 130 teams from 130 of 136.
@@ -2757,6 +3174,56 @@ _BUMP_TABLE_WIDTH = 250
 _BUMP_ROW_FONT = 14
 
 
+def _scoreboard_lines(frame: pd.DataFrame) -> pd.DataFrame:
+    """Two scoreboard strings per poll row — away over home — for the bump chart's tooltip.
+
+    > **MARC, v11:** *"a hover that shows a simple scoreboard look (away over home) with
+    > logo, name, record, and scores for the corresponding week."*
+
+    ⚠️ COMPOSING PUBLISHED VALUES INTO ONE STRING IS RENDERING, AND §4.2.1 NAMES THIS CASE:
+    *"composing two published values into one string… rendering, because joining creates no
+    quantity"*. Nothing here is computed — away/home were resolved in the model, the records
+    are `record_after` as published, and the scores are the scores.
+
+    🚨 THREE ABSENCES, AND THEY ARE NOT THE SAME ABSENCE (AC-G.11):
+
+        no game row at all      poll week 1 has no game week 0, and a bye leaves no row
+        a game with no score    the poll was published ahead of a week that is not played yet
+        a score                 the scoreboard
+
+    ⚠️ AND EVERY ONE IS TESTED WITH `pd.isna`, NOT FOR TRUTHINESS. `NaN` is truthy (A191), so
+    `if points` is true for a game that has not been played — which would print the word
+    `nan` as a score. **A score of 0 is also falsy**, so truthiness fails at both ends: a
+    shutout would render as "not yet played".
+    """
+    def line(display, record, points):
+        if display is None or pd.isna(display):
+            return ""
+        record_text = "" if record is None or pd.isna(record) else f" ({record})"
+        score = "" if points is None or pd.isna(points) else f"  {int(points)}"
+        return f"{display}{record_text}{score}"
+
+    away, home = [], []
+    for _index, row in frame.iterrows():
+        game_week = row.get("explained_by_game_week")
+        if game_week is None or pd.isna(game_week):
+            away.append("No game")
+            home.append("")
+            continue
+        if (row.get("game_away_points") is None or pd.isna(row.get("game_away_points"))):
+            away.append(f"Week {int(game_week)} — not yet played")
+            home.append("")
+            continue
+        away.append(line(row.get("game_away_display"), row.get("game_away_record_after"),
+                         row.get("game_away_points")))
+        home.append(line(row.get("game_home_display"), row.get("game_home_record_after"),
+                         row.get("game_home_points")))
+    out = frame.copy()
+    out["scoreboard_away"] = away
+    out["scoreboard_home"] = home
+    return out
+
+
 def _bump_table_chart(current: pd.DataFrame) -> alt.Chart:
     """The table, drawn as text marks that INHERIT the chart's y scale.
 
@@ -2814,9 +3281,19 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     # and the picture must not contradict it.
     grid = pd.MultiIndex.from_product([teams, weeks],
                                       names=["team_display", "week"]).to_frame(index=False)
-    data = grid.merge(frame[["team_display", "week", "rank"]],
+    # 🚨 A190: THE SCOREBOARD COLUMNS TRAVEL WITH THE RANK ONTO THE FULL GRID. The merge is
+    # what puts an explicit null in a team's unranked weeks (see above); the two scoreboard
+    # strings have to come through the same merge or a hovered point would show the wrong
+    # week's game — and on a GAP row they must be blank, which `_scoreboard_lines` gives them
+    # because the poll columns are null there too.
+    carried = ["team_display", "week", "rank", "scoreboard_away", "scoreboard_home"]
+    data = grid.merge(_scoreboard_lines(frame)[carried],
                       on=["team_display", "week"], how="left")
     data["week"] = data["week"].astype(int)
+    # ⚠️ A GAP ROW HAS NO GAME BECAUSE IT HAS NO POLL ROW, and `NaN` in a Vega tooltip renders
+    # as the string "null". Blank is the honest answer for a week a team was not ranked.
+    for column in ("scoreboard_away", "scoreboard_home"):
+        data[column] = data[column].fillna("")
 
     worst = int(frame["rank"].max())
     # Endpoint labels sit to the right of each team's last week, so the plotting area stops
@@ -2906,9 +3383,14 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
         color=colour,
         size=alt.condition(hover, alt.value(70), alt.value(22)),
         opacity=alt.condition(hover, alt.value(1.0), alt.value(0.65)),
+        # ── A190 (cfdb-main-R-1945): THE EXPLAINING GAME, ON THE HOVER ────────────────
+        # ⚠️ TWO LINES OF TEXT, AND THE LOGO IS NOT HERE — see `_rank_bump`'s note for the
+        # measurement that settled it. Vega-Lite's tooltip renders its values as TEXT.
         tooltip=[alt.Tooltip("team_display:N", title="Team"),
                  alt.Tooltip("week:O", title="Week"),
-                 alt.Tooltip("rank:Q", title="Rank", format="d")])
+                 alt.Tooltip("rank:Q", title="Rank", format="d"),
+                 alt.Tooltip("scoreboard_away:N", title="Away"),
+                 alt.Tooltip("scoreboard_home:N", title="Home")])
     labels = alt.Chart(last).mark_text(align="left", dx=8,
                                        fontSize=_BUMP_LABEL_FONT).encode(
         x=x, y=y, text="team_display:N",

@@ -59,7 +59,14 @@ WORKBOOK = ROOT / "site" / "lib" / "workbook.py"
 # Receivers whose `.get()` is not a row read. `params.get("tab")` is a URL parameter and has
 # nothing to do with a serving column; without this the check reports every filter name.
 NOT_A_ROW = {"params", "os", "environ", "st", "config", "session_state",
-             "kwargs", "opts", "spec", "overrides", "row_config"}
+             "kwargs", "opts", "spec", "overrides", "row_config",
+             # A190: `opponent` is a dict the PAGE builds in `today._profile` from a second
+             # query's rows and hangs on the scatter's own row dict — `{"name", "prep",
+             # "logo", "rank", "label"}`. Its keys are the hover's vocabulary, not any
+             # relation's columns, so reading them is not a row read. The receiver belongs
+             # here rather than its five keys in PROVIDED_BY_THE_PAGE, which is what that
+             # list's own size guard is for.
+             "opponent"}
 
 # ⚠️ NAMES A PAGE LEGITIMATELY READS THAT NO QUERY SELECTS. One entry, one reason, no blanket.
 # To add one you must be able to finish "the page reads this and no query selects it because…".

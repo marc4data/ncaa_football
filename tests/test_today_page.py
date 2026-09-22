@@ -2522,15 +2522,26 @@ def test_the_real_profile_panel_puts_the_strong_team_top_right_and_says_so(monke
 
     frame = pd.DataFrame([
         # Strong: most yards gained AND fewest allowed -> must land top-right.
+        # ⚠️ A190 WIDENED THIS FIXTURE, AND THE NULLS ARE THE POINT. `_yardage_profile` now
+        # selects the four facts the hover names, so a fixture without them tests a frame the
+        # panel can no longer receive. **Strong is ranked and Weak is not** — `ap_rank` is
+        # null for 113 of 138 real teams, and `NaN` is truthy (A191), so the unranked row is
+        # the one that would print "nan" as a rank if the branch tested truthiness.
         {"team_display": "Strong", "team_slug": "strong", "team_id": 1, "conference": "SEC",
          "week": 9, "games_counted": 4, "total_yards_for_per_game": 600.0,
          "total_yards_allowed_per_game": 100.0, "color_on_light": "#111111",
-         "color_on_dark": "#eeeeee", "logo_url": "l.png", "as_of_ts": None},
-        # Weak: the mirror image -> bottom-left.
+         "color_on_dark": "#eeeeee", "logo_url": "l.png", "as_of_ts": None,
+         "ap_rank": 3, "record_before_display": "4-0",
+         "total_yards_for_percentile": 99.0, "total_yards_allowed_percentile": 97.0,
+         "percentile_population": 138},
+        # Weak: the mirror image -> bottom-left, and UNRANKED.
         {"team_display": "Weak", "team_slug": "weak", "team_id": 2, "conference": "SEC",
          "week": 9, "games_counted": 4, "total_yards_for_per_game": 200.0,
          "total_yards_allowed_per_game": 500.0, "color_on_light": "#222222",
-         "color_on_dark": "#dddddd", "logo_url": "w.png", "as_of_ts": None},
+         "color_on_dark": "#dddddd", "logo_url": "w.png", "as_of_ts": None,
+         "ap_rank": None, "record_before_display": "1-3",
+         "total_yards_for_percentile": 4.0, "total_yards_allowed_percentile": 6.0,
+         "percentile_population": 138},
     ])
 
     written = []
@@ -2542,6 +2553,20 @@ def test_the_real_profile_panel_puts_the_strong_team_top_right_and_says_so(monke
         def caption(self, body, *a, **k):
             written.append(("caption", str(body)))
 
+        # 🚨 A190 PUT THE CHART AND THE DISTANCE TABLE IN `st.columns`, and `__getattr__`'s
+        # blanket `lambda: None` cannot stand in for that — the panel unpacks the result and
+        # uses each column as a context manager. Returning real ones keeps everything written
+        # inside them visible to `written`, which is what every assertion below reads.
+        def columns(self, spec, **k):
+            count = spec if isinstance(spec, int) else len(spec)
+            return [self] * count
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
         def __getattr__(self, name):
             return lambda *a, **k: None
 
@@ -2549,6 +2574,10 @@ def test_the_real_profile_panel_puts_the_strong_team_top_right_and_says_so(monke
     monkeypatch.setattr(today.states, "section", lambda *a, **k: contextlib.nullcontext())
     monkeypatch.setattr(today.table, "as_of_caption", lambda *a, **k: None)
     monkeypatch.setattr(today, "_yardage_profile", lambda scope: frame)
+    # A190: the opponent is a SECOND read (see `_week_opponents`); this test is about the
+    # chart's geometry, so it is stubbed empty — which is also the no-single-week-in-scope
+    # path, and proves the hover omits its last line rather than failing without it.
+    monkeypatch.setattr(today, "_week_opponents", lambda scope: pd.DataFrame())
 
     today._profile(_Scope(), 25)
 
