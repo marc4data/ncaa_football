@@ -4253,14 +4253,15 @@ def _turnovers(row) -> str:
 # and 45% under the floor, and named "the 200px alternative" — all three were B111's numbers and
 # B112 moved every one of them.** The row budget is 510px now (the gutter halved), so
 # 136 + 116 + 116 + 24 leaves **118px, 41% under the floor**, and the alternative this file
-# actually carries is **230px** at `_TABLE_CELLS_EQUAL = False`. **That is Marc's trade, not
+# actually carries is **222px** at `_TABLE_CELLS_EQUAL = False` — it was 230px until B142
+# re-measured the value cell and found `100.0%` did not fit. **That is Marc's trade, not
 # this round's to settle.** At 1700px the same row leaves 244px unused and the question does
 # not arise.
 #
 # 🚨 CORRECTED AGAIN, IN B117 (cfdb-wta-R-961): THIS SENTENCE ATTACHED 230px TO `True`, WHICH IS
 # THE OPPOSITE OF WHAT THE CODE DOES. `True` makes the three value cells take a third of the
 # budget each, leaving the chart the NARROW 118px; `False` gives the value cells their content
-# width and the chart the wider 230px. ⚠️ **The paragraph already carried one correction notice
+# width and the chart the wider one. ⚠️ **The paragraph already carried one correction notice
 # and shipped an inverted claim anyway**, and the stray space inside the old
 # `` `_TABLE_CELLS_EQUAL = True ` `` is the fingerprint of the edit that did it.
 # ✅ **So it now has a test.** `test_the_COMMENTS_ABOUT_THE_CHART_WIDTH_AGREE_WITH_THE_CODE`
@@ -4328,7 +4329,7 @@ _REM = 16
 #     value cells clipping   0 / 46  ->   0 / 46       widest value 54px in a 60px cell
 #
 # ✅ **AND IT CLEARS B108's FLOOR FOR THE FIRST TIME SINCE THE CHART EXISTED** — 200px measured
-# minimum useful plot width; `True` is 118px (41% under), `False` is 230px.
+# minimum useful plot width; `True` is 118px (41% under), `False` is 222px.
 #
 # ⚠️ **THE OLD NOTE BELOW SAID THIS WAS *"Marc's trade, not this round's to settle"*, AND THAT
 # WAS RIGHT WHEN NOTHING HAD BEEN ASKED. He has now asked.** The arithmetic that used to sit
@@ -4338,7 +4339,7 @@ _REM = 16
 # RATHER THAN THE DECISION BEING TAKEN THERE. Measured at 1300px, both rendered:
 #
 #     True   label 136 | value 116 | value 116 | chart 118     the three cells are equal
-#     False  label 136 | value  60 | value  60 | chart 230     the values are at their content
+#     False  label 136 | value  64 | value  64 | chart 222     the values are at their content
 #
 # ⚠️ AND THE TWO HALVES OF HIS OWN SENTENCE PULL APART, WHICH IS WHY BOTH ARE BUILT. He wrote
 # *"That will allow the Box Score to **reduce width of the measure value cells**. Measure Cells
@@ -4349,8 +4350,8 @@ _REM = 16
 #
 # 📊 AND THE FLOOR IS WHAT IT COSTS: B108 measured the minimum useful plot width at 200px and
 # A131's sweep agrees. **`True` is 118px — 41% under it, and barely better than B111's 110px.
-# `False` is 230px, over it for the first time since the chart existed.**
-_TABLE_CELLS_EQUAL = False    # B139, v08: values at their content, so the chart gets 230px
+# `False` is 222px, over it for the first time since the chart existed.**
+_TABLE_CELLS_EQUAL = False    # B139, v08: values at their content, so the chart gets 222px
 
 # 📊 THE ROW BUDGET, MEASURED RATHER THAN ASSUMED. At 1300px with the sidebar open the content
 # area runs 380 → 1220 = 840px. v11 makes it two Streamlit columns instead of three and halves
@@ -4367,11 +4368,25 @@ _TABLE_ROW_BUDGET = 510        # px — the table column at 1300px, sidebar open
 _TABLE_CELL_BUDGET = (_TABLE_ROW_BUDGET - int(_TABLE_LABEL_WIDTH * _REM)
                       - 3 * int(_TABLE_GAP * _REM))
 
-# 📊 WHAT THE VALUES ACTUALLY NEED AT `1 (1/0)`, measured in the browser at 1.05rem:
-#     `1 (1/0)`  48px   ·  `47.1%`  45px  ·  `-0.075`  45px  ·  `762`  30px
-# **60px carries the widest with 12px to spare** — and it is the first time since v08 that the
-# value column has been sized by a METRIC rather than by one composite string.
-_TABLE_VALUE_CONTENT_PX = 60   # px — the widest value at `1 (1/0)` is 48, plus margin
+# ── 🚨 RE-MEASURED 2026-09-22 (B142), AND 60px WAS NARROWER THAN THE WIDEST REAL VALUE ─────
+#
+# 📊 **MEASURED WITH A `Range` OVER 1,102 VALUE CELLS FROM 24 RANDOM COMPLETED 2025 FBS GAMES,
+# in a browser, at the cell's own font** (cfdb-wta-R-1286):
+#
+#     `100.0%`    60.23px    ← the widest, in every one of the 24 games
+#     `0 (0/0)`   54.50px
+#     `-0.259`    54.00px    ← what B139 measured and reported as the widest
+#
+# 🚨 **`100.0%` DID NOT FIT: 60.23px of text in a 60px cell.** ⚠️ **The old comment said the
+# widest was `1 (1/0)` at 48px *"with 12px to spare"* — it had never met a 100% rate**, which
+# is an ordinary value on a completion or a third-down row. **B139's 54px was the widest in the
+# ONE game it sampled; this is the widest in twenty-four.**
+#
+# ✅ **SET FROM THE MEASUREMENT: 64px clears 60.23 by 3.77px.** ⚠️ **AND IT IS PAID FOR BY THE
+# CHART, WHICH IS THE TRADE TO STATE RATHER THAN HIDE:** `_TABLE_CHART_WIDTH` is
+# `_TABLE_CELL_BUDGET − 2 × this`, so the box-and-whisker goes **230px → 222px** — still clear
+# of B108's measured 200px floor, which a test asserts.
+_TABLE_VALUE_CONTENT_PX = 64   # px — widest real value `100.0%` = 60.23px (24 games, 2026-09-22)
 
 # 🚨 R-895. THE THIRD OPTION, AND IT ONLY MAKES SENSE BESIDE `_TABLE_CELLS_EQUAL = False`.
 #
@@ -6630,10 +6645,15 @@ def _drive_glyph_filled(row) -> bool:
 # > **MARC:** *"I recommend a label change for "MISSED FG", present as "X-FG", "END OF HALF" as
 # > "EOH" or "Half". "Uncategorized" as N/A."*
 #
-# 🚨 **HE NAMED THREE AND THERE ARE 25, AND A PARTIAL MAP LEAVES THE COLUMN SIZED BY WHICHEVER
+# 🚨 **HE NAMED THREE AND THERE ARE 28, AND A PARTIAL MAP LEAVES THE COLUMN SIZED BY WHICHEVER
 # LONG STRING HE DID NOT HAPPEN TO MENTION.** `END OF 4TH QUARTER` is the widest published
 # string at 110.95px and he did not name it; on a partial map it would still set the width and
 # the round would have bought nothing.
+#
+# 📊 **28, COUNTED ON LIVE PUBLISHED SERVING 2026-09-22 (cfdb-main-R-1834) — this said 25 until
+# B142.** B141 added the last three (`KICKOFF RETURN TD`, `2PT PASS FAILED`, `PENALTY`), and a
+# test asserts the map and the published set match in BOTH directions, so the number above is
+# the one thing here that could drift silently. **It is dated for that reason.**
 #
 # ✅ **SO THE WHOLE SET IS PROPOSED, AND THE RULES ARE HIS RATHER THAN NEW ONES:**
 #
@@ -8305,10 +8325,27 @@ def _drive_scoreboard(row, curve: str = "") -> str:
         """
         edge = ("flex:1 1 0;min-width:0" if sides_may_shrink
                 else f"width:{_DRIVE_TABLE_WIDTH}px;flex:none")
+        # 🚨 B142: THE MIDDLE SLOT SHRINKS TOO ON THE SCOREBOARD ROW, AND ONLY THERE.
+        #
+        # 📊 **MEASURED IN THE RUNNING APP AT 1100px: the scoreboard row's `scrollWidth` was
+        # 660 against a client width of 640** (cfdb-wta-R-1297). B140 made the empty SIDES
+        # shrinkable and that carried the row down to ~670px of container; below it the fixed
+        # `_DRIVE_FIELD_WIDTH` middle slot is the floor, and the row sticks out by itself.
+        #
+        # ✅ **`flex:0 1 …` lets it give way, and nothing inside it needs the full 650px:** the
+        # linescore-and-chart group measures **333.3px** (B140), so the slot has ~316px of slack
+        # before the group is touched at all.
+        #
+        # ⚠️ **THE CARDS ROW KEEPS ITS FIXED MIDDLE**, because its three slots are what align
+        # the two team cards to the two 265px tables of the figure below — the property v02 was
+        # built to guarantee. **The scoreboard row has no such obligation: it centres one group
+        # over the field and nothing lines up with it.**
+        centre = (f"flex:0 1 {_DRIVE_FIELD_WIDTH}px;min-width:0" if sides_may_shrink
+                  else f"width:{_DRIVE_FIELD_WIDTH}px;flex:none")
         return (f"<div style='display:flex;width:{_DRIVE_PANEL_WIDTH}px;max-width:100%;"
                 f"align-items:flex-start;gap:{_DRIVE_PANEL_SPACING}px;margin:.1rem 0 .15rem'>"
                 f"<div style='{edge}'>{left}</div>"
-                f"<div style='width:{_DRIVE_FIELD_WIDTH}px;flex:none;text-align:center;"
+                f"<div style='{centre};text-align:center;"
                 f"display:flex;justify-content:center'>{middle}</div>"
                 f"<div style='{edge}'>{right}</div></div>")
 
@@ -8439,9 +8476,19 @@ def _drives(game_id, season, row) -> None:
     trade: at 236px the `Result` cell clips on 10.735% of drives, and 307px clips none.
 
     ⚠️ SCORING IS READ FROM `scoring_side` AND `drive_result_category`, NEVER FROM THE RESULT
-    TEXT. A `TD` suffix on a turnover or a kick means the DEFENSE scored. 📊 **1,209 drives
-    carry `scoring_side = 'defense'` and 2,845 (3.35%) put points on the defense's board**,
-    across 23 `drive_result_key` values in 7 categories.
+    TEXT. A `TD` suffix on a turnover or a kick means the DEFENSE scored.
+
+    📊 **RE-COUNTED ON LIVE PUBLISHED SERVING 2026-09-22 (cfdb-main-R-1834). 87,897 drives:**
+
+        28 `drive_result` strings · 26 `drive_result_key` values · 7 categories
+        scoring_side   defense  1,261 (1.435%)   offense  31,495 (35.832%)   null  55,141
+        every one of the 1,261 sits in the `defensive score` category, and nothing else does
+
+    ⚠️ **WHAT THIS REPLACED SAID *1,209 drives … 2,845 (3.35%) … across 23 keys in 7
+    categories*.** The key count was stale (B141 found 28 published results where this file
+    assumed 25) and the drive count has simply grown. 🚨 **AND THE 2,845 COULD NOT BE
+    REPRODUCED BY ANY COUNT I CAN CONSTRUCT** — no scoring_side, category or result grouping
+    yields it — **so it is not restated here rather than being quietly adjusted to fit.**
     """
     # 🚨 THE HEADER IS DRAWN BEFORE THE SECTION, FROM THE `srv_game` ROW, FOR TWO REASONS.
     # Marc wants the scoreboard *"inline with the Drives row"*, so it replaces the subheader
