@@ -3476,3 +3476,181 @@ def test_THE_CLOCK_COLUMN_IS_RIGHT_ALIGNED_so_the_colons_line_up():
     x, left, width = entry[2], entry[3], entry[4]
     assert x == left + width, (
         f"the Clock column anchors at {x}, not its cell's right edge ({left + width})")
+
+
+# ── 🚨 B144: THE `Result` COLUMN'S GLYPH SAYS WHAT THE FIELD'S MARK SAYS ──────────────────
+#
+# 🚨 **B143 CHANGED ONE OF THE TWO SURFACES AND ITS REPORT DID NOT NOTICE.** Marc asked to
+# *"adjust the Result icons"*; the field's marks took the page's ink and the scoring team's
+# fill, and the `Result` COLUMN — which is literally the column he named — went on drawing
+# itself in its own band's colour with no fill at all.
+#
+# ⚠️ **THE SHAPE HAD ALREADY CROSSED OVER AND THE COLOUR HAD NOT**, which is what made it
+# invisible: the new X appeared in the table the same day, so the column looked updated.
+
+def _table_glyph(spec, panel):
+    """The `Result` column's point layer for one side's table."""
+    return _only([n for n in _layers(spec, panel) if _mark_of(n) == "point"],
+                 f"point layer in table panel {panel}")
+
+
+def _b144_frame():
+    """Two bands, and every fill state the column can draw.
+
+    ⚠️ **THE TWO COLOURS DIFFER ON PURPOSE.** B139 staged a colour-swap break that came back
+    GREEN because the fixture gave both sides the identical fallback grey (R-744) — a fill
+    assertion cannot tell `home` from `away` unless the two are distinguishable.
+    """
+    return pd.DataFrame([
+        # home scores on its own offence
+        _drive(1, "home", "Alpha", "TD", category="offensive score",
+               scoring_side="offense", scoring=True, color="#101010"),
+        # away has the ball and HOME scores on defence — the points are home's
+        _drive(2, "away", "Beta", "INT TD", category="defensive score",
+               scoring_side="defense", scoring=True, color="#efefef"),
+        # scored, and the feed does not say whose points — the third state
+        _drive(3, "away", "Beta", "TD", category="offensive score",
+               scoring_side=None, scoring=True, color="#efefef"),
+        # a turnover that scored nothing — the only unfilled state
+        _drive(4, "away", "Beta", "INT", category="turnover", color="#efefef")])
+
+
+def test_THE_TABLES_GLYPH_TAKES_THE_PAGES_INK_not_its_own_bands_colour(panel):
+    """> **MARC, v21:** *"I would like to adjust the Result icons. Let's make the outline
+    > black (both teams)."*
+
+    🚨 **THE COLUMN IS CALLED `Result`, AND IT IS THE ONE HE NAMED.** B143 put the ink on the
+    field's marks only, so one drive was drawn two ways on one screen (cfdb-wta-R-1505).
+
+    ⚠️ **A `stroke` KEYED ON A COLUMN IS THE DEFECT, NOT A VARIANT OF THE FIX.** `accent` is
+    the band's own colour — exactly what Marc asked to stop seeing — so this asserts the
+    outline is a VALUE and that no per-row field supplies it.
+    """
+    spec = _spec(panel(_b144_frame())[1])
+    ink = _module_constant("_DRIVE_GLYPH_INK")
+    for side, name in ((_AWAY, "away"), (_HOME, "home")):
+        node = _table_glyph(spec, side)
+        stroke = (node.get("encoding") or {}).get("stroke") or {}
+        assert stroke.get("value") == ink, (
+            f"the {name} table's glyph outline is {stroke!r}; it must be the page's ink "
+            f"({ink!r}) for both teams, the same value the field's marks take")
+        assert "field" not in stroke, (
+            f"the {name} table's outline is keyed per row ({stroke!r}), so it is still the "
+            f"band's own colour wearing a different encoding")
+        enc = node.get("encoding") or {}
+        assert "color" not in enc, (
+            f"the {name} table's glyph still carries a `color` encoding ({enc.get('color')!r})"
+            f" — `color` sets stroke AND fill together and is what drew the team-coloured "
+            f"outline this round removed")
+
+
+def test_THE_TABLES_GLYPH_FILLS_FOR_THE_TEAM_THAT_SCORED(panel):
+    """> **MARC, v21:** *"Fill with the team color if it is a scoring drive."*
+
+    🚨 **THE FILL NAMES THE SCORING TEAM, WHICH IS NOT ALWAYS THE ROW'S OWN BAND.** Drive 2 is
+    a DEFENSIVE score while the AWAY band has the ball, so the points are HOME's and the away
+    table's own row must carry HOME's colour (cfdb-wta-R-1506).
+
+    ⚠️ **AND THE UNFILLED STATE HAS TO STAY UNFILLED** — `_DRIVE_NO_FILL` is what says *this
+    drive did not score*, and a fill assertion that only checks the scoring rows would pass on
+    a column that filled everything.
+    """
+    spec = _spec(panel(_b144_frame())[1])
+    no_fill = _module_constant("_DRIVE_NO_FILL")
+
+    away = {r["drive_number"]: r for r in _rows(spec, _table_glyph(spec, _AWAY))}
+    home = {r["drive_number"]: r for r in _rows(spec, _table_glyph(spec, _HOME))}
+    assert set(home) == {1}, f"the home table drew {sorted(home)}; drive 1 is home's"
+    assert set(away) == {2, 3, 4}, f"the away table drew {sorted(away)}"
+
+    for side, rows in (("away", away), ("home", home)):
+        node = _table_glyph(spec, _AWAY if side == "away" else _HOME)
+        fill = (node.get("encoding") or {}).get("fill") or {}
+        assert fill.get("field") == "glyph_fill", (
+            f"the {side} table's glyph fill is {fill!r}; it must read the `glyph_fill` column "
+            f"`_drive_frame` already computes, or the two surfaces compute it twice")
+
+    assert away[2]["glyph_fill"] == home[1]["glyph_fill"], (
+        f"drive 2 is a DEFENSIVE score by the away band, so the points are the HOME team's "
+        f"and its row must carry home's fill — it reads {away[2]['glyph_fill']!r} against "
+        f"home's own {home[1]['glyph_fill']!r}")
+    assert away[4]["glyph_fill"] == no_fill, (
+        f"drive 4 scored nothing and must stay unfilled, not {away[4]['glyph_fill']!r}")
+
+
+def test_A_SIDE_LESS_SCORING_DRIVE_IS_THE_THIRD_STATE_IN_THE_TABLE_TOO(panel):
+    """📊 **143 DRIVES SCORE AND PUBLISH NO `scoring_side`** (cfdb-wta-R-1501), and one is in
+    this round's own render set.
+
+    🚨 **UNFILLED ALREADY MEANS *THIS DRIVE DID NOT SCORE*.** Reusing it for *it scored and we
+    do not know whose points* merges two different facts into one mark (AC-G.11), so the third
+    state is the neutral rather than the absence — **on the table exactly as on the field.**
+    """
+    spec = _spec(panel(_b144_frame())[1])
+    away = {r["drive_number"]: r for r in _rows(spec, _table_glyph(spec, _AWAY))}
+    no_fill = _module_constant("_DRIVE_NO_FILL")
+    fallback = _module_constant("identity").FALLBACK
+
+    assert away[3]["glyph_fill"] != no_fill, (
+        "drive 3 SCORED — the feed just does not say whose points. Drawing it unfilled says "
+        "it did not score, which is a different fact")
+    assert away[3]["glyph_fill"] == fallback, (
+        f"the side-less scoring drive must draw the neutral {fallback!r}, not "
+        f"{away[3]['glyph_fill']!r}")
+    assert away[3]["glyph_fill"] != away[2]["glyph_fill"], (
+        "the third state is drawn as a team's colour, so it claims points for a side the "
+        "feed never named")
+
+
+def test_THE_TABLE_AND_THE_FIELD_READ_ONE_FILL_AND_ONE_INK(panel):
+    """✅ §4.3 / R-855: *"Two copies that agree today are two copies that drift."*
+
+    🚨 **THIS ROUND EXISTS BECAUSE THEY DID DRIFT.** So the guard is not "both are correct
+    today" — it is that **both read the same producer**, which is the only version of this a
+    later round cannot quietly undo by fixing one surface.
+    """
+    spec = _spec(panel(_b144_frame())[1])
+    field = _only([n for n in _layers(spec, _FIELD) if _mark_of(n) == "point"],
+                  "point layer on the field")
+    for side, name in ((_AWAY, "away"), (_HOME, "home")):
+        node = _table_glyph(spec, side)
+        for channel in ("fill", "stroke"):
+            theirs = (node.get("encoding") or {}).get(channel)
+            ours = (field.get("encoding") or {}).get(channel)
+            assert theirs == ours, (
+                f"the {name} table's `{channel}` is {theirs!r} and the field's is {ours!r}; "
+                f"one drive drawn two ways on one screen is the defect B144 fixed")
+
+    source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
+    assert source.count("def _drive_glyph_fill(") == 1, (
+        "the page defines a second fill producer; `_drive_frame` computes `glyph_fill` once "
+        "and both surfaces read that column")
+    assert source.count("def _drive_glyph_stroke(") == 1, (
+        "the page defines a second outline producer")
+    # 🚨 A GLYPH LAYER THAT SPELLS ITS OWN INK IS HOW THE TWO SURFACES COME APART AGAIN.
+    # ⚠️ **NOT a count of `"currentColor"` — that string is the bands, the row text and the
+    # legend as well, seven times over, and a test that counted it would be asserting
+    # something it had not read** (R-859). **The claim is about the two GLYPH layers.**
+    assert source.count("stroke=_drive_glyph_stroke()") == 2, (
+        "the field's marks and the table's glyph are the two layers that carry Marc's "
+        "outline; one of them has stopped asking the shared producer for it")
+    assert "stroke=alt.value(_DRIVE_GLYPH_INK)" not in source, (
+        "a glyph layer names the ink constant directly instead of calling "
+        "`_drive_glyph_stroke()`, so PART 3's option would move one surface and not the other")
+
+
+def test_THE_SHIPPED_OUTLINE_IS_THE_PAGES_INK_not_the_luminance_option():
+    """🚨 **B144 PART 3 IS A PICTURE FOR A DECISION, NOT A FEATURE** (cfdb-wta-R-1507).
+
+    B143 measured the outline at **1.03:1 against a dark team fill in light mode** — the mark
+    still reads against the page at 12.53:1, but the outline stops being a separate line.
+    ⚠️ **Marc asked for black and has not been shown the alternative, so the alternative is
+    rendered and NOT shipped**, and this pins which one ships.
+    """
+    assert _module_constant("_DRIVE_GLYPH_INK_MODE") == "page", (
+        "the luminance-picked outline is shipping; it is an option rendered for Marc to "
+        "choose, and the shipped ink is the page's own until he does")
+    # ⚠️ `alt.value(...)` IS A PLAIN DICT, not a schema object with `.to_dict()`.
+    stroke = dict(_module_constant_call("_drive_glyph_stroke"))
+    assert stroke == {"value": _module_constant("_DRIVE_GLYPH_INK")}, (
+        f"the shipped outline is {stroke!r} rather than the page's ink as a flat value")
