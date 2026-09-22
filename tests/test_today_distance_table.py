@@ -172,14 +172,15 @@ def test_the_type_is_the_sites_normal_table_size():
 def test_fifteen_rows_are_asked_for_and_the_chart_is_sized_to_hold_them():
     """> **MARC, v13:** *"enough real estate to include top 15 or 20"*
 
-    📊 15 rows at 30.1px plus 84px of chrome is **557px**; the chart renders at
-    `height x (column width / 560)`, so 490 x 1.141 = **559px** and they end together at 1440.
+    📊 15 rows at 30.1px plus 84px of chrome and the scroller's own gutter is **563px**; the
+    chart renders at `height x (column width / 560)`, so 496 x 1.141 = **566px** and they end
+    together at 1440.
     ⚠️ **20 was measured and not taken**: it needs 686px of table, which would need a viewBox
     601 units tall against 560 wide — a plot taller than it is wide, squeezing the very axis
     Marc just asked to label "Defense".
     """
     assert today._DISTANCE_TOP_N == 15
-    assert today._SCATTER_HEIGHT == 490
+    assert today._SCATTER_HEIGHT == 496
     body = code_of("_profile")
     assert "st.columns([66, 34]" in body, "the table needs more than A190's 18%"
 

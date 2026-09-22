@@ -2159,15 +2159,15 @@ _SCATTER_LOGO_PX = 18
 
 # 📊 The table's fixed columns, measured. The team column takes the remainder: it needs
 # 155.3px for "Mississippi State 2-0", the widest cell in the real week-3 frame.
-_SCATTER_HEIGHT = 490
+_SCATTER_HEIGHT = 496
 _FAR_RANK_PX = 26
 _FAR_NUM_PX = 66
 
 # 🚨 A203 TOOK THE CHART FROM 380 TO 470 SO THE TABLE SITS BESIDE IT RATHER THAN BELOW IT.
 # 📊 Measured at 1440 with the sidebar open: 15 rows at 30.1px plus 84px of head, header row
 # and footnote is **535px**, against a chart that was **433px** tall — the table ran 124px past
-# the bottom. The chart's rendered height is `height x (column width / 560)`, so 490 x 1.141
-# is 559px and the two now end together. ⚠️ At 1100 the board is narrower, the chart scales
+# the bottom. The chart's rendered height is `height x (column width / 560)`, so 496 x 1.141
+# is 566px and the two now end together. ⚠️ At 1100 the board is narrower, the chart scales
 # down to ~347px and the table still runs below it — nothing scrolls, the panel is simply
 # taller there, and that is reported rather than hidden.
 
@@ -2233,6 +2233,14 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
 
     ⚠️ THE DISTANCE ITSELF IS STILL NOT A COLUMN. It is on the row's `title` and in the
     header's explanation, exactly as A190 left it; four columns is what fits on one line.
+
+    🚨 AND A190's NARROW-VIEWPORT CLAIM WAS MEASURED AND IS FALSE. Its comment says a
+    `min-width` on this block makes the column "drop to its own full-width line" because
+    Streamlit's row is `flex-wrap:wrap`. 📊 It does not — the two bases sum to 100%, nothing
+    wraps, and a min-width larger than the column OVERFLOWS. At 1100 the column is 210px, the
+    table wanted 304px, and its right edge sat **94px past the block**: the Allowed column was
+    off-screen with no way to reach it. ✅ The table scrolls inside its own column now, which
+    is what Schedule's list and A201's SLATE already do at that width.
     """
     if not ranked:
         # AC-G.11: say WHICH absence. An empty quadrant is a real state — a conference filter
@@ -2257,6 +2265,7 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
            # from the `thead` cells, which carried none, and split the space equally — 99.5px
            # each to Team, Gained and Allowed, when Team needed **155.3px** and the numbers
            # needed **25.9px**. Ten of sixty cells clipped, all of them team names.
+           "<div class='cfdb-scroll'>"
            f"<table class='cfdb-far-table'><colgroup>"
            f"<col style='width:{_FAR_RANK_PX}px'><col>"
            f"<col style='width:{_FAR_NUM_PX}px'><col style='width:{_FAR_NUM_PX}px'>"
@@ -2295,7 +2304,7 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
             f"<td class='cfdb-far-num'>"
             f"{_far_spark(row.get('x'), allowed_top, f"{row['x']:.0f}")}</td>"
             f"</tr>")
-    out.append("</tbody></table>")
+    out.append("</tbody></table></div>")
     if centre:
         out.append(
             f"<div class='cfdb-far-foot'>Yards per game. Bars are relative to each column's "

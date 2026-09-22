@@ -258,10 +258,21 @@ CSS = """
    row; Marc has since allowed more width, so this is .9rem — `.cfdb-table`'s own size — on one
    line per team. The min-width is what makes the column drop below the chart on a narrow
    viewport rather than squeezing (Streamlit's row is flex-wrap:wrap). */
-.cfdb-far { font-size:.9rem; min-width:19rem; }
+/* 🚨 A203 MEASURED A190's `min-width` CLAIM AND IT IS FALSE.
+   A190's comment says the min-width makes this column "drop to its own full-width line"
+   because Streamlit's row is `flex-wrap:wrap`. 📊 It does not: the two columns' bases sum to
+   100%, so nothing wraps, and a min-width larger than the column simply OVERFLOWS and is
+   clipped. Measured at 1100 the column is 210px, the table wanted 304px, and its right edge
+   sat **94px past the block** — the Allowed column was off-screen with no way to reach it.
+   ✅ So the table SCROLLS inside its own column, which is what every other wide table on this
+   site does at 1100 (Schedule's list and A201's SLATE both do). `min-width:0` lets the column
+   shrink; the `min-width` on the TABLE keeps the columns their measured size and hands the
+   overflow to the scroller. */
+.cfdb-far { font-size:.9rem; min-width:0; }
 .cfdb-far-head { font-weight:700; font-size:.78rem; letter-spacing:.04em;
     text-transform:uppercase; opacity:.7; margin-bottom:.3rem; }
-.cfdb-far-table { width:100%; border-collapse:collapse; table-layout:fixed;
+.cfdb-far-table { width:100%; min-width:20rem; border-collapse:collapse;
+    table-layout:fixed;
     font-variant-numeric:tabular-nums; }
 .cfdb-far-table th { font-size:.68rem; font-weight:700; letter-spacing:.03em;
     text-transform:uppercase; opacity:.55; text-align:left; padding:0 .25rem .2rem 0;
