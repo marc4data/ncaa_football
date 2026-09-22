@@ -161,7 +161,44 @@ CSS = """
    A200 hit this exact rule with the key swatch and wrote it down; the first build of A201 hit
    it again with the plot, whose `height:auto` against a stretched viewBox drew a 26-unit row
    several hundred pixels tall. Specificity here is 0-2-0 against that rule's 0-1-1. */
-.cfdb-slate .cfdb-slate-plot { display:block; width:100%; height:26px; }
+/* 🚨 A204. THE BAR IS AN HTML BOX, NOT AN SVG RECT, and that is what lets the kickoff label
+   live inside it. A201 stretched each row's SVG with preserveAspectRatio='none', which
+   distorts every glyph it contains — the reason A201's own hour labels had to leave the SVG.
+   A percent-positioned box needs no stretch at all. */
+.cfdb-slate-track { position:relative; height:22px; }
+.cfdb-slate .cfdb-slate-bar { position:absolute; top:3px; height:16px; min-width:2px;
+    border-radius:3px; box-sizing:border-box; display:flex; align-items:center;
+    overflow:hidden; background:currentColor; border:1px solid currentColor; }
+/* The fills, as opacities of the row's own color so both themes track it. */
+.cfdb-slate .cfdb-slate-bar { background-color:color-mix(in srgb, currentColor 26%, transparent);
+    border-color:color-mix(in srgb, currentColor 46%, transparent); }
+.cfdb-slate .cfdb-slate-bar-top {
+    background-color:color-mix(in srgb, var(--cfdb-link) 52%, transparent);
+    border-color:color-mix(in srgb, var(--cfdb-link) 78%, transparent); }
+/* 📊 30%, NOT 40%, AND THE NUMBER IS MEASURED. At 40% the kickoff label read 4.44:1 against
+   this fill in dark mode — under the 4.5 that small text needs — because dark mode puts
+   near-white ink on a light-gray fill. Darkening the fill is what buys the contrast back;
+   lightening the ink cannot, it is already near-white. Light mode was 4.83 and is unharmed. */
+.cfdb-slate .cfdb-slate-bar-und {
+    background-color:color-mix(in srgb, currentColor 30%, transparent);
+    border-color:color-mix(in srgb, currentColor 58%, transparent); }
+.cfdb-slate .cfdb-slate-bar-added {
+    background-color:color-mix(in srgb, var(--cfdb-link) 20%, transparent);
+    border-color:color-mix(in srgb, var(--cfdb-link) 46%, transparent); }
+/* PART 2: the kickoff, inside the bar and flush left. It clips rather than overflowing, so a
+   bar too narrow to hold it loses the label instead of spilling into the column before it. */
+.cfdb-slate-clock { font-size:.6rem; line-height:1; padding-left:3px; white-space:nowrap;
+    color:var(--cfdb-text); opacity:.92; }
+/* 🚨 PART 3: ONE SET OF LINES BEHIND THE WHOLE DAY. Per-row lines cannot be continuous —
+   every row adds its own padding and border, so the line restarts at each one, which is the
+   "weird look" Marc named. This layer sits behind the table, inset by the fixed columns. */
+.cfdb-slate-block { position:relative; }
+.cfdb-slate-grid { position:absolute; top:0; right:0; bottom:0; pointer-events:none; }
+.cfdb-slate-grid i { position:absolute; top:1.35rem; bottom:0; width:1px;
+    background:currentColor; opacity:.14; }
+.cfdb-slate-block .cfdb-slate-table { position:relative; background:transparent; }
+.cfdb-slate-block .cfdb-slate-table td, .cfdb-slate-block .cfdb-slate-table th {
+    background:transparent; }
 .cfdb-slate .cfdb-slate-slots { display:inline-block; width:auto; height:16px; }
 /* The axis is HTML: percent-positioned spans, so the glyphs are not stretched by the plot's
    `preserveAspectRatio='none'`. */

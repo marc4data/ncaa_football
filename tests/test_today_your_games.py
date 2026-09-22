@@ -181,12 +181,12 @@ def test_an_added_game_carries_its_own_tag_and_keeps_any_rule_tags():
     """⚠️ A GAME CAN BE BOTH. Showing only "Added by you" would hide why it qualifies on its
     own; showing only the rule would hide that he asked for it."""
     both = today._high_value_reason(
-        {"is_top25_matchup": True, "is_undefeated_close": False, "is_added_by_you": True})
+        {"is_top25_matchup": True, "is_undefeated_entering": False, "is_added_by_you": True})
     tags = re.findall(r"cfdb-why-tag'>([^<]+)<", both)
     assert tags == ["Top 25", "Added by you"]
 
     only_added = today._high_value_reason(
-        {"is_top25_matchup": False, "is_undefeated_close": False, "is_added_by_you": True})
+        {"is_top25_matchup": False, "is_undefeated_entering": False, "is_added_by_you": True})
     assert re.findall(r"cfdb-why-tag'>([^<]+)<", only_added) == ["Added by you"]
 
 
@@ -242,12 +242,16 @@ def _run(monkeypatch, *, gate_open, pasted=(401866418,), games=None, week=4):
     monkeypatch.setattr(page, "st", _Quiet())
     monkeypatch.setattr(page.states, "section", lambda *a, **k: contextlib.nullcontext())
     monkeypatch.setattr(page, "_upcoming_game_week", lambda scope: week)
+    # ⚠️ A204 added a cutoff dropdown beside the section. These tests are about
+    # the gate and the pasted ids, so it is stubbed to the default; the control
+    # itself is asserted in `test_today_close_cut.py`.
+    monkeypatch.setattr(page, "_close_cut_control", lambda: 4)
     monkeypatch.setattr(page, "_looking_forward_box",
                         lambda scope, w: (list(pasted), [], False))
     monkeypatch.setattr(page, "_week_is_final", lambda scope, w: gate_open)
     monkeypatch.setattr(page, "_poll_is_out", lambda scope, w: gate_open)
 
-    def high_value(scope, w, also_ids=None):
+    def high_value(scope, w, also_ids=None, close_cut=4):
         seen["also_ids"] = also_ids
         return games if games is not None else pd.DataFrame()
     monkeypatch.setattr(page, "_high_value_games", high_value)
@@ -284,8 +288,8 @@ def test_with_the_gate_open_the_pasted_ids_reach_the_one_query(monkeypatch):
     """§4.2.1: ONE relation, ONE read. The added games widen the existing predicate."""
     import pandas as pd
     frame = pd.DataFrame([
-        {"game_id": 401866418, "is_top25_matchup": True, "is_undefeated_close": False},
-        {"game_id": 401856700, "is_top25_matchup": False, "is_undefeated_close": False},
+        {"game_id": 401866418, "is_top25_matchup": True, "is_undefeated_entering": False},
+        {"game_id": 401856700, "is_top25_matchup": False, "is_undefeated_entering": False},
     ])
     _written, seen = _run(monkeypatch, gate_open=True, pasted=(401856700,), games=frame)
     assert seen["also_ids"] == [401856700]
@@ -306,6 +310,6 @@ def test_an_added_game_says_why_it_is_on_the_slate_too():
            "away_team_display": "Oklahoma", "home_team_display": "Georgia",
            "network_abbreviation": "ESPN", "spread_current": -13.5,
            "kickoff_time_known": True,
-           "is_top25_matchup": False, "is_undefeated_close": False, "is_added_by_you": True}
+           "is_top25_matchup": False, "is_undefeated_entering": False, "is_added_by_you": True}
     svg = today._slate(pd.DataFrame([row]), esc=lambda t: t, scope=_SlateScope())
     assert "Added by you" in svg, svg[:400]

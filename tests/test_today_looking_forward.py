@@ -71,6 +71,10 @@ def _run(monkeypatch, answers, week=4):
     # ⚠️ A199 ADDED A SIDEBAR BOX THAT READS AND WRITES THE URL. These tests are about the
     # GATE, so the box is stubbed to "the reader pasted nothing" — its own parsing, feedback
     # and round-trip live in `test_today_your_games.py`.
+    # ⚠️ A204 added a cutoff dropdown beside the section. These tests are about
+    # the gate and the pasted ids, so it is stubbed to the default; the control
+    # itself is asserted in `test_today_close_cut.py`.
+    monkeypatch.setattr(page, "_close_cut_control", lambda: 4)
     monkeypatch.setattr(page, "_looking_forward_box",
                         lambda scope, week: ([], [], False))
     monkeypatch.setattr(page, "_looking_forward_feedback",
@@ -78,7 +82,7 @@ def _run(monkeypatch, answers, week=4):
     monkeypatch.setattr(page, "_week_is_final", lambda scope, w: answers["final"])
     monkeypatch.setattr(page, "_poll_is_out", lambda scope, w: answers["poll"])
     monkeypatch.setattr(page, "_high_value_games",
-                        lambda scope, w, also_ids=None: answers.get("games", pd.DataFrame()))
+                        lambda scope, w, also_ids=None, close_cut=4: answers.get("games", pd.DataFrame()))
     rendered = {}
 
     def render_or_state(frame, view, *a, **k):
@@ -184,7 +188,13 @@ def test_the_empty_state_names_the_week_rather_than_drawing_a_blank_table(monkey
 def test_the_reason_tag_reads_the_flags_and_shows_both_when_both_fire(top25, undef, expected):
     """⚠️ BOTH RULES CAN FIRE ON ONE GAME, AND SHOWING ONLY THE FIRST WOULD MAKE THE SECOND
     LOOK NARROWER THAN IT IS. 2 of the 8 qualifying week-4 games carry both tags."""
-    html = today._high_value_reason({"is_top25_matchup": top25, "is_undefeated_close": undef})
+    # ⚠️ A204 SPLIT THE FLAG: "undefeated · close" is now `is_undefeated_entering` AND a line
+    # inside the reader's cutoff, so the fixture supplies both halves rather than a flag the
+    # page stopped reading. -3.0 is inside every choice; the cutoff itself is exercised in
+    # `test_today_close_cut.py`.
+    html = today._high_value_reason({"is_top25_matchup": top25,
+                                     "is_undefeated_entering": undef,
+                                     "spread_current": -3.0 if undef else None})
     tags = re.findall(r"cfdb-why-tag'>([^<]+)<", html)
     assert tags == expected
     if not expected:
@@ -192,12 +202,22 @@ def test_the_reason_tag_reads_the_flags_and_shows_both_when_both_fire(top25, und
 
 
 def test_the_page_adds_no_rule_of_its_own():
-    """§4.2.1. The page filters on a published flag; it does not decide what is high-value."""
+    """§4.2.1. The page does not decide what is high-value; it asks for it.
+
+    🚨 A204 MOVED ONE COMPARISON INTO THE PAGE AND THE LINE IS WORTH STATING PRECISELY.
+    *Which teams are undefeated entering a game* is a DEFINITION and is still published
+    (`is_undefeated_entering`). *Is this line inside the number the reader picked* creates no
+    quantity and has nowhere upstream it could live — the number is a dropdown choice. So the
+    page may compare, and may not compute: no rank test, no record arithmetic, no literal 4.
+    """
     body = SOURCE[SOURCE.index("def _high_value_games("):SOURCE.index("def _looking_forward(")]
-    for forbidden in ("rank is not None", "< 4", "abs(", "losses"):
+    for forbidden in ("rank is not None", "losses", "wins", "classification"):
         assert forbidden not in body, (
             f"{forbidden!r} in the page means a rule has leaked out of dbt")
     assert "high_value_only=True" in body
+    # and the cutoff arrives as an argument rather than as a literal in the page
+    assert "close_cut=close_cut" in body
+    assert "< 4" not in body and "<4" not in body
 
 
 def test_looking_forward_renders_schedules_table_rather_than_a_copy_of_it():

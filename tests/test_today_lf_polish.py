@@ -94,7 +94,7 @@ def _game(**kw):
            "home_logo_url": "https://cdn.example/h.png",
            "network_abbreviation": "ESPN", "spread_current": -13.5,
            "kickoff_time_known": True, "is_completed": False,
-           "is_top25_matchup": False, "is_undefeated_close": False,
+           "is_top25_matchup": False, "is_undefeated_entering": False,
            "is_added_by_you": False}
     row.update(kw)
     return row
@@ -107,7 +107,8 @@ def test_the_tags_are_the_short_wording_the_column_was_measured_for():
     "Undefeated · close" is 87.8px, against a Why column of 106px including 17.6px of cell
     padding. ⚠️ The long wording did not FIT the column it was sized against."""
     both = today._high_value_reason(
-        {"is_top25_matchup": True, "is_undefeated_close": True})
+        {"is_top25_matchup": True, "is_undefeated_entering": True,
+         "spread_current": -3.0})
     assert re.findall(r"cfdb-why-tag'>([^<]+)<", both) == ["Top 25", "Undefeated · close"]
     assert "close line" not in both, "the long wording is what overflowed"
 
@@ -239,16 +240,20 @@ def test_the_left_of_the_row_is_schedules_cells_rather_than_new_markup():
         assert f">{column}</th>" in html, f"no {column} header"
 
 
-def test_the_two_columns_marc_asked_for_that_did_not_fit_are_named_as_dropped():
-    """🚨 MEASURED, NOT PREFERRED. At 1440 his seven columns need 745.2px of a 980px box,
-    leaving 176.8px of graph; dropping Wx leaves 244.7px and dropping O/U as well leaves
-    302.8px. ⚠️ Cowork's order was Wx then O/U and the round took exactly that and no more.
+def test_a204_put_wx_and_o_u_back_because_marc_reversed_the_trade():
+    """🚨 A200 DROPPED THESE TWO AND A204 PUT THEM BACK, ON AN EXPLICIT INSTRUCTION.
+
+    > **MARC, v13 addition 2:** *"Add Weather and O/U. The width of the graph is not as
+    > important as including all the data points."*
+
+    ⚠️ A200's measurement was not wrong — all seven columns really do leave 176.8px of axis at
+    1440. **Marc weighed the same trade and chose the other side**, which is his to choose:
+    what the page shows is his, how it is laid out is not. The consequence is stated rather
+    than hidden — the SLATE row scrolls sideways at 1440 now.
     """
     html = slate(_game())
-    assert ">Wx</th>" not in html and ">O/U</th>" not in html
-    reason = code_of("_slate") + today._slate.__doc__
-    assert "745.2" in reason and "302.8" in reason, (
-        "the measurement that justified the drop must travel with the code")
+    for column in ("Away", "Home", "Spread", "O/U", "Wx", "TV", "Game", "Why"):
+        assert f">{column}</th>" in html, f"the SLATE is missing {column}"
 
 
 # ── 4. the SLATE's reason is a mark, and the marks combine ────────────────────────────
@@ -265,11 +270,12 @@ def test_every_reason_has_its_own_mark_and_they_combine():
     one = slate(_game(is_top25_matchup=True))
     assert marks(one) == 1
 
-    both = slate(_game(is_top25_matchup=True, is_undefeated_close=True))
+    both = slate(_game(is_top25_matchup=True, is_undefeated_entering=True,
+                       spread_current=-3.0))
     assert marks(both) == 2, "a game on both rules shows both marks"
 
-    all_three = slate(_game(is_top25_matchup=True, is_undefeated_close=True,
-                            is_added_by_you=True))
+    all_three = slate(_game(is_top25_matchup=True, is_undefeated_entering=True,
+                            spread_current=-3.0, is_added_by_you=True))
     assert marks(all_three) == 3
 
 
@@ -284,7 +290,8 @@ def test_the_marks_are_shapes_so_they_survive_a_greyscale_print():
 
 def test_an_added_game_no_longer_draws_the_same_bar_as_an_undefeated_one():
     added = today._slate_bar_class(_game(is_added_by_you=True))
-    undef = today._slate_bar_class(_game(is_undefeated_close=True))
+    undef = today._slate_bar_class(_game(is_undefeated_entering=True,
+                                         spread_current=-3.0))
     top = today._slate_bar_class(_game(is_top25_matchup=True))
     assert len({added, undef, top}) == 3, (added, undef, top)
     for cls in (added, undef, top):
@@ -358,8 +365,8 @@ def test_every_mark_of_a_type_sits_at_the_same_x_on_every_row():
 
     only_top = xs(slate(_game(is_top25_matchup=True)))
     only_added = xs(slate(_game(is_added_by_you=True)))
-    all_three = xs(slate(_game(is_top25_matchup=True, is_undefeated_close=True,
-                               is_added_by_you=True)))
+    all_three = xs(slate(_game(is_top25_matchup=True, is_undefeated_entering=True,
+                               spread_current=-3.0, is_added_by_you=True)))
     # the same reason lands at the same x whether it is alone or in company
     assert only_top["Top 25"] == all_three["Top 25"]
     assert only_added["Added by you"] == all_three["Added by you"]
@@ -381,12 +388,21 @@ def test_the_reason_is_its_own_column_with_a_header():
     # ⚠️ `html.count("<col")` READS 8 — `<colgroup` matches it too. Count the elements.
     import re as _re
     cols = _re.findall(r"<col(?:\s[^>]*)?>", html)
-    assert len(cols) == 7, f"six sized columns and the graph taking the remainder: {cols}"
+    assert len(cols) == len(today._SLATE_COL_PX) + 1, (
+        f"one <col> per sized column plus the graph taking the remainder: {cols}")
     assert cols[-1] == "<col>", "the graph column carries no width, so it gets the rest"
 
 
-@pytest.mark.parametrize("flag,kind", [(f, k) for f, k, _l in today._SLATE_MARKS])
-def test_each_mark_hovers_with_its_own_name(flag, kind):
-    svg = slate(_game(**{flag: True}))
+@pytest.mark.parametrize("flag", [f for f, _k, _l in today._SLATE_MARKS])
+def test_each_mark_hovers_with_its_own_name(flag):
+    """⚠️ `is_undefeated_close` IS NO LONGER A ROW INPUT — A204 split it, so that mark is
+    earned by `is_undefeated_entering` plus a line inside the cutoff. The fixture says what
+    each reason actually needs rather than setting a flag the page stopped reading."""
+    inputs = {
+        "is_top25_matchup": {"is_top25_matchup": True},
+        "is_undefeated_close": {"is_undefeated_entering": True, "spread_current": -3.0},
+        "is_added_by_you": {"is_added_by_you": True},
+    }[flag]
+    svg = slate(_game(**inputs))
     label = next(lb for f, _k, lb in today._SLATE_MARKS if f == flag)
     assert f"<title>{label}</title>" in svg

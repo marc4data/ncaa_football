@@ -297,7 +297,7 @@ ROW_CAP = 1200
 
 def rows(season: int, week, season_type: str, conference,
          division: str = 'fbs', high_value_only: bool = False,
-         also_ids=None) -> pd.DataFrame:
+         also_ids=None, close_cut: int = 4) -> pd.DataFrame:
     """Schedule's own query. A196 added `high_value_only` and nothing else.
 
     🚨 TODAY'S LOOKING FORWARD READS THE SAME ROWS, SO IT CALLS THE SAME QUERY.
@@ -332,6 +332,7 @@ def rows(season: int, week, season_type: str, conference,
                away_conference, away_points, away_rank, away_team_record_display,
                venue_display, network, network_abbreviation, is_neutral_site,
                is_conference_game, is_completed, winner, best_rank_in_game,
+               is_undefeated_entering,
                spread_current, total_current, predicted_margin, home_win_probability,
                spread_move_from_open, total_move_from_open,
                spread_at_close, spread_at_close_basis,
@@ -354,7 +355,14 @@ def rows(season: int, week, season_type: str, conference,
           -- 'All divisions' in the filter bar genuinely widens it.
           and (:division = 'all' or is_fbs_game)
           and (:conf is null or home_conference = :conf or away_conference = :conf)
-          and (not :high_value_only or is_high_value
+          -- 🚨 A204: THE CLOSE-LINE CUTOFF IS THE READER'S, so `is_high_value` cannot be
+          -- the whole filter any more — it bakes in `< 4`. The Top 25 half is still the
+          -- published flag; the close half is the published DEFINITION
+          -- (`is_undefeated_entering`) compared against the reader's number.
+          -- ⚠️ A BOUND NUMBER, never formatted into the string, exactly as :also_ids is.
+          and (not :high_value_only
+               or is_top25_matchup
+               or (is_undefeated_entering and abs(spread_current) < :close_cut)
                or game_id = any(:also_ids))
         -- R-108. Date, then kickoff, then the best rank ON THE FIELD, then the home name.
         -- The rank only ever breaks a tie between games kicking at the same minute, which
@@ -368,4 +376,5 @@ def rows(season: int, week, season_type: str, conference,
     return query(sql, {"season": season, "week": week, "season_type": season_type,
                        "conf": conference, "division": division,
                        "high_value_only": high_value_only,
+                       "close_cut": close_cut,
                        "also_ids": list(also_ids or [])})
