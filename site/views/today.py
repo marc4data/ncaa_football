@@ -4312,7 +4312,19 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
     if not timed and not untimed:
         return ""
 
-    out = ["<div class='cfdb-slate'>", _slate_legend(esc)]
+    # 🚨 A207: AN AFFORDANCE THAT DOES NOT DEPEND ON THE SCROLLBAR BEING DRAWN.
+    # 📊 A styled `::-webkit-scrollbar` is the obvious answer and it could not be PROVEN: with
+    # the rule in the page and `scrollbar-width:thin` computing, `offsetHeight - clientHeight`
+    # stayed **0px at every width** — this browser draws an overlay bar, which is the platform
+    # default on macOS. ⚠️ The styling is kept because it does show where the platform honours
+    # it, but it cannot be the thing a reader depends on.
+    # ✅ SO THE NOTE IS A CONTAINER QUERY: it appears exactly when the section is narrower than
+    # the table's own minimum, which is a fact about the layout rather than about the browser's
+    # scrollbar policy — and it is visible or not, which is measurable.
+    out = ["<div class='cfdb-slate'>",
+           "<div class='cfdb-slate-scrollnote'>\u2194 Scroll the table sideways for the "
+           "network, the matchup link and the time chart.</div>",
+           _slate_legend(esc)]
 
     for day, entries in timed.items():
         first = min(local for local, _row in entries)
@@ -4592,8 +4604,14 @@ def _looking_forward(scope, depth: int) -> None:
                 f"Kick-off times Pacific. Each bar runs "
                 f"{_SLATE_GAME_MINUTES // 60}h {_SLATE_GAME_MINUTES % 60:02d}m from kick-off "
                 f"\u2014 a fixed allowance, not a measured end time, which CFBD does not "
-                f"publish. Hover a bar for the matchup, network, line and why it qualified. "
-                f"{_ADD_GAMES_HINT}")
+                f"publish. Hover a bar for the matchup, network, line and why it qualified.")
+            # 🚨 A207 (cfdb-main-R-2257). ITS OWN LINE, NOT THE FOURTH SENTENCE OF A
+            # METHODOLOGY NOTE. A205 put it in the caption above and it was true and unread:
+            # that paragraph opens with kick-off times and bar arithmetic, and **a reader
+            # looking for "how do I add a game" does not read a methodology note to the end.**
+            # ⚠️ THE SENTENCE IS UNCHANGED — Marc asked about where it sits, not what it says
+            # — and it is still the one definition the sidebar box's `help=` reads.
+            st.caption(_ADD_GAMES_HINT)
 
         # A199: never silent (AC-G.11) — say what happened to what was pasted.
         note = _looking_forward_feedback(

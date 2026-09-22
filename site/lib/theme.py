@@ -145,7 +145,16 @@ CSS = """
    the page's own ink and is therefore correct in both themes with no second palette to keep
    in step. The one accent is the Top 25 bar, which is the same `--cfdb-link` the page uses
    for a link — a rank is the strongest signal on this chart and it earns one hue. */
-.cfdb-slate { margin:.3rem 0 .2rem; }
+/* A207: a container, so the scroll note below can ask how wide THIS SECTION is. The viewport
+   is the wrong question — the sidebar's width changes the answer. */
+.cfdb-slate { margin:.3rem 0 .2rem; container-type:inline-size; }
+/* 🚨 THE NOTE IS HIDDEN BY DEFAULT AND REVEALED BY THE CONTAINER QUERY, never the other way
+   round: if container queries were unsupported the reader would see a note that is always
+   true-ish rather than a table that silently hides five columns. 940px is the table's own
+   `min-width` — the exact point past which something is out of reach. */
+.cfdb-slate-scrollnote { display:none; font-size:.7rem; opacity:.75; margin:.1rem 0 .3rem;
+    gap:.3rem; align-items:center; }
+@container (max-width: 939px) { .cfdb-slate-scrollnote { display:flex; } }
 .cfdb-slate svg { display:block; width:100%; height:auto; color:inherit; }
 /* A201. The SLATE is a schedule table whose last column holds the graph. The left cells are
    Schedule's own, so they inherit `.cfdb-table`; only the graph column is new. */
@@ -154,6 +163,28 @@ CSS = """
    column got 0px and all twelve hour labels piled up outside it — measured, in the browser.
    940px keeps ~300px of axis and lets the row scroll sideways instead, which is exactly what
    the list above it already does at that width. */
+/* 🚨 A207 (cfdb-main-R-2256). THE SCROLLBAR IS DRAWN, BECAUSE `overflow-x:auto` ALONE IS
+   INVISIBLE ON macOS.
+   📊 Measured on A205's shipped SLATE with the sidebar open: at 1100 the container is 640px
+   and the table 940px, so **TV, Game, Why and the whole time gantt sit past the right edge**
+   — and `offsetHeight - clientHeight` was **0px at every width**, which is an OVERLAY
+   scrollbar: it exists only while something is scrolling. The content was reachable and
+   nothing said so, which is a different defect from unreachable and a worse one to ship
+   (AC-G.11).
+   ⚠️ `scrollbar-width` and `::-webkit-scrollbar` together force a bar that OCCUPIES LAYOUT, so
+   `offsetHeight - clientHeight` becomes non-zero and the fix is measurable rather than
+   assumed.
+   ⚠️ SCOPED TO THE SLATE. Every `.cfdb-scroll` on the site has the same defect — see the
+   report — but this round was asked to fix this one. */
+.cfdb-slate .cfdb-scroll { scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, currentColor 35%, transparent) transparent; }
+.cfdb-slate .cfdb-scroll::-webkit-scrollbar { height:10px; }
+.cfdb-slate .cfdb-scroll::-webkit-scrollbar-track {
+    background:color-mix(in srgb, currentColor 8%, transparent); border-radius:5px; }
+.cfdb-slate .cfdb-scroll::-webkit-scrollbar-thumb {
+    background:color-mix(in srgb, currentColor 32%, transparent); border-radius:5px; }
+.cfdb-slate .cfdb-scroll::-webkit-scrollbar-thumb:hover {
+    background:color-mix(in srgb, currentColor 48%, transparent); }
 .cfdb-slate-table { table-layout:fixed; width:100%; min-width:940px; }
 .cfdb-slate-table td, .cfdb-slate-table th { padding-top:.2rem; padding-bottom:.2rem; }
 .cfdb-slate-table .cfdb-slate-cell { padding-left:.5rem; padding-right:.2rem; }
