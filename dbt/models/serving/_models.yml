@@ -524,7 +524,45 @@ models:
       - name: as_of_ts
         description: AC-G.35. Last load of the `rankings` domain, rendered instead of now().
 
-  # ---------------------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------------------      - name: explained_by_game_week
+        description: >
+          A190. The GAME week whose result explains the move into this POLL week, or null
+          where there is none. Poll week N reflects game week N-1, established from the data
+          rather than assumed: poll release dates are not in the warehouse (R-1848), so
+          A188's method was used - a team ranked in poll week N that loses in game week N
+          falls in poll week N+1. On 2026 AP, 3 of 3 week-2 losers fell in poll week 3, and
+          4 fell plus 1 dropped out of poll week 4 after week 3. The competing alignment was
+          tested and refuted: under it those five would have fallen in poll week 3, and 5 of
+          5 held or rose there. Null for poll week 1 (there is no game week 0), for a bye,
+          and for a poll published ahead of an unplayed week.
+      - name: game_away_display
+        description: >
+          A190. The AWAY side of that explaining game. Away and home are resolved in the
+          model, not in the page, so a consumer renders two lines in Marc's stated order
+          (away over home) without deciding anything.
+      - name: game_away_logo_url
+        description: A190. The away side's logo for the explaining game.
+      - name: game_away_record_after
+        description: >
+          A190. The away side's record AFTER the explaining game, from
+          fct_team_record_week.record_after - the same column srv_game reads for its own
+          after-records, not a second formatting of wins and losses.
+      - name: game_away_points
+        description: A190. The away side's score in the explaining game.
+      - name: game_home_display
+        description: A190. The HOME side of the explaining game.
+      - name: game_home_logo_url
+        description: A190. The home side's logo for the explaining game.
+      - name: game_home_record_after
+        description: A190. The home side's record after the explaining game.
+      - name: game_home_points
+        description: A190. The home side's score in the explaining game.
+      - name: game_result_for_team
+        description: >
+          A190. W or L for the RANKED team in the explaining game - which side that is
+          depends on game_away_display / game_home_display, so this is the unambiguous
+          answer to "did the team this row is about win".
+
   - name: srv_line_movement
     description: >
       Line Movement page. One row per game x provider x snapshot — a time series straight off
