@@ -195,6 +195,25 @@ def test_an_indoor_game_shows_the_dome_and_no_temperature():
     assert "94" not in cell
 
 
+def test_an_unreported_condition_does_not_put_nan_in_the_tooltip():
+    """🚨 `NaN` IS TRUTHY, so `row.get("weather_condition") or "…"` returns the NaN.
+
+    ⚠️ Found by A199's live render, which showed `title='nan'` on six of ten week-4 games.
+    It predates that round — the cell was promoted verbatim into `lib/schedule_table` by
+    A196 — and it renders on Schedule as well as on Looking Forward. A tooltip is the one
+    place a defect can sit in plain sight and never be looked at.
+    """
+    for absent in (float("nan"), None, ""):
+        cell = schedule._weather_cell(_row(temperature_f=71.0, weather_condition=absent,
+                                           weather_condition_code=float("nan")))
+        assert "nan" not in cell.lower(), (absent, cell)
+        assert "conditions not recorded" in cell
+    # and a condition that IS reported still reaches the tooltip
+    assert "Cloudy" in schedule._weather_cell(
+        _row(temperature_f=63.0, weather_condition="Cloudy",
+             weather_condition_code=float("nan")))
+
+
 def test_pending_and_tie_and_won_are_three_distinct_winner_states():
     """R-100 kept the distinction the chip it replaced had.
 

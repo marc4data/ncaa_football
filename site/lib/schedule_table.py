@@ -208,7 +208,12 @@ def weather_cell(row) -> str:
         return ""
     code = row.get("weather_condition_code")
     glyph = WEATHER_GLYPH.get(int(code)) if not missing(code) else None
-    label = row.get("weather_condition") or "conditions not recorded"
+    # 🚨 `or` CANNOT BE USED TO DEFAULT THIS, BECAUSE `NaN` IS TRUTHY. A game whose condition
+    # CFBD did not report carries `NaN`, so `row.get(...) or "…"` returns the NaN and the cell
+    # renders `title='nan'` — a tooltip that says nothing, in the site's most-repeated defect
+    # class. Found by A199's live render; it predates this round and affects Schedule too.
+    label = row.get("weather_condition")
+    label = "conditions not recorded" if missing(label) or not label else label
     return (f"<span class='cfdb-wx' title='{label}'>"
             f"{glyph or ''} {float(temp):.0f}°F</span>")
 
@@ -291,7 +296,8 @@ ROW_CAP = 1200
 
 
 def rows(season: int, week, season_type: str, conference,
-         division: str = 'fbs', high_value_only: bool = False) -> pd.DataFrame:
+         division: str = 'fbs', high_value_only: bool = False,
+         also_ids=None) -> pd.DataFrame:
     """Schedule's own query. A196 added `high_value_only` and nothing else.
 
     🚨 TODAY'S LOOKING FORWARD READS THE SAME ROWS, SO IT CALLS THE SAME QUERY.
@@ -306,6 +312,17 @@ def rows(season: int, week, season_type: str, conference,
 
     ⚠️ `high_value_only` ADDS A PREDICATE AND TWO FLAG COLUMNS. It does not change what
     Schedule selects or how it orders, so Schedule's own four call sites are untouched.
+
+    🚨 A199: `also_ids` WIDENS THAT PREDICATE IN THE SAME QUERY, NOT IN A SECOND ONE.
+    Today's Looking Forward lets a reader paste game_ids to add; they join the high-value
+    games as `is_high_value OR game_id = any(:also_ids)`. **One single-table read** — merging
+    a second query in the page is what §4.2.1 forbids, and it would also make the ordering
+    the page's problem rather than the query's.
+
+    ⚠️ THE IDS ARE A BOUND PARAMETER AND NEVER FORMATTED INTO THE STRING. They come from a
+    text box, so this is the one place on the site where user input reaches SQL. psycopg2
+    adapts a Python list to an ARRAY, so `= any(:also_ids)` needs no quoting of our own —
+    and an empty list matches nothing, which is exactly the "nothing added" case.
     """
     sql = """
         select game_id, season, week, season_type, start_date, game_date,
@@ -337,7 +354,8 @@ def rows(season: int, week, season_type: str, conference,
           -- 'All divisions' in the filter bar genuinely widens it.
           and (:division = 'all' or is_fbs_game)
           and (:conf is null or home_conference = :conf or away_conference = :conf)
-          and (not :high_value_only or is_high_value)
+          and (not :high_value_only or is_high_value
+               or game_id = any(:also_ids))
         -- R-108. Date, then kickoff, then the best rank ON THE FIELD, then the home name.
         -- The rank only ever breaks a tie between games kicking at the same minute, which
         -- is exactly where a reader wants the ranked matchup first. `nulls last` is the
@@ -349,4 +367,5 @@ def rows(season: int, week, season_type: str, conference,
     """.replace("{ROW_CAP}", str(ROW_CAP))
     return query(sql, {"season": season, "week": week, "season_type": season_type,
                        "conf": conference, "division": division,
-                       "high_value_only": high_value_only})
+                       "high_value_only": high_value_only,
+                       "also_ids": list(also_ids or [])})

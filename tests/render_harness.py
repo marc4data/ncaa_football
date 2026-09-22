@@ -343,7 +343,18 @@ def build(query_params=None, theme="light"):
         (list(options) or [None])[0])
     st.multiselect = lambda label, options, default=None, **k: list(default or [])
     st.slider = lambda label, *a, **k: k.get("value", 0)
-    st.text_input = lambda *a, **k: k.get("value", "")
+
+    # ⚠️ A KEYED WIDGET READS `st.session_state`, WHICH IS WHAT MAKES A SEEDED BOX WORK.
+    # Real Streamlit returns the session-state value for a widget's key when one is set, and
+    # a page that seeds the box from the URL and then draws it keyed (A199's Looking Forward
+    # box) reads back its own seed. A stub returning `value` unconditionally would render an
+    # empty box on a page that is displaying a full one.
+    def _keyed_text(*a, key=None, **k):
+        if key is not None and key in st.session_state:
+            return st.session_state[key]
+        return k.get("value", (a[1] if len(a) > 1 else ""))
+    st.text_input = _keyed_text
+    st.text_area = _keyed_text
     st.number_input = lambda *a, **k: k.get("value", 0)
     st.session_state = {}
     st.query_params = dict(query_params or {})
