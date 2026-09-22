@@ -300,6 +300,40 @@ TABLE_CSS = """
      no second value is needed. The percentages are measured from the two hardcoded values
      they replace, not guessed — #d7dae0 on white is 14.1% black and #333a45 on #0e1117 is a
      17.5% lift, so 16% reproduces both within a shade; #eef0f3/#242933 are 5.8%/10.4%, so 8%. */
+  /* 🚨 A192 (cfdb-main-R-2014). THE PLAYER CARD'S THREE WIDTHS, EVERY ONE MEASURED IN A REAL
+     BROWSER RATHER THAN CHOSEN — see `.cfdb-card` for the table they came from, and
+     `ci/measure_player_card.py`, which re-derives them and fails if they go stale.
+
+     ⚠️ THEY ARE CUSTOM PROPERTIES SO THE NUMBERS HAVE ONE HOME. A191 spent a round on six
+     header widths that existed twice — once in the page and once hand-copied into a test —
+     and the copies disagreed while the test stayed green. */
+  /* 🚨 2.75rem, AND THE FIRST TWO VALUES HERE WERE BOTH WRONG FOR THE SAME REASON.
+     📊 A192 read the widest abbreviation as 28.3px and cut this track to 30px — and then
+     measured **78 of 150 abbreviations clipped**, because that 28.3 was a `Range` over an
+     element that was ALREADY ellipsised, which returns its box and not its text. Cloning
+     each into an off-screen `nowrap` box gives the truth: **`MRMK` is 41.6px**, `WASH` 40.3,
+     `UNCO` 40. ⚠️ THIRD TIME THIS ROUND that a Range over a clipped element understated a
+     width — the header row in A191, the metric cells above, and this. **On this page, a
+     measured width is only trustworthy if the thing measured was free to be its full size.** */
+  --cfdb-card-team-w:    2.75rem;  /* 44px; widest abbreviation "MRMK" draws 41.6px */
+  /* 🚨 THE METRICS BLOCK IS CONTENT-SIZED, NOT A TRACK, AND THE FIRST ATTEMPT AT A TRACK WAS
+     WRONG IN A WAY A192 HAD ALREADY BEEN WARNED ABOUT. It was set to 72px from a measurement
+     that summed each metric's own need (66.6px) — but `.cfdb-card-metric` is `flex:1 1 0`,
+     **equal thirds**, so the widest single cell governs all three. 📊 And the re-measurement
+     understated it too: a `Range` over a cell that has ALREADY WRAPPED returns its wrapped
+     box, which is A191's header trap exactly. Cloning each cell into an off-screen `nowrap`
+     box gives the real figure — **25.4px for a three-digit value** — so equal thirds need
+     3 x 25.4 + 2 x 4 = 84.2px, and 30 of 180 cells were wrapping inside 72px.
+     ✅ Sizing to content removes the constant entirely: the block asks for what it draws, and
+     a card of two-digit values hands the difference back to the name. */
+  /* 🚨 THE FLOOR IS THE SURNAME ALONE (109.2px + slack), NOT the surname PLUS the jersey.
+     📊 Measured: at 1100px the card's content box is 158.9px, so team(36) + gap + jersey(27.2)
+     + gap + surname(109.2) = 185.2 cannot share a line however the tracks are cut. Setting the
+     floor to 144 made the flex row wrap in the worst order — **the team alone on line one**,
+     the name on line two, the metrics on line three, a 156.6px card. With the floor at the
+     surname the jersey wraps ABOVE the name inside the cell instead, the team keeps the name
+     company on line one, and the surname still cannot be squeezed. */
+  --cfdb-card-name-min:  7rem;     /* 112px; widest real surname "Chambers-Smith" is 109.2 */
   --cfdb-edge:      color-mix(in srgb, CanvasText 16%, Canvas);
   --cfdb-rule-soft: color-mix(in srgb, CanvasText 8%,  Canvas);
 
@@ -767,10 +801,85 @@ TABLE_CSS = """
              border-left:2px solid var(--cfdb-edge);
              background:var(--cfdb-row-alt, transparent); border-radius:3px;
              margin-bottom:.4rem;
-             display:grid; align-items:center; gap:.4rem;
-             /* A189: the rank track is GONE (it is the board's gutter now) and the team
-                track narrows because the name sits under the logo. */
-             grid-template-columns:3.6rem minmax(0, 1fr) 7.25rem; }
+             align-items:center; gap:.4rem;
+/* 🚨 A192 (cfdb-main-R-2013). A FLEX ROW THAT WRAPS, NOT A THREE-TRACK GRID — AND THE TWO
+   FIXED TRACKS GIVE BACK THE WIDTH THEY WERE NEVER USING.
+
+   > **MARC, v11:** *"the card is too crowded horizontally to present well."*
+
+   📊 MEASURED IN CHROMIUM ON THE REAL PAGE, 2026 week 3, SIDEBAR OPEN. The grid this
+   replaces was `3.6rem minmax(0,1fr) 7.25rem`, and both fixed tracks were oversized:
+
+       team track      slot 57.6px   widest content 28.3px   (a 28px logo over a 4-char name)
+       metrics track   slot 116px    widest content 66.6px
+
+   **115.6px of every card was reserved and unused**, while the name — the one thing a player
+   card exists to say — got what was left:
+
+       1100px   card 173.3   name slot 0       30 of 30 cards overflowing
+       1280px   card 233.3   name slot 29.6   150 of 150 overflowing
+       1440px   card 286.7   name slot 82.9    67 of 150 overflowing
+       1680px   card 366.7   name slot 162.9    0 overflowing
+
+   🚨 AT 1100 THE THREE TRACKS SUMMED TO 186.4px INSIDE A 173.3px CARD, so the middle one
+   resolved to ZERO and the name painted on top of the metrics. No redistribution inside the
+   name block could have fixed that: the card was overcommitted before the name was reached.
+
+   ✅ THE RULE THIS ENFORCES: **the last name is never truncated at any width from 1100 up.**
+   `--cfdb-card-name-min` is the widest real last name plus the jersey and its gap, so the
+   name block can never be squeezed below it — and because the card WRAPS rather than
+   shrinks, the metrics (then the team) drop to a second line instead of eating the name.
+
+   ⚠️ WRAP RATHER THAN A MEDIA QUERY, AND THAT IS THE POINT. The board's width depends on
+   whether Streamlit's sidebar is open, which a viewport media query cannot see — the same
+   1100px viewport is a 640px board with it open and ~885px without. A flex container
+   reflows on its OWN width, so both cases are right with no breakpoint to maintain.
+
+   ⚠️ AND IT IS WHY THE BOARD STILL HAS THREE COLUMNS. A192's brief offered "3 → 2 columns
+   below a measured breakpoint" as the last resort; reclaiming the 115.6px made it
+   unnecessary, and the rank gutter, the three category headings and their alignment all stay
+   exactly as A189 left them. */
+             display:flex; flex-wrap:wrap; }
+.cfdb-card > .cfdb-card-team { flex:0 0 var(--cfdb-card-team-w); }
+.cfdb-card > .cfdb-card-who  { flex:1 1 var(--cfdb-card-name-min);
+                               min-width:var(--cfdb-card-name-min); }
+.cfdb-card > .cfdb-card-stat,
+.cfdb-card > .cfdb-card-metrics { flex:0 0 auto; margin-left:auto; }
+/* ⚠️ AND EACH METRIC HOLDS ITS OWN CONTENT. `flex:1 1 0` split the block into equal thirds
+   regardless of what was in them, which is what wrapped `483` under its own `YDS`. */
+.cfdb-card .cfdb-card-metric { flex:0 0 auto; min-width:max-content; }
+/* ⚠️ THE LAST NAME OPTS OUT OF THE ELLIPSIS `player_row` PUTS ON EVERY LINE. That clip is
+   right for Matchup and for the FIRST name here; on this card the surname is the thing the
+   min-width above exists to protect, so clipping it would quietly undo the whole rule. */
+/* 🚨 A192 (cfdb-main-R-2015). `!important`, AND IT IS THE CANONICAL CASE FOR IT RATHER THAN
+   A SHORTCUT: these two declarations have to beat an INLINE `style=`, which outranks every
+   class selector no matter how specific.
+
+   `identity.player_row` writes `min-width:0;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis` into the attribute of all three name elements. ⚠️ **A192's first
+   attempt at both rules was silently inert** — `min-width:7rem` and `overflow:visible` were
+   written, were correct, and lost to the attribute; one surname ("Sagapolutele") was still
+   being cut with the rule sitting in the sheet.
+
+   ✅ MOVING THE FOUR DECLARATIONS INTO A CLASS RULE IS THE TIDIER CSS AND WAS TRIED FIRST.
+   It was reverted because `tests/test_matchup_postgame.py` and `tests/test_matchup_yardage.py`
+   locate this markup by those literal strings, and those are **session B's files** — a
+   shared-module change that forces edits into the other session's tests is R-729's shape
+   exactly. Two `!important`s in Today's own sheet cost less than crossing that line, and
+   leave Matchup's markup byte-identical to what its tests assert.
+
+   ⚠️ SCOPED UNDER `.cfdb-card`, which `matchup.py` does not use anywhere — asserted by
+   `test_matchup_cannot_be_reached_by_todays_card_rules`. */
+.cfdb-card .cfdb-player-last { overflow:visible !important; text-overflow:clip !important; }
+/* The jersey rides above the name rather than stealing from it once the card is narrow
+   enough that the two cannot share a line — see `--cfdb-card-name-min` for the measurement. */
+.cfdb-card .cfdb-player-row  { flex-wrap:wrap; }
+/* 1.7rem was 27.2px against a widest drawn jersey of 25.5px; 1.6rem still clears it. */
+.cfdb-card .cfdb-player-jersey { min-width:1.6rem; }
+.cfdb-card .cfdb-player-name { min-width:var(--cfdb-card-name-min) !important; }
+/* A192: class and position move to the cell's `title` — see `today._player_card` for why,
+   and note this cannot reach Matchup, which uses no `.cfdb-card`. */
+.cfdb-card .cfdb-player-meta { display:none; }
 /* The rank Marc asked for, far left. Tabular figures so 1 and 10 occupy the same width and
    the column below stays a column. */
 .cfdb-card-rank { font-size:.72rem; font-weight:700; opacity:.45;
