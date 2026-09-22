@@ -731,10 +731,37 @@ TABLE_CSS = """
    cell every other panel draws — and only its AXIS changes here, so nothing about what the
    cell contains moves. The column narrows from 5.75rem to 3.6rem, which is the horizontal
    space the stack buys back. */
-.cfdb-card-team > a, .cfdb-card-team > span { display:flex; flex-direction:column;
-                                              align-items:center; gap:.1rem;
-                                              text-align:center; line-height:1.15; }
-.cfdb-card-team .cfdb-team { font-size:.68rem; }
+/* 🚨 A191 (cfdb-main-R-2004). THE A189 RULE ABOVE SELECTED THE WRONG ELEMENT AND DID
+   NOTHING, AND THE RENDER SAID SO: the team cell measured 58x28 with
+   `flex-direction: row` — the name still beside the logo and clipped to ~5 characters.
+
+   📊 THE MARKUP, READ OFF THE LIVE RENDER RATHER THAN ASSUMED:
+
+       div.cfdb-card-team > span.cfdb-identity > a.cfdb-teamlink > [ .cfdb-logo-box,
+                                                                    .cfdb-rank?,
+                                                                    span.cfdb-team ]
+
+   `> a` matched nothing (the anchor is a GRANDCHILD) and `> span` matched `.cfdb-identity`,
+   whose only child is that anchor — so the column axis was applied to a one-item flex box,
+   which is a no-op. **The logo and the name are siblings inside `.cfdb-teamlink`, and that
+   is the box whose axis had to change.** The rule was written against `_team_identity`'s
+   description of the cell instead of against the cell (§2.2.1c.2's class, in CSS).
+
+   ⚠️ BOTH LEVELS ARE NAMED BECAUSE BOTH SHAPES OCCUR. `_team_identity` only wraps in an
+   anchor when `table.team_link` yields an href; a team with no slug renders logo, badge and
+   name directly inside `.cfdb-identity`. Selecting one of the two would stack most cards and
+   silently leave the others in a row.
+
+   ⚠️ AND IT WRAPS RATHER THAN STACKING, WHICH IS NOT THE SAME THING. A plain
+   `flex-direction:column` puts the rank badge on a line of its own between the logo and the
+   name — three rows for two facts. `flex-wrap` with the name at `flex:0 0 100%` keeps the
+   logo and its badge together on the first line and forces only the name down, which is what
+   Marc asked for: *"move the Team Name to be under the Logo"*. */
+.cfdb-card-team .cfdb-identity,
+.cfdb-card-team .cfdb-teamlink { display:flex; flex-wrap:wrap; justify-content:center;
+                                 align-items:center; row-gap:.1rem; column-gap:.2rem;
+                                 text-align:center; line-height:1.15; }
+.cfdb-card-team .cfdb-team { flex:0 0 100%; font-size:.68rem; }
 
 .cfdb-card { min-width:0; padding:.4rem .45rem; border:1px solid var(--cfdb-edge);
              border-left:2px solid var(--cfdb-edge);

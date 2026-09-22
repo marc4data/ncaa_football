@@ -1770,3 +1770,290 @@ def test_a_card_with_no_rank_still_reserves_its_column():
         order = [card.index(c) for c in
                  ("cfdb-card-team", "cfdb-card-who", "cfdb-card-value")]
         assert order == sorted(order), f"the three tracks are out of order: {card[:200]}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A191 — the five defects Cowork found in A189's own renders
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+
+def test_the_week_average_row_has_no_opponent_and_no_placeholder_logo():
+    """🚨 A191 (cfdb-main-R-2000). THE BENCHMARK ROW PRINTED THE LITERAL STRING `nan`.
+
+    📊 ON THE LIVE PAGE AT 2026 WEEK 3 IT READ `Week average · 150 teams` in the Team column
+    and **`nan` beside a grey placeholder disc** in the Opponent column. A189 branched the
+    Team cell on `is_summary_row` and did not branch the Opponent cell, so the appended row —
+    whose opponent fields `pd.concat` had filled with `NaN` — went through `_team_identity`
+    like a team.
+
+    🚨 AND THE EM DASH THAT EXISTS FOR EXACTLY THIS CASE WAS ONE TRUTHINESS TEST AWAY FROM
+    FIRING. `table.team_cell` ends `row.get(display_field) or "—"`, and **a float `NaN` is
+    truthy**, so the fallback could never run on a pandas null. The `rank` branch two lines
+    above it used `pd.isna` and was right. Both halves are fixed: the page does not ask for an
+    opponent it does not have, and `team_cell` no longer mistakes `NaN` for a value.
+
+    ⚠️ BLANK RATHER THAN "—", and that is the assertion. The Score cell beside it already
+    returns "" for this row, so a dash here would give one row two different marks for the
+    same absence (AC-G.11).
+    """
+    import importlib
+
+    import render_harness
+
+    def teams():
+        return pd.DataFrame([
+            {"team_display": f"Team {i}", "team_slug": f"t{i}", "team_logo_url": None,
+             "team_rank": None, "record_before_display": "3-0", "conference": "SEC",
+             "opponent": "Rival", "opponent_team_slug": "rival",
+             "opponent_team_display": "Rival", "opponent_logo_url": None,
+             "opponent_rank": None, "week": 2, "is_completed": True,
+             "total_yards": 800 - i * 200, "rushing_yards": 400 - i * 100,
+             "passing_yards": 400 - i * 100, "points_for": 30, "points_against": 17,
+             "result": "W", "as_of_ts": pd.Timestamp("2026-09-18", tz="UTC")}
+            for i in range(3)])
+
+    class _BoardScope(_Scope):
+        season, week, season_type, conference, division = 2026, 2, "regular", None, "fbs"
+
+        def describe(self):
+            return "2026 week 2"
+
+    with render_harness.streamlit_stubbed(
+            query_params={"season": "2026", "week": "2"}) as (_st, captured, _charts):
+        page = importlib.reload(importlib.import_module("views.today"))
+        page.query = lambda sql, params=None: (
+            pd.DataFrame([{"n": 150, "total_yards": 379.98, "rushing_yards": 159.07,
+                           "passing_yards": 220.91}]) if "count(*) as n" in sql
+            else teams() if "from srv_game_team" in sql
+            else pd.DataFrame())
+        page._leaderboards(_BoardScope(), 10)
+        render_harness.assert_no_error_card(captured, "the leaderboards panel")
+        html = "\n".join(captured)
+
+    assert "cfdb-summary-row" in html, "the Week average row is on the board at all"
+
+    # ⚠️ THE ASSERTION IS SCOPED TO THAT ONE ROW, NOT TO THE PAGE. "nan" appears legitimately
+    # inside real player names — "Keenan" contains it — so a document-wide substring search
+    # reports a defect on a correct page. That is how this was nearly mis-measured.
+    row = re.search(r"<tr[^>]*>(?:(?!</tr>).)*cfdb-summary-row(?:(?!</tr>).)*</tr>",
+                    html, re.S)
+    assert row, "could not isolate the Week average row"
+    summary = row.group(0)
+
+    assert ">nan<" not in summary and ">nan " not in summary, (
+        f"the Week average row is printing a pandas NaN as text: {summary[:400]}")
+    assert "cfdb-logo" not in summary and "cfdb-monogram" not in summary, (
+        "the Week average row is not a team and must draw no logo or placeholder disc")
+    assert "cfdb-rank" not in summary, "a benchmark row has no ranking badge"
+
+    # 🚨 A191 (cfdb-main-R-2010). AND EXACTLY ONE ROW IS THE SUMMARY ROW — THE ASSERTION THE
+    # ORIGINAL TEST WAS MISSING, AND THE ONE THAT MATTERED MOST.
+    #
+    # 📊 A189's branch was `if r.get("is_summary_row")`, and `pd.concat` fills that column
+    # with **NaN** for every real team. NaN is truthy, so the branch fired on ALL of them:
+    # measured in a real browser against live serving, `.cfdb-summary-row` matched **11
+    # elements, not 1**, and every team on the board rendered as a plain italic label with no
+    # logo, no rank badge, no record and no link. It shipped, and it is live at a7c50bb.
+    #
+    # ⚠️ A TEST THAT ONLY INSPECTS THE SUMMARY ROW CANNOT SEE THIS. The summary row was
+    # correct throughout — the defect is entirely in what the branch did to the OTHER ten,
+    # and nothing was looking at them. That is R-760's shape inverted: not an assertion that
+    # cannot fail, but a population that was never asserted over.
+    assert html.count("cfdb-summary-row") == 1, (
+        f"the summary styling leaked onto {html.count('cfdb-summary-row')} rows — "
+        f"`is_summary_row` is NaN for real teams after pd.concat, and NaN is truthy")
+
+    team_rows = [r for r in re.findall(r"<tr[^>]*>(?:(?!</tr>).)*</tr>", html, re.S)
+                 if "cfdb-summary-row" not in r and "<th" not in r]
+    assert team_rows, "no team rows to check — the board is empty and this proves nothing"
+    assert all("cfdb-teamlink" in r for r in team_rows), (
+        "every real team row keeps its linked team cell; the summary branch must not "
+        "swallow them")
+
+
+def test_team_cell_renders_a_missing_name_as_an_em_dash_rather_than_the_string_nan():
+    """🚨 A191 (cfdb-main-R-2001). `or "—"` CANNOT SEE A pandas NULL, BECAUSE NaN IS TRUTHY.
+
+    ⚠️ This is the general form of the defect above, in the shared cell seven tables draw. It
+    is asserted separately because the page-level guard and this one fail for different
+    reasons: the page must not ASK for an absent opponent, and the cell must not print `nan`
+    when anything else does.
+    """
+    row = pd.Series({"slug": None, "display": float("nan"), "logo": None, "rank": None})
+    cell = table.team_cell(row, "slug", "display", "logo", "rank")
+    assert "nan" not in cell, f"a NaN name rendered as text: {cell}"
+    assert "—" in cell, f"the absent name must render as an em dash: {cell}"
+
+
+def test_the_upset_score_puts_the_losers_score_first_even_when_the_favorites_disagree():
+    """🚨 A191 (cfdb-main-R-2002). THE LOSER COMES FROM THE RESULT, NOT FROM A FAVORITE COLUMN.
+
+    > **MARC, 2026-09-21:** *"loser's score first on every row, including the disagreement
+    > case. Pick 'the loser' from the result, not from a favourite definition. Add a test on
+    > that case."*
+
+    📊 THE CASE IS REAL AND IS THE ONE THAT SHIPPED WRONG: 2026 week 3, Wyoming at Central
+    Michigan — away 10, home 24, `spread_favorite_side = away`, `moneyline_favorite_side =
+    home`, `favorite_definitions_disagree` true. A189 preferred the moneyline side, so it
+    named the winner as the favorite and rendered `24–10`, winner first, on the one row of
+    eighty-six where the two definitions can be told apart.
+
+    🚨 AND THIS IS WHY A FIXTURE THAT AGREES PROVES NOTHING (R-843's class). Under the old
+    code every agreeing row is correct, so a test built only from agreeing rows passes on the
+    defect. **The two rows below differ ONLY in which side each definition names**, and the
+    expected string is identical for both.
+    """
+    page = today
+
+    disagreeing = pd.Series({"home_points": 24, "away_points": 10,
+                             "spread_favorite_side": "away",
+                             "moneyline_favorite_side": "home",
+                             "favorite_definitions_disagree": True})
+    agreeing = pd.Series({"home_points": 24, "away_points": 10,
+                          "spread_favorite_side": "away",
+                          "moneyline_favorite_side": "away",
+                          "favorite_definitions_disagree": False})
+
+    assert page._upset_score(disagreeing) == "10–24", (
+        "Wyoming scored 10 and Central Michigan 24, so the loser's 10 goes first — whatever "
+        "the two favorite columns disagree about")
+    assert page._upset_score(agreeing) == "10–24", (
+        "the agreeing row must render identically; if these two differ the cell is still "
+        "reading a favorite definition")
+
+    # ⚠️ AND IT MUST NOT READ THOSE COLUMNS AT ALL. Dropping them is the strongest form of the
+    # claim: a cell that still consulted one would raise or change its answer.
+    without = pd.Series({"home_points": 24, "away_points": 10})
+    assert page._upset_score(without) == "10–24", (
+        "the score pair must be derivable from the two published scores alone")
+
+    # An absent final is blank, not "0–0" — AC-G.11.
+    assert page._upset_score(pd.Series({"home_points": None, "away_points": 10})) == ""
+
+
+def test_the_player_cards_team_name_is_stacked_under_the_logo_on_the_element_that_holds_it():
+    """🚨 A191 (cfdb-main-R-2004). A189's STACK RULE SELECTED THE WRONG ELEMENT AND DID NOTHING.
+
+    📊 MEASURED IN CHROMIUM ON THE LIVE PAGE: the team cell came back `58x28` with
+    `flex-direction: row` — the name still beside the logo and clipped to about five
+    characters, which is exactly what it looked like before the rule was written.
+
+    🚨 THE MARKUP IS THREE LEVELS DEEP AND THE RULE ASSUMED TWO:
+
+        div.cfdb-card-team > span.cfdb-identity > a.cfdb-teamlink > [logo, badge?, name]
+
+    `.cfdb-card-team > a` matched nothing — the anchor is a GRANDCHILD — and
+    `.cfdb-card-team > span` matched `.cfdb-identity`, whose only child is that anchor, so the
+    column axis was applied to a one-item flex box. **The logo and the name are siblings
+    inside `.cfdb-teamlink`, and that is the box whose axis had to change.**
+
+    ⚠️ BOTH LEVELS ARE ASSERTED BECAUSE BOTH SHAPES OCCUR: `_team_identity` only wraps in an
+    anchor when the row has a slug, so a team without one renders the logo and name directly
+    inside `.cfdb-identity`. A rule naming one of the two stacks most cards and silently
+    leaves the rest in a row — which is worse than the defect, because it looks fixed.
+    """
+    css = (ROOT / "site" / "lib" / "theme.py").read_text()
+
+    assert ".cfdb-card-team > a" not in css, (
+        "the A189 selector is back; the anchor is a grandchild of .cfdb-card-team and this "
+        "matches nothing")
+    for selector in (".cfdb-card-team .cfdb-identity", ".cfdb-card-team .cfdb-teamlink"):
+        assert selector in css, (
+            f"{selector} must carry the stack, or the un-anchored shape stays in a row")
+
+    # ⚠️ WRAP, NOT COLUMN. A plain column axis puts the rank badge on a line of its own between
+    # the logo and the name — three rows for two facts. The name is what goes down.
+    # ⚠️ `.cfdb-card-team .cfdb-team` IS A PREFIX OF `.cfdb-card-team .cfdb-teamlink`, so a
+    # bare `index` for the first lands inside the second — which is how the first draft of
+    # this assertion sliced the wrong rule and reported a fix as missing.
+    stack = css[css.index(".cfdb-card-team .cfdb-identity"):]
+    stack = stack[:stack.index("}") + 1]
+    assert "flex-wrap:wrap" in stack.replace(" ", ""), (
+        "the logo and its rank badge share the first line; only the name wraps below")
+
+    name_rule = css[css.index(".cfdb-card-team .cfdb-team {"):]
+    name_rule = name_rule[:name_rule.index("}") + 1]
+    # ⚠️ AND THE NEEDLE CANNOT BE SPACE-STRIPPED TOO: `flex:0 0 100%` has MEANINGFUL spaces,
+    # so stripping both sides turns it into `flex:00100%` and the assertion fails on a correct
+    # rule. A regex over the rule as written is the honest comparison.
+    assert re.search(r"flex\s*:\s*0\s+0\s+100%", name_rule), (
+        ".cfdb-team must claim a full row, or a short name stays beside the logo: "
+        f"{name_rule}")
+
+
+def test_the_player_card_reads_the_published_short_team_name_with_the_full_one_on_hover():
+    """🚨 A191 (cfdb-main-R-2005/R-2006). THE FULL NAME DOES NOT FIT, MEASURED.
+
+    > **MARC, 2026-09-21:** *"If the full name can't fit at the card width, use the site's
+    > existing short/abbreviated team name and say which field."*
+
+    📊 IN CHROMIUM AT 2026 WEEK 3 THE TEAM TRACK IS 57.6px AND 15 OF 40 NAMES OVERFLOW IT —
+    "South Dakota State" draws 94.4px, "Mississippi Valley State" 112.9px. ⚠️ **And the width
+    cannot be taken from the card**: at a 1100px viewport the player-name track beside it is
+    already 90.9px with 56 of 150 rows overflowing.
+
+    ✅ THE FIELD IS `team_abbreviation`, published by A191 on `srv_player_game_log` from
+    `dim_team.abbreviation` — the same short name `srv_teams_index`, `srv_team_overview` and
+    `srv_standings` publish. **The page could not reach it before** (G-2 forbids the join).
+
+    ⚠️ THE FALLBACK IS THE DISPLAY NAME, NOT A BLANK: `abbreviation` is null for some teams.
+    """
+    source = SOURCE
+    card = source[source.index("def _player_card("):source.index("def _player_card_grid(")]
+
+    assert "team_abbreviation" in card, (
+        "the card must read the published short name, not the display name it cannot fit")
+    assert "'team_abbreviation' if short else 'team_display'" in card, (
+        "a team with no abbreviation must fall back to its display name rather than render "
+        "an empty cell beside a logo (AC-G.11)")
+    assert "html.escape(full)" in card, (
+        "the full name goes in a title attribute and team names carry apostrophes and "
+        "ampersands — Saint Mary's (CA), East Texas A&M")
+
+    # 🚨 AND THE COLUMN MUST ACTUALLY BE PUBLISHED, or the page reads a name that is not there
+    # and every card silently falls back (§2.5 — a column that exists is not a column with
+    # data, and a column that does NOT exist is a page-wide silent downgrade).
+    model = (ROOT / "dbt" / "models" / "serving" /
+             "srv_player_game_log.sql").read_text()
+    assert "as team_abbreviation" in model, (
+        "srv_player_game_log must publish team_abbreviation, or the fallback is the only path")
+    docs = (ROOT / "dbt" / "models" / "serving" / "_models.yml").read_text()
+    assert "- name: team_abbreviation" in docs, "and it must be documented"
+
+
+def test_a_header_tooltip_survives_an_apostrophe_in_its_text():
+    """🚨 A191 (cfdb-main-R-2009). AN APOSTROPHE CLOSED THE `title='…'` ATTRIBUTE.
+
+    📊 A191 moved Most Exciting's caption into header tooltips. The Win probability one opens
+    *"The home side's win probability on every play…"*, and read back off the rendered page
+    the attribute contained **`The home side`** — thirteen characters of a 230-character
+    sentence, with the rest loose in the `<th>`.
+
+    ⚠️ IT DID NOT LOOK BROKEN. The tooltip appeared, and what it showed reads as a complete
+    short phrase. Only reading the attribute back found it.
+
+    ⚠️ AND IT IS NOT A WORDING PROBLEM TO AVOID: team names carry apostrophes and ampersands
+    ("Saint Mary's (CA)", "East Texas A&M"), so any title built from data hits this.
+    """
+    column = table.Col("x", "X", title="The home side's chance & why")
+    tip = table._tip(column)
+
+    assert tip.count("'") == 2, (
+        f"the apostrophe must not close the attribute — exactly two quotes delimit it: {tip}")
+    assert "&#x27;" in tip, f"the apostrophe must be escaped: {tip}"
+    assert "&amp;" in tip, f"the ampersand must be escaped too: {tip}"
+    assert "why" in tip, f"the whole sentence must survive: {tip}"
+
+
+def test_the_upsets_score_header_does_not_describe_the_loser_as_the_favorite():
+    """⚠️ A191. THE WORDING FOLLOWED THE FIX, BECAUSE IT WAS THE FIX'S OWN FALSE PREMISE.
+
+    The Score column's tooltip read *"Final score, the losing favorite first"* — the exact
+    definition `_upset_score` stopped using, and the one that printed the WINNER first on the
+    row where spread and moneyline name different favourites. A label restating a rule the
+    code no longer follows is §4.3's worst form: it reads as corroboration.
+    """
+    assert "losing favorite first" not in SOURCE, (
+        "the Score header still describes the loser as the favorite, which is the definition "
+        "A191 removed from _upset_score")
+    assert 'title="Final score, the losing side first"' in SOURCE

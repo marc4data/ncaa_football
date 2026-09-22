@@ -6,6 +6,7 @@ leaderboard, and the poll delta for a team with no previous rank.
 """
 import pytest
 import re
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -1545,14 +1546,40 @@ def test_most_exciting_layout_has_one_entry_per_column_and_the_scoreboard_is_wid
     fixed = layout[2:]
     assert all(w.endswith("px") for w in fixed), (
         f"the last six columns must be FIXED, not auto — that is the whole ask: {fixed}")
-    # header text measured at 1600px in the table's own font, one line, including the ⇅ arrow
-    header_px = {"4th qtr": 58, "OT": 38, "Game": 57,
-                 "How close, late": 113, "Excitement": 88, "Commentary": 93}
+
+    # 🚨 A191 (cfdb-main-R-2008). THIS TEST PASSED ON WIDTHS THAT WRAPPED, AND THE REASON WAS
+    # THE TABLE THAT USED TO SIT HERE.
+    #
+    # A189 hand-copied six numbers into this file — `{"4th qtr": 58, …, "How close, late":
+    # 113}` — measured with a canvas `measureText` on `getComputedStyle(el).font`, a shorthand
+    # that carries **neither `text-transform` nor `letter-spacing`** while this header row has
+    # both. So the test asserted `74 >= 58` and passed, while the browser was drawing `4TH
+    # QTR` across three lines in that 74px. 📊 The real requirements are 82.9px and 145.0px.
+    #
+    # 🚨 THE DEFECT WAS NOT THE NUMBERS, IT WAS THAT THEY LIVED HERE. A constant hand-copied
+    # into a test is a second source that no instrument can contradict — it cannot go stale
+    # loudly, because nothing else knows what it claims. **`ci/measure_header_widths.py` now
+    # owns them and can re-derive them in a real browser** (`--check`), and this test imports
+    # from there. One home, and a way to re-prove it.
+    #
+    # ⚠️ THIS TEST STILL DOES NOT MEASURE ANYTHING, AND MUST NOT PRETEND TO. CI has no Chromium
+    # and no warehouse, so a browser assertion here would be a conditional skip — the failure
+    # mode R-575 exists to prevent. What it CAN assert deterministically is the one thing that
+    # actually broke: that every shipped width covers the recorded requirement. The recording
+    # is the instrument's job; holding the code to it is this one's.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+    from measure_header_widths import HEADER_ONE_LINE_PX, SUBPIXEL_ALLOWANCE_PX
+
+    assert set(HEADER_ONE_LINE_PX) == set(headers[2:]), (
+        f"the instrument measures {sorted(HEADER_ONE_LINE_PX)} but the table ships "
+        f"{sorted(headers[2:])} — one of the two moved without the other")
     for label, width in zip(headers[2:], fixed):
-        need = header_px[label]
+        need = HEADER_ONE_LINE_PX[label] + SUBPIXEL_ALLOWANCE_PX
         assert int(width[:-2]) >= need, (
-            f"{label!r} is {width} but its header needs {need}px on one line — it will wrap, "
-            f"which is the 'headers take up a bunch of vertical space' defect v11 reported")
+            f"{label!r} is {width} but the browser needs {HEADER_ONE_LINE_PX[label]}px to "
+            f"draw it on one line (+{SUBPIXEL_ALLOWANCE_PX}px for sub-pixel rounding) — it "
+            f"will wrap, which is the 'headers take up a bunch of vertical space' defect v11 "
+            f"reported. Re-measure with ci/measure_header_widths.py; do not lower this bound")
 
 
 def _rankings_frame():
