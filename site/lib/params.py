@@ -37,7 +37,19 @@ SLUG_PARAMS = {"team", "opponent", "conference", "poll", "provider", "model",
                # Which column a table is sorted by. In the URL like every other choice, so
                # a sorted table can be linked to — AC-2.8 asks for sortable headers and
                # AC-G.18 decides where that state lives.
-               "sort"}
+               "sort",
+               # A199. The game_ids a reader has added to Today's Looking Forward, comma
+               # separated. In the URL because that is where this site keeps viewer state
+               # (AC-G.18): a refresh keeps the list, a bookmark restores it, and a shared
+               # link carries it — with nothing stored server-side, so no viewer can change
+               # what another sees.
+               #
+               # 🚨 REGISTERED HERE OR IT SILENTLY DISAPPEARS. `link_here()` and `current()`
+               # both filter to `KNOWN`, so an unregistered parameter is dropped the moment
+               # the reader sorts a column or moves a filter. The `player`/`q` note above
+               # records that exact bug — read without being registered, and "sorting or
+               # changing any filter silently deselected the player you were looking at".
+               "lf"}
 KNOWN = INT_PARAMS | set(ENUM_PARAMS) | SLUG_PARAMS
 
 

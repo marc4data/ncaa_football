@@ -16,6 +16,7 @@ to keep.
 """
 import html
 import math
+import re
 import statistics
 
 import altair as alt
@@ -3621,7 +3622,7 @@ def _poll_is_out(scope, week: int) -> bool:
     return int(frame.iloc[0]["ranked"] or 0) > 0
 
 
-def _high_value_games(scope, week: int) -> pd.DataFrame:
+def _high_value_games(scope, week: int, also_ids=None) -> pd.DataFrame:
     """The upcoming week's high-value games — Schedule's own query, filtered.
 
     ⚠️ THE DEFINITION IS NOT HERE. `is_high_value`, `is_top25_matchup` and
@@ -3640,7 +3641,8 @@ def _high_value_games(scope, week: int) -> pd.DataFrame:
     show with its defaults and narrows it by the flag alone.
     """
     return schedule_table.rows(scope.season, int(week), scope.season_type,
-                               conference=None, division="fbs", high_value_only=True)
+                               conference=None, division="fbs", high_value_only=True,
+                               also_ids=also_ids)
 
 
 def _high_value_reason(row) -> str:
@@ -3655,11 +3657,138 @@ def _high_value_reason(row) -> str:
         tags.append("Top 25 matchup")
     if bool(row.get("is_undefeated_close")):
         tags.append("Undefeated \u00b7 close line")
+    # ⚠️ A199: A GAME CAN BE BOTH HIGH-VALUE AND ADDED, AND THE TAGS SAY SO. Marc may paste a
+    # game the rules already picked; showing only "Added by you" would hide why it qualifies
+    # on its own, and showing only the rule would hide that he asked for it.
+    if bool(row.get("is_added_by_you")):
+        tags.append("Added by you")
     if not tags:
         return ""
     return ("<span class='cfdb-why'>"
             + "".join(f"<span class='cfdb-why-tag'>{html.escape(t)}</span>" for t in tags)
             + "</span>")
+
+
+# ── A199 (cfdb-main-R-2065): THE GAMES A READER ADDS THEMSELVES ─────────────────────────
+#
+# > **MARC, v12:** *"making Looking Forward configurable, by providing a text input box on the
+# > bottom of the nav bar that would allow end-user to paste games they want included"* — and
+# > on how he would get the ids: *"I can go through the Schedule for the week and click to see
+# > the matchups I'm interested in. I can use the matchup url querystring to extract the
+# > game_id."*
+#
+# ⚠️ THE CAPS ARE STATED RATHER THAN GENEROUS. 2,000 characters is about forty Matchup URLs,
+# and forty ids is five times the size of a normal high-value week — past that a reader is
+# pasting something other than a shortlist, and the box says so instead of silently truncating.
+_LF_MAX_CHARS = 2000
+_LF_MAX_IDS = 40
+
+# A bare id, or the `game_id=` of a Matchup link. ⚠️ THE PARAMETER NAME IS READ FROM MATCHUP
+# RATHER THAN ASSUMED: `matchup.py:276` is `params.get("game_id")`, checked at this commit.
+_LF_URL_ID = re.compile(r"game_id=(\d+)")
+_LF_BARE_ID = re.compile(r"^\d+$")
+
+
+def _parse_game_ids(text: str):
+    """`(ids, unreadable_line_numbers, truncated)` from whatever the reader pasted.
+
+    Accepts bare ids and Matchup URLs, separated by newlines, commas or spaces, in any mix.
+
+    🚨 ONLY INTEGERS COME OUT. This is the one place on the site where reader text reaches a
+    query, and it reaches it as a **bound integer array** — nothing here is ever formatted
+    into SQL. A string like `1; drop table games` yields no id and one unreadable line, which
+    is the same outcome as any other prose.
+
+    ⚠️ LINE NUMBERS, NOT TOKEN NUMBERS, because a line is what the reader can see and point
+    at. A line contributing no id at all is reported once, whatever it contains.
+    """
+    if not text:
+        return [], [], False
+    truncated = len(text) > _LF_MAX_CHARS
+    ids, unreadable, seen = [], [], set()
+    for number, line in enumerate(text[:_LF_MAX_CHARS].splitlines(), start=1):
+        if not line.strip():
+            continue
+        found = False
+        for token in line.replace(",", " ").split():
+            match = _LF_URL_ID.search(token)
+            if match is None and _LF_BARE_ID.match(token):
+                match = _LF_BARE_ID.match(token)
+                value = int(token)
+            elif match is not None:
+                value = int(match.group(1))
+            else:
+                continue
+            found = True
+            # ⚠️ DE-DUPLICATED, ORDER PRESERVED. The same game pasted twice is one game, and
+            # a reader who pastes a URL and its id should not see the row twice.
+            if value not in seen:
+                seen.add(value)
+                ids.append(value)
+        if not found:
+            unreadable.append(number)
+    if len(ids) > _LF_MAX_IDS:
+        ids, truncated = ids[:_LF_MAX_IDS], True
+    return ids, unreadable, truncated
+
+
+def _looking_forward_box(scope, week):
+    """The sidebar box, and the `lf=` round trip. Returns the ids the reader asked for.
+
+    ⚠️ IT IS DRAWN ON TODAY ONLY BECAUSE IT IS WRITTEN DURING TODAY'S RUN. `st.navigation`
+    owns the sidebar, and a page adding to it during its own render lands below the nav —
+    which is where Marc asked for it — without any other page being touched.
+
+    🚨 THE LIST LIVES IN THE URL, WHICH IS THIS SITE'S OWN ANSWER TO "WHERE DOES VIEWER STATE
+    GO" (AC-G.18). A refresh keeps it, a bookmark restores it, a shared link carries it, and
+    **nothing is stored server-side, so no viewer can change what another sees.**
+    """
+    existing = params.get("lf") or ""
+    key = "today_lf"
+    # ⚠️ THE URL SEEDS THE BOX ONCE, THEN THE BOX OWNS IT. Re-seeding on every run would
+    # fight the reader's typing; `st.session_state` is the widget's own memory and the URL is
+    # the durable copy.
+    if key not in st.session_state:
+        st.session_state[key] = existing.replace(",", "\n")
+
+    with st.sidebar:
+        st.markdown("---")
+        typed = st.text_area(
+            "Add games to Looking Forward",
+            key=key, height=90,
+            help="Paste game_ids or Matchup page links, one per line or separated by commas.")
+
+    ids, unreadable, truncated = _parse_game_ids(typed)
+
+    # The URL follows the box. `set_params` writes only what changed, so a render that adds
+    # nothing adds no history entry either (AC-G.13's note on the back button).
+    params.set_params(lf=",".join(str(i) for i in ids) if ids else None)
+    return ids, unreadable, truncated
+
+
+def _looking_forward_feedback(week, asked, found_ids, unreadable, truncated) -> str:
+    """What happened to what the reader pasted. Never silent (AC-G.11).
+
+    ⚠️ A GAME OUTSIDE THE UPCOMING WEEK IS REPORTED BY ID, NOT DROPPED. That is also what
+    happens to last week's `lf=` after the week rolls over: the link keeps working, and the
+    box says the game is not a week-N game rather than quietly showing a shorter list.
+    """
+    missing = [i for i in asked if i not in found_ids]
+    bits = []
+    if asked:
+        bits.append(f"Added {len(asked) - len(missing)}")
+    if missing:
+        shown = ", ".join(str(i) for i in missing[:3])
+        more = f" and {len(missing) - 3} more" if len(missing) > 3 else ""
+        bits.append(f"{len(missing)} not a week-{week} game ({shown}{more})")
+    if unreadable:
+        lines = ", ".join(str(n) for n in unreadable[:3])
+        more = f" and {len(unreadable) - 3} more" if len(unreadable) > 3 else ""
+        bits.append(f"{len(unreadable)} line{'s' if len(unreadable) > 1 else ''} "
+                    f"unreadable (line {lines}{more})")
+    if truncated:
+        bits.append(f"input capped at {_LF_MAX_CHARS} characters / {_LF_MAX_IDS} games")
+    return " \u00b7 ".join(bits)
 
 
 # 🚨 A198 (cfdb-main-R-2050). CFBD PUBLISHES NO END TIME, SO THE BAR LENGTH IS A STATED
@@ -3767,9 +3896,13 @@ def _slate(games: pd.DataFrame, esc) -> str:
             # sheet reads as "no broadcast" rather than "not announced".
             network = (fmt.text(row.get("network_abbreviation"))
                        or fmt.text(row.get("network")) or "TBA")
+            # ⚠️ A199: "Added by you" BELONGS HERE TOO. The list and the SLATE are two views
+            # of one frame, and a game that says why it is on the list and nothing at all on
+            # the chart makes the reader wonder which of the two is wrong.
             reason = " \u00b7 ".join(
                 t for t, on in (("Top 25", row.get("is_top25_matchup")),
-                                ("Undefeated, close", row.get("is_undefeated_close")))
+                                ("Undefeated, close", row.get("is_undefeated_close")),
+                                ("Added by you", row.get("is_added_by_you")))
                 if bool(on))
             spread = row.get("spread_current")
             spread_text = ("no line" if spread is None or pd.isna(spread)
@@ -3831,6 +3964,11 @@ def _looking_forward(scope, depth: int) -> None:
 
         st.subheader(f"Looking forward \u00b7 week {week}")
 
+        # ⚠️ THE BOX IS DRAWN WHATEVER THE GATE SAYS, because a reader can line games up
+        # before the week opens — and it would be strange for the control to vanish exactly
+        # when he is planning. What the gate decides is whether anything is RENDERED from it.
+        added_ids, unreadable, truncated = _looking_forward_box(scope, week)
+
         pending = []
         if not _week_is_final(scope, week - 1):
             pending.append(f"week {week - 1} is not final yet")
@@ -3844,11 +3982,22 @@ def _looking_forward(scope, depth: int) -> None:
                 f"Week {week}'s games to watch will appear here once week {week - 1} is "
                 f"final and the new AP Top 25 is out. Still pending: "
                 f"{' and '.join(pending)}.")
+            if added_ids or unreadable:
+                st.caption(f"Your {len(added_ids)} added game(s) will show here once week "
+                           f"{week} opens.")
             st.markdown(f"In the meantime, see the full slate on "
                         f"[Schedule]({scope.link('schedule')}).")
             return
 
-        games = _high_value_games(scope, week)
+        games = _high_value_games(scope, week, also_ids=added_ids)
+        # 🚨 A199: THE FLAG IS COMPUTED HERE AND NOT IN dbt, AND THAT IS THE ONE PLACE THE
+        # §4.2.1 LINE FALLS THE OTHER WAY. "Which games are high-value" is a definition the
+        # whole site could share; "which games did THIS reader paste into THIS URL" cannot be
+        # a published column — it has exactly one consumer, this render, for this viewer.
+        if not games.empty:
+            asked = set(added_ids)
+            games = games.assign(
+                is_added_by_you=games["game_id"].map(lambda g: int(g) in asked))
         st.caption(
             "Top 25 matchups, and games where an undefeated FBS team meets a line inside "
             "four points. This section always shows the next week to be played \u2014 it "
@@ -3905,6 +4054,14 @@ def _looking_forward(scope, depth: int) -> None:
             "The week's games to watch would be here.",
             f"No games in week {week} meet the high-value rules yet.",
             renderer=render)
+
+        # A199: never silent (AC-G.11) — say what happened to what was pasted.
+        note = _looking_forward_feedback(
+            week, added_ids,
+            set(int(g) for g in games["game_id"]) if not games.empty else set(),
+            unreadable, truncated)
+        if note:
+            st.caption(note)
 
         # ── A198 (cfdb-main-R-2051): THE SLATE, BELOW THE LIST ────────────────────────────
         #

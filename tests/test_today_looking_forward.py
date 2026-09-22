@@ -68,10 +68,17 @@ def _run(monkeypatch, answers, week=4):
     monkeypatch.setattr(page, "st", _Quiet())
     monkeypatch.setattr(page.states, "section", lambda *a, **k: contextlib.nullcontext())
     monkeypatch.setattr(page, "_upcoming_game_week", lambda scope: week)
+    # ⚠️ A199 ADDED A SIDEBAR BOX THAT READS AND WRITES THE URL. These tests are about the
+    # GATE, so the box is stubbed to "the reader pasted nothing" — its own parsing, feedback
+    # and round-trip live in `test_today_your_games.py`.
+    monkeypatch.setattr(page, "_looking_forward_box",
+                        lambda scope, week: ([], [], False))
+    monkeypatch.setattr(page, "_looking_forward_feedback",
+                        lambda *a, **k: answers.get("note", ""))
     monkeypatch.setattr(page, "_week_is_final", lambda scope, w: answers["final"])
     monkeypatch.setattr(page, "_poll_is_out", lambda scope, w: answers["poll"])
     monkeypatch.setattr(page, "_high_value_games",
-                        lambda scope, w: answers.get("games", pd.DataFrame()))
+                        lambda scope, w, also_ids=None: answers.get("games", pd.DataFrame()))
     rendered = {}
 
     def render_or_state(frame, view, *a, **k):
