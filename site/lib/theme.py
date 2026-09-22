@@ -128,7 +128,9 @@ CSS = """
               border-top:1px solid var(--cfdb-rule-soft);
               display:flex; align-items:center; gap:.25rem; flex-wrap:wrap; }
 /* A190: the ring marking a team the distance table lists. */
-.cfdb-sc-ring { stroke-opacity:.35; }
+/* A190's ring around a ranked mark. A203 replaced it with the team's logo
+   (Marc: "instead of putting the second circle around the mark"), so nothing
+   emits this class any more. Kept out of the stylesheet rather than kept. */
 
 /* ── A190: the distance table beside the chart ────────────────────────────────────────────
    Six columns in ~18% of the row, so the team name is the only flexible one and everything
@@ -249,28 +251,58 @@ CSS = """
 .cfdb-why-tag { font-size:.62rem; line-height:1.4; padding:.05rem .3rem; white-space:nowrap;
                 border:1px solid var(--cfdb-edge); border-radius:3px; opacity:.8; }
 
-.cfdb-far { font-size:.72rem; min-width:10rem; }
-.cfdb-far-head { font-weight:700; font-size:.7rem; letter-spacing:.04em;
-                  text-transform:uppercase; opacity:.65; padding-bottom:.2rem;
-                  border-bottom:1px solid var(--cfdb-edge); margin-bottom:.15rem; }
-/* Two lines: rank + logo + NAME across the top, the three small facts under it. See
-   `today._distance_table` for the measurement that forced it — six columns on one line need
-   245.9px and Marc's 15-20% band gives 168.4px at 1440. */
-.cfdb-far-row { display:grid; grid-template-columns:1.1rem 1.1rem minmax(0,1fr);
-                align-items:center; gap:.1rem .25rem; padding:.2rem 0;
-                border-bottom:1px solid var(--cfdb-rule-soft); }
-.cfdb-far-meta { grid-column:3 / -1; display:flex; gap:.25rem; align-items:baseline;
-                 font-size:.64rem; opacity:.7; white-space:nowrap; }
-.cfdb-far-slash { opacity:.4; }
-.cfdb-far-rank { font-weight:700; opacity:.45; font-variant-numeric:tabular-nums;
-                  text-align:right; font-size:.68rem; }
-.cfdb-far-logo { width:16px; height:16px; object-fit:contain; }
-.cfdb-far-team { min-width:0; overflow:hidden; white-space:nowrap;
-                  text-overflow:ellipsis; font-weight:600; }
-.cfdb-far-rec { opacity:.5; font-weight:400; margin-left:.25rem; font-size:.66rem; }
-.cfdb-far-num { font-variant-numeric:tabular-nums; text-align:right; opacity:.8; }
-.cfdb-far-foot { opacity:.55; font-size:.62rem; margin-top:.3rem; line-height:1.25; }
-.cfdb-far-none { opacity:.6; font-size:.7rem; padding:.4rem 0; }
+/* A203. THE TABLE IS A TABLE NOW, AND THE TYPE IS THE SITE'S NORMAL TABLE SIZE.
+   > MARC: "The table needs to be bigger... Font needs to be bigger" and "Create columns for
+   > the Gained and Allowed so the values are vertically aligned".
+   A190 used .72rem on a two-line grid because six facts did not fit on one line at 18% of the
+   row; Marc has since allowed more width, so this is .9rem — `.cfdb-table`'s own size — on one
+   line per team. The min-width is what makes the column drop below the chart on a narrow
+   viewport rather than squeezing (Streamlit's row is flex-wrap:wrap). */
+/* 🚨 A203 MEASURED A190's `min-width` CLAIM AND IT IS FALSE.
+   A190's comment says the min-width makes this column "drop to its own full-width line"
+   because Streamlit's row is `flex-wrap:wrap`. 📊 It does not: the two columns' bases sum to
+   100%, so nothing wraps, and a min-width larger than the column simply OVERFLOWS and is
+   clipped. Measured at 1100 the column is 210px, the table wanted 304px, and its right edge
+   sat **94px past the block** — the Allowed column was off-screen with no way to reach it.
+   ✅ So the table SCROLLS inside its own column, which is what every other wide table on this
+   site does at 1100 (Schedule's list and A201's SLATE both do). `min-width:0` lets the column
+   shrink; the `min-width` on the TABLE keeps the columns their measured size and hands the
+   overflow to the scroller. */
+.cfdb-far { font-size:.9rem; min-width:0; }
+.cfdb-far-head { font-weight:700; font-size:.78rem; letter-spacing:.04em;
+    text-transform:uppercase; opacity:.7; margin-bottom:.3rem; }
+.cfdb-far-table { width:100%; min-width:20rem; border-collapse:collapse;
+    table-layout:fixed;
+    font-variant-numeric:tabular-nums; }
+.cfdb-far-table th { font-size:.68rem; font-weight:700; letter-spacing:.03em;
+    text-transform:uppercase; opacity:.55; text-align:left; padding:0 .25rem .2rem 0;
+    border-bottom:1px solid currentColor; border-color:color-mix(in srgb, currentColor 18%,
+    transparent); }
+.cfdb-far-table td { padding:.16rem .25rem .16rem 0; vertical-align:middle; }
+.cfdb-far-table tbody tr:hover td { background:color-mix(in srgb, currentColor 6%,
+    transparent); }
+.cfdb-far-numhead { text-align:right; }
+.cfdb-far-rank { width:1.6rem; font-weight:700; opacity:.45; text-align:right;
+    padding-right:.4rem !important; }
+.cfdb-far-team { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.cfdb-far-logo { width:18px; height:18px; object-fit:contain; vertical-align:middle;
+    display:inline-block; margin-right:.3rem; }
+.cfdb-far-name { vertical-align:middle; }
+.cfdb-far-link { color:var(--cfdb-link); text-decoration:none; }
+.cfdb-far-link:hover { text-decoration:underline; }
+.cfdb-far-rec { opacity:.5; font-weight:400; margin-left:.3rem; font-size:.78rem;
+    vertical-align:middle; }
+.cfdb-far-num { width:4.6rem; }
+/* A203. A spark that sits BESIDE its number rather than under it — see `_far_spark` for the
+   66px measurement that rules out the shared `.cfdb-spark` overlay in this column. */
+.cfdb-far-spark { display:flex; align-items:center; gap:.3rem; justify-content:flex-end; }
+.cfdb-far-spark-track { flex:1 1 auto; min-width:0; height:.72em; border-radius:2px;
+    background:color-mix(in srgb, currentColor 10%, transparent); }
+.cfdb-far-spark-bar { display:block; height:100%; border-radius:2px;
+    background:color-mix(in srgb, currentColor 42%, transparent); }
+.cfdb-far-spark-value { flex:0 0 auto; text-align:right; }
+.cfdb-far-foot { opacity:.55; font-size:.68rem; margin-top:.35rem; line-height:1.3; }
+.cfdb-far-none { opacity:.6; font-size:.78rem; padding:.4rem 0; }
 /* A178 (cfdb-main-R-1853). "Mute (lighter by 50%) down the current gridlines" — .14 -> .07,
    which is his 50% exactly, and with the ladder now at 100-yard steps there are half as many
    of them as well. */
@@ -297,7 +329,15 @@ CSS = """
 .cfdb-sc-pt { fill:none; stroke-opacity:.85; }
 .cfdb-sc-tick { fill:currentColor; fill-opacity:.55; font-size:10px;
     font-variant-numeric:tabular-nums; }
-.cfdb-sc-axis { fill:currentColor; fill-opacity:.7; font-size:11px; }
+/* A203. The axis NAME is the big word; the direction line stays small beneath it. Marc:
+   "Vertical Axis Label Title should have a big Offense, the better, more yards is a subtitle,
+   can be smaller." */
+.cfdb-sc-axis { fill:currentColor; fill-opacity:.6; font-size:10px; }
+.cfdb-sc-axis-name { fill:currentColor; fill-opacity:.85; font-size:15px; font-weight:700;
+    letter-spacing:.02em; }
+/* The logo that replaces a ranked team's mark. A203, Marc: "replace the initial circle with
+   the logo for the top 10". */
+.cfdb-sc-mark-logo { opacity:.95; }
 /* The good corner, named on the plot itself — a reader scans the shape before the words. */
 .cfdb-sc-corner { fill:currentColor; fill-opacity:.5; font-size:10px;
     letter-spacing:.02em; }

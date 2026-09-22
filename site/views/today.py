@@ -2149,43 +2149,98 @@ def _movers(scope, depth: int) -> None:
 # ✅ **TWENTY DOES NOT FIT AT ANY WIDTH TESTED** — 943px, against a 673px chart at the widest.
 # So ten it is, and the report puts the numbers to Marc rather than deciding his range for
 # him. ⚠️ Raising it is this one constant.
-_DISTANCE_TOP_N = 10
+# 🚨 A203: 15, NOT 10 — Marc asked for "enough real estate to include top 15 or 20",
+# and the measurement below chose 15. See `_distance_table` and the report's row-height table.
+_DISTANCE_TOP_N = 15
+
+# The logo drawn in place of a ranked team's mark. Sized against the collision measurement in
+# A203's report rather than chosen.
+_SCATTER_LOGO_PX = 18
+
+# 📊 The table's fixed columns, measured. The team column takes the remainder: it needs
+# 155.3px for "Mississippi State 2-0", the widest cell in the real week-3 frame.
+_SCATTER_HEIGHT = 496
+_FAR_RANK_PX = 26
+_FAR_NUM_PX = 66
+
+# 🚨 A203 TOOK THE CHART FROM 380 TO 470 SO THE TABLE SITS BESIDE IT RATHER THAN BELOW IT.
+# 📊 Measured at 1440 with the sidebar open: 15 rows at 30.1px plus 84px of head, header row
+# and footnote is **535px**, against a chart that was **433px** tall — the table ran 124px past
+# the bottom. The chart's rendered height is `height x (column width / 560)`, so 496 x 1.141
+# is 566px and the two now end together. ⚠️ At 1100 the board is narrower, the chart scales
+# down to ~347px and the table still runs below it — nothing scrolls, the panel is simply
+# taller there, and that is reported rather than hidden.
 
 
-def _distance_table(ranked, centre, population: int) -> str:
+def _far_spark(value: float, top: float, text: str) -> str:
+    """One cell: a bar from the left, the number right-aligned in the cell.
+
+    > **MARC, v13:** *"Inline spark bars would be helpful"*
+
+    ⚠️ ONE DENOMINATOR PER COLUMN, ACROSS THE ROWS SHOWN — `_spark_max`'s rule (A175) applied
+    per column rather than across both, because gained and allowed are different quantities
+    and a shared scale would make every Allowed bar a stub. The caption says which.
+
+    🚨 A LONGER "ALLOWED" BAR IS WORSE, AND THAT IS DELIBERATE. The bar encodes the magnitude
+    of the number printed beside it and nothing else. **Inverting it so "longer is better"
+    would be a computed quantity nobody published**, and a reader checking the bar against the
+    number would find them disagreeing. The caption says the bars are relative to each
+    column's own maximum.
+
+    ⚠️ §4.2.1 IS NOT ENGAGED, for `_spark_cell`'s own reason: a bar's width is a rendering
+    proportion of one published number against another in the SAME frame.
+
+    🚨 THE BAR SITS BESIDE THE NUMBER HERE, NOT UNDER IT, AND THE SHARED `.cfdb-spark` COULD
+    NOT BE REUSED AS-IS. That component overlays a right-aligned value on a bar anchored left,
+    which works on the yardage board because its cells are wide. 📊 This column is **66px**:
+    the bar's own ceiling is 1/1.15 = **87% of the cell**, leaving **9px** for a number that
+    needs **26px**, so the value was drawn ON the bar — visible in the first render of this
+    round. **A175/A189's rule is what is reused — one denominator per column, 1.15 headroom —
+    rather than the markup that rule happens to be wrapped in.**
+    """
+    if top <= 0 or value is None or pd.isna(value):
+        return (f"<span class='cfdb-far-spark'><span class='cfdb-far-spark-track'></span>"
+                f"<span class='cfdb-far-spark-value'>{text}</span></span>")
+    share = max(0.0, min(1.0, float(value) / top))
+    return (f"<span class='cfdb-far-spark'>"
+            f"<span class='cfdb-far-spark-track'>"
+            f"<span class='cfdb-far-spark-bar' style='width:{share * 100:.1f}%'></span>"
+            f"</span>"
+            f"<span class='cfdb-far-spark-value'>{text}</span></span>")
+
+
+def _distance_table(ranked, centre, population: int, scope=None) -> str:
     """The companion table: how far the strongest teams sit from the median intersection.
 
     > **MARC, v11:** *"measures how far the top-right data points are from the intersection of
     > the 2 means or medians showing the dotted line… the longest hypotenuse."*
 
+    > **MARC, v13:** *"The table needs to be bigger… Font needs to be bigger"* · *"Create
+    > columns for the Gained and Allowed so the values are vertically aligned"* · *"Inline
+    > spark bars would be helpful"* · *"Team name hyperlink to Teams page"* · *"enough real
+    > estate to include top 15 or 20"*
+
     ⚠️ THE RANK IS THE DISTANCE RANK AND THE HEADER SAYS SO. A column headed "#" beside team
     logos on a page that also draws AP polls would be read as the AP rank by anyone not told
     otherwise — and this panel's own hover shows the AP rank two inches away. **A true-looking
-    label on a different number is §4.3's worst form**, and it is the defect A153 was called in
-    to fix on Most Exciting.
+    label on a different number is §4.3's worst form.**
 
-    ⚠️ THE DISTANCE COLUMN IS DROPPED, NOT SHRUNK. Marc allowed it *"only if it fits"*; at 18%
-    of the row a sixth numeric column pushes the team name to an ellipsis, and the name is the
-    thing being ranked. **The number is in the header tooltip's explanation and on the row's
-    own `title`, so it is one hover away rather than gone.**
+    🚨 A203 REPLACED A190's TWO-LINE GRID WITH A REAL TABLE, AND THE REASON THE OLD ONE WRAPPED
+    IS GONE RATHER THAN WORKED AROUND. A190 measured six columns needing 245.9px against
+    168.4px available at 18% of the row, and wrapped the row to fit. **Marc has since allowed
+    more horizontal space**, so the columns fit on one line at a larger type size — which is
+    what makes 15 rows possible in the height the chart occupies.
 
-    🚨 AND THE ROW IS TWO LINES, BECAUSE SIX COLUMNS DO NOT FIT ON ONE AT THE WIDTH HE ASKED
-    FOR. 📊 Measured in Chromium at 1440 with the sidebar open, from clones in an off-screen
-    nowrap box (A191/A192's method — never a box that is already clipped):
+    ⚠️ THE DISTANCE ITSELF IS STILL NOT A COLUMN. It is on the row's `title` and in the
+    header's explanation, exactly as A190 left it; four columns is what fits on one line.
 
-        rank 17.6 + logo 17.6 + name-and-record 130.7 + gained 32 + allowed 32 + gaps 16
-          = 245.9px needed, against 168.4px available at 18% of the row
-
-    **A first pass shipped one line and clipped 8 of 10 team names at 1440 and 10 of 10 at
-    1100** — the exact defect A192 had just spent a round removing from the player cards.
-    Marc's band is 15-20%; 25% would be needed for one line, so the row wraps instead: the
-    name gets the full width on line one and the three small facts sit under it.
-
-    ⚠️ AND BELOW ~1400px THE TABLE GOES UNDER THE CHART BY ITSELF. `.cfdb-far` carries a
-    `min-width` equal to what line one needs, and Streamlit's column row is `flex-wrap:wrap`,
-    so the column simply cannot shrink past it and drops to its own full-width line. **That is
-    Marc's "the table stacks below the chart" case, handled by the container rather than by a
-    breakpoint** — which matters because the board's width depends on the sidebar.
+    🚨 AND A190's NARROW-VIEWPORT CLAIM WAS MEASURED AND IS FALSE. Its comment says a
+    `min-width` on this block makes the column "drop to its own full-width line" because
+    Streamlit's row is `flex-wrap:wrap`. 📊 It does not — the two bases sum to 100%, nothing
+    wraps, and a min-width larger than the column OVERFLOWS. At 1100 the column is 210px, the
+    table wanted 304px, and its right edge sat **94px past the block**: the Allowed column was
+    off-screen with no way to reach it. ✅ The table scrolls inside its own column now, which
+    is what Schedule's list and A201's SLATE already do at that width.
     """
     if not ranked:
         # AC-G.11: say WHICH absence. An empty quadrant is a real state — a conference filter
@@ -2197,31 +2252,65 @@ def _distance_table(ranked, centre, population: int) -> str:
     tip = ("Straight-line distance from the intersection of the two dotted median lines, "
            "in yards per game, for teams better than the median on BOTH axes. "
            "This is the distance rank, not the AP rank.")
+    # One denominator per column, over the rows SHOWN — a property of the rendered frame.
+    gained_top = max((float(r["y"]) for _d, r in ranked if not pd.isna(r.get("y"))),
+                     default=0.0) * _SPARK_HEADROOM
+    allowed_top = max((float(r["x"]) for _d, r in ranked if not pd.isna(r.get("x"))),
+                      default=0.0) * _SPARK_HEADROOM
+
     out = [f"<div class='cfdb-far'><div class='cfdb-far-head' title='{html.escape(tip)}'>"
-           f"Furthest from the median</div>"]
+           f"Furthest from the median</div>",
+           # 🚨 A COLGROUP, BECAUSE `table-layout:fixed` READS THE FIRST ROW.
+           # 📊 The widths were on the `td` at first and were IGNORED: the browser took them
+           # from the `thead` cells, which carried none, and split the space equally — 99.5px
+           # each to Team, Gained and Allowed, when Team needed **155.3px** and the numbers
+           # needed **25.9px**. Ten of sixty cells clipped, all of them team names.
+           "<div class='cfdb-scroll'>"
+           f"<table class='cfdb-far-table'><colgroup>"
+           f"<col style='width:{_FAR_RANK_PX}px'><col>"
+           f"<col style='width:{_FAR_NUM_PX}px'><col style='width:{_FAR_NUM_PX}px'>"
+           f"</colgroup><thead><tr>"
+           f"<th class='cfdb-far-rank' title='{html.escape(tip)}'>#</th>"
+           "<th>Team</th>"
+           "<th class='cfdb-far-numhead'>Gained</th>"
+           "<th class='cfdb-far-numhead'>Allowed</th>"
+           "</tr></thead><tbody>"]
     for position, (distance, row) in enumerate(ranked, start=1):
-        logo = (f"<img class='cfdb-far-logo' src='{html.escape(str(row['logo_url']))}' alt=''/>"
-                if row.get("logo_url") and not pd.isna(row["logo_url"]) else
-                "<span class='cfdb-far-logo'></span>")
-        record = ("" if not row.get("record_before_display") or pd.isna(row["record_before_display"])
-                  else f"<span class='cfdb-far-rec'>{html.escape(str(row['record_before_display']))}</span>")
+        # ⚠️ `pd.isna`, NOT TRUTHINESS, ON ALL THREE — `NaN` is truthy, and a missing logo, a
+        # missing record and a missing slug are all real states in this frame.
+        logo_url = row.get("logo_url")
+        logo = (f"<img class='cfdb-far-logo' src='{html.escape(str(logo_url))}' alt=''/>"
+                if logo_url is not None and not pd.isna(logo_url)
+                else "<span class='cfdb-far-logo'></span>")
+        record_value = row.get("record_before_display")
+        record = ("" if record_value is None or pd.isna(record_value)
+                  else f"<span class='cfdb-far-rec'>{html.escape(str(record_value))}</span>")
+        name = html.escape(str(row["team"]))
+        slug = row.get("team_slug")
+        if scope is not None and slug is not None and not pd.isna(slug):
+            # ✅ THE SAME DESTINATION SCHEDULE'S TEAM NAME USES, built through `scope.link` so
+            # this panel does not invent a second way to address a team page.
+            href = html.escape(scope.link("team", team=str(slug)))
+            name = (f"<a class='cfdb-far-link' href='{href}' target='_self'>{name}</a>")
         row_tip = (f"{row['team']} — {distance:.1f} yards per game from the median "
                    f"intersection; {row['y']:.1f} gained, {row['x']:.1f} allowed")
         out.append(
-            f"<div class='cfdb-far-row' title='{html.escape(row_tip)}'>"
-            f"<span class='cfdb-far-rank'>{position}</span>{logo}"
-            f"<span class='cfdb-far-team'>{html.escape(str(row['team']))}</span>"
-            # ⚠️ COMPACT, BECAUSE THE WORDS WRAPPED. "2-0 · 702 gained · 203 allowed" drew
-            # over two lines inside a 160px column, taking the row to 61.2px and the table
-            # past the bottom of the chart. The footnote below already says which number is
-            # which, so repeating it on all ten rows bought nothing and cost the layout.
-            f"<span class='cfdb-far-meta'>{record}"
-            f"<span class='cfdb-far-num'>{row['y']:.0f}</span>"
-            f"<span class='cfdb-far-slash'>/</span>"
-            f"<span class='cfdb-far-num'>{row['x']:.0f}</span></span></div>")
+            f"<tr title='{html.escape(row_tip)}'>"
+            f"<td class='cfdb-far-rank'>{position}</td>"
+            f"<td class='cfdb-far-team'>{logo}"
+            f"<span class='cfdb-far-name'>{name}</span>{record}</td>"
+            f"<td class='cfdb-far-num'>"
+            f"{_far_spark(row.get('y'), gained_top, f"{row['y']:.0f}")}</td>"
+            f"<td class='cfdb-far-num'>"
+            f"{_far_spark(row.get('x'), allowed_top, f"{row['x']:.0f}")}</td>"
+            f"</tr>")
+    out.append("</tbody></table></div>")
     if centre:
-        out.append(f"<div class='cfdb-far-foot'>Gained / allowed per game. Median "
-                   f"{centre[1]:.0f} / {centre[0]:.0f} over {population} teams shown.</div>")
+        out.append(
+            f"<div class='cfdb-far-foot'>Yards per game. Bars are relative to each column's "
+            f"own maximum among these {len(ranked)} rows, so a longer Allowed bar is more "
+            f"yards allowed. Median {centre[1]:.0f} gained / {centre[0]:.0f} allowed over "
+            f"{population} teams shown.</div>")
     out.append("</div>")
     return "".join(out)
 
@@ -2291,7 +2380,8 @@ def _distance_ranking(rows, limit: int = 10):
     return corner[:limit], (mid_x, mid_y)
 
 
-def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=380) -> str:
+def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560,
+                 height=_SCATTER_HEIGHT) -> str:
     """The scatter itself. Inline SVG in currentColor, following lib/distribution.py's
     precedent — one series, one hue, no legend, hairline axes (the chart standard's §7).
 
@@ -2421,10 +2511,36 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=3
     for r in rows:
         cx, cy = sx(r["x"]), sy(r["y"])
         colour = r.get("accent") or "currentColor"
-        if r.get("ranked_by_distance"):
+        # 🚨 A203 (cfdb-main-R-2132). THE RANKED TEAMS WEAR THEIR LOGO; THE RING IS GONE.
+        #
+        # > **MARC, v13:** *"Instead of putting the second circle around the mark, can you
+        # > replace the initial circle with the logo for the top 10?"*
+        #
+        # ⚠️ REPLACE, NOT DECORATE — the circle goes too for these teams, which is what makes
+        # the logo readable at this size instead of sitting on top of a stroke.
+        # ⚠️ AND A TEAM WITH NO LOGO KEEPS ITS CIRCLE rather than drawing nothing. `NaN` is
+        # truthy, so the test is `pd.isna` (0.00% null on this relation today, which is a
+        # measurement and not a guarantee).
+        logo_url = r.get("logo_url")
+        wears_logo = (r.get("ranked_by_distance") and logo_url is not None
+                      and not pd.isna(logo_url))
+        if wears_logo:
             parts.append(
-                f"<circle class='cfdb-sc-ring' cx='{cx:.1f}' cy='{cy:.1f}' r='8' "
-                f"fill='none' stroke='{colour}' stroke-width='1.2'/>")
+                # ⚠️ `cfdb-sc-mark-logo`, NOT `cfdb-sc-logo` — THAT NAME IS TAKEN.
+                # A190's hover tooltip already uses `.cfdb-sc-logo` for the team and
+                # opponent crests inside every hotspot, so a mark reusing it would be
+                # one of ~285 elements sharing a class and would inherit the
+                # tooltip's sizing. 📊 The first measurement of this round counted 285
+                # "mark logos" for 15 ranked teams and that is how it was found —
+                # A190's own `.cfdb-dist` collision, in the same panel, again.
+                f"<image class='cfdb-sc-mark-logo' href='{esc(str(logo_url))}' "
+                f"x='{cx - _SCATTER_LOGO_PX / 2:.1f}' y='{cy - _SCATTER_LOGO_PX / 2:.1f}' "
+                f"width='{_SCATTER_LOGO_PX}' height='{_SCATTER_LOGO_PX}' "
+                f"preserveAspectRatio='xMidYMid meet'>"
+                f"<title>{esc(r['team'])} \u2014 {r['y']:.1f} gained, {r['x']:.1f} allowed "
+                f"per game over {int(r['games'])} game(s)</title></image>")
+            hotspots.append(_scatter_hotspot(r, cx / width, cy / height, esc))
+            continue
         parts.append(
             f"<circle class='cfdb-sc-pt' cx='{cx:.1f}' cy='{cy:.1f}' r='4' "
             f"fill='none' stroke='{colour}' stroke-width='1.4'>"
@@ -2441,11 +2557,25 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560, height=3
                  f"text-anchor='end'>better \u2197</text>")
     # A176: the captions moved WITH their axes. X is now the defence and reads right-is-fewer;
     # Y is now the offence and reads up-is-more.
-    parts.append(f"<text class='cfdb-sc-axis' x='{pad_l + pw / 2:.0f}' y='{height - 8}' "
+    # 🚨 A203 (cfdb-main-R-2133). THE AXIS NAME IS BIG; THE DIRECTION IS A SUBTITLE.
+    #
+    # > **MARC, v13:** *"Vertical Axis Label Title should have a big Offense, the better, more
+    # > yards is a subtitle, can be smaller. Apply same to Horizontal with Defense"*
+    #
+    # 🚨 THE DIRECTION WORDING IS LOAD-BEARING AND SURVIVES INTACT. A176 transposed both axes
+    # and R-1082 is a caption left on an old one; **the subtitle still says which way is
+    # better on each axis**, because the big word alone does not — "Defense" says nothing
+    # about whether right is more or fewer.
+    parts.append(f"<text class='cfdb-sc-axis-name' x='{pad_l + pw / 2:.0f}' "
+                 f"y='{height - 20}' text-anchor='middle'>Defense</text>")
+    parts.append(f"<text class='cfdb-sc-axis' x='{pad_l + pw / 2:.0f}' y='{height - 7}' "
                  f"text-anchor='middle'>"
                  f"fewer yards allowed per game \u2192 better</text>")
-    parts.append(f"<text class='cfdb-sc-axis' transform='rotate(-90 12 {pad_t + ph / 2:.0f})' "
-                 f"x='12' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>"
+    parts.append(f"<text class='cfdb-sc-axis-name' "
+                 f"transform='rotate(-90 13 {pad_t + ph / 2:.0f})' "
+                 f"x='13' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>Offense</text>")
+    parts.append(f"<text class='cfdb-sc-axis' transform='rotate(-90 25 {pad_t + ph / 2:.0f})' "
+                 f"x='25' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>"
                  f"\u2191 better \u2014 more yards gained per game</text>")
 
     # 🚨 A190 (cfdb-main-R-1938). AN HTML LAYER OVER THE SVG, BECAUSE AN SVG `<title>` IS
@@ -2666,14 +2796,17 @@ def _profile(scope, depth: int) -> None:
                      {"color_on_light": cl, "color_on_dark": cd}),
                  "rank": rk, "record_before_display": rec, "logo_url": lg,
                  "total_yards_for_percentile": gp, "total_yards_allowed_percentile": ap, "percentile_population": pp,
-                 "team_id": int(tid), "opponent": opponents.get(int(tid))}
-                for t, x, y, g, cl, cd, rk, rec, lg, gp, ap, pp, tid in zip(
+                 "team_id": int(tid), "opponent": opponents.get(int(tid)),
+                 # A203: the table links the team name, so the slug has to reach the row.
+                 "team_slug": None if sl is None or pd.isna(sl) else str(sl)}
+                for t, x, y, g, cl, cd, rk, rec, lg, gp, ap, pp, tid, sl in zip(
                     playable["team_display"], xs, ys, playable["games_counted"],
                     playable["color_on_light"], playable["color_on_dark"],
                     playable["ap_rank"], playable["record_before_display"],
                     playable["logo_url"], playable["total_yards_for_percentile"],
                     playable["total_yards_allowed_percentile"],
-                    playable["percentile_population"], playable["team_id"])]
+                    playable["percentile_population"], playable["team_id"],
+                    playable["team_slug"])]
 
         # ── A190 (cfdb-main-R-1940): THE DISTANCE RANKING, AND THE RING THAT CONNECTS IT ───
         # The ranking is computed BEFORE the chart is drawn so the top ten can be marked on
@@ -2686,17 +2819,23 @@ def _profile(scope, depth: int) -> None:
         x_dom, x_step = domain(xs)
         y_dom, y_step = domain(ys)
 
-        # 🚨 THE TABLE TAKES THE NARROW SIDE — Marc: *"Table on the right, 15-20% of the row
-        # width; the chart takes the rest."* 82/18 sits inside that band.
-        # ⚠️ Streamlit stacks columns itself below ~640px of container, so the "narrow
-        # viewport" case Marc asked about needs no breakpoint of ours: the table falls under
-        # the chart on its own.
-        chart_col, table_col = st.columns([82, 18], gap="small")
+        # 🚨 A203: 66/34, NOT A190's 82/18 — MARC ALLOWED MORE ROOM AND THE TABLE NEEDED IT.
+        #
+        # > **MARC, v11:** *"Table on the right, 15-20% of the row width"* — which A190 met.
+        # > **MARC, v13:** *"The table needs to be bigger… enough real estate to include top
+        # > 15 or 20"*, which supersedes the band rather than stretching it.
+        #
+        # 📊 MEASURED: at 18% the column is 304px and **12 of 60 cells clip** — the team names
+        # and the two numeric cells. The type is now .9rem and each row carries a logo, a
+        # linked name, a record and two spark cells on ONE line, which is what needs the width.
+        # ⚠️ Streamlit stacks columns itself below ~640px of container, so the narrow-viewport
+        # case still needs no breakpoint of ours: the table falls under the chart on its own.
+        chart_col, table_col = st.columns([66, 34], gap="small")
         with chart_col:
             st.markdown(_scatter_svg(rows, x_dom, y_dom, x_step, y_step),
                         unsafe_allow_html=True)
         with table_col:
-            st.markdown(_distance_table(ranked, centre, len(rows)),
+            st.markdown(_distance_table(ranked, centre, len(rows), scope=scope),
                         unsafe_allow_html=True)
 
         # ⚠️ SAY WHAT WAS DROPPED AND WHY. A silently shorter chart is the same defect as a
