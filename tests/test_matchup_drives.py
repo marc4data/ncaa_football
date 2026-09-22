@@ -362,6 +362,19 @@ def _only(hits, what):
     return hits[0]
 
 
+def _field_slot_marker(matchup):
+    """The substring that marks the header's middle slot, whatever CSS expresses its size.
+
+    🚨 **B142 MADE THE SCOREBOARD ROW'S MIDDLE SLOT SHRINKABLE — `flex:0 1 650px` INSTEAD OF
+    `width:650px` — AND THREE TESTS KEYED ON THE LITERAL WENT RED** (cfdb-wta-R-1298). ⚠️ **The
+    property they were protecting did not change: the slot is still sized to the field, so the
+    scoreboard still centres over the figure it heads.** **A test keyed on one spelling of a
+    size is a test that fails when the size is respelled** — which is B140's break-6 lesson in
+    the opposite direction, and this helper is what stops it recurring.
+    """
+    return f"{matchup._DRIVE_FIELD_WIDTH}px"
+
+
 def _field_bar_layers(spec):
     """Every bar layer on the field.
 
@@ -1675,10 +1688,14 @@ def test_THE_SCOREBOARD_SEGMENTS_ARE_THE_PANELS_OWN_CONSTANTS(panel):
         return [int(m) for m in re.findall(r"width:(\d+)px", seg) if int(m) != 22]
 
     scoreboard_row, cards_row = widths_of(rows[0]), widths_of(rows[1])
-    assert scoreboard_row[:2] == [panel_w, field_w], (
-        f"the scoreboard row's segments are {scoreboard_row[:2]}; it must still declare the "
-        f"panel width and the FIELD's own {field_w}px, so the linescore and the chart stay "
-        f"centred on the field below them")
+    # ⚠️ **THE MIDDLE SLOT IS `flex:0 1 650px` SINCE B142, NOT `width:650px`** — it must be able
+    # to give way, or the scoreboard row sticks out by itself below a ~670px container
+    # (cfdb-wta-R-1297). **The size is still the field's; only the spelling moved.**
+    assert scoreboard_row[:1] == [panel_w], (
+        f"the scoreboard row's first segment is {scoreboard_row[:1]}, not the panel width")
+    assert f"flex:0 1 {field_w}px" in rows[0], (
+        f"the scoreboard row's middle slot is not a shrinkable {field_w}px: it must stay sized "
+        f"to the field so the group centres over it, AND be able to give way")
     assert table_w not in scoreboard_row, (
         f"the scoreboard row still pins a {table_w}px side slot: {scoreboard_row}. Both its "
         f"sides are empty and must be able to shrink, or the row overflows an 840px header "
@@ -3096,7 +3113,7 @@ def test_THE_CHART_SITS_BESIDE_THE_LINESCORE_not_in_the_empty_right_slot(panel):
         f"different slot rather than beside the scoreboard: {between[:120]!r}")
     # and the chart must still be inside the FIELD-width slot, which is what centres it
     before = header[:header.index(line)]
-    assert f"width:{matchup._DRIVE_FIELD_WIDTH}px" in before, (
+    assert _field_slot_marker(matchup) in before, (
         "the linescore and chart are not inside the field-width middle slot, so they are no "
         "longer centred on the field they head")
 
@@ -3230,7 +3247,7 @@ def test_THE_SCOREBOARD_AND_THE_CHART_ARE_ONE_GROUP_not_two_things_in_a_slot(pan
         "in a slot rather than one group — and `_line_score`'s `margin:0 auto` can absorb the "
         "slot's free space again, which is the 168.4px Marc could see")
     # and that shared wrapper must be inside the field slot rather than being it
-    assert min(shared) > header.index(f"width:{matchup._DRIVE_FIELD_WIDTH}px"), (
+    assert min(shared) > header.index(_field_slot_marker(matchup)), (
         "the group is not inside the field-width slot, so it is no longer centred on the "
         "field it heads")
 

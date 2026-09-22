@@ -1954,6 +1954,15 @@ def test_the_COMMENTS_ABOUT_THE_CHART_WIDTH_AGREE_WITH_THE_CODE():
             pairs.append((int(px), flag == "True", line.strip()))
         for flag, px in re.findall(r"`(True|False)` is \*?\*?(\d{2,4})px", line):
             pairs.append((int(px), flag == "True", line.strip()))
+        # 🚨 A THIRD SHAPE, AND A STAGED BREAK IS WHAT FOUND IT (cfdb-wta-R-1299). B142 changed
+        # `chart 222` to `chart 240` in the comment's own worked table and this guard stayed
+        # GREEN — because the other two patterns both require the digits to be followed by
+        # `px`, and a table row writes them bare. ⚠️ **The most number-dense comment in the
+        # file was the one shape it could not see.**
+        for flag, _lbl, _v1, _v2, px in re.findall(
+                r"(True|False)\s+label\s+(\d+)\s*\|\s*value\s+(\d+)"
+                r"\s*\|\s*value\s+(\d+)\s*\|\s*chart\s+(\d+)", line):
+            pairs.append((int(px), flag == "True", line.strip()))
 
     assert pairs, (
         "no comment in matchup.py pairs a pixel figure with a `_TABLE_CELLS_EQUAL` value — this "
@@ -2874,15 +2883,28 @@ def test_THE_TWO_VALUE_CELLS_ARE_STILL_EQUAL_TO_EACH_OTHER():
     > *"That will allow the Box Score to reduce width of the measure value cells. Measure Cells
     > and graph cells should be equal horizontal widths."*
 
-    📊 **At `False` the value cells are 60px and 60px — still equal to each other.** What
-    changed is that they are sized to their CONTENT rather than to a third of the budget, which
-    is the *reduction* he named as his reason and which `True` never delivered.
+    📊 **At `False` the value cells are equal to each other.** What changed is that they are
+    sized to their CONTENT rather than to a third of the budget, which is the *reduction* he
+    named as his reason and which `True` never delivered.
 
-    ✅ **AND THE CONTENT FITS, MEASURED WITH A RANGE RATHER THAN `scrollWidth`:** the widest
-    value string on the rendered table is **54px** (`-0.259`), the turnovers format `5 (2/3)` is
-    53.4px, and **0 of 46 values exceed the 60px cell**.
+    🚨 **AND B142 FOUND THE CONTENT DID NOT FIT (cfdb-wta-R-1286).** B139 reported the widest
+    value as **54px** (`-0.259`) — **the widest in the one game it sampled.** 📊 **Re-measured
+    with a `Range` over 1,102 value cells from 24 random completed 2025 FBS games:**
+
+        `100.0%`    60.23px    ← the widest, present in all 24 games
+        `0 (0/0)`   54.50px
+        `-0.259`    54.00px    ← B139's figure
+
+    ⚠️ **`100.0%` in a 60px cell is a clip**, and a 100% rate is an ordinary value on a
+    completion or third-down row rather than a curiosity. **The floor below is the MEASUREMENT,
+    so returning the constant to 60 fails here rather than passing quietly.**
     """
-    _budget, value, _chart = _recomputed_widths()
-    assert value >= 54, (
-        f"the value cell is {value}px and the widest measured value string is 54px — a "
-        f"narrower cell would clip a real number rather than merely tighten the column")
+    _budget, value, chart = _recomputed_widths()
+    widest = 60.23      # px, measured 2026-09-22 — see the docstring
+    assert value >= widest, (
+        f"the value cell is {value}px against a widest measured value of {widest}px "
+        f"(`100.0%`) — it would clip a real number rather than merely tighten the column")
+    # ⚠️ AND THE COST IS THE CHART's, so the trade cannot be taken past B108's floor unnoticed
+    assert chart >= 200, (
+        f"widening the value cell took the chart to {chart}px, under B108's measured 200px "
+        f"floor — the value cell is paid for out of the chart's width")
