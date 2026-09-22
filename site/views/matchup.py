@@ -4676,6 +4676,40 @@ def _section_heading(title: str) -> str:
             f"<div style='{_SECTION_UNDERRULE};margin:.25rem 0 .45rem'></div>")
 
 
+# ── 🚨 v21 PART 5: THE HEADER NAMED THE TEAM WITH ONE LETTER, AND B142 IS WHY ──────────────
+#
+# > **MARC, 2026-09-22:** *"This doesn't look good to not have full name or abbr, but then have
+# > all the whitespace to the right of the chart."*
+#
+# 🚨 **THE TRUNCATION IS MINE.** B142 took `_TABLE_VALUE_CONTENT_PX` from 116px to 64px because
+# `100.0%` did not fit the value cell — **and this header cell IS the value cell**, so the
+# team's name lost 52px in the same edit. 📊 **Text room went from 91.2px to 39.2px**
+# (64 − a 20px logo − a 4.8px gap), and at the value font of 1.05rem:
+#
+#     abbreviations that fit 39.2px, FBS teams since 2024   135 of 244   55.3%
+#     across all 700 published abbreviations                291 of 700   41.6%
+#
+# **So nearly half of Matchup's own games drew `M…` or `O…`.**
+#
+# ✅ **AND THE CELL CANNOT SIMPLY GROW.** The row budget is exactly allocated —
+# `136 + 24 + 64 + 64 + 222 = 510` — so every pixel the header takes comes off the chart, and
+# the chart is 22px above B108's measured 200px floor. **Widening the header to fit the widest
+# abbreviation (54.9px of text) would put the chart at 188px, under the floor.**
+#
+# ✅ **SO THE ROOM COMES FROM INSIDE THE CELL, NOT FROM ITS NEIGHBOURS.** A smaller logo, a
+# tighter gap, and a label-sized font for what is a LABEL rather than a figure:
+#
+#     room = 64 − 14 (logo) − 2 (gap) = 48.0px
+#     widest FBS abbreviation at 0.85rem = 45.3px       → 244 of 244 fit (100.0%)
+#
+# ⚠️ **THE LOGO STAYS, AND R-856 IS WHY** — *"the LOGO beside it is doing the identifying work
+# that a clipped word was failing at"*. **Dropping it would buy 100% at the full font too, and
+# it is not needed: the name fits with the logo in place.**
+_TABLE_HEADER_LOGO_PX = 14
+_TABLE_HEADER_GAP_PX = 2
+_TABLE_HEADER_NAME_REM = 0.85
+
+
 def _table_header(away, home, title: str, colors=None) -> str:
     """Marc's *"header row for Box Score / Logo Away / Logo Home"*, with a rule beneath it.
 
@@ -4710,7 +4744,8 @@ def _table_header(away, home, title: str, colors=None) -> str:
     cells = [f"<span style='{_TABLE_LABEL_CELL}'></span>"]
     for side, key in ((away, "away"), (home, "home")):
         logo = identity.logo_or_monogram(
-            side.get("team_logo_url"), str(side.get("team_display") or "?"), 20)
+            side.get("team_logo_url"), str(side.get("team_display") or "?"),
+            _TABLE_HEADER_LOGO_PX)
         pair, abbr = (colors or {}).get(key) or (None, "")
         accent = identity.accent_color(pair)
         # 🚨 R-856. THE ABBREVIATION, FALLING BACK TO THE FULL NAME. `North Alabama` did not
@@ -4722,9 +4757,11 @@ def _table_header(away, home, title: str, colors=None) -> str:
                 if _TABLE_HEADER_SHOWS_NAME else "")
         cells.append(
             f"<span style='{_TABLE_VALUE_CELL};font-weight:700;display:flex;"
-            f"align-items:center;justify-content:flex-end;gap:.3rem;"
+            f"align-items:center;justify-content:flex-end;"
+            f"gap:{_TABLE_HEADER_GAP_PX}px;"
             f"border-bottom:3px solid {accent};padding-bottom:.15rem'>{logo}"
-            f"<span style='overflow:hidden;text-overflow:ellipsis'>"
+            f"<span style='overflow:hidden;text-overflow:ellipsis;"
+            f"font-size:{_TABLE_HEADER_NAME_REM}rem'>"
             f"{html.escape(name)}</span></span>")
     # ⚠️ THE FOURTH CELL IS EMPTY AND IS STILL EMITTED. The header row is a row like any other,
     # and a header one cell short of the rows beneath it stops being a header — its two logos
@@ -6566,15 +6603,56 @@ _DRIVE_OTHER_SCORE_KEYS = frozenset({_DRIVE_MADE_KICK_KEY, _DRIVE_SAFETY_KEY})
 # ⚠️ **The mistake was conflating *scored* with *arrow*: the arrow says where the POINTS went,
 # and only a touchdown needs that. A field goal is a kick.** ✅ **So the class is `touchdown`,
 # not `score`, and fill carries *scored* on its own channel.**
+# ── 🚨 v21 PART 3: A TURNOVER IS AN X, AND IT HAD TO BE A PATH (cfdb-wta-R-1502) ───────────
+#
+# > **MARC:** *"Fumble, Downs, Int should all use an X that is fillable instead of the +."*
+#
+# 🚨 **VEGA-LITE HAS NO `x` SYMBOL.** Its built-in set is circle · square · cross · diamond ·
+# triangle-{up,down,right,left} · stroke · arrow · wedge — **`cross` is the `+` he is replacing,
+# and there is nothing to swap it for.** ⚠️ **AND `angle` IS A MARK PROPERTY, NOT AN ENCODING**
+# (cfdb-wta-R-1271 measured that on the mascot), so rotating one shape class by 45° would mean
+# a third icon layer carrying one shape.
+#
+# ✅ **SO IT IS A CUSTOM SVG PATH — A PLUS ROTATED 45°, CLOSED, WHICH IS WHAT MAKES IT
+# FILLABLE.** His word was *"fillable"*, and a two-stroke `M…L…M…L…` X is not: it has no
+# interior. **Twelve points, arm half-width 0.33 in a unit box, each rotated by
+# (x−y)/√2, (x+y)/√2.**
+#
+# 📊 **CONFIRMED IN A BROWSER BEFORE IT WAS BUILT ON**: the path renders, Vega scales it to
+# `size` like any built-in symbol, and it takes a `fill` — measured `fill: rgba(0,0,0,0)` when
+# transparent and a solid colour when not.
+_DRIVE_TURNOVER_X = (
+    "M0.474,-0.940L0.940,-0.474L0.467,0.000L0.940,0.474L0.474,0.940L0.000,0.467"
+    "L-0.474,0.940L-0.940,0.474L-0.467,0.000L-0.940,-0.474L-0.474,-0.940L0.000,-0.467Z")
+
 _DRIVE_GLYPH_SHAPES = {
     "touchdown": None,          # directional — see `_drive_glyph_shape`
     "kick": "diamond",          # made or missed; FILL says which
     "safety": "triangle-up",
-    "turnover": "cross",
+    "turnover": _DRIVE_TURNOVER_X,   # v21: was `cross`, the `+`
     "punt": "circle",
     "clock": "square",
     "unknown": _DRIVE_RESULT_UNKNOWN,
 }
+
+# ── 🚨 v21 PART 1: ONE OUTLINE FOR BOTH TEAMS, AND IT IS THE PAGE'S OWN INK ─────────────────
+#
+# > **MARC:** *"Let's make the outline black (both teams)."*
+#
+# ⚠️ **A LITERAL `#000` DISAPPEARS ON THE DARK PAGE**, whose ground is `#0e1117`. **So "black"
+# is read as *the colour ordinary body text is* — black-ish in light, near-white in dark**
+# (cfdb-wta-R-1500). 📋 **If Marc wants literal black in both themes it is this one constant.**
+#
+# ✅ **`currentColor` IS THAT TOKEN AND IT NEEDS NO THEME DETECTION.** The browser resolves it
+# from the inherited text colour, so the mark follows a mid-session theme flip with no Python
+# in the loop. 🚨 **AND IT IS THE ONE THEME MECHANISM THAT WORKS INSIDE A VEGA SPEC:** B135
+# measured `light-dark(...)` REJECTED by Vega and falling back to `#ddd` in both themes
+# (cfdb-main-R-1236). **This panel's own legend and gridlines already use `currentColor`**, so
+# it is the established path rather than a new one.
+#
+# 📊 **VERIFIED IN A BROWSER, NOT ASSUMED**: on a page whose text colour was `#123456`, the
+# rendered mark's computed `stroke` came back `rgb(18, 52, 86)`.
+_DRIVE_GLYPH_INK = "currentColor"
 # ⚠️ `_DRIVE_MADE_KICK = "FG"` AND `_DRIVE_SAFETY = "SF"` LIVED HERE AND ARE GONE (B141).
 # They were display STRINGS; the classification they stood for is published as
 # `drive_result_key`, and `_DRIVE_MADE_KICK_KEY` / `_DRIVE_SAFETY_KEY` above are what the
@@ -6627,6 +6705,53 @@ def _drive_glyph_shape(row) -> str:
     # the away end zone is on the left; a defensive score sends the points the other way
     points_left = away != scored_by_defense
     return _DRIVE_SCORE_LEFT if points_left else _DRIVE_SCORE_RIGHT
+
+
+_DRIVE_NO_FILL = "transparent"
+
+
+def _drive_glyph_fill(row, accents: dict) -> str:
+    """The mark's FILL: the scoring team's own colour, or nothing at all.
+
+    > **MARC, v21:** *"Fill with the team color if it is a scoring drive."*
+
+    🚨 **WHICH TEAM IS PUBLISHED, NOT INFERRED FROM THE RESULT TEXT.** `scoring_side` says
+    `offense` or `defense`, and B141's round is why that matters: a `TD` suffix on a turnover
+    means the DEFENCE scored, and `KICKOFF RETURN TD` scores for the feed's OFFENCE — **two
+    facts the string cannot tell apart and the column states outright** (cfdb-wta-R-1501).
+
+    ✅ **SO A DEFENSIVE SCORE FILLS WITH THE DEFENCE'S COLOUR — the team that got the points**,
+    which is the other band's accent. ⚠️ **`accents` is keyed by band and already carries each
+    side's contrast-safe variant for the current theme** (`identity.text_on(..., dark_theme)`),
+    so a team whose published colour is unreadable on this page uses its safe one, exactly as
+    the rest of the site does.
+
+    🚨 **THE AUTHORITY FOR *DID IT SCORE* IS `is_scoring_drive`, NOT `scoring_side`.** 📊
+    Measured on live published serving: **314 drives carry a `scoring_side` while
+    `is_scoring_drive` is false** — 303 offense, 11 defense. **Filling those would paint a
+    team's colour on a drive that scored nothing.**
+
+    ⚠️ **AND 143 SCORING DRIVES CARRY NO `scoring_side` AT ALL.** ✅ **Those fill with
+    `identity.FALLBACK`, the neutral grey — NOT unfilled.** **Unfilled already means *this
+    drive did not score*, and reusing it for *it scored and we do not know whose points* would
+    merge two different facts into one mark** (AC-G.11). **The neutral says the third thing.**
+
+    ⚠️ **EVERY BRANCH TESTS WITH `pd.isna`, BECAUSE NaN IS TRUTHY** — R-121's class, which this
+    file has paid for at `logo_url`, at `text_on` (B140) and in `_card_text`.
+    """
+    scored = row.get("is_scoring_drive")
+    if scored is None or pd.isna(scored) or not bool(scored):
+        return _DRIVE_NO_FILL
+    side = row.get("scoring_side")
+    side = "" if side is None or pd.isna(side) else str(side).strip()
+    band = str(row.get("band"))
+    if side == "offense":
+        return accents.get(band) or identity.FALLBACK
+    if side == "defense":
+        other = "home" if band == "away" else "away"
+        return accents.get(other) or identity.FALLBACK
+    # it scored and the feed does not say whose points — a third state, named as one
+    return identity.FALLBACK
 
 
 def _drive_glyph_filled(row) -> bool:
@@ -7479,27 +7604,36 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
     # TWO LAYERS.** ⚠️ **They partition `drawn` on `result_filled` — a `notna()`-style filter on
     # one layer only is half a partition, which is the defect v02's logo variant shipped as
     # `50 50` (cfdb-wta-R-1192).** A test asserts every drawn drive appears in exactly one.
-    icons = alt.Chart(drawn[~drawn["result_filled"]]).mark_point(
-        size=_DRIVE_GLYPH_SIZE, filled=False, strokeWidth=1.6).encode(
-        # 🚨 `x="x_end:Q"` AS A BARE STRING DREW A THIRD AXIS, AND THE RENDER IS WHAT SAID SO.
-        # A shorthand encoding declares no axis, and under `resolve_axis(x="independent")` that
-        # means Vega-Lite gives it the DEFAULT one — **26 ticks at 0, 5, 10 … sitting on top of
-        # the field's own 11.** ⚠️ **Merged resolution had hidden it; independence made every
-        # layer's silence its own decision.** The rendered-axis test counts them for exactly this.
+    # ── 🚨 v21 PARTS 1 AND 2: ONE ICON LAYER, TWO SEPARATE CHANNELS ─────────────────────
+    #
+    # 🚨 **THIS WAS TWO LAYERS AND NO LONGER NEEDS TO BE.** v04 split them because `filled` is a
+    # MARK property in Vega-Lite rather than an encoding, so a per-row fill needed two charts.
+    # ✅ **`fill` and `stroke` ARE encodings**, and giving them separately says the thing Marc
+    # asked for: **the outline is the same on both teams and the fill is the only colour that
+    # means anything** (cfdb-wta-R-1500/1501).
+    #
+    # 📊 **Verified in a browser before the rewrite**: with `fill` encoded and `stroke` valued,
+    # the rendered marks came back `fill: rgba(0,0,0,0)` where transparent, a solid team colour
+    # where not, and `stroke` resolved from `currentColor` in every case — **with no `filled`
+    # property on the mark at all.**
+    #
+    # ⚠️ **SO THE `result_filled` PARTITION IS GONE FROM THE FIELD** and the test that asserted
+    # every drawn drive sits in exactly one of the two layers moves with it. **`result_filled`
+    # itself stays — the TABLE's glyph column still asks the yes/no question.**
+    #
+    # 🚨 `x="x_end:Q"` AS A BARE STRING DREW A THIRD AXIS, AND THE RENDER IS WHAT SAID SO.
+    # A shorthand encoding declares no axis, and under `resolve_axis(x="independent")` that
+    # means Vega-Lite gives it the DEFAULT one — **26 ticks at 0, 5, 10 … sitting on top of
+    # the field's own 11.** ⚠️ **Merged resolution had hidden it; independence made every
+    # layer's silence its own decision.** The rendered-axis test counts them for exactly this.
+    icons = alt.Chart(drawn).mark_point(
+        size=_DRIVE_GLYPH_SIZE, strokeWidth=1.6).encode(
         x=alt.X("x_end:Q", title=None,
                 scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False), axis=None),
         y=y,
         shape=alt.Shape("result_shape:N", scale=None, legend=None),
-        color=alt.Color("accent:N", scale=None, legend=None),
-        xOffset=alt.XOffset("glyph_dx:Q", scale=None),
-        tooltip=tooltip)
-    scored_icons = alt.Chart(drawn[drawn["result_filled"]]).mark_point(
-        size=_DRIVE_GLYPH_SIZE, filled=True, strokeWidth=1.6).encode(
-        x=alt.X("x_end:Q", title=None,
-                scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False), axis=None),
-        y=y,
-        shape=alt.Shape("result_shape:N", scale=None, legend=None),
-        color=alt.Color("accent:N", scale=None, legend=None),
+        fill=alt.Fill("glyph_fill:N", scale=None, legend=None),
+        stroke=alt.value(_DRIVE_GLYPH_INK),
         xOffset=alt.XOffset("glyph_dx:Q", scale=None),
         tooltip=tooltip)
 
@@ -7539,7 +7673,7 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
             text=alt.Text("m:N")))
 
     layers = _drive_bands(frame, float(width)) + [
-        zone_fill, field, top_axis] + mascots + bars + [icons, scored_icons]
+        zone_fill, field, top_axis] + mascots + bars + [icons]
     # ⚠️ THE HONEST-ABSENCE BRANCH, KEPT DELIBERATELY THROUGH TWO REWRITES THAT COULD HAVE LOST
     # IT SILENTLY (R-141's family). 📊 118 of 84,838 drives — 0.139% — carry an end coordinate
     # off the field. **The row stays and says so; a missing possession is a worse lie than a
@@ -7779,7 +7913,27 @@ _DRIVE_GLYPH_CELL = 11.0
 # (key, field, width, data align, cell limit, heading limit, heading, heading align)
 _DRIVE_COLUMN_PLAN = (
     ("team_drive", "team_drive:Q",    12.0, "left",  13.0, 16.0, "#",      "left"),
-    ("clock",      "clock:N",         42.0, "left",  42.0, 30.0, "Clock",  "left"),
+    # ── 🚨 v21 PART 4: THE CLOCK RIGHT-ALIGNS SO THE COLONS LINE UP (cfdb-wta-R-1503) ──────
+    #
+    # > **MARC:** *"Can we make the Clock times right aligned so that the : line up on 12:30 and
+    # > 3:30?"*
+    #
+    # 📊 **MEASURED ON THE RENDERED SVG BEFORE THE CHANGE, reading each cell's colon with
+    # `getStartPositionOfChar`:** `Q1 15:00` put its colon at x 23.55 and `Q4 3:23` at 18.58 —
+    # **a 4.97px spread across the 19 cells of one game**, which is exactly one digit's width.
+    #
+    # ✅ **AND RIGHT ALIGNMENT ALONE IS ENOUGH — NO TABULAR-FIGURES CHANGE.** The prompt asked
+    # whether the font's digits are fixed-width; **the rendered cells answer it**: `Q1 15:00`
+    # and `Q1 11:16` both measure 36.0px and `Q2 8:42`, `Q4 3:23` and `Q4 0:09` all measure
+    # 31.0px. **Different digits, identical widths — so with two-digit seconds the colon sits a
+    # constant distance from the right edge and aligning the edges aligns the colons.**
+    # ⚠️ **A canvas at the site's font stack says the opposite (1.797px of spread) and is the
+    # WRONG RULER — Source Sans Pro is not installed in a headless browser, so it measures the
+    # fallback.** The page is the only instrument that can answer this.
+    #
+    # ⚠️ **THE HEADING RIGHT-ALIGNS WITH IT.** A left-anchored `Clock` over right-anchored
+    # values leaves the label and its column at opposite ends of a 42px cell.
+    ("clock",      "clock:N",         42.0, "right", 42.0, 30.0, "Clock",  "right"),
     ("duration",   "duration:N",      26.0, "left",  26.0, 20.0, "Dur",    "left"),
     ("yardline",   "yardline_mark:N", 17.0, "right", 17.0, 24.0, "Yard",   "right"),
     ("yards",      "yards:Q",         17.0, "right", 17.0, 25.0, "Yrds",   "left"),
@@ -8057,6 +8211,13 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
     # which drew a field goal and a touchdown identically on 30,369 drives.**
     frame["result_shape"] = frame.apply(_drive_glyph_shape, axis=1)
     frame["result_filled"] = frame.apply(_drive_glyph_filled, axis=1)
+    # 🚨 v21 PART 2: the fill is now a COLOUR rather than a boolean, and it names the team that
+    # got the points. `result_filled` survives because the TABLE's glyph column still asks the
+    # yes/no question — see `_DRIVE_TABLE_GLYPH_CLASSES`.
+    band_accents = {band: identity.text_on(colors.get(band), dark_theme=dark)
+                    for band in ("away", "home")}
+    frame["glyph_fill"] = [
+        _drive_glyph_fill(r, band_accents) for _i, r in frame.iterrows()]
     frame["glyph_class"] = frame.apply(_drive_glyph_class, axis=1)
     # ── v04 PART 5: *"can the glyph labels at the end of the line start at the end of the line
     # instead of being centred at the end of the line?"* ──────────────────────────────────────
