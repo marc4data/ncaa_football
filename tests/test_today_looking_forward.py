@@ -6,7 +6,6 @@ that re-derive them live beside the model. What this file holds is everything th
 when the section opens, what it says when it does not, and that it renders Schedule's table
 rather than one of its own.
 """
-import re
 import sys
 from pathlib import Path
 
@@ -177,28 +176,26 @@ def test_the_empty_state_names_the_week_rather_than_drawing_a_blank_table(monkey
 
 
 @pytest.mark.parametrize("top25,undef,expected", [
-    # ⚠️ A200 SHORTENED THESE so the column fits on screen at 1440 (the full wording moved
-    # to the section caption). The test asserts the SHIPPED text, because a reader reads the
-    # tag and not the flag — a tag that silently changed wording is a tag nobody checked.
     (True, False, ["Top 25"]),
     (False, True, ["Undefeated · close"]),
     (True, True, ["Top 25", "Undefeated · close"]),
     (False, False, []),
 ])
-def test_the_reason_tag_reads_the_flags_and_shows_both_when_both_fire(top25, undef, expected):
+def test_the_reason_reads_the_flags_and_shows_both_when_both_fire(top25, undef, expected):
     """⚠️ BOTH RULES CAN FIRE ON ONE GAME, AND SHOWING ONLY THE FIRST WOULD MAKE THE SECOND
-    LOOK NARROWER THAN IT IS. 2 of the 8 qualifying week-4 games carry both tags."""
-    # ⚠️ A204 SPLIT THE FLAG: "undefeated · close" is now `is_undefeated_entering` AND a line
-    # inside the reader's cutoff, so the fixture supplies both halves rather than a flag the
-    # page stopped reading. -3.0 is inside every choice; the cutoff itself is exercised in
-    # `test_today_close_cut.py`.
-    html = today._high_value_reason({"is_top25_matchup": top25,
+    LOOK NARROWER THAN IT IS.
+
+    🚨 A205 REMOVED THE LIST, SO `_high_value_reason` IS GONE — the same question is now asked
+    of `_slate_reason_text`, which the SLATE's marks and hovers both read. The assertion is
+    the behaviour, not the function that used to carry it.
+
+    ⚠️ And A204 split the flag: "undefeated · close" is `is_undefeated_entering` AND a line
+    inside the reader's cutoff, so the fixture supplies both halves.
+    """
+    text = today._slate_reason_text({"is_top25_matchup": top25,
                                      "is_undefeated_entering": undef,
                                      "spread_current": -3.0 if undef else None})
-    tags = re.findall(r"cfdb-why-tag'>([^<]+)<", html)
-    assert tags == expected
-    if not expected:
-        assert html == ""
+    assert text == " · ".join(expected)
 
 
 def test_the_page_adds_no_rule_of_its_own():
@@ -231,8 +228,15 @@ def test_looking_forward_renders_schedules_table_rather_than_a_copy_of_it():
     `UndefinedColumn` into `states.section` and drew one error card — a handled failure that
     looks considered. There is one query now, so the opportunity is gone rather than the bug.
     """
-    assert "schedule_table.columns(scope)" in SOURCE
+    # 🚨 A205 REMOVED THE SCHEDULE-STYLE LIST, SO TODAY NO LONGER CALLS `columns()`.
+    # ⚠️ What it still shares — and what this test is really about — is the QUERY and the team
+    # CELLS. A196's failure was a hand-written parallel SELECT with two guessed column names;
+    # that opportunity is still closed, because `rows()` is the only read either page makes.
     assert "schedule_table.rows(" in SOURCE
+    assert "schedule_table.team_with_record(" in SOURCE, (
+        "the SLATE draws Schedule's own identity cell rather than redrawing it")
+    assert "schedule_table.columns(scope)" not in SOURCE, (
+        "the list is gone; calling the column set again would be a copy with no renderer")
     assert "def columns(" in SHARED and "def rows(" in SHARED
     # Schedule keeps aliases so its own call sites, including the stacked card's six, are
     # untouched — that is what makes "the look cannot have changed" checkable.

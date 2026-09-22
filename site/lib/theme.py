@@ -158,6 +158,11 @@ CSS = """
 .cfdb-slate-table td, .cfdb-slate-table th { padding-top:.2rem; padding-bottom:.2rem; }
 .cfdb-slate-table .cfdb-slate-cell { padding-left:.5rem; padding-right:.2rem; }
 .cfdb-slate-table .cfdb-slate-tv { white-space:nowrap; }
+/* A205. The SLATE's team names link to the Teams page, the way Schedule's do. The RECORD is
+   outside the anchor (R-129) — styling cannot remove a pointer cursor, and dead text under
+   one is worse than either state. */
+.cfdb-slate-teamlink { color:var(--cfdb-link); text-decoration:none; }
+.cfdb-slate-teamlink:hover .cfdb-team { text-decoration:underline; }
 .cfdb-slate-table .cfdb-slate-why { padding-left:.2rem; padding-right:.2rem; }
 /* 🚨 SCOPED WITH THE PARENT, BECAUSE `.cfdb-slate svg` ABOVE OUT-SPECIFIES A BARE CLASS.
    A200 hit this exact rule with the key swatch and wrote it down; the first build of A201 hit
@@ -244,7 +249,7 @@ CSS = """
 .cfdb-slate-tba { font-size:.72rem; opacity:.7; margin:.35rem 0 .1rem; }
 
 /* ── A196: the "why is this game here" tag on Looking Forward ─────────────────────────────
-   ⚠️ IT READS THE PUBLISHED FLAGS AND DECIDES NOTHING (see `today._high_value_reason`), and
+   ⚠️ IT READS THE PUBLISHED FLAGS AND DECIDES NOTHING (see `today._reasons`), and
    BOTH tags can appear on one game — a Top 25 matchup that is also an undefeated side at a
    short line. Showing only the first would make the second rule look narrower than it is. */
 .cfdb-why { display:inline-flex; flex-wrap:wrap; gap:.25rem; }

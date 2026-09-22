@@ -210,11 +210,15 @@ def test_the_slate_is_drawn_inside_the_gate_and_from_the_same_frame():
     """
     body = SOURCE[SOURCE.index("def _looking_forward("):]
     body = body[:body.index("\n\ndef ")]
-    assert body.count("_slate(games") == 1, "the slate reads the table's own frame"
+    # ⚠️ A205 MADE THE SLATE THE SECTION, so it is `render_or_state`'s renderer now and is
+    # handed the frame as `rows` rather than reading `games` directly. The property this test
+    # is about is unchanged: ONE frame, drawn once, inside the gate.
+    assert body.count("_slate(rows") == 1, "the slate draws the frame it is given"
+    assert body.count("_high_value_games(") == 1, "and that frame comes from one query"
     # it must sit AFTER the table render and INSIDE the branch that draws it
-    assert body.index("states.render_or_state") < body.index("_slate(games")
+    assert body.index("states.render_or_state") < body.index("_slate(rows")
     for early_return in ("return\n", ):
-        assert body.index("_slate(games") > body.rindex(early_return), (
+        assert body.index("_slate(rows") > body.rindex(early_return), (
             "the slate must be below every gate return, or it can draw under the splash")
 
 

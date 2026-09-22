@@ -3793,51 +3793,6 @@ def _high_value_games(scope, week: int, also_ids=None,
                                also_ids=also_ids, close_cut=close_cut)
 
 
-def _lf_kickoff(row) -> str:
-    """`Fri 5:00 PM` — the day, then the time, on one line and without the zone.
-
-    ⚠️ THE DAY COMES FROM THE SAME CONVERSION THE TIME DOES. Reading the day off `game_date`
-    and the time off `start_date` would disagree for a late kickoff, which is R-643's family:
-    one instant, converted once, is the only way the two halves can agree.
-    """
-    ts = row.get("start_date")
-    if ts is None or pd.isna(ts):
-        return fmt.EM_DASH
-    local = fmt._local(ts)
-    return f"{local:%a} {local.strftime('%-I:%M %p')}"
-
-
-def _high_value_reason(row) -> str:
-    """The tag that says WHY a game is on this list. It reads the flags and decides nothing.
-
-    ⚠️ BOTH RULES CAN FIRE ON ONE GAME and the tag says so — USC vs Oregon in 2026 week 4 is a
-    Top 25 matchup AND an undefeated side at a 3-point line. Showing only the first would make
-    the second rule look narrower than it is.
-    """
-    # 🚨 A200: THE TAGS ARE SHORT BECAUSE THE COLUMN HAS TO FIT ON SCREEN, AND THE CAPTION
-    # CARRIES THE FULL RULE. 📊 Measured by the clone method at 1440 with the sidebar open:
-    # "Undefeated · close line" is 105.1px against "Undefeated · close" at 87.8px, and the
-    # cell adds 8.8px of padding a side. The wording below is the widest ONE tag, because
-    # the tags STACK when both rules fire.
-    close_cut = row.get("_close_cut") or _CLOSE_DEFAULT
-    reasons = _reasons(row, int(close_cut))
-    tags = []
-    if "is_top25_matchup" in reasons:
-        tags.append("Top 25")
-    if "is_undefeated_close" in reasons:
-        tags.append("Undefeated \u00b7 close")
-    # ⚠️ A199: A GAME CAN BE BOTH HIGH-VALUE AND ADDED, AND THE TAGS SAY SO. Marc may paste a
-    # game the rules already picked; showing only "Added by you" would hide why it qualifies
-    # on its own, and showing only the rule would hide that he asked for it.
-    if "is_added_by_you" in reasons:
-        tags.append("Added by you")   # already the shortest of the three; left as Marc's words
-    if not tags:
-        return ""
-    return ("<span class='cfdb-why'>"
-            + "".join(f"<span class='cfdb-why-tag'>{html.escape(t)}</span>" for t in tags)
-            + "</span>")
-
-
 # ── A199 (cfdb-main-R-2065): THE GAMES A READER ADDS THEMSELVES ─────────────────────────
 #
 # > **MARC, v12:** *"making Looking Forward configurable, by providing a text input box on the
@@ -3899,6 +3854,27 @@ def _parse_game_ids(text: str):
     if len(ids) > _LF_MAX_IDS:
         ids, truncated = ids[:_LF_MAX_IDS], True
     return ids, unreadable, truncated
+
+
+# 🚨 A205 (cfdb-main-R-2252). ONE SENTENCE, READ IN TWO PLACES.
+#
+# > **MARC, v13 addition 3:** *"There needs to be some info on how/where to add games to the
+# > list on the page (pointing them to the bottom section of the Nav bar and including the
+# > game_id, which is available in the URL of the Matchup page."*
+#
+# ⚠️ THE SIDEBAR BOX'S HELP TEXT AND THIS LINE ARE THE SAME STRING, NOT TWO COPIES. The
+# prompt's own warning — *"do not write a second copy of the rule that can drift"* — and it is
+# this project's most-repeated failure in miniature. **This constant is the sentence; the box's
+# `help=` points at it.**
+#
+# ✅ AND IT SHOWS THE SHAPE RATHER THAN DESCRIBING IT. A reader who has seen `game_id=401866418`
+# once in an address bar does not need the word "querystring".
+_ADD_GAMES_EXAMPLE = "401866418"
+_ADD_GAMES_HINT = (
+    "To add a game, paste its id into \u201cAdd games to Looking Forward\u201d at the bottom "
+    f"of the sidebar \u2014 for example {_ADD_GAMES_EXAMPLE}, which is the "
+    f"game_id={_ADD_GAMES_EXAMPLE} in a Matchup page\u2019s web address. A whole Matchup link "
+    "works too.")
 
 
 def _close_cut_control() -> int:
@@ -3970,7 +3946,8 @@ def _looking_forward_box(scope, week):
         typed = st.text_area(
             "Add games to Looking Forward",
             key=key, height=90,
-            help="Paste game_ids or Matchup page links, one per line or separated by commas.")
+            # ⚠️ THE SAME SENTENCE THE SECTION SHOWS, not a second copy of the rule.
+            help=f"{_ADD_GAMES_HINT} One per line, or separated by commas.")
 
     ids, unreadable, truncated = _parse_game_ids(typed)
 
@@ -4207,6 +4184,41 @@ def _slate_reason_text(row, close_cut: int = _CLOSE_DEFAULT) -> str:
     return " \u00b7 ".join(label for flag, _kind, label in _SLATE_MARKS if flag in reasons)
 
 
+def _slate_team(row, side: str, scope, esc) -> str:
+    """One SLATE team cell: Schedule's own identity, with the NAME linked to its team page.
+
+    > **MARC, v13 addition 3:** *"For SLATE, the Team names need to by hyperlinks to the Teams
+    > page."*
+
+    ⚠️ THE CELL IS STILL `schedule_table.team_with_record` — the logo, rank, name and record
+    are not redrawn here. Only the name is wrapped, which keeps one identity renderer on the
+    site rather than a second that agrees until one of them changes.
+
+    🚨 TWO TARGETS IN ONE ROW, AND THEY ARE DIFFERENT QUESTIONS. The **team name** goes to that
+    team's page — *"how has this side been playing?"* The **Game cell's glyph** goes to the
+    matchup — *"what does this fixture look like?"* R-129's boundary is the same one Schedule
+    draws: the row's other cells are not a third destination.
+
+    ⚠️ A TEAM WITH NO SLUG IS PLAIN TEXT, NOT A LINK TO NOWHERE (A203's case, and
+    `table.team_link`'s own rule). `pd.isna` decides it — `NaN` is truthy.
+    """
+    cell = schedule_table.team_with_record(row, side)
+    slug = row.get(f"{side}_team_slug")
+    if scope is None or slug is None or pd.isna(slug) or not str(slug).strip():
+        return cell
+    href = esc(scope.link("team", team=str(slug)))
+    # ⚠️ THE NAME ONLY. Wrapping the whole cell would put the record inside the anchor, which
+    # is precisely what R-129 moved it out of — dead text under a pointer cursor.
+    #
+    # 🚨 MATCHED, NOT SPLICED ON THE FIRST `</span>`. The first draft wrapped the name's
+    # opening tag and then closed the anchor at the first closing tag in the string — and the
+    # LOGO BOX closes at character 152 while the name opens at 193, so the anchor would have
+    # closed 41 characters before it opened. Measured on the real cell, not reasoned about.
+    return re.sub(r"(<span class='cfdb-team'>.*?</span>)",
+                  f"<a class='cfdb-slate-teamlink' href='{href}' target='_self'>\\1</a>",
+                  cell, count=1)
+
+
 def _slate_spread(row) -> str:
     """The market line, formatted the way the table above it formats the same column.
 
@@ -4359,8 +4371,8 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
             clock = f"{local.strftime('%-I:%M')}{'a' if local.hour < 12 else 'p'}"
             rows_html.append(
                 "<tr>"
-                f"<td class='cfdb-slate-team'>{schedule_table.team_with_record(row, 'away')}</td>"
-                f"<td class='cfdb-slate-team'>{schedule_table.team_with_record(row, 'home')}</td>"
+                f"<td class='cfdb-slate-team'>{_slate_team(row, 'away', scope, esc)}</td>"
+                f"<td class='cfdb-slate-team'>{_slate_team(row, 'home', scope, esc)}</td>"
                 f"<td class='cfdb-num'>{_slate_spread(row)}</td>"
                 f"<td class='cfdb-num'>{_slate_total(row)}</td>"
                 f"<td class='cfdb-center'>{schedule_table.weather_cell(row)}</td>"
@@ -4452,9 +4464,15 @@ def _looking_forward(scope, depth: int) -> None:
                 f"Week {week}'s games to watch will appear here once week {week - 1} is "
                 f"final and the new AP Top 25 is out. Still pending: "
                 f"{' and '.join(pending)}.")
+            # ⚠️ THE HINT STAYS TRUE WITH THE GATE SHUT, AND THAT IS WHY IT IS SHOWN HERE.
+            # A reader can queue a game before the week opens — A199 draws the box whatever the
+            # gate says, for exactly that reason — so the line tells him how, rather than
+            # disappearing at the moment he has time to plan.
             if added_ids or unreadable:
                 st.caption(f"Your {len(added_ids)} added game(s) will show here once week "
-                           f"{week} opens.")
+                           f"{week} opens. {_ADD_GAMES_HINT}")
+            else:
+                st.caption(_ADD_GAMES_HINT)
             st.markdown(f"In the meantime, see the full slate on "
                         f"[Schedule]({scope.link('schedule')}).")
             return
@@ -4468,13 +4486,13 @@ def _looking_forward(scope, depth: int) -> None:
         # a published column — it has exactly one consumer, this render, for this viewer.
         if not games.empty:
             asked = set(added_ids)
+            # ⚠️ A204 ALSO PUT `_close_cut` ON THE FRAME, because `Col.render` is handed a ROW
+            # and nothing else — and the only thing that read it was the list's Why column.
+            # A205 removed that column, so the passenger went with it: `_slate` takes the
+            # cutoff as an argument. **A key nothing reads is a key the next reader has to
+            # check before changing.**
             games = games.assign(
-                is_added_by_you=games["game_id"].map(lambda g: int(g) in asked),
-                # ⚠️ THE CUTOFF RIDES THE FRAME because `Col.render` is handed a ROW and
-                # nothing else. It is the reader's choice, not a published value, which is
-                # why the name is underscored — `check_page_reads` would otherwise ask which
-                # query selects it, and the honest answer is none.
-                _close_cut=close_cut)
+                is_added_by_you=games["game_id"].map(lambda g: int(g) in asked))
         # ⚠️ A200: THE CAPTION NOW CARRIES BOTH THINGS THE CELLS STOPPED SAYING — the full
         # wording of the "Undefeated · close" rule, and that every kickoff is Pacific.
         # 🚨 THE CAPTION STATES THE NUMBER THE PAGE IS ACTUALLY USING. A fixed "four points"
@@ -4513,86 +4531,39 @@ def _looking_forward(scope, depth: int) -> None:
         # is added beyond them at a measured width: the widest single tag draws 105.1px and
         # the cell adds 8.8px of padding a side. The tags STACK when both rules fire, so the
         # width is the widest ONE tag rather than the pair.
-        _WHY_COLUMN_PX = 106
-
-        def render(rows):
-            columns = schedule_table.columns(scope)
-
-            # 🚨 A200: THE TWO SCORE COLUMNS COME OUT WHILE NOTHING IN THE FRAME HAS BEEN
-            # PLAYED, AND THAT IS WHAT MAKES THE REASON READABLE WITHOUT SCROLLING.
-            #
-            # 📊 MEASURED at 1440 with the sidebar open, before this change: the scroll box is
-            # 980px and the table is 1022.9px, so the Why column sat 42.9px PAST the right
-            # edge. ⚠️ Cowork read that as the tags being clipped; the clone method says they
-            # are not — 0 of 12 clipped at either width. **The column was off-screen, not cut**,
-            # and the two defects have different fixes.
-            #
-            # ⚠️ AND SHORTENING THE TAGS CANNOT CLOSE IT: it buys 18.3px of a 47.6px gap (the
-            # gap includes the 4.7px the kickoff cell needs below). A196 already measured that
-            # scaling Schedule's percentages down to make room breaks the O/U cell, so the
-            # width has to come from a column rather than from all of them.
-            #
-            # ✅ These two are 96.4px between them and, on a list of games that have not
-            # kicked off, every cell in both reads "—". A column that can only render one
-            # value for every row is not information, and dropping them leaves 67px of spare
-            # width rather than a table that has to be dragged sideways.
-            #
-            # 🚨 THEY COME BACK THE MOMENT A GAME IN THE WEEK IS COMPLETE. The upcoming week
-            # can hold a Tuesday game that is already final, and hiding a real score to save
-            # width would be the trade this comment exists to refuse.
-            # 🚨 A200 / R-1977: THE KICKOFF CELL CARRIES ITS DAY, AND ONLY ON THIS PAGE.
-            #
-            # `fmt.clock` says in its own docstring that it is "for a table already grouped by
-            # day" — which Schedule is, and Looking Forward is not. So the Friday game sat at
-            # the top of the list with nothing saying it was a Friday.
-            #
-            # 📊 AND THE ZONE SUFFIX IS WHAT MADE IT WRAP: measured by the clone method, the
-            # cell's content box is 80px and "12:30 PM PDT" needs 90px, so 4 of 10 rows drew
-            # on two lines. "Sat 12:30 PM" is 84.7px and the widest of the week,
-            # "Sat 10:30 AM", is 84.3px — both inside a 103px column.
-            #
-            # ⚠️ THE ZONE IS NOT DROPPED, IT MOVES TO THE CAPTION. Every kickoff on this page
-            # is Pacific, so saying so eleven times costs a wrap to repeat what one sentence
-            # settles. ✅ AND `schedule_table.columns()` IS NOT TOUCHED: Schedule keeps its own
-            # day headings and its own "12:30 PM PDT", byte for byte.
-            columns = [
-                Col("start_date", "Kickoff", render=lambda r: (
-                    f"{_lf_kickoff(r)}{schedule_table.neutral_glyph(r)}"))
-                if c.field == "start_date" else c
-                for c in columns]
-
-            played = bool(rows["is_completed"].any()) if "is_completed" in rows else False
-            if not played:
-                columns = [c for c in columns
-                           if c.field not in ("away_points", "home_points")]
-
-            layout = table.column_layout(rows, columns) + [f"{_WHY_COLUMN_PX}px"]
-            columns.append(Col("why", "Why", render=_high_value_reason))
-            # ⚠️ `anchor` IS NOT OPTIONAL HERE — A141 anchored every table on this page and
-            # `test_every_table_render_that_takes_an_anchor_is_the_one_that_draws` holds it.
-            # It goes on the `table.render` that DRAWS, not on the `states.render_or_state`
-            # around it: A141 shipped five broken panels by putting it on the wrapper, where
-            # `states.section` caught the TypeError and drew a considered-looking failure card.
-            return table.render(
-                rows, columns, caption="",
-                layout=layout,
-                anchor="looking-forward", scroll=True,
-                link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]))
-
-        states.render_or_state(
-            games, "srv_game",
-            "The week's games to watch would be here.",
-            f"No games in week {week} meet the high-value rules yet.",
-            renderer=render)
-
-        # A199: never silent (AC-G.11) — say what happened to what was pasted.
-        note = _looking_forward_feedback(
-            week, added_ids,
-            set(int(g) for g in games["game_id"]) if not games.empty else set(),
-            unreadable, truncated)
-        if note:
-            st.caption(note)
-
+        # 🚨 A205 (cfdb-main-R-2250). THE SCHEDULE-STYLE LIST IS GONE; THE SLATE IS THE SECTION.
+        #
+        # > **MARC, v13 addition 3:** *"let's deprecate the table above the SLATE. It has the
+        # > same information as SLATE and I think SLATE is more informative."*
+        #
+        # ⚠️ WHAT THE LIST CARRIED, AND WHERE IT WENT — enumerated before deleting, because a
+        # column that quietly stops being drawn is indistinguishable from one that was never
+        # there (AC-G.11):
+        #
+        #   Kickoff ........ the SLATE labels every bar with its start time and groups by day
+        #   Away · Home .... the SLATE rows are Schedule's own team cells (A201)
+        #   Spread · O/U ... SLATE columns since A204
+        #   Wx · TV ........ SLATE columns since A204
+        #   Game ........... the SLATE's Matchup link
+        #   Why ............ the SLATE's three reason slots, aligned by type (A204)
+        #   "Added N" ...... KEPT, below the SLATE — it is a caption, not part of the table
+        #   full slate link  KEPT, below the SLATE
+        #
+        # 🚨 THREE THINGS HAVE NO HOME ON THE SLATE, AND THEY ARE NAMED RATHER THAN DROPPED:
+        #
+        #   1. A COMPLETED GAME'S SCORE. A200 gave the list score columns that appeared only
+        #      when something in the frame had been played; the SLATE has no score column and
+        #      adding one would break the width Marc chose in A204. **The row still links to
+        #      Matchup, where the score is.** ⚠️ The state has never occurred on live data —
+        #      A200 and A204 both recorded it as unexercised.
+        #   2. COLUMN SORTING. The list's headers sorted by spread, O/U and kickoff. The SLATE
+        #      is ordered by time within a day, which is what a run sheet is for.
+        #   3. THE `looking-forward` ANCHOR the sort links used. Nothing else points at it.
+        #
+        # ✅ AND THE STATED EMPTY SURVIVES, which is the one thing this could have lost
+        # silently: `_slate` returns "" for an empty frame, so the section would have drawn
+        # NOTHING where the list used to say "No games in week N meet the high-value rules
+        # yet." The SLATE goes inside `states.render_or_state` for exactly that.
         # ── A198 (cfdb-main-R-2051): THE SLATE, BELOW THE LIST ────────────────────────────
         #
         # > **MARC, v12:** *"Create a SLATE schedule for what games are on when (with network
@@ -4603,15 +4574,34 @@ def _looking_forward(scope, depth: int) -> None:
         # frame, so it cannot appear while the splash is showing and cannot disagree with the
         # table above it about which games qualify. An empty frame draws nothing at all —
         # `states.render_or_state` has already said the honest empty above.
-        slate = _slate(games, esc=html.escape, scope=scope, close_cut=close_cut)
-        if slate:
-            st.markdown("**Slate**")
-            st.markdown(slate, unsafe_allow_html=True)
+        # ✅ INSIDE `render_or_state`, SO THE STATED EMPTY SURVIVES THE LIST'S REMOVAL.
+        # `_slate` returns "" for an empty frame, so a bare `if slate:` would draw nothing at
+        # all where the list used to name the absence — the silent-empty defect AC-G.11 is
+        # about, arriving by deletion rather than by design.
+        st.markdown("**Slate**")
+        states.render_or_state(
+            games, "srv_game",
+            "The week's games to watch would be here.",
+            f"No games in week {week} meet the high-value rules yet.",
+            renderer=lambda rows: st.markdown(
+                _slate(rows, esc=html.escape, scope=scope, close_cut=close_cut),
+                unsafe_allow_html=True))
+
+        if not games.empty:
             st.caption(
                 f"Kick-off times Pacific. Each bar runs "
                 f"{_SLATE_GAME_MINUTES // 60}h {_SLATE_GAME_MINUTES % 60:02d}m from kick-off "
                 f"\u2014 a fixed allowance, not a measured end time, which CFBD does not "
-                f"publish. Hover a bar for the matchup, network, line and why it qualified.")
+                f"publish. Hover a bar for the matchup, network, line and why it qualified. "
+                f"{_ADD_GAMES_HINT}")
+
+        # A199: never silent (AC-G.11) — say what happened to what was pasted.
+        note = _looking_forward_feedback(
+            week, added_ids,
+            set(int(g) for g in games["game_id"]) if not games.empty else set(),
+            unreadable, truncated)
+        if note:
+            st.caption(note)
 
         st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
 
