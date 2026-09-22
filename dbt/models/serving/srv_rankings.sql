@@ -57,21 +57,36 @@ select
     case when eg.game_team_sk is not null then r.week - 1 end   as explained_by_game_week,
     -- Away over home, resolved HERE so the page orders nothing. `is_home` is the ranked
     -- team's own row, so it says which side of the pair that team is.
-    case when eg.is_home then og.team_display else t.team_display end
+    -- 🚨 EVERY ONE OF THESE IS GATED ON THE GAME EXISTING, AND THE FIRST VERSION WAS NOT.
+    -- `case when eg.is_home then A else B end` falls to B when `eg.is_home` is NULL, so a
+    -- poll row with NO explaining game published the RANKED TEAM'S OWN NAME in the away
+    -- slot. Measured after the first publish: explained_by_game_week was null on all 25 of
+    -- 2026 AP poll week 1, exactly right -- while game_away_display was non-null on all 100
+    -- rows. The page never showed it (it branches on explained_by_game_week first), which is
+    -- what made it invisible: a column that reads as data and is an artefact of a CASE.
+    case when eg.game_team_sk is null then null
+         when eg.is_home then og.team_display else t.team_display end
                                                                 as game_away_display,
-    case when eg.is_home then og.logo_source_url else t.logo_source_url end
+    case when eg.game_team_sk is null then null
+         when eg.is_home then og.logo_source_url else t.logo_source_url end
                                                                 as game_away_logo_url,
-    case when eg.is_home then rw_o.record_after else rw_t.record_after end
+    case when eg.game_team_sk is null then null
+         when eg.is_home then rw_o.record_after else rw_t.record_after end
                                                                 as game_away_record_after,
-    case when eg.is_home then eg.points_against else eg.points_for end
+    case when eg.game_team_sk is null then null
+         when eg.is_home then eg.points_against else eg.points_for end
                                                                 as game_away_points,
-    case when eg.is_home then t.team_display else og.team_display end
+    case when eg.game_team_sk is null then null
+         when eg.is_home then t.team_display else og.team_display end
                                                                 as game_home_display,
-    case when eg.is_home then t.logo_source_url else og.logo_source_url end
+    case when eg.game_team_sk is null then null
+         when eg.is_home then t.logo_source_url else og.logo_source_url end
                                                                 as game_home_logo_url,
-    case when eg.is_home then rw_t.record_after else rw_o.record_after end
+    case when eg.game_team_sk is null then null
+         when eg.is_home then rw_t.record_after else rw_o.record_after end
                                                                 as game_home_record_after,
-    case when eg.is_home then eg.points_for else eg.points_against end
+    case when eg.game_team_sk is null then null
+         when eg.is_home then eg.points_for else eg.points_against end
                                                                 as game_home_points,
     eg.result                                                   as game_result_for_team
 from {{ ref('fct_poll_rank') }} r

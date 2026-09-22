@@ -79,8 +79,87 @@ CSS = """
    which is also why there is no palette here to validate. One series, one hue, no legend —
    the chart standard's §7. Nothing encodes a judgement: no color scale, no threshold line,
    no quadrant shading. */
-.cfdb-scatter { margin:.2rem 0 .1rem; }
+/* 🚨 A190 (cfdb-main-R-1938). `position:relative` AND THE SVG FILLING ITS BOX ARE WHAT MAKE
+   THE HOVER LAYER LINE UP. Each hotspot is placed at `cx/viewBox-width%`, so the percentages
+   only land on the marks while the SVG is `width:100%; height:auto` with its viewBox aspect
+   ratio and the layer is `inset:0` on this box. Change either and every tooltip drifts off
+   its point — silently, because nothing throws. `test_the_scatter_overlay_can_line_up_with
+   _the_marks` holds both halves. */
+.cfdb-scatter { margin:.2rem 0 .1rem; position:relative; }
 .cfdb-scatter svg { display:block; width:100%; height:auto; color:inherit; }
+
+/* ── A190: the hover layer ─────────────────────────────────────────────────────────────────
+   ⚠️ CSS-ONLY, AND NOT BY CHOICE: Streamlit's `unsafe_allow_html` strips `<script>`, so there
+   is no JS to position anything with. Each hotspot owns its tooltip and shows it on `:hover`
+   and `:focus-within` — the second is what makes it work on a tap and from a keyboard, which
+   `:hover` alone cannot do. */
+.cfdb-sc-layer { position:absolute; inset:0; }
+.cfdb-sc-hot { position:absolute; width:18px; height:18px; margin:-9px 0 0 -9px;
+               border-radius:50%; cursor:pointer; outline:none; }
+.cfdb-sc-hot:focus-visible { outline:2px solid var(--cfdb-link); outline-offset:1px; }
+.cfdb-sc-tip { position:absolute; z-index:5; visibility:hidden; opacity:0;
+               transition:opacity .08s linear;
+               min-width:12rem; max-width:17rem; padding:.45rem .55rem;
+               background:var(--cfdb-sticky-bg); color:CanvasText;
+               border:1px solid var(--cfdb-edge); border-radius:4px;
+               box-shadow:0 2px 10px rgba(0,0,0,.18);
+               font-size:.72rem; line-height:1.25; text-align:left;
+               pointer-events:none; }
+.cfdb-sc-hot:hover .cfdb-sc-tip,
+.cfdb-sc-hot:focus .cfdb-sc-tip,
+.cfdb-sc-hot:focus-within .cfdb-sc-tip { visibility:visible; opacity:1; }
+/* The flip. `data-side`/`data-vert` are computed in Python from the point's own position,
+   because CSS cannot ask where its element sits — see `_scatter_hotspot`. */
+.cfdb-sc-tip[data-side='right'] { left:16px; }
+.cfdb-sc-tip[data-side='left']  { right:16px; }
+.cfdb-sc-tip[data-vert='down']  { bottom:6px; }
+.cfdb-sc-tip[data-vert='up']    { top:6px; }
+.cfdb-sc-head { display:flex; align-items:center; gap:.3rem; flex-wrap:wrap;
+                margin-bottom:.25rem; }
+.cfdb-sc-logo { width:18px; height:18px; object-fit:contain; flex:0 0 auto; }
+.cfdb-sc-team { font-weight:700; }
+.cfdb-sc-rank { font-weight:700; opacity:.75; font-size:.68rem; }
+.cfdb-sc-unranked { opacity:.55; font-size:.66rem; font-style:italic; }
+.cfdb-sc-record { opacity:.6; font-size:.68rem; }
+.cfdb-sc-stat { display:block; }
+.cfdb-sc-stat i { font-style:normal; opacity:.6; font-size:.66rem; }
+.cfdb-sc-pop { opacity:.5; font-size:.62rem; margin-top:.15rem; }
+.cfdb-sc-vs { margin-top:.3rem; padding-top:.25rem; font-size:.68rem;
+              border-top:1px solid var(--cfdb-rule-soft);
+              display:flex; align-items:center; gap:.25rem; flex-wrap:wrap; }
+/* A190: the ring marking a team the distance table lists. */
+.cfdb-sc-ring { stroke-opacity:.35; }
+
+/* ── A190: the distance table beside the chart ────────────────────────────────────────────
+   Six columns in ~18% of the row, so the team name is the only flexible one and everything
+   else is sized to its content. */
+/* ⚠️ THE `min-width` IS THE STACKING MECHANISM, NOT A COSMETIC FLOOR. It equals what the
+   row's first line needs (rank 17.6 + logo 17.6 + widest name 116.9 + gaps 8 = 160.1), and
+   Streamlit's `stHorizontalBlock` is `flex-wrap:wrap` with `min-width:auto` columns — so
+   below roughly 1400px the column cannot shrink past this and drops to its own full-width
+   line beneath the chart. Container-driven, so it is right with the sidebar open or closed. */
+.cfdb-far { font-size:.72rem; min-width:10rem; }
+.cfdb-far-head { font-weight:700; font-size:.7rem; letter-spacing:.04em;
+                  text-transform:uppercase; opacity:.65; padding-bottom:.2rem;
+                  border-bottom:1px solid var(--cfdb-edge); margin-bottom:.15rem; }
+/* Two lines: rank + logo + NAME across the top, the three small facts under it. See
+   `today._distance_table` for the measurement that forced it — six columns on one line need
+   245.9px and Marc's 15-20% band gives 168.4px at 1440. */
+.cfdb-far-row { display:grid; grid-template-columns:1.1rem 1.1rem minmax(0,1fr);
+                align-items:center; gap:.1rem .25rem; padding:.2rem 0;
+                border-bottom:1px solid var(--cfdb-rule-soft); }
+.cfdb-far-meta { grid-column:3 / -1; display:flex; gap:.25rem; align-items:baseline;
+                 font-size:.64rem; opacity:.7; white-space:nowrap; }
+.cfdb-far-slash { opacity:.4; }
+.cfdb-far-rank { font-weight:700; opacity:.45; font-variant-numeric:tabular-nums;
+                  text-align:right; font-size:.68rem; }
+.cfdb-far-logo { width:16px; height:16px; object-fit:contain; }
+.cfdb-far-team { min-width:0; overflow:hidden; white-space:nowrap;
+                  text-overflow:ellipsis; font-weight:600; }
+.cfdb-far-rec { opacity:.5; font-weight:400; margin-left:.25rem; font-size:.66rem; }
+.cfdb-far-num { font-variant-numeric:tabular-nums; text-align:right; opacity:.8; }
+.cfdb-far-foot { opacity:.55; font-size:.62rem; margin-top:.3rem; line-height:1.25; }
+.cfdb-far-none { opacity:.6; font-size:.7rem; padding:.4rem 0; }
 /* A178 (cfdb-main-R-1853). "Mute (lighter by 50%) down the current gridlines" — .14 -> .07,
    which is his 50% exactly, and with the ladder now at 100-yard steps there are half as many
    of them as well. */
