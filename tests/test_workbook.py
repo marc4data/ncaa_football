@@ -489,13 +489,26 @@ def test_export_labels_agree_with_the_site(built):
     from lib.registry import PAGES
     site = Path(__file__).resolve().parents[1] / "site"
 
+    COL_DECL = r'Col\(\s*"(\w+)"\s*,\s*"([^"]*)"'
+    # 🚨 A196: A PAGE'S COLUMNS ARE NOT ALWAYS IN THE PAGE'S OWN FILE ANY MORE.
+    #
+    # Schedule's game table moved to `lib/schedule_table.py` so Today's "Looking Forward"
+    # could render the SAME table rather than a copy of it. The labels did not change --
+    # their location did -- and this scanner read only `views/<page>.py`, so Schedule's
+    # compared count fell from 7 to 5 and the floor below caught it. ⚠️ **That is the guard
+    # working**: it is a floor precisely so a legitimate page change does not fail it while a
+    # silent drop to nothing does. The fix is to look where the columns live, not to lower it.
+    SHARED_COLUMN_MODULES = {"schedule": [site / "lib" / "schedule_table.py"]}
+
     view_labels = {}
     for page in PAGES:
         path = site / "views" / f"{page.key}.py"
         if not page.view or not path.exists():
             continue
-        for field, label in re.findall(r'Col\(\s*"(\w+)"\s*,\s*"([^"]*)"', path.read_text()):
-            view_labels.setdefault(page.view, {}).setdefault(field, set()).add(label)
+        sources = [path] + [s for s in SHARED_COLUMN_MODULES.get(page.key, []) if s.exists()]
+        for source in sources:
+            for field, label in re.findall(COL_DECL, source.read_text()):
+                view_labels.setdefault(page.view, {}).setdefault(field, set()).add(label)
 
     mismatches, compared = [], {}
     for sheet in workbook.SHEETS:
@@ -689,6 +702,9 @@ def test_the_export_and_the_page_spell_the_division_rule_identically():
     """
     page = (Path(__file__).resolve().parents[1] / "site" / "views" / "schedule.py").read_text()
     predicate = "(:division = 'all' or is_fbs_game)"
+    # A196: the query moved to `lib/schedule_table.py`; the predicate did not change.
+    page += (Path(__file__).resolve().parents[1]
+             / "site" / "lib" / "schedule_table.py").read_text()
     assert predicate in page, (
         "the Schedule page no longer spells the rule this way; the export must follow it, "
         "not the other way round")

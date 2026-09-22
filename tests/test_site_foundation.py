@@ -1155,7 +1155,13 @@ def test_the_query_checker_actually_scans_the_pages():
     scanned = list(check_page_queries.statements())
     files = {path.name for path, _, _ in scanned}
     assert len(scanned) >= 40, f"only {len(scanned)} statements found; the globs are wrong"
-    assert "schedule.py" in files, "the busiest page in the app is not being checked"
+    # ⚠️ A196: SCHEDULE'S QUERY MOVED TO `lib/schedule_table.py` so Today could render the
+    # SAME table rather than a copy. It is still scanned — `check_page_queries` globs `lib/`
+    # as well as `views/` — but under a different filename. The claim this test makes is that
+    # the busiest page's SQL is checked, not which file it sits in.
+    assert files & {"schedule.py", "schedule_table.py"}, (
+        "the busiest page in the app is not being checked, in either of the two files its "
+        "query has lived in")
     assert len(files) >= 15, f"only {len(files)} files scanned: {sorted(files)}"
 
 

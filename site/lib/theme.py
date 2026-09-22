@@ -138,6 +138,14 @@ CSS = """
    Streamlit's `stHorizontalBlock` is `flex-wrap:wrap` with `min-width:auto` columns — so
    below roughly 1400px the column cannot shrink past this and drops to its own full-width
    line beneath the chart. Container-driven, so it is right with the sidebar open or closed. */
+/* ── A196: the "why is this game here" tag on Looking Forward ─────────────────────────────
+   ⚠️ IT READS THE PUBLISHED FLAGS AND DECIDES NOTHING (see `today._high_value_reason`), and
+   BOTH tags can appear on one game — a Top 25 matchup that is also an undefeated side at a
+   short line. Showing only the first would make the second rule look narrower than it is. */
+.cfdb-why { display:inline-flex; flex-wrap:wrap; gap:.25rem; }
+.cfdb-why-tag { font-size:.62rem; line-height:1.4; padding:.05rem .3rem; white-space:nowrap;
+                border:1px solid var(--cfdb-edge); border-radius:3px; opacity:.8; }
+
 .cfdb-far { font-size:.72rem; min-width:10rem; }
 .cfdb-far-head { font-weight:700; font-size:.7rem; letter-spacing:.04em;
                   text-transform:uppercase; opacity:.65; padding-bottom:.2rem;

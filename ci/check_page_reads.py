@@ -328,8 +328,28 @@ def as_of_audit(path, selected):
     return calls[0]
 
 
+# ⚠️ A196: A PAGE'S QUERIES ARE NOT ALWAYS IN THE PAGE'S OWN FILE.
+#
+# Schedule's game table — its columns AND its query — moved to `lib/schedule_table.py` so
+# Today's Looking Forward could render the SAME table rather than a copy of it. Nothing about
+# what Schedule selects changed; the file did. This scanner read only `views/<page>.py`, so
+# every column Schedule reads suddenly looked unselected.
+#
+# 🚨 THE GUARD WAS RIGHT TO FIRE — a page reading a column no query selects is exactly what it
+# is for, and it cannot tell "moved" from "missing" by itself. The fix is to scan where the
+# query lives, one entry with a reason, never a blanket.
+SHARED_QUERY_MODULES = {
+    "schedule.py": [ROOT / "site" / "lib" / "schedule_table.py"],
+    # Today renders Schedule's table in Looking Forward through the same module.
+    "today.py": [ROOT / "site" / "lib" / "schedule_table.py"],
+}
+
+
 def audit(path, sheets):
     source = path.read_text(encoding="utf-8")
+    for extra in SHARED_QUERY_MODULES.get(path.name, []):
+        if extra.exists():
+            source += "\n" + extra.read_text(encoding="utf-8")
     tree = ast.parse(source)
     strings = _strings(tree)          # any level — SQL is often a function local
     constants = _module_strings(tree)  # module level only — see the docstring

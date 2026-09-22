@@ -24,6 +24,7 @@ import streamlit as st
 
 from lib import (filters, fmt, glyphs, identity, metrics, params, shell, states, tab,
                  table, theme, winprob)
+from lib import schedule_table
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -3529,13 +3530,244 @@ def _recap(scope, depth: int) -> None:
             _recap_lists(games, scope)
 
 
+# 🚨 A196 (cfdb-main-R-2033). THE GRACE WINDOW THAT KEEPS ONE CANCELLED GAME FROM HOLDING
+# THE GATE SHUT ALL SEASON.
+#
+# Marc's gate is "last week is done". Read literally — every FBS game whose kickoff has passed
+# is completed — a game that will NEVER complete jams it permanently.
+#
+# 📊 MEASURED ACROSS THE WHOLE CORPUS: exactly ONE such game exists. App State vs Liberty,
+# 2024 regular week 5, kickoff 2024-09-28, no points, `is_completed` false — **724 days past**.
+# That is the Hurricane Helene cancellation, and under a strict rule it would have held 2024
+# week 6's Looking Forward closed for the rest of the season and every season after.
+#
+# ✅ SO A GAME ONLY HOLDS THE GATE WHILE IT COULD STILL PLAUSIBLY FINISH: kickoff in the last
+# seven days. Seven because that is one game week — once the next week's slate has started, an
+# unfinished game from the week before is not coming back. ⚠️ **The number is stated rather
+# than tuned**: the one real instance is 724 days out, so nothing in the corpus sits near this
+# boundary and no choice between 2 and 7 days would change a single answer today.
+_STALE_GAME_DAYS = 7
+
+
+def _upcoming_game_week(scope):
+    """The earliest week of this season with FBS games still unplayed, or None.
+
+    🚨 A196 (cfdb-main-R-2034). THIS SECTION DOES NOT FOLLOW THE PAGE'S WEEK FILTER, AND THAT
+    IS A DECISION RATHER THAN AN OVERSIGHT.
+
+    ⚠️ **A reader looking back at week 2 still wants the UPCOMING week's games.** Looking
+    Forward is about the real upcoming week; the filter above it is about the recap below it.
+    The section's own heading names the week and its caption says the filter does not apply,
+    because a panel that silently ignores a control the reader just moved is worse than one
+    that never offered it.
+
+    ⚠️ RETURNS None AT THE END OF THE REGULAR SEASON — every week played — and the caller says
+    so plainly rather than guessing at a bowl week. Postseason scheduling is its own shape and
+    this round does not pretend to know it.
+    """
+    frame = query("""
+        select min(week) as week
+        from srv_game
+        where season = :season and season_type = :season_type
+          and is_fbs_game and not is_completed
+        limit 1
+    """, {"season": scope.season, "season_type": scope.season_type})
+    if frame is None or frame.empty:
+        return None
+    week = frame.iloc[0]["week"]
+    return None if week is None or pd.isna(week) else int(week)
+
+
+def _week_is_final(scope, week: int) -> bool:
+    """Is every FBS game in `week` that could still finish, finished?
+
+    See `_STALE_GAME_DAYS` for why "could still finish" is not the same as "has kicked off".
+    """
+    frame = query("""
+        select count(*) as blocking
+        from srv_game
+        where season = :season and season_type = :season_type and week = :week
+          and is_fbs_game and not is_completed
+          and start_date < now()
+          and start_date > now() - make_interval(days => :grace)
+        limit 1
+    """, {"season": scope.season, "season_type": scope.season_type, "week": int(week),
+          "grace": _STALE_GAME_DAYS})
+    if frame is None or frame.empty:
+        return False
+    return int(frame.iloc[0]["blocking"] or 0) == 0
+
+
+def _poll_is_out(scope, week: int) -> bool:
+    """Is the AP poll for this game week published?
+
+    📊 A190 ESTABLISHED THE ALIGNMENT AND IT IS WHY THIS READS WEEK W RATHER THAN W-1: poll
+    week W is published BEFORE game week W and reflects game week W-1. So "the new poll" for
+    upcoming game week W is poll week W.
+
+    ✅ AND `srv_game` ALREADY CARRIES THOSE RANKS. Proven against `srv_rankings` week 4: of
+    the 15 week-4 fixtures whose home side is ranked, **15 of 15 agree with the poll's rank
+    exactly**, and none carries a rank the poll does not have. So the Top 25 rule reads
+    `home_rank`/`away_rank` off the game and needs no join.
+    """
+    frame = query("""
+        select count(*) as ranked
+        from srv_rankings
+        where season = :season and poll_name = 'AP Top 25' and week = :week
+        limit 1
+    """, {"season": scope.season, "week": int(week)})
+    if frame is None or frame.empty:
+        return False
+    return int(frame.iloc[0]["ranked"] or 0) > 0
+
+
+def _high_value_games(scope, week: int) -> pd.DataFrame:
+    """The upcoming week's high-value games — Schedule's own query, filtered.
+
+    ⚠️ THE DEFINITION IS NOT HERE. `is_high_value`, `is_top25_matchup` and
+    `is_undefeated_close` are published on `srv_game` (A196) because "which games matter" is a
+    definition and not a rendering (§4.2.1). The page passes a flag and adds no rule.
+
+    🚨 AND THE COLUMN LIST IS NOT HERE EITHER, WHICH IS THE POINT. A196's first attempt wrote
+    its own SELECT beside Schedule's and guessed two column names wrong — `venue_name` (it is
+    `venue_display`) and `weather` (a synthetic name Schedule's `weather_cell` composes from
+    three real columns). The page raised `UndefinedColumn` into `states.section` and drew one
+    error card: **a handled failure that looks considered.** Rendering Schedule's columns from
+    a different query than Schedule's is the mistake; there is now only one query.
+
+    ⚠️ `division='fbs'` AND NO CONFERENCE FILTER ON PURPOSE. This section does not follow the
+    page's filters (see `_upcoming_game_week`), so it asks for the same slate Schedule would
+    show with its defaults and narrows it by the flag alone.
+    """
+    return schedule_table.rows(scope.season, int(week), scope.season_type,
+                               conference=None, division="fbs", high_value_only=True)
+
+
+def _high_value_reason(row) -> str:
+    """The tag that says WHY a game is on this list. It reads the flags and decides nothing.
+
+    ⚠️ BOTH RULES CAN FIRE ON ONE GAME and the tag says so — USC vs Oregon in 2026 week 4 is a
+    Top 25 matchup AND an undefeated side at a 3-point line. Showing only the first would make
+    the second rule look narrower than it is.
+    """
+    tags = []
+    if bool(row.get("is_top25_matchup")):
+        tags.append("Top 25 matchup")
+    if bool(row.get("is_undefeated_close")):
+        tags.append("Undefeated \u00b7 close line")
+    if not tags:
+        return ""
+    return ("<span class='cfdb-why'>"
+            + "".join(f"<span class='cfdb-why-tag'>{html.escape(t)}</span>" for t in tags)
+            + "</span>")
+
+
 def _looking_forward(scope, depth: int) -> None:
-    st.subheader("Looking forward")
-    st.caption(
-        "The week preview — matchups to watch, and what the market makes of them — is the "
-        "next round of work on this page. It is not built yet, and an empty frame would "
-        "imply it was.")
-    st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
+    """The upcoming week's games worth watching, once the week before it is settled.
+
+    > **MARC, v12:** *"the layout should be the same as Schedule, this section should be
+    > pre-filtered to games we've identified as high-value. Look for Top 25 matchups.
+    > Matchups with an undefeated FBS team and a ABS(spread) < 4"*
+
+    > **MARC, on timing:** *"It has to be live after Saturday games are complete and the next
+    > week of rankings is available. Can put up a splash note that it will be populated after
+    > Rankings come out."*
+
+    🚨 THE GATE IS DATA, NOT A CLOCK. Two conditions — the previous game week is settled, and
+    the AP poll for the upcoming week is published — and the splash names whichever is still
+    pending. ⚠️ **No empty table and no stale list from last week**, which are the two ways a
+    section like this lies while looking fine.
+    """
+    with states.section("srv_game", dataset=DATASETS["srv_game"]):
+        week = _upcoming_game_week(scope)
+        if week is None:
+            # AC-G.11: say WHICH absence. The regular season being over is a real state, and
+            # it is not the same as the gate being shut.
+            st.subheader("Looking forward")
+            st.caption(
+                f"Every {scope.season} regular-season week has been played. Bowl and playoff "
+                f"fixtures are a different shape and this section does not guess at them.")
+            st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
+            return
+
+        st.subheader(f"Looking forward \u00b7 week {week}")
+
+        pending = []
+        if not _week_is_final(scope, week - 1):
+            pending.append(f"week {week - 1} is not final yet")
+        if not _poll_is_out(scope, week):
+            pending.append(f"the AP Top 25 for week {week} is not out yet")
+
+        if pending:
+            # 🚨 THE SPLASH MARC ASKED FOR, AND IT NAMES WHAT IS MISSING. "Coming soon" would
+            # leave a reader unable to tell a pipeline failure from a Tuesday.
+            st.info(
+                f"Week {week}'s games to watch will appear here once week {week - 1} is "
+                f"final and the new AP Top 25 is out. Still pending: "
+                f"{' and '.join(pending)}.")
+            st.markdown(f"In the meantime, see the full slate on "
+                        f"[Schedule]({scope.link('schedule')}).")
+            return
+
+        games = _high_value_games(scope, week)
+        st.caption(
+            "Top 25 matchups, and games where an undefeated FBS team meets a line inside "
+            "four points. This section always shows the next week to be played \u2014 it "
+            "does not follow the week filter above.")
+
+        # ⚠️ THE SAME TABLE AS SCHEDULE, CALLED RATHER THAN COPIED. `lib/schedule_table` was
+        # promoted out of `views/schedule.py` for exactly this (A196); a view may not import
+        # another view, and a copy is two tables that agree until one of them changes.
+        # 🚨 THE REASON COLUMN GETS A FIXED SHARE, AND TWO EARLIER ATTEMPTS DID NOT WORK.
+        #
+        # `table.column_layout` weighs a column by the STRIPPED TEXT LENGTH of its widest
+        # cell. A game carrying both tags strips to about 37 characters, so the reason column
+        # asked for **201.8px against a 32.5px need** — and squeezed Spread to 52.4px against
+        # 70.5px, wrapping `+5.5` onto two lines. 📊 Measured at 1440: **88 wrapped body cells
+        # against Schedule's 10**, the same table at the same width.
+        #
+        # ⚠️ APPENDING A px WIDTH TO SCHEDULE'S PERCENTAGES DID NOT FIX IT EITHER. Those
+        # percentages already sum to 100, so a fixed column on the end is 124px ON TOP of a
+        # full-width table and every other column shrinks to make room. The wrap count did not
+        # move.
+        #
+        # ⚠️ SCALING SCHEDULE'S PERCENTAGES DOWN TO MAKE ROOM WAS THE THIRD ATTEMPT AND ALSO
+        # WRONG. It fixed the spread — `+5.5` stopped breaking — but it makes every Schedule
+        # column 12% narrower than Schedule's own, and `56.5` in O/U then splits instead.
+        # **An eleventh column in a table sized for ten has to come from somewhere**, and
+        # taking it from all ten is not "the same layout as Schedule".
+        #
+        # ✅ SO THE TABLE SCROLLS, WHICH IS THIS PAGE'S OWN PRECEDENT. A189 did exactly this
+        # for Most Exciting on Marc's instruction — *"the last 6 columns get a fixed width and
+        # the table will have a horizontal scroll instead of forcing them to be super
+        # narrow"*. Schedule's columns keep Schedule's widths, unscaled, and the reason column
+        # is added beyond them at a measured width: the widest single tag draws 105.1px and
+        # the cell adds 8.8px of padding a side. The tags STACK when both rules fire, so the
+        # width is the widest ONE tag rather than the pair.
+        _WHY_COLUMN_PX = 124
+
+        def render(rows):
+            columns = schedule_table.columns(scope)
+            layout = table.column_layout(rows, columns) + [f"{_WHY_COLUMN_PX}px"]
+            columns.append(Col("why", "Why", render=_high_value_reason))
+            # ⚠️ `anchor` IS NOT OPTIONAL HERE — A141 anchored every table on this page and
+            # `test_every_table_render_that_takes_an_anchor_is_the_one_that_draws` holds it.
+            # It goes on the `table.render` that DRAWS, not on the `states.render_or_state`
+            # around it: A141 shipped five broken panels by putting it on the wrapper, where
+            # `states.section` caught the TypeError and drew a considered-looking failure card.
+            return table.render(
+                rows, columns, caption="",
+                layout=layout,
+                anchor="looking-forward", scroll=True,
+                link_builder=lambda r: scope.link("matchup", game_id=r["game_id"]))
+
+        states.render_or_state(
+            games, "srv_game",
+            "The week's games to watch would be here.",
+            f"No games in week {week} meet the high-value rules yet.",
+            renderer=render)
+
+        st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
 
 
 # --- page -----------------------------------------------------------------------------
