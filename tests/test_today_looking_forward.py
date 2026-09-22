@@ -173,9 +173,12 @@ def test_the_empty_state_names_the_week_rather_than_drawing_a_blank_table(monkey
 
 
 @pytest.mark.parametrize("top25,undef,expected", [
-    (True, False, ["Top 25 matchup"]),
-    (False, True, ["Undefeated · close line"]),
-    (True, True, ["Top 25 matchup", "Undefeated · close line"]),
+    # ⚠️ A200 SHORTENED THESE so the column fits on screen at 1440 (the full wording moved
+    # to the section caption). The test asserts the SHIPPED text, because a reader reads the
+    # tag and not the flag — a tag that silently changed wording is a tag nobody checked.
+    (True, False, ["Top 25"]),
+    (False, True, ["Undefeated · close"]),
+    (True, True, ["Top 25", "Undefeated · close"]),
     (False, False, []),
 ])
 def test_the_reason_tag_reads_the_flags_and_shows_both_when_both_fire(top25, undef, expected):

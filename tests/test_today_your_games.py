@@ -173,7 +173,7 @@ def test_an_added_game_carries_its_own_tag_and_keeps_any_rule_tags():
     both = today._high_value_reason(
         {"is_top25_matchup": True, "is_undefeated_close": False, "is_added_by_you": True})
     tags = re.findall(r"cfdb-why-tag'>([^<]+)<", both)
-    assert tags == ["Top 25 matchup", "Added by you"]
+    assert tags == ["Top 25", "Added by you"]
 
     only_added = today._high_value_reason(
         {"is_top25_matchup": False, "is_undefeated_close": False, "is_added_by_you": True})
