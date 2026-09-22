@@ -733,6 +733,26 @@ select
     -- COALESCED, BECAUSE `abs(null) < 4` IS NULL AND A NULL FLAG IS NOT A FALSE ONE. 13 of
     -- 71 week-4 FBS games carry no line, and a page filtering `where is_undefeated_close`
     -- would drop them silently rather than say they do not qualify.
+    -- 🚨 A204 (cfdb-main-R-2154). THE DEFINITION HALF, PUBLISHED ON ITS OWN.
+    --
+    -- > **MARC:** *"Try switching the threshold for close-line cutoff to 6... Can that be
+    -- > drop-down for end-users to manipulate on the fly?"*
+    --
+    -- "At least one FBS side is undefeated entering this game" is a DEFINITION and belongs
+    -- here. "...and the line is inside N points" is a READER'S CHOICE and cannot be a
+    -- published flag: a column would have to exist per value of N, and the set of N is a
+    -- dropdown somebody can change.
+    --
+    -- ⚠️ THIS IS THE `is_undefeated_close` PREDICATE WITH THE SPREAD CLAUSE REMOVED, and
+    -- nothing else. Both flags are kept and both stay correct: `is_undefeated_close` and
+    -- `is_high_value` still mean `< 4`, so every existing reader keeps its meaning, and the
+    -- page composes this column with the reader's number instead.
+    coalesce(
+        (g.home_classification = 'fbs'
+         and coalesce(rw_home.losses, 0) = 0 and coalesce(rw_home.wins, 0) >= 1)
+     or (g.away_classification = 'fbs'
+         and coalesce(rw_away.losses, 0) = 0 and coalesce(rw_away.wins, 0) >= 1)
+        , false)                                             as is_undefeated_entering,
     coalesce(
         abs(l.spread) < 4
         and (
