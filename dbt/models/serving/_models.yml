@@ -3681,6 +3681,30 @@ models:
           sorting on this must put nulls LAST or every unranked game leads the page.
           Deliberately not coalesced to a sentinel: 999 would sort correctly and lie
           everywhere else, including the Excel export.
+      - name: is_top25_matchup
+        description: >
+          A196. BOTH teams are ranked in the AP poll this game is played under - Marc's
+          "Top 25 matchup" rule, and "both" is his clarification. Reads home_rank and
+          away_rank, which for an unplayed game carry the poll published before it (A190's
+          alignment: poll week W precedes game week W). Verified against srv_rankings week 4:
+          of the 15 week-4 fixtures with a ranked home side, 15 of 15 agree with the poll's
+          rank exactly and none carries a rank the poll does not have.
+      - name: is_undefeated_close
+        description: >
+          A196. At least one FBS side is undefeated ENTERING this game and the current market
+          spread is inside four points. "Entering" is rw_home/rw_away.wins/losses -
+          fct_team_record_week joined at THIS game's week, which is the record leading into
+          it - and NOT home_wins/home_losses, which are season-to-date totals carrying the
+          same value on every one of a team's rows. At least one game must have been played,
+          so a 0-0 side is untested rather than unbeaten; consequently no week-1 game can
+          qualify on this rule. False rather than null where there is no line: 13 of 71
+          week-4 FBS games carry none, and a null flag is not a false one.
+      - name: is_high_value
+        description: >
+          A196. is_top25_matchup OR is_undefeated_close - the games Today's Looking Forward
+          shows. The definition lives here rather than in the page because "which games
+          matter" is a definition and not a rendering (4.2.1), and because it has more than
+          one possible consumer the moment it exists.
       - name: home_moneyline
         description: >
           American-odds moneyline for the home team at the latest snapshot.
