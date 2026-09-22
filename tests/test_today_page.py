@@ -2160,6 +2160,16 @@ class _Scope:
     def describe(self):
         return "2026 week 9"
 
+    def link(self, page, **extra):
+        # ⚠️ A203. The distance table links each team name to its Teams page now, so the
+        # double has to model `scope.link`. 🚨 A stub that models LESS than the page uses
+        # fails as an `AttributeError` INSIDE `states.section`, which catches it and draws an
+        # Error card — the panel then "renders", the test sees markup, and the assertion runs
+        # against a failure card. That is the A141 shape, and it is why this is a real method
+        # rather than a `Mock`.
+        bits = "&".join(f"{k}={v}" for k, v in extra.items())
+        return f"/{page}?{bits}" if bits else f"/{page}"
+
 
 def _upset_row(favorite, opponent, spread, win_prob, margin):
     """One graded game where the HOME side was favored and lost by `margin`."""
@@ -2477,12 +2487,41 @@ def test_the_scatter_captions_moved_with_their_axes():
     round. The x caption is the DEFENCE now and the y caption is the OFFENCE."""
     today = _today()
     svg = today._scatter_svg(_scatter_rows(), (100.0, 500.0), (200.0, 600.0))
-    captions = re.findall(r"cfdb-sc-axis[^>]*>([^<]+)<", svg)
+    # ⚠️ A203 SPLIT EACH AXIS LABEL INTO A BIG NAME AND A SMALLER DIRECTION LINE, so the
+    # match must exclude `cfdb-sc-axis-name` — `cfdb-sc-axis[^>]*` matches BOTH classes, and
+    # a count of 2 would silently become a count of 4 with the direction words unchecked.
+    captions = re.findall(r"class='cfdb-sc-axis'[^>]*>([^<]+)<", svg)
     assert len(captions) == 2, captions
     horizontal, vertical = captions
     assert "allowed" in horizontal and "gained" not in horizontal, horizontal
     assert "gained" in vertical and "allowed" not in vertical, vertical
     assert "↑" in vertical, "the vertical caption keeps its direction arrow"
+
+
+def test_the_axis_names_are_big_and_the_direction_stays_a_subtitle():
+    """> **MARC, v13:** *"Vertical Axis Label Title should have a big Offense, the better,
+    > more yards is a subtitle, can be smaller. Apply same to Horizontal with Defense"*
+
+    🚨 THE DIRECTION WORDING IS LOAD-BEARING AND IS WHAT THIS PINS. A176 transposed both axes
+    and R-1082 is a caption left on an old one. **"Defense" alone says nothing about whether
+    right is more or fewer** — the subtitle has to keep saying it, on both axes.
+    """
+    today = _today()
+    svg = today._scatter_svg(_scatter_rows(), (100.0, 500.0), (200.0, 600.0))
+    names = re.findall(r"class='cfdb-sc-axis-name'[^>]*>([^<]+)<", svg)
+    assert names == ["Defense", "Offense"], names
+    subs = re.findall(r"class='cfdb-sc-axis'[^>]*>([^<]+)<", svg)
+    horizontal, vertical = subs
+    # the DEFENCE axis says fewer-is-better; the OFFENCE axis says more-is-better
+    assert "fewer" in horizontal and "→" in horizontal, horizontal
+    assert "more" in vertical and "↑" in vertical, vertical
+    # and the big word must be bigger than its subtitle, or it is not a title
+    theme = (ROOT / "site" / "lib" / "theme.py").read_text()
+    big = theme[theme.index(".cfdb-sc-axis-name {"):]
+    small = theme[theme.index(".cfdb-sc-axis {"):]
+    big_px = int(re.search(r"font-size:(\d+)px", big[:big.index("}")]).group(1))
+    small_px = int(re.search(r"font-size:(\d+)px", small[:small.index("}")]).group(1))
+    assert big_px > small_px, (big_px, small_px)
 
 
 def test_the_scatter_marks_are_unfilled_and_carry_the_teams_own_colour():
@@ -2591,10 +2630,22 @@ def test_the_real_profile_panel_puts_the_strong_team_top_right_and_says_so(monke
     today._profile(_Scope(), 25)
 
     svg = next(body for kind, body in written if kind == "markdown" and "cfdb-sc-pt" in body)
+    # 🚨 A203: A TEAM IN THE DISTANCE TABLE WEARS ITS LOGO INSTEAD OF A CIRCLE, so reading
+    # only `<circle>` loses exactly the teams this test is about — "Strong" is top-right and
+    # therefore ranked. ⚠️ THE TEST FAILED THAT WAY RATHER THAN SILENTLY DROPPING IT, which is
+    # the good outcome; an extractor that had matched both from the start would have hidden
+    # the change. A logo is positioned by its top-left corner, so its centre is x + half.
     marks = dict((t, (float(cx), float(cy))) for cx, cy, t in re.findall(
         r"<circle class='cfdb-sc-pt' cx='([\d.]+)' cy='([\d.]+)'[^>]*>"
         r"<title>([A-Za-z]+)", svg))
+    half = today._SCATTER_LOGO_PX / 2
+    for x, y, t in re.findall(
+            r"<image class='cfdb-sc-mark-logo'[^>]*x='([\d.-]+)' y='([\d.-]+)'[^>]*>"
+            r"<title>([A-Za-z]+)", svg):
+        marks[t] = (float(x) + half, float(y) + half)
     assert set(marks) == {"Strong", "Weak"}, marks
+    # and the ranked team is the one wearing the logo
+    assert "cfdb-sc-mark-logo" in svg and ">Strong" in svg
 
     # The whole feature, asserted through the real panel: gained on Y, allowed on X.
     assert marks["Strong"][1] < marks["Weak"][1], (
