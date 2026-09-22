@@ -242,24 +242,57 @@ def player_row(row, tie: str = "") -> str:
     # ⚠️ `min-width:0` ON EVERY FLEX CHILD THAT CAN OVERFLOW is what makes the ellipsis work at
     # all: without it a flex child refuses to shrink below its content and the name pushes the
     # year/position column off the card instead of truncating (the R-745 class).
+    # ⚠️ `min-width:0` ON EVERY FLEX CHILD THAT CAN OVERFLOW is what makes the ellipsis work at
+    # all: without it a flex child refuses to shrink below its content and the name pushes the
+    # year/position column off the card instead of truncating (the R-745 class).
+    #
+    # 🚨 A192 (cfdb-main-R-2015): THESE FOUR STAY INLINE, AND THAT IS A DELIBERATE REVERSAL.
+    # An inline `style=` beats every class selector, so Today's card cannot override them from
+    # a stylesheet — it uses `!important`, which is the canonical case for it. **Moving them
+    # into a class rule was tried first and is the tidier CSS**, but `tests/test_matchup_*.py`
+    # locate the name by this very `text-overflow:ellipsis` string, and those are session B's
+    # files (§3). A shared-module change that forces edits into the other session's tests is
+    # R-729's shape exactly; two `!important`s in Today's own sheet cost less than crossing
+    # that line, and leave Matchup's markup byte-identical to what its tests assert.
     clip = "min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+    # 🚨 A192 (cfdb-main-R-2011). THE PARTS CARRY CLASSES NOW, AND THEY ARE INERT HERE.
+    #
+    # 🚨 THE `class` ATTRIBUTE COMES AFTER `style`, AND THAT IS NOT FORMATTING. Session B's
+    # tests do string surgery on this markup — `test_each_POSITION_HEADER_spans_BOTH_halves`
+    # splits on the literal `<div style='display:flex`, and the yardage tests match
+    # `text-overflow:ellipsis[^>]*>`. Putting the class first breaks those literals and
+    # forces edits into another session's test files (§3, R-729). Appending instead leaves
+    # every prefix they match byte-identical. **CSS does not care about attribute order.**
+    #
+    # Every piece of this row was an anonymous `<div style=…>`, so **nothing outside this
+    # function could address any of it** — not a stylesheet, not a test, not a measurement.
+    # A192 had to reach the last name to guarantee it is never truncated, and the only way in
+    # was `who.firstElementChild.children[1].lastElementChild`, which is a fact about today's
+    # nesting rather than about the name.
+    #
+    # ⚠️ CLASSES ONLY — NO STYLE MOVES HERE, DELIBERATELY. `matchup.py:2374` calls this
+    # function and carries **zero** `cfdb-card*` rules, so Today can scope its own layout under
+    # `.cfdb-card` and Matchup cannot be reached by it. That is the §3 rule-3.1 shape: the
+    # shared module ships the hook, and each caller consumes it on its own page.
     name_block = (
-        f"<div style='flex:1;{clip}'>"
+        f"<div style='flex:1;{clip}' class='cfdb-player-name'>"
         # 🚨 THE FIRST NAME IS OMITTED, NOT BLANKED, WHEN THERE IS NONE — B103's ruling. An empty
         # first line would still take its line-height and drop that one card's surname below its
         # neighbours': a hole reserved for something that does not exist (AC-G.11).
-        + (f"<div style='font-size:{CARD_FIRST_SIZE}rem;opacity:.6;line-height:1.15;{clip}'>"
+        + (f"<div style='font-size:{CARD_FIRST_SIZE}rem;opacity:.6;line-height:1.15;"
+           f"{clip}' class='cfdb-player-first'>"
            f"{html.escape(first)}</div>" if first else "")
         + f"<div style='font-weight:700;font-size:{CARD_LAST_SIZE}rem;line-height:1.15;"
-          f"{clip}'>{html.escape(last)}</div></div>")
+          f"{clip}' class='cfdb-player-last'>{html.escape(last)}</div></div>")
     return (
         # 🚨 `align-items:center` IS MARC'S OWN ARGUMENT MADE MECHANICAL: the jersey spans the
         # two-line block, so it is centred against BOTH lines rather than sitting on the first.
-        f"<div style='display:flex;align-items:stretch;gap:.4rem'>"
+        f"<div style='display:flex;align-items:stretch;gap:.4rem' class='cfdb-player-row'>"
         f"<div style='min-width:1.7rem;font-weight:700;font-size:{CARD_JERSEY_SIZE}rem;"
-        f"line-height:1;display:flex;align-items:center'>{number}</div>"
+        f"line-height:1;display:flex;align-items:center' "
+        f"class='cfdb-player-jersey'>{number}</div>"
         f"{name_block}"
-        f"<div style='text-align:right;min-width:0'>"
+        f"<div style='text-align:right;min-width:0' class='cfdb-player-meta'>"
         + (f"<div style='{small}'>{html.escape(year)}</div>" if year else "")
         + f"<div style='{strong};white-space:nowrap'>"
           f"{html.escape(position) if position else '—'}{tie}</div></div>"

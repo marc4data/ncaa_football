@@ -1005,9 +1005,28 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None) -> str:
     #
     # ⚠️ `rank` IS KEPT IN THE SIGNATURE AND IGNORED so Matchup's caller — which passes it —
     # does not have to change in the same round as a Today layout edit (§3 rule 3.1).
+    # 🚨 A192 (cfdb-main-R-2012). CLASS AND POSITION LEAVE THE ROW AND BECOME THE CELL'S TITLE.
+    #
+    # 📊 THE ROW CANNOT AFFORD THEM AND THE LAST NAME IS WORTH MORE. Measured in Chromium at
+    # 2026 week 3: the widest last name is "Chambers-Smith" at **109.2px**, and the class/
+    # position block costs **17.8px plus a 6.4px gap**. At 1100px the whole card is 173.3px, so
+    # those 24.2px are the difference between a readable surname and "Chambers-Sm…".
+    #
+    # ⚠️ NOT DELETED — MOVED. The pair is the cell's `title`, so it is one hover away, and
+    # `_player_card_grid`'s heading already says which category the board is. **Marc's v11 ask
+    # is that the card "presents well"**, and a card that cannot say who the player is fails
+    # that in the one way that matters.
+    #
+    # ⚠️ AND IT IS TODAY'S DECISION ALONE. `identity.player_row` still EMITS the block —
+    # Matchup draws it exactly as before — and Today hides it with a rule scoped under
+    # `.cfdb-card`, a class `matchup.py` does not use anywhere. See `theme.py`.
+    who_title = " \u00b7 ".join(part for part in (fmt.text(row.get("class_year_display")),
+                                                  fmt.text(row.get("position"))) if part)
     return (f"<div class='cfdb-card'>"
             f"{team_block}"
-            f"<div class='cfdb-card-who'>{identity.player_row(row)}</div>"
+            f"<div class='cfdb-card-who'"
+            f"{f' title=\'{html.escape(who_title)}\'' if who_title else ''}>"
+            f"{identity.player_row(row)}</div>"
             # ⚠️ THE METRICS ARE LAST IN THE MARKUP AND RIGHT-ALIGNED IN THE LAYOUT, which is
             # the same thing said twice on purpose: a reader scanning for the number finds it
             # at a fixed x, and a screen reader meets it after the player it belongs to.
