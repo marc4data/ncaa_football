@@ -699,6 +699,61 @@ select
     -- including the Excel export.
     least(g.home_rank, g.away_rank)               as best_rank_in_game,
 
+    -- ══ A196 (cfdb-main-R-2031): WHICH GAMES ARE WORTH WATCHING ══════════════════════════
+    --
+    -- MARC, v12: "this section should be pre-filtered to games we've identified as
+    -- high-value. Look for Top 25 matchups. Matchups with an undefeated FBS team and a
+    -- ABS(spread) < 4"
+    --
+    -- THE DEFINITION IS HERE AND NOT IN THE PAGE. "Which games matter" is a definition, not a
+    -- rendering (4.2.1), and it has more than one possible consumer the moment it exists --
+    -- Looking Forward today, an alert or an export tomorrow. Two consumers computing it
+    -- separately is the drift this contract exists to stop.
+    --
+    -- WHY srv_game AND NOT A SIBLING VIEW: every input is already selected here -- the ranks,
+    -- spread_current, both classifications, and the record-before joins rw_home/rw_away. A
+    -- sibling would re-join all of it to add three booleans, and the page would then need two
+    -- relations for one list (G-2).
+    (g.home_rank is not null and g.away_rank is not null)        as is_top25_matchup,
+    -- "UNDEFEATED ENTERING THE GAME", AND THE COLUMN CHOICE IS THE WHOLE POINT.
+    --
+    -- NOT home_wins/home_losses: those are the SEASON-TO-DATE totals and carry the same value
+    -- on every one of a team's rows. Proven on Ohio State 2026 -- home_wins 2, home_losses 1
+    -- on weeks 1, 3, 4 and 6 alike -- so using them would ask "is this team undefeated NOW",
+    -- which for a week-4 fixture is a fact from the future.
+    --
+    -- rw_home/rw_away are fct_team_record_week joined at THIS game's week, whose wins/losses
+    -- are the record LEADING INTO it. Proven the same way: rw_home.current_record is
+    -- home_team_record_display, which reads 0-0 for Georgia in week 1 and 1-0 in week 2, and
+    -- 2-1 for Ohio State's unplayed week-4 fixture.
+    --
+    -- AT LEAST ONE GAME PLAYED, so a team's opener does not make it undefeated. A 0-0 side is
+    -- untested, not unbeaten. CONSEQUENCE, STATED: no week-1 game can ever qualify on this
+    -- rule, because every team enters week 1 at 0-0.
+    -- COALESCED, BECAUSE `abs(null) < 4` IS NULL AND A NULL FLAG IS NOT A FALSE ONE. 13 of
+    -- 71 week-4 FBS games carry no line, and a page filtering `where is_undefeated_close`
+    -- would drop them silently rather than say they do not qualify.
+    coalesce(
+        abs(l.spread) < 4
+        and (
+            (g.home_classification = 'fbs'
+             and coalesce(rw_home.losses, 0) = 0 and coalesce(rw_home.wins, 0) >= 1)
+         or (g.away_classification = 'fbs'
+             and coalesce(rw_away.losses, 0) = 0 and coalesce(rw_away.wins, 0) >= 1)
+        ), false)                                                as is_undefeated_close,
+    -- A GAME WITH NO LINE CANNOT QUALIFY ON THE SECOND RULE AND STILL CAN ON THE FIRST.
+    coalesce(
+        (g.home_rank is not null and g.away_rank is not null)
+        or (
+            abs(l.spread) < 4
+            and (
+                (g.home_classification = 'fbs'
+                 and coalesce(rw_home.losses, 0) = 0 and coalesce(rw_home.wins, 0) >= 1)
+             or (g.away_classification = 'fbs'
+                 and coalesce(rw_away.losses, 0) = 0 and coalesce(rw_away.wins, 0) >= 1)
+            )
+        ), false)                                                as is_high_value,
+
     l.home_moneyline,
     l.away_moneyline,
     l.provider_key,
