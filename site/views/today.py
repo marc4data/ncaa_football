@@ -3645,6 +3645,20 @@ def _high_value_games(scope, week: int, also_ids=None) -> pd.DataFrame:
                                also_ids=also_ids)
 
 
+def _lf_kickoff(row) -> str:
+    """`Fri 5:00 PM` — the day, then the time, on one line and without the zone.
+
+    ⚠️ THE DAY COMES FROM THE SAME CONVERSION THE TIME DOES. Reading the day off `game_date`
+    and the time off `start_date` would disagree for a late kickoff, which is R-643's family:
+    one instant, converted once, is the only way the two halves can agree.
+    """
+    ts = row.get("start_date")
+    if ts is None or pd.isna(ts):
+        return fmt.EM_DASH
+    local = fmt._local(ts)
+    return f"{local:%a} {local.strftime('%-I:%M %p')}"
+
+
 def _high_value_reason(row) -> str:
     """The tag that says WHY a game is on this list. It reads the flags and decides nothing.
 
@@ -3652,16 +3666,21 @@ def _high_value_reason(row) -> str:
     Top 25 matchup AND an undefeated side at a 3-point line. Showing only the first would make
     the second rule look narrower than it is.
     """
+    # 🚨 A200: THE TAGS ARE SHORT BECAUSE THE COLUMN HAS TO FIT ON SCREEN, AND THE CAPTION
+    # CARRIES THE FULL RULE. 📊 Measured by the clone method at 1440 with the sidebar open:
+    # "Undefeated · close line" is 105.1px against "Undefeated · close" at 87.8px, and the
+    # cell adds 8.8px of padding a side. The wording below is the widest ONE tag, because
+    # the tags STACK when both rules fire.
     tags = []
     if bool(row.get("is_top25_matchup")):
-        tags.append("Top 25 matchup")
+        tags.append("Top 25")
     if bool(row.get("is_undefeated_close")):
-        tags.append("Undefeated \u00b7 close line")
+        tags.append("Undefeated \u00b7 close")
     # ⚠️ A199: A GAME CAN BE BOTH HIGH-VALUE AND ADDED, AND THE TAGS SAY SO. Marc may paste a
     # game the rules already picked; showing only "Added by you" would hide why it qualifies
     # on its own, and showing only the rule would hide that he asked for it.
     if bool(row.get("is_added_by_you")):
-        tags.append("Added by you")
+        tags.append("Added by you")   # already the shortest of the three; left as Marc's words
     if not tags:
         return ""
     return ("<span class='cfdb-why'>"
@@ -3802,8 +3821,12 @@ _SLATE_GAME_MINUTES = 210
 # The drawing's geometry. The label gutter is measured rather than chosen — see `_slate`.
 _SLATE_ROW_PX = 26
 _SLATE_BAR_PX = 13
-_SLATE_LABEL_PX = 232
+_SLATE_LABEL_PX = 268
 _SLATE_NETWORK_PX = 46
+# 🚨 A200: THE REASON GETS ITS OWN GUTTER, AT A FIXED x, SO THE MARKS LINE UP IN A COLUMN.
+# ⚠️ Hanging them off the bar's END would scatter them across the width and put the latest
+# game's marks off the right edge — the bars are the one thing on this chart that move.
+_SLATE_WHY_PX = 58
 _SLATE_WIDTH = 900
 _SLATE_PAD_TOP = 18
 
@@ -3846,6 +3869,118 @@ def _slate_rows(games: pd.DataFrame):
     return timed, untimed
 
 
+# 🚨 A200 (cfdb-main-R-2083): THE SLATE'S REASON WAS COLOUR ONLY, AND ONLY TWO COLOURS.
+#
+# ⚠️ An added game drew the SAME grey as "Undefeated · close", and a game qualifying on BOTH
+# rules drew one blue bar that said only "Top 25". So the chart could not be read back to the
+# list beside it, which is the one thing a second view of the same frame has to do.
+#
+# ✅ A MARK PER REASON, AND THE MARKS COMBINE. Shapes rather than hues, because A198 checked
+# this chart prints and **a legend keyed on colour alone is a blank legend on a laser
+# printer**. The colour stays as the fast signal; the shape is what survives greyscale.
+_SLATE_MARKS = (
+    ("is_top25_matchup", "circle", "Top 25"),
+    ("is_undefeated_close", "triangle", "Undefeated \u00b7 close"),
+    ("is_added_by_you", "plus", "Added by you"),
+)
+_SLATE_MARK_PX = 16
+
+
+def _slate_matchup(row) -> str:
+    """`#1 Texas at #14 Tennessee` — the AP rank rides the name it belongs to.
+
+    🚨 `NaN` IS TRUTHY, and 6 of the 20 rank cells in the real week-4 slate are NaN. `if rank`
+    would print `#nan` on every unranked side, which is the defect class this project has paid
+    for more often than any other.
+    """
+    def side(which) -> str:
+        name = fmt.text(row.get(f"{which}_team_display"))
+        rank = row.get(f"{which}_rank")
+        if rank is None or pd.isna(rank):
+            return name
+        return f"#{int(rank)} {name}"
+    return f"{side('away')} at {side('home')}"
+
+
+_SLATE_LOGO_PX = 15
+
+
+def _slate_logos(row, cy: float, esc) -> str:
+    """The two logos, in a fixed column at the left of the label gutter.
+
+    🚨 FIXED x, NOT BESIDE THE TEXT. The names are right-aligned against the axis, so a logo
+    placed before the text would sit at a different x on every row — and the server cannot
+    know the rendered text length to place it. A column of logos reads as a column; a ragged
+    scatter of them does not.
+
+    📊 THEY FIT, MEASURED: the gutter is 260 units and the widest label of the real week-4
+    slate, "#19 Missouri at #24 Mississippi State", is 164.2 of them — so the text begins at
+    95.8, well clear of the 36 units this column uses.
+
+    ⚠️ A MISSING LOGO DRAWS NOTHING RATHER THAN A BROKEN IMAGE. `NaN` is truthy, so the test
+    is `pd.isna`, not the value.
+    """
+    out = []
+    for index, side in enumerate(("away", "home")):
+        url = row.get(f"{side}_logo_url")
+        if url is None or pd.isna(url) or not str(url).strip():
+            continue
+        x = 2 + index * (_SLATE_LOGO_PX + 3)
+        out.append(f"<image class='cfdb-slate-logo' href='{esc(str(url))}' "
+                   f"x='{x}' y='{cy - _SLATE_LOGO_PX / 2:.1f}' "
+                   f"width='{_SLATE_LOGO_PX}' height='{_SLATE_LOGO_PX}' "
+                   f"preserveAspectRatio='xMidYMid meet'/>")
+    return "".join(out)
+
+
+def _slate_bar_class(row) -> str:
+    """The bar's colour. ⚠️ ONE CLASS, BY PRECEDENCE — a bar has one fill, and the MARKS carry
+    the whole truth when more than one rule fires."""
+    if bool(row.get("is_top25_matchup")):
+        return "cfdb-slate-bar-top"
+    if bool(row.get("is_undefeated_close")):
+        return "cfdb-slate-bar-und"
+    if bool(row.get("is_added_by_you")):
+        return "cfdb-slate-bar-added"
+    return ""
+
+
+def _slate_mark_shape(kind: str, cx: float, cy: float) -> str:
+    """One mark, drawn at a centre. Shapes, so greyscale keeps them apart."""
+    if kind == "circle":
+        return f"<circle class='cfdb-slate-mark' cx='{cx:.1f}' cy='{cy:.1f}' r='4.2'/>"
+    if kind == "triangle":
+        return (f"<polygon class='cfdb-slate-mark' points='"
+                f"{cx:.1f},{cy - 4.6:.1f} {cx + 4.6:.1f},{cy + 3.6:.1f} "
+                f"{cx - 4.6:.1f},{cy + 3.6:.1f}'/>")
+    return (f"<path class='cfdb-slate-mark cfdb-slate-mark-line' d='"
+            f"M{cx - 4.4:.1f},{cy:.1f} H{cx + 4.4:.1f} "
+            f"M{cx:.1f},{cy - 4.4:.1f} V{cy + 4.4:.1f}'/>")
+
+
+def _slate_marks(row, x: float, cy: float) -> list:
+    """Every mark this game earns, left to right, each with its own hover text."""
+    out = []
+    for index, (flag, kind, label) in enumerate(
+            [m for m in _SLATE_MARKS if bool(row.get(m[0]))]):
+        cx = x + index * _SLATE_MARK_PX + _SLATE_MARK_PX / 2
+        out.append(f"<g><title>{html.escape(label)}</title>"
+                   f"{_slate_mark_shape(kind, cx, cy)}</g>")
+    return out
+
+
+def _slate_legend(esc) -> str:
+    """🚨 ON THE CHART, NOT ONLY IN THE CAPTION. A198 put the reason in the caption and the
+    marks were unreadable without it; a key that lives a paragraph away is a key nobody uses."""
+    bits = []
+    for _flag, kind, label in _SLATE_MARKS:
+        bits.append(f"<svg class='cfdb-slate-key-mark' viewBox='0 0 12 12' "
+                    f"width='12' height='12' aria-hidden='true'>"
+                    f"{_slate_mark_shape(kind, 6, 6)}</svg>"
+                    f"<span class='cfdb-slate-key-text'>{esc(label)}</span>")
+    return "<div class='cfdb-slate-key'>" + "".join(bits) + "</div>"
+
+
 def _slate(games: pd.DataFrame, esc) -> str:
     """A gantt of the upcoming slate: one row per game, time across the x-axis.
 
@@ -3859,8 +3994,8 @@ def _slate(games: pd.DataFrame, esc) -> str:
     if not timed and not untimed:
         return ""
 
-    plot = _SLATE_WIDTH - _SLATE_LABEL_PX - _SLATE_NETWORK_PX
-    out = ["<div class='cfdb-slate'>"]
+    plot = _SLATE_WIDTH - _SLATE_LABEL_PX - _SLATE_NETWORK_PX - _SLATE_WHY_PX
+    out = ["<div class='cfdb-slate'>", _slate_legend(esc)]
 
     for day, entries in timed.items():
         first = min(local for local, _row in entries)
@@ -3890,8 +4025,7 @@ def _slate(games: pd.DataFrame, esc) -> str:
             mid = y + _SLATE_ROW_PX / 2
             x1 = x_of(local)
             x2 = x_of(local + pd.Timedelta(minutes=_SLATE_GAME_MINUTES))
-            matchup = (f"{fmt.text(row.get('away_team_display'))} at "
-                       f"{fmt.text(row.get('home_team_display'))}")
+            matchup = _slate_matchup(row)
             # ⚠️ "TBA", NEVER BLANK — Marc asked for it by name, and a blank cell on a run
             # sheet reads as "no broadcast" rather than "not announced".
             network = (fmt.text(row.get("network_abbreviation"))
@@ -3909,17 +4043,20 @@ def _slate(games: pd.DataFrame, esc) -> str:
                            else f"{float(spread):+g}")
             tip = (f"{matchup} \u2014 {fmt.clock(row.get('start_date'))} on {network}"
                    f" \u2014 {spread_text}" + (f" \u2014 {reason}" if reason else ""))
+            parts.append(_slate_logos(row, mid, esc))
             parts.append(
                 f"<text class='cfdb-slate-label' x='{_SLATE_LABEL_PX - 8}' y='{mid + 3.5:.1f}' "
                 f"text-anchor='end'>{esc(matchup)}</text>")
             parts.append(
-                f"<rect class='cfdb-slate-bar{' cfdb-slate-bar-top' if row.get('is_top25_matchup') else ''}' "
+                f"<rect class='cfdb-slate-bar {_slate_bar_class(row)}' "
                 f"x='{x1:.1f}' y='{mid - _SLATE_BAR_PX / 2:.1f}' "
                 f"width='{max(x2 - x1, 2):.1f}' height='{_SLATE_BAR_PX}' rx='2'>"
                 f"<title>{esc(tip)}</title></rect>")
+            net_x = min(x2 + 6, _SLATE_WIDTH - _SLATE_WHY_PX - _SLATE_NETWORK_PX + 40)
             parts.append(
-                f"<text class='cfdb-slate-net' x='{min(x2 + 6, _SLATE_WIDTH - 4):.1f}' "
+                f"<text class='cfdb-slate-net' x='{net_x:.1f}' "
                 f"y='{mid + 3.5:.1f}'>{esc(network)}</text>")
+            parts.extend(_slate_marks(row, _SLATE_WIDTH - _SLATE_WHY_PX + 6, mid))
         parts.append("</svg>")
         out.extend(parts)
 
@@ -3998,10 +4135,12 @@ def _looking_forward(scope, depth: int) -> None:
             asked = set(added_ids)
             games = games.assign(
                 is_added_by_you=games["game_id"].map(lambda g: int(g) in asked))
+        # ⚠️ A200: THE CAPTION NOW CARRIES BOTH THINGS THE CELLS STOPPED SAYING — the full
+        # wording of the "Undefeated · close" rule, and that every kickoff is Pacific.
         st.caption(
             "Top 25 matchups, and games where an undefeated FBS team meets a line inside "
-            "four points. This section always shows the next week to be played \u2014 it "
-            "does not follow the week filter above.")
+            "four points. Kick-off times are Pacific. This section always shows the next "
+            "week to be played \u2014 it does not follow the week filter above.")
 
         # ⚠️ THE SAME TABLE AS SCHEDULE, CALLED RATHER THAN COPIED. `lib/schedule_table` was
         # promoted out of `views/schedule.py` for exactly this (A196); a view may not import
@@ -4032,10 +4171,59 @@ def _looking_forward(scope, depth: int) -> None:
         # is added beyond them at a measured width: the widest single tag draws 105.1px and
         # the cell adds 8.8px of padding a side. The tags STACK when both rules fire, so the
         # width is the widest ONE tag rather than the pair.
-        _WHY_COLUMN_PX = 124
+        _WHY_COLUMN_PX = 106
 
         def render(rows):
             columns = schedule_table.columns(scope)
+
+            # 🚨 A200: THE TWO SCORE COLUMNS COME OUT WHILE NOTHING IN THE FRAME HAS BEEN
+            # PLAYED, AND THAT IS WHAT MAKES THE REASON READABLE WITHOUT SCROLLING.
+            #
+            # 📊 MEASURED at 1440 with the sidebar open, before this change: the scroll box is
+            # 980px and the table is 1022.9px, so the Why column sat 42.9px PAST the right
+            # edge. ⚠️ Cowork read that as the tags being clipped; the clone method says they
+            # are not — 0 of 12 clipped at either width. **The column was off-screen, not cut**,
+            # and the two defects have different fixes.
+            #
+            # ⚠️ AND SHORTENING THE TAGS CANNOT CLOSE IT: it buys 18.3px of a 47.6px gap (the
+            # gap includes the 4.7px the kickoff cell needs below). A196 already measured that
+            # scaling Schedule's percentages down to make room breaks the O/U cell, so the
+            # width has to come from a column rather than from all of them.
+            #
+            # ✅ These two are 96.4px between them and, on a list of games that have not
+            # kicked off, every cell in both reads "—". A column that can only render one
+            # value for every row is not information, and dropping them leaves 67px of spare
+            # width rather than a table that has to be dragged sideways.
+            #
+            # 🚨 THEY COME BACK THE MOMENT A GAME IN THE WEEK IS COMPLETE. The upcoming week
+            # can hold a Tuesday game that is already final, and hiding a real score to save
+            # width would be the trade this comment exists to refuse.
+            # 🚨 A200 / R-1977: THE KICKOFF CELL CARRIES ITS DAY, AND ONLY ON THIS PAGE.
+            #
+            # `fmt.clock` says in its own docstring that it is "for a table already grouped by
+            # day" — which Schedule is, and Looking Forward is not. So the Friday game sat at
+            # the top of the list with nothing saying it was a Friday.
+            #
+            # 📊 AND THE ZONE SUFFIX IS WHAT MADE IT WRAP: measured by the clone method, the
+            # cell's content box is 80px and "12:30 PM PDT" needs 90px, so 4 of 10 rows drew
+            # on two lines. "Sat 12:30 PM" is 84.7px and the widest of the week,
+            # "Sat 10:30 AM", is 84.3px — both inside a 103px column.
+            #
+            # ⚠️ THE ZONE IS NOT DROPPED, IT MOVES TO THE CAPTION. Every kickoff on this page
+            # is Pacific, so saying so eleven times costs a wrap to repeat what one sentence
+            # settles. ✅ AND `schedule_table.columns()` IS NOT TOUCHED: Schedule keeps its own
+            # day headings and its own "12:30 PM PDT", byte for byte.
+            columns = [
+                Col("start_date", "Kickoff", render=lambda r: (
+                    f"{_lf_kickoff(r)}{schedule_table.neutral_glyph(r)}"))
+                if c.field == "start_date" else c
+                for c in columns]
+
+            played = bool(rows["is_completed"].any()) if "is_completed" in rows else False
+            if not played:
+                columns = [c for c in columns
+                           if c.field not in ("away_points", "home_points")]
+
             layout = table.column_layout(rows, columns) + [f"{_WHY_COLUMN_PX}px"]
             columns.append(Col("why", "Why", render=_high_value_reason))
             # ⚠️ `anchor` IS NOT OPTIONAL HERE — A141 anchored every table on this page and

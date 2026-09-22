@@ -129,7 +129,10 @@ def test_the_bar_spans_kickoff_to_kickoff_plus_the_allowance():
     x, width = float(rect.group(1)), float(rect.group(2))
     assert x == pytest.approx(today._SLATE_LABEL_PX), (
         "the first kickoff of the day starts at the left edge of that day's scale")
-    plot = today._SLATE_WIDTH - today._SLATE_LABEL_PX - today._SLATE_NETWORK_PX
+    # A200 reserved a right-hand gutter for the reason marks; the plot is what is left
+    # after the label gutter, the network label AND that gutter.
+    plot = (today._SLATE_WIDTH - today._SLATE_LABEL_PX - today._SLATE_NETWORK_PX
+            - today._SLATE_WHY_PX)
     # one game: the axis spans 9a to 1p (kickoff hour to kickoff + 210 min, rounded up)
     assert width == pytest.approx(plot * 210 / (4 * 60), rel=0.01), width
 

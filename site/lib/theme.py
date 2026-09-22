@@ -155,6 +155,23 @@ CSS = """
 .cfdb-slate-bar-top { fill:var(--cfdb-link); fill-opacity:.55; }
 /* A game whose kickoff is not announced gets NO bar — see `today._slate_rows`. It is named
    here instead, because a bar at a placeholder time is a fabricated slot on a run sheet. */
+.cfdb-slate-bar-und { fill:currentColor; fill-opacity:.42; }
+.cfdb-slate-bar-added { fill:var(--cfdb-link); fill-opacity:.22; }
+/* A200. The reason marks and their key. SHAPES, not hues: this chart prints, and a key
+   keyed on color alone is a blank key on a laser printer. */
+.cfdb-slate-logo { opacity:.95; }
+.cfdb-slate-mark { fill:currentColor; fill-opacity:.75; }
+.cfdb-slate-mark-line { fill:none; stroke:currentColor; stroke-opacity:.75; stroke-width:1.8;
+                        stroke-linecap:round; }
+.cfdb-slate-key { display:flex; flex-wrap:wrap; gap:.15rem 1rem; align-items:center;
+                  font-size:.7rem; opacity:.75; margin:.1rem 0 .35rem; }
+/* 🚨 HIGHER SPECIFICITY THAN `.cfdb-slate svg { width:100% }`, WHICH THIS SITS INSIDE.
+   Without this the 12x12 key swatch stretches to the full chart width — one gray circle
+   980px across, found in a render and invisible in the markup. */
+.cfdb-slate .cfdb-slate-key-mark { flex:0 0 auto; width:12px; height:12px;
+                                   display:inline-block; margin-right:.25rem;
+                                   vertical-align:-1px; }
+.cfdb-slate-key-text { margin-right:.4rem; }
 .cfdb-slate-tba { font-size:.72rem; opacity:.7; margin:.35rem 0 .1rem; }
 
 /* ── A196: the "why is this game here" tag on Looking Forward ─────────────────────────────
