@@ -15,6 +15,95 @@ import streamlit as st
 from lib import chips, fmt, identity, params
 
 
+# ── A208 (cfdb-main-R-2262, cfdb-main-R-2263): the shared scroll affordance ───────────────
+#
+# 🚨 A TABLE THAT SCROLLS SIDEWAYS AND DOES NOT SAY SO IS A DIFFERENT DEFECT FROM ONE THAT
+# CLIPS, AND A WORSE ONE TO SHIP (AC-G.11). A203 fixed the distance table, A207 fixed the
+# SLATE, and neither generalised; this is the third instance of one class in five rounds, so
+# the mechanism lives with the wrapper every wide table already uses.
+#
+# 📊 THE FOUR `.cfdb-scroll` WRAPPERS ON THIS SITE, enumerated before anything moved:
+#
+#     Scores     the results table          `scores.py` -> render(scroll=True)   px layout
+#     Today      Most Exciting              `today.py`  -> render(scroll=True)   px layout
+#     Today      Furthest from the median   `today.py`  hand-built               _FAR_MIN_PX
+#     Today      the SLATE, one per day     `today.py`  hand-built               _SLATE_MIN_PX
+#
+# ⚠️ AND SCHEDULE'S LIST IS NOT ONE OF THEM, though two shipped comments said it was. It calls
+# `render` without `scroll=True` and emits no wrapper at all.
+#
+# 🚨 THE NOTE IS EMITTED ONLY WHERE THE BOUNDARY IS KNOWN. A caller whose columns are not all
+# fixed pixels cannot say how wide its table wants to be, and a guessed boundary is exactly
+# how a note appears above a table with nothing past its edge — which teaches readers to
+# ignore it. `scroll_minimum` returns None there and no note is drawn.
+SCROLL_NOTE = "\u2194 Scroll the table sideways to see the rest of the row."
+
+
+def scroll_minimum(layout: Optional[List[str]]) -> Optional[int]:
+    """How wide this table wants to be, or None when it cannot be known.
+
+    ⚠️ ONLY AN ALL-PIXEL LAYOUT HAS AN ANSWER. A percentage layout is a share of whatever it
+    is given, so it has no intrinsic width to compare a container against, and `auto` is
+    content-driven and settled by the browser. Both return None, and the caller draws no note.
+
+    🚨 THIS IS A LOWER BOUND ON THE DRAWN WIDTH, NOT THE DRAWN WIDTH, AND THE DIRECTION IS THE
+    POINT. `table-layout:fixed` still lets a column exceed its declared width when its header's
+    min-content is wider, so a table can draw wider than the sum of its colgroup. 📊 Measured in
+    Chromium at 1440 with the sidebar open:
+
+        Most Exciting   declared 1264   drawn 1272   +8     WIN PROBABILITY wants 244.6 of 238
+        Scores          declared 1637   drawn 1752   +115   six 68px columns want up to 109.2
+        the SLATE        declared 940   drawn  940   0      `table-layout:fixed` plus a colgroup
+        distance table   declared 320   drawn  320   0
+
+    ✅ SO THE NOTE CAN BE ABSENT WHILE A LITTLE IS PAST THE EDGE, AND CAN NEVER BE PRESENT WHEN
+    NOTHING IS — because `shown` implies `container < declared <= drawn`. ⚠️ That is the
+    direction to fail in: a note above a table with nothing hidden teaches a reader to ignore
+    every note, which costs more than the few pixels it would have announced. 📊 And the band is
+    unreachable in practice on both: Scores' container is 980 at a 1440 viewport, so it would
+    take roughly a 2,200px viewport with the sidebar collapsed to land between 1637 and 1751.
+
+    ⚠️ THE SCORES GAP IS A SEPARATE DEFECT AND IT IS NOT THIS FUNCTION'S. `column_layout` sizes
+    those columns without their header labels (`seed_from_label=False`), which is deliberate for
+    density — and A191 already measured that a header's drawn width is not what a naive
+    measurement says. Filed as cfdb-main-R-2266; fixing it changes what Scores' columns look
+    like, which is a round of its own.
+    """
+    if not layout or not all(str(w).endswith("px") for w in layout):
+        return None
+    try:
+        return int(round(sum(float(str(w)[:-2]) for w in layout)))
+    except ValueError:
+        return None
+
+
+def scroll_note(min_px: int) -> str:
+    """The note, plus the one `@container` rule that reveals it at this table's boundary.
+
+    🚨 THE RULE IS GENERATED BECAUSE THE BOUNDARY IS PER-TABLE. A container query cannot read
+    a custom property in its condition — `@container (max-width: var(--x))` is not a thing —
+    so four tables with four minimums need four rules, and the number that produces them is
+    the table's own. `[data-min]` keys the note to the rule that belongs to it, so two boxes
+    on one page with different boundaries do not reveal each other.
+
+    ⚠️ HIDDEN BY DEFAULT. `.cfdb-scrollnote` carries `display:none` in the stylesheet and only
+    the query turns it on: with no container-query support the reader gets a table whose note
+    never appears — mildly under-informative — rather than one that is always on. The
+    stylesheet's comment carries the rest of the reasoning.
+    """
+    return (f"<style>@container (max-width:{min_px - 1}px)"
+            f"{{.cfdb-scrollnote[data-min='{min_px}']{{display:flex}}}}</style>"
+            f"<div class='cfdb-scrollnote' data-min='{min_px}'>{SCROLL_NOTE}</div>")
+
+
+def scroll_box(markup: str, min_px: Optional[int]) -> str:
+    """Wrap markup in the scroller, with the note when the boundary is known."""
+    scroller = f"<div class='cfdb-scroll'>{markup}</div>"
+    if not min_px:
+        return scroller
+    return f"<div class='cfdb-scrollbox'>{scroll_note(min_px)}{scroller}</div>"
+
+
 class Col:
     """One column: where it comes from, what it is, and how it should read."""
 
@@ -614,7 +703,10 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
     if scroll:
         # The scroll container is a WRAPPER, not the table: `overflow-x` on the table itself
         # does nothing, and putting it on an ancestor Streamlit owns is not ours to set.
-        markup = f"<div class='cfdb-scroll'>{markup}</div>"
+        # A208: and the wrapper says so, at this table's own boundary. `exact` above has
+        # already asked whether every column is a measured px — the same question, which is
+        # why the note appears on exactly the tables whose width is theirs to state.
+        markup = scroll_box(markup, scroll_minimum(layout))
     st.markdown(markup, unsafe_allow_html=True)
     if len(df) > max_rows:
         st.caption(f"Showing {max_rows:,} of {len(df):,} rows.")

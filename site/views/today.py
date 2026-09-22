@@ -2162,6 +2162,10 @@ _SCATTER_LOGO_PX = 18
 _SCATTER_HEIGHT = 496
 _FAR_RANK_PX = 26
 _FAR_NUM_PX = 66
+# A208: 20rem, which is where `.cfdb-far-table` carried it until this round — moved here so
+# the table's minimum and its scroll note's boundary are the same number. 📊 26 + 66 + 66 of
+# fixed columns leaves 162px for a team name that needs 155.3px at its widest.
+_FAR_MIN_PX = 320
 
 # 🚨 A203 TOOK THE CHART FROM 380 TO 470 SO THE TABLE SITS BESIDE IT RATHER THAN BELOW IT.
 # 📊 Measured at 1440 with the sidebar open: 15 rows at 30.1px plus 84px of head, header row
@@ -2239,8 +2243,12 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
     Streamlit's row is `flex-wrap:wrap`. 📊 It does not — the two bases sum to 100%, nothing
     wraps, and a min-width larger than the column OVERFLOWS. At 1100 the column is 210px, the
     table wanted 304px, and its right edge sat **94px past the block**: the Allowed column was
-    off-screen with no way to reach it. ✅ The table scrolls inside its own column now, which
-    is what Schedule's list and A201's SLATE already do at that width.
+    off-screen with no way to reach it. ✅ The table scrolls inside its own column now.
+
+    ⚠️ A208 CORRECTION: the sentence here used to add that Schedule's list and A201's SLATE
+    already did the same at that width. 📊 Schedule's list does not scroll — it emits no
+    `.cfdb-scroll` at all — and A208 moved the note and the scrollbar styling onto the shared
+    wrapper, so this table now SAYS it scrolls rather than merely doing it.
     """
     if not ranked:
         # AC-G.11: say WHICH absence. An empty quadrant is a real state — a conference filter
@@ -2265,8 +2273,11 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
            # from the `thead` cells, which carried none, and split the space equally — 99.5px
            # each to Team, Gained and Allowed, when Team needed **155.3px** and the numbers
            # needed **25.9px**. Ten of sixty cells clipped, all of them team names.
+           # A208: the same scroller every wide table uses, and it now SAYS it scrolls —
+           # `_FAR_MIN_PX` is both the table's minimum and the note's boundary.
+           "<div class='cfdb-scrollbox'>" + table.scroll_note(_FAR_MIN_PX) +
            "<div class='cfdb-scroll'>"
-           f"<table class='cfdb-far-table'><colgroup>"
+           f"<table class='cfdb-far-table' style='min-width:{_FAR_MIN_PX}px'><colgroup>"
            f"<col style='width:{_FAR_RANK_PX}px'><col>"
            f"<col style='width:{_FAR_NUM_PX}px'><col style='width:{_FAR_NUM_PX}px'>"
            f"</colgroup><thead><tr>"
@@ -2304,7 +2315,8 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
             f"<td class='cfdb-far-num'>"
             f"{_far_spark(row.get('x'), allowed_top, f"{row['x']:.0f}")}</td>"
             f"</tr>")
-    out.append("</tbody></table></div>")
+    # A208: `</table>`, then the scroller, then the scroll box that carries the note.
+    out.append("</tbody></table></div></div>")
     if centre:
         out.append(
             f"<div class='cfdb-far-foot'>Yards per game. Bars are relative to each column's "
@@ -4018,6 +4030,16 @@ _SLATE_WIDTH = 900
 # Away · Home · Spread · O/U · Wx · TV · Game · Why. The graph column carries no width.
 _SLATE_COL_PX = (190, 222, 68, 56, 64, 56, 52, _SLATE_WHY_PX)
 
+# 🚨 A208 (cfdb-main-R-2263). THE TABLE'S MINIMUM AND THE NOTE'S BOUNDARY ARE ONE NUMBER NOW.
+# 📊 A207 wrote 940 twice — `min-width:940px` on `.cfdb-slate-table` and `@container
+# (max-width: 939px)` in the same stylesheet — and held them together with a test comparing
+# the two. ⚠️ A test that two copies agree is a test that they have not drifted YET. The
+# minimum is Python's, the table carries it inline, and `table.scroll_note` derives the
+# boundary from it, so there is nothing left to disagree.
+# 📊 762px of fixed columns above plus 178px of axis: below 940 the gantt has fewer pixels
+# than its twelve hour labels need, which is what A201 measured the hard way.
+_SLATE_MIN_PX = 940
+
 _SLATE_PAD_TOP = 18
 
 
@@ -4321,9 +4343,26 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
     # ✅ SO THE NOTE IS A CONTAINER QUERY: it appears exactly when the section is narrower than
     # the table's own minimum, which is a fact about the layout rather than about the browser's
     # scrollbar policy — and it is visible or not, which is measurable.
-    out = ["<div class='cfdb-slate'>",
-           "<div class='cfdb-slate-scrollnote'>\u2194 Scroll the table sideways for the "
-           "network, the matchup link and the time chart.</div>",
+    #
+    # 🚨 A208 (cfdb-main-R-2262). THE SENTENCE NAMES NOTHING, BECAUSE WHAT IS HIDDEN CHANGES
+    # WITH THE WIDTH AND THE SENTENCE CANNOT.
+    # 📊 A207 shipped *"…for the network, the matchup link and the time chart"* — one fixed
+    # list against a hidden set that A207's own table says is three different sets:
+    #
+    #     1280   the gantt                           <- the sentence named two things that ARE reachable
+    #     1100   Game · Why · the gantt              <- and TV, which it names, reads fully here
+    #     1024   Wx · TV · Game · Why · the gantt    <- and it misses Wx entirely
+    #
+    # ⚠️ A sentence whose whole job is to say what is out of reach must be TRUE at the width it
+    # appears (AC-G.11), and this one over-claimed at two widths and under-claimed at a third.
+    # Python cannot see the viewport, so a true-at-every-width sentence means three notes
+    # behind three container queries — three more things to keep in step, for a reader who is
+    # about to scroll and find out. ✅ The note says less and is true everywhere instead.
+    # ⚠️ ONE NOTE FOR BOTH DAY BLOCKS, deliberately: they are two tables with identical columns
+    # and one minimum, so they hide the same things at the same width. Two notes would be two
+    # copies of one fact.
+    out = ["<div class='cfdb-slate cfdb-scrollbox'>",
+           table.scroll_note(_SLATE_MIN_PX),
            _slate_legend(esc)]
 
     for day, entries in timed.items():
@@ -4407,7 +4446,8 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
         out.append(
             "<div class='cfdb-scroll'><div class='cfdb-slate-block'>"
             f"<div class='cfdb-slate-grid' style='left:{sum(_SLATE_COL_PX)}px'>{lines}</div>"
-            "<table class='cfdb-table cfdb-slate-table'>"
+            f"<table class='cfdb-table cfdb-slate-table' "
+            f"style='min-width:{_SLATE_MIN_PX}px'>"
             f"<colgroup>{cols}</colgroup>"
             "<thead><tr>"
             "<th>Away</th><th>Home</th><th class='cfdb-num'>Spread</th>"

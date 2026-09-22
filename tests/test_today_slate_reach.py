@@ -17,6 +17,11 @@ defect from unreachable, and a worse one to ship (AC-G.11).
 `scrollbar-width:thin` computing, `offsetHeight - clientHeight` stayed **0**. The styling is
 kept for the platforms that honour it; **the thing the reader depends on is the note**, which
 is a container query on the layout rather than a guess about the browser.
+
+⚠️ A208 MOVED THE MECHANISM AND LEFT THE MEASUREMENTS ALONE. The note, the scrollbar styling
+and the container query are now `.cfdb-scroll`'s, shared by all four wrappers on the site, and
+the boundary is `today._SLATE_MIN_PX` rather than a second copy of 940 in the stylesheet. Every
+assertion below asks the same question of the new address.
 """
 import ast
 import re
@@ -106,10 +111,12 @@ def test_the_table_is_inside_a_scroller_so_no_column_is_unreachable():
 
 def test_the_scroll_note_is_emitted_for_every_slate():
     html = slate(_game())
-    assert "cfdb-slate-scrollnote" in html
+    assert "cfdb-scrollnote" in html
     assert "Scroll the table sideways" in html
     # it sits above the day blocks, where a reader meets it before the cut-off table
-    assert html.index("cfdb-slate-scrollnote") < html.index("cfdb-slate-day")
+    assert html.index("cfdb-scrollnote") < html.index("cfdb-slate-day")
+    # and the SLATE is the query container, or the note can never be revealed
+    assert "cfdb-slate cfdb-scrollbox" in html
 
 
 def test_the_note_is_hidden_by_default_and_revealed_by_the_container_query():
@@ -118,25 +125,36 @@ def test_the_note_is_hidden_by_default_and_revealed_by_the_container_query():
     ⚠️ If container queries were unsupported, the fallback must be the note showing at every
     width (mildly redundant) rather than a table that silently hides five columns. A rule that
     HID it in the query would fail open in exactly the wrong direction.
+
+    ⚠️ A208: the base rule is the stylesheet's and the QUERY is the page's, because the
+    boundary is per-table. Both halves are asserted, at their new addresses.
     """
-    base = rule(".cfdb-slate-scrollnote {")
-    assert "display:none" in base
-    query = THEME[THEME.index("@container (max-width:"):]
-    query = query[:query.index("}", query.index("{", query.index("{") + 1)) + 1]
-    assert "cfdb-slate-scrollnote" in query and "display:flex" in query
+    assert "display:none" in rule(".cfdb-scrollnote {")
+    query = slate(_game())
+    query = query[query.index("@container (max-width:"):]
+    query = query[:query.index("</style>")]
+    assert "cfdb-scrollnote" in query and "display:flex" in query
+    assert "display:none" not in query, "the query must REVEAL, never hide"
 
 
 def test_the_query_boundary_is_the_tables_own_minimum():
-    """🚨 TWO INDEPENDENT NUMBERS IN THE STYLESHEET, COMPARED — not a constant against itself.
+    """🚨 THE RENDERED QUERY AGAINST THE RENDERED TABLE — two strings the page actually emits.
 
     The note must appear at exactly the width past which something goes out of reach, which is
-    the table's `min-width`. 📊 940px is 762px of fixed columns plus 178px of axis.
+    the table's own minimum. 📊 940px is 762px of fixed columns plus 178px of axis.
+
+    ⚠️ A207 COMPARED TWO COPIES OF 940 IN THE STYLESHEET AND CALLED THAT INDEPENDENCE. It was
+    a test that they had not drifted yet. A208 leaves one definition — `_SLATE_MIN_PX` — so
+    this asserts that both emitted numbers come from it rather than that two numbers agree.
     """
-    min_w = int(re.search(r"\.cfdb-slate-table \{[^}]*min-width:(\d+)px",
-                          THEME).group(1))
-    boundary = int(re.search(r"@container \(max-width: ?(\d+)px\)", THEME).group(1))
-    assert boundary == min_w - 1, (
-        f"the note appears below {boundary + 1}px but the table needs {min_w}px")
+    html = slate(_game())
+    boundary = int(re.search(r"@container \(max-width: ?(\d+)px\)", html).group(1))
+    on_table = int(re.search(r"cfdb-slate-table' style='min-width:(\d+)px", html).group(1))
+    assert on_table == today._SLATE_MIN_PX
+    assert boundary == today._SLATE_MIN_PX - 1, (
+        f"the note appears below {boundary + 1}px but the table needs {on_table}px")
+    # and the stylesheet does not carry a second copy to drift from
+    assert "min-width" not in rule(".cfdb-slate-table {")
 
 
 def test_the_scrollbar_is_styled_even_though_it_could_not_be_proven_drawn():
@@ -148,9 +166,9 @@ def test_the_scrollbar_is_styled_even_though_it_could_not_be_proven_drawn():
     # `::-webkit-scrollbar-track` and `-thumb`, so a break deleting the only rule that gives
     # the bar a SIZE came back GREEN — the same substring trap that let a renamed column pass
     # in A204.
-    assert re.search(r"::-webkit-scrollbar \{[^}]*height:\d+px", THEME), (
+    assert re.search(r"^\.cfdb-scroll::-webkit-scrollbar \{[^}]*height:\d+px", THEME, re.M), (
         "the bar needs a height, or the track and thumb style nothing")
-    assert "scrollbar-width: thin" in rule(".cfdb-slate .cfdb-scroll {")
+    assert "scrollbar-width: thin" in rule(".cfdb-scroll {")
 
 
 def test_both_day_blocks_get_the_same_treatment():
@@ -160,7 +178,11 @@ def test_both_day_blocks_get_the_same_treatment():
     sat = _game(game_id=2, start_date=pd.Timestamp("2026-09-26T19:30:00Z"))
     html = slate(fri, sat)
     assert html.count("cfdb-slate-table") == 2, "two day blocks"
-    assert html.count("cfdb-scroll") == 2, "each inside its own scroller"
+    # 🚨 THE ELEMENT, NOT THE SUBSTRING. `html.count("cfdb-scroll")` reads 5 here, because
+    # `cfdb-scrollbox` and `cfdb-scrollnote` both contain it — A207's R-2260 in a count.
+    assert html.count("<div class='cfdb-scroll'>") == 2, "each inside its own scroller"
+    # ⚠️ ONE note for the two of them: identical columns, identical minimum, one fact.
+    assert html.count("cfdb-scrollnote' data-min=") == 1
     # ⚠️ `... or True` MAKES AN ASSERTION UNFAILABLE, and the first draft of this test had
     # one (R-760). The question is whether the two blocks carry the SAME columns.
     heads = re.findall(r"<thead><tr>(.*?)</tr></thead>", html, re.S)
@@ -174,7 +196,7 @@ def test_the_minimum_width_keeps_the_axis_from_collapsing():
     """⚠️ THE GANTT IS THE REASON THE SLATE EXISTS. Without a minimum the graph column takes
     whatever is left, which at 1024 is nothing — a chart with no axis is worse than a chart
     you have to scroll to."""
-    min_w = int(re.search(r"\.cfdb-slate-table \{[^}]*min-width:(\d+)px", THEME).group(1))
+    min_w = today._SLATE_MIN_PX
     fixed = sum(today._SLATE_COL_PX)
     assert min_w - fixed >= 150, (
         f"only {min_w - fixed}px left for the time axis after {fixed}px of fixed columns")
