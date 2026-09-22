@@ -524,7 +524,7 @@ models:
       - name: as_of_ts
         description: AC-G.35. Last load of the `rankings` domain, rendered instead of now().
 
-  # ---------------------------------------------------------------------------------------      - name: explained_by_game_week
+      - name: explained_by_game_week
         description: >
           A190. The GAME week whose result explains the move into this POLL week, or null
           where there is none. Poll week N reflects game week N-1, established from the data
@@ -563,6 +563,7 @@ models:
           depends on game_away_display / game_home_display, so this is the unambiguous
           answer to "did the team this row is about win".
 
+  # ---------------------------------------------------------------------------------------
   - name: srv_line_movement
     description: >
       Line Movement page. One row per game x provider x snapshot — a time series straight off
