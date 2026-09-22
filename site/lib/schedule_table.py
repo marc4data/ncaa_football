@@ -328,7 +328,7 @@ def rows(season: int, week, season_type: str, conference,
                count(*) over () as rows_in_scope,
                home_q1, home_q2, home_q3, home_q4, home_overtime_points, home_periods,
                away_q1, away_q2, away_q3, away_q4, away_overtime_points, away_periods,
-               is_top25_matchup, is_undefeated_close,
+               is_top25_matchup, is_undefeated_close, kickoff_time_known,
                as_of_ts
         from srv_game
         where season = :season and season_type = :season_type

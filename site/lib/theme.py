@@ -138,6 +138,25 @@ CSS = """
    Streamlit's `stHorizontalBlock` is `flex-wrap:wrap` with `min-width:auto` columns — so
    below roughly 1400px the column cannot shrink past this and drops to its own full-width
    line beneath the chart. Container-driven, so it is right with the sidebar open or closed. */
+/* ── A198: the SLATE — one row per game, time across the x-axis ───────────────────────────
+   ⚠️ `currentColor` THROUGHOUT, like `lib/distribution.py` and the scatter: the drawing takes
+   the page's own ink and is therefore correct in both themes with no second palette to keep
+   in step. The one accent is the Top 25 bar, which is the same `--cfdb-link` the page uses
+   for a link — a rank is the strongest signal on this chart and it earns one hue. */
+.cfdb-slate { margin:.3rem 0 .2rem; }
+.cfdb-slate svg { display:block; width:100%; height:auto; color:inherit; }
+.cfdb-slate-day { font-size:.72rem; font-weight:700; letter-spacing:.04em;
+                  text-transform:uppercase; opacity:.65; margin:.5rem 0 .1rem; }
+.cfdb-slate-grid { stroke:currentColor; stroke-opacity:.14; stroke-width:1; }
+.cfdb-slate-hour { fill:currentColor; fill-opacity:.5; font-size:9.5px; }
+.cfdb-slate-label { fill:currentColor; fill-opacity:.85; font-size:11px; }
+.cfdb-slate-net { fill:currentColor; fill-opacity:.55; font-size:10px; }
+.cfdb-slate-bar { fill:currentColor; fill-opacity:.28; }
+.cfdb-slate-bar-top { fill:var(--cfdb-link); fill-opacity:.55; }
+/* A game whose kickoff is not announced gets NO bar — see `today._slate_rows`. It is named
+   here instead, because a bar at a placeholder time is a fabricated slot on a run sheet. */
+.cfdb-slate-tba { font-size:.72rem; opacity:.7; margin:.35rem 0 .1rem; }
+
 /* ── A196: the "why is this game here" tag on Looking Forward ─────────────────────────────
    ⚠️ IT READS THE PUBLISHED FLAGS AND DECIDES NOTHING (see `today._high_value_reason`), and
    BOTH tags can appear on one game — a Top 25 matchup that is also an undefeated side at a

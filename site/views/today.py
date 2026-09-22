@@ -3662,6 +3662,145 @@ def _high_value_reason(row) -> str:
             + "</span>")
 
 
+# 🚨 A198 (cfdb-main-R-2050). CFBD PUBLISHES NO END TIME, SO THE BAR LENGTH IS A STATED
+# ASSUMPTION AND THE CAPTION SAYS SO.
+#
+# ⚠️ **A bar that looks measured and is not would be worse than no bar.** Three and a half
+# hours is the length every bar gets; nothing in the data supports a per-game estimate, and
+# inventing one from the total line or the pace would dress a guess as a measurement.
+_SLATE_GAME_MINUTES = 210
+
+# The drawing's geometry. The label gutter is measured rather than chosen — see `_slate`.
+_SLATE_ROW_PX = 26
+_SLATE_BAR_PX = 13
+_SLATE_LABEL_PX = 232
+_SLATE_NETWORK_PX = 46
+_SLATE_WIDTH = 900
+_SLATE_PAD_TOP = 18
+
+
+def _slate_rows(games: pd.DataFrame):
+    """The SLATE's rows, grouped by local day, plus the ones with no known kickoff.
+
+    > **MARC, v12:** *"Create a SLATE schedule for what games are on when (with network
+    > info)"* — his own format for a daily run sheet: one row per event, time across the
+    > x-axis, where to watch on each row, times Pacific.
+
+    🚨 THE INSTANT IS CONVERTED ONCE, THROUGH `fmt`, AND NEVER RE-CONVERTED. `srv_game`
+    publishes `start_date` as an instant carrying its own offset, and R-643 records what
+    happened the last time something converted it a second time: **every kickoff on the site
+    was four hours early for a season**, because a column had already been shifted to Eastern
+    and the formatter shifted it again. `fmt._local` is the one conversion, and it RAISES on a
+    naive value rather than guessing — so a double conversion cannot pass quietly here.
+
+    ⚠️ A GAME WITH NO KNOWN KICKOFF GETS NO BAR. Drawing one at a placeholder time would put a
+    fabricated slot on a run sheet, which is the one thing a run sheet must not have.
+    📊 The state is real but has no 2026 instance: `kickoff_time_known` is false on 702 rows in
+    2000 and on **0 of 71 week-4 games** — 0 across all of 2026, in fact — so this branch is
+    exercised by a fixture rather than by the live page, and the report says so.
+    """
+    timed, untimed = {}, {}
+    for _index, row in games.iterrows():
+        start = row.get("start_date")
+        known = row.get("kickoff_time_known")
+        # ⚠️ `pd.isna`, NOT TRUTHINESS — `NaN` is truthy (A191) and `False` is falsy, so a
+        # truthiness test would call an unknown kickoff known and a known one unknown.
+        missing = start is None or pd.isna(start)
+        if missing or (known is not None and not pd.isna(known) and not bool(known)):
+            day = fmt.day(row.get("game_date"))
+            untimed.setdefault(day, []).append(row)
+            continue
+        local = fmt._local(start)
+        timed.setdefault(local.strftime("%A, %b %-d"), []).append((local, row))
+    for day in timed:
+        timed[day].sort(key=lambda pair: pair[0])
+    return timed, untimed
+
+
+def _slate(games: pd.DataFrame, esc) -> str:
+    """A gantt of the upcoming slate: one row per game, time across the x-axis.
+
+    ⚠️ ONE HOUR SCALE PER DAY, SHARED BY EVERY ROW IN IT, so two windows that overlap look
+    overlapping. A scale shared across DAYS would waste most of the width on the hours nobody
+    plays, and a per-ROW scale would make every bar the same length and say nothing.
+    """
+    if games is None or games.empty:
+        return ""
+    timed, untimed = _slate_rows(games)
+    if not timed and not untimed:
+        return ""
+
+    plot = _SLATE_WIDTH - _SLATE_LABEL_PX - _SLATE_NETWORK_PX
+    out = ["<div class='cfdb-slate'>"]
+
+    for day, entries in timed.items():
+        first = min(local for local, _row in entries)
+        last = max(local for local, _row in entries)
+        start_hour = first.hour
+        end_hour = last.hour + math.ceil((last.minute + _SLATE_GAME_MINUTES) / 60)
+        span = max(end_hour - start_hour, 1)
+        height = _SLATE_PAD_TOP + _SLATE_ROW_PX * len(entries) + 6
+
+        def x_of(when) -> float:
+            minutes = (when.hour - start_hour) * 60 + when.minute
+            return _SLATE_LABEL_PX + plot * minutes / (span * 60)
+
+        parts = [f"<div class='cfdb-slate-day'>{esc(day)}</div>",
+                 f"<svg viewBox='0 0 {_SLATE_WIDTH} {height}' role='img' "
+                 f"aria-label='Kick-off times for {esc(day)}, Pacific'>"]
+        for hour in range(start_hour, end_hour + 1):
+            gx = _SLATE_LABEL_PX + plot * (hour - start_hour) * 60 / (span * 60)
+            parts.append(f"<line class='cfdb-slate-grid' x1='{gx:.1f}' y1='{_SLATE_PAD_TOP - 4}' "
+                         f"x2='{gx:.1f}' y2='{height - 4}'/>")
+            label = f"{(hour - 1) % 12 + 1}{'a' if hour < 12 else 'p'}"
+            parts.append(f"<text class='cfdb-slate-hour' x='{gx:.1f}' y='{_SLATE_PAD_TOP - 8}' "
+                         f"text-anchor='middle'>{label}</text>")
+
+        for index, (local, row) in enumerate(entries):
+            y = _SLATE_PAD_TOP + index * _SLATE_ROW_PX
+            mid = y + _SLATE_ROW_PX / 2
+            x1 = x_of(local)
+            x2 = x_of(local + pd.Timedelta(minutes=_SLATE_GAME_MINUTES))
+            matchup = (f"{fmt.text(row.get('away_team_display'))} at "
+                       f"{fmt.text(row.get('home_team_display'))}")
+            # ⚠️ "TBA", NEVER BLANK — Marc asked for it by name, and a blank cell on a run
+            # sheet reads as "no broadcast" rather than "not announced".
+            network = (fmt.text(row.get("network_abbreviation"))
+                       or fmt.text(row.get("network")) or "TBA")
+            reason = " \u00b7 ".join(
+                t for t, on in (("Top 25", row.get("is_top25_matchup")),
+                                ("Undefeated, close", row.get("is_undefeated_close")))
+                if bool(on))
+            spread = row.get("spread_current")
+            spread_text = ("no line" if spread is None or pd.isna(spread)
+                           else f"{float(spread):+g}")
+            tip = (f"{matchup} \u2014 {fmt.clock(row.get('start_date'))} on {network}"
+                   f" \u2014 {spread_text}" + (f" \u2014 {reason}" if reason else ""))
+            parts.append(
+                f"<text class='cfdb-slate-label' x='{_SLATE_LABEL_PX - 8}' y='{mid + 3.5:.1f}' "
+                f"text-anchor='end'>{esc(matchup)}</text>")
+            parts.append(
+                f"<rect class='cfdb-slate-bar{' cfdb-slate-bar-top' if row.get('is_top25_matchup') else ''}' "
+                f"x='{x1:.1f}' y='{mid - _SLATE_BAR_PX / 2:.1f}' "
+                f"width='{max(x2 - x1, 2):.1f}' height='{_SLATE_BAR_PX}' rx='2'>"
+                f"<title>{esc(tip)}</title></rect>")
+            parts.append(
+                f"<text class='cfdb-slate-net' x='{min(x2 + 6, _SLATE_WIDTH - 4):.1f}' "
+                f"y='{mid + 3.5:.1f}'>{esc(network)}</text>")
+        parts.append("</svg>")
+        out.extend(parts)
+
+    for day, rows in untimed.items():
+        # AC-G.11: a named state, not an empty axis and not a bar at a made-up time.
+        names = ", ".join(f"{fmt.text(r.get('away_team_display'))} at "
+                          f"{fmt.text(r.get('home_team_display'))}" for r in rows)
+        out.append(f"<div class='cfdb-slate-tba'><b>{esc(day)} \u00b7 time TBA</b> "
+                   f"{esc(names)}</div>")
+
+    out.append("</div>")
+    return "".join(out)
+
+
 def _looking_forward(scope, depth: int) -> None:
     """The upcoming week's games worth watching, once the week before it is settled.
 
@@ -3766,6 +3905,26 @@ def _looking_forward(scope, depth: int) -> None:
             "The week's games to watch would be here.",
             f"No games in week {week} meet the high-value rules yet.",
             renderer=render)
+
+        # ── A198 (cfdb-main-R-2051): THE SLATE, BELOW THE LIST ────────────────────────────
+        #
+        # > **MARC, v12:** *"Create a SLATE schedule for what games are on when (with network
+        # > info)"*, and on placement: *"The SLATE chart should be below the Schedule
+        # > layout."*
+        #
+        # ⚠️ ONE GATE, NOT TWO. It is drawn inside the same branch as the list, from the same
+        # frame, so it cannot appear while the splash is showing and cannot disagree with the
+        # table above it about which games qualify. An empty frame draws nothing at all —
+        # `states.render_or_state` has already said the honest empty above.
+        slate = _slate(games, esc=html.escape)
+        if slate:
+            st.markdown("**Slate**")
+            st.markdown(slate, unsafe_allow_html=True)
+            st.caption(
+                f"Kick-off times Pacific. Each bar runs "
+                f"{_SLATE_GAME_MINUTES // 60}h {_SLATE_GAME_MINUTES % 60:02d}m from kick-off "
+                f"\u2014 a fixed allowance, not a measured end time, which CFBD does not "
+                f"publish. Hover a bar for the matchup, network, line and why it qualified.")
 
         st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
 
