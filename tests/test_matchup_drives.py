@@ -38,6 +38,12 @@ import render_harness  # noqa: E402
 from lib import fmt  # noqa: E402
 
 
+def _module_constant_call(name):
+    """Call one of matchup.py's zero-argument module functions and return its result."""
+    import importlib
+    return getattr(importlib.import_module("views.matchup"), name)()
+
+
 def _module_constant(name):
     """A page constant, read off the imported module rather than parsed out of the source.
 
@@ -1032,50 +1038,100 @@ def test_THE_SCORE_ARROW_POINTS_AT_THE_END_ZONE_THAT_GOT_THE_POINTS(panel):
             f"so the picture credits the points to whoever had the ball")
 
 
-def test_EVERY_DRAWN_DRIVE_IS_FILLED_OR_HOLLOW_AND_NEVER_BOTH(panel):
-    """> **MARC:** *"Can anything that is a touchdown be filled."*
+def test_THE_OUTLINE_IS_THE_PAGES_INK_AND_THE_FILL_IS_THE_SCORING_TEAMS(panel):
+    """> **MARC, v21:** *"Let's make the outline black (both teams). Fill with the team color if
+    > it is a scoring drive."*
 
-    🚨 **`filled` IS A MARK PROPERTY IN VEGA-LITE, NOT AN ENCODING, SO A PER-ROW FILL NEEDS TWO
-    LAYERS — AND TWO LAYERS NEED A PARTITION.** ⚠️ **A filter on one layer only is half a
-    partition, which is the defect v02's logo variant shipped as `50 50` in one cell
-    (cfdb-wta-R-1192).**
+    🚨 **THIS REPLACES `test_EVERY_DRAWN_DRIVE_IS_FILLED_OR_HOLLOW_AND_NEVER_BOTH`, AND THE
+    PARTITION IT GUARDED IS GONE ON PURPOSE.** v04 drew two point layers because `filled` is a
+    MARK property in Vega-Lite rather than an encoding, so a per-row fill needed two charts.
+    ✅ **`fill` and `stroke` ARE encodings** — one layer now carries both channels, which is
+    exactly what lets the outline be shared while the fill names a team (cfdb-wta-R-1500/1501).
 
-    ⚠️ **AND FILL IS GENERALISED FROM HIS WORDS, DELIBERATELY: filled = SCORED**, so a made
-    field goal is filled and a missed one is hollow — the same diamond, differing only by fill,
-    which is the pair a reader most needs to tell apart. 📋 **Narrowing it to touchdowns alone
-    is one predicate if he prefers that.**
+    ⚠️ **"Black" is read as the page's own ink, `currentColor`** — a literal `#000` vanishes on
+    a `#0e1117` ground, and `light-dark()` is rejected by Vega (cfdb-main-R-1236). **Reversible
+    in one constant if Marc wants literal black in both themes.**
     """
     frame = pd.DataFrame([
         _drive(1, "home", "Alpha", "TD", category="offensive score",
-               scoring_side="offense", scoring=True),
+               scoring_side="offense", scoring=True, color="#101010"),
         _drive(2, "home", "Alpha", "FG", category="offensive score",
-               scoring_side="offense", scoring=True),
-        _drive(3, "home", "Alpha", "MISSED FG", category="kick"),
-        _drive(4, "home", "Alpha", "PUNT", category="punt")])
+               scoring_side="offense", scoring=True, color="#101010"),
+        _drive(3, "home", "Alpha", "MISSED FG", category="kick", color="#101010"),
+        _drive(4, "home", "Alpha", "PUNT", category="punt", color="#101010"),
+        _drive(5, "away", "Beta", "INT TD", category="defensive score",
+               scoring_side="defense", scoring=True, color="#efefef")])
     spec = _spec(panel(frame)[1])
     points = [n for n in _layers(spec, _FIELD) if _mark_of(n) == "point"]
-    assert len(points) == 2, (
-        f"the field draws {len(points)} point layers; a per-row fill needs exactly two — one "
-        f"filled, one hollow")
+    assert len(points) == 1, (
+        f"the field draws {len(points)} point layers; `fill` and `stroke` are encodings, so "
+        f"one layer carries both and a second is a partition nothing needs any more")
+    node = points[0]
 
-    by_fill = {}
-    for node in points:
-        by_fill[bool(node["mark"].get("filled"))] = {
-            r["drive_number"] for r in _rows(spec, node)}
-    assert by_fill.get(True) == {1, 2}, (
-        f"the FILLED layer drew {sorted(by_fill.get(True) or [])} — a touchdown and a made "
-        f"field goal put points on the board")
-    assert by_fill.get(False) == {3, 4}, (
-        f"the HOLLOW layer drew {sorted(by_fill.get(False) or [])}")
-    assert not (by_fill.get(True, set()) & by_fill.get(False, set())), (
-        "a drive is drawn in BOTH layers, so its glyph is stamped twice")
-    assert by_fill.get(True, set()) | by_fill.get(False, set()) == {1, 2, 3, 4}, (
-        "a drive is in NEITHER layer, so it has a bar and no result mark")
+    # 🚨 ONE OUTLINE FOR BOTH TEAMS, and it is a VALUE rather than a per-row field — a `stroke`
+    # keyed on a column is exactly the team-coloured outline Marc asked to remove.
+    stroke = (node.get("encoding") or {}).get("stroke") or {}
+    assert stroke.get("value") == _module_constant("_DRIVE_GLYPH_INK"), (
+        f"the outline is {stroke!r}; it must be the page's ink for every team")
+    assert "field" not in stroke, "the outline is keyed per row, so it is not shared"
+
+    rows = {r["drive_number"]: r for r in _rows(spec, node)}
+    assert set(rows) == {1, 2, 3, 4, 5}, (
+        f"the icon layer drew {sorted(rows)} — every drawn drive gets exactly one mark")
+
+    no_fill = _module_constant("_DRIVE_NO_FILL")
+    # scored: the SCORING team's colour. Drive 5 is a DEFENSIVE score by the away band, so the
+    # points went to HOME — its fill must be home's colour, not away's.
+    assert rows[1]["glyph_fill"] == rows[2]["glyph_fill"] != no_fill, (
+        "a touchdown and a made field goal both scored and must carry a colour")
+    assert rows[5]["glyph_fill"] == rows[1]["glyph_fill"], (
+        f"drive 5 is a DEFENSIVE score by the away band, so the points are the HOME team's and "
+        f"the fill must be home's colour — it reads {rows[5]['glyph_fill']!r} against home's "
+        f"{rows[1]['glyph_fill']!r}")
+    # did not score: no colour at all
+    assert rows[3]["glyph_fill"] == rows[4]["glyph_fill"] == no_fill, (
+        f"a missed kick and a punt scored nothing and must be unfilled: "
+        f"{rows[3]['glyph_fill']!r} / {rows[4]['glyph_fill']!r}")
 
     # AND A MADE AND A MISSED KICK ARE THE SAME SHAPE, differing only by fill.
-    rows = _field_rows(spec)
-    assert _row_for(rows, 2)["result_shape"] == _row_for(rows, 3)["result_shape"], (
+    field_rows = _field_rows(spec)
+    assert _row_for(field_rows, 2)["result_shape"] == _row_for(field_rows, 3)["result_shape"], (
         "a made and a missed field goal draw different shapes, so fill is carrying nothing")
+
+
+def test_A_SCORING_DRIVE_WITH_NO_PUBLISHED_SIDE_IS_A_THIRD_STATE(panel):
+    """🚨 AC-G.11: *scored, and we do not know whose points* IS NOT *did not score*.
+
+    📊 **Measured on live published serving: 143 drives carry `is_scoring_drive = true` with a
+    NULL `scoring_side`** — and, the other way, **314 carry a side while `is_scoring_drive` is
+    false** (303 offense, 11 defense).
+
+    ✅ **So the authority for *did it score* is `is_scoring_drive`, and the neutral
+    `identity.FALLBACK` is what a scoring drive with no named side gets.** ⚠️ **Reusing
+    "unfilled" there would merge two different facts into one mark.**
+
+    ⚠️ **AND THE NaN BRANCH IS THE ONE THAT BITES**: `pd.isna`, never truthiness.
+    """
+    import importlib
+    identity = importlib.import_module("lib.identity")
+    matchup = importlib.import_module("views.matchup")
+    accents = {"home": "#101010", "away": "#efefef"}
+    no_fill = matchup._DRIVE_NO_FILL
+
+    scored_unknown = {"is_scoring_drive": True, "scoring_side": None, "band": "home"}
+    assert matchup._drive_glyph_fill(scored_unknown, accents) == identity.FALLBACK
+    scored_nan = {"is_scoring_drive": True, "scoring_side": float("nan"), "band": "home"}
+    assert matchup._drive_glyph_fill(scored_nan, accents) == identity.FALLBACK, (
+        "a NaN scoring_side fell through a truthiness test — NaN is truthy (R-121)")
+
+    # a side named on a drive that scored nothing must NOT paint a team's colour
+    not_scored = {"is_scoring_drive": False, "scoring_side": "offense", "band": "home"}
+    assert matchup._drive_glyph_fill(not_scored, accents) == no_fill, (
+        "a non-scoring drive that names a side was filled; `is_scoring_drive` is the authority "
+        "and 314 published drives are exactly this shape")
+    nan_scored = {"is_scoring_drive": float("nan"), "scoring_side": "offense", "band": "home"}
+    assert matchup._drive_glyph_fill(nan_scored, accents) == no_fill, (
+        "a NaN is_scoring_drive was treated as scoring — NaN is truthy")
 
 
 def test_THE_TOUCHDOWNS_ARE_ENUMERATED_not_matched_on_a_suffix():
@@ -3352,3 +3408,71 @@ def test_A_KICKOFF_RETURN_TOUCHDOWN_DRAWS_AS_A_TOUCHDOWN(panel):
     assert away_row["result_shape"] == _module_constant("_DRIVE_SCORE_LEFT"), (
         f"the away band's kickoff-return touchdown points {away_row['result_shape']!r}; the "
         f"away end zone is on the left")
+
+
+def test_A_TURNOVER_IS_A_FILLABLE_X_not_the_plus(panel):
+    """> **MARC, v21:** *"Fumble, Downs, Int should all use an X that is fillable instead of
+    > the +."*
+
+    🚨 **VEGA-LITE HAS NO `x` SYMBOL** — its set is circle · square · cross · diamond ·
+    triangle-{up,down,left,right} · stroke · arrow · wedge, and `cross` IS the `+` he is
+    replacing. ✅ **So the shape is a custom SVG path: a plus rotated 45°, CLOSED.**
+
+    ⚠️ **"Fillable" is the word that rules out the obvious answer.** A two-stroke
+    `M…L…M…L…` X has no interior and cannot take a fill, so it could never carry PART 2's
+    "this drive scored" channel. **This asserts the path is closed, which is what makes it
+    fillable, and that it reaches the rendered spec.**
+    """
+    shapes = _module_constant("_DRIVE_GLYPH_SHAPES")
+    x = shapes["turnover"]
+    assert x != "cross", "the turnover is the `+` again"
+    assert x.startswith("M") and x.rstrip().endswith("Z"), (
+        f"the turnover shape is not a CLOSED path, so it cannot be filled: {x[:40]!r}")
+    assert "M" not in x[1:], (
+        f"the path lifts the pen and starts a second stroke, which leaves it unfillable: "
+        f"{x!r}")
+
+    # and it reaches the chart for all three of the results Marc named
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "FUMBLE", category="turnover"),
+        _drive(2, "home", "Alpha", "DOWNS", category="turnover"),
+        _drive(3, "home", "Alpha", "INT", category="turnover"),
+        _drive(4, "home", "Alpha", "PUNT", category="punt")])
+    rows = {r["drive_number"]: r for r in _field_rows(_spec(panel(frame)[1]))}
+    for n, what in ((1, "FUMBLE"), (2, "DOWNS"), (3, "INT")):
+        assert rows[n]["result_shape"] == x, (
+            f"{what} draws {rows[n]['result_shape']!r} rather than the X")
+    assert rows[4]["result_shape"] != x, "a punt is drawing the turnover mark"
+
+
+def test_THE_CLOCK_COLUMN_IS_RIGHT_ALIGNED_so_the_colons_line_up():
+    """> **MARC, v21:** *"Can we make the Clock times right aligned so that the : line up on
+    > 12:30 and 3:30?"*
+
+    📊 **MEASURED ON THE RENDERED SVG, reading each cell's colon with
+    `getStartPositionOfChar`:** before the change `Q1 15:00` put its colon at x 23.55 and
+    `Q4 3:23` at 18.58 — **a 4.97px spread over one game's 19 cells**. After: **0.01px.**
+
+    ✅ **AND NO TABULAR-FIGURES CHANGE WAS NEEDED, WHICH THE PAGE ANSWERED, NOT A CANVAS.**
+    `Q1 15:00` and `Q1 11:16` both render 36.0px wide and `Q2 8:42`, `Q4 3:23`, `Q4 0:09` all
+    31.0px — different digits, identical widths. ⚠️ **A canvas at the site's font stack says
+    the digits are proportional and is the WRONG RULER: Source Sans Pro is not installed in a
+    headless browser, so it measures the fallback.**
+
+    ⚠️ **THE HEADING MOVES WITH THE VALUES** — a left-anchored `Clock` over right-anchored
+    times leaves the label and its column at opposite ends of a 42px cell.
+    """
+    plan = {c[0]: c for c in _module_constant("_DRIVE_COLUMN_PLAN")}
+    key, _field, _w, align, _limit, _hl, heading, head_align = plan["clock"]
+    assert align == "right", (
+        f"the Clock column's data is {align}-aligned; right alignment is what puts the colon a "
+        f"constant distance from the cell's edge")
+    assert head_align == "right", (
+        f"the `{heading}` heading is {head_align}-aligned over right-aligned values")
+
+    # and the layout anchors it on the cell's RIGHT edge, which is what "right" has to mean
+    layout = {c[0]: c for c in _module_constant_call("_drive_column_layout")}
+    entry = layout["clock"]
+    x, left, width = entry[2], entry[3], entry[4]
+    assert x == left + width, (
+        f"the Clock column anchors at {x}, not its cell's right edge ({left + width})")

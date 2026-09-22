@@ -2908,3 +2908,37 @@ def test_THE_TWO_VALUE_CELLS_ARE_STILL_EQUAL_TO_EACH_OTHER():
     assert chart >= 200, (
         f"widening the value cell took the chart to {chart}px, under B108's measured 200px "
         f"floor — the value cell is paid for out of the chart's width")
+
+
+def test_THE_BOX_SCORE_HEADER_NAMES_THE_TEAM_rather_than_one_letter():
+    """🚨 **B142 NARROWED THE VALUE CELL AND THE HEADER SHARES IT** — Marc saw `M…` and `O…`.
+
+    📊 **Measured on the published abbreviations at the header's font.** Text room is
+    `_TABLE_VALUE_PX − logo − gap`, and at B142's 64px cell with a 20px logo, a 4.8px gap and
+    the value font of 1.05rem that is **39.2px — which 135 of 244 FBS abbreviations fit (55.3%)
+    and 291 of 700 overall.**
+
+    ✅ **The room has to come from INSIDE the cell**: the row budget is exactly allocated
+    (`136 + 24 + 64 + 64 + 222 = 510`), so anything the header takes comes off the chart, and
+    the chart is 22px above B108's floor. **This pins the three constants that buy it.**
+
+    📊 **48.0px of room against a widest FBS abbreviation of 45.3px at 0.85rem → 244 of 244.**
+    """
+    logo = _module_constant("_TABLE_HEADER_LOGO_PX")
+    gap = _module_constant("_TABLE_HEADER_GAP_PX")
+    rem = _module_constant("_TABLE_HEADER_NAME_REM")
+    _budget, value, chart = _recomputed_widths()
+
+    room = value - logo - gap
+    widest = 45.3      # px — the widest FBS abbreviation at 0.85rem, measured 2026-09-22
+    assert room >= widest, (
+        f"the header has {room}px of text room against a widest FBS abbreviation of "
+        f"{widest}px — it will truncate the team to an initial, which is what Marc reported")
+    # the label is a LABEL, not a figure: it must not be drawn at the value font
+    assert rem < 1.05, (
+        f"the header name is {rem}rem, the value font — it is a label and the room it needs "
+        f"is what the truncation was about")
+    # and none of this may be paid for out of the chart
+    assert chart >= 200, (
+        f"the chart is {chart}px, under B108's measured 200px floor — the header's room must "
+        f"come from inside its own cell, not from the figure")
