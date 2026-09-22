@@ -71,12 +71,6 @@ NOT_A_ROW = {"params", "os", "environ", "st", "config", "session_state",
 # ⚠️ NAMES A PAGE LEGITIMATELY READS THAT NO QUERY SELECTS. One entry, one reason, no blanket.
 # To add one you must be able to finish "the page reads this and no query selects it because…".
 PROVIDED_BY_THE_PAGE = {
-    "_close_cut": "A204. Today's Looking Forward lets the reader choose the close-line "
-                  "cutoff (3, 4, 6 or 8) from a dropdown, and `Col.render` is handed a ROW "
-                  "and nothing else — so the chosen number rides the frame to reach the "
-                  "reason tag. It CANNOT be a published column: there would have to be one "
-                  "per value of N, and N is a control somebody changes mid-page. The leading "
-                  "underscore is the tell that it is not from serving.",
     "is_added_by_you": "A199. The reader pastes game_ids into Looking Forward's sidebar box "
                        "and `today._looking_forward` marks the rows that came from that list "
                        "with `games.assign(...)`. It is the one flag on this page that CANNOT "

@@ -251,14 +251,25 @@ def _code_of(name: str) -> str:
     return "\n".join(ast.get_source_segment(SOURCE, n) for n in body)
 
 
-def test_the_frame_carries_the_cutoff_so_the_tag_can_read_it():
-    """⚠️ `Col.render` IS HANDED A ROW AND NOTHING ELSE, so the reader's choice has to ride the
-    frame. The name is underscored because it is not a published column — `check_page_reads`
-    would otherwise ask which query selects it, and the honest answer is none."""
+def test_the_cutoff_reaches_the_slate_as_an_argument_not_as_a_passenger():
+    """🚨 A204 PUT `_close_cut` ON THE FRAME and A205 TOOK IT OFF AGAIN.
+
+    A204 needed it there because `Col.render` is handed a ROW and nothing else, and the list's
+    Why column had to know the reader's number. ⚠️ **A205 removed that column**, so the only
+    reader went with it and the passenger became dead weight — a key nothing reads is a key
+    the next person has to check before changing.
+
+    ✅ `_slate` takes the cutoff as an argument, which is how it always wanted it.
+    """
     body = _code_of("_looking_forward")
-    assert "_close_cut=close_cut" in body
+    assert "_close_cut=close_cut" not in body, "the dead passenger is gone"
+    assert "close_cut=close_cut" in body, "the SLATE is still given the reader's number"
+    # and the registry entry went with it — a registered name for a column nobody reads is
+    # a stale exemption that outlives the thing it excused
+    guard = (Path(__file__).resolve().parents[1] / "ci" / "check_page_reads.py").read_text()
+    assert '"_close_cut"' not in guard
+
+    # the reasons themselves still honour the cutoff
     row = _row(is_undefeated_entering=True, spread_current=-5.5)
-    row["_close_cut"] = 6
-    assert "Undefeated" in today._high_value_reason(row)
-    row["_close_cut"] = 4
-    assert today._high_value_reason(row) == ""
+    assert "is_undefeated_close" in today._reasons(row, 6)
+    assert "is_undefeated_close" not in today._reasons(row, 4)

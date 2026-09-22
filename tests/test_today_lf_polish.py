@@ -7,7 +7,6 @@ that the SLATE's reason is a mark rather than a colour. The pixel proof lives in
 `claude_work/renders/A200_*.png` and in the report's clone-method table.
 """
 import ast
-import re
 import sys
 from pathlib import Path
 
@@ -102,41 +101,45 @@ def _game(**kw):
 
 # ── 1. the reason is readable without scrolling at 1440 ───────────────────────────────
 
-def test_the_tags_are_the_short_wording_the_column_was_measured_for():
-    """📊 The clone method at 1440: "Undefeated · close line" is 105.1px and
-    "Undefeated · close" is 87.8px, against a Why column of 106px including 17.6px of cell
-    padding. ⚠️ The long wording did not FIT the column it was sized against."""
-    both = today._high_value_reason(
-        {"is_top25_matchup": True, "is_undefeated_entering": True,
-         "spread_current": -3.0})
-    assert re.findall(r"cfdb-why-tag'>([^<]+)<", both) == ["Top 25", "Undefeated · close"]
-    assert "close line" not in both, "the long wording is what overflowed"
+def test_the_reason_wording_is_short_and_lives_in_one_place_now():
+    """📊 A200 measured the wording against a 106px column: "Undefeated · close line" is
+    105.1px and "Undefeated · close" is 87.8px.
+
+    🚨 A205 REMOVED THE LIST, SO THE TAG IT SIZED IS GONE — the same words survive as the
+    SLATE's reason labels, and `_SLATE_MARKS` is now the only place they are written. **The
+    measurement is kept because the labels are still rendered in a narrow cell**, and because
+    a round that deletes the thing a number was measured for should say so rather than leave
+    the number floating.
+    """
+    labels = [label for _f, _k, label in today._SLATE_MARKS]
+    assert labels == ["Top 25", "Undefeated · close", "Added by you"], labels
+    assert "_high_value_reason" not in SOURCE, "the list's Why renderer went with the list"
 
 
-def test_the_full_rule_moved_to_the_caption_rather_than_being_lost():
-    """🚨 A SHORTER TAG MUST NOT MEAN A VAGUER PAGE. "Undefeated · close" does not say how
-    close, so the sentence that does has to be on screen."""
+def test_the_full_rule_still_reaches_the_reader_in_the_caption():
+    """🚨 A SHORTER LABEL MUST NOT MEAN A VAGUER PAGE. "Undefeated · close" does not say how
+    close, so the sentence that does has to be on screen — and A204 made that sentence state
+    the reader's own cutoff."""
     body = code_of("_looking_forward")
     assert "undefeated FBS team meets a line inside" in body
-    assert "Kick-off times are Pacific" in body, (
-        "the zone left the cells, so the caption has to carry it")
+    assert "Kick-off times Pacific" in SOURCE
 
 
-def test_the_score_columns_are_dropped_only_while_nothing_has_been_played():
-    """🚨 96.4px OF EM DASHES IS WHAT MADE THE REASON UNREADABLE, and shortening the tags
-    could not close the gap on its own (18.3px of 47.6px, measured).
+def test_a_completed_games_score_is_named_as_lost_rather_than_dropped_quietly():
+    """🚨 A200's CONDITIONAL SCORE COLUMNS WENT WITH THE LIST, AND THAT IS A REAL LOSS.
 
-    ⚠️ BUT A COMPLETED GAME IN THE UPCOMING WEEK MUST STILL SHOW ITS SCORE. A week can hold a
-    Tuesday game that is already final, and hiding a real number to buy width is the trade
-    this test exists to refuse.
+    A200 gave the list `away_points`/`home_points` columns that appeared only when something
+    in the frame had been played. **The SLATE has no score column**, and adding one would
+    break the width Marc chose in A204.
+
+    ⚠️ AC-G.11 SAYS AN ABSENCE MUST BE NAMED, and this is where it is named in code: the row
+    still links to Matchup, where the score is, and the panel's own comment enumerates it.
+    The state has never occurred on live data — A200 and A204 both recorded it unexercised.
     """
-    body = code_of("_looking_forward", inner="render")
-    assert 'rows["is_completed"].any()' in body, "the drop must be conditional on the data"
-    assert 'c.field not in ("away_points", "home_points")' in body
-    # and the condition guards the drop rather than sitting beside it
-    drop = body.index('c.field not in ("away_points"')
-    guard = body.index("if not played:")
-    assert guard < drop, "the columns must come out INSIDE the not-played branch"
+    body = code_of("_looking_forward")
+    assert "away_points" not in body and "home_points" not in body
+    assert "A COMPLETED GAME'S SCORE" in SOURCE, (
+        "the loss must be enumerated where the list was removed")
 
 
 def test_schedule_keeps_its_own_columns_and_its_own_clock():
@@ -166,29 +169,17 @@ def test_schedule_keeps_its_own_columns_and_its_own_clock():
     assert "fmt.clock(r.get('start_date'))" in code_of_shared("columns")
 
 
-# ── 2. the kickoff reads on one line, with its day ────────────────────────────────────
-
-def test_the_kickoff_carries_its_day_and_drops_the_zone():
-    """📊 The cell's content box is 80px. "12:30 PM PDT" needs 90px, so 4 of 10 rows wrapped;
-    "Sat 12:30 PM" needs 84.7px and the widest of the week needs 84.3px."""
-    assert today._lf_kickoff(_game()) == "Sat 12:30 PM"
-    assert today._lf_kickoff(
-        _game(start_date=pd.Timestamp("2026-09-26T00:00:00Z"))) == "Fri 5:00 PM"
-    assert "PDT" not in today._lf_kickoff(_game())
-
-
-def test_a_missing_kickoff_is_an_em_dash_and_not_a_crash():
-    """AC-G.11 and `NaN` is truthy: a game with no instant has no day either."""
-    assert today._lf_kickoff(_game(start_date=None)) == "—"
-    assert today._lf_kickoff(_game(start_date=pd.NaT)) == "—"
-
-
-def test_the_day_and_the_time_come_from_ONE_conversion():
-    """🚨 R-643's FAMILY. Reading the day off `game_date` and the time off `start_date` makes
-    a late kickoff disagree with itself — the two halves must share one converted instant."""
-    body = code_of("_lf_kickoff")
-    assert "game_date" not in body, "the day must not come from a second column"
-    assert body.count("fmt._local(") == 1, "one conversion, used for both halves"
+# ── 2. the kickoff — RETIRED WITH THE LIST (A205) ─────────────────────────────────────
+#
+# 🚨 A200 SPENT A ROUND ON THIS AND A205 DELETED IT, WHICH IS WORTH RECORDING RATHER THAN
+# QUIETLY REMOVING. `_lf_kickoff` put the day on the kickoff cell and dropped the zone so the
+# cell stopped wrapping — 📊 the content box was 80px and "12:30 PM PDT" needed 90px, wrapping
+# 4 of 10 rows. **The list it belonged to is gone** (Marc: *"let's deprecate the table above
+# the SLATE"*), and the SLATE carries day headings and labels every bar with its own start
+# time, so nothing here lost a home.
+#
+# ⚠️ The three tests went with the helper. They are not "passing somewhere else" — they are
+# gone, and this note is so the next reader does not go looking for them.
 
 
 # ── 3. the SLATE labels carry their AP ranks ──────────────────────────────────────────
@@ -233,8 +224,11 @@ def test_the_logos_come_from_schedules_own_team_cell_now():
 def test_the_left_of_the_row_is_schedules_cells_rather_than_new_markup():
     """> **MARC, v13:** *"Re-use the layout from the inline schedule for the left side."*"""
     body = code_of("_slate")
-    assert "schedule_table.team_with_record(row, 'away')" in body
-    assert "schedule_table.team_with_record(row, 'home')" in body
+    # ⚠️ A205 wraps the NAME in a link, so the call moved into `_slate_team` — the identity
+    # is still Schedule's own cell rather than markup redrawn here.
+    assert "_slate_team(row, 'away', scope, esc)" in body
+    assert "_slate_team(row, 'home', scope, esc)" in body
+    assert "schedule_table.team_with_record(row, side)" in code_of("_slate_team")
     html = slate(_game())
     for column in ("Away", "Home", "Spread", "TV", "Game", "Why"):
         assert f">{column}</th>" in html, f"no {column} header"

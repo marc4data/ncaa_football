@@ -8,7 +8,6 @@ tested hardest: only integers come out, and they reach SQL as a bound array rath
 text. Everything else — prose, a URL to somewhere else, an injection-shaped string — is an
 unreadable line, which is a state the reader is told about rather than one that fails.
 """
-import re
 import sys
 from pathlib import Path
 
@@ -145,7 +144,8 @@ def test_the_ids_reach_sql_as_a_bound_array_and_never_as_text():
     assert "also_ids}" not in body and "+ str(also_ids" not in body, (
         "the ids must be bound, never formatted into the SQL string")
     # and the page passes them through rather than filtering afterwards
-    page = SOURCE[SOURCE.index("def _high_value_games("):SOURCE.index("def _high_value_reason(")]
+    # ⚠️ `_high_value_reason` was the old end marker and A205 deleted it with the list.
+    page = SOURCE[SOURCE.index("def _high_value_games("):SOURCE.index("def _looking_forward(")]
     assert "also_ids=also_ids" in page
 
 
@@ -179,15 +179,18 @@ def test_the_url_carries_the_list_and_the_box_is_seeded_from_it():
 
 def test_an_added_game_carries_its_own_tag_and_keeps_any_rule_tags():
     """⚠️ A GAME CAN BE BOTH. Showing only "Added by you" would hide why it qualifies on its
-    own; showing only the rule would hide that he asked for it."""
-    both = today._high_value_reason(
-        {"is_top25_matchup": True, "is_undefeated_entering": False, "is_added_by_you": True})
-    tags = re.findall(r"cfdb-why-tag'>([^<]+)<", both)
-    assert tags == ["Top 25", "Added by you"]
+    own; showing only the rule would hide that he asked for it.
 
-    only_added = today._high_value_reason(
+    🚨 A205 REMOVED THE LIST, so the question is asked of `_slate_reason_text` — the one place
+    the reason words now live, read by the SLATE's marks and its hovers alike.
+    """
+    both = today._slate_reason_text(
+        {"is_top25_matchup": True, "is_undefeated_entering": False, "is_added_by_you": True})
+    assert both == "Top 25 · Added by you"
+
+    only_added = today._slate_reason_text(
         {"is_top25_matchup": False, "is_undefeated_entering": False, "is_added_by_you": True})
-    assert re.findall(r"cfdb-why-tag'>([^<]+)<", only_added) == ["Added by you"]
+    assert only_added == "Added by you"
 
 
 def test_the_added_flag_is_computed_in_the_page_and_not_published():
