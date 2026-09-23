@@ -1534,11 +1534,18 @@ def test_a_card_draws_three_metrics_and_the_single_metric_boards_still_draw_one(
                      "metric_YDS": 485, "metric_TD": 5, "metric_INT": 2})
 
     three = today._player_card(row, "yards", ("YDS", "TD", "INT"))
-    units = re.findall(r"cfdb-card-unit'>([^<]+)<", three)
     values = re.findall(r"cfdb-card-value'>([^<]+)<", three)
-    assert units == ["YDS", "TD", "INT"], units
     assert values == ["485", "5", "2"], values
     assert three.count("cfdb-card-metric'") == 3
+
+    # 🚨 A212 (cfdb-main-R-2524) MOVED THE NAMES OUT OF THE CELLS, ON MARC'S v14 INSTRUCTION:
+    # *"we don't need to print the metric in every cell. Instead print it at the sub-header
+    # level so people can read down a clean column"*. ⚠️ THE INVARIANT THIS TEST GUARDS IS
+    # UNCHANGED — three metrics in, three values out, in order — and the ORDER is now what
+    # ties a number to its name, because the header lists them in the same order.
+    assert "cfdb-card-unit" not in three, "the name belongs to the sub-header now"
+    units = re.findall(r"cfdb-card-unit'>([^<]+)<", three)
+    assert units == [], units
 
     one = today._player_card(row, "yards")
     assert "cfdb-card-metrics" not in one
