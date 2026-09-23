@@ -100,3 +100,15 @@ def evaluate(frame: pd.DataFrame, pred_margin: Optional[pd.Series] = None,
 def market_baseline(frame: pd.DataFrame) -> pd.DataFrame:
     """The market's own margin MAE and straight-up rate on these rows — the bar to clear."""
     return evaluate(frame)[["market", "games", "note"]]
+
+
+def rate_interval(rate: float, n: int, z: float = 1.96) -> tuple:
+    """A 95% range for a hit rate measured on n games (normal approximation).
+
+    ATS on ~550 games carries a range of about ±4 points: 51% and 53% are not distinguishable
+    on one season, and this is the number that says so.
+    """
+    if not n or rate != rate:
+        return (np.nan, np.nan)
+    half = z * np.sqrt(rate * (1 - rate) / n)
+    return (rate - half, rate + half)
