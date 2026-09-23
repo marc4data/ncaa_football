@@ -176,3 +176,66 @@ def test_no_switches_is_r2430s_build(league):
     """Every R-2440 change is behind a switch; with all of them off, the build is R-2430's."""
     default = of.build(league, seasons=[2025])
     assert not any("sos_" in c or "points_rating" in c for c in default.columns)
+
+
+def test_a_team_that_changes_division_is_judged_by_that_seasons_division():
+    """cfdb-wtc-R-2450: Delaware was FCS in 2024 and FBS in 2025. A map built across seasons would call
+    it FBS in 2024; per season it must not."""
+    games = pd.DataFrame({"season": [2024, 2025], "home_team": ["Delaware", "Delaware"],
+                          "away_team": ["Rival", "Rival"], "home_classification": ["fcs", "fbs"],
+                          "away_classification": ["fbs", "fbs"]})
+    assert of.divisions(games[games["season"] == 2024])["Delaware"] == "fcs"
+    assert of.divisions(games[games["season"] == 2025])["Delaware"] == "fbs"
+
+
+# ---------------------------------------------------------------- cfdb-wtc-R-2450: scoring an upcoming week
+
+def _as_upcoming_2026(league):
+    """The synthetic league relabelled as 2026 with Week 6 NOT YET PLAYED — but its absurd stat rows
+    left in the inputs, as if something upstream had written them early."""
+    out = {n: f.copy() for n, f in league.items()}
+    out["games"]["season"] = 2026
+    out["talent"]["season"] = 2026
+    wk6 = out["games"]["week"] == 6
+    out["games"].loc[wk6, ["home_points", "away_points"]] = np.nan
+    return out
+
+
+def test_an_upcoming_2026_week_is_built_from_earlier_weeks_only(league):
+    """STAGED BREAK (cfdb-wtc-R-2450): `inputs_before` changed to `week <= week` lets the target week's
+    rows feed its own features, and THIS test goes RED — the live path, not only the backtest."""
+    upcoming = _as_upcoming_2026(league)
+    built = of.build(upcoming, seasons=[2026], completed=False).set_index("id")
+    assert set(built.index) == {1015, 1016, 1017}                     # only the unplayed Week 6
+    for game_id in built.index:
+        per_team, game = _independent_recompute(upcoming, game_id)
+        for side, team in (("home", game["home_team"]), ("away", game["away_team"])):
+            for name in per_team.columns:
+                assert built.loc[game_id, f"{side}_{name}"] == pytest.approx(per_team.loc[team, name])
+        assert built.loc[game_id, "home_adjusted_epa"] < 1.0, "Week 6's own rows reached Week 6's features"
+
+
+def test_scoring_refuses_a_null_feature_and_a_played_game(league):
+    from modeling import weekly
+    frame = of.build(league, seasons=[2025])
+    frame = frame.assign(neutral_site=False, week=6, home_points=np.nan)
+    bad = frame.copy()
+    bad.loc[bad.index[0], "home_adjusted_epa"] = np.nan
+    with pytest.raises(weekly.NullFeatureError, match="home_adjusted_epa"):
+        weekly.refuse_nulls(bad)
+    weekly.refuse_nulls(frame)
+    with pytest.raises(ValueError, match="unplayed"):
+        weekly.score_week(frame, frame.assign(home_points=24.0))
+
+
+def test_the_live_command_refuses_a_week_below_the_floor():
+    from modeling import weekly
+    with pytest.raises(SystemExit, match="below the Week 5 floor"):
+        weekly.main(["--season", "2026", "--week", "4"])
+
+
+def test_the_live_output_name_is_never_a_file_the_loader_ingests():
+    from modeling import weekly
+    from src.load_predictions import EXPECTED_FILES
+    assert weekly.output_name(2026, 5) == "cfdb_wtc_c1_own_2026_week05.csv"
+    assert weekly.output_name(2026, 5) not in EXPECTED_FILES
