@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from modeling import data, leakage, splits
+from modeling import data, export, features, leakage, splits
 from modeling.evaluate import ATS_BREAK_EVEN, evaluate
 
 
@@ -174,3 +174,95 @@ def test_real_pack_contract_and_2025_matches_the_packs_leaderboard():
     assert len(test) == 567
     assert result.loc["ATS %", "games"] == 553
     assert "pushes excluded: 14" in result.loc["ATS %", "note"]
+
+
+# ---------------------------------------------------------------- cfdb-wtc-R-2420: split guard, features, export
+
+def test_split_guard_refuses_a_2025_game_in_validation(small_frame):
+    """STAGED BREAK (cfdb-wtc-R-2420): letting one 2025 game into `validate` inside `split()`
+    turns `test_splits_are_by_season_and_regular_season_only` RED with SplitError."""
+    parts = splits.split(small_frame)
+    leaked = dict(parts, validate=pd.concat([parts["validate"], parts["test"].head(1)]))
+    with pytest.raises(splits.SplitError, match=r"validate holds 1 game\(s\) from season\(s\) \[2025\]"):
+        splits.check_splits(leaked)
+
+
+def test_split_guard_refuses_a_game_in_two_splits(small_frame):
+    parts = splits.split(small_frame)
+    twin = parts["train"].head(1).assign(season=2024)
+    with pytest.raises(splits.SplitError, match="more than one split"):
+        splits.check_splits(dict(parts, validate=pd.concat([parts["validate"], twin])))
+
+
+def _pack_like_columns():
+    stems = list(features.NOTEBOOK_PAIRS) + ["total_havoc_offense", "points_per_opportunity_offense"]
+    return (["id", "season", "season_type", "week", "neutral_site", "home_points", "away_points",
+             "margin", "spread"] + [f"{side}_{s}" for s in stems for side in ("home", "away")])
+
+
+@pytest.mark.parametrize("form", ["raw", "paired"])
+@pytest.mark.parametrize("breadth", ["notebook", "wide"])
+def test_every_candidate_feature_set_passes_the_leakage_guard(form, breadth):
+    """STAGED BREAK (cfdb-wtc-R-2420): adding "spread" to the extras in `feature_sets` makes
+    `assert_no_leakage` raise inside it, and every case of THIS test goes RED."""
+    sets = features.feature_sets(_pack_like_columns(), form, breadth)
+    for target, cols in sets.items():
+        assert "spread" not in cols and "margin" not in cols, target
+        assert "neutral_site" in cols
+
+
+def test_paired_form_points_each_target_the_right_way():
+    sets = features.feature_sets(_pack_like_columns(), "paired", "notebook")
+    assert all(c.endswith("_diff") for c in sets["margin"] if c != "neutral_site")
+    assert all(c.endswith("_sum") for c in sets["total"] if c != "neutral_site")
+    assert len(sets["points"]) == len(sets["margin"]) + len(sets["total"]) - 1
+
+
+def test_differential_runs_away_minus_home_like_the_margin():
+    frame = pd.DataFrame({"home_elo": [1600.0], "away_elo": [1500.0]})
+    out = features.add_paired_columns(frame, ["elo"])
+    assert out.loc[0, "elo_diff"] == -100.0 and out.loc[0, "elo_sum"] == 3100.0
+
+
+def test_the_august_baseline_inputs_carry_the_spread_and_no_candidate_does():
+    """The published model was fed the line; the reproduction says so and stays out of the candidates."""
+    assert features.AUGUST_BASELINE_FEATURES[0] == "spread"
+    with pytest.raises(leakage.LeakageError):
+        leakage.assert_no_leakage(features.AUGUST_BASELINE_FEATURES)
+
+
+def test_export_matches_the_42_column_contract_and_blanks_pushes():
+    from src.load_predictions import CONTRACT_COLUMNS
+    games = _frame([(2025, "regular", 30, 20, -7.0), (2025, "regular", 20, 23, 3.0)])
+    games = games.assign(start_date="2025-10-04", neutral_site=False,
+                         home_conference="SEC", away_conference="SEC")
+    out = export.export_frame(games, [-9.0, 3.0], [48.0, 44.0], "test", "m", "f", "t")
+    assert list(out.columns) == list(CONTRACT_COLUMNS) and len(CONTRACT_COLUMNS) == 42
+    assert out.loc[0, "actual_home_cover"] is True and pd.isna(out.loc[1, "actual_home_cover"])
+    assert pd.isna(out.loc[1, "predicted_home_cover"])                  # model exactly on the line
+    assert out.loc[0, "predicted_home_points"] == pytest.approx(28.5)    # (48 − (−9)) / 2
+    assert out.loc[0, "cover_correct"] is True and pd.isna(out.loc[1, "cover_correct"])
+
+
+def test_export_refuses_a_filename_the_warehouse_loader_ingests(tmp_path):
+    from src.load_predictions import EXPECTED_FILES
+    with pytest.raises(ValueError, match="warehouse loader"):
+        export.write_export(pd.DataFrame(), EXPECTED_FILES[0], directory=tmp_path)
+
+
+def test_ridge_team_points_paired_equals_ridge_on_the_margin():
+    """A linear model of each team's points, subtracted, IS a linear model of the margin — so
+    for ridge on the same features Marc's framing costs nothing. Trees do not have this property."""
+    pytest.importorskip("sklearn", reason="modeling extras (modeling/requirements.txt) not installed")
+    from modeling import models
+    rng = np.random.default_rng(7)
+    n = 300
+    frame = pd.DataFrame({f"{side}_{s}": rng.normal(size=n) for s in features.NOTEBOOK_PAIRS
+                          for side in ("home", "away")})
+    frame["neutral_site"] = False
+    frame["home_points"] = 28 + 5 * frame["home_elo"] + rng.normal(scale=7, size=n)
+    frame["away_points"] = 24 + 5 * frame["away_elo"] + rng.normal(scale=7, size=n)
+    frame["margin"] = frame["away_points"] - frame["home_points"]
+    direct, _ = models.predict(frame, frame, "raw", "notebook", "ridge", "direct")
+    paired, _ = models.predict(frame, frame, "raw", "notebook", "ridge", "team_points")
+    assert np.allclose(direct, paired)
