@@ -96,6 +96,8 @@ def test_an_unmapped_position_lands_in_unlisted_rather_than_vanishing():
         # A known one must NOT fall through, or the assertions above prove nothing.
         assert team.roster_unit("QB") == "Offense"
         assert team.roster_unit("EDGE") == "Defense"
+        # ⚠️ THE DATA VALUE, NOT THE HEADING. `roster_unit` is the grouping key;
+        # `fmt.title_case` is applied where the section is DRAWN (A211).
         assert team.roster_unit("P") == "Special teams"
 
     html = _draw([_player("QB"), _player("KR")])
@@ -110,7 +112,7 @@ def test_an_empty_unlisted_section_is_not_drawn():
     that an absence must say WHICH absence it is. A heading with nothing under it says neither.
     """
     fully_listed = _draw([_player("QB"), _player("LB"), _player("P")])
-    assert _sections(fully_listed) == ["Offense", "Defense", "Special teams"], (
+    assert _sections(fully_listed) == ["Offense", "Defense", "Special Teams"], (
         "a fully-listed roster must draw exactly three sections, in Marc's order")
 
     with_unknowns = _draw([_player("QB"), _player(None)])
@@ -120,10 +122,10 @@ def test_an_empty_unlisted_section_is_not_drawn():
 
 def test_a_unit_with_nobody_in_it_is_not_drawn_either():
     """⚠️ The same rule, applied to the three named units. A team with no listed kickers has no
-    `Special teams` heading rather than an empty one that reads as a rendering failure.
+    `Special Teams` heading rather than an empty one that reads as a rendering failure.
     """
     assert _sections(_draw([_player("QB"), _player("LB")])) == ["Offense", "Defense"]
-    assert _sections(_draw([_player("P")])) == ["Special teams"]
+    assert _sections(_draw([_player("P")])) == ["Special Teams"]
 
 
 def test_the_height_column_sorts_on_inches_and_displays_the_string():

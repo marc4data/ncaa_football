@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import streamlit as st
 
-from lib import filters, shell, states, workbook
+from lib import filters, fmt, shell, states, workbook
 
 
 def body(page) -> None:
@@ -58,7 +58,7 @@ def body(page) -> None:
             fix_label="Clear filters", fix=filters.clear)
         return
 
-    st.subheader("What this workbook will contain")
+    st.subheader(fmt.title_case("What this workbook will contain"))
     # R-196. SCOPE-COUNT AND WRITTEN-COUNT ARE SHOWN SEPARATELY, and the preview is the right
     # place for it rather than only the Index: the Index tells a reader what happened after
     # they have the file, and this is where they can still narrow the filters and prevent it.
@@ -83,7 +83,7 @@ def body(page) -> None:
     # the first was named HERE, so a reader who remembered the Odds tab had to download the
     # file to find out it was gone. The preview is the place to answer that.
     if missing or workbook.PENDING_SHEETS:
-        st.subheader("What it will not contain")
+        st.subheader(fmt.title_case("What it will not contain"))
     for name, reason in missing:
         st.markdown(f"- **{name}** — {reason}")
     if missing:

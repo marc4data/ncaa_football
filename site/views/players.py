@@ -25,7 +25,7 @@ has the player id in it.
 import pandas as pd
 import streamlit as st
 
-from lib import filters, params, shell, states, table
+from lib import filters, fmt, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -167,7 +167,7 @@ def _totals_table(df: pd.DataFrame) -> None:
 
 def _game_log(season: int, slug: str) -> None:
     st.divider()
-    st.markdown("#### Game log")
+    st.markdown("#### " + fmt.title_case("Game log"))
     if season < BOX_SCORE_FIRST_SEASON:
         states.empty(
             f"A game-by-game log for {season} would be here.",
@@ -243,7 +243,7 @@ def _game_log_table(df: pd.DataFrame) -> None:
 
 def _drill_down(season: int, slug: str) -> None:
     st.divider()
-    st.markdown("#### Every play, filterable")
+    st.markdown("#### " + fmt.title_case("Every play, filterable"))
     if season < BOX_SCORE_FIRST_SEASON:
         states.empty(
             f"Play-by-play for {season} would be here.",

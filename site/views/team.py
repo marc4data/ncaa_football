@@ -355,7 +355,7 @@ def _schedule_tab(season, team_slug, team_display) -> None:
     ✅ **So the Team page gains no legend**: the alternative was importing Today's, and a legend
     explaining marks this tab cannot draw is the defect R-178 forbids in the other direction.
     """
-    st.subheader("Schedule")
+    st.subheader(fmt.title_case("Schedule"))
 
     # 🚨 A174 (cfdb-main-R-1708). BOTH FRAMES ARE BOUND BEFORE EITHER SECTION RUNS, AND THE
     # CALIBRATION RENDER IS WHAT FOUND WHY. `states.section` CATCHES a raise and draws a card,
@@ -381,7 +381,8 @@ def _schedule_tab(season, team_slug, team_display) -> None:
             limit 60
         """, {"season": season, "team_slug": team_slug})
         if not played.empty:
-            st.markdown("<h4 class='cfdb-roster-unit'>Completed</h4>",
+            st.markdown(f"<h4 class='cfdb-roster-unit'>"
+                        f"{fmt.title_case('Completed')}</h4>",
                         unsafe_allow_html=True)
             table.as_of_caption(played)
             table.render(played, [
@@ -417,7 +418,8 @@ def _schedule_tab(season, team_slug, team_display) -> None:
             limit 60
         """, {"season": season, "team_slug": team_slug})
         if not upcoming.empty:
-            st.markdown("<h4 class='cfdb-roster-unit'>Upcoming</h4>",
+            st.markdown(f"<h4 class='cfdb-roster-unit'>"
+                        f"{fmt.title_case('Upcoming')}</h4>",
                         unsafe_allow_html=True)
             table.as_of_caption(upcoming)
             table.render(upcoming, [
@@ -525,7 +527,7 @@ def _roster(season, team_slug) -> None:
     boolean on `srv_team_roster` would let the name link for the players it resolves for and
     stay plain for the rest. That is a dbt round, and it is named in A172's report.
     """
-    st.subheader("Roster")
+    st.subheader(fmt.title_case("Roster"))
     with states.section("srv_team_roster"):
         df = query("""
             select full_name, position, jersey, class_year_display,
@@ -557,7 +559,8 @@ def _roster(season, team_slug) -> None:
                     # a team with no listed kickers has no Special teams heading, rather than
                     # an empty one that reads as a rendering failure.
                     continue
-                st.markdown(f"<h4 class='cfdb-roster-unit'>{unit}</h4>",
+                st.markdown(f"<h4 class='cfdb-roster-unit'>"
+                            f"{fmt.title_case(unit)}</h4>",
                             unsafe_allow_html=True)
                 table.render(block, ROSTER_COLUMNS, caption="")
 

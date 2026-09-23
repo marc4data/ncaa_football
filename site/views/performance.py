@@ -174,7 +174,7 @@ def _segment(model: str, segment_type: str) -> pd.DataFrame:
 
 def _breakdowns(models: list) -> None:
     st.divider()
-    st.subheader("Breakdowns")
+    st.subheader(fmt.title_case("Breakdowns"))
     model = st.selectbox("Model", models,
                          help="Breakdowns are per model; averaging across models would "
                               "produce a figure no model achieved.")
