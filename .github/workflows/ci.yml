@@ -52,7 +52,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Lint (flake8)
-        run: flake8 src dags tests modeling
+        run: flake8 src dags tests modeling site ci
 
       - name: Test (pytest)
         run: pytest -q

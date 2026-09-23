@@ -1123,7 +1123,12 @@ TABLE_CSS = """
    ❌ **A TRAILING SPACER WAS BUILT, MEASURED AND REMOVED.** 70vh of `::after` room took the
    one unreachable heading from 766px short to 136px, and ~85vh would have closed it — but
    **that heading is Poll movement, which carries NO anchor**, so the only thing the spacer
-   bought was two-thirds of a blank screen at the foot of every page on the site. Measuring
+   bought was two-thirds of a blank screen at the foot of every page on the site.
+   ⚠️ A215 RENAMED THAT HEADING TO **Tracking Top 25 Changes** AND MOVED IT SECOND IN the
+   Looking Back tab. The measurement above is left as it was taken — it is dated, and a
+   rewritten measurement is worse than an accurate one — but the heading it calls "Poll
+   movement" is the one now called Tracking Top 25 Changes, and **it still carries no
+   anchor**, which is the claim this paragraph is actually making. Measuring
    before shipping is the whole point; this is what it looked like when it paid.
 
    ✅ SO WHAT SHIPS IS THE HALF THAT COSTS NOTHING. `scroll-margin-top` keeps the heading from
