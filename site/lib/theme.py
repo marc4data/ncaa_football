@@ -135,26 +135,21 @@ CSS = """
 /* ── A190: the distance table beside the chart ────────────────────────────────────────────
    Six columns in ~18% of the row, so the team name is the only flexible one and everything
    else is sized to its content. */
-/* ⚠️ THE `min-width` IS THE STACKING MECHANISM, NOT A COSMETIC FLOOR. It equals what the
-   row's first line needs (rank 17.6 + logo 17.6 + widest name 116.9 + gaps 8 = 160.1), and
-   Streamlit's `stHorizontalBlock` is `flex-wrap:wrap` with `min-width:auto` columns — so
-   below roughly 1400px the column cannot shrink past this and drops to its own full-width
-   line beneath the chart. Container-driven, so it is right with the sidebar open or closed. */
+/* 🚨 A208 (cfdb-main-R-2261). A190's STACKING CLAIM STOOD HERE AND IS FALSE — it was
+   measured false by A203 (see `.cfdb-far` below), and the paragraph outlived the rule it
+   described: the block it sat above is the SLATE's, and nothing here has a `min-width` at
+   all. Streamlit's columns do NOT wrap out of a two-column row whose bases sum to 100%; a
+   `min-width` larger than the column overflows and is clipped. The remedy is the scroller,
+   which is now `.cfdb-scroll`'s job for every wide table on the site. */
 /* ── A198: the SLATE — one row per game, time across the x-axis ───────────────────────────
    ⚠️ `currentColor` THROUGHOUT, like `lib/distribution.py` and the scatter: the drawing takes
    the page's own ink and is therefore correct in both themes with no second palette to keep
    in step. The one accent is the Top 25 bar, which is the same `--cfdb-link` the page uses
    for a link — a rank is the strongest signal on this chart and it earns one hue. */
-/* A207: a container, so the scroll note below can ask how wide THIS SECTION is. The viewport
-   is the wrong question — the sidebar's width changes the answer. */
-.cfdb-slate { margin:.3rem 0 .2rem; container-type:inline-size; }
-/* 🚨 THE NOTE IS HIDDEN BY DEFAULT AND REVEALED BY THE CONTAINER QUERY, never the other way
-   round: if container queries were unsupported the reader would see a note that is always
-   true-ish rather than a table that silently hides five columns. 940px is the table's own
-   `min-width` — the exact point past which something is out of reach. */
-.cfdb-slate-scrollnote { display:none; font-size:.7rem; opacity:.75; margin:.1rem 0 .3rem;
-    gap:.3rem; align-items:center; }
-@container (max-width: 939px) { .cfdb-slate-scrollnote { display:flex; } }
+/* A207's container, A208's class: the SLATE carries `.cfdb-scrollbox` so its note can ask
+   how wide THIS SECTION is. The viewport is the wrong question — the sidebar's width changes
+   the answer. The note, the query and the boundary are all shared now; see `.cfdb-scroll`. */
+.cfdb-slate { margin:.3rem 0 .2rem; }
 .cfdb-slate svg { display:block; width:100%; height:auto; color:inherit; }
 /* A201. The SLATE is a schedule table whose last column holds the graph. The left cells are
    Schedule's own, so they inherit `.cfdb-table`; only the graph column is new. */
@@ -163,29 +158,10 @@ CSS = """
    column got 0px and all twelve hour labels piled up outside it — measured, in the browser.
    940px keeps ~300px of axis and lets the row scroll sideways instead, which is exactly what
    the list above it already does at that width. */
-/* 🚨 A207 (cfdb-main-R-2256). THE SCROLLBAR IS DRAWN, BECAUSE `overflow-x:auto` ALONE IS
-   INVISIBLE ON macOS.
-   📊 Measured on A205's shipped SLATE with the sidebar open: at 1100 the container is 640px
-   and the table 940px, so **TV, Game, Why and the whole time gantt sit past the right edge**
-   — and `offsetHeight - clientHeight` was **0px at every width**, which is an OVERLAY
-   scrollbar: it exists only while something is scrolling. The content was reachable and
-   nothing said so, which is a different defect from unreachable and a worse one to ship
-   (AC-G.11).
-   ⚠️ `scrollbar-width` and `::-webkit-scrollbar` together force a bar that OCCUPIES LAYOUT, so
-   `offsetHeight - clientHeight` becomes non-zero and the fix is measurable rather than
-   assumed.
-   ⚠️ SCOPED TO THE SLATE. Every `.cfdb-scroll` on the site has the same defect — see the
-   report — but this round was asked to fix this one. */
-.cfdb-slate .cfdb-scroll { scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, currentColor 35%, transparent) transparent; }
-.cfdb-slate .cfdb-scroll::-webkit-scrollbar { height:10px; }
-.cfdb-slate .cfdb-scroll::-webkit-scrollbar-track {
-    background:color-mix(in srgb, currentColor 8%, transparent); border-radius:5px; }
-.cfdb-slate .cfdb-scroll::-webkit-scrollbar-thumb {
-    background:color-mix(in srgb, currentColor 32%, transparent); border-radius:5px; }
-.cfdb-slate .cfdb-scroll::-webkit-scrollbar-thumb:hover {
-    background:color-mix(in srgb, currentColor 48%, transparent); }
-.cfdb-slate-table { table-layout:fixed; width:100%; min-width:940px; }
+/* A208: the scrollbar styling and the note moved to `.cfdb-scroll`, which every wide table
+   on the site already uses. Nothing SLATE-specific is left here; `_SLATE_MIN_PX` in
+   `views/today.py` is the one place 940 is written, and the table carries it inline. */
+.cfdb-slate-table { table-layout:fixed; width:100%; }
 .cfdb-slate-table td, .cfdb-slate-table th { padding-top:.2rem; padding-bottom:.2rem; }
 .cfdb-slate-table .cfdb-slate-cell { padding-left:.5rem; padding-right:.2rem; }
 .cfdb-slate-table .cfdb-slate-tv { white-space:nowrap; }
@@ -292,22 +268,26 @@ CSS = """
    > the Gained and Allowed so the values are vertically aligned".
    A190 used .72rem on a two-line grid because six facts did not fit on one line at 18% of the
    row; Marc has since allowed more width, so this is .9rem — `.cfdb-table`'s own size — on one
-   line per team. The min-width is what makes the column drop below the chart on a narrow
-   viewport rather than squeezing (Streamlit's row is flex-wrap:wrap). */
+   line per team. ⚠️ A208: the sentence that stood here said the min-width makes the column
+   drop below the chart — A190's claim, which the next comment measures FALSE. It squeezes;
+   the scroller is what saves it. */
 /* 🚨 A203 MEASURED A190's `min-width` CLAIM AND IT IS FALSE.
    A190's comment says the min-width makes this column "drop to its own full-width line"
    because Streamlit's row is `flex-wrap:wrap`. 📊 It does not: the two columns' bases sum to
    100%, so nothing wraps, and a min-width larger than the column simply OVERFLOWS and is
    clipped. Measured at 1100 the column is 210px, the table wanted 304px, and its right edge
    sat **94px past the block** — the Allowed column was off-screen with no way to reach it.
-   ✅ So the table SCROLLS inside its own column, which is what every other wide table on this
-   site does at 1100 (Schedule's list and A201's SLATE both do). `min-width:0` lets the column
-   shrink; the `min-width` on the TABLE keeps the columns their measured size and hands the
-   overflow to the scroller. */
+   ✅ So the table SCROLLS inside its own column. `min-width:0` lets the column shrink; the
+   minimum on the TABLE (`_FAR_MIN_PX`, inline from `views/today.py`) keeps the columns their
+   measured size and hands the overflow to the scroller.
+   ⚠️ A208 CORRECTION: this sentence used to end by naming Schedule's list and A201's SLATE as
+   two tables that already scroll at 1100. 📊 Schedule's list does not — `views/schedule.py`
+   calls `table.render` without `scroll=True` and emits no wrapper at all. FOUR wrappers exist
+   site-wide and they are enumerated at `.cfdb-scroll`. */
 .cfdb-far { font-size:.9rem; min-width:0; }
 .cfdb-far-head { font-weight:700; font-size:.78rem; letter-spacing:.04em;
     text-transform:uppercase; opacity:.7; margin-bottom:.3rem; }
-.cfdb-far-table { width:100%; min-width:20rem; border-collapse:collapse;
+.cfdb-far-table { width:100%; border-collapse:collapse;
     table-layout:fixed;
     font-variant-numeric:tabular-nums; }
 .cfdb-far-table th { font-size:.68rem; font-weight:700; letter-spacing:.03em;
@@ -722,7 +702,48 @@ TABLE_CSS = """
    917px window — horizontal scrolling was reachable only after scrolling the whole page down.
    Constraining the height puts the bar at the bottom of the visible box, where the reader is
    looking, and gives the table its own vertical scroll. */
-.cfdb-scroll { overflow-x:auto; overflow-y:auto; max-height:70vh; }
+.cfdb-scroll { overflow-x:auto; overflow-y:auto; max-height:70vh;
+    /* 🚨 A208 (cfdb-main-R-2263). THE SCROLLBAR IS STYLED FOR EVERY WIDE TABLE, AND IT IS NOT
+       WHAT THE READER DEPENDS ON. A207 measured this on the SLATE: `overflow-x:auto` says
+       content exists past the box and says NOTHING about whether a reader can tell, because
+       macOS draws an OVERLAY bar that exists only while something is scrolling.
+       📊 A207's measurement, kept because A208 did not repeat it: with these declarations in
+       the page and `scrollbar-width:thin` computing, `offsetHeight - clientHeight` stayed
+       **0px at every width**. 🚨 AN EARLIER VERSION OF THIS COMMENT ASSERTED THE OPPOSITE:
+       that these two declarations together take up layout space and so make the fix
+       measurable. ⚠️ THAT IS THE APPROACH A207 ABANDONED, and its reasoning shipped anyway —
+       left in the shared file, beside the styling it argued for, where the next reader would
+       have learned a mechanism this project measured as not working. It is corrected rather
+       than deleted: the styling is kept because a platform that draws classic scrollbars respects
+       it, and a future reader needs to know it was never PROVEN drawn in this one.
+       ✅ The affordance a reader actually depends on is `.cfdb-scrollnote` below. */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, currentColor 35%, transparent) transparent; }
+.cfdb-scroll::-webkit-scrollbar { height:10px; }
+.cfdb-scroll::-webkit-scrollbar-track {
+    background:color-mix(in srgb, currentColor 8%, transparent); border-radius:5px; }
+.cfdb-scroll::-webkit-scrollbar-thumb {
+    background:color-mix(in srgb, currentColor 32%, transparent); border-radius:5px; }
+.cfdb-scroll::-webkit-scrollbar-thumb:hover {
+    background:color-mix(in srgb, currentColor 48%, transparent); }
+
+/* 🚨 A208. THE NOTE IS KEYED TO EACH TABLE'S OWN MINIMUM, NOT TO ONE HARD-CODED 939.
+   A207 shipped `@container (max-width: 939px)` for the SLATE alone. Four wrappers on this
+   site use `.cfdb-scroll` and they have four different boundaries, so ONE number in the
+   stylesheet could only ever be right for one of them — a note that appears where nothing is
+   hidden is worse than no note, because it teaches readers to ignore it.
+   ✅ So the boundary travels with the table: `table.scroll_note(min_px)` emits the note AND
+   the one `@container` rule that reveals it, keyed on `[data-min]`. The stylesheet holds the
+   shape; the caller holds the number, and it is the SAME number the table's own `min-width`
+   is set from — one definition, in Python, per table.
+   ⚠️ HIDDEN BY DEFAULT AND REVEALED BY THE QUERY, never the other way round: with no
+   container-query support a reader gets a note that is mildly redundant rather than a table
+   that silently hides five columns.
+   ⚠️ `container-type:inline-size` ASKS ABOUT THE SECTION, NOT THE VIEWPORT — the sidebar's
+   width changes the answer and a media query cannot see it. */
+.cfdb-scrollbox { container-type:inline-size; }
+.cfdb-scrollnote { display:none; font-size:.7rem; opacity:.75; margin:.1rem 0 .3rem;
+    gap:.3rem; align-items:center; }
 /* AND THAT MAKES A STICKY HEADER NECESSARY, NOT MERELY POSSIBLE. Prompt 044 put it out of
    scope because vertical stickiness inside Streamlit's own scroll container is a separate
    problem — a reason that expires the moment the table owns its vertical scroll. With 166
