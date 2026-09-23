@@ -7,7 +7,7 @@ dim_athlete" is a portfolio asset.
 """
 import streamlit as st
 
-from lib import tab, theme
+from lib import rawhtml, tab, theme
 from lib.registry import GROUPS, PAGES
 
 # THE STATIC FALLBACK, AND IT IS THE DEGRADED PATH RATHER THAN A LEFTOVER.
@@ -21,6 +21,25 @@ from lib.registry import GROUPS, PAGES
 # survives untouched; measured byte-identical across the second call.
 st.set_page_config(page_title=tab.BRAND, page_icon="🏈",
                    layout="wide", initial_sidebar_state="expanded")
+
+# 🚨 A219 (cfdb-main-R-2662). BEFORE ANY MARKUP IS WRITTEN, INCLUDING THE STYLESHEET ON THE
+# NEXT LINE.
+#
+# `st.markdown(..., unsafe_allow_html=True)` parses MARKDOWN FIRST, and a blank line terminates
+# a raw HTML block — so one stray `\n\n` inside generated markup closes the tag, injects a
+# `<p>`, and escapes the rest of the string. B148 shipped that defect and found it in a browser
+# (cfdb-wta-R-1514); **every one of 1,934 Python tests stayed green**, because the suite asserts
+# the string before Streamlit's frontend ever parses it.
+#
+# 📊 62 raw-HTML call sites across 18 files reach this, 18 of them in `matchup.py`, which
+# session A does not own. **Guarding the seam touches none of them.** `lib/rawhtml.py` carries
+# the whole argument, including why BOTH bindings of `markdown` have to be replaced.
+#
+# ⚠️ IT IS HERE AND NOT IN `theme.inject()` FOR TWO REASONS: `theme.py` is the file session B
+# rebases across (R-2307), and `inject()` itself passes raw HTML — a guard installed by the
+# thing it has to guard is one edit away from ordering itself wrong.
+rawhtml.install()
+
 theme.inject()
 
 
