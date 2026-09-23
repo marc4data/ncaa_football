@@ -73,6 +73,7 @@ HAVOC = {"total": "total", "front_seven": "front_seven", "db": "db"}
 
 QUERIES = {
     "games": """select game_id, season, week, start_date, is_neutral_site, home_team, away_team,
+                       home_conference, away_conference,
                        home_classification, away_classification, home_points, away_points,
                        home_pregame_elo, away_pregame_elo
                 from staging.stg_games where season = any(%(s)s) and season_type = 'regular'""",
@@ -100,7 +101,7 @@ def load_inputs(conn, seasons: Iterable[int] = SEASONS) -> Dict[str, pd.DataFram
         cur.execute(sql, {"s": seasons})
         out[name] = pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
     # psycopg2 hands numeric columns back as Decimal; everything that is not text becomes a float.
-    text = {"team", "opponent", "offense", "defense", "home_team", "away_team",
+    text = {"team", "opponent", "offense", "defense", "home_team", "away_team", "home_conference", "away_conference",
             "home_classification", "away_classification", "start_date", "is_neutral_site", "drive_result"}
     for frame in out.values():
         for col in frame.columns.difference(list(text)):
@@ -133,7 +134,12 @@ def _home_sign(rows: pd.DataFrame, games: pd.DataFrame) -> np.ndarray:
 
 
 def divisions(games: pd.DataFrame) -> Dict[str, str]:
-    """team → 'fbs' / 'fcs' / 'ii' / 'iii', from the games spine. Blank reads as 'fcs'."""
+    """team → 'fbs' / 'fcs' / 'ii' / 'iii', from the games spine. Blank reads as 'fcs'.
+
+    ⚠️ Pass ONE season's games. Teams change division — Delaware and Missouri State moved FCS→FBS in
+    2025, North Dakota State and Sacramento State in 2026 — so a map built across seasons would
+    apply a later season's division to an earlier one (found and fixed in cfdb-wtc-R-2450).
+    """
     out = {}
     for side in ("home", "away"):
         for team, cls in zip(games[f"{side}_team"], games[f"{side}_classification"]):
@@ -282,10 +288,12 @@ def ratings_at(prior: Dict[str, pd.DataFrame], alpha: float = ALPHA,
 
 # ---------------------------------------------------------------- the builder
 
-def target_games(games: pd.DataFrame) -> pd.DataFrame:
-    """The pack's population: FBS vs FBS, regular season, Week 5 on, completed."""
+def target_games(games: pd.DataFrame, completed: bool = True) -> pd.DataFrame:
+    """The pack's population: FBS vs FBS, regular season, Week 5 on — completed, or (to score an
+    upcoming week) not yet played."""
+    played = games["home_points"].notna()
     return games[(games["week"] >= FIRST_WEEK) & (games["home_classification"] == "fbs")
-                 & (games["away_classification"] == "fbs") & games["home_points"].notna()]
+                 & (games["away_classification"] == "fbs") & (played if completed else ~played)]
 
 
 def schedule_strength(inputs: Dict[str, pd.DataFrame], season: int, week: int, team: str,
@@ -310,7 +318,8 @@ def schedule_strength(inputs: Dict[str, pd.DataFrame], season: int, week: int, t
 
 def build(inputs: Dict[str, pd.DataFrame], seasons: Iterable[int] = SEASONS, alpha: float = ALPHA,
           only_game_ids: Optional[set] = None, division_prior: bool = False, sos: bool = False,
-          ppo_without_try: bool = False, fp_without_period_end: bool = False) -> pd.DataFrame:
+          ppo_without_try: bool = False, fp_without_period_end: bool = False,
+          completed: bool = True) -> pd.DataFrame:
     """One row per target game: `id` plus home_/away_ features named as the pack names them.
 
     The switches are this round's changes, each off by default so R-2430's build is unchanged:
@@ -321,10 +330,10 @@ def build(inputs: Dict[str, pd.DataFrame], seasons: Iterable[int] = SEASONS, alp
     """
     games = inputs["games"]
     talent = inputs["talent"].set_index(["season", "team"])["talent"]
-    division = divisions(games) if division_prior else None
     rows = []
     for season in seasons:
-        season_games = target_games(games[games["season"] == season])
+        division = divisions(games[games["season"] == season]) if division_prior else None
+        season_games = target_games(games[games["season"] == season], completed)
         if only_game_ids is not None:
             season_games = season_games[season_games["game_id"].isin(only_game_ids)]
         ratings_by_week = {}

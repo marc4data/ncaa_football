@@ -55,6 +55,15 @@ def export_frame(games: pd.DataFrame, pred_margin, pred_total, split: str, model
     out["cover_correct"] = pd.Series(pd.NA, index=out.index, dtype="object")
     out.loc[both, "cover_correct"] = out.loc[both, "predicted_home_cover"] == out.loc[both, "actual_home_cover"]
 
+    # An unplayed game has no outcome: every actual-, error- and correctness-column stays blank.
+    unplayed = g["home_points"].isna() | g["away_points"].isna()
+    if unplayed.any():
+        for column in ("actual_margin", "actual_total_points", "actual_home_win", "actual_winner",
+                       "actual_home_cover", "margin_error", "absolute_margin_error", "home_win_correct",
+                       "cover_correct"):
+            out[column] = out[column].astype("object")
+            out.loc[unplayed.to_numpy(), column] = pd.NA
+
     for column in CONTRACT_COLUMNS:
         if column not in out.columns:
             out[column] = np.nan
