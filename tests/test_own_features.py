@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from modeling import features, own_features as of
+from modeling import features, leakage, own_features as of
 
 TEAMS = ["A", "B", "C", "D", "E", "F"]
 SCHEDULE = [  # (week, home, away)
@@ -32,7 +32,8 @@ def league():
         games.append({"game_id": gid, "season": 2025, "week": week, "start_date": kickoff,
                       "is_neutral_site": False, "home_team": home, "away_team": away,
                       "home_classification": "fbs", "away_classification": "fbs",
-                      "home_points": 24.0, "away_points": 21.0,
+                      "home_points": 99.0 if week == 6 else 24.0 + 30 * STRENGTH[home],
+                      "away_points": 0.0 if week == 6 else 21.0 + 30 * STRENGTH[away],
                       "home_pregame_elo": 1500.0, "away_pregame_elo": 1480.0})
         absurd = week == 6
         for team, opp in ((home, away), (away, home)):
@@ -106,3 +107,72 @@ def test_talent_missing_is_zero_as_the_pack_does(league):
     league["talent"] = league["talent"][league["talent"]["team"] != "F"]
     built = of.build(league, seasons=[2025]).set_index("id")
     assert built.loc[1017, "away_talent"] == 0.0
+
+
+# ---------------------------------------------------------------- cfdb-wtc-R-2440: SOS and the division prior
+
+def _ratings_as_of(inputs, season, week):
+    """Ratings from scratch: games of this season in an earlier week, before that week's first kickoff."""
+    g = inputs["games"]
+    first = g.loc[(g["season"] == season) & (g["week"] == week), "start_date"].min()
+    keep = g.loc[(g["season"] == season) & (g["week"] < week) & (g["start_date"] < first), "game_id"]
+    return of.ratings_at({n: (f[f["game_id"].isin(keep)] if "game_id" in f.columns else f) for n, f in inputs.items()})
+
+
+def test_strength_of_schedule_rates_each_opponent_as_it_stood_at_kickoff(league):
+    """STAGED BREAK (cfdb-wtc-R-2440): rating each past opponent by its CURRENT rating (as of the
+    target week) instead of its rating at that game's kickoff turns THIS test RED."""
+    built = of.build(league, seasons=[2025], sos=True).set_index("id")
+    g = league["games"]
+    for game_id in (1015, 1016, 1012):
+        game = g[g["game_id"] == game_id].iloc[0]
+        for side in ("home", "away"):
+            team = game[f"{side}_team"]
+            past = g[(g["week"] < game["week"]) & ((g["home_team"] == team) | (g["away_team"] == team))]
+            eff, pts = [], []
+            for p in past.itertuples():
+                opponent = p.away_team if p.home_team == team else p.home_team
+                r = _ratings_as_of(league, 2025, p.week)
+                eff.append(r["efficiency"].get(opponent, 0.0) if len(r) else 0.0)
+                pts.append(r["points"].get(opponent, 0.0) if len(r) else 0.0)
+            row = built.loc[game_id]
+            assert row[f"{side}_sos_efficiency"] == pytest.approx(np.mean(eff)), (game_id, side)
+            assert row[f"{side}_sos_results"] == pytest.approx(np.mean(pts)), (game_id, side)
+            now = _ratings_as_of(league, 2025, game["week"])
+            assert row[f"{side}_points_rating"] == pytest.approx(now["points"].get(team, 0.0))
+            assert abs(row[f"{side}_points_rating"]) < 40, "a Week 6 99-0 reached a Week 6 rating"
+
+
+def test_sos_columns_are_ours_and_pass_the_leakage_guard(league):
+    built = of.build(league, seasons=[2025], sos=True)
+    ours = [c for c in built.columns if "sos_" in c or "points_rating" in c]
+    assert len(ours) == 6 and leakage.assert_no_leakage(ours) == ours
+
+
+def test_points_rating_caps_a_blowout_at_four_scores():
+    games = pd.DataFrame({"game_id": [1, 2], "home_team": ["X", "Y"], "away_team": ["Z", "Z"],
+                          "home_points": [70.0, 56.0], "away_points": [0.0, 0.0], "is_neutral_site": [True, True]})
+    r = of.points_ratings(games, alpha=0.0001)
+    assert r["X"] == pytest.approx(r["Y"], abs=1e-3)          # 70-0 and 56-0 both count as +28
+
+
+def test_a_thin_fcs_opponent_shrinks_toward_fcs_average_not_the_leagues():
+    """Marc's case: a big day against an FCS defence is credited less once the prior knows what FCS is."""
+    games = pd.DataFrame({"game_id": range(1, 9), "home_team": ["X", "Y", "S", "W", "S", "W", "V", "X"],
+                          "is_neutral_site": [True] * 8})
+    # both sides of the FCS games, as in the warehouse
+    rows = pd.DataFrame({"game_id": [1, 1, 2, 2, 3, 4, 5, 6, 7, 8],
+                         "team":     ["X", "Z", "Y", "Q", "S", "W", "S", "W", "V", "X"],
+                         "opponent": ["Z", "X", "Q", "Y", "W", "S", "V", "V", "S", "S"],
+                         "v":        [0.90, -0.20, 0.85, -0.25, 0.20, 0.10, 0.25, 0.15, 0.12, 0.30]})
+    division = {t: "fbs" for t in "XYSWV"} | {"Z": "fcs", "Q": "fcs"}
+    flat = of.adjust(rows, "v", games, alpha=4.0).set_index("team")
+    prior = of.adjust(rows, "v", games, alpha=4.0, division=division).set_index("team")
+    assert prior.loc["Z", "allowed"] > flat.loc["Z", "allowed"] + 0.1
+    assert prior.loc["X", "offense"] < flat.loc["X", "offense"]
+
+
+def test_no_switches_is_r2430s_build(league):
+    """Every R-2440 change is behind a switch; with all of them off, the build is R-2430's."""
+    default = of.build(league, seasons=[2025])
+    assert not any("sos_" in c or "points_rating" in c for c in default.columns)
