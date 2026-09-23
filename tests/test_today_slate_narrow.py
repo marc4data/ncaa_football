@@ -81,6 +81,20 @@ def narrow_block(html: str) -> str:
     return html[start:html.index("</style>", start)]
 
 
+def _collapse_rule_for_cells() -> str:
+    """The declaration block that collapses the `th` and `td`, from the emitted page.
+
+    🚨 ANCHORED ON THE FULL SELECTOR PAIR, not on a substring. `th.cfdb-slate-putaway-col`
+    also appears inside the `col` rule's neighbourhood, and a selector is not a substring
+    (R-2260, and again in A209's own order test).
+    """
+    block = narrow_block(slate(_game()))
+    m = re.search(r"\.cfdb-slate-table th\.cfdb-slate-putaway-col,"
+                  r"\.cfdb-slate-table td\.cfdb-slate-putaway-col\{([^}]*)\}", block)
+    assert m, f"th and td must collapse in ONE rule; block was {block!r}"
+    return m.group(1)
+
+
 # ── PART 1: the numbers are derived, not chosen ───────────────────────────────────────
 
 def test_the_narrow_numbers_come_from_the_wide_ones():
@@ -132,11 +146,11 @@ def test_the_axis_stays_above_its_own_label_floor_at_the_narrow_minimum():
 def test_the_two_columns_and_only_those_two_carry_the_collapse_class():
     """⚠️ THE `<col>` AND BOTH CELLS, OR THE COLLAPSE REACHES ONE AND NOT THE OTHERS."""
     html = slate(_game())
-    assert html.count("<col class='cfdb-slate-away'") == len(today._SLATE_HIDE_AT)
-    assert len(re.findall(r"<th class='[^']*cfdb-slate-away", html)) == 2
-    assert len(re.findall(r"<td class='[^']*cfdb-slate-away", html)) == 2
+    assert html.count("<col class='cfdb-slate-putaway-col'") == len(today._SLATE_HIDE_AT)
+    assert len(re.findall(r"<th class='[^']*cfdb-slate-putaway-col", html)) == 2
+    assert len(re.findall(r"<td class='[^']*cfdb-slate-putaway-col", html)) == 2
     # the labels carrying it are exactly the two Marc authorised
-    labelled = re.findall(r"<th class='[^']*cfdb-slate-away'>([^<]+)</th>", html)
+    labelled = re.findall(r"<th class='[^']*cfdb-slate-putaway-col'>([^<]+)</th>", html)
     assert labelled == list(today._SLATE_PUT_AWAY), labelled
 
 
@@ -147,16 +161,79 @@ def test_the_header_and_the_body_collapse_by_the_same_rule():
     maps the Nth cell to the Nth `<col>` and removing two would hand the gantt `Why`'s 54px.
     📊 Measured in the browser: worst `th`/`td` offset 0.00px at all five widths, both themes.
     """
-    block = narrow_block(slate(_game()))
-    cells = re.search(r"\.cfdb-slate-table th\.cfdb-slate-away,"
-                      r"\.cfdb-slate-table td\.cfdb-slate-away\{([^}]*)\}", block)
-    assert cells, f"th and td must collapse in ONE rule; block was {block!r}"
+    cells = _collapse_rule_for_cells()
     for declaration in ("width:0", "padding-left:0", "padding-right:0", "visibility:hidden"):
-        assert declaration in cells.group(1), declaration
+        assert declaration in cells, declaration
     # 🚨 AND `display:none` MUST NOT BE THE MECHANISM — that is the column-shifting defect.
-    assert "display:none" not in cells.group(1)
-    assert "col.cfdb-slate-away{width:0 !important}" in block, (
+    assert "display:none" not in cells
+    assert ("col.cfdb-slate-putaway-col{width:0 !important}"
+            in narrow_block(slate(_game()))), (
         "the `<col>` width is an inline style; only `!important` beats it")
+
+
+def test_a_collapsed_cell_contributes_nothing_to_the_row_height():
+    """🚨 A210 (cfdb-main-R-2456). THE COLLAPSE DOUBLED THE ROW PITCH AND A209 NEVER LOOKED.
+
+    📊 MEASURED, before and after, sidebar open, one day block, both themes:
+
+        width   container   row pitch BEFORE   row pitch AFTER
+        1440    980         47.7               47.7      nothing collapses here
+        1280    820         106.6              47.7
+        1180    720         106.6              47.7
+        1100    640         106.6              47.7
+        1024    564         106.6              47.7
+
+    🚨 THE MECHANISM, AND IT IS NOT WHAT THE ARITHMETIC PREDICTED. `visibility:hidden` and
+    `overflow:hidden` HIDE and CLIP the text; they do not stop it being LAID OUT. In a
+    zero-width box it wraps as hard as it can and the row grows to the tallest wrapped cell:
+
+        th3  O/U    3 line boxes   54.9px     <- the header's driver
+        td3  56.0   4 line boxes   85.1px     <- the ROW's driver
+        td4  71°F   2 line boxes   19.0px        `.cfdb-wx` is already `nowrap`
+
+    ⚠️ **`Wx` was the suspect and `O/U` is the culprit** — `.cfdb-wx` carries `nowrap`
+    already, so the weather contributes 19px while the four characters of `56.0` contribute
+    85.1. A fix aimed only at the weather cell would have left the mechanism live.
+
+    ✅ `white-space:nowrap` makes the content one line that `overflow:hidden` clips, so it can
+    never out-measure the row's real content (a 28px logo). ⚠️ `font-size:0`/`line-height:0`
+    was the other family and measured the same 47.7 — not taken, because it makes the cell lie
+    about its font rather than about its wrapping, and it would leave a replaced element (an
+    `<img>` weather icon, say) contributing its intrinsic height anyway.
+    """
+    cells = _collapse_rule_for_cells()
+    assert "white-space:nowrap" in cells, (
+        "the collapsed text still wraps, so it is still in the row's height budget")
+    # 🚨 AND THE OTHER DECLARATIONS STAY — nowrap alone would show the text, not hide it.
+    for declaration in ("width:0", "overflow:hidden", "visibility:hidden"):
+        assert declaration in cells, declaration
+
+
+def test_the_put_away_class_cannot_be_read_as_the_away_column():
+    """⚠️ A210 (cfdb-main-R-2458). A209 called it `cfdb-slate-away` ON A TABLE WHOSE FIRST
+    COLUMN IS THE AWAY TEAM. The next reader meets `col.cfdb-slate-away` and has to open three
+    files to learn it means *put away*. Renamed on the `<col>`, the `<th>`, the `<td>` and the
+    generated rule together — four places, and a rename that reaches three of them is worse
+    than none."""
+    html = slate(_game())
+    assert "cfdb-slate-away" not in html, "the misreadable name is gone from the markup"
+    assert "cfdb-slate-away" not in THEME
+    # all four places carry the new one
+    assert "<col class='cfdb-slate-putaway-col'" in html
+    assert "<th class='cfdb-num cfdb-slate-putaway-col'>" in html
+    assert "<td class='cfdb-num cfdb-slate-putaway-col'>" in html
+    assert "col.cfdb-slate-putaway-col{width:0 !important}" in narrow_block(html)
+    # ⚠️ and the AWAY COLUMN is still there and does NOT carry it
+    away = re.search(r"<th[^>]*>Away</th>", html)
+    assert away and "putaway" not in away.group(0), away
+
+
+def test_the_dead_slate_width_constant_is_gone():
+    """A209 named `_SLATE_WIDTH = 900` as dead (its R-2455) and left it. ⚠️ Asserted against
+    the SOURCE, not with `hasattr`: a constant re-added elsewhere would still be dead."""
+    source = (ROOT / "site" / "views" / "today.py").read_text()
+    assert "_SLATE_WIDTH" not in source
+    assert not hasattr(today, "_SLATE_WIDTH")
 
 
 def test_the_gridline_layer_moves_with_the_columns():
@@ -185,8 +262,8 @@ def test_both_day_blocks_collapse_identically():
     sat = _game(game_id=2, start_date=pd.Timestamp("2026-09-26T19:30:00Z"))
     html = slate(fri, sat)
     assert html.count("<table class='cfdb-table cfdb-slate-table'") == 2
-    assert html.count("<col class='cfdb-slate-away'") == 4, "two per table"
-    assert len(re.findall(r"<th class='[^']*cfdb-slate-away", html)) == 4
+    assert html.count("<col class='cfdb-slate-putaway-col'") == 4, "two per table"
+    assert len(re.findall(r"<th class='[^']*cfdb-slate-putaway-col", html)) == 4
     # ONE generated block for both, so there is one boundary and not two
     assert html.count(f"@container (max-width:{today._SLATE_MIN_PX - 1}px)"
                       f"{{.cfdb-slate-table") == 1
@@ -197,7 +274,7 @@ def test_above_the_boundary_nothing_is_put_away():
     980, overflow 0, nine columns drawn, note `display:none` — A208's numbers exactly."""
     html = slate(_game())
     # the collapse is inside a container query and nowhere else: no unconditional rule
-    assert "cfdb-slate-away{width:0" not in THEME, (
+    assert "cfdb-slate-putaway-col{width:0" not in THEME, (
         "the collapse must be conditional on the width, never in the base stylesheet")
     assert ".cfdb-slate-putaway { display:none; }" in THEME, "hidden by default"
     # every one of the eight labels is still emitted
@@ -230,7 +307,7 @@ def test_the_put_away_names_come_from_the_columns_that_actually_hide():
     """🚨 ONE SOURCE, OR THE NOTE CAN NAME A COLUMN THAT DID NOT MOVE. The sentence is built
     from `_SLATE_PUT_AWAY`; these are the labels of the columns `_SLATE_HIDE_AT` collapses."""
     html = slate(_game())
-    labelled = re.findall(r"<th class='[^']*cfdb-slate-away'>([^<]+)</th>", html)
+    labelled = re.findall(r"<th class='[^']*cfdb-slate-putaway-col'>([^<]+)</th>", html)
     assert labelled == list(today._SLATE_PUT_AWAY), (labelled, today._SLATE_PUT_AWAY)
 
 
