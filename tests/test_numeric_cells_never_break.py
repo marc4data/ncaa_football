@@ -50,20 +50,39 @@ def rule(selector: str) -> str:
 
 
 NUMERIC_RULE = ".cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num {"
+VALUE_RULE = ".cfdb-table td.cfdb-num {"
+ALL_CELLS_RULE = ".cfdb-table td, .cfdb-table th {"
 
 
 def test_a_numeric_cell_may_not_break_inside_its_value():
-    """🚨 BOTH DECLARATIONS, AND THEY DO DIFFERENT JOBS.
+    """🚨 BOTH GUARANTEES SURVIVE; A218 MOVED WHERE THEY LIVE.
 
     `overflow-wrap:normal` puts the token back together — it is what undoes Streamlit's
-    `break-word`. `white-space:nowrap` then keeps the number on one line even when the column
-    cannot hold it, so the failure is a visible truncation rather than a second line.
+    `break-word` — and A218 promoted it from the numeric rule to EVERY cell, because `ESPN`
+    was still splitting after `ESP` in a text column. `white-space:nowrap` then keeps a number
+    on one line, and A218 narrowed it to `td` alone so a header may wrap rather than truncate.
+
+    ⚠️ THE ASSERTION FOLLOWS THE ADDRESS, NOT THE OTHER WAY ROUND: what must stay true is that
+    a numeric VALUE can neither break inside itself nor take a second line.
     """
-    block = rule(NUMERIC_RULE)
-    assert "overflow-wrap:normal" in block, (
+    assert "overflow-wrap:normal" in rule(ALL_CELLS_RULE), (
         "without this, Streamlit's `break-word` breaks `56.0` into `56.` and `0`")
-    assert "white-space:nowrap" in block, (
+    assert "white-space:nowrap" in rule(VALUE_RULE), (
         "without this a number can still take a second line at a space or a sign")
+
+
+def test_a_numeric_header_may_wrap_but_a_numeric_value_may_not():
+    """🚨 A218 (cfdb-main-R-2641). THE TWO HALVES OF A COLUMN GET OPPOSITE TREATMENT.
+
+    📊 A217 applied `nowrap` to `th.cfdb-num` and `td.cfdb-num` in one selector, and Schedule's
+    header truncated to `SPRE…` at 1440 — a column nobody can name. A value truncates visibly
+    and the reader knows to look elsewhere; a LABEL loses the word with nothing to recover it.
+    """
+    assert "white-space:nowrap" not in rule(NUMERIC_RULE), (
+        "the shared numeric rule must not put nowrap on the header again")
+    assert "white-space:nowrap" in rule(VALUE_RULE)
+    # and the header is allowed to break its word rather than lose it
+    assert "overflow-wrap:break-word" in rule(".cfdb-table th {")
 
 
 def test_the_cell_clips_visibly_rather_than_overflowing():
@@ -110,8 +129,13 @@ def test_the_stylesheet_still_sets_no_break_rule_of_its_own():
     # In a file that documents this densely, "the string is absent" is almost never the
     # assertion you want — §2.2.1c.1's lesson, arriving inside the test again.
     declarations = re.findall(r"[;{]\s*(word-break|word-wrap|overflow-wrap)\s*:", THEME)
-    assert declarations == ["overflow-wrap"], (
-        f"expected exactly one break-related declaration, found {declarations}")
+    # ⚠️ A218 ADDED ONE: `normal` on every cell, and `break-word` back on the header alone.
+    # `word-break` and `word-wrap` must still be absent — the diagnosis depends on it.
+    assert set(declarations) == {"overflow-wrap"}, (
+        f"a break-related declaration that is not overflow-wrap appeared: {declarations}")
+    assert len(declarations) == 2, (
+        f"expected two overflow-wrap declarations (all cells, then the header), "
+        f"found {len(declarations)}")
 
 
 def test_the_measurement_script_exists_and_names_its_instrument():

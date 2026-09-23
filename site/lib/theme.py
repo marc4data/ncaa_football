@@ -878,7 +878,27 @@ TABLE_CSS = """
 /* R-271. The globe sits INSIDE a text link, so it needs the baseline nudge the icon-only
    marks do not — without it the word rides high against the drawing. */
 .cfdb-icon-inline { width:.95em; height:.95em; vertical-align:-.13em; margin-right:.25em; }
-.cfdb-table td, .cfdb-table th { overflow:hidden; text-overflow:ellipsis; }
+/* 🚨 A218 (cfdb-main-R-2640). NOTHING SPLITS A TOKEN IN HALF — NOT A NUMBER, NOT A WORD.
+   📊 A217 put `overflow-wrap:normal` on `.cfdb-num` and left the text columns alone, because
+   its prompt framed the defect as *a header may wrap; a value may not*. The defect is a KIND
+   OF BREAK, not a kind of column: measured after A217 shipped, Schedule's TV column still
+   split `ESPN` after `ESP` and `CBSSN` after `CBSS` — 10 cells at 1440 and 14 at 1280.
+   ⚠️ A NETWORK NAME IS ONE TOKEN, EXACTLY LIKE A NUMBER. `ESP` / `N` reads as two things on a
+   row that still looks complete, which is the defect A217 was written to end.
+   ✅ So `normal` goes on EVERY cell. Streamlit's own stylesheet sets `break-word` here, and
+   this is what overrides it. */
+.cfdb-table td, .cfdb-table th { overflow:hidden; text-overflow:ellipsis;
+    overflow-wrap:normal; }
+/* 🚨 A218 (cfdb-main-R-2641). A HEADER BREAKS ITS WORD RATHER THAN LOSING IT.
+   📊 A217's own after-crops show `SPRE…` at 1440 and `SPR…` at 1280: the label truncated
+   because `white-space:nowrap` was applied to `th.cfdb-num` as well as `td.cfdb-num`.
+   🚨 FOR A LABEL THE TRADE GOES THE OTHER WAY ROUND FROM A VALUE. A truncated number is
+   visibly incomplete and the reader knows to look elsewhere; a truncated LABEL loses the word
+   and there is nothing to recover it from. `SPREA` / `D` is ugly; `SPRE…` is a column nobody
+   can name. **Complete beats tidy in the header row.**
+   ⚠️ SCOPED TO `th`. A value must never take this license — that is R-2640 above, and the
+   whole reason this rule is separate rather than folded into the one before it. */
+.cfdb-table th { overflow-wrap:break-word; }
 .cfdb-table caption { caption-side:top; text-align:left; font-size:.8rem; opacity:.6;
   padding-bottom:.4rem; }
 .cfdb-table th { text-align:left; font-weight:600; font-size:.78rem; letter-spacing:.02em;
@@ -966,8 +986,11 @@ TABLE_CSS = """
    this is one rule for every numeric column on the site rather than one column at a time. Text
    columns keep wrapping at spaces, which is what they should do — a team name on two lines is
    a layout, a number on two lines is a lie. */
-.cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right;
-    overflow-wrap:normal; white-space:nowrap; }
+.cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right; }
+/* ⚠️ A218: `nowrap` IS THE VALUE'S ALONE NOW. A217 gave it to `th` and `td` together through
+   one selector, which is what truncated `SPREAD`. A number on two lines is a lie; a LABEL on
+   two lines is merely ugly, and the header above may take the second line. */
+.cfdb-table td.cfdb-num { white-space:nowrap; }
 /* R-103: a third alignment. A single glyph plus a two-digit temperature is neither
    a number nor prose, and right-aligning it hung the column off its own header. */
 .cfdb-table th.cfdb-center, .cfdb-table td.cfdb-center { text-align:center; }
