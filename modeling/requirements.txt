@@ -1,0 +1,15 @@
+# Modeling environment — installed ON TOP of the repo's requirements.txt, into this checkout's
+# .venv (Python 3.12, the same interpreter CI uses):
+#
+#     pip install -r requirements.txt -r requirements-dev.txt -r modeling/requirements.txt
+#
+# Kept out of the root requirements.txt on purpose: that file builds the site image, and
+# nothing here belongs in production. The `modeling` package itself needs only pandas and
+# numpy (both already in the root file), which is why its tests run in CI without these.
+pandas>=3
+numpy>=2
+scikit-learn>=1.5
+matplotlib>=3.8
+ipykernel>=6.29
+nbformat>=5.10
+nbconvert>=7.16
