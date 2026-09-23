@@ -2148,40 +2148,56 @@ def test_the_AWAY_side_draws_its_CARDS_BEFORE_its_chart(panel):
         f"the away column is not cards-then-chart for all three metrics: {away}")
 
 
-def test_the_HOME_side_draws_its_CARDS_AFTER_its_chart(panel):
-    """🚨 THE OPPOSITE ASSERTION, AND THE ONE THE BREAK IS AIMED AT.
+def test_the_HOME_side_draws_its_CARDS_BEFORE_its_chart_like_the_away_side(panel):
+    """> **MARC, v15:** *"For the Home, let's swap the order of graph to player card to match
+    > how we are presenting on the Away side (player card then graph)"*
 
-    The right column's outer edge is the page's right, so the chart comes first and the cards
-    sit beyond it. ⚠️ This is the assertion a non-positional test cannot make, and the one that
-    fails when both sides are built the same way round.
+    🚨 **THIS REPLACES `test_the_HOME_side_draws_its_CARDS_AFTER_its_chart`, WHICH ASSERTED THE
+    EXACT OPPOSITE AND WAS RIGHT UNTIL v15.** R-731 put the cards on the OUTSIDE so the two
+    charts sat together in the middle; Marc lived with that and asked for the two sides to read
+    the same way instead (cfdb-wta-R-1513). **The mirror is gone on purpose, not by accident.**
     """
     _away, home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
-    assert home == ["chart", "cards"] * 3, (
-        f"the home column is not chart-then-cards for all three metrics: {home}")
+    assert home == ["cards", "chart"] * 3, (
+        f"the home column is not cards-then-chart for all three metrics: {home}")
 
 
-def test_the_TWO_SIDES_ARE_OPPOSITE_which_is_the_requirement(panel):
-    """⚠️ STATED AS ITS OWN CLAIM so that "both sides identical" fails even if some future
-    change makes both of the two assertions above agree on one order."""
-    away, home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
-    assert away != home, (
-        "both columns drew the same inner order, so the cards are not on the OUTSIDE of the "
-        "charts — they are on the same side of both, which is what the layout replaced")
-    assert away[0] == "cards" and home[0] == "chart"
+def test_the_TWO_SIDES_ARE_SYMMETRIC_which_is_now_the_requirement(panel):
+    """⚠️ STATED AS ITS OWN CLAIM, THE WAY ITS PREDECESSOR WAS — so that a future change which
+    re-mirrors ONE side fails here even if that side's own assertion is updated to match it.
 
-
-def test_the_side_is_READ_from_is_home_rather_than_assumed(panel):
-    """⚠️ AND IT IS READ FROM THE FRAME THE PANEL ALREADY HOLDS.
-
-    `srv_game_team.is_home` — measured live at 225,350 rows, set on every one, exactly two per
-    game and exactly one home. Flipping the fixture's flags must flip the layout, which is what
-    proves the column is being read rather than the call order being relied on.
+    🚨 **ITS PREDECESSOR ASSERTED `away != home`.** The requirement inverted; the shape of the
+    guard did not.
     """
+    away, home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
+    assert away == home, (
+        f"the two columns drew different inner orders — away {away}, home {home} — so the "
+        f"sides are not symmetric, which is what v15 asked for")
+    assert away[0] == "cards" and home[0] == "cards"
+
+
+def test_the_ORDER_IS_THE_SAME_WHICHEVER_SIDE_A_COLUMN_IS(panel):
+    """🚨 **THIS REPLACES `test_the_side_is_READ_from_is_home_rather_than_assumed`, AND THE
+    REASON IS WORTH RECORDING RATHER THAN QUIETLY DELETING.**
+
+    That test flipped the fixture's `is_home` and asserted the layout flipped with it — which
+    proved the flag was READ. ⚠️ **Under symmetry there is nothing left to observe: both sides
+    draw the same order, so no arrangement of the flag can change the output.** The old test's
+    mechanism died with the property it was measuring, and `_is_home_side` itself is gone
+    because this line was its only consumer.
+
+    ✅ **WHAT IS STILL WORTH PINNING IS THE STRONGER CLAIM: the order is UNCONDITIONAL.**
+    Flipping the flag must change NOTHING — which is what stops a later round reintroducing a
+    side-dependent branch without anyone noticing.
+    """
+    straight = _slots(panel(_game(), _both(), deltas=_deltas())[0])
     flipped = [dict(r, is_home=not r["is_home"]) for r in _deltas()]
-    away, home = _slots(panel(_game(), _both(), deltas=flipped)[0])
-    assert away == ["chart", "cards"] * 3, \
-        "flipping is_home did not flip the away column, so the flag is not being read"
-    assert home == ["cards", "chart"] * 3
+    swapped = _slots(panel(_game(), _both(), deltas=flipped)[0])
+    assert straight == swapped, (
+        f"flipping is_home changed the layout — {straight} became {swapped} — so the order is "
+        f"conditional on the side again, which v15 removed")
+    assert straight == [["cards", "chart"] * 3, ["cards", "chart"] * 3], (
+        f"both sides must be cards-then-chart whichever flag they carry: {straight}")
 
 
 def test_an_ABSENT_game_team_row_falls_back_rather_than_guessing(panel):
@@ -3405,14 +3421,21 @@ def test_the_WIDTHS_are_pinned_to_the_SLOT_and_not_to_the_column_index(panel):
     """🚨 B082 AND B083 BOTH PROVED A PRESENCE ASSERTION CANNOT SEE A LEFT/RIGHT SWAP, and a
     width is the same shape of claim.
 
-    B098 made one ordered tuple drive the order, the column AND the width, so the away side
-    reads [cards, chart] and the home side [chart, cards] — which means the WIDTH LIST IS
-    REVERSED BETWEEN THE SIDES TOO. If the weights were keyed by position rather than by slot,
-    the home chart would get the card's width while every positional assertion still passed.
+    B098 made one ordered tuple drive the order, the column AND the width.
+
+    🚨 **THE REVERSAL THAT USED TO PROVE THIS IS GONE, AND SAYING SO IS THE HONEST VERSION.**
+    While the sides were mirrored the width LIST was reversed between them, so a position-keyed
+    weight put the home chart in the card's slot and this test caught it. ⚠️ **Under v15's
+    symmetry both sides emit the same sequence, so a position-keyed bug and a slot-keyed one
+    produce identical output and nothing here can tell them apart** (cfdb-wta-R-1513).
+
+    ✅ **WHAT SURVIVES IS THE HALF THAT IS STILL OBSERVABLE** — the card is the narrow slot, and
+    both sides agree — and it is kept rather than deleted because a reversed 1:1.6 split is
+    still a defect a reader would see.
     """
     widths = _module_constant("_SLOT_WIDTHS")
     away, home = _slots(panel(_game(), _both(), deltas=_deltas())[0])
-    assert away[0] == "cards" and home[0] == "chart"
+    assert away[0] == "cards" and home[0] == "cards"
     # The card is the NARROW one on both sides, whichever end of the row it sits at.
     assert widths["cards"] < widths["chart"], (
         "the card is not the narrow slot, so the 1:4 split is applied the wrong way round")
@@ -4034,6 +4057,174 @@ def test_THE_HOVER_CARRIES_MARCS_FIVE_FIELDS(panel):
             f"no final score in {title!r}"
 
 
+# ── 🚨 v15: THE TOOLTIP NAMES THE GAME, AND SAYS WHICH YARDAGE IT IS ─────────────────────
+
+def test_THE_HOVER_NAMES_WHICH_YARDAGE_IT_IS_gained_or_allowed(panel):
+    """> **MARC, v15:** *"the Yards (gained or allowed, based on the graph)"*
+
+    🚨 **THE NUMBER ALONE WAS AMBIGUOUS ON EXACTLY THE PAGE THAT SHOWS BOTH.** This panel draws
+    a Gained row and an Allowed row one above the other and the tooltip said `336 yards` on
+    each, so a reader who hovered could not tell which measure they had landed on
+    (cfdb-wta-R-1512).
+
+    ⚠️ **AND THE TWO ROWS ARE NOT THE SAME TEAM'S GAMES**, which is why one label cannot serve
+    both: the gained circles are this team's per-game yardage, the allowed circles are the
+    OPPONENT's per-game yardage allowed.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    gained, allowed = _circle_columns(entries)
+    g_titles = re.findall(r"<title>(.*?)</title>", gained, re.S)
+    a_titles = re.findall(r"<title>(.*?)</title>", allowed, re.S)
+    assert g_titles and a_titles, (
+        "one of the two columns drew no tooltips, so this test would pass on an empty set "
+        "(R-2254) rather than on the page")
+
+    assert all("Yards gained " in t for t in g_titles), (
+        f"a gained tooltip does not name its direction: "
+        f"{[t for t in g_titles if 'Yards gained ' not in t][:1]}")
+    assert all("Yards allowed " in t for t in a_titles), (
+        f"an allowed tooltip does not name its direction: "
+        f"{[t for t in a_titles if 'Yards allowed ' not in t][:1]}")
+    # 🚨 AND NEITHER BORROWS THE OTHER'S WORD, which one shared constant would have allowed.
+    assert not any("Yards allowed " in t for t in g_titles), "a gained tooltip says allowed"
+    assert not any("Yards gained " in t for t in a_titles), "an allowed tooltip says gained"
+
+    # ✅ THE FIGURES ARE THE FIXTURE'S OWN, not literals the page also chooses (R-944).
+    played = sorted((r for r in _calendar()
+                     if r["team_id"] == AWAY_ID and r["total_yards"] is not None),
+                    key=lambda r: r["game_date"])
+    drawn = [re.search(r"Yards gained (\d+)", t).group(1) for t in g_titles]
+    assert drawn == [str(r["total_yards"]) for r in played], (
+        f"the gained tooltips carry {drawn}, not the fixture's own gained figures")
+
+
+def test_NO_TOOLTIP_CONTAINS_A_BLANK_LINE_because_markdown_would_shatter_the_svg(panel):
+    """🚨🚨 **THIS ROUND SHIPPED A BLANK LINE INTO AN SVG `<title>` AND THE WHOLE SUITE STAYED
+    GREEN.** The render is what caught it (cfdb-wta-R-1514).
+
+    This markup reaches the page through `st.markdown(..., unsafe_allow_html=True)`, which
+    parses **MARKDOWN FIRST**. ⚠️ **A blank line terminates a raw HTML block in Markdown**, so a
+    `\n\n` inside a `<title>` closed the block mid-element, injected a `<p>`, and left the rest
+    of the column as escaped literal text — nine circles collapsed into one tooltip reading
+    `&lt;/title&gt;&lt;circle cx='139.1'…`.
+
+    🚨 **AND THE REASON EVERY EXISTING TEST MISSED IT IS WORTH STATING: they assert the Python
+    STRING, before Streamlit's markdown ever runs.** This asserts the property that makes the
+    string survive that step, which is the half a string assertion cannot reach.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    titles = []
+    for metric in ("Total", "Rushing", "Passing"):
+        for column in _circle_columns(entries, metric=metric):
+            titles.extend(re.findall(r"<title>(.*?)</title>", column, re.S))
+    assert titles, "no tooltips drawn at all, so this would hold vacuously (R-2254)"
+    offenders = [t for t in titles if "\n\n" in t]
+    assert not offenders, (
+        f"{len(offenders)} of {len(titles)} tooltips contain a blank line, which Markdown "
+        f"reads as the end of the raw HTML block: {offenders[:1]}")
+
+
+def test_THE_OVERLAY_EMITS_ONE_TOOLTIP_PER_CIRCLE(panel):
+    """🚨 **NAMED FOR WHAT IT CAN PROVE, AFTER THE FIRST NAME CLAIMED MORE THAN IT COULD.**
+
+    ⚠️ This was written as `test_THE_OVERLAY_SURVIVES_STREAMLITS_MARKDOWN` — **and the blank-line
+    break came back GREEN against it.** `st.markdown` hands the raw string to the FRONTEND, which
+    parses the Markdown in the browser, so the Python string is still well-formed at the moment
+    pytest sees it. **No pure-Python test can watch that step** (R-744: a break that comes back
+    green is rewritten, not explained).
+
+    ✅ **SO THE TWO HALVES ARE SPLIT HONESTLY.** The CAUSE is guarded in Python by
+    `test_NO_TOOLTIP_CONTAINS_A_BLANK_LINE…`, which does go red. **The SYMPTOM is visible only
+    in a rendered page**, and this round is what saw it (cfdb-wta-R-1514).
+
+    **What this one guards is still real**: one tooltip per game mark, every element closed — so
+    a change that drops a `<title>`, doubles one, or leaves one open fails here.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    for metric in ("Total", "Rushing", "Passing"):
+        for which, column in zip(("gained", "allowed"),
+                                 _circle_columns(entries, metric=metric)):
+            circles = len(re.findall(r"<circle ", column))
+            opened = len(re.findall(r"<title>", column))
+            closed = len(re.findall(r"</title>", column))
+            assert circles, f"{metric} {which} drew no circles, so nothing is tested"
+            assert opened == closed == circles, (
+                f"{metric} {which}: {circles} circles but {opened} <title> and {closed} "
+                f"</title> — the overlay's markup is not one tooltip per game")
+
+
+def test_ONLY_A_MARK_THAT_IS_A_GAME_CARRIES_A_GAMES_IDENTITY(panel):
+    """🚨🚨 **A BOX-WHISKER HAS MARKS THAT ARE NOT GAMES, AND THIS IS THE ACCEPTANCE TEST.**
+
+    The box, the whiskers, the median rule and `box()`'s own extreme markers are SUMMARY
+    GEOMETRY — they describe the distribution, not any one fixture. ⚠️ **A median rule reporting
+    *Week 3 · at Ohio* would be worse than no tooltip at all**, because it would name a game
+    that mark is not about.
+
+    📊 **MEASURED IN THE RENDERED DOM: the two drawings are separate `<svg>` elements.**
+    `distribution.box()` emits the box, whiskers and two extreme markers — its tooltips read
+    *"lowest 42.0 — 11 beyond the whiskers"*. **`matchup.py`'s overlay emits one circle per
+    prior game**, and only those carry a week and an opponent.
+
+    ✅ **ASSERTED AS A PARTITION RATHER THAN AS AN ABSENCE**, so it cannot pass on an empty set:
+    the week text must be present in the block AND absent from everything that is not the
+    circle overlay.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    block = _of_metric(entries, "Total")[0]
+    assert "Week " in block, (
+        "no tooltip in the whole block names a week, so the assertion below would hold "
+        "vacuously (R-2254)")
+
+    # everything that is NOT a circle overlay: the legend, the two box rows, the captions
+    summary = block.split("<div data-cfdb='game-circles'")[0]
+    assert "<svg" in summary, "the box's own drawing was not isolated, so nothing is tested"
+    for claim in ("Week ", "Yards gained ", "Yards allowed ", "going in"):
+        assert claim not in summary, (
+            f"summary geometry carries {claim!r} — a box edge, whisker or median rule is "
+            f"reporting a single game, which is the one thing this panel must not do")
+
+
+def test_THE_HOVER_ALSO_CARRIES_THE_PLOTS_OWN_FIGURES(panel):
+    """> **MARC, v15:** *"**in addition to the data points that discribe the overall plot**, if
+    > the user is hovered on a previous game, can the tooltip show Week #, Opponent, and the
+    > Yards"*
+
+    🚨 **THAT OPENING CLAUSE IS A FIX FOR A LOSS, AND THE DOM IS WHAT SHOWED IT.** `box()` puts
+    its `describe()` text on the `span.cfdb-dist` that wraps its SVG; the circle overlay is a
+    SIBLING `<svg>` **outside** that span. **So an SVG `<title>` on a circle REPLACED the plot's
+    figures rather than adding to them** — hovering a game lost the description of the plot it
+    sits in (cfdb-wta-R-1512).
+
+    ✅ **AND `distribution.describe()` IS CALLED, NEVER COPIED** — it is session A's module
+    (§3), so the figures a circle shows are by construction the same ones the box shows.
+    """
+    entries, _ = panel(_game(), _both(), deltas=_deltas())
+    block = _of_metric(entries, "Total")[0]
+    gained, _allowed = _circle_columns(entries)
+    titles = re.findall(r"<title>(.*?)</title>", gained, re.S)
+    assert titles, "no tooltips drawn, so nothing below is tested"
+
+    # 🚨 THE ORACLE IS THE BOX'S OWN RENDERED TOOLTIP, WHICH IS THE CLAIM RESTATED RATHER THAN
+    # A SECOND COPY OF IT. `box()` puts `describe()` in `title='…'` on its wrapping span; the
+    # assertion is that a circle shows THOSE figures, so comparing the two outputs is the
+    # question — not the test grading its own arithmetic (R-768).
+    spans = re.findall(r"<span class='cfdb-dist' title='(.*?)'", block, re.S)
+    assert spans, "the box drew no describe() tooltip, so there is nothing to carry across"
+    # `box()` emits the attribute with `&#10;` for newlines; the `<title>` element uses real
+    # ones. Compare the STATEMENTS, which is what a reader sees either way.
+    lines = [ln for ln in spans[0].split("&#10;") if ln.strip()]
+    assert len(lines) >= 3, f"the distribution described as {lines!r}; too thin to prove much"
+    for line in lines:
+        assert all(html.escape(line) in t for t in titles), (
+            f"a circle tooltip is missing the plot's own line {line!r}; Marc asked for the "
+            f"game IN ADDITION TO the figures that describe the overall plot")
+    # 🚨 AND THE GAME COMES FIRST — the reader is pointing at a game, and the distribution is
+    # the context it sits in.
+    assert titles[0].index("Week ") < titles[0].index(html.escape(lines[0])), (
+        "the plot's figures are printed above the game the reader hovered")
+
+
 def test_AN_UNRANKED_OPPONENT_SAYS_SO_and_never_draws_an_EM_DASH(panel):
     """🚨 §2.5, AND THIS IS THE CASE IT CAUGHT. *"A column that exists is not a column that has
     data."*
@@ -4205,8 +4396,18 @@ def test_THE_ALLOWED_CIRCLES_ARE_THE_OPPONENTS_GAMES(panel):
     """
     entries, _ = panel(_game(), _both(), deltas=_deltas())
     _gained, allowed = _circle_columns(entries)
-    drawn = [re.search(r"(\d+) yards", t).group(1)
-             for t in re.findall(r"<title>(.*?)</title>", allowed, re.S)]
+    # 🚨 v15 RENAMED THE LINE FROM `318 yards` TO `Yards allowed 318`, because the same panel
+    # draws a Gained row and an Allowed row and the bare number was the identical string on
+    # both (cfdb-wta-R-1512). **The extraction moved with it; the claim did not.**
+    titles = re.findall(r"<title>(.*?)</title>", allowed, re.S)
+    assert titles, "the allowed column drew no tooltips at all, so nothing below is tested"
+    drawn = [re.search(r"Yards allowed (\d+)", t).group(1) for t in titles]
+    # ✅ AND EVERY ONE OF THEM SAYS *allowed* — this is the allowed column, and a tooltip here
+    # reading `Yards gained` would be the exact ambiguity v15 removed.
+    assert all("Yards allowed " in t for t in titles), (
+        "an allowed-column tooltip does not name its direction")
+    assert not any("Yards gained " in t for t in titles), (
+        "an allowed-column tooltip says `gained`, which names the wrong measure")
     home_rows = sorted((r for r in _calendar()
                         if r["team_id"] == HOME_ID and r["total_yards_allowed"] is not None),
                        key=lambda r: r["game_date"])
