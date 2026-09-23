@@ -131,7 +131,24 @@ MOST_EXCITING_ORDER = ("scoreboard_lead_changes_fourth_quarter desc nulls last, 
 # name out of the module at call time, and test_today_tabs.py asserts every name resolves to
 # the real function rather than to a recorder.
 TABS = (
-    ("back", "Looking Back", ("_recap", "_movers", "_profile", "_leaderboards", "_bump")),
+    # 🚨 A215 (cfdb-main-R-2562). THE POLL CHART MOVED FROM LAST TO SECOND.
+    #
+    # > **MARC, v14:** *"Move the graph between Against the Market and Week's Movers."*
+    #
+    # 📊 THE ORDER THIS NAMES, READ OFF THE EMITTED HEADINGS RATHER THAN OFF THE TUPLE:
+    # "How the week went against the market" is the SECOND half of `_recap` (the first is
+    # "Most exciting"), and "The week's movers" is `_movers`. **So "between" them is between
+    # those two panels** — `_bump` goes second.
+    #
+    #     before   _recap · _movers · _profile · _leaderboards · _bump
+    #     after    _recap · _bump   · _movers  · _profile      · _leaderboards
+    #
+    # ✅ NOTHING HERE READS STATE AN EARLIER SECTION SET, checked rather than assumed: each of
+    # the three runs its own scoped query, `query` is `@st.cache_data`-wrapped so repeats are
+    # free in any order, and the section's one widget carries an explicit `key="today_poll"`
+    # — Streamlit keys widget state by that key, not by call order. The page's only
+    # `st.session_state` use is in `_looking_forward`, on the other tab.
+    ("back", "Looking Back", ("_recap", "_bump", "_movers", "_profile", "_leaderboards")),
     ("forward", "Looking Forward", ("_looking_forward",)),
 )
 
@@ -3938,7 +3955,31 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
     #
     #     axis font    10px   13px   16px   20px   24px   28px
     #     plot drawn     388    381    375    366    355    345
-    st.altair_chart(chart, use_container_width=True)
+    # 🚨 A215 (cfdb-main-R-2561). THE BLURB GOES ABOVE THE PICTURE IT EXPLAINS.
+    #
+    # > **MARC, v14:** *"Move the text blurb to be above the graph."*
+    #
+    # ⚠️ IT IS STILL `st.caption`, SO NOTHING ABOUT ITS SIZE OR COLOUR MOVES — only its
+    # position. A caption is Streamlit's small-dim text and that is what this is; promoting it
+    # to body text because it moved up the page would be a second change wearing the first
+    # one's clothes.
+    #
+    # 📊 WHAT ELSE IS IN THIS BLOCK, AND WHERE EACH PART ENDS UP — because moving one line and
+    # leaving its neighbours is how a block stops reading as one:
+    #
+    #     the heading            `_bump`                    unchanged, first
+    #     the dataset line       `states.section(dataset=)`  unchanged, second — it names the
+    #                                                        relation, which belongs to the
+    #                                                        section rather than to the chart
+    #     the poll selector      `st.radio(key=today_poll)`  unchanged, third — a control that
+    #                                                        changes what is drawn belongs
+    #                                                        beside the heading, not between
+    #                                                        the explanation and the picture
+    #     THE BLURB              this caption                **MOVED: was last, now fourth**
+    #     the chart              `st.altair_chart`           **now last**
+    #
+    # ⚠️ THERE IS NO SEPARATE "as of" STAMP HERE. `table.as_of_caption` is called by `_recap`
+    # and `_movers`; this section has never carried one, so none moved and none was lost.
     st.caption(
         f"{poll}, full season. **Rank 1 is at the top.** Every ranked team is drawn; a line "
         "stops where a team left the poll and restarts where it returned, so a gap is a "
@@ -3946,10 +3987,28 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
         f"**The table beside it is week {int(frame['week'].max())} and shares the chart's rank "
         "axis**, so a team's row sits at the same height as its line — a team on the picture "
         "with no row beside it was ranked earlier in the season and is not ranked now.")
+    st.altair_chart(chart, use_container_width=True)
 
 
 def _bump(scope, depth: int) -> None:
-    st.subheader(fmt.title_case("Poll movement"))
+    # 🚨 A215 (cfdb-main-R-2560). THE TITLE IS MARC'S OWN WORDS.
+    #
+    # > **MARC, v14:** *"Poll Movement - better title is something like Tracking Top 25
+    # > Changes."*
+    #
+    # ⚠️ *"something like"* IS HIM LEAVING ROOM, AND THE ROOM IS EASIER TO USE FROM A RENDERED
+    # PAGE THAN FROM A PROPOSAL — so his words ship as written and he can move them from the
+    # site rather than from a list of options.
+    #
+    # ✅ A211's title-case rule is satisfied without a special case: `title_case` capitalises
+    # the first and last word always and leaves an already-mixed-case word alone, and "Top 25"
+    # is neither a minor word nor an initialism. Confirmed by rendering, not assumed.
+    #
+    # ⚠️ THE FUNCTION IS STILL `_bump` AND THAT IS DELIBERATE. It is named for the chart it
+    # draws — a bump chart — which is what it still is; `TABS` names it, `test_today_tabs.py`
+    # resolves it, and renaming a function to follow a heading is how a rename turns into a
+    # diff nobody can review.
+    st.subheader(fmt.title_case("Tracking Top 25 changes"))
     with states.section("srv_rankings", dataset=DATASETS["srv_rankings"]):
         polls = _rankings(scope)
         if polls.empty:

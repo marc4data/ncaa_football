@@ -781,6 +781,7 @@ def test_every_table_render_that_takes_an_anchor_is_the_one_that_draws():
 
     🚨 A156 TOOK THE BOUND FROM NINE TO EIGHT, AND LOWERING IT IS EXACTLY WHAT THIS GUARD EXISTS
     TO MAKE HARD — so the drop is pinned to its cause rather than just decremented. Poll movement
+    (renamed **Tracking Top 25 Changes** by A215, same section)
     no longer renders an HTML table AT ALL: the table became a chart element so it could share the
     bump chart's rank axis (Marc's ask), and a chart element has no anchor because it has no sort
     links to return from. **The second assertion below is what keeps this honest** — if some later
