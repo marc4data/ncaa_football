@@ -731,10 +731,23 @@ def render(df: pd.DataFrame, columns: List[Col], caption: str = "",
 
 
 def team_cell(row, slug_field: str, display_field: str, logo_field: str,
-              rank_field: Optional[str] = None) -> str:
+              rank_field: Optional[str] = None, logo_px: int = 28) -> str:
     """Logo-or-monogram plus name, with a rank badge only when the team is ranked.
 
     AC-1.5: an unranked team shows NO badge, not an em dash inside one.
+
+    🚨 A213 (cfdb-main-R-2545). `logo_px` EXISTS BECAUSE A CSS RULE CANNOT REACH THIS LOGO.
+    `identity.logo_or_monogram` emits its size as an INLINE STYLE on both branches, and an
+    inline style beats every selector at every specificity short of `!important`. So
+    `theme.py`'s `.cfdb-card-team .cfdb-logo-box { width:18px }` was never losing a
+    specificity contest — **it was never in the contest**, and the player cards drew a 28px
+    disc in a 44px track for six rounds while that rule sat there looking like the answer.
+
+    ⚠️ THE DEFAULT IS 28 AND EVERY EXISTING CALLER IS UNTOUCHED (§3 rule 3.1 — a shared-module
+    change ships the parameter and the default). The one caller that wants something else
+    passes it: `today._player_card` -> `_team_identity` -> here. **Do not change
+    `logo_or_monogram`'s own default** — `matchup.py` calls it directly at four sites, one of
+    them already passing 14, and `team.py` passes 44.
 
     The slug_field argument was accepted and ignored for weeks, which is why every team
     name on the site was inert text. It is now what the anchor is built from — see
@@ -752,7 +765,7 @@ def team_cell(row, slug_field: str, display_field: str, logo_field: str,
     display = row.get(display_field)
     if display is None or (isinstance(display, float) and pd.isna(display)):
         display = None
-    logo = identity.logo_or_monogram(row.get(logo_field), display or "?")
+    logo = identity.logo_or_monogram(row.get(logo_field), display or "?", logo_px)
     rank = row.get(rank_field) if rank_field else None
     badge = (f"<span class='cfdb-rank'>#{int(rank)}</span>"
              if rank is not None and not pd.isna(rank) else "")

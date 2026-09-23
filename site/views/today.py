@@ -442,7 +442,7 @@ def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
     # goes between the triple quotes but SQL.**
     primary = stat_types[0]
     return query("""
-        select player_name, player_slug, team, conference, opponent, week,
+        select player_id, player_name, player_slug, team, conference, opponent, week,
                stat_category, stat_type, stat_value, as_of_ts,
                jersey, position, class_year_display,
                team_slug, team_display, team_abbreviation, team_logo_url, team_rank,
@@ -810,7 +810,8 @@ def _quarter_cells(row, side: str):
 
 def _team_identity(row, side: str, slug_field=None, display_field=None,
                    logo_field=None, rank_field=None,
-                   record_field=None, record_after_field=None) -> str:
+                   record_field=None, record_after_field=None,
+                   logo_px: int = 28) -> str:
     """Rank + logo + hyperlinked name + record, for one side of a row.
 
     🚨 THE NAME IS THE LINK AND THE ROW IS NOT ONE, WHICH IS A CONSTRAINT AND NOT A STYLE.
@@ -854,7 +855,8 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
     elif record_after_field is None:
         record_after_field = f"{prefix}team_record_after_display"
 
-    cell = table.team_cell(row, slug_field, display_field, logo_field, rank_field)
+    cell = table.team_cell(row, slug_field, display_field, logo_field, rank_field,
+                           logo_px)
     href = table.team_link(slug_field)(row)
     if href:
         cell = f"<a class='cfdb-teamlink' href='{href}' target='_self'>{cell}</a>"
@@ -884,8 +886,73 @@ def _team_identity(row, side: str, slug_field=None, display_field=None,
 #                                     pages, and editing it is not this round's to do.
 #     team.py's `Col("jersey","#")` ❌ THE OPPOSITE TRADE — a whole column per fact. A board of
 #                                     ninety cards cannot spend a column on two characters.
-def _fold_metrics(frame, stat_types, depth: int) -> pd.DataFrame:
+# 🚨 A213 (cfdb-main-R-2541). A BOARD'S METRIC NAMES ITS CATEGORY, BECAUSE `stat_type` ALONE
+# IS NOT A KEY ON THIS VIEW.
+#
+# > **MARC, v14:** *"Touchdowns — add metrics: QB: Yards Rushing, Yards Passing / Receiving:
+# > Catches, Yards Receiving / Rushing: Attempts, Yards Rushing"*
+#
+# 📊 `srv_player_game_log` IS MELTED ON `(stat_category, stat_type)` — measured on live
+# published serving, 2026 regular: `YDS` exists under SEVEN categories (passing, rushing,
+# receiving, interceptions, kickReturns, punting, puntReturns) and `TD` under six. **So a QB's
+# passing yards and his rushing yards are both `YDS`**, and the fold that used to key on
+# `stat_type` alone would have silently taken whichever row came first.
+#
+# ⚠️ THAT IS THE WHOLE REASON FOR THIS FUNCTION. A bare `"TD"` means the board's OWN category;
+# `"rushing:YDS"` reaches another published category on the SAME view, which is still one
+# single-table SELECT with a widened `WHERE` and no join (§4.2.1). ✅ Nothing is computed:
+# both numbers are published and the card prints them as they come.
+#
+# ⚠️ AND THE LABEL IS CARRIED BESIDE THE KEY RATHER THAN DERIVED FROM IT. `rushing:YDS` is a
+# column address, not a word for a reader — A212's rule is that the sub-header names the
+# metric, so the sub-header needs a name a reader recognises ("RUSH YDS"), not a key.
+def _metric_spec(entry, default_category: str):
+    """`(key, category, stat_type, label)` for one entry in a board's metric tuple."""
+    label = None
+    if isinstance(entry, tuple):
+        entry, label = entry
+    category, _sep, stat_type = entry.rpartition(":")
+    return entry, (category or default_category), stat_type, (label or stat_type)
+
+
+def _board_query_args(specs) -> tuple:
+    """The categories and stat types one board's metrics need, de-duplicated, order kept."""
+    cats, types = [], []
+    for _key, category, stat_type, _label in specs:
+        if category not in cats:
+            cats.append(category)
+        if stat_type not in types:
+            types.append(stat_type)
+    return tuple(cats), tuple(types)
+
+
+def _boards(scope, depth: int, specs_by_board) -> list:
+    """`[(heading, folded frame, specs), ...]` — one query and one fold per column.
+
+    🚨 A213. THE QUERY'S `cats` IS DERIVED FROM THE METRICS, WHICH IS WHAT LETS THE QB
+    TOUCHDOWN BOARD SHOW A QUARTERBACK'S RUSHING YARDS. It stays one single-table SELECT with
+    a widened `IN` list — no join, no second query, nothing computed (§4.2.1).
+
+    ⚠️ **THE FIRST METRIC IS THE RANKING AND EVERY BOARD SAYS SO IN ITS CAPTION.** `_player_board`
+    orders by `max(stat_value) over (partition by player_slug, team)` for the PRIMARY type
+    only, and `_fold_metrics` takes the first `depth` of that order. **Putting a bigger number
+    second does not reorder anything** — which is exactly the failure mode to guard, because a
+    board ranked by touchdowns that prints yards beside them looks ranked by yards.
+    """
+    boards = []
+    for heading, category, entries in specs_by_board:
+        specs = [_metric_spec(entry, category) for entry in entries]
+        cats, types = _board_query_args(specs)
+        frame = _player_board(scope, depth, cats, types)
+        boards.append((heading, _fold_metrics(frame, specs, depth), specs))
+    return boards
+
+
+def _fold_metrics(frame, specs, depth: int) -> pd.DataFrame:
     """Melted rows -> one row per player, with a column per statistic. A175.
+
+    `specs` is a list of `_metric_spec` tuples, so each column knows its CATEGORY as well as
+    its type (A213). The first spec is the primary and decides the order.
 
     🚨 THE SAME RESHAPE THE WORKBOOK NEEDED IN THE SAME SPEC, AND THAT IS NOT A COINCIDENCE.
     > **MARC, v09:** *"I want 3 metrics per card"* — and, four lines later, *"Player Stats is a
@@ -906,17 +973,26 @@ def _fold_metrics(frame, stat_types, depth: int) -> pd.DataFrame:
     """
     if frame is None or frame.empty:
         return frame
-    primary = stat_types[0]
-    leaders = frame[frame["stat_type"] == primary].drop_duplicates(
+    # 🚨 A213: THE SLICE IS `(stat_category, stat_type)`, NOT `stat_type`. With the QB board now
+    # asking for `rushing:YDS` as well as `passing:YDS`, the frame holds two `YDS` rows per
+    # player and keying on the type alone would take whichever arrived first — a wrong number
+    # that looks entirely plausible beside a right one.
+
+    def slice_of(category, stat_type):
+        return frame[(frame["stat_type"] == stat_type)
+                     & (frame["stat_category"] == category)]
+
+    _pk, p_cat, p_type, _pl = specs[0]
+    leaders = slice_of(p_cat, p_type).drop_duplicates(
         subset=["player_slug", "team"]).head(depth)
     if leaders.empty:
         return leaders
     out = leaders.copy()
-    for stat in stat_types:
-        rows = frame[frame["stat_type"] == stat].drop_duplicates(
+    for key, category, stat_type, _label in specs:
+        rows = slice_of(category, stat_type).drop_duplicates(
             subset=["player_slug", "team"]).set_index(["player_slug", "team"])
-        key = out.set_index(["player_slug", "team"]).index
-        out[f"metric_{stat}"] = rows["stat_value"].reindex(key).values
+        index = out.set_index(["player_slug", "team"]).index
+        out[f"metric_{key}"] = rows["stat_value"].reindex(index).values
     return out
 
 
@@ -957,7 +1033,48 @@ def _card_spark(value, top: float) -> str:
     return f"<span class='cfdb-card-spark'><i style='width:{share * 100:.1f}%'></i></span>"
 
 
-def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0) -> str:
+# 🚨 A213 (cfdb-main-R-2545). THE CARD'S LOGO IS 18px AND IT IS PASSED, NOT STYLED.
+#
+# > **MARC, v14:** *"Cards with Ranked teams are word-wrapping an extra line."*
+#
+# 📊 MEASURED ON THE REAL PAGE BEFORE ANYTHING MOVED — the five contributors to the team
+# line's FIRST BAND, on `#3ND` in a 44px track (`ci/measure_player_cards.py`):
+#
+#     logo box            inline style from `logo_or_monogram`        28.00
+#     `.cfdb-logo-box`    margin-right:.4rem   (theme.py:1553)         6.40
+#     the flex container  column-gap:.2rem     (theme.py:1240)         3.20
+#     `.cfdb-rank`        margin-left:.3rem    (theme.py:1043)         4.80
+#     the badge itself    rect                                        12.17
+#                                                     FIRST BAND      54.57  of 44px
+#
+# 🚨 SO THE BADGE WRAPS TO A THIRD BAND, AND A212's REVERT WAS RIGHT: it widened the track to
+# 50px and the bands stayed at three, because 54.57 does not fit in 50 either. **A212 could
+# not explain that and named it as the next round's start; this is the explanation.**
+#
+# 🚨 AND IT IS NOT A SPECIFICITY PROBLEM. `logo_or_monogram` emits `style='width:28px'` on the
+# element itself, so `theme.py`'s `.cfdb-card-team .cfdb-logo-box { width:18px }` was not
+# losing at 0-2-0 — **an inline style is not in the contest at all.** A CSS rule could only
+# have won with `!important`, and `!important` to beat your own generated markup is a smell.
+# ✅ **FIXED AT THE PRODUCER**, which is why `table.team_cell` now takes `logo_px`.
+#
+# ⚠️ 18px ALONE IS NOT ENOUGH, WHICH THE ARITHMETIC SAYS AND THE RENDER CONFIRMS: 18 + 6.4 +
+# 3.2 + 4.8 + 12.17 = 44.57, still over 44, and a two-digit badge (`#20`, 18.25px) needs
+# 50.65. **The two margins go too** — both are written for the inline table-row context, and
+# inside the card the flex container's own `column-gap` already does that job. With all three:
+# 18 + 3.2 + 18.25 = **39.45px worst case**, against 44. See `theme.py`'s card-scoped resets.
+_CARD_LOGO_PX = 18
+
+# ⚠️ A213 (cfdb-main-R-2544). 400ms — Marc asked for a DELAYED hover and this is the number.
+# Chosen, not measured: it is long enough that a pointer travelling across the board to reach
+# something else does not light anything on the way, and short enough that a deliberate pause
+# does not feel broken. It sits between the ~300ms a tooltip conventionally waits and the
+# ~500ms at which a delay starts reading as lag. **Stated here rather than inlined so the next
+# round changes one number and the report can say what it was.**
+_HIGHLIGHT_DELAY_MS = 400
+
+
+def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0,
+                 player_key: str = "") -> str:
     """One player, as MATCHUP's card — plus the team line Today needs and Matchup does not.
 
     > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
@@ -1021,10 +1138,10 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0
         cells = "".join(
             f"<div class='cfdb-card-metric'>"
             f"<span class='cfdb-card-value'>"
-            f"{fmt.number(row.get(f'metric_{stat}'), 'stat_value')}</span>"
-            f"{_card_spark(row.get(f'metric_{stat}'), spark_top) if index == 0 else ''}"
+            f"{fmt.number(row.get(f'metric_{spec[0]}'), 'stat_value')}</span>"
+            f"{_card_spark(row.get(f'metric_{spec[0]}'), spark_top) if index == 0 else ''}"
             f"</div>"
-            for index, stat in enumerate(metric_types))
+            for index, spec in enumerate(metric_types))
         stat_block = f"<div class='cfdb-card-metrics'>{cells}</div>"
     else:
         # The same formatter the tables use — `Col(kind="num")` calls exactly this, so a card
@@ -1087,7 +1204,8 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0
                       row, '',
                       slug_field='team_slug',
                       display_field='team_abbreviation' if short else 'team_display',
-                      logo_field='team_logo_url', rank_field='team_rank')}</div>")
+                      logo_field='team_logo_url', rank_field='team_rank',
+                      logo_px=_CARD_LOGO_PX)}</div>")
 
     # 🚨 A175 (cfdb-main-R-1756). THE REFLOW, AND IT IS IN TODAY'S WRAPPER BECAUSE MOVING THE
     # SHARED ROW WOULD MOVE MATCHUP.
@@ -1161,7 +1279,28 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0
     # `.cfdb-card`, a class `matchup.py` does not use anywhere. See `theme.py`.
     who_title = " \u00b7 ".join(part for part in (fmt.text(row.get("class_year_display")),
                                                   fmt.text(row.get("position"))) if part)
-    return (f"<div class='cfdb-card'>"
+    # 🚨 A213 (cfdb-main-R-2544). THE HIGHLIGHT'S IDENTITY IS `player_id`, A PUBLISHED
+    # COLUMN — NEVER THE NAME.
+    #
+    # > **MARC, v14:** *"Can a delayed hover highlight the same player if it's in the other
+    # > Defense categories?"*
+    #
+    # ⚠️ TWO PLAYERS SHARE A NAME EVENTUALLY, and matching on a string is how the wrong man
+    # lights up on the board beside this one. `srv_player_game_log` publishes `player_id`
+    # (text) — confirmed against `information_schema` on live published serving, not against
+    # the model file (§2.2.1c.2) — and A213 added it to this view's select list.
+    #
+    # ⚠️ `player_slug` WAS THE OTHER CANDIDATE AND IS NOT AN ID. It is derived from the name,
+    # so two players called the same thing collide in exactly the case this attribute exists
+    # to survive.
+    #
+    # ✅ THE ATTRIBUTE IS EMPTY WHEN THERE IS NOTHING TO PAIR WITH. `_player_card_grid` passes
+    # a key only for an id that appears on MORE THAN ONE card in the same board group, so a
+    # player who appears once carries no attribute and no rule can select him — which is
+    # Marc's *"must do nothing when the player appears only once"* made structural rather
+    # than conditional.
+    return (f"<div class='cfdb-card'"
+            f"{f' data-cfdb-player=\"{html.escape(player_key)}\"' if player_key else ''}>"
             f"{team_block}"
             f"<div class='cfdb-card-who'"
             f"{f' title=\'{html.escape(who_title)}\'' if who_title else ''}>"
@@ -1207,10 +1346,27 @@ def _player_card_grid(columns, stat_label: str) -> None:
     # ⚠️ PER COLUMN, NOT PER BOARD, FOR `_spark_max`'s OWN REASON (A175): passing yards and
     # rushing yards are different quantities, and one scale across both would make every
     # rushing bar a stub. The caption says which scale it is.
+    # 🚨 A213 (cfdb-main-R-2544). WHICH PLAYERS APPEAR MORE THAN ONCE IN THIS GROUP — counted
+    # BEFORE any card is built, because a card cannot know what the other columns hold.
+    #
+    # 📊 ON THE THREE DEFENSE BOARDS AT WEEK 3 the overlap is real but small: `Jayden Woods`
+    # (Florida) is 4th on Tackles for loss and 2nd on Sacks, and `Demetrius Ballard` (Boston
+    # College) is on both as well. **Most players appear once, which is why the "do nothing"
+    # case is the common one and has to be the default.**
+    appearances = {}
+    for _heading, frame, _specs in columns:
+        if frame is None or frame.empty or "player_id" not in frame.columns:
+            continue
+        for value in frame["player_id"]:
+            key = fmt.text(value)
+            if key:
+                appearances[key] = appearances.get(key, 0) + 1
+    paired = {key for key, count in appearances.items() if count > 1}
+
     per_column, headings = [], []
     for heading, frame, metric_types in columns:
         # the field the column is RANKED by — the first metric, or the single stat
-        primary = f"metric_{metric_types[0]}" if metric_types else "stat_value"
+        primary = f"metric_{metric_types[0][0]}" if metric_types else "stat_value"
         top = 0.0
         if frame is not None and not frame.empty and primary in frame.columns:
             values = pd.to_numeric(frame[primary], errors="coerce").dropna()
@@ -1218,13 +1374,19 @@ def _player_card_grid(columns, stat_label: str) -> None:
         # 📋 R-2524: the names the cells stopped printing. A board with no cell text —
         # the defensive one, whose `stat_label` is "" — hoists nothing, because its
         # heading ALREADY names its metric (Tackles · Tackles for loss · Sacks).
-        names = [n for n in (metric_types or ([stat_label] if stat_label else [])) if n]
-        headings.append((fmt.text(heading), [fmt.text(n).upper() for n in names]))
+        # ⚠️ A213: THE LABEL, NOT THE KEY. `rushing:YDS` addresses a column; `RUSH YDS`
+        # names a number for a reader, and A212's rule is that the sub-header is where the
+        # metric's name lives now that the cells no longer carry it.
+        names = ([spec[3] for spec in metric_types] if metric_types
+                 else ([stat_label] if stat_label else []))
+        headings.append((fmt.text(heading), [fmt.text(n).upper() for n in names if n]))
         if frame is None or frame.empty:
             per_column.append(None)
         else:
             per_column.append([
-                _player_card(row, stat_label, metric_types, spark_top=top)
+                _player_card(row, stat_label, metric_types, spark_top=top,
+                             player_key=(fmt.text(row.get("player_id"))
+                                         if fmt.text(row.get("player_id")) in paired else ""))
                 for _index, row in frame.iterrows()])
 
     depth = max((len(c) for c in per_column if c), default=0)
@@ -1247,7 +1409,38 @@ def _player_card_grid(columns, stat_label: str) -> None:
                 cells_in_row.append(cards[position] if position < len(cards) else "<div></div>")
         rows.append(f"<div class='cfdb-cardrow-rank'>{position + 1}</div>"
                     + "".join(cells_in_row))
-    st.markdown(f"<div class='cfdb-cardboard'>{head}{''.join(rows)}</div>",
+    # ── A213 (cfdb-main-R-2544): THE DELAYED CROSS-BOARD HIGHLIGHT, IN CSS ────────────────
+    #
+    # 🚨 NO SERVER ROUND-TRIP AND NO SCRIPT, WHICH IS WHY THIS COULD BE BUILT AT ALL.
+    # Streamlit reruns the whole page on any widget interaction, so a hover routed through
+    # Python would re-query and repaint the board on every pointer crossing — the "blinking
+    # page" the prompt says to price rather than ship. And Streamlit's sanitiser strips
+    # `<script>` and every event handler (R-121 established that for `onerror`), so JS is not
+    # available here either.
+    #
+    # ✅ `:has()` CLOSES IT. The three columns of a group are ONE `.cfdb-cardboard` element —
+    # `_player_card_grid` emits a single `st.markdown` — so a rule anchored on the board can
+    # ask *"does this board contain a hovered card with this id"* and paint EVERY card with
+    # that id, including the ones in the other two columns. Baseline in Chromium, Safari and
+    # Firefox since 2023.
+    #
+    # ⚠️ THE DELAY IS `transition-delay` ON THE HOVER STATE ONLY, AND THE ASYMMETRY IS THE
+    # FEATURE. 400ms before it lights up, so a pointer crossing the board on its way somewhere
+    # else lights nothing; 0ms coming off, so it releases the instant you leave rather than
+    # hanging on for another 400ms. **A symmetric delay reads as lag, not as intent.**
+    #
+    # ⚠️ ONE RULE PER PAIRED ID, AND ONLY FOR PAIRED IDS. An unpaired player has no
+    # `data-cfdb-player` attribute at all, so there is nothing to select and nothing to
+    # suppress — the "does nothing when he appears once" requirement is structural.
+    highlight = "".join(
+        f".cfdb-cardboard:has(.cfdb-card[data-cfdb-player=\"{key}\"]:hover) "
+        f".cfdb-card[data-cfdb-player=\"{key}\"]{{"
+        f"background:var(--cfdb-hover-bg);"
+        f"border-left-color:var(--cfdb-u2);"
+        f"transition-delay:{_HIGHLIGHT_DELAY_MS}ms;}}"
+        for key in sorted(paired))
+    style = f"<style>{highlight}</style>" if highlight else ""
+    st.markdown(f"{style}<div class='cfdb-cardboard'>{head}{''.join(rows)}</div>",
                 unsafe_allow_html=True)
 
 
@@ -3243,12 +3436,10 @@ def _leaderboards(scope, depth: int) -> None:
         #
         # ⚠️ THE FIRST IS THE PRIMARY and it decides the ORDER of the board. `YDS` keeps the
         # ranking the panel has always had.
-        yardage = [(label, _fold_metrics(
-            _player_board(scope, depth, (category,), types), types, depth), types)
-            for label, category, types in (
-                ("QB", "passing", ("YDS", "TD", "INT")),
-                ("Receiving", "receiving", ("YDS", "TD", "REC")),
-                ("Rushing", "rushing", ("YDS", "TD", "CAR")))]
+        yardage = _boards(scope, depth, (
+            ("QB", "passing", ("YDS", "TD", "INT")),
+            ("Receiving", "receiving", ("YDS", "TD", "REC")),
+            ("Rushing", "rushing", ("YDS", "TD", "CAR"))))
         states.render_or_state(
             # ⚠️ THE CONCATENATION DECIDES THE STATE, THE THREE FRAMES DRAW THE GRID. The state
             # machinery asks one question — is there anything at all? — and three columns that
@@ -3266,12 +3457,17 @@ def _leaderboards(scope, depth: int) -> None:
         )
 
         st.markdown(f"**{fmt.title_case('Touchdowns')}**")
-        st.caption("A different board from yardage, and mostly different names on it."
-                   " Bars under the first number are that column's own ten cards, relative to its leader.")
-        touchdowns = [(label, _player_board(scope, depth, (category,), ("TD",)), ())
-                      for label, category in (("QB", "passing"),
-                                              ("Receiving", "receiving"),
-                                              ("Rushing", "rushing"))]
+        st.caption("A different board from yardage, and mostly different names on it. "
+                   "**Ranked by touchdowns** \u2014 the two numbers beside each one are "
+                   "context from the same game, not the order. "
+                   "Bars under the first number are that column's own ten cards, relative "
+                   "to its leader.")
+        touchdowns = _boards(scope, depth, (
+            ("QB", "passing", ("TD", ("passing:YDS", "Pass yds"),
+                               ("rushing:YDS", "Rush yds"))),
+            ("Receiving", "receiving", ("TD", ("REC", "Catches"),
+                                        ("YDS", "Rec yds"))),
+            ("Rushing", "rushing", ("TD", ("CAR", "Att"), ("YDS", "Rush yds")))))
         states.render_or_state(
             pd.concat([frame for _label, frame, _types in touchdowns])
             if touchdowns else pd.DataFrame(),
@@ -3282,13 +3478,42 @@ def _leaderboards(scope, depth: int) -> None:
         )
 
         st.markdown(f"**{fmt.title_case('Defensive leaders')}**")
-        st.caption("Tackles, tackles for loss and sacks — three stat types on one category, "
-                   "which is a different split from the two boards above."
-                   " Bars under the first number are that column's own ten cards, relative to its leader.")
-        defence = [(label, _player_board(scope, depth, ("defensive",), (stat_type,)), ())
-                   for label, stat_type in (("Tackles", "TOT"),
-                                            ("Tackles for loss", "TFL"),
-                                            ("Sacks", "SACKS"))]
+        # 🚨 A213 (cfdb-main-R-2543). MARC ASKED TWO QUESTIONS ABOUT THIS BOARD AND BOTH
+        # ARE ANSWERED BY MEASUREMENT, NOT BY ASKING HIM BACK.
+        #
+        # > **MARC, v14:** *"DEfense Leaders - are these totals for the week? Clarify in the
+        # > text below Defensive Leaders. Did all of these players in FBS or play against
+        # > FBS?"*
+        #
+        # 📊 **THE PERIOD IS ONE GAME.** `srv_player_game_log` is game-grain — measured on
+        # live published serving, week 3 of 2026 regular: every one of the 5,712 players with a
+        # `defensive`/`TOT` row has **exactly one** row. The page defaults to the latest played
+        # week, and a player plays once a week, so "totals for the week" is right for the
+        # default — but the caption says the narrower, always-true thing instead, because the
+        # week filter also offers **All**, and there the fold keeps ONE of a player's games
+        # while ordering by his best. **That is named in the report as a finding.**
+        #
+        # 🚨 **THE ANSWER TO THE SECOND QUESTION IS NO, AND IT IS NOT CLOSE.** Of the thirty
+        # players these three boards list at week 3, **thirteen played for an FBS team and
+        # seventeen played neither for nor against one** — Tackles 3 of 10, Tackles for loss
+        # 4 of 10, Sacks 6 of 10. This view publishes no classification column, so it cannot be
+        # filtered here, and **the query was NOT quietly changed to match the heading.**
+        #
+        # ⚠️ THE CAPTION STATES THE RULE, NOT THE COUNT. "13 of 30" is true of week 3 and of
+        # no other week, and a number baked into a caption goes stale the next Saturday with
+        # nothing to catch it (§2.2.1d, applied to the page's own prose).
+        st.caption("Tackles, tackles for loss and sacks \u2014 three stat types on one "
+                   "category, which is a different split from the two boards above. "
+                   "**Each number is one game**, this player's line in the week shown, not a "
+                   "season total. **Every division CFBD publishes a box score for is "
+                   "included** \u2014 these boards are not filtered to FBS, and in most weeks "
+                   "most of these names are FCS. "
+                   "Bars under the first number are that column's own ten cards, relative "
+                   "to its leader.")
+        defence = _boards(scope, depth, (
+            ("Tackles", "defensive", ("TOT", "TFL", "SACKS")),
+            ("Tackles for loss", "defensive", ("TFL", "TOT", "SACKS")),
+            ("Sacks", "defensive", ("SACKS", "TOT", "TFL"))))
         states.render_or_state(
             pd.concat([frame for _label, frame, _types in defence])
             if defence else pd.DataFrame(),

@@ -57,6 +57,29 @@ MEASURE = r"""() => {
     return top === Infinity ? 1 : Math.max(1, Math.round((bottom - top) / lh));
   };
 
+  // 🚨 A213 (cfdb-main-R-2546). BANDS ARE CLUSTERED BY VERTICAL OVERLAP, NOT BY ROUNDING A
+  // `top` INTO A BUCKET. A212 counted `Math.round(top / 4) * 4` and that is an instrument
+  // failure that only shows up once the fix WORKS: `align-items:center` gives items of
+  // different heights different tops ON THE SAME LINE — an 18px logo beside a 14.4px badge
+  // sit 1.8px apart — and a 4px bucket puts them either side of a boundary about half the
+  // time. 📊 It reported 3 bands for `#3ND` when the logo and badge were 1.8px apart and the
+  // name was 19.6px below, i.e. two lines. **A counter that reads a centering offset as a
+  // line break says the fix did nothing, which is exactly what it said.**
+  //
+  // ⚠️ OVERLAP IS THE RIGHT TEST BECAUSE IT IS WHAT A LINE IS: items on one flex line share
+  // vertical extent; items on the next are separated by the row-gap and cannot overlap.
+  const bandsOf = (els) => {
+    const rects = els.map(n => n.getBoundingClientRect())
+        .filter(r => r.width > 0.5 && r.height > 0.5)
+        .sort((a, b) => a.top - b.top);
+    let bands = 0, bottom = -Infinity;
+    for (const r of rects) {
+      if (r.top >= bottom) { bands += 1; bottom = r.bottom; }
+      else { bottom = Math.max(bottom, r.bottom); }
+    }
+    return bands;
+  };
+
   const boards = [...document.querySelectorAll('.cfdb-cardboard')];
   const out = boards.map((board, bi) => {
     const cards = [...board.querySelectorAll('.cfdb-card')];
@@ -66,6 +89,10 @@ MEASURE = r"""() => {
       fontWeight: getComputedStyle(h).fontWeight,
       w: +h.getBoundingClientRect().width.toFixed(1)}));
     let teamWrapped = 0, worstTeam = '', worstTeamW = 0, ranked = 0;
+    let teamLine = null;
+    const rankedBands = [], unrankedBands = [];
+    const monogramEmpty = board.querySelectorAll(
+        '.cfdb-card-team .cfdb-monogram-empty').length;
     const slots = [];
     const units = new Set();
     cards.forEach(card => {
@@ -81,11 +108,8 @@ MEASURE = r"""() => {
         // reads 2 for every ranked card whether or not anything is wrong, and the first run
         // of this script reported the wrap count unchanged after a fix that worked. The
         // defect is a THIRD band: logo / badge / name, where an unranked card has two.
-        const kids = [...identity.querySelectorAll('.cfdb-logo-box, .cfdb-rank, .cfdb-team')]
-            .filter(n => { const r = n.getBoundingClientRect();
-                           return r.width > 0.5 && r.height > 0.5; });
-        const bands = new Set(kids.map(n =>
-            Math.round(n.getBoundingClientRect().top / 4) * 4)).size;
+        const bands = bandsOf([...identity.querySelectorAll(
+            '.cfdb-logo-box, .cfdb-monogram-empty, .cfdb-rank, .cfdb-team')]);
         if (bands > 2) {
           teamWrapped += 1;
           const want = unwrapped(identity);
@@ -93,6 +117,59 @@ MEASURE = r"""() => {
             worstTeamW = want;
             worstTeam = (identity.textContent || '').trim().slice(0, 22);
           }
+        }
+      }
+      if (team) {
+        // ── A213 (cfdb-main-R-2545): THE FIVE CONTRIBUTORS TO THE FIRST BAND ─────────────
+        //
+        // 🚨 COWORK READ FIVE CSS RULES AND ADDED THEM UP. This measures the five on the
+        // element that actually draws, because a rule that is READ is not a rule that WON —
+        // `logo_or_monogram` emits its size as an INLINE STYLE, which no selector can beat.
+        //
+        // ⚠️ `getComputedStyle` FOR THE MARGINS AND THE GAP, a rect for the boxes, and an
+        // UNWRAPPED CLONE for the badge — a Range over a box that has already wrapped
+        // returns the wrapped box (A191's trap, A212 hit it again).
+        const identity = team.querySelector('.cfdb-identity') || team;
+        const hasRank = !!team.querySelector('.cfdb-rank');
+        const bands = bandsOf([...identity.querySelectorAll(
+            '.cfdb-logo-box, .cfdb-monogram-empty, .cfdb-rank, .cfdb-team')]);
+        (hasRank ? rankedBands : unrankedBands).push(bands);
+        if (hasRank && !teamLine) {
+          const logo = identity.querySelector('.cfdb-logo-box, .cfdb-monogram-empty');
+          const badge = identity.querySelector('.cfdb-rank');
+          const name = identity.querySelector('.cfdb-team');
+          const ics = getComputedStyle(identity);
+          const px = (v) => +(parseFloat(v) || 0).toFixed(2);
+          const rectW = (el) => el ? +el.getBoundingClientRect().width.toFixed(2) : null;
+          const lcs = logo ? getComputedStyle(logo) : null;
+          const bcs = badge ? getComputedStyle(badge) : null;
+          teamLine = {
+            sample: (identity.textContent || '').trim().slice(0, 24),
+            logoClass: logo ? logo.className : null,
+            logoInlineWidth: logo ? (logo.getAttribute('style') || '') : null,
+            logoRect: rectW(logo),
+            logoComputedWidth: lcs ? px(lcs.width) : null,
+            logoMarginRight: lcs ? px(lcs.marginRight) : null,
+            logoMarginLeft: lcs ? px(lcs.marginLeft) : null,
+            columnGap: px(ics.columnGap),
+            rowGap: px(ics.rowGap),
+            flexWrap: ics.flexWrap,
+            badgeRect: rectW(badge),
+            badgeUnwrapped: badge ? +unwrapped(badge).toFixed(2) : null,
+            badgeMarginLeft: bcs ? px(bcs.marginLeft) : null,
+            badgeMarginRight: bcs ? px(bcs.marginRight) : null,
+            badgeText: badge ? (badge.textContent || '').trim() : null,
+            nameRect: rectW(name),
+            identityRect: rectW(identity),
+            identityContent: +(identity.clientWidth
+                - px(ics.paddingLeft) - px(ics.paddingRight)).toFixed(2),
+            teamWrapperRect: rectW(team),
+            bands: bands,
+          };
+          teamLine.firstBandNeeds = +(
+              (teamLine.logoRect || 0) + (teamLine.logoMarginRight || 0)
+              + teamLine.columnGap + (teamLine.badgeMarginLeft || 0)
+              + (teamLine.badgeRect || 0)).toFixed(2);
         }
       }
       if (slots.length < 1 && team && who && mets) {
@@ -112,7 +189,11 @@ MEASURE = r"""() => {
         if (t) units.add(t);
       });
     });
+    const tally = (a) => { const m = {}; a.forEach(b => { m[b] = (m[b] || 0) + 1; }); return m; };
     return {board: bi, cards: cards.length, ranked, teamWrapped,
+            teamLine, monogramEmpty,
+            rankedBandTally: tally(rankedBands),
+            unrankedBandTally: tally(unrankedBands),
             worstTeam, worstTeamWanted: +worstTeamW.toFixed(1),
             heads, slot: slots[0] || null, units: [...units].sort()};
   });
@@ -152,10 +233,34 @@ def measure(scheme: str = "light", shot_prefix: str = "") -> list:
                         dialogs=page.locator('[role="dialog"]').count())
             rows.append(data)
             if shot_prefix:
+                # 🚨 A213 (cfdb-main-R-2547). THE CROP IS ANCHORED ON A RANKED CARD, NOT ON
+                # THE VIEWPORT. A212 shipped `A212_before_1440_light.png` and
+                # `A212_after_1440_light.png` BYTE-IDENTICAL — both the page top, with no
+                # player card in either — and cited them as before/after evidence (R-2367).
+                # A viewport screenshot after a wheel-scroll lands wherever the scroll landed;
+                # **clipping to the element under test is the only way a crop can be evidence
+                # about that element.**
                 out = Path("/Users/marcalexander/projects/ai_orchestrator_claude/"
                            "ncaa_football/claude_work/renders")
                 out.mkdir(parents=True, exist_ok=True)
-                page.screenshot(path=str(out / f"{shot_prefix}_{width}_{scheme}.png"))
+                card = page.locator(".cfdb-card").filter(
+                    has=page.locator(".cfdb-rank")).first
+                path = out / f"{shot_prefix}_{width}_{scheme}.png"
+                if card.count():
+                    card.scroll_into_view_if_needed()
+                    page.wait_for_timeout(600)
+                    box = card.bounding_box()
+                    board = page.locator(".cfdb-cardboard").first.bounding_box()
+                    if box and board:
+                        page.screenshot(path=str(path), clip={
+                            "x": max(0, board["x"] - 8),
+                            "y": max(0, box["y"] - 70),
+                            "width": min(board["width"] + 16, width - board["x"] + 8),
+                            "height": min(box["height"] * 5 + 80, 620)})
+                    else:
+                        page.screenshot(path=str(path))
+                else:
+                    page.screenshot(path=str(path))
             ctx.close()
         browser.close()
     return rows
@@ -176,6 +281,26 @@ def summarise(rows: list) -> str:
                        f"TEAM LINES WRAPPED: {b['teamWrapped']}"
                        + (f"  worst {b['worstTeam']!r} wants {b['worstTeamWanted']}px"
                           if b['teamWrapped'] else ""))
+            out.append(f"      BANDS ranked {b['rankedBandTally']}  "
+                       f"unranked {b['unrankedBandTally']}  "
+                       f"monogram-empty cards {b['monogramEmpty']}")
+            t = b.get("teamLine")
+            if t:
+                out.append(f"      TEAM LINE on {t['sample']!r} — bands {t['bands']}, "
+                           f"identity content {t['identityContent']}px")
+                out.append(f"        logo      {t['logoClass']!r} rect {t['logoRect']} "
+                           f"computed {t['logoComputedWidth']} "
+                           f"inline {t['logoInlineWidth']!r}")
+                out.append(f"        logo m-r  {t['logoMarginRight']}   "
+                           f"column-gap {t['columnGap']}  (wrap {t['flexWrap']}, "
+                           f"row-gap {t['rowGap']})")
+                out.append(f"        badge     {t['badgeText']!r} rect {t['badgeRect']} "
+                           f"unwrapped {t['badgeUnwrapped']} "
+                           f"m-l {t['badgeMarginLeft']} m-r {t['badgeMarginRight']}")
+                out.append(f"        FIRST BAND NEEDS {t['firstBandNeeds']}px "
+                           f"of {t['identityContent']}px "
+                           f"(name rect {t['nameRect']}, team wrapper "
+                           f"{t['teamWrapperRect']})")
             for h in b["heads"]:
                 out.append(f"      sub-header {h['fontSize']:>7} w{h['fontWeight']:<4} "
                            f"{h['w']:>6}px {h['text']!r}")
