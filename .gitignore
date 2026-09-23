@@ -18,6 +18,9 @@ venv/
 .idea/
 data/
 dbt/profiles.yml
+# Names which session a checkout belongs to (main / wta / wtc). Per working copy, like .env,
+# so it must never show up as an untracked stray (cfdb-wtc-R-2401).
+.session
 dbt/target/
 dbt/logs/
 dbt/dbt_packages/
