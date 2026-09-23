@@ -45,6 +45,10 @@ import pandas as pd
 
 ALPHA = 4.0
 FIRST_WEEK = 5
+MOV_CAP = 28.0     # a points rating counts no win as more than four scores
+# Division offsets are meant to be unpenalised; a negligible penalty keeps the solve defined when a
+# division has no rows on one side of the ball in a given week.
+OFFSET_PENALTY = 1e-6
 SEASONS = (2024, 2025)
 
 # pack stem → our per-game offence column in stg_game_team_advanced
@@ -79,7 +83,7 @@ QUERIES = {
                        defense_total_havoc_events, defense_front_seven_havoc_events, defense_db_havoc_events
                 from staging.stg_game_team_havoc where season = any(%(s)s) and season_type = 'regular'""",
     "drives": """select d.game_id, d.offense, d.defense, d.start_yards_to_goal, d.end_yards_to_goal,
-                        d.start_offense_score, d.end_offense_score
+                        d.start_offense_score, d.end_offense_score, d.drive_result
                  from staging.stg_drive d join staging.stg_games g on g.game_id = d.game_id
                  where g.season = any(%(s)s) and g.season_type = 'regular'""",
     "talent": "select season, team, talent from staging.stg_team_talent where season = any(%(s)s)",
@@ -97,7 +101,7 @@ def load_inputs(conn, seasons: Iterable[int] = SEASONS) -> Dict[str, pd.DataFram
         out[name] = pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
     # psycopg2 hands numeric columns back as Decimal; everything that is not text becomes a float.
     text = {"team", "opponent", "offense", "defense", "home_team", "away_team",
-            "home_classification", "away_classification", "start_date", "is_neutral_site"}
+            "home_classification", "away_classification", "start_date", "is_neutral_site", "drive_result"}
     for frame in out.values():
         for col in frame.columns.difference(list(text)):
             frame[col] = pd.to_numeric(frame[col])
@@ -128,22 +132,100 @@ def _home_sign(rows: pd.DataFrame, games: pd.DataFrame) -> np.ndarray:
     return np.where(neutral, 0.0, sign)
 
 
-def adjust(rows: pd.DataFrame, value: str, games: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFrame:
-    """Opponent-adjusted offence and defence-allowed per team, by closed-form ridge."""
+def divisions(games: pd.DataFrame) -> Dict[str, str]:
+    """team → 'fbs' / 'fcs' / 'ii' / 'iii', from the games spine. Blank reads as 'fcs'."""
+    out = {}
+    for side in ("home", "away"):
+        for team, cls in zip(games[f"{side}_team"], games[f"{side}_classification"]):
+            out[team] = cls if isinstance(cls, str) and cls else out.get(team, "fcs")
+    return out
+
+
+def _ridge(X: np.ndarray, y: np.ndarray, penalty: np.ndarray) -> np.ndarray:
+    """Closed-form ridge with a per-column penalty (0 = unpenalised)."""
+    return np.linalg.solve(X.T @ X + np.diag(penalty), X.T @ y)
+
+
+def _division_columns(teams_a, teams_b, division, classes, sign_b=1.0) -> np.ndarray:
+    """One column per non-FBS division: +1 if side A is in it, `sign_b` if side B is."""
+    cols = np.zeros((len(teams_a), len(classes)))
+    for j, cls in enumerate(classes):
+        cols[:, j] += np.array([division.get(t) == cls for t in teams_a], dtype=float)
+        if sign_b:
+            cols[:, j] += sign_b * np.array([division.get(t) == cls for t in teams_b], dtype=float)
+    return cols
+
+
+def adjust(rows: pd.DataFrame, value: str, games: pd.DataFrame, alpha: float = ALPHA,
+           division: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+    """Opponent-adjusted offence and defence-allowed per team, by closed-form ridge.
+
+    With `division`, each non-FBS division gets its own UNPENALISED offset for offence and for
+    defence, so a thinly observed FCS team shrinks toward the FCS average, not the league's.
+    The offsets are estimated from the same prior games as everything else (point-in-time holds).
+    """
     rows = rows.dropna(subset=[value])
-    teams = sorted(set(rows["team"]) | set(rows["opponent"]))
     if not len(rows):
         return pd.DataFrame(columns=["team", "offense", "allowed"])
+    teams = sorted(set(rows["team"]) | set(rows["opponent"]))
     index = {t: i for i, t in enumerate(teams)}
     n, k = len(rows), len(teams)
-    X = np.zeros((n, 2 * k + 1))
-    X[np.arange(n), [index[t] for t in rows["team"]]] = 1.0
-    X[np.arange(n), [k + index[t] for t in rows["opponent"]]] = 1.0
-    X[:, -1] = _home_sign(rows, games)
+    classes = sorted({division.get(t) for t in teams} - {"fbs", None}) if division else []
+    c = len(classes)
+    # y is centred on its mean (R-2430's formulation, kept so the no-prior build is unchanged).
+    # columns: division offsets (offence c, defence c) · hfa · attack k · defence k
+    X = np.zeros((n, 2 * c + 1 + 2 * k))
+    if c:
+        X[:, :c] = _division_columns(rows["team"], rows["opponent"], division, classes, sign_b=0.0)
+        X[:, c:2 * c] = _division_columns(rows["opponent"], rows["team"], division, classes, sign_b=0.0)
+    X[:, 2 * c] = _home_sign(rows, games)
+    base = 1 + 2 * c
+    X[np.arange(n), [base + index[t] for t in rows["team"]]] = 1.0
+    X[np.arange(n), [base + k + index[t] for t in rows["opponent"]]] = 1.0
     y = rows[value].to_numpy(dtype=float)
     mean = y.mean()
-    beta = np.linalg.solve(X.T @ X + alpha * np.eye(X.shape[1]), X.T @ (y - mean))
-    return pd.DataFrame({"team": teams, "offense": mean + beta[:k], "allowed": mean + beta[k:2 * k]})
+    penalty = np.r_[np.full(2 * c, OFFSET_PENALTY), alpha * np.ones(1 + 2 * k)]
+    beta = _ridge(X, y - mean, penalty)
+    off_div = {cls: beta[j] for j, cls in enumerate(classes)}
+    def_div = {cls: beta[c + j] for j, cls in enumerate(classes)}
+    division = division or {}
+    return pd.DataFrame({
+        "team": teams,
+        "offense": [mean + off_div.get(division.get(t), 0.0) + beta[base + i] for i, t in enumerate(teams)],
+        "allowed": [mean + def_div.get(division.get(t), 0.0) + beta[base + k + i] for i, t in enumerate(teams)],
+    })
+
+
+def points_ratings(games: pd.DataFrame, alpha: float = ALPHA, division: Optional[Dict[str, str]] = None,
+                   cap: float = MOV_CAP) -> pd.Series:
+    """A results rating per team: capped margin of victory = rating[home] − rating[away] + hfa.
+
+    The cap (±28) keeps a 70–0 over an FCS side from counting for more than a four-score win.
+    Only completed games with at least one FBS or FCS team are used.
+    """
+    g = games.dropna(subset=["home_points", "away_points"])
+    if division:
+        keep = [division.get(h) in ("fbs", "fcs") or division.get(a) in ("fbs", "fcs")
+                for h, a in zip(g["home_team"], g["away_team"])]
+        g = g[keep]
+    if not len(g):
+        return pd.Series(dtype=float)
+    teams = sorted(set(g["home_team"]) | set(g["away_team"]))
+    index = {t: i for i, t in enumerate(teams)}
+    n, k = len(g), len(teams)
+    classes = sorted({division.get(t) for t in teams} - {"fbs", None}) if division else []
+    c = len(classes)
+    X = np.zeros((n, c + 1 + k))
+    if c:
+        X[:, :c] = _division_columns(g["home_team"], g["away_team"], division, classes, sign_b=-1.0)
+    X[:, c] = np.where(g["is_neutral_site"].fillna(False).astype(bool), 0.0, 1.0)
+    X[np.arange(n), [c + 1 + index[t] for t in g["home_team"]]] += 1.0
+    X[np.arange(n), [c + 1 + index[t] for t in g["away_team"]]] -= 1.0
+    y = np.clip(g["home_points"].to_numpy(float) - g["away_points"].to_numpy(float), -cap, cap)
+    beta = _ridge(X, y, np.r_[np.full(c, OFFSET_PENALTY), alpha * np.ones(1 + k)])
+    offset = {cls: beta[j] for j, cls in enumerate(classes)}
+    division = division or {}
+    return pd.Series({t: offset.get(division.get(t), 0.0) + beta[c + 1 + i] for i, t in enumerate(teams)})
 
 
 def _havoc(havoc: pd.DataFrame) -> pd.DataFrame:
@@ -155,28 +237,47 @@ def _havoc(havoc: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _drives(drives: pd.DataFrame) -> pd.DataFrame:
+END_OF_PERIOD = ("END OF HALF", "END OF GAME", "END OF 4TH QUARTER", "END OF HALF TD", "END OF GAME TD")
+
+
+def _drives(drives: pd.DataFrame, ppo_without_try: bool = False, fp_without_period_end: bool = False) -> pd.DataFrame:
     d = drives.copy()
-    d["points"] = (d["end_offense_score"] - d["start_offense_score"]).clip(lower=0)
+    points = (d["end_offense_score"] - d["start_offense_score"]).clip(lower=0)
+    if ppo_without_try:
+        # 6 for a touchdown, 3 for a field goal: the try after a TD is not the drive's doing
+        points = np.where(points >= 6, 6, np.where(points >= 3, 3, points))
+    d["points"] = points
     d["opportunity"] = d[["start_yards_to_goal", "end_yards_to_goal"]].min(axis=1) <= 40
     opp = d[d["opportunity"]]
-    out = pd.DataFrame({
+    fp = d[~d["drive_result"].isin(END_OF_PERIOD)] if fp_without_period_end and "drive_result" in d else d
+    return pd.DataFrame({
         "points_per_opportunity_offense": opp.groupby("offense")["points"].mean(),
         "points_per_opportunity_defense": opp.groupby("defense")["points"].mean(),
-        "avg_start_offense": d.groupby("offense")["start_yards_to_goal"].mean(),
-        "avg_start_defense": d.groupby("defense")["start_yards_to_goal"].mean(),
+        "avg_start_offense": fp.groupby("offense")["start_yards_to_goal"].mean(),
+        "avg_start_defense": fp.groupby("defense")["start_yards_to_goal"].mean(),
     })
-    return out
 
 
-def team_features(prior: Dict[str, pd.DataFrame], alpha: float = ALPHA) -> pd.DataFrame:
+def team_features(prior: Dict[str, pd.DataFrame], alpha: float = ALPHA, division: Optional[Dict[str, str]] = None,
+                  ppo_without_try: bool = False, fp_without_period_end: bool = False) -> pd.DataFrame:
     """Per team, every non-Elo, non-talent feature from the given prior games only."""
     parts = []
     for stem, col in ADJUSTED.items():
-        a = adjust(prior["advanced"], col, prior["games"], alpha).set_index("team")
+        a = adjust(prior["advanced"], col, prior["games"], alpha, division).set_index("team")
         parts.append(a.rename(columns={"offense": stem, "allowed": f"{stem}_allowed"}))
-    parts += [_havoc(prior["havoc"]), _drives(prior["drives"])]
+    parts += [_havoc(prior["havoc"]), _drives(prior["drives"], ppo_without_try, fp_without_period_end)]
     return pd.concat(parts, axis=1)
+
+
+def ratings_at(prior: Dict[str, pd.DataFrame], alpha: float = ALPHA,
+               division: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+    """Each team's two single-number ratings from these prior games: efficiency and points.
+
+    efficiency = adjusted EPA for − adjusted EPA allowed (attack minus defence, per play).
+    """
+    a = adjust(prior["advanced"], ADJUSTED["adjusted_epa"], prior["games"], alpha, division).set_index("team")
+    return pd.DataFrame({"efficiency": a["offense"] - a["allowed"],
+                         "points": points_ratings(prior["games"], alpha, division)})
 
 
 # ---------------------------------------------------------------- the builder
@@ -187,18 +288,52 @@ def target_games(games: pd.DataFrame) -> pd.DataFrame:
                  & (games["away_classification"] == "fbs") & games["home_points"].notna()]
 
 
+def schedule_strength(inputs: Dict[str, pd.DataFrame], season: int, week: int, team: str,
+                      ratings_by_week: Dict[int, pd.DataFrame]) -> Dict[str, float]:
+    """Mean pre-game rating of the opponents `team` has faced before `week`.
+
+    Each opponent is rated AS IT STOOD AT THAT GAME'S KICKOFF — the ratings from games before the
+    week that game was played — never as it stands today. An opponent with no rating yet counts 0
+    (league average): early in the season, strength of schedule is honestly thin.
+    """
+    played = inputs_before(inputs, season, week)["games"]
+    mine = played[(played["home_team"] == team) | (played["away_team"] == team)]
+    eff, pts = [], []
+    for g in mine.itertuples():
+        opponent = g.away_team if g.home_team == team else g.home_team
+        at_kickoff = ratings_by_week[g.week]
+        eff.append(at_kickoff["efficiency"].get(opponent, 0.0) if len(at_kickoff) else 0.0)
+        pts.append(at_kickoff["points"].get(opponent, 0.0) if len(at_kickoff) else 0.0)
+    return {"sos_efficiency": float(np.nanmean(eff)) if eff else np.nan,
+            "sos_results": float(np.nanmean(pts)) if pts else np.nan}
+
+
 def build(inputs: Dict[str, pd.DataFrame], seasons: Iterable[int] = SEASONS, alpha: float = ALPHA,
-          only_game_ids: Optional[set] = None) -> pd.DataFrame:
-    """One row per target game: `id` plus home_/away_ features named as the pack names them."""
+          only_game_ids: Optional[set] = None, division_prior: bool = False, sos: bool = False,
+          ppo_without_try: bool = False, fp_without_period_end: bool = False) -> pd.DataFrame:
+    """One row per target game: `id` plus home_/away_ features named as the pack names them.
+
+    The switches are this round's changes, each off by default so R-2430's build is unchanged:
+      division_prior        FBS / FCS / II / III priors in the adjustment (R-2441)
+      sos                   points rating and the two cumulative SOS columns (R-2442) — ours, no pack twin
+      ppo_without_try       points per opportunity without the try after a TD (R-2443)
+      fp_without_period_end field position without end-of-half / end-of-game drives (R-2443)
+    """
     games = inputs["games"]
     talent = inputs["talent"].set_index(["season", "team"])["talent"]
+    division = divisions(games) if division_prior else None
     rows = []
     for season in seasons:
         season_games = target_games(games[games["season"] == season])
         if only_game_ids is not None:
             season_games = season_games[season_games["game_id"].isin(only_game_ids)]
+        ratings_by_week = {}
+        if sos:
+            weeks = sorted(games.loc[games["season"] == season, "week"].unique())
+            ratings_by_week = {w: ratings_at(inputs_before(inputs, season, w), alpha, division) for w in weeks}
         for week, week_games in season_games.groupby("week"):
-            per_team = team_features(inputs_before(inputs, season, week), alpha)
+            prior = inputs_before(inputs, season, week)
+            per_team = team_features(prior, alpha, division, ppo_without_try, fp_without_period_end)
             for g in week_games.itertuples():
                 row = {"id": g.game_id}
                 for side, team, elo in (("home", g.home_team, g.home_pregame_elo),
@@ -208,5 +343,9 @@ def build(inputs: Dict[str, pd.DataFrame], seasons: Iterable[int] = SEASONS, alp
                         row[f"{side}_{name}"] = feats.get(name, np.nan)
                     row[f"{side}_elo"] = elo
                     row[f"{side}_talent"] = float(talent.get((season, team), 0.0))
+                    if sos:
+                        row[f"{side}_points_rating"] = ratings_by_week[week]["points"].get(team, 0.0)
+                        row.update({f"{side}_{k}": v for k, v in
+                                    schedule_strength(inputs, season, week, team, ratings_by_week).items()})
                 rows.append(row)
     return pd.DataFrame(rows)
