@@ -1377,7 +1377,7 @@ def _row_colors(row) -> tuple:
 
 
 def _most_exciting(df: pd.DataFrame, scope) -> None:
-    st.subheader("Most exciting")
+    st.subheader(fmt.title_case("Most exciting"))
     # ✅ A153. THE CAPTION SAYS "lead changes" AGAIN AND IT IS TRUE THIS TIME — the whole point of
     # the two-round sequence.
     #
@@ -1888,7 +1888,7 @@ def _underdog_cell(row) -> str:
 
 
 def _recap_lists(df: pd.DataFrame, scope) -> None:
-    st.subheader("How the week went against the market")
+    st.subheader(fmt.title_case("How the week went against the market"))
     if scope.week is not None and scope.week < MODEL_WEEK_FLOOR:
         st.caption(
             f"Market-only edition. Model-derived framing is withheld before week "
@@ -1972,7 +1972,7 @@ def _recap_lists(df: pd.DataFrame, scope) -> None:
     # 🚨 A189: `covers` IS GONE — Marc: *"Biggest Underdog covers / Remove this section"*.
     # `ats` is still computed above and still used by `_movers`; nothing else fed this list.
 
-    st.markdown("**Biggest upsets**")
+    st.markdown(f"**{fmt.title_case('Biggest upsets')}**")
     st.caption(
         "Favorites that lost outright, ranked by how likely the market thought the loser was "
         "to win \u2014 not by the size of the spread, and not by the final margin. A short "
@@ -2035,7 +2035,7 @@ def _movers(scope, depth: int) -> None:
     share a scale. Multiplying this one by 100 — the obvious thing to do to a column whose
     name says "probability" — renders 1,338 points and looks merely large rather than wrong.
     """
-    st.subheader("The week's movers")
+    st.subheader(fmt.title_case("The week's movers"))
 
     with states.section("srv_game", dataset=DATASETS["srv_game"]):
         games = _line_movement(scope)
@@ -2253,8 +2253,9 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
     if not ranked:
         # AC-G.11: say WHICH absence. An empty quadrant is a real state — a conference filter
         # can leave nobody better than the median on both axes — and it is not a failure.
-        return ("<div class='cfdb-far'><div class='cfdb-far-head'>Furthest from the "
-                "median</div><div class='cfdb-far-none'>No team in this scope is better "
+        return (f"<div class='cfdb-far'><div class='cfdb-far-head'>"
+                f"{fmt.title_case('Furthest from the median')}</div>"
+                "<div class='cfdb-far-none'>No team in this scope is better "
                 "than the median on both axes.</div></div>")
 
     tip = ("Straight-line distance from the intersection of the two dotted median lines, "
@@ -2267,7 +2268,7 @@ def _distance_table(ranked, centre, population: int, scope=None) -> str:
                       default=0.0) * _SPARK_HEADROOM
 
     out = [f"<div class='cfdb-far'><div class='cfdb-far-head' title='{html.escape(tip)}'>"
-           f"Furthest from the median</div>",
+           f"{fmt.title_case('Furthest from the median')}</div>",
            # 🚨 A COLGROUP, BECAUSE `table-layout:fixed` READS THE FIRST ROW.
            # 📊 The widths were on the `td` at first and were IGNORED: the browser took them
            # from the `thead` cells, which carried none, and split the space equally — 99.5px
@@ -2586,9 +2587,23 @@ def _scatter_svg(rows, x_dom, y_dom, x_step=100, y_step=100, width=560,
     parts.append(f"<text class='cfdb-sc-axis-name' "
                  f"transform='rotate(-90 13 {pad_t + ph / 2:.0f})' "
                  f"x='13' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>Offense</text>")
+    # 🚨 A211 (cfdb-main-R-2502). THE GLYPH IS `\u2192`, AND IT RENDERS AS AN UP ARROW.
+    #
+    # > **MARC, v14:** *"On the Y-axis subtitle, the arrow for better needs to rotate 90
+    # > degrees clockwise to be pointing upwards toward the top of the graph. It's pointing to
+    # > the left of the page."*
+    #
+    # 📊 MEASURED, NOT READ: this `<text>` is inside `rotate(-90)`, so a glyph is drawn turned
+    # a quarter-turn anticlockwise from the direction its character names. Taking the
+    # element's `getScreenCTM()` and transforming the glyph's own local vector, `\u2191` came
+    # out at screen `[-1, 0]` — **pointing left**, exactly as Marc saw it.
+    #
+    # ⚠️ SO THE FIX IS A DIFFERENT GLYPH, NOT A SECOND ROTATION. Rotating the text again would
+    # turn the WORDS as well, and they are already correct. `\u2192` points along local +x,
+    # which the same -90° turn renders as screen up: measured `[0, -1]` after the change.
     parts.append(f"<text class='cfdb-sc-axis' transform='rotate(-90 25 {pad_t + ph / 2:.0f})' "
                  f"x='25' y='{pad_t + ph / 2:.0f}' text-anchor='middle'>"
-                 f"\u2191 better \u2014 more yards gained per game</text>")
+                 f"\u2192 better \u2014 more yards gained per game</text>")
 
     # 🚨 A190 (cfdb-main-R-1938). AN HTML LAYER OVER THE SVG, BECAUSE AN SVG `<title>` IS
     # PLAIN TEXT AND MARC'S HOVER NAMES A LOGO.
@@ -2714,7 +2729,7 @@ def _profile(scope, depth: int) -> None:
     comment discussing page copy — which is why this note describes the banned phrasing
     instead of quoting it. Weakening the test to allow the quote would be the wrong trade.
     """
-    st.subheader("Offense and defense, per game")
+    st.subheader(fmt.title_case("Offense and defense, per game"))
 
     with states.section("srv_team_week", dataset=DATASETS["srv_team_week"]):
         # ⚠️ A SCATTER NEEDS ONE POINT PER TEAM, WHICH NEEDS ONE WEEK. The week filter offers
@@ -2985,7 +3000,7 @@ def _spark_cell(row, field: str, frame) -> str:
 
 
 def _leaderboards(scope, depth: int) -> None:
-    st.subheader("Leaderboards")
+    st.subheader(fmt.title_case("Leaderboards"))
 
     # ⚠️ THE DECLARED VIEW FOLLOWED THE QUERY. `test_the_views_named_in_sections_are_exactly_the
     # _views_the_module_reads` caught this the moment `_team_yardage` changed relation — the
@@ -3034,7 +3049,7 @@ def _leaderboards(scope, depth: int) -> None:
             # this flag and a third could; `fillna(False).astype(bool)` makes the column a
             # real boolean so `r.get(...)` means what every reader assumes it means.
             teams["is_summary_row"] = teams["is_summary_row"].fillna(False).astype(bool)
-        st.markdown("**Team yardage**")
+        st.markdown(f"**{fmt.title_case('Team yardage')}**")
         states.render_or_state(
             teams, "srv_game_team",
             "The team yardage board would be here.",
@@ -3129,7 +3144,7 @@ def _leaderboards(scope, depth: int) -> None:
     # ⚠️ `SOLO`, `PD`, `QB HUR` and `TD` are equally populated and are NOT drawn: Marc named
     # tackles, TFL and sacks, and a fourth column nobody asked for is a decision, not a freebie.
     with states.section("srv_player_game_log", dataset=DATASETS["srv_player_game_log"]):
-        st.markdown("**Player yardage**")
+        st.markdown(f"**{fmt.title_case('Player yardage')}**")
         st.caption("Top players by yards in each category, deepest first. "
                    "\"QB\" is the passing column — it is not filtered on position, and the "
                    "passing leader has been a quarterback in every week measured.")
@@ -3170,7 +3185,7 @@ def _leaderboards(scope, depth: int) -> None:
             renderer=lambda _d: _player_card_grid(yardage, "yards"),
         )
 
-        st.markdown("**Touchdowns**")
+        st.markdown(f"**{fmt.title_case('Touchdowns')}**")
         st.caption("A different board from yardage, and mostly different names on it.")
         touchdowns = [(label, _player_board(scope, depth, (category,), ("TD",)), ())
                       for label, category in (("QB", "passing"),
@@ -3185,7 +3200,7 @@ def _leaderboards(scope, depth: int) -> None:
             renderer=lambda _d: _player_card_grid(touchdowns, "touchdowns"),
         )
 
-        st.markdown("**Defensive leaders**")
+        st.markdown(f"**{fmt.title_case('Defensive leaders')}**")
         st.caption("Tackles, tackles for loss and sacks — three stat types on one category, "
                    "which is a different split from the two boards above.")
         defence = [(label, _player_board(scope, depth, ("defensive",), (stat_type,)), ())
@@ -3627,7 +3642,7 @@ def _bump_chart(frame: pd.DataFrame, poll: str, current: pd.DataFrame) -> None:
 
 
 def _bump(scope, depth: int) -> None:
-    st.subheader("Poll movement")
+    st.subheader(fmt.title_case("Poll movement"))
     with states.section("srv_rankings", dataset=DATASETS["srv_rankings"]):
         polls = _rankings(scope)
         if polls.empty:
@@ -4576,14 +4591,14 @@ def _looking_forward(scope, depth: int) -> None:
         if week is None:
             # AC-G.11: say WHICH absence. The regular season being over is a real state, and
             # it is not the same as the gate being shut.
-            st.subheader("Looking forward")
+            st.subheader(fmt.title_case("Looking forward"))
             st.caption(
                 f"Every {scope.season} regular-season week has been played. Bowl and playoff "
                 f"fixtures are a different shape and this section does not guess at them.")
             st.markdown(f"For the full slate, see [Schedule]({scope.link('schedule')}).")
             return
 
-        st.subheader(f"Looking forward \u00b7 week {week}")
+        st.subheader(fmt.title_case(f"Looking forward \u00b7 week {week}"))
 
         # ⚠️ THE BOX IS DRAWN WHATEVER THE GATE SAYS, because a reader can line games up
         # before the week opens — and it would be strange for the control to vanish exactly
@@ -4717,7 +4732,7 @@ def _looking_forward(scope, depth: int) -> None:
         # `_slate` returns "" for an empty frame, so a bare `if slate:` would draw nothing at
         # all where the list used to name the absence — the silent-empty defect AC-G.11 is
         # about, arriving by deletion rather than by design.
-        st.markdown("**Slate**")
+        st.markdown(f"**{fmt.title_case('Slate')}**")
         states.render_or_state(
             games, "srv_game",
             "The week's games to watch would be here.",

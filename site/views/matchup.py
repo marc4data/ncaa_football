@@ -1298,7 +1298,7 @@ def _excursions(row) -> None:
 
 
 def _model(row) -> None:
-    st.subheader("Model")
+    st.subheader(fmt.title_case("Model"))
     floor = row.get("training_week_floor")
     week = row.get("week")
 
@@ -3701,7 +3701,7 @@ def _yardage(row) -> None:
     NOTHING IS RANKED, COLOURED BY ADVANTAGE OR CALLED AN EDGE. Marc sets the line, not the
     page — the same rule _line_movement carries a test for.
     """
-    st.subheader("Offense vs Defense")
+    st.subheader(fmt.title_case("Offense vs Defense"))
     # Its own section and its own view: this is the only block on the page that reads
     # srv_team_week, so a failure here degrades one panel rather than blanking a Matchup
     # that is otherwise complete.
@@ -6027,7 +6027,7 @@ def _travel(game_id) -> None:
     `home_elevation_*` are not read here and adding them would grow a panel Marc asked to
     shrink (R-600).
     """
-    st.subheader("Travel and rest")
+    st.subheader(fmt.title_case("Travel and rest"))
     with states.section("srv_game_travel", dataset=DATASETS["srv_game_travel"]):
         df = query("""
             select team, opponent, is_home, is_neutral_site, game_venue, travel_miles,

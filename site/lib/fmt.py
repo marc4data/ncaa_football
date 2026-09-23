@@ -184,6 +184,69 @@ def text(value) -> str:
     return str(value)
 
 
+# ── A211 (cfdb-main-R-2500): section headings, in Title Case ──────────────────────────
+#
+# > **MARC, v14:** *"Section headers should be more formal (Camel Case for major words. Don't
+# > capitalize the, per, and, etc)"*
+#
+# 📋 READ AS TITLE CASE, AND SAID SO RATHER THAN ASSUMED. Camel Case literally is
+# `LookingBack`, which is not what a section heading is; the examples he gives — *the*, *per*,
+# *and* — are the minor-word list of Title Case. **If this reading is wrong it is one list and
+# one function to change, which is the point of it being here at all.**
+#
+# ⚠️ ONE HELPER, ONE RULE, ONE LIST. Eighteen pages each spelling their own heading is how the
+# nineteenth drifts, and this project has paid for a second copy of a rule more than once.
+_MINOR_WORDS = frozenset("""
+    a an and as at but by for from in nor of on or per the to v vs via with
+""".split())
+
+
+def title_case(heading: str) -> str:
+    """A section heading in Title Case: major words capitalised, minor words not.
+
+    🚨 THE FIRST AND LAST WORD ARE ALWAYS CAPITALISED, whatever they are — *"The Week's Movers"*
+    keeps its capital `The` because it opens the heading, and a heading ending in a preposition
+    capitalises it for the same reason. That is the rule every style guide agrees on and the
+    one a reader notices when it is missing.
+
+    ⚠️ A WORD THAT IS ALREADY MIXED-CASE IS LEFT ALONE. `O/U`, `ATS`, `FBS` and a team's
+    `McNeese` are not `.capitalize()`'s business — that method would produce `O/u`, `Ats` and
+    `Mcneese`. Only an all-lowercase word is touched.
+
+    ⚠️ AND A SEGMENT AFTER A `·` OPENS ITS OWN PHRASE. *"Looking Forward · Week 4"* capitalises
+    `Week`, because to a reader that dot starts a new heading rather than continuing one.
+
+    📊 Data is not cased by this. Team, player and network names are published values and pass
+    through views without meeting this function — see the report's enumeration for which
+    headings are built rather than written.
+    """
+    if not heading:
+        return heading
+    words = heading.split(" ")
+    # where each phrase starts: the beginning, and anything after a separator token
+    opens = {0}
+    for index, word in enumerate(words):
+        if word in {"\u00b7", "-", "—", ":"} and index + 1 < len(words):
+            opens.add(index + 1)
+    closes = {len(words) - 1}
+    for index, word in enumerate(words):
+        if word in {"\u00b7", "-", "—", ":"} and index:
+            closes.add(index - 1)
+
+    out = []
+    for index, word in enumerate(words):
+        stripped = word.strip("(),.?!'\"")
+        if not stripped or not stripped.islower():
+            # already carries a capital, or is punctuation, or is a number — leave it
+            out.append(word)
+            continue
+        if stripped in _MINOR_WORDS and index not in opens and index not in closes:
+            out.append(word)
+            continue
+        out.append(word.replace(stripped, stripped[0].upper() + stripped[1:], 1))
+    return " ".join(out)
+
+
 def number(value, column: str = "", dp: Optional[int] = None) -> str:
     """A number, or an em dash for null.
 

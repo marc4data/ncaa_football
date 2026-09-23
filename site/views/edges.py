@@ -209,7 +209,7 @@ def _track_record(market: str, market_label: str) -> None:
     dishonesty from overstating it.
     """
     st.divider()
-    st.markdown("#### Has a bigger edge been a better bet?")
+    st.markdown("#### " + fmt.title_case("Has a bigger edge been a better bet?"))
     with states.section("srv_edge_bucket_performance"):
         df = query("""
             select edge_bucket, bucket_order, bucket_games, bucket_hits, hit_rate_pct,

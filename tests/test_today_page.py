@@ -528,9 +528,9 @@ def test_every_panel_builds_ITS_OWN_columns_and_formats_a_row():
         # somewhere else and `calls` is empty, so this fails instead of passing quietly —
         # which is the whole difference between this version and the inert one.
         headings = [arg for name, arg in calls if name == "subheader"]
-        assert "Most exciting" in headings, \
+        assert "Most Exciting" in headings, \
             f"_most_exciting's heading never reached the stub; recorded: {headings}"
-        assert "How the week went against the market" in headings, \
+        assert "How the Week Went Against the Market" in headings, \
             f"_recap_lists' heading never reached the stub; recorded: {headings}"
 
         sample = pd.Series({**row, "favorite": "Home", "opponent": "Away", "spread": 3.5,
@@ -2205,7 +2205,10 @@ def test_the_recap_section_no_longer_ships_one_set_of_games_twice():
     assert "Underperformers" not in code, (
         "Marc read that heading and asked for what was underneath it; the section leads with "
         "the upsets now")
-    assert "**Biggest upsets**" in code
+    # ⚠️ A211 ROUTES HEADINGS THROUGH `fmt.title_case`, so the SOURCE now carries the
+    # call rather than the cased literal. The invariant is unchanged: this section
+    # leads with the upsets.
+    assert "fmt.title_case('Biggest upsets')" in code
 
 
 def test_ats_is_gone_now_that_its_only_reader_is():
@@ -2495,7 +2498,7 @@ def test_the_scatter_captions_moved_with_their_axes():
     horizontal, vertical = captions
     assert "allowed" in horizontal and "gained" not in horizontal, horizontal
     assert "gained" in vertical and "allowed" not in vertical, vertical
-    assert "↑" in vertical, "the vertical caption keeps its direction arrow"
+    assert "→" in vertical, "the vertical caption keeps its direction arrow"
 
 
 def test_the_axis_names_are_big_and_the_direction_stays_a_subtitle():
@@ -2514,7 +2517,7 @@ def test_the_axis_names_are_big_and_the_direction_stays_a_subtitle():
     horizontal, vertical = subs
     # the DEFENCE axis says fewer-is-better; the OFFENCE axis says more-is-better
     assert "fewer" in horizontal and "→" in horizontal, horizontal
-    assert "more" in vertical and "↑" in vertical, vertical
+    assert "more" in vertical and "→" in vertical, vertical
     # and the big word must be bigger than its subtitle, or it is not a title
     theme = (ROOT / "site" / "lib" / "theme.py").read_text()
     big = theme[theme.index(".cfdb-sc-axis-name {"):]

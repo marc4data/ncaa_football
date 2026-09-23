@@ -601,9 +601,30 @@ TABLE_CSS = """
      measured #1f6feb on #0e1117 at about 3.6:1, below the 4.5:1 a small glyph needs, and
      #58a6ff is the contrast lift that clears it. Same for the three underperformer tiers. */
   --cfdb-link: light-dark(#1f6feb, #58a6ff);
+  /* 🚨 A211 (cfdb-main-R-2503). THE OUTCOME BANDS WERE SEPARATED BY HUE AND NOT BY LUMINANCE,
+     AND THE NUMBERS SAY SO.
+     > **MARC, v14:** *"The color scale on the Outcome cicrle glyph is too hard to
+     > differentiate. Change 8-14 to a light/medium gray, 15+ to a dark/black."*
+     📊 MEASURED as WCAG contrast between the bands as they stood — amber, orange, red:
+         light   u1|u2 1.46:1   u2|u3 1.48:1        dark   u1|u2 1.45:1   u2|u3 1.28:1
+     ⚠️ EVERY ADJACENT PAIR WAS UNDER 1.5:1, which is what "too hard to differentiate" is when
+     it is a number. R-141 made these three differ by COLOR ALONE on purpose; that only works
+     if the colors are far apart, and three warm hues at one luminance are not.
+     ✅ AFTER: a luminance ramp, which a grayscale or color-blind reader can also read —
+         light   u1|u2 2.79:1   u2|u3 2.79:1        dark   u1|u2 2.28:1   u2|u3 3.84:1
+     ⚠️ `u2` IS MEDIUM RATHER THAN LIGHT GRAY, AND THAT IS A TRADE WORTH NAMING. A light gray
+     (#8b9099) reads 1.41:1 against the amber `u1` keeps — WORSE than today — and 3.2:1
+     against the page, under the 4.5:1 this file already demands of a small glyph. Medium gray
+     clears both.
+     🚨 AND `u3` IS NEAR-WHITE IN DARK MODE, WHICH IS "dark/black" READ AS *the heaviest ink
+     on the page*. Literal black on a #0e1117 ground is an invisible mark, and Marc is
+     describing the light theme he looks at. Said here rather than decided silently.
+     ⚠️ `u1` IS UNCHANGED — he did not name it, and the change does not collide with it. 📊 It
+     is 2.27:1 against a white page, under the 4.5:1 floor, and that is PRE-EXISTING and
+     reported rather than fixed in passing. */
   --cfdb-u1:   light-dark(#d9a406, #e8b931);
-  --cfdb-u2:   light-dark(#e06c1f, #f0803c);
-  --cfdb-u3:   light-dark(#d2333a, #f0555c);
+  --cfdb-u2:   light-dark(#5f5f67, #7b7b83);
+  --cfdb-u3:   light-dark(#16191d, #f2f5f8);
 }
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
     table-layout:fixed; }
@@ -747,6 +768,24 @@ TABLE_CSS = """
    that silently hides five columns.
    ⚠️ `container-type:inline-size` ASKS ABOUT THE SECTION, NOT THE VIEWPORT — the sidebar's
    width changes the answer and a media query cannot see it. */
+/* 🚨 A211 (cfdb-main-R-2501). THE CLOSE-LINE CONTROL STOPS SPANNING THE SECTION.
+   > **MARC, v14:** *"The Close Line withing drop-down menu shouldn't span the full width of
+   > the page. Reduce to 10-25% of the page."*
+   📊 MEASURED FIRST: it spanned **980px of a 980px section at 1440, and 564 of 564 at 1024** —
+   100% at both, which is Streamlit's default for a widget in a full-width block.
+   ⚠️ A PERCENTAGE ALONE WOULD CLIP IT AT THE NARROW END. 25% of 564 is 141px, and the widest
+   option — `8 points` — plus the chevron needs more than that at Streamlit's own font. So the
+   width is a percentage with a PIXEL FLOOR: 22% of the section, never below what the longest
+   string needs. At 1440 that is ~216px (22%); at 1024 the floor wins and it sits at the
+   floor, which is still ~34% of a much narrower section and is the honest trade.
+   ⚠️ THE LABEL AND THE HELP ICON TRAVEL WITH IT because they are the widget's own children —
+   constraining the container constrains all three, which a narrow control under a full-width
+   label would not.
+   ⚠️ SCOPED BY THE WIDGET'S KEY. Streamlit stamps `st-key-<key>` on the element container when
+   a `key=` is given; `_close_cut_control` passes `key="today_close_cut"`, and the class was
+   confirmed present in the browser before this rule was written rather than assumed. */
+.st-key-today_close_cut { width:22%; min-width:var(--cfdb-close-cut-floor, 170px); }
+
 .cfdb-scrollbox { container-type:inline-size; }
 .cfdb-scrollnote { display:none; font-size:.7rem; opacity:.75; margin:.1rem 0 .3rem;
     gap:.3rem; align-items:center; }

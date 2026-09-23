@@ -155,7 +155,7 @@ def test_the_heading_names_the_upcoming_week_and_the_caption_disowns_the_filter(
     """
     written, _ = _run(monkeypatch, {"final": True, "poll": True})
     head = next(b for k, b in written if k == "subheader")
-    assert head == "Looking forward · week 4"
+    assert head == "Looking Forward · Week 4"
     caption = " ".join(b for k, b in written if k == "caption")
     assert "does not follow the week filter" in caption
 
