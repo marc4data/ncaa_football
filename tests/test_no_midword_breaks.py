@@ -1,4 +1,11 @@
-"""A218 — nothing splits a token in half, and a column label keeps its word.
+r"""A218 — nothing splits a word in half, and a column label keeps its word.
+
+⚠️ THE FILE IS `test_no_midword_breaks.py` AND NOT `test_no_token_splits.py`, WHICH IS WHAT IT
+WAS CALLED FIRST. CI's *"Assert no secrets are tracked in git"* step greps every TRACKED
+FILENAME for `(^|/)\.env$|secret|token`, and a file about lexical TOKENS matched it. 🚨 The
+guard is right to be blunt and the filename is the thing that should move: loosening a secrets
+scanner so one test file can keep a name is the wrong direction, and the word "token" survives
+inside this file where it costs nothing.
 
 🚨 A217 FIXED A COLUMN KIND. THE DEFECT IS A KIND OF BREAK. A217's prompt framed it as *a
 header may wrap; a value may not* and pointed the fix at `.cfdb-num`; measured after it
