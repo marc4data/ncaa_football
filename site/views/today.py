@@ -4019,7 +4019,6 @@ _SLATE_NETWORK_PX = 46
 # the alignment is arithmetic rather than a layout that could drift.
 _SLATE_WHY_PX = 54
 _SLATE_SLOT_PX = 16
-_SLATE_WIDTH = 900
 
 # 🚨 A204: ALL EIGHT COLUMNS, ON MARC'S INSTRUCTION, AND THE AXIS TAKES WHAT IS LEFT.
 # > **MARC:** *"Add Weather and O/U. The width of the graph is not as important as including
@@ -4089,9 +4088,11 @@ def _slate_narrow_css() -> str:
     """
     return (
         f"<style>@container (max-width:{_SLATE_MIN_PX - 1}px){{"
-        f".cfdb-slate-table col.cfdb-slate-away{{width:0 !important}}"
-        f".cfdb-slate-table th.cfdb-slate-away,.cfdb-slate-table td.cfdb-slate-away"
-        f"{{width:0;padding-left:0;padding-right:0;overflow:hidden;visibility:hidden}}"
+        f".cfdb-slate-table col.cfdb-slate-putaway-col{{width:0 !important}}"
+        f".cfdb-slate-table th.cfdb-slate-putaway-col,"
+        f".cfdb-slate-table td.cfdb-slate-putaway-col"
+        f"{{width:0;padding-left:0;padding-right:0;overflow:hidden;visibility:hidden;"
+        f"white-space:nowrap}}"
         f".cfdb-slate-table{{min-width:{_SLATE_NARROW_MIN_PX}px !important}}"
         f".cfdb-slate-grid{{left:{_SLATE_NARROW_FIXED_PX}px !important}}"
         f".cfdb-slate-putaway{{display:inline}}"
@@ -4502,8 +4503,8 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
                 f"<td class='cfdb-slate-team'>{_slate_team(row, 'away', scope, esc)}</td>"
                 f"<td class='cfdb-slate-team'>{_slate_team(row, 'home', scope, esc)}</td>"
                 f"<td class='cfdb-num'>{_slate_spread(row)}</td>"
-                f"<td class='cfdb-num cfdb-slate-away'>{_slate_total(row)}</td>"
-                f"<td class='cfdb-center cfdb-slate-away'>"
+                f"<td class='cfdb-num cfdb-slate-putaway-col'>{_slate_total(row)}</td>"
+                f"<td class='cfdb-center cfdb-slate-putaway-col'>"
                 f"{schedule_table.weather_cell(row)}</td>"
                 f"<td class='cfdb-slate-tv'>{esc(network)}</td>"
                 f"<td class='cfdb-center'>{_slate_link(row, esc, scope)}</td>"
@@ -4523,7 +4524,8 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
         # both of their cells, so the collapse is one rule and cannot reach one without the
         # others. The `<col>` keeps its pixel width for the wide case; the query zeroes it.
         cols = "".join(
-            f"<col class='cfdb-slate-away' style='width:{w}px'>" if i in _SLATE_HIDE_AT
+            f"<col class='cfdb-slate-putaway-col' style='width:{w}px'>"
+            if i in _SLATE_HIDE_AT
             else f"<col style='width:{w}px'>"
             for i, w in enumerate(_SLATE_COL_PX)) + "<col>"
         out.append(f"<div class='cfdb-slate-day'>{esc(day)}</div>")
@@ -4535,8 +4537,8 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
             f"<colgroup>{cols}</colgroup>"
             "<thead><tr>"
             "<th>Away</th><th>Home</th><th class='cfdb-num'>Spread</th>"
-            "<th class='cfdb-num cfdb-slate-away'>O/U</th>"
-            "<th class='cfdb-center cfdb-slate-away'>Wx</th><th>TV</th>"
+            "<th class='cfdb-num cfdb-slate-putaway-col'>O/U</th>"
+            "<th class='cfdb-center cfdb-slate-putaway-col'>Wx</th><th>TV</th>"
             "<th class='cfdb-center'>Game</th><th class='cfdb-center'>Why</th>"
             f"<th class='cfdb-slate-cell'><div class='cfdb-slate-axis'>{''.join(head)}"
             "</div></th>"
