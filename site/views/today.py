@@ -920,7 +920,44 @@ def _fold_metrics(frame, stat_types, depth: int) -> pd.DataFrame:
     return out
 
 
-def _player_card(row, stat_label: str, metric_types=(), rank=None) -> str:
+def _card_spark(value, top: float) -> str:
+    """A 3px bar under a card's primary metric, as a share of its OWN column's maximum.
+
+    > **MARC, v14:** *"Can we add a small sparkbark to help give a quick visual reference to
+    > the variance in the metric up/down the leaderboard."*
+
+    🚨 WHAT IT IS SCALED AGAINST IS ON THE PAGE, IN THE CAPTION, BECAUSE A BAR WITH NO STATED
+    BASELINE IS DECORATION. The scale is **this column's own ten cards** — not the season, not
+    all of FBS — so a tight column reads as ten near-equal bars and a runaway leader reads as
+    one long bar over nine stubs, which is the variance Marc is asking to see.
+
+    ⚠️ §4.2.1 IS NOT ENGAGED, and the precedent is named rather than assumed: `_spark_cell`
+    settles this for the yardage table — *a bar's width is a rendering proportion of one
+    published number against another in the SAME frame* — and `_spark_max` (A175's
+    cfdb-main-R-1750) settles that a maximum over the RENDERED ROWS is a property of the
+    frame on screen. **No column is computed and none is needed.**
+
+    ⚠️ THREE STATES, AND `pd.isna` RATHER THAN TRUTHINESS, BECAUSE `NaN` IS TRUTHY — the most
+    repeated defect in this project:
+
+        a missing value   the track, no fill          — the scale exists, this player has no number
+        a zero            the track, no fill          — honest: zero is nothing of the maximum
+        a negative        the track, no fill          — clamped at 0; a bar cannot run backwards
+
+    ✅ **The track is drawn in all three**, so an absent bar reads as an empty scale rather
+    than as a missing element (AC-G.11).
+    """
+    if top is None or top <= 0:
+        return ""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "<span class='cfdb-card-spark'></span>"
+    share = max(0.0, min(1.0, float(value) / top))
+    if share <= 0:
+        return "<span class='cfdb-card-spark'></span>"
+    return f"<span class='cfdb-card-spark'><i style='width:{share * 100:.1f}%'></i></span>"
+
+
+def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0) -> str:
     """One player, as MATCHUP's card — plus the team line Today needs and Matchup does not.
 
     > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
@@ -961,21 +998,43 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None) -> str:
     # three-metric branch and iterated a module object.** `flake8` cannot see it: the name is
     # legitimately bound at module scope. **A shadowed import is an undefined name that passes
     # every lint.**
+    # 🚨 A212 (cfdb-main-R-2524). THE METRIC NAME LEFT THE CELLS.
+    #
+    # > **MARC, v14:** *"There's an argument that we don't need to print the metric in every
+    # > cell. Instead print it at the sub-header level so people can read down a clean column
+    # > (not littered with words among the numbers)"*
+    #
+    # 📊 EVERY CELL'S TEXT, ENUMERATED AND SPLIT INTO *NAME* AND *UNIT* BEFORE ANYTHING MOVED:
+    #
+    #     YDS  TD  INT  REC  CAR   all NAMES (yards, touchdowns, interceptions, …)
+    #     touchdowns                a NAME
+    #     (defensive board)         no cell text at all — `stat_label` is ""
+    #
+    # ✅ **THERE IS NO UNIT IN ANY OF THEM**, so hoisting the name loses nothing. ⚠️ Had one
+    # been `yds/att` or `%`, it would have stayed: dropping a unit to win a clean column is a
+    # data change wearing a layout costume, and this check is why that did not happen here.
+    #
+    # ⚠️ THE ORDER IS THE CONTRACT. The header lists the names in `metric_types` order and the
+    # cells are built from the same tuple in the same loop, so a reader matching the third
+    # number to the third name is right by construction rather than by care.
     if metric_types:
         cells = "".join(
             f"<div class='cfdb-card-metric'>"
             f"<span class='cfdb-card-value'>"
             f"{fmt.number(row.get(f'metric_{stat}'), 'stat_value')}</span>"
-            f"<span class='cfdb-card-unit'>{fmt.text(stat)}</span></div>"
-            for stat in metric_types)
+            f"{_card_spark(row.get(f'metric_{stat}'), spark_top) if index == 0 else ''}"
+            f"</div>"
+            for index, stat in enumerate(metric_types))
         stat_block = f"<div class='cfdb-card-metrics'>{cells}</div>"
     else:
         # The same formatter the tables use — `Col(kind="num")` calls exactly this, so a card
         # and a row can never disagree about how many decimal places a stat has.
         value = fmt.number(row.get("stat_value"), "stat_value")
+        # ⚠️ THE LABEL IS GONE FROM HERE TOO (R-2524) — the sub-header carries it. The spark
+        # rides the single value, because on these boards that value IS the ranking metric.
         stat_block = (f"<div class='cfdb-card-stat'>"
                       f"<span class='cfdb-card-value'>{value}</span>"
-                      f"<span class='cfdb-card-unit'>{fmt.text(stat_label)}</span></div>")
+                      f"{_card_spark(row.get('stat_value'), spark_top)}</div>")
     # ── A178 (cfdb-main-R-1855): THE TEAM NAME IN THE TEAM'S COLOUR ────────────────────────
     #
     # > **MARC, v10:** *"Color Team Name with Team Color while retaining the underlyine to
@@ -1143,19 +1202,39 @@ def _player_card_grid(columns, stat_label: str) -> None:
     #
     # ⚠️ COLUMNS CAN BE UNEQUAL — a category with fewer players leaves a hole in its column
     # rather than pulling the row below it up, which would put rank 4 beside rank 3.
+    # 🚨 A212. ONE DENOMINATOR PER COLUMN, AND THE METRIC NAMES ONTO THE HEADER.
+    #
+    # ⚠️ PER COLUMN, NOT PER BOARD, FOR `_spark_max`'s OWN REASON (A175): passing yards and
+    # rushing yards are different quantities, and one scale across both would make every
+    # rushing bar a stub. The caption says which scale it is.
     per_column, headings = [], []
     for heading, frame, metric_types in columns:
-        headings.append(fmt.text(heading))
+        # the field the column is RANKED by — the first metric, or the single stat
+        primary = f"metric_{metric_types[0]}" if metric_types else "stat_value"
+        top = 0.0
+        if frame is not None and not frame.empty and primary in frame.columns:
+            values = pd.to_numeric(frame[primary], errors="coerce").dropna()
+            top = float(values.max()) * _SPARK_HEADROOM if len(values) else 0.0
+        # 📋 R-2524: the names the cells stopped printing. A board with no cell text —
+        # the defensive one, whose `stat_label` is "" — hoists nothing, because its
+        # heading ALREADY names its metric (Tackles · Tackles for loss · Sacks).
+        names = [n for n in (metric_types or ([stat_label] if stat_label else [])) if n]
+        headings.append((fmt.text(heading), [fmt.text(n).upper() for n in names]))
         if frame is None or frame.empty:
             per_column.append(None)
         else:
             per_column.append([
-                _player_card(row, stat_label, metric_types)
+                _player_card(row, stat_label, metric_types, spark_top=top)
                 for _index, row in frame.iterrows()])
 
     depth = max((len(c) for c in per_column if c), default=0)
     head = ("<div class='cfdb-cardrow-rank cfdb-cardrow-head'></div>"
-            + "".join(f"<div class='cfdb-cardcol-head'>{h}</div>" for h in headings))
+            + "".join(
+                f"<div class='cfdb-cardcol-head'>{heading}"
+                + (f"<span class='cfdb-cardcol-metrics'>{' · '.join(names)}</span>"
+                   if names else "")
+                + "</div>"
+                for heading, names in headings))
     rows = []
     for position in range(depth):
         cells_in_row = []
@@ -3147,7 +3226,8 @@ def _leaderboards(scope, depth: int) -> None:
         st.markdown(f"**{fmt.title_case('Player yardage')}**")
         st.caption("Top players by yards in each category, deepest first. "
                    "\"QB\" is the passing column — it is not filtered on position, and the "
-                   "passing leader has been a quarterback in every week measured.")
+                   "passing leader has been a quarterback in every week measured."
+                   " Bars under the first number are that column's own ten cards, relative to its leader.")
         # 🚨 A175 (cfdb-main-R-1754). THE TRIO PER CATEGORY, ENUMERATED FROM LIVE SERVING
         # RATHER THAN GUESSED — A166 learned the hard way that it is `SACKS` and not `SACK`,
         # and this relation is not the one the workbook reads. `srv_player_game_log`, 2026:
@@ -3186,7 +3266,8 @@ def _leaderboards(scope, depth: int) -> None:
         )
 
         st.markdown(f"**{fmt.title_case('Touchdowns')}**")
-        st.caption("A different board from yardage, and mostly different names on it.")
+        st.caption("A different board from yardage, and mostly different names on it."
+                   " Bars under the first number are that column's own ten cards, relative to its leader.")
         touchdowns = [(label, _player_board(scope, depth, (category,), ("TD",)), ())
                       for label, category in (("QB", "passing"),
                                               ("Receiving", "receiving"),
@@ -3202,7 +3283,8 @@ def _leaderboards(scope, depth: int) -> None:
 
         st.markdown(f"**{fmt.title_case('Defensive leaders')}**")
         st.caption("Tackles, tackles for loss and sacks — three stat types on one category, "
-                   "which is a different split from the two boards above.")
+                   "which is a different split from the two boards above."
+                   " Bars under the first number are that column's own ten cards, relative to its leader.")
         defence = [(label, _player_board(scope, depth, ("defensive",), (stat_type,)), ())
                    for label, stat_type in (("Tackles", "TOT"),
                                             ("Tackles for loss", "TFL"),

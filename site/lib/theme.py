@@ -567,6 +567,20 @@ TABLE_CSS = """
      `UNCO` 40. ⚠️ THIRD TIME THIS ROUND that a Range over a clipped element understated a
      width — the header row in A191, the metric cells above, and this. **On this page, a
      measured width is only trustworthy if the thing measured was free to be its full size.** */
+  /* 🚨 A212 (cfdb-main-R-2520) LOOKED AT THIS AND PUT IT BACK. 44px IS NOT THE CONSTRAINT.
+     > **MARC, v14:** *"Cards with Ranked teams are word-wrapping an extra line."*
+     📊 THE DEFECT IS REAL AND MEASURED: a ranked card's identity occupies THREE line bands —
+     logo (28px) / rank badge (12.2–18.3px) / abbreviation — and is 59.2px tall against an
+     unranked card's two bands and 43.2px. That 16px is the extra line, on 12 of 150 cards,
+     every one of them ranked.
+     🚨 BUT WIDENING THIS DOES NOT FIX IT, WHICH IS THE FINDING. Raised to 3.125rem (50px) and
+     re-measured: the bands stayed at three. **28 + 1.6 gap + 12.2 badge = 41.8px fits inside
+     44px, let alone 50** — so the badge is not wrapping for want of room, and the arithmetic
+     that said it was (47.9px against 44) used the widest badge rather than this card's.
+     ⚠️ TWO THINGS ARE STILL UNEXPLAINED AND ARE THE NEXT ROUND'S START: the logo box draws
+     **28px** where `.cfdb-card-team .cfdb-logo-box` says 18px, and the break survives a slot
+     22% wider than the content. **A number put back rather than a fix shipped on a cause that
+     was measured false.** */
   --cfdb-card-team-w:    2.75rem;  /* 44px; widest abbreviation "MRMK" draws 41.6px */
   /* 🚨 THE METRICS BLOCK IS CONTENT-SIZED, NOT A TRACK, AND THE FIRST ATTEMPT AT A TRACK WAS
      WRONG IN A WAY A192 HAD ALREADY BEEN WARNED ABOUT. It was set to 72px from a measurement
@@ -1132,9 +1146,27 @@ TABLE_CSS = """
    the BOARD (between the three columns) rather than on the card, because that is the
    horizontal space he is pointing at; a card's own margin would only indent it. */
 .cfdb-cardcol { min-width:0; display:flex; flex-direction:column; gap:.3rem; }
-.cfdb-cardcol-head { font-size:.72rem; font-weight:700; letter-spacing:.06em;
-                     text-transform:uppercase; opacity:.6; padding-bottom:.15rem;
+/* 🚨 A212 (cfdb-main-R-2523). THE SUB-HEADER SITS IN THE HIERARCHY INSTEAD OF UNDER IT.
+   > **MARC, v14:** *"The sub-headers (QB, Receiving, etc) - need to be bigger fonts and look
+   > like a sub-header."*
+   📊 MEASURED, ALL THREE LEVELS TOGETHER, because a sub-header that out-ranks its own section
+   is worse than one that is too small:
+       section heading (h3)   28px / 600
+       board label (bold)     16px / 600
+       sub-header BEFORE    11.52px / 700   <- smaller than the body text around it
+       sub-header AFTER      13.6px / 700
+   ✅ 13.6px is clearly a heading against the 11.52px it replaces and stays **2.4px under the
+   board label** and 14.4px under the section heading, so the three still read top to bottom.
+   ⚠️ AND THE OPACITY LIFTS WITH THE SIZE. At .6 a bigger label is a bigger gray smudge; the
+   rule is a heading now, so it takes the page's own ink. */
+.cfdb-cardcol-head { font-size:.85rem; font-weight:700; letter-spacing:.04em;
+                     text-transform:uppercase; opacity:.85; padding-bottom:.22rem;
                      border-bottom:1px solid var(--cfdb-edge); }
+/* A212 (cfdb-main-R-2524): the metric names, hoisted out of the cells and onto the header
+   they belong to. Lighter than the category name beside them — the category is what the
+   column IS, the metrics are what its numbers MEAN. */
+.cfdb-cardcol-head .cfdb-cardcol-metrics { font-weight:600; opacity:.65; letter-spacing:.02em;
+                     margin-left:.4rem; }
 /* The card itself. A rule on one side rather than a box on four: thirty boxes on a page is a
    grid of borders competing with the text inside them, and the reader is scanning a ranked
    list down a column. */
@@ -1325,11 +1357,41 @@ TABLE_CSS = """
 
 /* A178: "more densely populated" — the gap halves and the vertical margin goes, because the
    metrics now sit in their own grid track rather than on a line of their own. */
-.cfdb-card-metrics { display:flex; gap:.25rem; align-items:baseline; margin:0;
+/* 🚨 A212 (cfdb-main-R-2521). THE GAP WAS 4px AND THE CARD HAD ROOM TO SPARE.
+   > **MARC, v14:** *"The metrics are too compressed on the right side. Spread them out, give
+   > them some padding in between."*
+   📊 THE CARD'S BUDGET AT 1440, MEASURED: 286.7px = 14.4 padding + 44 team + 148.5 who +
+   64 metrics, and the three metrics inside that 64px were 26.6 + 13 + 16.4 with 4px between
+   them. **The slack is in `who`**, which is `flex:1 1 112px` and had grown 36.5px past its
+   floor — so the metrics were the only slot NOT taking its share.
+   ⚠️ THE CONSTRAINT IS THE CARD, NOT STREAMLIT'S THREE COLUMNS. The board is one `grid` with
+   `1fr` tracks; at 1440 each card gets 286.7px whatever this rule says. The compression was
+   internal, and so is the fix.
+   ✅ .6rem between metrics, and the block is allowed to claim what it needs before `who`
+   grows into it. */
+.cfdb-card-metrics { display:flex; gap:.6rem; align-items:baseline; margin:0;
                      justify-content:flex-end; }
 .cfdb-card-metric { display:flex; flex-direction:column; min-width:0; flex:1 1 0;
                     text-align:right; }
 .cfdb-card-metric .cfdb-card-value { font-size:1.05rem; font-weight:700; line-height:1.15; }
+/* 🚨 A212 (cfdb-main-R-2522). A SPARK UNDER THE PRIMARY METRIC, SCALED ACROSS ITS OWN COLUMN.
+   > **MARC, v14:** *"Can we add a small sparkbark to help give a quick visual reference to the
+   > variance in the metric up/down the leaderboard."*
+   ⚠️ THE RULE IS REUSED, NOT THE MARKUP — which is exactly what A203 did and said why. The
+   shared `.cfdb-spark` OVERLAYS a right-aligned value on a left-anchored bar; a card's metric
+   is a stacked value-over-label only ~27px wide, so an overlay would put the number on the
+   bar. What is reused is `_spark_max`'s rule: **one denominator per column, over the rows
+   shown, with `_SPARK_HEADROOM`** — the same function, called per card column.
+   ⚠️ §4.2.1 IS NOT ENGAGED, for `_spark_cell`'s own reason: a bar's width is a rendering
+   proportion of one published number against another in the SAME frame. No new column, no
+   page-side metric.
+   ⚠️ AND THE TRACK IS DRAWN EVEN WHEN THE BAR IS NOT, so a missing value reads as an empty
+   scale rather than as a missing element (AC-G.11). */
+.cfdb-card-spark { display:block; height:3px; margin-top:.2rem; border-radius:2px;
+    background:color-mix(in srgb, currentColor 12%, transparent); overflow:hidden; }
+.cfdb-card-spark > i { display:block; height:100%; border-radius:2px;
+    background:color-mix(in srgb, currentColor 42%, transparent); }
+
 .cfdb-card-metric .cfdb-card-unit { font-size:.68rem; opacity:.6; text-transform:uppercase;
                                     letter-spacing:.02em; }
 /* 🚨 A166 (cfdb-main-R-1307). THE POSITION FOLLOWS THE NAME IN A CARD, AND THIS IS R-855's
