@@ -1860,7 +1860,23 @@ def _yardage_row(offense, defense, week_rows, dimension, deltas=None,
     they say.
     """
     label, for_column, allowed_column, delta_column, outlook_column = dimension
-    order = ("chart", "cards") if _is_home_side(deltas) else ("cards", "chart")
+    # ── 🚨🚨 v15 PART 2: BOTH SIDES READ THE SAME WAY, AND THIS ENDS R-731's MIRROR ────────
+    #
+    # > **MARC, v15:** *"For the Home, let's swap the order of graph to player card to match how
+    # > we are presenting on the Away side (player card then graph)"*
+    #
+    # 🚨 **R-731 PUT THE CARDS ON THE OUTSIDE SO THE TWO CHARTS SAT TOGETHER IN THE MIDDLE**, and
+    # that is the property this removes: the charts are no longer adjacent, and Home's cards now
+    # sit between them. ⚠️ **It is a deliberate trade Marc made after living with the mirror, the
+    # same way v22 replaced the outline he asked for in v21** — and it is reversible in this one
+    # line (cfdb-wta-R-1513).
+    #
+    # 🚨 **AND IT MADE `_is_home_side` DEAD, SO IT IS GONE RATHER THAN LEFT LYING.** It had
+    # exactly one consumer — this line — and a predicate whose docstring says it decides the
+    # layout, kept beside a layout that no longer asks it, is the drift B147 found in this very
+    # file (`result_filled`'s comment had gone false and nothing caught it). **`git show` has it
+    # if the mirror ever comes back.**
+    order = ("cards", "chart")
     widths = [_SLOT_WIDTHS[slot] for slot in order]
     # ✅ cfdb-wta-R-901 / R-855. ONE PRODUCER, CALLED TWICE HERE — the series rule beside each
     # box and the card borders beside it are the SAME string, so a reader cannot be shown two
@@ -2118,36 +2134,6 @@ def _kpi_value(value, secondary, format_name: str):
     if format_name == _KPI_PAIR:
         return f"{fmt.number(value, '', dp=0)}-{fmt.number(secondary, '', dp=0)}"
     return None
-
-
-def _is_home_side(deltas) -> bool:
-    """Which side of the mirror this column is — READ, not passed (R-731).
-
-    ✅ `is_home` IS ALREADY IN THE FRAME THIS PANEL HOLDS. `_GAME_TEAM_COLUMNS` selects it and
-    `_yardage` hands each column its own `srv_game_team` row, so this costs no query and no new
-    column. Measured against live serving: 225,350 rows, `is_home` set on every one, exactly
-    two rows per game and exactly one of them home.
-
-    ⚠️ THE TWO SOURCES THE PROMPT NAMED WERE MEASURED FIRST AND NEITHER IS USABLE HERE:
-
-        srv_team_week                              has NEITHER is_home nor home_away — and it
-                                                   should not: a team is not home or away in
-                                                   a WEEK, only in a game
-        srv_game_team_leader_through_prior_week     HAS home_away, but `_LEADER_COLUMNS` does
-                                                   not select it, so reading it would mean
-                                                   adding a column to a query to learn
-                                                   something another frame already carries
-
-    ⚠️ AND AN ABSENT ROW FALLS BACK TO THE AWAY ORDER RATHER THAN GUESSING. A game with no
-    `srv_game_team` row draws no delta chips either, so it is already a degraded render; the
-    mirror is then unmirrored, which is visible, rather than silently reversed on one side.
-    """
-    if deltas is None:
-        return False
-    value = deltas.get("is_home")
-    if value is None or (not isinstance(value, bool) and pd.isna(value)):
-        return False
-    return bool(value)
 
 
 def _game_leaders(game_id: int) -> dict:
@@ -3290,8 +3276,34 @@ def _circle_paint(game, accent: str) -> tuple:
     return "none", accent
 
 
-def _circle_title(game, column) -> str:
+def _circle_title(game, column, direction: str, week_row=None) -> str:
     """Marc's hover: *"the Week #, Opponenet Rank, Name, Record, Final Score"*.
+
+    🚨 **v15 ADDS THE TWO THINGS THAT WERE MISSING, AND ONLY TWO WERE.**
+
+    > **MARC, v15:** *"in addition to the data points that discribe the overall plot, if the
+    > user is hovered on a previous game, can the tooltip show Week #, Opponent, and the Yards
+    > (gained or allowed, based on the graph)"*
+
+    📊 **MEASURED IN THE RENDERED DOM BEFORE ANYTHING WAS BUILT: Week and Opponent were already
+    here**, and have been since B118 — `'Week 1\nNo. 3 at Ohio State\n0-0 going in\nL 7-14\n336
+    yards'`. **What was missing is the pair he put in brackets and the clause he opened with.**
+
+    ✅ **`direction` NAMES WHICH YARDAGE THIS IS, IN WORDS.** The same panel draws a Gained row
+    and an Allowed row one above the other, and `336 yards` is the identical string on both —
+    **so the number alone was ambiguous on exactly the page that shows both** (cfdb-wta-R-1512).
+
+    ✅ **`week_row` IS THE DISTRIBUTION THE BOX IS DRAWN ON, AND IT IS HERE BECAUSE OF THE
+    CLAUSE MARC OPENED WITH.** 📊 Measured: the circle overlay is a SIBLING `<svg>` **outside**
+    the `span.cfdb-dist` that carries `describe()`, so an SVG `<title>` on a circle **replaced**
+    the plot's figures rather than adding to them — hovering a game LOST the description of the
+    plot it sits in. *"In addition to the data points that describe the overall plot"* is
+    precisely that, so both now appear on one tooltip.
+
+    ⚠️ **`distribution.describe()` IS CALLED, NEVER COPIED.** It lives in `site/lib/`, which is
+    session A's (§3) — calling it is reading, and a second formatter here would be the drift
+    §4.3 is about. **The plot's figures therefore say exactly what they say when the box itself
+    is hovered.**
 
     🚨 ZERO JOINS, AND THE B118 PROMPT SAID FOUR. `srv_game_team` — the relation the calendar
     already reads — publishes every one of these, so this is `_CALENDAR_COLUMNS` carrying five
@@ -3347,8 +3359,15 @@ def _circle_title(game, column) -> str:
             "L" if float(scored) < float(allowed) else "T")
         bits.append(f"{verdict} {int(scored)}-{int(allowed)}")
     value = game.get(column)
+    # 🚨 THE WORD IS THE POINT, NOT THE NUMBER. `Yards gained 336` and `Yards allowed 336` are
+    # different claims and this panel draws both rows on one screen.
+    # ⚠️ **THE GUARD IS UNREACHABLE FROM THIS CALL SITE AND IS KEPT RATHER THAN DECORATED.**
+    # `_circle_column` builds `played` by DROPPING every game whose `column` is null, so a game
+    # with no figure has no circle to hover. 📊 Measured: 0 of 3,876 FBS team-games since 2024
+    # are null, 33 of 3,593 FCS. **So no message is written for an absence that cannot reach a
+    # drawn mark** (R-762) — the line is simply not added, exactly as before.
     if not (value is None or pd.isna(value)):
-        bits.append(f"{fmt.number(value, column, dp=0)} yards")
+        bits.append(f"Yards {direction} {fmt.number(value, column, dp=0)}")
     # 🚨 cfdb-main-R-1046. ONE STATEMENT PER LINE, LIKE THE CHART'S OWN TOOLTIP UNDER IT.
     #
     # A150 broke `describe()` onto separate lines; this joined with `" · "`, so **two tooltips on
@@ -3366,6 +3385,29 @@ def _circle_title(game, column) -> str:
     #
     # ⚠️ **Measured in Python and then confirmed in Chromium with `el.textContent`**, because the
     # question is what the TOOLTIP shows, not what the markup says (A150's own method).
+    #
+    # 🚨 AND THE PLOT'S OWN FIGURES FOLLOW THE GAME, SEPARATED BY A BLANK LINE — v15's *"in
+    # addition to"*. **The game comes first because it is the thing the reader is pointing at**;
+    # the distribution is the context it sits in, and is the same text the box itself shows.
+    #
+    # 🚨🚨 **AND THE SEPARATOR IS A SINGLE NEWLINE, NEVER A BLANK LINE. THIS COST THE ROUND A
+    # SHATTERED OVERLAY AND THE RENDER IS THE ONLY THING THAT SAW IT** (cfdb-wta-R-1514).
+    #
+    # The first version appended `""` to put a blank line between the game and the plot. **A
+    # BLANK LINE TERMINATES A RAW HTML BLOCK IN MARKDOWN**, and this markup reaches the page
+    # through `st.markdown(..., unsafe_allow_html=True)` — which parses MARKDOWN FIRST. The
+    # parser closed the block mid-`<title>`, injected `<p>`, and **escaped the remainder of the
+    # column**, so nine circles became one `<title>` containing the literal text
+    # `&lt;/title&gt;&lt;circle cx='139.1'…`:
+    #
+    #     Yards gained 336
+    #     <p>n=1376 over 11 weeks        ← Markdown's paragraph, inside an SVG <title>
+    #
+    # ⚠️ **EVERY TEST PASSED.** The fixture's markup is asserted as a STRING in Python, before
+    # Streamlit's markdown ever runs, so the suite cannot see this class at all —
+    # `test_THE_OVERLAY_SURVIVES_STREAMLITS_MARKDOWN` is the guard that can.
+    if week_row is not None:
+        bits.append(distribution.describe(week_row))
     return "\n".join(bits)
 
 
@@ -3382,7 +3424,8 @@ def _shifted(body: str, top_band: int) -> str:
     return f"<g transform='translate(0,{top_band})'>{body}</g>" if top_band else body
 
 
-def _circle_column(games, column, frame, accent, width, band: int = None) -> str:
+def _circle_column(games, column, frame, accent, width, band: int = None,
+                   direction: str = "gained", week_row=None) -> str:
     """Marc's ordered jitter: one circle per played game, earliest at the top, **drawn INSIDE
     the box-and-whisker's own band** (v16, cfdb-wta-R-993) and **filled when that game's opponent
     was an FBS team** (v16, cfdb-wta-R-994 — see `_circle_paint`).
@@ -3494,7 +3537,7 @@ def _circle_column(games, column, frame, accent, width, band: int = None) -> str
         inside = lo <= value <= hi
         x = _axis_x(min(max(value, lo), hi), frame, width)
         y = top + index * pitch
-        title = html.escape(_circle_title(game, column))
+        title = html.escape(_circle_title(game, column, direction, week_row))
         # 🚨 A VALUE BEYOND THE SHARED FRAME IS PINNED AND SAYS SO — B115's rule, and the one
         # place this element cannot follow `box()`. `box()` widens its frame around an
         # out-of-range value; a mark that shares an axis CANNOT, because widening is exactly what
@@ -3647,13 +3690,23 @@ def _gained_allowed(team, opponent, for_column, allowed_column, week_rows,
     # ⚠️ THE GUARD IS ON THE FRAME ALONE NOW. `games` being `None` is a state the element knows
     # how to draw — it is the season opener, and it says so — whereas a missing FRAME means there
     # is no axis to draw anything on, which is the week's own absence and is named in the caption.
+    # 🚨 v15: EACH COLUMN SAYS WHICH YARDAGE IT IS, IN WORDS, AND THE TWO ARE NOT THE SAME
+    # TEAM'S GAMES (cfdb-wta-R-1512). The GAINED circles are THIS team's per-game yardage; the
+    # ALLOWED circles are **the OPPONENT's per-game yardage allowed** — see the pairing note
+    # above. ⚠️ A single `direction` derived from the row's caption would have been one string
+    # for two different populations.
+    # ✅ `week_row` IS THE DISTRIBUTION BOTH ROWS ARE DRAWN ON — one row, per B119's finding that
+    # at game grain the gained distribution IS the allowed one — so both tooltips carry the same
+    # plot figures, which is what a reader comparing the two rows should see.
     circles = ""
     if frame is not None:
-        circles = _circle_column(games, game_column, frame, accent, _BOX_ROW_WIDTH)
+        circles = _circle_column(games, game_column, frame, accent, _BOX_ROW_WIDTH,
+                                 direction="gained", week_row=week_row)
     allowed_circles = ""
     if allowed_frame is not None:
         allowed_circles = _circle_column(opponent_games, game_allowed_column, allowed_frame,
-                                         opponent_accent, _BOX_ROW_WIDTH)
+                                         opponent_accent, _BOX_ROW_WIDTH,
+                                         direction="allowed", week_row=week_row)
     return (
         f"<div data-cfdb='gained-allowed' data-metric='{html.escape(label.lower())}'>"
         f"{_matchup_legend(team, opponent, for_column, allowed_column, delta, outlook)}"
