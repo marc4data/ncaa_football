@@ -577,10 +577,12 @@ TABLE_CSS = """
      re-measured: the bands stayed at three. **28 + 1.6 gap + 12.2 badge = 41.8px fits inside
      44px, let alone 50** — so the badge is not wrapping for want of room, and the arithmetic
      that said it was (47.9px against 44) used the widest badge rather than this card's.
-     ⚠️ TWO THINGS ARE STILL UNEXPLAINED AND ARE THE NEXT ROUND'S START: the logo box draws
-     **28px** where `.cfdb-card-team .cfdb-logo-box` says 18px, and the break survives a slot
-     22% wider than the content. **A number put back rather than a fix shipped on a cause that
-     was measured false.** */
+     ✅ A213 (cfdb-main-R-2545) EXPLAINED BOTH, AND THE SECOND FOLLOWS FROM THE FIRST. The box
+     drew 28px because `logo_or_monogram` writes the size as an INLINE STYLE, which no
+     selector can beat — the 18px rule was never in the contest. And with two margins nobody
+     had counted (logo `margin-right:.4rem`, rank `margin-left:.3rem`) the first band needed
+     **54.57px**, so a 50px slot could not have held it either. **A212's revert was correct
+     and this note records why, rather than leaving the number looking arbitrary.** */
   --cfdb-card-team-w:    2.75rem;  /* 44px; widest abbreviation "MRMK" draws 41.6px */
   /* 🚨 THE METRICS BLOCK IS CONTENT-SIZED, NOT A TRACK, AND THE FIRST ATTEMPT AT A TRACK WAS
      WRONG IN A WAY A192 HAD ALREADY BEEN WARNED ABOUT. It was set to 72px from a measurement
@@ -1247,6 +1249,15 @@ TABLE_CSS = """
              background:var(--cfdb-row-alt, transparent); border-radius:3px;
              margin-bottom:.4rem;
              align-items:center; gap:.4rem;
+             /* 🚨 A213 (cfdb-main-R-2544). THE TRANSITION IS DECLARED HERE AND THE DELAY IS
+                DECLARED ON THE HOVER RULE, WHICH IS WHAT MAKES THE HIGHLIGHT ASYMMETRIC.
+                `today._player_card_grid` emits, per player who appears on more than one board
+                in a group, a `:has()` rule carrying `transition-delay:400ms`. Coming OFF the
+                hover that rule stops applying, so this 0ms delay governs and the highlight
+                releases immediately. **400ms on and 0ms off reads as intent; 400ms both ways
+                reads as lag.** No script is involved — Streamlit strips handlers (R-121). */
+             transition:background .18s ease, border-left-color .18s ease;
+             transition-delay:0ms;
 /* 🚨 A192 (cfdb-main-R-2013). A FLEX ROW THAT WRAPS, NOT A THREE-TRACK GRID — AND THE TWO
    FIXED TRACKS GIVE BACK THE WIDTH THEY WERE NEVER USING.
 
@@ -1429,8 +1440,35 @@ TABLE_CSS = """
                              text-overflow:ellipsis; }
 /* ⚠️ THE TEAM LINE REUSES `.cfdb-identity`, so the logo, the rank badge and the record all
    arrive with the treatment they have everywhere else — including A165's center alignment.
-   Only the logo is resized, because a 28px disc is a table-row affordance and this is a card. */
-.cfdb-card-team .cfdb-logo-box, .cfdb-card-team .cfdb-logo { width:18px; height:18px; }
+   Only the logo is resized, because a 28px disc is a table-row affordance and this is a card.
+
+   🚨 A213 (cfdb-main-R-2545). THE WIDTH RULE THAT USED TO BE HERE IS DELETED, NOT MOVED, AND
+   THAT IS THE POINT. It read `.cfdb-card-team .cfdb-logo-box, .cfdb-card-team .cfdb-logo
+   { width:18px; height:18px; }` and it had NEVER APPLIED: `identity.logo_or_monogram` writes
+   the size as an inline style on the element, and an inline style beats every selector short
+   of `!important`. A212 read this rule, saw a 28px disc, and recorded it as a specificity
+   problem — **it was never in the contest.** The size is now passed to the producer
+   (`today._CARD_LOGO_PX` -> `_team_identity` -> `table.team_cell`), so a rule restating it
+   here would be a second source of truth that agrees today and drifts tomorrow (§3.2.3).
+
+   ✅ WHAT STAYS IS THE PART CSS ALONE CAN DO: the two margins that the inline style cannot
+   carry. Both are written for the inline table-row context, where there is no flex gap to
+   space the items; inside the card `.cfdb-identity`'s own `column-gap:.2rem` already does it,
+   so they double-count and push the badge onto a third line.
+
+   📊 MEASURED ON `#3ND`, first band against a 44px track:
+       28 + 6.4 (logo m-r) + 3.2 (gap) + 4.8 (rank m-l) + 12.17 (badge) = 54.57  — wraps
+       18 + 6.4              + 3.2      + 4.8            + 12.17        = 44.57  — still wraps
+       18 + 0                + 3.2      + 0              + 18.25 (`#20`) = 39.45  — fits
+   **A two-digit badge is why both margins go and not just one.**
+
+   🚨 `.cfdb-monogram-empty` IS NAMED BESIDE `.cfdb-logo-box` BECAUSE IT IS A DIFFERENT CLASS
+   CARRYING THE SAME 6.4px MARGIN (line 951). A team with no logo renders that branch, so a
+   reset that named only `.cfdb-logo-box` would give the two branches different footprints —
+   which is exactly what AC-G.28 promises they never have. 📊 Zero cards on this week's boards
+   take that branch, so it is unobservable today and would surface on some future Saturday. */
+.cfdb-card-team .cfdb-logo-box, .cfdb-card-team .cfdb-monogram-empty { margin-right:0; }
+.cfdb-card-team .cfdb-rank { margin-left:0; }
 .cfdb-card-none { font-size:.78rem; opacity:.6; padding:.3rem .5rem; }
 /* A189 (cfdb-main-R-1931). The Week average row on the yardage board: a BENCHMARK, not a
    competitor. Italic and dimmed so it reads as a different kind of row at a glance, and it

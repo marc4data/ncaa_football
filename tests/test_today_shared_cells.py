@@ -505,11 +505,27 @@ def test_the_three_boards_split_on_the_axis_each_one_actually_has():
     tree = ast.parse(SOURCE)
     board = next(n for n in ast.walk(tree)
                  if isinstance(n, ast.FunctionDef) and n.name == "_leaderboards")
-    calls = [ast.unparse(n) for n in ast.walk(board)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-             and n.func.id == "_player_board"]
-    assert len(calls) == 3, f"one call per board, each looped over its own three: {calls}"
-    joined = " ".join(calls)
+    # 🚨 A213 MOVED THE QUERY CALL, NOT THE CLAIM. `_leaderboards` now declares three board
+    # GROUPS through `_boards`, and `_boards` issues one `_player_board` per column — so the
+    # "nine calls where there were three" property is still exactly true, one level down.
+    # ⚠️ RE-AIMED RATHER THAN RELAXED: asserting `_player_board` appears in `_leaderboards`
+    # would now be asserting the wrong function's body (R-1321's indirection class again).
+    groups = [n for n in ast.walk(board)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+              and n.func.id == "_boards"]
+    assert len(groups) == 3, f"three board groups: yardage, touchdowns, defence ({groups})"
+    for call in groups:
+        columns = call.args[-1]
+        assert isinstance(columns, ast.Tuple) and len(columns.elts) == 3, (
+            f"every group declares three columns: {ast.unparse(call)}")
+    maker = next(n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_boards")
+    queries = [n for n in ast.walk(maker)
+               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id == "_player_board"]
+    assert len(queries) == 1, (
+        "one query per column, issued in the loop — nine in all, not one blended top-N")
+    joined = " ".join(ast.unparse(g) for g in groups)
     # 🚨 A175 MOVED THE YARDAGE BOARD'S TYPE INTO THE COMPREHENSION, so the CALL now reads
     # `types` and a substring check on the call site stopped seeing `'YDS'` — R-1321's
     # indirection class, third outing. The claim is unchanged; where it is read is not.
@@ -524,9 +540,21 @@ def test_the_three_boards_split_on_the_axis_each_one_actually_has():
     assert trios, "the yardage board must declare a trio led by YDS"
     assert any("'TD'" in t and ("'REC'" in t or "'INT'" in t or "'CAR'" in t) for t in trios), (
         f"each yardage column's trio is YDS + TD + a category-specific third: {trios}")
-    # defence varies the TYPE at a fixed category, and the values are the measured ones
-    for stat_type in ('"TOT"', '"TFL"', '"SACKS"'):
-        assert stat_type in SOURCE, f"{stat_type} is one of the three defensive types measured"
+    # 🚨 A213 (cfdb-main-R-2542). EACH DEFENCE COLUMN NOW CARRIES THE OTHER TWO METRICS —
+    # > **MARC, v14:** *"Tackles: Tackles for Loss, Sacks / Tackles for Loss: Tackles, Sacks /
+    # > Sacks: Tackles, Tackles for Loss"* — and the FIRST one is still the ranking.
+    defence = next(g for g in groups if "'TOT'" in ast.unparse(g))
+    leads = []
+    for column in defence.args[-1].elts:
+        heading, category, metrics = column.elts
+        assert category.value == "defensive", ast.unparse(column)
+        names = [e.value if isinstance(e, ast.Constant) else e.elts[0].value
+                 for e in metrics.elts]
+        assert len(names) == 3, f"each defence column shows all three: {names}"
+        assert set(names) == {"TOT", "TFL", "SACKS"}, names
+        leads.append(names[0])
+    assert leads == ["TOT", "TFL", "SACKS"], (
+        f"each column is RANKED by its own metric, which is the first one: {leads}")
     assert '"SACK"' not in SOURCE, "it is SACKS, measured against live serving, not SACK"
 
 
@@ -1533,7 +1561,13 @@ def test_a_card_draws_three_metrics_and_the_single_metric_boards_still_draw_one(
                      "class_year_display": "SR", "stat_value": 485,
                      "metric_YDS": 485, "metric_TD": 5, "metric_INT": 2})
 
-    three = today._player_card(row, "yards", ("YDS", "TD", "INT"))
+    # ⚠️ A213 (cfdb-main-R-2541): A BOARD'S METRIC IS NOW A `(key, category, type, label)`
+    # SPEC, because `stat_type` alone is not a key on this view — `YDS` exists under seven
+    # published categories, so the QB board's passing yards and rushing yards are both `YDS`.
+    # The invariant this test guards is unchanged: three metrics in, three values out, in
+    # order.
+    specs = [today._metric_spec(e, "passing") for e in ("YDS", "TD", "INT")]
+    three = today._player_card(row, "yards", specs)
     values = re.findall(r"cfdb-card-value'>([^<]+)<", three)
     assert values == ["485", "5", "2"], values
     assert three.count("cfdb-card-metric'") == 3

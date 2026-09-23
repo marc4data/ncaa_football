@@ -144,11 +144,36 @@ def test_no_metric_name_is_printed_in_a_cell():
 def test_the_names_appear_once_on_the_header_in_cell_order():
     """⚠️ THE ORDER IS THE CONTRACT — a reader matching the third number to the third name is
     right by construction, because both come from the same tuple in the same loop."""
-    grid = TODAY[TODAY.index("def _player_card_grid("):]
-    grid = grid[:grid.index("\ndef ")]
-    assert "cfdb-cardcol-metrics" in grid
-    assert "metric_types or ([stat_label] if stat_label else [])" in grid, (
-        "a single-stat board hoists its one label; a three-metric board hoists its three")
+    # 🚨 A213 (cfdb-main-R-2541) RE-AIMED THIS AT THE RENDERED HEADER. It used to assert that
+    # one exact EXPRESSION appeared in the source — which is R-2624's trap in its purest form:
+    # the claim is about what the header SAYS, and a source string stops matching the moment
+    # the expression is reformatted, while saying nothing about the output either way.
+    #
+    # ⚠️ AND THE NAMES ARE NOW LABELS, NOT KEYS. `rushing:YDS` addresses a column; the header
+    # must show `RUSH YDS`. Asserting the old expression could not have caught a header that
+    # printed the key.
+    import pandas as pd
+    import streamlit as st
+    drawn = []
+    real = st.markdown
+    st.markdown = lambda body, **kw: drawn.append(body)
+    try:
+        frame = pd.DataFrame([{
+            "player_name": "A Player", "player_id": "1", "player_slug": "a-player",
+            "team_display": "Team", "team_slug": "team", "team_logo_url": None,
+            "team_rank": None, "jersey": 7, "position": "QB",
+            "class_year_display": "SR", "stat_value": 3,
+            "metric_TD": 3, "metric_passing:YDS": 412, "metric_rushing:YDS": 55}])
+        specs = [today._metric_spec(e, "passing") for e in
+                 ("TD", ("passing:YDS", "Pass yds"), ("rushing:YDS", "Rush yds"))]
+        today._player_card_grid([("QB", frame, specs)], "touchdowns")
+    finally:
+        st.markdown = real
+    header = "".join(drawn)
+    names = re.findall(r"cfdb-cardcol-metrics'>([^<]+)<", header)
+    assert names == ["TD \u00b7 PASS YDS \u00b7 RUSH YDS"], names
+    assert "rushing:YDS" not in header, (
+        "the header must carry the LABEL, never the column key a reader cannot parse")
 
 
 def test_a_board_with_no_cell_text_hoists_nothing():
@@ -170,6 +195,12 @@ def test_the_card_still_renders_end_to_end():
                      "team_logo_url": None, "team_rank": 3.0,
                      "player_name": "A Player", "position": "QB",
                      "class_year_display": "SR", "jersey": 9})
-    out = today._player_card(row, "yards", ("YDS", "TD", "INT"), spark_top=500.0)
+    # ⚠️ A213: SPECS, NOT BARE TYPES — and the values are asserted, because with bare strings
+    # this call still RENDERS (every cell reads an absent column and draws an em dash) and the
+    # old assertions could not tell that apart from working. A test that passes on three
+    # em dashes is not testing the card.
+    specs = [today._metric_spec(e, "passing") for e in ("YDS", "TD", "INT")]
+    out = today._player_card(row, "yards", specs, spark_top=500.0)
     assert "cfdb-card" in out and "cfdb-card-spark" in out
     assert "cfdb-card-unit" not in out
+    assert re.findall(r"cfdb-card-value'>([^<]+)<", out) == ["412", "3", "1"]
