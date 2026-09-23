@@ -949,7 +949,25 @@ TABLE_CSS = """
 .cfdb-scope-chip { display:inline-block; background:rgba(31,111,235,.12);
     border:1px solid rgba(31,111,235,.35); border-radius:999px; padding:.06rem .5rem;
     margin-right:.3rem; font-weight:600; font-size:.78rem; }
-.cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right; }
+/* 🚨 A217 (cfdb-main-R-2620). A NUMBER IS ONE TOKEN AND MUST NEVER BE BROKEN INSIDE IT.
+   📊 Schedule shipped `56.0` as `56.` / `0` and `51.5` as `51.` / `5` — in the O/U column, at
+   1440 with the sidebar open, on the page Marc reads most. A figure split across two lines is
+   worse than a clipped one: clipped, a reader knows something is missing; split, `51.5` reads
+   as two numbers and the row still looks complete.
+   🚨 THE CAUSE IS NOT OURS AND THAT IS WHY NOTHING HERE MENTIONED IT. `overflow-wrap` computes
+   to **break-word** on every table cell — it comes from STREAMLIT's own stylesheet, and this
+   file contains no `overflow-wrap`, `word-break` or `word-wrap` rule at all. `break-word`
+   licenses a break INSIDE a token the moment the box is a hair too narrow, and the O/U column
+   is a hair too narrow: it draws 52.4px against content that wants 52.3px.
+   ✅ `normal` puts the token back together. `nowrap` then keeps a number on one line even when
+   the column cannot hold it, and `.cfdb-table td` already carries `overflow:hidden` and
+   `text-overflow:ellipsis`, so the honest failure is `56.…` — visibly truncated.
+   ⚠️ SCOPED TO `.cfdb-num`, WHICH `Col.css` GIVES EVERY `num`, `signed` AND `plain` COLUMN, so
+   this is one rule for every numeric column on the site rather than one column at a time. Text
+   columns keep wrapping at spaces, which is what they should do — a team name on two lines is
+   a layout, a number on two lines is a lie. */
+.cfdb-table th.cfdb-num, .cfdb-table td.cfdb-num { text-align:right;
+    overflow-wrap:normal; white-space:nowrap; }
 /* R-103: a third alignment. A single glyph plus a two-digit temperature is neither
    a number nor prose, and right-aligning it hung the column off its own header. */
 .cfdb-table th.cfdb-center, .cfdb-table td.cfdb-center { text-align:center; }
