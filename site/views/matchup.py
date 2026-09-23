@@ -6654,28 +6654,48 @@ _DRIVE_GLYPH_SHAPES = {
 # rendered mark's computed `stroke` came back `rgb(18, 52, 86)`.
 _DRIVE_GLYPH_INK = "currentColor"
 
-# ── 🚨 B144 PART 3: THE ALTERNATIVE MARC HAS NOT BEEN SHOWN, BEHIND A CONSTANT ───────────
+# ── 🚨🚨 B147 PART 1: THE OUTLINE BECOMES THE FILL — MARC, HAVING SEEN BOTH ──────────────
 #
-# 📊 **B143 MEASURED THE COST OF "BLACK" AND REPORTED IT: the outline reads 12.53:1 against
-# the light page, and 1.03:1 against a dark team FILL.** Nothing is invisible — the mark
-# still separates from the page — but on a dark-coloured team the outline stops being a
-# separate line. ⚠️ **That is inherent to "black outline + team fill", not to the code.**
+# > **MARC, v21:** *"Let's make the outline black (both teams)."*
+# > **MARC, v22, after the 5× crop:** *"the dark/white outline isn't adding as much pop as I
+# > thought. I'd change the outline to be the same color as the fill."*
 #
-# ✅ **SO THE ALTERNATIVE IS RENDERED RATHER THAN ARGUED, AND IT IS NOT SHIPPED.**
-# `"page"` is the shipped behaviour and a test pins it. `"fill"` picks black or white from
-# each mark's OWN fill by B137's WCAG crossover, so a dark fill gets a light outline.
+# 🚨 **THE SECOND SUPERSEDES THE FIRST, AND B143 WAS NOT A MISTAKE.** He asked for the black
+# outline, was shown it magnified, and changed his mind. **That is the loop working** — the
+# round that built it is why there was something to look at.
 #
-# ⚠️ **AND THE UNFILLED CASE IS WHY THIS IS NOT JUST `_drive_endzone_ink`.** A non-scoring
-# mark's fill is `transparent`, which has no luminance to pick from; `_drive_endzone_ink`
-# answers WHITE for anything it cannot parse, and a white outline on a transparent fill is
-# invisible on the light page. **Those marks keep the page's ink** (cfdb-wta-R-1507).
-_DRIVE_GLYPH_INK_MODE = "page"
+# ✅ **A FILLED MARK IS NOW A SOLID SILHOUETTE IN ITS FILL'S OWN COLOUR**, with no contrasting
+# edge at all. **The information is unchanged**: `is_scoring_drive` never said *whose*, and
+# `scoring_side` still does, so a defensive score is still the scoring team's colour.
+#
+# 🚨 **THE UNFILLED CASE IS NOT IN HIS SENTENCE AND CANNOT BE — a transparent fill has no
+# colour to copy.** ✅ **Those marks keep the PAGE's ink.** *Scored* then reads as a solid
+# colour shape and *did not score* as a neutral outline, which is the sharpest form of the
+# distinction the fill already carries. ⚠️ **The alternative — giving unfilled marks the
+# band's own team colour — is what B143 REMOVED**: it makes every mark team-coloured again
+# and the fill stops being the thing that says "scored" (cfdb-wta-R-1509).
+#
+# **The three modes, and only the first ships:**
+#
+#     "match"  the outline IS the fill; unfilled keeps the page ink      ← SHIPPED, v22
+#     "page"   one page-ink outline for every mark                       B143/B144
+#     "fill"   black or white picked from the fill's luminance (B137)    B144's option
+_DRIVE_GLYPH_INK_MODE = "match"
 
 
 def _drive_glyph_ink(fill: str) -> str:
-    """This mark's outline under `_DRIVE_GLYPH_INK_MODE == "fill"`. Not the shipped path."""
+    """This mark's outline, for the two per-row modes. **Never called under `"page"`.**
+
+    ⚠️ **AN UNFILLED MARK HAS NOTHING TO COPY AND NOTHING TO MEASURE**, so both per-row modes
+    hand it back the page's ink. Under `"fill"` that is also a correctness guard rather than
+    a preference: `_drive_endzone_ink` answers WHITE for anything it cannot parse, and
+    `transparent` is exactly that — **a white outline on a transparent fill is invisible on
+    the light page** (cfdb-wta-R-1507).
+    """
     if not fill or fill == _DRIVE_NO_FILL:
         return _DRIVE_GLYPH_INK
+    if _DRIVE_GLYPH_INK_MODE == "match":
+        return fill
     return _drive_endzone_ink(fill)
 
 
@@ -6687,8 +6707,12 @@ def _drive_glyph_stroke():
     (cfdb-wta-R-1505).** B143 put Marc's ink on the field layer and left the table's glyph
     drawing itself in the team's own colour, so one drive was drawn two ways on one screen.
     **A second literal here is how that comes back.**
+
+    ⚠️ **AND IT IS WHY B147 WAS A CONSTANT RATHER THAN A ROUND.** Marc changed his mind about
+    the outline; because both layers and the legend ask this one function, the change reached
+    all three without touching a single call site.
     """
-    if _DRIVE_GLYPH_INK_MODE == "fill":
+    if _DRIVE_GLYPH_INK_MODE in ("match", "fill"):
         return alt.Stroke("glyph_ink:N", scale=None, legend=None)
     return alt.value(_DRIVE_GLYPH_INK)
 
@@ -6750,6 +6774,50 @@ def _drive_glyph_shape(row) -> str:
 _DRIVE_NO_FILL = "transparent"
 
 
+def _drive_put_points_on_the_board(row) -> bool:
+    """**Did the SCOREBOARD move on this drive?** The one authority for whether a mark fills.
+
+    > **COWORK, with a picture:** rows reading `FUM` or `DOWNS` drew a filled grey X — *it
+    > scored, whose points unknown* — while the `Impact` cell beside them read `—`.
+    > **MARC, v22:** *"scored vs impact - like the hollow X for blank impact."*
+
+    🚨 **SO THE MARK AND THE `Impact` CELL MUST AGREE, AND THIS IS THE FUNCTION THAT MAKES
+    THEM.** A mark fills exactly when that cell prints a swing (cfdb-wta-R-1511).
+
+    📊 **IT IS `_drive_score_impact`'s ANSWER, NOT A SECOND OPINION ABOUT IT.** That function
+    already cross-checks the published delta against `is_scoring_drive` and suppresses the
+    figure where they disagree or produce an illegal value. **Re-deciding here would be a
+    second copy of a rule this file has been bitten by twice.**
+
+    ⚠️ **`is_scoring_drive` IS NOT DEMOTED EVERYWHERE — ONLY HERE.** It is still one of the two
+    facts `_drive_score_impact` cross-checks, and `scoring_side` still says WHOSE points. **What
+    it stops doing is deciding, on its own, that a mark is filled while the page refuses to say
+    the scoreboard moved.**
+
+    📊 **MEASURED ON ALL 87,897 PUBLISHED DRIVES — the change is purely SUBTRACTIVE:**
+
+        fills today (is_scoring_drive)        32,585
+        fills under this rule                 30,608
+        ── start filling                           0     no mark gains a fill
+        ── stop filling                        1,977     6.07% of today's filled marks
+
+    ✅ **NOTHING STARTS FILLING, AND THAT IS A PROPERTY RATHER THAN A COINCIDENCE**: guard 1 of
+    `_drive_score_impact` only returns a nonzero figure when `is_scoring_drive` is true, so this
+    rule is a strict SUBSET of the old one. **Marc asked for marks to stop claiming points, and
+    exactly that happens.**
+
+    ⚠️ **THE OTHER READING WAS MEASURED AND REJECTED.** *The delta alone is the authority* would
+    make **1,136 drives START filling — 559 of them PUNTS** — because a punt whose snapshots are
+    incoherent has a nonzero delta and no points. **That is new noise nobody asked for.**
+    """
+    impact = row.get("impact")
+    if impact is None or pd.isna(impact):
+        # `—` in the cell: the page has just said no figure here can be trusted, so a filled
+        # mark would assert the very thing it declined to state.
+        return False
+    return float(impact) != 0
+
+
 def _drive_glyph_fill(row, accents: dict) -> str:
     """The mark's FILL: the scoring team's own colour, or nothing at all.
 
@@ -6779,8 +6847,9 @@ def _drive_glyph_fill(row, accents: dict) -> str:
     ⚠️ **EVERY BRANCH TESTS WITH `pd.isna`, BECAUSE NaN IS TRUTHY** — R-121's class, which this
     file has paid for at `logo_url`, at `text_on` (B140) and in `_card_text`.
     """
-    scored = row.get("is_scoring_drive")
-    if scored is None or pd.isna(scored) or not bool(scored):
+    # 🚨 v22: THE SCOREBOARD DECIDES WHETHER, NOT `is_scoring_drive` — see
+    # `_drive_put_points_on_the_board`. `scoring_side` still decides WHOSE, below.
+    if not _drive_put_points_on_the_board(row):
         return _DRIVE_NO_FILL
     side = row.get("scoring_side")
     side = "" if side is None or pd.isna(side) else str(side).strip()
@@ -6795,14 +6864,19 @@ def _drive_glyph_fill(row, accents: dict) -> str:
 
 
 def _drive_glyph_filled(row) -> bool:
-    """Whether the mark is filled. **Filled = this drive put points on the board.**
+    """Whether the mark is filled, as a boolean. **The same question `glyph_fill` answers.**
 
-    ⚠️ Generalised from Marc's *"anything that is a touchdown"* — see the note above. A made and
-    a missed field goal are the same diamond and differ only by this, which is the pair a reader
-    most needs to tell apart.
+    ⚠️ Generalised from Marc's *"anything that is a touchdown"* — a made and a missed field goal
+    are the same diamond and differ only by this, which is the pair a reader most needs to tell
+    apart.
+
+    🚨 **IT USED TO ANSWER FROM `drive_result_key` ALONE — *is this the KIND of result that
+    scores* — WHICH IS A DIFFERENT QUESTION FROM *did THIS drive score*, and v22 made the gap
+    visible.** A `touchdown` key whose scoreboard never moved would have read `True` here while
+    the mark it describes drew hollow. **Two functions whose docstrings claim the same thing and
+    whose answers differ is the drift B144 was spent on** (cfdb-wta-R-1511).
     """
-    key = fmt.text(row.get("drive_result_key"))
-    return key in _DRIVE_TOUCHDOWN_KEYS or key in _DRIVE_OTHER_SCORE_KEYS
+    return _drive_put_points_on_the_board(row)
 
 
 # ── 🚨 v03: THE DISPLAY MAP. MARC'S ABBREVIATIONS, EXTENDED BY HIS OWN RULES ────────────────
@@ -8270,8 +8344,10 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
     frame["result_shape"] = frame.apply(_drive_glyph_shape, axis=1)
     frame["result_filled"] = frame.apply(_drive_glyph_filled, axis=1)
     # 🚨 v21 PART 2: the fill is now a COLOUR rather than a boolean, and it names the team that
-    # got the points. `result_filled` survives because the TABLE's glyph column still asks the
-    # yes/no question — see `_DRIVE_TABLE_GLYPH_CLASSES`.
+    # got the points. ⚠️ **THE LINE HERE USED TO SAY `result_filled` SURVIVES "because the TABLE's
+    # glyph column still asks the yes/no question" — AND B144 MADE THAT FALSE** by giving the
+    # table the colour too. ✅ v22 keeps the boolean and makes it honest instead: it and
+    # `glyph_fill` both call `_drive_put_points_on_the_board`, so the two cannot disagree.
     band_accents = {band: identity.text_on(colors.get(band), dark_theme=dark)
                     for band in ("away", "home")}
     frame["glyph_fill"] = [
@@ -8383,20 +8459,34 @@ def _drive_result_legend_chart() -> alt.Chart:
     y = alt.Y("y:Q", axis=None, scale=alt.Scale(domain=[-1, 1], nice=False))
     x = alt.X("slot:Q", axis=None,
               scale=alt.Scale(domain=[0, len(entries) * _DRIVE_LEGEND_SLOT], nice=False))
-    # 🚨 TWO LAYERS AGAIN, FOR THE SAME REASON THE FIELD NEEDS TWO: `filled` is a mark property.
-    hollow = alt.Chart(frame[~frame["result_filled"]]).mark_point(
-        size=_DRIVE_GLYPH_SIZE, filled=False, strokeWidth=1.5,
-        color="currentColor").encode(
-        x=x, y=y, shape=alt.Shape("result_shape:N", scale=None, legend=None))
-    solid = alt.Chart(frame[frame["result_filled"]]).mark_point(
-        size=_DRIVE_GLYPH_SIZE, filled=True, strokeWidth=1.5,
-        color="currentColor").encode(
-        x=x, y=y, shape=alt.Shape("result_shape:N", scale=None, legend=None))
+    # ── 🚨🚨 B147 PART 2: ONE LAYER, BUILT THE WAY THE CHART IS BUILT ───────────────────
+    #
+    # ⚠️ **B144 LEFT THIS AS TWO `filled=` LAYERS AND SAID WHY IT WAS SAFE: the legend used
+    # `currentColor`, which AGREED with the ink of the day.** 🚨 **v22 changes that ink, and
+    # agreement-by-coincidence is exactly what stops holding when one side moves.**
+    #
+    # ✅ **SO THE KEY NOW ASKS THE SAME TWO PRODUCERS THE FIELD AND THE `Result` COLUMN ASK.**
+    # A legend entry's fill is the page's ink where it is filled and `_DRIVE_NO_FILL` where it
+    # is not; `_drive_glyph_ink` then answers the outline for both, and under `"match"` a
+    # filled entry's outline IS its fill — the same solid silhouette the chart now draws.
+    #
+    # ⚠️ **THE KEY STAYS GENERIC AND THAT IS DELIBERATE.** It explains the VOCABULARY — which
+    # shape means what, and that a solid mark scored — so it uses the page's ink rather than
+    # any team's colour. **What it must not do is arrive there by a different route.**
+    frame["glyph_fill"] = [
+        _DRIVE_GLYPH_INK if filled else _DRIVE_NO_FILL
+        for filled in frame["result_filled"]]
+    frame["glyph_ink"] = [_drive_glyph_ink(fill) for fill in frame["glyph_fill"]]
+    marks = alt.Chart(frame).mark_point(
+        size=_DRIVE_GLYPH_SIZE, strokeWidth=1.5).encode(
+        x=x, y=y, shape=alt.Shape("result_shape:N", scale=None, legend=None),
+        fill=alt.Fill("glyph_fill:N", scale=None, legend=None),
+        stroke=_drive_glyph_stroke())
     labels = alt.Chart(frame).mark_text(
         align="left", baseline="middle", fontSize=_DRIVE_ROW_FONT, dx=9,
         color="currentColor", opacity=0.8, limit=_DRIVE_LEGEND_SLOT - 14).encode(
         x=x, y=y, text=alt.Text("category:N"))
-    return alt.layer(hollow, solid, labels).properties(
+    return alt.layer(marks, labels).properties(
         width=_DRIVE_PANEL_WIDTH, height=_DRIVE_LEGEND_HEIGHT)
 
 
