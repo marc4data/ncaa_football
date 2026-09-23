@@ -77,8 +77,21 @@ def scroll_minimum(layout: Optional[List[str]]) -> Optional[int]:
         return None
 
 
-def scroll_note(min_px: int) -> str:
-    """The note, plus the one `@container` rule that reveals it at this table's boundary.
+def scroll_note(min_px: int, *, show_at: Optional[int] = None, lead: str = "") -> str:
+    """The note, plus the `@container` rules that reveal it at this table's boundary.
+
+    🚨 A209: `show_at` EXISTS BECAUSE ONE LINE CAN CARRY TWO FACTS THAT APPEAR AT DIFFERENT
+    WIDTHS, AND BOTH HAVE TO BE TRUE WHERE THEY APPEAR (AC-G.11).
+
+    The SLATE puts two columns away below 940 and, having done so, does not overflow until 820
+    — so between those two widths the reader must be told about the columns and must NOT be
+    told the row scrolls, because it does not. ⚠️ Two separate notes would be two sentences
+    where one belongs; a single sentence with both clauses always on would be false at one of
+    the two widths. **So the note element appears at `show_at` and the scroll CLAUSE inside it
+    appears at `min_px`.**
+
+    ✅ WITH `show_at` OMITTED THE TWO BOUNDARIES COINCIDE and the rendered line is exactly what
+    A208 shipped, which is what the other three wrappers get.
 
     🚨 THE RULE IS GENERATED BECAUSE THE BOUNDARY IS PER-TABLE. A container query cannot read
     a custom property in its condition — `@container (max-width: var(--x))` is not a thing —
@@ -91,9 +104,14 @@ def scroll_note(min_px: int) -> str:
     never appears — mildly under-informative — rather than one that is always on. The
     stylesheet's comment carries the rest of the reasoning.
     """
-    return (f"<style>@container (max-width:{min_px - 1}px)"
-            f"{{.cfdb-scrollnote[data-min='{min_px}']{{display:flex}}}}</style>"
-            f"<div class='cfdb-scrollnote' data-min='{min_px}'>{SCROLL_NOTE}</div>")
+    at = show_at or min_px
+    return (f"<style>@container (max-width:{at - 1}px)"
+            f"{{.cfdb-scrollnote[data-min='{at}']{{display:flex}}}}"
+            f"@container (max-width:{min_px - 1}px)"
+            f"{{.cfdb-scrollnote[data-min='{at}'] .cfdb-scrollnote-scroll"
+            f"{{display:inline}}}}</style>"
+            f"<div class='cfdb-scrollnote' data-min='{at}'>{lead}"
+            f"<span class='cfdb-scrollnote-scroll'>{SCROLL_NOTE}</span></div>")
 
 
 def scroll_box(markup: str, min_px: Optional[int]) -> str:
