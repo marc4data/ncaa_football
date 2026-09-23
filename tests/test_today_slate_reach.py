@@ -177,7 +177,9 @@ def test_both_day_blocks_get_the_same_treatment():
     fri = _game(game_id=1, start_date=pd.Timestamp("2026-09-26T00:00:00Z"))
     sat = _game(game_id=2, start_date=pd.Timestamp("2026-09-26T19:30:00Z"))
     html = slate(fri, sat)
-    assert html.count("cfdb-slate-table") == 2, "two day blocks"
+    # 🚨 THE ELEMENT, NOT THE SUBSTRING — again. A209 generates a `<style>` block naming
+    # `.cfdb-slate-table` four times, so a bare count reads 6 for two tables. R-2260's class.
+    assert html.count("<table class='cfdb-table cfdb-slate-table'") == 2, "two day blocks"
     # 🚨 THE ELEMENT, NOT THE SUBSTRING. `html.count("cfdb-scroll")` reads 5 here, because
     # `cfdb-scrollbox` and `cfdb-scrollnote` both contain it — A207's R-2260 in a count.
     assert html.count("<div class='cfdb-scroll'>") == 2, "each inside its own scroller"

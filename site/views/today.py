@@ -4040,6 +4040,64 @@ _SLATE_COL_PX = (190, 222, 68, 56, 64, 56, 52, _SLATE_WHY_PX)
 # than its twelve hour labels need, which is what A201 measured the hard way.
 _SLATE_MIN_PX = 940
 
+# 🚨 A209 (cfdb-main-R-2450). THE NARROW LAYOUT'S NUMBERS ARE DERIVED FROM THE WIDE ONE'S, SO
+# THERE IS NOTHING TO KEEP IN STEP.
+#
+# > **MARC, 2026-09-22**, asked whether columns could hide when narrow and come back when
+# > wide: *"YES, make this happen, with the fix to have column say it's hidden."*
+#
+# 📊 MEASURED ON A208's HEAD, sidebar open, and the two boundaries are DIFFERENT NUMBERS — the
+# round's main finding, because the prompt expected one:
+#
+#     container   what happens with all eight columns   with O/U and Wx put away
+#     980 (1440)  fits, nothing hidden                  n/a — above the boundary
+#     820 (1280)  the gantt is cut; 58px of it shows    fits exactly, all 178px of gantt
+#     640 (1100)  TV · Game · Why · gantt cut           still scrolls, 180px instead of 300
+#     564 (1024)  Wx · TV · Game · Why · gantt cut      still scrolls, 256px instead of 376
+#
+# ⚠️ SO *HIDE BELOW 940* AND *STOPS OVERFLOWING AT 820* ARE NOT THE SAME WIDTH, and choosing
+# either one for both jobs is wrong in a way that looks right. Hiding only below 820 would do
+# nothing at 1280 — the width where the gantt is the ONLY thing cut, which is the case Marc
+# was shown. Claiming the row scrolls down to 940 would put a scroll note above a table that
+# does not scroll, which is the defect A208 exists to prevent.
+#
+# 📊 AND THE AXIS STAYS READABLE AT THE NARROW MINIMUM, checked rather than assumed: the
+# widest hour label is 16.47px and adjacent labels sit 0.13227 of the axis apart, so the axis
+# needs **154.8px** for a 4px gap between them. It gets 178 at the floor and more above it —
+# `width:100%` hands the gantt every pixel of slack, so at a 900px container it draws 258.
+_SLATE_HIDE_AT = (3, 4)                                       # O/U and Wx, in _SLATE_COL_PX
+_SLATE_GANTT_MIN_PX = _SLATE_MIN_PX - sum(_SLATE_COL_PX)      # 178
+_SLATE_NARROW_FIXED_PX = sum(w for i, w in enumerate(_SLATE_COL_PX)
+                             if i not in _SLATE_HIDE_AT)      # 642
+_SLATE_NARROW_MIN_PX = _SLATE_NARROW_FIXED_PX + _SLATE_GANTT_MIN_PX   # 820
+# The two columns' names, for the sentence that says what was put away. ⚠️ ONE SOURCE: the
+# header labels, the cell classes and the note all read this, so a column cannot be hidden
+# without being named (AC-G.11).
+_SLATE_PUT_AWAY = ("O/U", "Wx")
+
+
+def _slate_narrow_css() -> str:
+    """The container queries that put two columns away, generated where the numbers live.
+
+    🚨 THE BOUNDARY IS THE SECTION'S WIDTH, NEVER THE VIEWPORT'S — the sidebar changes the
+    answer and a media query cannot see it. Same mechanism as A207's note and A208's wrapper.
+
+    ⚠️ THE GRIDLINE LAYER MOVES TOO, AND FORGETTING IT WOULD HAVE BEEN INVISIBLE IN A TEST.
+    `.cfdb-slate-grid` is inset from the left by the fixed columns' total; with two of them
+    collapsed that total is 120px smaller, and the hour lines would have stood 120px right of
+    the hours they mark — a chart that is wrong rather than one that is broken.
+    """
+    return (
+        f"<style>@container (max-width:{_SLATE_MIN_PX - 1}px){{"
+        f".cfdb-slate-table col.cfdb-slate-away{{width:0 !important}}"
+        f".cfdb-slate-table th.cfdb-slate-away,.cfdb-slate-table td.cfdb-slate-away"
+        f"{{width:0;padding-left:0;padding-right:0;overflow:hidden;visibility:hidden}}"
+        f".cfdb-slate-table{{min-width:{_SLATE_NARROW_MIN_PX}px !important}}"
+        f".cfdb-slate-grid{{left:{_SLATE_NARROW_FIXED_PX}px !important}}"
+        f".cfdb-slate-putaway{{display:inline}}"
+        f"}}</style>")
+
+
 _SLATE_PAD_TOP = 18
 
 
@@ -4361,8 +4419,27 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
     # ⚠️ ONE NOTE FOR BOTH DAY BLOCKS, deliberately: they are two tables with identical columns
     # and one minimum, so they hide the same things at the same width. Two notes would be two
     # copies of one fact.
+    # 🚨 A209 (cfdb-main-R-2452). THE NOTE SAYS WHAT WAS PUT AWAY, AND IT IS ONE LINE.
+    #
+    # > **MARC:** *"with the fix to have column say it's hidden."*
+    #
+    # ⚠️ A COLUMN THAT VANISHES SILENTLY IS THE SAME DEFECT AS ONE CLIPPED OFF-SCREEN — the
+    # reader is looking at a row quietly missing two numbers with no way to know. AC-G.11.
+    #
+    # ✅ ONE LINE, TWO CLAUSES, EACH APPEARING AT ITS OWN WIDTH — see `table.scroll_note`. The
+    # put-away clause comes with the note (below 940); the scroll clause only below 820, where
+    # the row actually still overflows. ⚠️ A single always-on sentence would be FALSE between
+    # 820 and 939, which is the width Marc was shown.
+    #
+    # 📋 AND THE NUMBERS ARE NOT LOST, ONLY THE COLUMNS — the Game link is still in the row and
+    # the matchup carries both (verified: `matchup.py` queries `srv_game_weather` and renders
+    # `O/U`). That is a clause, not a sentence of its own.
+    put_away = (f"<span class='cfdb-slate-putaway'>"
+                f"{esc(' and '.join(_SLATE_PUT_AWAY))} are put away at this width — the "
+                f"matchup has them.</span>")
     out = ["<div class='cfdb-slate cfdb-scrollbox'>",
-           table.scroll_note(_SLATE_MIN_PX),
+           table.scroll_note(_SLATE_NARROW_MIN_PX, show_at=_SLATE_MIN_PX, lead=put_away),
+           _slate_narrow_css(),
            _slate_legend(esc)]
 
     for day, entries in timed.items():
@@ -4425,8 +4502,9 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
                 f"<td class='cfdb-slate-team'>{_slate_team(row, 'away', scope, esc)}</td>"
                 f"<td class='cfdb-slate-team'>{_slate_team(row, 'home', scope, esc)}</td>"
                 f"<td class='cfdb-num'>{_slate_spread(row)}</td>"
-                f"<td class='cfdb-num'>{_slate_total(row)}</td>"
-                f"<td class='cfdb-center'>{schedule_table.weather_cell(row)}</td>"
+                f"<td class='cfdb-num cfdb-slate-away'>{_slate_total(row)}</td>"
+                f"<td class='cfdb-center cfdb-slate-away'>"
+                f"{schedule_table.weather_cell(row)}</td>"
                 f"<td class='cfdb-slate-tv'>{esc(network)}</td>"
                 f"<td class='cfdb-center'>{_slate_link(row, esc, scope)}</td>"
                 f"<td class='cfdb-slate-why'>{_slate_marks(row, esc, close_cut)}</td>"
@@ -4441,7 +4519,13 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
         # ⚠️ `table-layout:fixed` PLUS A COLGROUP, so the graph takes what is LEFT. With
         # `auto` and a 100%-wide graph cell the browser gave the graph the whole table and
         # pushed Schedule's columns off the left edge (A201, measured).
-        cols = "".join(f"<col style='width:{w}px'>" for w in _SLATE_COL_PX) + "<col>"
+        # A209: the two columns that can be put away carry the class on the `<col>` AND on
+        # both of their cells, so the collapse is one rule and cannot reach one without the
+        # others. The `<col>` keeps its pixel width for the wide case; the query zeroes it.
+        cols = "".join(
+            f"<col class='cfdb-slate-away' style='width:{w}px'>" if i in _SLATE_HIDE_AT
+            else f"<col style='width:{w}px'>"
+            for i, w in enumerate(_SLATE_COL_PX)) + "<col>"
         out.append(f"<div class='cfdb-slate-day'>{esc(day)}</div>")
         out.append(
             "<div class='cfdb-scroll'><div class='cfdb-slate-block'>"
@@ -4451,7 +4535,8 @@ def _slate(games: pd.DataFrame, esc, scope, close_cut: int = _CLOSE_DEFAULT) -> 
             f"<colgroup>{cols}</colgroup>"
             "<thead><tr>"
             "<th>Away</th><th>Home</th><th class='cfdb-num'>Spread</th>"
-            "<th class='cfdb-num'>O/U</th><th class='cfdb-center'>Wx</th><th>TV</th>"
+            "<th class='cfdb-num cfdb-slate-away'>O/U</th>"
+            "<th class='cfdb-center cfdb-slate-away'>Wx</th><th>TV</th>"
             "<th class='cfdb-center'>Game</th><th class='cfdb-center'>Why</th>"
             f"<th class='cfdb-slate-cell'><div class='cfdb-slate-axis'>{''.join(head)}"
             "</div></th>"

@@ -153,11 +153,17 @@ CSS = """
 .cfdb-slate svg { display:block; width:100%; height:auto; color:inherit; }
 /* A201. The SLATE is a schedule table whose last column holds the graph. The left cells are
    Schedule's own, so they inherit `.cfdb-table`; only the graph column is new. */
-/* 🚨 A MINIMUM, SO THE GRAPH CANNOT BE SQUEEZED TO NOTHING. 📊 The six fixed columns are
-   642px; at 1100 with the sidebar open the scroll box is 640px, so without this the graph
-   column got 0px and all twelve hour labels piled up outside it — measured, in the browser.
-   940px keeps ~300px of axis and lets the row scroll sideways instead, which is exactly what
-   the list above it already does at that width. */
+/* 🚨 A MINIMUM, SO THE GRAPH CANNOT BE SQUEEZED TO NOTHING. 📊 A201 measured it: with the
+   fixed columns at 642px and the scroll box 640px at 1100, the graph column got 0px and all
+   twelve hour labels piled up outside it.
+   ⚠️ A209 CORRECTION (cfdb-main-R-2454): the numbers in this paragraph went stale the day
+   A204 added `Wx` and `O/U`. The fixed columns are **762px**, not 642, and 940 leaves the
+   axis **178px**, not the ~300 this used to claim. 📊 Re-measured: the widest hour label is
+   16.47px and adjacent labels sit 0.13227 of the axis apart, so 178 is above the 154.8 the
+   labels need — narrow, and not piled up.
+   ✅ And 642 is live again as `_SLATE_NARROW_FIXED_PX`: below 940 the SLATE puts `O/U` and
+   `Wx` away and the table's minimum drops to 820, which is where A201's arithmetic came from
+   in the first place. `views/today.py` owns all four numbers. */
 /* A208: the scrollbar styling and the note moved to `.cfdb-scroll`, which every wide table
    on the site already uses. Nothing SLATE-specific is left here; `_SLATE_MIN_PX` in
    `views/today.py` is the one place 940 is written, and the table carries it inline. */
@@ -744,6 +750,29 @@ TABLE_CSS = """
 .cfdb-scrollbox { container-type:inline-size; }
 .cfdb-scrollnote { display:none; font-size:.7rem; opacity:.75; margin:.1rem 0 .3rem;
     gap:.3rem; align-items:center; }
+/* 🚨 A209 (cfdb-main-R-2452). THE SCROLL SENTENCE IS A CLAUSE, NOT THE WHOLE NOTE.
+   One line has to be able to carry two facts that become true at DIFFERENT widths — the SLATE
+   puts two columns away below 940 and does not overflow until 820 — and a clause that is
+   always on would be false between them. `table.scroll_note` reveals the element at one
+   boundary and this span at the other; where a caller gives only one, both fire together and
+   the line reads exactly as A208 shipped it. */
+.cfdb-scrollnote-scroll { display:none; }
+
+/* 🚨 A209 (cfdb-main-R-2451). THE SLATE PUTS `O/U` AND `Wx` AWAY WHERE THEY CANNOT ALL FIT.
+   > **MARC, 2026-09-22:** *"YES, make this happen, with the fix to have column say it's
+   > hidden."*
+   ⚠️ THIS REVERSES NOTHING FROM A204. There he asked for every column and at full width he
+   still gets every column; this is the narrow case, which he had not been shown then.
+
+   🚨 `display:none` ON THE CELLS WOULD HAVE SHIFTED EVERY COLUMN IN THE ROW, AND IT WOULD HAVE
+   LOOKED LIKE DATA. `table-layout:fixed` maps the Nth cell to the Nth `<col>`, so removing two
+   cells leaves seven cells reading nine columns' widths: measured on paper, the gantt would
+   have inherited `Why`'s 54px. ✅ So the cells STAY and collapse to zero — the mapping is
+   never disturbed, and the header and the body collapse by the same rule, together.
+   ⚠️ `!important` IS LOAD-BEARING, NOT A SHORTCUT: the widths are inline `style` attributes
+   written per table by `views/today.py`, and a stylesheet rule cannot beat an inline one
+   without it. The boundaries live in Python with the widths they are derived from. */
+.cfdb-slate-putaway { display:none; }
 /* AND THAT MAKES A STICKY HEADER NECESSARY, NOT MERELY POSSIBLE. Prompt 044 put it out of
    scope because vertical stickiness inside Streamlit's own scroll container is a separate
    problem — a reason that expires the moment the table owns its vertical scroll. With 166

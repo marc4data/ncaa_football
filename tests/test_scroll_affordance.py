@@ -176,14 +176,20 @@ def test_the_slate_still_renders_what_a207_shipped():
     which is what a reader sees: the note, then the legend, then each day and its scroller.
     """
     html = today._slate(pd.DataFrame([_game()]), esc=str, scope=_Scope())
-    order = ["cfdb-slate cfdb-scrollbox", "cfdb-scrollnote", "cfdb-slate-key",
-             "cfdb-slate-day", WRAPPER, "cfdb-slate-grid", "cfdb-slate-table"]
+    # 🚨 EVERY ENTRY IS AN ELEMENT, NOT A CLASS NAME. A209 emits a `<style>` block between the
+    # note and the legend, and it names `.cfdb-slate-grid` and `.cfdb-slate-table` — so a
+    # class-name index finds the RULE, not the element, and the order test failed on its own
+    # instrument. A selector is not a substring (R-2260), and neither is a class name.
+    order = ["<div class='cfdb-slate cfdb-scrollbox'", "<div class='cfdb-scrollnote'",
+             "<div class='cfdb-slate-key'", "<div class='cfdb-slate-day'", WRAPPER,
+             "<div class='cfdb-slate-grid'", "<table class='cfdb-table cfdb-slate-table'"]
     found = [html.index(piece) for piece in order]
     assert found == sorted(found), dict(zip(order, found))
     # the retired SLATE-scoped names are gone, not renamed alongside the new ones
     assert "cfdb-slate-scrollnote" not in html
-    # one note, one style rule, one scroller per day block
-    assert html.count("<style>") == 1
+    # ⚠️ A209 ADDS A SECOND GENERATED BLOCK — the note's reveal rules and the narrow-width
+    # collapse are separate concerns with separate boundaries, and both are per-table numbers.
+    assert html.count("<style>") == 2
 
 
 def test_an_empty_distance_table_says_nothing_about_scrolling():
