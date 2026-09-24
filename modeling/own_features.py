@@ -174,7 +174,7 @@ def _division_columns(teams_a, teams_b, division, classes, sign_b=1.0) -> np.nda
 
 
 def adjust(rows: pd.DataFrame, value: str, games: pd.DataFrame, alpha: float = ALPHA,
-           division: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+           division: Optional[Dict[str, str]] = None, weights: Optional[pd.Series] = None) -> pd.DataFrame:
     """Opponent-adjusted offence and defence-allowed per team, by closed-form ridge.
 
     With `division`, each non-FBS division gets its own UNPENALISED offset for offence and for
@@ -200,9 +200,14 @@ def adjust(rows: pd.DataFrame, value: str, games: pd.DataFrame, alpha: float = A
     X[np.arange(n), [base + index[t] for t in rows["team"]]] = 1.0
     X[np.arange(n), [base + k + index[t] for t in rows["opponent"]]] = 1.0
     y = rows[value].to_numpy(dtype=float)
-    mean = y.mean()
     penalty = np.r_[np.full(2 * c, OFFSET_PENALTY), alpha * np.ones(1 + 2 * k)]
-    beta = _ridge(X, y - mean, penalty)
+    if weights is None:
+        mean = y.mean()
+        beta = _ridge(X, y - mean, penalty)
+    else:   # recency weighting (cfdb-wtc-R-2492): a weighted mean and a weighted ridge, nothing else changes
+        w = weights.loc[rows.index].to_numpy(dtype=float)
+        mean = float(np.average(y, weights=w))
+        beta = np.linalg.solve(X.T @ (X * w[:, None]) + np.diag(penalty), X.T @ (w * (y - mean)))
     off_div = {cls: beta[j] for j, cls in enumerate(classes)}
     def_div = {cls: beta[c + j] for j, cls in enumerate(classes)}
     division = division or {}
@@ -276,11 +281,21 @@ def _drives(drives: pd.DataFrame, ppo_without_try: bool = False, fp_without_peri
 
 
 def team_features(prior: Dict[str, pd.DataFrame], alpha: float = ALPHA, division: Optional[Dict[str, str]] = None,
-                  ppo_without_try: bool = False, fp_without_period_end: bool = False) -> pd.DataFrame:
-    """Per team, every non-Elo, non-talent feature from the given prior games only."""
+                  ppo_without_try: bool = False, fp_without_period_end: bool = False,
+                  recency_halflife: Optional[float] = None, as_of_week: Optional[int] = None) -> pd.DataFrame:
+    """Per team, every non-Elo, non-talent feature from the given prior games only.
+
+    `recency_halflife` (weeks) weights each prior game in the opponent adjustment by
+    0.5 ** ((as_of_week − game week) / halflife): a game that many weeks old counts half.
+    Havoc, points per opportunity and field position stay plain season-to-date averages.
+    """
+    weights = None
+    if recency_halflife and as_of_week is not None and len(prior["advanced"]):
+        week_of = prior["advanced"]["game_id"].map(prior["games"].set_index("game_id")["week"])
+        weights = 0.5 ** ((as_of_week - week_of) / recency_halflife)
     parts = []
     for stem, col in ADJUSTED.items():
-        a = adjust(prior["advanced"], col, prior["games"], alpha, division).set_index("team")
+        a = adjust(prior["advanced"], col, prior["games"], alpha, division, weights).set_index("team")
         parts.append(a.rename(columns={"offense": stem, "allowed": f"{stem}_allowed"}))
     parts += [_havoc(prior["havoc"]), _drives(prior["drives"], ppo_without_try, fp_without_period_end)]
     return pd.concat(parts, axis=1)
@@ -295,6 +310,19 @@ def ratings_at(prior: Dict[str, pd.DataFrame], alpha: float = ALPHA,
     a = adjust(prior["advanced"], ADJUSTED["adjusted_epa"], prior["games"], alpha, division).set_index("team")
     return pd.DataFrame({"efficiency": a["offense"] - a["allowed"],
                          "points": points_ratings(prior["games"], alpha, division)})
+
+
+def carry_forward(current: pd.DataFrame, previous: pd.DataFrame, prior_advanced: pd.DataFrame,
+                  weight: float) -> pd.DataFrame:
+    """(n × current + weight × previous) / (n + weight), per team and column; n = games so far."""
+    teams = current.index.union(previous.index)
+    cur, prev = current.reindex(teams), previous.reindex(index=teams, columns=current.columns)
+    n = prior_advanced.groupby("team").size().reindex(teams).fillna(0).to_numpy(float)[:, None]
+    has_prev = prev.notna().to_numpy()
+    has_cur = cur.notna().to_numpy()
+    blended = np.where(has_cur & has_prev, (n * cur.to_numpy() + weight * prev.to_numpy()) / (n + weight),
+                       np.where(has_cur, cur.to_numpy(), prev.to_numpy()))
+    return pd.DataFrame(blended, index=teams, columns=current.columns)
 
 
 # ---------------------------------------------------------------- the builder
@@ -330,7 +358,8 @@ def schedule_strength(inputs: Dict[str, pd.DataFrame], season: int, week: int, t
 def build(inputs: Dict[str, pd.DataFrame], seasons: Iterable[int] = SEASONS, alpha: float = ALPHA,
           only_game_ids: Optional[set] = None, division_prior: bool = False, sos: bool = False,
           ppo_without_try: bool = False, fp_without_period_end: bool = False,
-          completed: bool = True) -> pd.DataFrame:
+          completed: bool = True, carry_weight: float = 0.0,
+          recency_halflife: Optional[float] = None) -> pd.DataFrame:
     """One row per target game: `id` plus home_/away_ features named as the pack names them.
 
     The switches are this round's changes, each off by default so R-2430's build is unchanged:
@@ -338,6 +367,10 @@ def build(inputs: Dict[str, pd.DataFrame], seasons: Iterable[int] = SEASONS, alp
       sos                   points rating and the two cumulative SOS columns (R-2442) — ours, no pack twin
       ppo_without_try       points per opportunity without the try after a TD (R-2443)
       fp_without_period_end field position without end-of-half / end-of-game drives (R-2443)
+      carry_weight          last season carried forward (R-2492): each per-team feature becomes
+                            (n × this season + k × last season's end value) / (n + k), n = games
+                            played so far this season, k = carry_weight — so it fades as games accrue
+      recency_halflife      recent games weigh more in the opponent adjustment (R-2492)
     """
     games = inputs["games"]
     talent = inputs["talent"].set_index(["season", "team"])["talent"]
@@ -347,13 +380,23 @@ def build(inputs: Dict[str, pd.DataFrame], seasons: Iterable[int] = SEASONS, alp
         season_games = target_games(games[games["season"] == season], completed)
         if only_game_ids is not None:
             season_games = season_games[season_games["game_id"].isin(only_game_ids)]
+        previous = None
+        if carry_weight:
+            last_ids = set(games.loc[(games["season"] == season - 1) & games["home_points"].notna(), "game_id"])
+            if last_ids:
+                last = {n: (f[f["game_id"].isin(last_ids)] if "game_id" in f.columns else f) for n, f in inputs.items()}
+                last_division = divisions(games[games["season"] == season - 1]) if division_prior else None
+                previous = team_features(last, alpha, last_division, ppo_without_try, fp_without_period_end)
         ratings_by_week = {}
         if sos:
             weeks = sorted(games.loc[games["season"] == season, "week"].unique())
             ratings_by_week = {w: ratings_at(inputs_before(inputs, season, w), alpha, division) for w in weeks}
         for week, week_games in season_games.groupby("week"):
             prior = inputs_before(inputs, season, week)
-            per_team = team_features(prior, alpha, division, ppo_without_try, fp_without_period_end)
+            per_team = team_features(prior, alpha, division, ppo_without_try, fp_without_period_end,
+                                     recency_halflife, week)
+            if previous is not None:
+                per_team = carry_forward(per_team, previous, prior["advanced"], carry_weight)
             for g in week_games.itertuples():
                 row = {"id": g.game_id}
                 for side, team, elo in (("home", g.home_team, g.home_pregame_elo),

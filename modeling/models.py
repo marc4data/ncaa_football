@@ -24,7 +24,7 @@ TARGETS
     direct       one model for the margin, one for the total
     team_points  one model for each team's points; margin and total are then paired from them
 """
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -43,30 +43,32 @@ SEED = 2420
 
 # ---------------------------------------------------------------- models
 
-def make_model(family: str):
+HGB_DEFAULTS = {"learning_rate": 0.03, "max_iter": 400, "max_leaf_nodes": 8, "min_samples_leaf": 60,
+                "l2_regularization": 1.0}
+
+
+def make_model(family: str, ridge_alpha: float = RIDGE_ALPHA, hgb_params: Optional[dict] = None):
     if family == "ridge":
-        return make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
+        return make_pipeline(StandardScaler(), Ridge(alpha=ridge_alpha))
     if family == "hgb":
-        # Fixed, conservative settings chosen before looking at 2024 — shallow trees, a
-        # slow learning rate, and large leaves, because ~3,600 training games is small.
-        return HistGradientBoostingRegressor(learning_rate=0.03, max_iter=400, max_leaf_nodes=8,
-                                             min_samples_leaf=60, l2_regularization=1.0,
-                                             random_state=SEED)
+        # Defaults fixed before looking at 2024 (R-2420) — shallow trees, a slow learning rate,
+        # large leaves. `hgb_params` overrides them for tuning (R-2492).
+        return HistGradientBoostingRegressor(**{**HGB_DEFAULTS, **(hgb_params or {})}, random_state=SEED)
     raise ValueError(f"unknown model family {family!r}")
 
 
 def _fit_predict(family: str, train: pd.DataFrame, target: pd.Series, cols: List[str],
-                 score: pd.DataFrame) -> np.ndarray:
+                 score: pd.DataFrame, **settings) -> np.ndarray:
     if family == "avg":
-        return (_fit_predict("ridge", train, target, cols, score)
-                + _fit_predict("hgb", train, target, cols, score)) / 2
-    model = make_model(family)
+        return (_fit_predict("ridge", train, target, cols, score, **settings)
+                + _fit_predict("hgb", train, target, cols, score, **settings)) / 2
+    model = make_model(family, **settings)
     model.fit(train[cols].astype(float), target)
     return model.predict(score[cols].astype(float))
 
 
 def predict(train: pd.DataFrame, score: pd.DataFrame, form: str, breadth: str, family: str,
-            target: str) -> Tuple[np.ndarray, np.ndarray]:
+            target: str, **settings) -> Tuple[np.ndarray, np.ndarray]:
     """(predicted margin, predicted total) for `score`, from a model fitted on `train` only."""
     stems = list(NOTEBOOK_PAIRS) if breadth == "notebook" else pairs_in(train.columns)
     if form == "paired":
@@ -74,11 +76,12 @@ def predict(train: pd.DataFrame, score: pd.DataFrame, form: str, breadth: str, f
     sets = feature_sets(train.columns, form, breadth)
 
     if target == "direct":
-        margin = _fit_predict(family, train, train["margin"], sets["margin"], score)
-        total = _fit_predict(family, train, train["home_points"] + train["away_points"], sets["total"], score)
+        margin = _fit_predict(family, train, train["margin"], sets["margin"], score, **settings)
+        total = _fit_predict(family, train, train["home_points"] + train["away_points"], sets["total"], score,
+                             **settings)
     elif target == "team_points":
-        home = _fit_predict(family, train, train["home_points"], sets["points"], score)
-        away = _fit_predict(family, train, train["away_points"], sets["points"], score)
+        home = _fit_predict(family, train, train["home_points"], sets["points"], score, **settings)
+        away = _fit_predict(family, train, train["away_points"], sets["points"], score, **settings)
         margin, total = away - home, away + home
     else:
         raise ValueError(f"unknown target {target!r}")
