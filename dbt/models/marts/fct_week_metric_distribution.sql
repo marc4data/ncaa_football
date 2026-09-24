@@ -218,9 +218,17 @@ select
     k.whisker_lo, k.whisker_hi, coalesce(k.outlier_count, 0) as outlier_count,
 
     -- The histogram's own configuration, carried ON THE ROW so the picture is reproducible
-    -- from the row alone and the renderer needs no lookup table. A214 adds the axis the
-    -- picture belongs to, for the same reason: a renderer that has to look up which other
-    -- metric shares this one's bounds is a renderer doing a join.
+    -- from the row alone and the renderer needs no lookup table.
+    --
+    -- ⚠️ `axis_group` AND `domain_rule` ARE EMITTED HERE BUT THIS IS NOT WHERE THEY ARE READ.
+    -- This model is incremental and keeps one immutable row per past `as_of_date`, so the two
+    -- columns are NULL on every day that existed before A214 added them - 1,905 of 10,190 rows
+    -- - and a full refresh cannot fix that, because `int_week_metric_value` carries only ONE
+    -- as_of_date and rebuilding would discard twenty days of history. **The authoritative
+    -- values are resolved in `srv_week_metric_distribution`, on every build, from the project
+    -- config**, and `assert_an_axis_group_shares_one_domain` reads them there. These stay so
+    -- that new rows and published rows agree, and so that removing them from an incremental
+    -- model's insert list is not this round's risk to take.
     e.axis_group,
     e.domain_rule,
     e.bin_min, e.bin_max, e.bin_count,
