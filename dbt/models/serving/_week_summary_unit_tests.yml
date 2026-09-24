@@ -1,0 +1,77 @@
+# THE CASE REAL DATA HAS NEVER CONTAINED, AND A214 PROVED IT NEVER HAS.
+#
+# `srv_week_summary` counts a pick'em on its own: a game closing at exactly 0 has no favorite,
+# so it belongs in neither the favorite's numerator nor its denominator, and it is published as
+# `favorite_straight_up_pickems` rather than silently dropped.
+#
+# 📊 THAT BRANCH CANNOT BE EXERCISED BY ANY ROW THIS WAREHOUSE HOLDS. Measured across every
+# season: ONE game has ever closed at exactly 0 - Elon at Richmond, 2024 regular week 5 - and
+# it is not an FBS game, so it is not in this model's population at all. Staging the obvious
+# break against real data fires on zero rows, which is R-760's shape: an assertion that cannot
+# fail is decoration.
+#
+# ⚠️ AND THE SAME MEASUREMENT FOUND WHY THE OBVIOUS BREAK WOULD PROVE NOTHING EVEN IF THE GAME
+# WERE FBS. At a spread of exactly 0 `srv_game` publishes `spread_favorite_side` as NULL, so
+# removing the `spread_at_close = 0` clause from the model changes nothing - the null side
+# already sends `favorite_won` to null. The two guards are belt and braces, and the part that
+# actually carries information is the pick'em COUNT.
+#
+# So the case is synthesised, exactly as `_distribution_unit_tests.yml` synthesises a value
+# sitting on a bin ceiling, and for the same stated reason: the property is about an input that
+# has not occurred yet.
+unit_tests:
+  - name: a_pickem_is_counted_as_a_pickem_and_not_as_a_favorite
+    model: srv_week_summary
+    # 🚨 EVERY `yes` AND `no` BELOW IS QUOTED, AND THE FIRST RUN OF THIS TEST IS WHY. YAML 1.1
+    # reads a bare `yes` as the BOOLEAN true, so `over_met: yes` fed the model `true` instead of
+    # the string it compares against, and every filter keyed on 'yes' counted zero. The test
+    # failed loudly and said which columns - but a fixture that quietly cannot hold the value
+    # under test is R-763's shape, and here it was the FILE FORMAT doing it rather than a dtype.
+    given:
+      - input: ref('srv_game')
+        rows:
+          # 1 - THE PICK'EM. Closes at 0, so there is no favorite to be right or wrong about.
+          # `spread_favorite_side` is null because that is what srv_game publishes at 0.
+          - {game_id: 1, season: 2026, season_type: regular, week: 1, is_fbs_game: true,
+             is_completed: true, home_points: 24, away_points: 21,
+             spread_at_close: 0, total_at_close: 40, spread_favorite_side: null,
+             favorite_covered: no_favorite, over_met: "yes"}
+          # 2 - AN ORDINARY GAME, so the denominators are not all zero and the rates are real.
+          # Home favored by 7, wins by 14: covers, and the 48 points clear a total of 45.
+          - {game_id: 2, season: 2026, season_type: regular, week: 1, is_fbs_game: true,
+             is_completed: true, home_points: 31, away_points: 17,
+             spread_at_close: -7, total_at_close: 45, spread_favorite_side: home,
+             favorite_covered: "yes", over_met: "yes"}
+          # 3 - A NON-FBS GAME, which the population must exclude. It is a pick'em too, so if
+          # the filter ever widens the pick'em count moves and this test says so.
+          - {game_id: 3, season: 2026, season_type: regular, week: 1, is_fbs_game: false,
+             is_completed: true, home_points: 10, away_points: 7,
+             spread_at_close: 0, total_at_close: 30, spread_favorite_side: null,
+             favorite_covered: no_favorite, over_met: "no"}
+      # The record spine contributes nothing here; undefeated counts coalesce to 0 and the
+      # LEFT JOIN is what lets the week still produce a row. That is its own claim below.
+      - input: ref('fct_team_record_week')
+        rows: []
+    expect:
+      rows:
+        - {season: 2026, season_type: regular, week: 1,
+           # TWO games, not three: the non-FBS pick'em is out of the population.
+           fbs_games: 2, fbs_games_completed: 2,
+           # THE PICK'EM IS COUNTED, AND IT IS OUT OF THE DENOMINATOR.
+           favorite_straight_up_pickems: 1,
+           favorite_straight_up_games: 1,
+           favorite_straight_up_wins: 1,
+           favorite_straight_up_no_line: 0,
+           # `no_favorite` is neither a cover nor a fail, so the ATS denominator is 1 as well.
+           favorite_ats_covers: 1, favorite_ats_fails: 0, favorite_ats_games: 1,
+           favorite_ats_pushes: 0, favorite_ats_no_line: 0,
+           # ⚠️ BUT BOTH GAMES COUNT TOWARDS THE OVER, THE PICK'EM INCLUDED. Having no favorite
+           # does not mean having no total: 24 + 21 clears 40, and 31 + 17 clears 45. The
+           # pick'em leaves the FAVORITE denominators and stays in this one, which is the
+           # distinction the two sets of columns exist to keep.
+           overs: 2, unders: 0, over_under_decided_games: 2,
+           total_pushes: 0, total_no_line: 0,
+           # A week with no record-spine rows still publishes a row, with zeros rather than
+           # nulls - *no undefeated team lost* and *we do not know* are different facts and
+           # this one is the first.
+           undefeated_teams_lost: 0, undefeated_teams_entering: 0}

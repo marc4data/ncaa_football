@@ -4472,6 +4472,22 @@ models:
       - name: outlier_count
         description: >
           Values falling beyond the whiskers. 0 rather than null when there are none.
+      - name: axis_group
+        description: >
+          The axis this metric is drawn on. Metrics naming the same group must be drawn on one
+          axis and their bounds are asserted equal by
+          assert_an_axis_group_shares_one_domain; winning_points and losing_points share the
+          group game_points, which is what makes the two distributions comparable rather than
+          merely adjacent. A metric on its own axis is a group of one named after itself, so
+          this is never null and a page never branches on its absence.
+        tests: [not_null]
+      - name: domain_rule
+        description: >
+          Where this metric's bounds came from. fixed means a hand-set min and max in
+          dbt_project.yml, which is every metric today; the standard also allows
+          zero_to_season_max and group_max, and the column exists so a page can say what it is
+          drawing rather than infer it, and so adding a rule needs no new column.
+        tests: [not_null]
       - name: bin_min
         description: "{{ doc('bin_min') }}"
       - name: bin_max
@@ -5522,3 +5538,138 @@ models:
           is stated per row rather than assumed - the whiskers look like the range and are not.
       - name: as_of_ts
         description: When the game domain was last refreshed.
+
+  # A214. The KPI row's one row. Grain (season, season_type, week) - division is deliberately
+  # NOT in the key; the model's own header carries the reasoning and the consequence.
+  #
+  # It aggregates `srv_game`, not a mart: the four market/outcome columns it reads are defined
+  # in `srv_game.sql` and exist nowhere upstream. `ci/check_layering.py` rule 3 permits it.
+  - name: srv_week_summary
+    description: >
+      One row per week with the seven figures the KPI strip above Most Exciting shows, each
+      published with its own denominator and its own excluded count. Population is every game
+      with an FBS team on either side, which is the same population the week's O/U distribution
+      is built from so a KPI cannot disagree with its own thumbnail.
+    columns:
+      # The three rates are range-checked by a singular test that refs this model - see
+      # dbt/tests/assert_a_week_summary_rate_is_a_share.sql. dbt_utils is NOT a dependency of
+      # this project (there is no packages.yml), so `accepted_range` does not exist here.
+      - name: week_summary_sk
+        description: >
+          Surrogate key over (season, season_type, week). It is what asserts the grain, which
+          is why the model can count rows and call them distinct games.
+        tests: [unique, not_null]
+      - name: season
+        description: The season these games belong to.
+        tests: [not_null]
+      - name: season_type
+        description: >
+          regular or postseason. Part of the key because postseason week numbers restart, so
+          season plus week alone would collide.
+        tests: [not_null]
+      - name: week
+        description: The week number within the season type.
+        tests: [not_null]
+      - name: fbs_games
+        description: >
+          Distinct games with an FBS team on either side. An FBS-vs-FCS game counts, which is
+          Marc's own definition of the population.
+        tests: [not_null]
+      - name: fbs_games_completed
+        description: How many of those games have been played.
+        tests: [not_null]
+      - name: over_under_mean
+        description: >
+          Mean closing total across the games that have one. Null when no game in the week
+          carries a closing total, rather than zero.
+      - name: over_under_games
+        description: The denominator behind over_under_mean - games carrying a closing total.
+        tests: [not_null]
+      - name: over_under_missing
+        description: Games in the population with no closing total, so excluded from the mean.
+        tests: [not_null]
+      - name: favorite_straight_up_wins
+        description: Completed games where the closing favorite won outright.
+        tests: [not_null]
+      - name: favorite_straight_up_games
+        description: >
+          The denominator - completed games with a closing favorite. Excludes pick'ems and
+          games with no closing spread, both of which are counted separately.
+        tests: [not_null]
+      - name: favorite_straight_up_pickems
+        description: >
+          Completed games closing at exactly zero. Neither side is favorite, so they are out
+          of the denominator and counted here instead of silently joining one side.
+        tests: [not_null]
+      - name: favorite_straight_up_no_line
+        description: Completed games with no closing spread at all, a different absence from a pick'em.
+        tests: [not_null]
+      - name: favorite_straight_up_rate
+        description: >
+          favorite_straight_up_wins over favorite_straight_up_games. Null when the denominator
+          is zero - a week nobody has played has no rate, and zero would draw a bar at the floor.
+      - name: favorite_ats_covers
+        description: Completed games where the closing favorite covered.
+        tests: [not_null]
+      - name: favorite_ats_fails
+        description: >
+          Completed games where the closing favorite did not cover. Published so the partition
+          can be asserted rather than bounded: assert_a_week_summary_rate_is_a_share requires
+          covers plus fails to EQUAL favorite_ats_games, because A214's staged break counted a
+          push as a cover and covers-under-games stayed true while the rate stayed inside
+          zero to one. One side of a partition cannot check the partition.
+        tests: [not_null]
+      - name: favorite_ats_games
+        description: The denominator - games that resolved to a cover or a fail. Pushes are excluded.
+        tests: [not_null]
+      - name: favorite_ats_pushes
+        description: >
+          Games landing exactly on the closing spread. A push is not a cover and not a fail, so
+          it leaves the denominator and is published on its own.
+        tests: [not_null]
+      - name: favorite_ats_no_line
+        description: Completed games with no closing spread to judge a cover against.
+        tests: [not_null]
+      - name: favorite_ats_rate
+        description: favorite_ats_covers over favorite_ats_games. Null when the denominator is zero.
+      - name: overs
+        description: Completed games whose total points exceeded the closing total.
+        tests: [not_null]
+      - name: unders
+        description: >
+          Completed games whose total points fell short of the closing total. Published for the
+          same reason as favorite_ats_fails - overs plus unders must equal
+          over_under_decided_games, and that identity needs both halves to be assertable.
+        tests: [not_null]
+      - name: over_under_decided_games
+        description: The denominator - games that resolved to an over or an under.
+        tests: [not_null]
+      - name: total_pushes
+        description: Games landing exactly on the closing total, excluded from the denominator.
+        tests: [not_null]
+      - name: total_no_line
+        description: Completed games with no closing total to judge an over against.
+        tests: [not_null]
+      - name: over_rate
+        description: overs over over_under_decided_games. Null when the denominator is zero.
+      - name: winning_points_mean
+        description: >
+          Mean points scored by the winning side across completed games. The distribution behind
+          it is srv_week_metric_distribution, metric winning_points.
+      - name: losing_points_mean
+        description: >
+          Mean points scored by the losing side across completed games. The distribution behind
+          it is srv_week_metric_distribution, metric losing_points, which shares the axis_group
+          game_points with winning_points so the two are drawn on one set of bounds and can be
+          compared rather than merely placed side by side.
+      - name: undefeated_teams_lost
+        description: >
+          Teams that entered the week undefeated and lost in it, counted as TEAMS. Two undefeated
+          sides meeting produces exactly one. Undefeated means the record spine shows no losses,
+          no ties and at least one win leading into the week.
+        tests: [not_null]
+      - name: undefeated_teams_entering
+        description: >
+          The denominator - teams that entered the week undefeated by that definition.
+        tests: [not_null]
+

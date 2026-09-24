@@ -52,6 +52,11 @@ select
     d.whisker_hi,
     d.outlier_count,
 
+    -- A214. The axis group and the rule that set its bounds, so a page drawing two measures
+    -- side by side can tell that they share one axis rather than assuming it from two equal
+    -- numbers it happened to read.
+    d.axis_group,
+    d.domain_rule,
     d.bin_min,
     d.bin_max,
     d.bin_incr,

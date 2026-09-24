@@ -261,6 +261,12 @@ Authoritative documents (read before acting, in ../claude_work):
 
 Settled decisions you must work within:
 - Naming: fct_* / dim_* in the warehouse. Serving layer is pre-joined wide srv_* tables.
+- **A dbt description is ONE PARAGRAPH. No blank lines.** 📊 A219 measured why: `persist_docs`
+  writes these into the database, `srv_data_dictionary.column_description` already carries a
+  newline on 918 rows (longest 1,451 characters), and the Data Dictionary page renders it as raw
+  HTML — where a blank line terminates the HTML block and shatters the table. A223's guard now
+  collapses that on the way out, so nothing is broken; this is the upstream habit, stated once.
+  Write the paragraph long if it needs to be long (A214).
 - Streamlit is display-only: single-table SELECT + WHERE. No joins, no metric math in the app.
   🚨 **THIS SENTENCE IS THE SETTLED DECISION AND THE CHARTER SAYS SO — but it is NOT the whole
   rule, and a round deciding a hard case from this line alone will get it wrong.** The working

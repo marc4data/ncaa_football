@@ -63,5 +63,6 @@
     'srv_teams_index',
     'srv_week_metric_distribution',
     'srv_week_metric_distribution_bin',
+    'srv_week_summary',
   ]) }}
 {% endmacro %}
