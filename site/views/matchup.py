@@ -6095,10 +6095,23 @@ _SEASON_TD_NOTE = (
 # ⚠️ **THE COLUMNS THEMSELVES LIVE ON `_CALENDAR_COLUMNS`**, because this panel reads the
 # calendar rather than opening a second `srv_game_team` query — see `_season_so_far`.
 
-# 📊 **THE MINIMUM IS MEASURED, NOT GUESSED** — see the round's report for the per-column budget.
-# ⚠️ **A208's SHARED `.cfdb-scroll` AFFORDANCE CARRIES IT.** This panel writes no second scroll
-# mechanism; `table.scroll_note` reveals the line at the width the table actually needs.
-_SEASON_TABLE_MIN_PX = 1180
+# 📊 **THE LAYOUT IS MEASURED IN A BROWSER, NOT GUESSED** (cfdb-wta-R-2703). Rendered at 1600
+# with the sidebar open, the natural column widths summed to **1251.5px inside a 1140px box** —
+# so this table scrolls at every width the page draws it at, and the note has to say so.
+#
+# ⚠️ **AN ALL-PIXEL LAYOUT IS WHAT GIVES `scroll_minimum` AN ANSWER.** A percentage layout is a
+# share of whatever it is given and returns `None`, and a table with no declared minimum draws
+# **no note at all** — which is the state the first version of this panel shipped in.
+#
+# 🚨 **AND IT IS A LOWER BOUND ON THE DRAWN WIDTH, NOT THE DRAWN WIDTH** — `table-layout:fixed`
+# still lets a header's min-content push a column wider, measured at +8px on Most Exciting in
+# `scroll_minimum`'s own comment. **These are the measured widths, rounded up.**
+_SEASON_LAYOUT = ["40px", "132px", "68px",          # Wk · Opponent · Result
+                  "66px", "58px", "50px", "50px",   # 1st Dn · Yards · Rush · Pass
+                  "36px", "74px",                   # TO · Pen Yds
+                  "72px", "82px", "82px", "74px",   # PPA · Rush PPA · Pass PPA · Cum PPA
+                  "74px", "54px",                   # Success · Expl
+                  "82px", "90px", "90px"]           # Yds Allw · Pass Allw · Rush Allw
 
 
 def _season_opponent(row) -> str:
@@ -6251,23 +6264,37 @@ def _season_so_far(row) -> None:
         for team_id, name, slug in [side for side in sides if side[2] == chosen]:
             mine = df[df["team_id"] == team_id]
             played = mine[mine["has_box_score"].fillna(False).astype(bool)]
-            rest = len(mine) - len(played)
+            # 🚨 THE TWO ABSENCES ARE DIFFERENT AND THE WORDS SAY WHICH (AC-G.11).
+            # **Nothing before this game** is the season opener and is simply correct;
+            # **earlier games with no box score** is cfdb missing something. 📊 Measured:
+            # 0 of 1,271 prior-dated 2025 FBS team-games lack a box score, so the second is
+            # rare — and it is still named rather than folded into the first.
             if played.empty:
                 states.empty(
                     f"{fmt.text(name)}'s season to date would be here.",
-                    f"None of this team's {len(mine)} scheduled games has a box score "
-                    f"yet, so there is no per-game figure to show — a zero here would be "
-                    f"a measurement cfdb did not make.")
+                    (f"This is {fmt.text(name)}'s first game of the season, so there is "
+                     f"nothing before it to show."
+                     if mine.empty else
+                     f"cfdb holds no box score for any of {fmt.text(name)}'s {len(mine)} "
+                     f"earlier games this season, so there is no per-game figure to show "
+                     f"— a zero here would be a measurement cfdb did not make."))
                 continue
+            # ⚠️ **"BEFORE THIS ONE" IS NOT DECORATION — IT IS WHAT THE READER IS LOOKING
+            # AT.** `_game_calendar` is bounded to games that kicked off BEFORE this matchup
+            # (cfdb-wta-R-1000), so this is the season SO FAR, never the whole season.
+            # 🚨 **AND THERE IS NO "N MORE SCHEDULED" CLAUSE, BECAUSE THE BOUND MAKES ONE
+            # UNREACHABLE** — a first draft carried one and it could never have fired (R-762).
             caption = (
-                f"{len(played)} game{'' if len(played) == 1 else 's'} played"
-                + (f"; {rest} more scheduled and not yet played, so not shown"
-                   if rest else "")
-                + f". Source: srv_game_team, {int(row['season'])}.")
-            st.markdown(table.scroll_note(_SEASON_TABLE_MIN_PX),
-                        unsafe_allow_html=True)
+                f"{len(played)} game{'' if len(played) == 1 else 's'} played before this "
+                f"one. Source: srv_game_team, {int(row['season'])}.")
+            # 🚨 **NO SECOND SCROLL MECHANISM.** `render(scroll=True)` wraps the table in
+            # A208's `.cfdb-scrollbox` and emits `scroll_note(scroll_minimum(layout))`
+            # ITSELF — and the note is a CONTAINER query, so one emitted outside that box
+            # can never fire. **The first version of this panel did exactly that: the note
+            # stayed hidden at 1600 while the table really was scrolling**
+            # (cfdb-wta-R-2703).
             table.render(played, _season_table_columns(), caption=caption,
-                         scroll=True, sortable=False)
+                         scroll=True, sortable=False, layout=_SEASON_LAYOUT)
 
 
 def _travel(game_id) -> None:
