@@ -65,7 +65,12 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # ⚠️ `_season_so_far` JOINED THE BEFORE TAB IN v15 (cfdb-wta-R-2701) — Marc asked for it
 # "between Offense vs Defense and Travel and Rest". **This inventory is the guard that made
 # the round declare it**: the split test failed the moment the panel existed and was not here.
-ALL_PANELS = ("_market_and_model", "_series", "_yardage", "_season_so_far",
+# ⚠️ `_ats_so_far` JOINED IT IN B152 AND THIS LIST FOUND THE OMISSION FIRST. The panel was
+# written, registered in `TABS`, and left out of here — and **every `page` test errored with
+# `KeyError: 'game_date'`**, because a panel this inventory does not name is NOT stubbed and
+# runs for real against `_game()`'s fixture row. 🚨 **That is the guard working exactly as
+# B149's comment above says it did**: the failure is loud, immediate, and names the panel.
+ALL_PANELS = ("_market_and_model", "_series", "_yardage", "_season_so_far", "_ats_so_far",
               "_travel", "_post_game", "_drives")
 
 
