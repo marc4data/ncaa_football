@@ -21,7 +21,7 @@ select
     over_rate, overs, over_under_decided_games,
     fbs_games, fbs_games_completed,
     undefeated_teams_lost, undefeated_teams_entering
-from {{ ref('fct_week_summary') }}
+from {{ ref('srv_week_summary') }}
 where
     -- a rate outside [0, 1]
     favorite_straight_up_rate not between 0 and 1

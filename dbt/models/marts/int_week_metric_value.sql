@@ -63,7 +63,21 @@ games as (
              then coalesce(c.total_at_close, c.total_current)
              else c.total_current end                             as total,
         w.temperature_f,
-        w.is_indoors
+        w.is_indoors,
+        -- A214. THE TWO OUTCOME MEASURES, AND THEY ARE NULL UNTIL THE GAME IS PLAYED.
+        --
+        -- 🚨 THAT NULL IS THE FEATURE. This model's consumer already counts
+        -- `count(*) as games_in_week` beside `count(value) as n`, so an unplayed game lands in
+        -- the week's denominator and out of the distribution — which is exactly the excluded
+        -- count every other figure on the KPI row publishes, for free.
+        --
+        -- ⚠️ THE WINNER IS THE HIGHER SCORE, NOT THE HOME SIDE. A tie makes `greatest` and
+        -- `least` coincide and both distributions take that value, which is honest; college
+        -- football has had no ties since 1996, so this is a definition rather than a live case.
+        case when g.is_completed then greatest(g.home_points, g.away_points) end
+                                                                  as winning_points,
+        case when g.is_completed then least(g.home_points, g.away_points) end
+                                                                  as losing_points
     from {{ ref('fct_game') }} g
     -- The closing line, from the model that owns that rule. Extracted out of srv_game for
     -- exactly this: a mart cannot read a serving view, and copying the logic down a layer

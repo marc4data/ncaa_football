@@ -288,37 +288,3 @@ models:
           asking only whether the line opened before the gap flags 1,728 games, asking whether
           the window spans it flags 98, and all 98 are in 2026 where the outage happened.
         data_tests: [not_null]
-
-  # A214. One row per week, the KPI strip's source.
-  - name: fct_week_summary
-    description: >
-      One row per (season, season_type, week) carrying the seven KPI figures with their
-      denominators. Population is every game with an FBS team on either side - the same
-      population int_week_metric_value already uses, so the average O/U here and the O/U
-      distribution drawn under it are computed over the same games.
-    columns:
-      - name: week_summary_sk
-        description: Surrogate key over (season, season_type, week).
-        tests: [unique, not_null]
-      - name: season
-        tests: [not_null]
-        description: The season these games belong to.
-      - name: season_type
-        tests: [not_null]
-        description: regular or postseason; part of the key because postseason weeks restart.
-      - name: week
-        tests: [not_null]
-        description: The week number within the season type.
-      - name: fbs_games
-        tests: [not_null]
-        description: Distinct games with an FBS team on either side.
-      # The three rates are range-checked by a singular test that refs this model - see
-      # dbt/tests/assert_a_week_summary_rate_is_a_share.sql. dbt_utils is NOT a dependency of
-      # this project (there is no packages.yml), so `accepted_range` does not exist here.
-      - name: favorite_straight_up_rate
-        description: Favorites winning outright, as a share of games that had a favorite.
-      - name: favorite_ats_rate
-        description: Favorites covering, as a share of games that resolved to a cover or a fail.
-      - name: over_rate
-        description: Overs, as a share of games that resolved to an over or an under.
-

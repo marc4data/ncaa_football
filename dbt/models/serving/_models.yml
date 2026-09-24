@@ -5524,7 +5524,10 @@ models:
         description: When the game domain was last refreshed.
 
   # A214. The KPI row's one row. Grain (season, season_type, week) - division is deliberately
-  # NOT in the key; `fct_week_summary` carries the reasoning and the consequence.
+  # NOT in the key; the model's own header carries the reasoning and the consequence.
+  #
+  # It aggregates `srv_game`, not a mart: the four market/outcome columns it reads are defined
+  # in `srv_game.sql` and exist nowhere upstream. `ci/check_layering.py` rule 3 permits it.
   - name: srv_week_summary
     description: >
       One row per week with the seven figures the KPI strip above Most Exciting shows, each
@@ -5532,6 +5535,14 @@ models:
       with an FBS team on either side, which is the same population the week's O/U distribution
       is built from so a KPI cannot disagree with its own thumbnail.
     columns:
+      # The three rates are range-checked by a singular test that refs this model - see
+      # dbt/tests/assert_a_week_summary_rate_is_a_share.sql. dbt_utils is NOT a dependency of
+      # this project (there is no packages.yml), so `accepted_range` does not exist here.
+      - name: week_summary_sk
+        description: >
+          Surrogate key over (season, season_type, week). It is what asserts the grain, which
+          is why the model can count rows and call them distinct games.
+        tests: [unique, not_null]
       - name: season
         description: The season these games belong to.
         tests: [not_null]
