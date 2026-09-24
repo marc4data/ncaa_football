@@ -513,11 +513,33 @@ def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
         # Named rather than hidden; there is no postseason in the corpus today.
         # ⚠️ `team as team_display` IS AN ALIAS, NOT A JOIN — this view spells the team name
         # `team`, and the card falls back to `team_display` when a team has no abbreviation.
+        # ✅ A226 (cfdb-main-R-3055). `team_slug` IS WHAT MAKES THE TEAM A LINK.
+        #
+        # A225 swapped this board onto `srv_player_stats` and the team abbreviation stopped
+        # being a link — 📊 measured on the rendered Touchdowns board at week = All, **16
+        # anchors to 0**. `_team_identity` builds the href from `team_slug`, which only the
+        # game log carried; A225 published it here as an EXPAND and this is the MIGRATE.
+        #
+        # ⚠️ A NULL SLUG FALLS BACK RATHER THAN LINKING TO NOWHERE, and that is
+        # `table.team_link`'s own behavior rather than something added here: it returns None
+        # for a missing slug, so the cell renders unlinked. 📊 0.3 percent of 2026 rows on
+        # this view have no slug, so the branch is live rather than theoretical.
+        # 🚨 R-287 IS WHY THAT MATTERS: 996 team anchors once shared ONE href, every one of
+        # them `/team` with no team, and a test that counts anchors passes on 996 links to
+        # nowhere. The acceptance is the DESTINATION — `ci/measure_team_links.py`.
+        #
+        # ⚠️ AND THIS PROSE IS OUT HERE RATHER THAN IN THE SQL BECAUSE THE REPO ALREADY
+        # FORBIDS THE ALTERNATIVE, for a reason better than tidiness:
+        # `test_no_page_query_carries_prose_between_its_triple_quotes` caught the first
+        # version — **`--` swallows the rest of the line once a query is normalised to one
+        # line, and `%` is a parameter marker to the driver.** A comment inside the string is
+        # a live hazard, not a style question.
         return query("""
             select player_id, player_name, player_slug, team, conference,
                    stat_category, stat_type, stat_value, as_of_ts,
                    jersey, position, class_year_display,
                    team as team_display, team_abbreviation, team_logo_url,
+                   team_slug,
                    color_on_light, color_on_dark
             from srv_player_stats
             where season = :season

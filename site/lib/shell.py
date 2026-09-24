@@ -9,7 +9,7 @@ from typing import Callable, Optional
 
 import streamlit as st
 
-from lib import attribution, states
+from lib import attribution, params, states
 from lib.registry import BY_KEY, Page
 
 
@@ -61,10 +61,59 @@ def partial_notice(page: Page) -> None:
                         f"{section.split('(')[0].strip()} is not available yet.")
 
 
+def discard_unreadable_params() -> list:
+    """Read every known parameter once, drop the ones that cannot be read, and name them.
+
+    🚨 A226 (cfdb-main-R-3057). A BAD PARAMETER USED TO TAKE THE WHOLE PAGE TO ZERO.
+    `params.get` raises `BadParam` for a value it cannot type, and **nothing caught it for
+    the four `INT_PARAMS`** — the raise escaped every `states.section`, so `?season=banana`,
+    `?game_id=x` or a stale `?week=All` rendered no panels, no error card, nothing at all.
+    A225 found it as a `week` problem; it is a FOUR-PARAMETER problem on any page that reads
+    them, from any hand-typed or stale URL.
+
+    ## Why the catch is HERE and not inside `params.get`
+
+    ⚠️ A fallback inside `get` would fix all four parameters and every caller in one place —
+    and it would make a raising function stop raising. `BadParam` would then have **no live
+    raiser for an int**, and a bad value would become a default that the reader cannot
+    distinguish from the default they asked for. **That is the "graceful fallback that fires
+    100% of the time is indistinguishable from a design" shape this project has paid for
+    twice** — the monogram that was drawn for every team, and R-299's left join that matched
+    every row. The exception is the only thing that knows the difference.
+
+    ✅ SO THE RAISE STAYS HONEST AND THE SHELL DECIDES WHAT TO DO WITH IT. One catch, before
+    any page body runs, covering every page and every parameter — and the notice reaches the
+    reader from OUTSIDE any panel, which is the only place it can be seen when the alternative
+    is a page with no panels at all.
+
+    ⚠️ IT RUNS BEFORE `body()`, NOT AROUND IT, AND THAT IS THE POINT. Wrapping the body would
+    catch the raise halfway through a render and leave the reader a half-drawn page followed
+    by a notice followed by a second copy. Reading the parameters first means the body never
+    sees a value it cannot use.
+
+    ⚠️ AND DROPPING A PARAMETER DOES NOT RE-RUN THE SCRIPT — `params.set_params` is already
+    called on every render of every scoped page (its own docstring says so), which would loop
+    forever if a write re-ran. So the notice and the clean render happen in the same pass.
+    """
+    bad = []
+    for name in sorted(params.INT_PARAMS | set(params.ENUM_PARAMS)):
+        try:
+            params.get(name)
+        except params.BadParam as exc:
+            bad.append((exc.name, exc.value))
+    for name, _value in bad:
+        params.set_params(**{name: None})
+    return bad
+
+
 def render_page(key: str, body: Optional[Callable[[Page], None]] = None) -> None:
     """Standard page lifecycle: header, body or blocked state, attribution, footer."""
     page = BY_KEY[key]
+    # 🚨 BEFORE THE HEADER, BECAUSE THE HEADER READS PARAMETERS TOO.
+    discarded = discard_unreadable_params()
     header(page)
+    if discarded:
+        states.discarded(discarded)
 
     if not page.buildable:
         blocked(page)
