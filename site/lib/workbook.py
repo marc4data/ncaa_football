@@ -35,7 +35,7 @@ from urllib.parse import quote
 
 import pandas as pd
 
-from lib import fmt, metrics
+from lib import fmt, metrics, models
 from lib.query import query
 
 CFBD_CREDIT = ("Data from CollegeFootballData.com. Used under their terms; attribution is "
@@ -121,6 +121,10 @@ def first_data_row(note_lines: int) -> int:
 # bar can express. It is a CAP, not a target: the point is that the file cannot become
 # unbounded, not that it should approach this.
 ROW_CAP = 5000
+
+# A227 (cfdb-main-R-3101). Bound here for the same reason ROW_CAP is: sheet SQL is
+# interpolated from module-level string constants in this file.
+PUBLISHED_MODELS_ONLY = models.PUBLISHED_MODELS_ONLY
 
 
 def site_base_url() -> Optional[str]:
@@ -1332,7 +1336,8 @@ SCORES_DECIMALS = 2
 # `ci/check_page_queries.py` resolves the same two before executing — ROW_CAP from its own
 # SUBSTITUTIONS table, SCORES_GAME_ORDER by reading this module's constants — so the checker
 # runs the query the workbook runs rather than a placeholder-shaped approximation of it.
-SQL_HOLES = {"ROW_CAP": str(ROW_CAP), "SCORES_GAME_ORDER": SCORES_GAME_ORDER}
+SQL_HOLES = {"ROW_CAP": str(ROW_CAP), "SCORES_GAME_ORDER": SCORES_GAME_ORDER,
+             "PUBLISHED_MODELS_ONLY": PUBLISHED_MODELS_ONLY}
 
 
 # SCHEDULE AND SCORES SHIP; FIVE SHEETS ARE STILL PENDING. Marc took the one-sheet
@@ -1766,6 +1771,7 @@ _ALL_SHEETS = [
         from srv_edge_finder
         where season = :season
           and (:week is null or week = :week)
+          and {PUBLISHED_MODELS_ONLY}
         order by edge_magnitude desc
         limit {ROW_CAP}
     """, [
@@ -2238,6 +2244,7 @@ _ALL_SHEETS = [
                brier_score, log_loss, attribution,
                count(*) over () as rows_in_scope
         from srv_model_performance
+        where {PUBLISHED_MODELS_ONLY}
         order by model_name, segment_type, segment_order, segment_value
         limit {ROW_CAP}
     """, [
@@ -2972,6 +2979,12 @@ def read_sheet(sheet, season, week, season_type, conference, division="fbs",
         raise
     if sheet.augment is not None:
         df = sheet.augment(df)
+    # 🚨 A227 (cfdb-main-R-3101): THE WORKBOOK IS THE SURFACE THAT OUTLIVES THE PAGE.
+    # A withdrawal covering three pages and leaving the file shipping the same numbers is
+    # not a withdrawal — it is the same claim in a format Marc emails to people, which they
+    # keep, and which carries no note saying it was retracted. Applied HERE rather than per
+    # sheet so a sheet added later inherits it without anybody remembering to.
+    df, _withdrawn_rows = models.suppress_withdrawn(df)
     if df.empty:
         return SheetRead(None, f"{sheet.view} returned no rows in this scope")
     # ONE QUERY ANSWERS BOTH QUESTIONS. `count(*) over ()` is a window function, and Postgres
@@ -3615,9 +3628,14 @@ def _write_index(book, season, week, season_type, conference, division, generate
     # The model version is read from the data rather than stated, so it cannot describe a
     # different run than the one in the file.
     try:
-        versions = query("""select distinct model_version, model_name
+        # 🚨 A227: FILTERED, BECAUSE THIS TAB NAMES THE MODELS IN A FILE THAT GETS EMAILED.
+        # No sheet carries a withdrawn model's rows any more, and without this line the
+        # cover tab would still have listed all six of them by name under "Model
+        # version(s)" — a withdrawal everywhere except the one surface that leaves the site.
+        versions = query(f"""select distinct model_version, model_name
                             from srv_model_performance
-                            where segment_type = 'overall' limit 20""")
+                            where segment_type = 'overall'
+                              and {PUBLISHED_MODELS_ONLY} limit 20""")
         model_version = ", ".join(
             f"{r.model_name} {r.model_version}" for r in versions.itertuples()) or "none"
     except Exception:                                              # noqa: BLE001
