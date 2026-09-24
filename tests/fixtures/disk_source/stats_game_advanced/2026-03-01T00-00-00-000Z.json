@@ -1,0 +1,90 @@
+{
+  "status_code": 404,
+  "params": {},
+  "data": [
+    {
+      "gameId": 1,
+      "season": 2024,
+      "week": 5,
+      "seasonType": "regular",
+      "team": "Home U",
+      "opponent": "Away St",
+      "offense": {
+        "plays": 70,
+        "drives": 12,
+        "ppa": 9.99,
+        "totalPPA": 10.5,
+        "successRate": "0.45",
+        "explosiveness": 1.2,
+        "powerSuccess": 0.7,
+        "stuffRate": 0.2,
+        "lineYards": 2.9,
+        "lineYardsTotal": 90,
+        "secondLevelYards": 1.1,
+        "secondLevelYardsTotal": 30,
+        "openFieldYards": 1.3,
+        "openFieldYardsTotal": 40,
+        "standardDowns": {
+          "ppa": 0.2,
+          "successRate": 0.48,
+          "explosiveness": 1.1
+        },
+        "passingDowns": {
+          "ppa": 0.1,
+          "successRate": 0.3,
+          "explosiveness": 1.5
+        },
+        "rushingPlays": {
+          "ppa": 0.12,
+          "totalPPA": 4.0,
+          "successRate": 0.44,
+          "explosiveness": 0.9
+        },
+        "passingPlays": {
+          "ppa": 0.25,
+          "totalPPA": 6.5,
+          "successRate": 0.41,
+          "explosiveness": 1.6
+        }
+      },
+      "defense": {
+        "plays": 70,
+        "drives": 12,
+        "ppa": 0.05,
+        "totalPPA": 10.5,
+        "successRate": 0.4,
+        "explosiveness": 1.2,
+        "powerSuccess": 0.7,
+        "stuffRate": 0.2,
+        "lineYards": 2.9,
+        "lineYardsTotal": 90,
+        "secondLevelYards": 1.1,
+        "secondLevelYardsTotal": 30,
+        "openFieldYards": 1.3,
+        "openFieldYardsTotal": 40,
+        "standardDowns": {
+          "ppa": 0.1,
+          "successRate": 0.48,
+          "explosiveness": 1.1
+        },
+        "passingDowns": {
+          "ppa": 0.1,
+          "successRate": 0.3,
+          "explosiveness": 1.5
+        },
+        "rushingPlays": {
+          "ppa": 0.12,
+          "totalPPA": 4.0,
+          "successRate": 0.44,
+          "explosiveness": 0.9
+        },
+        "passingPlays": {
+          "ppa": 0.25,
+          "totalPPA": 6.5,
+          "successRate": 0.41,
+          "explosiveness": 1.6
+        }
+      }
+    }
+  ]
+}

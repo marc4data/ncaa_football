@@ -83,7 +83,7 @@ QUERIES = {
                        offense_total_havoc_events, offense_front_seven_havoc_events, offense_db_havoc_events,
                        defense_total_havoc_events, defense_front_seven_havoc_events, defense_db_havoc_events
                 from staging.stg_game_team_havoc where season = any(%(s)s) and season_type = 'regular'""",
-    "drives": """select d.game_id, d.offense, d.defense, d.start_yards_to_goal, d.end_yards_to_goal,
+    "drives": """select d.drive_id, d.game_id, d.offense, d.defense, d.start_yards_to_goal, d.end_yards_to_goal,
                         d.start_offense_score, d.end_offense_score, d.drive_result
                  from staging.stg_drive d join staging.stg_games g on g.game_id = d.game_id
                  where g.season = any(%(s)s) and g.season_type = 'regular'""",
@@ -100,14 +100,25 @@ def load_inputs(conn, seasons: Iterable[int] = SEASONS) -> Dict[str, pd.DataFram
         cur = conn.cursor()
         cur.execute(sql, {"s": seasons})
         out[name] = pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
-    # psycopg2 hands numeric columns back as Decimal; everything that is not text becomes a float.
-    text = {"team", "opponent", "offense", "defense", "home_team", "away_team", "home_conference", "away_conference",
-            "home_classification", "away_classification", "start_date", "is_neutral_site", "drive_result"}
-    for frame in out.values():
-        for col in frame.columns.difference(list(text)):
+    return coerce(out)
+
+
+TEXT_COLUMNS = {"team", "opponent", "offense", "defense", "home_team", "away_team", "home_conference",
+                "away_conference", "home_classification", "away_classification", "start_date",
+                "is_neutral_site", "drive_result", "drive_id"}
+
+
+def coerce(frames: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+    """One set of dtypes, whichever source the frames came from (warehouse or `disk_source`).
+
+    psycopg2 hands numeric columns back as Decimal; everything that is not text becomes a number.
+    """
+    for frame in frames.values():
+        for col in frame.columns.difference(list(TEXT_COLUMNS)):
             frame[col] = pd.to_numeric(frame[col])
-    out["games"]["start_date"] = pd.to_datetime(out["games"]["start_date"], utc=True)
-    return out
+    if "games" in frames:
+        frames["games"]["start_date"] = pd.to_datetime(frames["games"]["start_date"], utc=True)
+    return frames
 
 
 # ---------------------------------------------------------------- the point-in-time rule

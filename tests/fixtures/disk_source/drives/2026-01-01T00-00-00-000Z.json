@@ -1,0 +1,17 @@
+{
+  "status_code": 200,
+  "params": {},
+  "data": [
+    {
+      "id": "11",
+      "gameId": 1,
+      "offense": "Home U",
+      "defense": "Away St",
+      "startYardsToGoal": 75,
+      "endYardsToGoal": 0,
+      "startOffenseScore": 0,
+      "endOffenseScore": 7,
+      "driveResult": "TD"
+    }
+  ]
+}
