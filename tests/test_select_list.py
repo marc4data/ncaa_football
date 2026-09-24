@@ -152,6 +152,22 @@ def test_the_CALENDAR_columns_block_names_every_column_the_circles_need():
         "total_yards_allowed", "rushing_yards_allowed", "passing_yards_allowed",
         # which absence a missing figure is (B118)
         "game_figures_state",
+        # ── 🚨 B149 (cfdb-wta-R-2701): Marc's per-team season table READS THIS CALENDAR ────
+        #
+        # > **MARC, v15:** *"add a table for each teams schedule w/high-level stats"*
+        #
+        # ⚠️ **IT DELIBERATELY DID NOT OPEN A SECOND `srv_game_team` READ.** The calendar
+        # already fetched both teams in one query AND already carried the leakage bound
+        # `game_date < :before` — and on the *Before the game* tab that bound is
+        # cfdb-wta-R-1000, the defect Marc found live: *"It shouldn't present data that
+        # transpired during the game."* **A fresh read would have shipped without it.**
+        # ✅ So the seven stats and the played flag joined the read that was already here.
+        "first_downs", "turnovers", "penalty_yards",
+        "offense_ppa", "offense_rushing_plays_total_ppa",
+        "offense_passing_plays_total_ppa", "cumulative_ppa_overall_total",
+        "offense_success_rate", "offense_explosiveness",
+        # whether this game has been played — the table shows played games only
+        "has_box_score",
         # cfdb-wta-R-994: Marc's fill rule — filled when THAT game's opponent was FBS
         "opponent_classification",
     }
@@ -161,7 +177,10 @@ def test_the_CALENDAR_columns_block_names_every_column_the_circles_need():
         f"⚠️ The panel's tests CANNOT see this — they stub `query` and return a fixture frame "
         f"whatever the SQL says (B124's break 4: one test of 130 went red). If the change is "
         f"deliberate, move the name here WITH its reason; do not delete the assertion.")
-    assert len(parsed) == 18
+    # 18 -> 28: B149 (cfdb-wta-R-2701) added the nine season-table stats plus `has_box_score`
+    # to the read that already existed rather than opening a second one — see the group above
+    # and its leakage-bound reason.
+    assert len(parsed) == 28
     assert not select_list.unnameable_items(matchup._CALENDAR_COLUMNS)
 
 
@@ -185,7 +204,13 @@ def test_the_REAL_columns_block_parses_cleanly_and_names_everything():
     # cannot be derived from `start_date`, which is a UTC instant while `game_date` is the local
     # calendar date, and the two genuinely differ** (game 401856670: `game_date` 2026-09-12
     # against `start_date` 2026-09-13 02:15Z).
-    assert len(parsed) == 104
+    # 104 -> 106: B149 (cfdb-wta-R-2702) selected `home_team_slug` / `away_team_slug`. Marc asked
+    # the season table to be *"a tab that allows end-user to toggle between the teams"*, and
+    # `st.tabs` is banned on this page (R-283 — it loses the tab on every link, and
+    # `test_no_post_game_content_was_stubbed` enforces it). **The page's own bar carries the
+    # choice in the URL instead, and `team` is already in `params.KNOWN`** — so the toggle needed
+    # no `site/lib/` edit (session A's, §3.2.2) and this SELECT needed the two slugs.
+    assert len(parsed) == 106
     assert not select_list.unnameable_items(matchup.COLUMNS)
     assert all(name.replace("_", "").isalnum() for name in parsed), \
         f"the parse produced something that is not an identifier: {sorted(parsed)}"
