@@ -2013,14 +2013,27 @@ def test_the_player_cards_team_name_is_stacked_under_the_logo_on_the_element_tha
     assert "flex-wrap:wrap" in stack.replace(" ", ""), (
         "the logo and its rank badge share the first line; only the name wraps below")
 
+    # 🚨 A221 RE-AIMED THIS: THE NAME NO LONGER CLAIMS THE ROW — THE LOGO DOES.
+    #
+    # A191's claim was *the name must not sit beside the logo*, and `flex:0 0 100%` on the
+    # name was how that was achieved. A221 needs the RANK on the name's line (Marc: *"That's
+    # where the Rank should be"*), so the name cannot claim 100% any more — **the logo takes
+    # the whole first line instead, and the badge wraps down with the name.**
+    #
+    # ⚠️ THE INVARIANT IS UNCHANGED AND IT IS WHAT IS ASSERTED: something must claim the full
+    # row, or a short abbreviation stays beside the logo and A191's defect is back. Only which
+    # element does it has moved.
+    logo_rule = css[css.index(".cfdb-card-team .cfdb-logo-box,"):]
+    logo_rule = logo_rule[:logo_rule.index("}") + 1]
+    assert re.search(r"flex\s*:\s*0\s+0\s+100%", logo_rule), (
+        f"the logo must claim a full row, or the abbreviation stays beside it: {logo_rule}")
+    assert ".cfdb-monogram-empty" in logo_rule, (
+        "a team with no logo renders a different class and must claim the row too (AC-G.28)")
+
     name_rule = css[css.index(".cfdb-card-team .cfdb-team {"):]
     name_rule = name_rule[:name_rule.index("}") + 1]
-    # ⚠️ AND THE NEEDLE CANNOT BE SPACE-STRIPPED TOO: `flex:0 0 100%` has MEANINGFUL spaces,
-    # so stripping both sides turns it into `flex:00100%` and the assertion fails on a correct
-    # rule. A regex over the rule as written is the honest comparison.
-    assert re.search(r"flex\s*:\s*0\s+0\s+100%", name_rule), (
-        ".cfdb-team must claim a full row, or a short name stays beside the logo: "
-        f"{name_rule}")
+    assert not re.search(r"flex\s*:\s*0\s+0\s+100%", name_rule), (
+        "the name claiming the row again would push the rank back onto the logo's line")
 
 
 def test_the_player_card_reads_the_published_short_team_name_with_the_full_one_on_hover():

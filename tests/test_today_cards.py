@@ -126,7 +126,7 @@ def test_the_metrics_are_content_sized_rather_than_equal_thirds():
     single cell governs all three when they are equal — and the widest is not a value but the
     touchdowns board's unit label, "touchdowns" at 59.8px.
     """
-    assert re.search(r"\.cfdb-card \.cfdb-card-metric\s*{[^}]*min-width:\s*max-content", THEME)
+    assert re.search(r"\.cfdb-card \.cfdb-card-metric\s*{[^}]*flex:\s*0 0 auto", THEME)
     assert re.search(r"\.cfdb-card > \.cfdb-card-metrics\s*{[^}]*flex:\s*0 0 auto", THEME), (
         "the block must size to its content; a fixed track has to be guessed and was, twice")
     assert CARD_WIDTHS_PX["widest_metric_cell"] >= CARD_WIDTHS_PX["widest_metric_value"], (

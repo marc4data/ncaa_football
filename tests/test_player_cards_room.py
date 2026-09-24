@@ -51,10 +51,21 @@ def test_the_metrics_have_real_padding_between_them():
     slot had grown 36.5px past its own floor — so the metrics were the one slot not taking a
     share.
     """
+    # 🚨 A221 RE-AIMED THIS, AND THE REASON IS THE ROUND'S WHOLE POINT. A212 relieved the
+    # compression by widening the GAP to .6rem, because the cells were content-sized and could
+    # not be widened. **A221 gives each cell a measured width instead**, so the room is in the
+    # cells and the gap comes back down to .3rem — 2 x 9.6px the numbers can use.
+    #
+    # ⚠️ ASSERTING `gap >= 8` NOW WOULD PIN THE WORKAROUND AND FORBID THE FIX. What survives is
+    # the claim underneath it: **the metric block must not be compressed**, which is now the
+    # cells carrying their own width rather than the gap standing in for it.
     gap = re.search(r"gap:([\d.]+rem)", rule(".cfdb-card-metrics {"))
     assert gap, "the metric block declares no gap"
-    assert _px(gap.group(1)) >= 8, (
-        f"{_px(gap.group(1))}px between metrics is the compression Marc is pointing at")
+    assert _px(gap.group(1)) > 0, "the metrics must not touch"
+    assert "_metric_widths" in TODAY, (
+        "the cells no longer get a measured width — the compression is back")
+    assert re.search(r"style=\"width:\{metric_widths\[index\]\}\"", TODAY), (
+        "a metric cell must carry the width its column was measured at")
 
 
 # ── PART 3: the sparkbar ──────────────────────────────────────────────────────────────
@@ -87,8 +98,33 @@ def test_no_spark_at_all_when_there_is_no_scale():
 def test_the_spark_is_scaled_per_column_and_the_page_says_so():
     """🚨 A BAR WITH NO STATED BASELINE IS DECORATION. The scale is the column being shown —
     not the season, not all of FBS — and every board that draws one says so in its caption."""
-    assert TODAY.count("Bars under the first number") == 3, (
-        "each of the three boards states its own scale")
+    # 🚨 A221 RE-AIMED THIS AT THE CONSTANT, AND THE OLD FORM WOULD NOW BE WRONG TWICE OVER.
+    # A212's clause said the bars are UNDER the first number and that every column has one;
+    # after A221 they are BESIDE it and a column without spread has none. **Counting the old
+    # sentence three times would pin a sentence that is now false** — and counting the NEW one
+    # three times would forbid the fix that put it in one place, which is what stops three
+    # captions drifting apart (§3.2.3).
+    # ⚠️ ON THE RENDERED CAPTIONS, NOT ON THE FILE (A217's R-2624). The constant's own comment
+    # QUOTES the old clause to explain what changed, so "the string is absent from today.py"
+    # is red on correct code — **this test's first draft failed exactly that way.**
+    import ast as _ast
+    captions = []
+    for node in _ast.walk(_ast.parse(TODAY)):
+        if (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
+                and node.func.attr == "caption" and node.args):
+            captions.append(" ".join(
+                n.value for n in _ast.walk(node.args[0])
+                if isinstance(n, _ast.Constant) and isinstance(n.value, str)))
+    assert not any("Bars under the first number" in c for c in captions), (
+        "a caption still promises bars under the number, and in every column")
+    assert TODAY.count("_SPARK_CAPTION") >= 4, (
+        "one constant, read by all three boards — found "
+        f"{TODAY.count('_SPARK_CAPTION')} mentions including its definition")
+    caption = today._SPARK_CAPTION.lower()
+    assert "beside" in caption, "the caption must say where the bar IS"
+    assert "own ten" in caption, "a bar with no stated baseline is decoration"
+    assert "without that spread" in caption, (
+        "the caption must say that a board without spread has no bar")
     # 🚨 THE DENOMINATOR IS COMPUTED INSIDE THE PER-COLUMN LOOP, NOT ONCE FOR THE BOARD.
     # A staged break that emptied the value series left both `_SPARK_HEADROOM` and
     # `values.max()` in the source and this test PASSED — it was asserting that two strings
@@ -170,8 +206,24 @@ def test_the_names_appear_once_on_the_header_in_cell_order():
     finally:
         st.markdown = real
     header = "".join(drawn)
-    names = re.findall(r"cfdb-cardcol-metrics'>([^<]+)<", header)
-    assert names == ["TD \u00b7 PASS YDS \u00b7 RUSH YDS"], names
+    # 🚨 A221 RE-AIMED THIS, AND THE NEW FORM IS THE STRONGER CLAIM. A213 hoisted the names as
+    # ONE run of text — `TD · PASS YDS · RUSH YDS` — and this asserted that string. A221 puts
+    # each name in its own `.cfdb-card-metric` cell at the same width as the values below it,
+    # **so the names are now over their own columns by construction** and the separator is
+    # gone. Asserting the joined string would forbid exactly that.
+    # ⚠️ SLICED TO THE HEADING'S `</div>`, NOT TO `</span></span>`. The first draft used the
+    # double close as the delimiter and it ATE THE LAST CELL'S OWN CLOSING TAG — so `RUSH YDS`
+    # had no trailing `<` to match and the test reported two names where three were rendered.
+    # **A green-looking two-of-three, from the delimiter rather than from the markup.**
+    assert "cfdb-cardcol-metrics'>" in header, (
+        f"the sub-header no longer emits a metrics block: {header[:200]}")
+    block = header.split("cfdb-cardcol-metrics'>", 1)[1].split("</div>", 1)[0]
+    names = re.findall(r"cfdb-cardcol-name'>([^<]+)<", block)
+    assert names == ["TD", "PASS YDS", "RUSH YDS"], names
+    # each name's cell carries a width, which is what puts it over its column
+    widths = re.findall(r"cfdb-card-metric' style=\"width:([^\"]+)\"", block)
+    assert len(widths) == len(names), (
+        f"every heading cell must carry its column's width: {widths} for {names}")
     assert "rushing:YDS" not in header, (
         "the header must carry the LABEL, never the column key a reader cannot parse")
 
