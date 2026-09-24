@@ -9,9 +9,13 @@
 # the ceiling is 80; one 80.0 game strands itself outside every bin, gets counted in neither
 # tail, and the histogram silently drops it.
 #
-# So the case is synthesised. This is the only place in the project that needs a unit test
-# rather than a data test, and it is because the property is about an input that has not
-# occurred yet.
+# So the case is synthesised, because the property is about an input that has not occurred yet.
+#
+# ⚠️ THIS PARAGRAPH USED TO SAY THIS WAS "THE ONLY PLACE IN THE PROJECT" THAT NEEDS A UNIT
+# TEST. A214 added the second - `dbt/models/serving/_week_summary_unit_tests.yml`, for a
+# pick'em, which exactly one game in the warehouse has ever been and that one is not FBS.
+# The REASON is what generalises, not the count: when the input has never occurred, a data
+# test fires on zero rows and proves nothing (R-760), and only a synthesised row can.
 unit_tests:
   - name: a_value_exactly_on_the_ceiling_lands_in_the_last_bin
     model: fct_week_metric_distribution_bin

@@ -159,7 +159,17 @@ edges as (
     select '{{ metric }}' as metric,
            cast({{ cfg['min'] }} as numeric) as bin_min,
            cast({{ cfg['max'] }} as numeric) as bin_max,
-           cast({{ bin_count }} as integer)  as bin_count
+           cast({{ bin_count }} as integer)  as bin_count,
+           -- A214. THE AXIS THIS METRIC IS DRAWN ON, AND WHERE ITS BOUNDS CAME FROM.
+           --
+           -- A metric with no `axis_group` is a group of one, named after itself — so the
+           -- default is not a null and a page never has to branch on absence. Two metrics
+           -- naming the SAME group are asserting that they must be drawn on one axis, which
+           -- is what lets winning and losing scores be compared instead of merely displayed.
+           cast('{{ cfg.get('axis_group', metric) }}' as {{ dbt.type_string() }})
+                                             as axis_group,
+           cast('{{ cfg.get('domain_rule', 'fixed') }}' as {{ dbt.type_string() }})
+                                             as domain_rule
     {% if not loop.last %}union all{% endif %}
     {% endfor %}
 ),
@@ -208,7 +218,11 @@ select
     k.whisker_lo, k.whisker_hi, coalesce(k.outlier_count, 0) as outlier_count,
 
     -- The histogram's own configuration, carried ON THE ROW so the picture is reproducible
-    -- from the row alone and the renderer needs no lookup table.
+    -- from the row alone and the renderer needs no lookup table. A214 adds the axis the
+    -- picture belongs to, for the same reason: a renderer that has to look up which other
+    -- metric shares this one's bounds is a renderer doing a join.
+    e.axis_group,
+    e.domain_rule,
     e.bin_min, e.bin_max, e.bin_count,
     (e.bin_max - e.bin_min) / e.bin_count               as bin_incr,
     coalesce(t.below_min_count, 0)                      as below_min_count,

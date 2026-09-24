@@ -4472,6 +4472,22 @@ models:
       - name: outlier_count
         description: >
           Values falling beyond the whiskers. 0 rather than null when there are none.
+      - name: axis_group
+        description: >
+          The axis this metric is drawn on. Metrics naming the same group must be drawn on one
+          axis and their bounds are asserted equal by
+          assert_an_axis_group_shares_one_domain; winning_points and losing_points share the
+          group game_points, which is what makes the two distributions comparable rather than
+          merely adjacent. A metric on its own axis is a group of one named after itself, so
+          this is never null and a page never branches on its absence.
+        tests: [not_null]
+      - name: domain_rule
+        description: >
+          Where this metric's bounds came from. fixed means a hand-set min and max in
+          dbt_project.yml, which is every metric today; the standard also allows
+          zero_to_season_max and group_max, and the column exists so a page can say what it is
+          drawing rather than infer it, and so adding a rule needs no new column.
+        tests: [not_null]
       - name: bin_min
         description: "{{ doc('bin_min') }}"
       - name: bin_max
@@ -5595,6 +5611,14 @@ models:
       - name: favorite_ats_covers
         description: Completed games where the closing favorite covered.
         tests: [not_null]
+      - name: favorite_ats_fails
+        description: >
+          Completed games where the closing favorite did not cover. Published so the partition
+          can be asserted rather than bounded: assert_a_week_summary_rate_is_a_share requires
+          covers plus fails to EQUAL favorite_ats_games, because A214's staged break counted a
+          push as a cover and covers-under-games stayed true while the rate stayed inside
+          zero to one. One side of a partition cannot check the partition.
+        tests: [not_null]
       - name: favorite_ats_games
         description: The denominator - games that resolved to a cover or a fail. Pushes are excluded.
         tests: [not_null]
@@ -5610,6 +5634,12 @@ models:
         description: favorite_ats_covers over favorite_ats_games. Null when the denominator is zero.
       - name: overs
         description: Completed games whose total points exceeded the closing total.
+        tests: [not_null]
+      - name: unders
+        description: >
+          Completed games whose total points fell short of the closing total. Published for the
+          same reason as favorite_ats_fails - overs plus unders must equal
+          over_under_decided_games, and that identity needs both halves to be assertable.
         tests: [not_null]
       - name: over_under_decided_games
         description: The denominator - games that resolved to an over or an under.
@@ -5628,8 +5658,10 @@ models:
           it is srv_week_metric_distribution, metric winning_points.
       - name: losing_points_mean
         description: >
-          Mean points scored by the losing side. Shares an axis_group with winning_points so the
-          two distributions are drawn on the same bounds and can be compared.
+          Mean points scored by the losing side across completed games. The distribution behind
+          it is srv_week_metric_distribution, metric losing_points, which shares the axis_group
+          game_points with winning_points so the two are drawn on one set of bounds and can be
+          compared rather than merely placed side by side.
       - name: undefeated_teams_lost
         description: >
           Teams that entered the week undefeated and lost in it, counted as TEAMS. Two undefeated

@@ -120,6 +120,12 @@ by_week as (
         -- ⚠️ `favorite_covered` carries FIVE states — `pending` before kickoff, null for no line,
         -- `no_favorite` for a pick'em, then `push`/`yes`/`no`. Only the last two are a denominator.
         count(*) filter (where favorite_covered = 'yes')             as favorite_ats_covers,
+        -- 🚨 THE OTHER HALF OF THE DENOMINATOR IS PUBLISHED, AND IT IS NOT REDUNDANT. A214's
+        -- staged break counted a push as a cover; `covers <= games` stayed true (36 <= 74) and
+        -- every rate stayed inside [0, 1], so a range check could not see it. Only
+        -- `covers + fails = games` can, which is why that identity is asserted and why this
+        -- column has to exist for it to be assertable at all.
+        count(*) filter (where favorite_covered = 'no')              as favorite_ats_fails,
         count(*) filter (where favorite_covered in ('yes', 'no'))    as favorite_ats_games,
         count(*) filter (where favorite_covered = 'push')            as favorite_ats_pushes,
         count(*) filter (where is_completed and favorite_covered is null)
@@ -127,6 +133,8 @@ by_week as (
 
         -- 5 — OVERS. Same reasoning, same shape. 📊 Two total-pushes in 2026 regular.
         count(*) filter (where over_met = 'yes')                     as overs,
+        -- Same reasoning as `favorite_ats_fails` above: the identity needs both halves.
+        count(*) filter (where over_met = 'no')                      as unders,
         count(*) filter (where over_met in ('yes', 'no'))            as over_under_decided_games,
         count(*) filter (where over_met = 'push')                    as total_pushes,
         count(*) filter (where is_completed and over_met is null)    as total_no_line,
@@ -190,11 +198,13 @@ select
     b.favorite_straight_up_no_line,
 
     b.favorite_ats_covers,
+    b.favorite_ats_fails,
     b.favorite_ats_games,
     b.favorite_ats_pushes,
     b.favorite_ats_no_line,
 
     b.overs,
+    b.unders,
     b.over_under_decided_games,
     b.total_pushes,
     b.total_no_line,

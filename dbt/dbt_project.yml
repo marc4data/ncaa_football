@@ -234,8 +234,17 @@ vars:
     # like a winning one. Sharing the domain is what puts the winning distribution visibly to
     # the right of the losing one, which is the comparison he is asking for.
     #
-    # ⚠️ THIS IS `axis_group` EXPRESSED THROUGH IDENTICAL BOUNDS RATHER THAN THROUGH THE COLUMN
-    # THE STANDARD ASKS FOR - see `week_distribution_axis_group` below for what is and is not
-    # shipped, and why.
-    winning_points:                 {min: 0,   max: 80}
-    losing_points:                  {min: 0,   max: 80}
+    # ⚠️ AND IDENTICAL BOUNDS ARE NOT ENOUGH ON THEIR OWN, WHICH IS WHY `axis_group` IS A REAL
+    # KEY HERE AND NOT A COMMENT. Two metrics that happen to carry the same two numbers share an
+    # axis by coincidence: the next person to widen one of them has no way to know the other was
+    # meant to move with it. `axis_group` says the two belong together, the distribution model
+    # publishes it on the row, and `assert_an_axis_group_shares_one_domain` fails the build if
+    # the bounds ever drift apart.
+    #
+    # `domain_rule` names WHERE the bounds came from. The standard allows `fixed`,
+    # `zero_to_season_max` and `group_max`; every metric in this project is `fixed` today,
+    # because every entry here carries a hand-set min and max. It is published so a page can
+    # say what it is drawing rather than inferring it, and so the day a rule is added the
+    # column already exists to carry it.
+    winning_points:                 {min: 0,   max: 80, axis_group: game_points}
+    losing_points:                  {min: 0,   max: 80, axis_group: game_points}
