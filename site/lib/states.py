@@ -11,6 +11,7 @@ names the missing object in code font so the blocker can be read off the screen.
 from contextlib import contextmanager
 from typing import Callable, Optional
 
+import html
 import os
 import sys
 
@@ -48,6 +49,39 @@ def empty(what: str, why: str, fix_label: Optional[str] = None,
     if fix_label and fix:
         if st.button(fix_label, key=f"fix_{abs(hash(what + fix_label))}"):
             fix()
+
+
+def discarded(bad) -> None:
+    """One or more URL parameters could not be read, so the page ignored them. A226.
+
+    🚨 THE THIRD THING A PAGE CAN BE, AND IT IS NOT AN ERROR AND NOT AN EMPTY. An Error state
+    says *this is our problem*; an Empty says *your filters matched nothing*. This says **the
+    address you arrived on asked for something that is not a value, and the page is showing
+    you the default instead** — which is the reader's problem to fix, in their URL bar, and
+    the one thing they cannot work out from a page that silently defaults.
+
+    ⚠️ AC-G.11: *the absence must say WHICH absence it is.* Before A226 a bad `?season=banana`
+    raised out of every `states.section` and the reader got a blank page — no panels, no error
+    card, nothing. Defaulting silently would have been the other failure: a page that pretends
+    they asked for what it is showing.
+
+    🚨 THE VALUE IS ESCAPED AND THE EXCEPTION IS NOT SHOWN (AC-G.9). The text comes from the
+    reader's own URL, so it is untrusted input rendered into markup; `html.escape` is what
+    stops `?week=<script>` being a page that runs it. **No traceback, no exception class, no
+    host — the reader is told what was ignored, never how it broke.**
+    """
+    items = "".join(
+        f"<div class='cfdb-state-object'><code>{html.escape(str(name))}="
+        f"{html.escape(str(value))}</code></div>" for name, value in bad)
+    plural = "parameters" if len(bad) > 1 else "parameter"
+    st.markdown(
+        f"<div class='cfdb-state cfdb-degraded'>"
+        f"<div class='cfdb-state-title'>Ignored {len(bad)} address {plural}</div>"
+        f"<div class='cfdb-state-body'>The page is showing its defaults instead. "
+        f"Everything below is real; only the {plural} named here {'were' if len(bad) > 1 else 'was'} "
+        f"discarded.</div>{items}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def degraded(missing_object: str, explanation: str, scheduled: Optional[str] = None,

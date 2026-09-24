@@ -41,6 +41,29 @@ class _Scope:
         return f"2026 regular week {self.week}"
 
 
+def _sql_code(sql: str) -> str:
+    """The SQL with its `--` comments stripped.
+
+    🚨 THIS EXISTS BECAUSE A STAGED BREAK CAUGHT ITS ABSENCE IN THIS FILE'S OWN TESTS.
+    A226's first draft put its reasoning inside the season query as `--` comments, and that
+    prose contained the words `team_slug`, `week =` and `season_type` — so `"team_slug" in
+    sql` was satisfied by the COMMENT. **The break that deleted the column from the SELECT
+    left the test green**, and the break that should have proved the `week` filter absent went
+    red on a sentence.
+
+    ⚠️ THE PRIMARY FIX WAS NOT THIS HELPER, AND SAYING SO MATTERS. The repo already forbids
+    prose between a page query's triple quotes —
+    `test_no_page_query_carries_prose_between_its_triple_quotes` — because `--` swallows the
+    rest of the line once a query is normalised and `%` is a driver parameter marker. **The
+    comments moved out; this is the belt behind that brace**, so an assertion about what a
+    query does can never again be answered by what a comment says.
+
+    ⚠️ R-2260 — *a substring is not a rule* — in a codebase where the prose about an
+    identifier reliably outnumbers the code using it.
+    """
+    return "\n".join(line.split("--")[0] for line in sql.splitlines())
+
+
 def _capture(monkeypatch, week):
     """The SQL `_player_board` ACTUALLY ISSUES for a filter state.
 
@@ -65,7 +88,7 @@ def test_WEEK_EQUALS_ALL_READS_THE_SEASON_VIEW(monkeypatch):
     per WEEK, so ranking by a window maximum and printing one of the rows prints a different
     number. `srv_player_stats` is one row per player per stat per SEASON, so the figure
     printed IS the figure ranked, by construction."""
-    sql = _capture(monkeypatch, None)
+    sql = _sql_code(_capture(monkeypatch, None))
     assert "from srv_player_stats" in sql, sql[:400]
     assert "srv_player_game_log" not in sql
 
@@ -73,15 +96,37 @@ def test_WEEK_EQUALS_ALL_READS_THE_SEASON_VIEW(monkeypatch):
 def test_A_PICKED_WEEK_STILL_READS_THE_GAME_LOG(monkeypatch):
     """⚠️ AND IT IS A CONSTRAINT, NOT A PREFERENCE: `srv_player_stats` publishes no `week`
     and no `season_type`, so a week-filtered board CANNOT be served from it."""
-    sql = _capture(monkeypatch, 3)
+    sql = _sql_code(_capture(monkeypatch, 3))
     assert "from srv_player_game_log" in sql, sql[:400]
     assert "srv_player_stats" not in sql
+
+
+def test_THE_SEASON_QUERY_SELECTS_THE_COLUMNS_THE_CARD_NEEDS_TO_LINK(monkeypatch):
+    """A226 (cfdb-main-R-3055). `team_slug` is what makes the team abbreviation a LINK.
+
+    🚨 A225 SHIPPED THIS BOARD WITH THE LINK GONE — 📊 16 anchors to 0 on the rendered
+    Touchdowns board at week = All — because `_team_identity` builds the href from
+    `team_slug` and only the game log carried it. A225 published it on the season view as an
+    EXPAND; this asserts the page now reads it.
+
+    ⚠️ AT THE CALL, NOT IN THE SOURCE. A `SOURCE.count("team_slug")` assertion passes while
+    the column sits in a comment, in the other branch, or in a docstring — this project has
+    paid for that shape repeatedly (R-2260: a substring is not a rule). The SQL the call
+    actually issues is the only thing that answers *does the board fetch it*.
+
+    ⚠️ AND A NULL SLUG IS NOT THIS TEST'S SUBJECT: `table.team_link` returns None for one, so
+    the card renders unlinked rather than linking to nowhere (R-287). That branch is the
+    render measurement's, in `ci/measure_team_links.py`.
+    """
+    select = _sql_code(_capture(monkeypatch, None)).split("from srv_player_stats")[0]
+    for column in ("team_slug", "team_abbreviation", "team_logo_url", "team_display"):
+        assert column in select, f"the season query does not select {column}: {select[:400]}"
 
 
 def test_THE_SEASON_QUERY_DOES_NOT_FILTER_ON_A_COLUMN_THAT_VIEW_LACKS(monkeypatch):
     """A `where week = :week` against `srv_player_stats` would raise `UndefinedColumn` on
     every load — the B121 shape, and the reason §2.2.1c.2 exists."""
-    sql = _capture(monkeypatch, None)
+    sql = _sql_code(_capture(monkeypatch, None))
     for absent in (" week ", "week =", "season_type"):
         assert absent not in sql, f"the season query references {absent!r}: {sql[:400]}"
 
