@@ -6666,9 +6666,20 @@ def _travel(game_id) -> None:
         # are also the COMMON case — 1,218 of 1,590 upcoming 2026 games have neither side's
         # distance — so this sentence is furniture rather than an edge note, and a table of
         # unexplained dashes would be worse than the prose it replaced.
-        st.caption("An em dash means cfdb publishes no coordinates for one of the two "
-                   "venues, which is a different fact from `home venue` — that is a "
-                   "team playing where it always plays, and it is a measured zero.")
+        #
+        # ⚠️ **AND IT IS DRAWN ONLY WHEN THERE IS A DASH TO EXPLAIN, WHICH THE CROPS FOUND.**
+        # An unconditional note explains a symbol that is not on screen — on the 18.1% of
+        # games carrying both distances it is prose describing nothing, which is a comment
+        # that has stopped being true wearing a caption (§3.2.3). 📊 **This is not a branch
+        # that cannot fire (R-762): it is the state three games in four are in.**
+        # ⚠️ **AND THE BACKTICKS ARE GONE** — `st.caption` renders Markdown, so `home venue`
+        # drew a grey code chip in the middle of a sentence. **The crop is what found that;
+        # no test could have.**
+        absent = df["travel_miles"].isna().any() or df["elevation_change_ft"].isna().any()
+        if absent:
+            st.caption("An em dash means cfdb publishes no coordinates for one of the two "
+                       "venues. That is a different fact from “home venue”, which "
+                       "is a team playing where it always plays — a measured zero.")
         table.as_of_caption(df)
 
 

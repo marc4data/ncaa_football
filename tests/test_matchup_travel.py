@@ -350,3 +350,17 @@ def test_AN_ABSENT_FIGURE_IS_NAMED_rather_than_left_as_a_bare_dash(travel):
         "will see")
     assert "home venue" in note, (
         "the note no longer separates the absence from the measured zero (R-634)")
+
+
+def test_THE_NOTE_IS_NOT_DRAWN_WHEN_THERE_IS_NO_DASH_TO_EXPLAIN(travel):
+    """⚠️ **A NOTE ABOUT A SYMBOL THAT IS NOT ON SCREEN IS PROSE DESCRIBING NOTHING**, which is
+    §3.2.3's defect wearing a caption. 📊 **Satisfiable, not a fiction (R-762): 287 of 1,590
+    upcoming 2026 games carry both sides' distance**, and the round's own crops are of one.
+    """
+    _body, both = travel([_side(), HOME_SIDE])
+    assert "\u2014" not in _cells(both), f"this fixture has no absence to test: {_cells(both)}"
+    assert "no coordinates" not in " ".join(str(t) for t in both["raw"]), (
+        "the panel explains an em dash on a game that draws none")
+    _b2, missing = travel([_side(travel_miles=None)])
+    assert "no coordinates" in " ".join(str(t) for t in missing["raw"]), (
+        "the note vanished on a game that DOES draw an em dash, which is the 76.6% case")
