@@ -3814,3 +3814,133 @@ def test_THE_BOOLEAN_AND_THE_COLOUR_ASK_ONE_QUESTION(panel):
     assert rows[1]["result_filled"] != rows[2]["result_filled"], (
         "both fixture rows landed on the same side; two identical rows cannot show that a "
         "`touchdown` key alone no longer decides this")
+
+
+# ── 🚨 v16: THE CHART TELLS THE TRUTH ABOUT A FIELD GOAL, AND THE GLYPHS ANSWER A HOVER ──
+
+def _fg(number, band, team, *, to_goal, **over):
+    """A made field goal whose published end position is `to_goal` yards from the goal."""
+    row = _drive(number, band, team, "FG", category="offensive score", key="field_goal",
+                 scoring_side="offense", scoring=True, **over)
+    row["end_yards_to_goal"] = to_goal
+    return row
+
+
+def test_A_FIELD_GOAL_FROM_BEYOND_THE_RECORD_IS_NOT_DRAWN(panel):
+    """> **MARC, v16:** *"FG for NC State doesn't look right… Would be something like a 70
+    > yeard FG."*
+
+    🚨 **HE IS RIGHT AND THE CAUSE IS UPSTREAM.** 📊 On live published serving, `end_yardline`
+    on a made field goal sits exactly on the kicking team's own 35 — the ensuing kickoff spot —
+    on **760 of 920 (82.6%) 2026 drives**, against **3 of 3,377 in 2024** and **5 of 3,474 in
+    2025**. ⚠️ **Every end column carries it**, so there is no right one to switch to, and
+    `start_yards_to_goal - yards` is the §4.2.1 arithmetic this file has already declined.
+
+    ✅ **SO THE PANEL DECLINES TO DRAW IT.** The longest made field goal in college football is
+    69 yards = **52 yards to goal**; beyond that the coordinate is not a kick position
+    (cfdb-wta-R-2720/R-2721).
+    """
+    frame = pd.DataFrame([
+        _fg(1, "home", "Alpha", to_goal=65, color="#101010"),   # the kickoff spot
+        _fg(2, "away", "Beta", to_goal=20, color="#efefef"),    # an ordinary 37-yard kick
+    ])
+    spec = _spec(panel(frame)[1])
+    bars = [n for n in _layers(spec, _FIELD) if _mark_of(n) == "rule" and "x2" in
+            (n.get("encoding") or {})]
+    drawn = {r["drive_number"] for n in bars for r in _rows(spec, n)}
+    assert 2 in drawn, (
+        "the ordinary field goal stopped being drawn — the threshold is suppressing a kick "
+        "that is perfectly possible, which is a worse defect than the one it fixes")
+    assert 1 not in drawn, (
+        "a field goal whose published end is 65 yards from the goal — an 82-yard attempt — is "
+        "still drawn; a reader can read a 70-yard field goal off this panel")
+
+
+def test_THE_SUPPRESSED_DRIVE_SAYS_WHICH_ABSENCE_IT_IS(panel):
+    """🚨 AC-G.11. **Two absences now share one layer and they are different facts.**
+
+    *"the end of this drive is not on the field"* and *"the published end is the kickoff spot"*
+    are not the same statement, and one note for both would tell a reader the wrong one on the
+    772 of 920 2026 field goals this round suppresses.
+    """
+    frame = pd.DataFrame([
+        _fg(1, "home", "Alpha", to_goal=65, color="#101010"),
+        _drive(2, "away", "Beta", "PUNT", category="punt", key="punt",
+               on_field=False, color="#efefef"),
+    ])
+    spec = _spec(panel(frame)[1])
+    notes = {r["drive_number"]: r["field_note"]
+             for n in _layers(spec, _FIELD) if _mark_of(n) == "text"
+             for r in _rows(spec, n) if "field_note" in r}
+    assert set(notes) == {1, 2}, (
+        f"the absence layer drew {sorted(notes)}; both drives must appear or one of the two "
+        f"absences is untested (R-2254)")
+    assert "kickoff" in notes[1], (
+        f"the field goal's note reads {notes[1]!r} — it must say the end is the kickoff spot")
+    assert "not on the field" in notes[2], (
+        f"the off-field drive's note reads {notes[2]!r}")
+    assert notes[1] != notes[2], "two different absences are drawing one sentence"
+
+
+def test_EVERY_LAYER_THAT_DRAWS_A_DRIVE_ANSWERS_WITH_THE_DRIVE(panel):
+    """> **MARC, v16:** *"Hover on the Glyphs is showing the color of the glyphs. I want the
+    > information about the drive."*
+
+    🚨 **THE `Result` COLUMN'S GLYPH CARRIED NO TOOLTIP, SO THE EMBED SHOWED ITS ENCODED
+    FIELDS** — `glyph_fill` and `result_shape`, which is literally the colour of the glyph
+    (cfdb-wta-R-2722).
+
+    ⚠️ **AND HE FOUND ONE BECAUSE HE HOVERED ONE.** The audit found the table's text cells
+    leaking `accent` and `clock` the same way, so this asserts the PROPERTY rather than the one
+    layer: **any layer whose encodings name a field must declare its own tooltip.**
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score", key="touchdown",
+               scoring_side="offense", scoring=True, color="#101010"),
+        _drive(2, "away", "Beta", "PUNT", category="punt", key="punt", color="#efefef")])
+    spec = _spec(panel(frame)[1])
+    leaks = []
+    for name, index in (("away table", _AWAY), ("field", _FIELD), ("home table", _HOME)):
+        for i, node in enumerate(_layers(spec, index)):
+            enc = node.get("encoding") or {}
+            if "tooltip" in enc:
+                continue
+            # a channel backed by a FIELD is what the default handler would show
+            fields = sorted(k for k, v in enc.items()
+                            if isinstance(v, dict) and "field" in v and k not in ("y", "y2"))
+            if fields:
+                leaks.append(f"{name} layer {i} ({_mark_of(node)}) leaks {fields}")
+    assert not leaks, (
+        "these layers declare no tooltip and encode fields, so hovering one shows the encoding "
+        "rather than the drive:\n  " + "\n  ".join(leaks))
+
+
+def test_THE_TABLES_GLYPH_AND_THE_FIELDS_BAR_ANSWER_WITH_ONE_VOCABULARY(panel):
+    """✅ §4.3 / R-855: *"Two copies that agree today are two copies that drift."*
+
+    ⚠️ **The fix for Marc's hover was NOT a second list.** The field's bars already carried the
+    lines a reader wants, so `_drive_tooltip()` is that list promoted to a producer — and this
+    asserts the table's glyph reaches the identical encoding rather than a look-alike.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "TD", category="offensive score", key="touchdown",
+               scoring_side="offense", scoring=True, color="#101010")])
+    spec = _spec(panel(frame)[1])
+    glyph = _only([n for n in _layers(spec, _HOME) if _mark_of(n) == "point"],
+                  "the home table's glyph layer")
+    bar = _only([n for n in _layers(spec, _FIELD)
+                 if _mark_of(n) == "rule" and "x2" in (n.get("encoding") or {})],
+                "the field's bar layer")
+    tips = (glyph.get("encoding") or {}).get("tooltip")
+    assert tips, "the table's glyph still has no tooltip — this is Marc's own report"
+    assert tips == (bar.get("encoding") or {}).get("tooltip"), (
+        "the table's glyph and the field's bar answer with different vocabularies")
+
+    # 🚨 EVERY FIELD IN THE TOOLTIP IS A PUBLISHED COLUMN ON THE FRAME (§4.2.1).
+    source = [r for n in _layers(spec, _FIELD) if _mark_of(n) == "rule"
+              and "x2" in (n.get("encoding") or {}) for r in _rows(spec, n)]
+    columns = set(source[0].keys()) if source else set()
+    assert columns, "no drawn row to read the frame's columns off (R-2254)"
+    for tip in tips:
+        assert tip["field"] in columns, (
+            f"the tooltip names {tip['field']!r}, which the frame does not carry")

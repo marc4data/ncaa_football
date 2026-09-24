@@ -3405,7 +3405,13 @@ def _circle_title(game, column, direction: str, week_row=None) -> str:
     #
     # ⚠️ **EVERY TEST PASSED.** The fixture's markup is asserted as a STRING in Python, before
     # Streamlit's markdown ever runs, so the suite cannot see this class at all —
-    # `test_THE_OVERLAY_SURVIVES_STREAMLITS_MARKDOWN` is the guard that can.
+    # ⚠️ **NO PURE-PYTHON TEST CAN WATCH THAT STEP** — `st.markdown` hands the raw
+    # string to the FRONTEND, which parses the Markdown in the browser.
+    # `test_NO_TOOLTIP_CONTAINS_A_BLANK_LINE_because_markdown_would_shatter_the_svg`
+    # guards the CAUSE; the symptom needs a render. ⚠️ **This line named
+    # `test_THE_OVERLAY_SURVIVES_STREAMLITS_MARKDOWN`, which B148 RENAMED after its
+    # break came back green — a comment naming a test that does not exist, corrected
+    # here under §3.2.3, which was written about this exact sentence.**
     if week_row is not None:
         bits.append(distribution.describe(week_row))
     return "\n".join(bits)
@@ -6390,6 +6396,73 @@ _DRIVE_BAND_BORDER_OPACITY = 0.30
 _DRIVE_BAND_BORDER_WIDTH = 0.5
 
 
+# ── 🚨🚨 v16: THE PANEL STOPS DRAWING A FIELD GOAL WHERE NO KICK COULD HAVE HAPPENED ────────
+#
+# > **MARC, v16:** *"FG for NC State doesn't look right. Looks like it was kicked from the 35 on
+# > the opposite side of the field. Would be something like a 70 yeard FG."*
+#
+# 🚨 **HE IS RIGHT, AND THE CAUSE IS UPSTREAM: IN 2026 `end_yardline` ON A MADE FIELD GOAL IS THE
+# ENSUING KICKOFF SPOT** — the kicking team's own 35 — **not where the kick was taken.**
+#
+# 📊 **MEASURED ON LIVE PUBLISHED SERVING, made field goals, by season:**
+#
+#     end_yardline sits exactly on the kicking team's own 35
+#       2024      3 / 3,377    0.1%
+#       2025      5 / 3,474    0.1%
+#       2026    760 /   920   82.6%      🚨 the current season
+#
+#     end_yardline agrees with start + the published gain
+#       2025  97.2%      2026  13.5%
+#
+# ⚠️ **AND EVERY END COLUMN CARRIES IT, SO THERE IS NO RIGHT ONE TO SWITCH TO.** On NC State's
+# kick: `end_yardline 65`, `end_yards_to_goal 65`, `end_yards_from_own_goal 35` — all three the
+# kickoff spot, while the kick itself was from 7 yards to goal.
+#
+# 🚨 **THE PAGE CANNOT COMPUTE THE TRUTH AND MUST NOT PRETEND TO.** `start_yards_to_goal - yards`
+# is arithmetic between two published columns, which §4.2.1 forbids and which this file has
+# already declined once for the gain-end tick. 📋 **The upstream ask is in the round's report.**
+#
+# ✅ **SO THE PANEL DECLINES TO DRAW IT, THROUGH THE ABSENCE IT ALREADY HAS.** `has_position` is
+# the one boolean every panel reads; a drive that fails it draws *"position unavailable"* with a
+# note saying why. **A mark in a place the data cannot support is worse than no mark.**
+#
+# ⚠️ **THE TEST IS A CODE CONSTANT AGAINST ONE PUBLISHED COLUMN, NEVER TWO COLUMNS AGAINST EACH
+# OTHER** (§4.2.1). **The longest field goal ever made in college football is 69 yards**, which is
+# 52 yards to goal once the 10-yard end zone and the 7-yard snap are taken off. **Beyond that no
+# made kick is possible**, so the coordinate is not a kick position.
+#
+# 📊 **WHAT THE THRESHOLD COSTS, MEASURED ON BOTH SIDES:** it suppresses **44 of 3,377 (1.3%)** in
+# 2024 and **21 of 3,474 (0.6%)** in 2025 — the same defect, rare — against **772 of 920 (83.9%)**
+# in 2026. ⚠️ **361 of the 394 2026 games that have a made field goal draw at least one false mark
+# today.**
+_DRIVE_FG_RECORD_YARDS_TO_GOAL = 52
+
+_DRIVE_FG_NOTE = (
+    "cfdb publishes this drive's end as the ensuing kickoff spot rather than where the kick "
+    "was taken, so the bar and the result mark are not drawn. The Yrds column is the drive's "
+    "own gain and is unaffected."
+)
+
+
+def _drive_end_is_impossible(row) -> bool:
+    """Whether a drive's published end position CANNOT be where its result happened.
+
+    🚨 **SCOPED TO MADE FIELD GOALS ON PURPOSE.** A punt, a turnover or a kneel-down
+    legitimately ends a long way from the goal the offence was attacking — **only a KICK has a
+    maximum range**, so only a kick's end coordinate can be falsified by distance alone.
+    ⚠️ **Widening this to every result would suppress 34,340 rows, nearly all of them correct.**
+
+    ⚠️ **`pd.isna` BEFORE `float()`, and the key read as a string** — the column is absent on a
+    frame built before B141 published `drive_result_key`, and NaN is truthy (R-121).
+    """
+    if fmt.text(row.get("drive_result_key")) != _DRIVE_MADE_KICK_KEY:
+        return False
+    to_goal = row.get("end_yards_to_goal")
+    if to_goal is None or pd.isna(to_goal):
+        return False
+    return float(to_goal) > _DRIVE_FG_RECORD_YARDS_TO_GOAL
+
+
 def _drive_field_x(yardline):
     """A published `yardline` placed on the 120-yard field. ONE expression, one home.
 
@@ -7560,6 +7633,47 @@ def _drive_bands(frame: pd.DataFrame, width: float) -> list:
         x=alt.value(0), x2=alt.value(width))]
 
 
+def _drive_tooltip() -> list:
+    """THE drive tooltip. **One vocabulary, every layer that draws a drive.**
+
+    > **MARC, v16:** *"Hover on the Glyphs is showing the color of the glyphs. I want the
+    > information about the drive."*
+
+    🚨 **HE HOVERED THE `Result` COLUMN'S GLYPH, WHICH CARRIED NO TOOLTIP OF ITS OWN.** 📊
+    Measured in the emitted spec: that layer declared `fill`, `shape`, `stroke`, `x` and `y`
+    and **no `tooltip`** — and `fill`, `shape` and `stroke` are FIELD encodings
+    (`glyph_fill`, `result_shape`, `glyph_ink`). **With no explicit list the embed's default
+    handler shows the encoded fields, so the hover really was the colour of the glyph**
+    (cfdb-wta-R-2722).
+
+    ✅ **THE FIX IS NOT A SECOND LIST.** The field's bars already carried exactly the lines a
+    reader wants, so this is that list promoted to a producer and called from every layer that
+    draws a drive. ⚠️ **A second vocabulary for one drive is how two hovers on one picture come
+    to disagree** — §4.3, and the defect B144 was spent on one panel over.
+
+    🚨 **EVERY ENTRY IS A PUBLISHED COLUMN ON THE FRAME OR A STRING COMPOSED FROM ONE**
+    (§4.2.1). Nothing here divides, subtracts or ranks.
+    """
+    return [alt.Tooltip("offense_team_display:N", title="Offense"),
+            alt.Tooltip("clock:N", title="Start"),
+            alt.Tooltip("duration:N", title="Duration"),
+            # 🚨 MARC'S ASK, AND THE LOGO HE SUGGESTED CANNOT LIVE HERE — measured, see
+            # `_drive_yardline_words`. The team's name does the job instead.
+            alt.Tooltip("yardline_words:N", title="Started on"),
+            alt.Tooltip("yards:Q", title="Yards gained", format="d"),
+            alt.Tooltip("drive_result:N", title="Result"),
+            # ── 🚨 v04 PART 4.1: THE SWING AND THE SCOREBOARD ARE TWO LINES ──────────
+            #
+            # > **MARC:** *"add a new line after Score Impact as Score and split the score to
+            # > that line, leave the +/- value on the score impact line."*
+            #
+            # ⚠️ **THE TABLE CELL KEEPS THEM TOGETHER AND THAT IS NOT AN INCONSISTENCY** —
+            # the cell has 47 measured pixels and one line; the tooltip has room for two.
+            # **Both read the same two published facts, so they cannot disagree.**
+            alt.Tooltip("impact_swing:N", title="Score impact"),
+            alt.Tooltip("score_line:N", title="Score")]
+
+
 def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Chart:
     """One field, goal line to goal line, both teams on it. THE PANEL THAT PINS y.
 
@@ -7608,7 +7722,11 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
     x_top = alt.X("x:Q", title=None,
                   scale=alt.Scale(domain=[0, _DRIVE_FIELD_YARDS], nice=False),
                   axis=_axis("top"))
-    top_axis = alt.Chart(gridlines).mark_rule(opacity=0).encode(x=x_top)
+    # ⚠️ v16: `tooltip=alt.value(None)` ON EVERY CHROME LAYER. An OMITTED tooltip is not
+    # silence — the embed falls back to the encoded fields, so this invisible axis
+    # carrier answered a hover with its own `x` (cfdb-wta-R-2722).
+    top_axis = alt.Chart(gridlines).mark_rule(opacity=0).encode(
+        x=x_top, tooltip=alt.value(None))
     # 🚨 **UNDER `resolve_axis(x="independent")` EVERY LAYER DRAWS ITS OWN AXIS, SO THE LAYERS
     # THAT ARE NOT AN AXIS MUST SAY SO — AND THAT IS THE SAME `axis=None` THAT BROKE v02.**
     #
@@ -7687,30 +7805,15 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
             range=list(_DRIVE_GRID_OPACITY.values())), legend=None),
         strokeWidth=alt.StrokeWidth("kind:N", scale=alt.Scale(
             domain=list(_DRIVE_GRID_WIDTH),
-            range=list(_DRIVE_GRID_WIDTH.values())), legend=None))
+            range=list(_DRIVE_GRID_WIDTH.values())), legend=None),
+        # a yard line is furniture: it has no drive to describe, so it says nothing
+        tooltip=alt.value(None))
 
     drawn = frame[frame["has_position"]]
     # 🚨 THE BAR IS A `mark_rule` WITH x AND x2 RATHER THAN A `mark_bar`, because y here is a
     # CONTINUOUS drive index: a bar mark on a quantitative y has no natural thickness and
     # Vega-Lite sizes it from the scale's step, which a 0.5-padded domain does not have.
-    tooltip = [alt.Tooltip("offense_team_display:N", title="Offense"),
-               alt.Tooltip("clock:N", title="Start"),
-               alt.Tooltip("duration:N", title="Duration"),
-               # 🚨 MARC'S ASK, AND THE LOGO HE SUGGESTED CANNOT LIVE HERE — measured, see
-               # `_drive_yardline_words`. The team's name does the job instead.
-               alt.Tooltip("yardline_words:N", title="Started on"),
-               alt.Tooltip("yards:Q", title="Yards gained", format="d"),
-               alt.Tooltip("drive_result:N", title="Result"),
-               # ── 🚨 v04 PART 4.1: THE SWING AND THE SCOREBOARD ARE TWO LINES ──────────
-               #
-               # > **MARC:** *"add a new line after Score Impact as Score and split the score to
-               # > that line, leave the +/- value on the score impact line."*
-               #
-               # ⚠️ **THE TABLE CELL KEEPS THEM TOGETHER AND THAT IS NOT AN INCONSISTENCY** —
-               # the cell has 47 measured pixels and one line; the tooltip has room for two.
-               # **Both read the same two published facts, so they cannot disagree.**
-               alt.Tooltip("impact_swing:N", title="Score impact"),
-               alt.Tooltip("score_line:N", title="Score")]
+    tooltip = _drive_tooltip()
     # ── 🚨 v04 PART 4.2: `On the field` IS GONE FROM HERE, AND THE REASON IS STRUCTURAL ───
     #
     # > **MARC:** *"What does On the field mean?"*
@@ -7837,7 +7940,8 @@ def _drive_field_chart(frame: pd.DataFrame, height: int, width: int) -> alt.Char
             color=_drive_endzone_ink(fill), opacity=0.9).encode(
             x=alt.value(float(width) * span / (_DRIVE_FIELD_YARDS / _DRIVE_ENDZONE)),
             y=alt.value(float(height) / 2.0),
-            text=alt.Text("m:N")))
+            # the end-zone name is furniture too — it described no drive and leaked `m`
+            text=alt.Text("m:N"), tooltip=alt.value(None)))
 
     layers = _drive_bands(frame, float(width)) + [
         zone_fill, field, top_axis] + mascots + bars + [icons]
@@ -8224,14 +8328,15 @@ def _drive_table_chart(frame: pd.DataFrame, band: str, height: int,
             layers.append(alt.Chart(side[has_logo]).mark_image(
                 width=12, height=12, align="right", baseline="middle").encode(
                 x=alt.value(x_px - 12.0), y=_drive_y_shared(),
-                url=alt.Url("yardline_logo:N")))
+                url=alt.Url("yardline_logo:N"), tooltip=_drive_tooltip()))
             # 📊 The rows with no logo — midfield (634 drives, 0.747%) and the ~0.9% whose
             # team publishes no logo url — keep Marc's other encoding rather than a hole.
             layers.append(alt.Chart(side[~has_logo]).mark_text(
                 align=align, fontSize=_DRIVE_ROW_FONT, baseline="middle",
                 limit=limit).encode(
                 x=alt.value(x_px), y=_drive_y_shared(),
-                text=alt.Text("yardline_mark:N"), color=alt.value("currentColor")))
+                text=alt.Text("yardline_mark:N"), color=alt.value("currentColor"),
+                tooltip=_drive_tooltip()))
             text = alt.Text("yardline_number:N")
             text_rows = side[has_logo]
         if key == "result":
@@ -8257,17 +8362,27 @@ def _drive_table_chart(frame: pd.DataFrame, band: str, height: int,
             # read that one column — so `is_scoring_drive` as the authority, `scoring_side`
             # for whose points, and `identity.FALLBACK` for the 143 side-less scoring
             # drives are settled in one place and cannot disagree between the two.
+            # 🚨🚨 v16: THIS LAYER IS THE ONE MARC HOVERED, AND IT HAD NO TOOLTIP.
+            # Its `fill`, `shape` and `stroke` are FIELD encodings, so the embed's default
+            # handler showed `glyph_fill` and `result_shape` — **literally the colour of the
+            # glyph** (cfdb-wta-R-2722). `_drive_tooltip()` is the field bars' own list.
             layers.append(alt.Chart(marked).mark_point(
                 size=_DRIVE_GLYPH_SIZE, strokeWidth=1.4).encode(
                 x=alt.value(left + _DRIVE_GLYPH_CELL / 2), y=_drive_y_shared(),
                 shape=alt.Shape("result_shape:N", scale=None, legend=None),
                 fill=alt.Fill("glyph_fill:N", scale=None, legend=None),
-                stroke=_drive_glyph_stroke()))
+                stroke=_drive_glyph_stroke(),
+                tooltip=_drive_tooltip()))
+        # ⚠️ **AND EVERY TEXT CELL TOO — THE AUDIT FOUND MORE THAN THE ONE MARC HOVERED.**
+        # A cell's `text` is a field and the `Result` cell's `color` is `accent`, so a bare
+        # hover here leaked `clock`, `yards` or a hex colour. **A reader who hovers any part
+        # of a row now gets the same account of the drive.**
         layers.append(alt.Chart(text_rows).mark_text(
             align=align, fontSize=_DRIVE_ROW_FONT, baseline="middle", limit=limit).encode(
             x=alt.value(x_px), y=_drive_y_shared(), text=text,
             color=alt.Color("accent:N", scale=None, legend=None)
-            if key == "result" else alt.value("currentColor")))
+            if key == "result" else alt.value("currentColor"),
+            tooltip=_drive_tooltip()))
         # The heading sits at a NEGATIVE pixel y for A156's reason: it is chrome, not a drive.
         # ⚠️ `head_x` AND `head_align`, NOT THE CELL'S — see `_DRIVE_COLUMN_PLAN`.
         layers.append(alt.Chart(side.head(1)).mark_text(
@@ -8426,16 +8541,21 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
         bool(row.get("is_end_on_field"))
         and not pd.isna(row.get("start_yardline"))
         and not pd.isna(row.get("end_yardline"))
+        and not _drive_end_is_impossible(row)
         for _i, row in frame.iterrows()]
     frame["x"] = frame["start_yardline"].map(_drive_field_x)
     frame["x_end"] = frame["end_yardline"].map(_drive_field_x)
     # 🚨 v04: THE WORDING IS WHAT A READER SEES, NOT THE NAME OF A FLAG. Marc asked what *"On
     # the field"* meant, and the old value — `yes` — was the answer to a question nobody asked.
     # 📋 **A PROPOSAL: it is his panel and his word that it was unclear.**
+    # 🚨 v16: TWO ABSENCES NOW, AND THEY ARE DIFFERENT FACTS (AC-G.11). *"the end is off the
+    # field"* and *"the published end position cannot be where this kick happened"* are not the
+    # same statement, and one note for both would tell a reader the wrong one 772 times.
     frame["field_note"] = [
         "yes" if ok else
-        "the end of this drive is not on the field, so no bar is drawn"
-        for ok in frame["has_position"]]
+        (_DRIVE_FG_NOTE if _drive_end_is_impossible(row)
+         else "the end of this drive is not on the field, so no bar is drawn")
+        for ok, (_i, row) in zip(frame["has_position"], frame.iterrows())]
     # ── v04 PART 4.1: the two tooltip lines, from the same two facts as the table cell ────
     frame["impact_swing"] = [
         fmt.EM_DASH if impact is None or pd.isna(impact)
@@ -8906,6 +9026,14 @@ def _drives(game_id, season, row) -> None:
         # Single table, single WHERE, always by game_id. THE LIMIT IS THE CONTRACT, NOT
         # DECORATION — lib.query rejects an unbounded select outright (AC-G.39). 200 is far
         # above the measured ceiling: the longest game in 84,838 rows carries 38 drives.
+        # 🚨 v16: `end_yards_to_goal` IS READ BY `_drive_end_is_impossible` AND WAS NOT
+        # SELECTED. `ci/check_page_reads.py` caught it: `row.get()` returns None on every real
+        # page load, so the predicate would have answered False for every drive and **the fix
+        # would have shipped doing NOTHING while its tests passed**, because the fixture
+        # carries the column (cfdb-wta-R-2721).
+        # ⚠️ **AND THE EXPLANATION LIVES HERE RATHER THAN INSIDE THE SQL**: a `--` comment in
+        # the select list makes that checker's parse miss the columns after it, so the guard
+        # went on failing with the column already added.
         df = query("""
             select drive_id,
                    drive_number, band, band_order, is_home_offense,
@@ -8919,6 +9047,7 @@ def _drives(game_id, season, row) -> None:
                    start_period, start_clock_display,
                    start_yardline, end_yardline,
                    start_yards_from_own_goal, end_yards_from_own_goal,
+                   end_yards_to_goal,
                    start_offense_score, end_offense_score,
                    start_defense_score, end_defense_score,
                    is_end_on_field, is_negative_drive,
