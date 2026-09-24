@@ -4055,3 +4055,36 @@ def test_THE_CAPTION_NAMES_THE_SEASON_it_is_talking_about():
         "the caption still carries the all-season average it was corrected away from")
     assert "punt" in note.lower(), (
         "the caption names returns but not punts, which is the case Marc actually met")
+
+
+def test_THE_FRAME_FEEDS_THE_END_WORDS_FROM_THE_END_COLUMN(panel):
+    """🚨🚨 **THIS EXISTS BECAUSE A STAGED BREAK CAME BACK GREEN** (R-744).
+
+    `test_THE_HOVER_NAMES_WHERE_THE_BAR_ENDS…` checks the tooltip names `end_yardline_words`,
+    and `test_THE_END_WORDS_READ_THE_END_COLUMN…` checks the producer honours its parameter.
+    ⚠️ **Neither can see the wiring between them.** Point `_drive_frame` at
+    `start_yards_from_own_goal` and the tooltip still declares the right FIELD NAME carrying
+    the wrong CONTENT — the hover prints the drive's start twice and both tests stay green.
+
+    ✅ **SO THIS ASSERTS THE DRAWN ROWS**, on a fixture whose two ends differ, which is the only
+    place the mistake is visible (cfdb-wta-R-2901).
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", key="punt",
+               start=25, end=71, color="#101010")])
+    spec = _spec(panel(frame)[1])
+    bar = _only([n for n in _layers(spec, _FIELD)
+                 if _mark_of(n) == "rule" and "x2" in (n.get("encoding") or {})],
+                "the field's bar layer")
+    rows = _rows(spec, bar)
+    assert rows, "no drawn row, so nothing is tested (R-2254)"
+    row = rows[0]
+    for key in ("yardline_words", "end_yardline_words"):
+        assert key in row, f"the frame does not carry {key!r}"
+    assert row["start_yards_from_own_goal"] != row["end_yards_from_own_goal"], (
+        "the fixture's two ends are the same, so this test cannot tell them apart (R-744)")
+    assert row["end_yardline_words"] != row["yardline_words"], (
+        f"the bar's end and its start render the same words "
+        f"({row['end_yardline_words']!r}) on a drive that started at "
+        f"{row['start_yards_from_own_goal']} and ended at {row['end_yards_from_own_goal']} — "
+        f"`_drive_frame` is feeding the end words from the START column")
