@@ -660,7 +660,34 @@ TABLE_CSS = """
      is 2.27:1 against a white page, under the 4.5:1 floor, and that is PRE-EXISTING and
      reported rather than fixed in passing. */
   --cfdb-u1:   light-dark(#d9a406, #e8b931);
-  --cfdb-u2:   light-dark(#5f5f67, #7b7b83);
+  /* 🚨 A223 (cfdb-main-R-2628). THE 8-14 BAND IS LIGHTENED 25% TOWARD ITS OWN PAGE.
+     > **MARC, v16:** *"Upset by 8-14 is too dark, not very discernable from Upset by 15+ by
+     > shade. Reduce the darkness by 25%, maybe 50%"*
+     📊 THE WHOLE LADDER, RESOLVED IN A BROWSER AGAINST THE REAL PAGE — and the first probe
+     got the ground wrong, which is worth recording: the app container is TRANSPARENT, so
+     reading its `backgroundColor` returned `rgba(0,0,0,0)` and every "vs page" figure was
+     computed against BLACK in both themes. Walk up to something that paints.
+         light  page #ffffff   u1 #d9a406 2.27:1   u2 #5f5f67 6.33:1   u3 #16191d 17.63:1
+         dark   page #0e1117   u1 #e8b931 10.27:1  u2 #7b7b83 4.50:1   u3 #f2f5f8 17.27:1
+         steps  light u1|u2 2.79  u2|u3 2.79       dark u1|u2 2.28  u2|u3 3.84
+     ⚠️ A211 BALANCED THOSE TWO STEPS DELIBERATELY, AND THE LADDER IS LUMINANCE-SATURATED:
+     white -> amber -> gray -> near-black is the whole range, so widening one gap narrows the
+     other. **Moving u2 up cannot be free.**
+     ✅ IT IS STILL THE RIGHT TRADE, AND THE REASON IS WHAT SEPARATES EACH PAIR. `u2` and `u3`
+     are both NEUTRAL GRAYS — luminance is the only signal they have. `u1` is AMBER, so `u1|u2`
+     carries a hue difference as well. **Spend luminance where luminance is all there is.**
+         25%  light u2 #87878d  vs page 3.57   u1|u2 1.58   u2|u3 2.79 -> 4.94
+              dark  u2 #606068  vs page 3.03   u1|u2 2.28 -> 3.39      u2|u3 3.84 -> 5.69
+         50%  light u2 #afafb3  vs page 2.19   dark #44464d  vs page 2.01
+     🚨 **50% IS REJECTED BY MEASUREMENT, NOT BY TASTE: it puts the glyph under 3:1 against its
+     own page in both themes** — WCAG 1.4.11's floor for a non-text graphical object, which is
+     what a filled circle is. 25% clears it in both (3.57 and 3.03). ⚠️ A211 applied the 4.5:1
+     TEXT floor to this glyph; the applicable one for a shape is 3:1, and that is why 25% ships.
+     🚨 AND "TOWARD THE PAGE" IS NOT "LIGHTER" IN BOTH THEMES — R-547's lesson. In light mode
+     it lightens; in dark mode the page is #0e1117, so the same move DARKENS. **Both directions
+     mean less ink against the ground the reader is looking at**, and both improve the pair
+     Marc named. The dark theme is not the mirror of the light one. */
+  --cfdb-u2:   light-dark(#87878d, #606068);
   --cfdb-u3:   light-dark(#16191d, #f2f5f8);
 }
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
@@ -1294,9 +1321,29 @@ TABLE_CSS = """
    🚨 AN UNRANKED CARD IS UNCHANGED BY CONSTRUCTION — logo on line 1, abbreviation on line 2,
    which is exactly the two bands it already had. 138 of 150 cards are unranked and none of
    them moves (AC-G.28's principle, measured rather than asserted). */
+/* 🚨 A223 (cfdb-main-R-2626). THE LINE BREAK MOVED OFF THE PAINTED BOX.
+   A221 put `flex:0 0 100%` on `.cfdb-logo-box` to make the logo claim the first line. The
+   LAYOUT was right — rank on the abbreviation's line, 8 of 8 ranked, unranked unmoved — and
+   the target was wrong: **`.cfdb-logo-box` is the painted element.** It carries
+   `border-radius:50%` and a gray background from its base rule while the `<img>` keeps its own
+   18px inline size, so the disc stretched into a pill with the mark at its left edge.
+   📊 MEASURED ON ALL 150 CARDS BEFORE THIS FIX: painted box 41.66..57.59 wide x 18 tall —
+   **square on 0 of 150.** It is visible in A221's own after-crop, which was taken and not read.
+
+   ✅ A ZERO-HEIGHT PSEUDO-ELEMENT CLAIMS THE LINE INSTEAD, ordered between the logo and the
+   badge. Nothing painted is resized: the box goes back to its natural 18x18 and the break
+   happens after it.
+   ⚠️ BOTH CONTAINERS, because both shapes occur (A191): `_team_identity` wraps in an anchor
+   only when the row has a slug, so a team without one renders the logo directly inside
+   `.cfdb-identity`. A rule naming one of the two fixes most cards and leaves the rest.
+   ⚠️ AND `order` IS SET ON EVERY ITEM, not just the break. An item with no `order` defaults to
+   0 and would sort BEFORE the pseudo-element whatever the source order says. */
+.cfdb-card-team .cfdb-identity::before,
+.cfdb-card-team .cfdb-teamlink::before { content:''; order:2; flex:0 0 100%; height:0; }
 .cfdb-card-team .cfdb-logo-box,
-.cfdb-card-team .cfdb-monogram-empty { flex:0 0 100%; }
-.cfdb-card-team .cfdb-team { flex:0 1 auto; font-size:.68rem; }
+.cfdb-card-team .cfdb-monogram-empty { order:1; }
+.cfdb-card-team .cfdb-rank { order:3; }
+.cfdb-card-team .cfdb-team { order:4; flex:0 1 auto; font-size:.68rem; }
 
 .cfdb-card { min-width:0; padding:.4rem .45rem; border:1px solid var(--cfdb-edge);
              border-left:2px solid var(--cfdb-edge);

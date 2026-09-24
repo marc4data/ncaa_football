@@ -139,3 +139,53 @@ def teams_suffix(row) -> Optional[str]:
     if not away or not home:
         return None
     return f"{away} @ {home}"
+
+
+# 🚨 A223 (cfdb-main-R-2627). THE ROUTE'S OWN SUFFIX, RESOLVED IN THE SHELL.
+#
+# > **MARC, v16:** *"Match - tab name, can we team Abbr to the tab? Otherwise, I've got 10 M4D -
+# > Matchup tabs for 10 different games, that all look the same"*
+#
+# 🚨 `teams_suffix` ABOVE WAS BUILT FOR EXACTLY THIS BY A130 AND NOTHING HAS EVER CALLED IT.
+# 📊 `git grep teams_suffix` at `bdc41ba`: its own definition, four mentions in comments, eight
+# assertions in `tests/test_tab_title.py` — and **zero call sites.** `matchup.py`'s own docstring
+# says A130 *"reached the same conclusion independently"*, and `app.py`'s says a page with more
+# to say refines the title *"see views/today.py, and Matchup's team abbreviations"*. **Today does.
+# Matchup never did.** That is §2.5's class — a capability that exists, is tested, and is silent.
+#
+# ⚠️ SO THE CALL GOES IN THE SHELL, NOT IN `matchup.py`, WHICH IS SESSION B's (§3.2.2). The page
+# would be the natural home and reaching into another session's file for a browser title is not
+# worth the crossing. `app.py` already knows which route it resolved and the game is in the URL.
+#
+# 🚨 AND IT SWALLOWS EVERYTHING, FOR THE REASON `set_title` DOES — measured by A130 in a browser,
+# not reasoned about. This runs OUTSIDE any page body, so `states.section` never sees an
+# exception: an unguarded failure here does not draw an Error card, **it kills the site** and
+# prints a traceback with absolute filesystem paths on screen (AC-G.9).
+# `claude_work/renders/A130_unguarded_title_failure.png` is the picture.
+def route_suffix(url_path: Optional[str]) -> Optional[str]:
+    """`USM @ AUB` when the reader is on a Matchup with a game, else None.
+
+    ⚠️ ONE SINGLE-TABLE SELECT ON A RELATION THE PAGE ALREADY READS, and §4.2.1 is not
+    engaged: joining two published strings creates no quantity — `teams_suffix`'s own note.
+    `query` is `@st.cache_data`-wrapped, so a reader clicking between tabs pays once.
+    """
+    try:
+        if url_path != "matchup":
+            return None
+        from lib import params
+        from lib.query import query
+        game_id = params.get("game_id")
+        if not game_id:
+            return None
+        df = query("""
+            select away_abbreviation, home_abbreviation, away_team, home_team
+            from srv_game
+            where game_id = :game_id
+            limit 1
+        """, {"game_id": int(game_id)})
+        if df is None or df.empty:
+            return None
+        return teams_suffix(df.iloc[0])
+    except Exception:                                              # noqa: BLE001
+        # ⚠️ A TAB WITHOUT ITS TEAMS IS A COSMETIC LOSS. A dead shell is not.
+        return None

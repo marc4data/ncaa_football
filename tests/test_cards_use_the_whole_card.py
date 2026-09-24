@@ -229,10 +229,19 @@ def test_the_logo_claims_the_first_line_so_the_rank_joins_the_abbreviation():
         was   line 1  [logo] #1        after   line 1  [logo]
               line 2  TEX                      line 2  #1 TEX
     """
+    # 🚨 A223 RE-AIMED THIS, AND A221's VERSION IS WHY THE DEFECT SHIPPED. It asserted
+    # `flex:0 0 100%` on `.cfdb-logo-box` — **the painted element** — so the test passed on a
+    # 57.6 x 18 grey pill. 📊 Square on 0 of 150 cards, and the assertion was green throughout.
+    # The invariant is *something claims the line*, never *the disc claims the line*.
+    breaker = rule(".cfdb-card-team .cfdb-identity::before,")
+    assert re.search(r"flex\s*:\s*0 0 100%", breaker), breaker
+    assert "height:0" in breaker.replace(" ", ""), (
+        "the line breaker must paint nothing; a sized one is the pill again")
     logo = rule(".cfdb-card-team .cfdb-logo-box,")
-    assert re.search(r"flex\s*:\s*0 0 100%", logo), logo
+    assert not re.search(r"flex\s*:\s*0 0 100%", logo), (
+        f"the painted box must never claim the line — that is the A221 regression: {logo}")
     assert ".cfdb-monogram-empty" in logo, (
-        "a team with no logo renders a different class and must claim the row too (AC-G.28)")
+        "a team with no logo renders a different class and must be ordered too (AC-G.28)")
     name = rule(".cfdb-card-team .cfdb-team {")
     assert not re.search(r"flex\s*:\s*0 0 100%", name), (
         "the name claiming the row pushes the rank back onto the logo's line")
