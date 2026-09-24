@@ -5522,3 +5522,111 @@ models:
           is stated per row rather than assumed - the whiskers look like the range and are not.
       - name: as_of_ts
         description: When the game domain was last refreshed.
+
+  # A214. The KPI row's one row. Grain (season, season_type, week) - division is deliberately
+  # NOT in the key; `fct_week_summary` carries the reasoning and the consequence.
+  - name: srv_week_summary
+    description: >
+      One row per week with the seven figures the KPI strip above Most Exciting shows, each
+      published with its own denominator and its own excluded count. Population is every game
+      with an FBS team on either side, which is the same population the week's O/U distribution
+      is built from so a KPI cannot disagree with its own thumbnail.
+    columns:
+      - name: season
+        description: The season these games belong to.
+        tests: [not_null]
+      - name: season_type
+        description: >
+          regular or postseason. Part of the key because postseason week numbers restart, so
+          season plus week alone would collide.
+        tests: [not_null]
+      - name: week
+        description: The week number within the season type.
+        tests: [not_null]
+      - name: fbs_games
+        description: >
+          Distinct games with an FBS team on either side. An FBS-vs-FCS game counts, which is
+          Marc's own definition of the population.
+        tests: [not_null]
+      - name: fbs_games_completed
+        description: How many of those games have been played.
+        tests: [not_null]
+      - name: over_under_mean
+        description: >
+          Mean closing total across the games that have one. Null when no game in the week
+          carries a closing total, rather than zero.
+      - name: over_under_games
+        description: The denominator behind over_under_mean - games carrying a closing total.
+        tests: [not_null]
+      - name: over_under_missing
+        description: Games in the population with no closing total, so excluded from the mean.
+        tests: [not_null]
+      - name: favorite_straight_up_wins
+        description: Completed games where the closing favorite won outright.
+        tests: [not_null]
+      - name: favorite_straight_up_games
+        description: >
+          The denominator - completed games with a closing favorite. Excludes pick'ems and
+          games with no closing spread, both of which are counted separately.
+        tests: [not_null]
+      - name: favorite_straight_up_pickems
+        description: >
+          Completed games closing at exactly zero. Neither side is favorite, so they are out
+          of the denominator and counted here instead of silently joining one side.
+        tests: [not_null]
+      - name: favorite_straight_up_no_line
+        description: Completed games with no closing spread at all, a different absence from a pick'em.
+        tests: [not_null]
+      - name: favorite_straight_up_rate
+        description: >
+          favorite_straight_up_wins over favorite_straight_up_games. Null when the denominator
+          is zero - a week nobody has played has no rate, and zero would draw a bar at the floor.
+      - name: favorite_ats_covers
+        description: Completed games where the closing favorite covered.
+        tests: [not_null]
+      - name: favorite_ats_games
+        description: The denominator - games that resolved to a cover or a fail. Pushes are excluded.
+        tests: [not_null]
+      - name: favorite_ats_pushes
+        description: >
+          Games landing exactly on the closing spread. A push is not a cover and not a fail, so
+          it leaves the denominator and is published on its own.
+        tests: [not_null]
+      - name: favorite_ats_no_line
+        description: Completed games with no closing spread to judge a cover against.
+        tests: [not_null]
+      - name: favorite_ats_rate
+        description: favorite_ats_covers over favorite_ats_games. Null when the denominator is zero.
+      - name: overs
+        description: Completed games whose total points exceeded the closing total.
+        tests: [not_null]
+      - name: over_under_decided_games
+        description: The denominator - games that resolved to an over or an under.
+        tests: [not_null]
+      - name: total_pushes
+        description: Games landing exactly on the closing total, excluded from the denominator.
+        tests: [not_null]
+      - name: total_no_line
+        description: Completed games with no closing total to judge an over against.
+        tests: [not_null]
+      - name: over_rate
+        description: overs over over_under_decided_games. Null when the denominator is zero.
+      - name: winning_points_mean
+        description: >
+          Mean points scored by the winning side across completed games. The distribution behind
+          it is srv_week_metric_distribution, metric winning_points.
+      - name: losing_points_mean
+        description: >
+          Mean points scored by the losing side. Shares an axis_group with winning_points so the
+          two distributions are drawn on the same bounds and can be compared.
+      - name: undefeated_teams_lost
+        description: >
+          Teams that entered the week undefeated and lost in it, counted as TEAMS. Two undefeated
+          sides meeting produces exactly one. Undefeated means the record spine shows no losses,
+          no ties and at least one win leading into the week.
+        tests: [not_null]
+      - name: undefeated_teams_entering
+        description: >
+          The denominator - teams that entered the week undefeated by that definition.
+        tests: [not_null]
+

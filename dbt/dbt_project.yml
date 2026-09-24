@@ -225,3 +225,17 @@ vars:
     market_implied_favorite_points: {min: 0,   max: 60}
     market_implied_underdog_points: {min: 0,   max: 60}
     temperature_f:                  {min: 15,  max: 105}
+    # A214. THE TWO OUTCOME MEASURES MARC ASKED TO SEE SIDE BY SIDE.
+    #
+    # > **MARC, v14:** *"histograms/box-whiskers of Winning Scores vs Losing Scores"*
+    #
+    # 🚨 0-80 FOR BOTH, AND THE SHARED RANGE IS THE WHOLE POINT. Drawn on their own bounds the
+    # two pictures would look alike - a losing-score distribution rescaled to its own max reads
+    # like a winning one. Sharing the domain is what puts the winning distribution visibly to
+    # the right of the losing one, which is the comparison he is asking for.
+    #
+    # ⚠️ THIS IS `axis_group` EXPRESSED THROUGH IDENTICAL BOUNDS RATHER THAN THROUGH THE COLUMN
+    # THE STANDARD ASKS FOR - see `week_distribution_axis_group` below for what is and is not
+    # shipped, and why.
+    winning_points:                 {min: 0,   max: 80}
+    losing_points:                  {min: 0,   max: 80}

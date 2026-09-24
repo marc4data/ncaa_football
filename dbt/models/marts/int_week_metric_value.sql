@@ -94,7 +94,9 @@ valued as (
         -- conditions at the venue's LOCATION, not inside it, so a domed game carries ordinary
         -- outdoor readings. `fct_game_weather` says so in its own header. Including them puts
         -- a number in the distribution that is true about the car park.
-        case when is_indoors is not true then temperature_f end  as temperature_f
+        case when is_indoors is not true then temperature_f end  as temperature_f,
+        winning_points,
+        losing_points
     from games
 )
 

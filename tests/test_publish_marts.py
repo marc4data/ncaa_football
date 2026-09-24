@@ -408,10 +408,16 @@ def test_every_table_the_scores_dag_publishes_is_one_it_builds():
     """
     assert set(publish_marts.SCORES_HOT) <= set(publish_marts.HOT_SERVING)
     assert set(publish_marts.DISTRIBUTION_HOT) <= set(publish_marts.HOT_SERVING)
-    # The 14 hot tables no gated DAG rebuilds must be shipped by neither.
+    # The hot tables no gated DAG rebuilds must be shipped by neither.
     gated = set(publish_marts.SCORES_HOT) | set(publish_marts.DISTRIBUTION_HOT)
-    # 13 in A184; 14 since A185 added srv_drive to the game-day build.
-    assert len(gated) == 14, f"expected 14 gated-published hot tables, got {sorted(gated)}"
+    # 13 in A184; 14 since A185 added srv_drive to the game-day build; 15 since A214 added
+    # srv_week_summary, whose every figure moves when a score lands and which therefore rides
+    # the SCORES cadence rather than the weekly one.
+    #
+    # ⚠️ THE BOUND IS RAISED DELIBERATELY AND WITH ITS REASON, WHICH IS THE POINT OF PINNING IT.
+    # A count that is edited to match whatever the code now does is not a test; this one exists
+    # so a table cannot join the hot publish without somebody saying why in this comment.
+    assert len(gated) == 15, f"expected 15 gated-published hot tables, got {sorted(gated)}"
 
 
 def test_the_box_relations_and_the_hot_subset_ship_in_one_locked_call():

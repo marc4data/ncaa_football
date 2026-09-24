@@ -95,7 +95,10 @@ SCHEDULE = "0 */2 * * *"
 # two-hourly refresh. dbt does not mind a duplicate selector, which is why it never surfaced.
 # Deduplicated because a selector that says one thing four times is a selector nobody reads.
 SCORES_SELECTOR = (
-    "--select +srv_game +srv_team_game_log"
+    # A214. `+srv_week_summary` pulls fct_week_summary and the record spine it reads. It rides
+    # the SCORES cadence because every figure on it moves when a score lands - a week-old
+    # "% of favourites that covered" beside fresh scores is the R-878 shape.
+    "--select +srv_game +srv_team_game_log +srv_week_summary"
     # WEATHER IS FETCHED BY THE LINES DAG AND BUILT HERE, exactly as lines themselves are:
     # that DAG lands raw and this one is where dbt runs and the site is published.
     # Refreshing the raw every four hours while rebuilding the model weekly would leave the

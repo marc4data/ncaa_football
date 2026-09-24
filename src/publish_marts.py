@@ -191,6 +191,9 @@ DEFAULT_SERVING = [
     # every time a line moves, and a week-old distribution on a live page is worse than none.
     "srv_week_metric_distribution",
     "srv_week_metric_distribution_bin",
+    # A214. One row per week; it rides the hot publish for the same reason the distributions do
+    # — every figure on it moves when a score lands.
+    "srv_week_summary",
     "srv_team_roster",
     "srv_game_travel",
     "srv_edge_bucket_performance",
@@ -480,6 +483,9 @@ SCORES_HOT = [
     "srv_team_week",
     "srv_team_week_metric_distribution",
     "srv_teams_index",
+    # A214. Held equal to SCORES_SELECTOR by ci/check_publish_build_agreement.py — the guard
+    # that exists because two lists which must agree had nothing checking that they did.
+    "srv_week_summary",
 ]
 
 # ⚠️ `srv_team_week_metric_distribution` IS DELIBERATELY NOT HERE. It looks like it belongs —
