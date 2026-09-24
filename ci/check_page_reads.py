@@ -66,7 +66,14 @@ NOT_A_ROW = {"params", "os", "environ", "st", "config", "session_state",
              # relation's columns, so reading them is not a row read. The receiver belongs
              # here rather than its five keys in PROVIDED_BY_THE_PAGE, which is what that
              # list's own size guard is for.
-             "opponent"}
+             "opponent",
+             # A216: `by_metric` is a dict `today._kpi_row` builds from the distribution
+             # query's rows, keyed by the METRIC NAME — 'total', 'winning_points',
+             # 'losing_points'. Those are values in a `metric` column, not columns
+             # themselves, so `by_metric.get("total")` is a lookup and not a row read. Same
+             # shape as `opponent` above, and for the same reason the RECEIVER is listed
+             # here rather than its three keys in PROVIDED_BY_THE_PAGE.
+             "by_metric"}
 
 # ⚠️ NAMES A PAGE LEGITIMATELY READS THAT NO QUERY SELECTS. One entry, one reason, no blanket.
 # To add one you must be able to finish "the page reads this and no query selects it because…".

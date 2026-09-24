@@ -33,6 +33,35 @@ select
     s.team,
     s.team_id,
     s.conference,
+    -- ── A216 (cfdb-main-R-2605). THE TEAM IDENTITY THE PLAYER CARD DRAWS ───────────────────
+    --
+    -- 🚨 EXPAND, AND THE MIGRATE IS A LATER ROUND'S (§3.3). Nothing reads these yet. They are
+    -- published so that Today's All-weeks player boards can move off `srv_player_game_log`,
+    -- which is the fix for a board that RANKS by a player's best single game and PRINTS a
+    -- different one — A213 found it, A214 measured it (4 of 10 cards on QB Touchdowns), and
+    -- it is still live.
+    --
+    -- 🚨 AND THE REASON IT IS AN EXPAND RATHER THAN A SWAP IS A CORRECTION OF A214's OWN
+    -- REPORT. A214 said this view carried *"every identity column the card draws"*. 📊 It
+    -- carried `team` and `team_id` and NOT the logo, the abbreviation or the two colours —
+    -- measured against `information_schema`, which is where that claim should have been
+    -- checked the first time (§2.2.1c.2). A same-round swap would have asked the deployed
+    -- page for columns the parallel pipeline half had not published yet; `deploy_main.sh`
+    -- runs its two halves concurrently and the site image builds in ~33s against a ~15 minute
+    -- dbt build, so the window is real and it is the board's whole width.
+    --
+    -- ⚠️ THE COST IS MEASURED AND IT IS NOT FREE: the same five columns on
+    -- `srv_player_game_log` are 120.3 MB over 1.48M rows, so on this view's 1.53M rows they
+    -- add ~125 MB to a publish that dumps 1,925 MB (+6.5%). That is the denormalisation the
+    -- display-only contract buys — one relation per query (G-2), no page-side join — and it
+    -- is the same trade `srv_player_game_log` already makes for the same cards.
+    --
+    -- ⚠️ `abbreviation` IS NULL FOR SOME TEAMS, so the page falls back to the display name
+    -- exactly as the game log's consumer does. An absence must not read as a blank.
+    dt.abbreviation                                            as team_abbreviation,
+    dt.logo_source_url                                         as team_logo_url,
+    dt.color_on_light,
+    dt.color_on_dark,
     s.stat_category,
     s.stat_type,
     s.stat_value,
@@ -85,6 +114,11 @@ select
     ao.as_of_ts
 from {{ ref('fct_player_season_stat') }} s
 cross join (select as_of_ts from {{ ref('mart_as_of') }} where domain = 'player_stats') ao
+-- ⚠️ SEASON-SCOPED, LIKE THE GAME LOG's. `dim_team` is one row per (season, team_id) — a
+-- team's colours and logo can change between seasons — so joining on team_id alone would
+-- multiply every stat row by the number of seasons that team exists in. A216.
+left join {{ ref('dim_team') }} dt
+    on dt.season = s.season and dt.team_id = s.team_id
 )
 select
     ranked.*,

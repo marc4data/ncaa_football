@@ -48,6 +48,9 @@ DATASETS = {
     "srv_game_weather": "Kickoff weather",
     "srv_game_travel": "Travel and rest",
     "srv_drive": "Drive-by-drive log",
+    # A216: the KPI row above Most Exciting, and the pictures under three of its numbers.
+    "srv_week_summary": "The week in one row",
+    "srv_week_metric_distribution": "Distributions, by week",
     # --- shipped by the Excel export (A173, cfdb-main-R-1701) ----------------------------
     # ⚠️ REGISTERED BECAUSE THE WORKBOOK SHIPS THEM, not because a page reads them. A sheet
     # names its source view to the reader, and an unregistered view has no honest label —

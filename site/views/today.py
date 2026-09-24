@@ -23,8 +23,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import (filters, fmt, glyphs, identity, metrics, params, shell, states, tab,
-                 table, theme, winprob)
+from lib import (distribution, filters, fmt, glyphs, identity, metrics, params, shell,
+                 states, tab, table, theme, winprob)
 from lib import schedule_table
 from lib.datasets import DATASETS
 from lib.query import query
@@ -148,7 +148,20 @@ TABS = (
     # free in any order, and the section's one widget carries an explicit `key="today_poll"`
     # — Streamlit keys widget state by that key, not by call order. The page's only
     # `st.session_state` use is in `_looking_forward`, on the other tab.
-    ("back", "Looking Back", ("_recap", "_bump", "_movers", "_profile", "_leaderboards")),
+    # 🚨 A216 (cfdb-main-R-2600). `_kpi_row` GOES FIRST, WHICH IS WHAT "ABOVE MOST EXCITING"
+    # MEANS HERE. Most Exciting is the first half of `_recap`, so the row cannot sit inside
+    # that panel without being inside the section Most Exciting owns — it is its own panel,
+    # reading its own view, with its own Error and Empty states.
+    #
+    #     before   _recap   · _bump · _movers · _profile · _leaderboards
+    #     after    _kpi_row · _recap · _bump  · _movers  · _profile · _leaderboards
+    #
+    # ✅ NOTHING HERE READS STATE AN EARLIER SECTION SET — the same check A215 made when it
+    # moved `_bump`: this panel runs two scoped queries of its own, `query` is
+    # `@st.cache_data`-wrapped, and it registers no widget at all, so it has no key to
+    # collide and no order to depend on.
+    ("back", "Looking Back",
+     ("_kpi_row", "_recap", "_bump", "_movers", "_profile", "_leaderboards")),
     ("forward", "Looking Forward", ("_looking_forward",)),
 )
 
@@ -479,6 +492,113 @@ def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
         {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
          "conf": scope.conference, "cats": list(categories),
          "types": list(stat_types), "primary": primary})
+
+
+def _week_summary(scope) -> pd.DataFrame:
+    """The KPI row's one row, straight off A214's view.
+
+    🚨 ONE SELECT, NO JOIN, NO ARITHMETIC (§4.2.1). Every rate, every denominator and every
+    excluded count is a published column. **If this function ever finds itself dividing, the
+    view is wrong and the fix is upstream** — which is the whole reason A214 built it.
+
+    ⚠️ EMPTY WHEN NO SINGLE WEEK IS IN SCOPE, and that is a decision rather than an oversight.
+    The grain is `(season, season_type, week)`; with the week filter on "All" there is no one
+    week to summarise, and the only ways to make a number would be to pick a week arbitrarily
+    or to aggregate across weeks in the page. The second is the display-only contract's exact
+    prohibition — a rate over a season is not the mean of the weekly rates — so the panel says
+    so instead. **`_week_opponents` takes the identical position for the identical reason.**
+
+    ⚠️ AND THE SCOPE'S CONFERENCE AND DIVISION ARE DELIBERATELY NOT PASSED. A214's grain has
+    no division in it, because Marc defined the population himself — *"every distinct game_id
+    that includes an FBS team"* — and it has to match the population the distributions under
+    it are built from, or a KPI would disagree with its own picture. **The panel has to SAY it
+    is FBS-scoped, which the caption does.**
+    """
+    if scope.week is None:
+        return pd.DataFrame()
+    # ⚠️ THE COLUMNS ARE ENUMERATED, NOT `select *`, AND `ci/check_page_queries.py` IS WHY.
+    # That guard cross-checks every `row.get()` on a page against the columns its queries
+    # SELECT; a star hides the list from it, so twelve real reads were reported as reading a
+    # column no query provides. An explicit list is also the honest contract: it says on the
+    # page which of A214's thirty columns this row actually consumes.
+    #
+    # 🚨 `as_of_ts` IS DELIBERATELY ABSENT AND IT IS THE SAME EXPAND/MIGRATE AS THE PLAYER
+    # BOARDS (§3.3). A216 adds that column to the model; it is not in PUBLISHED serving until
+    # this round's deploy has run, and `deploy_main.sh` runs its site and pipeline halves
+    # CONCURRENTLY — so a page that selected it would ask for a column that does not exist yet
+    # for as long as the dbt build takes. It is published now and read next round.
+    # ⚠️ `favorite_ats_fails` and `unders` are not read either: they exist so a dbt test can
+    # assert the states PARTITION the population, which is a warehouse property, not a tile.
+    return query("""
+        select season, season_type, week,
+               fbs_games, fbs_games_completed,
+               over_under_mean, over_under_games, over_under_missing,
+               favorite_straight_up_rate, favorite_straight_up_wins,
+               favorite_straight_up_games, favorite_straight_up_pickems,
+               favorite_straight_up_no_line,
+               favorite_ats_rate, favorite_ats_covers, favorite_ats_games,
+               favorite_ats_pushes, favorite_ats_no_line,
+               over_rate, overs, over_under_decided_games, total_pushes, total_no_line,
+               winning_points_mean, losing_points_mean,
+               undefeated_teams_lost, undefeated_teams_entering
+        from srv_week_summary
+        where season = :season and season_type = :season_type and week = :week
+        limit 1
+    """, {"season": scope.season, "season_type": scope.season_type, "week": scope.week})
+
+
+def _week_distributions(scope) -> pd.DataFrame:
+    """The three pictures under the KPI row, newest snapshot only.
+
+    ⚠️ A SECOND RELATION IS A SECOND QUERY, NOT A JOIN (G-2). `srv_week_summary` is week-grain
+    and this is (week x metric x as_of_date) grain; joining them in the page is the thing the
+    contract forbids, and `_week_opponents` beside `_yardage_profile` is the same shape.
+
+    🚨 `as_of_date` IS IN THE GRAIN AND EACH METRIC HAS ITS OWN LATEST — WHICH IS NOT WHAT
+    THE FIRST TWO VERSIONS ASSUMED, AND THE ROUND'S OWN CROP IS WHAT SAID SO.
+
+    📊 MEASURED, 2026 regular week 3: `total` was last built **2026-09-20** with 7 snapshots,
+    while `winning_points` and `losing_points` — added by A214 four days later — carry exactly
+    one, dated **2026-09-24**. Filtering to a single `max(as_of_date)` over the whole week
+    therefore returned the two NEW metrics and silently dropped the over/under, so the KPI
+    row's first render drew an em dash under "75 priced". ⚠️ Nothing errored, every figure
+    above the picture was right, and the tile looked like an honest absence. **Only looking at
+    the picture found it** (R-855's family: the round looks at its own crops).
+
+    ✅ SO THE LATEST IS TAKEN PER METRIC. The rows come back newest-first and pandas keeps the
+    first of each — a reshape of rows already fetched, which is what `_fold_metrics` does and
+    is not arithmetic (§4.2.1). ⚠️ An earlier version used a scalar subquery for the max and
+    `query.py` rejected it: a self-referencing subquery names the relation twice and AC-G.3
+    allows exactly one. The guard was right both times.
+
+    ⚠️ `span = 'week'` — the other span is season-to-date, whose population is every EARLIER
+    week. Drawing it under a number about the SCOPED week would be R-1082's shape: a picture
+    that does not describe the figure above it.
+    """
+    if scope.week is None:
+        return pd.DataFrame()
+    rows = query("""
+        select metric, as_of_date, n, games_in_week, p50, p25, p75, min_value, max_value,
+               whisker_lo, whisker_hi, outlier_count, bin_min, bin_max, bin_incr,
+               bin_count, bin_counts, axis_group, domain_rule
+        from srv_week_metric_distribution
+        where season = :season and season_type = :season_type and week = :week
+          and span = 'week' and metric in ('total', 'winning_points', 'losing_points')
+        order by as_of_date desc
+        limit 400
+    """, {"season": scope.season, "season_type": scope.season_type, "week": scope.week})
+    # ⚠️ 400 IS THE GRAIN'S CEILING RESTATED, NOT A GUESS (AC-G.39): three metrics against the
+    # model's one immutable row per day. At 21 snapshots today that is 63 rows; 400 leaves room
+    # for a season of daily history before it could ever cut one.
+    # ⚠️ A FRAME WITHOUT `metric` IS ONE THIS FUNCTION CANNOT USE, AND IT MUST NOT RAISE.
+    # `drop_duplicates(subset=["metric"])` raises `KeyError` on a frame missing the column,
+    # and `states.section` would turn that into an Error card over a row whose SEVEN NUMBERS
+    # are fine — the pictures are an ornament on three tiles, not the panel. Returning empty
+    # makes `thumbnail(None)` draw its reserved empty box instead (R-141, AC-G.11), which is
+    # the absence this panel already has a design for.
+    if rows.empty or "metric" not in rows.columns:
+        return pd.DataFrame()
+    return rows.drop_duplicates(subset=["metric"])
 
 
 def _line_movement(scope) -> pd.DataFrame:
@@ -1126,7 +1246,21 @@ _SPARK_MIN_DISTINCT = 4
 # NUMBER's width — ~45px under a three-digit yardage, ~18px under a one-digit `TD` — so the
 # same proportion drew two different pictures depending on how many digits the metric happened
 # to have. **A slot of its own makes one bar length mean one thing.**
-_SPARK_SLOT_CH = 3
+# 🚨 A216 (cfdb-main-R-2604) REPLACED THE `ch` BUDGET WITH THE BAR'S OWN UNITS, AND THE
+# REASON IS A MEASUREMENT A221 COULD NOT HAVE TAKEN WITH ITS OWN INSTRUMENT.
+#
+# `_SPARK_SLOT_CH = 3` budgeted a bar drawn at `1.9rem` in three `ch` OF A DIFFERENT FONT.
+# 📊 At 1440, `ch` on this cell is ~9.33px, so the slot was 28px against a bar plus gap of
+# 34.4px — **6.4px short on every card**. The value is `flex:1 1 auto; min-width:0;
+# white-space:nowrap`, so the shortfall came out of the VALUE BOX and the digits overflowed
+# it onto the bar. ⚠️ `ci/measure_card_budget.py` read every BOX edge as correct throughout,
+# because they were: `box→track` was +4.00px the whole time. Only an ink measurement sees it
+# (`ci/measure_spark_gap.py`).
+#
+# ✅ SO THE SLOT IS NAMED IN CSS AND READ FROM CSS. Both halves live on `.cfdb-card-metrics`
+# in `theme.py`; this emits a `calc()` that adds them to the digit count, so the budget and
+# the drawing are one value and cannot drift apart again.
+_SPARK_SLOT = "var(--cfdb-card-spark-w) + var(--cfdb-card-spark-gap)"
 
 # ⚠️ A221. A COLUMN'S FLOOR, AND IT IS THE HALF OF MARC'S SENTENCE THE ALIGNMENT DID NOT ANSWER.
 #
@@ -1162,6 +1296,36 @@ _SPARK_CAPTION = (
     "Where a column's ten cards hold enough different values to be worth a picture, "
     "a bar sits beside its first number, scaled across that column's own ten. "
     "A column without that spread shows the numbers alone.")
+
+
+# 🚨 A216 (cfdb-main-R-2605). WHAT THESE BOARDS ACTUALLY SHOW WHEN THE WEEK FILTER IS "ALL",
+# SAID OUT LOUD, BECAUSE IT IS NOT WHAT A READER ASSUMES.
+#
+# `_player_board` orders by `max(stat_value) over (partition by player_slug, team)` and
+# `_fold_metrics` then keeps ONE of that player's rows. With a week selected those are the
+# same row. With the week on "All" they are not: the board RANKS a player by his best single
+# game and PRINTS whichever week's row survived the de-duplication.
+#
+# 📊 A213 found it; A214 measured it on live published serving — **4 of the 10 cards on QB
+# Touchdowns print a number they were not ranked by**, and 9,667 players carry more than one
+# week of rows in 2026 regular. Austyn Modrzewski is ranked second off a 6-TD game and prints
+# a 2.
+#
+# ⚠️ THE FIX IS A DATA CHANGE, NOT A CAPTION, AND IT IS SEQUENCED RATHER THAN SKIPPED. A214
+# settled what the board should mean — a season leaderboard is a cumulative total — and the
+# grain exists in `srv_player_stats`. 🚨 But that view did NOT carry the logo, the
+# abbreviation or the team colours this card draws; A216 published them (EXPAND), and the
+# query swap is the MIGRATE step, which §3.3 puts in a later round because
+# `scripts/deploy_main.sh` runs its site and pipeline halves CONCURRENTLY — the image builds
+# in ~33s against a ~15 minute dbt build, so a same-round swap points the live page at columns
+# that are not published yet for a quarter of an hour.
+#
+# ✅ SO UNTIL THE SWAP LANDS, THE CAPTION TELLS THE TRUTH. A board that ranks by one number
+# and prints another is not something to leave silent for a third round.
+_ALL_WEEKS_CAPTION = (
+    "With every week selected, these rank each player by his single best week and show that "
+    "player's figures from one of those weeks — not his season totals. Pick a week to compare "
+    "like with like.")
 
 
 def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0,
@@ -1457,10 +1621,13 @@ def _metric_widths(frame, metric_types, stat_label: str, draws_bar: bool) -> tup
         if frame is not None and not frame.empty and key in frame.columns:
             for value in frame[key]:
                 drawn = max(drawn, len(str(fmt.number(value, "stat_value"))))
-        need = drawn
         if index == 0 and draws_bar:
-            need += _SPARK_SLOT_CH
-        widths.append(f"{need}ch")
+            # ⚠️ MIXED UNITS ON PURPOSE (A216). The digits are `ch` because they are tabular
+            # and a character count converts exactly; the bar's slot is whatever CSS draws it
+            # at. Adding them in `calc()` is what keeps the two from disagreeing.
+            widths.append(f"calc({drawn}ch + {_SPARK_SLOT})")
+        else:
+            widths.append(f"{drawn}ch")
     return tuple(widths)
 
 
@@ -3608,7 +3775,9 @@ def _leaderboards(scope, depth: int) -> None:
         st.caption("Top players by yards in each category, deepest first. "
                    "\"QB\" is the passing column — it is not filtered on position, and the "
                    "passing leader has been a quarterback in every week measured."
-                   " " + _SPARK_CAPTION)
+                   " " + _SPARK_CAPTION
+                   + ("" if scope.week is not None
+                      else " " + _ALL_WEEKS_CAPTION))
         # 🚨 A175 (cfdb-main-R-1754). THE TRIO PER CATEGORY, ENUMERATED FROM LIVE SERVING
         # RATHER THAN GUESSED — A166 learned the hard way that it is `SACKS` and not `SACK`,
         # and this relation is not the one the workbook reads. `srv_player_game_log`, 2026:
@@ -3647,7 +3816,9 @@ def _leaderboards(scope, depth: int) -> None:
         st.markdown(f"**{fmt.title_case('Touchdowns')}**")
         st.caption("A different board from yardage, and mostly different names on it. "
                    "**Ranked by touchdowns** \u2014 the two numbers beside each one are "
-                   "context from the same game, not the order. " + _SPARK_CAPTION)
+                   "context from the same game, not the order. " + _SPARK_CAPTION
+                   + ("" if scope.week is not None
+                      else " " + _ALL_WEEKS_CAPTION))
         touchdowns = _boards(scope, depth, (
             ("QB", "passing", ("TD", ("passing:YDS", "Pass yds"),
                                ("rushing:YDS", "Rush yds"))),
@@ -3700,7 +3871,9 @@ def _leaderboards(scope, depth: int) -> None:
                    "**Each number is one game**, this player's line in the week shown, not a "
                    "season total. **Every division CFBD publishes a box score for is "
                    "included** \u2014 these boards are not filtered to FBS, and in most weeks "
-                   "most of these names are FCS. " + _SPARK_CAPTION)
+                   "most of these names are FCS. " + _SPARK_CAPTION
+                   + ("" if scope.week is not None
+                      else " " + _ALL_WEEKS_CAPTION))
         defence = _boards(scope, depth, (
             ("Tackles", "defensive", ("TOT", "TFL", "SACKS")),
             ("Tackles for loss", "defensive", ("TFL", "TOT", "SACKS")),
@@ -4214,6 +4387,252 @@ def _bump(scope, depth: int) -> None:
         # rendered after. `sort_values` stays and is not decoration: text marks are emitted in
         # data order, and a stable order is what makes a staged break legible.
         _bump_chart(one, poll, current.sort_values("rank"))
+
+
+# 🚨 A216 (cfdb-main-R-2600…R-2603). THE KPI ROW, AND EVERY NUMBER ON IT IS A COLUMN.
+#
+# > **MARC, v14:** *"Need a KPI summary row - above Most Exciting: # of FBS Games / Avg O/U
+# > with spread / histograms/box-whiskers of Winning Scores vs Losing Scores / % of Favorites
+# > that Win (straight-up) / % of Favorites that Cover (ATS) / % of Over / # of Undefeated
+# > Teams that lost"* — and *"Avg O/U is the KPI, supported by a small box-whisker or
+# > histogram underneath to give some visibility to the distribution."*
+#
+# ✅ NOT ONE DIVISION HAPPENS HERE. A214 built `srv_week_summary` so that every rate, every
+# denominator and every excluded count is published (§4.2.1). `fmt.percent` scales a 0–1
+# proportion by a literal 100, which the charter names explicitly as rendering.
+#
+# ⚠️ THE ABSENCE MARK IS `fmt.EM_DASH`, WHICH IS THE SITE'S AND NOT THIS PANEL'S. PART 3 asks
+# for one mark used everywhere; the honest way to satisfy that is to reuse the one `fmt`
+# already returns for a null rather than to invent a second (R-855's first half).
+# 📊 72px, NOT 96. At 96 the winning/losing tile was 300px wide on its own and the row
+# needed 1,174px against 980px of content width at 1440 — so a summary row scrolled at the
+# WIDEST supported viewport. The thumbnail has no axis and ten bins, so 72px is 7.2px a
+# bin: still legible as a SHAPE, which is the only thing this size is for.
+_KPI_CHART_W = 72
+
+# 📊 THE ROW'S OWN SCROLL BOUNDARY, MEASURED BY `ci/measure_kpi_row.py` RATHER THAN CHOSEN:
+# seven tiles totalling 917.4px plus six .55rem gaps is 970px. At 1440 the page gives the row
+# 980px and it does not scroll; at 1024 it gives 564px and it does. The note appears below the
+# boundary and says so.
+_KPI_MIN_PX = 970
+_KPI_ABSENT = fmt.EM_DASH
+
+
+def _kpi_figure(label: str, value: str, sub: str, chart: str = "") -> str:
+    """One tile: what it is, the number, and what the number is out of.
+
+    🚨 THE SUB-LINE IS NOT DECORATION AND IT IS NOT OPTIONAL. A214 publishes a denominator and
+    an excluded count beside every rate precisely because *"62% of favorites covered"* over 8
+    games and over 60 games are different claims, and the rate alone cannot tell them apart.
+    **Every tile that shows a rate shows its denominator on the face of the card**, not only
+    in a tooltip a reader has to find.
+    """
+    return (f"<div class='cfdb-kpi'>"
+            f"<div class='cfdb-kpi-label'>{html.escape(label)}</div>"
+            f"<div class='cfdb-kpi-value'>{value}</div>"
+            f"<div class='cfdb-kpi-sub'>{sub}</div>"
+            f"{chart}</div>")
+
+
+def _kpi_rate(row, rate_key: str, num_key: str, den_key: str, excluded=()) -> tuple:
+    """A published rate as `(value, sub-line)`, or an honest absence.
+
+    🚨 A ZERO DENOMINATOR PRINTS AN ABSENCE, NEVER `0%` (PART 3). `0%` of nothing is a claim
+    nobody measured, and A214's view publishes NULL for exactly this reason — so the page must
+    not convert that null into a number on its way to the screen.
+
+    ⚠️ `pd.isna`, NOT TRUTHINESS, ON EVERY FIGURE. **NaN is truthy in Python.** This file has
+    paid for that at `logo_url`, at `text_on`, in `_card_text` and in the drive glyphs, and a
+    KPI row of seven nullable numbers is the biggest surface it has had yet.
+    """
+    rate, num, den = row.get(rate_key), row.get(num_key), row.get(den_key)
+    parts = []
+    # ⚠️ `0 of 0` IS TRUE AND UNREADABLE, so a zero denominator prints no fraction at all —
+    # the absence below carries the meaning instead. Found by rendering week 4, where every
+    # game is scheduled and none has been played.
+    if den is not None and not pd.isna(den) and int(den) > 0:
+        parts.append(f"{int(num):,} of {int(den):,}"
+                     if num is not None and not pd.isna(num) else f"of {int(den):,}")
+    for label, key in excluded:
+        count = row.get(key)
+        if count is not None and not pd.isna(count) and int(count) > 0:
+            parts.append(f"{int(count):,} {label}")
+    # 🚨 THE GATE IS THE DENOMINATOR, NOT ONLY THE RATE, AND A STAGED BREAK IS WHY.
+    # The first version tested `rate is None or pd.isna(rate)`. Under the break that deleted
+    # that branch the test STAYED GREEN — because `fmt.percent` returns an em dash for a null
+    # of its own accord, so the page's branch was never doing the work and the guard was
+    # asserting `fmt.percent`'s behaviour rather than this page's (R-758's family).
+    #
+    # ⚠️ AND THE CASE IT LEFT OPEN IS REAL EVEN IF TODAY'S MODEL CANNOT PRODUCE IT: a rate of
+    # 0.0 beside a denominator of 0 is not a measurement, and `fmt.percent(0.0)` renders
+    # `0.0%` — a claim nobody made, drawn at the floor. A214 publishes NULL there precisely so
+    # this cannot happen upstream; the page refuses it downstream too, because *the page must
+    # not convert an absence into a number* is the rule, not *the model is careful*.
+    if (rate is None or pd.isna(rate)
+            or den is None or pd.isna(den) or int(den) == 0):
+        # The excluded counts are still worth showing: *nothing resolved* and *no data* differ.
+        return _KPI_ABSENT, (" · ".join(parts) if parts else "nothing to judge yet")
+    return fmt.percent(rate, dp=0), " · ".join(parts)
+
+
+def _kpi_row(scope, depth: int) -> None:
+    """Marc's seven figures for the scoped week, above Most Exciting.
+
+    ⚠️ `depth` IS ACCEPTED AND UNUSED, because `TABS` calls every panel with the same two
+    arguments. Naming it rather than swallowing it with `*_` keeps the signature readable
+    against the other panels'.
+    """
+    with states.section("srv_week_summary", dataset=DATASETS["srv_week_summary"]):
+        summary = _week_summary(scope)
+        if scope.week is None:
+            # 🚨 A DELIBERATE ABSENCE, NOT A GAP. The view's grain is one row per WEEK; with
+            # every week in scope there is no single week to summarise, and the two ways to
+            # produce a number anyway are both wrong — pick a week arbitrarily, or aggregate
+            # across weeks in the page, which is the display-only contract's exact
+            # prohibition (a season rate is not the mean of the weekly rates).
+            states.empty(
+                "The week in one row would be here.",
+                "This summary is per week, and every week is selected. "
+                "Pick a single week to see its figures.")
+            return
+        if summary.empty:
+            # ⚠️ A DIFFERENT ABSENCE FROM THE ONE BELOW, AND AC-G.11 IS THE WHOLE POINT.
+            # A214's model publishes a row for every week that has fixtures, played or not —
+            # so NO ROW means cfdb holds nothing for that week at all, which is a statement
+            # about our data. *No games yet* is a statement about the calendar.
+            states.empty(
+                "The week in one row would be here.",
+                f"cfdb holds no week summary for {scope.describe()} yet.")
+            return
+
+        row = summary.iloc[0]
+        # 🚨 THE PICTURES GET THEIR OWN SECTION, AND THAT IS A DESIGN CHOICE THE SUITE ASKED
+        # FOR RATHER THAN A FORMALITY. `test_the_views_named_in_sections_are_exactly_the_views
+        # _the_module_reads` requires every view a panel reads to be named by a section — and
+        # the right shape here is the one that guard pushes you towards: **the numbers are the
+        # panel and the distributions are an ornament on three of them.** A failure fetching
+        # the histograms must not blank the seven figures, so it is scoped to its own block
+        # and `dists` keeps the empty default. `thumbnail(None)` then reserves the same width
+        # (R-141), so the row's geometry does not move either.
+        dists = pd.DataFrame()
+        with states.section("srv_week_metric_distribution",
+                            dataset=DATASETS["srv_week_metric_distribution"]):
+            dists = _week_distributions(scope)
+        by_metric = {r["metric"]: r for _i, r in dists.iterrows()} if not dists.empty else {}
+
+        played = row.get("fbs_games_completed")
+        played = 0 if played is None or pd.isna(played) else int(played)
+        games = row.get("fbs_games")
+        games = 0 if games is None or pd.isna(games) else int(games)
+
+        st.markdown(f"**{fmt.title_case('The week in one row')}**")
+        # 🚨 THE CAPTION CARRIES THE TWO THINGS A214 SAID THIS ROW MUST SAY OUT LOUD.
+        # The population is FBS-either-side and does NOT follow the page's Division selector,
+        # because A214's grain has no division in it and the pictures under these numbers are
+        # built from that same population. A row that quietly meant something different from
+        # the sections below it would be worse than a row that says so.
+        st.caption(
+            "Every game with an FBS team on either side — this row keeps that population "
+            "whatever the Division filter says, so its numbers match the distributions "
+            "drawn under them. Each rate shows what it is out of; pushes and games with no "
+            "closing line leave the denominator and are counted separately."
+            + ("" if played else
+               " No game in the selected week has finished, so the outcome figures have "
+               "nothing to measure yet."))
+
+        tiles = []
+        # 1 — FBS GAMES
+        tiles.append(_kpi_figure(
+            "FBS games", f"{games:,}",
+            f"{played:,} completed" if played != games else "all completed"))
+
+        # 2 — AVERAGE OVER/UNDER, with its distribution under it
+        mean = row.get("over_under_mean")
+        priced = row.get("over_under_games")
+        missing = row.get("over_under_missing")
+        sub = []
+        if priced is not None and not pd.isna(priced):
+            sub.append(f"{int(priced):,} priced")
+        if missing is not None and not pd.isna(missing) and int(missing) > 0:
+            sub.append(f"{int(missing):,} with no line")
+        tiles.append(_kpi_figure(
+            "Average over/under",
+            _KPI_ABSENT if mean is None or pd.isna(mean) else fmt.number(float(mean), dp=1),
+            " · ".join(sub) if sub else "no closing totals yet",
+            distribution.thumbnail(by_metric.get("total"), width=_KPI_CHART_W)))
+
+        # 3 — WINNING VS LOSING SCORES, ON ONE AXIS
+        # 🚨 THE SHARED AXIS IS THE POINT AND IT IS GUARANTEED UPSTREAM. A214 gave both
+        # metrics `axis_group: game_points` with identical bounds, and
+        # `assert_an_axis_group_shares_one_domain` fails the build if they ever disagree —
+        # so the page reads two rows and draws them, rather than reconciling two scales.
+        win, lose = row.get("winning_points_mean"), row.get("losing_points_mean")
+        pair = (distribution.thumbnail(by_metric.get("winning_points"), label="W",
+                                       width=_KPI_CHART_W)
+                + distribution.thumbnail(by_metric.get("losing_points"), label="L",
+                                         width=_KPI_CHART_W))
+        tiles.append(_kpi_figure(
+            "Winning vs losing score",
+            (_KPI_ABSENT if win is None or pd.isna(win)
+             else f"{fmt.number(float(win), dp=1)}"
+                  f"<span class='cfdb-kpi-vs'>–</span>"
+                  f"{_KPI_ABSENT if lose is None or pd.isna(lose) else fmt.number(float(lose), dp=1)}"),
+            f"mean of {played:,} completed" if played else "nothing played yet",
+            f"<div class='cfdb-kpi-pair'>{pair}</div>"))
+
+        # 4 · 5 · 6 — THE THREE RATES, each with its denominator and its exclusions
+        value, sub = _kpi_rate(row, "favorite_straight_up_rate",
+                               "favorite_straight_up_wins", "favorite_straight_up_games",
+                               (("pick'em", "favorite_straight_up_pickems"),
+                                ("no line", "favorite_straight_up_no_line")))
+        tiles.append(_kpi_figure("Favorites won", value, sub))
+
+        value, sub = _kpi_rate(row, "favorite_ats_rate",
+                               "favorite_ats_covers", "favorite_ats_games",
+                               (("push", "favorite_ats_pushes"),
+                                ("no line", "favorite_ats_no_line")))
+        tiles.append(_kpi_figure("Favorites covered", value, sub))
+
+        value, sub = _kpi_rate(row, "over_rate", "overs", "over_under_decided_games",
+                               (("push", "total_pushes"), ("no line", "total_no_line")))
+        tiles.append(_kpi_figure("Went over", value, sub))
+
+        # 7 — UNDEFEATED TEAMS THAT LOST
+        # ⚠️ ITS POPULATION IS WIDER THAN THE OTHER SIX AND THE SUB-LINE SAYS SO. The record
+        # spine is every team on the schedule, so a non-FBS team that was 3-0 and lost is
+        # counted here while its game is not counted above. A214 named this explicitly as a
+        # thing not to reconcile against the other six and conclude one is wrong.
+        lost, entering = row.get("undefeated_teams_lost"), row.get("undefeated_teams_entering")
+        has_entering = entering is not None and not pd.isna(entering) and int(entering) > 0
+        # 🚨 AND IT IS AN ABSENCE UNTIL SOMETHING HAS BEEN PLAYED, WHICH THE MODEL CANNOT SAY
+        # FOR ITSELF. A214 coalesces this count to 0 so a week always has a number; on a week
+        # nobody has played, that 0 is true only because nothing has happened yet, and printed
+        # as a figure it reads as *no unbeaten team was beaten* — a claim about a week that has
+        # not occurred. The other six outcome figures go to an em dash there and so does this.
+        tiles.append(_kpi_figure(
+            "Undefeated teams that lost",
+            _KPI_ABSENT if lost is None or pd.isna(lost) or not has_entering or not played
+            else f"{int(lost):,}",
+            (f"of {int(entering):,} unbeaten" if has_entering
+             else "no team came in unbeaten"),))
+
+        # ⚠️ A208's SHARED WRAPPER, NOT A SECOND SCROLL MECHANISM. Seven tiles do not fit at
+        # every width; `.cfdb-scroll` is the one the whole site uses and it carries its own
+        # note. A private `overflow-x` here would be the drift this project keeps paying for.
+        # 🚨 THE NOTE IS NOT OPTIONAL AND `table.scroll_note` IS THE ONE THAT EXISTS (A208).
+        # A scroller a reader cannot tell is a scroller is a row that simply ends early, and
+        # `tests/test_scroll_affordance.py` refuses one — correctly. 📊 The boundary is this
+        # row's OWN minimum, measured rather than guessed: seven tiles plus six gaps come to
+        # 970px, so below 970 it scrolls and at 1440 (980px of content width) it does not.
+        st.markdown(f"<div class='cfdb-scrollbox'>{table.scroll_note(_KPI_MIN_PX)}"
+                    f"<div class='cfdb-scroll'><div class='cfdb-kpirow'>"
+                    f"{''.join(tiles)}</div></div></div>", unsafe_allow_html=True)
+        # ⚠️ NO `table.as_of_caption` HERE YET, AND THE ABSENCE IS DELIBERATE RATHER THAN AN
+        # OVERSIGHT. It returns SILENTLY for a frame with no `as_of_ts`, so calling it on this
+        # frame today would read like a freshness stamp and do nothing — which is the shape
+        # §3.2.3 is about. A216 publishes the column on the model; the page reads it, and
+        # stamps, once that has been deployed. The page still carries a stamp meanwhile: the
+        # shell's as-of slot is filled by `_recap` directly below.
 
 
 def _recap(scope, depth: int) -> None:
