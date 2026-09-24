@@ -225,7 +225,13 @@ select
          then b.favorite_ats_covers::numeric / b.favorite_ats_games end
                                                                      as favorite_ats_rate,
     case when b.over_under_decided_games > 0
-         then b.overs::numeric / b.over_under_decided_games end      as over_rate
+         then b.overs::numeric / b.over_under_decided_games end      as over_rate,
+
+    -- ⚠️ A216. AC-G.35 — EVERY PAGE STATES WHEN ITS OWN DATA WAS LOADED, and A214 shipped this
+    -- view without the column that lets it. `table.as_of_caption` returns silently when a
+    -- frame has no `as_of_ts`, so the KPI row's call to it was a no-op that READ like a
+    -- freshness stamp. Every other serving view publishes this; so does this one now.
+    {{ dbt.current_timestamp() }}                                    as as_of_ts
 from by_week b
 -- ⚠️ LEFT JOIN, AND A WEEK WITH NO COMPLETED GAMES STILL PRODUCES A ROW. *No games yet* and *no
 -- row for this week* are different facts and the page cannot tell them apart from an empty

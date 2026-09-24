@@ -1507,8 +1507,76 @@ TABLE_CSS = """
    decompress a huddle; with the cells now at measured widths the decompression is in the
    cells, and 2 x 9.6px of gap is width the numbers can use instead. `align-items:center`
    because the cells are rows now, not baseline-aligned stacks. */
-.cfdb-card-metrics { display:flex; gap:.3rem; align-items:center; margin:0;
-                     justify-content:flex-end; }
+/* ── A216 (cfdb-main-R-2600…R-2603): THE KPI ROW ABOVE MOST EXCITING ────────────────────
+   > **MARC, v14:** *"Need a KPI summary row - above Most Exciting"*
+
+   🚨 SEVEN TILES, THREE OF THEM CARRYING A PICTURE, ABOVE A SECTION THAT ALREADY HAS PLENTY.
+   The row is a flex line inside the site's SHARED `.cfdb-scroll` wrapper (A208) rather than a
+   grid that reflows: a grid would wrap tile 7 onto a second line at 1024 and turn a summary
+   ROW into a summary BLOCK, which is A209/A210's defect in a new place. Scrolling keeps the
+   row one row at every width and the wrapper's own note says so.
+
+   ⚠️ `flex:0 0 auto` AND A MIN-WIDTH, NOT `flex:1`. Equal-width tiles would size every tile
+   to the widest sub-line — "35 of 74 · 1 push" — and leave `FBS games` with a 12-character
+   number slot for two digits. Each tile takes the room its own content needs. */
+/* 📊 THE GAP AND THE FLOOR ARE MEASURED, NOT CHOSEN. The first render needed 1,174px against
+   980px of content width at 1440 — so the row scrolled at the WIDEST supported viewport, and a
+   summary you have to scroll is not a summary. `.cfdb-scroll` is still there and still right
+   for 1024; it should not be doing the work at 1440. */
+.cfdb-kpirow { display:flex; align-items:stretch; gap:.55rem; margin:.25rem 0 .1rem; }
+/* 🚨 A `max-width` IS WHAT MAKES THE LABEL RULE ABOVE DO ANYTHING, AND THAT COST A RENDER.
+   Removing `white-space:nowrap` from the label changed the row's total by ZERO px: a
+   `flex:0 0 auto` item's base size is its MAX-CONTENT, so a wrappable label still contributes
+   its full unwrapped width until something caps the box. 📊 Measured — 995.3px of tiles before
+   and 995.3px after. **The cap is the fix; the wrap is what makes the cap survivable.**
+   ⚠️ 11rem is the floor the widest tile actually needs: two 72px thumbnails plus their gap and
+   the tile's padding is ~170px, so anything less would squeeze the pictures. */
+.cfdb-kpi { flex:0 0 auto; min-width:6rem; max-width:11rem; display:flex;
+            flex-direction:column;
+            gap:.1rem; padding:.5rem .65rem;
+            border:1px solid var(--cfdb-u2, #87878d); border-radius:6px; }
+/* The label is the quietest thing in the tile and the value the loudest, because a reader
+   scanning seven of these is scanning the NUMBERS and reading the labels only once. */
+/* 🚨 THE LABEL WRAPS AND THE VALUE DOES NOT, WHICH IS A218's RULE APPLIED HERE: *a team name
+   on two lines is a layout, a number on two lines is a lie.*
+   ⚠️ AND THE LABEL WRAPS BECAUSE OF THE TILE'S `max-width`, NOT BECAUSE OF ANYTHING WRITTEN
+   HERE. An earlier version set `overflow-wrap:normal` on this rule and measured the row's
+   total at 995.3px BEFORE and 995.3px AFTER — a `flex:0 0 auto` item's base size is its
+   max-content, so the declaration was inert. It is gone rather than left looking load-bearing
+   (§3.2.3), and `tests/test_numeric_cells_never_break.py` is what refused to let it stay. */
+.cfdb-kpi-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.03em;
+                  opacity:.7; }
+.cfdb-kpi-value { font-size:1.45rem; font-weight:700; line-height:1.15;
+                  font-variant-numeric:tabular-nums; white-space:nowrap; }
+/* 🚨 THE DENOMINATOR IS ON THE FACE OF THE TILE, NOT IN A TOOLTIP. A214 publishes it for
+   every rate because *"62% of favorites covered"* over 8 games and over 60 are different
+   claims; a reader who has to hover to find that out has already read the wrong one. */
+.cfdb-kpi-sub { font-size:.64rem; opacity:.65; line-height:1.25; white-space:nowrap; }
+/* The en dash between the two score means is a separator, not a minus. Spaced so `38.9–17.2`
+   cannot be misread as a negative number. */
+.cfdb-kpi-vs { opacity:.45; padding:0 .18rem; font-weight:400; }
+/* The two score distributions sit side by side ON ONE AXIS — `axis_group: game_points`
+   upstream, asserted by a dbt test. Drawn on separate bounds they would look alike, and the
+   whole point is that the winning distribution sits to the RIGHT of the losing one. */
+.cfdb-kpi-pair { display:flex; gap:.3rem; align-items:flex-end; }
+.cfdb-kpi .cfdb-dist { margin-top:.15rem; }
+
+/* 🚨 A216 (cfdb-main-R-2604). THE BAR'S WIDTH AND THE GAP BESIDE IT ARE VARIABLES NOW,
+   BECAUSE TWO FILES HAD TO AGREE ABOUT THEM AND DID NOT.
+   `today._metric_widths` budgets the cell; this rule draws what goes in it. A221 wrote the
+   budget as `_SPARK_SLOT_CH = 3` — three `ch` — for a bar sized `1.9rem`. 📊 MEASURED at
+   1440: `ch` on this cell is ~9.33px, so three of them is 28px against a bar plus gap of
+   34.4px, and **the cell was 6.4px too narrow**. The value is `flex:1 1 auto; min-width:0;
+   white-space:nowrap`, so the shortfall came out of the VALUE BOX and the digits overflowed
+   it — landing on the bar with `box→track` still reading a perfectly correct +4.00px.
+   ⚠️ THAT IS WHY THE DEFECT SURVIVED A221's OWN MEASUREMENT: every box edge was right.
+   ✅ THE FIX IS THE UNIT, NOT THE NUMBER. The cell is now
+   `calc(<digits>ch + var(--cfdb-card-spark-w) + var(--cfdb-card-spark-gap))`, so the digits
+   are budgeted in `ch` — correct, they are tabular — and the bar's slot in the same `rem`
+   the bar is drawn in. The two cannot drift apart again because they are one value. */
+.cfdb-card-metrics { display:flex; gap:var(--cfdb-card-metric-gap, .55rem);
+                     align-items:center; margin:0; justify-content:flex-end;
+                     --cfdb-card-spark-w:1.9rem; --cfdb-card-spark-gap:.25rem; }
 /* 🚨 A221 (cfdb-main-R-2687/R-2688). THE CELL IS A ROW NOW, NOT A COLUMN.
    > **MARC:** *"sparkbar should be beside the number, not under. That's too noisy for the
    > eye to scan down."*
@@ -1522,9 +1590,11 @@ TABLE_CSS = """
    `45` over `4`. 📊 Caught in the after-crop, which is what the crop is for; the numbers on
    the page contradicted a measurement that said every column was one left edge wide.
    ✅ THE CELL CARRIES THE VALUE'S OWN SIZE, so `ch` means a digit of the text it is sizing. */
+/* ⚠️ THE GAP IS THE VARIABLE THE WIDTH BUDGET ALSO READS (A216). A literal here would be a
+   second copy of a number `_metric_widths` has to know, which is the drift just fixed. */
 .cfdb-card-metric { display:flex; flex-direction:row; align-items:center; min-width:0;
-                    flex:0 0 auto; gap:.25rem; justify-content:flex-end;
-                    font-size:1.05rem; }
+                    flex:0 0 auto; gap:var(--cfdb-card-spark-gap, .25rem);
+                    justify-content:flex-end; font-size:1.05rem; }
 /* 🚨 THE VALUE FILLS ITS CELL AND RIGHT-ALIGNS ITS TEXT, WHICH IS NOT THE SAME AS
    RIGHT-ALIGNING THE VALUE — and the difference is the whole measurement.
    📊 The first version made the value `flex:0 0 auto; margin-left:auto`. The digits lined up

@@ -90,14 +90,20 @@ def test_every_scroll_wrapper_is_emitted_beside_a_note():
 
 
 def test_the_wrapper_count_is_the_four_this_round_measured():
-    """⚠️ A COUNT THAT MOVES IS NOT A FAILURE, IT IS A ROUND. 📊 Two hand-built wrappers in
-    `today.py` (the SLATE and the distance table) plus the one inside `table.scroll_box`,
-    which serves Scores and Most Exciting. A fifth means someone has a table this file's
-    enumeration does not describe."""
+    """⚠️ A COUNT THAT MOVES IS NOT A FAILURE, IT IS A ROUND. 📊 THREE hand-built wrappers in
+    `today.py` — the SLATE, the distance table, and A216's KPI row — plus the one inside
+    `table.scroll_box`, which serves Scores and Most Exciting. A fifth means someone has a
+    table this file's enumeration does not describe.
+
+    🚨 A216 MOVED IT FROM 2 TO 3, AND THE REASON IS THE POINT OF THE COUNT. The KPI row is
+    seven tiles totalling 970px; at 1440 the page gives it 980px and it does not scroll, at
+    1024 it gives 564px and it does. It is in the SHARED wrapper with `table.scroll_note`
+    rather than behind a private `overflow-x`, which is A208's rule and is what the test
+    above enforces."""
     written = {p.relative_to(ROOT).as_posix(): p.read_text().count(WRAPPER)
                for p in sorted((ROOT / "site").rglob("*.py"))
                if WRAPPER in p.read_text()}
-    assert written == {"site/lib/table.py": 1, "site/views/today.py": 2}, written
+    assert written == {"site/lib/table.py": 1, "site/views/today.py": 3}, written
 
 
 # ── the boundary is the table's own ───────────────────────────────────────────────────

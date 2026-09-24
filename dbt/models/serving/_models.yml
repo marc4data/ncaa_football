@@ -1471,6 +1471,27 @@ models:
           roster feed. Not a join failure.
       - name: conference
         description: Conference affiliation recorded for that season.
+      - name: team_abbreviation
+        description: >
+          Short team code from dim_team, season-scoped. A216 published it so Today's All-weeks
+          player boards can read season totals from this view instead of ranking a player by
+          his best single game and printing a different one. It is null for some teams, so a
+          consumer falls back to the team name rather than drawing a blank - an absence must
+          not read as an empty cell. Measured on 2026, 0.52% of rows are null.
+      - name: team_logo_url
+        description: >
+          The team's logo, from dim_team, season-scoped. Null for 0.84% of 2026 rows and for
+          most seasons before the roster feed exists, which is not a join failure. This column
+          is the bulk of the denormalisation cost - the same five identity columns on
+          srv_player_game_log are 120.3 MB - and it is paid for the same reason: one relation
+          per query, no page-side join.
+      - name: color_on_light
+        description: >
+          The team color to draw on a light background, from dim_team. Consumers read it
+          through identity.accent_color rather than directly, because picking the wrong one of
+          the pair renders black on near-black - the defect R-855 records.
+      - name: color_on_dark
+        description: The same color for a dark background; the two are always read as a pair.
       - name: stat_category
         description: >
           CFBD's grouping — defensive, receiving, rushing, passing, kickReturns, fumbles,
@@ -5672,4 +5693,9 @@ models:
         description: >
           The denominator - teams that entered the week undefeated by that definition.
         tests: [not_null]
+      - name: as_of_ts
+        description: >
+          When this row was built. A216 added it because table.as_of_caption returns silently
+          for a frame that has no as_of_ts, so the KPI row's freshness stamp was a no-op that
+          read like one. Every other serving view publishes this column.
 

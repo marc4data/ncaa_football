@@ -247,6 +247,13 @@ PANELS = {
     # exactly that reason — the discovery rule is good and this is the case it does not
     # cover, which is worth a line rather than a widening of the rule.
     "_recap": lambda page, games, scope: page._recap(scope, 10),
+    # A216. The KPI row. ⚠️ `_panels_defined_in` cannot see it either, for `_recap`'s reason:
+    # it announces itself with `st.markdown`, not `st.subheader`, because a KPI strip is not a
+    # sub-section of the page — it is the page's opening line. Listed by hand, like `_recap`.
+    # 🚨 AND IT NEEDS A SCOPE WITH A REAL WEEK, exactly as `_profile` does: under week=None it
+    # renders the "pick a single week" Empty and would never build a tile, so exercising it
+    # with the page's default scope would put it in the list and still test nothing.
+    "_kpi_row": lambda page, games, scope: page._kpi_row(scope, 10),
 }
 
 

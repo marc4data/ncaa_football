@@ -335,5 +335,13 @@ def test_the_panel_name_is_still_registered(stubbed):
     name lost in a tuple edit is a section that silently stops rendering."""
     page, _calls = stubbed
     back = page.TABS[0][2]
-    assert set(back) == {"_recap", "_bump", "_movers", "_profile", "_leaderboards"}, back
+    # 🚨 A216 ADDED `_kpi_row` AT THE FRONT — Marc's KPI strip, *above Most Exciting*. The
+    # set moves when a panel is added and that is a round, not a failure; what this test
+    # protects is that no EXISTING name silently disappears in a tuple edit, and A215's own
+    # ordering assertions below still pin `_recap` before `_bump` before `_movers`.
+    assert set(back) == {"_kpi_row", "_recap", "_bump", "_movers", "_profile",
+                         "_leaderboards"}, back
+    assert back[0] == "_kpi_row", \
+        "the KPI row is the first thing on Looking Back, which is what 'above Most " \
+        "Exciting' means — Most Exciting is the first half of _recap"
     assert len(back) == len(set(back)), f"a panel is named twice: {back}"
