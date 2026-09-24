@@ -98,9 +98,18 @@ def test_TOUCHDOWNS_IS_NAMED_AS_ABSENT_and_never_derived_from_points():
     assert "ouchdown" in note, f"the note does not name touchdowns: {note!r}"
     assert "field goal" in note.lower(), (
         "the note does not say WHY points cannot stand in for touchdowns")
+    # 🚨 **THE FIRST VERSION LISTED LITERAL SPELLINGS AND CAME BACK GREEN** (R-744): the break
+    # wrote `played["points_for"] / 7`, which contains none of them. **A substring is not a
+    # rule** (R-2260) — so this asserts the PROPERTY: the panel performs no arithmetic on the
+    # scoring columns at all, however it is spelled.
     code = _code_of("_season_so_far")
-    for derived in ("points_for / 7", "points_for/7", "// 7", "/ 6", "// 6"):
-        assert derived not in code, f"a touchdown count is being derived: {derived!r}"
+    for line in code.split("\n"):
+        if "points_for" not in line and "points_against" not in line:
+            continue
+        for op in ("/", "*", "+", "-"):
+            assert op not in line, (
+                f"the panel does arithmetic on a scoring column, which is how a touchdown "
+                f"count gets derived from points: {line.strip()!r}")
 
 
 def test_EVERY_COLUMN_READS_A_PUBLISHED_FIELD_and_none_is_summed_in_the_page():
@@ -109,6 +118,23 @@ def test_EVERY_COLUMN_READS_A_PUBLISHED_FIELD_and_none_is_summed_in_the_page():
     to prevent — and it would agree with the published column often enough to look right.
     """
     cols = _matchup()._season_table_columns()
+    # 🚨 **THE PAIRS ARE PINNED, NOT THE COUNT — AND A STAGED BREAK IS WHY.** Swapping
+    # `total_yards_allowed` for `total_yards` under the label `Yds Allw` kept eighteen columns
+    # and came back GREEN against the first version of this test (R-744). **A count cannot see
+    # a swap**, which is `test_select_list`'s own lesson arriving one file over.
+    assert [(c.label, c.field) for c in cols] == [
+        ("Wk", "week"), ("Opponent", "opponent"), ("Result", "result"),
+        ("1st Dn", "first_downs"), ("Yards", "total_yards"),
+        ("Rush", "rushing_yards"), ("Pass", "passing_yards"),
+        ("TO", "turnovers"), ("Pen Yds", "penalty_yards"),
+        ("PPA", "offense_ppa"),
+        ("Rush PPA", "offense_rushing_plays_total_ppa"),
+        ("Pass PPA", "offense_passing_plays_total_ppa"),
+        ("Cum PPA", "cumulative_ppa_overall_total"),
+        ("Success", "offense_success_rate"), ("Expl", "offense_explosiveness"),
+        ("Yds Allw", "total_yards_allowed"), ("Pass Allw", "passing_yards_allowed"),
+        ("Rush Allw", "rushing_yards_allowed"),
+    ], "a column's label and its field no longer agree"
     fields = [c.field for c in cols]
     assert "cumulative_ppa_overall_total" in fields, "the published running total is not read"
     code = _code_of("_season_so_far")
@@ -137,6 +163,13 @@ def test_THE_LAYOUT_IS_ALL_PIXELS_so_the_scroll_note_has_a_boundary():
         f"the declared minimum moved to {table_lib.scroll_minimum(layout)}; if that is "
         f"deliberate, re-measure the drawn width in a browser and say so")
     code = _code_of("_season_so_far")
+    # 🚨 **AND THE CALL MUST ACTUALLY PASS IT.** Deleting `layout=` from the render leaves this
+    # constant perfectly correct and the table with no declared minimum — the first version of
+    # this test inspected only the constant and came back GREEN (R-744).
+    assert "layout=_SEASON_LAYOUT" in code, (
+        "the render call no longer passes the layout, so `scroll_minimum` gets None and the "
+        "scroll note vanishes while `_SEASON_LAYOUT` still looks right")
+    assert "scroll=True" in code, "the table is no longer inside A208's shared scroll wrapper"
     assert "scroll_note(" not in code, (
         "the panel emits its own scroll note again — `render` already does, inside the "
         "container the note's query reads")
