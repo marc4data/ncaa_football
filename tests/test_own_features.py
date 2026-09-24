@@ -224,8 +224,61 @@ def test_scoring_refuses_a_null_feature_and_a_played_game(league):
     with pytest.raises(weekly.NullFeatureError, match="home_adjusted_epa"):
         weekly.refuse_nulls(bad)
     weekly.refuse_nulls(frame)
+    played = frame.assign(home_points=24.0)
     with pytest.raises(ValueError, match="unplayed"):
-        weekly.score_week(frame, frame.assign(home_points=24.0))
+        weekly.score_week(frame, frame, played, played)
+
+
+# ---------------------------------------------------------------- cfdb-wtc-R-2490: carry-forward and recency
+
+def _two_seasons(league):
+    """The league twice: 2024 (every team strong on offence) then 2025 as in the fixture."""
+    last = {n: f.copy() for n, f in league.items()}
+    last["games"]["season"] = 2024
+    last["games"]["game_id"] += 1000
+    last["games"]["start_date"] -= pd.Timedelta(days=365)
+    for n in ("advanced", "havoc", "drives"):
+        last[n]["game_id"] += 1000
+    for col in of.ADJUSTED.values():
+        last["advanced"][col] = np.where(last["advanced"][col] > 40, 50.0, 0.9)   # Week 6 stays absurd
+    last["talent"]["season"] = 2024
+    return {n: pd.concat([last[n], league[n]], ignore_index=True) for n in league}
+
+
+def test_carry_forward_uses_last_season_and_fades_as_games_accrue(league):
+    both = _two_seasons(league)
+    plain = of.build(both, seasons=[2025]).set_index("id")
+    carried = of.build(both, seasons=[2025], carry_weight=4.0).set_index("id")
+    # last season was 0.9 EPA a play for everyone (2024's absurd Week 6 included: it is a PAST season)
+    assert (carried["home_adjusted_epa"] > plain["home_adjusted_epa"]).all()
+    lift_week5 = (carried - plain).loc[1012, "home_adjusted_epa"]            # 4 games played so far
+    lift_week6 = (carried - plain).loc[1015, "home_adjusted_epa"]            # 5 games played so far
+    assert lift_week5 > lift_week6 > 0
+
+
+def test_last_seasons_values_are_computed_from_last_season_only(league, monkeypatch):
+    """STAGED BREAK (cfdb-wtc-R-2490): building last season's values from `season` instead of
+    `season - 1` in `build` turns THIS test RED."""
+    both = _two_seasons(league)
+    seen = []
+    real = of.team_features
+
+    def recording(prior, *args, **kwargs):
+        if kwargs.get("as_of_week") is None and (len(args) < 6 or args[5] is None):
+            seen.append(set(prior["games"].loc[prior["games"]["game_id"].isin(prior["advanced"]["game_id"]), "season"]))
+        return real(prior, *args, **kwargs)
+    monkeypatch.setattr(of, "team_features", recording)
+    of.build(both, seasons=[2025], carry_weight=4.0)
+    assert seen == [{2024}]
+
+
+def test_recency_weighting_with_equal_weights_is_the_plain_fit(league):
+    prior = of.inputs_before(league, 2025, 6)
+    plain = of.team_features(prior)
+    flat = of.team_features(prior, recency_halflife=1e12, as_of_week=6)
+    pd.testing.assert_frame_equal(plain, flat, atol=1e-9)
+    recent = of.team_features(prior, recency_halflife=1.0, as_of_week=6)
+    assert not np.allclose(plain["adjusted_epa"], recent["adjusted_epa"])
 
 
 def test_the_live_command_refuses_a_week_below_the_floor():

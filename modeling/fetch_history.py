@@ -69,11 +69,23 @@ def plan() -> List[Tuple[str, Dict[str, str]]]:
     return requests
 
 
-def run(requests, sleep: float = backfill.SLEEP_SECONDS) -> Dict[str, int]:
-    """Fetch each request once, skipping any already on disk; one retry after a failure."""
+def current_season_plan(season: int) -> List[Tuple[str, Dict[str, str]]]:
+    """The four feature endpoints for one in-progress season, whole-season requests (13 calls).
+
+    cfdb-wtc-R-2495: the live pipeline refetches advanced stats only for recent weeks, so an early week
+    it stopped refetching goes stale when CFBD revises it — 2026 Week 1 PPA differed on 323 of 408
+    team-games. The weekly command therefore reads the season it predicts fresh, to disk, every run."""
+    requests = []
+    for path in FOUR:
+        requests += backfill.requests_for(BY_PATH[path], [str(season)], per_game=False, current_season=season)
+    return requests
+
+
+def run(requests, sleep: float = backfill.SLEEP_SECONDS, force: bool = False) -> Dict[str, int]:
+    """Fetch each request once, skipping any already on disk unless `force`; one retry after a failure."""
     counts = {"planned": len(requests), "fetched": 0, "skipped": 0, "retried": 0, "failed": 0}
     for i, (endpoint, params) in enumerate(requests, 1):
-        if backfill.already_fetched(endpoint, params):
+        if not force and backfill.already_fetched(endpoint, params):
             counts["skipped"] += 1
             continue
         for attempt in (1, 2):
