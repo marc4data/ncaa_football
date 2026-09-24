@@ -40,34 +40,63 @@ from lib.query import query
 
 CFBD_CREDIT = ("Data from CollegeFootballData.com. Used under their terms; attribution is "
                "optional under those terms and provided anyway.")
-MODEL_DISCLAIMER = (
-    "Predictions are cfdb's own, built on a commercially licensed training pack. They are "
-    "NOT CollegeFootballData.com predictions and CFBD does not endorse them. Figures are "
-    "held-out backtests, not realised betting results. Nothing here is betting advice.")
-
-# THE NOTE BLOCK IS AS LONG AS IT NEEDS TO BE, THEN EXACTLY ONE BLANK ROW, THEN THE HEADER.
+# ══ A222 (cfdb-main-R-3000): `MODEL_DISCLAIMER` IS GONE, ON MARC'S RULING ════════════════
 #
-# R-181, and Marc calls it a global requirement: "there needs to be 1 empty row between
-# disclaimer info and the header row of the dataset — global requirement to help play to how
-# sorting works in Excel."
+# > **MARC, 2026-09-24:** *"Keep 'Data from CollegeFootballData.com…'. Drop Model
+# > disclaimer."*
 #
-# It used to be four constants — credit 1, disclaimer 2, header 4, data 5 — which gives
-# exactly one blank row on a sheet WITH the model disclaimer and TWO on a sheet without it.
-# Excel treats a blank row as the end of a region, so the second blank is not cosmetic: it
-# changes what Ctrl+A and a header-click select.
+# 🚨 AND IT IS SAFE FOR A MEASURED REASON, NOT BECAUSE HE ASKED. The licence positions
+# differ: CFBD attribution is OPTIONAL under their terms and kept by choice, but presenting
+# Model Pack output as official CFBD prediction is PROHIBITED — that obligation is not ours
+# to waive. 📊 A222 enumerated every sheet whose data is prediction-bearing, by the presence
+# of an `attribution` COLUMN rather than by `has_predictions`:
 #
-# WHAT THIS COSTS, SAID OUT LOUD. `ROW_HEADER = 4` existed so "the freeze pane, autofilter and
-# header row are at the same address throughout", and a computed header gives that up. The
-# replacement is stronger, which is why the trade is worth taking: with Excel Tables (R-182)
-# every data range is a NAMED OBJECT that Excel resolves for itself, so nothing downstream
-# needs the address at all. Anyone tempted to restore the constant should restore the Tables
-# first and then discover there is nothing left for it to do.
+#     Schedule            SHIPPED · attribution selected in SQL and rendered as `Attribution`
+#     Model performance   not shipped · attribution selected and rendered
+#     Edges               not shipped · has_predictions, and NO attribution column
+#
+# ✅ SO THE ONE SHIPPED PREDICTION-BEARING SHEET MEETS THE OBLIGATION PER ROW, which R-221
+# already argued is the stronger form: attribution carried per row survives filtering and
+# sorting, and a banner does not. 📊 And no shipped sheet was writing the banner at all —
+# `sheet_disclaimer` was False on all sixteen — so the disclaimer only ever appeared on the
+# Index.
+#
+# 🚨 `Edges` IS THE ONE TO WATCH AND IT IS GUARDED RATHER THAN NOTED. It is prediction-
+# bearing with no attribution column, so shipping it after this change would remove the only
+# place its licence obligation is met. `tests/test_workbook.py` now fails if any sheet in
+# SHIPPED carries predictions without an attribution column.
+# ══ A222 (cfdb-main-R-3001): THE HEADER IS ROW 1 ON EVERY DATA SHEET ══════════════════════
+#
+# > **MARC, v16:** *"Remove the disclaimer row and blank row above the data in the data
+# > sheets. Some external tools don't play nice with the blank space above the dataset
+# > (e.g. Tableau Public)."*
+#
+# 🚨 HE IS OVERRIDING HIMSELF, AND THE OVERRIDDEN RULE WAS A GLOBAL ONE. R-181 read, in his
+# words: *"there needs to be 1 empty row between disclaimer info and the header row of the
+# dataset — global requirement to help play to how sorting works in Excel."*
+#
+# ✅ THE CONFLICT DISSOLVES RATHER THAN BEING TRADED AWAY. That blank row existed to SEPARATE
+# the header from the note block, because Excel treats a blank row as the end of a region and
+# the second blank changed what `Ctrl+A` and a header-click select. **With no note rows on a
+# data sheet there is nothing to separate the header from**, so the requirement has no
+# subject. The Index still carries a note block and still gets its blank row.
+#
+# ⚠️ WHAT R-181 ALSO GAVE UP IS UNCHANGED AND STILL PAID FOR: `ROW_HEADER = 4` existed so the
+# freeze pane, header and filter shared one address. Excel Tables (R-182) made every data
+# range a NAMED OBJECT Excel resolves for itself, so nothing downstream needs the address.
 ROW_CREDIT = 1
 BLANK_ROWS_BEFORE_HEADER = 1
 
 
 def header_row(note_lines: int) -> int:
-    """The 1-based row the header sits on, given how many note lines precede it."""
+    """The 1-based row the header sits on, given how many note lines precede it.
+
+    🚨 NO NOTES MEANS NO BLANK ROW, AND THAT IS THE WHOLE OF A222's PART 1. The blank row
+    separates the header from a note block; with nothing above it there is nothing to
+    separate, and a leading blank is exactly what Tableau Public and friends choke on.
+    """
+    if not note_lines:
+        return 1
     return note_lines + BLANK_ROWS_BEFORE_HEADER + 1
 
 
@@ -75,9 +104,8 @@ def first_data_row(note_lines: int) -> int:
     return header_row(note_lines) + 1
 
 
-# Retained ONLY because `_write_index` writes a fixed two-line note block of its own and the
-# rest of the module reads these for the index's own layout. Data sheets compute their rows.
-ROW_DISCLAIMER = 2
+# ⚠️ A222 REMOVED `ROW_DISCLAIMER`. It existed only because `_write_index` wrote a fixed
+# TWO-line note block; the Index now writes one line and nothing reads row 2 as a disclaimer.
 
 # THE ROW CAP, NAMED, AND RAISED — R-196.
 #
@@ -717,7 +745,6 @@ class Sheet:
                  derived: Optional[Dict[str, Callable]] = None,
                  link_fields: Optional[Dict[str, str]] = None,
                  display: Optional[Dict[str, Callable]] = None,
-                 sheet_disclaimer: Optional[bool] = None,
                  freeze_before: Optional[str] = None,
                  field_category: Optional[Dict[str, str]] = None,
                  integer_fields: frozenset = frozenset(),
@@ -735,13 +762,6 @@ class Sheet:
         # `derived` on purpose: one answers "where does this value come from", the other
         # "what does the reader see". A boolean is still a boolean in the view.
         self.display: Dict[str, Callable] = display or {}
-        # WHETHER THE SHEET WRITES THE MODEL DISCLAIMER, which is NOT the same question as
-        # whether it carries predictions (R-221). Marc removed row 2 from Schedule, and the
-        # sheet still has six prediction columns — what makes that safe is the per-row
-        # `attribution` column, not the absence of predictions. Conflating the two flags
-        # would have made the model lie about the sheet.
-        self.sheet_disclaimer = has_predictions if sheet_disclaimer is None \
-            else sheet_disclaimer
         # THE FIRST COLUMN THAT SCROLLS, by LABEL — named for what Excel actually does.
         #
         # `freeze_panes = "M4"` splits BEFORE M, so M is the first column to move and A–L
@@ -1512,7 +1532,6 @@ _ALL_SHEETS = [
         ("attribution", "Attribution"),
     ],
         has_predictions=True,          # it does carry predictions...
-        sheet_disclaimer=False,        # ...and says so per row instead of in row 2 (R-221)
         derived={"status": _status},
         display={
             # R-218. Booleans as words. `Out-of-sample week` is deliberately NOT here:
@@ -1804,7 +1823,7 @@ _ALL_SHEETS = [
     # `count(*) over () as rows_in_scope` still travels on every one of them, so a scope that
     # DOES overflow says so rather than being quietly clipped.
     # ======================================================================================
-    Sheet("Team form", "srv_team_week", """
+    Sheet("Team Form", "srv_team_week", """
         select season, week, team_display, conference, classification, games_counted,
                total_yards_for, rushing_yards_for, passing_yards_for,
                total_yards_allowed, rushing_yards_allowed, passing_yards_allowed,
@@ -1838,7 +1857,7 @@ _ALL_SHEETS = [
              "team — 136 of 2,176 rows in 2025 — which is the honest zero rather than a gap. "
              "FBS only, matching the site's spine; the full season is 10,688 rows."),
 
-    Sheet("Team stats", "srv_team_stats", """
+    Sheet("Team Stats", "srv_team_stats", """
         select season, school, conference, classification, stat_base_name, stat_name,
                stat_value, stat_value_raw, rank_desc, rank_asc, percentile,
                count(*) over () as rows_in_scope
@@ -2019,7 +2038,7 @@ _ALL_SHEETS = [
              "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
              "who is top-50 in one and not another has that column BLANK: 29.8% of the value "
              "cells in this category are filled (183 players). That is the cut, not a gap."),
-    Sheet("Player Stat - Kick returns", "srv_player_stats", """
+    Sheet("Player Stat - Kick Returns", "srv_player_stats", """
         select jersey, player_name, team, conference, class_year_display, position,
                height_display, weight_pounds, stat_type, stat_value, rank_desc,
                count(*) over () as rows_in_scope
@@ -2109,7 +2128,7 @@ _ALL_SHEETS = [
              "statistic — the Value and its Rank. THE TOP 50 IN EACH STATISTIC, so a player "
              "who is top-50 in one and not another has that column BLANK: 34.3% of the value "
              "cells in this category are filled (171 players). That is the cut, not a gap."),
-    Sheet("Player Stat - Punt returns", "srv_player_stats", """
+    Sheet("Player Stat - Punt Returns", "srv_player_stats", """
         select jersey, player_name, team, conference, class_year_display, position,
                height_display, weight_pounds, stat_type, stat_value, rank_desc,
                count(*) over () as rows_in_scope
@@ -2210,7 +2229,7 @@ _ALL_SHEETS = [
     # cover_scored travels beside ats_accuracy_pct on purpose. A rate without its
     # denominator is the defect AC-G.33 exists to prevent, and it is worse in a workbook,
     # where the column gets averaged.
-    Sheet("Model performance", "srv_model_performance", """
+    Sheet("Model Performance", "srv_model_performance", """
         select segment_type, segment_value, model_name, model_version, model_family,
                split, season, is_out_of_sample_week, games,
                mean_absolute_margin_error, winner_accuracy_pct, winner_scored,
@@ -2254,7 +2273,7 @@ _ALL_SHEETS = [
     # listed — five sheets are still pending, and the moment one converts a hardcoded list
     # would be wrong with nothing failing.
     # ======================================================================================
-    Sheet("Data dictionary", "srv_data_dictionary", """
+    Sheet("Data Dictionary", "srv_data_dictionary", """
         select table_name, column_name, data_type, is_nullable,
                description_status, column_description, ordinal_position,
                count(*) over () as rows_in_scope
@@ -2277,14 +2296,47 @@ _ALL_SHEETS = [
 # adding a converted sheet is moving one name and cannot be done by accident.
 # A175: `Player stats` (melted) REPLACED by ten pivoted per-category sheets — Marc called the
 # melted one "too long for export", and keeping it beside its own fix would be clutter.
-SHIPPED = ("Schedule", "Scores", "Standings", "Team form", "Team stats",
+SHIPPED = ("Schedule", "Scores", "Standings", "Team Form", "Team Stats",
            "Player Stat - Defensive", "Player Stat - Fumbles",
            "Player Stat - Interceptions", "Player Stat - Kicking",
-           "Player Stat - Kick returns", "Player Stat - Passing",
-           "Player Stat - Punting", "Player Stat - Punt returns",
+           "Player Stat - Kick Returns", "Player Stat - Passing",
+           "Player Stat - Punting", "Player Stat - Punt Returns",
            "Player Stat - Receiving", "Player Stat - Rushing",
-           "Data dictionary")
-SHEETS = [s for s in _ALL_SHEETS if s.name in SHIPPED]
+           "Data Dictionary")
+# ══ A222 (R-3002 and R-3006): THE TAB ORDER IS DECLARED HERE, LEFT TO RIGHT ══════════════
+#
+# > **MARC, v16:** *"Data Dictionary should be 2nd sheet"* and *"Player Stats pages should
+# > order: Offense (Passing, Receiving, Rushing), Defense, Kicking (Kicking, Kick Returns,
+# > Punting, Punt Returns), Fumbles, Interceptions"*
+#
+# ✅ ORDERED AT CREATION RATHER THAN MOVED AFTERWARDS. `openpyxl` has `move_sheet`, and the
+# sheets are written in one pass from this list — so creating them in the wanted order costs
+# nothing and leaves no window in which the file is briefly wrong. The Index is separately
+# inserted at position 0 by `_write_index`, which puts `Data Dictionary` second by
+# construction rather than by a second edit that has to agree with it.
+#
+# ⚠️ *Offense* AND *Kicking* ARE HIS WORDS FOR GROUPS, NOT TABS, and no grouping tabs were
+# invented. 📋 If a visual grouping would help, that is a proposal for him rather than a
+# thing to add unasked.
+#
+# 🚨 ANY SHIPPED SHEET MISSING FROM THIS LIST IS AN ERROR, NOT A SILENT APPEND. A sheet that
+# fell off the order would otherwise ship in whatever position `_ALL_SHEETS` happened to give
+# it, which is exactly the kind of drift a declared order exists to prevent.
+SHEET_ORDER = (
+    "Data Dictionary",
+    "Schedule", "Scores", "Standings", "Team Form", "Team Stats",
+    # Marc's order: Offense, then Defense, then Kicking, then Fumbles, then Interceptions.
+    "Player Stat - Passing", "Player Stat - Receiving", "Player Stat - Rushing",
+    "Player Stat - Defensive",
+    "Player Stat - Kicking", "Player Stat - Kick Returns",
+    "Player Stat - Punting", "Player Stat - Punt Returns",
+    "Player Stat - Fumbles", "Player Stat - Interceptions",
+)
+assert set(SHEET_ORDER) == set(SHIPPED), (
+    "SHEET_ORDER and SHIPPED disagree: "
+    f"{set(SHIPPED) ^ set(SHEET_ORDER)}")
+_BY_NAME = {s.name: s for s in _ALL_SHEETS}
+SHEETS = [_BY_NAME[name] for name in SHEET_ORDER]
 PENDING_SHEETS = [s for s in _ALL_SHEETS if s.name not in SHIPPED]
 # 🚨 A174 (cfdb-main-R-1436). THE OLD SENTENCE WAS DISPROVED BY A173 AND LEFT IN THE FILE —
 # where `_write_index` prints it into the workbook Marc downloads, for all three sheets.
@@ -2327,13 +2379,13 @@ def dictionary_tables() -> list:
 
 PAGE_FOR_SHEET = {
     "Schedule": "schedule", "Scores": "scores", "Odds": "odds", "Edges": "edges",
-    "Standings": "standings", "Model performance": "performance",
-    # A173. ⚠️ "Team form" POINTS AT TODAY AND THAT IS THE HONEST ANSWER RATHER THAN A TIDY
+    "Standings": "standings", "Model Performance": "performance",
+    # A173. ⚠️ "Team Form" POINTS AT TODAY AND THAT IS THE HONEST ANSWER RATHER THAN A TIDY
     # ONE: `srv_team_week` has NO page registered against it — Today and Matchup both read it
     # and neither declares it — so the Index links to the page a reader actually meets those
     # numbers on. The other two have real owners.
-    "Team form": "today", "Team stats": "stats", "Player stats": "players",
-    "Data dictionary": "dictionary",
+    "Team Form": "today", "Team Stats": "stats", "Player stats": "players",
+    "Data Dictionary": "dictionary",
 }
 # The split is asserted at IMPORT, not in a test: moving a sheet between the two lists is a
 # one-word edit, and this is what makes "I shipped a sheet" and "I lost a sheet" different
@@ -2684,9 +2736,74 @@ def is_plain_integer(field: str) -> bool:
     return field in PLAIN_INTEGER or field.endswith(PLAIN_INTEGER_SUFFIXES)
 
 
+INTEGER_DB_TYPES = frozenset({"integer", "bigint", "smallint"})
+
+
+def integer_columns() -> Dict[str, frozenset]:
+    """Every serving column whose DATABASE TYPE is an integer, by view. A222 (R-3004).
+
+    > **MARC, v16:** *"A see a lot of data points presented as integer values with a decimal
+    > point, but no significant digits. Don't print unnecessary significant digits, and don't
+    > print unnecessary decimal points. If it's an integer, it's ideal to show it as an
+    > integer."*
+
+    🚨 THE TEST IS THE COLUMN'S TYPE, NOT THIS WEEK'S VALUES, AND THE DIFFERENCE IS THE WHOLE
+    RULE. *Games played* is an integer; a *points per game* that happens to read 21.0 in a
+    one-week scope is not, and a rule built on "every value in scope is whole" would strip the
+    decimals off the second one the moment a reader picked a narrow filter. **A type does not
+    change between Saturdays.**
+
+    🚨 AND IT IS NOT A HAND LIST, WHICH THIS FILE HAS ALREADY BEEN BITTEN BY: the note above
+    `COUNT_FIELDS` says *"a list every new integer column has to be remembered into will be
+    wrong again on the next column."* This is read from the catalogue, so a column added to a
+    view next month is covered without anyone editing this file.
+
+    ✅ AND THE SOURCE IS `srv_data_dictionary`, WHICH THE WORKBOOK ALREADY SHIPS AS A SHEET —
+    one serving view, read the way every other sheet is read (G-1), rather than a second
+    channel into `information_schema`.
+
+    ⚠️ IT DECIDES ONLY WHETHER THERE IS A DECIMAL POINT. Whether a number carries a thousands
+    separator is R-216's question and is left exactly where it was: a season is not "2,025" on
+    any sheet, and a rank is not "1,234".
+    """
+    try:
+        rows = query("""
+            select table_name, column_name, data_type
+            from srv_data_dictionary
+            where table_schema = 'serving' and data_type = any(:types)
+            limit 5000
+        """, {"types": sorted(INTEGER_DB_TYPES)})
+    except Exception:                                              # noqa: BLE001
+        # ⚠️ A CATALOGUE THAT CANNOT BE READ MUST NOT TAKE THE WORKBOOK DOWN. The formats fall
+        # back to what they were before A222, which is wrong-looking rather than absent —
+        # and the sheet the reader wanted still arrives.
+        return {}
+    if rows is None or rows.empty or not {"table_name", "column_name", "data_type"} \
+            <= set(rows.columns):
+        return {}
+    out: Dict[str, set] = {}
+    for record in rows.itertuples():
+        # 🚨 THE TYPE IS RE-CHECKED HERE, NOT TRUSTED TO THE `where`, AND A TEST DOUBLE IS
+        # WHAT PROVED THAT NECESSARY. `tests/test_workbook.py` stubs `query` and returns the
+        # catalogue fixture for any `srv_data_dictionary` read WITHOUT applying the filter —
+        # so the first version of this function treated **every column in every view** as an
+        # integer and stripped the decimals off `spread_current`, which is `numeric` and is
+        # a half-point number 58.5% of the time.
+        #
+        # ⚠️ THE STUB WAS NOT WRONG TO IGNORE THE `where`; A FUNCTION THAT ONLY WORKS WHEN ITS
+        # CALLER HONOURS A CLAUSE IT CANNOT SEE IS. Asking for a type and then verifying the
+        # type is the same discipline §2.2.1c.2 applies to columns — check the cell, not the
+        # description of the cell.
+        if record.data_type not in INTEGER_DB_TYPES:
+            continue
+        out.setdefault(record.table_name, set()).add(record.column_name)
+    return {view: frozenset(fields) for view, fields in out.items()}
+
+
 def number_format(field: str, decimals: Optional[int] = None,
                   integers: frozenset = frozenset(),
-                  site_precision: frozenset = frozenset()) -> str:
+                  site_precision: frozenset = frozenset(),
+                  db_integers: frozenset = frozenset()) -> str:
     """Excel format string at the SAME precision the site renders (AC-G.31, AC-15.7).
 
     Decimals are derived from fmt.precision_for rather than restated, so a column cannot
@@ -2712,8 +2829,21 @@ def number_format(field: str, decimals: Optional[int] = None,
         return "#,##0"
     if field.endswith("moneyline"):
         return "+#,##0;-#,##0"
+    # 🚨 A222 (R-3004). AN INTEGER COLUMN GETS NO DECIMAL POINT, decided by the column's
+    # DATABASE TYPE — see `integer_columns()`. 📊 41 shipped columns were integer-typed and
+    # formatted with decimals before this: 18 on Scores, 2 on Schedule, 1 on Standings and
+    # `jersey`/`weight_pounds` on all ten Player Stat sheets.
+    if field in db_integers:
+        return "#,##0"
     places = fmt.precision_for(field) if decimals is None or field in site_precision \
         else decimals
+    # 🚨 AND ZERO PLACES MEANS NO POINT AT ALL, WHICH IS LITERALLY WHAT MARC DESCRIBED.
+    # `"#,##0." + "" ` is `#,##0.` — a trailing decimal point with nothing after it, which
+    # Excel renders as `12.` 📊 It reached twenty shipped columns: `jersey` and
+    # `weight_pounds` on each of the ten Player Stat sheets, both of which `precision_for`
+    # correctly gives 0 places. **The format string was wrong, not the precision.**
+    if not places:
+        return "#,##0"
     return "#,##0." + "0" * places
 
 
@@ -3202,6 +3332,11 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
     # srv_game, so any row of it answers, and a sheet without them falls back.
     legend_frame = None
 
+    # 🚨 A222 (R-3004): READ ONCE, NOT PER SHEET. The catalogue is one query and sixteen
+    # sheets read from it; doing it inside the loop would be sixteen round trips for one
+    # answer that does not change between them.
+    db_integers_by_view = integer_columns()
+
     for sheet in SHEETS:
         # AC-15.5: a sheet with nothing to say is omitted and named. The view name goes in
         # the note so the omission points at an object rather than at a mood.
@@ -3212,13 +3347,21 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
             continue
 
         tab = book.create_sheet(sheet.name)
+        # ⚠️ BY VIEW, so a sheet whose view is missing from the catalogue simply gets the old
+        # behaviour for its columns rather than raising — an absent catalogue is a worse
+        # workbook, never no workbook.
+        db_integer_fields = db_integers_by_view.get(sheet.view, frozenset())
 
-        # AC-15.3 / AC-15.4, written before anything else so no sheet can exist without it.
-        # The block is however many lines this sheet needs; the header address follows from
-        # it (R-181) rather than being a constant every sheet has to agree with.
-        notes = [CFBD_CREDIT] + ([MODEL_DISCLAIMER] if sheet.sheet_disclaimer else [])
-        for offset, text in enumerate(notes):
-            tab.cell(ROW_CREDIT + offset, 1, text).font = note_font
+        # 🚨 A222 (R-3001): A DATA SHEET WRITES NOTHING ABOVE ITS HEADER. Header on row 1,
+        # first data row on row 2, nothing above either — Marc's v16 ruling, because a
+        # leading note block is what stops Tableau Public reading the sheet as a dataset.
+        # ✅ THE CREDIT DID NOT DISAPPEAR, IT MOVED: `_write_index` carries it, which is the
+        # only place left that can hold it now the data sheets start at row 1.
+        # ⚠️ AC-15.3 / AC-15.4 ARE STILL MET — by the Index for the credit, and per row by
+        # `Schedule`'s own `Attribution` column for the licence obligation that is not
+        # optional. Neither was ever met by a banner on a data sheet: 📊 zero shipped sheets
+        # wrote one.
+        notes = []
         row_header = header_row(len(notes))
         row_first_data = first_data_row(len(notes))
 
@@ -3260,7 +3403,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     cell.number_format = number_format(
                         field, sheet.decimals, sheet.integer_fields,
-                        sheet.site_precision)
+                        sheet.site_precision, db_integer_fields)
                 elif isinstance(value, datetime):
                     cell.number_format = date_format(field)
                 # R-183. The link goes ON the cell whose text is already the label, never as
@@ -3356,7 +3499,7 @@ def build(season: int, week: Optional[int], season_type: str = "regular",
                         # is applied.
                         rendered = len(
                             number_format(field, sheet.decimals, sheet.integer_fields,
-                                          sheet.site_precision)
+                                          sheet.site_precision, db_integer_fields)
                             .replace("#,##", "").replace(";", ""))
                         rendered = max(rendered, 8)
                 else:
@@ -3456,7 +3599,11 @@ def _write_index(book, season, week, season_type, conference, division, generate
     from openpyxl.worksheet.table import Table as ExcelTable, TableStyleInfo
 
     tab = book.create_sheet("Index", 0)
-    notes = [CFBD_CREDIT, MODEL_DISCLAIMER]
+    # ✅ A222 (R-3000/R-3001): THE INDEX IS WHERE `CFBD_CREDIT` LIVES NOW, and it is the only
+    # place it can: PART 1 put every data sheet's header on row 1, so there is no longer a row
+    # above the data to put it on. The Index is not a data sheet and keeps its note block, its
+    # blank row and its own layout. `MODEL_DISCLAIMER` is gone — see the module header.
+    notes = [CFBD_CREDIT]
     for offset, text in enumerate(notes):
         tab.cell(ROW_CREDIT + offset, 1, text).font = note_font
 
