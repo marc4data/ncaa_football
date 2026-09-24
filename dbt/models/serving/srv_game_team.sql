@@ -133,6 +133,11 @@ select
     t.week,
     t.season_type,
     t.game_date,
+    -- A224 (R-3012). The kickoff timestamp, so a "before this game" bound is the kickoff
+    -- rather than the calendar day. 📊 B152: 120 of 225,350 team-games share a date with
+    -- another game of the same team, which is what `game_date <` gets wrong.
+    -- ⚠️ Read `kickoff_time_known` beside it: without a published time this is midnight.
+    t.start_date,
     t.team_id,
     t.team,
     -- fct_game_team carries classification but not conference; the conference is

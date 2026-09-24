@@ -148,6 +148,108 @@ select
     100 - start_yards_to_goal                               as start_yards_from_own_goal,
     100 - end_yards_to_goal                                 as end_yards_from_own_goal,
 
+    -- ══ A224 (cfdb-main-R-3010): WHERE THE OFFENSE'S POSSESSION ACTUALLY ENDED ═══════════
+    --
+    -- 🚨 `end_yardline` IS NOT THAT, AND SINCE 2026 IT IS USUALLY SOMETHING ELSE ENTIRELY.
+    -- It is the possession-CHANGE spot: the ensuing kickoff after a score, the punt's
+    -- destination after a punt, the return's end after a turnover. B151 specified this pair
+    -- so the drive chart could draw the part of the field the offense actually reached.
+    --
+    -- 📊 MEASURED ON THIS MODEL, 87,897 drives. `end_yards_to_goal` equals
+    -- `start_yards_to_goal - yards` on:
+    --
+    --     2024   34,119 of 37,798   90.3%
+    --     2025   31,645 of 38,906   81.3%
+    --     2026    4,575 of 11,193   40.9%      <- the feed changed
+    --
+    -- 🚨 AND THE 2026 SPLIT BY RESULT IS THE PROOF THAT THIS IS A DIFFERENT FACT RATHER THAN
+    -- A DEFECT: punts agree on **0.9%** (37 of 4,052), because `end_yardline` is where the
+    -- PUNT landed; offensive scores agree on 65.3%, clock-outs on 83.7%. B150 hit the same
+    -- wall from the page and had to suppress a mark on 83.9% of 2026 made field goals.
+    --
+    -- ⚠️ THE DERIVATION IS THE FEED'S OWN ARITHMETIC, NOT A RECONSTRUCTION FROM PLAYS.
+    -- `yards` is the drive's net gain and `start_yards_to_goal` is where it began, so the
+    -- offense's last spot is one minus the other. Both inputs are non-null on every row of
+    -- all three seasons, so coverage is 100% (§2.5's first question) — what varies is whether
+    -- the result lands on the field, which the flag below answers.
+    start_yards_to_goal - yards                             as offense_end_yards_to_goal,
+    100 - (start_yards_to_goal - yards)                     as offense_end_yards_from_own_goal,
+
+    -- ⚠️ THE ABSOLUTE FRAME, AND THE FORMULA IS VERIFIED RATHER THAN ASSUMED. `yardline` is
+    -- anchored on one end of the field and therefore FLIPS with the side in possession.
+    -- 📊 Control: `case when is_home_offense then 100 - start_yards_to_goal else
+    -- start_yards_to_goal end` reproduces the published `start_yardline` on **87,897 of
+    -- 87,897 rows (100.00%)**, so the same expression is the right one for the new end.
+    case when is_home_offense then 100 - (start_yards_to_goal - yards)
+         else start_yards_to_goal - yards end                as offense_end_yardline,
+
+    -- 🚨 FLAGGED, NEVER CLAMPED — the same ruling `is_end_on_field` already carries one line
+    -- up, for the same reason: clamping silently redraws a real bar.
+    --
+    -- ⚠️ AND IT IS A SEPARATE FLAG BECAUSE IT IS A SEPARATE SET OF ROWS, MEASURED: 590 drives
+    -- put the OFFENSE's end off the field against 118 for `end_yards_from_own_goal`, and only
+    -- **38 are in both**. Reusing the existing flag would have told a reader that 118 rows
+    -- were suspect when 590 are, and named the wrong ones.
+    --
+    -- ⚠️ AND IT IS TOTAL — `coalesce(..., false)` — WHICH IS A DELIBERATE DEPARTURE FROM THE
+    -- `is_end_on_field` LINE BELOW, for a reason §2.3 already paid for. A null input would
+    -- otherwise make the FLAG null, and a flag with three states is an absence that does not
+    -- say which absence it is (AC-G.11). 📊 Both inputs are non-null on all 87,897 rows today
+    -- — but a property of today's feed is not a property of the column (B150), and a dbt
+    -- assertion that fires on a missing snapshot is a STOPPED PUBLISH rather than a finding.
+    -- **False means *do not draw this*, whether the end is off the field or unknown.**
+    coalesce((100 - (start_yards_to_goal - yards)) between 0 and 100,
+             false)                                         as is_offense_end_on_field,
+
+    -- ══ A224 (cfdb-main-R-3011): WHAT THE DRIVE PUT ON THE BOARD ═════════════════════════
+    --
+    -- ✅ THIS DELETES `matchup.py`'s ONE §4.2.1 EXCEPTION. That file's own comment says
+    -- *"`score_impact` IS REQUESTED ON `srv_drive`, AND THIS EXPRESSION IS THE ONE PLACE TO
+    -- DELETE WHEN IT LANDS"*. The arithmetic below is that expression, moved rather than
+    -- reinvented.
+    --
+    -- 🚨 AND THE INPUT IS KNOWN-UNRELIABLE, WHICH IS WHY THE FLAG SHIPS WITH IT. The score
+    -- snapshots are incoherent on a measurable share of drives — B133's render caught a PUNT
+    -- worth +7, a MISSED FIELD GOAL worth +13 and a TOUCHDOWN worth 0, all from the published
+    -- columns. **The window some snapshots cover is not the drive.**
+    (end_offense_score - start_offense_score)
+        - (end_defense_score - start_defense_score)          as score_impact,
+    -- 🚨 TWO COLUMNS, NOT ONE NULLABLE ONE, AND AC-G.11 IS THE WHOLE REASON. A null in
+    -- `score_impact` already means *the snapshots are missing*; making it ALSO mean *the
+    -- snapshots disagree* would be an absence that does not say which absence it is. The
+    -- value is always published where the inputs exist; this says whether to believe it.
+    --
+    -- ⚠️ THE RULE IS `matchup.py`'s, TO THE LETTER, so the page can delete its copy and get
+    -- the same answer rather than a second opinion:
+    --   GUARD 1 — the delta and `is_scoring_drive` are two INDEPENDENT facts about one
+    --             drive (the second derived from the result, not the scoreboard). Where they
+    --             disagree, the snapshots are wrong.
+    --   GUARD 2 — where they agree, the delta must still be a number a scoring play can
+    --             produce: a safety, a field goal, a touchdown alone or with either kind of
+    --             conversion, positive or negative, or zero.
+    --
+    -- 📊 MEASURED BY RUNNING THIS MODEL'S OWN SQL ON THE WAREHOUSE: **3,113 of 87,897 drives
+    -- (3.54%) are NOT coherent** — 1,073 in 2024, 1,606 in 2025, 434 in 2026.
+    --
+    -- ✅ AND 3.54% IS EXACTLY B133's PUBLISHED SUPPRESSION RATE, TO TWO DECIMAL PLACES, which
+    -- is the check that this is the page's rule MOVED rather than a second opinion that
+    -- happens to look similar. ⚠️ An earlier draft of this comment cited 2.64% from four
+    -- hand-written heuristics A224 ran before reading `_drive_score_impact`; that number
+    -- measured a different thing and is not this column's.
+    --
+    -- ⚠️ TOTAL, FOR THE REASON GIVEN ON `is_offense_end_on_field` ABOVE: the outer coalesce
+    -- makes a missing snapshot read as *not coherent* rather than as a third state. That is
+    -- also exactly what the page does — `_drive_score_impact` returns None on a null input
+    -- and on an incoherent one alike, and suppresses both.
+    coalesce(
+        coalesce(is_scoring_drive, false)
+          = (((end_offense_score - start_offense_score)
+              - (end_defense_score - start_defense_score)) <> 0)
+        and ((end_offense_score - start_offense_score)
+             - (end_defense_score - start_defense_score))
+            in (0, 2, 3, 6, 7, 8, -2, -3, -6, -7, -8),
+        false)                                              as is_score_impact_coherent,
+
     -- A DRIVE CAN LOSE YARDS, so end < start is legitimate and is never clamped and never
     -- abs()'d — a sack-and-punt rendered as a forward bar is a lie about the game.
     --

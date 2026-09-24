@@ -2241,6 +2241,18 @@ models:
       - name: game_date
         description: >
           Calendar date of the game.
+      - name: start_date
+        description: >
+          Kickoff timestamp, carried down from fct_game so a "before this game" bound can be
+          the kickoff rather than the calendar day. Without it a leakage bound is game_date
+          less-than, which is nearly exact and not exact: 60 groups of team-games share a date
+          with another game of the same team, and keying on this timestamp instead leaves 28.
+          It resolves the ambiguity completely for 2024 onward, where every one of the 22,622
+          team-games carries a known kickoff and the single colliding pair becomes none. It is
+          only a real kickoff where kickoff_time_known says so - across all seasons 43.4% of
+          rows have a published time and the rest are midnight on the game's date, a date
+          wearing a timestamp, so a consumer ordering by it gets the calendar answer there
+          rather than a wrong one.
       - name: team_id
         description: >
           CFBD team id for the side this row describes.
@@ -4195,6 +4207,36 @@ models:
           sack-and-punt drawn as a forward bar is a lie about the game.
       - name: is_end_on_field
         description: False where CFBD's end coordinate falls off the field. Render the row, suppress the bar.
+      - name: offense_end_yards_from_own_goal
+        description: >
+          Where the OFFENSE's possession ended, measured from its own goal line on the same
+          0-100 coordinate the drive bar is drawn on. This is not end_yards_from_own_goal,
+          which since 2026 is the possession-CHANGE spot - the ensuing kickoff after a score,
+          the punt's destination, the return's end after a turnover. Derived from the feed's
+          own arithmetic as start_yards_to_goal minus the drive's net yards, so both inputs
+          are non-null on every row and coverage is 100% across 2024, 2025 and 2026. The two
+          measures agree on 90.3% of 2024 drives, 81.3% of 2025 and only 40.9% of 2026; on
+          2026 punts they agree on 0.9%, which is the difference this column exists to carry.
+          A drive that loses yards ends behind where it started and this column says so rather
+          than clamping - 10.1% of 2024 drives, 10.1% of 2025 and 11.0% of 2026.
+      - name: offense_end_yardline
+        description: >
+          The same position in the absolute field frame, the spelling start_yardline uses, so
+          a consumer reading one pair reads both the same way. It is the twin of
+          offense_end_yards_from_own_goal computed from one unrounded source rather than a
+          second fact, which is what stops the two bands of the drive chart disagreeing. The
+          frame flips with the side in possession, and the expression that does it reproduces
+          the published start_yardline on 87,897 of 87,897 rows.
+      - name: is_offense_end_on_field
+        description: >
+          False where the offense's computed end position falls outside the 0-100 field, which
+          is 590 of 87,897 drives or 0.67%. It is a separate flag from is_end_on_field rather
+          than a reuse, because they name different rows - that one is false on 118 drives and
+          only 38 rows are in both, so reusing it would have told a reader the wrong drives
+          were suspect. Flagged rather than clamped, for the reason is_end_on_field already
+          carries: clamping silently redraws a real bar. It is never null - a missing input
+          reads as false, so the flag has two states rather than three and false always means
+          the same thing: do not draw this.
       - name: start_clock_display
         description: '"Q2 07:14" — the game clock at the snap. One of two start-time forms; Marc picks one in pass 2.'
       - name: elapsed_from_kickoff_seconds
@@ -4389,6 +4431,30 @@ models:
       - name: end_defense_score
         description: >
           Score of the team without the ball as the drive ended.
+      - name: score_impact
+        description: >
+          Net points this drive put on the board from the offense's point of view, as the
+          offense's score change minus the defense's. It is published so the Matchup page can
+          delete the one expression that breaks its display-only contract; that page's own
+          comment calls it the one place to delete when this lands. Read
+          is_score_impact_coherent before printing it, because the underlying score snapshots
+          are unreliable on a measured 3.54% of drives - a render found a punt worth +7, a
+          missed field goal worth +13 and a touchdown worth 0, all from published columns. The
+          value is still published on those rows rather than nulled, because a null here
+          already means the snapshots are missing and making it also mean they disagree would
+          be an absence that does not say which absence it is.
+      - name: is_score_impact_coherent
+        description: >
+          Whether score_impact can be believed on this row, by two independent checks that are
+          the Matchup page's own rule moved upstream rather than restated. First, the delta
+          and is_scoring_drive are two independent facts about one drive - the second derived
+          from the result rather than the scoreboard - so where they disagree the snapshots
+          are wrong. Second, where they agree the delta must still be a value a scoring play
+          can produce: a safety, a field goal, a touchdown alone or with either conversion,
+          positive or negative, or zero. False on 3,113 of 87,897 drives, which is 3.54% and
+          matches the page's own published suppression rate to two decimal places. It is
+          never null - a missing snapshot reads as not coherent, which is what the page does
+          too, so the flag has two states rather than three.
   - name: srv_week_metric_distribution
     description: >
       ONE ROW, ONE PICTURE — everything a distribution chart draws, flattened so a page
