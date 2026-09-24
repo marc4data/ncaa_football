@@ -33,12 +33,16 @@ def test_the_description_names_exactly_the_sheets_that_ship():
             f"{sheet.name} is described as shipping and does not")
     # A173: 3 -> 7. The sentence is DERIVED, so this is the only line that had to move.
     # A175: sixteen sheets now. Built as one string so the sentence stays readable here.
-    expected = ("schedule, scores, standings, team form, team stats, "
-                "player stat - defensive, player stat - fumbles, "
-                "player stat - interceptions, player stat - kicking, "
-                "player stat - kick returns, player stat - passing, "
+    # A222 (R-3002/R-3006): the sentence follows `SHEET_ORDER` now, so this string is Marc's
+    # tab order read back out of the page — Data Dictionary second (first here, because the
+    # Index is not in this list), then the Player Stats as Offense, Defense, Kicking,
+    # Fumbles, Interceptions.
+    expected = ("data dictionary, schedule, scores, standings, team form, team stats, "
+                "player stat - passing, player stat - receiving, "
+                "player stat - rushing, player stat - defensive, "
+                "player stat - kicking, player stat - kick returns, "
                 "player stat - punting, player stat - punt returns, "
-                "player stat - receiving, player stat - rushing and data dictionary")
+                "player stat - fumbles and player stat - interceptions")
     assert described == expected, described
 
 
@@ -160,11 +164,11 @@ def test_the_page_body_runs_and_says_what_the_workbook_holds(monkeypatch):
     # A173 shipped four more sheets; the fixture covers every sheet that ships, because
     # `fake_read` is asked for each one by name.
     # A175 replaced the melted Player stats sheet with ten pivoted per-category sheets.
-    counts = {"Schedule": 83, "Scores": 166, "Data dictionary": 371,
-              "Standings": 265, "Team form": 2176, "Team stats": 4352}
+    counts = {"Schedule": 83, "Scores": 166, "Data Dictionary": 371,
+              "Standings": 265, "Team Form": 2176, "Team Stats": 4352}
     counts.update({f"Player Stat - {c}": n for c, n in (
         ("Defensive", 403), ("Fumbles", 280), ("Interceptions", 281), ("Kicking", 183),
-        ("Kick returns", 131), ("Passing", 270), ("Punting", 171), ("Punt returns", 163),
+        ("Kick Returns", 131), ("Passing", 270), ("Punting", 171), ("Punt Returns", 163),
         ("Receiving", 193), ("Rushing", 175))})
 
     def fake_read(sheet, *_a, **_k):
@@ -177,12 +181,16 @@ def test_the_page_body_runs_and_says_what_the_workbook_holds(monkeypatch):
 
     out = recorder.rendered
     # A175: sixteen sheets now. Built as one string so the sentence stays readable here.
-    expected = ("schedule, scores, standings, team form, team stats, "
-                "player stat - defensive, player stat - fumbles, "
-                "player stat - interceptions, player stat - kicking, "
-                "player stat - kick returns, player stat - passing, "
+    # A222 (R-3002/R-3006): the sentence follows `SHEET_ORDER` now, so this string is Marc's
+    # tab order read back out of the page — Data Dictionary second (first here, because the
+    # Index is not in this list), then the Player Stats as Offense, Defense, Kicking,
+    # Fumbles, Interceptions.
+    expected = ("data dictionary, schedule, scores, standings, team form, team stats, "
+                "player stat - passing, player stat - receiving, "
+                "player stat - rushing, player stat - defensive, "
+                "player stat - kicking, player stat - kick returns, "
                 "player stat - punting, player stat - punt returns, "
-                "player stat - receiving, player stat - rushing and data dictionary")
+                "player stat - fumbles and player stat - interceptions")
     assert expected in out
     assert "83 row(s)" in out and "166 row(s)" in out
     assert "srv_game_team" in out

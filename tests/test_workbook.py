@@ -226,29 +226,38 @@ def test_sheet_names_are_legal(built):
 
 def test_every_sheet_carries_cfbd_attribution_in_a_fixed_cell(built):
     _, book, _, _ = built
+    # 🚨 A222 (R-3000/R-3001): THE CREDIT IS ON THE INDEX, AND ONLY THERE. Marc's v16 ruling
+    # put every data sheet's header on row 1, so there is no row above the data left to hold
+    # it. AC-15.3 is still met — by one sheet rather than by seventeen copies.
+    assert "CollegeFootballData.com" in str(
+        book["Index"].cell(workbook.ROW_CREDIT, 1).value)
     for name in book.sheetnames:
-        assert "CollegeFootballData.com" in str(
-            book[name].cell(workbook.ROW_CREDIT, 1).value), name
+        if name == "Index":
+            continue
+        assert "CollegeFootballData.com" not in str(
+            book[name].cell(1, 1).value or ""), (
+            f"{name} still carries a note above its header — PART 1 requires row 1 to be "
+            f"the header")
 
 
-def test_every_sheet_that_declares_the_disclaimer_carries_it(built):
-    """AC-15.4 was "every sheet with predictions writes the disclaimer". R-221 split that in
-    two, and the split is the point: Schedule STILL CARRIES PREDICTIONS and no longer writes
-    the sheet-level line, because attribution now travels per row instead.
+def test_the_model_disclaimer_appears_nowhere_in_the_workbook(built):
+    """A222 (cfdb-main-R-3000). Marc: *"Drop Model disclaimer."*
 
-    So the assertion follows `sheet_disclaimer`, and the test below is what makes removing
-    the line safe rather than merely requested.
+    🚨 AND WHAT MAKES THAT SAFE IS THE TEST BELOW, NOT THIS ONE. The CFBD credit is optional
+    under CFBD's terms and kept by choice; presenting Model Pack output as official CFBD
+    prediction is PROHIBITED, and that obligation is not ours to waive. It is met per row, by
+    an `attribution` column, on the one shipped sheet that carries predictions.
+
+    📊 The banner was never doing that work: no shipped sheet wrote it, so it only ever
+    appeared on the Index.
     """
     _, book, _, _ = built
-    for sheet in workbook.SHEETS:
-        if sheet.name not in book.sheetnames:
-            continue
-        tab = book[sheet.name]
-        text = str(tab.cell(workbook.ROW_DISCLAIMER, 1).value)
-        if sheet.sheet_disclaimer:
-            assert "NOT CollegeFootballData.com predictions" in text, sheet.name
-        else:
-            assert "NOT CollegeFootballData.com predictions" not in text, sheet.name
+    for name in book.sheetnames:
+        tab = book[name]
+        for row in tab.iter_rows(min_row=1, max_row=min(6, tab.max_row), max_col=3):
+            for cell in row:
+                assert "NOT CollegeFootballData.com predictions" not in str(
+                    cell.value or ""), f"{name} still carries the model disclaimer"
 
 
 def test_a_sheet_without_the_disclaimer_must_carry_attribution_per_row(built):
@@ -262,11 +271,17 @@ def test_a_sheet_without_the_disclaimer_must_carry_attribution_per_row(built):
     So a sheet that drops the sheet-level line must have the column. If it ever has neither,
     the workbook ships unattributed predictions.
     """
+    # 🚨 A222 WIDENED THIS FROM "no disclaimer" TO "SHIPPED", AND THAT IS THE WHOLE GUARD NOW.
+    # With `MODEL_DISCLAIMER` deleted there is no banner left to fall back on, so a shipped
+    # prediction-bearing sheet with no attribution column would leave the site unattributed
+    # with nothing to catch it.
+    # 📊 `Edges` is exactly that sheet today — prediction-bearing, no attribution column — and
+    # it is NOT in SHIPPED. Adding it without giving it the column must fail here.
     for sheet in workbook._ALL_SHEETS:
-        if sheet.has_predictions and not sheet.sheet_disclaimer:
+        if sheet.name in workbook.SHIPPED and sheet.has_predictions:
             assert "attribution" in sheet.fields, (
-                f"{sheet.name} carries predictions, writes no disclaimer, and has no "
-                f"attribution column — that is an unattributed prediction leaving the site")
+                f"{sheet.name} ships, carries predictions, and has no attribution column — "
+                f"that is an unattributed prediction leaving the site")
 
 
 def test_no_prediction_cell_is_populated_beside_a_blank_attribution(built):
@@ -279,11 +294,11 @@ def test_no_prediction_cell_is_populated_beside_a_blank_attribution(built):
     _, book, _, _ = built
     schedule = next(s for s in workbook.SHEETS if s.name == "Schedule")
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     prediction_columns = ["Pred margin", "Home win prob", "Confidence", "Model",
                           "Model version"]
-    assert "Attribution" in labels and schedule.sheet_disclaimer is False
+    assert "Attribution" in labels and schedule.has_predictions
     for row in range(header + 1, tab.max_row + 1):
         attributed = tab.cell(row, labels["Attribution"]).value
         for column in prediction_columns:
@@ -319,7 +334,7 @@ def test_scoped_sheets_filter_on_the_season(built):
     # work and still under the CI query checker; letting the property lapse while they sit
     # out of the shipping list is how they would come back broken.
     unscoped = {s.name for s in workbook._ALL_SHEETS if not s.scoped}
-    assert unscoped == {"Model performance", "Data dictionary"}
+    assert unscoped == {"Model Performance", "Data Dictionary"}
     for sheet in workbook._ALL_SHEETS:
         if sheet.scoped:
             assert ":season" in sheet.sql, sheet.name
@@ -376,7 +391,7 @@ def test_numeric_cells_are_numbers_with_the_sites_precision(built):
         if sheet.name not in book.sheetnames:
             continue
         tab = book[sheet.name]
-        first_data = workbook.first_data_row(2 if sheet.sheet_disclaimer else 1)
+        first_data = workbook.first_data_row(0)
         for index, (field, _) in enumerate(sheet.columns, start=1):
             cell = tab.cell(first_data, index)
             if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
@@ -418,7 +433,7 @@ def test_sheets_are_workable_not_merely_readable(built):
             continue
         tab = book[sheet.name]
         from openpyxl.utils import get_column_letter
-        expected_row = workbook.first_data_row(2 if sheet.sheet_disclaimer else 1)
+        expected_row = workbook.first_data_row(0)
         expected_col = get_column_letter(sheet.freeze_column())
         assert tab.freeze_panes == f"{expected_col}{expected_row}", sheet.name
         assert not tab.auto_filter.ref, (
@@ -534,7 +549,7 @@ def test_export_labels_agree_with_the_site(built):
     # to scrape and the two label sets are IDENTICAL BY CONSTRUCTION rather than merely in
     # agreement. Agreement can drift; one source cannot. So the assertion changes from "this
     # gap is known" to "this gap is closed by there being one list", which is checked below.
-    # A173 ADDED "Team form", AND ITS REASON IS A THIRD ONE — neither Scores' original gap
+    # A173 ADDED "Team Form", AND ITS REASON IS A THIRD ONE — neither Scores' original gap
     # nor Scores' current answer. `srv_team_week` HAS NO PAGE REGISTERED AGAINST IT AT ALL:
     # Today and Matchup both read the view, and neither declares it as its own `page.view`,
     # so there is no page for this test to scrape labels from. ⚠️ That is a fact about the
@@ -550,10 +565,10 @@ def test_export_labels_agree_with_the_site(built):
     # column there, not columns at all. **There is nothing for this test to compare, and that
     # is a fact about the two shapes rather than a gap to close.**
     PIVOTED = {f"Player Stat - {c}" for c in (
-        "Defensive", "Fumbles", "Interceptions", "Kicking", "Kick returns", "Passing",
-        "Punting", "Punt returns", "Receiving", "Rushing")}
+        "Defensive", "Fumbles", "Interceptions", "Kicking", "Kick Returns", "Passing",
+        "Punting", "Punt Returns", "Receiving", "Rushing")}
     uncovered = {name for name, n in compared.items() if n == 0}
-    assert uncovered == {"Scores", "Team form"} | PIVOTED, (
+    assert uncovered == {"Scores", "Team Form"} | PIVOTED, (
         f"sheets compared against no page: {uncovered or 'none'}")
 
     scores_source = (site / "views" / "scores.py").read_text()
@@ -682,7 +697,7 @@ def test_a_workbook_scoped_to_fbs_holds_no_game_between_two_non_fbs_teams(monkey
         for sheet in GAME_SHEETS:
             if sheet.name in book.sheetnames:
                 tab = book[sheet.name]
-                first = workbook.first_data_row(2 if sheet.sheet_disclaimer else 1)
+                first = workbook.first_data_row(0)
                 rows += tab.max_row - first + 1
         return rows
 
@@ -862,58 +877,147 @@ def test_the_flattened_sql_survives_comment_semantics_not_just_string_matching()
 
 # === R-181 / R-182 / R-183: the layout ====================================================
 
-def test_exactly_one_blank_row_sits_between_the_notes_and_the_header(built):
-    """R-181, Marc's global requirement. Excel treats a blank row as the end of a region, so
-    a second blank changes what a header-click and Ctrl+A select — it is not cosmetic.
+def test_every_data_sheet_starts_at_A1_with_nothing_above_its_header(built):
+    """A222 (cfdb-main-R-3001), and it REPLACES R-181's blank-row rule on data sheets.
 
-    Asserted by READING THE CELLS, not by recomputing the constant. A test that asks
-    `header_row(n) == n + 2` restates the implementation and would pass with the sheet laid
-    out any way at all.
+    > **MARC, v16:** *"Remove the disclaimer row and blank row above the data in the data
+    > sheets. Some external tools don't play nice with the blank space above the dataset
+    > (e.g. Tableau Public)."*
+
+    🚨 HE IS OVERRIDING HIMSELF. R-181 was *"there needs to be 1 empty row between disclaimer
+    info and the header row of the dataset — global requirement"*, and the blank row existed
+    to SEPARATE the header from a note block. With no notes on a data sheet there is nothing
+    to separate, so the requirement has no subject rather than being traded away.
+
+    ⚠️ ASSERTED BY READING THE CELLS, not by recomputing the constant — a test that asks
+    `header_row(0) == 1` restates the implementation and would pass with the sheet laid out
+    any way at all.
+
+    ⚠️ THE INDEX IS NOT A DATA SHEET and keeps its note block, its blank row and its own
+    layout; it is checked separately below.
     """
     _, book, _, _ = built
     for name in book.sheetnames:
+        if name == "Index":
+            continue
         tab = book[name]
-        column_a = [tab.cell(r, 1).value for r in range(1, 12)]
-        notes = 0
-        while notes < len(column_a) and column_a[notes] not in (None, ""):
-            notes += 1
-        assert notes >= 1, f"{name} has no note block at all — attribution is structural"
-        blanks = 0
-        while column_a[notes + blanks] in (None, ""):
-            blanks += 1
-        assert blanks == 1, (
-            f"{name} has {blanks} blank row(s) between its notes and its header, not 1")
+        assert tab.cell(1, 1).value not in (None, ""), (
+            f"{name} has an empty A1 — a leading blank is exactly what stops Tableau "
+            f"Public reading the sheet as a dataset")
+        assert tab.cell(2, 1).value not in (None, ""), (
+            f"{name} has no data on row 2, so something still sits between the header "
+            f"and the data")
 
 
-def test_the_blank_row_holds_on_a_sheet_with_the_disclaimer_and_one_without(monkeypatch):
-    """THE NEGATIVE HALF, and the reason the old layout was wrong.
+def test_every_table_range_starts_at_the_header_row(built):
+    """A222 (R-3001). 🚨 A TABLE WHOSE RANGE STILL STARTS AT ROW 4 IS A SILENT CORRUPTION.
 
-    Four fixed constants gave exactly one blank row on a sheet WITH the model disclaimer and
-    two on a sheet without — so a test that only ever saw a prediction sheet would have
-    reported the old layout as correct. Both shapes, in one test.
+    Excel repairs it on open — the reader gets a "we found a problem with some content"
+    dialog and a file with the Table quietly removed, which is worse than an obvious break
+    because the sheet still looks right afterwards.
+
+    ⚠️ EVERY THING THAT KEYS OFF THE HEADER ROW IS ASSERTED HERE, from the FILE rather than
+    from the constant: the table range, the freeze pane, and the absence of a separate
+    autofilter (R-182 TRAP 1 — a Table brings its own filter buttons and a second one on the
+    same range is what AC-15.6 forbids).
     """
-    monkeypatch.setenv("CFDB_SITE_HOST", "https://cfdb.example")
-    monkeypatch.setattr(workbook, "query", _division_aware_query())
-    from openpyxl import load_workbook
+    _, book, _, _ = built
+    for name in book.sheetnames:
+        if name == "Index":
+            continue
+        tab = book[name]
+        tables = list(tab.tables.values())
+        assert len(tables) == 1, f"{name} has {len(tables)} tables, expected exactly 1"
+        ref = tables[0].ref
+        assert ref.startswith("A1:"), (
+            f"{name}'s table range is {ref} — it must start at the header on row 1, or "
+            f"Excel repairs the file on open")
+        assert tab.freeze_panes.endswith("2"), (
+            f"{name} freezes at {tab.freeze_panes}, which is not the first data row")
+        assert not tab.auto_filter.ref, (
+            f"{name} has a separate autofilter at {tab.auto_filter.ref}; the Table supplies "
+            f"that affordance and two on one range is what AC-15.6 forbids")
 
-    seen = {}
-    for sheet in (next(s for s in workbook._ALL_SHEETS if s.sheet_disclaimer),
-                  next(s for s in workbook._ALL_SHEETS if not s.sheet_disclaimer)):
-        monkeypatch.setattr(workbook, "SHEETS", [sheet])
-        payload, _, _ = workbook.build(2026, 8, "regular", None, "all")
-        tab = load_workbook(BytesIO(payload))[sheet.name]
-        column_a = [tab.cell(r, 1).value for r in range(1, 12)]
-        # The CONTIGUOUS prefix. Counting non-empty cells in the first three rows instead
-        # counted the header as a note the moment the block was one line long.
-        notes = 0
-        while column_a[notes] not in (None, ""):
-            notes += 1
-        seen[sheet.sheet_disclaimer] = (notes, column_a[notes])
-    assert seen[True][0] == 2 and seen[False][0] == 1, seen
-    for _, first_gap in seen.values():
-        assert first_gap in (None, ""), seen
-    assert workbook.header_row(2) != workbook.header_row(1), (
-        "the header address must MOVE with the note block; a constant is what R-181 removed")
+
+def test_an_integer_column_prints_without_a_decimal_point():
+    """A222 (cfdb-main-R-3004).
+
+    > **MARC, v16:** *"A see a lot of data points presented as integer values with a decimal
+    > point, but no significant digits… If it's an integer, it's ideal to show it as an
+    > integer."*
+
+    🚨 TWO SEPARATE DEFECTS, AND THEY NEED SEPARATE ASSERTIONS.
+
+    **One: a format ending in a bare decimal point.** `"#,##0." + "" ` is `#,##0.`, which
+    Excel renders as `12.` — literally what he described. 📊 It reached twenty shipped
+    columns: `jersey` and `weight_pounds` on each of the ten Player Stat sheets, both of
+    which `precision_for` correctly gives ZERO places. The precision was right and the
+    format string was wrong.
+
+    **Two: an integer-typed column formatted with decimals.** 📊 41 shipped columns — 18 on
+    Scores, 2 on Schedule, 1 on Standings and the twenty above.
+
+    ⚠️ ASSERTED AT THE FUNCTION, NOT ON THE BUILT FILE, AND THE REASON IS THE FIXTURE.
+    `built` stubs the catalogue with `data_type: "text"` for every column, so the db-integer
+    set is empty there and a file-level assertion could not see the rule at all. The file
+    gets the half it CAN see — no format ends in a point — in the test below.
+    """
+    # the trailing-point defect: a column precision_for gives zero places
+    assert workbook.number_format("jersey") == "#,##0"
+    assert not workbook.number_format("jersey").endswith(".")
+    assert workbook.number_format("weight_pounds") == "#,##0"
+    # the integer-type rule: the SAME field, with and without the catalogue's verdict.
+    #
+    # 🚨 `final_margin`, NOT `total_yards`, AND R-843 IS WHY. A pinned value only proves
+    # anything if it MOVES under the thing being tested — and `total_yards` is already in
+    # `COUNT_FIELDS`, so it reads `#,##0` with the rule and without it. The first draft of
+    # this test used it and asserted nothing at all.
+    assert workbook.number_format("final_margin") == "#,##0.0", (
+        "the control is wrong: final_margin must have decimals BEFORE the rule applies, or "
+        "the assertion below proves nothing (R-843)")
+    assert workbook.number_format(
+        "final_margin", db_integers=frozenset({"final_margin"})) == "#,##0"
+    # ⚠️ AND A NUMERIC COLUMN MUST KEEP ITS DECIMALS. `spread_current` is `numeric` and is a
+    # half-point number 58.5% of the time; a rule that stripped it would be worse than the
+    # defect. This is the case a stubbed catalogue got wrong once — see `integer_columns`.
+    assert workbook.number_format("spread_current") == "#,##0.0"
+    assert workbook.number_format(
+        "spread_current", db_integers=frozenset({"final_margin"})) == "#,##0.0"
+
+
+def test_no_number_in_the_file_is_formatted_with_a_trailing_decimal_point(built):
+    """The file-level half of the rule above: `12.` must not appear anywhere."""
+    _, book, _, _ = built
+    offenders = []
+    for name in book.sheetnames:
+        tab = book[name]
+        for row in tab.iter_rows(min_row=2, max_row=min(8, tab.max_row)):
+            for cell in row:
+                if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                    if str(cell.number_format).endswith("."):
+                        offenders.append((name, cell.coordinate, cell.number_format))
+    assert not offenders, f"formats ending in a bare decimal point: {offenders[:5]}"
+
+
+def test_the_index_keeps_its_note_block_and_its_blank_row(built):
+    """THE OTHER HALF, and it is what stops PART 1 being read as "delete the credit".
+
+    📊 The credit did not disappear, it moved: with every data sheet starting at row 1 the
+    Index is the only sheet left that can carry it. R-181's blank row still applies HERE,
+    because here there is still a note block to separate the header from.
+    """
+    _, book, _, _ = built
+    tab = book["Index"]
+    column_a = [tab.cell(r, 1).value for r in range(1, 12)]
+    notes = 0
+    while notes < len(column_a) and column_a[notes] not in (None, ""):
+        notes += 1
+    assert notes == 1, f"the Index carries {notes} note lines, expected exactly the credit"
+    assert "CollegeFootballData.com" in str(column_a[0])
+    blanks = 0
+    while column_a[notes + blanks] in (None, ""):
+        blanks += 1
+    assert blanks == 1, f"the Index has {blanks} blank rows under its note, not 1"
 
 
 def test_every_table_name_is_legal_unique_and_has_no_space(built):
@@ -956,7 +1060,7 @@ def test_the_navy_header_survives_the_table_style(built):
     """
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     assert tab.cell(header, 1).fill.fgColor.rgb.endswith("2F4858")
     for table in tab.tables.values():
         assert table.tableStyleInfo.showRowStripes is False
@@ -979,7 +1083,7 @@ def test_freeze_panes_stays_on_the_sheet_not_on_the_table(built):
     schedule = next(s for s in workbook._ALL_SHEETS if s.name == "Schedule")
     from openpyxl.utils import get_column_letter
     column = get_column_letter(schedule.freeze_column())
-    assert book["Schedule"].freeze_panes == f"{column}{workbook.first_data_row(1)}"
+    assert book["Schedule"].freeze_panes == f"{column}{workbook.first_data_row(0)}"
 
 
 # --- R-183, the hyperlinks --------------------------------------------------------------
@@ -989,7 +1093,7 @@ def test_team_and_matchup_cells_link_back_and_carry_the_scope(built):
     team return a 2026 page. It is worse in a workbook, which is read weeks later."""
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     away = tab.cell(header + 1, labels["Away"])
     assert away.hyperlink is not None, "the team name cell is not linked"
@@ -1012,7 +1116,7 @@ def test_the_matchup_cell_reads_a_word_and_carries_the_url_behind_it(built):
     """
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     cell = tab.cell(header + 1, labels["Matchup URL"])
     assert cell.value == workbook.URL_CELL_LABEL == "Matchup"
@@ -1216,14 +1320,24 @@ def test_sixteen_sheets_ship_and_the_other_three_are_kept_not_deleted():
     Both halves still matter: that the shipped list is exactly what we think, and that nothing
     fell out of `_ALL_SHEETS` on the way. Ten in, ten accounted for.
     """
-    assert [s.name for s in workbook.SHEETS] == [
-        "Schedule", "Scores", "Standings", "Team form", "Team stats",
-        "Player Stat - Defensive", "Player Stat - Fumbles", "Player Stat - Interceptions",
-        "Player Stat - Kicking", "Player Stat - Kick returns", "Player Stat - Passing",
-        "Player Stat - Punting", "Player Stat - Punt returns", "Player Stat - Receiving",
-        "Player Stat - Rushing", "Data dictionary"]
+    # 🚨 A222 (R-3002/R-3006): THIS LIST IS NOW THE TAB ORDER MARC ASKED FOR, and the order
+    # is the assertion rather than a by-product of `_ALL_SHEETS`.
+    #
+    # > *"Data Dictionary should be 2nd sheet"* — so it is first here, because `_write_index`
+    # > inserts the Index at position 0 ahead of it.
+    # > *"Player Stats pages should order: Offense (Passing, Receiving, Rushing), Defense,
+    # > Kicking (Kicking, Kick Returns, Punting, Punt Returns), Fumbles, Interceptions"*
+    assert [s.name for s in workbook.SHEETS] == list(workbook.SHEET_ORDER) == [
+        "Data Dictionary",
+        "Schedule", "Scores", "Standings", "Team Form", "Team Stats",
+        "Player Stat - Passing", "Player Stat - Receiving", "Player Stat - Rushing",
+        "Player Stat - Defensive",
+        "Player Stat - Kicking", "Player Stat - Kick Returns",
+        "Player Stat - Punting", "Player Stat - Punt Returns",
+        "Player Stat - Fumbles", "Player Stat - Interceptions",
+    ]
     assert {s.name for s in workbook.PENDING_SHEETS} == {
-        "Odds", "Edges", "Model performance"}
+        "Odds", "Edges", "Model Performance"}
     assert len(workbook.SHEETS) + len(workbook.PENDING_SHEETS) == len(workbook._ALL_SHEETS)
 
 
@@ -1356,7 +1470,7 @@ def test_column_width_is_measured_from_the_data_not_from_the_header(built):
     """
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     from openpyxl.utils import get_column_letter
     for label in ("Current week", "Conference game", "Home rank", "Best rank"):
@@ -1378,7 +1492,7 @@ def test_the_header_row_wraps_and_its_height_is_computed_not_hardcoded(built):
     """
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     assert tab.cell(header, 1).alignment.wrap_text is True
     height = tab.row_dimensions[header].height
     assert height and height >= workbook.MIN_HEADER_HEIGHT
@@ -1692,7 +1806,7 @@ def test_a_column_is_never_narrower_than_the_longest_word_in_its_header(built):
     from openpyxl.utils import get_column_letter
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     for index in range(1, tab.max_column + 1):
         label = str(tab.cell(header, index).value)
         width = tab.column_dimensions[get_column_letter(index)].width
@@ -1718,7 +1832,7 @@ def test_the_header_is_top_aligned_and_centred(built):
     middle of a four-line row and no two headers share a baseline."""
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     for index in range(1, tab.max_column + 1):
         alignment = tab.cell(header, index).alignment
         assert alignment.vertical == "top", index
@@ -1731,7 +1845,7 @@ def test_the_mark_columns_are_centred_and_the_others_are_not(built):
     _, book, _, _ = built
     schedule = next(s for s in workbook.SHEETS if s.name == "Schedule")
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     centred_labels = {dict(schedule.columns)[f] for f in schedule.centred}
     assert centred_labels == {"Upset level", "Winner covered", "O/U result"}
@@ -1787,7 +1901,7 @@ def test_the_legend_glyphs_match_the_sheet_in_size_and_colour(built):
 def test_the_open_marks_in_the_sheet_carry_the_same_colour(built):
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     coloured = 0
     for row in range(header + 1, tab.max_row + 1):
@@ -1849,7 +1963,7 @@ def test_the_header_row_clears_the_tables_filter_buttons(built):
     label."""
     _, book, _, _ = built
     tab = book["Schedule"]
-    assert tab.row_dimensions[workbook.header_row(1)].height >= 50
+    assert tab.row_dimensions[workbook.header_row(0)].height >= 50
 
 
 def test_the_fifty_point_floor_never_shortens_a_header_that_needs_more(monkeypatch):
@@ -1872,14 +1986,13 @@ def test_the_fifty_point_floor_never_shortens_a_header_that_needs_more(monkeypat
         [(schedule.columns[0][0], "Supercalifragilistic Expialidocious Header")]
         + list(schedule.columns[1:]),
         has_predictions=schedule.has_predictions,
-        sheet_disclaimer=schedule.sheet_disclaimer,
         derived=schedule.derived, display=schedule.display,
         link_fields=schedule.link_fields, freeze_before=schedule.freeze_before)
     monkeypatch.setattr(workbook, "SHEETS", [stretched])
     payload, _, _ = workbook.build(2026, 8, "regular", None, "fbs")
     from openpyxl import load_workbook
     tab = load_workbook(BytesIO(payload))["Schedule"]
-    height = tab.row_dimensions[workbook.header_row(1)].height
+    height = tab.row_dimensions[workbook.header_row(0)].height
     assert height > workbook.MIN_HEADER_HEIGHT, (
         f"a header needing {tall}pt was written at {height}pt — the floor has become a "
         f"ceiling and long headers will clip")
@@ -1918,7 +2031,7 @@ def test_the_hand_set_widths_are_exactly_what_marc_measured(built):
     from openpyxl.utils import get_column_letter
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     assert workbook.WIDTH_OVERRIDES == {
         "Kickoff": 11.5, "Winner covered": 8.0, "Final margin": 5.85, "Season": 5.6,
@@ -1950,7 +2063,7 @@ def test_a_hand_set_width_is_still_floored_at_its_header_word():
 def test_winner_covered_is_centred_as_well_as_widened(built):
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     index = labels["Winner covered"]
     assert tab.cell(header, index).alignment.horizontal == "center"
@@ -2006,7 +2119,7 @@ def test_text_columns_tell_excel_the_text_is_deliberate(built):
 
     # And it must cover the columns that actually hold the text, not an arbitrary range.
     tab = built[1]["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     from openpyxl.utils import get_column_letter
     covered = set()
@@ -2083,13 +2196,13 @@ def test_a_numeric_column_is_not_told_to_ignore_text_errors(built):
                                           parts[sheet.name])}
         assert covered, f"{sheet.name} suppresses nothing — the injection did not happen"
         tab = book[sheet.name]
-        first_data = workbook.first_data_row(2 if sheet.sheet_disclaimer else 1)
+        first_data = workbook.first_data_row(0)
         for index in range(1, tab.max_column + 1):
             value = tab.cell(first_data, index).value
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 letter = get_column_letter(index)
                 assert letter not in covered, (
-                    f"{sheet.name}!{letter} ({tab.cell(workbook.header_row(1), index).value}) "
+                    f"{sheet.name}!{letter} ({tab.cell(workbook.header_row(0), index).value}) "
                     f"holds numbers; silencing text warnings there hides a real mistake")
                 checked += 1
     assert checked > 20, checked
@@ -2326,7 +2439,7 @@ def test_the_record_columns_are_centred(built):
     a week of play produces well over five distinct records."""
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     for label in ("Away record", "Home record"):
         index = labels[label]
@@ -2359,7 +2472,7 @@ def test_every_mark_cell_names_the_same_font(built):
     _, book, _, _ = built
     schedule = next(s for s in workbook.SHEETS if s.name == "Schedule")
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     marked = {dict(schedule.columns)[f] for f in schedule.centred}
     checked = 0
@@ -2424,7 +2537,7 @@ def test_the_kickoff_prints_as_month_day_and_time(built):
     the year is redundant with the Season column right there and the filename carrying it."""
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     cell = tab.cell(header + 1, labels["Kickoff"])
     assert cell.number_format == "mmm-dd hh:mm"
@@ -2438,7 +2551,7 @@ def test_provenance_timestamps_keep_their_year(built):
     provenance timestamp without a year is not one."""
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     for label in ("As of", "Line taken"):
         assert "yyyy" in tab.cell(header + 1, labels[label]).number_format, label
@@ -2451,7 +2564,7 @@ def test_the_date_column_width_follows_its_format(built):
     from openpyxl.utils import get_column_letter
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     kickoff = tab.column_dimensions[get_column_letter(labels["Kickoff"])].width
     as_of = tab.column_dimensions[get_column_letter(labels["As of"])].width
@@ -2466,7 +2579,7 @@ def test_the_push_mark_is_blue_wherever_it_appears(built):
     colour — red is for Under and the open marks, blue is for the outcome that was neither."""
     _, book, _, _ = built
     tab = book["Schedule"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     seen = 0
     for label in ("Winner covered", "O/U result"):
@@ -2817,7 +2930,7 @@ def test_the_header_fill_written_into_the_file_is_the_category_colour(built):
     _, book, _, _ = built
     tab = book["Scores"]
     sheet = _scores()
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     seen = {}
     for index, (field, _) in enumerate(sheet.columns, start=1):
         written = tab.cell(header, index).fill.fgColor.rgb
@@ -3002,7 +3115,7 @@ def test_the_scores_banding_is_painted_on_the_cells_and_follows_the_game(built):
     _, book, _, _ = built
     tab = book["Scores"]
     sheet = _scores()
-    first = workbook.first_data_row(1)
+    first = workbook.first_data_row(0)
     band_index = sheet.fields.index("game_no") + 1
     last_column = len(sheet.columns)
 
@@ -3058,7 +3171,7 @@ def test_the_scores_freeze_keeps_team_and_opponent_and_still_leaves_room(built):
         f"{len(frozen)} frozen columns; 12 is 138 characters on real data and 20 — the whole "
         f"Game block — is 200, against the ~110-130 an Excel window shows")
 
-    expected = f"{get_column_letter(first_scrolling)}{workbook.first_data_row(1)}"
+    expected = f"{get_column_letter(first_scrolling)}{workbook.first_data_row(0)}"
     assert tab.freeze_panes == expected
 
 
@@ -3224,7 +3337,7 @@ def test_the_cover_verdicts_read_as_words(built):
     assert not sheet.centred, sheet.centred
     _, book, _, _ = built
     tab = book["Scores"]
-    body = {str(c.value) for row in tab.iter_rows(min_row=workbook.first_data_row(1))
+    body = {str(c.value) for row in tab.iter_rows(min_row=workbook.first_data_row(0))
             for c in row if c.value is not None}
     for glyph in set(workbook.COVER_MARKS.values()) | set(workbook.UPSET_MARKS.values()):
         assert glyph not in body, f"{glyph} is still being written to Scores"
@@ -3286,7 +3399,7 @@ def test_the_freeze_lands_on_pts_for_and_never_reaches_the_ancillary_block(built
 
     # N now: the reorder put Rank and Record inside the frozen prefix, and the Win glyph
     # sits immediately after Pts for.
-    assert book["Scores"].freeze_panes == f"N{workbook.first_data_row(1)}"
+    assert book["Scores"].freeze_panes == f"N{workbook.first_data_row(0)}"
     assert get_column_letter(first_scrolling) == "N"
 
     frozen = sheet.columns[:first_scrolling - 1]
@@ -3315,7 +3428,7 @@ def test_the_ancillary_block_is_last_and_holds_the_keys(built):
     # — which would have been one category in two runs.
     _, book, _, _ = built
     tab = book["Scores"]
-    header = workbook.header_row(1)
+    header = workbook.header_row(0)
     for index in range(len(sheet.columns) - 7, len(sheet.columns) + 1):
         assert tab.cell(header, index).fill.fgColor.rgb.endswith(
             workbook.CATEGORY_FILLS["Ancillary"])
@@ -3401,13 +3514,13 @@ def test_every_column_in_the_file_is_in_the_dictionary_with_its_own_header(built
     time; the join existed and had never been used for this.
     """
     _, book, _, _ = built
-    tab = book["Data dictionary"]
-    header = workbook.header_row(1)
+    tab = book["Data Dictionary"]
+    header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     assert {"Table", "Field", "Header", "Data type", "Definition"} <= set(labels)
 
     documented = {}
-    for row in range(workbook.first_data_row(1), tab.max_row + 1):
+    for row in range(workbook.first_data_row(0), tab.max_row + 1):
         table = tab.cell(row, labels["Table"]).value
         field = tab.cell(row, labels["Field"]).value
         documented[(table, field)] = tab.cell(row, labels["Header"]).value
@@ -3459,7 +3572,7 @@ def test_a_column_the_workbook_does_not_print_has_a_blank_header():
     """Blank rather than a dash. An em dash reads as "this has no header", where the truth is
     "this workbook does not print it" — and the views carry far more columns than the sheets
     do."""
-    sheet = next(s for s in workbook.SHEETS if s.name == "Data dictionary")
+    sheet = next(s for s in workbook.SHEETS if s.name == "Data Dictionary")
     assert sheet.value_for("header", {"table_name": "srv_game_team",
                                       "column_name": "points_for"}) == "Pts for"
     assert sheet.value_for("header", {"table_name": "srv_game_team",
