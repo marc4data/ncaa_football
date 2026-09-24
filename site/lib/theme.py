@@ -1544,8 +1544,21 @@ TABLE_CSS = """
    total at 995.3px BEFORE and 995.3px AFTER — a `flex:0 0 auto` item's base size is its
    max-content, so the declaration was inert. It is gone rather than left looking load-bearing
    (§3.2.3), and `tests/test_numeric_cells_never_break.py` is what refused to let it stay. */
+/* 🚨 A225 (cfdb-main-R-3051). EVERY LABEL RESERVES TWO LINES, SO EVERY FIGURE STARTS AT ONE y.
+   📊 MEASURED on A216's own crop and confirmed in the render: six numerals began at 570.0 and
+   the seventh at 587.4 — **17.4 CSS px lower** — because *"Undefeated teams that lost"* is the
+   one label that wraps, and a wrapped label pushes its numeral down. A216 measured the ROW
+   (one band, 110.0px) and that was correct and blind to this: **the row is one band and the
+   figures inside it were not on one line.**
+   🚨 MARC HAS ALREADY SAID THIS IS WHAT HE NOTICES, about the player cards, in his own words:
+   *"Why aren't they numbers vertically aligned in the same space?"* A221 answered it there.
+   ✅ RESERVING BEATS TRUNCATING. The alternative was to cap the label to one line, which buys
+   the same alignment by deleting words a reader needs — *"Undefeated teams that"* is not a
+   label. Two lines are reserved on every tile whether or not that tile uses the second.
+   ⚠️ `em`, NOT `lh`. `lh` is the unit this wants and is not safe across every browser a
+   reader may open; `line-height` is stated here so `3.2em` is exactly two of them. */
 .cfdb-kpi-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.03em;
-                  opacity:.7; }
+                  opacity:.7; line-height:1.6; min-height:3.2em; }
 .cfdb-kpi-value { font-size:1.45rem; font-weight:700; line-height:1.15;
                   font-variant-numeric:tabular-nums; white-space:nowrap; }
 /* 🚨 THE DENOMINATOR IS ON THE FACE OF THE TILE, NOT IN A TOOLTIP. A214 publishes it for

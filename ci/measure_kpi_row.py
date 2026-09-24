@@ -33,6 +33,27 @@ WIDTHS = (1440, 1024)
 
 MEASURE = r"""() => {
   const px = (v) => +(+v).toFixed(2);
+
+  // 🚨 A225 PART 2. THE INK, NOT THE BOX — and A216's own R-2606 is exactly why. That round
+  // measured BOX edges on the player cards and could not see a value overlapping its
+  // sparkbar, because every box edge was correct. A numeral's box is its line box; what a
+  // reader sees start at a y is the GLYPH. Union of the text rects, never a count of them
+  // (A217's R-2623).
+  const ink = (el) => {
+    if (!el) return null;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let top = Infinity, bottom = -Infinity, n;
+    while ((n = walker.nextNode())) {
+      if (!n.textContent.trim()) continue;
+      const r = document.createRange(); r.selectNodeContents(n);
+      for (const b of r.getClientRects()) {
+        if (!b.width || !b.height) continue;
+        top = Math.min(top, b.top); bottom = Math.max(bottom, b.bottom);
+      }
+    }
+    return top === Infinity ? null : {top: px(top), bottom: px(bottom)};
+  };
+
   const row = document.querySelector('.cfdb-kpirow');
   if (!row) return {found: false};
   const scroller = row.closest('.cfdb-scroll');
@@ -41,12 +62,21 @@ MEASURE = r"""() => {
     const label = t.querySelector('.cfdb-kpi-label');
     const value = t.querySelector('.cfdb-kpi-value');
     const sub   = t.querySelector('.cfdb-kpi-sub');
+    const glyph = ink(value);
+    const labelInk = ink(label);
     return {
       label: label ? label.textContent.trim() : '',
       value: value ? value.textContent.trim() : '',
       sub:   sub   ? sub.textContent.trim()   : '',
       w: px(r.width), h: px(r.height), top: px(r.top), bottom: px(r.bottom),
       charts: t.querySelectorAll('.cfdb-dist').length,
+      // the numeral's own ink, which is what PART 2 is about
+      valueInkTop: glyph ? glyph.top : null,
+      valueInkBottom: glyph ? glyph.bottom : null,
+      labelLines: label ? Math.round(label.getBoundingClientRect().height /
+                    (parseFloat(getComputedStyle(label).lineHeight) || 1)) : null,
+      labelInkTop: labelInk ? labelInk.top : null,
+      labelBoxH: label ? px(label.getBoundingClientRect().height) : null,
     };
   });
   // BANDS BY VERTICAL OVERLAP (A213's R-2546), never by a rounded `top`: a tile centred a
@@ -113,6 +143,23 @@ def summarise(rows: list) -> str:
                      f"-> scrolls: {r['scrolls']}")
         verdict = "✅ ONE BAND" if r["bands"] == 1 else f"🚨 {r['bands']} BANDS — the row wrapped"
         lines.append(f"  {verdict}")
+
+        # 🚨 PART 2's ACCEPTANCE, AND IT IS THE SAME SHAPE AS A221's: the number of DISTINCT
+        # top edges across the seven big numerals must be ONE. A216 measured the ROW — one
+        # band, 110.0px — and that was correct and blind to this: the row is one band and the
+        # FIGURES INSIDE IT were not on one line, because a label that wraps pushes its
+        # numeral down.
+        tops = [t["valueInkTop"] for t in r["tiles"] if t["valueInkTop"] is not None]
+        distinct = sorted({round(v, 1) for v in tops})
+        lines.append(f"  numeral ink tops: {distinct}")
+        spread = (max(tops) - min(tops)) if tops else 0
+        ok = "✅" if len(distinct) == 1 else "🚨"
+        lines.append(f"  {ok} DISTINCT TOP EDGES ACROSS {len(tops)} NUMERALS: "
+                     f"{len(distinct)} (spread {spread:.1f}px)")
+        wrapped = [t["label"] for t in r["tiles"] if (t["labelLines"] or 1) > 1]
+        lines.append(f"  labels on two lines: {wrapped or 'none'}")
+        boxes = sorted({t["labelBoxH"] for t in r["tiles"] if t["labelBoxH"] is not None})
+        lines.append(f"  label box heights: {boxes}")
     return "\n".join(lines)
 
 

@@ -471,6 +471,66 @@ def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
     # sequence`. `_rankings` carries the identical warning fifteen hundred lines up: **nothing
     # goes between the triple quotes but SQL.**
     primary = stat_types[0]
+    binds = {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
+             "conf": scope.conference, "cats": list(categories),
+             "types": list(stat_types), "primary": primary}
+    rows = int(depth) * len(stat_types) * 2
+
+    # ══ A225 (cfdb-main-R-3050). ONE BOARD, TWO SOURCES, AND **THE CHOICE IS MADE HERE** ══
+    #
+    # 🚨 THE DEFECT THIS CLOSES, MEASURED BY A214 ON LIVE PUBLISHED SERVING: with the week
+    # filter on All, **four of the ten QB Touchdowns cards printed a number they were not
+    # ranked by** — Austyn Modrzewski ranked second off a 6-TD game and printed a 2.
+    #
+    # ⚠️ AND THE CAUSE IS THE GRAIN, NOT THE SORT. `srv_player_game_log` is one row per
+    # player x stat x WEEK, so the window below ranks a player by his best week and
+    # `_fold_metrics` then keeps whichever of his rows arrived first. 📊 9,667 players carry
+    # more than one week of rows in 2026 regular, so this is the normal case, not an edge.
+    #
+    # ✅ A214 SETTLED WHAT THE BOARD MEANS: a board headed by a stat with every week selected
+    # is a SEASON leaderboard, and that means the cumulative total. `srv_player_stats` is
+    # exactly that grain — **one row per (player, category, type, season)** — so on that view
+    # the figure printed IS the figure ranked, by construction rather than by care.
+    #
+    # 🚨 TWO SOURCES IS A CONSTRAINT, NOT A PREFERENCE. `srv_player_stats` publishes no
+    # `week` and no `season_type` (checked against `information_schema` this round, not
+    # assumed), so a week-filtered board CANNOT be served from it. The week path is unchanged.
+    if scope.week is None:
+        # ⚠️ THE ORDERING EXPRESSION IS THE SAME WINDOW AS THE WEEK PATH, DELIBERATELY, even
+        # though this view has one row per player per metric and a plain `order by` would do.
+        # The two paths feed the same `_fold_metrics`, which takes the first `depth` players
+        # of the PRIMARY metric's slice — so they must agree about what "first" means. One
+        # ordering, two relations.
+        #
+        # 🚨 AND `rank_desc` IS PUBLISHED HERE AND IS NOT USED, WHICH IS A DECISION.
+        # It ranks the whole 2026 population for a (category, type); this board's rank gutter
+        # means POSITION WITHIN THE FILTERED COLUMN, and the conference filter moves that.
+        # Printing a published rank beside a position computed from the filtered rows is two
+        # rankings of one thing, which is how they come to disagree. The board keeps one.
+        #
+        # ⚠️ `season_type` IS NOT APPLIED AND CANNOT BE. These are CFBD's season totals, so in
+        # January they will include postseason games while the page's filter says `regular`.
+        # Named rather than hidden; there is no postseason in the corpus today.
+        # ⚠️ `team as team_display` IS AN ALIAS, NOT A JOIN — this view spells the team name
+        # `team`, and the card falls back to `team_display` when a team has no abbreviation.
+        return query("""
+            select player_id, player_name, player_slug, team, conference,
+                   stat_category, stat_type, stat_value, as_of_ts,
+                   jersey, position, class_year_display,
+                   team as team_display, team_abbreviation, team_logo_url,
+                   color_on_light, color_on_dark
+            from srv_player_stats
+            where season = :season
+              and stat_type = any(:types)
+              and stat_category = any(:cats)
+              and (:conf is null or conference = :conf)
+              and stat_value is not null
+            order by max(case when stat_type = :primary then stat_value end)
+                     over (partition by player_slug, team) desc nulls last,
+                     player_name, stat_type
+            limit {DEPTH}
+        """.replace("{DEPTH}", str(rows)), binds)
+
     return query("""
         select player_id, player_name, player_slug, team, conference, opponent, week,
                stat_category, stat_type, stat_value, as_of_ts,
@@ -488,10 +548,7 @@ def _player_board(scope, depth: int, categories, stat_types) -> pd.DataFrame:
                  over (partition by player_slug, team) desc nulls last,
                  player_name, stat_type
         limit {DEPTH}
-    """.replace("{DEPTH}", str(int(depth) * len(stat_types) * 2)),
-        {"season": scope.season, "week": scope.week, "season_type": scope.season_type,
-         "conf": scope.conference, "cats": list(categories),
-         "types": list(stat_types), "primary": primary})
+    """.replace("{DEPTH}", str(rows)), binds)
 
 
 def _week_summary(scope) -> pd.DataFrame:
@@ -1298,34 +1355,22 @@ _SPARK_CAPTION = (
     "A column without that spread shows the numbers alone.")
 
 
-# 🚨 A216 (cfdb-main-R-2605). WHAT THESE BOARDS ACTUALLY SHOW WHEN THE WEEK FILTER IS "ALL",
-# SAID OUT LOUD, BECAUSE IT IS NOT WHAT A READER ASSUMES.
+# ✅ A225 (cfdb-main-R-3050). WHAT THESE BOARDS SHOW WITH EVERY WEEK SELECTED — AND IT IS NOT
+# WHAT A216's CAPTION SAID, BECAUSE A225 CHANGED IT.
 #
-# `_player_board` orders by `max(stat_value) over (partition by player_slug, team)` and
-# `_fold_metrics` then keeps ONE of that player's rows. With a week selected those are the
-# same row. With the week on "All" they are not: the board RANKS a player by his best single
-# game and PRINTS whichever week's row survived the de-duplication.
+# 🚨 A216 SHIPPED THIS CAPTION: *"these rank each player by his single best week and show that
+# player's figures from one of those weeks — not his season totals."* **That was true and is
+# now false.** The MIGRATE landed: the All-weeks board reads `srv_player_stats`, which is one
+# row per player per stat per SEASON, so the figure printed is the figure ranked and both are
+# the cumulative total. ⚠️ A caption describing behaviour a round removed is worse than none —
+# it is the R-2353 shape, and moving it in the same commit is §3.2.3.
 #
-# 📊 A213 found it; A214 measured it on live published serving — **4 of the 10 cards on QB
-# Touchdowns print a number they were not ranked by**, and 9,667 players carry more than one
-# week of rows in 2026 regular. Austyn Modrzewski is ranked second off a 6-TD game and prints
-# a 2.
-#
-# ⚠️ THE FIX IS A DATA CHANGE, NOT A CAPTION, AND IT IS SEQUENCED RATHER THAN SKIPPED. A214
-# settled what the board should mean — a season leaderboard is a cumulative total — and the
-# grain exists in `srv_player_stats`. 🚨 But that view did NOT carry the logo, the
-# abbreviation or the team colours this card draws; A216 published them (EXPAND), and the
-# query swap is the MIGRATE step, which §3.3 puts in a later round because
-# `scripts/deploy_main.sh` runs its site and pipeline halves CONCURRENTLY — the image builds
-# in ~33s against a ~15 minute dbt build, so a same-round swap points the live page at columns
-# that are not published yet for a quarter of an hour.
-#
-# ✅ SO UNTIL THE SWAP LANDS, THE CAPTION TELLS THE TRUTH. A board that ranks by one number
-# and prints another is not something to leave silent for a third round.
+# ⚠️ THE CAPTION STILL EARNS ITS PLACE, because the two filter states now show DIFFERENT
+# QUANTITIES from DIFFERENT RELATIONS. A reader who picks a week and sees smaller numbers
+# should be told why, and a reader comparing the two should know they are not the same measure.
 _ALL_WEEKS_CAPTION = (
-    "With every week selected, these rank each player by his single best week and show that "
-    "player's figures from one of those weeks — not his season totals. Pick a week to compare "
-    "like with like.")
+    "With every week selected these are season totals, ranked by the same total. "
+    "Pick a week and they become that week's figures.")
 
 
 def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0,
@@ -3770,7 +3815,13 @@ def _leaderboards(scope, depth: int) -> None:
     # `SACKS`, not `SACK`**, which is the sort of thing a guess gets wrong and a query does not.
     # ⚠️ `SOLO`, `PD`, `QB HUR` and `TD` are equally populated and are NOT drawn: Marc named
     # tackles, TFL and sacks, and a fourth column nobody asked for is a decision, not a freebie.
-    with states.section("srv_player_game_log", dataset=DATASETS["srv_player_game_log"]):
+    # 🚨 A225: THE SECTION NAMES THE VIEW IT ACTUALLY READ, AND THAT NOW DEPENDS ON THE FILTER.
+    # `states.section`'s `view` is what the Error state and the dataset caption both render
+    # from — one argument, so "a caption that disagrees with the Error state under the same
+    # panel is impossible to write" (R-574). With two sources behind one board that argument
+    # has to move with them, or the reader is told the season totals came from the game log.
+    _board_view = ("srv_player_stats" if scope.week is None else "srv_player_game_log")
+    with states.section(_board_view, dataset=DATASETS[_board_view]):
         st.markdown(f"**{fmt.title_case('Player yardage')}**")
         st.caption("Top players by yards in each category, deepest first. "
                    "\"QB\" is the passing column — it is not filtered on position, and the "
@@ -3805,7 +3856,7 @@ def _leaderboards(scope, depth: int) -> None:
             # a column that IS empty still draws its heading.
             pd.concat([frame for _label, frame, _types in yardage])
             if yardage else pd.DataFrame(),
-            "srv_player_game_log",
+            _board_view,
             "The player yardage board would be here.",
             f"No player box scores for {scope.describe()}. Box scores start in 2024.",
             # ⚠️ THE PER-COLUMN TRIOS DIFFER, so the card reads its labels from the frame's
@@ -3835,7 +3886,7 @@ def _leaderboards(scope, depth: int) -> None:
         states.render_or_state(
             pd.concat([frame for _label, frame, _types in touchdowns])
             if touchdowns else pd.DataFrame(),
-            "srv_player_game_log",
+            _board_view,
             "The touchdown board would be here.",
             f"No player box scores for {scope.describe()}.",
             renderer=lambda _d: _player_card_grid(touchdowns, "touchdowns"),
@@ -3881,7 +3932,7 @@ def _leaderboards(scope, depth: int) -> None:
         states.render_or_state(
             pd.concat([frame for _label, frame, _types in defence])
             if defence else pd.DataFrame(),
-            "srv_player_game_log",
+            _board_view,
             "The defensive board would be here.",
             f"No defensive box scores for {scope.describe()}.",
             renderer=lambda _d: _player_card_grid(defence, ""),

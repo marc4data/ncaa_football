@@ -60,6 +60,17 @@ select
     -- exactly as the game log's consumer does. An absence must not read as a blank.
     dt.abbreviation                                            as team_abbreviation,
     dt.logo_source_url                                         as team_logo_url,
+    -- ⚠️ A225. `team_slug` IS THE ONE A216 DID NOT ANTICIPATE, AND THE MIGRATE FOUND IT.
+    -- A216 published four identity columns and this round swapped Today's All-weeks player
+    -- boards onto this view. 📊 Measured on the rendered page: the Touchdowns board went from
+    -- **30 team links to 0**, because `_team_identity` builds the link from `team_slug` and
+    -- only `srv_player_game_log` carried it. 🚨 A216's enumeration was of what the CARD
+    -- READS; the LINK is built one level down, in a shared helper, from a field the card
+    -- passes by name — so reading the card's `row.get()` calls could not see it.
+    -- ⚠️ EXPAND ONLY, AGAIN, AND FOR THE SAME REASON: the deploy runs its site and pipeline
+    -- halves concurrently, so the page cannot read this until it is published. ~16 MB, by the
+    -- same measurement as the game log's.
+    dt.team_slug,
     dt.color_on_light,
     dt.color_on_dark,
     s.stat_category,

@@ -1478,6 +1478,14 @@ models:
           his best single game and printing a different one. It is null for some teams, so a
           consumer falls back to the team name rather than drawing a blank - an absence must
           not read as an empty cell. Measured on 2026, 0.52% of rows are null.
+      - name: team_slug
+        description: >
+          URL-safe team identifier from dim_team, season-scoped. A225 published it because
+          swapping Today's All-weeks player boards onto this view took the Touchdowns board
+          from 30 team links to 0 - the link is built by a shared helper from a field name the
+          card passes, one level below the columns the card itself reads, so enumerating the
+          card's reads could not find it. Not consumed yet; the page reads it a round later,
+          because a deploy publishes and ships the site concurrently.
       - name: team_logo_url
         description: >
           The team's logo, from dim_team, season-scoped. Null for 0.84% of 2026 rows and for
