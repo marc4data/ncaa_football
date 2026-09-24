@@ -142,7 +142,8 @@ TABS = (
     # ⚠️ `_market` AND `_line_movement` ARE ONE PANEL NOW (R-519). Marc: "Taking up WAY too
     # much space. Develop a card that we can drop in somewhere to cover both."
     (BEFORE, "Before the game",
-     ("_series", "_market_and_model", "_yardage", "_season_so_far", "_travel")),
+     ("_series", "_market_and_model", "_yardage", "_season_so_far", "_ats_so_far",
+      "_travel")),
     # ⚠️ ONE PANEL TODAY, AND THAT IS EXPECTED RATHER THAN UNBALANCED. The box score, the
     # advanced block and the player leaders are B076 — specified in
     # claude_work/cfdb_matchup_postgame_spec.md §1, all three on relations that already
@@ -2951,7 +2952,8 @@ _CALENDAR_COLUMNS = """
     first_downs, turnovers, penalty_yards,
     offense_ppa, offense_rushing_plays_total_ppa, offense_passing_plays_total_ppa,
     cumulative_ppa_overall_total, offense_success_rate, offense_explosiveness,
-    has_box_score
+    has_box_score,
+    spread_final, covered_final, ats_margin_final
 """
 
 
@@ -6284,9 +6286,15 @@ def _season_so_far(row) -> None:
             # (cfdb-wta-R-1000), so this is the season SO FAR, never the whole season.
             # 🚨 **AND THERE IS NO "N MORE SCHEDULED" CLAUSE, BECAUSE THE BOUND MAKES ONE
             # UNREACHABLE** — a first draft carried one and it could never have fired (R-762).
+            # ⚠️ **THE RELATION NAME IS GONE FROM THIS SENTENCE (cfdb-wta-R-2907).** B149
+            # wrote *"Source: srv_game_team, 2025."* — but the line ABOVE already says it
+            # properly: `states.section("srv_game_team", dataset=…)` renders the site's own
+            # dataset label, linked to the Data Dictionary. **The raw name was both a
+            # duplicate and a break with the convention.** ✅ The season stays; it is the
+            # sentence's only unique content.
             caption = (
                 f"{len(played)} game{'' if len(played) == 1 else 's'} played before this "
-                f"one. Source: srv_game_team, {int(row['season'])}.")
+                f"one, {int(row['season'])} season.")
             # 🚨 **NO SECOND SCROLL MECHANISM.** `render(scroll=True)` wraps the table in
             # A208's `.cfdb-scrollbox` and emits `scroll_note(scroll_minimum(layout))`
             # ITSELF — and the note is a CONTAINER query, so one emitted outside that box
@@ -6295,6 +6303,152 @@ def _season_so_far(row) -> None:
             # (cfdb-wta-R-2703).
             table.render(played, _season_table_columns(), caption=caption,
                          scroll=True, sortable=False, layout=_SEASON_LAYOUT)
+
+
+# ── 🚨🚨 v16: AGAINST THE SPREAD ───────────────────────────────────────────────────────────
+#
+# > **MARC, v16:** *"Will also want an ATS section."*
+#
+# 🚨 **HE NAMED A SECTION, NOT A COLUMN LIST, SO THE ROUND CHOSE AND DEFENDS THE CHOICE.**
+#
+# ✅ **THE ATS FACTS ARE AT TEAM-GAME GRAIN, WHICH IS THE GATE PART 0 SET.** `srv_game_team`
+# publishes `spread_final`, `covered_final` and `ats_margin_final` — **100% populated on
+# completed FBS team-games**, 417/417 in 2026 and 1,742/1,742 in 2025. **No join and no
+# upstream column is needed to say whether THIS team covered** (cfdb-wta-R-2904).
+#
+# 🚨 **WHAT IS *NOT* POSSIBLE HERE IS THE RECORD, AND THAT IS THE ROUND'S REAL FINDING.**
+# A season-to-date ATS record IS published — `srv_team_overview.ats_record_display` and
+# `srv_standings.ats_record_display` — but **both are one row per team-SEASON**, measured:
+# 684 rows for 684 teams in 2026. **They are the FULL season, not as-of.** Alabama 2025 reads
+# `8-5-2` whether the reader is looking at week 3 or the bowl.
+#
+# ⚠️ **SO SHOWING ONE ON *Before the game* WOULD BE cfdb-wta-R-1000 AGAIN** — the leak Marc
+# found live — and **computing an as-of one HERE would be §4.2.1**: a record is exactly the
+# quantity that has a second consumer, and it would sit one click from a published record that
+# disagrees with it. 📋 **The upstream ask is in the round's report.**
+#
+# ✅ **WHAT SHIPS IS WHAT IS PUBLISHED PER GAME**, read and rendered, with no rate computed
+# from it — **so no denominator can go unstated, because there is no denominator** (A214's
+# rule, satisfied by not creating the thing it governs).
+_ATS_COVERED_LABELS = {"yes": "Cover", "no": "No", "push": "Push", "pending": "—"}
+
+# 📊 **MEASURED: the section is narrow enough NOT to scroll, and that is why it is its own
+# section rather than three more columns on B149's table** (cfdb-wta-R-2906). That table already
+# draws **1275px in a 1140px box** and scrolls; three more columns would take it to roughly
+# 1455px. **These five columns total 452px — inside the box at 1024 and above** — so a reader
+# scanning the market never scrolls. ⚠️ **The cost is honest and small: `Wk` and `Opponent` are
+# repeated from B149's table, 172px of the 452.**
+_ATS_LAYOUT = ["40px", "132px", "80px", "80px", "120px"]
+
+
+def _ats_covered(row) -> str:
+    """Did THIS team cover — the published verdict, relabelled for a 80px cell.
+
+    ⚠️ **FOUR STATES AT TEAM GRAIN, NOT THE FIVE `srv_game.favorite_covered` CARRIES.**
+    📊 Measured across 2025+: `yes` 1,979 · `no` 1,979 · `push` 54 · `pending` 142 (none
+    completed) · null 10,866 (every one with no published line). 🚨 **`no_favorite` does not
+    occur here and cannot**: a pick'em has no favorite, but *did this team cover* is still a
+    well-formed question, and the two pick'em rows on record answer it `yes` and `no`.
+
+    ⚠️ **NULL IS AN ABSENCE AND SAYS WHICH ONE** (AC-G.11): no line was published for the game,
+    which is a different fact from a push.
+    """
+    value = fmt.text(row.get("covered_final"))
+    if not value:
+        return fmt.EM_DASH
+    return _ATS_COVERED_LABELS.get(value, value)
+
+
+def _ats_table_columns() -> list:
+    """Five columns. **Every one reads a published field; none is computed.**"""
+    return [
+        Col("week", "Wk", "plain"),
+        Col("opponent", "Opponent", render=_season_opponent),
+        # 🚨 THE SIGN IS THE MARKET'S AND IS NOT FLIPPED HERE. 📊 Verified on 2025 week 3:
+        # Baylor −52.0 against Samford — **negative is the number this team is laying.**
+        Col("spread_final", "Spread", "signed",
+            title="The closing spread this team faced; negative means it was favored"),
+        Col("covered_final", "ATS", render=_ats_covered),
+        # 📊 `ats_margin_final` == (points_for − points_against) + spread_final on **4,012 of
+        # 4,012** completed rows — so it is PUBLISHED rather than derivable here, which is the
+        # only reason this column can exist at all (§4.2.1).
+        Col("ats_margin_final", "vs Spread", "signed",
+            title="Points clear of the spread; 0 is a push"),
+    ]
+
+
+def _ats_so_far(row) -> None:
+    """Marc's ATS section: how each side has done against the market, game by game.
+
+    ⚠️ **IT WORKS IN WEEK 1, AND THE NEIGHBOURING MODEL SECTIONS DO NOT.** This is about the
+    MARKET — a line exists from the opening week, where a model prediction does not — so the
+    section is useful on exactly the early-season pages where `_model` has nothing to say.
+
+    ⚠️ **SAME BOUNDED READ AS B149, AND FOR THE SAME REASON.** `_game_calendar` carries
+    `game_date < :before` (cfdb-wta-R-1000); this panel adds **no second query**, only three
+    columns to a select that was already happening.
+    """
+    st.subheader(fmt.title_case("Against the spread"))
+    with states.section("srv_game_team", dataset=DATASETS["srv_game_team"]):
+        home_id, away_id = row.get("home_team_id"), row.get("away_team_id")
+        if pd.isna(home_id) or pd.isna(away_id):
+            states.empty(
+                "Each team's record against the market would be here.",
+                "This game's schedule row does not identify both teams.")
+            return
+        calendars = _game_calendar(int(row["season"]), row["season_type"],
+                                   (int(away_id), int(home_id)), row["game_date"])
+        df = pd.concat(calendars.values()) if calendars else pd.DataFrame()
+        if df.empty:
+            states.empty(
+                "Each team's record against the market would be here.",
+                "Neither side has played a game before this one, so there is nothing to "
+                "measure against the market yet.")
+            return
+
+        sides = [(int(away_id), row.get("away_team"), fmt.text(row.get("away_team_slug"))),
+                 (int(home_id), row.get("home_team"), fmt.text(row.get("home_team_slug")))]
+        # ⚠️ **ONE CHOICE, BOTH SECTIONS.** This reuses B149's `team` parameter rather than
+        # minting a second, so the two tables follow the same team and a reader makes the
+        # decision once. `team` was already in `params.KNOWN` — **no `site/lib/` edit**.
+        wanted = fmt.text(params.get("team"))
+        chosen = next((slug for _i, _n, slug in sides if slug and slug == wanted),
+                      sides[0][2])
+        links = []
+        for _i, name, slug in sides:
+            css = "cfdb-tab" + (" cfdb-tab-on" if slug == chosen else "")
+            links.append(f"<a class='{css}' href='{params.link_here(team=slug)}' "
+                         f"target='_self'>{html.escape(fmt.text(name) or '—')}</a>")
+        st.markdown(f"<div class='cfdb-tabbar'>{''.join(links)}</div>",
+                    unsafe_allow_html=True)
+
+        for team_id, name, slug in [side for side in sides if side[2] == chosen]:
+            mine = df[df["team_id"] == team_id]
+            played = mine[mine["has_box_score"].fillna(False).astype(bool)]
+            if played.empty:
+                states.empty(
+                    f"{fmt.text(name)}'s record against the market would be here.",
+                    f"This is {fmt.text(name)}'s first game of the season, so there is "
+                    f"nothing before it to show.")
+                continue
+            # 🚨 **THE CAPTION COUNTS ROWS ON SCREEN; IT DOES NOT COMPUTE A RATE.** A214's
+            # rule is that *"a percentage with an unstated denominator is AC-G.11 wearing a
+            # number"* — ✅ **this section states the denominator and publishes no percentage
+            # at all**, because the record it would belong to cannot be computed here.
+            # ⚠️ **AND THE THREE REASONS A GAME IS NOT IN IT ARE DIFFERENT FACTS**: no line
+            # published, a push, and a game not yet played. The first is counted here, the
+            # second is a row you can see, and the third was never fetched.
+            lined = played[played["spread_final"].notna()]
+            missing = len(played) - len(lined)
+            caption = (
+                f"{len(lined)} of {len(played)} game"
+                f"{'' if len(played) == 1 else 's'} before this one carried a published "
+                f"line"
+                + (f"; {missing} had no line and "
+                   f"show{'s' if missing == 1 else ''} an em dash" if missing else "")
+                + f", {int(row['season'])} season.")
+            table.render(played, _ats_table_columns(), caption=caption,
+                         scroll=True, sortable=False, layout=_ATS_LAYOUT)
 
 
 def _travel(game_id) -> None:

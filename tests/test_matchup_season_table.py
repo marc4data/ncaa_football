@@ -40,13 +40,24 @@ def _code_of(func: str) -> str:
 
 
 def test_THE_PANEL_SITS_BETWEEN_OFFENCE_VS_DEFENCE_AND_TRAVEL():
-    """Marc placed it: *"Between Offense vs Defense and Travel and Rest"*."""
+    """Marc placed it: *"Between Offense vs Defense and Travel and Rest"*.
+
+    ⚠️ **B152 PUT THE MARKET SECTION BETWEEN THIS TABLE AND *Travel and Rest*, SO MARC'S
+    PLACEMENT IS NOW HELD AS AN ORDERING RATHER THAN AS AN ADJACENCY** (cfdb-wta-R-2906).
+    ✅ **The half that carries his instruction is unchanged and still exact**: this table
+    immediately follows *Offense vs Defense*, and it still sits before *Travel and Rest*.
+    🚨 **The `i + 1` clause is not loosened to nothing** — it names the panel that took the
+    slot, so a round that drops something else in here turns this red and has to say why.
+    """
     tabs = _matchup().TABS
     before = next(panels for slug, _label, panels in tabs if slug == "before")
     assert "_season_so_far" in before, f"the panel is not on the before tab: {before}"
     i = before.index("_season_so_far")
     assert before[i - 1] == "_yardage", f"it does not follow Offense vs Defense: {before}"
-    assert before[i + 1] == "_travel", f"it does not precede Travel and rest: {before}"
+    assert before[i + 1] == "_ats_so_far", (
+        f"the panel after the season table is no longer B152's market section: {before}")
+    assert i < before.index("_travel"), (
+        f"it no longer precedes Travel and rest: {before}")
 
 
 def test_IT_READS_THE_BOUNDED_CALENDAR_rather_than_opening_its_own_read():

@@ -170,6 +170,19 @@ def test_the_CALENDAR_columns_block_names_every_column_the_circles_need():
         "has_box_score",
         # cfdb-wta-R-994: Marc's fill rule — filled when THAT game's opponent was FBS
         "opponent_classification",
+        # ── 🚨 B152 (cfdb-wta-R-2904): the ATS section reads THE SAME CALENDAR ──────────
+        #
+        # > **MARC, v16:** *"Will also want an ATS section."*
+        #
+        # ✅ **THREE COLUMNS, AND THEY ARE THE REASON THE SECTION COULD BE BUILT AT ALL.**
+        # 📊 On completed FBS team-games all three are **100% populated** — 417/417 in 2026,
+        # 1,742/1,742 in 2025 — while the `_open` twins reach only 74.3% and 85.6%, so the
+        # section reads the CLOSING line. **They are published at team-game grain**, which
+        # is what made *did THIS team cover* answerable without a join (§4.2.1).
+        # ⚠️ **AND THEY JOINED THE BOUNDED READ, NOT A NEW ONE** — same cfdb-wta-R-1000
+        # reason as the B149 group above: a fresh `srv_game_team` query would have had no
+        # `game_date < :before` on it and would have listed games that had not happened.
+        "spread_final", "covered_final", "ats_margin_final",
     }
     assert parsed == expected, (
         f"`_CALENDAR_COLUMNS` no longer selects what the circles read. "
@@ -180,7 +193,9 @@ def test_the_CALENDAR_columns_block_names_every_column_the_circles_need():
     # 18 -> 28: B149 (cfdb-wta-R-2701) added the nine season-table stats plus `has_box_score`
     # to the read that already existed rather than opening a second one — see the group above
     # and its leakage-bound reason.
-    assert len(parsed) == 28
+    # 28 -> 31: B152 (cfdb-wta-R-2904) added the three ATS facts, for the same reason and
+    # into the same read.
+    assert len(parsed) == 31
     assert not select_list.unnameable_items(matchup._CALENDAR_COLUMNS)
 
 
