@@ -1089,9 +1089,83 @@ _CARD_LOGO_PX = 18
 # round changes one number and the report can say what it was.**
 _HIGHLIGHT_DELAY_MS = 400
 
+# 🚨 A221 (cfdb-main-R-2688). WHEN A SPARKBAR IS DRAWN AT ALL.
+#
+# > **MARC:** *"I agree with this statement 'a bar that can't show variance is decoration'."*
+#
+# 📊 THE RULE WAS CHOSEN FROM A MEASUREMENT, AND THE FIRST CANDIDATE FAILED. Cowork proposed
+# the spread ratio — *"Tackles (19…15) and Touchdowns (5…3) are both small integers and only
+# one of them has a story"*. **Measured across all nine board columns on the rendered ten,
+# `min/max` does not separate them at all:**
+#
+#     Player yardage   0.772  0.662  0.752      distinct values  10  10  10
+#     Touchdowns       0.800  0.667  0.750      distinct values   2   2   2
+#     Defence          0.737  0.750  0.667      distinct values   5   2   2
+#
+# 🚨 **EVERY RATIO SITS IN 0.662…0.800, AND RECEIVING TOUCHDOWNS (0.667) HAS *MORE* SPREAD BY
+# THAT MEASURE THAN TACKLES (0.737).** A threshold anywhere in that band would switch bars on
+# and off between weeks for a reason no reader could see. **Cowork picked the right boards and
+# the wrong reason.**
+#
+# ✅ **WHAT SEPARATES THEM CLEANLY IS HOW MANY DISTINCT NUMBERS THE COLUMN HOLDS** — 10 · 10 ·
+# 10 against 5 against 2 · 2 · 2 · 2 · 2, with nothing in between. **A bar can only draw as
+# many lengths as the column has distinct values**: ten cards reading `4, 4, 4, 3, 3…` draw two
+# bar lengths, and two lengths is a label, not a distribution.
+#
+# ⚠️ **THE NUMBER IS CHOSEN, AND THIS IS FROM WHAT.** 4 sits in the middle of the measured gap
+# between 2 and 5, so it is not knife-edge on the data measured. **Stated so a reader can check
+# it: a column whose ten cards show fewer than four different values draws no bar.**
+_SPARK_MIN_DISTINCT = 4
+
+# ⚠️ A221. THE BAR'S OWN SLOT, BESIDE THE NUMBER RATHER THAN UNDER IT.
+#
+# > **MARC:** *"sparkbar should be beside the number, not under. That's too noisy for the eye
+# > to scan down. We have lots of horizontal real estate. Let's take advantage of it."*
+#
+# 🚨 A FIXED SLOT IS THE OTHER HALF OF THE DEFECT. Under the old layout the bar inherited the
+# NUMBER's width — ~45px under a three-digit yardage, ~18px under a one-digit `TD` — so the
+# same proportion drew two different pictures depending on how many digits the metric happened
+# to have. **A slot of its own makes one bar length mean one thing.**
+_SPARK_SLOT_CH = 3
+
+# ⚠️ A221. A COLUMN'S FLOOR, AND IT IS THE HALF OF MARC'S SENTENCE THE ALIGNMENT DID NOT ANSWER.
+#
+# > **MARC:** *"Look at all the white space next to it!!! Take a step back and use the space to
+# > inform the end-user."*
+#
+# 📊 Sizing a column from its own values fixed the ragged edge and made the narrow boards
+# NARROWER: a one-digit `TD` column is 1ch, so the measured gap between the end of the name and
+# the start of the numbers went from 82.2px to 91.8px on Touchdowns and from 84.8 to 106.2 on
+# Defense — the opposite of what he asked for. **A three-character floor spends some of that on
+# the figures, which is what he wanted it spent on.**
+#
+# 🚨 AND IT WAS BUILT, MEASURED, AND REVERTED — WHICH IS THE ANSWER TO HIS QUESTION RATHER THAN
+# A FAILURE TO ACT ON IT. A three-character floor does spend the space: the mean gap fell to
+# 45.5 / 69.6 / 61.7px. **It also pushed the metrics block past what the card can hold**, and
+# the cards wrapped to a second band again — Player yardage 69.38 -> 95.08px on every card, and
+# Defence back to a RANGE of 69.38..95.08 after this round had just made it uniform.
+#
+# ⚠️ **THE SPACE IS A RESERVATION, NOT SLACK, AND THAT IS THE FINDING.** Most of that gap is
+# `--cfdb-card-name-min` holding 112px open for the longest surname the board can draw; the
+# name text is simply shorter than its floor on most cards. Spending it on the figures costs
+# the single-band card this round just delivered — so the floor is NOT shipped, the trade is
+# reported, and the number to change if Marc wants the denser figures instead is this one.
+_METRIC_MIN_CH = 3     # measured, not applied — see above
+
+# ⚠️ A221 (cfdb-main-R-2688). THE CAPTION IS ONE STRING BECAUSE THREE BOARDS SAY IT.
+#
+# A212's clause — *"Bars under the first number are that column's own ten cards, relative to
+# its leader"* — was wrong in two ways after this round: the bars are not under, and they are
+# not always there. It was copied into three captions, so correcting it in three places is
+# three chances to leave one behind (§3.2.3). **One constant, three readers.**
+_SPARK_CAPTION = (
+    "Where a column's ten cards hold enough different values to be worth a picture, "
+    "a bar sits beside its first number, scaled across that column's own ten. "
+    "A column without that spread shows the numbers alone.")
+
 
 def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0,
-                 player_key: str = "") -> str:
+                 player_key: str = "", metric_widths=()) -> str:
     """One player, as MATCHUP's card — plus the team line Today needs and Matchup does not.
 
     > **MARC, Today v06:** *"Prefer the player card from the Matchup, but want to add in the team
@@ -1152,8 +1226,26 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0
     # cells are built from the same tuple in the same loop, so a reader matching the third
     # number to the third name is right by construction rather than by care.
     if metric_types:
+        # 🚨 A221 (cfdb-main-R-2687). EACH CELL IS A FIXED WIDTH, AND THE WIDTH COMES FROM THE
+        # COLUMN'S OWN TEN VALUES.
+        #
+        # > **MARC:** *"Why aren't they numbers vertically aligned in the same space?"*
+        #
+        # 📊 MEASURED BEFORE THE CHANGE (`ci/measure_card_budget.py`, 1440): every cell was
+        # `flex:0 0 auto; min-width:max-content`, so it sized to ITS OWN content and the block
+        # was pinned right by `margin-left:auto`. **A column's ten values therefore started at
+        # up to FIVE different x-positions** — Touchdowns QB, 5 distinct left edges spanning
+        # 14.44px; Receiving, 3 spanning 17.74px. **A reader scanning down was reading a ragged
+        # edge**, which is exactly what he boxed.
+        #
+        # ✅ **ONE WIDTH PER COLUMN MAKES ONE LEFT EDGE BY CONSTRUCTION.** With every card in a
+        # column emitting the same total metrics width, `margin-left:auto` puts every block at
+        # the same x — so the block stays pinned to the right (which is what keeps `who` able
+        # to shrink at 1024) and the values still line up. **The alignment is a consequence of
+        # the widths, not of a second positioning rule.**
         cells = "".join(
-            f"<div class='cfdb-card-metric'>"
+            f"<div class='cfdb-card-metric'"
+            f"{f' style="width:{metric_widths[index]}"' if index < len(metric_widths) else ''}>"
             f"<span class='cfdb-card-value'>"
             f"{fmt.number(row.get(f'metric_{spec[0]}'), 'stat_value')}</span>"
             f"{_card_spark(row.get(f'metric_{spec[0]}'), spark_top) if index == 0 else ''}"
@@ -1166,7 +1258,8 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0
         value = fmt.number(row.get("stat_value"), "stat_value")
         # ⚠️ THE LABEL IS GONE FROM HERE TOO (R-2524) — the sub-header carries it. The spark
         # rides the single value, because on these boards that value IS the ranking metric.
-        stat_block = (f"<div class='cfdb-card-stat'>"
+        width = f' style="width:{metric_widths[0]}"' if metric_widths else ""
+        stat_block = (f"<div class='cfdb-card-stat'{width}>"
                       f"<span class='cfdb-card-value'>{value}</span>"
                       f"{_card_spark(row.get('stat_value'), spark_top)}</div>")
     # ── A178 (cfdb-main-R-1855): THE TEAM NAME IN THE TEAM'S COLOUR ────────────────────────
@@ -1329,6 +1422,48 @@ def _player_card(row, stat_label: str, metric_types=(), rank=None, spark_top=0.0
             f"</div>")
 
 
+def _metric_widths(frame, metric_types, stat_label: str, draws_bar: bool) -> tuple:
+    """One CSS width per metric column, from the widest thing that column actually renders.
+
+    🚨 A221 (cfdb-main-R-2687). TAKEN FROM THE RENDERED TEN, NOT FROM THE METRIC'S NAME OR
+    FROM A GUESS. `.cfdb-card-value` carries `font-variant-numeric:tabular-nums`, so every
+    digit is exactly one `ch` and a character count converts without measuring pixels — which
+    is what makes `ch` the honest unit here rather than a px figure that drifts with the font.
+
+    🚨 **THE HEADING IS *NOT* ALLOWED TO SET THE WIDTH, AND THAT WAS MEASURED RATHER THAN
+    ASSUMED.** The first version took `max(value, heading)` so a name could never overflow its
+    column. 📊 `RUSH YDS` is eight characters over values of three, so Touchdowns QB's metric
+    block went to **152.7px** — and the card is 286.66px with ~97px of room once padding, the
+    team slot and the name's floor are paid. **Every Touchdowns and Defence card wrapped to a
+    second band**, 73.67–108.97px tall against 47.97 before.
+
+    ✅ **SO THE WIDTH COMES FROM THE NUMBERS AND THE HEADING WRAPS AT ITS SPACE** — `PASS` over
+    `YDS`, inside its own column, costing ~11px ONCE per board instead of a second band on
+    every one of thirty cards. ⚠️ **It wraps at a space and never inside a word** (A218's
+    rule); `theme.py`'s header rule is what enforces that.
+
+    ⚠️ **ONLY THE PRIMARY COLUMN IS WIDENED FOR THE BAR, AND ONLY WHEN ONE IS DRAWN** (R-2688).
+    A column that draws no bar keeps its own width and the space goes back to the name.
+    """
+    names = ([spec[3] for spec in metric_types] if metric_types
+             else ([stat_label] if stat_label else []))
+    if not names:
+        return ()
+    keys = ([f"metric_{spec[0]}" for spec in metric_types] if metric_types
+            else ["stat_value"])
+    widths = []
+    for index, key in enumerate(keys):
+        drawn = 1
+        if frame is not None and not frame.empty and key in frame.columns:
+            for value in frame[key]:
+                drawn = max(drawn, len(str(fmt.number(value, "stat_value"))))
+        need = drawn
+        if index == 0 and draws_bar:
+            need += _SPARK_SLOT_CH
+        widths.append(f"{need}ch")
+    return tuple(widths)
+
+
 def _player_card_grid(columns, stat_label: str) -> None:
     """Three columns of cards, one per category. `columns` is [(heading, frame), ...].
 
@@ -1385,9 +1520,29 @@ def _player_card_grid(columns, stat_label: str) -> None:
         # the field the column is RANKED by — the first metric, or the single stat
         primary = f"metric_{metric_types[0][0]}" if metric_types else "stat_value"
         top = 0.0
+        draws_bar = False
         if frame is not None and not frame.empty and primary in frame.columns:
             values = pd.to_numeric(frame[primary], errors="coerce").dropna()
             top = float(values.max()) * _SPARK_HEADROOM if len(values) else 0.0
+            # 🚨 A221 (cfdb-main-R-2688). THE BAR IS DRAWN ONLY WHERE IT CAN SHOW SOMETHING —
+            # see `_SPARK_MIN_DISTINCT` for the measurement, and for why the spread RATIO (the
+            # obvious candidate, and Cowork's) had to be rejected.
+            #
+            # 🚨 COUNTED ON WHAT IS **DRAWN**, NOT ON WHAT IS STORED, AND THE FIRST VERSION GOT
+            # THIS WRONG. `values.nunique()` on the raw column let Tackles-for-loss through:
+            # tackles for loss are published in halves, so its ten rows are 4.5, 4.0, 3.5 …
+            # — five distinct numbers that `fmt.number` renders as **`4`, `4`, `3`**. 📊 The
+            # page then drew ten bars of differing length beside ten numbers that read the
+            # same, which is worse than no bar: it invites the reader to see a difference the
+            # figures deny. **The prompt's own words — the threshold is a property of the TEN
+            # RENDERED VALUES.**
+            drawn_values = {fmt.number(v, "stat_value") for v in values}
+            draws_bar = len(drawn_values) >= _SPARK_MIN_DISTINCT
+        if not draws_bar:
+            # ⚠️ AND NO TRACK EITHER. `_card_spark` renders NOTHING at top<=0, which is the
+            # state Marc asked for: *"an empty track is the decoration under another name."*
+            top = 0.0
+        widths = _metric_widths(frame, metric_types, stat_label, draws_bar)
         # 📋 R-2524: the names the cells stopped printing. A board with no cell text —
         # the defensive one, whose `stat_label` is "" — hoists nothing, because its
         # heading ALREADY names its metric (Tackles · Tackles for loss · Sacks).
@@ -1396,24 +1551,40 @@ def _player_card_grid(columns, stat_label: str) -> None:
         # metric's name lives now that the cells no longer carry it.
         names = ([spec[3] for spec in metric_types] if metric_types
                  else ([stat_label] if stat_label else []))
-        headings.append((fmt.text(heading), [fmt.text(n).upper() for n in names if n]))
+        headings.append((fmt.text(heading),
+                         [fmt.text(n).upper() for n in names if n], widths))
         if frame is None or frame.empty:
             per_column.append(None)
         else:
             per_column.append([
                 _player_card(row, stat_label, metric_types, spark_top=top,
                              player_key=(fmt.text(row.get("player_id"))
-                                         if fmt.text(row.get("player_id")) in paired else ""))
+                                         if fmt.text(row.get("player_id")) in paired else ""),
+                             metric_widths=widths)
                 for _index, row in frame.iterrows()])
 
     depth = max((len(c) for c in per_column if c), default=0)
+    # 🚨 A221 (cfdb-main-R-2687). THE HEADER SHARES THE CELLS, NOT JUST THE ORDER.
+    #
+    # A213 hoisted the metric names onto the sub-header as one run of text — `TD · CATCHES ·
+    # REC YDS`. **Once the values sit in fixed columns, a name over the wrong column is worse
+    # than a name in the cell**, which is what A213 removed. So the header emits the SAME
+    # `.cfdb-card-metric` cells at the SAME widths, and each name sits over its own column by
+    # construction rather than by counting characters.
     head = ("<div class='cfdb-cardrow-rank cfdb-cardrow-head'></div>"
             + "".join(
                 f"<div class='cfdb-cardcol-head'>{heading}"
-                + (f"<span class='cfdb-cardcol-metrics'>{' · '.join(names)}</span>"
+                + ("<span class='cfdb-cardcol-metrics'>"
+                   + "".join(
+                       "<span class='cfdb-card-metric'"
+                       + (f' style="width:{widths[i]}"' if i < len(widths) else "")
+                       + ">"
+                       + f"<span class='cfdb-cardcol-name'>{name}</span></span>"
+                       for i, name in enumerate(names))
+                   + "</span>"
                    if names else "")
                 + "</div>"
-                for heading, names in headings))
+                for heading, names, widths in headings))
     rows = []
     for position in range(depth):
         cells_in_row = []
@@ -3437,7 +3608,7 @@ def _leaderboards(scope, depth: int) -> None:
         st.caption("Top players by yards in each category, deepest first. "
                    "\"QB\" is the passing column — it is not filtered on position, and the "
                    "passing leader has been a quarterback in every week measured."
-                   " Bars under the first number are that column's own ten cards, relative to its leader.")
+                   " " + _SPARK_CAPTION)
         # 🚨 A175 (cfdb-main-R-1754). THE TRIO PER CATEGORY, ENUMERATED FROM LIVE SERVING
         # RATHER THAN GUESSED — A166 learned the hard way that it is `SACKS` and not `SACK`,
         # and this relation is not the one the workbook reads. `srv_player_game_log`, 2026:
@@ -3476,14 +3647,19 @@ def _leaderboards(scope, depth: int) -> None:
         st.markdown(f"**{fmt.title_case('Touchdowns')}**")
         st.caption("A different board from yardage, and mostly different names on it. "
                    "**Ranked by touchdowns** \u2014 the two numbers beside each one are "
-                   "context from the same game, not the order. "
-                   "Bars under the first number are that column's own ten cards, relative "
-                   "to its leader.")
+                   "context from the same game, not the order. " + _SPARK_CAPTION)
         touchdowns = _boards(scope, depth, (
             ("QB", "passing", ("TD", ("passing:YDS", "Pass yds"),
                                ("rushing:YDS", "Rush yds"))),
-            ("Receiving", "receiving", ("TD", ("REC", "Catches"),
-                                        ("YDS", "Rec yds"))),
+            # ⚠️ A221: `Catches` AND `Rec yds` BECAME `Rec` AND `Yds`, FROM A MEASUREMENT.
+            # With the columns now sized from their own values, `CATCHES` is seven characters
+            # over a two-digit column and it OVERLAPPED `REC YDS` in the render — visible in
+            # `A221_after_touchdowns_1440_light.png` before the change. `REC` and `YDS` are the
+            # box-score words for these two and the column is already headed "Receiving", so
+            # nothing is lost. 📋 **A213 chose the long forms, not Marc — but a label is his to
+            # veto, so it is named in the report.**
+            ("Receiving", "receiving", ("TD", ("REC", "Rec"),
+                                        ("YDS", "Yds"))),
             ("Rushing", "rushing", ("TD", ("CAR", "Att"), ("YDS", "Rush yds")))))
         states.render_or_state(
             pd.concat([frame for _label, frame, _types in touchdowns])
@@ -3524,9 +3700,7 @@ def _leaderboards(scope, depth: int) -> None:
                    "**Each number is one game**, this player's line in the week shown, not a "
                    "season total. **Every division CFBD publishes a box score for is "
                    "included** \u2014 these boards are not filtered to FBS, and in most weeks "
-                   "most of these names are FCS. "
-                   "Bars under the first number are that column's own ten cards, relative "
-                   "to its leader.")
+                   "most of these names are FCS. " + _SPARK_CAPTION)
         defence = _boards(scope, depth, (
             ("Tackles", "defensive", ("TOT", "TFL", "SACKS")),
             ("Tackles for loss", "defensive", ("TFL", "TOT", "SACKS")),

@@ -54,10 +54,14 @@ def captions_in(function: str) -> list:
     for call in ast.walk(node):
         if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
                 and call.func.attr == "caption" and call.args):
-            try:
-                out.append(ast.literal_eval(call.args[0]))
-            except ValueError:
-                pass
+            # ⚠️ A221: A CAPTION MAY BE A CONCATENATION NOW. `_SPARK_CAPTION` is one constant
+            # read by three boards, so the argument is `"…" + _SPARK_CAPTION` — a BinOp, which
+            # `literal_eval` refuses. **The first version returned nothing for those captions
+            # and two tests failed on correct copy.** Every string literal in the expression is
+            # collected instead, which is what the assertions are actually about.
+            out.append(" ".join(
+                node.value for node in ast.walk(call.args[0])
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)))
     return out
 
 

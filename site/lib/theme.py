@@ -583,7 +583,13 @@ TABLE_CSS = """
      had counted (logo `margin-right:.4rem`, rank `margin-left:.3rem`) the first band needed
      **54.57px**, so a 50px slot could not have held it either. **A212's revert was correct
      and this note records why, rather than leaving the number looking arbitrary.** */
-  --cfdb-card-team-w:    2.75rem;  /* 44px; widest abbreviation "MRMK" draws 41.6px */
+  /* 🚨 A221 (cfdb-main-R-2689): 57.6px, AND THE NUMBER IS FROM A MEASUREMENT. The rank now
+     shares the abbreviation's line, so the slot has to hold `#20 MRMK` rather than `MRMK`
+     alone: the widest badge draws 18.25px, the flex `column-gap` is 3.2px, and the widest
+     abbreviation is 41.6px — 63.05px if all three worst cases land on one card, 57.6 for the
+     realistic pair. ⚠️ THE EXTRA 13.6px COMES OUT OF THE NAME'S FLOOR, which is the gap PART 1
+     reclaimed; see `--cfdb-card-name-min` for what that costs and why it is affordable. */
+  --cfdb-card-team-w:    3.6rem;   /* 57.6px; was 44px for `MRMK` alone */
   /* 🚨 THE METRICS BLOCK IS CONTENT-SIZED, NOT A TRACK, AND THE FIRST ATTEMPT AT A TRACK WAS
      WRONG IN A WAY A192 HAD ALREADY BEEN WARNED ABOUT. It was set to 72px from a measurement
      that summed each metric's own need (66.6px) — but `.cfdb-card-metric` is `flex:1 1 0`,
@@ -601,6 +607,21 @@ TABLE_CSS = """
      the name on line two, the metrics on line three, a 156.6px card. With the floor at the
      surname the jersey wraps ABOVE the name inside the cell instead, the team keeps the name
      company on line one, and the surname still cannot be squeezed. */
+  /* 🚨 A221 (cfdb-main-R-2690): 108.8px, DOWN FROM 112, AND IT BUYS A UNIFORM JERSEY.
+     📊 MEASURED BEFORE THE CHANGE: the jersey sat BESIDE the name on 16 of 30 yardage cards
+     and ABOVE it on 14 — and cards in one row differed in height by 45%. **The driver was not
+     the name: it was the metrics block.** `.cfdb-card .cfdb-player-row` wraps, so the jersey
+     shares the name's line only when `who` is wide enough for 25.6px of jersey, a 6.4px gap
+     and the name's floor — and `who` is whatever the metrics block left over, which varied
+     with how many digits the metric happened to have.
+     ✅ THE FLOOR IS UNCHANGED AT 7rem, AND THAT IS THE POINT OF THE FIX BELOW. Squeezing it
+     to 6.8rem to let the jersey share the name's line was tried and measured: it left the
+     jersey beside the name on Defense's 10 of 30 and above it on the other 20, because `who`
+     still differs by board and the wrap still depended on which side of a threshold it fell.
+     **A layout that depends on a threshold is a layout that will cross it again.**
+     🚨 SO THE JERSEY IS GIVEN ITS OWN LINE UNCONDITIONALLY (see `.cfdb-player-jersey` below),
+     which is deterministic, costs no overflow, and is what 1024 already did — one layout at
+     both widths instead of two. */
   --cfdb-card-name-min:  7rem;     /* 112px; widest real surname "Chambers-Smith" is 109.2 */
   --cfdb-edge:      color-mix(in srgb, CanvasText 16%, Canvas);
   --cfdb-rule-soft: color-mix(in srgb, CanvasText 8%,  Canvas);
@@ -1172,8 +1193,23 @@ TABLE_CSS = """
 /* A212 (cfdb-main-R-2524): the metric names, hoisted out of the cells and onto the header
    they belong to. Lighter than the category name beside them — the category is what the
    column IS, the metrics are what its numbers MEAN. */
-.cfdb-cardcol-head .cfdb-cardcol-metrics { font-weight:600; opacity:.65; letter-spacing:.02em;
-                     margin-left:.4rem; }
+/* 🚨 A221 (cfdb-main-R-2687). THE SUB-HEADER'S NAMES SIT IN THE SAME CELLS AS THE VALUES, at
+   the same widths, so each name is over its own column by construction. A name wider than its
+   column WRAPS AT A SPACE — `PASS` over `YDS` — and never inside a word (A218's rule, which
+   `overflow-wrap:normal` on the table cells enforces site-wide and is restated here because
+   this element is not a table cell). ⚠️ That costs ~11px ONCE per board; letting the name set
+   the column width instead cost a second band on every one of thirty cards. */
+.cfdb-cardcol-head .cfdb-cardcol-metrics { display:flex; gap:.3rem;
+    justify-content:flex-end; align-items:flex-end;
+    font-weight:600; opacity:.65; letter-spacing:.02em; margin-left:.4rem; }
+/* ⚠️ THE HEADING CELL CARRIES THE SAME 1.05rem SO ITS WIDTH MATCHES THE COLUMN BELOW IT,
+   and the NAME inside is scaled down instead. Sizing the cell at the heading's own font would
+   make `3ch` a different number of pixels here than in the card — the two would stop lining
+   up, which is the whole thing this shares cells to achieve. */
+.cfdb-cardcol-head .cfdb-cardcol-metrics .cfdb-card-metric { display:block;
+    text-align:right; font-size:1.05rem; line-height:0; }
+.cfdb-cardcol-head .cfdb-cardcol-metrics .cfdb-cardcol-name { display:block;
+    font-size:.62rem; line-height:1.1; white-space:normal; overflow-wrap:normal; }
 /* The card itself. A rule on one side rather than a box on four: thirty boxes on a page is a
    grid of borders competing with the text inside them, and the reader is scanning a ranked
    list down a column. */
@@ -1247,7 +1283,20 @@ TABLE_CSS = """
 .cfdb-card-team .cfdb-teamlink { display:flex; flex-wrap:wrap; justify-content:center;
                                  align-items:center; row-gap:.1rem; column-gap:.2rem;
                                  text-align:center; line-height:1.15; }
-.cfdb-card-team .cfdb-team { flex:0 0 100%; font-size:.68rem; }
+/* 🚨 A221 (cfdb-main-R-2689). THE RANK MOVES DOWN BESIDE THE ABBREVIATION.
+   > **MARC:** *"For the Team Rank, look at the attachment, bottom-left for Tex. That's where
+   > the Rank should be… we have enough white space in the middle to give a little room for
+   > Rank and Team Abbr."*
+       was      line 1  [logo] #1        after   line 1  [logo]
+                line 2  TEX                      line 2  #1 TEX
+   ✅ THE LOGO TAKES THE WHOLE FIRST LINE, so the badge wraps with the name instead of riding
+   beside the disc; the name stops claiming 100% so the two can share their line.
+   🚨 AN UNRANKED CARD IS UNCHANGED BY CONSTRUCTION — logo on line 1, abbreviation on line 2,
+   which is exactly the two bands it already had. 138 of 150 cards are unranked and none of
+   them moves (AC-G.28's principle, measured rather than asserted). */
+.cfdb-card-team .cfdb-logo-box,
+.cfdb-card-team .cfdb-monogram-empty { flex:0 0 100%; }
+.cfdb-card-team .cfdb-team { flex:0 1 auto; font-size:.68rem; }
 
 .cfdb-card { min-width:0; padding:.4rem .45rem; border:1px solid var(--cfdb-edge);
              border-left:2px solid var(--cfdb-edge);
@@ -1306,9 +1355,17 @@ TABLE_CSS = """
                                min-width:var(--cfdb-card-name-min); }
 .cfdb-card > .cfdb-card-stat,
 .cfdb-card > .cfdb-card-metrics { flex:0 0 auto; margin-left:auto; }
-/* ⚠️ AND EACH METRIC HOLDS ITS OWN CONTENT. `flex:1 1 0` split the block into equal thirds
-   regardless of what was in them, which is what wrapped `483` under its own `YDS`. */
-.cfdb-card .cfdb-card-metric { flex:0 0 auto; min-width:max-content; }
+/* 🚨 A221 (cfdb-main-R-2687). `min-width:max-content` IS GONE, AND IT WAS THE RAGGED EDGE.
+   📊 Measured at 1440 before the change (`ci/measure_card_budget.py`): sizing each cell to
+   its own content gave a column's ten values up to FIVE different left edges — Touchdowns QB
+   spanned 14.44px, Receiving 17.74px. **`today._metric_widths` now sets one width per column
+   from the rendered ten**, so every card in a column emits the same total metrics width and
+   `margin-left:auto` puts them all at the same x. The alignment is a consequence of the
+   widths, not of a second positioning rule — which is what lets the block stay pinned right
+   and `who` stay able to shrink at 1024.
+   ⚠️ A192's note below is why `flex:1 1 0` was wrong too: equal thirds wrapped `483` under
+   its own label. Neither equal thirds nor content-sizing; a measured width per column. */
+.cfdb-card .cfdb-card-metric { flex:0 0 auto; }
 /* ⚠️ THE LAST NAME OPTS OUT OF THE ELLIPSIS `player_row` PUTS ON EVERY LINE. That clip is
    right for Matchup and for the FIRST name here; on this card the surname is the thing the
    min-width above exists to protect, so clipping it would quietly undo the whole rule. */
@@ -1335,8 +1392,20 @@ TABLE_CSS = """
 /* The jersey rides above the name rather than stealing from it once the card is narrow
    enough that the two cannot share a line — see `--cfdb-card-name-min` for the measurement. */
 .cfdb-card .cfdb-player-row  { flex-wrap:wrap; }
-/* 1.7rem was 27.2px against a widest drawn jersey of 25.5px; 1.6rem still clears it. */
-.cfdb-card .cfdb-player-jersey { min-width:1.6rem; }
+/* 🚨 A221 (cfdb-main-R-2690). THE JERSEY TAKES ITS OWN LINE ON EVERY CARD.
+   📊 MEASURED BEFORE: on the yardage board it sat BESIDE the name on 16 of 30 cards and ABOVE
+   it on 14, and cards in one row differed in height by 45% (47.97px against 69.38px).
+   **The driver was never the name — it was the metrics block.** `.cfdb-card .cfdb-player-row`
+   wraps, so the jersey shared the name's line only when `who` happened to be wider than
+   25.6 + 6.4 + the name's floor, and `who` was whatever the content-sized metrics left over.
+   ⚠️ FIXING THE COLUMNS MADE `who` CONSTANT PER BOARD BUT NOT ACROSS BOARDS — re-measured at
+   that point: yardage 0 beside / 30 above, Touchdowns 0 / 30, **Defense 10 / 20**. Still two
+   places, now for a subtler reason.
+   ✅ `flex:0 0 100%` REMOVES THE THRESHOLD INSTEAD OF MOVING IT. One place on every card, at
+   every width, whatever the metrics do next — and a card whose player has no jersey draws the
+   same em-dash line, so its footprint is unchanged (the screenshot's CNSU row).
+   1.6rem clears the widest drawn jersey of 25.5px and stays as the minimum. */
+.cfdb-card .cfdb-player-jersey { min-width:1.6rem; flex:0 0 100%; }
 .cfdb-card .cfdb-player-name { min-width:var(--cfdb-card-name-min) !important; }
 /* A192: class and position move to the cell's `title` — see `today._player_card` for why,
    and note this cannot reach Matchup, which uses no `.cfdb-card`. */
@@ -1385,11 +1454,45 @@ TABLE_CSS = """
    internal, and so is the fix.
    ✅ .6rem between metrics, and the block is allowed to claim what it needs before `who`
    grows into it. */
-.cfdb-card-metrics { display:flex; gap:.6rem; align-items:baseline; margin:0;
+/* ⚠️ A221: THE GAP COMES DOWN FROM .6rem, AND IT IS A BUDGET DECISION RATHER THAN A TASTE.
+   📊 The card is 286.66px at 1440 and its fixed costs are padding 14.4 + team + the name's
+   floor, which leaves ~97px for three metric columns. A212 widened this gap to .6rem to
+   decompress a huddle; with the cells now at measured widths the decompression is in the
+   cells, and 2 x 9.6px of gap is width the numbers can use instead. `align-items:center`
+   because the cells are rows now, not baseline-aligned stacks. */
+.cfdb-card-metrics { display:flex; gap:.3rem; align-items:center; margin:0;
                      justify-content:flex-end; }
-.cfdb-card-metric { display:flex; flex-direction:column; min-width:0; flex:1 1 0;
-                    text-align:right; }
-.cfdb-card-metric .cfdb-card-value { font-size:1.05rem; font-weight:700; line-height:1.15; }
+/* 🚨 A221 (cfdb-main-R-2687/R-2688). THE CELL IS A ROW NOW, NOT A COLUMN.
+   > **MARC:** *"sparkbar should be beside the number, not under. That's too noisy for the
+   > eye to scan down."*
+   The value is right-aligned inside its own fixed width — a number column is read from its
+   units place — and the bar sits BESIDE it in a slot of its own. `today._metric_widths`
+   writes the width; this rule decides what happens inside it. */
+/* 🚨 THE `ch` UNIT RESOLVES AGAINST *THIS* ELEMENT'S FONT, AND THAT COST A RENDER.
+   `today._metric_widths` writes `width:3ch` for a three-digit column. The first version left
+   this cell at the card's base size while `.cfdb-card-value` was 1.05rem — **so 3ch was three
+   digits of the SMALLER font and the value wrapped**: `333` drew as `33` over `3`, `454` as
+   `45` over `4`. 📊 Caught in the after-crop, which is what the crop is for; the numbers on
+   the page contradicted a measurement that said every column was one left edge wide.
+   ✅ THE CELL CARRIES THE VALUE'S OWN SIZE, so `ch` means a digit of the text it is sizing. */
+.cfdb-card-metric { display:flex; flex-direction:row; align-items:center; min-width:0;
+                    flex:0 0 auto; gap:.25rem; justify-content:flex-end;
+                    font-size:1.05rem; }
+/* 🚨 THE VALUE FILLS ITS CELL AND RIGHT-ALIGNS ITS TEXT, WHICH IS NOT THE SAME AS
+   RIGHT-ALIGNING THE VALUE — and the difference is the whole measurement.
+   📊 The first version made the value `flex:0 0 auto; margin-left:auto`. The digits lined up
+   on their units place correctly, and **the element's LEFT edge then varied with the digit
+   count**: `ci/measure_card_budget.py` still reported 5 distinct left edges on Touchdowns QB.
+   ⚠️ A right-aligned box of varying width cannot share a left edge — so the box is made
+   constant and the TEXT is aligned inside it. One left edge, one right edge, units place
+   under units place. */
+.cfdb-card-metric .cfdb-card-value { flex:1 1 auto; min-width:0; text-align:right; }
+/* ⚠️ NO `font-size` HERE — IT INHERITS THE CELL'S, which is what makes `ch` mean the same
+   thing to the width and to the glyphs. 🚨 AND `white-space:nowrap`, for A217's reason in its
+   own words: *a team name on two lines is a layout, a number on two lines is a lie.* A column
+   sized at exactly its digit count has no slack for a rounding error; this makes the failure
+   an invisible overflow into measured white space rather than a broken figure. */
+.cfdb-card-metric .cfdb-card-value { font-weight:700; line-height:1.15; white-space:nowrap; }
 /* 🚨 A212 (cfdb-main-R-2522). A SPARK UNDER THE PRIMARY METRIC, SCALED ACROSS ITS OWN COLUMN.
    > **MARC, v14:** *"Can we add a small sparkbark to help give a quick visual reference to the
    > variance in the metric up/down the leaderboard."*
@@ -1403,7 +1506,12 @@ TABLE_CSS = """
    page-side metric.
    ⚠️ AND THE TRACK IS DRAWN EVEN WHEN THE BAR IS NOT, so a missing value reads as an empty
    scale rather than as a missing element (AC-G.11). */
-.cfdb-card-spark { display:block; height:3px; margin-top:.2rem; border-radius:2px;
+/* 🚨 A221: BESIDE THE NUMBER, IN A SLOT OF ITS OWN. It no longer inherits the value's
+   width — which was ~45px under a three-digit yardage and ~18px under a one-digit `TD`, so
+   one proportion drew two different pictures. Taller than 3px because a horizontal bar beside
+   a 1.05rem number has the height to be read; `margin-top` is gone with the stacking. */
+.cfdb-card-spark { display:block; flex:0 0 auto; width:var(--cfdb-card-spark-w, 1.9rem);
+    height:6px; border-radius:3px;
     background:color-mix(in srgb, currentColor 12%, transparent); overflow:hidden; }
 .cfdb-card-spark > i { display:block; height:100%; border-radius:2px;
     background:color-mix(in srgb, currentColor 42%, transparent); }

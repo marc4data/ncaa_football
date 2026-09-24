@@ -133,9 +133,19 @@ def test_the_stylesheet_still_sets_no_break_rule_of_its_own():
     # `word-break` and `word-wrap` must still be absent — the diagnosis depends on it.
     assert set(declarations) == {"overflow-wrap"}, (
         f"a break-related declaration that is not overflow-wrap appeared: {declarations}")
-    assert len(declarations) == 2, (
-        f"expected two overflow-wrap declarations (all cells, then the header), "
-        f"found {len(declarations)}")
+    # ⚠️ A221 ADDED A THIRD, AND THE COUNT IS RE-AIMED RATHER THAN RAISED. The bound exists so
+    # a blanket break rule cannot creep in unnoticed; a THIRD site that is `normal` is the same
+    # rule being applied again, not the diagnosis being undone. So the check now asserts what
+    # each declaration SAYS: only the table header may re-enable `break-word`, and everything
+    # else must be `normal`.
+    #
+    # 📊 A221's third is the leaderboard sub-header's metric cells. They carry hoisted names
+    # like `PASS YDS`, they are not table cells, and Streamlit's inherited `break-word` would
+    # split one mid-word — which is the very defect A218 shipped this rule to end.
+    values = re.findall(r"[;{]\s*overflow-wrap\s*:\s*([a-z-]+)", THEME)
+    assert sorted(values) == ["break-word", "normal", "normal"], (
+        f"overflow-wrap is set to {values} — only the table header may re-enable break-word, "
+        f"and every other site must be normal")
 
 
 def test_the_measurement_script_exists_and_names_its_instrument():
