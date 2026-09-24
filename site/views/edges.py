@@ -13,9 +13,14 @@ time the model is retrained on a different cut.
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, chips, filters, fmt, params, shell, states, table
+from lib import (attribution, chips, filters, fmt, models, params, shell, states,
+                 table)
 from lib.query import query
 from lib.table import Col
+
+# A227 (cfdb-main-R-3101): bound to a local name because `ci/check_page_queries.py`
+# resolves `{NAME}` holes from module-level string constants in the same file.
+PUBLISHED_MODELS_ONLY = models.PUBLISHED_MODELS_ONLY
 
 MARKETS = {"Spread (points)": "spread", "Moneyline (probability)": "moneyline"}
 BY_CODE = {code: label for label, code in MARKETS.items()}
@@ -30,8 +35,13 @@ def _floor() -> int:
     number the page cannot state when it matters most is not carried as data in any useful
     sense.
     """
-    df = query("""select distinct training_week_floor from srv_edge_finder
-                  where training_week_floor is not null limit 5""")
+    # A227: filtered like every other read of this view. The floor is a property of a
+    # MODEL's training cut, so an unfiltered read could state a floor belonging to a model
+    # the page no longer shows — and this number is what the empty state explains itself
+    # with, which is the one moment a reader is relying on it.
+    df = query(f"""select distinct training_week_floor from srv_edge_finder
+                  where training_week_floor is not null
+                    and {PUBLISHED_MODELS_ONLY} limit 5""")
     return int(df["training_week_floor"].min()) if not df.empty else 5
 
 
@@ -48,6 +58,11 @@ def body(page) -> None:
     table.dataset_caption("Edge finder", "srv_edge_finder")
     with states.section("srv_edge_finder"):
         floor = _floor()
+        # A227 (cfdb-main-R-3102): stated on the page, not bolted on above it. Every number
+        # below is model-versus-market, so a reader is entitled to know that some models
+        # were disqualified from making that comparison at all.
+        if models.WITHDRAWN:
+            st.warning(models.WITHDRAWAL_NOTE)
         seasons = _seasons()
         if not seasons:
             states.empty(
@@ -64,10 +79,14 @@ def body(page) -> None:
         with controls[0]:
             market_label = st.selectbox("Market", list(MARKETS),
                                         index=list(MARKETS).index(market_label))
-        models = query("""select distinct model_name from srv_edge_finder
-                          where season = :season order by model_name limit 40""",
-                       {"season": season})["model_name"].tolist()
-        model_options = ["All models"] + models
+        # A227 (cfdb-main-R-3101): the PICKER is filtered too. A withdrawn model that is
+        # still selectable is a withdrawal a reader can undo from the page.
+        model_names = query(
+            f"""select distinct model_name from srv_edge_finder
+               where season = :season and {PUBLISHED_MODELS_ONLY}
+               order by model_name limit 40""",
+            {"season": season})["model_name"].tolist()
+        model_options = ["All models"] + model_names
         chosen_model = params.get("model")
         with controls[1]:
             model = st.selectbox(
@@ -85,7 +104,7 @@ def body(page) -> None:
         model = None if model == "All models" else model
         params.set_params(market=market, model=model)
 
-        df = query("""
+        df = query(f"""
             select game_id, season, season_type, week, model_name, model_family, split,
                    home_team, away_team, home_conference, away_conference,
                    market, edge_unit, edge_value, edge_magnitude, confidence_bucket,
@@ -100,6 +119,7 @@ def body(page) -> None:
               and (:week is null or week = :week)
               and market = :market
               and (:model is null or model_name = :model)
+              and {PUBLISHED_MODELS_ONLY}
               and edge_magnitude >= :minimum
             order by edge_magnitude desc
             limit 400
@@ -124,6 +144,16 @@ def _nothing_yet(season: int, floor: int, minimum: float, market_label: str) -> 
     with completely different fixes, and offering the wrong control is worse than offering
     none.
     """
+    # 🚨 AC-G.11: A THIRD CAUSE, AND IT ARRIVED WITH A227. "Too early in the season" is
+    # false when the season is over and every model that graded it has been withdrawn. The
+    # fix offered matters as much as the words: there is no control that brings these back.
+    if not models.PUBLISHED:
+        states.empty(
+            "Model-versus-market edges would be here.",
+            "Every model this site had was trained on the closing spread, so none of them "
+            "can honestly be compared against it. All have been withdrawn and a "
+            "line-free replacement is being built.")
+        return
     if minimum > 0:
         states.empty(
             f"Edges of {minimum:g} or more would be listed here.",
@@ -196,6 +226,20 @@ def _edges(df: pd.DataFrame, market: str) -> None:
         st.caption(str(note))
 
 
+@st.cache_data(ttl=3600)
+def _withdrawal_emptied(market: str) -> bool:
+    """Did this market have graded buckets that A227's exclusion removed?
+
+    One row is enough to answer it, so this reads `limit 1` and never renders anything. It
+    exists so an empty section can name its own cause instead of guessing between two
+    absences that look identical on screen (AC-G.11).
+    """
+    if not models.WITHDRAWN:
+        return False
+    return not query("""select market from srv_edge_bucket_performance
+                        where market = :market limit 1""", {"market": market}).empty
+
+
 def _track_record(market: str, market_label: str) -> None:
     """Hit rate by how big the edge was — the question the slider raises and cannot answer.
 
@@ -211,18 +255,31 @@ def _track_record(market: str, market_label: str) -> None:
     st.divider()
     st.markdown("#### " + fmt.title_case("Has a bigger edge been a better bet?"))
     with states.section("srv_edge_bucket_performance"):
-        df = query("""
+        df = query(f"""
             select edge_bucket, bucket_order, bucket_games, bucket_hits, hit_rate_pct,
                    edge_over_break_even_pct, mean_edge_magnitude, is_thin_sample,
                    market, edge_unit, as_of_ts
             from srv_edge_bucket_performance
-            where market = :market
+            where market = :market and {PUBLISHED_MODELS_ONLY}
             order by bucket_order
             limit 20
         """, {"market": market})
         if df.empty:
+            # 📊 REACHABLE TODAY, NOT HYPOTHETICALLY: all four models that graded the
+            # MONEYLINE market were trained on the closing spread, so this section is empty
+            # on that market the moment A227 lands. "No graded predictions yet" would be a
+            # flat lie there — they exist, they are graded, and they are not shown.
+            #
+            # 🚨 AND THE CAUSE IS MEASURED RATHER THAN INFERRED. Asking "are any models
+            # withdrawn" would answer the wrong question: models are withdrawn site-wide,
+            # but the SPREAD market still has a publishable one, so an empty spread section
+            # means something else entirely. This asks whether THIS market had rows before
+            # the exclusion — which is exactly the question the reader needs answered.
             states.empty(
                 f"The {market_label.lower()} track record by edge size would be here.",
+                "Every model graded on this market was trained on the closing spread and "
+                "has been withdrawn, so there is no honest track record to show."
+                if _withdrawal_emptied(market) else
                 "No graded predictions yet, so there is nothing to score.")
             return
 

@@ -12,7 +12,7 @@ and a definition belongs in the warehouse where it can be tested, not in a page.
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, filters, fmt, params, shell, states, table
+from lib import attribution, filters, fmt, models, params, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -67,6 +67,12 @@ def body(page) -> None:
             limit 900
         """, {"season": season, "week": week})
         table.as_of_caption(df)
+        # A227 (cfdb-main-R-3101): this page renders "Model margin … edge …" from the
+        # prediction columns on the odds row, so a withdrawn model would keep publishing a
+        # figure here after the Model Performance page had stopped. 📊 A no-op today —
+        # srv_odds_board carries only `random_forest_score` — and the load path is what
+        # decides that, not this page.
+        df, _ = models.suppress_withdrawn(df)
 
         if best_only and not df.empty:
             # Filtering is selection, not computation — the flags were decided in dbt.

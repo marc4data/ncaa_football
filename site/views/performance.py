@@ -13,7 +13,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import attribution, chips, filters, fmt, shell, states, table
+from lib import attribution, chips, filters, fmt, models, shell, states, table
 from lib.query import query
 from lib.table import Col
 
@@ -22,11 +22,16 @@ BREAKEVEN = 52.4          # ATS breakeven at −110.
 # AC-13.4: the seventh model renders as a VISIBLE ROW MARKED NOT LOADED, never as a shorter
 # table. fastai_wp_predictions.csv was never written, and a missing model is an absence the
 # page states rather than an omission the reader has to notice.
-EXPECTED_MODELS = {
-    "ridge_margin_expanded", "random_forest_score", "xgboost_home_win_calibrated",
-    "logistic_home_win_c_0.25", "xgboost_home_win_shap_explained",
-    "stacked_ensemble_home_win", "fastai_home_win",
-}
+# A227 (cfdb-main-R-3101): READ FROM `lib.models`, NOT RESTATED HERE. This was a literal
+# set, and `workbook.py`, `edges.py` and this page each knowing their own list is how one
+# surface comes to publish a model another has withdrawn — with every page looking
+# internally consistent while they disagree (R-574).
+EXPECTED_MODELS = set(models.ALL_MODELS)
+
+# Interpolated into this module's queries. `ci/check_page_queries.py` resolves `{NAME}` from
+# module-level STRING constants in the same file, so the shared fragment is bound to a local
+# name here rather than reached through the module at the call site.
+PUBLISHED_MODELS_ONLY = models.PUBLISHED_MODELS_ONLY
 
 MEASURES = """
     model_name, model_version, model_family, split, season, is_out_of_sample_week,
@@ -93,7 +98,7 @@ def body(page) -> None:
         df = query(f"""
             select {MEASURES}
             from srv_model_performance
-            where segment_type = 'overall'
+            where segment_type = 'overall' and {PUBLISHED_MODELS_ONLY}
             order by winner_accuracy_pct desc nulls last
             limit 200
         """)
@@ -108,9 +113,27 @@ def body(page) -> None:
             "here has been bet. A backtest number and a realised number are different "
             "claims.")
 
+        # A227 (cfdb-main-R-3102): THE WITHDRAWAL IS STATED IN THE PAGE'S OWN VOICE, beside
+        # the backtest warning that is already here, because they are the same kind of fact
+        # about the same numbers. A banner bolted on top would read as site chrome.
+        if models.WITHDRAWN:
+            st.warning(models.WITHDRAWAL_NOTE)
+
         if df.empty:
-            states.empty("Model accuracy would be here.",
-                         "No predictions have been loaded yet.")
+            # 🚨 AC-G.11: THREE DIFFERENT ABSENCES, AND THIS BRANCH USED TO NAME ONLY ONE.
+            # "No predictions have been loaded yet" is true when nothing was ever exported.
+            # It is FALSE, and misleading, when the rows exist and this site has chosen not
+            # to publish them — which is now a reachable state and becomes the ONLY state
+            # the moment the last publishable model is withdrawn.
+            if models.PUBLISHED:
+                states.empty("Model accuracy would be here.",
+                             "No predictions have been loaded yet.")
+            else:
+                states.empty(
+                    "Model accuracy would be here.",
+                    "Every model this site had has been withdrawn for training on the "
+                    "closing line. The predictions still exist; none of them describes a "
+                    "model that had not already seen the answer, so none is shown.")
             return
 
         columns = [
@@ -139,8 +162,29 @@ def body(page) -> None:
 
 
 def _missing_models(df: pd.DataFrame) -> None:
-    loaded = set(df["model_name"].unique())
+    """Every model the site knows about that is not in the table above, and WHY.
+
+    🚨 A227: THERE ARE NOW TWO REASONS A MODEL IS ABSENT AND THEY MUST NOT RENDER ALIKE.
+    `fastai_home_win`'s export was never written — nothing to show. The other five were
+    withdrawn — plenty to show, and a decision not to. AC-13.4 says the row stays visible
+    either way; AC-G.11 says it has to say which of the two it is.
+    """
+    loaded = set(df["model_name"].unique()) if not df.empty else set()
     missing = sorted(m for m in EXPECTED_MODELS if m not in loaded)
+    if not missing:
+        return
+
+    # Withdrawn first, and stated once as a group rather than repeated per model: five
+    # identical cards would read as five separate problems.
+    withdrawn = [m for m in missing if models.is_withdrawn(m)]
+    if withdrawn:
+        states.degraded(
+            missing_object=", ".join(withdrawn),
+            explanation=(models.WITHDRAWAL_CAPTION + " They are listed rather than "
+                         "dropped so the absence is visible: a shorter table would hide "
+                         "it."),
+            title=f"{len(withdrawn)} model(s) withdrawn — trained on the closing line")
+    missing = [m for m in missing if not models.is_withdrawn(m)]
     if not missing:
         return
     # 🚨 ROUTED THROUGH states.degraded RATHER THAN HAND-DRAWN. R-616.
@@ -167,6 +211,7 @@ def _segment(model: str, segment_type: str) -> pd.DataFrame:
         select {MEASURES}
         from srv_model_performance
         where segment_type = :segment_type and model_name = :model
+          and {PUBLISHED_MODELS_ONLY}
         order by segment_order, segment_value
         limit 200
     """, {"segment_type": segment_type, "model": model})

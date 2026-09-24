@@ -53,6 +53,17 @@ SUBSTITUTIONS = {
     # matter here: any integer executes the same query, and the value is not what is under
     # test. The models own the real numbers.
     "{ROW_CAP}": "5000",
+    # A227 (cfdb-main-R-3101). The withdrawn-model exclusion lives in `site/lib/models.py`
+    # so four surfaces cannot disagree about it, and the consumers bind it as
+    # `PUBLISHED_MODELS_ONLY = models.PUBLISHED_MODELS_ONLY`. `module_constants` resolves
+    # only literal `NAME = "..."` strings, so that binding is invisible to it and the hole
+    # would read as uninterpolated.
+    #
+    # ⚠️ A REPRESENTATIVE CLAUSE, NOT THE REAL LIST, for ROW_CAP's own reason: which names
+    # are excluded is not what this script tests. What it DOES test, and what matters here,
+    # is that `model_name` exists on every relation the clause is spliced into — a filter on
+    # a column a view does not have is exactly the R-1007 failure, and this executes it.
+    "{PUBLISHED_MODELS_ONLY}": "(model_name is null or model_name not in ('_none_'))",
     # Today's leaderboard depth, chosen by a user radio (10/25/50) and interpolated for the
     # same reason ROW_CAP is: the contract's LIMIT check matches `limit <digits>` and a bind
     # parameter fails it. Any integer executes the same query; the value is not under test.
