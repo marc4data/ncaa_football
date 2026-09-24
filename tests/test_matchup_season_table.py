@@ -12,9 +12,13 @@ that is the defect Marc found live, and the guard below is the thing that can se
 import sys
 from pathlib import Path
 
+import pandas as pd
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "site"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import render_harness  # noqa: E402
 from lib import table as table_lib  # noqa: E402
 
 SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
@@ -37,6 +41,59 @@ def _code_of(func: str) -> str:
     body = body.split('"""', 2)[-1] if body.count('"""') >= 2 else body
     return "\n".join(
         line for line in body.split("\n") if not line.strip().startswith("#"))
+
+
+AWAY, HOME = 333, 2390
+
+
+def _game(**over):
+    row = {
+        "game_id": 401752766, "season": 2025, "season_type": "regular",
+        "game_date": "2025-10-04",
+        "home_team_id": HOME, "away_team_id": AWAY,
+        "home_team": "Baylor", "away_team": "Oklahoma State",
+        "home_team_slug": "baylor", "away_team_slug": "oklahoma-state",
+    }
+    row.update(over)
+    return pd.Series(row)
+
+
+def _calendar_row(team_id, week, **over):
+    row = {
+        "team_id": team_id, "week": week, "game_date": f"2025-09-{week:02d}",
+        "is_home": True, "opponent_abbreviation": f"OP{week}",
+        "opponent_team_display": f"Opponent {week}", "opponent_rank": None,
+        "opponent_classification": "fbs",
+        "record_before_display": "1-0", "points_for": 31, "points_against": 17,
+        "has_box_score": True,
+        "first_downs": 20, "turnovers": 1, "penalty_yards": 45,
+        "total_yards": 400, "rushing_yards": 150, "passing_yards": 250,
+        "total_yards_allowed": 300, "rushing_yards_allowed": 100,
+        "passing_yards_allowed": 200,
+        "offense_ppa": 0.2, "offense_rushing_plays_total_ppa": 3.0,
+        "offense_passing_plays_total_ppa": 5.0, "cumulative_ppa_overall_total": 8.0,
+        "offense_success_rate": 0.44, "offense_explosiveness": 1.2,
+        "spread_final": -7.5, "covered_final": "yes", "ats_margin_final": 6.5,
+    }
+    row.update(over)
+    return row
+
+
+@pytest.fixture
+def panel():
+    """`_season_so_far` with streamlit captured and the calendar query replaced."""
+    import importlib
+    with render_harness.streamlit_stubbed() as (stub, captured, _charts):
+        matchup = importlib.reload(importlib.import_module("views.matchup"))
+
+        def run(rows, team=None):
+            captured.clear()
+            matchup.query = lambda sql, params=None: pd.DataFrame(rows)
+            stub.query_params = {} if team is None else {"team": team}
+            matchup._season_so_far(_game())
+            return render_harness.body_html(captured)
+
+        yield run
 
 
 def test_THE_PANEL_SITS_BETWEEN_OFFENCE_VS_DEFENCE_AND_TRAVEL():
@@ -79,22 +136,83 @@ def test_IT_READS_THE_BOUNDED_CALENDAR_rather_than_opening_its_own_read():
         "teams in one bounded query (G-2: one read, two renderings)")
 
 
-def test_THE_TOGGLE_IS_NOT_ST_TABS_because_that_loses_the_tab_on_every_link():
-    """🚨 **R-283, AND IT HAS A TEST ON THE OTHER SIDE TOO.** `st.tabs` loses the tab on every
-    link, which is why the page's own Before/After bar is anchors carrying the choice in the
-    URL. ⚠️ **It also renders BOTH panes**, so two eighteen-column tables would be built on
-    every load to show one.
+def test_BOTH_TEAMS_ARE_DRAWN_away_first_with_no_toggle_at_all(panel):
+    """🚨 **v17 (cfdb-wta-R-2910).** Marc: *"Remove the tab and put Away over Home with a
+    sub-header in-between. That way people can see both at the same time and compare without
+    swapping between screens and having a page refresh."*
 
-    ✅ The toggle reuses `params.link_here(team=…)` — and `team` was **already** in
-    `params.KNOWN`, so the round needed no `site/lib/` edit (session A's file, §3.2.2).
+    ⚠️ **HIS SECOND CLAUSE IS WHY THE CONTROL IS DELETED RATHER THAN RESHAPED.** The toggle
+    was a LINK, so every swap was a full page load that threw the reader to the top
+    (cfdb-wta-R-2853). **A section with no navigation cannot reload.**
+
+    ✅ **ASSERTED ON THE RENDERED PANEL** (R-2260: a substring is not a rule) — "the source no
+    longer contains `cfdb-tabbar`" would also pass on a panel that drew nothing.
+    """
+    run = panel
+    html = run([_calendar_row(AWAY, 1, opponent_team_display="Away Opponent"),
+                _calendar_row(HOME, 1, opponent_team_display="Home Opponent")])
+    assert "cfdb-tabbar" not in html, "the panel still draws a tab bar"
+    assert "Away Opponent" in html and "Home Opponent" in html, (
+        "both teams' tables are not drawn in one render, which is the whole of Marc's ask")
+    assert html.index("Oklahoma State") < html.index("Baylor"), (
+        "home is drawn above away; Marc asked for away over home")
+    # 🚨 **AND THE SUB-HEADER IS PART OF THE ASK — *"with a sub-header in-between"*.** Two
+    # stacked eighteen-column tables with nothing between them are one table to a reader
+    # scrolling past.
+    assert "Oklahoma State \u00b7 away" in html and "Baylor \u00b7 home" in html, (
+        f"a side is not named above its own table: {html[:400]}")
+
+
+def test_THE_URL_PARAMETER_NO_LONGER_CHANGES_WHAT_IS_DRAWN(panel):
+    """🚨 **DELETING A TAB BAR AND LEAVING ITS FILTER BEHIND WOULD LOOK IDENTICAL IN THE
+    SOURCE AND SHOW ONE TEAM ON THE PAGE.** B152 pointed this panel and *Against the Spread*
+    at one `?team=`; both are gone, and inert is a claim worth asserting.
+    """
+    run = panel
+    rows = [_calendar_row(AWAY, 1, opponent_team_display="Away Opponent"),
+            _calendar_row(HOME, 1, opponent_team_display="Home Opponent")]
+    neutral = run(rows)
+    for slug in ("baylor", "oklahoma-state", "not-a-team"):
+        assert run(rows, team=slug) == neutral, (
+            f"?team={slug} changed what the panel drew, so a filter outlived the toggle")
+
+
+def test_THE_IDENTITY_COLUMNS_ARE_FROZEN_so_the_two_tables_can_be_compared(panel):
+    """🚨 **STACKING TWO TABLES THAT EACH SCROLL SIDEWAYS DOES NOT PRODUCE A COMPARISON.**
+
+    📊 Measured: this table draws **1275px** in content boxes of 1140 / 980 / 840 / 564, so it
+    scrolls at every width — and two independent scrollers can only be read against each other
+    if the reader happens to align them, which nothing lets them do.
+
+    ✅ **`table.render(sticky=n)` PINS THE FIRST n COLUMNS**, and `site/lib/table.py` ignores
+    it *silently* unless `scroll` is on and the first n widths are pixels (R-269). **Both
+    hold, so no `site/lib/` edit was needed** — and this asserts the RENDERED result rather
+    than the argument, because the silent-ignore is exactly the failure mode.
+    """
+    run = panel
+    html = run([_calendar_row(AWAY, w) for w in (1, 2)])
+    assert "cfdb-sticky" in html, (
+        "no column is frozen, so the two stacked tables scroll independently and cannot be "
+        "compared — which is the reason Marc gave for stacking them")
+    assert "cfdb-sticky-edge" in html, "the frozen block draws no edge against the scroll"
+    code = _code_of("_season_so_far")
+    assert "sticky=2" in code, (
+        "the freeze is no longer two columns; if that is deliberate, re-measure the frozen "
+        "width against the 564px box at 1024 and say so")
+
+
+def test_THE_TOGGLE_IS_NOT_ST_TABS_because_that_loses_the_tab_on_every_link():
+    """🚨 **R-283 SURVIVES THE TOGGLE'S DELETION AND IS WHY IT WAS NEVER `st.tabs`.**
+
+    ⚠️ **THE OBVIOUS WAY TO PUT TWO TEAMS ON ONE PAGE IS `st.tabs`, AND IT IS BANNED HERE**:
+    it loses the tab on every link and renders both panes to show one. v17 arrives at the same
+    place from the other direction — **draw both, hide neither** — so this guard stays, now
+    defending against a control coming back rather than against the wrong control.
     """
     code = _code_of("_season_so_far")
     assert "st.tabs(" not in code, "the season table uses st.tabs, which R-283 forbids here"
-    assert "link_here(team=" in code, (
-        "the toggle does not carry its choice in the URL, so a link resets it")
-    from lib import params
-    assert "team" in params.KNOWN, (
-        "`team` left params.KNOWN, so the toggle's links would be stripped")
+    assert "link_here(team=" not in code, (
+        "the toggle is back: a link here is a full page reload, which is what v17 removed")
 
 
 def test_TOUCHDOWNS_IS_NAMED_AS_ABSENT_and_never_derived_from_points():

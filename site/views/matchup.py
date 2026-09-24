@@ -6248,22 +6248,37 @@ def _season_so_far(row) -> None:
         # page's furniture, but the two bars answer different questions at different levels
         # and only one of them is ever a hierarchy a reader has to hold. **Reported rather
         # than assumed — see the round's crops** (cfdb-wta-R-2702).
-        sides = [(int(away_id), row.get("away_team"), fmt.text(row.get("away_team_slug"))),
-                 (int(home_id), row.get("home_team"), fmt.text(row.get("home_team_slug")))]
-        wanted = fmt.text(params.get("team"))
-        chosen = next((slug for _i, _n, slug in sides if slug and slug == wanted),
-                      sides[0][2])
-        links = []
-        for _i, name, slug in sides:
-            css = "cfdb-tab" + (" cfdb-tab-on" if slug == chosen else "")
-            links.append(f"<a class='{css}' href='{params.link_here(team=slug)}' "
-                         f"target='_self'>{html.escape(fmt.text(name) or '—')}</a>")
-        st.markdown(f"<div class='cfdb-tabbar'>{''.join(links)}</div>",
-                    unsafe_allow_html=True)
-
-        # ✅ ONE TABLE BUILT, NOT TWO HIDDEN — which is the other half of why `st.tabs` was
-        # the wrong control here.
-        for team_id, name, slug in [side for side in sides if side[2] == chosen]:
+        sides = [(int(away_id), row.get("away_team"), "away"),
+                 (int(home_id), row.get("home_team"), "home")]
+        # ── 🚨🚨 v17: THE TOGGLE IS GONE AND BOTH TABLES ARE DRAWN (cfdb-wta-R-2910) ──────
+        #
+        # > **MARC, v17:** *"Remove the tab and put Away over Home with a sub-header
+        # > in-between. That way people can see both at the same time and compare without
+        # > swapping between screens and having a page refresh."*
+        #
+        # 🚨 **HIS SECOND SENTENCE IS THE HARDER REQUIREMENT, AND DELETING THE CONTROL IS
+        # WHAT SATISFIES IT.** The toggle was a LINK, so every swap was a full page load that
+        # threw the reader back to the top — cfdb-wta-R-2853, his standing complaint about
+        # exactly that. ✅ **A section with no navigation cannot reload**, so the layout ask
+        # and the reload ask have one fix between them.
+        #
+        # ⚠️ **AND B152's SHARED-CHOICE ARGUMENT DIES WITH IT, WHICH IS FINE AND IS SAID
+        # RATHER THAN LEFT AS A COMMENT ABOUT A CONTROL NOBODY CAN SEE** (§3.2.3). That round
+        # pointed this panel and *Against the Spread* at ONE `?team=` parameter so a reader
+        # chose once; **both toggles are gone, so there is no choice left to share.**
+        # ✅ **`params.get("team")` IS NOT ORPHANED BY THAT** — `site/views/team.py` reads it
+        # as the Team page's own slug. **`params.KNOWN` is untouched: session A's file.**
+        #
+        # 🚨 **AND BOTH TABLES ARE NOW BUILT ON EVERY RENDER, WHICH IS THE COST.** B149
+        # rejected `st.tabs` partly because it builds both panes to show one; this builds
+        # both to SHOW both, which is what was asked for. 📊 The measured price is in the
+        # round's report — the section is two `table.render` calls over frames the one
+        # bounded read already returned, and no second query exists either way.
+        for team_id, name, where in sides:
+            # ⚠️ **THE SUB-HEADER NAMES THE TEAM *AND* THE SIDE.** Two stacked tables with
+            # only a team name above each make the reader carry which one is the visitor;
+            # the page states it everywhere else and states it here.
+            st.markdown("#### " + (fmt.text(name) or fmt.EM_DASH) + f" · {where}")
             mine = df[df["team_id"] == team_id]
             played = mine[mine["has_box_score"].fillna(False).astype(bool)]
             # 🚨 THE TWO ABSENCES ARE DIFFERENT AND THE WORDS SAY WHICH (AC-G.11).
@@ -6301,8 +6316,28 @@ def _season_so_far(row) -> None:
             # can never fire. **The first version of this panel did exactly that: the note
             # stayed hidden at 1600 while the table really was scrolling**
             # (cfdb-wta-R-2703).
+            # ── 🚨 THE FREEZE IS WHAT MAKES THE STACK A COMPARISON (cfdb-wta-R-2910) ──
+            #
+            # 📊 **B152 MEASURED THIS TABLE AT 1275px DRAWN IN BOXES OF 1140 / 980 / 840 /
+            # 564, SO IT SCROLLS AT EVERY WIDTH** — and two stacked copies are two
+            # INDEPENDENTLY scrolling tables. **Marc's stated purpose is comparison**, and a
+            # column can only be compared across the two if both happen to sit at the same
+            # offset, which a reader has no way to arrange.
+            #
+            # ✅ **`table.render` ALREADY TAKES THE FIX AND IT WAS CHECKED RATHER THAN
+            # ASSUMED:** `sticky=n` pins the first n columns with `position:sticky`, and
+            # `site/lib/table.py` ignores it *silently* unless `scroll` is on and the first
+            # n layout entries are pixels (R-269). **Both hold here** — `_SEASON_LAYOUT` is
+            # all pixels — so **no `site/lib/` edit was needed** (§3.2.2).
+            #
+            # 📊 **TWO, NOT THREE: `Wk` 40px + `Opponent` 132px = 172px of the 564px box at
+            # 1024**, which leaves 392px of stats moving. Freezing `Result` as well would
+            # take 240px of that box to say something the reader can already see.
+            # 🚨 **AND THE ALTERNATIVE WAS DROPPING COLUMNS, WHICH IS MARC'S TO VETO AND NOT
+            # THIS ROUND'S TO TAKE** — the round's report names the ones it would have
+            # dropped and asks.
             table.render(played, _season_table_columns(), caption=caption,
-                         scroll=True, sortable=False, layout=_SEASON_LAYOUT)
+                         scroll=True, sortable=False, layout=_SEASON_LAYOUT, sticky=2)
 
 
 # ── 🚨🚨 v16: AGAINST THE SPREAD ───────────────────────────────────────────────────────────
@@ -6339,6 +6374,13 @@ _ATS_COVERED_LABELS = {"yes": "Cover", "no": "No", "push": "Push", "pending": "�
 # scanning the market never scrolls. ⚠️ **The cost is honest and small: `Wk` and `Opponent` are
 # repeated from B149's table, 172px of the 452.**
 _ATS_LAYOUT = ["40px", "132px", "80px", "80px", "120px"]
+
+# 📊 **THE DRAWN WIDTH, MEASURED IN A BROWSER, AND IT IS ONE MORE THAN THE DECLARED SUM.**
+# `_ATS_LAYOUT` totals 452; the table draws **453** once the collapsed border is counted
+# (B152 measured it at 1600, 1440, 1300 and 1024 — the same 453 at every one, because every
+# column is a fixed pixel). ⚠️ **v17's side-by-side pair is sized from THIS and nothing
+# else**, so if the columns above move, this is re-measured rather than adjusted to taste.
+_ATS_PAIR_WIDTH = 453
 
 
 def _ats_covered(row) -> str:
@@ -6406,49 +6448,160 @@ def _ats_so_far(row) -> None:
                 "measure against the market yet.")
             return
 
-        sides = [(int(away_id), row.get("away_team"), fmt.text(row.get("away_team_slug"))),
-                 (int(home_id), row.get("home_team"), fmt.text(row.get("home_team_slug")))]
-        # ⚠️ **ONE CHOICE, BOTH SECTIONS.** This reuses B149's `team` parameter rather than
-        # minting a second, so the two tables follow the same team and a reader makes the
-        # decision once. `team` was already in `params.KNOWN` — **no `site/lib/` edit**.
-        wanted = fmt.text(params.get("team"))
-        chosen = next((slug for _i, _n, slug in sides if slug and slug == wanted),
-                      sides[0][2])
-        links = []
-        for _i, name, slug in sides:
-            css = "cfdb-tab" + (" cfdb-tab-on" if slug == chosen else "")
-            links.append(f"<a class='{css}' href='{params.link_here(team=slug)}' "
-                         f"target='_self'>{html.escape(fmt.text(name) or '—')}</a>")
-        st.markdown(f"<div class='cfdb-tabbar'>{''.join(links)}</div>",
-                    unsafe_allow_html=True)
+        sides = [(int(away_id), row.get("away_team"), "away"),
+                 (int(home_id), row.get("home_team"), "home")]
+        # ── 🚨🚨 v17: AWAY ON THE LEFT, HOME ON THE RIGHT, AND IT WRAPS (cfdb-wta-R-2911) ──
+        #
+        # > **MARC, v17:** *"Remove the tab and put them side by side (Away on the left, Home
+        # > on the right)."*
+        #
+        # 🚨 **SIDE BY SIDE IS A WIDTH CLAIM AND IT IS FALSE AT TWO OF THE FOUR MEASURED
+        # WIDTHS.** 📊 This table draws **453px** (`_ATS_LAYOUT` declares 452), so a pair is
+        # **453 + 453 + the gap**, against content boxes measured at **1140 / 980 / 840 /
+        # 564** for viewports 1600 / 1440 / 1300 / 1024. **A naive two-column split puts each
+        # table in a box narrower than itself at 1300 and 1024** — reintroducing exactly the
+        # horizontal scroll that made this a separate narrow section in the first place
+        # (cfdb-wta-R-2906).
+        #
+        # ✅ **SO THE BREAKPOINT IS THE TABLE'S OWN WIDTH, NOT A ROUND NUMBER.** The pair is a
+        # WRAPPING flex row of two fixed-width children: when the container cannot hold
+        # `453 + gap + 453`, the second child wraps **below** the first — away above home,
+        # which is the same reading order as side by side and the same order PART 1 stacks
+        # in. **Nothing is hidden and nothing scrolls at any width.**
+        #
+        # ⚠️ **THIS IS STREAMLIT'S OWN FLEX WRAP, NOT A MEDIA QUERY AND NOT A CSS INJECTION.**
+        # A media query would have to name a viewport, and the viewport is not what decides:
+        # **the sidebar's state moves the content box by ~460px** while the viewport says
+        # nothing. **The container answers the question the layout is actually asking**, which
+        # is A208's own reason for using container queries rather than `@media` for the
+        # scroll note. 📊 The measured wrap point is in the round's report.
+        pair = st.container(horizontal=True, wrap=True, gap="medium")
+        for team_id, name, where in sides:
+            # ⚠️ **`with`, NOT `side.markdown(...)` — AND THE DIFFERENCE IS THE WHOLE PANEL.**
+            # `states.empty` and `table.render` write to the ACTIVE container through the
+            # module-level `st`; addressing only the sub-header through the child would have
+            # put the heading in the column and the table back in the page, which reads as a
+            # rendering fault rather than as a layout.
+            with pair.container(width=_ATS_PAIR_WIDTH):
+                st.markdown("#### " + (fmt.text(name) or fmt.EM_DASH) + f" \u00b7 {where}")
+                mine = df[df["team_id"] == team_id]
+                played = mine[mine["has_box_score"].fillna(False).astype(bool)]
+                if played.empty:
+                    states.empty(
+                        f"{fmt.text(name)}'s record against the market would be here.",
+                        f"This is {fmt.text(name)}'s first game of the season, so there is "
+                        f"nothing before it to show.")
+                    continue
+                # 🚨 **THE CAPTION COUNTS ROWS ON SCREEN; IT DOES NOT COMPUTE A RATE.** A214's
+                # rule is that *"a percentage with an unstated denominator is AC-G.11 wearing a
+                # number"* — ✅ **this section states the denominator and publishes no percentage
+                # at all**, because the record it would belong to cannot be computed here.
+                # ⚠️ **AND THE THREE REASONS A GAME IS NOT IN IT ARE DIFFERENT FACTS**: no line
+                # published, a push, and a game not yet played. The first is counted here, the
+                # second is a row you can see, and the third was never fetched.
+                lined = played[played["spread_final"].notna()]
+                missing = len(played) - len(lined)
+                caption = (
+                    f"{len(lined)} of {len(played)} game"
+                    f"{'' if len(played) == 1 else 's'} before this one carried a published "
+                    f"line"
+                    + (f"; {missing} had no line and "
+                       f"show{'s' if missing == 1 else ''} an em dash" if missing else "")
+                    + f", {int(row['season'])} season.")
+                table.render(played, _ats_table_columns(), caption=caption,
+                             scroll=True, sortable=False, layout=_ATS_LAYOUT)
 
-        for team_id, name, slug in [side for side in sides if side[2] == chosen]:
-            mine = df[df["team_id"] == team_id]
-            played = mine[mine["has_box_score"].fillna(False).astype(bool)]
-            if played.empty:
-                states.empty(
-                    f"{fmt.text(name)}'s record against the market would be here.",
-                    f"This is {fmt.text(name)}'s first game of the season, so there is "
-                    f"nothing before it to show.")
-                continue
-            # 🚨 **THE CAPTION COUNTS ROWS ON SCREEN; IT DOES NOT COMPUTE A RATE.** A214's
-            # rule is that *"a percentage with an unstated denominator is AC-G.11 wearing a
-            # number"* — ✅ **this section states the denominator and publishes no percentage
-            # at all**, because the record it would belong to cannot be computed here.
-            # ⚠️ **AND THE THREE REASONS A GAME IS NOT IN IT ARE DIFFERENT FACTS**: no line
-            # published, a push, and a game not yet played. The first is counted here, the
-            # second is a row you can see, and the third was never fetched.
-            lined = played[played["spread_final"].notna()]
-            missing = len(played) - len(lined)
-            caption = (
-                f"{len(lined)} of {len(played)} game"
-                f"{'' if len(played) == 1 else 's'} before this one carried a published "
-                f"line"
-                + (f"; {missing} had no line and "
-                   f"show{'s' if missing == 1 else ''} an em dash" if missing else "")
-                + f", {int(row['season'])} season.")
-            table.render(played, _ats_table_columns(), caption=caption,
-                         scroll=True, sortable=False, layout=_ATS_LAYOUT)
+
+# ── 🚨🚨 v17: TRAVEL AND REST BECOMES A LABELLED TABLE (cfdb-wta-R-2912) ──────────────────
+#
+# > **MARC, v17:** *"Can you make it more tabular with headings and so that the data points are
+# > labeled and aligned. Don't need a decimal point on the distance. Without the header, not
+# > sure end-users understand the elevation difference listed in ft."*
+#
+# 🚨 **THE THIRD ASK IS THE ONE THAT MATTERS: A NUMBER NOBODY CAN NAME IS NOT INFORMATION.**
+# The line this replaces read `Baylor  Home · home venue · 6d rest · —`, where every figure
+# depended on the reader knowing the order they came in. **A heading per measure is the whole
+# fix**, and the elevation one needs a sentence rather than a unit, because it is a CHANGE.
+#
+# ⚠️ **THIS IS A RENDERING CHANGE AND NOTHING ELSE (§4.2.1).** `travel_miles`,
+# `elevation_change_ft`, `rest_days` and `rest_bucket` were already selected and are already
+# published rounded from the same unrounded measurement as their metric twins (A097) — **so
+# dropping the decimal is a format string, and nothing here recomputes, converts or derives.**
+#
+# 📊 **AND THE EMPTY CASE IS THE COMMON CASE — 1,218 of 1,590 upcoming 2026 games (76.6%) have
+# neither side's distance.** The table is therefore designed to read as a table of em dashes:
+# the caption says which absence each one is, because *no coordinates published for this venue*
+# and *they played at home* are different facts and only one of them is a zero (R-634).
+_TRAVEL_LAYOUT = ["168px", "72px", "104px", "128px", "88px"]
+
+
+def _travel_side(row) -> str:
+    """`Away` / `Home` / `Neutral site` — the side, as its own labelled column."""
+    if row.get("is_neutral_site"):
+        return "Neutral site"
+    return "Home" if row.get("is_home") else "Away"
+
+
+def _travel_distance(row) -> str:
+    """How far they came — **no decimal, and a zero that says what it means.**
+
+    🚨 **AC-G.32 / R-634: A NULL IS AN EM DASH AND A ZERO IS NOT, AND THAT SURVIVES THE
+    REFORMAT.** 📊 Measured: 367 upcoming sides carry a literal zero, which is a team playing
+    where it always plays — **`home venue` says what that zero MEANS**, and what matters for
+    the rule is that it is emphatically not the em dash the missing coordinates draw.
+    """
+    miles = row.get("travel_miles")
+    if miles is None or pd.isna(miles):
+        return fmt.EM_DASH
+    return "home venue" if float(miles) < 1 else f"{float(miles):,.0f} mi"
+
+
+def _travel_elevation(row) -> str:
+    """The venue's elevation minus the team's own — **signed, because the sign is the fact.**
+
+    🚨 **NEVER `abs()`.** Arriving 1,500 ft higher and 1,500 ft lower are different
+    experiences; Arizona State drop 1,027 ft going to Wembley and a side going to Laramie
+    climbs. **The leading + or − is what says which**, and the heading plus the caption say
+    what it is a change FROM — which is the half Marc could not read off the old line.
+    """
+    change = row.get("elevation_change_ft")
+    if change is None or pd.isna(change):
+        return fmt.EM_DASH
+    return f"{float(change):+,.0f} ft"
+
+
+def _travel_rest(row) -> str:
+    """Days since this team last played, with the published bucket as the hover.
+
+    ⚠️ **THE WORD `rest` MOVED INTO THE HEADING, WHICH IS THE POINT OF THE REFORMAT** — the
+    cell used to read `6d rest` because nothing else said what the number was.
+    """
+    rest = row.get("rest_days")
+    if rest is None or pd.isna(rest):
+        return fmt.EM_DASH
+    text = f"{int(rest)}"
+    bucket = str(row.get("rest_bucket") or "")
+    if not bucket:
+        return text
+    return (f"<span title='{html.escape(bucket, quote=True)}' "
+            f"style='cursor:help;border-bottom:1px dotted'>{text}</span>")
+
+
+def _travel_columns() -> list:
+    """Five labelled columns. **Every one reads a published field; none is computed.**"""
+    return [
+        Col("team", "Team"),
+        Col("is_home", "Side", render=_travel_side),
+        Col("travel_miles", "Traveled", render=_travel_distance,
+            title="Miles from this team's home venue to this game's venue"),
+        # 🚨 **THE HEADING CARRIES THE WORD MARC WAS MISSING, AND THE CAPTION CARRIES THE
+        # SENTENCE.** A `title` alone would not have answered him: a hover is invisible to a
+        # reader who does not know there is anything to hover.
+        Col("elevation_change_ft", "Elevation change", render=_travel_elevation,
+            title="The game venue's elevation minus this team's home elevation"),
+        Col("rest_days", "Rest, days", render=_travel_rest,
+            title="Days since this team last played"),
+    ]
 
 
 def _travel(game_id) -> None:
@@ -6486,7 +6639,7 @@ def _travel(game_id) -> None:
                    elevation_change_ft, rest_days, rest_bucket, previous_game_date, as_of_ts
             from srv_game_travel
             where game_id = :game_id
-            order by is_home desc
+            order by is_home asc
             limit 2
         """, {"game_id": game_id})
         if df.empty:
@@ -6494,46 +6647,39 @@ def _travel(game_id) -> None:
                          "No travel or rest figures for this game.")
             return
 
-        for _, r in df.iterrows():
-            # R-600. ONE LINE PER SIDE, NOT A HEADING AND THREE TILES. Marc: "Too big, not
-            # that important." Six st.metric tiles and two headings became two lines; every
-            # figure and every caveat survives, and the panel costs about a fifth of the
-            # height it did.
-            #
-            # ⚠️ COMPRESSED, NOT DELETED — he said too big, not unwanted. And the conditional
-            # highlight R-524 asks for still waits on a measured threshold: shrinking needed
-            # no distribution, so it happened now; choosing what counts as "significant" by
-            # taste is the thing R-524 exists to prevent.
-            side = "Home" if r.get("is_home") else "Away"
-            if r.get("is_neutral_site"):
-                side = "Neutral site"
-            miles = r.get("travel_miles")
-            # ⚠️ AC-G.32. Zero is a real answer here and reads as one; null is not, and the
-            # two must never render the same. A home side carries 0.0 — measured, not assumed:
-            # 367 of the upcoming sides are a literal zero rather than a null. "home venue"
-            # says what that zero MEANS, which is why it is preferred to "0.0 mi"; what
-            # matters for the rule is that it is emphatically not the em dash.
-            travel = ("—" if miles is None or pd.isna(miles)
-                      else "home venue" if float(miles) < 1 else f"{float(miles):,.1f} mi")
-            rest = r.get("rest_days")
-            rest_text = "—" if rest is None or pd.isna(rest) else f"{int(rest)}d rest"
-            bucket = str(r.get("rest_bucket") or "")
-            if bucket:
-                # The Rest label's hover survives the shrink — it is the one piece of prose
-                # here that says what a number MEANS rather than repeating it.
-                rest_text = (f"<span title='{html.escape(bucket, quote=True)}' "
-                             f"style='cursor:help;border-bottom:1px dotted'>{rest_text}</span>")
-            change = r.get("elevation_change_ft")
-            # 🚨 SIGNED ON PURPOSE, AND THE SIGN IS THE FACT. Arriving 1,500 ft higher and
-            # 1,500 ft lower are different experiences and a magnitude would erase which
-            # happened — Arizona State drop 1,027 ft going to Wembley, a side going to Laramie
-            # climbs. The leading + or − is what says which, so this must never be abs()ed.
-            elevation = ("—" if change is None or pd.isna(change)
-                         else f"{float(change):+,.0f} ft")
-            st.markdown(
-                f"<div style='padding:.1rem 0'><strong>{html.escape(str(r.get('team')))}"
-                f"</strong> <span style='opacity:.6'>{side}</span> · {travel} · "
-                f"{rest_text} · {elevation}</div>", unsafe_allow_html=True)
+        # ── 🚨 ONE ROW PER SIDE, AWAY FIRST — cfdb-wta-R-2912 ────────────────────────────
+        #
+        # ⚠️ **R-600's COMPRESSION IS KEPT, NOT UNDONE.** Marc: *"Too big, not that
+        # important."* Six `st.metric` tiles became two lines; this makes those two lines a
+        # table, which is **shorter still** — one header row plus two data rows, against two
+        # prose lines that wrapped at 1024.
+        #
+        # ⚠️ **AND THE ORDER IS NOW AWAY-THEN-HOME**, which is a one-word change to the
+        # `order by` and the order every other section on this page reads in (B148 made the
+        # two sides symmetric). **The query is otherwise untouched: same columns, same row
+        # count, no second read.**
+        caption = ("Elevation change is the game venue's elevation minus this team's home "
+                   "elevation, so a negative number means they came down.")
+        table.render(df, _travel_columns(), caption=caption,
+                     scroll=True, sortable=False, layout=_TRAVEL_LAYOUT)
+        # 🚨 **THE TWO ABSENCES ARE DIFFERENT AND THE NOTE SAYS WHICH (AC-G.11).** 📊 They
+        # are also the COMMON case — 1,218 of 1,590 upcoming 2026 games have neither side's
+        # distance — so this sentence is furniture rather than an edge note, and a table of
+        # unexplained dashes would be worse than the prose it replaced.
+        #
+        # ⚠️ **AND IT IS DRAWN ONLY WHEN THERE IS A DASH TO EXPLAIN, WHICH THE CROPS FOUND.**
+        # An unconditional note explains a symbol that is not on screen — on the 18.1% of
+        # games carrying both distances it is prose describing nothing, which is a comment
+        # that has stopped being true wearing a caption (§3.2.3). 📊 **This is not a branch
+        # that cannot fire (R-762): it is the state three games in four are in.**
+        # ⚠️ **AND THE BACKTICKS ARE GONE** — `st.caption` renders Markdown, so `home venue`
+        # drew a grey code chip in the middle of a sentence. **The crop is what found that;
+        # no test could have.**
+        absent = df["travel_miles"].isna().any() or df["elevation_change_ft"].isna().any()
+        if absent:
+            st.caption("An em dash means cfdb publishes no coordinates for one of the two "
+                       "venues. That is a different fact from “home venue”, which "
+                       "is a team playing where it always plays — a measured zero.")
         table.as_of_caption(df)
 
 

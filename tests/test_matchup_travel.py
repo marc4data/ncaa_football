@@ -19,6 +19,7 @@ neutral-site game, read from live serving on 2026-09-11:
 Both columns are rounded from the same unrounded measurement, which is what stops them
 disagreeing, and it is also why a fixture must not compute one from the other.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -83,8 +84,46 @@ def travel():
             # panel has no legitimate reason to render an Error card.
             render_harness.assert_no_error_card(captured, "the travel panel")
             seen["raw"] = list(captured)
+            seen["html"] = render_harness.body_html(captured)
             return render_harness.plain(" ".join(str(t) for t in captured)), seen
     return run
+
+
+def _matchup():
+    import importlib
+    return importlib.import_module("views.matchup")
+
+
+def _cells(seen) -> list:
+    """The table's DATA cells, as text — never the caption, the note or the heading.
+
+    🚨 **THIS HELPER EXISTS BECAUSE v17's CAPTION BROKE SIX ASSERTIONS AT ONCE, AND THEY WERE
+    RIGHT TO BREAK.** cfdb-wta-R-2912 gave the panel a sentence explaining that *an em dash
+    means cfdb publishes no coordinates … which is a different fact from `home venue`* — so
+    the strings `—` and `home venue` are now in the panel's PROSE whatever any cell says.
+    **Every test below that searched the whole blob had silently stopped being able to fail**
+    (R-2260: a substring is not a rule; B152's caption guard learned the same lesson one file
+    over, twice in one round).
+
+    ✅ **THE RULE THE PANEL ACTUALLY HAS IS ABOUT CELLS** — R-634: a null renders as an em dash
+    and a zero does not — so the instrument reads cells.
+    """
+    body = re.search(r"<tbody>(.*?)</tbody>", seen["html"], re.S)
+    assert body, f"the travel panel drew no table body: {seen['html'][:400]}"
+    return [re.sub("<[^>]+>", "", c).strip()
+            for c in re.findall(r"<td[^>]*>(.*?)</td>", body.group(1), re.S)]
+
+
+def _rows(seen) -> int:
+    body = re.search(r"<tbody>(.*?)</tbody>", seen["html"], re.S)
+    return len(re.findall(r"<tr", body.group(1))) if body else 0
+
+
+def _headings(seen) -> list:
+    head = re.search(r"<thead>(.*?)</thead>", seen["html"], re.S)
+    assert head, "the travel table draws no header row"
+    return [re.sub("<[^>]+>", "", c).strip()
+            for c in re.findall(r"<th[^>]*>(.*?)</th>", head.group(1), re.S)]
 
 
 # --- 🚨 R-634: the UNIT, not the column name --------------------------------------------------
@@ -99,8 +138,11 @@ def test_the_rendered_distance_is_in_MILES(travel):
     ⚠️ The fixture's two columns disagree — 8,463.6 against 5,259.0 — so only one of them can
     produce this string.
     """
-    body, _ = travel([_side()])
-    assert "5,259.0 mi" in body, f"the distance is not the miles figure: {body}"
+    body, seen = travel([_side()])
+    # ⚠️ **NO DECIMAL SINCE v17 — Marc: *"Don't need a decimal point on the distance."***
+    # 📊 The published figure is unchanged at 5,259.0; **rounding for DISPLAY is rendering,
+    # and nothing here recomputes or converts** (§4.2.1).
+    assert "5,259 mi" in _cells(seen), f"the distance is not the miles figure: {_cells(seen)}"
     assert "8,463.6" not in body, "the kilometre figure reached the page"
     assert " km" not in body, f"the panel still names kilometres: {body}"
 
@@ -158,19 +200,20 @@ def test_a_HOME_side_is_zero_and_NOT_an_em_dash(travel):
     cares about is that it is emphatically not the em dash a null produces. Saying what the
     zero MEANS is better copy than printing it; confusing it with absence is the failure.
     """
-    body, _ = travel([HOME_SIDE])
-    assert "home venue" in body, f"a home side did not render its zero: {body}"
-    assert "—" not in body, f"a home side rendered as absent: {body}"
+    _body, seen = travel([HOME_SIDE])
+    cells = _cells(seen)
+    assert "home venue" in cells, f"a home side did not render its zero: {cells}"
+    assert "\u2014" not in cells, f"a home side rendered as absent: {cells}"
 
 
 def test_a_NULL_distance_is_an_em_dash_and_not_a_zero(travel):
     """The other half, and the common one: 76.6% of upcoming games have neither side's
     distance. An absent measurement must never read as "they travelled nowhere"."""
-    body, _ = travel([_side(travel_miles=None, elevation_change_ft=None)])
-    assert "—" in body, f"a null distance did not render as absent: {body}"
-    assert "home venue" not in body, "a null distance was rendered as a home game"
-    assert "mi" not in body.split("Arizona State")[-1].split("·")[1], \
-        f"a null distance invented a number: {body}"
+    _body, seen = travel([_side(travel_miles=None, elevation_change_ft=None)])
+    cells = _cells(seen)
+    assert "\u2014" in cells, f"a null distance did not render as absent: {cells}"
+    assert "home venue" not in cells, "a null distance was rendered as a home game"
+    assert not any("mi" in c for c in cells), f"a null distance invented a number: {cells}"
 
 
 def test_zero_and_null_never_render_the_same_string(travel):
@@ -185,10 +228,10 @@ def test_zero_and_null_never_render_the_same_string(travel):
     ⚠️ That is the sixth time on this page's tests that a fixture could not distinguish what it
     claimed to test. Same team, same everything, one field apart.
     """
-    zero, _ = travel([_side(travel_miles=0.0)])
-    null, _ = travel([_side(travel_miles=None)])
-    assert zero != null, "zero and null rendered identically (AC-G.32)"
-    assert "home venue" in zero and "home venue" not in null
+    _z, zero = travel([_side(travel_miles=0.0)])
+    _n, null = travel([_side(travel_miles=None)])
+    assert _cells(zero) != _cells(null), "zero and null rendered identically (AC-G.32)"
+    assert "home venue" in _cells(zero) and "home venue" not in _cells(null)
 
 
 # --- the panel must not have grown -------------------------------------------------------------
@@ -201,16 +244,123 @@ def test_the_panel_still_emits_ONE_line_per_side(travel):
     B085 left. A panel that grew back would pass every unit assertion above.
     """
     _body, seen = travel([_side(), HOME_SIDE])
-    # The panel's own per-side wrapper. Counting THAT rather than "how many strings were
-    # captured" is what makes this a statement about the panel's shape instead of about the
-    # harness's bookkeeping.
-    lines = [t for t in seen["raw"] if "padding:.1rem 0" in str(t)]
-    assert len(lines) == 2, (
-        f"the travel panel emits {len(lines)} side lines for two sides, not 2 — it has grown "
-        f"back from the one-line-per-side shape B085 left")
+    # ⚠️ **ONE ROW PER SIDE SINCE v17, WHICH IS THE SAME CLAIM IN THE NEW SHAPE.** R-600's
+    # rule was *one line per side, not a heading and three tiles*; the table keeps it — one
+    # header row and two data rows, which is shorter than the two prose lines it replaced
+    # because those wrapped at 1024.
+    assert _rows(seen) == 2, (
+        f"the travel panel draws {_rows(seen)} rows for two sides, not 2 — it has grown back "
+        f"from the one-per-side shape B085 left")
 
 
 def test_both_sides_are_rendered_and_named(travel):
-    body, _ = travel([_side(), HOME_SIDE])
-    assert "Arizona State" in body and "Towson" in body
-    assert "5,259.0 mi" in body and "home venue" in body
+    _body, seen = travel([_side(), HOME_SIDE])
+    cells = _cells(seen)
+    assert "Arizona State" in cells and "Towson" in cells
+    assert "5,259 mi" in cells and "home venue" in cells
+
+
+# --- 🚨 v17 (cfdb-wta-R-2912): labelled, aligned, and the elevation says what it is ----------
+
+def test_EVERY_MEASURE_HAS_A_HEADING_that_names_it(travel):
+    """> **MARC, v17:** *"Can you make it more tabular with headings and so that the data
+    > points are labeled and aligned."*
+
+    🚨 **THE LINE THIS REPLACED WAS POSITIONAL.** It read `Towson  Home · home venue · 7d rest
+    · +0 ft`, so every figure depended on the reader knowing the order they came in — and the
+    one he could not decode was the last. **A heading per measure is the whole fix.**
+
+    ⚠️ **THE PAIRS ARE PINNED, NOT THE COUNT** (B149's R-744): swapping the field under a
+    heading keeps five columns and would come back green against a count.
+    """
+    _body, seen = travel([_side()])
+    assert _headings(seen) == ["Team", "Side", "Traveled", "Elevation change", "Rest, days"], (
+        f"the travel table's headings moved: {_headings(seen)}")
+    cols = _matchup()._travel_columns()
+    assert [(c.label, c.field) for c in cols] == [
+        ("Team", "team"), ("Side", "is_home"), ("Traveled", "travel_miles"),
+        ("Elevation change", "elevation_change_ft"), ("Rest, days", "rest_days"),
+    ], "a heading and the field under it no longer agree"
+
+
+def test_THE_ELEVATION_SAYS_WHAT_IT_IS_A_CHANGE_FROM(travel):
+    """> **MARC, v17:** *"Without the header, not sure end-users understand the elevation
+    > difference listed in ft."*
+
+    🚨 **A HEADING ALONE DOES NOT ANSWER HIM AND NEITHER DOES A HOVER.** *Elevation change*
+    says it is a change; it does not say **from what**, and a `title` is invisible to a reader
+    who does not know there is anything to hover. ✅ **So the sentence is in the caption, where
+    it is read without being sought** — and the sign is the fact it explains: negative means
+    they came down.
+    """
+    body, seen = travel([_side()])
+    caption = re.search(r"<caption[^>]*>(.*?)</caption>", seen["html"], re.S)
+    assert caption, f"the travel table draws no caption: {seen['html'][:300]}"
+    text = re.sub("<[^>]+>", "", caption.group(1))
+    assert "home elevation" in text and "game venue" in text, (
+        f"the caption no longer says what the elevation is a change FROM: {text!r}")
+    assert "negative" in text.lower() or "came down" in text.lower(), (
+        f"the caption no longer says which way the sign runs: {text!r}")
+    assert "-1,027 ft" in _cells(seen), f"the signed figure left the cell: {_cells(seen)}"
+    assert "1,027 ft" in body and "+1,027" not in body, "the descent lost its sign"
+
+
+def test_THE_DISTANCE_CARRIES_NO_DECIMAL_POINT(travel):
+    """> **MARC, v17:** *"Don't need a decimal point on the distance."*
+
+    ⚠️ **ROUNDING FOR DISPLAY IS RENDERING; CONVERTING OR DERIVING IS NOT** (§4.2.1). A097
+    published `travel_miles` rounded from the same unrounded measurement as its metric twin,
+    and this reads that column and prints fewer of its digits — **nothing is recomputed.**
+    """
+    _body, seen = travel([_side(), HOME_SIDE])
+    distances = [c for c in _cells(seen) if "mi" in c]
+    assert distances == ["5,259 mi"], f"the distance cells are {distances}"
+    assert not any("." in c for c in distances), (
+        f"a distance still carries a decimal point: {distances}")
+
+
+def test_THE_TABLE_READS_AWAY_THEN_HOME_like_every_other_section(travel):
+    """⚠️ **THE `order by` FLIPPED IN v17 AND THAT IS THE WHOLE CHANGE** — `is_home asc`
+    rather than `desc`. B148 made the two sides symmetric away-then-home, and PART 1 and
+    PART 2 of this round both stack and sit in that order; this panel was the last one
+    reading home-first. **Same columns, same row count, no second read.**
+    """
+    _body, seen = travel([_side(), HOME_SIDE])
+    assert "order by is_home asc" in seen["sql"], (
+        f"the travel query no longer orders away first: {seen['sql']}")
+
+
+def test_AN_ABSENT_FIGURE_IS_NAMED_rather_than_left_as_a_bare_dash(travel):
+    """🚨 **THE EMPTY TABLE IS THE COMMON CASE — 1,218 of 1,590 upcoming 2026 games have
+    NEITHER side's distance (76.6%).** So a table of unexplained em dashes is what three
+    readers in four would see, and it would be worse than the prose it replaced.
+
+    ⚠️ **AC-G.11: the note says WHICH absence it is**, and keeps it apart from the zero that
+    is a measurement.
+    """
+    _body, seen = travel([_side(travel_miles=None, elevation_change_ft=None),
+                          _side(team="Towson", travel_miles=None,
+                                elevation_change_ft=None)])
+    assert _cells(seen).count("—") == 4, (
+        f"two sides with no distance and no elevation drew "
+        f"{_cells(seen).count(chr(8212))} em dashes, not 4: {_cells(seen)}")
+    note = " ".join(str(t) for t in seen["raw"])
+    assert "no coordinates" in note, (
+        "nothing on the panel says what an em dash means, and it is the state most readers "
+        "will see")
+    assert "home venue" in note, (
+        "the note no longer separates the absence from the measured zero (R-634)")
+
+
+def test_THE_NOTE_IS_NOT_DRAWN_WHEN_THERE_IS_NO_DASH_TO_EXPLAIN(travel):
+    """⚠️ **A NOTE ABOUT A SYMBOL THAT IS NOT ON SCREEN IS PROSE DESCRIBING NOTHING**, which is
+    §3.2.3's defect wearing a caption. 📊 **Satisfiable, not a fiction (R-762): 287 of 1,590
+    upcoming 2026 games carry both sides' distance**, and the round's own crops are of one.
+    """
+    _body, both = travel([_side(), HOME_SIDE])
+    assert "\u2014" not in _cells(both), f"this fixture has no absence to test: {_cells(both)}"
+    assert "no coordinates" not in " ".join(str(t) for t in both["raw"]), (
+        "the panel explains an em dash on a game that draws none")
+    _b2, missing = travel([_side(travel_miles=None)])
+    assert "no coordinates" in " ".join(str(t) for t in missing["raw"]), (
+        "the note vanished on a game that DOES draw an em dash, which is the 76.6% case")

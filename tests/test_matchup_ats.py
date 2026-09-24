@@ -109,6 +109,7 @@ def panel():
         seen = {}
 
         def run(rows, game=None, team=None):
+            """`team` is kept ONLY so a test can prove the parameter changes nothing."""
             captured.clear()
             seen.clear()
             seen["queries"] = []
@@ -250,7 +251,7 @@ def test_THE_CAPTION_STATES_ITS_DENOMINATOR_and_names_the_season(panel):
                 _calendar_row(AWAY, 2, spread_final=None, covered_final=None,
                               ats_margin_final=None),
                 _calendar_row(AWAY, 3)],
-               team="oklahoma-state")
+               )
     assert "3 of 3" not in html, "the caption counts a game with no line as though it had one"
     assert "2 of 3 games before this one carried a published line" in html, (
         f"the caption does not state both the numerator and its denominator: {html[-800:]}")
@@ -267,7 +268,7 @@ def test_THE_CAPTION_DOES_NOT_NAME_THE_RELATION_because_the_section_header_alrea
     convention** — this round dropped it from B149's caption and never wrote it into this one.
     """
     run, _seen, matchup = panel
-    html = run([_calendar_row(AWAY, w) for w in (1, 2)], team="oklahoma-state")
+    html = run([_calendar_row(AWAY, w) for w in (1, 2)])
     # 🚨 **SCOPED TO THE `<caption>`, AND THE FIRST VERSION WAS NOT — IT SEARCHED THE WHOLE
     # PANEL AND WENT RED ON `states.section`'s OWN DATA DICTIONARY LINK**,
     # `?table=srv_game_team`, which is the mechanism this test exists to keep. ⚠️ **An
@@ -303,7 +304,7 @@ def test_THE_SPREAD_SIGN_IS_THE_MARKETS_and_is_not_flipped(panel):
     """
     run, _seen, _m = panel
     html = run([_calendar_row(AWAY, 1, spread_final=-52.0, ats_margin_final=14.0)],
-               team="oklahoma-state")
+               )
     assert "-52" in html or "−52" in html, (
         f"the laid spread does not draw as a negative number: {html[-800:]}")
     assert ">+52" not in html, "the spread's sign was flipped, so a favorite reads as a dog"
@@ -324,22 +325,69 @@ def test_THE_SECTION_SITS_AFTER_THE_SEASON_TABLE_and_before_travel_and_rest():
         f"the before-the-game section order moved: {before}")
 
 
-def test_THE_TOGGLE_IS_THE_SEASON_TABLES_OWN_so_both_tables_follow_one_choice(panel):
-    """⚠️ **ONE `?team=` PARAMETER, TWO SECTIONS.** A second parameter would let a reader put
-    the two tables on different teams, which is two decisions for one question — and `team` was
-    already in `params.KNOWN`, so this needed **no `site/lib/` edit** (session A's, §3.2.2).
+def test_THERE_IS_NO_TOGGLE_and_both_teams_are_drawn_away_first(panel):
+    """🚨 **v17 (cfdb-wta-R-2911).** Marc: *"Remove the tab and put them side by side (Away on
+    the left, Home on the right)."*
+
+    ⚠️ **ASSERTED ON THE RENDERED PANEL, NOT BY GREPPING FOR THE ABSENT STRING** — *a
+    substring is not a rule* (R-2260), and "the source no longer says `cfdb-tabbar`" would
+    also pass on a panel that drew nothing at all. **This asserts what IS there**: two teams,
+    away before home, in one render.
     """
-    run, _seen, matchup = panel
-    code = _code_of("_ats_so_far")
-    assert "st.tabs(" not in code, "the toggle uses st.tabs, which R-283 forbids on this page"
-    assert "link_here(team=" in code, (
-        "the toggle does not carry its choice in the URL, so a link resets it")
-    from lib import params
-    assert "team" in params.KNOWN, "`team` left params.KNOWN, so the toggle's links are stripped"
+    run, _seen, _m = panel
     rows = [_calendar_row(AWAY, 1, opponent_team_display="Away Opponent"),
             _calendar_row(HOME, 1, opponent_team_display="Home Opponent")]
-    assert "Away Opponent" in run(rows, team="oklahoma-state"), "the away choice is not honoured"
-    assert "Home Opponent" in run(rows, team="baylor"), "the home choice is not honoured"
+    html = run(rows)
+    assert "cfdb-tabbar" not in html, "the section still draws a tab bar"
+    assert "Away Opponent" in html and "Home Opponent" in html, (
+        "both teams are not drawn in one render, which is the whole of Marc's ask")
+    assert html.index("Oklahoma State") < html.index("Baylor"), (
+        "home is drawn before away; Marc asked for away on the left")
+
+
+def test_THE_URL_PARAMETER_NO_LONGER_CHANGES_WHAT_IS_DRAWN(panel):
+    """🚨 **THE TOGGLE IS GONE, SO `?team=` MUST BE INERT HERE — AND INERT IS A CLAIM.**
+
+    ⚠️ **B152 SHARED ONE `?team=` BETWEEN THIS PANEL AND THE SEASON TABLE.** A round that
+    deleted the tab bar and left the filter behind would render one team and look, from the
+    source, exactly like a round that had done this properly.
+
+    ✅ **`params.get("team")` IS NOT ORPHANED BY THE DELETION** — `site/views/team.py` reads
+    it as the Team page's own slug — **and `params.KNOWN` is session A's file, untouched.**
+    """
+    run, _seen, _m = panel
+    rows = [_calendar_row(AWAY, 1, opponent_team_display="Away Opponent"),
+            _calendar_row(HOME, 1, opponent_team_display="Home Opponent")]
+    neutral = run(rows)
+    for slug in ("baylor", "oklahoma-state", "not-a-team"):
+        assert run(rows, team=slug) == neutral, (
+            f"?team={slug} changed what the section drew, so a filter survived the toggle")
+
+
+def test_THE_PAIR_IS_A_WRAPPING_ROW_OF_TWO_FIXED_WIDTH_COLUMNS():
+    """📊 **THE BREAKPOINT IS THE TABLE'S OWN WIDTH, AND THIS PINS THE MECHANISM THAT MAKES
+    IT ONE.** The table draws 453px; a pair needs 453 + gap + 453. **Two fixed-width children
+    in a wrapping flex row wrap when the container cannot hold both** — so the stack point
+    follows the measurement instead of a viewport number, and the sidebar moving the content
+    box by ~460px cannot desynchronise it.
+
+    ⚠️ **WHAT THIS TEST CANNOT DO IS PROVE THE WRAP HAPPENS.** Flex layout is the browser's;
+    the round measured it at 1600 / 1440 / 1300 / 1024 and published the numbers. **This
+    asserts only that the three things the wrap depends on are still passed.**
+    """
+    code = _code_of("_ats_so_far")
+    assert "horizontal=True" in code and "wrap=True" in code, (
+        "the pair is no longer a wrapping horizontal container, so it cannot stack")
+    assert "width=_ATS_PAIR" in code, (
+        "the columns no longer carry a fixed width, so there is nothing for the wrap to "
+        "measure against and the two tables will shrink instead of stacking")
+    assert _matchup()._ATS_PAIR_WIDTH == 453, (
+        "the pair width no longer matches the table's measured drawn width; if the table "
+        "moved, re-measure it in a browser and move this with it")
+    assert "st.tabs(" not in code, "the section uses st.tabs, which R-283 forbids on this page"
+    assert "link_here(team=" not in code, (
+        "the toggle is back: a link here is a full page reload, which is the thing v17 "
+        "removed (cfdb-wta-R-2853)")
 
 
 def test_THE_LAYOUT_IS_ALL_PIXELS_and_the_render_call_passes_it():
@@ -374,6 +422,6 @@ def test_A_TEAM_WITH_NO_GAMES_BEFORE_THIS_ONE_SAYS_SO(panel):
     this one* is empty in week 1, and an empty table is not an answer (AC-G.11).
     """
     run, _seen, _m = panel
-    html = run([_calendar_row(HOME, 1)], team="oklahoma-state")
+    html = run([_calendar_row(HOME, 1)])
     assert "first game of the season" in html, (
         f"a team with no prior games draws no named absence: {html[-800:]}")
