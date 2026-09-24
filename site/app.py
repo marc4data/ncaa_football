@@ -96,7 +96,13 @@ page = st.navigation(nav, expanded=True)
 # string. st.navigation hands back the page it routed to, so the name is already in hand.
 #
 # A page with more to say refines this DURING its own run and the later call wins — see
-# views/today.py, and Matchup's team abbreviations.
+# views/today.py, which adds its week.
+#
+# ⚠️ THIS COMMENT USED TO SAY "and Matchup's team abbreviations" AND IT WAS NEVER TRUE (A223).
+# A130 built `tab.teams_suffix` for that job and tested it eight ways; `matchup.py` never
+# called it, so the sentence described an intention as though it were the code. **Matchup's
+# suffix is resolved HERE now, from the route** — see `tab.route_suffix` — which is what makes
+# the claim true without reaching into session B's file for a browser title.
 #
 # 🚨 `getattr`, NOT `page.title`, AND CI TAUGHT ME THE DIFFERENCE. tab.set_title swallows its
 # own failure, but an attribute error HERE is outside that guard and outside any page body —
@@ -104,5 +110,9 @@ page = st.navigation(nav, expanded=True)
 # page.run() with a raw traceback on screen. That is the exact failure lib/tab.py rasters.
 # A navigation object that stops carrying `title` must cost the tab its page name and
 # nothing else; tests/test_tab_title.py and ci/site_smoke.py are what notice that it did.
-tab.set_title(getattr(page, "title", None))
+# ⚠️ A223: THE SUFFIX IS RESOLVED FROM THE ROUTE, so Matchup's tab names its game.
+# `lib/tab.py` carries the whole argument, including why the call is here rather than
+# in `matchup.py` (session B's file) and why it can never raise.
+tab.set_title(getattr(page, "title", None),
+              suffix=tab.route_suffix(getattr(page, "url_path", None)))
 page.run()

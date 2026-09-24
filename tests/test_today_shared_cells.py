@@ -2023,12 +2023,20 @@ def test_the_player_cards_team_name_is_stacked_under_the_logo_on_the_element_tha
     # ⚠️ THE INVARIANT IS UNCHANGED AND IT IS WHAT IS ASSERTED: something must claim the full
     # row, or a short abbreviation stays beside the logo and A191's defect is back. Only which
     # element does it has moved.
+    # 🚨 A223: THE BREAK MOVED OFF THE PAINTED BOX. A191's claim is *the abbreviation must not
+    # sit beside the logo*; A221 achieved it by stretching `.cfdb-logo-box`, which carries the
+    # disc's background and border-radius, into a 57.6 x 18 pill. **A zero-height pseudo-element
+    # claims the line now and nothing painted is resized.**
+    breaker = css[css.index(".cfdb-card-team .cfdb-identity::before,"):]
+    breaker = breaker[:breaker.index("}") + 1]
+    assert re.search(r"flex\s*:\s*0\s+0\s+100%", breaker), (
+        f"something must claim the row, or the abbreviation stays beside the logo: {breaker}")
     logo_rule = css[css.index(".cfdb-card-team .cfdb-logo-box,"):]
     logo_rule = logo_rule[:logo_rule.index("}") + 1]
-    assert re.search(r"flex\s*:\s*0\s+0\s+100%", logo_rule), (
-        f"the logo must claim a full row, or the abbreviation stays beside it: {logo_rule}")
+    assert not re.search(r"flex\s*:\s*0\s+0\s+100%", logo_rule), (
+        f"the painted disc must not be the thing that claims the row: {logo_rule}")
     assert ".cfdb-monogram-empty" in logo_rule, (
-        "a team with no logo renders a different class and must claim the row too (AC-G.28)")
+        "a team with no logo renders a different class and must be ordered too (AC-G.28)")
 
     name_rule = css[css.index(".cfdb-card-team .cfdb-team {"):]
     name_rule = name_rule[:name_rule.index("}") + 1]

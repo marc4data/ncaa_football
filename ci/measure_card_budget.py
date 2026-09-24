@@ -135,8 +135,23 @@ MEASURE = r"""() => {
         const logo = team.querySelector('.cfdb-logo-box, .cfdb-monogram-empty');
         const badge = team.querySelector('.cfdb-rank');
         const abbr = team.querySelector('.cfdb-team');
+        // 🚨 A223 (cfdb-main-R-2626). THE PAINTED BOX, NOT THE BLOCK.
+        // A221 measured the team BLOCK at 57.59 x 33.19 and called it correct. The block WAS
+        // correct; the disc inside it was a 57.6 x 18 grey pill, because `flex-basis:100%`
+        // landed on `.cfdb-logo-box` — which carries `border-radius:50%` and a background.
+        // **A square box is the test.**
+        const painted = logo ? logo.getBoundingClientRect() : null;
+        const img = team.querySelector('.cfdb-logo');
+        const imgBox = img ? img.getBoundingClientRect() : null;
         teamBlocks.push({
           ranked: !!badge,
+          logoClass: logo ? logo.className : null,
+          paintedW: painted ? px(painted.width) : null,
+          paintedH: painted ? px(painted.height) : null,
+          square: painted ? Math.abs(painted.width - painted.height) < 1.5 : null,
+          imgW: imgBox ? px(imgBox.width) : null,
+          imgH: imgBox ? px(imgBox.height) : null,
+          radius: logo ? getComputedStyle(logo).borderTopLeftRadius : null,
           h: w(team) === null ? null : px(rect(team).height),
           width: w(team),
           rankWithLogo: !!(badge && logo && overlapsVertically(rect(badge), rect(logo))),
@@ -174,6 +189,10 @@ MEASURE = r"""() => {
             cardHeight: cardHeights.length
               ? {min: Math.min(...cardHeights), max: Math.max(...cardHeights)} : null,
             teamRanked: teamBlocks.filter(t => t.ranked),
+            teamAllSquare: teamBlocks.filter(t => t.square).length,
+            teamAllCount: teamBlocks.length,
+            monogramCount: teamBlocks.filter(
+              t => (t.logoClass || '').indexOf('monogram') >= 0).length,
             teamUnranked: teamBlocks.filter(t => !t.ranked).slice(0, 3)};
   });
   return out;
@@ -241,6 +260,16 @@ def summarise(rows: list) -> str:
                            f"min/max {s['ratio']}  distinct {s['distinct']} "
                            f"{s['values']}  (n={s['n']})")
             rk = b["teamRanked"]
+            boxes = [(t["logoClass"], t["paintedW"], t["paintedH"], t["square"])
+                     for t in b["teamRanked"]]
+            out.append(f"    🚨 PAINTED LOGO BOX (ranked sample): {boxes[:2]}")
+            sq = [t for t in b["teamRanked"] if t["square"]]
+            out.append(f"       square on {len(sq)} of {len(b['teamRanked'])} ranked · "
+                       f"{b['teamAllSquare']} of {b['teamAllCount']} ALL CARDS · "
+                       f"monogram branch {b['monogramCount']}")
+            ub = [(t["logoClass"], t["paintedW"], t["paintedH"], t["square"])
+                  for t in b["teamUnranked"]]
+            out.append(f"    🚨 PAINTED LOGO BOX (unranked sample): {ub}")
             out.append(f"    TEAM BLOCK: {len(rk)} ranked · "
                        f"rank on the logo's line {sum(1 for t in rk if t['rankWithLogo'])} · "
                        f"on the abbreviation's line "
