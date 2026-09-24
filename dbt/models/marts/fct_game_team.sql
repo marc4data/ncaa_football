@@ -14,7 +14,8 @@
 with team_games as (
 
     select
-        game_sk, game_id, season, week, season_type, week_sk, game_date, kickoff_time_known,
+        game_sk, game_id, season, week, season_type, week_sk, game_date,
+        start_date, kickoff_time_known,
         is_completed, is_conference_game, is_neutral_site, venue, attendance,
         home_team_sk as team_sk, home_team_id as team_id, home_team as team,
         home_classification as classification,
@@ -27,7 +28,8 @@ with team_games as (
     union all
 
     select
-        game_sk, game_id, season, week, season_type, week_sk, game_date, kickoff_time_known,
+        game_sk, game_id, season, week, season_type, week_sk, game_date,
+        start_date, kickoff_time_known,
         is_completed, is_conference_game, is_neutral_site, venue, attendance,
         away_team_sk, away_team_id, away_team, away_classification,
         home_team_sk, home_team_id, home_team, home_classification,
@@ -88,6 +90,23 @@ select
     g.season_type,
     g.week_sk,
     g.game_date,
+    -- ══ A224 (cfdb-main-R-3012): THE KICKOFF, SO A LEAKAGE BOUND CAN BE EXACT ════════════
+    --
+    -- 🚨 WITHOUT IT A "BEFORE THIS GAME" BOUND IS `game_date <`, WHICH IS NEARLY EXACT AND
+    -- NOT EXACT. B152 measured the gap: **120 team-games of 225,350 (0.053%) share a date
+    -- with another game of the same team**, and exactly one such pair since 2024 — so the
+    -- bound is wrong for a handful of rows and silently right for the rest, which is the
+    -- shape that survives review.
+    --
+    -- ✅ `fct_game` ALREADY CARRIES IT, checked against the WAREHOUSE rather than the model
+    -- file (§2.2.1c.2): `marts.fct_game.start_date` is `timestamp with time zone`. This is
+    -- that column carried down to game x team grain, not a new fact.
+    --
+    -- ⚠️ AND IT IS ONLY A KICKOFF WHERE `kickoff_time_known` SAYS SO. Where CFBD publishes
+    -- no time this is midnight on the game's date — a DATE wearing a timestamp. A consumer
+    -- ordering by it gets the calendar answer rather than a wrong one, and the companion
+    -- column already beside it is how a reader tells the two apart.
+    g.start_date,
     g.kickoff_time_known,
     g.is_home,
     g.is_neutral_site,

@@ -120,6 +120,24 @@ select
     -- renders the ROW and suppresses the BAR: a possession that is missing from a game's
     -- sequence is a worse lie than a bar that admits it does not know where it ended.
     d.is_end_on_field,
+
+    -- ══ A224 (cfdb-main-R-3010): WHERE THE OFFENSE STOPPED, WHICH IS NOT WHERE THE BALL
+    --    NEXT WAS ═══════════════════════════════════════════════════════════════════════
+    --
+    -- 🚨 `end_yards_from_own_goal` ABOVE IS THE POSSESSION-CHANGE SPOT — the ensuing kickoff
+    -- after a score, the punt's destination, the return's end. 📊 On 2026 punts it agrees
+    -- with the offense's own end on **0.9%** of drives (37 of 4,052). B151 specified this
+    -- pair so the drive bar can draw the field the offense actually reached; B150 hit the
+    -- same wall and had to suppress a mark on 83.9% of 2026 made field goals.
+    --
+    -- ⚠️ TWO SPELLINGS OF ONE NUMBER, from one unrounded source, exactly as `start_yardline`
+    -- and `start_yards_from_own_goal` already are (R-306) — so the two bands of the chart
+    -- cannot disagree about a measure they both read.
+    d.offense_end_yards_from_own_goal,
+    d.offense_end_yardline,
+    -- 📊 False on 590 of 87,897 drives (0.67%), and they are NOT the 118 `is_end_on_field`
+    -- names — only 38 rows are in both. Its own flag, because it is its own set of rows.
+    d.is_offense_end_on_field,
     -- Carried, not collapsed. Staging kept both measurements deliberately and the invariant
     -- between them is what proves the coordinate above is the right one.
     d.start_yardline,
@@ -157,6 +175,21 @@ select
     d.start_defense_score,
     d.end_offense_score,
     d.end_defense_score,
+
+    -- ══ A224 (cfdb-main-R-3011): THE POINTS THIS DRIVE PUT ON THE BOARD ══════════════════
+    --
+    -- ✅ PUBLISHED SO `matchup.py` CAN DELETE ITS COPY. That file computes this today and its
+    -- own comment calls it *"the one place to delete when it lands"* — it is the single
+    -- §4.2.1 exception on that page.
+    --
+    -- 🚨 READ `is_score_impact_coherent` BEFORE PRINTING THIS. The score snapshots are
+    -- unreliable on a measured 3.54% of drives: B133's render found a PUNT worth +7, a MISSED
+    -- FIELD GOAL worth +13 and a TOUCHDOWN worth 0, all from published columns.
+    -- ⚠️ THE VALUE IS STILL PUBLISHED ON THOSE ROWS rather than nulled, because a null here
+    -- already means *the snapshots are missing* and making it also mean *the snapshots
+    -- disagree* is an absence that does not say which absence it is (AC-G.11).
+    d.score_impact,
+    d.is_score_impact_coherent,
 
     s.drives_min_season,
     s.drives_max_season,
