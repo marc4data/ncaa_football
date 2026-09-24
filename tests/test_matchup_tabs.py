@@ -62,7 +62,10 @@ SOURCE = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py")
 # *"Replace Game Leaders section by adding player cards"* — and the cards absorbed the last
 # two figures it alone carried: receiving arrived in B107, the defence in B110's own
 # `_CARD_GROUPS`. **The list's whole purpose is that such a change is visible here.**
-ALL_PANELS = ("_market_and_model", "_series", "_yardage",
+# ⚠️ `_season_so_far` JOINED THE BEFORE TAB IN v15 (cfdb-wta-R-2701) — Marc asked for it
+# "between Offense vs Defense and Travel and Rest". **This inventory is the guard that made
+# the round declare it**: the split test failed the moment the panel existed and was not here.
+ALL_PANELS = ("_market_and_model", "_series", "_yardage", "_season_so_far",
               "_travel", "_post_game", "_drives")
 
 

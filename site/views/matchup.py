@@ -67,6 +67,7 @@ from lib.table import Col
 COLUMNS = """
     game_id, season, season_type, week, start_date, game_date, venue_display, attendance,
     home_team_id, away_team_id,
+    home_team_slug, away_team_slug,
     is_completed, is_conference_game, is_neutral_site,
     home_team, home_abbreviation, home_conference, home_logo_url, home_color_on_light,
     home_color_on_dark, home_points, home_wins, home_losses,
@@ -141,7 +142,7 @@ TABS = (
     # ⚠️ `_market` AND `_line_movement` ARE ONE PANEL NOW (R-519). Marc: "Taking up WAY too
     # much space. Develop a card that we can drop in somewhere to cover both."
     (BEFORE, "Before the game",
-     ("_series", "_market_and_model", "_yardage", "_travel")),
+     ("_series", "_market_and_model", "_yardage", "_season_so_far", "_travel")),
     # ⚠️ ONE PANEL TODAY, AND THAT IS EXPECTED RATHER THAN UNBALANCED. The box score, the
     # advanced block and the player leaders are B076 — specified in
     # claude_work/cfdb_matchup_postgame_spec.md §1, all three on relations that already
@@ -2946,7 +2947,11 @@ _CALENDAR_COLUMNS = """
     points_for, points_against,
     total_yards, rushing_yards, passing_yards,
     total_yards_allowed, rushing_yards_allowed, passing_yards_allowed,
-    game_figures_state
+    game_figures_state,
+    first_downs, turnovers, penalty_yards,
+    offense_ppa, offense_rushing_plays_total_ppa, offense_passing_plays_total_ppa,
+    cumulative_ppa_overall_total, offense_success_rate, offense_explosiveness,
+    has_box_score
 """
 
 
@@ -6056,6 +6061,213 @@ def _post_game(game_id, season) -> None:
             "behind the box score beside them. **\"tied 2\" on a card means that figure is "
             "shared** — the players are level, not first and second.")
         table.as_of_caption(df)
+
+
+# ── 🚨🚨 v15: EACH TEAM'S SEASON SO FAR ─────────────────────────────────────────────────────
+#
+# > **MARC, v15:** *"Between Offense vs Defense and Travel and Rest, add a table for each teams
+# > schedule w/high-level stats for each team. There are going to be enough stats that probably
+# > need to make it a tab that allows end-user to toggle between the teams."*
+#
+# ✅ **HIS ASSUMPTION WAS RIGHT AND THE VIEW HAS A NAME.** *"I'm assuming these are coming from
+# the Scores dataset instead of the Schedule dataset"* — `srv_game_team`, game × team grain, one
+# row per team per game. **Schedule is game grain and could not carry a per-team stat line
+# without fanning out** (cfdb-wta-R-2700).
+#
+# 📊 **ALL FIFTEEN COLUMNS CONFIRMED AGAINST `information_schema` AND THEN AGAINST THE ROWS**
+# (§2.5 — a column that exists is not a column that has data). On completed FBS team-games every
+# one is **100%** populated: 417 of 417 in 2026, 1,742 of 1,742 in 2025.
+#
+# 🚨 **TOUCHDOWNS IS THE SIXTEENTH AND IT IS NOT PUBLISHED.** Searched all 243 columns of
+# `srv_game_team` for `touchdown|_td|td_`: **none**. ⚠️ **AND IT IS NOT DERIVED FROM POINTS
+# HERE.** `points_for` includes field goals, safeties and two-point conversions, so a touchdown
+# count computed from it would be wrong and would look right. **The absence is named on the
+# page instead** (AC-G.11), and adding it is a dbt round of its own.
+_SEASON_TD_NOTE = (
+    "Touchdowns are not in this table because cfdb does not publish a per-game touchdown "
+    "count. It is not derived from points here: points include field goals, safeties and "
+    "two-point conversions, so a figure computed from them would be wrong and would look right."
+)
+
+# ⚠️ **`cumulative_ppa_overall_total` IS READ, NEVER ACCUMULATED.** It is already a published
+# running total; a running sum computed in the page is arithmetic ACROSS ROWS and is the §4.2.1
+# breach this charter exists to prevent. **A test stages exactly that break.**
+# ⚠️ **THE COLUMNS THEMSELVES LIVE ON `_CALENDAR_COLUMNS`**, because this panel reads the
+# calendar rather than opening a second `srv_game_team` query — see `_season_so_far`.
+
+# 📊 **THE MINIMUM IS MEASURED, NOT GUESSED** — see the round's report for the per-column budget.
+# ⚠️ **A208's SHARED `.cfdb-scroll` AFFORDANCE CARRIES IT.** This panel writes no second scroll
+# mechanism; `table.scroll_note` reveals the line at the width the table actually needs.
+_SEASON_TABLE_MIN_PX = 1180
+
+
+def _season_opponent(row) -> str:
+    """`vs Kentucky` / `at Georgia`, from published values joined into a string.
+
+    ✅ §4.2.1's own worked example — *"composing two published values into one string… because
+    joining creates no quantity"*. ⚠️ **`pd.isna`, because `is_home` NaN is truthy** (R-121).
+    """
+    name = fmt.text(row.get("opponent_team_display")) or fmt.EM_DASH
+    home = row.get("is_home")
+    where = "" if home is None or pd.isna(home) else ("vs " if bool(home) else "at ")
+    return f"{where}{name}"
+
+
+def _season_result(row) -> str:
+    """`W 48-10`. **The verb is decided by the two published numbers, never by a stored flag.**
+
+    ⚠️ **AN UNPLAYED GAME IS NOT `0-0`** — it has no score at all and renders an em dash, which
+    is the absence rather than a result (AC-G.32).
+    """
+    fo, ag = row.get("points_for"), row.get("points_against")
+    if fo is None or ag is None or pd.isna(fo) or pd.isna(ag):
+        return fmt.EM_DASH
+    verdict = "W" if float(fo) > float(ag) else ("L" if float(fo) < float(ag) else "T")
+    return f"{verdict} {int(fo)}-{int(ag)}"
+
+
+def _season_table_columns() -> list:
+    """The eighteen columns, in Marc's order, each formatted by the SITE's formatter.
+
+    🚨 **NO LOCAL FORMAT STRING ANYWHERE HERE.** `Col(kind="num")` with no `dp=` lands on
+    `fmt.precision_for`, which already answers correctly for every one of these — 0 for counts
+    and yards, **3 for PPA**, **2 for explosiveness** — so the page inherits the site's rule
+    rather than restating it. **B143 found `:+g` doing the wrong thing in this exact file.**
+
+    ⚠️ **SUCCESS RATE IS THE ONE EXCEPTION AND IT IS MEASURED.** It is published as a PROPORTION
+    — 0.143 to 0.738 across 2026 — and `precision_for` gives it 1 decimal, which would collapse
+    0.43 and 0.44 onto `0.4`. ✅ **`fmt.percent` is the site's one place a proportion becomes a
+    percentage** and §4.2.1 names `×100` as rendering explicitly (cfdb-wta-R-2704).
+    """
+    return [
+        Col("week", "Wk", "plain"),
+        Col("opponent", "Opponent", render=_season_opponent),
+        Col("result", "Result", render=_season_result),
+        Col("first_downs", "1st Dn", "num"),
+        Col("total_yards", "Yards", "num"),
+        Col("rushing_yards", "Rush", "num"),
+        Col("passing_yards", "Pass", "num"),
+        Col("turnovers", "TO", "num"),
+        Col("penalty_yards", "Pen Yds", "num"),
+        Col("offense_ppa", "PPA", "num", title="Predicted points added, per play"),
+        Col("offense_rushing_plays_total_ppa", "Rush PPA", "num"),
+        Col("offense_passing_plays_total_ppa", "Pass PPA", "num"),
+        Col("cumulative_ppa_overall_total", "Cum PPA", "num",
+            title="Published running total — this page reads it, it does not sum it"),
+        Col("offense_success_rate", "Success", "num",
+            render=lambda r: fmt.percent(r.get("offense_success_rate"))),
+        Col("offense_explosiveness", "Expl", "num"),
+        Col("total_yards_allowed", "Yds Allw", "num"),
+        Col("passing_yards_allowed", "Pass Allw", "num"),
+        Col("rushing_yards_allowed", "Rush Allw", "num"),
+    ]
+
+
+def _season_so_far(row) -> None:
+    """Marc's per-team season table, tabbed away-then-home.
+
+    ⚠️ **PLAYED GAMES ONLY, AND THE REST IS NAMED RATHER THAN DRAWN AS ZEROS.** 📊 Measured on
+    2026: of 1,649 FBS team-games, **417 are completed and carry every stat; 1,232 are not
+    played and carry none of them.** A row of em dashes for each of a team's remaining fixtures
+    would be ten rows of nothing between the reader and the three that answer the question —
+    **so the count of the rest goes in the caption** (AC-G.11: the absence is named, not hidden).
+
+    📊 **AND THE EDGES ARE MEASURED, NOT ASSUMED** (cfdb-wta-R-2701):
+    **a bye is simply an ABSENT ROW** — Alabama's 2026 rows run 1,2,3,4,5,6,7,8,10,11,12,13 and
+    week 9 does not exist, so nothing has to special-case it. **A postseason game is a row like
+    any other** — 92 of them carry stats at 100%. **An FCS opponent does not cost the FBS team
+    its own stats**: 103 of 2026's 417 completed FBS team-games were against non-FBS sides and
+    all 417 are fully populated.
+    """
+    st.subheader(fmt.title_case("Each team's season so far"))
+    with states.section("srv_game_team", dataset=DATASETS["srv_game_team"]):
+        home_id, away_id = row.get("home_team_id"), row.get("away_team_id")
+        if pd.isna(home_id) or pd.isna(away_id):
+            states.empty(
+                "Each team's season to date would be here.",
+                "This game's schedule row does not identify both teams, so there is nothing "
+                "to look the two seasons up by.")
+            return
+        # 🚨🚨 IT READS `_game_calendar`, AND THAT IS NOT PLUMBING — IT IS THE LEAKAGE BOUND.
+        #
+        # ⚠️ **THE FIRST VERSION OPENED ITS OWN `srv_game_team` READ WITH NO TIME BOUND, AND ON
+        # THE *BEFORE THE GAME* TAB THAT IS cfdb-wta-R-1000 EXACTLY** — the defect Marc found
+        # on the live site: *"this is the Today / Before the Game. It shouldn't present data
+        # that transpired during the game."* A 2025 matchup would have listed the whole season
+        # including the games that came AFTER it.
+        #
+        # ✅ **`_game_calendar` ALREADY CARRIES `game_date < :before`, ALREADY FETCHES BOTH
+        # TEAMS IN ONE READ, AND ALREADY CARRIED ELEVEN OF THIS TABLE'S EIGHTEEN COLUMNS.**
+        # Seven stat columns joined `_CALENDAR_COLUMNS`; no second query exists. **G-2: one
+        # read, two renderings** — and `test_no_post_game_content_was_stubbed` is the guard
+        # that refused the second read (cfdb-wta-R-2701).
+        calendars = _game_calendar(int(row["season"]), row["season_type"],
+                                   (int(away_id), int(home_id)), row["game_date"])
+        df = pd.concat(calendars.values()) if calendars else pd.DataFrame()
+
+        if df.empty:
+            states.empty(
+                "Each team's season to date would be here.",
+                f"cfdb holds no game-by-game record for either side in "
+                f"{int(row['season'])}.")
+            return
+
+        st.caption(_SEASON_TD_NOTE)
+        # ── 🚨🚨 MARC ASKED FOR A TAB AND `st.tabs` IS BANNED ON THIS PAGE ────────────────
+        #
+        # > **MARC, v15:** *"probably need to make it a tab that allows end-user to toggle
+        # > between the teams"*
+        #
+        # 🚨 **R-283, WITH A TEST: `st.tabs` LOSES THE TAB ON EVERY LINK.** The page's own
+        # Before/After bar is anchors carrying the choice in the URL for exactly that reason,
+        # and `test_no_post_game_content_was_stubbed` refused the `st.tabs` this panel was
+        # first written with. ⚠️ **It also renders BOTH panes and hides one, so two full
+        # eighteen-column tables would be built on every render.**
+        #
+        # ✅ **SO IT IS THE PAGE'S OWN MECHANISM, AND THE PARAMETER ALREADY EXISTS.** `team` is
+        # a published slug and is already in `params.KNOWN` — **no `site/lib/` edit, which is
+        # session A's file** (§3.2.2) — and Matchup reads and writes it nowhere else, so it
+        # carries exactly one meaning here: *whose season am I looking at*.
+        #
+        # ⚠️ **AND IT IS NOT A NESTED TAB BAR.** It reuses `.cfdb-tab` so it looks like the
+        # page's furniture, but the two bars answer different questions at different levels
+        # and only one of them is ever a hierarchy a reader has to hold. **Reported rather
+        # than assumed — see the round's crops** (cfdb-wta-R-2702).
+        sides = [(int(away_id), row.get("away_team"), fmt.text(row.get("away_team_slug"))),
+                 (int(home_id), row.get("home_team"), fmt.text(row.get("home_team_slug")))]
+        wanted = fmt.text(params.get("team"))
+        chosen = next((slug for _i, _n, slug in sides if slug and slug == wanted),
+                      sides[0][2])
+        links = []
+        for _i, name, slug in sides:
+            css = "cfdb-tab" + (" cfdb-tab-on" if slug == chosen else "")
+            links.append(f"<a class='{css}' href='{params.link_here(team=slug)}' "
+                         f"target='_self'>{html.escape(fmt.text(name) or '—')}</a>")
+        st.markdown(f"<div class='cfdb-tabbar'>{''.join(links)}</div>",
+                    unsafe_allow_html=True)
+
+        # ✅ ONE TABLE BUILT, NOT TWO HIDDEN — which is the other half of why `st.tabs` was
+        # the wrong control here.
+        for team_id, name, slug in [side for side in sides if side[2] == chosen]:
+            mine = df[df["team_id"] == team_id]
+            played = mine[mine["has_box_score"].fillna(False).astype(bool)]
+            rest = len(mine) - len(played)
+            if played.empty:
+                states.empty(
+                    f"{fmt.text(name)}'s season to date would be here.",
+                    f"None of this team's {len(mine)} scheduled games has a box score "
+                    f"yet, so there is no per-game figure to show — a zero here would be "
+                    f"a measurement cfdb did not make.")
+                continue
+            caption = (
+                f"{len(played)} game{'' if len(played) == 1 else 's'} played"
+                + (f"; {rest} more scheduled and not yet played, so not shown"
+                   if rest else "")
+                + f". Source: srv_game_team, {int(row['season'])}.")
+            st.markdown(table.scroll_note(_SEASON_TABLE_MIN_PX),
+                        unsafe_allow_html=True)
+            table.render(played, _season_table_columns(), caption=caption,
+                         scroll=True, sortable=False)
 
 
 def _travel(game_id) -> None:
