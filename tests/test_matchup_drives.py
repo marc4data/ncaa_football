@@ -3944,3 +3944,114 @@ def test_THE_TABLES_GLYPH_AND_THE_FIELDS_BAR_ANSWER_WITH_ONE_VOCABULARY(panel):
     for tip in tips:
         assert tip["field"] in columns, (
             f"the tooltip names {tip['field']!r}, which the frame does not carry")
+
+
+# ── 🚨 v16: THE BAR NAMES BOTH ITS ENDS, BECAUSE IT CANNOT SPLIT ITSELF ──────────────────
+
+def test_THE_HOVER_NAMES_WHERE_THE_BAR_ENDS_beside_what_the_offence_gained(panel):
+    """> **MARC, v16:** *"I think we are misrepresenting Punts on the graph. The kick should
+    > have a different line style… b/c it's not yards earned by the offense."*
+
+    🚨 **HE IS RIGHT AND THE PAGE CANNOT DRAW THE BOUNDARY.** 📊 `srv_drive` publishes 61
+    columns, confirmed against `information_schema`, and **none of them is where the offence's
+    own gain ended** — no gain-end, no punt distance, no return. `start_yardline + yards` is
+    arithmetic between two published columns, which §4.2.1 forbids and which this file has
+    already declined once for this exact purpose (cfdb-wta-R-2900/R-2901).
+
+    ✅ **SO IT NAMES BOTH ENDS INSTEAD OF GUESSING THE MIDDLE.** The hover carries where the
+    drive started, what the offence gained, and where the bar finishes — **three published
+    facts, rendered, and the reader can see the last two disagree.**
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", key="punt", color="#101010")])
+    spec = _spec(panel(frame)[1])
+    bar = _only([n for n in _layers(spec, _FIELD)
+                 if _mark_of(n) == "rule" and "x2" in (n.get("encoding") or {})],
+                "the field's bar layer")
+    tips = (bar.get("encoding") or {}).get("tooltip") or []
+    titles = [t.get("title") for t in tips]
+    assert "Bar ends at" in titles, (
+        f"the hover does not name where the bar ends: {titles}")
+    assert "Yards gained" in titles, (
+        "the hover stopped naming the offence's own gain, which is the number the bar's end "
+        "has to be read against")
+    # the two must be DIFFERENT fields, or the hover says one thing twice
+    by_title = {t.get("title"): t.get("field") for t in tips}
+    assert by_title["Bar ends at"] != by_title["Started on"], (
+        "the bar's end and its start name the same column, so the hover cannot show a punt "
+        "reaching past where the offence stopped")
+
+
+def test_THE_END_WORDS_READ_THE_END_COLUMN_not_the_start(panel):
+    """🚨 **THE TWIN DEFECT THIS ROUND COULD MOST EASILY HAVE SHIPPED.**
+
+    `_drive_yardline_words` took the column as a parameter rather than growing a second
+    function, and **a default argument is exactly the kind of thing that quietly keeps
+    pointing at the old column** — the new line would render, read plausibly, and be the start
+    of the drive twice.
+
+    ⚠️ **ASSERTED ON A FIXTURE WHOSE TWO ENDS DIFFER**, or the test cannot tell them apart
+    (R-744's class: a fixture whose defaults make the assertion true).
+    """
+    row = {"start_yards_from_own_goal": 25, "end_yards_from_own_goal": 48,
+           "offense_team_display": "Alpha", "opponent_team_display": "Beta"}
+    start = _module_constant("_drive_yardline_words")(row)
+    end = _module_constant("_drive_yardline_words")(row, "end_yards_from_own_goal")
+    assert "25" in start, f"the start words read {start!r}"
+    assert "48" in end, (
+        f"the END words read {end!r} — the column parameter is not reaching `_drive_yardline`, "
+        f"so the hover would print the drive's start twice")
+    assert start != end, "both ends rendered identically on a fixture whose ends differ"
+
+
+def test_THE_BAR_HAS_NO_LINE_STYLE_KEYED_ON_THE_RESULT(panel):
+    """🚨🚨 **THIS PINS A DECISION NOT TO BUILD SOMETHING, AND THE REASON IS MEASURED.**
+
+    Marc asked for the kick to be dashed. ⚠️ **A rule keyed on the drive's RESULT would be
+    false on most of the site**, because whether a punt's bar includes the kick is not a
+    property of the result — **it is a property of the season's feed semantics:**
+
+        a punt's bar includes the kick     2024  3.1%     2025  3.9%     2026  98.8%
+
+    🚨 **So `dash every punt` would be wrong on ~96% of 2024 and 2025 punts**, and the site
+    shows all three seasons (cfdb-wta-R-2901). ✅ **Keying it on the SEASON instead would encode
+    a feed artefact into the page's visual vocabulary**, which is worse.
+
+    ⚠️ **THIS TEST EXISTS SO THE NEXT ROUND CANNOT ADD IT WITHOUT READING WHY IT WAS DECLINED.**
+    When the gain-end column lands, the bar can be split honestly and this test is the thing to
+    delete — deliberately, with its reason read.
+    """
+    frame = pd.DataFrame([
+        _drive(1, "home", "Alpha", "PUNT", category="punt", key="punt", color="#101010"),
+        _drive(2, "away", "Beta", "TD", category="offensive score", key="touchdown",
+               scoring_side="offense", scoring=True, color="#efefef")])
+    spec = _spec(panel(frame)[1])
+    bars = [n for n in _layers(spec, _FIELD)
+            if _mark_of(n) == "rule" and "x2" in (n.get("encoding") or {})]
+    assert bars, "no bar layer drawn, so nothing below is tested (R-2254)"
+    for node in bars:
+        mark = node.get("mark")
+        mark = mark if isinstance(mark, dict) else {"type": mark}
+        assert "strokeDash" not in mark, (
+            f"a bar layer carries a fixed strokeDash ({mark.get('strokeDash')!r}); see this "
+            f"test's docstring for why a result-keyed dash is false on two of three seasons")
+        assert "strokeDash" not in (node.get("encoding") or {}), (
+            "a bar layer encodes strokeDash per row — the page cannot know which part of a "
+            "bar the offence earned, so it must not draw a boundary")
+
+
+def test_THE_CAPTION_NAMES_THE_SEASON_it_is_talking_about():
+    """🚨 §3.2.3 — **a comment is a claim and it ships.**
+
+    ⚠️ **The caption said *"18.1% of drives"*, one number for three seasons that describes
+    none of them.** 📊 Re-measured this round: **9.1% in 2024, 17.9% in 2025, 58.3% in 2026.**
+    A reader looking at a 2026 game and a reader looking at a 2024 game were being told the
+    same thing about two very different pictures (cfdb-wta-R-2900).
+    """
+    note = _module_constant("_DRIVE_GAIN_NOTE")
+    for season in ("2024", "2025", "2026"):
+        assert season in note, f"the caption does not name {season}: {note!r}"
+    assert "18.1%" not in note, (
+        "the caption still carries the all-season average it was corrected away from")
+    assert "punt" in note.lower(), (
+        "the caption names returns but not punts, which is the case Marc actually met")
