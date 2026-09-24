@@ -40,14 +40,47 @@ def today():
     return importlib.import_module("views.today")
 
 
+def _view_names(node, assigned):
+    """The view name(s) a `states.section(...)` first argument can resolve to.
+
+    🚨 A225 WIDENED THIS, AND THE REASON IS A REAL PANEL RATHER THAN A CONVENIENCE. The
+    player boards read `srv_player_stats` with every week selected and `srv_player_game_log`
+    with one week picked — two sources behind one board, because the season view publishes no
+    `week`. `states.section`'s `view` argument is what the Error state AND the dataset caption
+    both render from (R-574), so it has to move with the source or the reader is told the
+    season totals came from the game log.
+
+    ⚠️ THE ALTERNATIVE WAS TO KEEP A LITERAL AND LET THE CAPTION BE WRONG HALF THE TIME. This
+    check exists to make a panel declare what it reads; a panel that reads two things and says
+    so is the case it should cover, not the case it should refuse.
+
+    ⚠️ IT RESOLVES ONE HOP AND NO FURTHER — a Constant, or a Name bound to a conditional over
+    constants. Anything cleverer than that is a view name this file cannot verify, and it is
+    better for the assertion below to fail loudly on it than for the walker to guess.
+    """
+    if isinstance(node, ast.Constant):
+        return [node.value]
+    if isinstance(node, ast.IfExp):
+        return _view_names(node.body, assigned) + _view_names(node.orelse, assigned)
+    if isinstance(node, ast.Name):
+        return assigned.get(node.id, [])
+    return []
+
+
 def _section_views():
     """Every view named in a `states.section(...)` call, in source order."""
+    assigned = {}
+    for node in ast.walk(TREE):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            names = _view_names(node.value, {})
+            if names and all(isinstance(n, str) and n.startswith("srv_") for n in names):
+                assigned.setdefault(node.targets[0].id, []).extend(names)
     out = []
     for node in ast.walk(TREE):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "section" and node.args
-                and isinstance(node.args[0], ast.Constant)):
-            out.append(node.args[0].value)
+                and node.func.attr == "section" and node.args):
+            out.extend(_view_names(node.args[0], assigned))
     return out
 
 
