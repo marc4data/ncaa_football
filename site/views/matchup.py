@@ -6545,8 +6545,16 @@ def _drive_yardline_mark(row) -> str:
     return (_DRIVE_OWN_MARK if side == "own" else _DRIVE_OPPONENT_MARK) + label
 
 
-def _drive_yardline_words(row) -> str:
-    """The same position named in words — `Duke 25`, `Midfield 50` — for the TOOLTIP.
+def _drive_yardline_words(row, column: str = "start_yards_from_own_goal") -> str:
+    """A position named in words — `Duke 25`, `Midfield 50` — for the TOOLTIP.
+
+    🚨 **v16 GAVE IT THE COLUMN AS A PARAMETER RATHER THAN GROWING A TWIN**, because the END of
+    the bar now needs the same sentence and two functions that format one thing are how the two
+    ends come to read differently (§4.3). ⚠️ **The default keeps every existing call site
+    byte-identical**; only the new one passes anything.
+
+    ✅ **BOTH COLUMNS ARE IN THE OFFENCE'S OWN FRAME** — `start_yards_from_own_goal` and
+    `end_yards_from_own_goal` — so the own/opponent question is the same at either end.
 
     🚨 **A VEGA TOOLTIP CANNOT CARRY MARC'S LOGO, AND THAT IS MEASURED RATHER THAN ASSUMED.**
     A tooltip field whose value is `<img src=…>` was hovered in Chromium and read back out of
@@ -6556,7 +6564,7 @@ def _drive_yardline_words(row) -> str:
     ✅ **The team's NAME is the honest substitute there** — it says which side exactly, which is
     the job he gave the logo, and it is what a broadcast caption says out loud.
     """
-    side, label = _drive_yardline(row.get("start_yards_from_own_goal"))
+    side, label = _drive_yardline(row.get(column))
     if side is None:
         return fmt.EM_DASH
     if side == "midfield":
@@ -7403,10 +7411,29 @@ def _drive_impact_cell(impact, running) -> str:
 # arithmetic between two published columns and would be a SECOND §4.2.1 exception in this panel.
 # 📋 **The upstream ask is two columns on `srv_drive`, one round, A's file:** `score_impact`
 # (which deletes the exception above) and a gain-end coordinate (which buys the tick).
+# 🚨🚨 v16: THE NUMBERS IN THIS CAPTION WERE AN ALL-SEASON AVERAGE THAT HID A THREE-WAY SPLIT,
+# AND THE SPLIT IS THE STORY (cfdb-wta-R-2900).
+#
+# > **MARC, v16:** *"I think we are misrepresenting Punts on the graph. The kick should have a
+# > different line style (usually a dashed line) b/c it's not yards earned by the offense."*
+#
+# 📊 **RE-MEASURED THIS ROUND, drives ending on the field, % whose bar reaches past the
+# offence's own gain:**
+#
+#     2024   9.1%      2025  17.9%      2026  58.3%      all three  19.3%
+#
+# ⚠️ **The caption said 18.1% and 32.3%; they are now 19.3% and 31.6%** — but the correction
+# that matters is not the decimal, it is that **one number for three seasons describes none of
+# them.** 🚨 **On punts specifically the bar includes the kick on 3.1% of 2024 drives, 3.9% of
+# 2025 and 98.8% of 2026** — the same 2026 feed change B150 found on field goals.
+#
+# ✅ **SO THE CAPTION NAMES THE SEASON IT IS TALKING ABOUT**, because a reader looking at a 2026
+# game and a reader looking at a 2024 game are being told two different things by one sentence.
 _DRIVE_GAIN_NOTE = (
-    "A drive's bar spans where the ball actually went, so a drive that ended in a return "
-    "reaches past what the offense gained — on 18.1% of drives, and 32.3% of touchdowns. "
-    "The Yrds column is the offense's own gain; the bar is where the ball finished."
+    "A drive's bar spans where the ball actually went, so a drive that ended in a punt or a "
+    "return reaches past what the offense gained. How often depends on the season: 9.1% of "
+    "2024 drives, 17.9% of 2025 and 58.3% of 2026. The Yrds column is always the offense's "
+    "own gain; the bar is where the ball finished, and the hover names both ends."
 )
 
 
@@ -7661,6 +7688,10 @@ def _drive_tooltip() -> list:
             # `_drive_yardline_words`. The team's name does the job instead.
             alt.Tooltip("yardline_words:N", title="Started on"),
             alt.Tooltip("yards:Q", title="Yards gained", format="d"),
+            # 🚨 v16: THE BAR'S END, BESIDE THE OFFENCE'S OWN GAIN — Marc noticed the two
+            # disagree and the page cannot draw the boundary between them, so it names both
+            # and lets the reader see it (cfdb-wta-R-2901).
+            alt.Tooltip("end_yardline_words:N", title="Bar ends at"),
             alt.Tooltip("drive_result:N", title="Result"),
             # ── 🚨 v04 PART 4.1: THE SWING AND THE SCOREBOARD ARE TWO LINES ──────────
             #
@@ -8497,6 +8528,13 @@ def _drive_frame(df: pd.DataFrame, colors: dict) -> pd.DataFrame:
     frame["duration"] = frame.apply(_drive_duration, axis=1)
     frame["yardline_mark"] = frame.apply(_drive_yardline_mark, axis=1)
     frame["yardline_words"] = frame.apply(_drive_yardline_words, axis=1)
+    # 🚨 v16: WHERE THE BAR ENDS, IN THE SAME WORDS AS WHERE IT STARTS (cfdb-wta-R-2901).
+    # ⚠️ **ONE PUBLISHED COLUMN RENDERED, NOT TWO COMPARED** (§4.2.1). The reader gets the
+    # start, the offence's own gain and the bar's end on one hover and can see for themselves
+    # that the last two differ — **which is the honest half of what Marc asked for**, since the
+    # page cannot draw the boundary between them.
+    frame["end_yardline_words"] = frame.apply(
+        _drive_yardline_words, axis=1, column="end_yards_from_own_goal")
     frame["yardline_number"] = [
         _drive_yardline(v)[1] or fmt.EM_DASH
         for v in frame["start_yards_from_own_goal"]]
