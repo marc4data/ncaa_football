@@ -119,6 +119,25 @@ def verdict(payload: str) -> tuple:
     return (RED if reasons else GREEN), reasons
 
 
+def checked_lines(payload: str) -> list:
+    """What a GREEN verdict actually looked at, so the check can show its working.
+
+    🚨 "SILENCE IS NOT SUCCESS" APPLIES TO THIS GATE'S OWN OUTPUT. A green check whose log
+    says only "GREEN" is indistinguishable, to a reader, from a green check that read nothing
+    — and this round exists because a signal nobody looked at was treated as fine. The
+    structural guarantee is in `verdict` (an empty parse is UNDETERMINED, never GREEN); this
+    is the same fact made visible to someone reading the run.
+    """
+    ages, _f, _t, _o = parse_payload(payload)
+    out = []
+    for name in PUBLISH_CADENCES:
+        cadence, budget = CADENCES[name]
+        if name in ages:
+            out.append(f"{name} ({cadence}): last beat {describe(ages[name])} ago, "
+                       f"budget {describe(budget)}")
+    return out
+
+
 def override_reason(commit_messages: str):
     """The trailer's reason, or None. Case-insensitive on the key, never on the reason."""
     for line in commit_messages.splitlines():
@@ -180,8 +199,11 @@ def main(argv=None) -> int:
         print(f"  - {line}")
 
     if state == GREEN:
-        print("::notice::The publish path is green. Read live from the pipeline host, not "
-              "from the dead-man's switch's last scheduled run.")
+        for line in checked_lines(payload):
+            print(f"  ok  {line}")
+        print(f"::notice::The publish path is green — {len(checked_lines(payload))} of "
+              f"{len(PUBLISH_CADENCES)} publish cadences checked, read live from the pipeline "
+              f"host rather than from the dead-man's switch's last scheduled run.")
         return 0
 
     # 🚨 FAIL-CLOSED ON UNDETERMINED, AND THE REASONING IS THE OVERRIDE.

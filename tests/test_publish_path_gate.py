@@ -268,3 +268,20 @@ def test_the_check_name_is_the_one_branch_protection_would_select(ci_workflow):
     cannot ship the enforcement. The name is what Marc selects in that setting, so renaming
     the job silently detaches it from the protection rule."""
     assert ci_workflow["jobs"]["publish-path"]["name"] == "Publish path is green"
+
+
+def test_a_green_verdict_shows_what_it_looked_at(tmp_path):
+    """🚨 "SILENCE IS NOT SUCCESS" APPLIES TO THIS GATE'S OWN OUTPUT.
+
+    A green check whose log says only "GREEN" reads, to a human, exactly like a green check
+    that read nothing — and this round exists because a signal nobody looked at was treated
+    as fine. `verdict` already guarantees an empty parse is UNDETERMINED; this makes the same
+    fact visible to whoever opens the run.
+    """
+    f = tmp_path / "p.txt"
+    f.write_text(FRESH)
+    done = _run("--payload-file", str(f), "--base", "HEAD")
+    assert done.returncode == 0
+    for name in PUBLISH_CADENCES:
+        assert name in done.stdout, f"a green run does not say it checked {name}"
+    assert f"{len(PUBLISH_CADENCES)} of {len(PUBLISH_CADENCES)}" in done.stdout
