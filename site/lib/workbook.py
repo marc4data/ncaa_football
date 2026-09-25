@@ -1351,6 +1351,130 @@ SQL_HOLES = {"ROW_CAP": str(ROW_CAP), "SCORES_GAME_ORDER": SCORES_GAME_ORDER,
 # Why not keep them shipping in the OLD layout: a workbook with one sheet whose header row is
 # computed and six whose header row is 4 is a file that contradicts itself about where its
 # data starts, which is exactly the thing R-181 exists to fix.
+# 📊 THE 32 TEAM STATISTICS, READ FROM LIVE SERVING THIS ROUND (A228, cfdb-main-R-3061):
+#     select distinct stat_base_name from srv_team_stats where stat_scope = 'team'
+#
+# 🚨 ONE LIST, DRIVING BOTH THE PIVOT AND THE COLUMN DECLARATION. The ten Player Stat
+# sheets pass their statistic list TWICE — once to `_pivot_player_stats` and once in
+# `columns` — and `_pivot_player_stats`' own docstring warns about exactly that shape of
+# duplication in the SQL. Here the two are generated from this tuple, so they cannot
+# disagree with each other.
+#
+# ⚠️ WHAT THIS STILL CANNOT DO IS NOTICE A 33rd STATISTIC. If CFBD adds one, the pivot
+# driven by this list silently omits it — the same exposure the player sheets carry.
+# `test_the_declared_team_statistics_match_live_serving` closes it where serving is
+# reachable and skips where it is not, which is honest rather than silent.
+TEAM_STAT_NAMES = (
+    "firstDowns", "fourthDownConversions", "fourthDowns",
+    "fumblesLost", "fumblesRecovered", "games",
+    "interceptions", "interceptionTDs", "interceptionYards",
+    "kickReturns", "kickReturnTDs", "kickReturnYards",
+    "netPassingYards", "passAttempts", "passCompletions",
+    "passesIntercepted", "passingTDs", "penalties",
+    "penaltyYards", "possessionTime", "puntReturns",
+    "puntReturnTDs", "puntReturnYards", "rushingAttempts",
+    "rushingTDs", "rushingYards", "sacks",
+    "tacklesForLoss", "thirdDownConversions", "thirdDowns",
+    "totalYards", "turnovers",
+)
+
+
+def _team_stat_header(name: str) -> str:
+    """`netPassingYards` -> `Net Passing Yards`. A228.
+
+    ✅ PROPER CASE, WHICH MARC RULED ON 2026-09-24: *"I like the Proper Case."* A222 renamed
+    six headers to it and those stand; these 32 are generated to match rather than typed, so
+    a new statistic cannot arrive in a different style.
+
+    ⚠️ `TDs` SURVIVES WITHOUT HELP, AND A STAGED BREAK IS HOW THAT WAS ESTABLISHED. The
+    first version ended `.replace("T Ds", "TDs")`, on the reasoning that a camelCase split
+    would shatter the acronym. **It does not**: the boundary is lower-to-upper only, so
+    `interceptionTDs` splits at `n|T` and never inside `TDs`. 📊 Measured on all five of the
+    TD statistics — `Interception TDs`, `Kick Return TDs`, `Punt Return TDs`, `Passing TDs`,
+    `Rushing TDs` — with the replace removed. **The break came back GREEN, which is how an
+    inert declaration announces itself**, and it is gone rather than left looking load-bearing
+    (§3.2.3, and A222's `overflow-wrap:normal` is the same shape).
+    """
+    import re as _re
+    words = _re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name).split()
+    return " ".join(w if w.isupper() else w[0].upper() + w[1:] for w in words)
+
+
+def _pivoted_rows_in_scope(melted: int, pivoted: int) -> int:
+    """What `rows_in_scope` means on a sheet whose rows were reshaped. A228 (cfdb-main-R-3064).
+
+    🚨 `SheetRead.truncated` IS `rows_in_scope > rows`, AND AFTER A PIVOT THE MELTED COUNT IS
+    ALWAYS GREATER THAN THE PIVOTED ONE. Carrying it through therefore asserted "this sheet
+    was cut off" on every pivoted sheet, for ever, whatever the cap did.
+
+    ✅ THE CAP BIT IF AND ONLY IF THE MELTED READ CAME BACK AT THE CAP. That is the only
+    signal the query gives — `limit {ROW_CAP}` returns exactly ROW_CAP rows when there was
+    more to fetch — so it is what this keys on.
+
+    ⚠️ AND AT THE CAP IT RETURNS THE MELTED COUNT RATHER THAN A GUESS AT THE TRUE TOTAL.
+    `count(*) over ()` is computed before the limit, so the melted figure IS the honest
+    in-scope total; the sheet says "cut" and the number says how much was in scope. Inventing
+    a pivoted-equivalent total would be arithmetic on a number nobody measured.
+    """
+    return melted if melted >= ROW_CAP else pivoted
+
+
+def _pivot_team_stats(df):
+    """Melted `srv_team_stats` -> one row per team, one column per statistic. A228 (R-3061).
+
+    > **MARC, v16:** *"Team Stats needs to pivot Stat or Stat (null) with Value (numeric).
+    > Will need to do some cleansing before doing the pivot."*
+
+    🚨 THE SAME SHAPE AS `_pivot_player_stats`, DELIBERATELY — and A222 recommended a new
+    SERVING VIEW instead, on the argument that *"the ten Player Stat sheets are pivoted per
+    category because A175 did it upstream."* **They are not.** All ten pivot HERE, through
+    `augment=_pivot_player_stats([...])`, against a melted `srv_player_stats` whose sheet SQL
+    selects `stat_type, stat_value`. The precedent is exact and it points the other way.
+
+    📊 THE CLEANSING MARC ANTICIPATED IS NOT NEEDED, RE-MEASURED THIS ROUND on live serving
+    for `stat_scope = 'team'`, which is the only scope this sheet reads:
+
+        2026   4,348 rows   138 teams   32 stat names   0 null names
+        2025   4,352 rows   136 teams   32 stat names   0 null names
+
+    ✅ `(school, stat_base_name)` IS UNIQUE — 4,348 pairs over 4,348 rows — so the pivot
+    collapses nothing and `drop_duplicates` cannot silently take the first of two (A213's
+    `YDS` class). **The key is `school` alone**: no school appears under two classifications.
+
+    ⚠️ `stat_base_name`, NOT `stat_name`, AND IN THIS SCOPE THE CHOICE IS FREE. Measured:
+    32 distinct values each and **zero base names carrying more than one full name** — they
+    are the same strings here (`firstDowns` / `firstDowns`), because the qualifier that
+    separates them lives in the `stat_scope` this sheet filters to one value. The base name is
+    chosen as the shorter and the one Marc named first.
+
+    ⚠️ VALUE ONLY, NOT VALUE AND RANK. Marc said *"pivot Stat … with Value (numeric)"*, and
+    the rank twin would take 32 columns to 64 — a different sheet. **The select still carries
+    `rank_desc`, `rank_asc` and `percentile`, so adding it later is a one-line change**, and
+    the report asks him rather than deciding it.
+    """
+    if df is None or df.empty:
+        return df
+    in_scope = df["rows_in_scope"].iloc[0] if "rows_in_scope" in df.columns else len(df)
+    identity = ["season", "school", "conference", "classification"]
+    keep = [c for c in identity if c in df.columns]
+    out = df[keep].drop_duplicates(subset=["school"]).set_index("school")
+    # ⚠️ THE DECLARED LIST, NOT WHATEVER ARRIVED. `sheet.columns` drives the header row, the
+    # widths, the Excel Table range and every number format, so the writer cannot accept a
+    # column it was not told about — which is why this emits exactly `TEAM_STAT_NAMES`, in
+    # that order, and a statistic missing from a scope becomes an empty column rather than a
+    # missing one. Both come from the same tuple, so they cannot disagree.
+    for stat in TEAM_STAT_NAMES:
+        rows = df[df["stat_base_name"] == stat].drop_duplicates(
+            subset=["school"]).set_index("school")
+        out[stat] = rows["stat_value"]
+    out = out.reset_index()
+    ordered = [c for c in identity if c in out.columns] + [
+        c for c in out.columns if c not in identity]
+    out = out[ordered]
+    out["rows_in_scope"] = _pivoted_rows_in_scope(in_scope, len(out))
+    return out
+
+
 def _pivot_player_stats(stat_types):
     """Melted `srv_player_stats` -> one row per player, two columns per statistic. A175.
 
@@ -1359,8 +1483,23 @@ def _pivot_player_stats(stat_types):
     `max(case when stat_type = ...)` per statistic would put the STATISTIC LIST in the SQL —
     where the sheet's column declaration already is, free to disagree with it.
 
-    ⚠️ `rows_in_scope` IS CARRIED THROUGH. `read_sheet` reads it AFTER `augment` runs, and it
-    is the MELTED count — which is the honest one: it is what the 5,000-row cap applied to.
+    🚨 `rows_in_scope` IS THE PIVOTED COUNT UNLESS THE CAP ACTUALLY BIT — A228 (R-3064), AND
+    THE OLD BEHAVIOUR WAS A FALSE WARNING ON TEN SHEETS.
+
+    This used to carry the MELTED count through, reasoned as *"the honest one: it is what the
+    5,000-row cap applied to."* ⚠️ **That is true about the cap and wrong about `truncated`**,
+    which is `rows_in_scope > rows` — and after a pivot the melted count is ALWAYS greater
+    than the pivoted one, so every pivoted sheet reported itself truncated for ever.
+
+    📊 MEASURED on live serving, 2026, before the fix: all ten Player Stat sheets returned
+    `truncated = True` while the largest of them read 1,011 melted rows against a 5,000 cap.
+    `views/export.py` reads that flag, so the page warned a reader about ten of sixteen sheets
+    that were complete. **A truncation warning that is always on is a truncation warning
+    nobody reads the day one is real.**
+
+    ✅ SO THE RULE IS THE ONE `truncated` ACTUALLY NEEDS: the cap bit if and only if the
+    MELTED read came back at the cap. Below it, nothing was cut and `rows_in_scope` is the
+    pivoted count; at it, the melted count is carried so the sheet still says it was cut.
 
     ⚠️ AND THE RANK FIELDS END IN `_rank`, WHICH IS LOAD-BEARING. R-216 gives a numeric LABEL
     no thousands separator, and `PLAIN_INTEGER_SUFFIXES` matches the SUFFIX `_rank`. A173 was
@@ -1388,7 +1527,7 @@ def _pivot_player_stats(stat_types):
         ordered = [c for c in identity if c in out.columns] + [
             c for c in out.columns if c not in identity]
         out = out[ordered]
-        out["rows_in_scope"] = in_scope
+        out["rows_in_scope"] = _pivoted_rows_in_scope(in_scope, len(out))
         return out
     return pivot
 
@@ -1875,13 +2014,19 @@ _ALL_SHEETS = [
     """, [
         ("season", "Season"), ("school", "Team"), ("conference", "Conference"),
         ("classification", "Division"),
-        ("stat_base_name", "Stat"), ("stat_name", "Stat (full)"),
-        # AC-15.8: `stat_value_raw` is "Value" on stats.py, so IT keeps the site's word and
-        # the numeric twin takes the qualifier. Two columns headed "Value" would also be an
-        # illegal Excel Table (R-182 trap 2).
-        ("stat_value", "Value (numeric)"), ("stat_value_raw", "Value"),
-        ("rank_desc", "Rank high"), ("rank_asc", "Rank low"), ("percentile", "Percentile"),
-    ], freeze_before="Conference",
+        # 🚨 A228 (cfdb-main-R-3061): ONE ROW PER TEAM, ONE COLUMN PER STATISTIC.
+        #
+        # > MARC, v16: *"Team Stats needs to pivot Stat or Stat (null) with Value (numeric)."*
+        #
+        # The melted columns this replaces — `stat_base_name`, `stat_name`, `stat_value`,
+        # `stat_value_raw`, `rank_desc`, `rank_asc`, `percentile` — are still SELECTED, because
+        # the pivot reads `stat_base_name` and `stat_value` and a later round adding the rank
+        # twin needs `rank_desc` already in the frame. They are simply no longer COLUMNS.
+        #
+        # ⚠️ VALUE ONLY, NOT VALUE AND RANK. Marc asked for the value; the twin would take 32
+        # columns to 64, which is a different sheet. The report asks him.
+    ] + [(name, _team_stat_header(name)) for name in TEAM_STAT_NAMES],
+        augment=_pivot_team_stats, freeze_before="Conference",
         note="Season totals, NOT week-scoped — this view is current state, so the Week filter "
              "does not narrow it. THE TEAM'S OWN stats only: the view also carries an "
              "`opponent` scope (what opponents did against them), which is a further 4,216 "
