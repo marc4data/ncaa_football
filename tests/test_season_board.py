@@ -267,23 +267,37 @@ def test_THE_DECLARED_VIEW_FOLLOWS_THE_FILTER():
 
 # ── PART 2: the KPI numerals share a baseline ─────────────────────────────────────────────
 
-def test_EVERY_KPI_LABEL_RESERVES_TWO_LINES_so_the_numerals_share_a_y():
-    """📊 A216 shipped six numerals at one y and the seventh 17.4px lower, because
-    *"Undefeated teams that lost"* is the one label that wraps. A216 measured the ROW — one
-    band — and that was correct and blind to this.
+def test_THE_KPI_NUMERALS_SHARE_A_Y_by_no_label_wrapping_rather_than_by_a_reserve():
+    """🚨 THE PROPERTY IS UNCHANGED. THE MECHANISM THAT HOLDS IT IS NOT — A231 (R-3025).
 
-    ⚠️ THE ASSERTION IS THE RELATIONSHIP, NOT THE NUMBERS: the reserved height must be exactly
-    two of the label's own line-height, so changing one and not the other fails here rather
-    than on the page."""
+    📊 A216 shipped six numerals at one y and the seventh 17.4px lower, because *"Undefeated
+    teams that lost"* was the one label that wrapped. A225 fixed it by RESERVING two lines on
+    every label, and this test asserted that reserve — `min-height` being exactly two of the
+    label's own line-height.
+
+    ✅ A231 REMOVED THE RESERVE AND THIS TEST WAS REWRITTEN RATHER THAN DELETED (R-2834).
+    Marc's shorter wording — *"Undefeated but Lost"* — plus grow-only tiles means **no
+    label's text wraps at 1600, 1440, 1300 or 1024 in either scheme**, so the reserve was
+    holding 17.4 CSS px of empty space on all seven tiles. A test that goes on demanding the
+    old mechanism would block the fix and say nothing about the property.
+
+    ⚠️ AND THE PROPERTY IS NOW ENFORCED WHERE ITS CAUSE IS, IN `tests/test_kpi_row.py`:
+    `test_no_kpi_label_is_long_enough_to_wrap` reads the labels the page actually ships and
+    fails if one grows past what a tile holds on one line. **The reserve made that failure
+    invisible — a long label would simply have used the second line while its numeral sat
+    lower than the other six. The budget test makes it loud.**
+
+    This assertion is the other half: the reserve must STAY gone, so that removing the budget
+    test cannot quietly restore a silent failure mode.
+    """
     block = THEME[THEME.index(".cfdb-kpi-label"):]
     block = block[:block.index("}") + 1]
     import re
-    lh = re.search(r"line-height:([\d.]+)", block)
-    mh = re.search(r"min-height:([\d.]+)em", block)
-    assert lh, "the KPI label has no stated line-height, so two lines cannot be reserved"
-    assert mh, "the KPI label reserves no minimum height — a wrapped label moves its numeral"
-    assert abs(float(mh.group(1)) - 2 * float(lh.group(1))) < 1e-6, (
-        f"min-height {mh.group(1)}em is not two lines of line-height {lh.group(1)}")
+    assert re.search(r"line-height:([\d.]+)", block), (
+        "the KPI label has no stated line-height")
+    assert "min-height" not in block, (
+        "the reserved second line is back. If a label now needs it, shorten the label "
+        "instead — and see test_no_kpi_label_is_long_enough_to_wrap for the budget.")
 
 
 def test_THE_KPI_VALUE_DOES_NOT_WRAP():

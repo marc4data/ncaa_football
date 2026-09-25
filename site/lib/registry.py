@@ -72,7 +72,13 @@ PAGES = [
     #
     # AC-G.51 does not apply: that is about BLOCKED pages staying visible, and this page is
     # built. The page count stays 18; this is a nav decision, not a scope one.
-    Page("team", "Team page", GAMES, "srv_team_overview", True, True, True,
+    # 🚨 A231 (cfdb-main-R-3024). "Team", NOT "Team page", AND THE TAB IS THE ONLY READER.
+    # > MARC, v17: *"Team Page — Change the tab name to M4D - Team ・ <Team Abbr>"*
+    # ⚠️ THE TITLE FEEDS THE BROWSER TAB AND THE SIDEBAR, AND THIS PAGE HAS NO SIDEBAR ENTRY
+    # — `in_nav=False` on the next line, and `app.py` registers it only so its URL resolves.
+    # So renaming it costs nothing anywhere else, which is why the change is safe to make
+    # here rather than by adding a per-route title override nothing else would use.
+    Page("team", "Team", GAMES, "srv_team_overview", True, True, True,
          in_nav=False,
          # Roster is BUILT — dim_athlete exists and srv_team_roster sits on it, so the
          # section renders and links each player through to the Players page.

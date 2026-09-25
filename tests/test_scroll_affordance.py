@@ -96,7 +96,7 @@ def test_the_wrapper_count_is_the_four_this_round_measured():
     table this file's enumeration does not describe.
 
     🚨 A216 MOVED IT FROM 2 TO 3, AND THE REASON IS THE POINT OF THE COUNT. The KPI row is
-    seven tiles totalling 970px; at 1440 the page gives it 980px and it does not scroll, at
+    seven tiles totalling 917px (A231); at 1440 the page gives it 980px and it does not scroll, at
     1024 it gives 564px and it does. It is in the SHARED wrapper with `table.scroll_note`
     rather than behind a private `overflow-x`, which is A208's rule and is what the test
     above enforces."""

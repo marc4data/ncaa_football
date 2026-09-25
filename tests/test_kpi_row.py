@@ -277,3 +277,135 @@ def test_THE_PANEL_EXISTS_UNDER_THE_NAME_THE_TESTS_AND_TABS_USE(name):
     """R-2353: a comment or a registry naming a function that does not exist is worse than
     silence, because the name is what the next round will trust."""
     assert _func(name) is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A231 — THE ROW SAYS WHAT IT IS, AND STOPS WRAPPING
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#
+# > **MARC, v17:** *"The text blurb seems inaccurate. The KPI's are based on FBS. Doesn't seem
+# > impacted by Division filter or Conference filter."* · *"It should consume the same width
+# > as the Most Exciting table."* · *"'Undefeated Teams that Lost' wraps. Title can be reduced
+# > to 'Undefeated but Lost'."* · *"Once the title wordwrap is fixed, KPI font has room to
+# > grow."*
+
+# The seven labels the page expects to draw, as DATA — the roster, not the subject.
+_KPI_LABELS = ("FBS games", "Average over/under", "Winning vs losing score",
+               "Favorites won", "Favorites covered", "Went over", "Undefeated but lost")
+
+
+def _labels_the_page_actually_draws() -> list:
+    """Every first argument to `_kpi_figure` inside `_kpi_row` — the labels that SHIP.
+
+    🚨 READ FROM THE SOURCE, NOT FROM `_KPI_LABELS`. The budget test below exists to catch a
+    label somebody LENGTHENS, and a version of it that iterated over the tuple above would
+    have gone on passing while the page drew something else entirely — the test would be
+    asserting that a constant in the test file is short. R-768's shape: the subject has to
+    come from the thing under test.
+    """
+    found = []
+    for node in ast.walk(_func("_kpi_row")):
+        if (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_kpi_figure"
+                and node.args and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)):
+            found.append(node.args[0].value)
+    return found
+
+
+def test_the_caption_says_NEITHER_filter_reaches_this_row():
+    """🚨 MARC REPORTED BOTH FILTERS AND THE CAPTION NAMED ONLY ONE.
+
+    📊 It is structural, not a wording slip: `srv_week_summary` publishes thirty columns and
+    not one is a conference or a division — its grain is (season, season_type, week) — and
+    `_week_summary`'s WHERE clause passes exactly those three. **Neither filter CAN reach
+    this row**, and both selectors are on screen while a reader looks at it.
+
+    ⚠️ THE CONFERENCE HALF IS THE MORE IMPORTANT ONE: a reader who has just narrowed to one
+    conference is the reader most likely to believe these seven figures moved with it.
+    """
+    body = ast.get_source_segment(SOURCE, _func("_kpi_row")) or ""
+    caption = body[body.index("st.caption("):]
+    for word in ("Conference", "Division"):
+        assert word in caption, f"the caption does not name the {word} filter"
+    assert "Neither" in caption or "neither" in caption, (
+        "the caption must say the filters do NOT apply, not merely mention them")
+
+
+def test_the_caption_does_not_claim_both_teams_are_FBS():
+    """📊 THE MODEL'S RULE IS *EITHER SIDE*, AND THE TWO DIFFER BY ENOUGH TO MATTER.
+
+    Measured on 2026 week 12: either-side-FBS 70, both-sides-FBS 66, all games 130, and
+    `fbs_games` published 70. A caption reading "FBS games" without qualification invites the
+    stricter reading, which is wrong by four games in that week alone.
+    """
+    body = ast.get_source_segment(SOURCE, _func("_kpi_row")) or ""
+    caption = body[body.index("st.caption("):body.index("tiles = []")]
+    assert "either side" in caption, "the caption must state the either-side rule"
+
+
+def test_no_kpi_label_is_long_enough_to_wrap():
+    """🚨 THIS IS WHAT REPLACED A225's RESERVED SECOND LINE, AND IT IS THE POINT OF THE SWAP.
+
+    A225 gave every label `min-height:3.2em` because one label wrapped and pushed its numeral
+    17.4 CSS px below the other six. A231 shortened that label to Marc's own wording and made
+    the tiles grow-only, so **no label's text wraps at 1600, 1440, 1300 or 1024 in either
+    scheme** — measured on the text's own line boxes, not on the box height.
+
+    ⚠️ THE RESERVE MADE THE NEXT FAILURE INVISIBLE. With it in place a longer label would
+    simply have used the second line and nothing would have looked wrong, while that tile's
+    numeral sat lower than the other six — which is precisely what happened and took a render
+    to find. **Removing it makes the failure visible; this test makes it loud.**
+
+    📊 THE BUDGET IS MEASURED, NOT CHOSEN. The tile caps at `max-width:11rem` = 176px, less
+    `.65rem` of padding each side = 155.2px of text. At `.68rem` uppercase with `.03em`
+    tracking the longest surviving label, "Winning vs losing score" (23 chars), renders inside
+    that. 24 characters is the first length not verified to fit, so that is the line.
+    """
+    labels = _labels_the_page_actually_draws()
+    # 🚨 R-760: a loop that iterates zero times reports success. The extractor must find all
+    # seven, and they must be the seven this file knows about, or the budget checks nothing.
+    assert len(labels) == 7, f"found {len(labels)} labels in _kpi_row, not 7: {labels}"
+    assert set(labels) == set(_KPI_LABELS), (
+        f"the page draws labels this test does not know about: "
+        f"{sorted(set(labels) ^ set(_KPI_LABELS))}")
+    for label in labels:
+        assert len(label) <= 23, (
+            f"{label!r} is {len(label)} characters; the widest tile holds 23 on one line, so "
+            f"this wraps and pushes its numeral off the shared baseline. Shorten it, or "
+            f"restore a reserved second line on .cfdb-kpi-label for every tile.")
+
+
+def test_the_page_uses_the_shortened_undefeated_label():
+    """Marc's exact reduction. Pinned by VALUE, because the point of the change is the string
+    and a test on its length alone would pass on any 19-character label."""
+    body = ast.get_source_segment(SOURCE, _func("_kpi_row")) or ""
+    assert '"Undefeated but lost"' in body
+    assert "Undefeated teams that lost" not in body
+
+
+def test_the_tiles_grow_into_the_row_but_never_shrink_out_of_it():
+    """🚨 `flex:1 0 auto` — AND BOTH DIGITS WERE DECIDED BY A MEASUREMENT.
+
+    📊 `0 0 auto` (before): seven tiles summed to 864.1px inside a 980px box at 1440 and a
+    1140px box at 1600 — the row could never fill either, which is what Marc asked for.
+    📊 `1 1 auto`: fills correctly at 1440 and 1600, and at 1300 and 1024 the tiles shrink
+    toward `min-width` and **four and five labels start wrapping** — reintroducing the exact
+    defect this round removed.
+    📊 `1 0 auto`: fills at 1440 and 1600 (tiles + gaps = 980.0 and 1140.0 exactly), keeps
+    content width at 1300 and 1024, and wraps nothing at any of the four.
+    """
+    rule = THEME[THEME.index(".cfdb-kpi {"):]
+    rule = rule[:rule.index("}")]
+    assert "flex:1 0 auto" in rule, (
+        "the tiles must grow into spare width and never shrink below their content")
+    assert "min-width:6rem" in rule, "the scroll floor is what keeps a narrow row honest"
+
+
+def test_the_label_reserves_no_second_line_any_more():
+    """The reserve is gone and `test_no_kpi_label_is_long_enough_to_wrap` is what replaced it.
+    If both this and that test were removed, a long label would silently break the baseline
+    again — so this one asserts the CSS and that one asserts the cause."""
+    rule = THEME[THEME.index(".cfdb-kpi-label {"):]
+    rule = rule[:rule.index("}")]
+    assert "min-height" not in rule, (
+        "a reserved second line is 17.4px of empty space on every tile once no label wraps")

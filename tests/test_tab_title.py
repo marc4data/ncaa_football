@@ -196,3 +196,94 @@ def test_the_routed_page_reaches_the_tab():
     assert seen[-1] == "M4D · Matchup", (
         "the routed page's name never reached the tab — app.py set "
         f"{seen[-1]!r}, which is what it would say with the per-page call deleted")
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A231 (cfdb-main-R-3024) — THE TEAM PAGE'S TAB NAMES ITS TEAM
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#
+# > **MARC, v17:** *"Team Page — Change the tab name to M4D - Team ・ <Team Abbr>"*
+
+def test_the_team_tab_reads_brand_team_and_abbreviation(tab):
+    """Marc's string, pinned as a literal — the whole point of the change is what it says."""
+    assert tab.compose("Team", "AUB") == "M4D · Team · AUB"
+
+
+def test_the_registry_calls_the_team_page_Team_because_the_tab_is_its_only_reader():
+    """⚠️ THE TITLE FEEDS THE TAB AND THE SIDEBAR, AND THIS PAGE HAS NO SIDEBAR ENTRY.
+
+    `in_nav=False`, so renaming it is a tab-only change. If that ever flips to True this test
+    still passes and the nav quietly gains an entry called "Team" — so the nav flag is
+    asserted here beside the title rather than left implied.
+    """
+    from lib import registry
+    page = registry.BY_KEY["team"]
+    assert page.title == "Team", f"the tab would read 'M4D · {page.title} · AUB'"
+    assert page.in_nav is False, (
+        "the Team page has gained a nav slot; the title is no longer tab-only and renaming "
+        "it now changes the sidebar too")
+
+
+def test_the_team_route_resolves_its_abbreviation(tab, monkeypatch):
+    """🚨 THE ABBREVIATION IS NOT ON THE VIEW THE PAGE ITSELF READS.
+
+    `srv_team_overview` publishes `team_slug` and `team_display` and **no abbreviation of any
+    kind** — checked against `information_schema`, not against the model's description. The
+    column is on `srv_teams_index`, spelled `abbreviation` rather than `team_abbreviation`,
+    which is what every other view calls it.
+
+    📊 Grain checked before the `limit 1`: 34,061 rows over 772 slugs, up to 157 rows for one
+    slug, and zero slugs carrying two different abbreviations — so any row answers the same.
+    """
+    import lib.params as params
+    import lib.query as query_module
+    seen = {}
+
+    def fake_query(sql, binds=None):
+        seen["sql"] = " ".join(sql.split())
+        seen["binds"] = binds
+        return pd.DataFrame({"abbreviation": ["AUB"]})
+
+    monkeypatch.setattr(params, "get", lambda name: "auburn" if name == "team" else None)
+    monkeypatch.setattr(query_module, "query", fake_query)
+    assert tab.route_suffix("team") == "AUB"
+    assert "srv_teams_index" in seen["sql"], seen["sql"]
+    # 🚨 THE COLUMN NAME IS PINNED because the whole finding was that it is NOT the one the
+    # other views use. A test asserting only "some abbreviation came back" would pass against
+    # `team_abbreviation` and the page would return None on every team.
+    assert "select abbreviation" in seen["sql"], seen["sql"]
+    assert seen["binds"] == {"team_slug": "auburn"}
+
+
+def test_a_blank_team_abbreviation_drops_the_suffix_rather_than_printing_an_empty_segment(
+        tab, monkeypatch):
+    """📊 BLANK ON 517 OF 34,061 ROWS (1.52%), so this is a state a reader reaches.
+
+    `compose` drops empty parts, so the tab reads `M4D · Team` — never `M4D · Team · `.
+    """
+    import lib.params as params
+    import lib.query as query_module
+    monkeypatch.setattr(params, "get", lambda name: "some-team" if name == "team" else None)
+    for value in (None, "", "   "):
+        monkeypatch.setattr(query_module, "query",
+                            lambda sql, binds=None, v=value:
+                            pd.DataFrame({"abbreviation": [v]}))
+        assert tab.route_suffix("team") is None, f"{value!r} should drop the suffix"
+    assert tab.compose("Team", None) == "M4D · Team"
+
+
+def test_the_team_route_with_no_team_selected_says_nothing(tab, monkeypatch):
+    import lib.params as params
+    monkeypatch.setattr(params, "get", lambda name: None)
+    assert tab.route_suffix("team") is None
+
+
+def test_one_separator_across_the_whole_site(tab):
+    """⚠️ MARC TYPED `・` (U+30FB) AND THE SITE USES `·` (U+00B7) EVERYWHERE.
+
+    Adopting his character would have given the site two separators that look nearly
+    identical at tab size — the kind of inconsistency nobody notices for months. The site's
+    own one is used and the difference is named in A231's report rather than decided quietly.
+    """
+    assert tab.SEPARATOR == " · ", repr(tab.SEPARATOR)
+    assert "・" not in tab.compose("Team", "AUB")

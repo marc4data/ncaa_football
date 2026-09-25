@@ -29,7 +29,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ci.page_url import page_url                                  # noqa: E402
 
-WIDTHS = (1440, 1024)
+# A231: four widths, not two. Marc's v17 asks for the row to take the Most Exciting table's
+# width, and a change that is right at 1440 and wrong at 1300 is a change nobody measured.
+WIDTHS = (1600, 1440, 1300, 1024)
 
 MEASURE = r"""() => {
   const px = (v) => +(+v).toFixed(2);
@@ -75,6 +77,26 @@ MEASURE = r"""() => {
       valueInkBottom: glyph ? glyph.bottom : null,
       labelLines: label ? Math.round(label.getBoundingClientRect().height /
                     (parseFloat(getComputedStyle(label).lineHeight) || 1)) : null,
+      // 🚨 A231. `labelLines` ABOVE DIVIDES THE BOX HEIGHT AND SO CAN ONLY EVER SAY "2"
+      // WHILE `min-height:3.2em` IS ON THE RULE — it reported all seven labels as wrapping
+      // when what it was seeing was the RESERVE that A225 added because one of them did.
+      // A round asking "may the reserve go?" cannot use it: the instrument answers the
+      // question the reserve already decided. **A box measurement reports the CSS back to
+      // itself** (R-2606), and this is that, one level down from the numerals.
+      //
+      // ✅ THE TEXT'S OWN LINE BOXES. A Range over the label's contents yields ONE RECT PER
+      // LINE the text actually occupies, so it is blind to the box the text sits in.
+      labelTextLines: (() => {
+        if (!label) return null;
+        const rg = document.createRange();
+        rg.selectNodeContents(label);
+        const rects = [...rg.getClientRects()].filter((q) => q.width > 0 && q.height > 0);
+        const tops = [];
+        rects.forEach((q) => {
+          if (!tops.some((y) => Math.abs(y - q.top) < 2)) tops.push(q.top);
+        });
+        return tops.length;
+      })(),
       labelInkTop: labelInk ? labelInk.top : null,
       labelBoxH: label ? px(label.getBoundingClientRect().height) : null,
     };
@@ -156,8 +178,14 @@ def summarise(rows: list) -> str:
         ok = "✅" if len(distinct) == 1 else "🚨"
         lines.append(f"  {ok} DISTINCT TOP EDGES ACROSS {len(tops)} NUMERALS: "
                      f"{len(distinct)} (spread {spread:.1f}px)")
-        wrapped = [t["label"] for t in r["tiles"] if (t["labelLines"] or 1) > 1]
-        lines.append(f"  labels on two lines: {wrapped or 'none'}")
+        # 🚨 THE TEXT'S LINES, NOT THE BOX'S. See `labelTextLines` in MEASURE for why the
+        # box-derived figure cannot answer this while the reserve exists.
+        wrapped = [t["label"] for t in r["tiles"] if (t.get("labelTextLines") or 1) > 1]
+        lines.append(f"  labels whose TEXT wraps: {wrapped or 'none'}")
+        boxed = [t["label"] for t in r["tiles"] if (t["labelLines"] or 1) > 1]
+        lines.append(f"  labels whose BOX is two lines tall: "
+                     f"{'all ' + str(len(boxed)) if len(boxed) == len(r['tiles']) else boxed}"
+                     f"  <- the reserve, not a wrap")
         boxes = sorted({t["labelBoxH"] for t in r["tiles"] if t["labelBoxH"] is not None})
         lines.append(f"  label box heights: {boxes}")
     return "\n".join(lines)

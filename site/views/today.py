@@ -4484,10 +4484,17 @@ def _bump(scope, depth: int) -> None:
 _KPI_CHART_W = 72
 
 # 📊 THE ROW'S OWN SCROLL BOUNDARY, MEASURED BY `ci/measure_kpi_row.py` RATHER THAN CHOSEN:
-# seven tiles totalling 917.4px plus six .55rem gaps is 970px. At 1440 the page gives the row
-# 980px and it does not scroll; at 1024 it gives 564px and it does. The note appears below the
-# boundary and says so.
-_KPI_MIN_PX = 970
+# seven tiles at their content width total 864.1px and six .55rem gaps add 52.8px, so the row
+# cannot go below 917px without scrolling. At 1440 the page gives it 980px and at 1600 1140px
+# — it does not scroll at either and the tiles GROW to fill both exactly. At 1300 it gives
+# 840px and at 1024 564px, and it scrolls at both. The note appears below the boundary.
+#
+# ⚠️ A231 MOVED THIS FROM 970 TO 917 AND THE NUMBER HAD TO MOVE WITH THE LABEL. The old
+# figure was measured when the seventh tile read "Undefeated teams that lost"; Marc's shorter
+# wording narrowed that tile, so the row's minimum came down with it. A threshold left at 970
+# would have drawn the scroll note at a width where the row no longer scrolls — a note that
+# tells a reader to scroll something that does not.
+_KPI_MIN_PX = 917
 _KPI_ABSENT = fmt.EM_DASH
 
 
@@ -4599,16 +4606,34 @@ def _kpi_row(scope, depth: int) -> None:
         games = 0 if games is None or pd.isna(games) else int(games)
 
         st.markdown(f"**{fmt.title_case('The week in one row')}**")
-        # 🚨 THE CAPTION CARRIES THE TWO THINGS A214 SAID THIS ROW MUST SAY OUT LOUD.
-        # The population is FBS-either-side and does NOT follow the page's Division selector,
-        # because A214's grain has no division in it and the pictures under these numbers are
-        # built from that same population. A row that quietly meant something different from
-        # the sections below it would be worse than a row that says so.
+        # 🚨 THE CAPTION CARRIES THE TWO THINGS THIS ROW MUST SAY OUT LOUD, AND A231 FIXED
+        # THE HALF IT WAS MISSING.
+        #
+        # > MARC, v17: "The text blurb seems inaccurate. The KPI's are based on FBS. Doesn't
+        # > seem impacted by Division filter or Conference filter."
+        #
+        # ✅ HE IS RIGHT ON BOTH, AND IT IS STRUCTURAL RATHER THAN A WORDING SLIP. A231 read
+        # the published view rather than its description (§2.2.1c.2): `srv_week_summary` has
+        # THIRTY columns and not one of them is a conference or a division — its grain is
+        # (season, season_type, week) — and `_week_summary`'s own WHERE clause passes only
+        # those three. **Neither filter CAN reach this row.**
+        #
+        # ⚠️ THE OLD CAPTION NAMED THE DIVISION FILTER AND NOT THE CONFERENCE ONE, which is
+        # the worse half of the two: a reader who has just narrowed to one conference is the
+        # reader most likely to believe these seven figures moved with it. Both selectors are
+        # on screen, so both are named.
+        #
+        # 📊 AND "EITHER SIDE" IS NOT A LOOSE PARAPHRASE OF "FBS GAMES" — it is the model's
+        # actual rule and the two differ by enough to matter. Measured on 2026 week 12:
+        # either-side-FBS 70, both-sides-FBS 66, all games 130. `fbs_games` published 70.
         st.caption(
-            "Every game with an FBS team on either side — this row keeps that population "
-            "whatever the Division filter says, so its numbers match the distributions "
-            "drawn under them. Each rate shows what it is out of; pushes and games with no "
-            "closing line leave the denominator and are counted separately."
+            "Every game with an FBS team on either side — not only games where both teams "
+            "are FBS. **Neither the Conference nor the Division filter changes this row**: "
+            "it is summarised one week at a time and carries no conference or division of "
+            "its own, so it keeps the same population whatever those two are set to, and "
+            "its numbers match the distributions drawn under them. Each rate shows what it "
+            "is out of; pushes and games with no closing line leave the denominator and are "
+            "counted separately."
             + ("" if played else
                " No game in the selected week has finished, so the outcome figures have "
                "nothing to measure yet."))
@@ -4682,8 +4707,14 @@ def _kpi_row(scope, depth: int) -> None:
         # nobody has played, that 0 is true only because nothing has happened yet, and printed
         # as a figure it reads as *no unbeaten team was beaten* — a claim about a week that has
         # not occurred. The other six outcome figures go to an em dash there and so does this.
+        # 🚨 A231 (cfdb-main-R-3023). MARC'S WORDS: *"'Undefeated Teams that Lost' wraps.
+        # Title can be reduced to 'Undefeated but Lost'."*
+        # ⚠️ SENTENCE CASE HERE, TITLE CASE ON SCREEN, AND THE TWO ARE THE SAME THING:
+        # `.cfdb-kpi-label` carries `text-transform:uppercase`, so every label renders in
+        # caps whatever this string says. The other six are sentence case in code and this
+        # matches them rather than introducing a second convention for one tile.
         tiles.append(_kpi_figure(
-            "Undefeated teams that lost",
+            "Undefeated but lost",
             _KPI_ABSENT if lost is None or pd.isna(lost) or not has_entering or not played
             else f"{int(lost):,}",
             (f"of {int(entering):,} unbeaten" if has_entering
@@ -4696,7 +4727,8 @@ def _kpi_row(scope, depth: int) -> None:
         # A scroller a reader cannot tell is a scroller is a row that simply ends early, and
         # `tests/test_scroll_affordance.py` refuses one — correctly. 📊 The boundary is this
         # row's OWN minimum, measured rather than guessed: seven tiles plus six gaps come to
-        # 970px, so below 970 it scrolls and at 1440 (980px of content width) it does not.
+        # 917px (A231), so below that it scrolls and at 1440 (980px of content width) it does
+        # not — and at 1440 and 1600 the tiles grow to fill the row exactly.
         st.markdown(f"<div class='cfdb-scrollbox'>{table.scroll_note(_KPI_MIN_PX)}"
                     f"<div class='cfdb-scroll'><div class='cfdb-kpirow'>"
                     f"{''.join(tiles)}</div></div></div>", unsafe_allow_html=True)
