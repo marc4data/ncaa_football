@@ -1620,6 +1620,19 @@ TABLE_CSS = """
    full-page chart; inside `.cfdb-kpi`, which already has a border, that renders as a box inside a
    box and spends 24px of the 140px the chart was just given. The panel keeps its structure and
    drops its chrome. */
+/* 🚨 A237 (cfdb-main-R-3042). THE FIGURE AND ITS p25/p50/p75 SHARE A ROW.
+   > MARC, 2026-09-25: *"How about a tight table to the right KPI value that shows p25, p50, p75."*
+   📊 IT HAD TO COST NOTHING HORIZONTALLY AND IT DOES. A235 left 22px of headroom across the whole
+   row at 1440 (958 minimum against 980 given), so a table that widened seven tiles by 4px each
+   would have pushed the row into a scroll at the width Marc works at. `baseline` alignment puts
+   the three small rows against the numeral's own baseline, and `margin-left:auto` pushes them to
+   the tile's right edge — into whitespace the 1.7rem figure was already leaving. */
+.cfdb-kpi-head { display:flex; align-items:baseline; gap:.3rem; min-width:0; }
+/* ⚠️ THE TABLE MAY SHRINK AND THE NUMERAL MAY NOT — A218's rule, which this row has paid for
+   twice: *a team name on two lines is a layout, a number on two lines is a lie.* */
+.cfdb-kpi-head .cfdb-dist-stats { margin-left:auto; min-width:0; flex:0 1 auto;
+    font-size:.56rem; line-height:1.18; opacity:.75; }
+.cfdb-kpi-head .cfdb-dist-stat { gap:.3rem; }
 .cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
 /* `.cfdb-dist-body` is a flex row because the standalone panel puts the stats table beside the
    chart. The KPI tile passes `stats=False`, so there is one child and the gap would be dead

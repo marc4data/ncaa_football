@@ -47,6 +47,7 @@ THE GEOMETRY COMES FROM THE ROW. `bin_min`, `bin_incr` and `bin_count` travel on
 row precisely so the renderer needs no lookup table and no knowledge of which metric it is
 drawing. Hand it a row, get a picture.
 """
+import math
 from typing import Optional
 
 import pandas as pd
@@ -97,46 +98,154 @@ def parse_bin_counts(value) -> list:
     return out
 
 
-def _value_to_x(value, row, width: float) -> Optional[float]:
+def axis_span(row, axis=None) -> Optional[tuple]:
+    """The span this chart DRAWS: the caller's axis if it gave one, else the bin range.
+
+    🚨 A237 (cfdb-main-R-3039). ONE PLACE DECIDES WHAT THE AXIS IS, because three things have to
+    agree about it — the bars, the box and the ticks — and A235's whole reason for drawing them
+    in one SVG was that they cannot be allowed to drift apart.
+    """
+    if axis is not None:
+        low, high = float(axis[0]), float(axis[1])
+    else:
+        low, high = float(row["bin_min"]), float(row["bin_max"])
+    return None if high <= low else (low, high)
+
+
+def _value_to_x(value, row, width: float, axis=None) -> Optional[float]:
     """Where a value sits along the axis, in pixels, or None if it is off the end.
 
-    The axis is the BIN RANGE, not the observed range — that is what makes two weeks
+    ⚠️ THE DEFAULT AXIS IS THE BIN RANGE, not the observed range — that is what makes two weeks
     comparable, and it is why a median outside the bins is clamped away rather than drawn at
     the edge as if it were inside.
+
+    🚨 A237 (cfdb-main-R-3039). `axis=` NARROWS IT, AND THAT IS A TRADE THE CALLER MAKES.
+    > **MARC, 2026-09-25:** *"Constrain the box-whisker to just show the extent of the whiskers.
+    > Don't need to include x-axis range to cover outliers beyond IQR."*
+    📊 Measured on 2026 week 3: the three KPI charts were using **49%, 50% and 56%** of their own
+    width, because the bin range is set wide enough to hold a season's tail. ⚠️ **What is given up
+    is cross-week comparability** — the property the sentence above exists to protect — so a
+    caller that narrows is choosing a readable picture of THIS week over a comparable one across
+    weeks, and `today._kpi_chart` says in its own comment that it made that choice.
+
+    ⚠️ **A VALUE OUTSIDE THE DRAWN AXIS STILL RETURNS None**, which is A142's law and is why the
+    caller has to make the dropped mass visible rather than letting it clamp to the edge.
     """
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
-    low, high = float(row["bin_min"]), float(row["bin_max"])
-    if high <= low:
+    span = axis_span(row, axis)
+    if span is None:
         return None
+    low, high = span
     position = (float(value) - low) / (high - low)
     if position < 0 or position > 1:
         return None
     return position * width
 
 
-def _bars(counts: list, width: float, height: float) -> str:
-    """The histogram itself. Shared by both sizes."""
+def _bars(counts: list, width: float, height: float, bins=None, axis=None) -> str:
+    """The histogram itself. Shared by both sizes.
+
+    ⚠️ WITHOUT `bins`/`axis` THE BARS ARE SPREAD EVENLY ACROSS THE WIDTH, which is correct only
+    because the axis IS the bin range — every bin gets the same slot because every bin is the
+    same fraction of the axis. **That assumption is the whole of this function's old geometry**,
+    and it stops being true the moment a caller narrows the axis (A237).
+
+    🚨 SO WHEN AN AXIS IS GIVEN, EVERY BAR IS PLACED BY ITS OWN VALUE RANGE rather than by its
+    index. `bins` is `(bin_min, bin_max)`; a bin entirely outside the drawn axis is SKIPPED, and
+    one straddling the edge is CLIPPED to it — **and the caller is responsible for saying that
+    mass went missing** (`_overflow_marks`). A bar silently squeezed to the edge would put mass
+    at a value it does not have, which is A142's law applied to a rectangle.
+    """
     if not counts:
         return ""
     tallest = max(counts) or 1
-    slot = width / len(counts)
-    # A hairline gap so adjacent bars read as separate bins at 12px wide. Below about 3px of
-    # slot the gap costs more than it buys, so it scales.
-    gap = min(1.0, slot * 0.12)
     parts = []
+
+    if bins is None or axis is None:
+        slot = width / len(counts)
+        # A hairline gap so adjacent bars read as separate bins at 12px wide. Below about 3px of
+        # slot the gap costs more than it buys, so it scales.
+        gap = min(1.0, slot * 0.12)
+        for index, count in enumerate(counts):
+            tall = (count / tallest) * height if tallest else 0
+            tall = max(tall, EMPTY_BIN_PIXELS)
+            parts.append(
+                f"<rect x='{index * slot + gap / 2:.2f}' y='{height - tall:.2f}' "
+                f"width='{max(slot - gap, 0.5):.2f}' height='{tall:.2f}' "
+                f"fill='currentColor' fill-opacity='{BAR_OPACITY if count else 0.18:.2f}'/>")
+        return "".join(parts)
+
+    bin_lo, bin_hi = float(bins[0]), float(bins[1])
+    axis_lo, axis_hi = float(axis[0]), float(axis[1])
+    if bin_hi <= bin_lo or axis_hi <= axis_lo:
+        return ""
+    incr = (bin_hi - bin_lo) / len(counts)
+    scale = width / (axis_hi - axis_lo)
+    gap = min(1.0, incr * scale * 0.12)
     for index, count in enumerate(counts):
+        left, right = bin_lo + index * incr, bin_lo + (index + 1) * incr
+        if right <= axis_lo or left >= axis_hi:
+            continue
+        x0 = max((left - axis_lo) * scale, 0.0)
+        x1 = min((right - axis_lo) * scale, width)
+        if x1 - x0 <= 0:
+            continue
         tall = (count / tallest) * height if tallest else 0
         tall = max(tall, EMPTY_BIN_PIXELS)
         parts.append(
-            f"<rect x='{index * slot + gap / 2:.2f}' y='{height - tall:.2f}' "
-            f"width='{max(slot - gap, 0.5):.2f}' height='{tall:.2f}' "
+            f"<rect x='{x0 + gap / 2:.2f}' y='{height - tall:.2f}' "
+            f"width='{max(x1 - x0 - gap, 0.5):.2f}' height='{tall:.2f}' "
             f"fill='currentColor' fill-opacity='{BAR_OPACITY if count else 0.18:.2f}'/>")
     return "".join(parts)
 
 
-def _median_tick(row, width: float, height: float) -> str:
-    x = _value_to_x(row.get("p50"), row, width)
+def bins_outside(counts: list, row, axis=None) -> tuple:
+    """How much histogram mass falls OUTSIDE the drawn axis, as `(below, above)`.
+
+    🚨 A237 (cfdb-main-R-3040). NARROWING THE AXIS DROPS BARS, AND THE DROP MUST BE VISIBLE.
+    A235's own finding one level over: a mark that is present, correct and off the canvas is
+    invisible in the DOM and wrong on the screen. Here the bar is not even drawn, so nothing but
+    an explicit count can say it existed.
+
+    📊 MEASURED on 2026 week 3, narrowing to the whisker span costs **0.0% of `winning_points`,
+    1.3% of `losing_points` and 4.0% of `total`** — small, which is the argument FOR the trade
+    and not a reason to leave it unsaid.
+    """
+    span = axis_span(row, axis)
+    if not counts or span is None:
+        return (0, 0)
+    axis_lo, axis_hi = span
+    bin_lo, bin_hi = float(row["bin_min"]), float(row["bin_max"])
+    if bin_hi <= bin_lo:
+        return (0, 0)
+    incr = (bin_hi - bin_lo) / len(counts)
+    below = above = 0
+    for index, count in enumerate(counts):
+        left, right = bin_lo + index * incr, bin_lo + (index + 1) * incr
+        if right <= axis_lo:
+            below += count
+        elif left >= axis_hi:
+            above += count
+    return (below, above)
+
+
+def _bins_of(row) -> Optional[tuple]:
+    """The row's own bin range, which is what the published `bin_counts` are spread across.
+
+    ⚠️ DISTINCT FROM `axis_span`, AND A237 EXISTS IN THE GAP BETWEEN THEM. Until this round the
+    two were always equal and neither needed a name; narrowing the axis separates *what the bars
+    describe* from *what the chart draws*, and every bar has to be placed against both.
+    """
+    try:
+        lo, hi = float(row["bin_min"]), float(row["bin_max"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return None if hi <= lo else (lo, hi)
+
+
+def _median_tick(row, width: float, height: float, axis=None) -> str:
+    x = _value_to_x(row.get("p50"), row, width, axis)
     if x is None:
         return ""
     return (f"<line x1='{x:.2f}' y1='0' x2='{x:.2f}' y2='{height:.2f}' "
@@ -305,6 +414,36 @@ TICK_NONE = "none"
 # on top of the whisker end and say the minimum is there.** So asking for these ticks asks for
 # the frame that can hold them honestly.
 TICK_EXTREMES = "extremes"
+
+# 🚨 A237 (cfdb-main-R-3041). THE FIFTH STRATEGY, AND IT IS THE ONLY ONE THAT PRINTS NOTHING.
+#
+# > **MARC, 2026-09-25:** *"Add an x-axis below the histogram with major tickmarks at increments
+# > of 5 (counting from a baseline of 0, so 5, 10, 15, etc for the scores that are in scope).
+# > Don't need to include the values for the tickmarks, just the ticks, which should take up
+# > minimal vertical space."*
+#
+# ⚠️ IT IS A FIFTH STRATEGY RATHER THAN A FLAG ON TICK_BOUNDS, AND THE REASON IS THAT IT ANSWERS
+# A DIFFERENT QUESTION. The other four all ask *which of this row's statistics deserve a label* —
+# they emit VALUES, chosen from the row, and compete for horizontal room through `_LabelBands`.
+# This one emits a RULER: marks at every multiple of a step, carrying no text, competing with
+# nothing. Folding it into `_axis_ticks` would mean that function returned values that are
+# sometimes labelled and sometimes not, which is the kind of overload that reads fine and breaks
+# the next caller.
+#
+# ⚠️ "COUNTING FROM A BASELINE OF 0" IS A MODULUS, NOT A START POINT — and it matters precisely
+# because A237 also narrows the axis. The first tick is the lowest multiple of the step INSIDE
+# the axis, which is 15 on an axis starting at 14, not 14. Ticks on a ruler have to mean the same
+# value on every chart or they are decoration.
+TICK_STEP = "step"
+
+# The tick band's own height. Marc asked for "minimal vertical space", and this is what that
+# costs: a 3px mark plus 2px of clearance, against `LABEL_BAND`'s 15 for a row of digits.
+TICK_BAND = 5
+TICK_MARK = 3
+
+# The overflow arrow's depth, in px. It points OUT of the plot and sits entirely INSIDE the
+# viewBox — see the draw site for why that distinction cost a render.
+OVERFLOW_MARK = 5.0
 
 BOX_HEIGHT = 26
 
@@ -790,9 +929,47 @@ def _sided_marker(x: float, height: float, mid: float, above: bool, color: str) 
     return cap + rule
 
 
+PANEL_STATS = (("n", "n"), ("min", "min_value"), ("p25", "p25"), ("median", "p50"),
+               ("p75", "p75"), ("max", "max_value"))
+
+
+def stats_table(row, keys=True) -> str:
+    """The statistics table, label-left value-right monospace. ONE implementation, two callers.
+
+    🚨 A237 (cfdb-main-R-3042). `panel()` DRAWS THIS BESIDE THE CHART; MARC WANTS IT BESIDE THE
+    KPI VALUE.
+    > **MARC, 2026-09-25:** *"How about a tight table to the right KPI value that shows p25, p50,
+    > p75."*
+
+    ⚠️ THE TILE CANNOT REACH INSIDE `panel()`'s MARKUP TO MOVE IT — the block is nested two divs
+    deep inside the chart, and the value it wants to sit beside is rendered before the chart even
+    starts. **So the table is factored out rather than reimplemented**, which is exactly what A235
+    did with `_LabelBands` and for the same reason: a second copy of a renderer is a copy that
+    drifts, and the drift here would be two tables of the same numbers formatted differently on
+    one screen.
+
+    `keys` is `True` for all of `PANEL_STATS`, `False` for none, or a sequence of COLUMN names.
+    ⚠️ The ORDER is `PANEL_STATS`'s, never the caller's — so two callers asking for the same three
+    rows cannot get them in different orders.
+    """
+    wanted = (PANEL_STATS if keys is True else
+              () if keys is False or keys is None else
+              tuple(pair for pair in PANEL_STATS if pair[1] in tuple(keys)))
+    if not wanted:
+        return ""
+    cells = []
+    for name, key in wanted:
+        value = row.get(key)
+        shown = "\u2013" if value is None or pd.isna(value) else (
+            f"{int(value)}" if key == "n" else fmt.number(float(value), dp=1))
+        cells.append(f"<div class=\'cfdb-dist-stat\'><span>{name}</span><b>{shown}</b></div>")
+    return f"<div class=\'cfdb-dist-stats\'>{''.join(cells)}</div>"
+
+
 def panel(row, label: str = "", width: int = 420, *,
           height: Optional[int] = None, ticks: str = TICK_NONE,
-          head: bool = True, stats: bool = True, dp=_UNSET, metric: str = "") -> str:
+          head: bool = True, stats=True, dp=_UNSET, metric: str = "",
+          axis=None, tick_step: Optional[float] = None) -> str:
     """The same picture with room to read it: the histogram, the box-and-whisker beneath it on
     a SHARED X-SCALE, and the statistics as a table beside it.
 
@@ -815,9 +992,16 @@ def panel(row, label: str = "", width: int = 420, *,
         ticks    TICK_NONE (default, and the byte-identical one) | TICK_BOUNDS | TICK_PERCENTILES
                  | TICK_EXTREMES — Marc's *"x-axis with labels"*, drawn in a band below the box
         head     the label and the bin subtitle. OFF for a caller that already names the measure
-        stats    the n/min/p25/median/p75/max table beside the chart
+        stats    True for the full n/min/p25/median/p75/max table beside the chart, False for
+                 none, or a SEQUENCE OF KEYS for a subset — `("p25", "p50", "p75")` is Marc's
+                 *"tight table to the right KPI value that shows p25, p50, p75"* (A237)
         dp       decimals for the tick labels; defaults via `fmt.precision_for(metric)`
         metric   the metric's COLUMN NAME, used only to choose `dp` — `box()`'s rule, one place
+        axis     `(lo, hi)` to DRAW instead of the bin range — A237. Narrows, and the mass it
+                 drops is marked at the edge rather than clipped away silently
+        tick_step
+                 with `ticks=TICK_STEP`, the interval between tick marks. Marks land on
+                 multiples of it, so the first is the lowest multiple inside the axis
 
     🚨 AND THE SVG'S WIDTH BEHAVIOUR IS DECIDED BY WHETHER THERE IS TEXT IN IT, WHICH IS A
     CORRECTNESS RULE RATHER THAN A PREFERENCE. With no ticks the SVG keeps `width='100%'` and
@@ -844,11 +1028,11 @@ def panel(row, label: str = "", width: int = 420, *,
     # `_bars`. 🚨 IT IS ALSO WHAT MARC ASKED FOR IN v18 — *"Histogram and Box-Whisker x-axis have
     # to be aligned"* — and it was already true here; what was missing was the labels.
     box = []
-    q1 = _value_to_x(row.get("p25"), row, width)
-    q3 = _value_to_x(row.get("p75"), row, width)
+    q1 = _value_to_x(row.get("p25"), row, width, axis)
+    q3 = _value_to_x(row.get("p75"), row, width, axis)
     raw_lo, raw_hi = _whisker_pair(row)
-    lo = _value_to_x(raw_lo, row, width)
-    hi = _value_to_x(raw_hi, row, width)
+    lo = _value_to_x(raw_lo, row, width, axis)
+    hi = _value_to_x(raw_hi, row, width, axis)
     mid = hist_height + box_height / 2
     if lo is not None and hi is not None:
         box.append(f"<line x1='{lo:.1f}' y1='{mid:.1f}' x2='{hi:.1f}' y2='{mid:.1f}' "
@@ -861,7 +1045,7 @@ def panel(row, label: str = "", width: int = 420, *,
                    f"width='{max(q3 - q1, 1):.1f}' height='{box_height - 4}' "
                    f"fill='currentColor' fill-opacity='.22' stroke='currentColor' "
                    f"stroke-opacity='.55'/>")
-    median_x = _value_to_x(row.get("p50"), row, width)
+    median_x = _value_to_x(row.get("p50"), row, width, axis)
     if median_x is not None:
         box.append(f"<line x1='{median_x:.1f}' y1='{hist_height + 2:.1f}' "
                    f"x2='{median_x:.1f}' y2='{hist_height + box_height - 2:.1f}' "
@@ -877,7 +1061,59 @@ def panel(row, label: str = "", width: int = 420, *,
     # the extreme is AT the boundary when it is beyond it (A142's rule).
     if dp is _UNSET:
         dp = fmt.precision_for(metric) if metric else 1
-    label_band = LABEL_BAND if ticks != TICK_NONE else 0
+
+    # ── A237: THE OVERFLOW MARKS, DRAWN BEFORE THE AXIS SO THEY SIT UNDER IT ────────────────
+    #
+    # 🚨 A NARROWED AXIS DROPS BARS AND SOMETHING HAS TO SAY SO. A142's law is that a mark at the
+    # boundary must not claim to BE at the boundary, so this is deliberately NOT a bar squeezed
+    # against the edge: it is a solid triangle pointing OUT of the plot, which says *there is
+    # more this way* and names no value at all. The count rides in the chart's own `<title>`.
+    # 🚨 IT POINTS OUT AND IT SITS IN. The first draft put the tip at `width + 4.5` on a viewBox
+    # `0 0 {width} …` — **present in the DOM, correct in every attribute, and clipped off the
+    # canvas.** A237's own crop caught it, which is A235's clipped `0` repeated by the round that
+    # had just written the test for it: `polygons: 1` and nothing on screen. The apex now lands ON
+    # the edge and the base is inset, so the mark is entirely inside the frame.
+    below_out, above_out = bins_outside(counts, row, axis)
+    for count, edge_x, direction in ((below_out, 0.0, -1), (above_out, float(width), 1)):
+        if not count:
+            continue
+        base_x = edge_x - direction * OVERFLOW_MARK
+        base_y = hist_height - 3.5
+        box.append(
+            f"<polygon points='{edge_x:.1f},{base_y:.1f} {base_x:.1f},{base_y - 3.5:.1f} "
+            f"{base_x:.1f},{base_y + 3.5:.1f}' fill='currentColor' fill-opacity='.55'>"
+            f"<title>{int(count)} beyond the drawn axis</title></polygon>")
+
+    # ── THE TICK RULER — Marc's "just the ticks", minimal vertical space ────────────────────
+    #
+    # ⚠️ MULTIPLES OF THE STEP, NOT STEPS FROM THE LEFT EDGE. See TICK_STEP: on an axis starting
+    # at 14 the first mark is 15. A ruler whose marks mean a different value on each chart is
+    # decoration, and two tiles side by side is exactly where that would show.
+    tick_band = 0
+    if ticks == TICK_STEP:
+        tick_band = TICK_BAND
+        span = axis_span(row, axis)
+        step = float(tick_step or 0)
+        if span and step > 0:
+            axis_lo, axis_hi = span
+            first = math.ceil(axis_lo / step) * step
+            baseline = hist_height + box_height
+            # ⚠️ A GUARD ON THE COUNT, NOT ON THE LOOP: a tiny step against a wide axis would
+            # emit thousands of marks into the DOM. 200 is far more than any readable ruler and
+            # far less than a runaway.
+            n = 0
+            value = first
+            while value <= axis_hi + 1e-9 and n < 200:
+                x = _value_to_x(value, row, width, axis)
+                if x is not None:
+                    box.append(
+                        f"<line x1='{x:.1f}' y1='{baseline + 1:.1f}' x2='{x:.1f}' "
+                        f"y2='{baseline + 1 + TICK_MARK:.1f}' stroke='currentColor' "
+                        f"stroke-opacity='.45'/>")
+                value += step
+                n += 1
+
+    label_band = LABEL_BAND if ticks not in (TICK_NONE, TICK_STEP) else 0
     if label_band:
         # 🚨 `pad=8.0` IS NOT A MARGIN, IT CANCELS `place()`'s OVERHANG — and a raster found it.
         # `_LabelBands.place` clamps to `[pad + half - 8, width - pad - half + 8]`: the ±8 lets a
@@ -892,7 +1128,7 @@ def panel(row, label: str = "", width: int = 420, *,
         # which is exactly inside.
         bands = _LabelBands(width, 8.0)
         for edge in _axis_ticks(row, ticks):
-            at_x = _value_to_x(edge, row, width)
+            at_x = _value_to_x(edge, row, width, axis)
             if at_x is not None:
                 bands.place("below", at_x, fmt.number(edge, dp=dp))
         baseline = hist_height + box_height + 11
@@ -900,7 +1136,7 @@ def panel(row, label: str = "", width: int = 420, *,
             box.append(f"<text x='{x:.1f}' y='{baseline:.1f}' text-anchor='middle' "
                        f"font-size='9' fill='currentColor' opacity='.65'>{text}</text>")
 
-    total_height = hist_height + box_height + label_band
+    total_height = hist_height + box_height + label_band + tick_band
     # 🚨 FIXED WIDTH THE MOMENT THERE IS TEXT. See the docstring: `preserveAspectRatio='none'`
     # distorts glyphs, and a squashed numeral on an axis is a legibility defect that is invisible
     # in the DOM — every <text> element present, correct and unreadable (R-855's family).
@@ -909,26 +1145,25 @@ def panel(row, label: str = "", width: int = 420, *,
     # draft of this change reordered `preserveAspectRatio` ahead of `height` — semantically
     # identical, textually different, and the identity test caught it. `:g` is not needed here
     # because `total_height` is an int throughout.
-    sizing = (f"width='100%' height='{total_height}' preserveAspectRatio='none'" if not label_band
+    sizing = (f"width='100%' height='{total_height}' preserveAspectRatio='none'"
+              if not (label_band or tick_band)
               else f"width='{width}' height='{total_height}' "
                    f"style='display:block;max-width:100%'")
     svg = (f"<svg class='cfdb-dist-svg' viewBox='0 0 {width} {total_height}' "
            f"{sizing} "
-           f"aria-hidden='true'>{_bars(counts, width, hist_height)}"
-           f"{_median_tick(row, width, hist_height)}{''.join(box)}</svg>")
+           f"aria-hidden='true'>"
+           f"{_bars(counts, width, hist_height, _bins_of(row), axis_span(row, axis))}"
+           f"{_median_tick(row, width, hist_height, axis)}{''.join(box)}</svg>")
 
     # ⚠️ NOT `stats`, WHICH IS THE PARAMETER. The first draft built the table into a local called
     # `stats` and then tested `if stats else ""` — which read the LIST, always truthy, so
     # `stats=False` was silently inert and the KPI tile printed the table it had asked not to.
     # A shadowed parameter fails by doing nothing, which is the hardest kind to see.
-    stat_rows = []
-    for name, key in (("n", "n"), ("min", "min_value"), ("p25", "p25"), ("median", "p50"),
-                      ("p75", "p75"), ("max", "max_value")):
-        value = row.get(key)
-        shown = "–" if value is None or pd.isna(value) else (
-            f"{int(value)}" if key == "n" else fmt.number(float(value), dp=1))
-        stat_rows.append(
-            f"<div class='cfdb-dist-stat'><span>{name}</span><b>{shown}</b></div>")
+    # ⚠️ A237: `stats` IS NO LONGER ONLY A BOOLEAN. True keeps all six, False keeps none, and a
+    # sequence of KEYS keeps a subset in `PANEL_STATS`'s order — which is how Marc's *"tight table
+    # ... that shows p25, p50, p75"* is three rows of the table that already existed rather than a
+    # second table beside it.
+    stats_html = stats_table(row, stats)
 
     # THE SUBTITLE CARRIES THE BIN CONFIGURATION, as plot_distribution's does, so the picture
     # is reproducible from what is on screen.
@@ -945,8 +1180,7 @@ def panel(row, label: str = "", width: int = 420, *,
     head_html = (f"<div class='cfdb-dist-head'><b>{label}</b>"
                  f"<span class='cfdb-dist-sub'>{subtitle}{tail_note}</span></div>"
                  if head else "")
-    stats_html = (f"<div class='cfdb-dist-stats'>{''.join(stat_rows)}</div>"
-                  if stats else "")
+
     return (f"<div class='cfdb-dist-panel' title='{_attr(describe(row))}'>"
             f"{head_html}"
             f"<div class='cfdb-dist-body'>{svg}"
