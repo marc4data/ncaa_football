@@ -470,7 +470,11 @@ def test_THE_PANEL_EXISTS_UNDER_THE_NAME_THE_TESTS_AND_TABS_USE(name):
 # 🚨 A235 (cfdb-main-R-3028 · R-3030 · R-3032). THREE OF THESE SEVEN MOVED IN ONE ROUND, and
 # the count stayed at seven: *Undefeated but lost* was REMOVED on Marc's instruction and
 # *Winning vs losing score* SPLIT IN TWO, so he freed the WIDTH of one tile rather than a slot.
-_KPI_LABELS = ("FBS games", "Avg closing O/U", "Winning score", "Losing score",
+# 🚨 A239 (cfdb-main-R-3235). > **MARC, v19:** *"Winning Score and Losing Score titles should be
+# prefixed with AVG."* 📊 And the widths did not move: A239 measured 927.3px at 1440, the same
+# figure A235 and A237 measured — the THIRD round running to find that these tiles size on their
+# SUB-LINE and not on their label. The length budget below is what keeps that honest.
+_KPI_LABELS = ("FBS games", "Avg closing O/U", "Avg winning score", "Avg losing score",
                "Favorites won", "Favorites covered", "O/U \u2013 over %")
 
 
@@ -711,7 +715,13 @@ def test_THE_KPI_HISTOGRAM_BAND_IS_HALVED():
     svg = today._kpi_chart(_dist("winning_points", 38), "winning_points", axis=(0.0, 59.0))
     total = int(re.search(r"viewBox='0 0 \d+ (\d+)'", svg).group(1))
     box_band = max(today._KPI_CHART_H // 4, 12)
-    assert total == today._KPI_CHART_H + box_band + distribution.TICK_BAND, (
+    # ⚠️ A239: THE AXIS BAND IS NOW `LABEL_BAND`, NOT `TICK_BAND` — Marc asked for numbers on the
+    # ruler, and a row of digits costs 15px where bare marks cost 5. **The band is derived from
+    # what the page asks for rather than hard-coded**, so this keeps asserting that the bands add
+    # up instead of pinning a total that moves whenever the axis changes.
+    axis_band = (distribution.LABEL_BAND if today._KPI_TICK_LABEL_STEP
+                 else distribution.TICK_BAND)
+    assert total == today._KPI_CHART_H + box_band + axis_band, (
         f"the chart is {total}px; the bands do not add up, so something other than the "
         f"histogram changed height")
     assert box_band == 12, "the box band collapsed with the bars; Marc halved the BARS"
@@ -737,3 +747,92 @@ def test_EVERY_CHARTED_TILE_CARRIES_ITS_p25_p50_p75():
     assert "<span>min</span>" not in html and "<span>n</span>" not in html, (
         "the KPI stats block is showing rows Marc did not ask for; it is meant to be tight")
     assert today._kpi_stats(None) == "", "an absent row must render nothing, not a broken table"
+
+
+# ── A239 — three gaps that staged breaks found GREEN ────────────────────────────────────────
+
+def test_THE_AXIS_IS_LABELLED_ON_THE_EVEN_VALUES():
+    """> **MARC, v19:** *"Label x-axis on the even values (10, 20, 30, etc)."*
+
+    🚨 A STAGED BREAK CAME BACK GREEN: moving the label step from 10 to 5 put a number on every
+    mark and nothing went red. **Pinned by VALUE**, like `_KPI_CHART_H`, because the point of the
+    change IS the number — a test on "some label step" passes on the reading Marc did not ask
+    for.
+
+    ⚠️ AND THE TWO STEPS ARE PINNED AS A RELATIONSHIP, not just individually: the marks stay
+    finer than the labels. A round that set them equal would satisfy both value checks and lose
+    A237's ruler.
+    """
+    import today
+    assert today._KPI_TICK_LABEL_STEP == 10, (
+        f"the axis labels every {today._KPI_TICK_LABEL_STEP}, not the 10 Marc asked for")
+    assert today._KPI_TICK_STEP == 5, "the tick marks moved off 5"
+    assert today._KPI_TICK_LABEL_STEP > today._KPI_TICK_STEP, (
+        "every mark now carries a number; Marc asked for marks every 5 and labels on the 10s")
+    import re
+    from lib import distribution
+    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points", axis=(0.0, 59.0))
+    labels = [float(t) for t in re.findall(r"<text[^>]*>([\d.]+)</text>", svg)]
+    assert labels, "the axis drew no labels at all"
+    for v in labels:
+        assert abs(v / today._KPI_TICK_LABEL_STEP
+                   - round(v / today._KPI_TICK_LABEL_STEP)) < 0.05, (
+            f"a label landed at {v}, which is not a multiple of "
+            f"{today._KPI_TICK_LABEL_STEP}")
+    marks = re.findall(r"<line x1='[\d.]+'[^>]*stroke-opacity='\.45'", svg)
+    assert len(marks) > len(labels), (
+        f"{len(marks)} marks and {len(labels)} labels — the ruler is no finer than the labels")
+    assert distribution.LABEL_BAND > distribution.TICK_BAND, \
+        "the label band should cost more than a bare ruler; one of them moved"
+
+
+def test_THE_STATS_BLOCK_IS_TOP_ALIGNED_WITH_THE_NUMERAL():
+    """> **MARC, v19:** *"Move the p25, med, p75 up to be aligned with the top of the KPI # and
+    > remove the wasted whitespace."*
+
+    🚨 A STAGED BREAK CAME BACK GREEN: reverting to `align-items:baseline` put the block back
+    where he asked it not to be, with nothing red. `baseline` sits the FIRST stat row on the
+    numeral's baseline and pushes the other two below it — which is the wasted whitespace.
+    """
+    rule = THEME[THEME.index(".cfdb-kpi-head {"):]
+    rule = rule[:rule.index("}")]
+    assert "align-items:flex-start" in rule, (
+        f"the stats block is not top-aligned with the numeral: {rule.strip()}")
+    assert "align-items:baseline" not in rule
+    stats = THEME[THEME.index(".cfdb-kpi-head .cfdb-dist-stats {"):]
+    stats = stats[:stats.index("}")]
+    assert "font-size:.64rem" in stats, (
+        f"the stats font is not the one-increment-larger size: {stats.strip()}")
+
+
+def test_A_CARRIED_DATASET_LABEL_NAMES_ITS_OWN_VIEW():
+    """🚨 THE THIRD GREEN BREAK, AND IT IS THE SUBTLE ONE. `dataset_also` carries a
+    `(label, table)` pair; pointing the LABEL at a different view than the TABLE produces a
+    caption that links correctly and reads wrongly — a dataset line naming one thing and opening
+    another.
+
+    ⚠️ The test that checks the label "reaches the reader" walks the TABLE side, so it could not
+    see this. Here the two halves are required to agree.
+    """
+    pairs = []
+    for node in ast.walk(_func("_kpi_row")):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "section"):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "dataset_also":
+                continue
+            for element in getattr(kw.value, "elts", []):
+                parts = getattr(element, "elts", [])
+                assert len(parts) == 2, f"dataset_also takes (label, table) pairs: {parts}"
+                pairs.append(parts)
+    assert pairs, "the KPI row carries no additional dataset label (R-2254)"
+    for label_node, table_node in pairs:
+        assert isinstance(table_node, ast.Constant), "the table must be a literal"
+        # the label must be DATASETS[<that same view>], not DATASETS[<something else>]
+        assert isinstance(label_node, ast.Subscript), (
+            f"the label for {table_node.value} is not read from DATASETS: "
+            f"{ast.dump(label_node)[:90]}")
+        assert getattr(label_node.value, "id", "") == "DATASETS"
+        assert label_node.slice.value == table_node.value, (
+            f"the caption labels {table_node.value!r} with "
+            f"{label_node.slice.value!r}'s name — the line would link one view and name another")

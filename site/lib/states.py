@@ -196,7 +196,7 @@ def _trace(exc: BaseException, view: str) -> None:
 
 
 @contextmanager
-def section(view: str, degraded_if_missing: Optional[str] = None,
+def section(view: str, degraded_if_missing: Optional[str] = None, dataset_also=(),
             explanation: str = "", scheduled: Optional[str] = None,
             dataset: Optional[str] = None):
     """Wrap a section so an exception becomes an Error state instead of a broken page.
@@ -231,7 +231,7 @@ def section(view: str, degraded_if_missing: Optional[str] = None,
         # four sibling modules and this one imports none, so keeping the edge out of module
         # scope keeps that asymmetry from becoming a cycle later.
         from lib import table
-        table.dataset_caption(dataset, view)
+        table.dataset_caption(dataset, view, dataset_also)
     from lib.query import QueryFailed
     try:
         yield

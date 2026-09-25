@@ -4523,6 +4523,16 @@ _KPI_CHART_H = 28
 # multiples of this, so an axis starting at 14 gets its first mark at 15. See `distribution.py`.
 _KPI_TICK_STEP = 5
 
+# 🚨 A239 (cfdb-main-R-3231). > **MARC, v19:** *"Label x-axis on the even values (10, 20, 30,
+# etc)."*
+# ⚠️ READ AS: KEEP A237's MARKS EVERY 5, AND PUT A NUMBER ON THE MULTIPLES OF 10. Two other
+# readings were available — marks only at 10s, or a number on every mark — and A239's report says
+# why this one: it keeps the finer ruler Marc asked for one round ago and adds the labels he asks
+# for now, rather than trading one against the other.
+# 📊 IT COSTS THE VERTICAL SPACE A237 SAVED: the band goes from `TICK_BAND` (5px) to `LABEL_BAND`
+# (15px). Halving the bars bought that room; this spends it back, measured in the report.
+_KPI_TICK_LABEL_STEP = 10
+
 # 🚨 THE THREE ROWS MARC ASKED FOR BESIDE THE FIGURE.
 # > **MARC:** *"How about a tight table to the right KPI value that shows p25, p50, p75."*
 # ⚠️ COLUMN NAMES, NOT LABELS — `distribution.stats_table` owns the display names and the order,
@@ -4608,6 +4618,7 @@ def _kpi_chart(dist_row, metric: str, axis=None) -> str:
     """
     return distribution.panel(dist_row, width=_KPI_CHART_W, height=_KPI_CHART_H,
                               ticks=distribution.TICK_STEP, tick_step=_KPI_TICK_STEP,
+                              tick_label_step=_KPI_TICK_LABEL_STEP,
                               head=False, stats=False, metric=metric, axis=axis)
 
 
@@ -4720,7 +4731,22 @@ def _kpi_row(scope, depth: int) -> None:
     arguments. Naming it rather than swallowing it with `*_` keeps the signature readable
     against the other panels'.
     """
-    with states.section("srv_week_summary", dataset=DATASETS["srv_week_summary"]):
+    # 🚨 A239 (cfdb-main-R-3232). ONE `Dataset:` LINE FOR THIS PANEL, NAMING BOTH VIEWS IT READS.
+    # > **MARC, v19:** *"Why do we have 3 lines of Dataset? … Can't we have 1 line of dataset and
+    # > list them comma delimited on a single row?"*
+    #
+    # 📊 THE PANEL GENUINELY READS TWO VIEWS — `srv_week_summary` for the seven figures and
+    # `srv_week_metric_distribution` for the three charts — and it opened a nested
+    # `states.section` for each, so it printed two captions. **Both were accurate; there were
+    # just two of them.** Each keeps its own dictionary link on the merged line.
+    #
+    # ⚠️ THE NESTED SECTION KEEPS ITS OWN ERROR AND DEGRADED STATES. Only its CAPTION is
+    # suppressed (`dataset=` omitted renders nothing, by `states.section`'s own contract) — the
+    # distribution query can still fail independently and draw its own card, which is the whole
+    # reason the two sections are nested rather than merged.
+    with states.section("srv_week_summary", dataset=DATASETS["srv_week_summary"],
+                        dataset_also=[(DATASETS["srv_week_metric_distribution"],
+                                       "srv_week_metric_distribution")]):
         summary = _week_summary(scope)
         if scope.week is None:
             # 🚨 A DELIBERATE ABSENCE, NOT A GAP. The view's grain is one row per WEEK; with
@@ -4753,8 +4779,10 @@ def _kpi_row(scope, depth: int) -> None:
         # and `dists` keeps the empty default. `thumbnail(None)` then reserves the same width
         # (R-141), so the row's geometry does not move either.
         dists = pd.DataFrame()
-        with states.section("srv_week_metric_distribution",
-                            dataset=DATASETS["srv_week_metric_distribution"]):
+        # ⚠️ NO `dataset=` — its label is carried by the panel's single caption above (A239).
+        # The section itself STAYS, because its Error and Degraded states are what keep a failed
+        # distribution query from taking the seven figures down with it.
+        with states.section("srv_week_metric_distribution"):
             dists = _week_distributions(scope)
         by_metric = {r["metric"]: r for _i, r in dists.iterrows()} if not dists.empty else {}
 
@@ -4867,14 +4895,19 @@ def _kpi_row(scope, depth: int) -> None:
         # each tile would give two correct calls that can still disagree, which is the class
         # A235's cross-tile test exists to catch.
         points_axis = _kpi_axis(by_metric, "winning_points", "losing_points")
+        # 🚨 A239 (cfdb-main-R-3235). > **MARC, v19:** *"Winning Score and Losing Score titles
+        # should be prefixed with AVG."* ⚠️ Sentence case in code; `.cfdb-kpi-label` uppercases on
+        # screen, which is A235's settled convention for this row. 📊 The width cost is measured
+        # in A239's report, not predicted — A237's own prediction about a longer label was wrong
+        # because these tiles size on their SUB-LINE.
         tiles.append(_kpi_figure(
-            "Winning score",
+            "Avg winning score",
             _KPI_ABSENT if win is None or pd.isna(win) else fmt.number(float(win), dp=1),
             played_sub,
             _kpi_chart(by_metric.get("winning_points"), "winning_points", points_axis),
             _kpi_stats(by_metric.get("winning_points"))))
         tiles.append(_kpi_figure(
-            "Losing score",
+            "Avg losing score",
             _KPI_ABSENT if lose is None or pd.isna(lose) else fmt.number(float(lose), dp=1),
             played_sub,
             _kpi_chart(by_metric.get("losing_points"), "losing_points", points_axis),
