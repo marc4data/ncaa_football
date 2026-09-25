@@ -4477,24 +4477,65 @@ def _bump(scope, depth: int) -> None:
 # ⚠️ THE ABSENCE MARK IS `fmt.EM_DASH`, WHICH IS THE SITE'S AND NOT THIS PANEL'S. PART 3 asks
 # for one mark used everywhere; the honest way to satisfy that is to reuse the one `fmt`
 # already returns for a null rather than to invent a second (R-855's first half).
-# 📊 72px, NOT 96. At 96 the winning/losing tile was 300px wide on its own and the row
-# needed 1,174px against 980px of content width at 1440 — so a summary row scrolled at the
-# WIDEST supported viewport. The thumbnail has no axis and ten bins, so 72px is 7.2px a
-# bin: still legible as a SHAPE, which is the only thing this size is for.
-_KPI_CHART_W = 72
+# 🚨 A235 (cfdb-main-R-3029). 140px AND A `panel()`, NOT 72px AND A `thumbnail()`.
+#
+# > **MARC, v18:** *"The distributions need fill the width of the KPI card. Might need more
+# > vertical real estate to include an x-axis with labels in the box-whisker diagram."* ·
+# > *"Histogram and Box-Whisker x-axis have to be aligned."* · *"not presenting the median next
+# > to the histogram."*
+#
+# ✅ ALL THREE WERE ALREADY BUILT AND NONE OF THEM WAS WIRED. `distribution.panel()` draws the
+# histogram and the box in ONE SVG on one scale — so the axes cannot drift — and puts no median
+# number beside the chart; `thumbnail()` is a 28px sparkline that prints one. **`panel()` had
+# ZERO call sites anywhere in `site/` before this round** (grepped, not assumed). What it did not
+# have was the axis labels, which lived in `box()`; A235 gave it the band.
+#
+# 📊 AND THE WIDTH IS THE BUDGET'S ANSWER, NOT A PREFERENCE. Measured with
+# `ci/measure_kpi_row.py` at `a7e1f78`, the four tiles that carry no chart have intrinsic widths
+# of 96.0 + 101.8 + 123.4 (and ~111 for the relabelled over-percentage tile), the six gaps cost
+# 52.8px, and 1440 gives the row 980px of content width. That leaves ~496px for three chart
+# tiles — 165px each — and a tile is `chart + 20.8px padding + 2px border`, so the chart itself
+# can have ~142. **140 is that number with the rounding left on the safe side**, and the row
+# measures 963.7px against 980 (below).
+#
+# ⚠️ 96 WAS TRIED AND REJECTED FOR THE OLD THUMBNAIL and the reason still stands as arithmetic:
+# at 96 the single winning/losing tile was 300px and the row needed 1,174px. **The split is what
+# makes 140 affordable** — two charts in one tile cost double inside a 176px cap, two charts in
+# two tiles each get their own.
+_KPI_CHART_W = 140
+
+# 📊 THE HISTOGRAM BAND, AND IT IS THE "more vertical real estate" MARC ASKED FOR. `panel()`'s
+# own default is `PANEL_HEIGHT = 120`, which is a full-page chart; the box adds a quarter of it
+# and the axis band 15px, so 120 would make a 165px picture inside a 115px tile. 56 gives
+# 56 + 14 + 15 = 85px of chart — twice the old thumbnail's 28 and legible with four labels under
+# it, which is what the axis was added for.
+_KPI_CHART_H = 56
 
 # 📊 THE ROW'S OWN SCROLL BOUNDARY, MEASURED BY `ci/measure_kpi_row.py` RATHER THAN CHOSEN:
-# seven tiles at their content width total 864.1px and six .55rem gaps add 52.8px, so the row
-# cannot go below 917px without scrolling. At 1440 the page gives it 980px and at 1600 1140px
+# seven tiles at their content width total 905.5px and six .55rem gaps add 52.8px, so the row
+# cannot go below 958px without scrolling. At 1440 the page gives it 980px and at 1600 1140px
 # — it does not scroll at either and the tiles GROW to fill both exactly. At 1300 it gives
 # 840px and at 1024 564px, and it scrolls at both. The note appears below the boundary.
 #
-# ⚠️ A231 MOVED THIS FROM 970 TO 917 AND THE NUMBER HAD TO MOVE WITH THE LABEL. The old
-# figure was measured when the seventh tile read "Undefeated teams that lost"; Marc's shorter
-# wording narrowed that tile, so the row's minimum came down with it. A threshold left at 970
-# would have drawn the scroll note at a width where the row no longer scrolls — a note that
-# tells a reader to scroll something that does not.
-_KPI_MIN_PX = 917
+# ⚠️ A231 MOVED THIS FROM 970 TO 917 AND THE NUMBER HAD TO MOVE WITH THE LABEL; A235 MOVES IT
+# TO 958 AND THE NUMBER HAD TO MOVE WITH THE TILE SET. A231's figure was measured when the
+# seventh tile read "Undefeated but lost" and the charts were 72px thumbnails. This round
+# deleted that tile, split the winning/losing tile in two, and took the charts to 140px —
+# three changes to the row's width in one commit, so the threshold is RE-MEASURED rather than
+# adjusted. 📊 The arithmetic of the move, per tile at 1300:
+#
+#     −137.4  the Undefeated tile, removed
+#     −176.0  the old combined winning/losing tile (it sat on the 11rem cap)
+#     +325.6  two chart tiles at 162.8 each (140px chart + 20.8 padding + 2 border)
+#     + 29.3  the over/under tile, 133.5 -> 162.8, same reason
+#     ±  0.0  the `O/U – over %` relabel — measured, and it did not move (see the tile)
+#     ───────
+#     + 41.4  864.1 -> 905.5, and 917 -> 958 with the gaps
+#
+# 🚨 A THRESHOLD LEFT AT 917 WOULD HAVE BEEN WRONG IN THE DANGEROUS DIRECTION: the row would
+# scroll between 917 and 958 with no note telling the reader there was more to see. A231's
+# was wrong the other way — a note where nothing scrolled.
+_KPI_MIN_PX = 958
 _KPI_ABSENT = fmt.EM_DASH
 
 
@@ -4512,6 +4553,35 @@ def _kpi_figure(label: str, value: str, sub: str, chart: str = "") -> str:
             f"<div class='cfdb-kpi-value'>{value}</div>"
             f"<div class='cfdb-kpi-sub'>{sub}</div>"
             f"{chart}</div>")
+
+
+def _kpi_chart(dist_row, metric: str) -> str:
+    """The distribution under a KPI figure: histogram, box-whisker, one axis, labels.
+
+    🚨 ONE CALL SITE'S WORTH OF ARGUMENTS IN ONE PLACE, so three tiles cannot drift apart. A235
+    split the winning/losing tile in two, which took the number of charted tiles from two to
+    three — and three copies of a five-argument call is how two of them end up on different
+    heights after somebody tunes one.
+
+    ⚠️ `ticks=TICK_EXTREMES` IS MARC'S LIST AND NOT A DEFAULT. v17: *"label MIN, Max, 25pctl,
+    75pctl where there is room"*, and when asked what the whisker ends should then do: *"MIN and
+    MAX should be labeled on the axis, the whisker endpoints don't need to be labeled."* The
+    median is not in his list either — it stays as the bold rule on the chart with no number,
+    which is also v18's *"not presenting the median next to the histogram"*.
+
+    ⚠️ `head=False, stats=False` BECAUSE THE TILE ALREADY SAYS BOTH. `panel()`'s head prints the
+    measure's name and its bin configuration and its stats block prints n/min/p25/median/p75/max;
+    the tile above it carries the label, the figure and the denominator. Printing them twice in
+    130px is the defect, not the feature.
+
+    📊 `metric` IS PASSED FOR THE DECIMALS AND FOR NOTHING ELSE. `fmt.precision_for` owns that
+    rule (R-555) and these three metrics are whole points, so the axis reads `10 · 24 · 38`
+    rather than `10.0 · 24.0 · 38.0` — four labels' worth of room saved by asking the module that
+    already knows instead of restating it here (§4.2.1).
+    """
+    return distribution.panel(dist_row, width=_KPI_CHART_W, height=_KPI_CHART_H,
+                              ticks=distribution.TICK_EXTREMES,
+                              head=False, stats=False, metric=metric)
 
 
 def _kpi_rate(row, rate_key: str, num_key: str, den_key: str, excluded=()) -> tuple:
@@ -4633,7 +4703,8 @@ def _kpi_row(scope, depth: int) -> None:
             "its own, so it keeps the same population whatever those two are set to, and "
             "its numbers match the distributions drawn under them. Each rate shows what it "
             "is out of; pushes and games with no closing line leave the denominator and are "
-            "counted separately."
+            "counted separately. **The over/under figure is the sportsbooks' average closing "
+            "total, not a score** — no game's points enter it."
             + ("" if played else
                " No game in the selected week has finished, so the outcome figures have "
                "nothing to measure yet."))
@@ -4644,7 +4715,33 @@ def _kpi_row(scope, depth: int) -> None:
             "FBS games", f"{games:,}",
             f"{played:,} completed" if played != games else "all completed"))
 
-        # 2 — AVERAGE OVER/UNDER, with its distribution under it
+        # 2 — THE AVERAGE CLOSING OVER/UNDER, with its distribution under it
+        #
+        # 🚨 A235 (cfdb-main-R-3028). THE LABEL MISLED ITS OWN AUTHOR, AND THAT IS WHY IT MOVED.
+        # > **MARC, v18:** *"Average Over/Under - is this the average(Home Score - Away Score) of
+        # > the Completed FBS games?"*
+        #
+        # 📊 NO, AND NOT BY A LITTLE. `srv_week_summary.sql:107` is `avg(total_at_close)` — the
+        # average closing TOTAL the sportsbooks posted. **No score enters it at all**: not
+        # `home − away`, which is the margin, and not the average of actual combined points
+        # either. It is a market number and the old label *"Average over/under"* did not say so
+        # loudly enough for the person who commissioned it.
+        #
+        # ✅ SO THE LABEL NAMES THE MARKET IN TWO WORDS — *closing* and *O/U*, both of which are
+        # the book's vocabulary and neither of which can be read as score arithmetic. ⚠️ MARC'S
+        # OWN SHORTHAND IS O/U (his v14 asked for *"Avg O/U with spread"*), so this is his
+        # vocabulary rather than a third one invented here.
+        #
+        # ✅ AND THE PICTURE AGREES WITH THE FIGURE, WHICH THIS ROUND CHECKED RATHER THAN ASSUMED.
+        # `by_metric.get("total")` plots `int_week_metric_value`'s `total`, which is
+        # `coalesce(total_at_close, total_current)` — **the LINE, not the realised total.** Had it
+        # been the outcome, a market figure over an outcome distribution would have been a second
+        # and worse defect; it is not, and the tile is internally consistent.
+        #
+        # ⚠️ THE SUB-LINE IS LEFT ALONE ON PURPOSE. `N priced · N with no line` is already a
+        # MARKET denominator, and it is `white-space:nowrap`, so a market prefix in front of it
+        # would push a 44-character string through a 176px cap. The distinction belongs in the
+        # label, which has room, and in the caption, which has more.
         mean = row.get("over_under_mean")
         priced = row.get("over_under_games")
         missing = row.get("over_under_missing")
@@ -4654,29 +4751,39 @@ def _kpi_row(scope, depth: int) -> None:
         if missing is not None and not pd.isna(missing) and int(missing) > 0:
             sub.append(f"{int(missing):,} with no line")
         tiles.append(_kpi_figure(
-            "Average over/under",
+            "Avg closing O/U",
             _KPI_ABSENT if mean is None or pd.isna(mean) else fmt.number(float(mean), dp=1),
             " · ".join(sub) if sub else "no closing totals yet",
-            distribution.thumbnail(by_metric.get("total"), width=_KPI_CHART_W)))
+            _kpi_chart(by_metric.get("total"), "total")))
 
-        # 3 — WINNING VS LOSING SCORES, ON ONE AXIS
-        # 🚨 THE SHARED AXIS IS THE POINT AND IT IS GUARANTEED UPSTREAM. A214 gave both
-        # metrics `axis_group: game_points` with identical bounds, and
-        # `assert_an_axis_group_shares_one_domain` fails the build if they ever disagree —
-        # so the page reads two rows and draws them, rather than reconciling two scales.
+        # 3 · 4 — WINNING AND LOSING SCORE, TWO TILES ON ONE AXIS
+        #
+        # > **MARC, v18:** *"Winning vs Losing Score - Break this into 2 KPI's."*
+        #
+        # 🚨 THE SHARED AXIS IS THE POINT AND SPLITTING THE TILE IS WHAT PUTS IT AT RISK. A214
+        # gave both metrics `axis_group: game_points` with identical bounds and
+        # `assert_an_axis_group_shares_one_domain` fails the build if they ever disagree — so the
+        # page reads two rows and draws them rather than reconciling two scales.
+        #
+        # ⚠️ THAT ASSERTION IS ABOUT THE MODEL AND CANNOT SEE THIS PAGE. Two tiles drawn on two
+        # scales would look fine and destroy the comparison Marc split them to make: the winning
+        # distribution sits to the RIGHT of the losing one, and that is only true if both are
+        # drawn against the same `bin_min`..`bin_max`. `panel()` frames on the ROW's own bins, so
+        # the property holds as long as the two rows agree — and
+        # `test_the_two_score_tiles_are_drawn_on_ONE_domain` pins it ACROSS THE TWO TILES rather
+        # than upstream, which is the half that had no guard.
         win, lose = row.get("winning_points_mean"), row.get("losing_points_mean")
-        pair = (distribution.thumbnail(by_metric.get("winning_points"), label="W",
-                                       width=_KPI_CHART_W)
-                + distribution.thumbnail(by_metric.get("losing_points"), label="L",
-                                         width=_KPI_CHART_W))
+        played_sub = f"mean of {played:,} completed" if played else "nothing played yet"
         tiles.append(_kpi_figure(
-            "Winning vs losing score",
-            (_KPI_ABSENT if win is None or pd.isna(win)
-             else f"{fmt.number(float(win), dp=1)}"
-                  f"<span class='cfdb-kpi-vs'>–</span>"
-                  f"{_KPI_ABSENT if lose is None or pd.isna(lose) else fmt.number(float(lose), dp=1)}"),
-            f"mean of {played:,} completed" if played else "nothing played yet",
-            f"<div class='cfdb-kpi-pair'>{pair}</div>"))
+            "Winning score",
+            _KPI_ABSENT if win is None or pd.isna(win) else fmt.number(float(win), dp=1),
+            played_sub,
+            _kpi_chart(by_metric.get("winning_points"), "winning_points")))
+        tiles.append(_kpi_figure(
+            "Losing score",
+            _KPI_ABSENT if lose is None or pd.isna(lose) else fmt.number(float(lose), dp=1),
+            played_sub,
+            _kpi_chart(by_metric.get("losing_points"), "losing_points")))
 
         # 4 · 5 · 6 — THE THREE RATES, each with its denominator and its exclusions
         value, sub = _kpi_rate(row, "favorite_straight_up_rate",
@@ -4691,34 +4798,52 @@ def _kpi_row(scope, depth: int) -> None:
                                 ("no line", "favorite_ats_no_line")))
         tiles.append(_kpi_figure("Favorites covered", value, sub))
 
+        # 🚨 A235 (cfdb-main-R-3030). MARC'S OWN STRING, IN THE ROW'S OWN CASE.
+        # > **MARC, v18:** *"Went Over - change to O/U - OVER %"*
+        #
+        # ⚠️ SENTENCE CASE IN CODE, CAPS ON SCREEN — `.cfdb-kpi-label` carries
+        # `text-transform:uppercase`, so this renders exactly as he wrote it: `O/U – OVER %`.
+        # Writing `OVER` in capitals here would make this the only label shouting in source and
+        # introduce a second convention for one tile, which is the note already sitting on the
+        # Undefeated label three rounds ago. `O/U` stays capitalised because it is an initialism,
+        # not a word.
+        # ⚠️ AND AN EN DASH, NOT THE HYPHEN HE TYPED. An en dash is the site's separator — `fmt`
+        # uses one for every range it composes — and a hyphen here would be the only
+        # hyphen-as-separator on the row. Rendered at .68rem the two are near-indistinguishable,
+        # so this costs the reader nothing and keeps one convention.
+        # 📊 AND IT COSTS THE ROW NOTHING, WHICH WAS MEASURED RATHER THAN PREDICTED — the
+        # prediction was wrong and is corrected here rather than left standing (§3.2.3). A231's
+        # budget note reasons from label length, so this round expected `O/U – OVER %` (12
+        # characters) to widen the tile past `WENT OVER` (9) by ~15px. **`ci/measure_kpi_row.py`
+        # says 96.0px before and 96.0px after, at both 1300 and 1024.** The label was never what
+        # sized this tile: the sub-line `43 of 73 · 2 push` is longer than either label, so the
+        # tile sits on the 6rem `min-width` floor and a label has to beat the SUB-LINE, not its
+        # predecessor, before the row's minimum moves at all.
         value, sub = _kpi_rate(row, "over_rate", "overs", "over_under_decided_games",
                                (("push", "total_pushes"), ("no line", "total_no_line")))
-        tiles.append(_kpi_figure("Went over", value, sub))
+        tiles.append(_kpi_figure("O/U – over %", value, sub))
 
-        # 7 — UNDEFEATED TEAMS THAT LOST
-        # ⚠️ ITS POPULATION IS WIDER THAN THE OTHER SIX AND THE SUB-LINE SAYS SO. The record
-        # spine is every team on the schedule, so a non-FBS team that was 3-0 and lost is
-        # counted here while its game is not counted above. A214 named this explicitly as a
-        # thing not to reconcile against the other six and conclude one is wrong.
-        lost, entering = row.get("undefeated_teams_lost"), row.get("undefeated_teams_entering")
-        has_entering = entering is not None and not pd.isna(entering) and int(entering) > 0
-        # 🚨 AND IT IS AN ABSENCE UNTIL SOMETHING HAS BEEN PLAYED, WHICH THE MODEL CANNOT SAY
-        # FOR ITSELF. A214 coalesces this count to 0 so a week always has a number; on a week
-        # nobody has played, that 0 is true only because nothing has happened yet, and printed
-        # as a figure it reads as *no unbeaten team was beaten* — a claim about a week that has
-        # not occurred. The other six outcome figures go to an em dash there and so does this.
-        # 🚨 A231 (cfdb-main-R-3023). MARC'S WORDS: *"'Undefeated Teams that Lost' wraps.
-        # Title can be reduced to 'Undefeated but Lost'."*
-        # ⚠️ SENTENCE CASE HERE, TITLE CASE ON SCREEN, AND THE TWO ARE THE SAME THING:
-        # `.cfdb-kpi-label` carries `text-transform:uppercase`, so every label renders in
-        # caps whatever this string says. The other six are sentence case in code and this
-        # matches them rather than introducing a second convention for one tile.
-        tiles.append(_kpi_figure(
-            "Undefeated but lost",
-            _KPI_ABSENT if lost is None or pd.isna(lost) or not has_entering or not played
-            else f"{int(lost):,}",
-            (f"of {int(entering):,} unbeaten" if has_entering
-             else "no team came in unbeaten"),))
+        # 🚨 A235 (cfdb-main-R-3032). THE *Undefeated but lost* TILE IS GONE, ON MARC'S
+        # INSTRUCTION, AND THE COLUMNS IT READ ARE STILL PUBLISHED.
+        # > **MARC, 2026-09-25:** *"remove Undefeated but Lost kpi card on Today, that will free
+        # > up the space needed for the histograms."*
+        #
+        # ⚠️ `undefeated_teams_lost` AND `undefeated_teams_entering` STAY ON `srv_week_summary`.
+        # Nothing in `dbt/` moved, so this is one commit to reverse and cost no dbt round — which
+        # is also why it is NOT a §3.3 contract: no column was removed, only a reader.
+        #
+        # 📊 AND THE TILE COUNT DID NOT FALL. Seven before; minus this one is six; plus the
+        # winning/losing split is seven again. **He did not free a tile SLOT, he freed the WIDTH
+        # of one tile to spend on the charts** — which is exactly the 137.4px the old seventh tile
+        # measured, and it is what pays for three 140px charts where two 72px ones used to fit.
+        #
+        # 📋 ITS SURVIVING REASONING IS IN A235's REPORT FOR COWORK TO FILE, NOT DELETED WITH IT:
+        # the record spine is every team on the schedule, so a non-FBS team that was 3-0 and lost
+        # was counted by these columns while its game was not counted by the other six figures.
+        # A214 named that as a thing not to reconcile and conclude one side is wrong. **The
+        # columns are still published, so the warning still applies to the next reader of them**
+        # — which is why it goes somewhere a reader of the MODEL will meet it, rather than staying
+        # as a comment about a tile that no longer exists (§3.2.3).
 
         # ⚠️ A208's SHARED WRAPPER, NOT A SECOND SCROLL MECHANISM. Seven tiles do not fit at
         # every width; `.cfdb-scroll` is the one the whole site uses and it carries its own

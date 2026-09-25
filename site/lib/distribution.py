@@ -267,79 +267,6 @@ def thumbnail(row, label: str = "", width: int = 120) -> str:
             f"<span class='cfdb-dist-median'>{median_text}</span></span>")
 
 
-def panel(row, label: str = "", width: int = 420) -> str:
-    """The same picture with room to read it: the histogram, the box-and-whisker beneath it on
-    a SHARED X-SCALE, and the statistics as a table beside it.
-
-    The stats block is a table, not a caption — label left, value right, monospace — which is
-    what `plot_distribution` does and is the part that makes the numbers scannable.
-    """
-    if row is None:
-        return ("<div class='cfdb-dist-panel cfdb-dist-empty'>"
-                "cfdb holds no distribution for this week yet.</div>")
-
-    counts = parse_bin_counts(row.get("bin_counts"))
-    hist_height = PANEL_HEIGHT
-    box_height = PANEL_HEIGHT // 4
-
-    # THE BOX SITS ON THE HISTOGRAM'S OWN SCALE. Drawn in one SVG rather than two stacked, so
-    # the axes cannot drift apart — which is the same reason the thumbnail and this share
-    # `_bars`.
-    box = []
-    q1 = _value_to_x(row.get("p25"), row, width)
-    q3 = _value_to_x(row.get("p75"), row, width)
-    lo = _value_to_x(row.get("whisker_lo"), row, width)
-    hi = _value_to_x(row.get("whisker_hi"), row, width)
-    mid = hist_height + box_height / 2
-    if lo is not None and hi is not None:
-        box.append(f"<line x1='{lo:.1f}' y1='{mid:.1f}' x2='{hi:.1f}' y2='{mid:.1f}' "
-                   f"stroke='currentColor' stroke-opacity='.6'/>")
-        for end in (lo, hi):
-            box.append(f"<line x1='{end:.1f}' y1='{mid - 4:.1f}' x2='{end:.1f}' "
-                       f"y2='{mid + 4:.1f}' stroke='currentColor' stroke-opacity='.6'/>")
-    if q1 is not None and q3 is not None:
-        box.append(f"<rect x='{q1:.1f}' y='{hist_height + 2:.1f}' "
-                   f"width='{max(q3 - q1, 1):.1f}' height='{box_height - 4}' "
-                   f"fill='currentColor' fill-opacity='.22' stroke='currentColor' "
-                   f"stroke-opacity='.55'/>")
-    median_x = _value_to_x(row.get("p50"), row, width)
-    if median_x is not None:
-        box.append(f"<line x1='{median_x:.1f}' y1='{hist_height + 2:.1f}' "
-                   f"x2='{median_x:.1f}' y2='{hist_height + box_height - 2:.1f}' "
-                   f"stroke='currentColor' stroke-width='2'/>")
-
-    svg = (f"<svg class='cfdb-dist-svg' viewBox='0 0 {width} {hist_height + box_height}' "
-           f"width='100%' height='{hist_height + box_height}' preserveAspectRatio='none' "
-           f"aria-hidden='true'>{_bars(counts, width, hist_height)}"
-           f"{_median_tick(row, width, hist_height)}{''.join(box)}</svg>")
-
-    stats = []
-    for name, key in (("n", "n"), ("min", "min_value"), ("p25", "p25"), ("median", "p50"),
-                      ("p75", "p75"), ("max", "max_value")):
-        value = row.get(key)
-        shown = "–" if value is None or pd.isna(value) else (
-            f"{int(value)}" if key == "n" else fmt.number(float(value), dp=1))
-        stats.append(f"<div class='cfdb-dist-stat'><span>{name}</span><b>{shown}</b></div>")
-
-    # THE SUBTITLE CARRIES THE BIN CONFIGURATION, as plot_distribution's does, so the picture
-    # is reproducible from what is on screen.
-    subtitle = (f"n={len(counts)} bins · incr={fmt.number(float(row['bin_incr']), dp=1)} · "
-                f"min={fmt.number(float(row['bin_min']), dp=0)} · "
-                f"max={fmt.number(float(row['bin_max']), dp=0)}")
-    tails = []
-    if int(row.get("below_min_count") or 0):
-        tails.append(f"{int(row['below_min_count'])} below")
-    if int(row.get("above_max_count") or 0):
-        tails.append(f"{int(row['above_max_count'])} above")
-    tail_note = f" · {' and '.join(tails)} the axis" if tails else ""
-
-    return (f"<div class='cfdb-dist-panel' title='{_attr(describe(row))}'>"
-            f"<div class='cfdb-dist-head'><b>{label}</b>"
-            f"<span class='cfdb-dist-sub'>{subtitle}{tail_note}</span></div>"
-            f"<div class='cfdb-dist-body'>{svg}"
-            f"<div class='cfdb-dist-stats'>{''.join(stats)}</div></div></div>")
-
-
 # ── box() ───────────────────────────────────────────────────────────────────────────────────
 #
 # Marc, 2026-09-14: "For every measure I'd like a horizontal box-whisker plot under the measure
@@ -610,6 +537,85 @@ def _whisker_pair(row):
     return None, None
 
 
+# ── A235 (cfdb-main-R-3029). TWO THINGS `box()` OWNED PRIVATELY AND `panel()` NOW NEEDS ──────
+#
+# 🚨 MARC ASKED FOR ONE PICTURE THAT NO ENTRY POINT DREW. His v18 wants the histogram and the
+# box-whisker *"x-axis aligned"* AND *"an x-axis with labels"*, and measured at `a7e1f78`:
+#
+#     panel()   histogram + box in ONE SVG on one scale  ✅   axis labels: NONE
+#     box()     axis labels, four tick strategies        ✅   reads no bin column at all
+#
+# ⚠️ SO THE GAP IS NOT A MISSING FUNCTION, IT IS A LABEL BAND `panel()` HAS NEVER HAD. The two
+# helpers below are lifted OUT of `box()`'s body unchanged rather than reimplemented beside it,
+# because a second copy of the collision rule is a copy that drifts — and the drift would be
+# invisible: two charts whose labels disagree about which one fits still both look fine.
+#
+# ✅ `tests/test_distribution_axis_labels.py` PINS `box()`'s OUTPUT BYTE-FOR-BYTE ACROSS EVERY
+# TICK STRATEGY, so the extraction is provably inert for the 130-odd tests and every live call
+# site that already read it.
+class _LabelBands:
+    """First-come-first-served label placement, one contest per baseline.
+
+    The three rules are `box()`'s and are unchanged: the caller's own figure is placed first and
+    wins, a label that would collide is DROPPED rather than shifted (a shifted label points at
+    the wrong place on the axis, which is worse than one fewer label), and every label is clamped
+    inside the frame so the viewBox cannot clip it.
+    """
+
+    def __init__(self, width: float, pad: float):
+        self.width, self.pad = width, pad
+        self.bands: dict = {}
+
+    def place(self, band: str, x: float, text: str, color: Optional[str] = None,
+              scale: float = 1.0) -> None:
+        # Half the label's MEASURED width each side is the exclusion zone — see _ADVANCE_9PX
+        # for why this is summed per character rather than averaged over the length.
+        half = _text_width(text) * scale / 2.0
+        x = min(max(x, self.pad + half - 8), self.width - self.pad - half + 8)
+        placed = self.bands.setdefault(band, [])
+        for other_x, other_half, _, _ in placed:
+            # Touching boxes plus a constant of clear space. No multiplier: see LABEL_GAP.
+            if abs(x - other_x) < half + other_half + LABEL_GAP:
+                return
+        placed.append((x, half, text, color))
+
+    def get(self, band: str) -> list:
+        return self.bands.get(band, [])
+
+
+def _axis_ticks(row, ticks: str) -> list:
+    """The values a tick strategy labels, IN THE ORDER THAT DECIDES WHICH SURVIVE.
+
+    🚨 THE ORDER IS LOAD-BEARING RATHER THAN TIDY, because `_LabelBands.place` is
+    first-come-first-served and drops whatever will not fit. Marc, v17: *"label MIN, Max, 25pctl,
+    75pctl where there is room"* — so when the four cannot all fit, the two he named first
+    survive, which are also the two the chart has never shown before.
+
+    ⚠️ THE WHISKER ENDS ARE NOT LABELLED UNDER `TICK_EXTREMES` — Marc, v17: *"the whisker
+    endpoints don't need to be labeled"*. Every other strategy prints them exactly as before.
+
+    ⚠️ A MISSING VALUE IS SKIPPED, NEVER DRAWN AT A SUBSTITUTE POSITION (R-084). `min_value` and
+    `max_value` are published by all four distribution siblings, but this module does not require
+    them — a hand-built row without them labels what it has.
+    """
+    def num(key):
+        raw = row.get(key)
+        return None if raw is None or pd.isna(raw) else float(raw)
+
+    if ticks == TICK_NONE:
+        return []
+    raw_lo, raw_hi = _whisker_pair(row)
+    lo = None if raw_lo is None or pd.isna(raw_lo) else float(raw_lo)
+    hi = None if raw_hi is None or pd.isna(raw_hi) else float(raw_hi)
+    if ticks == TICK_EXTREMES:
+        wanted = (num("min_value"), num("max_value"), num("p25"), num("p75"))
+    elif ticks == TICK_PERCENTILES:
+        wanted = (lo, hi, num("p50"), num("p25"), num("p75"))
+    else:
+        wanted = (lo, hi)
+    return [v for v in wanted if v is not None]
+
+
 def _box_scale(lo: float, hi: float, width: float, pad: float):
     """A closure mapping a value to an x offset inside the box plot.
 
@@ -782,6 +788,169 @@ def _sided_marker(x: float, height: float, mid: float, above: bool, color: str) 
         rule = (f"<line x1='{x:.1f}' y1='{mid:.1f}' x2='{x:.1f}' y2='{height:.1f}' "
                 f"stroke='{color}' stroke-width='2.2'></line>")
     return cap + rule
+
+
+def panel(row, label: str = "", width: int = 420, *,
+          height: Optional[int] = None, ticks: str = TICK_NONE,
+          head: bool = True, stats: bool = True, dp=_UNSET, metric: str = "") -> str:
+    """The same picture with room to read it: the histogram, the box-and-whisker beneath it on
+    a SHARED X-SCALE, and the statistics as a table beside it.
+
+    The stats block is a table, not a caption — label left, value right, monospace — which is
+    what `plot_distribution` does and is the part that makes the numbers scannable.
+
+    🚨 A235 MOVED THIS FUNCTION DOWN THE FILE AND CHANGED NOTHING ABOUT ITS DEFAULT OUTPUT. It
+    sits below `_LabelBands`, `_axis_ticks` and `_whisker_pair` because it now uses all three, and
+    Python resolves a default argument at `def` time — `ticks: str = TICK_NONE` cannot be written
+    above the constant it names. **It had ZERO call sites in `site/` when it moved**, so the move
+    could not break a caller; `tests/test_distribution_axis_labels.py` pins the default render.
+
+    ⚠️ FIVE KEYWORD-ONLY PARAMETERS, NOT A FOURTH DRAWING FUNCTION. Marc's v18 asks the KPI row
+    for a chart this module could ALMOST already draw: the aligned pair is here, the axis labels
+    were in `box()`, and nothing had both. The KPI tile also supplies its own label, figure and
+    denominator, so the panel's head and stats block would print each of them twice.
+
+        height   the histogram band. `PANEL_HEIGHT` when unasked; the box and the label band are
+                 sized from it, so one number moves the whole chart
+        ticks    TICK_NONE (default, and the byte-identical one) | TICK_BOUNDS | TICK_PERCENTILES
+                 | TICK_EXTREMES — Marc's *"x-axis with labels"*, drawn in a band below the box
+        head     the label and the bin subtitle. OFF for a caller that already names the measure
+        stats    the n/min/p25/median/p75/max table beside the chart
+        dp       decimals for the tick labels; defaults via `fmt.precision_for(metric)`
+        metric   the metric's COLUMN NAME, used only to choose `dp` — `box()`'s rule, one place
+
+    🚨 AND THE SVG'S WIDTH BEHAVIOUR IS DECIDED BY WHETHER THERE IS TEXT IN IT, WHICH IS A
+    CORRECTNESS RULE RATHER THAN A PREFERENCE. With no ticks the SVG keeps `width='100%'` and
+    `preserveAspectRatio='none'`, so it fills its container and the bars simply get wider — the
+    behaviour every existing render has. **`preserveAspectRatio='none'` scales TEXT
+    non-uniformly**, so the moment a tick label exists that stretch would render the digits
+    squashed or splayed by whatever ratio the container happened to have. A labelled panel is
+    therefore a FIXED-WIDTH SVG with `max-width:100%`, which is exactly what `box()` does and for
+    the same reason.
+    """
+    if row is None:
+        return ("<div class='cfdb-dist-panel cfdb-dist-empty'>"
+                "cfdb holds no distribution for this week yet.</div>")
+
+    counts = parse_bin_counts(row.get("bin_counts"))
+    hist_height = PANEL_HEIGHT if height is None else int(height)
+    # ⚠️ THE BOX KEEPS ITS PROPORTION OF THE BAND, WHICH IS A145's RULE ONE LEVEL OVER: a box
+    # plot has no y quantity, so its THICKNESS is decoration and scales, while nothing that
+    # carries a number moves. The floor stops the box collapsing to a rule at a short height.
+    box_height = max(hist_height // 4, 12)
+
+    # THE BOX SITS ON THE HISTOGRAM'S OWN SCALE. Drawn in one SVG rather than two stacked, so
+    # the axes cannot drift apart — which is the same reason the thumbnail and this share
+    # `_bars`. 🚨 IT IS ALSO WHAT MARC ASKED FOR IN v18 — *"Histogram and Box-Whisker x-axis have
+    # to be aligned"* — and it was already true here; what was missing was the labels.
+    box = []
+    q1 = _value_to_x(row.get("p25"), row, width)
+    q3 = _value_to_x(row.get("p75"), row, width)
+    raw_lo, raw_hi = _whisker_pair(row)
+    lo = _value_to_x(raw_lo, row, width)
+    hi = _value_to_x(raw_hi, row, width)
+    mid = hist_height + box_height / 2
+    if lo is not None and hi is not None:
+        box.append(f"<line x1='{lo:.1f}' y1='{mid:.1f}' x2='{hi:.1f}' y2='{mid:.1f}' "
+                   f"stroke='currentColor' stroke-opacity='.6'/>")
+        for end in (lo, hi):
+            box.append(f"<line x1='{end:.1f}' y1='{mid - 4:.1f}' x2='{end:.1f}' "
+                       f"y2='{mid + 4:.1f}' stroke='currentColor' stroke-opacity='.6'/>")
+    if q1 is not None and q3 is not None:
+        box.append(f"<rect x='{q1:.1f}' y='{hist_height + 2:.1f}' "
+                   f"width='{max(q3 - q1, 1):.1f}' height='{box_height - 4}' "
+                   f"fill='currentColor' fill-opacity='.22' stroke='currentColor' "
+                   f"stroke-opacity='.55'/>")
+    median_x = _value_to_x(row.get("p50"), row, width)
+    if median_x is not None:
+        box.append(f"<line x1='{median_x:.1f}' y1='{hist_height + 2:.1f}' "
+                   f"x2='{median_x:.1f}' y2='{hist_height + box_height - 2:.1f}' "
+                   f"stroke='currentColor' stroke-width='2'/>")
+
+    # ── THE AXIS LABEL BAND ──────────────────────────────────────────────────────────────────
+    #
+    # ⚠️ THE TICKS ARE PLACED ON THE HISTOGRAM'S SCALE, NOT ON `box()`'s. `box()` frames on the
+    # whiskers and pads; this frames on `bin_min`..`bin_max`, because that is the axis the bars
+    # are drawn against and the whole point of the shared scale. `_value_to_x` returns None for a
+    # value outside the bins, which is the honest answer — `below_min_count`/`above_max_count`
+    # already tell the reader the tail is off the axis, and a label clamped to the edge would say
+    # the extreme is AT the boundary when it is beyond it (A142's rule).
+    if dp is _UNSET:
+        dp = fmt.precision_for(metric) if metric else 1
+    label_band = LABEL_BAND if ticks != TICK_NONE else 0
+    if label_band:
+        # 🚨 `pad=8.0` IS NOT A MARGIN, IT CANCELS `place()`'s OVERHANG — and a raster found it.
+        # `_LabelBands.place` clamps to `[pad + half - 8, width - pad - half + 8]`: the ±8 lets a
+        # label hang slightly outside the FRAME, which is right for `box()`, where the frame is
+        # inset from the viewBox by its own `pad` and there is room to hang into. **A panel's
+        # histogram starts at x=0**, so with `pad=0` the same expression clamps a left-edge label
+        # to `half - 8` — outside the viewBox, where it is clipped. 📊 MEASURED ON THE LOSING
+        # SCORE TILE, whose `min_value` is 0: the crop at 1440 rendered `)` where `0` belonged.
+        # ⚠️ AND IT WAS INVISIBLE IN THE DOM — the `<text>` element was present, correct and
+        # half off the canvas (R-855's family: the picture caught what reading could not).
+        # `pad=8` makes the two constants cancel and the clamp become `[half, width - half]`,
+        # which is exactly inside.
+        bands = _LabelBands(width, 8.0)
+        for edge in _axis_ticks(row, ticks):
+            at_x = _value_to_x(edge, row, width)
+            if at_x is not None:
+                bands.place("below", at_x, fmt.number(edge, dp=dp))
+        baseline = hist_height + box_height + 11
+        for x, _half, text, _color in bands.get("below"):
+            box.append(f"<text x='{x:.1f}' y='{baseline:.1f}' text-anchor='middle' "
+                       f"font-size='9' fill='currentColor' opacity='.65'>{text}</text>")
+
+    total_height = hist_height + box_height + label_band
+    # 🚨 FIXED WIDTH THE MOMENT THERE IS TEXT. See the docstring: `preserveAspectRatio='none'`
+    # distorts glyphs, and a squashed numeral on an axis is a legibility defect that is invisible
+    # in the DOM — every <text> element present, correct and unreadable (R-855's family).
+    # ⚠️ THE ATTRIBUTE ORDER IS LOAD-BEARING FOR THE UNLABELLED CASE AND THAT IS NOT PEDANTRY.
+    # A145's rule is that a default may not move a byte of an existing render, and the first
+    # draft of this change reordered `preserveAspectRatio` ahead of `height` — semantically
+    # identical, textually different, and the identity test caught it. `:g` is not needed here
+    # because `total_height` is an int throughout.
+    sizing = (f"width='100%' height='{total_height}' preserveAspectRatio='none'" if not label_band
+              else f"width='{width}' height='{total_height}' "
+                   f"style='display:block;max-width:100%'")
+    svg = (f"<svg class='cfdb-dist-svg' viewBox='0 0 {width} {total_height}' "
+           f"{sizing} "
+           f"aria-hidden='true'>{_bars(counts, width, hist_height)}"
+           f"{_median_tick(row, width, hist_height)}{''.join(box)}</svg>")
+
+    # ⚠️ NOT `stats`, WHICH IS THE PARAMETER. The first draft built the table into a local called
+    # `stats` and then tested `if stats else ""` — which read the LIST, always truthy, so
+    # `stats=False` was silently inert and the KPI tile printed the table it had asked not to.
+    # A shadowed parameter fails by doing nothing, which is the hardest kind to see.
+    stat_rows = []
+    for name, key in (("n", "n"), ("min", "min_value"), ("p25", "p25"), ("median", "p50"),
+                      ("p75", "p75"), ("max", "max_value")):
+        value = row.get(key)
+        shown = "–" if value is None or pd.isna(value) else (
+            f"{int(value)}" if key == "n" else fmt.number(float(value), dp=1))
+        stat_rows.append(
+            f"<div class='cfdb-dist-stat'><span>{name}</span><b>{shown}</b></div>")
+
+    # THE SUBTITLE CARRIES THE BIN CONFIGURATION, as plot_distribution's does, so the picture
+    # is reproducible from what is on screen.
+    subtitle = (f"n={len(counts)} bins · incr={fmt.number(float(row['bin_incr']), dp=1)} · "
+                f"min={fmt.number(float(row['bin_min']), dp=0)} · "
+                f"max={fmt.number(float(row['bin_max']), dp=0)}")
+    tails = []
+    if int(row.get("below_min_count") or 0):
+        tails.append(f"{int(row['below_min_count'])} below")
+    if int(row.get("above_max_count") or 0):
+        tails.append(f"{int(row['above_max_count'])} above")
+    tail_note = f" · {' and '.join(tails)} the axis" if tails else ""
+
+    head_html = (f"<div class='cfdb-dist-head'><b>{label}</b>"
+                 f"<span class='cfdb-dist-sub'>{subtitle}{tail_note}</span></div>"
+                 if head else "")
+    stats_html = (f"<div class='cfdb-dist-stats'>{''.join(stat_rows)}</div>"
+                  if stats else "")
+    return (f"<div class='cfdb-dist-panel' title='{_attr(describe(row))}'>"
+            f"{head_html}"
+            f"<div class='cfdb-dist-body'>{svg}"
+            f"{stats_html}</div></div>")
 
 
 def box(row, value=None, width: int = 240, label: str = "",
@@ -1124,22 +1293,12 @@ def box(row, value=None, width: int = 240, label: str = "",
     # therefore not made worse by the second value; measured across 120/200/300/448, the two-value
     # chart keeps MORE labels than the one-value chart at every width, because it adds a label in
     # a band where nothing can displace it.
-    bands = {}
-
-    def place(band: str, x: float, text: str, color: Optional[str] = None,
-              scale: float = 1.0) -> None:
-        # Half the label's MEASURED width each side is the exclusion zone — see _ADVANCE_9PX
-        # for why this is summed per character rather than averaged over the length.
-        # ⚠️ A154: `scale` is 1.0 for every axis label and for every caller that has not asked for
-        # the bigger value font, so the arithmetic below is unchanged for them to the bit.
-        half = _text_width(text) * scale / 2.0
-        x = min(max(x, pad + half - 8), width - pad - half + 8)
-        placed = bands.setdefault(band, [])
-        for other_x, other_half, _, _ in placed:
-            # Touching boxes plus a constant of clear space. No multiplier: see LABEL_GAP.
-            if abs(x - other_x) < half + other_half + LABEL_GAP:
-                return
-        placed.append((x, half, text, color))
+    # ⚠️ A235: THE PLACEMENT RULE MOVED OUT AND NOTHING ABOUT IT CHANGED. `panel()` needs the
+    # identical contest for its own axis band, and `_LabelBands` is this closure lifted verbatim
+    # — `scale` is still 1.0 for every axis label and for every caller that has not asked for the
+    # bigger value font, so the arithmetic here is unchanged for them to the bit.
+    bands = _LabelBands(width, pad)
+    place = bands.place
 
     # THE VALUE LABEL WINS, so it is placed into its band before anything else can take the room.
     #
@@ -1171,28 +1330,11 @@ def box(row, value=None, width: int = 240, label: str = "",
               else fmt.number(marker_value, dp=dp),
               marker_color,
               _VALUE_LABEL_SCALE if value_labels_own_row else 1.0)
-    # ⚠️ THE WHISKER ENDS ARE NOT LABELLED UNDER `TICK_EXTREMES` — Marc, v17: *"the whisker
-    # endpoints don't need to be labeled"*. Every other strategy prints them exactly as before.
-    if ticks not in (TICK_NONE, TICK_EXTREMES):
-        place("below", at(lo), fmt.number(lo, dp=dp))
-        place("below", at(hi), fmt.number(hi, dp=dp))
-    if ticks == TICK_PERCENTILES:
-        for edge in (p50, p25, p75):
-            place("below", at(edge), fmt.number(edge, dp=dp))
-    elif ticks == TICK_EXTREMES:
-        # 🚨 THE ORDER IS MARC'S AND IT IS ALSO THE PRIORITY, because `place()` is
-        # first-come-first-served and drops whatever will not fit (its own rule 2). *"label MIN,
-        # Max, 25pctl, 75pctl where there is room"* — so when the four cannot all fit, the two he
-        # named first survive, which are also the two the chart has never shown before.
-        #
-        # ⚠️ AND A ROW MAY NOT CARRY THEM. `min_value`/`max_value` are published by the four
-        # distribution siblings but this module does not require them — `box()` already returns
-        # its empty state only for p25/p50/p75 and the whiskers. A missing extreme is skipped,
-        # never drawn at a substitute position (R-084's rule: render nothing rather than
-        # substitute something).
-        for edge in (out_min, out_max, p25, p75):
-            if edge is not None:
-                place("below", at(edge), fmt.number(edge, dp=dp))
+    # ⚠️ A235: WHICH VALUES EACH STRATEGY LABELS, AND IN WHICH ORDER, IS NOW `_axis_ticks` — the
+    # same list `panel()` reads. The strategy's meaning (whisker ends for every strategy but
+    # `extremes`, Marc's MIN·MAX·p25·p75 priority for that one) is documented there, once.
+    for edge in _axis_ticks(row, ticks):
+        place("below", at(edge), fmt.number(edge, dp=dp))
 
     # ⚠️ THE BOX KEEPS ITS OWN COORDINATES AND THE BAND IS ADDED AROUND IT, so every line above
     # this point is written once and the one-value SVG is unchanged to the byte.
@@ -1210,7 +1352,7 @@ def box(row, value=None, width: int = 240, label: str = "",
     for band, baseline in (("above", -6.0),
                            ("value-below", height + 11),
                            ("below", height + 11 + value_below_band)):
-        for x, _half, text, color in bands.get(band, []):
+        for x, _half, text, color in bands.get(band):
             fill = f"fill='{color}'" if color else "fill='currentColor' opacity='.65'"
             # ⚠️ GATED ON THE FLAG, NOT ON `color`. A two-sided caller that has NOT asked for the
             # move also draws a coloured label in the `above` band — keying the size off the

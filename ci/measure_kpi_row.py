@@ -71,7 +71,14 @@ MEASURE = r"""() => {
       value: value ? value.textContent.trim() : '',
       sub:   sub   ? sub.textContent.trim()   : '',
       w: px(r.width), h: px(r.height), top: px(r.top), bottom: px(r.bottom),
-      charts: t.querySelectorAll('.cfdb-dist').length,
+      // 🚨 A235 (cfdb-main-R-3034). BOTH SELECTORS, BECAUSE THE ROW CHANGED RENDERER AND THIS
+      // COUNTER SILENTLY WENT TO ZERO. `thumbnail()` emits `.cfdb-dist`; `panel()` emits
+      // `.cfdb-dist-panel`, which is NOT a `.cfdb-dist`. A235 moved the KPI row from the first
+      // to the second and this line went on reporting `0 charts` for a row carrying three of
+      // them — the measurement was taken, printed, and false. **R-859: a selector counts
+      // elements matching that selector, never "charts"** — so it names every shape a chart can
+      // arrive in, and a fifth entry point will break it loudly rather than read zero.
+      charts: t.querySelectorAll('.cfdb-dist, .cfdb-dist-panel').length,
       // the numeral's own ink, which is what PART 2 is about
       valueInkTop: glyph ? glyph.top : null,
       valueInkBottom: glyph ? glyph.bottom : null,
@@ -133,8 +140,18 @@ def run(scheme: str = "light", week: str = "3") -> list:
             ctx = browser.new_context(viewport={"width": width, "height": 1100},
                                       color_scheme=scheme, device_scale_factor=2)
             page = ctx.new_page()
+            # 🚨 A235 (cfdb-main-R-3033). `networkidle` WAS A PROXY AND IT BOTH HANGS AND LIES.
+            # It timed out at 120s on a page that had rendered correctly in under 10 — measured:
+            # the same four widths loaded with `domcontentloaded` gave 7 tiles, 3 charts and 0
+            # error cards every time, while `networkidle` never settled. ⚠️ AND IT WAS THE WEAKER
+            # ASSERTION IN THE OTHER DIRECTION TOO: "no requests for 500ms" can be satisfied by a
+            # page whose KPI row is absent, which is why `summarise` carries a `found: false`
+            # branch at all. **Waiting for the element under measurement is both more reliable and
+            # strictly stronger**, and the 9s settle that follows is unchanged — it is what lets
+            # Streamlit finish its own re-run before anything is read.
             page.goto(f"http://localhost:8604{page_url('today')}?tab=back&week={week}",
-                      wait_until="networkidle", timeout=120000)
+                      wait_until="domcontentloaded", timeout=120000)
+            page.wait_for_selector(".cfdb-kpirow", timeout=120000)
             page.wait_for_timeout(9000)
             data = page.evaluate(MEASURE)
             data.update({"width": width, "scheme": scheme, "week": week,

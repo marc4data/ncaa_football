@@ -1610,13 +1610,25 @@ TABLE_CSS = """
    every rate because *"62% of favorites covered"* over 8 games and over 60 are different
    claims; a reader who has to hover to find that out has already read the wrong one. */
 .cfdb-kpi-sub { font-size:.64rem; opacity:.65; line-height:1.25; white-space:nowrap; }
-/* The en dash between the two score means is a separator, not a minus. Spaced so `38.9–17.2`
-   cannot be misread as a negative number. */
-.cfdb-kpi-vs { opacity:.45; padding:0 .18rem; font-weight:400; }
-/* The two score distributions sit side by side ON ONE AXIS — `axis_group: game_points`
-   upstream, asserted by a dbt test. Drawn on separate bounds they would look alike, and the
-   whole point is that the winning distribution sits to the RIGHT of the losing one. */
-.cfdb-kpi-pair { display:flex; gap:.3rem; align-items:flex-end; }
+/* 🚨 A235 (cfdb-main-R-3029). `.cfdb-kpi-vs` AND `.cfdb-kpi-pair` ARE GONE BECAUSE THEIR TILE IS.
+   `-vs` drew the en dash in `38.9–17.2` and `-pair` sat two 72px thumbnails side by side; Marc's
+   v18 split that tile in two, so each score now has its own tile and its own full-width chart and
+   there is no pair to lay out and no dash to space. **Dead rules are deleted rather than left
+   looking load-bearing** (§3.2.3) — a selector nothing emits is a claim that something does. */
+/* 🚨 AND THE PANEL LOSES ITS OWN FRAME INSIDE A TILE, WHICH IS NOT COSMETIC. `.cfdb-dist-panel`
+   carries a border, a radius and .6rem of padding because it was written as a standalone
+   full-page chart; inside `.cfdb-kpi`, which already has a border, that renders as a box inside a
+   box and spends 24px of the 140px the chart was just given. The panel keeps its structure and
+   drops its chrome. */
+.cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
+/* `.cfdb-dist-body` is a flex row because the standalone panel puts the stats table beside the
+   chart. The KPI tile passes `stats=False`, so there is one child and the gap would be dead
+   space. ⚠️ AND THE SVG MUST NOT SHRINK: it is a FIXED width here (see `panel()` — a chart with
+   axis text cannot use `preserveAspectRatio='none'` without distorting its own digits), so
+   `flex:1 1 auto` would squeeze the picture narrower than the geometry it was drawn at while
+   every tick label stayed where it was put. */
+.cfdb-kpi .cfdb-dist-body { gap:0; }
+.cfdb-kpi .cfdb-dist-body .cfdb-dist-svg { flex:0 0 auto; }
 .cfdb-kpi .cfdb-dist { margin-top:.15rem; }
 
 /* 🚨 A216 (cfdb-main-R-2604). THE BAR'S WIDTH AND THE GAP BESIDE IT ARE VARIABLES NOW,

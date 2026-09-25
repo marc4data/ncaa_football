@@ -160,23 +160,132 @@ def _dist(metric, p50, bin_min=0, bin_max=80, bin_count=10):
                       "axis_group": "game_points", "domain_rule": "fixed"}, dtype=object)
 
 
-def test_THE_TWO_SCORE_THUMBNAILS_ARE_DRAWN_ON_ONE_DOMAIN():
-    """🚨 THE COMPARISON IS THE POINT. Rescaled to its own maximum a losing-score
-    distribution looks very like a winning one; the whole reason to put them side by side is
-    that the winning distribution sits visibly to the RIGHT.
+def test_the_two_score_tiles_are_drawn_on_ONE_domain():
+    """🚨 A235 (cfdb-main-R-3029). THE SPLIT IS EXACTLY WHAT PUTS THE SHARED AXIS AT RISK.
 
-    ⚠️ THE TWO FIXTURES CARRY DIFFERENT MEDIANS (38 and 17), so this cannot pass by comparing
-    a row with itself — and the assertion is EQUALITY of the drawn domain, not each being
+    > **MARC, v18:** *"Winning vs Losing Score - Break this into 2 KPI's."*
+
+    Rescaled to its own maximum a losing-score distribution looks very like a winning one; the
+    whole reason to show them together is that the winning distribution sits visibly to the
+    RIGHT. While they were two thumbnails in ONE tile that was obvious on inspection. **As two
+    separate tiles, two different scales would look completely fine and be silently wrong.**
+
+    ⚠️ `assert_an_axis_group_shares_one_domain` PINS THIS UPSTREAM AND CANNOT SEE THIS PAGE —
+    it asserts the two metrics' published bounds agree, not that the page draws them that way.
+    This is the half that had no guard: the property is asserted THROUGH THE RENDERER, on the
+    exact call the two tiles make, so a round that passed a per-tile `frame` or let one tile
+    fall back to its own extremes goes red here.
+
+    ⚠️ THE TWO FIXTURES CARRY DIFFERENT MEDIANS (38 and 17), so this cannot pass by comparing a
+    row with itself — and the assertion is EQUALITY of the drawn geometry, not each being
     inside some range (R-2260).
     """
-    from lib import distribution
+    import re
+    import today
     win, lose = _dist("winning_points", 38), _dist("losing_points", 17)
     assert float(win["p50"]) != float(lose["p50"]), "the fixtures are the same picture"
-    a = distribution.thumbnail(win, label="W", width=72)
-    b = distribution.thumbnail(lose, label="L", width=72)
+    # 🚨 THROUGH THE PAGE'S OWN HELPER, NOT THROUGH A CALL THIS TEST COMPOSES (R-768). If the
+    # page changes the arguments it renders with, this test changes with it.
+    a, b = today._kpi_chart(win, "winning_points"), today._kpi_chart(lose, "losing_points")
+    geom = lambda svg: re.search(r"viewBox='([^']+)'", svg).group(1)      # noqa: E731
+    assert geom(a) == geom(b), "the two score tiles are drawn on different domains"
+
+    # AND THE SHARED DOMAIN IS DOING WORK, not agreeing by accident: with equal bounds and
+    # different data the two MEDIAN RULES must land at different x. If they coincided, the
+    # renderer would be ignoring the row and the equality above would be worthless.
+    assert (float(win["bin_min"]), float(win["bin_max"])) == \
+           (float(lose["bin_min"]), float(lose["bin_max"]))
+    median_x = lambda svg: re.search(                                     # noqa: E731
+        r"<line x1='([\d.]+)'[^>]*stroke-opacity='0.95'", svg).group(1)
+    assert median_x(a) != median_x(b), (
+        "both medians are at the same x on a shared axis — the chart is not reading the row")
+
+
+def test_THE_KPI_ROW_ACTUALLY_ASKS_FOR_AN_AXIS():
+    """🚨 A STAGED BREAK FOUND THIS GAP AND IT IS THE POINT OF STAGING THEM.
+
+    > **MARC, v18:** *"Might need more vertical real estate to include an x-axis with labels in
+    > the box-whisker diagram."*
+
+    `tests/test_distribution_axis_labels.py` proves `panel()` CAN draw an axis. **Changing the
+    page's own call to `ticks=TICK_NONE` left all 37 tests green** — the axis Marc asked for
+    would have vanished from the site with nothing red, because every axis test was pointed at
+    the module and none at the caller. This is the caller.
+    """
     import re
-    box = lambda svg: re.search(r"viewBox='([^']+)'", svg).group(1)      # noqa: E731
-    assert box(a) == box(b), "the two score thumbnails are drawn on different domains"
+    import today
+    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points")
+    labels = re.findall(r"<text[^>]*>([^<]*)</text>", svg)
+    assert labels, (
+        "the KPI charts draw no axis labels. Marc asked for an x-axis with labels; the page "
+        "is asking distribution.panel() for TICK_NONE.")
+    assert all(re.fullmatch(r"-?[\d.]+", t) for t in labels), \
+        f"the axis is emitting something that is not a number: {labels}"
+
+
+def test_NEITHER_SCORE_TILE_RESHAPES_ITS_PUBLISHED_ROW():
+    """🚨 THE OTHER BREAK THAT CAME BACK GREEN, AND THE ONE THE SPLIT EXISTS TO PREVENT.
+
+    Giving the losing tile its own `bin_max` — two tiles, two scales, side by side — left every
+    test passing. The renderer test above cannot see it: handed two rows that share bounds it
+    correctly draws them on one domain, so it proves the RENDERER honest and says nothing about
+    what the PAGE hands it (R-768 — a test whose subject it builds itself).
+
+    ✅ SO THE CLAIM IS STRUCTURAL AND IT IS CHECKED ON THE PAGE'S OWN CALLS: each chart gets the
+    published row, unmodified. A dict literal, a merge, a `.copy()` with an override — anything
+    that is not `by_metric.get(<metric>)` — is the page reconciling scales, which is exactly
+    what §4.2.1 and the upstream `axis_group` assertion exist to keep it out of.
+    """
+    calls = [node for node in ast.walk(_func("_kpi_row"))
+             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_kpi_chart"]
+    assert len(calls) == 3, f"expected three charted tiles, found {len(calls)}"
+    metrics = []
+    for call in calls:
+        arg = call.args[0]
+        assert isinstance(arg, ast.Call) and getattr(arg.func, "attr", "") == "get", (
+            f"a KPI chart is handed {ast.dump(arg)[:80]} rather than the published row. "
+            f"The page must pass `by_metric.get(<metric>)` unmodified — reshaping it here is "
+            f"the page reconciling two scales.")
+        assert getattr(arg.func.value, "id", "") == "by_metric"
+        assert len(arg.args) == 1 and isinstance(arg.args[0], ast.Constant)
+        metrics.append(arg.args[0].value)
+    assert metrics == ["total", "winning_points", "losing_points"], \
+        f"the charted tiles changed: {metrics}"
+
+
+def test_the_two_score_tiles_are_NOT_drawn_on_one_domain_if_the_bounds_diverge():
+    """🚨 R-843 — A PIN IS ONLY A PIN IF THE BREAK MOVES IT. The test above would pass on any
+    renderer that ignored `bin_min`/`bin_max` entirely and always emitted the same viewBox.
+
+    This stages that break: give the losing metric a DIFFERENT published domain, which is the
+    exact condition `assert_an_axis_group_shares_one_domain` exists to prevent upstream, and
+    confirm the page-level assertion goes red rather than shrugging.
+    """
+    from lib import distribution
+    win = _dist("winning_points", 38)
+    lose = _dist("losing_points", 17, bin_min=0, bin_max=40)
+    assert float(win["bin_max"]) != float(lose["bin_max"]), "the staged break did not stage"
+
+    # 🚨 THE OBSERVABLE CONSEQUENCE A READER WOULD BE MISLED BY: with diverging bounds, ONE
+    # VALUE lands at two different places. 20 points is a quarter of the way along an 80-point
+    # axis and half way along a 40-point one, and the two tiles sit side by side.
+    assert distribution._value_to_x(20, win, 140) != distribution._value_to_x(20, lose, 140), (
+        "the renderer puts one value at the same pixel on two different domains — it is not "
+        "reading bin_min/bin_max, so the test above proves nothing")
+
+    # ⚠️ AND THE POINT OF STAGING IT: the viewBox is `width x height`, so it is IDENTICAL under
+    # this break. **The test above cannot catch a divergence on its own** — it catches a
+    # renderer that ignores the row, which is a different and weaker claim. The bounds
+    # themselves are guaranteed by `assert_an_axis_group_shares_one_domain` in dbt, and that
+    # division of labour is recorded here so the next reader does not mistake one for the other.
+    import re
+    a, b = None, None
+    for row in (win, lose):
+        svg = distribution.panel(row, width=140, height=56,
+                                 ticks=distribution.TICK_EXTREMES, head=False, stats=False)
+        box = re.search(r"viewBox='([^']+)'", svg).group(1)
+        a, b = (box, b) if row is win else (a, box)
+    assert a == b, "viewBox is width x height and both are unchanged by the bounds"
 
 
 def test_THE_SHARED_AXIS_IS_GUARANTEED_UPSTREAM_not_by_this_page():
@@ -231,13 +340,35 @@ def test_A_WEEK_WITH_NO_COMPLETED_GAME_STILL_DRAWS_THE_ROW():
         or "not played" in SOURCE, "the unplayed-week reasoning is undocumented"
 
 
-def test_THE_UNDEFEATED_COUNT_IS_AN_ABSENCE_UNTIL_SOMETHING_HAS_BEEN_PLAYED():
-    """A214 coalesces this to 0 so every week has a number. On a week nobody has played that
-    0 reads as *no unbeaten team was beaten* — a claim about a week that has not happened.
-    The other six outcome figures go to an em dash there and so does this one."""
-    src = ast.get_source_segment(SOURCE, _func("_kpi_row"))
-    assert "or not played" in src, \
-        "the undefeated tile does not gate on whether anything has been played"
+def test_THE_UNDEFEATED_TILE_IS_GONE_AND_ITS_COLUMNS_ARE_STILL_PUBLISHED():
+    """🚨 A235 (cfdb-main-R-3032). MARC: *"remove Undefeated but Lost kpi card on Today, that
+    will free up the space needed for the histograms."*
+
+    ⚠️ THE SECOND HALF IS THE HALF WORTH A TEST. The tile went; `undefeated_teams_lost` and
+    `undefeated_teams_entering` stayed on `srv_week_summary`, so this is one commit to reverse
+    and is NOT a §3.3 contract — no column was removed, only a reader. A round that "tidied up"
+    by dropping the columns too would turn a reversible change into a dbt round, and nothing
+    else in the suite would notice.
+    """
+    # 🚨 R-2260 — A SUBSTRING IS NOT A RULE, AND THIS TEST'S FIRST DRAFT PROVED IT. It searched
+    # the function's SOURCE for "Undefeated" and went red on the COMMENT that explains why the
+    # tile was removed. A233 paid for this exact shape one round ago. **The question is which
+    # tiles the page DRAWS and which columns it READS**, and both are `ast` questions.
+    labels = _labels_the_page_actually_draws()
+    assert not [x for x in labels if "ndefeated" in x], \
+        f"the undefeated tile is still being drawn: {labels}"
+    reads = [node.args[0].value for node in ast.walk(_func("_kpi_row"))
+             if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "get"
+             and node.args and isinstance(node.args[0], ast.Constant)
+             and isinstance(node.args[0].value, str)]
+    assert not [c for c in reads if "undefeated" in c], \
+        f"the page still reads the undefeated columns: {sorted(set(reads))}"
+    model = (ROOT / "dbt/models/serving/srv_week_summary.sql").read_text()
+    for column in ("undefeated_teams_lost", "undefeated_teams_entering"):
+        assert column in model, (
+            f"{column} was removed from srv_week_summary. A235 removed a READER, not a column "
+            f"— dropping the column makes the tile's removal a contract step (§3.3) instead of "
+            f"a one-commit reversal.")
 
 
 # ── PART 0 — the sparkbar's gap, and the unit mismatch that caused it ──────────────────────
@@ -268,7 +399,10 @@ def test_THE_KPI_ROW_USES_THE_SHARED_SCROLL_WRAPPER_not_a_second_mechanism():
     note, and a private `overflow-x` here would be the drift this project keeps paying for."""
     src = ast.get_source_segment(SOURCE, _func("_kpi_row"))
     assert "cfdb-scroll" in src, "the KPI row does not sit in the shared scroll wrapper"
-    kpi_css = THEME[THEME.index(".cfdb-kpirow"):THEME.index(".cfdb-kpi-pair")]
+    # ⚠️ A235: the slice used to end at `.cfdb-kpi-pair`, which this round DELETED along with
+    # the tile that emitted it. An index anchor on a rule that no longer exists raises
+    # ValueError and reads as a broken test rather than a broken page.
+    kpi_css = THEME[THEME.index(".cfdb-kpirow"):THEME.index(".cfdb-kpi-label {")]
     assert "overflow-x" not in kpi_css, "the KPI row grew its own scroll mechanism"
 
 
@@ -290,8 +424,11 @@ def test_THE_PANEL_EXISTS_UNDER_THE_NAME_THE_TESTS_AND_TABS_USE(name):
 # > grow."*
 
 # The seven labels the page expects to draw, as DATA — the roster, not the subject.
-_KPI_LABELS = ("FBS games", "Average over/under", "Winning vs losing score",
-               "Favorites won", "Favorites covered", "Went over", "Undefeated but lost")
+# 🚨 A235 (cfdb-main-R-3028 · R-3030 · R-3032). THREE OF THESE SEVEN MOVED IN ONE ROUND, and
+# the count stayed at seven: *Undefeated but lost* was REMOVED on Marc's instruction and
+# *Winning vs losing score* SPLIT IN TWO, so he freed the WIDTH of one tile rather than a slot.
+_KPI_LABELS = ("FBS games", "Avg closing O/U", "Winning score", "Losing score",
+               "Favorites won", "Favorites covered", "O/U \u2013 over %")
 
 
 def _labels_the_page_actually_draws() -> list:
@@ -375,12 +512,53 @@ def test_no_kpi_label_is_long_enough_to_wrap():
             f"restore a reserved second line on .cfdb-kpi-label for every tile.")
 
 
-def test_the_page_uses_the_shortened_undefeated_label():
-    """Marc's exact reduction. Pinned by VALUE, because the point of the change is the string
-    and a test on its length alone would pass on any 19-character label."""
-    body = ast.get_source_segment(SOURCE, _func("_kpi_row")) or ""
-    assert '"Undefeated but lost"' in body
-    assert "Undefeated teams that lost" not in body
+def test_the_over_under_tile_cannot_be_read_as_score_arithmetic():
+    """🚨 A235 (cfdb-main-R-3028). THE LABEL MISLED ITS OWN AUTHOR AND THAT IS THE DEFECT.
+
+    > **MARC, v18:** *"Average Over/Under - is this the average(Home Score - Away Score) of the
+    > Completed FBS games?"*
+
+    📊 No. `srv_week_summary.sql` computes it as `avg(total_at_close)` — the average closing
+    TOTAL the sportsbooks posted, with no score in it at all. **A label its own commissioner
+    misreads is a defect, not a preference**, and this pins the fix by VALUE: the two market
+    words have to be there, and the old wording has to be gone.
+
+    ⚠️ AND IT CHECKS THE MODEL, NOT ONLY THE PAGE. If `over_under_mean` ever stopped being a
+    market average the label would become wrong in the opposite direction, and the round that
+    changed it would get a red test naming this one.
+    """
+    # ⚠️ THE LABELS THE PAGE DRAWS, NOT THE SOURCE TEXT (R-2260) — the old wording is quoted in
+    # the comment above the tile, which is exactly where it belongs and exactly what a substring
+    # search trips over.
+    labels = _labels_the_page_actually_draws()
+    assert "Avg closing O/U" in labels, \
+        f"the over/under tile's label moved without this test: {labels}"
+    assert "Average over/under" not in labels, "the misleading label is still on the page"
+    # 📊 THE MODEL LINE THE LABEL IS ABOUT, READ FROM THE MODEL. Comments are stripped first,
+    # because this file discusses `total_at_close` in prose and a substring is not a rule
+    # (R-2260) — the claim is that the PUBLISHED EXPRESSION is a market average.
+    model = (ROOT / "dbt/models/serving/srv_week_summary.sql").read_text()
+    code = "\n".join(line.split("--")[0] for line in model.splitlines())
+    built_from = [line.strip() for line in code.splitlines() if "over_under_mean" in line]
+    assert built_from, "srv_week_summary no longer publishes over_under_mean"
+    assert any("total_at_close" in line for line in built_from), (
+        f"over_under_mean is no longer the average closing LINE — it is now {built_from!r}. "
+        f"The tile's label says 'Avg closing O/U' because the number is the sportsbooks', "
+        f"not a score; if the model changed, the label has to change with it.")
+
+
+def test_the_over_percentage_tile_carries_marcs_own_string():
+    """> **MARC, v18:** *"Went Over - change to O/U - OVER %"*
+
+    ⚠️ SENTENCE CASE IN CODE, CAPS ON SCREEN. `.cfdb-kpi-label` carries
+    `text-transform:uppercase`, so `O/U – over %` renders as `O/U – OVER %`, which is what he
+    asked for. Writing it capitalised in source would make it the only label shouting in the
+    file. **Pinned by value, because the point of the change is the string.**
+    """
+    labels = _labels_the_page_actually_draws()
+    assert "O/U \u2013 over %" in labels, \
+        f"the over-percentage label is not Marc's string: {labels}"
+    assert "Went over" not in labels, "the old label is still there"
 
 
 def test_the_tiles_grow_into_the_row_but_never_shrink_out_of_it():
