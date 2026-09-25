@@ -6330,14 +6330,45 @@ def _season_so_far(row) -> None:
             # n layout entries are pixels (R-269). **Both hold here** — `_SEASON_LAYOUT` is
             # all pixels — so **no `site/lib/` edit was needed** (§3.2.2).
             #
-            # 📊 **TWO, NOT THREE: `Wk` 40px + `Opponent` 132px = 172px of the 564px box at
-            # 1024**, which leaves 392px of stats moving. Freezing `Result` as well would
-            # take 240px of that box to say something the reader can already see.
-            # 🚨 **AND THE ALTERNATIVE WAS DROPPING COLUMNS, WHICH IS MARC'S TO VETO AND NOT
-            # THIS ROUND'S TO TAKE** — the round's report names the ones it would have
-            # dropped and asks.
+            # ── 🚨 THREE, AND MARC SETTLED BOTH HALVES OF IT (cfdb-wta-R-2923) ─────────
+            #
+            # > **MARC, 2026-09-25:** *"I'd set WK, Opponent, and Result as key columns that
+            # > don't scroll, then have the rest scroll — without removing any columns b/c
+            # > they are all important. The scroll doesn't bother me. I like that they are
+            # > all accessible."*
+            # >
+            # > *"would like to freeze 3 columns instead of 2. **The result gives additional
+            # > context to the rest of the numbers in the table.**"*
+            #
+            # 📊 **B153 MEASURED TWO AND ITS NUMBERS ARE KEPT, BECAUSE THEY ARE STILL THE
+            # EVIDENCE — WHAT CHANGED IS THE CONCLUSION DRAWN FROM THEM.** It read: *"TWO,
+            # NOT THREE: `Wk` 40px + `Opponent` 132px = 172px of the 564px box at 1024,
+            # which leaves 392px of stats moving. Freezing `Result` as well would take 240px
+            # of that box to say something the reader can already see."*
+            #
+            # ✅ **BOTH OF THOSE FACTS ARE STILL TRUE AND THE INFERENCE WAS WRONG.** `Result`
+            # does cost 68px and a reader can find the score elsewhere — **but not while
+            # reading a row of stats**, which is the only moment it is worth anything. A
+            # `W 27-24` beside 326 yards and 1 turnover is a different fact from the same
+            # line beside `L 21-23`. 🚨 **THE COLUMN IS CONTEXT FOR THE ROW, AND CONTEXT THAT
+            # SCROLLS AWAY IS NOT CONTEXT.**
+            #
+            # 📊 **RE-MEASURED AT THREE (cfdb-wta-R-2925), frozen 240px of a declared 1274:**
+            #
+            #     box   1140 | 980 | 840 | 564          (viewports 1600 / 1440 / 1300 / 1024)
+            #     moving 900 | 740 | 600 | 324
+            #
+            # ⚠️ **AT THE 564px BOX THAT IS ABOUT THREE STAT COLUMNS AT A TIME**, and the
+            # round said so in its report rather than letting Marc find it on a phone. **He
+            # chose three knowing the cost** — *"the scroll doesn't bother me"*.
+            #
+            # 🚨 **AND THE COLUMN TRIM IS VETOED, PERMANENTLY — DO NOT RE-PROPOSE IT.** B153
+            # offered to drop `Rush PPA`, `Pass PPA`, `Cum PPA` and `Expl` (292px) to make
+            # the table fit. **Marc refused, with his reason: every column is important and
+            # he wants them all reachable.** The scrolling remainder is the feature, not the
+            # cost of one.
             table.render(played, _season_table_columns(), caption=caption,
-                         scroll=True, sortable=False, layout=_SEASON_LAYOUT, sticky=2)
+                         scroll=True, sortable=False, layout=_SEASON_LAYOUT, sticky=3)
 
 
 # ── 🚨🚨 v16: AGAINST THE SPREAD ───────────────────────────────────────────────────────────
