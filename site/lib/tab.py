@@ -170,10 +170,42 @@ def route_suffix(url_path: Optional[str]) -> Optional[str]:
     `query` is `@st.cache_data`-wrapped, so a reader clicking between tabs pays once.
     """
     try:
-        if url_path != "matchup":
-            return None
         from lib import params
         from lib.query import query
+
+        # 🚨 A231 (cfdb-main-R-3024). THE TEAM ROUTE NAMES ITS TEAM, the same way the Matchup
+        # route names its game — one function, two routes, rather than a second mechanism.
+        #
+        # ⚠️ AND THE ABBREVIATION IS NOT WHERE IT LOOKS LIKE IT SHOULD BE. The Team page reads
+        # `srv_team_overview`, which publishes `team_slug` and `team_display` and **no
+        # abbreviation of any kind** — checked against `information_schema`, not against the
+        # model's description (§2.2.1c.2). The column lives on `srv_teams_index`, spelled
+        # `abbreviation` rather than `team_abbreviation`, which is the name the other views
+        # use. 📊 One single-table select, and the grain was checked before the `limit 1`:
+        # 34,061 rows over 772 slugs, up to 157 rows for one slug, and **zero slugs carry two
+        # different abbreviations** — so any row for that slug gives the same answer.
+        #
+        # ⚠️ BLANK ON 1.52% OF ROWS (517 of 34,061), and a blank drops the suffix rather than
+        # publishing an empty segment — `compose` already drops empty parts, so the tab reads
+        # `M4D · Team` and never `M4D · Team · `.
+        if url_path == "team":
+            slug = params.get("team")
+            if not slug:
+                return None
+            df = query("""
+                select abbreviation
+                from srv_teams_index
+                where team_slug = :team_slug
+                limit 1
+            """, {"team_slug": str(slug)})
+            if df is None or df.empty:
+                return None
+            value = df["abbreviation"].iloc[0]
+            text = "" if value is None else str(value).strip()
+            return text or None
+
+        if url_path != "matchup":
+            return None
         game_id = params.get("game_id")
         if not game_id:
             return None

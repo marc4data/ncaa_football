@@ -1531,7 +1531,29 @@ TABLE_CSS = """
    and 995.3px after. **The cap is the fix; the wrap is what makes the cap survivable.**
    ⚠️ 11rem is the floor the widest tile actually needs: two 72px thumbnails plus their gap and
    the tile's padding is ~170px, so anything less would squeeze the pictures. */
-.cfdb-kpi { flex:0 0 auto; min-width:6rem; max-width:11rem; display:flex;
+/* 🚨 A231 (cfdb-main-R-3023). `flex:1 1 auto`, NOT `0 0 auto` — THE ROW TAKES THE WIDTH IT
+   IS GIVEN.
+   > MARC, v17: *"It should consume the same width as the Most Exciting table. So, has some
+   > more horizontal real estate."*
+   📊 MEASURED BEFORE: seven tiles summed to 864.1px inside a 980px box at 1440 and a 1140px
+   box at 1600 — 116px and 276px of the row's own width left empty, while the table directly
+   below it used all of both. `0 0 auto` sizes every tile to its MAX-CONTENT and then stops,
+   so the row could never fill anything.
+   ⚠️ THE GROW BASIS IS `auto`, NOT `0`. `flex:1 1 0` would make all seven EQUAL, which is
+   wrong here: the Winning-vs-losing tile carries two 72px thumbnails and needs more room
+   than "Went over" does. `auto` keeps each tile's content-derived basis and shares out the
+   slack in proportion, so the row fills without flattening the differences that mean
+   something.
+   🚨 AND THE SHRINK FACTOR IS `0`, WHICH A MEASUREMENT DECIDED RATHER THAN A PREFERENCE.
+   `flex:1 1 auto` was tried first and it fills the row correctly at 1440 and 1600 — and at
+   1300 and 1024 the tiles shrink toward `min-width` and **four and five labels start
+   wrapping**, which is the exact complaint this change came from. 📊 Measured: at 1300,
+   `1 1 auto` wrapped Average over/under, Favorites won, Favorites covered and Undefeated but
+   lost; `1 0 auto` wraps none at any of the four widths.
+   ✅ SO: GROW INTO SLACK, NEVER SHRINK OUT OF IT. Where there is room the row takes it; where
+   there is not, the tiles keep their content width and the row scrolls in `.cfdb-scroll` as
+   it always has. `min-width` stays as the floor that was already there. */
+.cfdb-kpi { flex:1 0 auto; min-width:6rem; max-width:11rem; display:flex;
             flex-direction:column;
             gap:.1rem; padding:.5rem .65rem;
             border:1px solid var(--cfdb-u2, #87878d); border-radius:6px; }
@@ -1544,22 +1566,45 @@ TABLE_CSS = """
    total at 995.3px BEFORE and 995.3px AFTER — a `flex:0 0 auto` item's base size is its
    max-content, so the declaration was inert. It is gone rather than left looking load-bearing
    (§3.2.3), and `tests/test_numeric_cells_never_break.py` is what refused to let it stay. */
-/* 🚨 A225 (cfdb-main-R-3051). EVERY LABEL RESERVES TWO LINES, SO EVERY FIGURE STARTS AT ONE y.
-   📊 MEASURED on A216's own crop and confirmed in the render: six numerals began at 570.0 and
-   the seventh at 587.4 — **17.4 CSS px lower** — because *"Undefeated teams that lost"* is the
-   one label that wraps, and a wrapped label pushes its numeral down. A216 measured the ROW
-   (one band, 110.0px) and that was correct and blind to this: **the row is one band and the
-   figures inside it were not on one line.**
-   🚨 MARC HAS ALREADY SAID THIS IS WHAT HE NOTICES, about the player cards, in his own words:
+/* ── A225 (cfdb-main-R-3051), KEPT AS HISTORY BECAUSE A231 RETIRED IT. ──────────────────
+   A225 gave every label `min-height:3.2em` so that every figure started at one y.
+   📊 The defect it fixed was real and measured: six numerals began at 570.0 and the seventh
+   at 587.4 — 17.4 CSS px lower — because *"Undefeated teams that lost"* wrapped, and a
+   wrapped label pushes its numeral down. A216 had measured the ROW (one band, 110.0px),
+   which was correct and blind to it: **the row was one band and the figures inside it were
+   not on one line.**
+   🚨 MARC HAS SAID THIS IS WHAT HE NOTICES, about the player cards, in his own words:
    *"Why aren't they numbers vertically aligned in the same space?"* A221 answered it there.
-   ✅ RESERVING BEATS TRUNCATING. The alternative was to cap the label to one line, which buys
-   the same alignment by deleting words a reader needs — *"Undefeated teams that"* is not a
-   label. Two lines are reserved on every tile whether or not that tile uses the second.
-   ⚠️ `em`, NOT `lh`. `lh` is the unit this wants and is not safe across every browser a
-   reader may open; `line-height` is stated here so `3.2em` is exactly two of them. */
+   ⚠️ A225 CHOSE RESERVING OVER TRUNCATING, and was right to: capping the label to one line
+   buys the alignment by deleting words a reader needs. **What A231 did instead was make the
+   label shorter — Marc's own wording — so there is nothing left to reserve for.** The
+   alignment is unchanged; only the empty second line is gone. */
+/* 🚨 A231 (cfdb-main-R-3025). THE RESERVED SECOND LINE IS GONE, AND A MEASUREMENT RETIRED IT
+   RATHER THAN A PREFERENCE.
+   📊 A225 added `min-height:3.2em` because ONE label wrapped and pushed its numeral 17.4px
+   below the other six. A231 renamed that label to Marc's own shorter wording and made the
+   tiles `flex:1 0 auto`, and with both in place **no label's text wraps at 1600, 1440, 1300
+   or 1024, in either scheme** — so the reserve was holding 17.4 CSS px of empty space on
+   every one of the seven tiles, every render.
+   ⚠️ MEASURED ON THE TEXT'S OWN LINE BOXES, NOT ON THE BOX. `ci/measure_kpi_row.py`'s
+   `labelLines` divides the box height by the line height, so while this very rule existed it
+   could only ever answer "2" — it reported all seven labels as wrapping when what it saw was
+   the reserve. A231 added `labelTextLines`, a Range over the label's contents, which yields
+   one rect per line the TEXT occupies. **The old figure would have said the reserve was
+   still needed, for as long as the reserve was there.**
+   🚨 AND THE PROPERTY IT PROTECTED IS NOW HELD BY A TEST INSTEAD OF BY PADDING.
+   `test_no_kpi_label_is_long_enough_to_wrap` fails if any label grows past what its tile can
+   hold on one line — so a future longer label goes RED rather than silently pushing one
+   numeral off the shared baseline, which is what happened last time and took a render to
+   find. **The reserve made the failure invisible; the test makes it loud.** */
 .cfdb-kpi-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.03em;
-                  opacity:.7; line-height:1.6; min-height:3.2em; }
-.cfdb-kpi-value { font-size:1.45rem; font-weight:700; line-height:1.15;
+                  opacity:.7; line-height:1.6; }
+/* 🚨 A231. THE NUMERAL GROWS, AND ONLY BECAUSE THE TWO CHANGES ABOVE MADE ROOM FOR IT.
+   > MARC, v17: *"Once the title wordwrap is fixed, KPI font has room to grow."*
+   ⚠️ THE ORDER IS THE WHOLE POINT AND IT IS HIS: the wrap had to go first, then the reserve,
+   and only then is there vertical room to spend. Growing the figure with a wrapped label
+   still on screen would have made the misalignment worse rather than better. */
+.cfdb-kpi-value { font-size:1.7rem; font-weight:700; line-height:1.15;
                   font-variant-numeric:tabular-nums; white-space:nowrap; }
 /* 🚨 THE DENOMINATOR IS ON THE FACE OF THE TILE, NOT IN A TOOLTIP. A214 publishes it for
    every rate because *"62% of favorites covered"* over 8 games and over 60 are different
