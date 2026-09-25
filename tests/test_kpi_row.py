@@ -202,25 +202,68 @@ def test_the_two_score_tiles_are_drawn_on_ONE_domain():
 
 
 def test_THE_KPI_ROW_ACTUALLY_ASKS_FOR_AN_AXIS():
-    """🚨 A STAGED BREAK FOUND THIS GAP AND IT IS THE POINT OF STAGING THEM.
+    """🚨 A STAGED BREAK FOUND THIS GAP IN A235 AND A237 HAD TO REWRITE IT WITHOUT WEAKENING IT.
 
-    > **MARC, v18:** *"Might need more vertical real estate to include an x-axis with labels in
-    > the box-whisker diagram."*
+    > **MARC, v18:** *"an x-axis with labels in the box-whisker diagram."*
+    > **MARC, 2026-09-25:** *"Don't need to include the values for the tickmarks, just the ticks."*
 
-    `tests/test_distribution_axis_labels.py` proves `panel()` CAN draw an axis. **Changing the
-    page's own call to `ticks=TICK_NONE` left all 37 tests green** — the axis Marc asked for
-    would have vanished from the site with nothing red, because every axis test was pointed at
-    the module and none at the caller. This is the caller.
+    ⚠️ **THE OLD ASSERTION WAS `<text>` ELEMENTS EXIST, AND MARC'S NEW AXIS HAS NONE.** Deleting
+    it would have let the axis vanish with nothing red — which is the exact failure A235 wrote it
+    to prevent, one requirement later. **So it asserts on the TICK MARKS instead**, which is what
+    the axis is made of now, and it still points at the PAGE's own call rather than at the module
+    (R-768).
     """
     import re
     import today
-    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points")
-    labels = re.findall(r"<text[^>]*>([^<]*)</text>", svg)
-    assert labels, (
-        "the KPI charts draw no axis labels. Marc asked for an x-axis with labels; the page "
-        "is asking distribution.panel() for TICK_NONE.")
-    assert all(re.fullmatch(r"-?[\d.]+", t) for t in labels), \
-        f"the axis is emitting something that is not a number: {labels}"
+    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points", axis=(0.0, 59.0))
+    ticks = re.findall(r"<line[^>]*stroke-opacity='\.45'", svg)
+    assert ticks, (
+        "the KPI charts draw no axis tick marks. Marc asked for an x-axis of ticks; the page is "
+        "asking distribution.panel() for TICK_NONE.")
+    # 🚨 AND THE RULER IS A RULER: marks on MULTIPLES of the step, not steps from the left edge.
+    # On an axis starting at 14 the first mark is 15. Two tiles side by side is exactly where a
+    # ruler whose marks mean different values would show.
+    xs = sorted(float(m) for m in
+                re.findall(r"<line x1='([\d.]+)'[^>]*stroke-opacity='\.45'", svg))
+    assert len(xs) >= 2, f"a ruler needs more than one mark: {xs}"
+    # ⚠️ TOLERANCE 0.1px, AND IT IS THE `:.1f` IN THE EMITTED COORDINATE RATHER THAN SLACK IN
+    # THE RULE. A 45-point axis over 140px puts the true spacing at 11.864px, which rounds to an
+    # alternating 11.8 / 11.9 — a strict equality here fails on the printing, not on the geometry.
+    # Two coordinates each rounded to one decimal can differ by at most 0.1, so the bound is that
+    # plus float dust. A ruler that was genuinely uneven would be out by whole pixels.
+    gaps = [b - a for a, b in zip(xs, xs[1:])]
+    assert max(gaps) - min(gaps) <= 0.1 + 1e-9, \
+        f"the tick marks are not evenly spaced: {gaps}"
+
+
+def test_THE_TICK_RULER_COUNTS_FROM_ZERO_NOT_FROM_THE_LEFT_EDGE():
+    """🚨 MARC SAID *"counting from a baseline of 0, so 5, 10, 15, etc"* — A MODULUS.
+
+    ⚠️ IT ONLY BECAME OBSERVABLE BECAUSE A237 ALSO NARROWED THE AXIS. While the axis started at
+    `bin_min` (0 for both score metrics) a ruler counting from the left edge and one counting
+    from zero were the SAME PICTURE, and a test could not tell them apart. **On an axis starting
+    at 14 they differ by 4px, and this pins the difference.**
+    """
+    import re
+    from lib import distribution
+    row = _dist("winning_points", 38)
+    width, lo, hi, step = 140, 14.0, 59.0, 5.0
+    svg = distribution.panel(row, width=width, height=28, ticks=distribution.TICK_STEP,
+                             tick_step=step, head=False, stats=False, axis=(lo, hi))
+    xs = sorted(float(m) for m in
+                re.findall(r"<line x1='([\d.]+)'[^>]*stroke-opacity='\.45'", svg))
+    assert xs, "no tick marks were drawn"
+    # every mark must sit at a multiple of the step, converted back to a value
+    values = [lo + x / width * (hi - lo) for x in xs]
+    # the same `:.1f` rounding, carried back into value units: 0.05px over this axis is 0.016
+    # of a point, so 0.05 is two orders of magnitude clear of the defect being pinned (a ruler
+    # counting from the left edge would put the first mark 1.0 out, at 14).
+    for v in values:
+        assert abs(v / step - round(v / step)) < 0.05, (
+            f"a tick landed at {v:.3f}, which is not a multiple of {step:g} — the ruler is "
+            f"counting from the left edge instead of from zero")
+    assert abs(values[0] - 15.0) < 0.05, (
+        f"the first tick on an axis starting at {lo:g} must be 15, not {values[0]:.2f}")
 
 
 def test_NEITHER_SCORE_TILE_RESHAPES_ITS_PUBLISHED_ROW():
@@ -587,3 +630,110 @@ def test_the_label_reserves_no_second_line_any_more():
     rule = rule[:rule.index("}")]
     assert "min-height" not in rule, (
         "a reserved second line is 17.4px of empty space on every tile once no label wraps")
+
+
+# ── A237 — four gaps that staged breaks found GREEN, each closed at the PAGE ────────────────
+
+def test_ONE_AXIS_OBJECT_REACHES_BOTH_SCORE_TILES():
+    """🚨 A STAGED BREAK CAME BACK GREEN AND THIS IS WHY IT MATTERS. Narrowing the axis to each
+    tile's OWN whiskers — winning [14, 59], losing [0, 39] — left every test passing, because the
+    cross-tile test hands the renderer an axis it composed itself (R-768 again, in the round that
+    quotes R-768).
+
+    ⚠️ THE CLAIM IS ABOUT THE PAGE: both score charts receive the SAME axis object, computed once
+    from BOTH metrics. Two correct calls to `_kpi_axis` with one metric each would be two correct
+    calls that disagree, and the picture would look entirely reasonable.
+    """
+    fn = _func("_kpi_row")
+    calls = [n for n in ast.walk(fn)
+             if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_kpi_chart"]
+    assert len(calls) == 3, f"expected three charted tiles, found {len(calls)}"
+    axis_arg = {}
+    for call in calls:
+        metric = call.args[0].args[0].value
+        assert len(call.args) >= 3, f"{metric} is drawn with no axis argument at all"
+        axis_arg[metric] = ast.dump(call.args[2])
+    assert axis_arg["winning_points"] == axis_arg["losing_points"], (
+        "the two score tiles are handed different axis expressions, so they can be drawn on "
+        "different scales — which is the comparison Marc split the tile to make")
+    # and the shared one is built from BOTH metrics, not from one of them
+    shared = [n for n in ast.walk(fn)
+              if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_kpi_axis"]
+    names = [tuple(a.value for a in c.args[1:]) for c in shared]
+    assert ("winning_points", "losing_points") in names, (
+        f"no _kpi_axis call spans both score metrics: {names}")
+
+
+def test_THE_BARS_MOVE_WITH_THE_AXIS_not_just_the_box():
+    """🚨 THE SECOND GREEN BREAK. Reverting `_bars` to its even spread left the box and the ruler
+    on the narrowed axis and the HISTOGRAM on the old one — two scales inside one SVG, which is
+    the exact defect drawing them in a single element was supposed to make impossible.
+
+    ⚠️ `wide != tight` IS NOT ENOUGH and that is what let it through: the box alone moving makes
+    the strings differ. This compares the BAR geometry specifically.
+    """
+    import re
+    from lib import distribution
+    row = _dist("winning_points", 38)
+    # 🚨 BARS ONLY, NOT EVERY `<rect>` — AND THE FIRST DRAFT OF THIS TEST GOT THAT WRONG, WHICH
+    # IS WHY THE BREAK CAME BACK GREEN TWICE. A panel emits the box's p25-p75 rectangle as a
+    # `<rect>` too, and THAT one moves with the axis whether or not the bars do — so a match on
+    # `<rect` compared two lists that always differ and asserted nothing. R-859 inside the test
+    # written to catch R-859's shape. The bars carry `fill-opacity='0.NN'` from a `:.2f`; the box
+    # carries the literal `.22` and a `stroke`.
+    bars = lambda svg: re.findall(  # noqa: E731
+        r"<rect x='([\d.]+)' y='[\d.]+' width='([\d.]+)'[^>]*fill-opacity='0\.\d+'/>", svg)
+    wide = bars(distribution.panel(row, width=140, height=28, head=False, stats=False))
+    tight = bars(distribution.panel(row, width=140, height=28, head=False, stats=False,
+                                    axis=(14.0, 59.0)))
+    assert wide and tight, "no bars drawn (R-2254)"
+    assert wide != tight, (
+        "the histogram bars are identical with and without a narrowed axis — `_bars` is still "
+        "spreading the published counts evenly, so the bars and the box are on two scales")
+
+
+def test_THE_KPI_HISTOGRAM_BAND_IS_HALVED():
+    """> **MARC, 2026-09-25:** *"Reduce the vertical size of the histogram bars by 50%."*
+
+    🚨 PINNED BY VALUE, because the third green break was raising it straight back to 56 with
+    nothing red. A235 pinned its labels by value for the same reason: the point of the change IS
+    the number, and a test on "some height" passes on the value he asked to be changed.
+
+    ⚠️ AND THE BOX IS PINNED NOT TO HAVE HALVED WITH IT — he asked for the BARS, and A237's own
+    comment says the furniture keeps its space. A round that halved the whole chart would satisfy
+    a looser reading of the sentence and lose the box.
+    """
+    import today
+    assert today._KPI_CHART_H == 28, (
+        f"the KPI histogram band is {today._KPI_CHART_H}, not the 28 Marc's 50% asks for")
+    from lib import distribution
+    import re
+    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points", axis=(0.0, 59.0))
+    total = int(re.search(r"viewBox='0 0 \d+ (\d+)'", svg).group(1))
+    box_band = max(today._KPI_CHART_H // 4, 12)
+    assert total == today._KPI_CHART_H + box_band + distribution.TICK_BAND, (
+        f"the chart is {total}px; the bands do not add up, so something other than the "
+        f"histogram changed height")
+    assert box_band == 12, "the box band collapsed with the bars; Marc halved the BARS"
+
+
+def test_EVERY_CHARTED_TILE_CARRIES_ITS_p25_p50_p75():
+    """> **MARC, 2026-09-25:** *"How about a tight table to the right KPI value that shows p25,
+    > p50, p75."*
+
+    🚨 THE FOURTH GREEN BREAK: emptying `_kpi_stats` removed the table from all three tiles and
+    nothing went red. **Asserted at the page**, because the module-level test only proves the
+    renderer CAN produce a table."""
+    import today
+    fn = _func("_kpi_row")
+    stats_calls = [n for n in ast.walk(fn)
+                   if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_kpi_stats"]
+    assert len(stats_calls) == 3, (
+        f"{len(stats_calls)} of the three charted tiles ask for a stats block")
+    html = today._kpi_stats(_dist("winning_points", 38))
+    assert html, "the stats block is empty for a row that has percentiles"
+    for key in ("p25", "median", "p75"):
+        assert f"<span>{key}</span>" in html, f"{key} is missing from the KPI stats block"
+    assert "<span>min</span>" not in html and "<span>n</span>" not in html, (
+        "the KPI stats block is showing rows Marc did not ask for; it is meant to be tight")
+    assert today._kpi_stats(None) == "", "an absent row must render nothing, not a broken table"

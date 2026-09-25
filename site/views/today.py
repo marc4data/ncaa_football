@@ -4509,7 +4509,25 @@ _KPI_CHART_W = 140
 # and the axis band 15px, so 120 would make a 165px picture inside a 115px tile. 56 gives
 # 56 + 14 + 15 = 85px of chart — twice the old thumbnail's 28 and legible with four labels under
 # it, which is what the axis was added for.
-_KPI_CHART_H = 56
+# 🚨 A237 (cfdb-main-R-3043). 28, NOT 56 — MARC HALVED THE BARS.
+# > **MARC, 2026-09-25:** *"Reduce the vertical size of the histogram bars by 50%."*
+# ⚠️ THE HISTOGRAM BAND ONLY. The box keeps its own proportion (`max(h//4, 12)` = 12 here) and
+# the tick ruler its 5, so the chart goes 56+14+15 = 85px to 28+12+5 = **45px** — the bars halve
+# and the furniture does not, which is what he asked for rather than a chart scaled by half.
+_KPI_CHART_H = 28
+
+# 📊 THE TICK INTERVAL, AND IT IS HIS NUMBER.
+# > **MARC:** *"major tickmarks at increments of 5 (counting from a baseline of 0, so 5, 10, 15,
+# > etc for the scores that are in scope)."*
+# ⚠️ "Counting from a baseline of 0" is a MODULUS, not a start point — `TICK_STEP` puts marks on
+# multiples of this, so an axis starting at 14 gets its first mark at 15. See `distribution.py`.
+_KPI_TICK_STEP = 5
+
+# 🚨 THE THREE ROWS MARC ASKED FOR BESIDE THE FIGURE.
+# > **MARC:** *"How about a tight table to the right KPI value that shows p25, p50, p75."*
+# ⚠️ COLUMN NAMES, NOT LABELS — `distribution.stats_table` owns the display names and the order,
+# so these cannot drift from what `panel()` prints for the same three rows.
+_KPI_STATS = ("p25", "p50", "p75")
 
 # 📊 THE ROW'S OWN SCROLL BOUNDARY, MEASURED BY `ci/measure_kpi_row.py` RATHER THAN CHOSEN:
 # seven tiles at their content width total 905.5px and six .55rem gaps add 52.8px, so the row
@@ -4539,7 +4557,8 @@ _KPI_MIN_PX = 958
 _KPI_ABSENT = fmt.EM_DASH
 
 
-def _kpi_figure(label: str, value: str, sub: str, chart: str = "") -> str:
+def _kpi_figure(label: str, value: str, sub: str, chart: str = "",
+                stats: str = "") -> str:
     """One tile: what it is, the number, and what the number is out of.
 
     🚨 THE SUB-LINE IS NOT DECORATION AND IT IS NOT OPTIONAL. A214 publishes a denominator and
@@ -4548,14 +4567,22 @@ def _kpi_figure(label: str, value: str, sub: str, chart: str = "") -> str:
     **Every tile that shows a rate shows its denominator on the face of the card**, not only
     in a tooltip a reader has to find.
     """
+    # 🚨 A237: THE VALUE AND ITS STATS SHARE A ROW, which is the whole of Marc's *"tight table to
+    # the right KPI value"*. 📊 A235's 1440 crop showed the numeral leaving visible whitespace to
+    # its right inside a 162.8px tile, and PART 2's budget has 22px in it across the entire row —
+    # so the table had to go in room that already existed or not at all. It does: measured below.
+    # ⚠️ THE WRAPPER IS EMITTED EVEN WITH NO STATS, so a tile with and without them puts its
+    # numeral at the same y. R-141's rule — an element that appears only when populated moves
+    # everything beside it — and A225 paid 17.4px for the same class on this exact row.
     return (f"<div class='cfdb-kpi'>"
             f"<div class='cfdb-kpi-label'>{html.escape(label)}</div>"
-            f"<div class='cfdb-kpi-value'>{value}</div>"
+            f"<div class='cfdb-kpi-head'>"
+            f"<div class='cfdb-kpi-value'>{value}</div>{stats}</div>"
             f"<div class='cfdb-kpi-sub'>{sub}</div>"
             f"{chart}</div>")
 
 
-def _kpi_chart(dist_row, metric: str) -> str:
+def _kpi_chart(dist_row, metric: str, axis=None) -> str:
     """The distribution under a KPI figure: histogram, box-whisker, one axis, labels.
 
     🚨 ONE CALL SITE'S WORTH OF ARGUMENTS IN ONE PLACE, so three tiles cannot drift apart. A235
@@ -4580,8 +4607,69 @@ def _kpi_chart(dist_row, metric: str) -> str:
     already knows instead of restating it here (§4.2.1).
     """
     return distribution.panel(dist_row, width=_KPI_CHART_W, height=_KPI_CHART_H,
-                              ticks=distribution.TICK_EXTREMES,
-                              head=False, stats=False, metric=metric)
+                              ticks=distribution.TICK_STEP, tick_step=_KPI_TICK_STEP,
+                              head=False, stats=False, metric=metric, axis=axis)
+
+
+def _kpi_stats(dist_row) -> str:
+    """The p25/p50/p75 block that sits beside the KPI figure.
+
+    ✅ `distribution.stats_table` IS THE SAME RENDERER `panel()` USES, called with three of its
+    six rows (A237). ⚠️ **Not a second table**: the display names, the formatting and the ORDER
+    all stay in one place, so the three numbers beside the figure cannot end up looking different
+    from the same three inside a full-size panel elsewhere on the site.
+
+    ⚠️ AN ABSENT ROW RETURNS AN EMPTY STRING, and `_kpi_figure` still emits the wrapper — a tile
+    whose week has no distribution keeps its numeral on the shared baseline (R-141).
+    """
+    if dist_row is None:
+        return ""
+    return distribution.stats_table(dist_row, _KPI_STATS)
+
+
+def _kpi_axis(by_metric, *metrics):
+    """The span the charts DRAW, as the UNION of these metrics' whisker extents — or None.
+
+    🚨 A237 (cfdb-main-R-3044). MARC ASKED FOR THE NARROWER AXIS AND HAS ALSO ASKED TWICE FOR THE
+    COMPARISON THAT A NARROWER AXIS BREAKS. Both are his, and taking the second literally would
+    have silently undone the first:
+
+    > **MARC, 2026-09-25:** *"Constrain the box-whisker to just show the extent of the whiskers."*
+    > **MARC, v14:** *"histograms/box-whiskers of Winning Scores vs Losing Scores"* — the point of
+    > which is that the winning distribution sits visibly to the RIGHT of the losing one.
+
+    📊 MEASURED on 2026 regular week 3, and this is why the union wins rather than being a
+    compromise:
+
+        per-tile whiskers   winning [14, 59]  losing [0, 39]   TWO SCALES — 56% and 49% of the
+                            old width, and a reader comparing them is comparing nothing
+        the UNION           both    [0, 59]                    ONE scale, 74% of the old width
+
+    ✅ So the union keeps A235's R-3029 guarantee AND still takes 1.36x the resolution. A metric
+    with no `axis_group` partner is its own group and gets its own whiskers — `total` draws
+    [40, 65] and doubles its resolution, because nothing is being compared to it.
+
+    ⚠️ §4.2.1: THIS COMPOSES A FRAME, IT DOES NOT COMPUTE A METRIC. `min`/`max` SELECT one of two
+    published bounds — no quantity is created, nothing else could ever cite the result, and
+    `box()` has carried a caller-supplied `frame=` for exactly this since A139 (cfdb-wta-R-927),
+    which is the precedent rather than a new liberty.
+
+    ⚠️ AND IT RETURNS None RATHER THAN A GUESS when a whisker is missing, which falls back to the
+    bin range — the behaviour every chart had before this round.
+    """
+    lows, highs = [], []
+    for name in metrics:
+        row = by_metric.get(name)
+        if row is None:
+            continue
+        lo, hi = distribution._whisker_pair(row)
+        if lo is None or hi is None or pd.isna(lo) or pd.isna(hi):
+            continue
+        lows.append(float(lo))
+        highs.append(float(hi))
+    if not lows or max(highs) <= min(lows):
+        return None
+    return (min(lows), max(highs))
 
 
 def _kpi_rate(row, rate_key: str, num_key: str, den_key: str, excluded=()) -> tuple:
@@ -4754,7 +4842,8 @@ def _kpi_row(scope, depth: int) -> None:
             "Avg closing O/U",
             _KPI_ABSENT if mean is None or pd.isna(mean) else fmt.number(float(mean), dp=1),
             " · ".join(sub) if sub else "no closing totals yet",
-            _kpi_chart(by_metric.get("total"), "total")))
+            _kpi_chart(by_metric.get("total"), "total", _kpi_axis(by_metric, "total")),
+            _kpi_stats(by_metric.get("total"))))
 
         # 3 · 4 — WINNING AND LOSING SCORE, TWO TILES ON ONE AXIS
         #
@@ -4774,16 +4863,22 @@ def _kpi_row(scope, depth: int) -> None:
         # than upstream, which is the half that had no guard.
         win, lose = row.get("winning_points_mean"), row.get("losing_points_mean")
         played_sub = f"mean of {played:,} completed" if played else "nothing played yet"
+        # 🚨 ONE AXIS, COMPUTED ONCE AND HANDED TO BOTH — see `_kpi_axis`. Computing it inside
+        # each tile would give two correct calls that can still disagree, which is the class
+        # A235's cross-tile test exists to catch.
+        points_axis = _kpi_axis(by_metric, "winning_points", "losing_points")
         tiles.append(_kpi_figure(
             "Winning score",
             _KPI_ABSENT if win is None or pd.isna(win) else fmt.number(float(win), dp=1),
             played_sub,
-            _kpi_chart(by_metric.get("winning_points"), "winning_points")))
+            _kpi_chart(by_metric.get("winning_points"), "winning_points", points_axis),
+            _kpi_stats(by_metric.get("winning_points"))))
         tiles.append(_kpi_figure(
             "Losing score",
             _KPI_ABSENT if lose is None or pd.isna(lose) else fmt.number(float(lose), dp=1),
             played_sub,
-            _kpi_chart(by_metric.get("losing_points"), "losing_points")))
+            _kpi_chart(by_metric.get("losing_points"), "losing_points", points_axis),
+            _kpi_stats(by_metric.get("losing_points"))))
 
         # 4 · 5 · 6 — THE THREE RATES, each with its denominator and its exclusions
         value, sub = _kpi_rate(row, "favorite_straight_up_rate",

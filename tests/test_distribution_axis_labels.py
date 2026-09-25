@@ -528,3 +528,103 @@ def test_a_text_bearing_svg_never_stretches():
     assert "preserveAspectRatio='none'" in plain and not _texts(plain)
     assert "preserveAspectRatio='none'" not in ticked and _texts(ticked)
     assert "max-width:100%" in ticked, "a fixed-width chart must still not overflow its tile"
+
+
+# ── A237 — the narrowed axis, and the mass it must not drop silently ────────────────────────
+
+def test_a_narrowed_axis_moves_every_mark_together():
+    """🚨 THE BARS, THE BOX AND THE RULER MUST AGREE, which is the whole reason A235 drew them in
+    one SVG. A237 narrows the axis, and a narrowing that reached only some of them would put the
+    box on one scale and the histogram on another — inside a single picture.
+
+    > **MARC, 2026-09-25:** *"Constrain the box-whisker to just show the extent of the whiskers."*
+    """
+    row = _row(whisker_lo=10.0, whisker_hi=31.0)
+    wide = d.panel(row, width=140, height=28, head=False, stats=False)
+    tight = d.panel(row, width=140, height=28, head=False, stats=False, axis=(10.0, 31.0))
+    assert wide != tight, "the axis argument did nothing"
+    # p25 sits at 17 on a [0,80] axis -> 29.75px; on a [10,31] axis -> 46.7px. Every mark moves.
+    assert d._value_to_x(17.0, row, 140) != d._value_to_x(17.0, row, 140, (10.0, 31.0))
+    # and the box's own ends land on the frame it was narrowed to
+    assert abs(d._value_to_x(10.0, row, 140, (10.0, 31.0)) - 0.0) < 1e-6
+    assert abs(d._value_to_x(31.0, row, 140, (10.0, 31.0)) - 140.0) < 1e-6
+
+
+def test_MASS_OUTSIDE_THE_DRAWN_AXIS_IS_MARKED_never_silently_dropped():
+    """🚨 A142's LAW, APPLIED TO A RECTANGLE. Narrowing the axis removes bars; a reader looking at
+    a histogram has no way to know a bar was there unless something says so.
+
+    📊 LIVE: on 2026 week 3 the `total` tile loses 3 of 75 games to its whisker-span axis, so this
+    is a real state and not a hypothetical (R-762 — a verification requirement is a claim too).
+    """
+    row = _row(bin_counts="5,2,5,9,14,18,12,8,4,7", whisker_lo=10.0, whisker_hi=31.0)
+    below, above = d.bins_outside(d.parse_bin_counts(row["bin_counts"]), row, (10.0, 31.0))
+    assert below > 0 and above > 0, f"the fixture drops nothing, so nothing is tested: {below},{above}"
+    svg = d.panel(row, width=140, height=28, head=False, stats=False, axis=(10.0, 31.0))
+    marks = re.findall(r"<polygon points='([^']+)'", svg)
+    assert len(marks) == 2, f"expected an overflow mark at each end, got {len(marks)}"
+    assert "beyond the drawn axis" in svg, "the dropped count is not named anywhere"
+
+
+def test_THE_OVERFLOW_MARK_IS_INSIDE_THE_VIEWBOX():
+    """🚨 A237's OWN RASTER FINDING, AND IT IS A235's CLIPPED `0` REPEATED BY THE ROUND THAT WROTE
+    THE TEST FOR IT. The first draft put the apex at `width + 4.5` on a viewBox of `width`:
+    `polygons: 1` in the DOM and **nothing on the screen**. A mark that cannot be seen is not a
+    mark, and only the crop said so."""
+    width = 140
+    row = _row(bin_counts="5,2,5,9,14,18,12,8,4,7", whisker_lo=10.0, whisker_hi=31.0)
+    svg = d.panel(row, width=width, height=28, head=False, stats=False, axis=(10.0, 31.0))
+    pts = re.findall(r"<polygon points='([^']+)'", svg)
+    assert pts, "no overflow marks were drawn, so nothing is being checked (R-2254)"
+    for p in pts:
+        xs = [float(pair.split(",")[0]) for pair in p.split()]
+        ys = [float(pair.split(",")[1]) for pair in p.split()]
+        assert min(xs) >= -0.01 and max(xs) <= width + 0.01, \
+            f"overflow mark {p} runs outside the viewBox (width {width})"
+        assert min(ys) >= -0.01, f"overflow mark {p} runs off the top of the viewBox"
+
+
+def test_a_bin_entirely_outside_the_axis_is_not_drawn_at_the_edge():
+    """⚠️ CLIPPED, NOT SQUEEZED. A bar compressed against the boundary would put mass at a value it
+    does not have — the same lie as a label clamped to the extreme."""
+    row = _row(bin_counts="9,0,0,0,0,0,0,0,0,9", whisker_lo=32.0, whisker_hi=48.0)
+    svg = d.panel(row, width=140, height=28, head=False, stats=False, axis=(32.0, 48.0))
+    rects = re.findall(r"<rect x='([\d.]+)' y='[\d.]+' width='([\d.]+)'", svg)
+    assert rects, "no bars drawn at all (R-2254)"
+    # the two loaded bins are [0,8) and [72,80); neither overlaps [32,48], so neither may appear
+    for x, w in rects:
+        assert float(w) > 0.4, f"a bar was squeezed to {w}px, which is a bin drawn where it is not"
+
+
+def test_the_tick_band_costs_less_than_the_label_band():
+    """> **MARC:** *"just the ticks, which should take up minimal vertical space."*
+
+    📊 THE WHOLE POINT OF THE FIFTH STRATEGY IS THE VERTICAL SAVING, so it is pinned as an
+    inequality rather than a magic number — `TICK_BAND` may be tuned, but it may not quietly grow
+    past the row of digits it was introduced to replace."""
+    box = lambda svg: int(re.search(r"viewBox='0 0 \d+ (\d+)'", svg).group(1))   # noqa: E731
+    plain = d.panel(_row(), width=140, height=28, head=False, stats=False)
+    ticked = d.panel(_row(), width=140, height=28, ticks=d.TICK_STEP, tick_step=5,
+                     head=False, stats=False)
+    labelled = d.panel(_row(), width=140, height=28, ticks=d.TICK_EXTREMES,
+                       head=False, stats=False)
+    assert box(ticked) - box(plain) == d.TICK_BAND
+    assert box(ticked) < box(labelled), "the tick ruler costs as much height as a row of labels"
+    assert not _texts(ticked), "the tick ruler printed values; Marc asked for ticks only"
+
+
+def test_the_stats_table_has_ONE_implementation():
+    """🚨 THE TILE PUTS p25/p50/p75 BESIDE THE FIGURE AND `panel()` PUTS SIX BESIDE THE CHART.
+    Two renderers would eventually format the same number two ways on one screen, which is what
+    `stats_table` exists to prevent — so the subset the tile asks for must be EXACTLY the rows the
+    panel would have drawn, byte for byte."""
+    row = _row()
+    three = d.stats_table(row, ("p25", "p50", "p75"))
+    full = d.stats_table(row, True)
+    assert three and full
+    for key in ("p25", "median", "p75"):
+        cell = re.search(rf"<div class='cfdb-dist-stat'><span>{key}</span><b>([^<]*)</b>", three)
+        same = re.search(rf"<div class='cfdb-dist-stat'><span>{key}</span><b>([^<]*)</b>", full)
+        assert cell and same and cell.group(1) == same.group(1), \
+            f"the subset formats {key} differently from the full table"
+    assert "min" not in three and "max" not in three, "the subset leaked rows it did not ask for"
