@@ -386,6 +386,28 @@ def thumbnail(row, label: str = "", width: int = 120) -> str:
 # THE VALUE MARKER'S COLOUR, and it is only half of the marker — see `_value_marker`.
 VALUE_COLOR = "#2f6fdb"
 
+# 🚨 A239 (cfdb-main-R-3234). THE IQR'S OWN COLOUR — Marc, v19:
+# > *"Color p25 and p75 values and labels a dark orange, like burnt sienna. Fill the IQR range
+# > with the same orange, or fill with a lighter orange and outline with the dark orange. That
+# > will help end-user understand the relationship."*
+#
+# ⚠️ **THE REASON IS THE REQUIREMENT: a reader should see that the two numbers ARE the box.** So
+# the same token paints the p25/p75 text and the box, and nothing else on the chart uses it.
+#
+# 🚨 IT IS A `var()`, NOT A LITERAL, AND THAT INVERTS COWORK'S INSTRUCTION FOR A MEASURED REASON.
+# The prompt asked for the hex here with `theme.py` referencing it. **`theme.py`'s `CSS` is a
+# plain string, not an f-string** — interpolating a Python value into it would mean escaping
+# every brace in the entire stylesheet. So the literal lives where every other colour token on
+# this site already lives (`--cfdb-link`, `--cfdb-u1`, `--cfdb-u2` are all `light-dark()` pairs
+# in `theme.py`) and this references it. **One definition either way; this is the direction that
+# does not rewrite the stylesheet.**
+#
+# 📊 AND IT HAD TO BE A PAIR, WHICH THE PROMPT SUSPECTED AND THIS ROUND MEASURED. Marc's
+# `#8A3324` scores **8.14:1 on the light canvas and 2.32:1 on the dark one** — the latter is
+# below even the 3:1 non-text floor, so a single literal is unreadable in a scheme this site
+# ships. The dark-mode variant is measured beside it in `theme.py`.
+IQR_COLOR = "var(--cfdb-iqr)"
+
 # TICK STRATEGIES, offered rather than invented. Marc asked to "set tick mark strategy"; these
 # are the three the published row can actually support, and `percentiles` is the default because
 # it is the only one whose ticks are values the row already carries — the other two derive
@@ -957,19 +979,26 @@ def stats_table(row, keys=True) -> str:
               tuple(pair for pair in PANEL_STATS if pair[1] in tuple(keys)))
     if not wanted:
         return ""
+    # 🚨 A239: THE TWO QUARTILE ROWS ARE MARKED, so one CSS rule colours the label AND the value
+    # in the same orange as the box they describe — which is Marc's stated reason rather than a
+    # decoration: *"a reader should see that the two numbers ARE the box."*
+    # ⚠️ `median` IS NOT MARKED. He coloured two of the three, and the third is the bold rule on
+    # the chart rather than an edge of the box.
     cells = []
     for name, key in wanted:
         value = row.get(key)
         shown = "\u2013" if value is None or pd.isna(value) else (
             f"{int(value)}" if key == "n" else fmt.number(float(value), dp=1))
-        cells.append(f"<div class=\'cfdb-dist-stat\'><span>{name}</span><b>{shown}</b></div>")
-    return f"<div class=\'cfdb-dist-stats\'>{''.join(cells)}</div>"
+        cls = "cfdb-dist-stat cfdb-iqr" if key in ("p25", "p75") else "cfdb-dist-stat"
+        cells.append(f"<div class='{cls}'><span>{name}</span><b>{shown}</b></div>")
+    return f"<div class='cfdb-dist-stats'>{''.join(cells)}</div>"
 
 
 def panel(row, label: str = "", width: int = 420, *,
           height: Optional[int] = None, ticks: str = TICK_NONE,
           head: bool = True, stats=True, dp=_UNSET, metric: str = "",
-          axis=None, tick_step: Optional[float] = None) -> str:
+          axis=None, tick_step: Optional[float] = None,
+          tick_label_step: Optional[float] = None) -> str:
     """The same picture with room to read it: the histogram, the box-and-whisker beneath it on
     a SHARED X-SCALE, and the statistics as a table beside it.
 
@@ -1002,6 +1031,11 @@ def panel(row, label: str = "", width: int = 420, *,
         tick_step
                  with `ticks=TICK_STEP`, the interval between tick marks. Marks land on
                  multiples of it, so the first is the lowest multiple inside the axis
+        tick_label_step
+                 with `ticks=TICK_STEP`, ALSO print a value at every multiple of this — A239,
+                 Marc's *"Label x-axis on the even values (10, 20, 30, etc)"*. The marks stay at
+                 `tick_step`; only some of them get a number. Costs `LABEL_BAND` instead of
+                 `TICK_BAND`, which is the vertical price and is measured in A239's report
 
     🚨 AND THE SVG'S WIDTH BEHAVIOUR IS DECIDED BY WHETHER THERE IS TEXT IN IT, WHICH IS A
     CORRECTNESS RULE RATHER THAN A PREFERENCE. With no ticks the SVG keeps `width='100%'` and
@@ -1041,10 +1075,13 @@ def panel(row, label: str = "", width: int = 420, *,
             box.append(f"<line x1='{end:.1f}' y1='{mid - 4:.1f}' x2='{end:.1f}' "
                        f"y2='{mid + 4:.1f}' stroke='currentColor' stroke-opacity='.6'/>")
     if q1 is not None and q3 is not None:
+        # 🚨 A239: MARC'S SECOND OPTION — *"fill with a lighter orange and outline with the dark
+        # orange"* — achieved with ONE token rather than two, so the fill and the outline cannot
+        # drift into different hues. The opacity does the lightening.
         box.append(f"<rect x='{q1:.1f}' y='{hist_height + 2:.1f}' "
                    f"width='{max(q3 - q1, 1):.1f}' height='{box_height - 4}' "
-                   f"fill='currentColor' fill-opacity='.22' stroke='currentColor' "
-                   f"stroke-opacity='.55'/>")
+                   f"fill='{IQR_COLOR}' fill-opacity='.22' stroke='{IQR_COLOR}' "
+                   f"stroke-opacity='.85'/>")
     median_x = _value_to_x(row.get("p50"), row, width, axis)
     if median_x is not None:
         box.append(f"<line x1='{median_x:.1f}' y1='{hist_height + 2:.1f}' "
@@ -1091,13 +1128,33 @@ def panel(row, label: str = "", width: int = 420, *,
     # decoration, and two tiles side by side is exactly where that would show.
     tick_band = 0
     if ticks == TICK_STEP:
-        tick_band = TICK_BAND
+        # 🚨 A239: LABELLING SOME OF THE MARKS COSTS THE FULL LABEL BAND, and A237 bought that
+        # room by halving the bars. Marc, v19: *"Label x-axis on the even values (10, 20, 30,
+        # etc)"* — read as **keep the marks every 5 and put a number on the multiples of 10**,
+        # which is the reading that keeps A237's ruler and adds what he asked for. The two other
+        # readings (marks only at 10s, or a number on every mark) are named in the report.
+        label_step = float(tick_label_step or 0)
+        tick_band = LABEL_BAND if label_step > 0 else TICK_BAND
         span = axis_span(row, axis)
         step = float(tick_step or 0)
         if span and step > 0:
             axis_lo, axis_hi = span
             first = math.ceil(axis_lo / step) * step
             baseline = hist_height + box_height
+            # ⚠️ ONE PLACEMENT RULE, NOT TWO. `_LabelBands` was extracted by A235 precisely so a
+            # second caller could not invent its own contest — it clamps inside the frame and
+            # DROPS a label that would collide rather than shifting it to a wrong value.
+            # `pad=8.0` cancels its overhang for a panel, exactly as the label band below does.
+            ruler = _LabelBands(width, 8.0) if label_step > 0 else None
+            # 🚨 A239 (cfdb-main-R-3236). AN AXIS TICK IS A POSITION, NOT A MEASUREMENT, and a
+            # multiple of a whole step is always whole — so it prints whole. 📊 The raster is
+            # what raised it: the O/U tile read `40.0  50.0  60.0` beside two tiles reading
+            # `0  10  20`, because `fmt.precision_for("total")` is 1 and the ruler had inherited
+            # the METRIC's precision. That 1 decimal is right for the FIGURE — a closing total
+            # really is 49.5 — and it is false precision on a ruler whose marks land on 10s.
+            # ⚠️ `dp` is untouched for every other strategy: `TICK_EXTREMES` labels `min_value`
+            # and `p25`, which are measurements and can genuinely carry a decimal.
+            tick_dp = 0 if float(label_step).is_integer() else dp
             # ⚠️ A GUARD ON THE COUNT, NOT ON THE LOOP: a tiny step against a wide axis would
             # emit thousands of marks into the DOM. 200 is far more than any readable ruler and
             # far less than a runaway.
@@ -1110,8 +1167,17 @@ def panel(row, label: str = "", width: int = 420, *,
                         f"<line x1='{x:.1f}' y1='{baseline + 1:.1f}' x2='{x:.1f}' "
                         f"y2='{baseline + 1 + TICK_MARK:.1f}' stroke='currentColor' "
                         f"stroke-opacity='.45'/>")
+                    if ruler is not None and abs(value / label_step
+                                                 - round(value / label_step)) < 1e-9:
+                        ruler.place("below", x, fmt.number(value, dp=tick_dp))
                 value += step
                 n += 1
+            if ruler is not None:
+                text_y = baseline + 1 + TICK_MARK + 8
+                for lx, _half, text, _color in ruler.get("below"):
+                    box.append(
+                        f"<text x='{lx:.1f}' y='{text_y:.1f}' text-anchor='middle' "
+                        f"font-size='9' fill='currentColor' opacity='.65'>{text}</text>")
 
     label_band = LABEL_BAND if ticks not in (TICK_NONE, TICK_STEP) else 0
     if label_band:

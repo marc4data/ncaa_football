@@ -394,10 +394,17 @@ def test_PANELS_DEFAULT_RENDER_IS_UNCHANGED():
     line emitted `preserveAspectRatio` BEFORE `height` instead of after. Semantically identical,
     textually different, and it would have rewritten every existing panel render.
     """
+    # 🚨 A239 REGENERATED THESE, AND THE REGENERATION WAS ITSELF CHECKED. `panel()`'s default
+    # changed on purpose this round — the IQR box takes `var(--cfdb-iqr)` and the two quartile
+    # rows carry a marker class — so a golden that still matched would mean the intended change
+    # had not shipped. 📊 **Before recording them, A239 normalised the new output back across
+    # exactly those two edits and compared it to `ba13118`: identical at all three widths.**
+    # ⚠️ That is the difference between regenerating a golden and erasing one — the hashes moved
+    # for a reason that was enumerated, not because the test was in the way.
     goldens = {
-        "plain|120": "5e538cd623320d0c16b80347b406c361",
-        "plain|240": "864ae9d5e0568f8eb86d315306afe6f1",
-        "plain|420": "7d106bca550b38336dd0e875b2b81a04",
+        "plain|120": "a7ae77123d152e0e67f22ff2fbeec21d",
+        "plain|240": "f41c905d6004f99e8aabbf928d6b6890",
+        "plain|420": "c67d8752f2797161e2423edc9825dcea",
     }
     assert goldens, "no goldens (R-2254)"
     for key, digest in goldens.items():
@@ -622,9 +629,35 @@ def test_the_stats_table_has_ONE_implementation():
     three = d.stats_table(row, ("p25", "p50", "p75"))
     full = d.stats_table(row, True)
     assert three and full
+    # ⚠️ A239: the quartile rows carry an extra class now, so the match is on the row rather
+    # than on an exact class string — otherwise this silently stops comparing p25 and p75, which
+    # are the two rows the round changed.
+    cell_of = lambda html, key: re.search(                                    # noqa: E731
+        rf"<div class='cfdb-dist-stat[^']*'><span>{key}</span><b>([^<]*)</b>", html)
     for key in ("p25", "median", "p75"):
-        cell = re.search(rf"<div class='cfdb-dist-stat'><span>{key}</span><b>([^<]*)</b>", three)
-        same = re.search(rf"<div class='cfdb-dist-stat'><span>{key}</span><b>([^<]*)</b>", full)
+        cell, same = cell_of(three, key), cell_of(full, key)
         assert cell and same and cell.group(1) == same.group(1), \
             f"the subset formats {key} differently from the full table"
     assert "min" not in three and "max" not in three, "the subset leaked rows it did not ask for"
+
+
+def test_ONLY_THE_TWO_QUARTILES_ARE_MARKED_FOR_THE_IQR_COLOUR():
+    """🚨 MARC COLOURED TWO OF THE THREE, AND THE THIRD IS THE POINT OF THE OTHER TWO.
+    > **MARC, v19:** *"Color p25 and p75 values and labels a dark orange … Fill the IQR range
+    > with the same orange … That will help end-user understand the relationship."*
+
+    ⚠️ The median is deliberately left alone: it is the bold rule ON the chart, not an edge of
+    the box, and marking it would break the very relationship the colour exists to show.
+    """
+    row = _row()
+    full = d.stats_table(row, True)
+    marked = re.findall(r"<div class='cfdb-dist-stat cfdb-iqr'><span>([^<]*)</span>", full)
+    assert marked == ["p25", "p75"], f"the marked rows are {marked}, not exactly p25 and p75"
+    # and the box the numbers describe is painted from the SAME token, not a second literal
+    svg = d.panel(row, width=140, height=28, head=False, stats=False)
+    assert svg.count(d.IQR_COLOR) == 2, (
+        "the IQR box should take its fill AND its stroke from the one token; found "
+        f"{svg.count(d.IQR_COLOR)} references")
+    assert "#8A3324" not in svg and "#E07B5A" not in svg, (
+        "a hex literal reached the SVG — the colour must arrive as var(--cfdb-iqr) so light and "
+        "dark resolve from one definition in theme.py")

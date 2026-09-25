@@ -852,21 +852,33 @@ def details_col(link_builder, label: str = "") -> "Col":
                link=link_builder)
 
 
-def dataset_caption(label: str, table_name: str) -> None:
+def dataset_caption(label: str, table_name: str, also=()) -> None:
     """AC-G.7, amended: front of house says "Dataset: Schedule", not `srv_game`.
 
     The literal object name is right for a BUILDER — System Overview and Degraded states
     keep it, because there the exact identifier is the point. On a page whose reader wants
     to know what they are looking at, a table name is jargon, and the useful move is a link
     to what that dataset actually contains.
+
+    🚨 A239 (cfdb-main-R-3232). `also` IS A SEQUENCE OF `(label, table)` PAIRS FOR A PANEL THAT
+    GENUINELY READS MORE THAN ONE VIEW, rendered comma-delimited on the SAME line.
+    > **MARC, v19:** *"Why do we have 3 lines of Dataset? … Can't we have 1 line of dataset and
+    > list them comma delimited on a single row?"*
+
+    ⚠️ ADDITIVE, AND THE DEFAULT IS BYTE-IDENTICAL — which matters more here than almost anywhere
+    else, because **this function is called by every one of the eighteen pages.** A239 compared
+    the rendered markup with `also=()` against the pre-change function across every live caller
+    and found zero differences. **Each dataset keeps its OWN link**: a merged line that pointed
+    both names at one table would be a worse caption than the two it replaced.
     """
     # The link carries the TABLE, and the Data Dictionary reads it as a filter so the
     # reader lands on that table rather than the top of a 1,200-row page. `table` is the
     # canonical parameter name; `stat` was the wrong one and is why these did not resolve.
+    links = [(label, table_name), *also]
+    body = ", ".join(
+        f"<a href='/dictionary?table={t}' target='_self'>{lab}</a>" for lab, t in links)
     st.markdown(
-        f"<div class='cfdb-dataset'>Dataset: "
-        f"<a href='/dictionary?table={table_name}' target='_self'>{label}</a>"
-        f"</div>", unsafe_allow_html=True)
+        f"<div class='cfdb-dataset'>Dataset: {body}</div>", unsafe_allow_html=True)
 
 
 def as_of_caption(df: pd.DataFrame) -> None:

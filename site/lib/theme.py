@@ -638,6 +638,20 @@ TABLE_CSS = """
      measured #1f6feb on #0e1117 at about 3.6:1, below the 4.5:1 a small glyph needs, and
      #58a6ff is the contrast lift that clears it. Same for the three underperformer tiers. */
   --cfdb-link: light-dark(#1f6feb, #58a6ff);
+  /* 🚨 A239 (cfdb-main-R-3234). THE IQR TINT — Marc, v19: *"a dark orange, like burnt
+     sienna"*, on the p25/p75 numbers AND on the box they describe, so a reader sees the two
+     numbers ARE the box.
+     📊 A PAIR, BECAUSE ONE LITERAL CANNOT SERVE BOTH SCHEMES AND THIS ROUND MEASURED IT.
+     Marc's `#8A3324` is **8.14:1 on the light canvas** — comfortably past AA — and **2.32:1 on
+     `#0e1117`**, which is below even the 3:1 floor for non-text. Unreadable in a scheme the site
+     ships. `#E07B5A` is the same hue lightened and scores **6.43:1 on dark** (and its own 2.94
+     on light, which is why it is not used there). Both halves therefore pass AA for body text
+     in the scheme they serve.
+     ⚠️ `distribution.py` references this as `var(--cfdb-iqr)` rather than carrying its own hex:
+     `CSS` here is a plain string, not an f-string, so the literal cannot travel the other way
+     without escaping every brace in the stylesheet. ONE definition, and this is the end that
+     does not rewrite it. */
+  --cfdb-iqr:  light-dark(#8A3324, #E07B5A);
   /* 🚨 A211 (cfdb-main-R-2503). THE OUTCOME BANDS WERE SEPARATED BY HUE AND NOT BY LUMINANCE,
      AND THE NUMBERS SAY SO.
      > **MARC, v14:** *"The color scale on the Outcome cicrle glyph is too hard to
@@ -1627,12 +1641,26 @@ TABLE_CSS = """
    would have pushed the row into a scroll at the width Marc works at. `baseline` alignment puts
    the three small rows against the numeral's own baseline, and `margin-left:auto` pushes them to
    the tile's right edge — into whitespace the 1.7rem figure was already leaving. */
-.cfdb-kpi-head { display:flex; align-items:baseline; gap:.3rem; min-width:0; }
+/* 🚨 A239 (cfdb-main-R-3230). TOP-ALIGNED, NOT BASELINE — Marc, v19: *"Move the p25, med, p75 up
+   to be aligned with the top of the KPI # and remove the wasted whitespace."*
+   ⚠️ `baseline` put the FIRST stat row on the numeral's baseline, which pushed the other two
+   below it and left the space above them empty. `flex-start` puts the block's top edge on the
+   numeral's top edge, which is what he described and what closes the gap. */
+.cfdb-kpi-head { display:flex; align-items:flex-start; gap:.3rem; min-width:0; }
 /* ⚠️ THE TABLE MAY SHRINK AND THE NUMERAL MAY NOT — A218's rule, which this row has paid for
    twice: *a team name on two lines is a layout, a number on two lines is a lie.* */
+/* 📊 A239: ONE INCREMENT UP — `.56rem` to `.64rem`, which is the step the row already uses
+   (`.cfdb-kpi-sub` is `.64rem`) rather than a new size invented for this block. The tighter
+   `line-height` is what "remove the wasted whitespace" buys: three rows now occupy less height
+   than two did, so the block clears the numeral without pushing the chart down. */
 .cfdb-kpi-head .cfdb-dist-stats { margin-left:auto; min-width:0; flex:0 1 auto;
-    font-size:.56rem; line-height:1.18; opacity:.75; }
+    font-size:.64rem; line-height:1.12; opacity:.85; }
 .cfdb-kpi-head .cfdb-dist-stat { gap:.3rem; }
+/* 🚨 THE LABEL AND THE VALUE BOTH — Marc said *"p25 and p75 values and labels"*, and painting
+   only the number would leave the row reading as half-related to the box. `.cfdb-iqr` is set by
+   `distribution.stats_table` on exactly those two rows and on no other. */
+.cfdb-dist-stat.cfdb-iqr, .cfdb-dist-stat.cfdb-iqr span, .cfdb-dist-stat.cfdb-iqr b {
+    color:var(--cfdb-iqr); }
 .cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
 /* `.cfdb-dist-body` is a flex row because the standalone panel puts the stats table beside the
    chart. The KPI tile passes `stats=False`, so there is one child and the gap would be dead
