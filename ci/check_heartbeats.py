@@ -70,8 +70,16 @@ OUTCOME_LINES = {
 }
 
 
-def read_ages(host: str) -> dict:
-    """name -> seconds since last beat, via the forced command. Raises if unreachable."""
+def fetch_payload(host: str) -> str:
+    """The forced command's raw output. Raises if the host is unreachable.
+
+    🚨 A232 (cfdb-main-R-3107). SPLIT OUT OF `read_ages` SO THE PARSER CAN BE TESTED WITHOUT
+    AN SSH SESSION. `ci/check_publish_path.py` gates merges on this payload, and a gate whose
+    only test path is "make production look broken" is a gate nobody exercises.
+    ⚠️ The existing switch tests monkeypatch `read_ages` WHOLESALE, so before this split
+    **nothing in the suite had ever run the parser at all** — the shapes it knows were
+    asserted only by the one production caller.
+    """
     result = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
          "-o", f"ConnectTimeout={SSH_TIMEOUT_SECONDS}", host, "heartbeat"],
@@ -80,8 +88,18 @@ def read_ages(host: str) -> dict:
         raise RuntimeError(
             f"could not read heartbeats from {host} (exit {result.returncode}): "
             f"{result.stderr.strip()[:400]}")
+    return result.stdout
+
+
+def read_ages(host: str) -> dict:
+    """name -> seconds since last beat, via the forced command. Raises if unreachable."""
+    return parse_payload(fetch_payload(host))
+
+
+def parse_payload(text: str) -> tuple:
+    """`(ages, failures, failed_tests, outcomes)` from the forced command's output."""
     ages, failures, failed_tests, outcomes = {}, {}, {}, {}
-    for line in result.stdout.splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line or "|" not in line:
             continue
