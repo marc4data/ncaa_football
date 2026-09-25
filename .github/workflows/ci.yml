@@ -23,6 +23,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ══ A232 (cfdb-main-R-3108). THE RED LIGHT STOPS THE LINE. ═══════════════════════════════
+  #
+  # §2.2.3: "A red publish path stops feature work in both sessions until it is green."
+  # That rule has been broken three times, most recently by its own author merging A227 into
+  # a red path on 2026-09-24 — and that stoppage was found BY ACCIDENT, as a sixth check run
+  # on A227's own merge commit. This makes the accident deliberate.
+  #
+  # 🚨 IT READS THE PIPELINE HOST LIVE, NOT THE DEAD-MAN'S SWITCH'S LAST RUN. Measured over
+  # 562 hours from the Actions API: the switch's */20 cron asked for 1,686 runs and GitHub
+  # delivered 154 — median gap 212 minutes, max 534. A gate on that signal is stale by hours
+  # in both directions. `ci/check_publish_path.py` carries the whole argument.
+  #
+  # ⚠️ FIRST IN THE FILE BECAUSE IT IS THE CHEAPEST AND THE MOST LIKELY TO MATTER: it costs
+  # about as long as an SSH round trip, and when it is red the other four jobs are burning
+  # minutes on a PR that should not merge yet.
+  publish-path:
+    name: Publish path is green
+    runs-on: ubuntu-24.04
+    steps:
+      # ⚠️ `fetch-depth: 0` IS LOAD-BEARING, NOT A DEFAULT. The override is a commit trailer
+      # read from `origin/main..HEAD`; a shallow clone has no `origin/main` to diff against,
+      # and the gate would fall back to HEAD alone and miss a trailer on an earlier commit of
+      # the branch.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install the monitoring key
+        env:
+          MONITOR_SSH_KEY: ${{ secrets.CFDB_MONITOR_SSH_KEY }}
+          MONITOR_HOST: ${{ secrets.CFDB_MONITOR_HOST }}
+        # 🚨 A MISSING SECRET IS NOT A PASS. A fork PR gets no secrets, and so cannot read the
+        # signal — that is the UNDETERMINED case, and the gate below reports it as such rather
+        # than as green. This step therefore does NOT fail; it leaves the host empty and lets
+        # the gate say which of the three states it is in.
+        run: |
+          if [ -z "$MONITOR_SSH_KEY" ] || [ -z "$MONITOR_HOST" ]; then
+            echo "::warning::the monitoring secrets are not available to this run (a fork " \
+                 "PR, or the secret is unset) — the publish path cannot be read"
+            exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$MONITOR_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${MONITOR_HOST#*@}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Is the publish path green?
+        env:
+          MONITOR_HOST: ${{ secrets.CFDB_MONITOR_HOST }}
+        # The key is the same restricted forced command the dead-man's switch uses: it can
+        # only print heartbeat ages. See deploy/cfdb_heartbeat.sh.
+        run: python ci/check_publish_path.py "$MONITOR_HOST"
+
   lint-and-test:
     name: flake8 + pytest
     # 🚨 A179 (cfdb-main-R-1809). PINNED, NOT `ubuntu-latest`. Every run of the dead-man's
