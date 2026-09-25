@@ -9,6 +9,7 @@ kicked off before this matchup (cfdb-wta-R-1000). A round that gives it its own 
 would put the rest of the season on a *Before the game* tab and look entirely healthy doing it —
 that is the defect Marc found live, and the guard below is the thing that can see it come back.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -195,10 +196,32 @@ def test_THE_IDENTITY_COLUMNS_ARE_FROZEN_so_the_two_tables_can_be_compared(panel
         "no column is frozen, so the two stacked tables scroll independently and cannot be "
         "compared — which is the reason Marc gave for stacking them")
     assert "cfdb-sticky-edge" in html, "the frozen block draws no edge against the scroll"
+    # 🚨 **THREE SINCE cfdb-wta-R-2923, AND COUNTED IN THE MARKUP RATHER THAN READ OFF THE
+    # CALL.** > **MARC:** *"would like to freeze 3 columns instead of 2. The result gives
+    # additional context to the rest of the numbers in the table."*
+    #
+    # ⚠️ **THE OLD ASSERTION WAS `"sticky=2" in code` — A SOURCE STRING, AND IT IS HALF A
+    # PIN** (R-843). It moves when the literal moves, and it would stay green if
+    # `site/lib/table.py` silently ignored the argument — which is **exactly** what that
+    # module does when `scroll` is off or a frozen width is not a pixel (R-269). **The
+    # silent-ignore is the failure mode, so the count is taken from what was DRAWN.**
+    #
+    # ⚠️ **AND IT COUNTS CELLS, NOT OCCURRENCES — THE FIRST VERSION COUNTED 4 OF 3.** The
+    # edge cell carries `class='… cfdb-sticky cfdb-sticky-edge'`, and `cfdb-sticky-edge`
+    # CONTAINS `cfdb-sticky`, so a `.count()` scores that cell twice. **R-2260 inside the
+    # assertion written to pin R-2923** — caught by running it.
+    body = html.split("<tbody>")[1].split("</tbody>")[0]
+    rows = [r for r in body.split("<tr") if "<td" in r]
+    assert rows, "the table drew no data rows, so this assertion would pass on nothing"
+    for row in rows:
+        frozen = [c for c in re.findall(r"<td[^>]*class='([^']*)'", row)
+                  if "cfdb-sticky" in c.split()]
+        assert len(frozen) == 3, (
+            f"{len(frozen)} frozen cells in a row, not 3 — Wk, Opponent and Result are the "
+            f"three Marc named; if that is deliberate, re-measure the frozen width against "
+            f"the 564px box at 1024 and say so")
     code = _code_of("_season_so_far")
-    assert "sticky=2" in code, (
-        "the freeze is no longer two columns; if that is deliberate, re-measure the frozen "
-        "width against the 564px box at 1024 and say so")
+    assert "sticky=3" in code, "the render call no longer asks for three frozen columns"
 
 
 def test_THE_TOGGLE_IS_NOT_ST_TABS_because_that_loses_the_tab_on_every_link():
