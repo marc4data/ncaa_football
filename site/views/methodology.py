@@ -60,6 +60,7 @@ from memory:
 | dbt data tests | **650** — **510** schema tests and **140** hand-written assertions |
 | Python tests | more than **2,250** |
 | Pages on this site | **18** |
+| Serving columns, every one with a written definition | **1,502** |
 | Databases | **two** — a warehouse where everything is built, and a small serving Postgres the site reads |
 
 The two databases are the point of the shape rather than an accident of it. The site never
@@ -127,6 +128,39 @@ the thing it monitors is not a monitor — a stack that is down cannot report th
 The rule existed before that as a written one and was broken three times, including once by
 the person who wrote it. A rule that depends on remembering is not a control.
 
+
+### What it runs on
+
+The whole of it — the ingestion, the warehouse, the transformation layer, the scheduler and this
+site — runs on modest hardware for **under $15 a month**. The two-database shape above is part of
+why: the site reads a small Postgres holding only what has been published, so serving a page costs
+almost nothing, and the expensive work happens on a schedule rather than while someone is looking.
+
+### Every column has a definition, and the definition travels
+
+Every column in the serving layer — the **1,502** columns this site reads — carries a written
+definition. Those definitions are not kept in a document beside the code; they are attached to the
+columns themselves when each table is built, read back out of the database, and published like any
+other data.
+
+They reach you two ways. The **Data Dictionary** page lists them, filterable by table. And every
+Excel export carries a **Data Dictionary** as its second sheet, generated from the same view the
+page reads, so the workbook and the site cannot disagree about what a field means. That sheet also
+names which sheet each field appears on, and leaves it blank where a field is documented but not
+exported — documented and shipped are different claims, and the sheet says which is which.
+
+⚠️ The layers below serving are a different matter: staging and the dimensional models are
+documented in part, not in full. The claim above is about the layer a reader actually meets.
+
+### When this page changes
+
+When a round changes it. This is prose, and prose is only as current as the last person who read
+it — which is why the counts above carry a date.
+
+The counts themselves are not typed from memory. A test re-measures every one of them against the
+repository — the endpoint registry, the compiled dbt manifest, the test suite, the page registry —
+and fails the build when one drifts. So a number here can be out of date only if nobody has run
+the build since it drifted, and the build runs on every change.
 
 ### The sign convention, which is not the intuitive one
 

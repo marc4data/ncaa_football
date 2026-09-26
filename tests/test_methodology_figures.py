@@ -174,3 +174,89 @@ def test_the_page_states_the_gate_and_what_it_costs():
     assert "gated" in low or "gate" in low
     assert "yesterday" in low, "the page must say what a failed check actually costs a reader"
     assert "dead-man" in low or "heartbeat" in low
+
+
+# ── A240 — the documentation figure, and the two claims around it ───────────────────────────
+
+def test_the_serving_column_count_is_the_DATABASES_own(monkeypatch):
+    """🚨 A240 (cfdb-main-R-3264). THE PAGE NOW CLAIMS A COLUMN COUNT, SO THE COUNT IS GUARDED
+    LIKE EVERY OTHER FIGURE — that is A233's whole mechanism and a new number outside it is the
+    stale number the mechanism exists to prevent.
+
+    ⚠️ THIS ONE IS MEASURED AGAINST LIVE SERVING, NOT THE REPOSITORY, because that is where the
+    claim is true or false: `srv_data_dictionary` reads the database catalogue, so a column added
+    without a description moves this number the moment it is published.
+
+    📊 THE CLAIM IS DELIBERATELY NARROW. Measured 2026-09-26: the catalogue holds **4,355**
+    columns of which **2,191 carry no description** — staging is 15.7% documented and the marts
+    32.3%. **Serving is 1,502 of 1,502.** *"Every column is documented"* would be false; *"every
+    column in the serving layer"* is true, and this test pins the narrow one.
+    """
+    pytest.importorskip("psycopg2")
+    sys.path.insert(0, str(ROOT / "site"))
+    try:
+        from lib.query import query
+        got = query("""select count(*) n from serving.srv_data_dictionary
+                       where layer = 'serving' limit 1""", {})
+        undocumented = query("""select count(*) n from serving.srv_data_dictionary
+                                where layer = 'serving'
+                                  and (column_description is null
+                                       or trim(column_description) = '') limit 1""", {})
+    except Exception as exc:                                             # noqa: BLE001
+        pytest.skip(f"no serving database reachable from here: {type(exc).__name__}: {exc}")
+    live = int(got.n.iloc[0])
+    printed = _printed("every one with a written definition")
+    assert printed, "the page no longer prints a serving column count"
+    assert printed[0] == live, (
+        f"the page says {printed[0]:,} serving columns; the database has {live:,}")
+    assert int(undocumented.n.iloc[0]) == 0, (
+        f"{int(undocumented.n.iloc[0])} serving columns carry no description, so the page's "
+        f"claim that every one has a definition is now FALSE")
+
+
+def test_the_page_does_not_claim_EVERY_column_is_documented():
+    """🚨 THE CLAIM THAT WOULD BE FALSE, ASSERTED AS ABSENT (R-2260's shape, inverted).
+
+    📊 Half the catalogue carries no description. A future edit that trims *"every column in the
+    serving layer"* to *"every column"* would be shorter, would read better, and would be wrong —
+    so the narrowing is pinned rather than trusted to survive a copy-edit.
+    """
+    body = PAGE[PAGE.index("Every column has a definition"):]
+    body = body[:body.index("### When this page changes")]
+    assert "serving layer" in body, (
+        "the documentation claim no longer names the serving layer, so it now reads as a claim "
+        "about all 4,355 catalogued columns — of which 2,191 have no description")
+    assert "staging" in body and "not in full" in body, (
+        "the page dropped the sentence admitting the layers below serving are only partly "
+        "documented; without it the narrow claim reads as a whole-warehouse one")
+
+
+def test_the_page_states_its_cost_without_naming_the_hardware():
+    """> **MARC:** *"should also indicate that we are doing this on minimal hardware with a budget
+    > of <$15/month."*
+
+    🚨 §4.7.1 — THE CLAIM IS THE BUDGET, NOT THE INVENTORY. This repository is public. A figure is
+    fine; a provider, a region, a host name or a sizing that identifies the box is not, and this
+    pins the absence as well as the presence.
+    """
+    assert "$15" in PAGE, "the page no longer states what it costs to run"
+    lowered = PAGE.lower()
+    for leak in ("droplet", "digitalocean", "digital ocean", "aws", "ec2", "gcp", "azure",
+                 "linode", "vultr", "hetzner", "vcpu", " gb ram", "nyc3", "sfo3"):
+        assert leak not in lowered, (
+            f"the page names {leak!r} — the cost claim must not identify the hardware (§4.7.1)")
+
+
+def test_the_page_answers_when_it_changes_and_does_not_overclaim():
+    """> **MARC:** *"When does this get updated?"*
+
+    ⚠️ THE HONEST ANSWER HAS TWO HALVES AND THE PAGE MUST CARRY BOTH. The COUNTS are re-measured
+    by this very file and fail the build when they drift; the PROSE is only as current as the last
+    round that touched it. **A page claiming the whole of itself is auto-verified would be
+    overclaiming**, which is the failure A233 built the date into the page to avoid.
+    """
+    body = PAGE[PAGE.index("### When this page changes"):]
+    assert "prose" in body.lower(), "the page does not say that the prose is hand-maintained"
+    assert "test" in body.lower(), "the page does not say the counts are re-measured by a test"
+    assert "carry a date" in body or "date" in body.lower(), \
+        "the page does not tie the counts back to their date"
