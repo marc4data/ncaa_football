@@ -4568,7 +4568,37 @@ _KPI_TICK_LABEL_STEP = 10
 # just two** — which is why `_kpi_axis` could go rather than being kept beside it.
 #
 # ⚠️ §4.2.1 IS NOT ENGAGED: this SELECTS a frame, it computes no quantity.
-_KPI_AXIS = (0.0, 80.0)
+#
+# 🚨 A244 (cfdb-main-R-3350). 82, NOT 80 — AND THE TWO EXTRA UNITS ARE THERE TO PRINT A LABEL,
+# NOT TO HOLD DATA.
+#
+# > **MARC, v21:** *"expand the x-axis to 82 so that 80 on the axis has enough space to print"*
+#
+# 📊 MEASURED on all three cards, both frames, from the rendered `<text>` nodes:
+#
+#     top 80 -> 0 10 20 30 40 50 60 70      `80` DROPPED, x(70) = 122.5
+#     top 82 -> 0 10 20 30 40 50 60 70 80   both print, x(70) = 119.5, x(80) = 134.1
+#
+# ⚠️ `_LabelBands.place()` drops a label whose exclusion zone overlaps a placed one — half each
+# measured width plus `LABEL_GAP`. At a top of 80 the last two need 13.45px of centre-to-centre
+# clearance and have 11.62; at 82 they have 14.60. 🚨 **THE MARGIN IS 1.15px**, so a font or
+# padding change can take the label back without anything else moving —
+# `test_THE_TOP_OF_THE_KPI_AXIS_IS_LABELLED` is the pin, and it fails on a frame of 80.
+#
+# ⚠️ THE TICKS AND LABELS ARE UNCHANGED: marks every 5, numbers every 10. Only the frame top
+# moved, so the data is drawn very slightly narrower and nothing is clamped that was not before.
+_KPI_AXIS = (0.0, 82.0)
+
+# 🚨 A244 (cfdb-main-R-3351). > **MARC, v21:** *"Can you add major gridlines at 0, 20, 40, 60,
+# and 80? They can be muted down a bit, but it will help comparisons across Win, Loss, and Total
+# KPI's."*
+# ⚠️ THE POINT IS CROSS-CARD COMPARISON, so all three cards get the SAME five values, and they
+# land at the same x on every card because all three now share `_KPI_AXIS`. That is the whole
+# reason A243's fixed frame had to come first.
+# ⚠️ NOT DERIVED FROM `_KPI_TICK_LABEL_STEP`. The ruler labels every 10 and the gridlines are
+# the 20s; deriving one from the other would couple two things Marc asked for separately, and a
+# later change to either would silently move the other.
+_KPI_GRIDLINES = (0.0, 20.0, 40.0, 60.0, 80.0)
 
 # 🚨 THE THREE ROWS MARC ASKED FOR BESIDE THE FIGURE.
 # > **MARC:** *"How about a tight table to the right KPI value that shows p25, p50, p75."*
@@ -4659,7 +4689,8 @@ def _kpi_chart(dist_row, metric: str) -> str:
                               histogram=False, box_height=_KPI_BOX_H,
                               ticks=distribution.TICK_STEP, tick_step=_KPI_TICK_STEP,
                               tick_label_step=_KPI_TICK_LABEL_STEP,
-                              head=False, stats=False, metric=metric, axis=_KPI_AXIS)
+                              head=False, stats=False, metric=metric, axis=_KPI_AXIS,
+                              gridlines=_KPI_GRIDLINES)
 
 
 def _kpi_stats(dist_row) -> str:

@@ -638,20 +638,56 @@ TABLE_CSS = """
      measured #1f6feb on #0e1117 at about 3.6:1, below the 4.5:1 a small glyph needs, and
      #58a6ff is the contrast lift that clears it. Same for the three underperformer tiers. */
   --cfdb-link: light-dark(#1f6feb, #58a6ff);
-  /* 🚨 A239 (cfdb-main-R-3234). THE IQR TINT — Marc, v19: *"a dark orange, like burnt
-     sienna"*, on the p25/p75 numbers AND on the box they describe, so a reader sees the two
-     numbers ARE the box.
-     📊 A PAIR, BECAUSE ONE LITERAL CANNOT SERVE BOTH SCHEMES AND THIS ROUND MEASURED IT.
-     Marc's `#8A3324` is **8.14:1 on the light canvas** — comfortably past AA — and **2.32:1 on
-     `#0e1117`**, which is below even the 3:1 floor for non-text. Unreadable in a scheme the site
-     ships. `#E07B5A` is the same hue lightened and scores **6.43:1 on dark** (and its own 2.94
-     on light, which is why it is not used there). Both halves therefore pass AA for body text
-     in the scheme they serve.
+  /* 🚨 A244 (cfdb-main-R-3352). THE IQR TINT IS VIOLET, AND A239's NUMBER BESIDE IT WAS
+     MEASURED ON THE WRONG THING.
+     > **MARC, v21:** *"Shift the orange fill of the box and font color on p25, p75 to a bright
+     > blue that will pop and contrast more than the default font on p05, median, p95"*
+     > **MARC, asked because blue is already `--cfdb-link`, the site's one accent, and
+     > `distribution.VALUE_COLOR` is a second blue: "1-C"** — something other than blue.
+
+     🚨 A239's COMMENT SAID `#8A3324` IS "8.14:1 on the light canvas — comfortably past AA".
+     THAT IS THE RAW HEX AGAINST WHITE. The rendered number is **4.18:1**, because these rows
+     are inside TWO stacked opacity groups — `.cfdb-kpi-head .cfdb-dist-stats` at .85 and
+     `.cfdb-dist-stat` at .85 — which composite to **0.7225**. 📊 So the shipped quartile text
+     was BELOW the 4.5:1 text floor in both schemes (4.18 light, 3.86 dark) and nobody had
+     measured what was actually painted (cfdb-main-R-3354).
+
+     ✅ `opacity:1` on the `.cfdb-iqr` rule below lifts these rows to .85 — a child cannot
+     exceed its parent group, so .85 is the ceiling — and that is also, literally, Marc's
+     "contrast more than the default font": the other rows stay dimmed.
+
+     📊 MEASURED AS PAINTED, against the tile ground read from the live DOM (#fff / #0e1117):
+
+         light  #5B21B6  numbers 6.38:1  outline 6.38:1  vs default 5.25:1 -> pops x1.21
+         dark   #D4B0FF  numbers 7.68:1  outline 7.68:1  vs default 9.66:1 -> x0.79
+
+     ⚠️ x0.79 IS NOT A MISS, IT IS A CEILING. The default row on dark is near-white on
+     near-black — the top of the contrast range — so NO hue can out-contrast it there. In dark
+     the quartiles are distinguished by hue and by being clearly less bright, not by more.
+
+     ⚠️ DICHROMAT SEPARATION FROM THE DEFAULT ROW IS 1.16-1.32:1 (Viénot, both types), and
+     A240 REFUSED A PAIR AT 1.17. The difference is what carries the meaning: A240's upset ramp
+     encoded a QUANTITY in color alone, so a dichromat lost the datum. Here the rows are
+     labeled `p25` and `p75`, in fixed positions, describing a box whose meaning is its
+     POSITION. Color is redundant encoding, so a low separation costs emphasis and not
+     information (cfdb-main-R-3355).
+
      ⚠️ `distribution.py` references this as `var(--cfdb-iqr)` rather than carrying its own hex:
      `CSS` here is a plain string, not an f-string, so the literal cannot travel the other way
      without escaping every brace in the stylesheet. ONE definition, and this is the end that
      does not rewrite it. */
-  --cfdb-iqr:  light-dark(#8A3324, #E07B5A);
+  --cfdb-iqr:  light-dark(#5B21B6, #D4B0FF);
+  /* 🚨 A244 (cfdb-main-R-3351). THE MAJOR GRIDLINES — Marc, v21: *"major gridlines at 0, 20,
+     40, 60, and 80... They can be muted down a bit, but it will help comparisons across Win,
+     Loss, and Total KPI's."*
+     📊 IT MUST BE THE FAINTEST THING IN THE CHART, and the number that says so is its contrast
+     against the EXISTING tick marks, which are `currentColor` at stroke-opacity .45:
+
+         light  #D9DEE5  1.35:1  vs tick 2.51:1     dark  #2A3038  1.42:1  vs tick 4.39:1
+
+     ⚠️ A PAIR, NOT A HEX — A239 shipped a single literal here and it failed one scheme (see
+     above). A gridline that is invisible in one mode is the same defect one step quieter. */
+  --cfdb-grid: light-dark(#D9DEE5, #2A3038);
   /* 🚨 A211 (cfdb-main-R-2503). THE OUTCOME BANDS WERE SEPARATED BY HUE AND NOT BY LUMINANCE,
      AND THE NUMBERS SAY SO.
      > **MARC, v14:** *"The color scale on the Outcome cicrle glyph is too hard to
@@ -1659,8 +1695,13 @@ TABLE_CSS = """
 /* 🚨 THE LABEL AND THE VALUE BOTH — Marc said *"p25 and p75 values and labels"*, and painting
    only the number would leave the row reading as half-related to the box. `.cfdb-iqr` is set by
    `distribution.stats_table` on exactly those two rows and on no other. */
+/* 🚨 A244 (cfdb-main-R-3354): `opacity:1` IS HALF OF "contrast more than the default font".
+   These rows sit in two stacked opacity groups (.85 x .85 = 0.7225) and the quartile text was
+   painting at 4.18:1 light / 3.86:1 dark — under the 4.5:1 text floor, in a rule whose own
+   comment claimed 8.14:1. ⚠️ A child cannot exceed its parent group, so this reaches .85 and
+   not 1.0; the OTHER rows keep the full dimming, which is what makes these ones louder. */
 .cfdb-dist-stat.cfdb-iqr, .cfdb-dist-stat.cfdb-iqr span, .cfdb-dist-stat.cfdb-iqr b {
-    color:var(--cfdb-iqr); }
+    color:var(--cfdb-iqr); opacity:1; }
 .cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
 /* `.cfdb-dist-body` is a flex row because the standalone panel puts the stats table beside the
    chart. The KPI tile passes `stats=False`, so there is one child and the gap would be dead
