@@ -230,8 +230,20 @@ def section(view: str, degraded_if_missing: Optional[str] = None, dataset_also=(
         # Deferred, matching table.as_of_caption's own import of shell: lib.table imports
         # four sibling modules and this one imports none, so keeping the edge out of module
         # scope keeps that asymmetry from becoming a cycle later.
-        from lib import table
-        table.dataset_caption(dataset, view, dataset_also)
+        from lib import shell, table
+        # 🚨 A243 (cfdb-main-R-3328). REGISTER WHEN A TAB HAS RESERVED A LINE; RENDER WHEN IT HAS
+        # NOT. The fallback is what keeps the other seventeen pages byte-identical — they reserve
+        # no slot, so they take the path they always did.
+        #
+        # ⚠️ IT REGISTERS *HERE*, BEFORE THE `try`, EXACTLY WHERE IT USED TO RENDER. A panel that
+        # then raises or degrades has still DECLARED the view it read, which is the honest
+        # behaviour: the tab's line says what the page tried to read, not only what succeeded.
+        # Moving it after the yield would silently drop a failing panel's source.
+        if shell.register_dataset(dataset, view):
+            for extra_label, extra_view in (dataset_also or ()):
+                shell.register_dataset(extra_label, extra_view)
+        else:
+            table.dataset_caption(dataset, view, dataset_also)
     from lib.query import QueryFailed
     try:
         yield

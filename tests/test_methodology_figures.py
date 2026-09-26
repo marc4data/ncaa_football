@@ -214,21 +214,30 @@ def test_the_serving_column_count_is_the_DATABASES_own(monkeypatch):
         f"claim that every one has a definition is now FALSE")
 
 
-def test_the_page_does_not_claim_EVERY_column_is_documented():
-    """🚨 THE CLAIM THAT WOULD BE FALSE, ASSERTED AS ABSENT (R-2260's shape, inverted).
+def test_no_documentation_claim_on_the_page_is_UNSCOPED():
+    """🚨 A243 (cfdb-main-R-3327). THIS PINS THE PROPERTY, NOT A PARTICULAR DISCLOSURE.
 
-    📊 Half the catalogue carries no description. A future edit that trims *"every column in the
-    serving layer"* to *"every column"* would be shorter, would read better, and would be wrong —
-    so the narrowing is pinned rather than trusted to survive a copy-edit.
+    ⚠️ **A240's version asserted `"staging" in body and "not in full" in body`** — it pinned the
+    exact caveat sentence rather than the thing that sentence existed for. Marc removed the
+    sentence for a product reason (*"People viewing the site don't need to know anything about the
+    data dictionary in the raw or stage realms"*), and the old test would have failed on a page
+    that was still perfectly honest. **R-2260's shape: pinning a substring instead of a rule.**
+
+    📊 THE RULE: half the catalogue carries no description — **2,191 of 4,355** — so the bare
+    phrase *"every column"* is FALSE unless a scope is attached to it. This asserts that every
+    occurrence carries one, **headings included, which is where A240's test was not looking**: the
+    heading read *"Every column has a definition"*, an unbounded whole-warehouse claim in five
+    words, and nothing checked it.
     """
-    body = PAGE[PAGE.index("Every column has a definition"):]
-    body = body[:body.index("### When this page changes")]
-    assert "serving layer" in body, (
-        "the documentation claim no longer names the serving layer, so it now reads as a claim "
-        "about all 4,355 catalogued columns — of which 2,191 have no description")
-    assert "staging" in body and "not in full" in body, (
-        "the page dropped the sentence admitting the layers below serving are only partly "
-        "documented; without it the narrow claim reads as a whole-warehouse one")
+    # every place the page says "every column", with the words that follow it
+    hits = re.findall(r"[Ee]very column([^.\n|]*)", PAGE)
+    assert hits, "the page no longer makes a documentation claim at all"
+    SCOPES = ("the site reads", "in the serving layer", "this site reads", "serving")
+    unscoped = [h.strip() for h in hits if not any(sc in h for sc in SCOPES)]
+    assert not unscoped, (
+        f"the page claims 'every column' without naming the layer: {unscoped}. "
+        f"Half the catalogue has no description, so an unscoped claim is false — "
+        f"name the serving layer, as the body sentence and the heading both do.")
 
 
 def test_the_page_states_its_cost_without_naming_the_hardware():
@@ -260,3 +269,24 @@ def test_the_page_answers_when_it_changes_and_does_not_overclaim():
     assert "test" in body.lower(), "the page does not say the counts are re-measured by a test"
     assert "carry a date" in body or "date" in body.lower(), \
         "the page does not tie the counts back to their date"
+
+    # 🚨 A243 (cfdb-main-R-3326). AND THE SCOPE OF THAT CLAIM IS PINNED, because A240's version of
+    # this paragraph was itself an overclaim — in the section whose entire purpose is not to
+    # overclaim.
+    #
+    # 📊 IT SAID every count is re-measured "against the repository" and "fails the build when one
+    # drifts". Neither is true of the newest count on the page: the 1,502 serving columns are read
+    # from `serving.srv_data_dictionary` — a DATABASE, not the repository — by a test that calls
+    # `pytest.skip` when serving is unreachable. **`ci.yml`'s `flake8 + pytest` job carries no
+    # serving credentials, so in the build that check SKIPS.** A column losing its description
+    # does not fail CI.
+    #
+    # ⚠️ THE FIX WAS HONEST PROSE, NOT A WEAKER TEST — the claim is the good part, the scope was
+    # wrong. This asserts the page keeps distinguishing the two, so it cannot drift back.
+    assert "Most of them" in body or "most of them" in body, (
+        "the paragraph claims ALL counts are re-measured against the repository again — the "
+        "serving-column count is read from the live database and skips in the build")
+    assert "live database" in body, (
+        "the page no longer says the documented-column count is checked against the database")
+    assert "not in the build" in body, (
+        "the page no longer admits that the database check does not run in the build")

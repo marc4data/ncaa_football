@@ -195,8 +195,10 @@ def test_the_two_score_tiles_are_drawn_on_ONE_domain():
     # renderer would be ignoring the row and the equality above would be worthless.
     assert (float(win["bin_min"]), float(win["bin_max"])) == \
            (float(lose["bin_min"]), float(lose["bin_max"]))
+    # ⚠️ A243: THE HISTOGRAM'S MEDIAN TICK (`stroke-opacity='0.95'`) IS GONE WITH THE BARS. The
+    # box's own bold rule is now the only median mark, and it is what this reads.
     median_x = lambda svg: re.search(                                     # noqa: E731
-        r"<line x1='([\d.]+)'[^>]*stroke-opacity='0.95'", svg).group(1)
+        r"<line x1='([\d.]+)'[^>]*stroke-width='2'", svg).group(1)
     assert median_x(a) != median_x(b), (
         "both medians are at the same x on a shared axis — the chart is not reading the row")
 
@@ -215,7 +217,7 @@ def test_THE_KPI_ROW_ACTUALLY_ASKS_FOR_AN_AXIS():
     """
     import re
     import today
-    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points", axis=(0.0, 59.0))
+    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points")
     ticks = re.findall(r"<line[^>]*stroke-opacity='\.45'", svg)
     assert ticks, (
         "the KPI charts draw no axis tick marks. Marc asked for an x-axis of ticks; the page is "
@@ -292,8 +294,12 @@ def test_NEITHER_SCORE_TILE_RESHAPES_ITS_PUBLISHED_ROW():
         assert getattr(arg.func.value, "id", "") == "by_metric"
         assert len(arg.args) == 1 and isinstance(arg.args[0], ast.Constant)
         metrics.append(arg.args[0].value)
-    assert metrics == ["total", "winning_points", "losing_points"], \
-        f"the charted tiles changed: {metrics}"
+    # 🚨 A243 (cfdb-main-R-3323). THE ORDER IS MARC'S v20 AND IS PINNED BY VALUE.
+    # > *"Reorder the cards to be Winning, Losing, then Closing O/U"*
+    # ⚠️ Pinned here rather than in a test of its own because this already walks the charted
+    # calls in page order — a second walker would be a second copy of the same question.
+    assert metrics == ["winning_points", "losing_points", "total"], \
+        f"the charted tiles are in the wrong order: {metrics}"
 
 
 def test_the_two_score_tiles_are_NOT_drawn_on_one_domain_if_the_bounds_diverge():
@@ -638,34 +644,44 @@ def test_the_label_reserves_no_second_line_any_more():
 
 # ── A237 — four gaps that staged breaks found GREEN, each closed at the PAGE ────────────────
 
-def test_ONE_AXIS_OBJECT_REACHES_BOTH_SCORE_TILES():
-    """🚨 A STAGED BREAK CAME BACK GREEN AND THIS IS WHY IT MATTERS. Narrowing the axis to each
-    tile's OWN whiskers — winning [14, 59], losing [0, 39] — left every test passing, because the
-    cross-tile test hands the renderer an axis it composed itself (R-768 again, in the round that
-    quotes R-768).
+def test_ALL_THREE_CHARTS_SHARE_ONE_FIXED_FRAME():
+    """🚨 A243 (cfdb-main-R-3321) REPLACES A237's VERSION OF THIS, AND THE PROPERTY GOT STRONGER.
 
-    ⚠️ THE CLAIM IS ABOUT THE PAGE: both score charts receive the SAME axis object, computed once
-    from BOTH metrics. Two correct calls to `_kpi_axis` with one metric each would be two correct
-    calls that disagree, and the picture would look entirely reasonable.
+    A237 computed the frame as the UNION of the two score metrics' whiskers and this test pinned
+    that both tiles received the same object — because two correct calls with one metric each
+    would be two correct calls that disagree.
+
+    > **MARC, v20:** *"Standardize the x-axis for Closing, Winning, and Losing cards to run from
+    > 0 to 70."* — and he chose **80** when offered headroom.
+
+    ✅ **So the frame is now a CONSTANT shared by all three, including the O/U card, which never
+    shared a scale with the other two.** ⚠️ The old test is not deleted, it is superseded: the
+    thing it protected — *the cards can be compared to each other* — is what this asserts, over a
+    wider set.
     """
-    fn = _func("_kpi_row")
-    calls = [n for n in ast.walk(fn)
+    import today
+    assert today._KPI_AXIS == (0.0, 80.0), (
+        f"the fixed frame is {today._KPI_AXIS}; Marc chose 0-80")
+    # no chart may be handed a frame of its own
+    calls = [n for n in ast.walk(_func("_kpi_row"))
              if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_kpi_chart"]
     assert len(calls) == 3, f"expected three charted tiles, found {len(calls)}"
-    axis_arg = {}
     for call in calls:
-        metric = call.args[0].args[0].value
-        assert len(call.args) >= 3, f"{metric} is drawn with no axis argument at all"
-        axis_arg[metric] = ast.dump(call.args[2])
-    assert axis_arg["winning_points"] == axis_arg["losing_points"], (
-        "the two score tiles are handed different axis expressions, so they can be drawn on "
-        "different scales — which is the comparison Marc split the tile to make")
-    # and the shared one is built from BOTH metrics, not from one of them
-    shared = [n for n in ast.walk(fn)
-              if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_kpi_axis"]
-    names = [tuple(a.value for a in c.args[1:]) for c in shared]
-    assert ("winning_points", "losing_points") in names, (
-        f"no _kpi_axis call spans both score metrics: {names}")
+        assert len(call.args) == 2, (
+            f"a KPI chart is passed {len(call.args)} arguments — a per-tile axis is back, and "
+            f"three cards on three scales cannot be compared")
+    import re
+    from lib import distribution
+    geom = lambda svg: re.search(r"viewBox='([^']+)'", svg).group(1)      # noqa: E731
+    a = today._kpi_chart(_dist("winning_points", 38), "winning_points")
+    b = today._kpi_chart(_dist("losing_points", 17), "losing_points")
+    c = today._kpi_chart(_dist("total", 52), "total")
+    assert geom(a) == geom(b) == geom(c), "the three charts are not drawn on one geometry"
+    # and the frame really is 0-80, not whatever the rows happened to carry
+    lo, hi = today._KPI_AXIS
+    row = _dist("winning_points", 38)
+    assert distribution.clamped_to_axis(lo, row, 140, today._KPI_AXIS)[0] == 0.0
+    assert distribution.clamped_to_axis(hi, row, 140, today._KPI_AXIS)[0] == 140.0
 
 
 def test_THE_BARS_MOVE_WITH_THE_AXIS_not_just_the_box():
@@ -696,35 +712,37 @@ def test_THE_BARS_MOVE_WITH_THE_AXIS_not_just_the_box():
         "spreading the published counts evenly, so the bars and the box are on two scales")
 
 
-def test_THE_KPI_HISTOGRAM_BAND_IS_HALVED():
-    """> **MARC, 2026-09-25:** *"Reduce the vertical size of the histogram bars by 50%."*
+def test_THE_BOX_BAND_GREW_50_PERCENT_AND_THE_HISTOGRAM_IS_GONE():
+    """> **MARC, v20:** *"Remove the histograms. Increase the vertical size of the box-whisker
+    > chart (not the axis and tickmarks) by 50%."*
 
-    🚨 PINNED BY VALUE, because the third green break was raising it straight back to 56 with
-    nothing red. A235 pinned its labels by value for the same reason: the point of the change IS
-    the number, and a test on "some height" passes on the value he asked to be changed.
+    🚨 SUPERSEDES A237's `..._HISTOGRAM_BAND_IS_HALVED`, which pinned `_KPI_CHART_H = 28`. There
+    is no histogram band to pin any more, so the test pins what replaced it — **and the clause
+    that must NOT move with it.**
 
-    ⚠️ AND THE BOX IS PINNED NOT TO HAVE HALVED WITH IT — he asked for the BARS, and A237's own
-    comment says the furniture keeps its space. A round that halved the whole chart would satisfy
-    a looser reading of the sentence and lose the box.
+    📊 Measured from the rendered SVG before the change: box band **12px** inside **140 x 55**.
+    +50% is **18**, and the total becomes **0 + 18 + 15 = 33**.
     """
-    import today
-    assert today._KPI_CHART_H == 28, (
-        f"the KPI histogram band is {today._KPI_CHART_H}, not the 28 Marc's 50% asks for")
-    from lib import distribution
     import re
-    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points", axis=(0.0, 59.0))
+    import today
+    from lib import distribution
+    assert today._KPI_BOX_H == 18, (
+        f"the box band is {today._KPI_BOX_H}; 12 + 50% is 18")
+    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points")
     total = int(re.search(r"viewBox='0 0 \d+ (\d+)'", svg).group(1))
-    box_band = max(today._KPI_CHART_H // 4, 12)
-    # ⚠️ A239: THE AXIS BAND IS NOW `LABEL_BAND`, NOT `TICK_BAND` — Marc asked for numbers on the
-    # ruler, and a row of digits costs 15px where bare marks cost 5. **The band is derived from
-    # what the page asks for rather than hard-coded**, so this keeps asserting that the bands add
-    # up instead of pinning a total that moves whenever the axis changes.
-    axis_band = (distribution.LABEL_BAND if today._KPI_TICK_LABEL_STEP
-                 else distribution.TICK_BAND)
-    assert total == today._KPI_CHART_H + box_band + axis_band, (
-        f"the chart is {total}px; the bands do not add up, so something other than the "
-        f"histogram changed height")
-    assert box_band == 12, "the box band collapsed with the bars; Marc halved the BARS"
+    assert total == today._KPI_BOX_H + distribution.LABEL_BAND, (
+        f"the chart is {total}px; box {today._KPI_BOX_H} + axis {distribution.LABEL_BAND} is "
+        f"{today._KPI_BOX_H + distribution.LABEL_BAND} — something other than the box moved")
+    # 🚨 "not the axis and tickmarks" — his words, so the axis is pinned NOT to have changed
+    assert today._KPI_TICK_STEP == 5 and today._KPI_TICK_LABEL_STEP == 10
+    assert distribution.LABEL_BAND == 15
+    # and no bars survive
+    bars = re.findall(r"<rect x='[\d.]+' y='[\d.]+' width='[\d.]+'[^>]*fill-opacity='0\.\d+'/>",
+                      svg)
+    assert not bars, f"{len(bars)} histogram bars are still drawn"
+    # exactly ONE median mark — there were two before, the box rule and the histogram tick
+    medians = re.findall(r"stroke-width='2'", svg) + re.findall(r"stroke-opacity='0.95'", svg)
+    assert len(medians) == 1, f"{len(medians)} median marks; the histogram tick was duplicated"
 
 
 def test_EVERY_CHARTED_TILE_CARRIES_ITS_p25_p50_p75():
@@ -771,7 +789,7 @@ def test_THE_AXIS_IS_LABELLED_ON_THE_EVEN_VALUES():
         "every mark now carries a number; Marc asked for marks every 5 and labels on the 10s")
     import re
     from lib import distribution
-    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points", axis=(0.0, 59.0))
+    svg = today._kpi_chart(_dist("winning_points", 38), "winning_points")
     labels = [float(t) for t in re.findall(r"<text[^>]*>([\d.]+)</text>", svg)]
     assert labels, "the axis drew no labels at all"
     for v in labels:
@@ -836,3 +854,70 @@ def test_A_CARRIED_DATASET_LABEL_NAMES_ITS_OWN_VIEW():
         assert label_node.slice.value == table_node.value, (
             f"the caption labels {table_node.value!r} with "
             f"{label_node.slice.value!r}'s name — the line would link one view and name another")
+
+
+def _week_distributions_sql() -> str:
+    """The SQL literal `_week_distributions` actually runs, read from the `ast`.
+
+    ⚠️ NOT A GREP OF THE MODULE (R-2260). `today.py` mentions `srv_week_metric_distribution` in
+    a docstring, in a `DATASETS` key and in a `states.section` call, and none of those is the
+    query. The one that reaches the database is the first argument of the `query(...)` call
+    inside this function, so that is what is read.
+    """
+    for node in ast.walk(_func("_week_distributions")):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "query":
+            first = node.args[0]
+            assert isinstance(first, ast.Constant), "the query is not a literal"
+            return first.value
+    raise AssertionError("_week_distributions makes no query() call")
+
+
+def _selected_columns(sql: str) -> set:
+    """Every column name the select list names, parsed by sqlglot rather than split on commas."""
+    import sqlglot
+    from sqlglot import expressions as exp
+    select = sqlglot.parse_one(sql, read="postgres")
+    assert isinstance(select, exp.Select), f"not a SELECT: {type(select).__name__}"
+    return {e.alias_or_name for e in select.expressions}
+
+
+def test_THE_KPI_STATS_TABLE_ASKS_FOR_NOTHING_THIS_QUERY_DOES_NOT_SELECT():
+    """🚨 A243 SHIPPED THIS DEFECT AND THE 1440 CROP IS WHAT FOUND IT.
+
+    `_KPI_STATS` was widened to five rows and `_week_distributions` was left selecting three.
+    `stats_table` reads `row.get(key)`, so `p05` and `p95` drew their honest en dash on all
+    three charts — beside values that were in serving the whole time.
+
+    ⚠️ EVERY OTHER INSTRUMENT SAID GREEN: the columns publish, nothing raised, the suite passed
+    and the error-card count was zero. **A missing key is indistinguishable from a null one at
+    the renderer**, which is exactly why the agreement has to be asserted at the two ends rather
+    than observed in the middle.
+
+    ✅ IT FIRES ON THE REAL BREAK: delete `p05` from the select list and this goes red naming it.
+    ⚠️ And it is asserted at the SOURCE rather than through a render, deliberately — a render
+    needs a database and CI has none, so a test that reaches for one skips exactly where it is
+    most needed.
+    """
+    import today
+    selected = _selected_columns(_week_distributions_sql())
+    missing = [key for key in today._KPI_STATS if key not in selected]
+    assert not missing, (
+        f"the KPI tiles draw {missing} and `_week_distributions` does not select them — "
+        f"`stats_table` would render an en dash for each. Selected: {sorted(selected)}")
+
+
+def test_EVERY_KPI_STAT_IS_A_COLUMN_THE_PANEL_REGISTRY_KNOWS():
+    """⚠️ THE OTHER END OF THE SAME AGREEMENT, AND IT IS NOT THE SAME TEST.
+
+    `stats_table` keeps `PANEL_STATS`'s order and filters to the caller's keys, so a key that
+    is in the SELECT LIST but not in the registry is silently dropped — the tile loses a row
+    and nothing anywhere says so. R-2254: the filter returning fewer pairs is not a failure,
+    it is an empty collection, and an empty collection is not a pass.
+    """
+    import today
+    from lib import distribution
+    known = {key for _, key in distribution.PANEL_STATS}
+    unknown = [key for key in today._KPI_STATS if key not in known]
+    assert not unknown, (
+        f"{unknown} is asked for by `_KPI_STATS` and is not in `PANEL_STATS`, so "
+        f"`stats_table` drops it without a word. Registry: {sorted(known)}")

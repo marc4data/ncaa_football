@@ -25,6 +25,67 @@ def as_of_slot():
     return _ASOF_SLOT
 
 
+# 🚨 A243 (cfdb-main-R-3328). ONE `Dataset:` LINE PER TAB, BUILT FROM THE SECTIONS THEMSELVES.
+#
+# > **MARC, 2026-09-26:** *"why is there a singular standalone dataset line under the KPIs and
+# > then 2 more dataset lines at the top of the page? … Consolidate instead of wasting 3 lines."*
+#
+# 📊 THE CAUSE: `states.section(dataset=…)` renders its caption BEFORE its `yield`, so every
+# panel's line lands above that panel — and the line under the KPI row is the NEXT panel's.
+# Measured on Looking Back before this: **eight** `cfdb-dataset` divs, `srv_game` twice.
+#
+# 🚨 AND THE OBVIOUS FIX IS THE ONE R-574 ALREADY PUNISHED: Today once carried a single
+# hand-written `dataset_caption("Looking Back", "srv_game")` while reading FIVE views, and because
+# the label links to `/dictionary?table=…`, a reader clicking it from the Leaderboards landed on
+# the wrong table. **So this collects what the sections THEMSELVES declare — no second list to
+# drift** — and each name keeps its own link.
+_DATASET_SLOT = None
+_DATASETS_SEEN: list = []
+
+
+def dataset_slot():
+    """The tab's reserved `Dataset:` placeholder, or None when no tab reserved one."""
+    return _DATASET_SLOT
+
+
+def open_dataset_slot():
+    """Reserve the line at the TOP of a tab and start collecting. Marc chose 1-B: the top."""
+    global _DATASET_SLOT, _DATASETS_SEEN
+    _DATASETS_SEEN = []
+    _DATASET_SLOT = st.empty()
+    return _DATASET_SLOT
+
+
+def register_dataset(label: str, view: str) -> bool:
+    """Record a `(label, view)` a section declared. True when the slot took it.
+
+    ⚠️ DE-DUPLICATED ON THE PAIR, first-seen order — `srv_game` is read by more than one panel on
+    Looking Back and must appear once.
+    """
+    if _DATASET_SLOT is None:
+        return False
+    if (label, view) not in _DATASETS_SEEN:
+        _DATASETS_SEEN.append((label, view))
+    return True
+
+
+def close_dataset_slot() -> None:
+    """Fill the reserved line with ONE caption naming every view the tab's sections declared.
+
+    ⚠️ NOTHING REGISTERED RENDERS NOTHING — not `Dataset:` with an empty tail. AC-G.11: an absence
+    must say which absence it is, and the honest absence here is silence.
+    """
+    global _DATASET_SLOT
+    slot, seen = _DATASET_SLOT, list(_DATASETS_SEEN)
+    _DATASET_SLOT = None
+    if slot is None or not seen:
+        return
+    from lib import table
+    first, rest = seen[0], seen[1:]
+    with slot:
+        table.dataset_caption(first[0], first[1], rest)
+
+
 def header(page: Page) -> None:
     """R-158 BAND 1: title left; readiness and the as-of stamp right, on the title's line.
 
