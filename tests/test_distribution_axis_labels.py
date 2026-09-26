@@ -661,3 +661,118 @@ def test_ONLY_THE_TWO_QUARTILES_ARE_MARKED_FOR_THE_IQR_COLOUR():
     assert "#8A3324" not in svg and "#E07B5A" not in svg, (
         "a hex literal reached the SVG — the colour must arrive as var(--cfdb-iqr) so light and "
         "dark resolve from one definition in theme.py")
+
+
+# ── A243 — the fixed frame, and the marks that would fall off it ────────────────────────────
+
+FRAME = (0.0, 80.0)
+
+
+def test_A_MARK_BEYOND_THE_FIXED_FRAME_IS_CLAMPED_AND_MARKED():
+    """🚨 A243 (cfdb-main-R-3321). A FIXED AXIS IS HOW A VALUE DISAPPEARS, and this is the test
+    that proves it does not.
+
+    > **MARC, v20:** *"Standardize the x-axis … to run from 0 to 70"* — he then chose **80**.
+
+    ⚠️ TWO FAILURE MODES, BOTH WITH PRECEDENT IN THIS MODULE:
+      1. **drawn outside the viewBox** — A237's overflow arrow ran x=140 to 144.5 on a 140-wide
+         box (cfdb-main-R-3037). The DOM said it was there; a raster said it was not.
+      2. **silently clipped** — `_value_to_x` returns None outside the frame, so the mark is
+         simply absent, which is the absence AC-G.11 forbids.
+
+    📊 AND IT IS TESTED RATHER THAN OBSERVED BECAUSE TODAY IT CANNOT HAPPEN: measured across
+    2026, **zero** rows carry `whisker_hi > 80` for any of the three metrics — while **34 of 38**
+    `winning_points` rows carry `max_value > 80`. The data routinely passes the frame; the marks
+    currently drawn do not. **A guard that only ever sees in-range data has not been tested.**
+    """
+    row = _row(p25=40.0, p50=55.0, p75=70.0, whisker_lo=10.0, whisker_hi=95.0,
+               min_value=5.0, max_value=95.0, bin_min=0.0, bin_max=80.0)
+    width = 140
+    svg = d.panel(row, width=width, histogram=False, box_height=18, ticks=d.TICK_STEP,
+                  tick_step=5, tick_label_step=10, head=False, stats=False, axis=FRAME)
+
+    # 1 — nothing is drawn outside the viewBox
+    xs = [float(x) for x in re.findall(r"<line x1='([\d.]+)'", svg)]
+    xs += [float(x) for x in re.findall(r"<rect x='([\d.]+)'", svg)]
+    for pts in re.findall(r"<polygon points='([^']+)'", svg):
+        xs += [float(pt.split(",")[0]) for pt in pts.split()]
+    assert xs, "nothing was drawn at all (R-2254)"
+    assert min(xs) >= -0.01 and max(xs) <= width + 0.01, (
+        f"a mark is drawn outside the viewBox: x range {min(xs)}..{max(xs)} of {width}")
+
+    # 2 — and the clamp is NAMED, not silent
+    marks = re.findall(r"<polygon points='([^']+)'", svg)
+    assert marks, "the whisker runs past the frame and nothing marks the edge"
+    assert "past the drawn axis" in svg, (
+        "the edge marker does not say the range reaches beyond the frame")
+
+
+def test_AN_IN_RANGE_ROW_GETS_NO_EDGE_MARK():
+    """🚨 R-843's other half — a pin that always fires is not a pin. If the edge marker appeared
+    on every chart it would say nothing, and the test above would pass on a renderer that marked
+    everything."""
+    row = _row(p25=40.0, p50=55.0, p75=70.0, whisker_lo=10.0, whisker_hi=78.0,
+               min_value=10.0, max_value=78.0, bin_min=0.0, bin_max=80.0)
+    svg = d.panel(row, width=140, histogram=False, box_height=18, ticks=d.TICK_STEP,
+                  tick_step=5, tick_label_step=10, head=False, stats=False, axis=FRAME)
+    assert not re.findall(r"<polygon points='", svg), (
+        "an edge marker was drawn for a row entirely inside the frame")
+    assert "past the drawn axis" not in svg
+
+
+def test_clamped_to_axis_reports_WHICH_edge_and_never_leaves_the_frame():
+    """The helper the whole rule rests on, asserted directly: inside returns no side, outside
+    returns the edge AND the side, and a null returns neither."""
+    row = _row(bin_min=0.0, bin_max=80.0)
+    assert d.clamped_to_axis(40.0, row, 140, FRAME) == (70.0, None)
+    assert d.clamped_to_axis(95.0, row, 140, FRAME) == (140.0, "hi")
+    assert d.clamped_to_axis(-5.0, row, 140, FRAME) == (0.0, "lo")
+    assert d.clamped_to_axis(None, row, 140, FRAME) == (None, None)
+
+
+def test_the_histogram_can_be_removed_without_orphaning_the_median():
+    """> **MARC, v20:** *"Remove the histograms."*
+
+    📊 MEASURED BEFORE THE CHANGE: the SVG carried **two** median marks — the box's bold rule and
+    the histogram's own tick on the bar band. **Keeping the tick with no bars would orphan it
+    above an empty band; keeping both was a duplication nobody had noticed.**
+    """
+    row = _row()
+    with_hist = d.panel(row, width=140, height=28, head=False, stats=False)
+    without = d.panel(row, width=140, histogram=False, box_height=18, head=False, stats=False)
+    count = lambda s: len(re.findall(r"stroke-width='2'", s)) + \
+        len(re.findall(r"stroke-opacity='0.95'", s))                      # noqa: E731
+    assert count(with_hist) == 2, "the histogram build no longer draws two median marks"
+    assert count(without) == 1, f"{count(without)} median marks with the histogram off"
+    box = lambda s: int(re.search(r"viewBox='0 0 \d+ (\d+)'", s).group(1))  # noqa: E731
+    assert box(without) == 18, f"the no-histogram chart is {box(without)}px, not the box's 18"
+
+
+def test_the_registry_and_the_default_are_DIFFERENT_lists():
+    """🚨 A243 (cfdb-main-R-3322). `PANEL_STATS` did two jobs — it fixed the ORDER any subset
+    renders in, and it was also what `keys=True` drew. Adding p05/p95 for the KPI would have put
+    them on every full panel too.
+
+    📊 The risk was smaller than it looked — **no live caller passes `keys=True`** — but the split
+    is what stops the next one inheriting five rows because the KPI wanted them.
+    """
+    assert d.DEFAULT_STATS != d.PANEL_STATS, "the default is the registry again"
+    assert [k for _, k in d.DEFAULT_STATS] == ["n", "min_value", "p25", "p50", "p75", "max_value"]
+    for key in ("p05", "p95"):
+        assert key in [k for _, k in d.PANEL_STATS], f"{key} is not in the registry"
+        assert key not in [k for _, k in d.DEFAULT_STATS], (
+            f"{key} reached the full-panel default; Marc asked for it beside the KPI only")
+    # the subset still renders in REGISTRY order, never the caller's
+    row = _row(p05=1.0, p95=9.0)
+    asked = d.stats_table(row, ("p95", "p05", "p50"))
+    names = re.findall(r"<span>([^<]*)</span>", asked)
+    assert names == ["p05", "median", "p95"], f"the caller's order leaked through: {names}"
+
+
+def test_p05_and_p95_do_NOT_wear_the_IQR_COLOUR():
+    """⚠️ A239 gave burnt sienna ONE meaning — *the inter-quartile range*. p05 and p95 are not in
+    it, so marking them would dilute the thing the colour was introduced to show."""
+    row = _row(p05=1.0, p95=9.0)
+    html = d.stats_table(row, ("p05", "p25", "p50", "p75", "p95"))
+    marked = re.findall(r"<div class='cfdb-dist-stat cfdb-iqr'><span>([^<]*)</span>", html)
+    assert marked == ["p25", "p75"], f"the IQR colour reached {marked}"

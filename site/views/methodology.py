@@ -136,7 +136,7 @@ site — runs on modest hardware for **under $15 a month**. The two-database sha
 why: the site reads a small Postgres holding only what has been published, so serving a page costs
 almost nothing, and the expensive work happens on a schedule rather than while someone is looking.
 
-### Every column has a definition, and the definition travels
+### Every column the site reads has a definition, and the definition travels
 
 Every column in the serving layer — the **1,502** columns this site reads — carries a written
 definition. Those definitions are not kept in a document beside the code; they are attached to the
@@ -149,18 +149,18 @@ page reads, so the workbook and the site cannot disagree about what a field mean
 names which sheet each field appears on, and leaves it blank where a field is documented but not
 exported — documented and shipped are different claims, and the sheet says which is which.
 
-⚠️ The layers below serving are a different matter: staging and the dimensional models are
-documented in part, not in full. The claim above is about the layer a reader actually meets.
-
 ### When this page changes
 
 When a round changes it. This is prose, and prose is only as current as the last person who read
 it — which is why the counts above carry a date.
 
-The counts themselves are not typed from memory. A test re-measures every one of them against the
-repository — the endpoint registry, the compiled dbt manifest, the test suite, the page registry —
-and fails the build when one drifts. So a number here can be out of date only if nobody has run
-the build since it drifted, and the build runs on every change.
+The counts themselves are not typed from memory. Most of them — the endpoints, the models, the
+tests, the pages — are re-measured against the repository by a test that fails the build when one
+drifts, so those can only be stale if nobody has built since, and the build runs on every change.
+
+The count of documented columns is checked differently, because it is a fact about the database
+rather than about the repository: the definitions live on the columns themselves, so the test reads
+them from the live database. That check runs for anyone who can reach it, and not in the build.
 
 ### The sign convention, which is not the intuitive one
 

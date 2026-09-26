@@ -143,6 +143,56 @@ def _value_to_x(value, row, width: float, axis=None) -> Optional[float]:
     return position * width
 
 
+def _beyond_note(count: int, was_clamped: bool) -> str:
+    """What the edge marker says it is marking, which is not always the same thing.
+
+    ⚠️ AC-G.11 — AN ABSENCE MUST SAY WHICH ABSENCE IT IS. The same triangle now stands for two
+    different facts: histogram mass that fell outside the drawn axis (A237's case), and a
+    box-and-whisker mark that had to be clamped to the frame (A243's). A reader hovering it is
+    entitled to know which, and "3 beyond the drawn axis" would be false when nothing was counted.
+    """
+    if count and was_clamped:
+        return f"{int(count)} beyond the drawn axis, and the whisker reaches past it"
+    if count:
+        return f"{int(count)} beyond the drawn axis"
+    return "the range reaches past the drawn axis"
+
+
+def clamped_to_axis(value, row, width: float, axis=None):
+    """Where a value sits, CLAMPED into the frame, plus which edge it was pushed to.
+
+    Returns `(x, side)` — `side` is None when the value was already inside, `"lo"`/`"hi"` when it
+    was not. `(None, None)` when the value is null or the axis is degenerate.
+
+    🚨 A243 (cfdb-main-R-3321). THIS EXISTS BECAUSE A FIXED AXIS IS HOW A VALUE DISAPPEARS.
+    `_value_to_x` returns None outside the frame, which is right when the caller can choose not to
+    draw — but with a FIXED `(0, 80)` every mark beyond it would simply stop being drawn, and a
+    whisker that is not drawn is the absence AC-G.11 forbids.
+
+    ⚠️ TWO FAILURE MODES, BOTH WITH PRECEDENT IN THIS MODULE:
+      1. drawn OUTSIDE the viewBox — A237's overflow arrow ran x=140 to 144.5 on a 140-wide box
+         (cfdb-main-R-3037); the DOM said it was there and a raster said it was not;
+      2. SILENTLY CLIPPED — the mark is absent and nothing says so.
+
+    ✅ SO: clamp (never outside the frame) AND report the side (never silent). The caller marks the
+    edge, which is what makes the clamp honest rather than a lie about where the value is — A142's
+    law is that a mark at the boundary must not claim to BE the boundary, and the edge marker is
+    what distinguishes "at 80" from "beyond 80".
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return (None, None)
+    span = axis_span(row, axis)
+    if span is None:
+        return (None, None)
+    low, high = span
+    position = (float(value) - low) / (high - low)
+    if position < 0:
+        return (0.0, "lo")
+    if position > 1:
+        return (float(width), "hi")
+    return (position * width, None)
+
+
 def _bars(counts: list, width: float, height: float, bins=None, axis=None) -> str:
     """The histogram itself. Shared by both sizes.
 
@@ -951,8 +1001,25 @@ def _sided_marker(x: float, height: float, mid: float, above: bool, color: str) 
     return cap + rule
 
 
-PANEL_STATS = (("n", "n"), ("min", "min_value"), ("p25", "p25"), ("median", "p50"),
-               ("p75", "p75"), ("max", "max_value"))
+# 🚨 A243 (cfdb-main-R-3322). THE ORDERED REGISTRY AND THE DEFAULT ARE NOW TWO THINGS.
+#
+# > **MARC, v20:** *"Add p05 and p95 to the stats shown to the right of the KPI"*
+#
+# ⚠️ THEY WERE ONE LIST, AND IT DID TWO JOBS: it fixed the ORDER any subset renders in, and it was
+# also what `keys=True` drew. Adding p05/p95 to a single list would have put them on every full
+# panel as well — **Marc asked for them beside the KPI, not everywhere.**
+#
+# 📊 MEASURED BEFORE SPLITTING, because the risk turned out to be smaller than it looks: **no
+# live caller passes `keys=True` at all.** `site/` contains exactly two stats consumers —
+# `today._kpi_chart` (`stats=False`) and `today._kpi_stats` (explicit keys) — so `keys=True` is
+# exercised only by tests today. ✅ **The split is still right**: it stops the next full-panel
+# caller inheriting five rows because the KPI wanted them.
+PANEL_STATS = (("n", "n"), ("min", "min_value"), ("p05", "p05"), ("p25", "p25"),
+               ("median", "p50"), ("p75", "p75"), ("p95", "p95"), ("max", "max_value"))
+
+# What `keys=True` renders — the six a full panel has always shown, unchanged.
+DEFAULT_STATS = (("n", "n"), ("min", "min_value"), ("p25", "p25"), ("median", "p50"),
+                 ("p75", "p75"), ("max", "max_value"))
 
 
 def stats_table(row, keys=True) -> str:
@@ -970,11 +1037,13 @@ def stats_table(row, keys=True) -> str:
     drifts, and the drift here would be two tables of the same numbers formatted differently on
     one screen.
 
-    `keys` is `True` for all of `PANEL_STATS`, `False` for none, or a sequence of COLUMN names.
-    ⚠️ The ORDER is `PANEL_STATS`'s, never the caller's — so two callers asking for the same three
-    rows cannot get them in different orders.
+    `keys` is `True` for `DEFAULT_STATS`, `False` for none, or a sequence of COLUMN names drawn
+    from `PANEL_STATS`.
+    ⚠️ The ORDER is `PANEL_STATS`'s, never the caller's — so two callers asking for the same rows
+    cannot get them in different orders. ⚠️ And `True` renders `DEFAULT_STATS`, NOT the whole
+    registry: the registry is what MAY be asked for, the default is what a full panel shows (A243).
     """
-    wanted = (PANEL_STATS if keys is True else
+    wanted = (DEFAULT_STATS if keys is True else
               () if keys is False or keys is None else
               tuple(pair for pair in PANEL_STATS if pair[1] in tuple(keys)))
     if not wanted:
@@ -998,7 +1067,8 @@ def panel(row, label: str = "", width: int = 420, *,
           height: Optional[int] = None, ticks: str = TICK_NONE,
           head: bool = True, stats=True, dp=_UNSET, metric: str = "",
           axis=None, tick_step: Optional[float] = None,
-          tick_label_step: Optional[float] = None) -> str:
+          tick_label_step: Optional[float] = None,
+          histogram: bool = True, box_height: Optional[int] = None) -> str:
     """The same picture with room to read it: the histogram, the box-and-whisker beneath it on
     a SHARED X-SCALE, and the statistics as a table beside it.
 
@@ -1031,6 +1101,12 @@ def panel(row, label: str = "", width: int = 420, *,
         tick_step
                  with `ticks=TICK_STEP`, the interval between tick marks. Marks land on
                  multiples of it, so the first is the lowest multiple inside the axis
+        histogram
+                 draw the bars at all. OFF is Marc's v20 — *"Remove the histograms"* — and it
+                 leaves the box, the axis and the tick ruler exactly where they were (A243)
+        box_height
+                 the box band in pixels, EXPLICIT. Defaults to the historic `max(hist//4, 12)`,
+                 which is meaningless once there is no histogram to take a quarter of
         tick_label_step
                  with `ticks=TICK_STEP`, ALSO print a value at every multiple of this — A239,
                  Marc's *"Label x-axis on the even values (10, 20, 30, etc)"*. The marks stay at
@@ -1051,23 +1127,39 @@ def panel(row, label: str = "", width: int = 420, *,
                 "cfdb holds no distribution for this week yet.</div>")
 
     counts = parse_bin_counts(row.get("bin_counts"))
-    hist_height = PANEL_HEIGHT if height is None else int(height)
+    # 🚨 A243 (cfdb-main-R-3320). > **MARC, v20:** *"Remove the histograms. Increase the vertical
+    # size of the box-whisker chart (not the axis and tickmarks) by 50%."*
+    # ⚠️ WITH NO HISTOGRAM THERE IS NO BAND TO TAKE A QUARTER OF, so the box height stops being
+    # derived and becomes the caller's. 📊 Measured from the rendered SVG before changing it: the
+    # box band was **12px** (`max(28 // 4, 12)`) inside a **140 x 55** viewBox.
+    hist_height = 0 if not histogram else (PANEL_HEIGHT if height is None else int(height))
     # ⚠️ THE BOX KEEPS ITS PROPORTION OF THE BAND, WHICH IS A145's RULE ONE LEVEL OVER: a box
     # plot has no y quantity, so its THICKNESS is decoration and scales, while nothing that
     # carries a number moves. The floor stops the box collapsing to a rule at a short height.
-    box_height = max(hist_height // 4, 12)
+    box_band = int(box_height) if box_height is not None else max(hist_height // 4, 12)
 
     # THE BOX SITS ON THE HISTOGRAM'S OWN SCALE. Drawn in one SVG rather than two stacked, so
     # the axes cannot drift apart — which is the same reason the thumbnail and this share
     # `_bars`. 🚨 IT IS ALSO WHAT MARC ASKED FOR IN v18 — *"Histogram and Box-Whisker x-axis have
     # to be aligned"* — and it was already true here; what was missing was the labels.
     box = []
-    q1 = _value_to_x(row.get("p25"), row, width, axis)
-    q3 = _value_to_x(row.get("p75"), row, width, axis)
+    # 🚨 A243: CLAMPED, NOT DROPPED. On a fixed axis a whisker beyond the frame would otherwise
+    # simply not be drawn — see `clamped_to_axis` for the two failure modes this replaces. Every
+    # clamp is recorded so the edge can be MARKED; a silent clamp is a lie about where the value is.
+    clamped = set()
+
+    def at(value):
+        x, side = clamped_to_axis(value, row, width, axis)
+        if side:
+            clamped.add(side)
+        return x
+
+    q1 = at(row.get("p25"))
+    q3 = at(row.get("p75"))
     raw_lo, raw_hi = _whisker_pair(row)
-    lo = _value_to_x(raw_lo, row, width, axis)
-    hi = _value_to_x(raw_hi, row, width, axis)
-    mid = hist_height + box_height / 2
+    lo = at(raw_lo)
+    hi = at(raw_hi)
+    mid = hist_height + box_band / 2
     if lo is not None and hi is not None:
         box.append(f"<line x1='{lo:.1f}' y1='{mid:.1f}' x2='{hi:.1f}' y2='{mid:.1f}' "
                    f"stroke='currentColor' stroke-opacity='.6'/>")
@@ -1079,13 +1171,13 @@ def panel(row, label: str = "", width: int = 420, *,
         # orange"* — achieved with ONE token rather than two, so the fill and the outline cannot
         # drift into different hues. The opacity does the lightening.
         box.append(f"<rect x='{q1:.1f}' y='{hist_height + 2:.1f}' "
-                   f"width='{max(q3 - q1, 1):.1f}' height='{box_height - 4}' "
+                   f"width='{max(q3 - q1, 1):.1f}' height='{box_band - 4}' "
                    f"fill='{IQR_COLOR}' fill-opacity='.22' stroke='{IQR_COLOR}' "
                    f"stroke-opacity='.85'/>")
-    median_x = _value_to_x(row.get("p50"), row, width, axis)
+    median_x = at(row.get("p50"))
     if median_x is not None:
         box.append(f"<line x1='{median_x:.1f}' y1='{hist_height + 2:.1f}' "
-                   f"x2='{median_x:.1f}' y2='{hist_height + box_height - 2:.1f}' "
+                   f"x2='{median_x:.1f}' y2='{hist_height + box_band - 2:.1f}' "
                    f"stroke='currentColor' stroke-width='2'/>")
 
     # ── THE AXIS LABEL BAND ──────────────────────────────────────────────────────────────────
@@ -1110,16 +1202,21 @@ def panel(row, label: str = "", width: int = 420, *,
     # canvas.** A237's own crop caught it, which is A235's clipped `0` repeated by the round that
     # had just written the test for it: `polygons: 1` and nothing on screen. The apex now lands ON
     # the edge and the base is inset, so the mark is entirely inside the frame.
-    below_out, above_out = bins_outside(counts, row, axis)
-    for count, edge_x, direction in ((below_out, 0.0, -1), (above_out, float(width), 1)):
-        if not count:
+    below_out, above_out = bins_outside(counts, row, axis) if histogram else (0, 0)
+    # ⚠️ A243: THE EDGE IS MARKED FOR EITHER REASON — histogram mass beyond the frame (A237's
+    # case) OR a box/whisker mark that had to be clamped to it (this round's). With the histogram
+    # gone the first can no longer happen, and the second is the only thing that can say a value
+    # fell off the end. 🚨 That is why `bins_outside` is not simply deleted with the bars.
+    for count, side, edge_x, direction in ((below_out, "lo", 0.0, -1),
+                                           (above_out, "hi", float(width), 1)):
+        if not count and side not in clamped:
             continue
         base_x = edge_x - direction * OVERFLOW_MARK
         base_y = hist_height - 3.5
         box.append(
             f"<polygon points='{edge_x:.1f},{base_y:.1f} {base_x:.1f},{base_y - 3.5:.1f} "
             f"{base_x:.1f},{base_y + 3.5:.1f}' fill='currentColor' fill-opacity='.55'>"
-            f"<title>{int(count)} beyond the drawn axis</title></polygon>")
+            f"<title>{_beyond_note(count, side in clamped)}</title></polygon>")
 
     # ── THE TICK RULER — Marc's "just the ticks", minimal vertical space ────────────────────
     #
@@ -1140,7 +1237,7 @@ def panel(row, label: str = "", width: int = 420, *,
         if span and step > 0:
             axis_lo, axis_hi = span
             first = math.ceil(axis_lo / step) * step
-            baseline = hist_height + box_height
+            baseline = hist_height + box_band
             # ⚠️ ONE PLACEMENT RULE, NOT TWO. `_LabelBands` was extracted by A235 precisely so a
             # second caller could not invent its own contest — it clamps inside the frame and
             # DROPS a label that would collide rather than shifting it to a wrong value.
@@ -1197,12 +1294,12 @@ def panel(row, label: str = "", width: int = 420, *,
             at_x = _value_to_x(edge, row, width, axis)
             if at_x is not None:
                 bands.place("below", at_x, fmt.number(edge, dp=dp))
-        baseline = hist_height + box_height + 11
+        baseline = hist_height + box_band + 11
         for x, _half, text, _color in bands.get("below"):
             box.append(f"<text x='{x:.1f}' y='{baseline:.1f}' text-anchor='middle' "
                        f"font-size='9' fill='currentColor' opacity='.65'>{text}</text>")
 
-    total_height = hist_height + box_height + label_band + tick_band
+    total_height = hist_height + box_band + label_band + tick_band
     # 🚨 FIXED WIDTH THE MOMENT THERE IS TEXT. See the docstring: `preserveAspectRatio='none'`
     # distorts glyphs, and a squashed numeral on an axis is a legibility defect that is invisible
     # in the DOM — every <text> element present, correct and unreadable (R-855's family).
@@ -1218,8 +1315,13 @@ def panel(row, label: str = "", width: int = 420, *,
     svg = (f"<svg class='cfdb-dist-svg' viewBox='0 0 {width} {total_height}' "
            f"{sizing} "
            f"aria-hidden='true'>"
-           f"{_bars(counts, width, hist_height, _bins_of(row), axis_span(row, axis))}"
-           f"{_median_tick(row, width, hist_height, axis)}{''.join(box)}</svg>")
+           f"{_bars(counts, width, hist_height, _bins_of(row), axis_span(row, axis)) if histogram else ''}"
+           # 🚨 A243: THE HISTOGRAM'S MEDIAN TICK GOES WITH THE HISTOGRAM. Measured before the
+           # change: the SVG carried TWO median marks — this one on the bar band AND the box's own
+           # bold rule. Keeping it with no bars would orphan it above an empty band; keeping both
+           # was already a duplication nobody had noticed.
+           f"{_median_tick(row, width, hist_height, axis) if histogram else ''}"
+           f"{''.join(box)}</svg>")
 
     # ⚠️ NOT `stats`, WHICH IS THE PARAMETER. The first draft built the table into a local called
     # `stats` and then tested `if stats else ""` — which read the LIST, always truthy, so

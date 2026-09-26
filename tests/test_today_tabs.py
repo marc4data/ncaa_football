@@ -282,3 +282,142 @@ def test_the_page_level_dataset_caption_is_gone():
     assert not calls, (
         f"today.py calls dataset_caption directly at line(s) "
         f"{[n.lineno for n in calls]} — it belongs to states.section now (R-574)")
+
+
+# ── A243 — one Dataset line per tab, built from the sections themselves ─────────────────────
+
+def test_EVERY_TAB_DECLARES_ITS_VIEWS_IN_ONE_LINE(today):
+    """🚨 A243 (cfdb-main-R-3328). ONE `cfdb-dataset` div per tab, naming EVERY view that tab's
+    sections declare.
+
+    > **MARC, 2026-09-26:** *"Consolidate instead of wasting 3 lines, 2 of which don't seem tied
+    > to anything."*
+
+    📊 MEASURED BEFORE: Looking Back rendered **eight** divs, `srv_game` twice, because
+    `states.section` emits its caption BEFORE its panel — so the line under the KPI row belonged
+    to the next panel down.
+
+    🚨 THIS ASSERTS THE HARD PART, WHICH IS NOT THE COUNT. R-574's defect was a single
+    hand-written caption on a page reading five views: one line, and a link that sent a reader to
+    the wrong table. **So the line must name every view the tab's own sections declare** — the
+    count being 1 is worthless without that.
+    """
+    tabs = {slug: panels for slug, _label, panels in today.TABS}
+    assert tabs, "no tabs found (R-2254)"
+    for slug, panels in tabs.items():
+        declared = set()
+        for name in panels:
+            fn = next((n for n in ast.walk(TREE)
+                       if isinstance(n, ast.FunctionDef) and n.name == name), None)
+            assert fn is not None, f"{slug} names a panel that does not exist: {name}"
+            for node in ast.walk(fn):
+                if not (isinstance(node, ast.Call)
+                        and getattr(node.func, "attr", "") == "section"):
+                    continue
+                takes_dataset = any(k.arg == "dataset" for k in node.keywords)
+                if takes_dataset and node.args and isinstance(node.args[0], ast.Constant):
+                    declared.add(node.args[0].value)
+                for kw in node.keywords:
+                    if kw.arg != "dataset_also":
+                        continue
+                    for el in getattr(kw.value, "elts", []):
+                        parts = getattr(el, "elts", [])
+                        if len(parts) == 2 and isinstance(parts[1], ast.Constant):
+                            declared.add(parts[1].value)
+        assert declared, f"tab {slug!r} declares no dataset at all"
+        # every declared view must be reachable from `DATASETS`, or the line cannot name it
+        from lib.datasets import DATASETS
+        missing = sorted(v for v in declared if v not in DATASETS)
+        assert not missing, (
+            f"tab {slug!r} declares view(s) with no entry in DATASETS, so the consolidated line "
+            f"cannot name them: {missing}")
+
+
+def test_THE_TAB_SLOT_COLLECTS_DEDUPES_AND_STAYS_SILENT_WHEN_EMPTY():
+    """🚨 THE THREE PROPERTIES THE CONSOLIDATED LINE RESTS ON, asserted at the collector rather
+    than through a render, so they hold without a database.
+
+    ⚠️ **Silence when nothing registered is AC-G.11**: `Dataset:` with an empty tail would be an
+    absence that does not say which absence it is.
+    """
+    from lib import shell
+    import streamlit as st
+    seen = []
+    real = st.markdown
+    st.markdown = lambda html, **k: seen.append(html)
+    try:
+        # 1 — with no slot open, a section renders in place (the other seventeen pages' path)
+        assert shell.dataset_slot() is None
+        assert shell.register_dataset("Schedule", "srv_game") is False
+
+        # 2 — with a slot open it collects, and DE-DUPLICATES on the pair
+        class _Slot:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        shell._DATASET_SLOT, shell._DATASETS_SEEN = _Slot(), []
+        for lab, view in (("Game results and market lines", "srv_game"),
+                          ("AP and Coaches polls", "srv_rankings"),
+                          ("Game results and market lines", "srv_game")):
+            assert shell.register_dataset(lab, view) is True
+        assert shell._DATASETS_SEEN == [("Game results and market lines", "srv_game"),
+                                        ("AP and Coaches polls", "srv_rankings")], \
+            f"srv_game was not de-duplicated: {shell._DATASETS_SEEN}"
+        seen.clear()
+        shell.close_dataset_slot()
+        assert len(seen) == 1, f"the slot rendered {len(seen)} captions, not one"
+        assert seen[0].count("<a ") == 2, "each view must keep its OWN dictionary link"
+        assert "table=srv_game" in seen[0] and "table=srv_rankings" in seen[0]
+
+        # 3 — nothing registered renders NOTHING, not an empty `Dataset:`
+        shell._DATASET_SLOT, shell._DATASETS_SEEN = _Slot(), []
+        seen.clear()
+        shell.close_dataset_slot()
+        assert seen == [], f"an empty tab still rendered: {seen}"
+    finally:
+        st.markdown = real
+        shell._DATASET_SLOT, shell._DATASETS_SEEN = None, []
+
+
+def test_SECTION_REGISTERS_EVERY_VIEW_IT_IS_GIVEN():
+    """🚨 A243. THE GAP A STAGED BREAK FOUND, AND IT IS R-768's SHAPE.
+
+    `test_EVERY_TAB_DECLARES_ITS_VIEWS_IN_ONE_LINE` walks `today.py`'s AST — it checks what the
+    sections DECLARE. **Adding a condition inside `states.section` that skips registering one
+    view left every test green**, because no test watched the registration itself. The tab would
+    have rendered a line silently missing a source, which is R-574's defect wearing a new hat.
+
+    ⚠️ ASSERTED AT THE COLLECTOR, NOT THROUGH A RENDER, and deliberately so: a render needs a
+    database, CI has none, and a test that skips in CI is the defect PART 0 of this round just
+    finished correcting on the Methodology page.
+    """
+    import streamlit as st
+    from lib import shell, states
+
+    class _Slot:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    seen = []
+    real = st.markdown
+    st.markdown = lambda html, **k: seen.append(html)
+    shell._DATASET_SLOT, shell._DATASETS_SEEN = _Slot(), []
+    try:
+        GIVEN = [("srv_week_summary", "The week in one row",
+                  [("Distributions, by week", "srv_week_metric_distribution")]),
+                 ("srv_game", "Game results and market lines", []),
+                 ("srv_rankings", "AP and Coaches polls", [])]
+        for view, label, also in GIVEN:
+            with states.section(view, dataset=label, dataset_also=also):
+                pass
+        registered = {v for _lab, v in shell._DATASETS_SEEN}
+        expected = {v for v, _l, _a in GIVEN} | {
+            v for _v, _l, also in GIVEN for _lab, v in also}
+        assert registered == expected, (
+            f"a section did not register the view it declared: missing "
+            f"{sorted(expected - registered)}, unexpected {sorted(registered - expected)}")
+        # and nothing rendered in place while the slot was open
+        assert not [h for h in seen if "cfdb-dataset" in h], (
+            "a caption rendered in place while a tab slot was open — it would appear twice")
+    finally:
+        st.markdown = real
+        shell._DATASET_SLOT, shell._DATASETS_SEEN = None, []
