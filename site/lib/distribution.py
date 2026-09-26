@@ -458,6 +458,12 @@ VALUE_COLOR = "#2f6fdb"
 # ships. The dark-mode variant is measured beside it in `theme.py`.
 IQR_COLOR = "var(--cfdb-iqr)"
 
+# 🚨 A244 (cfdb-main-R-3351). THE FAINTEST THING IN THE CHART, AND A TOKEN PAIR BECAUSE A239
+# SHIPPED A SINGLE HEX AND IT FAILED ONE MODE (8.14:1 light, 2.32:1 dark). A gridline must read
+# as ground rather than as a whisker, a tick or a box edge, so it is defined against the tile
+# background in `theme.py` and measured in BOTH modes rather than eyeballed.
+GRID_COLOR = "var(--cfdb-grid)"
+
 # TICK STRATEGIES, offered rather than invented. Marc asked to "set tick mark strategy"; these
 # are the three the published row can actually support, and `percentiles` is the default because
 # it is the only one whose ticks are values the row already carries — the other two derive
@@ -1068,7 +1074,8 @@ def panel(row, label: str = "", width: int = 420, *,
           head: bool = True, stats=True, dp=_UNSET, metric: str = "",
           axis=None, tick_step: Optional[float] = None,
           tick_label_step: Optional[float] = None,
-          histogram: bool = True, box_height: Optional[int] = None) -> str:
+          histogram: bool = True, box_height: Optional[int] = None,
+          gridlines=()) -> str:
     """The same picture with room to read it: the histogram, the box-and-whisker beneath it on
     a SHARED X-SCALE, and the statistics as a table beside it.
 
@@ -1143,6 +1150,29 @@ def panel(row, label: str = "", width: int = 420, *,
     # `_bars`. 🚨 IT IS ALSO WHAT MARC ASKED FOR IN v18 — *"Histogram and Box-Whisker x-axis have
     # to be aligned"* — and it was already true here; what was missing was the labels.
     box = []
+    # ── A244 (cfdb-main-R-3351): THE MAJOR GRIDLINES, AND THEY ARE EMITTED FIRST ─────────────
+    #
+    # > **MARC, v21:** *"Can you add major gridlines at 0, 20, 40, 60, and 80? They can be muted
+    # > down a bit, but it will help comparisons across Win, Loss, and Total KPI's."*
+    #
+    # 🚨 FIRST INTO `box`, WHICH IS THE WHOLE MECHANISM. SVG has no z-index — it paints in
+    # document order — so a gridline appended anywhere else would sit ON TOP of the box, the
+    # median rule and the overflow mark. Being first is what makes it a background.
+    #
+    # ⚠️ THE VALUES ARE THE CALLER'S, NOT DERIVED FROM THE TICK STEP. Marc named five specific
+    # values and they are not every second tick label: the ruler labels 0..80 by 10, and the
+    # gridlines are the 20s. Deriving them would couple two things he asked for separately.
+    #
+    # ⚠️ A GRIDLINE OUTSIDE THE FRAME IS DROPPED, NOT CLAMPED. `_value_to_x` returns None there,
+    # and a gridline clamped to the edge would draw a line labelled 80 somewhere that is not 80
+    # — A142's law, the same one the overflow mark exists to respect.
+    for value in (gridlines or ()):
+        gx = _value_to_x(float(value), row, width, axis)
+        if gx is None:
+            continue
+        box.append(f"<line x1='{gx:.1f}' y1='{hist_height:.1f}' x2='{gx:.1f}' "
+                   f"y2='{hist_height + box_band:.1f}' stroke='{GRID_COLOR}' "
+                   f"stroke-width='1'/>")
     # 🚨 A243: CLAMPED, NOT DROPPED. On a fixed axis a whisker beyond the frame would otherwise
     # simply not be drawn — see `clamped_to_axis` for the two failure modes this replaces. Every
     # clamp is recorded so the edge can be MARKED; a silent clamp is a lie about where the value is.

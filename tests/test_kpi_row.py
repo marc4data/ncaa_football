@@ -653,15 +653,22 @@ def test_ALL_THREE_CHARTS_SHARE_ONE_FIXED_FRAME():
 
     > **MARC, v20:** *"Standardize the x-axis for Closing, Winning, and Losing cards to run from
     > 0 to 70."* — and he chose **80** when offered headroom.
+    > **MARC, v21:** *"expand the x-axis to 82 so that 80 on the axis has enough space to
+    > print"* — so the frame tops at **82** and the DATA ceiling Marc chose is still 80.
 
     ✅ **So the frame is now a CONSTANT shared by all three, including the O/U card, which never
     shared a scale with the other two.** ⚠️ The old test is not deleted, it is superseded: the
     thing it protected — *the cards can be compared to each other* — is what this asserts, over a
     wider set.
+
+    ⚠️ A244: THE TOP IS PINNED HERE AND ITS CONSEQUENCE IS PINNED SEPARATELY, in
+    `test_THE_TOP_OF_THE_KPI_AXIS_IS_LABELLED`. This one says the three cards agree; that one
+    says the number at the top actually prints. A single test asserting both would go red for
+    two unrelated reasons.
     """
     import today
-    assert today._KPI_AXIS == (0.0, 80.0), (
-        f"the fixed frame is {today._KPI_AXIS}; Marc chose 0-80")
+    assert today._KPI_AXIS == (0.0, 82.0), (
+        f"the fixed frame is {today._KPI_AXIS}; v21 asks for a top of 82 so the `80` label fits")
     # no chart may be handed a frame of its own
     calls = [n for n in ast.walk(_func("_kpi_row"))
              if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_kpi_chart"]
@@ -921,3 +928,149 @@ def test_EVERY_KPI_STAT_IS_A_COLUMN_THE_PANEL_REGISTRY_KNOWS():
     assert not unknown, (
         f"{unknown} is asked for by `_KPI_STATS` and is not in `PANEL_STATS`, so "
         f"`stats_table` drops it without a word. Registry: {sorted(known)}")
+
+
+# ── A244 ─────────────────────────────────────────────────────────────────────────────────────
+
+def _kpi_row_fixture():
+    """A distribution row shaped like `srv_week_metric_distribution`, entirely in range.
+
+    ⚠️ NOTHING HERE IS CLAMPED AND NOTHING IS AT AN IDENTITY VALUE (R-843): the whiskers sit at
+    12 and 66 on an 0-82 frame, so a test that accidentally measured a clamped edge would read a
+    different number, and `p50` is 38 rather than 0 so a median drawn at the origin is visible as
+    wrong rather than plausible.
+    """
+    return {"n": 75, "min_value": 7.0, "max_value": 71.0, "p05": 21.7, "p25": 30.0,
+            "p50": 38.0, "p75": 48.0, "p95": 59.0, "whisker_lo": 12.0, "whisker_hi": 66.0,
+            "bin_min": 0.0, "bin_max": 82.0, "bin_incr": 10.0, "bin_count": 9,
+            "bin_counts": "1,2,5,12,20,18,10,5,1", "axis_group": "points",
+            "domain_rule": "fixed", "outlier_count": 0, "games_in_week": 75}
+
+
+def _axis_labels(svg: str) -> list:
+    """The ruler's labels in x order, read from the rendered `<text>` nodes."""
+    import re
+    found = re.findall(r"<text[^>]*x='([\d.]+)'[^>]*>([^<]*)</text>", svg)
+    return [text for _x, text in sorted(found, key=lambda pair: float(pair[0]))]
+
+
+def test_THE_TOP_OF_THE_KPI_AXIS_IS_LABELLED():
+    """🚨 A244 (cfdb-main-R-3350). THE `80` HAS 1.15px OF ROOM AND THAT IS THE WHOLE PIN.
+
+    > **MARC, v21:** *"expand the x-axis to 82 so that 80 on the axis has enough space to print"*
+
+    `_LabelBands.place()` DROPS a label whose exclusion zone overlaps one already placed — half
+    each measured width plus `LABEL_GAP`. On a frame of 80 the last two labels need 13.45px of
+    centre-to-centre clearance and have 11.62, so `80` silently vanishes: no error, no gap in the
+    ruler, just a chart that stops counting at 70.
+
+    ✅ R-843 — THE PIN MOVES UNDER THE BREAK. Re-rendered on the old `(0.0, 80.0)` frame this
+    assertion fails, which is asserted here rather than claimed, so the margin cannot be eaten by
+    a later font or padding change without something going red.
+    """
+    import today
+    row = _kpi_row_fixture()
+    top = today._KPI_AXIS[1]
+    labels = _axis_labels(today._kpi_chart(row, "winning_points"))
+    assert "80" in labels, (
+        f"the ruler stops at {labels[-1] if labels else '(nothing)'} on a frame topping at "
+        f"{top} — `80` was dropped by the label contest. Labels: {labels}")
+
+    # the break, run in-process: the same render on the frame this round replaced
+    import lib.distribution as distribution
+    narrow = distribution.panel(row, width=today._KPI_CHART_W, histogram=False,
+                                box_height=today._KPI_BOX_H, ticks=distribution.TICK_STEP,
+                                tick_step=today._KPI_TICK_STEP,
+                                tick_label_step=today._KPI_TICK_LABEL_STEP,
+                                head=False, stats=False, metric="winning_points",
+                                axis=(0.0, 80.0), gridlines=today._KPI_GRIDLINES)
+    assert "80" not in _axis_labels(narrow), (
+        "a frame topping at 80 now prints `80` too — the 1.15px margin this test pins has "
+        "moved, so the test no longer proves the frame top is what makes the label fit")
+
+
+def test_EVERY_KPI_CARD_GETS_THE_SAME_GRIDLINES_AT_THE_SAME_X():
+    """🚨 A244 (cfdb-main-R-3351). CROSS-CARD COMPARISON IS THE POINT, SO IDENTICAL x IS THE TEST.
+
+    > **MARC, v21:** *"it will help comparisons across Win, Loss, and Total KPI's"*
+
+    ⚠️ THREE DIFFERENT ROWS, ONE SET OF POSITIONS. The three cards carry different data, so a
+    gridline derived from anything in the ROW would land differently on each and the comparison
+    Marc is buying would be silently false. Passing three genuinely different frames is what
+    makes this able to fail (R-760).
+    """
+    import re
+    import today
+    rows = {
+        "winning_points": dict(_kpi_row_fixture(), p25=30.0, p50=38.0, p75=48.0),
+        "losing_points": dict(_kpi_row_fixture(), p25=9.5, p50=17.0, p75=24.0,
+                              whisker_lo=0.0, whisker_hi=40.0),
+        "total": dict(_kpi_row_fixture(), p25=49.5, p50=52.5, p75=56.5,
+                      whisker_lo=44.0, whisker_hi=66.0),
+    }
+    seen = {}
+    for metric, row in rows.items():
+        svg = today._kpi_chart(row, metric)
+        seen[metric] = re.findall(r"<line x1='([\d.]+)'[^>]*stroke='var\(--cfdb-grid\)'", svg)
+    counts = {m: len(xs) for m, xs in seen.items()}
+    assert all(n == len(today._KPI_GRIDLINES) for n in counts.values()), (
+        f"not every card drew {len(today._KPI_GRIDLINES)} gridlines: {counts}")
+    distinct = {tuple(xs) for xs in seen.values()}
+    assert len(distinct) == 1, (
+        f"the three cards put their gridlines at different x, so they cannot be compared "
+        f"across: {seen}")
+
+
+def test_THE_GRIDLINES_ARE_PAINTED_BEHIND_THE_BOX():
+    """🚨 A244. SVG HAS NO z-index — IT PAINTS IN DOCUMENT ORDER, so "behind" IS "earlier".
+
+    ⚠️ ASSERTED ON POSITION IN THE MARKUP, not on a colour or an opacity. A gridline drawn after
+    the box would be a visible line ACROSS the median rule and the IQR fill, and every attribute
+    in it would still be correct — which is the class of defect only order can express.
+    """
+    import today
+    svg = today._kpi_chart(_kpi_row_fixture(), "winning_points")
+    grid_at = svg.index("var(--cfdb-grid)")
+    box_at = svg.index("fill='var(--cfdb-iqr)'")
+    median_at = svg.index("stroke-width='2'")
+    assert grid_at < box_at, "a gridline is emitted after the IQR box, so it paints over it"
+    assert grid_at < median_at, "a gridline is emitted after the median rule"
+
+
+def test_THE_IQR_AND_GRID_TOKENS_ARE_BOTH_LIGHT_DARK_PAIRS():
+    """🚨 A244 (cfdb-main-R-3352/R-3351). A SINGLE HEX IS A DEFECT THIS PROJECT HAS SHIPPED.
+
+    A239 shipped `--cfdb-iqr: #8A3324` measuring 8.14:1 light and **2.32:1 dark** — below even
+    the 3:1 non-text floor in a scheme the site serves — and it had to become a pair. Both of
+    this round's colour tokens are pinned as pairs so the same fix is not needed a third time.
+
+    ⚠️ THE ASSERTION IS ON THE TOKEN, NOT ON A HEX VALUE. Pinning the literal would make every
+    future hue change a test edit, which is how a guard becomes something people delete.
+    """
+    import re
+    for token in ("--cfdb-iqr", "--cfdb-grid"):
+        match = re.search(rf"{token}:\s*([^;]+);", THEME)
+        assert match, f"{token} is not defined in theme.py"
+        value = match.group(1).strip()
+        assert value.startswith("light-dark("), (
+            f"{token} is `{value}` — a single value cannot serve both schemes (A239)")
+        halves = [h.strip() for h in value[len("light-dark("):-1].split(",")]
+        assert len(halves) == 2 and all(h.startswith("#") for h in halves), (
+            f"{token} does not carry two hex halves: {value}")
+        assert halves[0].lower() != halves[1].lower(), (
+            f"{token}'s two halves are the same colour, so the pair is decoration: {value}")
+
+
+def test_THE_QUARTILE_ROWS_ARE_NOT_DOUBLE_DIMMED():
+    """🚨 A244 (cfdb-main-R-3354). `opacity:1` IS HALF OF "pops more than the default font".
+
+    These rows sit in two stacked opacity groups — `.cfdb-kpi-head .cfdb-dist-stats` at .85 and
+    `.cfdb-dist-stat` at .85 — compositing to **0.7225**, and the quartile text was painting at
+    4.18:1 light and 3.86:1 dark. Both are under the 4.5:1 floor for text, in a rule whose own
+    comment claimed 8.14:1 because it had measured the raw hex instead of what is painted.
+    """
+    rule = THEME[THEME.index(".cfdb-dist-stat.cfdb-iqr, "):]
+    rule = rule[:rule.index("}")]
+    assert "opacity:1" in rule.replace(" ", ""), (
+        f"the quartile rows inherit the full double dimming, so they cannot out-contrast the "
+        f"rows beside them: {rule.strip()}")
