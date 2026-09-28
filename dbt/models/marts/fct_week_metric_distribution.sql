@@ -122,8 +122,8 @@ per_week as (
         -- "the game is final", which is the only moment a winning score is knowable.
         -- ⚠️ `games_live` therefore keeps its meaning — "still to come" — and becomes true to
         -- it for outcomes, where a kicked-off game genuinely still has its number to come.
-        count(*) filter (where is_settled)              as games_locked,
-        count(*) filter (where not is_settled)          as games_live,
+        count(*) filter (where has_kicked)              as games_locked,
+        count(*) filter (where not has_kicked)          as games_live,
         min(lock_basis)                                 as lock_basis,
         count(*) filter (where metric = 'temperature_f' and is_indoors) as excluded_indoor,
         avg(value)                                      as mean,
