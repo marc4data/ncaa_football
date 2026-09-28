@@ -376,10 +376,18 @@ def describe(row) -> str:
         reach = ("" if any(v is None or pd.isna(v) for v in span)
                  else f" ({fmt.number(float(span[0]), dp=1)} to {fmt.number(float(span[1]), dp=1)})")
         bits.append(f"{int(outliers)} beyond the whiskers{reach}")
+    # 🚨 A246 (cfdb-main-R-3382). THE SENTENCE BRANCHES BECAUSE `games_live` MEANS TWO THINGS.
+    # A market number is sealed at kickoff, so its remaining games have not started. An OUTCOME
+    # is sealed at the last whistle, so its remaining games have kicked off and are still being
+    # played — "still to kick off" would be flatly false about them.
+    # ⚠️ `lock_basis` IS READ WITH A DEFAULT OF `kickoff`, which is what every row published
+    # before this round carries (the column arrives null on them).
     if not row.get("is_locked", False):
         live = int(row.get("games_live") or 0)
         if live:
-            bits.append(f"{live} game(s) still to kick off — this can still move")
+            basis = row.get("lock_basis") or "kickoff"
+            waiting = ("still to finish" if basis == "whistle" else "still to kick off")
+            bits.append(f"{live} game(s) {waiting} — this can still move")
     as_of = row.get("as_of_date")
     if as_of is not None and not pd.isna(as_of):
         bits.append(f"as of {as_of}")

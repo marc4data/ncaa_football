@@ -52,14 +52,14 @@ membership as (
     -- The same two spans as the summary fact, and they MUST be the same: a bin count that
     -- disagrees with the n beside it is the exhaustiveness test failing, which is the single
     -- most valuable check here.
-    select l.metric, l.value, l.has_kicked, w.season, w.season_type, w.week, w.as_of_date,
+    select l.metric, l.value, l.is_settled, w.season, w.season_type, w.week, w.as_of_date,
            cast('week' as {{ dbt.type_string() }}) as span
     from long l
     join weeks w
       on  w.season = l.season and w.season_type = l.season_type
       and w.as_of_date = l.as_of_date and w.week = l.week
     union all
-    select l.metric, l.value, l.has_kicked, w.season, w.season_type, w.week, w.as_of_date,
+    select l.metric, l.value, l.is_settled, w.season, w.season_type, w.week, w.as_of_date,
            cast('season_to_date' as {{ dbt.type_string() }}) as span
     from long l
     join weeks w
@@ -72,7 +72,10 @@ locked as (
     -- SIBLING built from the same source — a ref would make one wait on the other for a
     -- boolean both can derive in one line. Same definition: no game left to kick off.
     select season, season_type, week, span, as_of_date,
-           bool_and(has_kicked) as is_locked
+           -- 🚨 A246 (cfdb-main-R-3382): SETTLED, NOT KICKED — the same change as the
+           -- summary fact beside it. The two models must agree about when a week seals or
+           -- one of them would go on writing rows the other has stopped writing.
+           bool_and(is_settled) as is_locked
     from membership
     group by season, season_type, week, span, as_of_date
 ),

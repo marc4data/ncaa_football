@@ -69,6 +69,11 @@ select
     d.games_locked,
     d.games_live,
     d.is_locked,
+    -- 🚨 A246 (cfdb-main-R-3382): WHICH MOMENT SEALED THIS ROW, published because the PAGE
+    -- needs it to describe `games_live` truthfully. A market metric's remaining games have
+    -- not kicked off; an outcome metric's have kicked off and are still being played, and
+    -- one sentence cannot say both.
+    d.lock_basis,
     d.excluded_indoor,
 
     d.mean,

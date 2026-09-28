@@ -56,6 +56,10 @@ games as (
         -- therefore a mixture until the last game kicks off, which is the honest reading of
         -- "re-calc each day until kick-off then it's locked".
         g.start_date <= a.as_of_date + interval '1 day'          as has_kicked,
+        -- 🚨 A246 (cfdb-main-R-3382). THE SECOND LOCK BASIS. `has_kicked` seals a MARKET
+        -- number; this seals an OUTCOME. They are different moments and the gap between them
+        -- is a whole afternoon of football.
+        coalesce(g.is_completed, false)                          as is_final,
         case when g.start_date <= a.as_of_date + interval '1 day'
              then coalesce(c.spread_at_close, c.spread_current)
              else c.spread_current end                            as spread,
@@ -95,7 +99,7 @@ games as (
 
 valued as (
     select
-        game_id, season, season_type, week, as_of_date, has_kicked, is_indoors,
+        game_id, season, season_type, week, as_of_date, has_kicked, is_final, is_indoors,
         spread,
         abs(spread)                                              as spread_abs,
         total,
@@ -114,9 +118,22 @@ valued as (
     from games
 )
 
+-- 🚨 A246 (cfdb-main-R-3382). `is_settled` IS THE PER-METRIC LOCK BASIS, AND IT IS READ FROM
+-- THE REGISTRY RATHER THAN FROM THE METRIC'S NAME. `distribution_bins` already carries
+-- per-metric keys beside the bounds (`axis_group`, `domain_rule`), so `final_at` sits where a
+-- reader adding the next metric will see it. A name test — "does it end in _points" — would
+-- have silently mis-classified `market_implied_favorite_points`, which IS final at kickoff.
+{% set bins_cfg = var('distribution_bins') %}
 {% for metric in metrics %}
 select
-    game_id, season, season_type, week, as_of_date, has_kicked, is_indoors,
+    game_id, season, season_type, week, as_of_date, has_kicked, is_final, is_indoors,
+    {% if bins_cfg[metric].get('final_at') == 'whistle' -%}
+    is_final                                        as is_settled,
+    cast('whistle' as {{ dbt.type_string() }})      as lock_basis,
+    {%- else -%}
+    has_kicked                                      as is_settled,
+    cast('kickoff' as {{ dbt.type_string() }})      as lock_basis,
+    {%- endif %}
     cast('{{ metric }}' as {{ dbt.type_string() }}) as metric,
     cast({{ metric }} as numeric)                   as value
 from valued

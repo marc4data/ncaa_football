@@ -95,7 +95,7 @@ membership as (
     --
     -- CONSEQUENCE, AND IT IS THE RIGHT ONE: week 1 has no season-to-date row at all. That is
     -- an Empty state rather than a zero, exactly as a week nobody has priced is.
-    select l.metric, l.value, l.has_kicked, l.is_indoors, l.game_id,
+    select l.metric, l.value, l.has_kicked, l.is_settled, l.lock_basis, l.is_indoors, l.game_id,
            w.season, w.season_type, w.week, w.as_of_date,
            cast('week' as {{ dbt.type_string() }}) as span
     from long l
@@ -103,7 +103,7 @@ membership as (
       on  w.season = l.season and w.season_type = l.season_type
       and w.as_of_date = l.as_of_date and w.week = l.week
     union all
-    select l.metric, l.value, l.has_kicked, l.is_indoors, l.game_id,
+    select l.metric, l.value, l.has_kicked, l.is_settled, l.lock_basis, l.is_indoors, l.game_id,
            w.season, w.season_type, w.week, w.as_of_date,
            cast('season_to_date' as {{ dbt.type_string() }}) as span
     from long l
@@ -117,8 +117,14 @@ per_week as (
         season, season_type, week, span, as_of_date, metric,
         count(*)                                        as games_in_week,
         count(value)                                    as n,
-        count(*) filter (where has_kicked)              as games_locked,
-        count(*) filter (where not has_kicked)          as games_live,
+        -- 🚨 A246 (cfdb-main-R-3382). SETTLED, NOT KICKED. For every market metric `is_settled`
+        -- IS `has_kicked` and nothing about this changes; for the two outcome metrics it is
+        -- "the game is final", which is the only moment a winning score is knowable.
+        -- ⚠️ `games_live` therefore keeps its meaning — "still to come" — and becomes true to
+        -- it for outcomes, where a kicked-off game genuinely still has its number to come.
+        count(*) filter (where is_settled)              as games_locked,
+        count(*) filter (where not is_settled)          as games_live,
+        min(lock_basis)                                 as lock_basis,
         count(*) filter (where metric = 'temperature_f' and is_indoors) as excluded_indoor,
         avg(value)                                      as mean,
         stddev_samp(value)                              as stddev,
@@ -210,6 +216,11 @@ select
     w.games_locked,
     w.games_live,
     w.games_live = 0                                    as is_locked,
+    -- 🚨 A246: WHICH RULE SEALED THIS ROW. Published on the row so a reader of the table can
+    -- tell a kickoff-locked market number from a whistle-locked outcome without inferring it
+    -- from the metric name — and so the day a third basis is added the column already carries
+    -- it, which is exactly why `domain_rule` sits two lines below.
+    w.lock_basis,
     w.excluded_indoor,
 
     w.mean, w.stddev, w.min_value, w.max_value,
