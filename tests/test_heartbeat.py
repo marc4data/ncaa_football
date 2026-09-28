@@ -1006,3 +1006,38 @@ def test_one_missing_outcome_line_is_blind_and_fails(monkeypatch, capsys):
             f"dropping the {dropped} line must fail the run, not read as clean")
         out = capsys.readouterr().out
         assert "BLIND" in out and dropped in out, out
+
+
+def test_the_watcher_parses_the_unadvanced_line_and_fails_on_it(monkeypatch, capsys):
+    """🚨 A249 (cfdb-main-R-3472). THE FIFTH DETECTOR, AND IT IS THE CONDITION OF A DECOUPLING.
+
+    `game/box/advanced` is now the one endpoint whose failure does not fail the weekly run
+    (`Endpoint.optional`), so the gap it can leave has to be seen. Without this the round would
+    trade a loud weekly failure for a silent data gap — strictly worse, and the thing every
+    other line here was added after.
+    """
+    fresh = {name: 60 for name in chk.CADENCES}
+    monkeypatch.setattr(chk, "read_ages",
+                        lambda _h: (fresh, {}, {}, _all_clear(unadvanced=(4, 100_800, "w4"))))
+    assert chk.main(["host"]) == 1, (
+        "finished team-games with no advanced box score on the site must FAIL the check")
+    out = capsys.readouterr().out
+    assert "UNADVANCED 4" in out, out
+
+
+def test_the_unadvanced_line_stays_QUIET_when_there_is_no_gap(monkeypatch, capsys):
+    """🚨 R-762 — A BRANCH THAT NEVER STAYS QUIET IS DECORATION, and this one has to stay quiet
+    most of the time: measured on 2026 weeks 1-4, every completed FBS team-game has its advanced
+    box score and the count is ZERO.
+
+    ⚠️ AND IT IS THE HALF THAT WOULD HAVE CAUGHT `unplayered`'s DEFECT (B156's ninth class): a
+    detector whose threshold contradicts the publish design fires every week for a reason that
+    is not a fault. This one watches `srv_game_team.has_box_advanced`, which publishes on the
+    HOT two-hourly cadence, rather than `srv_game_team_leader_usage`, which is HEAVY_SERVING
+    and reaches the site only through the weekly `publish_all()`.
+    """
+    fresh = {name: 60 for name in chk.CADENCES}
+    monkeypatch.setattr(chk, "read_ages",
+                        lambda _h: (fresh, {}, {}, _all_clear()))
+    assert chk.main(["host"]) == 0, "a week with no gap must not fail the check"
+    assert "UNADVANCED" not in capsys.readouterr().out

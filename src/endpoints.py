@@ -64,6 +64,19 @@ class Endpoint:
     # this the daily lines pull would be skipped from its second run onward and the
     # movement series would never accumulate.
     snapshot: bool = False
+    # 🚨 A249 (cfdb-main-R-3470). WHETHER A FAILURE HERE MAY FAIL THE WHOLE REFRESH.
+    #
+    # Default False means SPINE: a failure raises and the run stops, which is every endpoint's
+    # behaviour today and stays the behaviour of all but one. ⚠️ **AMBIGUOUS MEANS SPINE** —
+    # the safe default is the loud one.
+    #
+    # 🚨 AND AN ENDPOINT MAY ONLY BE MARKED OPTIONAL IF A DETECTOR WATCHES THE GAP IT LEAVES.
+    # That is the whole difference between Marc's "decouple, narrowly" and the thing
+    # `_run`'s own comment forbids: this changes WHAT fails, never WHETHER it is loud. An
+    # optional endpoint with no watcher trades a loud weekly failure for a silent data gap,
+    # which is strictly worse and is what each of `check_heartbeats.OUTCOME_LINES`' entries was
+    # added after.
+    optional: bool = False
     # Query parameters sent on EVERY request for this endpoint, merged under whatever the
     # strategy generates. For endpoints whose default window is wrong for this project:
     # /recruiting/groups aggregates over startYear..endYear and defaults to 2000-present,
@@ -298,9 +311,27 @@ REGISTRY: List[Endpoint] = [
     # 2026, so the live season read 0.0% coverage while 2024 and 2025 read 99.2% and 100%.
     # A108 asked the endpoint directly for a completed 2026 game and it answered 200 with 21
     # players, so the gap was ours and not CFBD's.
+    # 🚨 A249 (cfdb-main-R-3470): THE ONE OPTIONAL ENDPOINT, AND THE CLASSIFICATION IS TRACED
+    # THROUGH THE dbt GRAPH RATHER THAN READ OFF THE NAME (A240's lesson).
+    #
+    # 📊 Downstream, from the manifest: `srv_game_team_leader_usage`,
+    # `srv_game_team_metric_distribution`, `..._through_prior_week`, and `srv_game_team`.
+    # ⚠️ A246 SAID "AND NOTHING ON THE SPINE" AND THAT WAS TRUE IN EFFECT AND WRONG IN DETAIL —
+    # it reaches FOUR serving views, `srv_game_team` among them.
+    #
+    # ✅ THE SPINE SURVIVES ANYWAY, AND THE REASON IS A JOIN: `fct_game_team_advanced` is built
+    # `from fct_game_team LEFT JOIN box`, so it is row-complete, and `srv_game_team`'s INNER
+    # join to it (`srv_game_team.sql:689`) still returns every team-game. A missing advanced box
+    # NULLS MEASURES; it does not drop a game, empty a page or fail a build.
+    #
+    # 🚨 AND NULL MEASURES ARE EXACTLY §2.5's FAILURE — "the page works, the tests pass, and the
+    # reader is told something false" — which is why `unadvanced` in `deploy/cfdb_heartbeat.sh`
+    # is the condition of this marking and not a nicety.
     Endpoint("game/box/advanced", PER_GAME, BUCKET_IMMUTABLE_WK, include=False,
+             optional=True,
              extra={"id_param": "id", "weekly_per_game": True},
-             note="one call per game; weekly for player usage (R-697)"),
+             note="one call per game; weekly for player usage (R-697). OPTIONAL: watched by "
+                  "`unadvanced` (A249)"),
     # R-716. OPTED INTO THE WEEKLY REFRESH, and A108 left it out on purpose one round earlier —
     # "it has no reader, no request behind it". THAT CHANGED: Marc asked for lead changes and win
     # probability swings to rank his games (R-709), and A114 measured that every measure he named

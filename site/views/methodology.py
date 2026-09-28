@@ -60,7 +60,7 @@ from memory:
 | dbt data tests | **650** — **510** schema tests and **140** hand-written assertions |
 | Python tests | more than **2,250** |
 | Pages on this site | **18** |
-| Serving columns, every one with a written definition | **1,502** |
+| Serving columns, every one with a written definition | **1,503** |
 | Databases | **two** — a warehouse where everything is built, and a small serving Postgres the site reads |
 
 The two databases are the point of the shape rather than an accident of it. The site never
@@ -138,7 +138,7 @@ almost nothing, and the expensive work happens on a schedule rather than while s
 
 ### Every column the site reads has a definition, and the definition travels
 
-Every column in the serving layer — the **1,502** columns this site reads — carries a written
+Every column in the serving layer — the **1,503** columns this site reads — carries a written
 definition. Those definitions are not kept in a document beside the code; they are attached to the
 columns themselves when each table is built, read back out of the database, and published like any
 other data.

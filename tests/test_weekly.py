@@ -348,3 +348,89 @@ def test_a_success_older_than_the_window_is_re_fetched(monkeypatch):
     cutoff = datetime(2026, 9, 20, 6, 0, tzinfo=timezone.utc)
     assert m.succeeded_since("plays", {"week": 3}, cutoff) is False, (
         "last week's 200 must not stop this week's refresh")
+
+
+# ── A249: an optional payload stops failing the spine ─────────────────────────────────────
+
+class _Resp:
+    def __init__(self, code):
+        self.status_code = code
+
+
+def _fail_only(paths, monkeypatch):
+    """Every request 200s except the named endpoint paths, which 500."""
+    def fetch(endpoint, params):
+        return _Resp(500 if endpoint in paths else 200)
+    monkeypatch.setattr(weekly.ingest, "fetch", fetch)
+
+
+def test_A_SPINE_FAILURE_STILL_FAILS_THE_WHOLE_REFRESH(monkeypatch):
+    """🚨 A249 (cfdb-main-R-3473). THE IMPORTANT HALF, AND THE EASIEST TO LOSE.
+
+    A decoupling that accidentally swallows a spine failure is the 09-20-class incident with no
+    alarm at all — strictly worse than the failure it replaced. `games/teams` is SPINE: the
+    team box score everything hangs off.
+    """
+    _fail_only({"games/teams"}, monkeypatch)
+    with pytest.raises(RuntimeError, match="requests failed"):
+        weekly.results_refresh("2026", datetime(2026, 9, 20, tzinfo=timezone.utc))
+
+
+def test_AN_OPTIONAL_FAILURE_IS_RECORDED_AND_DOES_NOT_RAISE(monkeypatch):
+    """🚨 A249. THE ONE ENDPOINT MARC AUTHORISED DECOUPLING, AND IT IS RECORDED NOT SWALLOWED.
+
+    📊 Every scheduled `cfbd_results_refresh` failed three Sundays running on ONE
+    `game/box/advanced` payload out of ~477, and 476 good payloads never loaded because of it.
+
+    ⚠️ THE SUMMARY MUST DISTINGUISH THE TWO COUNTS. A single `failed` would hide which kind
+    happened, and "three optional payloads missing" and "the games endpoint is down" are
+    different facts with different fixes.
+    """
+    _fail_only({"game/box/advanced"}, monkeypatch)
+    out = weekly.results_refresh("2026", datetime(2026, 9, 20, tzinfo=timezone.utc))
+
+    assert out["status"] == "ok", "an optional failure must not fail the run"
+    assert out["failed_optional"] > 0, "the optional failure was not recorded at all"
+    assert out["failed_spine"] == 0
+    assert any("game/box/advanced" in line for line in out["optional_failures"]), (
+        "the summary does not say WHICH optional payload was missing")
+
+
+def test_AN_UNRECOGNISED_ENDPOINT_IS_TREATED_AS_SPINE(monkeypatch):
+    """⚠️ A249 — "I do not recognise this" must not be the quiet branch.
+
+    `BY_PATH` is the registry; a request whose path is not in it was classified by nobody.
+    ✅ R-843 — the pin moves: make the lookup default to optional and this goes green while the
+    run silently succeeds on an endpoint no one has ever assessed.
+    """
+    unknown = "some/endpoint/nobody/registered"
+    assert weekly.BY_PATH.get(unknown) is None, "this test needs a path the registry lacks"
+
+    # 🚨 `_run` DIRECTLY, because `results_refresh` can only build requests FROM the registry —
+    # every path it produces is registered by construction, so routing it through the public
+    # entry point could never reach this branch. An earlier version of this test did exactly
+    # that, failed a KNOWN spine endpoint instead, and passed under a staged break that made
+    # the unknown path optional. R-760: it asserted something that could not be false.
+    monkeypatch.setattr(weekly.ingest, "fetch", lambda ep, params: _Resp(500))
+    with pytest.raises(RuntimeError, match="requests failed"):
+        weekly._run([(unknown, {"year": "2026"})])
+
+
+def test_EXACTLY_ONE_ENDPOINT_IS_OPTIONAL_AND_IT_IS_WATCHED(monkeypatch):
+    """🚨 A249 (cfdb-main-R-3470/R-3472). THE RULE THAT KEEPS THIS HONEST, ASSERTED.
+
+    An endpoint may be OPTIONAL only if a detector watches the gap it leaves. Marking a second
+    one without registering a watcher is the failure this whole round exists to avoid, and it
+    would otherwise be a one-word edit nobody notices.
+
+    ⚠️ Pinned as a SET, not a count: a count would stay green if one were swapped for another.
+    """
+    from ci.check_heartbeats import OUTCOME_LINES
+    from src.endpoints import REGISTRY
+
+    optional = {e.path for e in REGISTRY if e.optional}
+    assert optional == {"game/box/advanced"}, (
+        f"the optional set changed to {optional} — every member needs a detector in "
+        f"OUTCOME_LINES, and this test is the reminder")
+    assert "unadvanced" in OUTCOME_LINES, (
+        "game/box/advanced is optional and nothing watches the gap it can leave")

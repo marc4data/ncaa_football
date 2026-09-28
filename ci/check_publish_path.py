@@ -47,6 +47,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ci.check_heartbeats import (CADENCES, describe, fetch_payload,   # noqa: E402
@@ -147,21 +148,47 @@ def override_reason(commit_messages: str):
     return None
 
 
+def _git_log(*args) -> Optional[str]:
+    """`git log --format=%B <args>`, or None when the command itself could not run."""
+    try:
+        done = subprocess.run(["git", "log", "--format=%B", *args],
+                              capture_output=True, text=True, timeout=30)
+    except Exception:                                               # noqa: BLE001
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
 def commit_messages(base: str = "origin/main") -> str:
     """Every commit message on this branch that is not on `base`.
 
     ⚠️ FALLS BACK TO HEAD ALONE rather than raising: in a shallow clone `base` may not exist,
     and a gate that crashes on its own convenience lookup is a gate that blocks everything.
+
+    🚨 A251 (cfdb-main-R-3531). AN EMPTY RANGE IS AN ANSWER, NOT A FAILURE, AND CONFLATING THE
+    TWO DISARMED THIS GATE ON `main` FOR A DAY.
+
+    A247 merged with a `Publish-path-override:` trailer. `gh pr merge --squash` folds the
+    branch's messages into the merge commit, so the trailer landed in `main`'s own tip. On
+    `main`, `origin/main..HEAD` is EMPTY — a successful query with nothing in it — and the old
+    loop treated empty output as "try the next thing", fell through to `-1`, read the merge
+    commit, and honoured the override. 📊 A248 measured the result: the gate printed
+    **`publish path: RED`** and reported **SUCCESS**.
+
+    ✅ **THE RULE THIS NOW STATES DIRECTLY: an override applies to the change being PROPOSED,
+    never to the branch it has already landed on.** The range is non-empty exactly when this is
+    a branch or a PR, and empty exactly when it is the base branch — so the range itself is the
+    question, and it only has to be asked honestly.
+
+    ⚠️ **THE SHALLOW-CLONE FALLBACK IS KEPT AND IS NOW REACHED FOR ITS ACTUAL REASON.** In a
+    shallow clone `base` does not resolve and the command FAILS; that is a different outcome
+    from succeeding with no commits, and only the first should fall back. Deleting the fallback
+    would have been the wrong fix — it exists so the gate cannot crash on its own lookup.
     """
-    for args in ([f"{base}..HEAD"], ["-1"]):
-        try:
-            done = subprocess.run(["git", "log", "--format=%B", *args],
-                                  capture_output=True, text=True, timeout=30)
-            if done.returncode == 0 and done.stdout.strip():
-                return done.stdout
-        except Exception:                                           # noqa: BLE001
-            continue
-    return ""
+    ranged = _git_log(f"{base}..HEAD")
+    if ranged is not None:
+        # Empty is a real answer: this is the base branch, and nothing here is being proposed.
+        return ranged
+    return _git_log("-1") or ""
 
 
 def main(argv=None) -> int:
