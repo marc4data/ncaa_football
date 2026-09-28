@@ -247,6 +247,36 @@ SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
                      where p.game_id = g.game_id)
 " || echo "unplayered|MONITOR.cannot_read_published_serving|0|-"
 
+  # ── A249 (cfdb-main-R-3472): THE ADVANCED BOX SCORE, AND IT IS THE CONDITION OF A DECOUPLING
+  #
+  # 🚨 `game/box/advanced` IS NOW THE ONE ENDPOINT WHOSE FAILURE DOES NOT FAIL THE WEEKLY RUN
+  # (`Endpoint.optional`). That trade is only honest with a watcher: without one it swaps a loud
+  # weekly failure for a silent data gap, which is what every check above was added after —
+  # "EVERY ONE OF THESE WAS ADDED AFTER THE SITE WAS WRONG AND NOTHING SAID SO."
+  #
+  # ⚠️ IT WATCHES `srv_game_team.has_box_advanced`, NOT `srv_game_team_leader_usage`, AND THE
+  # REASON IS THE PUBLISH DESIGN — B156's ninth class, which is exactly what `unplayered` got
+  # wrong. 📊 `srv_game_team_leader_usage` is in HEAVY_SERVING and reaches the site ONLY through
+  # `publish_all()`, which only the weekly DAG calls; a daily threshold against it would fire
+  # every week for a reason that is not a fault. **`srv_game_team` is HOT and publishes
+  # two-hourly, and it already carries the fact.** Checked against the published column list
+  # rather than the model file (§2.2.1c.2): `has_box_advanced` is there.
+  #
+  # ⚠️ TEAM-GAMES, NOT GAMES, because that is this relation's grain and because one side of a
+  # fixture can have its advanced box while the other does not.
+  "${SERVING_PSQL[@]}" -c "
+    select 'unadvanced|' || count(*) || '|' ||
+           coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
+           coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
+    from serving.srv_game_team g
+    where g.is_fbs_game
+      and g.is_completed
+      and g.points_for is not null
+      and not g.has_box_advanced
+      and g.season = (select max(season) from serving.srv_game_team where is_completed)
+      and g.game_date < (now() at time zone 'America/Los_Angeles')::date
+  " || echo "unadvanced|MONITOR.cannot_read_published_serving|0|-"
+
 # 🚨 THE REST OF SATURDAY — DRIVES AND THE WIN-PROBABILITY CURVE. A185 (cfdb-main-R-1914).
 #
 # The two checks above ask whether the BOX SCORES are on the site. They were both quiet on

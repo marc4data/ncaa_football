@@ -67,6 +67,14 @@ OUTCOME_LINES = {
     "uncurved": ("UNCURVED",
                  "FBS game(s) final with no win-probability curve on the site — Matchup's "
                  "Win % chart and Today's sparklines are empty for those games"),
+    # 🚨 A249 (cfdb-main-R-3472). THE FIFTH, AND IT IS WHAT MAKES `game/box/advanced` SAFE TO
+    # DECOUPLE. That endpoint's failure no longer fails the weekly run (`Endpoint.optional`),
+    # so the gap it can now leave has to be seen by something. ⚠️ A team-game, not a game:
+    # `srv_game_team` is the grain, and one side of a fixture can have its advanced box while
+    # the other does not.
+    "unadvanced": ("UNADVANCED",
+                   "FBS team-game(s) final with no advanced box score on the site — Matchup's "
+                   "Advanced panel and the player-usage dots are empty for those team-games"),
 }
 
 

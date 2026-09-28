@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from . import ingest
 from .endpoints import (
+    BY_PATH,
     BUCKET_IMMUTABLE_WK, BUCKET_PREGAME, BUCKET_REVISIONIST, PER_GAME, REGISTRY, SEASON,
     SEASON_TYPE, SEASON_WEEK,
 )
@@ -180,9 +181,22 @@ def _run(requests: List[tuple], now: Optional[datetime] = None) -> Dict[str, Any
     timestamp, so "did this attempt's predecessor already get this one?" is a question the raw
     layer can answer for free. A request with a 200 inside `RETRY_WINDOW_HOURS` is skipped.
 
-    ⚠️ **THE LOUD-FAILURE RULE IS UNCHANGED, AND THAT IS THE POINT — *retry less, never fail
-    quieter*.** The run still raises if anything is missing after this attempt, so nothing
-    downstream publishes on a partial refresh. What changes is only how much is re-asked.
+    ⚠️ **THE LOUD-FAILURE RULE IS UNCHANGED FOR THE SPINE, AND THAT IS STILL THE POINT —
+    *retry less, never fail quieter*.** A spine failure still raises, so nothing downstream
+    publishes on a partial refresh of the things everything else hangs off.
+
+    🚨 **A249 (cfdb-main-R-3471) NARROWED *WHAT* FAILS AND CHANGED NOTHING ABOUT *WHETHER IT IS
+    LOUD*, WHICH IS THE WHOLE OF MARC'S "A".** 📊 Every SCHEDULED `cfbd_results_refresh` failed
+    three Sundays running — 09-13, 09-20, 09-27 — on ONE `game/box/advanced` payload out of
+    ~477, with a different transient status each week (429, 503, 500) and the same endpoint
+    every time. **476 good payloads never loaded**, `load → dbt_run → dbt_test → publish →
+    heartbeat` all went `upstream_failed`, and a human re-ran it by hand twice.
+
+    ⚠️ **AN OPTIONAL FAILURE IS RECORDED, NOT SWALLOWED:** it lands in `failed_optional` and in
+    `optional_failures`, and the gap it leaves is watched by `unadvanced` in
+    `deploy/cfdb_heartbeat.sh`. **An endpoint may only be marked optional if such a watcher
+    exists** — see `Endpoint.optional`. Without one this would trade a loud weekly failure for
+    a silent data gap, which is strictly worse.
 
     🚨 AND THE SKIP IS KEYED ON A **200 WITHIN THE WINDOW**, NOT ON `manifest.exists()`, which
     ignores `status_code` — keying on that would skip exactly the requests that failed.
@@ -190,7 +204,8 @@ def _run(requests: List[tuple], now: Optional[datetime] = None) -> Dict[str, Any
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=RETRY_WINDOW_HOURS)
 
-    fetched, failures, touched, skipped = 0, [], set(), 0
+    fetched, touched, skipped = 0, set(), 0
+    spine_failures, optional_failures = [], []
     for endpoint, params in requests:
         endpoint_key = endpoint.replace("/", "_")
         if ingest.manifest.succeeded_since(endpoint_key, params, cutoff):
@@ -204,17 +219,36 @@ def _run(requests: List[tuple], now: Optional[datetime] = None) -> Dict[str, Any
         if resp.status_code == 200:
             fetched += 1
         else:
-            failures.append(f"{endpoint} {params} -> {resp.status_code}")
+            line = f"{endpoint} {params} -> {resp.status_code}"
+            registered = BY_PATH.get(endpoint)
+            # ⚠️ AN UNKNOWN PATH IS SPINE. `BY_PATH` is the registry and a request whose
+            # endpoint is not in it is not an endpoint anyone classified — treating it as
+            # optional would make "I do not recognise this" the quiet branch.
+            if registered is not None and registered.optional:
+                optional_failures.append(line)
+            else:
+                spine_failures.append(line)
 
+    failures = spine_failures + optional_failures
     summary = {"requests": len(requests), "fetched": fetched, "skipped": skipped,
-               "failed": len(failures), "endpoints": sorted(touched)}
+               "failed": len(failures),
+               # 🚨 A249 (cfdb-main-R-3471). TWO COUNTS, NOT ONE. A single `failed` hides the
+               # one that matters: "three optional payloads missing" and "the games endpoint is
+               # down" are different facts and a caller reading one number cannot tell them
+               # apart.
+               "failed_spine": len(spine_failures),
+               "failed_optional": len(optional_failures),
+               "endpoints": sorted(touched)}
     if failures:
         summary["failures"] = failures
-        # Loud: a partial refresh must not read as a success.
+    if optional_failures:
+        summary["optional_failures"] = optional_failures
+    if spine_failures:
+        # Loud: a partial refresh of the SPINE must not read as a success.
         raise RuntimeError(
-            f"{len(failures)} of {len(requests)} requests failed "
+            f"{len(spine_failures)} of {len(requests)} requests failed "
             f"({skipped} already had a 200 from an earlier attempt and were not re-asked): "
-            f"{failures[:5]}")
+            f"{spine_failures[:5]}")
     return summary
 
 
