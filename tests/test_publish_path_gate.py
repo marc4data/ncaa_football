@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from ci.check_publish_path import (CADENCES, GREEN, OVERRIDE_TRAILER,   # noqa: E402
                                    PUBLISH_CADENCES, RED, UNDETERMINED,
-                                   override_reason, verdict)
+                                   commit_messages, override_reason, verdict)
 
 # A payload with every publish cadence fresh, in the monitor's own line shapes.
 FRESH = "\n".join([
@@ -285,3 +285,91 @@ def test_a_green_verdict_shows_what_it_looked_at(tmp_path):
     for name in PUBLISH_CADENCES:
         assert name in done.stdout, f"a green run does not say it checked {name}"
     assert f"{len(PUBLISH_CADENCES)} of {len(PUBLISH_CADENCES)}" in done.stdout
+
+
+# ── A251: an override must not outlive the branch it was written for ──────────────────────
+
+def _git_repo(tmp_path, trailer: bool):
+    """A real repository with a `main`, and a branch carrying one commit.
+
+    ⚠️ A REAL REPO RATHER THAN A MONKEYPATCH, because the behaviour under test IS what `git
+    log` returns for a range — an empty-but-successful query versus a failed one. Faking the
+    subprocess would assert that the fake behaves as I expect, which is R-768's shape.
+    """
+    import subprocess as sp
+
+    def git(*args):
+        return sp.run(["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@e.st")
+    git("config", "user.name", "t")
+    (tmp_path / "f").write_text("1\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    # `origin/main` without a remote: a ref in the right place is all the range needs.
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    git("checkout", "-q", "-b", "feature")
+    (tmp_path / "f").write_text("2\n")
+    git("add", "-A")
+    body = "A251: a change\n\n" + (f"{OVERRIDE_TRAILER} because I say so\n" if trailer else "")
+    git("commit", "-q", "-m", body)
+    return git
+
+
+def _messages_in(tmp_path):
+    """`commit_messages()` as the gate calls it, with the cwd it would have in CI."""
+    import os
+    here = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        return commit_messages("origin/main")
+    finally:
+        os.chdir(here)
+
+
+def test_AN_OVERRIDE_ON_A_BRANCH_IS_STILL_HONOURED(tmp_path):
+    """🚨 A251 — THE HALF THAT MUST KEEP WORKING. The override exists so the round that FIXES a
+    red path can merge; breaking that would be a worse defect than the one being fixed.
+    """
+    _git_repo(tmp_path, trailer=True)
+    assert override_reason(_messages_in(tmp_path)) == "because I say so"
+
+
+def test_AN_OVERRIDE_DOES_NOT_SURVIVE_ONTO_THE_BASE_BRANCH(tmp_path):
+    """🚨 A251 (cfdb-main-R-3531). THE HALF THAT WAS BROKEN, AND IT DISARMED THE GATE ON `main`.
+
+    Same commit, same trailer — but now it IS the base branch's tip, so `origin/main..HEAD` is
+    empty. The old code read empty output as "try the next thing", fell back to `git log -1`,
+    found the trailer in the merge commit and honoured it. 📊 A248 measured the consequence:
+    `publish path: RED` reported as SUCCESS.
+
+    ✅ R-843 — THE PIN MOVES: with the old two-element loop restored this assertion fails,
+    because `override_reason` finds the trailer again.
+    """
+    git = _git_repo(tmp_path, trailer=True)
+    # squash the branch onto main, exactly as `gh pr merge --squash` leaves it
+    git("checkout", "-q", "main")
+    git("merge", "-q", "--squash", "feature")
+    git("commit", "-q", "-m",
+        f"A251: a change (#1)\n\n{OVERRIDE_TRAILER} because I say so\n")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    assert _messages_in(tmp_path) == "", (
+        "origin/main..HEAD is empty on the base branch and must be REPORTED as empty — "
+        "falling back to `git log -1` is what read the merge commit's trailer")
+    assert override_reason(_messages_in(tmp_path)) is None, (
+        "the override survived onto the base branch, so the gate cannot report red there")
+
+
+def test_THE_SHALLOW_CLONE_FALLBACK_STILL_WORKS(tmp_path):
+    """⚠️ THE FALLBACK IS KEPT AND MUST STILL FIRE FOR ITS REAL REASON.
+
+    With no `origin/main` ref at all the range cannot resolve and `git log` FAILS — which is a
+    different outcome from succeeding with nothing, and is the case the fallback was written
+    for. Deleting it would make the gate crash on its own convenience lookup.
+    """
+    git = _git_repo(tmp_path, trailer=True)
+    git("update-ref", "-d", "refs/remotes/origin/main")
+    assert override_reason(_messages_in(tmp_path)) == "because I say so", (
+        "a shallow clone with no resolvable base must still fall back to HEAD alone")
