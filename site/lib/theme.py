@@ -1703,6 +1703,12 @@ TABLE_CSS = """
 .cfdb-dist-stat.cfdb-iqr, .cfdb-dist-stat.cfdb-iqr span, .cfdb-dist-stat.cfdb-iqr b {
     color:var(--cfdb-iqr); opacity:1; }
 .cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
+/* 🚨 A246 (cfdb-main-R-3383): the chart and the numeral above it describe different games.
+   ⚠️ QUIET, NOT ALARMING. It is a caption on a correct-but-partial picture, not an error
+   state — the site already has `.cfdb-error` for that and using it here would make an
+   upstream lag read as a broken page. It sits under the ruler, at the stats' own size. */
+.cfdb-kpi-coverage { font-size:.6rem; opacity:.75; margin-top:.1rem;
+    font-family:ui-monospace,Menlo,monospace; }
 /* `.cfdb-dist-body` is a flex row because the standalone panel puts the stats table beside the
    chart. The KPI tile passes `stats=False`, so there is one child and the gap would be dead
    space. ⚠️ AND THE SVG MUST NOT SHRINK: it is a FIXED width here (see `panel()` — a chart with

@@ -4500,18 +4500,28 @@ models:
           is 0.
       - name: games_locked
         description: >
-          Games in scope that have already kicked off, contributing their CLOSING number.
+          Games in scope whose number is SETTLED and can no longer change. ⚠️ Which moment
+          settles a game depends on the metric and is named by `lock_basis`: a market number
+          is settled at kickoff, an outcome at the last whistle.
       - name: games_live
         description: >
-          Games in scope that have not yet kicked off, contributing their LIVE number. ⚠️ A
+          Games in scope whose number can still change, contributing their LIVE value. ⚠️ A
           mid-slate row is a MIXTURE of locked and live, deliberately — a week's games kick
-          off across three or four days.
+          off across three or four days. ⚠️ For an outcome metric these games have ALREADY
+          kicked off and are still being played, which is why the page reads `lock_basis`
+          before describing them.
       - name: is_locked
         description: >
-          True when `games_live` is 0: every game in scope has kicked off and this row will
-          never change again. ⚠️ `is_locked`, not `is_final` — “Final” already means
-          `is_completed` on this site, and two meanings on one screen is a defect waiting to
-          be read.
+          True when `games_live` is 0: every game in scope is settled and this row will never
+          change again. ⚠️ `is_locked`, not `is_final` — “Final” already means `is_completed`
+          on this site, and two meanings on one screen is a defect waiting to be read.
+      - name: lock_basis
+        description: >
+          Which moment seals this metric's number: `kickoff` for a market or venue metric,
+          `whistle` for an outcome. 🚨 A246 — every metric locked at KICKOFF until 2026-09-28,
+          which froze `winning_points` and `losing_points` for 2026 week 4 at 6 of its 71
+          games, because a week's last kickoff is by definition a moment at which the last
+          games have not been played. Set from `final_at` in `distribution_bins`.
       - name: excluded_indoor
         description: >
           Games dropped from a temperature distribution for being played indoors. 0 for

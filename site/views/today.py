@@ -4659,7 +4659,47 @@ def _kpi_figure(label: str, value: str, sub: str, chart: str = "",
             f"{chart}</div>")
 
 
-def _kpi_chart(dist_row, metric: str) -> str:
+def _kpi_coverage_note(dist_row, expected) -> str:
+    """The caption that fires when the chart and the number above it describe different games.
+
+    🚨 A246 (cfdb-main-R-3383). THE TILE PRINTS ONE POPULATION AND DRAWS ANOTHER, AND NOTHING
+    ON IT SAYS SO.
+
+    📊 MEASURED on 2026 week 4: the numeral and the sub-line both come from `srv_week_summary`
+    and describe **71** completed games; the box-whisker and its p05-p95 come from
+    `srv_week_metric_distribution` and described **6**. The tile read *"38.9 — mean of 71
+    completed"* above a distribution of six games. ⚠️ `_KPI_STATS` shows p05/p25/p50/p75/p95
+    and NOT `n`, so the six was invisible.
+
+    🚨 AND A243/A244 MADE IT MAXIMALLY MISLEADING BY DOING EXACTLY WHAT MARC ASKED: the three
+    charts now share one axis and one set of gridlines, specifically so a reader compares them.
+    A chart built from 6 games sitting beside two built from 71, on a shared scale, invites the
+    comparison it cannot support.
+
+    ⚠️ THIS IS A GUARD, NOT A REDESIGN. The chart is still drawn — hiding it would replace a
+    misleading picture with a missing one, and the reader loses the shape for a defect that is
+    upstream. What changes is that the tile now SAYS which games the picture covers, which is
+    AC-G.11: an absence must name which absence it is.
+
+    ⚠️ IT RETURNS `""` WHEN THE TWO AGREE, so the note is invisible in the normal case and
+    cannot become decoration the eye learns to skip.
+
+    ⚠️ AND IT IS SILENT WHEN EITHER SIDE IS UNKNOWN. A missing distribution row already draws
+    the reserved empty box (R-141) and a missing denominator is `srv_week_summary`'s own
+    absence; inventing a discrepancy out of a null would be a third state nobody asked for.
+    """
+    if dist_row is None or expected is None or pd.isna(expected):
+        return ""
+    n = dist_row.get("n")
+    if n is None or pd.isna(n):
+        return ""
+    n, expected = int(n), int(expected)
+    if n == expected or expected <= 0:
+        return ""
+    return (f"<div class='cfdb-kpi-coverage'>covers {n:,} of {expected:,}</div>")
+
+
+def _kpi_chart(dist_row, metric: str, *, expected=None) -> str:
     """The distribution under a KPI figure: histogram, box-whisker, one axis, labels.
 
     🚨 ONE CALL SITE'S WORTH OF ARGUMENTS IN ONE PLACE, so three tiles cannot drift apart. A235
@@ -4685,12 +4725,17 @@ def _kpi_chart(dist_row, metric: str) -> str:
     rather than `10.0 · 24.0 · 38.0` — four labels' worth of room saved by asking the module that
     already knows instead of restating it here (§4.2.1).
     """
-    return distribution.panel(dist_row, width=_KPI_CHART_W,
-                              histogram=False, box_height=_KPI_BOX_H,
-                              ticks=distribution.TICK_STEP, tick_step=_KPI_TICK_STEP,
-                              tick_label_step=_KPI_TICK_LABEL_STEP,
-                              head=False, stats=False, metric=metric, axis=_KPI_AXIS,
-                              gridlines=_KPI_GRIDLINES)
+    # ⚠️ `expected` IS KEYWORD-ONLY ON PURPOSE. `test_ALL_THREE_CHARTS_SHARE_ONE_FIXED_FRAME`
+    # asserts every `_kpi_chart` call takes exactly TWO positional arguments, because a third
+    # one is how a per-tile axis came back once. The coverage denominator is not an axis and
+    # must not look like one.
+    return (distribution.panel(dist_row, width=_KPI_CHART_W,
+                               histogram=False, box_height=_KPI_BOX_H,
+                               ticks=distribution.TICK_STEP, tick_step=_KPI_TICK_STEP,
+                               tick_label_step=_KPI_TICK_LABEL_STEP,
+                               head=False, stats=False, metric=metric, axis=_KPI_AXIS,
+                               gridlines=_KPI_GRIDLINES)
+            + _kpi_coverage_note(dist_row, expected))
 
 
 def _kpi_stats(dist_row) -> str:
@@ -4885,13 +4930,15 @@ def _kpi_row(scope, depth: int) -> None:
             "Avg winning score",
             _KPI_ABSENT if win is None or pd.isna(win) else fmt.number(float(win), dp=1),
             played_sub,
-            _kpi_chart(by_metric.get("winning_points"), "winning_points"),
+            _kpi_chart(by_metric.get("winning_points"), "winning_points",
+                       expected=played),
             _kpi_stats(by_metric.get("winning_points"))))
         tiles.append(_kpi_figure(
             "Avg losing score",
             _KPI_ABSENT if lose is None or pd.isna(lose) else fmt.number(float(lose), dp=1),
             played_sub,
-            _kpi_chart(by_metric.get("losing_points"), "losing_points"),
+            _kpi_chart(by_metric.get("losing_points"), "losing_points",
+                       expected=played),
             _kpi_stats(by_metric.get("losing_points"))))
 
         # 4 — THE AVERAGE CLOSING OVER/UNDER, now AFTER the two score cards (A243)
@@ -4933,7 +4980,11 @@ def _kpi_row(scope, depth: int) -> None:
             "Avg closing O/U",
             _KPI_ABSENT if mean is None or pd.isna(mean) else fmt.number(float(mean), dp=1),
             " · ".join(sub) if sub else "no closing totals yet",
-            _kpi_chart(by_metric.get("total"), "total"),
+            # ⚠️ THE O/U TILE'S DENOMINATOR IS `priced`, NOT `played`. Its distribution
+            # counts games that carry a closing total, which is a different population from
+            # the games that have been played — comparing it to `played` would fire the note
+            # on every mid-week row and teach the reader to ignore it.
+            _kpi_chart(by_metric.get("total"), "total", expected=priced),
             _kpi_stats(by_metric.get("total"))))
 
         # 4 · 5 · 6 — THE THREE RATES, each with its denominator and its exclusions

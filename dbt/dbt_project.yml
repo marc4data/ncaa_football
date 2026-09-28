@@ -246,5 +246,26 @@ vars:
     # because every entry here carries a hand-set min and max. It is published so a page can
     # say what it is drawing rather than inferring it, and so the day a rule is added the
     # column already exists to carry it.
-    winning_points:                 {min: 0,   max: 80, axis_group: game_points}
-    losing_points:                  {min: 0,   max: 80, axis_group: game_points}
+    #
+    # 🚨 A246 (cfdb-main-R-3382). `final_at` IS THE LOCK BASIS, AND THESE TWO ARE THE ONLY
+    # METRICS HERE THAT ARE NOT KNOWABLE AT KICKOFF.
+    #
+    # Every other metric above is a MARKET number or a VENUE reading: a closing spread or
+    # total is final the moment the game starts, which is exactly what `fct_week_metric_
+    # distribution`'s lock rule was written around. **An OUTCOME is final at the last
+    # whistle**, and a week's LAST KICKOFF is by definition a moment at which the last games
+    # have not been played.
+    #
+    # 📊 MEASURED: week 4 of 2026 locked at its last kickoff, 2026-09-27 03:00 UTC, with 6 of
+    # its 71 FBS games scored. `total` correctly reached 71; these two froze at **n=6** and
+    # could never move again, because a locked week is never rewritten. Season-to-date counted
+    # all 71, the week rows summed to 266 against 331, and
+    # `assert_season_to_date_excludes_the_week_it_describes` went red on 36 rows and held
+    # `publish_distributions` down for two days.
+    #
+    # ⚠️ A HEALTHIER FETCH WOULD HAVE MADE THE NUMBER LARGER AND STILL WRONG — and 58-of-71 is
+    # worse than 6-of-71, because only one of them is visibly broken.
+    #
+    # ⚠️ ABSENT MEANS `kickoff`, so every existing metric keeps the behaviour it had.
+    winning_points:                 {min: 0,   max: 80, axis_group: game_points, final_at: whistle}
+    losing_points:                  {min: 0,   max: 80, axis_group: game_points, final_at: whistle}

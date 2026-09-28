@@ -1074,3 +1074,65 @@ def test_THE_QUARTILE_ROWS_ARE_NOT_DOUBLE_DIMMED():
     assert "opacity:1" in rule.replace(" ", ""), (
         f"the quartile rows inherit the full double dimming, so they cannot out-contrast the "
         f"rows beside them: {rule.strip()}")
+
+
+# ── A246 ─────────────────────────────────────────────────────────────────────────────────────
+
+def test_THE_COVERAGE_NOTE_FIRES_WHEN_THE_CHART_AND_THE_NUMERAL_DISAGREE():
+    """🚨 A246 (cfdb-main-R-3383). THE TILE PRINTED 71 AND DREW 6, AND NOTHING SAID SO.
+
+    📊 The two halves of one tile come from two models with two refresh paths:
+    `srv_week_summary` for the numeral and its *"mean of N completed"*, and
+    `srv_week_metric_distribution` for the box and p05-p95. On 2026 week 4 they were 71 and 6.
+
+    ✅ R-762 — THE BRANCH MUST BE ABLE TO STAY QUIET. Week 3's real shape (75 of 75) is
+    asserted silent in the same test, because a note that fires on every row is decoration the
+    reader learns to skip, and would have "passed" this test while saying nothing.
+    """
+    import today
+    fired = today._kpi_coverage_note({"metric": "winning_points", "n": 6}, 71)
+    assert "covers 6 of 71" in fired, (
+        f"the note did not fire on week 4's real shape (n=6, 71 completed): {fired!r}")
+    assert "cfdb-kpi-coverage" in fired
+
+    quiet = today._kpi_coverage_note({"metric": "winning_points", "n": 75}, 75)
+    assert quiet == "", (
+        f"the note fired on a week whose chart and numeral agree, so it is decoration: "
+        f"{quiet!r}")
+
+
+def test_THE_COVERAGE_NOTE_IS_SILENT_ON_EVERY_ABSENCE():
+    """⚠️ AC-G.11 — an absence must say WHICH absence it is, and these are not this one.
+
+    A missing distribution row already draws the panel's reserved empty box (R-141); a missing
+    denominator is `srv_week_summary`'s own absence. Manufacturing a discrepancy out of a null
+    would invent a third state, and it would fire on every pre-season week.
+    """
+    import today
+    assert today._kpi_coverage_note(None, 71) == ""
+    assert today._kpi_coverage_note({"n": 6}, None) == ""
+    assert today._kpi_coverage_note({"n": None}, 71) == ""
+    assert today._kpi_coverage_note({"n": 6}, 0) == ""
+
+
+def test_EACH_CHARTED_TILE_PASSES_ITS_OWN_DENOMINATOR():
+    """🚨 A246. THE O/U TILE COUNTS PRICED GAMES; THE TWO SCORE TILES COUNT PLAYED ONES.
+
+    ⚠️ COMPARING `total` TO `played` WOULD FIRE THE NOTE ON EVERY MID-WEEK ROW — a game is
+    priced days before it is played, so the two populations differ by design and the note
+    would become noise exactly where it is supposed to mean something.
+
+    Asked of the `ast` rather than by grepping for the word `expected` (R-2260): the test reads
+    the keyword actually passed at each `_kpi_chart` call site.
+    """
+    import ast as _ast
+    wanted = {"winning_points": "played", "losing_points": "played", "total": "priced"}
+    seen = {}
+    for node in _ast.walk(_func("_kpi_row")):
+        if not (isinstance(node, _ast.Call) and getattr(node.func, "id", "") == "_kpi_chart"):
+            continue
+        metric = node.args[1].value
+        kw = {k.arg: k.value for k in node.keywords}
+        assert "expected" in kw, f"the {metric} chart is drawn with no denominator to check"
+        seen[metric] = _ast.unparse(kw["expected"])
+    assert seen == wanted, f"denominators are wired wrongly: {seen} (wanted {wanted})"

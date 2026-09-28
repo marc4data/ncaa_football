@@ -30,13 +30,16 @@ unit_tests:
         rows:
           # total's configured range is 30..80 in ten bins of 5, so bin 10 is [75, 80].
           - {game_id: 1, season: 2026, season_type: regular, week: 1,
-             as_of_date: "2026-09-01", has_kicked: false, is_indoors: false,
+             as_of_date: "2026-09-01", has_kicked: false, is_settled: false,
+             lock_basis: kickoff, is_indoors: false,
              metric: total, value: 80.0}
           - {game_id: 2, season: 2026, season_type: regular, week: 1,
-             as_of_date: "2026-09-01", has_kicked: false, is_indoors: false,
+             as_of_date: "2026-09-01", has_kicked: false, is_settled: false,
+             lock_basis: kickoff, is_indoors: false,
              metric: total, value: 30.0}
           - {game_id: 3, season: 2026, season_type: regular, week: 1,
-             as_of_date: "2026-09-01", has_kicked: false, is_indoors: false,
+             as_of_date: "2026-09-01", has_kicked: false, is_settled: false,
+             lock_basis: kickoff, is_indoors: false,
              metric: total, value: 52.5}
     expect:
       rows:
@@ -53,3 +56,71 @@ unit_tests:
         - {span: week, metric: total, bin_index: 8, games: 0}   # [65, 70)
         - {span: week, metric: total, bin_index: 9, games: 0}   # [70, 75)
         - {span: week, metric: total, bin_index: 10, games: 1}  # 80.0, the CEILING — the case real data has never produced   # [75, 80]
+
+  # ══════════════════════════════════════════════════════════════════════════════════════
+  # 🚨 A246 (cfdb-main-R-3382). A WEEK WHOSE GAMES HAVE ALL KICKED OFF BUT NOT ALL FINISHED.
+  #
+  # This is the state week 4 of 2026 was in at 2026-09-27 03:00 UTC, and it is the state
+  # EVERY week passes through — a week's last kickoff is by definition a moment at which the
+  # last games are still being played. The old rule called that week LOCKED and never wrote
+  # it again, freezing `winning_points` at the 6 games that happened to be final.
+  #
+  # ⚠️ IT IS SYNTHESISED FOR THE REASON THE FILE'S HEADER GIVES: against real data this fires
+  # on whatever happens to be mid-slate at build time, which is nothing for most of the week
+  # (R-760). The input is a MIXTURE, which is the only input that can tell the two rules
+  # apart — a week where all games are final, or none are, scores identically under both.
+  #
+  # ✅ R-843 — THE PIN MOVES UNDER THE BREAK. Revert `is_locked` to `games_live = 0` counting
+  # `has_kicked` and this test goes red: is_locked flips false -> true and n stays 2.
+  - name: an_outcome_week_does_not_lock_until_its_games_are_final
+    model: fct_week_metric_distribution
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('int_week_metric_value')
+        rows:
+          # Three games, ALL kicked off. Two are final; the third is still being played —
+          # so its outcome value is null, exactly as `int_week_metric_value` emits it.
+          - {game_id: 1, season: 2026, season_type: regular, week: 4,
+             as_of_date: "2026-09-27", has_kicked: true, is_settled: true,
+             lock_basis: whistle, is_indoors: false, metric: winning_points, value: 31.0}
+          - {game_id: 2, season: 2026, season_type: regular, week: 4,
+             as_of_date: "2026-09-27", has_kicked: true, is_settled: true,
+             lock_basis: whistle, is_indoors: false, metric: winning_points, value: 45.0}
+          - {game_id: 3, season: 2026, season_type: regular, week: 4,
+             as_of_date: "2026-09-27", has_kicked: true, is_settled: false,
+             lock_basis: whistle, is_indoors: false, metric: winning_points, value: null}
+    expect:
+      rows:
+        # games_in_week counts all three; n counts the two with a value; and the week is NOT
+        # locked, so tomorrow's run rewrites it with the third game included.
+        - {season: 2026, season_type: regular, week: 4, span: week,
+           metric: winning_points, games_in_week: 3, n: 2,
+           games_locked: 2, games_live: 1, is_locked: false, lock_basis: whistle}
+
+  # 🚨 THE COMPANION, AND WITHOUT IT THE ONE ABOVE PROVES HALF THE RULE. A MARKET metric in
+  # the identical situation MUST still lock at kickoff — that behaviour is correct and this
+  # round must not have changed it. Same three games, same moment, opposite verdict.
+  - name: a_market_week_still_locks_at_kickoff
+    model: fct_week_metric_distribution
+    overrides:
+      macros:
+        is_incremental: false
+    given:
+      - input: ref('int_week_metric_value')
+        rows:
+          - {game_id: 1, season: 2026, season_type: regular, week: 4,
+             as_of_date: "2026-09-27", has_kicked: true, is_settled: true,
+             lock_basis: kickoff, is_indoors: false, metric: total, value: 51.5}
+          - {game_id: 2, season: 2026, season_type: regular, week: 4,
+             as_of_date: "2026-09-27", has_kicked: true, is_settled: true,
+             lock_basis: kickoff, is_indoors: false, metric: total, value: 47.0}
+          - {game_id: 3, season: 2026, season_type: regular, week: 4,
+             as_of_date: "2026-09-27", has_kicked: true, is_settled: true,
+             lock_basis: kickoff, is_indoors: false, metric: total, value: 60.0}
+    expect:
+      rows:
+        - {season: 2026, season_type: regular, week: 4, span: week,
+           metric: total, games_in_week: 3, n: 3,
+           games_locked: 3, games_live: 0, is_locked: true, lock_basis: kickoff}
