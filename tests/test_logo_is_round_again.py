@@ -274,8 +274,13 @@ def test_the_other_two_bands_are_unchanged():
     ⚠️ `u1` was amber at 2.27:1 on white and is now a light gray at **1.76:1** — still under any
     floor, still pre-existing in kind, and now slightly weaker. Reported in A258 rather than
     silently corrected, because the 50% is Marc's own number.
+
+    🚨 A260 (cfdb-main-R-3933) MOVED THE DARK HALF ONLY. > **MARC, 2026-09-29:** *"For the dark
+    theme, make 7 or fewer a lighter shade by 25%."* 📊 #373840 -> #696a70, which takes it from
+    1.62:1 to **3.51:1** against the dark page and clears WCAG 1.4.11's 3:1 for a graphical
+    object. **The light half is untouched** — he named the dark theme.
     """
-    assert token("cfdb-u1") == ("#c3c3c6", "#373840")
+    assert token("cfdb-u1") == ("#c3c3c6", "#696a70")
     assert token("cfdb-u3") == ("#e0112b", "#ff4d5e")
 
 

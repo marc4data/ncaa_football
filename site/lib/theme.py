@@ -732,7 +732,14 @@ TABLE_CSS = """
      handed to Marc rather than quietly corrected: a bright red cannot be darker than a near-black
      gray, so 15+ now reads LESS strongly than 8-14. A211 built the monotone ramp and A240 refused
      a dichromat pair at 1.17:1; light-mode protan here is 1.18:1. Numbers in A258's report. */
-  --cfdb-u1:   light-dark(#c3c3c6, #373840);
+  /* ⚠️ A260 (cfdb-main-R-3933): the DARK u1 only. > **MARC, 2026-09-29:** *"For the dark
+     theme, make 7 or fewer a lighter shade by 25%."* Read as 25% of the way from the color
+     TOWARD WHITE — the plain sense of "lighter by 25%", and a different construction from the
+     "50% of the gray" A258 read as a proportion of another color. 📊 #373840 -> #696a70 takes it
+     from 1.62:1 to 3.51:1 against the dark page, which also clears WCAG 1.4.11's 3:1 for a
+     graphical object; the stricter reading (+25% of its strength against the ground) gives
+     #41424a and only 1.89:1, and is offered in A260's report. ⚠️ THE LIGHT u1 DOES NOT MOVE. */
+  --cfdb-u1:   light-dark(#c3c3c6, #696a70);
   /* 🚨 A223 (cfdb-main-R-2628). THE 8-14 BAND IS LIGHTENED 25% TOWARD ITS OWN PAGE.
      > **MARC, v16:** *"Upset by 8-14 is too dark, not very discernable from Upset by 15+ by
      > shade. Reduce the darkness by 25%, maybe 50%"*
@@ -1753,8 +1760,19 @@ TABLE_CSS = """
    the padding back as a negative margin did NOT fix it, because max-content sizing still counts
    the padding. **`box-shadow` contributes nothing to layout at all**, so the chip extends around
    the label and its value and the tile is exactly as wide as it was. */
-.cfdb-dist-stat.cfdb-iqr { background:var(--cfdb-iqr-chip); border-radius:.12rem;
-    box-shadow:0 0 0 .18rem var(--cfdb-iqr-chip); }
+/* 🚨 A260 (cfdb-main-R-3930). TWO CHIPS, NOT ONE ROW-WIDE BAR.
+   > **MARC, 2026-09-29:** *"Can we avoid the full row (p25 all the way to the value) and just
+   > have the p25 label and the p25 value with the background, not the whitespace in between?"*
+   ⚠️ A258 put the chip on the DIV, and the div is a flex row with `gap:.3rem` and the value
+   pushed right — so the background spanned the gap. Moving it onto the `<span>` and the `<b>`
+   gives one chip hugging the label and one hugging the value, with the gap left bare.
+   ⚠️ `box-shadow` IS KEPT AND IT IS STILL THE POINT (A258's own two failed attempts): padding
+   widened the stats block, widened the tile 167.1 -> 176.0 and pushed the row past its container
+   at 1440, and a negative margin did not help because max-content still counts padding.
+   **`box-shadow` contributes nothing to layout**, so two chips cost exactly as much as none. */
+.cfdb-dist-stat.cfdb-iqr > span, .cfdb-dist-stat.cfdb-iqr > b {
+    background:var(--cfdb-iqr-chip); border-radius:.12rem;
+    box-shadow:0 0 0 .16rem var(--cfdb-iqr-chip); }
 .cfdb-dist-stat.cfdb-iqr, .cfdb-dist-stat.cfdb-iqr span, .cfdb-dist-stat.cfdb-iqr b {
     color:var(--cfdb-iqr-chip-ink); opacity:1; }
 .cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
@@ -2282,6 +2300,21 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
                    text-align:center; font-weight:700; }
 .cfdb-ind-open { background:transparent; border-color:currentColor; }
 .cfdb-ind-fill { background:currentColor; border-color:currentColor; }
+/* 🚨 A260 (cfdb-main-R-3931). THE UPSET CIRCLE'S RING IS THE LINK BLUE; ITS FILL STAYS THE BAND.
+   > **MARC, 2026-09-29:** *"For the upset glyph colors, the outside of the circle should be blue
+   > like the square and diamond. The fill should vary… The rest works."*
+   📊 "BLUE LIKE THE SQUARE AND DIAMOND" WAS MEASURED RATHER THAN ASSUMED, and the answer is not
+   the literal on `.cfdb-ind-quiet`. The square (`.cfdb-sh-cover`) and diamond (`.cfdb-sh-over`)
+   are drawn with `.cfdb-acc`, which is `color:var(--cfdb-link)`, and `.cfdb-ind-fill` takes its
+   border from `currentColor` — so THEIR ring is `var(--cfdb-link)`. ⚠️ `.cfdb-ind-quiet` carries a
+   bare `#1f6feb`, which is the LIGHT half of that token only; using it would have given a dark
+   theme a ring that does not match the shapes Marc named (R-2963: blue is already spoken for
+   twice here, and one of them means "clickable").
+   ⚠️ SCOPED TO THE UPSET SHAPE. The square and diamond are untouched — "the rest works".
+   ✅ AND IT CHANGES WHAT THE FILL HAS TO DO: the ring measures 4.63:1 on the light page and
+   7.48:1 on the dark one, so the glyph is LOCATED by its ring and the fill is free to carry only
+   the band. That is why a dark `u1` under the 3:1 graphical floor is no longer the same problem. */
+.cfdb-ind.cfdb-sh-upset.cfdb-ind-fill { border-color:var(--cfdb-link); }
 /* A push is neither: half-filled reads as "landed on the number" without a fourth color. */
 .cfdb-ind-push { background:linear-gradient(90deg, currentColor 50%, transparent 50%);
                  border-color:currentColor; }
