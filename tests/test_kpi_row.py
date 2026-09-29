@@ -667,8 +667,13 @@ def test_ALL_THREE_CHARTS_SHARE_ONE_FIXED_FRAME():
     two unrelated reasons.
     """
     import today
-    assert today._KPI_AXIS == (0.0, 82.0), (
-        f"the fixed frame is {today._KPI_AXIS}; v21 asks for a top of 82 so the `80` label fits")
+    assert today._KPI_AXIS == (0.0, 94.0), (
+        f"the fixed frame is {today._KPI_AXIS}; A258 MEASURED that 94 is the top at which the "
+        f"`90` Marc asked for actually prints, at this chart's 140-unit width — rendering "
+        f"`panel()` and counting labels gave: top 90 no, 91 no, 92 no, 93 no, 94 YES. The binding "
+        f"constraint is the RIGHT EDGE, not the gap between labels: a label at the axis maximum "
+        f"has nothing to its right and is dropped, which is the same reason v21 used 82 to print "
+        f"80. Never widen this to make a render look right — re-measure which labels print")
     # no chart may be handed a frame of its own
     calls = [n for n in ast.walk(_func("_kpi_row"))
              if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_kpi_chart"]
@@ -1095,10 +1100,16 @@ def test_THE_COVERAGE_NOTE_FIRES_WHEN_THE_CHART_AND_THE_NUMERAL_DISAGREE():
         f"the note did not fire on week 4's real shape (n=6, 71 completed): {fired!r}")
     assert "cfdb-kpi-coverage" in fired
 
+    # 🚨 A258 (cfdb-main-R-3852) INVERTED THIS HALF ON MARC'S INSTRUCTION; the half above is
+    # untouched. > **MARC, 2026-09-29:** *"I would remove 'mean of' and put 'X completed' under
+    # the box-whisker b/c it's applicable to the entire card."* The slot stopped being a warning
+    # that appears only on disagreement and became the tile's DENOMINATOR, which A214 puts on the
+    # face of every card. ⚠️ The decoration worry that justified silence is answered by the line
+    # carrying information in BOTH states, not by it being rare.
     quiet = today._kpi_coverage_note({"metric": "winning_points", "n": 75}, 75)
-    assert quiet == "", (
-        f"the note fired on a week whose chart and numeral agree, so it is decoration: "
-        f"{quiet!r}")
+    assert quiet == "<div class='cfdb-kpi-coverage'>75 completed</div>", (
+        f"on a week whose chart and numeral agree the note must state the denominator Marc asked "
+        f"to read under the box-whisker; it said {quiet!r}")
 
 
 def test_THE_COVERAGE_NOTE_IS_SILENT_ON_EVERY_ABSENCE():
@@ -1109,10 +1120,20 @@ def test_THE_COVERAGE_NOTE_IS_SILENT_ON_EVERY_ABSENCE():
     would invent a third state, and it would fire on every pre-season week.
     """
     import today
-    assert today._kpi_coverage_note(None, 71) == ""
+    # ⚠️ A258: "silent on every absence" is now "silent only when the DENOMINATOR is unknown".
+    # A missing distribution row is not a missing denominator — the tile still knows it describes
+    # 71 completed games, and saying so claims nothing about the picture. A246's silence-on-unknown
+    # is KEPT for the DISCREPANCY, which is the half that could mislead.
+    assert (today._kpi_coverage_note(None, 71)
+            == "<div class='cfdb-kpi-coverage'>71 completed</div>")
+    assert (today._kpi_coverage_note({"n": None}, 71)
+            == "<div class='cfdb-kpi-coverage'>71 completed</div>")
+    # the denominator itself unknown -> still silent, exactly as before
     assert today._kpi_coverage_note({"n": 6}, None) == ""
-    assert today._kpi_coverage_note({"n": None}, 71) == ""
-    assert today._kpi_coverage_note({"n": 6}, 0) == ""
+    # ⚠️ AND ZERO IS ITS OWN ABSENCE, not "0 completed" — this is where "nothing played yet" went
+    # when it left the sub-line (AC-G.11).
+    assert (today._kpi_coverage_note({"n": 6}, 0)
+            == "<div class='cfdb-kpi-coverage'>nothing completed yet</div>")
 
 
 def test_EACH_CHARTED_TILE_PASSES_ITS_OWN_DENOMINATOR():

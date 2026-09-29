@@ -206,12 +206,30 @@ def test_the_eight_to_fourteen_band_reads_apart_from_fifteen_plus():
     📊 `u2|u3` was **2.79:1** in light and 3.84:1 in dark. Those two are the only pair separated
     by luminance ALONE — both are neutral grays — so that is where the luminance has to go.
     """
+    # 🚨🚨 A258 (cfdb-main-R-3856). THIS FLOOR IS NOT MET ANY MORE, AND THE TEST NOW PINS THE
+    # MEASURED REALITY INSTEAD OF ASSERTING A PROPERTY THE SHIPPED COLOURS DO NOT HAVE.
+    #
+    # > **MARC, 2026-09-29:** *"7 or fewer - shifting to 50% of the gray that is now used for
+    # > 8-14, 8-14 - use 80% of the dark gray used for 15+ now, Upset by 15+ - go to a bright Red"*
+    #
+    # 🚨 HIS NEW SPEC RE-CREATES THE DEFECT HIS OWN v16 COMPLAINT PRODUCED THIS GUARD FOR. A223
+    # pushed `u2|u3` to 4.0:1 because he could not tell 8-14 from 15+. Measured on what A258
+    # ships: **1.90:1 in light and 1.91:1 in dark** — worse than the 2.79:1 that drew the
+    # complaint. The cause is arithmetic rather than choice: a BRIGHT red cannot be darker than a
+    # near-black gray, so the two bands land at similar luminance.
+    #
+    # ⚠️ IT IS PINNED RATHER THAN DELETED, AND RATHER THAN LOWERED TO A NUMBER THAT PASSES. A
+    # floor quietly moved to fit is R-843's failure; a deleted test is a lost finding. This asserts
+    # what is actually painted, so the day anyone changes these tokens the number moves and is
+    # re-read. **A258's report hands Marc the picture and the alternative; the decision is his.**
     u2_light, u2_dark = token("cfdb-u2")
     u3_light, u3_dark = token("cfdb-u3")
-    assert contrast(u2_light, u3_light) >= 4.0, (
-        f"8-14 vs 15+ is {contrast(u2_light, u3_light)}:1 in light — Marc's complaint")
-    assert contrast(u2_dark, u3_dark) >= 4.0, (
-        f"8-14 vs 15+ is {contrast(u2_dark, u3_dark)}:1 in dark")
+    assert round(contrast(u2_light, u3_light), 2) == 1.90, (
+        f"8-14 vs 15+ measures {contrast(u2_light, u3_light)}:1 in light; A258 shipped 1.90 under "
+        f"Marc's 2026-09-29 spec, against the 4.0 floor his v16 complaint set. If this moved, "
+        f"someone changed the ramp — re-read A258 before assuming which direction is right")
+    assert round(contrast(u2_dark, u3_dark), 2) == 1.91, (
+        f"8-14 vs 15+ measures {contrast(u2_dark, u3_dark)}:1 in dark; A258 shipped 1.91")
 
 
 def test_the_band_still_clears_the_non_text_contrast_floor():
@@ -221,6 +239,9 @@ def test_the_band_still_clears_the_non_text_contrast_floor():
     ⚠️ A211 applied the 4.5:1 TEXT floor to this glyph; 3:1 is the applicable one for a shape,
     and naming which floor is being used is the whole reason the number can be defended."""
     u2_light, u2_dark = token("cfdb-u2")
+    # ✅ A258: STILL MET, and worth saying because it is the floor that survived. Marc's new
+    # 8-14 is 9.32:1 on white and 11.14:1 on the dark page — far clear of WCAG 1.4.11's 3:1 for a
+    # graphical object. What his spec costs is the SEPARATION between bands, not their visibility.
     assert contrast(u2_light, LIGHT_PAGE) >= 3.0, contrast(u2_light, LIGHT_PAGE)
     assert contrast(u2_dark, DARK_PAGE) >= 3.0, contrast(u2_dark, DARK_PAGE)
 
@@ -229,16 +250,33 @@ def test_the_dark_theme_is_not_the_mirror_of_the_light_one():
     """🚨 R-547's LESSON. "Less ink" moves TOWARD the page in both themes — which lightens on
     white and **darkens** on #0e1117. A dark value that merely mirrored the light one would
     move toward the near-white `u3` and make Marc's pair worse."""
+    # 🚨 A258 (cfdb-main-R-3856) INVERTED THIS, AND THE RULE ABOVE IS STILL RIGHT — Marc's new
+    # spec simply points the other way. "Less ink" moves TOWARD the page, so A223's `u2` was a
+    # LIGHT gray on white and a DARK gray on #0e1117. Marc's 2026-09-29 spec makes `u2` **80% of
+    # the way to the old `u3`**, and the old `u3` is near-black on white and near-WHITE on dark —
+    # so the new `u2` is dark on light and light on dark. 📊 Measured: light 0.0627, dark 0.5689.
+    # ⚠️ IT IS STILL NOT A MIRROR, which is what R-547 actually cares about: each frame is derived
+    # from ITS OWN ground and its own `u3`, not by flipping the other one's hex.
     u2_light, u2_dark = token("cfdb-u2")
-    assert _lum(_rgb(u2_light)) > _lum(_rgb(u2_dark)), (
-        "the dark band must be darker than the light one, not its mirror")
+    assert _lum(_rgb(u2_light)) < _lum(_rgb(u2_dark)), (
+        "under Marc's 2026-09-29 ramp the 8-14 band is DARK on the light page and LIGHT on the "
+        "dark page, because it is 80% of the way to a `u3` that is near-black on one and "
+        "near-white on the other — see A258")
 
 
 def test_the_other_two_bands_are_unchanged():
-    """⚠️ MARC NAMED ONE RUNG. `u1` is 2.27:1 against a white page — under any floor — and that
-    is **pre-existing, reported by A211, and still not this round's to fix.**"""
-    assert token("cfdb-u1") == ("#d9a406", "#e8b931")
-    assert token("cfdb-u3") == ("#16191d", "#f2f5f8")
+    """🚨 A258 (cfdb-main-R-3856): MARC NAMED ALL THREE RUNGS THIS TIME, so "unchanged" is no
+    longer the property — the test pins what he specified instead.
+
+    > **MARC, 2026-09-29:** *"7 or fewer - shifting to 50% of the gray that is now used for 8-14,
+    > 8-14 - use 80% of the dark gray used for 15+ now, Upset by 15+ - go to a bright Red"*
+
+    ⚠️ `u1` was amber at 2.27:1 on white and is now a light gray at **1.76:1** — still under any
+    floor, still pre-existing in kind, and now slightly weaker. Reported in A258 rather than
+    silently corrected, because the 50% is Marc's own number.
+    """
+    assert token("cfdb-u1") == ("#c3c3c6", "#373840")
+    assert token("cfdb-u3") == ("#e0112b", "#ff4d5e")
 
 
 def test_the_legend_reads_the_same_tokens_and_names_ranges_not_shades():

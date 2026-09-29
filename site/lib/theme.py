@@ -677,6 +677,20 @@ TABLE_CSS = """
      without escaping every brace in the stylesheet. ONE definition, and this is the end that
      does not rewrite it. */
   --cfdb-iqr:  light-dark(#5B21B6, #D4B0FF);
+  /* 🚨 A258 (cfdb-main-R-3854). THE QUARTILE ROWS BECOME A CHIP, NOT COLORED TEXT.
+     > **MARC, 2026-09-29:** *"The purple font color isn't noticeable to me… can we use a colored
+     > background that matches the box and put that background behind p25, p75 and their
+     > corresponding values?… slightly lighter shade… so black text is easy to see on top."*
+     ⚠️ "Matches the box" is `--cfdb-iqr` above — the box's OWN fill — lightened toward the page,
+     not a new hue invented for the chip. 📊 MEASURED AS PAINTED (the parent opacity group is
+     removed below, so these are real numbers and not A244's 8.14-that-was-4.18):
+       LIGHT  chip #dbceef · ink #12161c -> 12.17:1 text, 1.49:1 against the tile
+       DARK   chip #4a4160 · ink #ece6f8 ->  7.78:1 text, 1.99:1 against the tile
+     ⚠️ DARK IS NOT "BLACK TEXT" AND THAT IS DELIBERATE. Marc was describing the light frame;
+     black ink on a dark page is the fiction cfdb-main-R-2965 warns about. A deep chip with light
+     ink is the same badge, read the other way up. */
+  --cfdb-iqr-chip:     light-dark(#dbceef, #4a4160);
+  --cfdb-iqr-chip-ink: light-dark(#12161c, #ece6f8);
   /* 🚨 A244 (cfdb-main-R-3351). THE MAJOR GRIDLINES — Marc, v21: *"major gridlines at 0, 20,
      40, 60, and 80... They can be muted down a bit, but it will help comparisons across Win,
      Loss, and Total KPI's."*
@@ -709,7 +723,16 @@ TABLE_CSS = """
      ⚠️ `u1` IS UNCHANGED — he did not name it, and the change does not collide with it. 📊 It
      is 2.27:1 against a white page, under the 4.5:1 floor, and that is PRE-EXISTING and
      reported rather than fixed in passing. */
-  --cfdb-u1:   light-dark(#d9a406, #e8b931);
+  /* 🚨 A258 (cfdb-main-R-3856). MARC'S RAMP, IMPLEMENTED AS ASKED AND MEASURED AS BUILT.
+     > **MARC, 2026-09-29:** *"7 or fewer - shifting to 50% of the gray that is now used for
+     > 8-14, 8-14 - use 80% of the dark gray used for 15+ now, Upset by 15+ - go to a bright Red"*
+     ⚠️ "50% of" is read as HALF THE STRENGTH AGAINST THE PAGE GROUND — half the distance from the
+     ground to the old color — because that is what makes a band lighter rather than merely
+     mixing two inks. 🚨 THE RAMP IS NO LONGER MONOTONE IN LUMINANCE, IN EITHER FRAME, and that is
+     handed to Marc rather than quietly corrected: a bright red cannot be darker than a near-black
+     gray, so 15+ now reads LESS strongly than 8-14. A211 built the monotone ramp and A240 refused
+     a dichromat pair at 1.17:1; light-mode protan here is 1.18:1. Numbers in A258's report. */
+  --cfdb-u1:   light-dark(#c3c3c6, #373840);
   /* 🚨 A223 (cfdb-main-R-2628). THE 8-14 BAND IS LIGHTENED 25% TOWARD ITS OWN PAGE.
      > **MARC, v16:** *"Upset by 8-14 is too dark, not very discernable from Upset by 15+ by
      > shade. Reduce the darkness by 25%, maybe 50%"*
@@ -737,8 +760,11 @@ TABLE_CSS = """
      it lightens; in dark mode the page is #0e1117, so the same move DARKENS. **Both directions
      mean less ink against the ground the reader is looking at**, and both improve the pair
      Marc named. The dark theme is not the mirror of the light one. */
-  --cfdb-u2:   light-dark(#87878d, #606068);
-  --cfdb-u3:   light-dark(#16191d, #f2f5f8);
+  --cfdb-u2:   light-dark(#45474a, #c4c7cb);
+  /* ⚠️ RED ALREADY MEANS SOMETHING HERE: `.cfdb-error` is a #c53030 left border. These two
+     reds are deliberately not that one, and the collision is named in A258's report because it is
+     Marc's to weigh (cfdb-main-R-2963 is the precedent — blue was already taken twice). */
+  --cfdb-u3:   light-dark(#e0112b, #ff4d5e);
 }
 .cfdb-table { width:100%; border-collapse:collapse; font-size:.9rem;
     table-layout:fixed; }
@@ -1659,7 +1685,12 @@ TABLE_CSS = """
 /* 🚨 THE DENOMINATOR IS ON THE FACE OF THE TILE, NOT IN A TOOLTIP. A214 publishes it for
    every rate because *"62% of favorites covered"* over 8 games and over 60 are different
    claims; a reader who has to hover to find that out has already read the wrong one. */
-.cfdb-kpi-sub { font-size:.64rem; opacity:.65; line-height:1.25; white-space:nowrap; }
+/* ⚠️ A258: `min-height` RESERVES THE LINE. The two score tiles moved their "N completed" down
+   under the box-whisker (Marc, 2026-09-29), leaving an empty sub — and an empty div collapses to
+   0, which would lift those two charts above the other tiles'. R-141's rule: an element that
+   appears only when populated moves everything beside it. */
+.cfdb-kpi-sub { font-size:.64rem; opacity:.65; line-height:1.25; white-space:nowrap;
+    min-height:.8rem; }
 /* 🚨 A235 (cfdb-main-R-3029). `.cfdb-kpi-vs` AND `.cfdb-kpi-pair` ARE GONE BECAUSE THEIR TILE IS.
    `-vs` drew the en dash in `38.9–17.2` and `-pair` sat two 72px thumbnails side by side; Marc's
    v18 split that tile in two, so each score now has its own tile and its own full-width chart and
@@ -1689,8 +1720,14 @@ TABLE_CSS = """
    (`.cfdb-kpi-sub` is `.64rem`) rather than a new size invented for this block. The tighter
    `line-height` is what "remove the wasted whitespace" buys: three rows now occupy less height
    than two did, so the block clears the numeral without pushing the chart down. */
+/* 🚨 A258: THE OPACITY MOVED OFF THE GROUP AND ONTO THE NON-QUARTILE ROWS, and that is why the
+   chip's contrast numbers above can be trusted. A244 measured this exact trap: a rule claiming
+   8.14:1 while painting 4.18:1, because "a child cannot exceed its parent group" and the group
+   was dimming it. A BACKGROUND painted inside a .85 group is dimmed too — so the group is gone
+   and the rows that WANT dimming now ask for it themselves. */
 .cfdb-kpi-head .cfdb-dist-stats { margin-left:auto; min-width:0; flex:0 1 auto;
-    font-size:.64rem; line-height:1.12; opacity:.85; }
+    font-size:.64rem; line-height:1.12; }
+.cfdb-kpi-head .cfdb-dist-stat:not(.cfdb-iqr) { opacity:.85; }
 .cfdb-kpi-head .cfdb-dist-stat { gap:.3rem; }
 /* 🚨 THE LABEL AND THE VALUE BOTH — Marc said *"p25 and p75 values and labels"*, and painting
    only the number would leave the row reading as half-related to the box. `.cfdb-iqr` is set by
@@ -1700,8 +1737,19 @@ TABLE_CSS = """
    painting at 4.18:1 light / 3.86:1 dark — under the 4.5:1 text floor, in a rule whose own
    comment claimed 8.14:1. ⚠️ A child cannot exceed its parent group, so this reaches .85 and
    not 1.0; the OTHER rows keep the full dimming, which is what makes these ones louder. */
+/* 🚨 A258: THE CHIP COVERS THE LABEL AND THE VALUE TOGETHER, which is what Marc asked for —
+   the div already wraps `<span>p25</span><b>26.0</b>`, so the background goes on the div. */
+/* 🚨 THE CHIP IS PAINTED WITH `box-shadow`, NOT WITH PADDING, AND THAT IS A LAYOUT FIX RATHER
+   THAN A STYLISTIC CHOICE. 📊 A258 measured two failed drafts before this one: `.26rem` of
+   padding widened the stats block, which widened the tile 167.1 -> 176.0, which pushed the KPI
+   row's scrollWidth past its container AT 1440 — a row that had not scrolled there before. Giving
+   the padding back as a negative margin did NOT fix it, because max-content sizing still counts
+   the padding. **`box-shadow` contributes nothing to layout at all**, so the chip extends around
+   the label and its value and the tile is exactly as wide as it was. */
+.cfdb-dist-stat.cfdb-iqr { background:var(--cfdb-iqr-chip); border-radius:.12rem;
+    box-shadow:0 0 0 .18rem var(--cfdb-iqr-chip); }
 .cfdb-dist-stat.cfdb-iqr, .cfdb-dist-stat.cfdb-iqr span, .cfdb-dist-stat.cfdb-iqr b {
-    color:var(--cfdb-iqr); opacity:1; }
+    color:var(--cfdb-iqr-chip-ink); opacity:1; }
 .cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
 /* 🚨 A246 (cfdb-main-R-3383): the chart and the numeral above it describe different games.
    ⚠️ QUIET, NOT ALARMING. It is a caption on a correct-but-partial picture, not an error
@@ -1716,7 +1764,10 @@ TABLE_CSS = """
    `flex:1 1 auto` would squeeze the picture narrower than the geometry it was drawn at while
    every tick label stayed where it was put. */
 .cfdb-kpi .cfdb-dist-body { gap:0; }
-.cfdb-kpi .cfdb-dist-body .cfdb-dist-svg { flex:0 0 auto; }
+/* 🚨 A258 (cfdb-main-R-3855): `flex:0 0 auto` is what pinned the picture at 140px inside a tile
+   that grows to 146.3 at 1440 and 155.2 at 1600 — measured gaps 1.0/5.3 and 1.0/14.2, every bit
+   of the slack on the right. `panel()` now scales UNIFORMLY (`xMidYMid meet`), so it can fill. */
+.cfdb-kpi .cfdb-dist-body .cfdb-dist-svg { flex:1 1 auto; min-width:0; width:100%; height:auto; }
 .cfdb-kpi .cfdb-dist { margin-top:.15rem; }
 
 /* 🚨 A216 (cfdb-main-R-2604). THE BAR'S WIDTH AND THE GAP BESIDE IT ARE VARIABLES NOW,

@@ -4511,6 +4511,15 @@ def _bump(scope, depth: int) -> None:
 # at 96 the single winning/losing tile was 300px and the row needed 1,174px. **The split is what
 # makes 140 affordable** — two charts in one tile cost double inside a 176px cap, two charts in
 # two tiles each get their own.
+# 🚨 A258 (cfdb-main-R-3855) TOOK THIS FROM 140 TO 155, AND THE REASON IS NOT "BIGGER".
+# 📊 The tile's CONTENT box measures 146.3px at 1440 and 155.2px at 1600 (A258, measured with
+# `ci/measure_kpi_row.py` and a gap probe), while this number pinned the picture at 140 — so the
+# right-hand slack was 5.3px and 14.2px against a 1.0px left gap. `panel()` is responsive now, so
+# the drawn width no longer has to equal the painted width.
+# ⚠️ WHAT THIS NUMBER STILL DECIDES IS LABEL ROOM, AND ONLY THAT. Scaling is uniform, so it moves
+# the digits and the gaps between them by one factor and cannot make a label fit that did not.
+# **Room comes from viewBox units.** 155 is the widest content box the row reaches (1600), so the
+# picture is drawn at its largest real size and scaled DOWN at narrower viewports rather than up.
 _KPI_CHART_W = 140
 
 # 📊 THE HISTOGRAM BAND, AND IT IS THE "more vertical real estate" MARC ASKED FOR. `panel()`'s
@@ -4587,7 +4596,22 @@ _KPI_TICK_LABEL_STEP = 10
 #
 # ⚠️ THE TICKS AND LABELS ARE UNCHANGED: marks every 5, numbers every 10. Only the frame top
 # moved, so the data is drawn very slightly narrower and nothing is clamped that was not before.
-_KPI_AXIS = (0.0, 82.0)
+# 🚨 A258 (cfdb-main-R-3855) TOOK THE TOP FROM 82 TO 92, AND IT IS A244's ARITHMETIC REDONE AT
+# THE NEW WIDTH RATHER THAN AN ASSUMPTION THAT 90 WOULD FIT.
+# > **MARC, 2026-09-29:** *"Right now there's enough room to include 90. Use the full breadth of
+# > the real estate."*
+# 📊 MEASURED by rendering `panel()` and counting which labels actually print — A244's own method:
+#
+#     width   top=90   top=91   top=92   top=93   top=94
+#     140       no       no       no       no      YES
+#     155       no       no      YES      YES      YES
+#
+# ⚠️ AND THE BINDING CONSTRAINT IS THE RIGHT EDGE, NOT THE GAP BETWEEN LABELS. A label at the axis
+# maximum has nothing to its right, so it is dropped — which is exactly why v21 asked for 82 to
+# print 80. The top must overshoot the last label, and at 155 units the overshoot needed is 2
+# rather than the 4 the old 140-wide chart would have cost.
+# ✅ SO THE DATA CEILING MARC CHOSE IS 90 AND THE FRAME TOPS AT 92, the same relationship v21 set.
+_KPI_AXIS = (0.0, 94.0)
 
 # 🚨 A244 (cfdb-main-R-3351). > **MARC, v21:** *"Can you add major gridlines at 0, 20, 40, 60,
 # and 80? They can be muted down a bit, but it will help comparisons across Win, Loss, and Total
@@ -4630,6 +4654,15 @@ _KPI_STATS = ("p05", "p25", "p50", "p75", "p95")
 # 🚨 A THRESHOLD LEFT AT 917 WOULD HAVE BEEN WRONG IN THE DANGEROUS DIRECTION: the row would
 # scroll between 917 and 958 with no note telling the reader there was more to see. A231's
 # was wrong the other way — a note where nothing scrolled.
+# ✅ A258 (cfdb-main-R-3855) RE-MEASURED THIS AND IT DID NOT MOVE — which is the point worth
+# recording, because an intermediate draft DID move it and that was the signal something was
+# wrong. 📊 Making the chart responsive briefly took the row's `scrollWidth` to 998 and made it
+# scroll at 1440, because an SVG sized only in percent has no intrinsic width and every tile went
+# greedy. Restoring the `width`/`height` attributes (see `panel()`) put the basis back: measured
+# with `ci/measure_kpi_row.py` at all four widths, `scrollWidth` is **958** again and the row fits
+# at 1440 and 1600 exactly as it did before.
+# ⚠️ SO THE CHART FILLS ITS TILE AND THE ROW IS NOT ONE PIXEL WIDER. That is the whole trade this
+# number exists to police, and it is still 958.
 _KPI_MIN_PX = 958
 _KPI_ABSENT = fmt.EM_DASH
 
@@ -4659,7 +4692,8 @@ def _kpi_figure(label: str, value: str, sub: str, chart: str = "",
             f"{chart}</div>")
 
 
-def _kpi_coverage_note(dist_row, expected) -> str:
+def _kpi_coverage_note(dist_row, expected, noun: str = "completed",
+                       always: bool = True) -> str:
     """The caption that fires when the chart and the number above it describe different games.
 
     🚨 A246 (cfdb-main-R-3383). THE TILE PRINTS ONE POPULATION AND DRAWS ANOTHER, AND NOTHING
@@ -4681,25 +4715,47 @@ def _kpi_coverage_note(dist_row, expected) -> str:
     upstream. What changes is that the tile now SAYS which games the picture covers, which is
     AC-G.11: an absence must name which absence it is.
 
-    ⚠️ IT RETURNS `""` WHEN THE TWO AGREE, so the note is invisible in the normal case and
-    cannot become decoration the eye learns to skip.
+    🚨 A258 (cfdb-main-R-3852) CHANGED WHAT IT SAYS WHEN THE TWO AGREE, AND A246'S GUARD IS
+    UNTOUCHED. It used to return `""` there, so the note was invisible in the normal case.
+    > **MARC, 2026-09-29:** *"I would remove 'mean of' and put 'X completed' under the
+    > box-whisker b/c it's applicable to the entire card."*
+    ⚠️ So the slot now ALWAYS carries the denominator — `71 completed` when the picture covers the
+    whole population, `covers 6 of 71` when it does not. **The discrepancy wording, and the reason
+    it exists, is exactly as A246 left it**; what is new is that agreement is stated rather than
+    silent, because Marc asked to read the count there.
+    ⚠️ THE OLD ARGUMENT FOR SILENCE WAS THAT A CONSTANT NOTE BECOMES DECORATION THE EYE SKIPS, and
+    it is not wrong. What changes it is that the line is no longer only a warning: it is the
+    tile's denominator, which A214's rule puts on the face of the card either way.
 
     ⚠️ AND IT IS SILENT WHEN EITHER SIDE IS UNKNOWN. A missing distribution row already draws
     the reserved empty box (R-141) and a missing denominator is `srv_week_summary`'s own
     absence; inventing a discrepancy out of a null would be a third state nobody asked for.
     """
-    if dist_row is None or expected is None or pd.isna(expected):
+    if expected is None or pd.isna(expected):
         return ""
-    n = dist_row.get("n")
-    if n is None or pd.isna(n):
-        return ""
-    n, expected = int(n), int(expected)
-    if n == expected or expected <= 0:
-        return ""
-    return (f"<div class='cfdb-kpi-coverage'>covers {n:,} of {expected:,}</div>")
+    expected = int(expected)
+    # ⚠️ THE ABSENCE BRANCH, MOVED HERE FROM THE SUB-LINE. Nothing finished is a different fact
+    # from a partial cover, and it says so rather than printing "0 completed" (AC-G.11).
+    if expected <= 0:
+        return ("" if not always
+                else f"<div class='cfdb-kpi-coverage'>nothing {noun} yet</div>")
+    # ⚠️ `always=False` KEEPS A246's ORIGINAL BEHAVIOUR FOR A TILE THAT ALREADY PRINTS ITS OWN
+    # DENOMINATOR ABOVE THE CHART. 📷 A258 rendered the first draft and SAW the O/U card saying
+    # "75 priced" twice — once on its sub-line and once here. Marc asked for the count to move,
+    # not to appear twice, and the O/U sub-line carries a second fact ("N with no line") that
+    # cannot move with it.
+    n = None if dist_row is None else dist_row.get("n")
+    # ⚠️ A246's silence-on-unknown is KEPT for the DISCREPANCY half: with no distribution row there
+    # is nothing to disagree with, so the tile states its own denominator and claims nothing about
+    # the picture.
+    if n is None or pd.isna(n) or int(n) == expected:
+        return ("" if not always
+                else f"<div class='cfdb-kpi-coverage'>{expected:,} {noun}</div>")
+    return f"<div class='cfdb-kpi-coverage'>covers {int(n):,} of {expected:,}</div>"
 
 
-def _kpi_chart(dist_row, metric: str, *, expected=None) -> str:
+def _kpi_chart(dist_row, metric: str, *, expected=None, noun: str = "completed",
+               always: bool = True) -> str:
     """The distribution under a KPI figure: histogram, box-whisker, one axis, labels.
 
     🚨 ONE CALL SITE'S WORTH OF ARGUMENTS IN ONE PLACE, so three tiles cannot drift apart. A235
@@ -4735,7 +4791,7 @@ def _kpi_chart(dist_row, metric: str, *, expected=None) -> str:
                                tick_label_step=_KPI_TICK_LABEL_STEP,
                                head=False, stats=False, metric=metric, axis=_KPI_AXIS,
                                gridlines=_KPI_GRIDLINES)
-            + _kpi_coverage_note(dist_row, expected))
+            + _kpi_coverage_note(dist_row, expected, noun, always))
 
 
 def _kpi_stats(dist_row) -> str:
@@ -4920,7 +4976,15 @@ def _kpi_row(scope, depth: int) -> None:
         # `test_the_two_score_tiles_are_drawn_on_ONE_domain` pins it ACROSS THE TWO TILES rather
         # than upstream, which is the half that had no guard.
         win, lose = row.get("winning_points_mean"), row.get("losing_points_mean")
-        played_sub = f"mean of {played:,} completed" if played else "nothing played yet"
+        # 🚨 A258 (cfdb-main-R-3852). > **MARC, 2026-09-29:** *"I would remove 'mean of' and put
+        # 'X completed' under the box-whisker b/c it's applicable to the entire card."*
+        # ⚠️ SO THE SUB-LINE GOES EMPTY HERE AND THE COUNT RENDERS UNDER THE CHART, through
+        # `_kpi_coverage_note`, which already owned that slot. The empty string is not a gap in
+        # the tile: `.cfdb-kpi-sub` reserves its line (R-141), so the three charts stay on one y.
+        # ⚠️ AND THE ABSENCE BRANCH MOVES WITH IT. "nothing played yet" is not dropped — it is now
+        # what the note under the chart says when nothing has finished, which is where a reader is
+        # already looking for the denominator (AC-G.11: the absence still names itself).
+        played_sub = ""
         # 🚨 A239 (cfdb-main-R-3235). > **MARC, v19:** *"Winning Score and Losing Score titles
         # should be prefixed with AVG."* ⚠️ Sentence case in code; `.cfdb-kpi-label` uppercases on
         # screen, which is A235's settled convention for this row. 📊 The width cost is measured
@@ -4984,7 +5048,8 @@ def _kpi_row(scope, depth: int) -> None:
             # counts games that carry a closing total, which is a different population from
             # the games that have been played — comparing it to `played` would fire the note
             # on every mid-week row and teach the reader to ignore it.
-            _kpi_chart(by_metric.get("total"), "total", expected=priced),
+            _kpi_chart(by_metric.get("total"), "total", expected=priced, noun="priced",
+                       always=False),
             _kpi_stats(by_metric.get("total"))))
 
         # 4 · 5 · 6 — THE THREE RATES, each with its denominator and its exclusions

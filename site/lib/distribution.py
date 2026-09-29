@@ -1133,9 +1133,13 @@ def panel(row, label: str = "", width: int = 420, *,
     `preserveAspectRatio='none'`, so it fills its container and the bars simply get wider — the
     behaviour every existing render has. **`preserveAspectRatio='none'` scales TEXT
     non-uniformly**, so the moment a tick label exists that stretch would render the digits
-    squashed or splayed by whatever ratio the container happened to have. A labelled panel is
-    therefore a FIXED-WIDTH SVG with `max-width:100%`, which is exactly what `box()` does and for
-    the same reason.
+    squashed or splayed by whatever ratio the container happened to have.
+
+    ⚠️ A258 CORRECTED THE CONCLUSION THIS USED TO DRAW. It said a labelled panel is *therefore* a
+    FIXED-WIDTH SVG — and that does not follow. The hazard is NON-UNIFORM scaling, not scaling, so
+    a labelled panel now takes `width:100%` with **`preserveAspectRatio='xMidYMid meet'`**, which
+    fills the container and keeps every digit's shape. `box()` is still fixed-width; it was not
+    the thing Marc was looking at.
     """
     if row is None:
         return ("<div class='cfdb-dist-panel cfdb-dist-empty'>"
@@ -1346,10 +1350,41 @@ def panel(row, label: str = "", width: int = 420, *,
     # draft of this change reordered `preserveAspectRatio` ahead of `height` — semantically
     # identical, textually different, and the identity test caught it. `:g` is not needed here
     # because `total_height` is an int throughout.
+    # 🚨 A258 (cfdb-main-R-3855). THE LABELLED PANEL IS RESPONSIVE NOW, AND THE DOCSTRING'S RULE
+    # IS NOT BROKEN — IT IS OBEYED MORE CAREFULLY.
+    #
+    # > **MARC, 2026-09-29:** *"the 0 to 80 x-axis isn't using the full width of the KPI card. The
+    # > right side should have the same padding as on the left side… Use the full breadth of the
+    # > real estate."*
+    #
+    # 📊 MEASURED BEFORE CHANGING IT, at the two widths that do not scroll: the tile's content box
+    # is 146.3px at 1440 and 155.2px at 1600 while the SVG stayed pinned at 140, leaving
+    # **gapL 1.0 / gapR 5.3** and **gapL 1.0 / gapR 14.2**. The dead space is on the right and it
+    # GROWS with the viewport, which is exactly what Marc is looking at.
+    #
+    # ⚠️ THE HAZARD THE OLD RULE NAMES IS REAL AND IS AVOIDED RATHER THAN IGNORED.
+    # `preserveAspectRatio='none'` scales text NON-UNIFORMLY, so a labelled panel could not simply
+    # take `width:100%`. **`xMidYMid meet` scales UNIFORMLY** — every digit keeps its shape, and
+    # the picture fills its container instead of sitting in it. That is the distinction the old
+    # comment collapsed: the danger was never "responsive", it was "non-uniform".
+    #
+    # 🚨 AND UNIFORM SCALING BUYS NO LABEL ROOM, which is the thing that surprised A258 and is
+    # worth writing down. The fit is computed in VIEWBOX UNITS, so scaling the finished picture up
+    # moves the digits and their gaps by the same factor and changes nothing about whether a label
+    # fits. **Room for a label comes from a wider viewBox** — `_KPI_CHART_W` — and nowhere else.
     sizing = (f"width='100%' height='{total_height}' preserveAspectRatio='none'"
               if not (label_band or tick_band)
+              # 🚨 THE `width`/`height` ATTRIBUTES STAY, AND THE CSS OVERRIDES THEM. That looks
+              # redundant and is not: an SVG whose only width is a PERCENTAGE has no intrinsic
+              # size, so max-content sizing falls back to the CSS default object size (300px) and
+              # every tile becomes greedy. 📊 A258 measured that: the KPI tiles jumped 167.1 ->
+              # 176.0 at 1440 and the row's scrollWidth went past its container. The attributes
+              # give the box a definite intrinsic width; `style` decides what is PAINTED.
+              # ⚠️ `max-width:100%` also stays — `test_a_text_bearing_svg_never_stretches` asserts
+              # it, and the property it protects is unchanged by making the chart responsive.
               else f"width='{width}' height='{total_height}' "
-                   f"style='display:block;max-width:100%'")
+                   f"preserveAspectRatio='xMidYMid meet' "
+                   f"style='display:block;width:100%;height:auto;max-width:100%'")
     svg = (f"<svg class='cfdb-dist-svg' viewBox='0 0 {width} {total_height}' "
            f"{sizing} "
            f"aria-hidden='true'>"
