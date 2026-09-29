@@ -761,6 +761,13 @@ TABLE_CSS = """
      mean less ink against the ground the reader is looking at**, and both improve the pair
      Marc named. The dark theme is not the mirror of the light one. */
   --cfdb-u2:   light-dark(#45474a, #c4c7cb);
+  /* 🚨 A258 (cfdb-main-R-3857). THE KPI TILE'S BORDER USED `--cfdb-u2` AND HAD TO STOP.
+     ⚠️ Marc asked to change the UPSET GLYPHS; the 8-14 band was doing double duty as a generic
+     hairline on `.cfdb-kpi`, so his color instruction would have repainted all seven tile
+     borders — light from #87878d to a much darker #45474a, dark from #606068 to a much brighter
+     #c4c7cb. **A shared token is a coupling, and this one connected two things a reader would
+     never connect.** The border keeps the value it has always had, under its own name. */
+  --cfdb-tile-border: light-dark(#87878d, #606068);
   /* ⚠️ RED ALREADY MEANS SOMETHING HERE: `.cfdb-error` is a #c53030 left border. These two
      reds are deliberately not that one, and the collision is named in A258's report because it is
      Marc's to weigh (cfdb-main-R-2963 is the precedent — blue was already taken twice). */
@@ -1632,7 +1639,7 @@ TABLE_CSS = """
 .cfdb-kpi { flex:1 0 auto; min-width:6rem; max-width:11rem; display:flex;
             flex-direction:column;
             gap:.1rem; padding:.5rem .65rem;
-            border:1px solid var(--cfdb-u2, #87878d); border-radius:6px; }
+            border:1px solid var(--cfdb-tile-border, #87878d); border-radius:6px; }
 /* The label is the quietest thing in the tile and the value the loudest, because a reader
    scanning seven of these is scanning the NUMBERS and reading the labels only once. */
 /* 🚨 THE LABEL WRAPS AND THE VALUE DOES NOT, WHICH IS A218's RULE APPLIED HERE: *a team name
