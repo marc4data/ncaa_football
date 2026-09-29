@@ -10,10 +10,14 @@
 -- A140, cfdb-main-R-916. The `*_by_clock` columns must be what you get from a curve read in the
 -- order its plays happened, and NOT what you get from the order the feed lists them in.
 --
--- 🚨 TAGGED `full_refresh_only` FOR THE REASON A136's OWN TEST WAS REWRITTEN. `cfbd_scores_refresh`
--- rebuilds `fct_game_win_probability_summary` and NOT the play-grain curve, so on a hot run this
--- compares two relations with different fetch times and measures the gap between them rather than
--- the thing it is about. Full authority on the weekly `+tag:production` build, which rebuilds both.
+-- 🚨 A253 (cfdb-main-R-3569): THE `full_refresh_only` RATIONALE THAT USED TO SIT HERE IS GONE,
+-- AND DELETING IT IS THE POINT. It said this test "compares two relations with different fetch
+-- times and measures the gap between them", which was true while the tag existed and has been
+-- false since A185 removed it — the note immediately below. ⚠️ A252 READ THIS FILE TOP-DOWN, MET
+-- THE DEAD PARAGRAPH FIRST, AND HANDED ON A REFRESH-BOUNDARY EXPLANATION FOR A FAILURE THAT
+-- CANNOT HAVE ONE: `cfbd_results_refresh` is a WEEKLY DAG and rebuilds both sides in one pass
+-- (`src/dbt_selectors.py` — "the weekly DAGs rebuild the whole production set and are where
+-- those tests have their authority"). 🚨 A SUPERSEDED SENTENCE ABOVE A TRUE ONE IS READ FIRST.
 --
 -- 🚨 A PRESENCE ASSERTION CANNOT SEE THIS DEFECT, WHICH IS WHY IT SURVIVED TO A140. The old and
 -- the new columns were integers on the same grain in the same range: every not-null, every

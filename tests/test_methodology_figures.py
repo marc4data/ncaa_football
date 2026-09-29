@@ -86,8 +86,8 @@ def test_the_model_counts_are_the_manifests_own(manifest):
 
 
 def test_the_test_counts_are_the_manifests_own(manifest):
-    """🚨 THE SPLIT IS THE INFORMATIVE PART. 650 alone reads as one kind of thing; 510 schema
-    tests and 140 hand-written assertions says what kind of checking this project does."""
+    """🚨 THE SPLIT IS THE INFORMATIVE PART. 651 alone reads as one kind of thing; 510 schema
+    tests and 141 hand-written assertions says what kind of checking this project does."""
     tests = [n for n in manifest["nodes"].values() if n["resource_type"] == "test"]
     singular = [n for n in tests if n.get("test_metadata") is None]
     generic = [n for n in tests if n.get("test_metadata") is not None]
