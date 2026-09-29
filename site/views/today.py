@@ -4693,7 +4693,7 @@ def _kpi_figure(label: str, value: str, sub: str, chart: str = "",
 
 
 def _kpi_coverage_note(dist_row, expected, noun: str = "completed",
-                       always: bool = True) -> str:
+                       always: bool = True, suffix: str = "") -> str:
     """The caption that fires when the chart and the number above it describe different games.
 
     🚨 A246 (cfdb-main-R-3383). THE TILE PRINTS ONE POPULATION AND DRAWS ANOTHER, AND NOTHING
@@ -4736,9 +4736,14 @@ def _kpi_coverage_note(dist_row, expected, noun: str = "completed",
     expected = int(expected)
     # ⚠️ THE ABSENCE BRANCH, MOVED HERE FROM THE SUB-LINE. Nothing finished is a different fact
     # from a partial cover, and it says so rather than printing "0 completed" (AC-G.11).
+    # ⚠️ A261 (cfdb-main-R-3960): `suffix` carries a SECOND fact on the same line — the O/U
+    # tile's "N with no line", which cannot become its own row without giving that tile a shape
+    # the other two do not have. It rides every branch, including the absences, because "nothing
+    # priced yet · 2 with no line" is still the truer sentence.
+    tail = f" \u00b7 {suffix}" if suffix else ""
     if expected <= 0:
         return ("" if not always
-                else f"<div class='cfdb-kpi-coverage'>nothing {noun} yet</div>")
+                else f"<div class='cfdb-kpi-coverage'>nothing {noun} yet{tail}</div>")
     # ⚠️ `always=False` KEEPS A246's ORIGINAL BEHAVIOUR FOR A TILE THAT ALREADY PRINTS ITS OWN
     # DENOMINATOR ABOVE THE CHART. 📷 A258 rendered the first draft and SAW the O/U card saying
     # "75 priced" twice — once on its sub-line and once here. Marc asked for the count to move,
@@ -4750,12 +4755,14 @@ def _kpi_coverage_note(dist_row, expected, noun: str = "completed",
     # the picture.
     if n is None or pd.isna(n) or int(n) == expected:
         return ("" if not always
-                else f"<div class='cfdb-kpi-coverage'>{expected:,} {noun}</div>")
-    return f"<div class='cfdb-kpi-coverage'>covers {int(n):,} of {expected:,}</div>"
+                else f"<div class='cfdb-kpi-coverage'>{expected:,} {noun}{tail}</div>")
+    # ✅ A246's DISCREPANCY WORDING SURVIVES ON ALL THREE TILES, which is the half that could
+    # mislead and the half A261 was told not to lose.
+    return f"<div class='cfdb-kpi-coverage'>covers {int(n):,} of {expected:,}{tail}</div>"
 
 
 def _kpi_chart(dist_row, metric: str, *, expected=None, noun: str = "completed",
-               always: bool = True) -> str:
+               always: bool = True, suffix: str = "") -> str:
     """The distribution under a KPI figure: histogram, box-whisker, one axis, labels.
 
     🚨 ONE CALL SITE'S WORTH OF ARGUMENTS IN ONE PLACE, so three tiles cannot drift apart. A235
@@ -4791,7 +4798,7 @@ def _kpi_chart(dist_row, metric: str, *, expected=None, noun: str = "completed",
                                tick_label_step=_KPI_TICK_LABEL_STEP,
                                head=False, stats=False, metric=metric, axis=_KPI_AXIS,
                                gridlines=_KPI_GRIDLINES)
-            + _kpi_coverage_note(dist_row, expected, noun, always))
+            + _kpi_coverage_note(dist_row, expected, noun, always, suffix))
 
 
 def _kpi_stats(dist_row) -> str:
@@ -5028,28 +5035,36 @@ def _kpi_row(scope, depth: int) -> None:
         # been the outcome, a market figure over an outcome distribution would have been a second
         # and worse defect; it is not, and the tile is internally consistent.
         #
-        # ⚠️ THE SUB-LINE IS LEFT ALONE ON PURPOSE. `N priced · N with no line` is already a
-        # MARKET denominator, and it is `white-space:nowrap`, so a market prefix in front of it
-        # would push a 44-character string through a 176px cap. The distinction belongs in the
-        # label, which has room, and in the caption, which has more.
+        # ⚠️ A261 REPLACED A COMMENT THAT SAID THE OPPOSITE. It used to read "THE SUB-LINE IS
+        # LEFT ALONE ON PURPOSE", which was true until Marc asked for the three cards to match:
+        # the denominator now renders UNDER the box-whisker like the other two, and the sub-line
+        # is empty. ⚠️ The `nowrap` width worry it recorded still applies — which is why the
+        # no-line count rides the caption as a suffix rather than becoming a second line.
         mean = row.get("over_under_mean")
         priced = row.get("over_under_games")
         missing = row.get("over_under_missing")
-        sub = []
-        if priced is not None and not pd.isna(priced):
-            sub.append(f"{int(priced):,} priced")
-        if missing is not None and not pd.isna(missing) and int(missing) > 0:
-            sub.append(f"{int(missing):,} with no line")
         tiles.append(_kpi_figure(
             "Avg closing O/U",
             _KPI_ABSENT if mean is None or pd.isna(mean) else fmt.number(float(mean), dp=1),
-            " · ".join(sub) if sub else "no closing totals yet",
+            # 🚨 A261 (cfdb-main-R-3960). > **MARC, 2026-09-29, asked whether the three cards
+            # should read alike:** *make it match.* ⚠️ SO THIS SUB-LINE GOES EMPTY like the two
+            # score tiles', and `N priced` renders UNDER the box-whisker instead. The no-line
+            # count rides the same line as a suffix rather than taking a row of its own, because
+            # a fourth line here would give this tile a shape the other two do not have — which
+            # is the inconsistency Marc was pointing at.
+            "",
             # ⚠️ THE O/U TILE'S DENOMINATOR IS `priced`, NOT `played`. Its distribution
             # counts games that carry a closing total, which is a different population from
             # the games that have been played — comparing it to `played` would fire the note
             # on every mid-week row and teach the reader to ignore it.
+            # ✅ `always=True` NOW, which is the whole change: A258 left this tile
+            # discrepancy-only because its denominator was already printed above, and that is no
+            # longer true. ⚠️ A258's render caught this exact tile printing `75 priced` TWICE
+            # when both slots spoke; only one speaks now.
             _kpi_chart(by_metric.get("total"), "total", expected=priced, noun="priced",
-                       always=False),
+                       suffix=(f"{int(missing):,} with no line"
+                               if missing is not None and not pd.isna(missing)
+                               and int(missing) > 0 else "")),
             _kpi_stats(by_metric.get("total"))))
 
         # 4 · 5 · 6 — THE THREE RATES, each with its denominator and its exclusions
