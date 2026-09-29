@@ -1770,9 +1770,37 @@ TABLE_CSS = """
    widened the stats block, widened the tile 167.1 -> 176.0 and pushed the row past its container
    at 1440, and a negative margin did not help because max-content still counts padding.
    **`box-shadow` contributes nothing to layout**, so two chips cost exactly as much as none. */
+/* 🚨 A262 (cfdb-main-R-4000). THE CHIP IS PAINTED BY A PSEUDO-ELEMENT NOW, AND THE REASON IS
+   ARITHMETIC RATHER THAN TASTE.
+   > **MARC, 2026-09-29:** *"The purple background on p25, p75 and the corresponding values has too
+   > much padding around it. It looks like it's spilling into the rows above/below. Tighten the
+   > background fill a little (vertically)."*
+   📊 MEASURED FROM THE LIVE DOM BEFORE CHANGING IT: the row pitch is 11.45px and the chip painted
+   16.57px — `box-shadow`'s spread is uniform, so `.16rem` went above AND below and the gap to each
+   neighbor was **-2.56px**. He was reading a real overlap.
+   🚨 AND SHRINKING THE SPREAD CANNOT FIX IT, which is why this is not a smaller number. The flex
+   item's own box is **11.45px — exactly the pitch** — so `background` on the element paints a full
+   row height no matter what the shadow does. A chip that sits INSIDE the pitch cannot be the
+   element's background.
+   ✅ SO AN ABSOLUTELY-POSITIONED `::before` PAINTS IT: `inset` takes a positive value vertically
+   (pull in) and a negative one horizontally (push out), which is the asymmetry the box-shadow
+   could not express. ⚠️ AND IT STILL COSTS NOTHING IN LAYOUT — `position:absolute` is out of flow,
+   which is the property A258 spent two attempts learning to respect (padding widened the tile
+   167.1 -> 176.0 and pushed the row past its container at 1440; a negative margin did not help
+   because max-content still counts padding).
+   🚨 `isolation:isolate` IS LOAD-BEARING AND IT WAS FOUND BY LOOKING, NOT BY MEASURING. The first
+   draft used `z-index:-1` alone. **Every reading was green — painted height 8.57 inside an 11.45
+   pitch, gaps +1.44, contrast 12.17:1 — and the render showed NO CHIP AT ALL**, because a negative
+   z-index resolves against the nearest ANCESTOR stacking context and sent the chip behind the
+   tile's own background. `isolation:isolate` gives the span its own context, so `-1` means "behind
+   my text" instead of "behind the card". ⚠️ A DOM probe cannot see this: the computed style said
+   `background: rgb(219,206,239)` throughout. Only the picture did (A235, A237, A239, A243, A244,
+   A258 — and now this). */
 .cfdb-dist-stat.cfdb-iqr > span, .cfdb-dist-stat.cfdb-iqr > b {
-    background:var(--cfdb-iqr-chip); border-radius:.12rem;
-    box-shadow:0 0 0 .16rem var(--cfdb-iqr-chip); }
+    position:relative; isolation:isolate; }
+.cfdb-dist-stat.cfdb-iqr > span::before, .cfdb-dist-stat.cfdb-iqr > b::before {
+    content:''; position:absolute; inset:.09rem -.16rem; z-index:-1;
+    background:var(--cfdb-iqr-chip); border-radius:.12rem; }
 .cfdb-dist-stat.cfdb-iqr, .cfdb-dist-stat.cfdb-iqr span, .cfdb-dist-stat.cfdb-iqr b {
     color:var(--cfdb-iqr-chip-ink); opacity:1; }
 .cfdb-kpi .cfdb-dist-panel { border:0; border-radius:0; padding:0; margin:.25rem 0 0; }
