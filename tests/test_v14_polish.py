@@ -254,19 +254,31 @@ def test_adjacent_outcome_bands_can_be_told_apart():
 
 
 def test_the_two_bands_marc_named_moved_and_the_one_he_did_not_stayed():
-    """⚠️ `8-14` IS `u2` AND `15+` IS `u3` — the bands his two instructions name. `u1` is the
-    1-7 upset and keeps its amber, because he did not name it and the change does not collide
-    with it (measured 2.79:1 away in light, 2.28:1 in dark)."""
+    """🚨 REWRITTEN BY A258 (cfdb-main-R-3856): MARC NAMED ALL THREE BANDS ON 2026-09-29, so the
+    "one he did not" no longer exists and `u3` stopped being the heaviest ink on the page.
+
+    > **MARC:** *"7 or fewer - shifting to 50% of the gray that is now used for 8-14, 8-14 - use
+    > 80% of the dark gray used for 15+ now, Upset by 15+ - go to a bright Red"*
+
+    ⚠️ `u1` AND `u2` ARE STILL GREYS and that is still worth pinning — the ramp's first two rungs
+    are separated by luminance alone (R-141 made them differ by colour on purpose, and A211 made
+    that a luminance ramp so a grayscale or dichromat reader keeps the datum). **`u3` is now a
+    HUE**, which is the whole of what changed and is why the old near-black / near-white
+    assertions are gone rather than adjusted.
+    """
     bands = _bands()
-    assert bands["light"]["u1"] == "#d9a406" and bands["dark"]["u1"] == "#e8b931"
-    # grey for 8-14: the three channels sit close together
+    # the first two rungs stay neutral: three channels close together
     for theme in ("light", "dark"):
-        r, g, b = (int(bands[theme]["u2"].lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
-        assert max(r, g, b) - min(r, g, b) <= 24, f"{theme} u2 is not a grey: {bands[theme]['u2']}"
-    # 🚨 AND 15+ IS THE HEAVIEST INK ON THE PAGE IN EACH THEME — near-black on white, and
-    # near-white on the dark ground, because literal black there is an invisible mark.
-    assert _luminance(bands["light"]["u3"]) < 0.05, "15+ must be near-black on a light page"
-    assert _luminance(bands["dark"]["u3"]) > 0.80, "15+ must be near-white on a dark page"
+        for key in ("u1", "u2"):
+            r, g, b = (int(bands[theme][key].lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+            assert max(r, g, b) - min(r, g, b) <= 24, (
+                f"{theme} {key} is not a grey: {bands[theme][key]}")
+    # 🚨 AND 15+ IS NOW A RED, NOT THE HEAVIEST INK. Pinned as a hue so that the day it drifts
+    # back to a neutral someone re-reads A258 rather than assuming the old rule still holds.
+    for theme in ("light", "dark"):
+        r, g, b = (int(bands[theme]["u3"].lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+        assert r > g + 60 and r > b + 60, (
+            f"{theme} 15+ must read as a red under Marc's 2026-09-29 spec: {bands[theme]['u3']}")
 
 
 def test_every_band_carries_a_separate_value_per_theme():
