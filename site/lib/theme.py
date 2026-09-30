@@ -2306,7 +2306,14 @@ a .cfdb-team-record, .cfdb-cell-link .cfdb-team-record { color:inherit; }
    leaving here: it means "played, nothing remarkable", and an accent border can read as
    active. It is distinguishable from the covered/over indicators by SHAPE — circle against
    square and diamond — so the color is not carrying the distinction on its own. */
-.cfdb-ind-quiet { background:transparent; border-color:#1f6feb; opacity:.45; }
+/* A267 (cfdb-main-R-4251). THE ACCENT IS THE TOKEN, NOT ITS LIGHT HALF. This carried the
+   literal `#1f6feb`, which is what `--cfdb-link` resolves to IN LIGHT ONLY — so the quiet
+   circle painted the light-mode blue in the dark frame, beside a filled circle correctly
+   painting `#58a6ff` from the same token in the same column (A265 measured both from the
+   live DOM). The comment above already said this state "TAKES THE ACCENT"; it now takes the
+   accent rather than a copy of half of it. ⚠️ `opacity:.45` is UNTOUCHED — the recessiveness
+   is R-160's deliberate choice and Marc's to change, not this round's. */
+.cfdb-ind-quiet { background:transparent; border-color:var(--cfdb-link); opacity:.45; }
 /* R-164, Marc's choice of the three offered. `nodata` means WE HOLD NO CLOSING LINE, which
    is a third thing again: not "not played" (nothing drawn) and not "played, unremarkable"
    (the quiet accent). Closing lines exist for roughly 3,200 games in the whole warehouse, so
