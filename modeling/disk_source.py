@@ -159,6 +159,37 @@ def talent(raw: Path = RAW) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def lines(raw: Path = RAW) -> pd.DataFrame:
+    """The market's number per game, from `data/raw/lines/` — one row per game (cfdb edges work).
+
+    The warehouse holds lines from 2024 only (`marts.fct_betting_line`), so older seasons come from
+    whole-season `lines` fetches on disk. A historical fetch returns ONE line per book (CFBD's final
+    record), so the market here is the MEDIAN across books of `spread` and `overUnder`, each over
+    the books that carry it — the same median `modeling.weekly.LINES_SQL` takes over each book's
+    latest snapshot. `spread` keeps CFBD's sign: the HOME line, i.e. the expected away − home margin
+    (−7 = home favoured by 7), which is the pack's and `weekly`'s convention too.
+    """
+    out = []
+    for r in rows("lines", ("id",), raw):
+        books = r.get("lines") or []
+        spreads = [safe_numeric(b.get("spread")) for b in books]
+        totals = [safe_numeric(b.get("overUnder")) for b in books]
+        spreads, totals = [s for s in spreads if s is not None], [t for t in totals if t is not None]
+        out.append({"game_id": as_int(r.get("id")), "season": as_int(r.get("season")),
+                    "week": as_int(r.get("week")), "season_type": _text(r.get("seasonType")),
+                    "start_date": _text(r.get("startDate")),
+                    "home_team": _text(r.get("homeTeam")), "away_team": _text(r.get("awayTeam")),
+                    "home_conference": _text(r.get("homeConference")),
+                    "away_conference": _text(r.get("awayConference")),
+                    "home_classification": _text(r.get("homeClassification")),
+                    "away_classification": _text(r.get("awayClassification")),
+                    "home_points": as_int(r.get("homeScore")), "away_points": as_int(r.get("awayScore")),
+                    "spread": float(pd.Series(spreads).median()) if spreads else None,
+                    "market_total": float(pd.Series(totals).median()) if totals else None,
+                    "books": len(books)})
+    return pd.DataFrame(out)
+
+
 def load_inputs(games: pd.DataFrame, seasons: Iterable[int], raw: Path = RAW) -> Dict[str, pd.DataFrame]:
     """The same five frames, columns and filters as `own_features.load_inputs`, with `games` supplied
     (read from the warehouse's `stg_games`) and the other four read from disk."""
