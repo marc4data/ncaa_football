@@ -43,5 +43,14 @@ where attribution like '%CFB Model Training Pack%'
       'stacked_ensemble_home_win',
       'fastai_home_win',
       -- and the one the site still publishes
-      'random_forest_score'
+      'random_forest_score',
+      -- 🚨 `linear_margin` IS A PACK MODEL AND THE LIST WAS WRONG WITHOUT IT — caught by CI,
+      -- which is the only place it appears (§2.3.3: a test that names production's rows runs
+      -- in one place unless it also knows the fixture's). The pack's notebook 01 exports
+      -- `linear_margin_predictions.csv`, which is `EXPECTED_FILES[0]`; production's rows for
+      -- that model carry `ridge_margin_expanded` and `ci/fixtures.sql:4128` carries
+      -- `linear_margin`. Two names for one pack notebook, and BOTH are entitled to claim the
+      -- pack — which is what this test is actually about. ⚠️ This is the list widening to
+      -- match the rule, not the rule relaxing to match a failure.
+      'linear_margin'
   )
