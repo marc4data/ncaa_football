@@ -568,6 +568,7 @@ select
     end                                                    as favorite_covered,
 
     p.predicted_margin,
+    -- retiring — no site consumer since cfdb-wtc-R-2550; CONTRACT after deploy
     -1 * p.predicted_margin       as predicted_margin_home_perspective,
     p.predicted_home_win_probability as home_win_probability,
     p.predicted_home_win_probability,

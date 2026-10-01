@@ -108,8 +108,7 @@ def body(page) -> None:
             select game_id, season, season_type, week, model_name, model_family, split,
                    home_team, away_team, home_conference, away_conference,
                    market, edge_unit, edge_value, edge_magnitude, confidence_bucket,
-                   spread, spread_home_perspective, predicted_margin,
-                   predicted_margin_home_perspective,
+                   spread, predicted_margin,
                    predicted_home_win_probability, market_implied_home_win_probability,
                    actual_margin, actual_home_cover, cover_correct, home_win_correct,
                    is_out_of_sample_week, training_week_floor, is_default_actionable,
@@ -193,8 +192,9 @@ def _result(row) -> str:
 
 def _edges(df: pd.DataFrame, market: str) -> None:
     unit = df["edge_unit"].iloc[0] if "edge_unit" in df.columns and not df.empty else ""
-    st.caption(f"Ranked by absolute edge, measured in {unit}. "
-               f"Positive favors the home side.")
+    st.caption(f"Ranked by absolute edge, measured in {unit}. Positive favors the home side."
+               + (" Lines are the home team's, read like the market's: negative means the home "
+                  "team is favored." if market == "spread" else ""))
     columns = [
         Col("week", "Wk", "num", dp=0),
         Col("away_team", "Away"),
@@ -212,8 +212,11 @@ def _edges(df: pd.DataFrame, market: str) -> None:
     # a spreadsheet with duplicate headers is unusable in a way a web table merely looks
     # cluttered.
     if market == "spread":
-        columns.insert(3, Col("spread_home_perspective", "Market spread", "signed"))
-        columns.insert(4, Col("predicted_margin_home_perspective", "Model margin", "signed"))
+        # ONE CONVENTION, THE MARKET'S (cfdb-wtc-R-2550): both lines are read as stored, away −
+        # home, so a home favourite is negative in both and they compare at a glance. Labelled
+        # "line (home)" because each is the home team's line — not a margin with an unstated side.
+        columns.insert(3, Col("spread", "Market line (home)", "signed"))
+        columns.insert(4, Col("predicted_margin", "Model line (home)", "signed"))
     else:
         columns.insert(3, Col("market_implied_home_win_probability",
                               "Market win prob", "num"))

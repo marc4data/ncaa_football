@@ -286,7 +286,7 @@ WITHDRAWAL_CAPTION = (
 # ⚠️ SO THE PREDICTION IS BLANKED AND THE GAME SURVIVES. One list of which columns carry a
 # claim, in the same file as the list of which models may make one.
 PREDICTION_COLUMNS = frozenset({
-    "predicted_margin", "predicted_margin_home_perspective",
+    "predicted_margin",
     "predicted_home_points", "predicted_away_points", "predicted_total_points",
     "predicted_home_win_probability", "home_win_probability",
     "home_cover_edge", "home_win_probability_edge",
@@ -326,7 +326,7 @@ def suppress_withdrawn(df):
     #     srv_odds_board  (no model_name column at all)        model_version_key = 'random_forest_score'
     #
     # So `model_version_key` is a HASH on one view and a NAME on the other. Keying only on
-    # `model_name` would have left the Odds Board — which renders "Model margin … edge …" —
+    # `model_name` would have left the Odds Board — which renders "Model line … cover edge …" —
     # outside the withdrawal entirely, silently, and it would have looked wired up.
     #
     # ⚠️ THE FALLBACK IS SAFE IN THE OTHER DIRECTION because `is_withdrawn` matches exact

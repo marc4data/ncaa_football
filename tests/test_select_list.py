@@ -225,7 +225,10 @@ def test_the_REAL_columns_block_parses_cleanly_and_names_everything():
     # `test_no_post_game_content_was_stubbed` enforces it). **The page's own bar carries the
     # choice in the URL instead, and `team` is already in `params.KNOWN`** — so the toggle needed
     # no `site/lib/` edit (session A's, §3.2.2) and this SELECT needed the two slugs.
-    assert len(parsed) == 106
+    # 106 -> 104: cfdb-wtc-R-2550 stopped reading `predicted_margin_home_perspective` and
+    # `actual_margin_home_perspective`. Every line on the page is now read as stored, in the
+    # market's sign (Marc, 2026-10-01), and the result is printed as a score, said once.
+    assert len(parsed) == 104
     assert not select_list.unnameable_items(matchup.COLUMNS)
     assert all(name.replace("_", "").isalnum() for name in parsed), \
         f"the parse produced something that is not an identifier: {sorted(parsed)}"

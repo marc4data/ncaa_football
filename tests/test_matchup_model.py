@@ -1,37 +1,31 @@
-"""The Matchup model panel: every model number on the site, and the sign convention twice.
+"""The Matchup model panel: every model number on the site, in one sign convention.
 
 WHY THIS FILE DID NOT EXIST UNTIL R-517. B080's panel-invocation census found that nothing
-in `tests/` calls `_model` — the panel carrying the predicted margin, the predicted total,
-the win probability, the cover edge and the actual-margin reconciliation was executed by
-nothing. The gap had already cost something: a line re-wrap dropped four words from the
-reconciliation caption and an `ast` string census caught it, because the suite could not.
+in `tests/` calls `_model` — the panel carrying the model line, the predicted total, the win
+probability, the cover edge and the result was executed by nothing.
 
-🚨 THE RECONCILIATION CAPTION IS WHY THIS FILE MATTERS MORE THAN ITS SIZE SUGGESTS. It is
-the ONE place on the site that states both margin conventions side by side:
+🚨 ONE CONVENTION FOR EVERY LINE (cfdb-wtc-R-2550, Marc's decision 2026-10-01). The panel used
+to show the model's margin HOME-POSITIVE beside a header that prints the market's line
+HOME-NEGATIVE — *"Flipping the sign on 2 values that are compared makes things difficult to
+comprehend."* The model line is now the stored `predicted_margin` (away − home, the market's
+sign), shown beside the home team's name exactly as the header shows `spread`:
 
-    Actual margin -1.0 from the home perspective (+1.0 as cfdb stores it, away minus home).
+    header      LOU -1.5          model line      LOU -7.4
 
-R-544: A083 found the market recap treating `actual_margin` as home-perspective when it is
-away-minus-home — "both branches were each other's, so the sign inverted on EVERY graded
-game". Nothing checked this caption.
+So the assertions here are POSITIONAL and carry the sign: the "Model line" tile must hold the
+stored value, and a panel that reached for a flipped copy would render "+7.4" and fail.
 
-⚠️ AND A083'S OWN TEST PASSED AGAINST THE BUGGY CODE ON ITS FIRST DRAFT, because under the
-inversion "is it negative" was true for the wrong reason. So the assertion here is
-POSITIONAL, never a sign check: the value in the home-perspective slot must be the row's
-`actual_margin_home_perspective`, and the value in the parenthetical must be its
-`actual_margin`. A test that asked "is one of them negative" would pass on the swap, which
-is precisely the failure it is supposed to catch. It is run in BOTH directions — a home loss
-and a home win — because a convention that is only ever exercised one way is only half
-tested.
+The RESULT is a score, said once ("Final score 20 – 19 (away – home)"). It used to print the
+actual margin two ways; R-544's inversion lived in exactly that kind of sentence.
 
 THE FIXTURE IS A REAL ROW, read back from `srv_game` for game 401754591 (Clemson at
-Louisville, week 12 2025). Louisville lost by one, so the home perspective is -1 and cfdb
-stores +1. If a rendered figure disagrees with this fixture, the fixture is wrong.
+Louisville, week 12 2025, Clemson won 20–19). Its model columns are the random-forest row the
+file was written against. If a rendered figure disagrees with this fixture, the fixture is
+wrong.
 
 ⚠️ `home_win_probability` DEFAULTS TO None HERE BECAUSE THAT IS THE ONLY VALUE IT HAS EVER
-HAD: R-572 measured it null in all 111,049 rows of srv_game. The em dash is not an edge case
-on this column, it is the whole of its history. One test below deliberately supplies a value
-anyway, so that this file keeps testing the metric rather than the outage.
+HAD: R-572 measured it null in all 111,049 rows of srv_game. One test below deliberately
+supplies a value anyway, so that this file keeps testing the metric rather than the outage.
 """
 import html
 import re
@@ -93,8 +87,10 @@ def _row(**overrides):
         "model_name": "random_forest_score",
         "model_family": "random_forest",
         "model_version_key": "98d34949266b",
+        "home_team": "Louisville",
+        "home_abbreviation": "LOU",
+        "away_team": "Clemson",
         "predicted_margin": -7.386955,
-        "predicted_margin_home_perspective": 7.386955,
         "predicted_total_points": 48.474485,
         "predicted_home_points": 27.93072,
         "predicted_away_points": 20.543765,
@@ -102,9 +98,10 @@ def _row(**overrides):
         "home_win_probability": None,
         "home_cover_edge": 5.886955,
         "is_out_of_sample_week": False,
-        # Louisville were at home and lost by one.
+        # Louisville were at home and lost by one: Clemson 20, Louisville 19.
         "actual_margin": 1,
-        "actual_margin_home_perspective": -1,
+        "home_points": 19,
+        "away_points": 20,
         "attribution": ATTRIBUTION,
     }
     row.update(overrides)
@@ -147,20 +144,11 @@ def _captions(entries):
     return [_plain(body) for kind, body in entries if kind == "caption"]
 
 
-_RECONCILIATION = re.compile(
-    r"Actual margin (?P<home>[-+][\d.,]+) from the home perspective "
-    r"\((?P<stored>[-+][\d.,]+) as it is stored, away minus home\)")
-
-
-def _reconciliation(entries):
-    """The two margins, each read from ITS OWN named position in the sentence."""
-    for caption in _captions(entries):
-        found = _RECONCILIATION.search(caption)
-        if found:
-            return found.group("home"), found.group("stored")
-    raise AssertionError(
-        "the reconciliation caption did not render in its stated shape; captions were "
-        f"{_captions(entries)}")
+def _line(entries, label):
+    """A LINE TILE'S VALUE: the team named, then its signed number — "LOU -7.4"."""
+    hits = [b for k, b in entries if k == "metric" and b.startswith(label + " :: ")]
+    assert len(hits) == 1, f"expected one metric labelled {label!r}, drew {hits}"
+    return " ".join(hits[0][len(label) + len(" :: "):].strip().split(" ")[:2])
 
 
 # --- the four figures ------------------------------------------------------------------------
@@ -168,86 +156,68 @@ def _reconciliation(entries):
 def test_each_model_figure_lands_in_its_own_metric(panel):
     """Four figures, four labels, none interchangeable.
 
-    The margin and the cover edge are the dangerous pair: +7.4 and +5.9 are both plausible
-    as either, both positive, and a swap would render perfectly.
+    The line and the cover edge are the dangerous pair: 7.4 and 5.9 are both plausible as
+    either, and a swap would render perfectly.
     """
     entries = panel(_row())
-    assert _metric(entries, "Predicted margin (home)") == "+7.4"
+    assert _line(entries, "Model line") == "LOU -7.4"
     assert _metric(entries, "Predicted total") == "48.5"
     assert _metric(entries, "Cover edge") == "+5.9"
 
 
-def test_the_predicted_margin_is_the_home_perspective_column_not_the_stored_one(panel):
-    """⚠️ THE SAME INVERSION AS R-544, ONE PANEL EARLIER IN THE PAGE.
+def test_the_model_line_reads_in_the_MARKETS_sign_not_a_flipped_one(panel):
+    """🚨 cfdb-wtc-R-2550: ONE CONVENTION. The header prints the home team's line as the market
+    does — a home favourite is NEGATIVE ("LOU -1.5" on this game). The model's line sits beside
+    it in the same sign: the model has Louisville by 7.4, so "LOU -7.4".
 
-    `predicted_margin` is -7.39 and `predicted_margin_home_perspective` is +7.39 on this
-    game: the model has the HOME team winning by 7.4. A panel that reached for
-    `predicted_margin` because the name is shorter would render "-7.4" under a label reading
-    "Predicted margin (home)" and say the away team was favoured.
+    ⚠️ POSITIONAL AND SIGNED. A panel that read the old home-positive copy
+    (`predicted_margin_home_perspective`, +7.39 on this game) would render "LOU +7.4" — the
+    opposite of the header's convention, which is the thing Marc asked to stop.
     """
-    assert _metric(panel(_row()), "Predicted margin (home)") == "+7.4"
+    assert _line(panel(_row()), "Model line") == "LOU -7.4"
 
 
-def test_positive_predicted_margin_means_the_home_team_wins_and_says_so(panel):
-    """AC: the help travels with the figure, on the metric, not merely on the page."""
-    block = [b for k, b in panel(_row())
-             if k == "metric" and b.startswith("Predicted margin (home) ")]
-    assert block and "Positive means the model has the home team winning" in block[0]
+def test_an_away_favourite_reads_positive_like_the_market(panel):
+    """The other direction, because a convention exercised one way is half tested: a model that
+    has Clemson by 3 is "LOU +3.0", exactly as the market would quote it."""
+    assert _line(panel(_row(predicted_margin=3.0)), "Model line") == "LOU +3.0"
 
 
-# --- the reconciliation: the reason this file exists ------------------------------------------
-
-def test_the_reconciliation_puts_each_margin_in_its_OWN_stated_position(panel):
-    """🚨 R-544's defect, at the one place on the site that states both conventions.
-
-    ⚠️ POSITIONAL, NOT A SIGN CHECK. A083's first draft of the equivalent test passed
-    against the inverted code because "is it negative" was true for the wrong reason. This
-    asserts that the figure introduced as "from the home perspective" IS the row's
-    `actual_margin_home_perspective`, and that the one introduced as "as cfdb stores it,
-    away minus home" IS its `actual_margin`. Swap the two in the panel and both assertions
-    fail.
-    """
-    home, stored = _reconciliation(panel(_row()))
-    assert home == "-1.0", \
-        "the home-perspective slot is not carrying actual_margin_home_perspective"
-    assert stored == "+1.0", \
-        "the parenthetical is not carrying actual_margin as cfdb stores it"
+def test_the_model_line_says_how_to_read_it(panel):
+    """The help travels with the figure, on the metric, not merely on the page."""
+    block = [b for k, b in panel(_row()) if k == "metric" and b.startswith("Model line ")]
+    assert block and "negative means the home team is favored" in block[0]
 
 
-def test_the_reconciliation_holds_when_the_home_team_WON(panel):
-    """The other direction, because a convention exercised one way is half tested.
+# --- the result: a score, said once ----------------------------------------------------------
 
-    Louisville lost this game by one. Here they win by ten, so the home perspective is +10
-    and cfdb stores -10 — every sign in the sentence flips, and each must flip in its own
-    position rather than the two trading places.
-    """
-    home, stored = _reconciliation(
-        panel(_row(actual_margin=-10, actual_margin_home_perspective=10)))
-    assert home == "+10.0"
-    assert stored == "-10.0"
+_RESULT = re.compile(r"Final score (?P<away>\d+) – (?P<home>\d+) \(away – home\)")
 
 
-def test_the_two_readings_are_opposites_of_one_another(panel):
-    """The property that makes the sentence true at all: same result, two ends.
-
-    Kept SEPARATE from the positional assertions above deliberately. This one would still
-    pass on a swap — it is here to catch a panel that rendered the same column twice, which
-    the positional test would not notice if both slots agreed with one column.
-    """
-    home, stored = _reconciliation(panel(_row()))
-    assert float(home) == -float(stored), \
-        "the two readings are not opposites — one column was rendered into both slots"
+def _result(entries):
+    found = [m for c in _captions(entries) for m in [_RESULT.search(c)] if m]
+    assert len(found) == 1, f"expected the result once; captions were {_captions(entries)}"
+    return found[0].group("away"), found[0].group("home")
 
 
-def test_an_ungraded_game_states_no_actual_margin_at_all(panel):
-    """A game that has not been played has no result to reconcile.
+def test_the_result_is_the_score_away_then_home(panel):
+    """POSITIONAL. Clemson (away) 20, Louisville (home) 19 — distinct numbers, so a swap fails."""
+    assert _result(panel(_row())) == ("20", "19")
 
-    Absent, not zero: a 0.0 here would claim a tie that never happened.
-    """
-    entries = panel(_row(actual_margin=None, actual_margin_home_perspective=None))
-    body = _text(entries)
-    assert "Actual margin" not in body
-    assert _metric(entries, "Predicted margin (home)") == "+7.4", \
+
+def test_the_result_no_longer_restates_the_margin_two_ways(panel):
+    """The old caption printed the actual margin twice, from both ends — R-544's inversion lived
+    in exactly that kind of sentence. One statement of the result, as a score."""
+    body = _text(panel(_row()))
+    assert "Actual margin" not in body and "home perspective" not in body
+
+
+def test_an_ungraded_game_states_no_result_at_all(panel):
+    """A game that has not been played has no result. Absent, not zero: 0 – 0 would claim a
+    scoreless tie that never happened."""
+    entries = panel(_row(actual_margin=None, home_points=None, away_points=None))
+    assert "Final score" not in _text(entries)
+    assert _line(entries, "Model line") == "LOU -7.4", \
         "the forecast stopped drawing because the result was missing"
 
 
@@ -345,7 +315,7 @@ def test_a_missing_attribution_is_reported_as_a_DEFECT_not_quietly_omitted(panel
     caption = " ".join(_captions(entries))
     assert "defect" in caption.lower(), \
         "a prediction rendered with no attribution and no complaint"
-    assert _metric(entries, "Predicted margin (home)") == "+7.4", \
+    assert _line(entries, "Model line") == "LOU -7.4", \
         "the numbers stopped drawing rather than the omission being reported"
 
 
