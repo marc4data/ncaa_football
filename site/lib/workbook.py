@@ -413,7 +413,7 @@ def mark_legend(df=None) -> list:
         ("Any of the three", PUSH_MARK,
          "push — the result landed exactly on the number, so neither side won the bet"),
         ("Any of the three", "·", "not settled yet"),
-        ("Any of the three", "–", "cfdb holds no closing line for this game"),
+        ("Any of the three", "–", "M4D holds no closing line for this game"),
     ]
 
 
@@ -3788,7 +3788,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
         tab.cell(ROW_CREDIT + offset, 1, text).font = note_font
 
     row = header_row(len(notes))
-    tab.cell(row, 1, "cfdb export").font = header_font
+    tab.cell(row, 1, "M4D export").font = header_font
     tab.cell(row, 1).fill = header_fill
     row += 2
 
@@ -3813,7 +3813,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
         ("Generated (UTC)", generated.strftime("%Y-%m-%d %H:%M:%S")),
         ("Scope", describe_scope(season, week, season_type, conference, division)),
         ("Model version(s)", model_version),
-        ("Source", "cfdb serving layer; every sheet is one serving view"),
+        ("Source", "M4D serving layer; every sheet is one serving view"),
     ):
         tab.cell(row, 1, label).font = header_font
         tab.cell(row, 2, value)
@@ -3965,7 +3965,7 @@ def _write_index(book, season, week, season_type, conference, division, generate
 
     row += 1
     tab.cell(row, 1, "Blank Δ Spread / Δ O/U").font = header_font
-    tab.cell(row, 2, "A blank delta means EITHER the line did not move OR cfdb holds no "
+    tab.cell(row, 2, "A blank delta means EITHER the line did not move OR M4D holds no "
                      "opening line for that game. The two are not distinguishable in this "
                      "workbook — the opening-line columns are not included. The Matchup URL "
                      "shows which it is.")
@@ -3985,12 +3985,12 @@ def _write_index(book, season, week, season_type, conference, division, generate
     # every number and cannot be filtered on "Blanks".
     row += 1
     tab.cell(row, 1, "Blank cells").font = header_font
-    tab.cell(row, 2, "A blank cell means cfdb holds no value for it — not zero. The site "
+    tab.cell(row, 2, "A blank cell means M4D holds no value for it — not zero. The site "
                      "renders the same absence as a dash; a dash in a spreadsheet is text "
                      "and would break sorting and COUNTBLANK.")
     row += 2
 
-    tab.cell(row, 1, "Scope is bounded by the filters on the Excel Export page. cfdb does "
+    tab.cell(row, 1, "Scope is bounded by the filters on the Excel Export page. M4D does "
                      "not offer a full-corpus or raw-layer export.").font = note_font
 
     for index, width in enumerate((26, 34, 14, 14, 60), start=1):

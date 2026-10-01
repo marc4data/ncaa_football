@@ -101,11 +101,11 @@ provider had restated predicted-points-added across **6,250 team-game records** 
 and 2025 seasons — 95.8% of the records in that endpoint — while other endpoints in the same
 family had not moved at all.
 
-cfdb refetches those seasons and republishes them, so this site follows the source rather
+M4D refetches those seasons and republishes them, so this site follows the source rather
 than freezing whatever it happened to see first. **The raw layer is append-only**: the August
 payload and the September one are both kept, so any change is reconstructable rather than
 merely asserted. A figure you read here in August may therefore differ in September, and the
-freshness stamp on every page is when cfdb last built it.
+freshness stamp on every page is when M4D last built it.
 
 
 ### How it gets here, and what happens when it is wrong
@@ -190,7 +190,7 @@ is stored beside them, and the overround is shown so the size of the adjustment 
 
 ### What the model is, and what it is not
 
-Predictions are cfdb's own, produced by models trained using a commercially licensed training
+Predictions are M4D's own, produced by models trained using a commercially licensed training
 pack. **They are not CollegeFootballData.com predictions**, and CFBD does not endorse them.
 That attribution is carried as a data column on every serving view containing a prediction,
 so a page physically cannot display the numbers without having fetched the statement.
@@ -207,7 +207,7 @@ rate are different claims and are never styled alike.
 
 ### The models this site stopped publishing
 
-Most of them. Of the seven models cfdb had trained, **six were found to have been given the
+Most of them. Of the seven models M4D had trained, **six were found to have been given the
 closing spread as an input and then scored on how well they beat that same spread.** Their
 accuracy figures described a model that had already seen the answer.
 
@@ -225,7 +225,7 @@ is the job; the leaderboard was the easy part.**
 
 ### Nothing here is betting advice
 
-cfdb is a portfolio project about data engineering. It reports where a model and a market
+M4D is a portfolio project about data engineering. It reports where a model and a market
 disagree; it does not tell anyone to act on that, and a measured edge is not an expectation
 of profit.
 
