@@ -373,11 +373,29 @@ def test_THE_PAIR_IS_A_WRAPPING_ROW_OF_TWO_FIXED_WIDTH_COLUMNS():
 
     ⚠️ **WHAT THIS TEST CANNOT DO IS PROVE THE WRAP HAPPENS.** Flex layout is the browser's;
     the round measured it at 1600 / 1440 / 1300 / 1024 and published the numbers. **This
-    asserts only that the three things the wrap depends on are still passed.**
+    asserts only that the things the wrap depends on are still passed.**
+
+    🚨 **AND `wrap=True` IS DELIBERATELY ABSENT NOW — B159 (cfdb-wta-R-2970), AND THIS TEST
+    USED TO REQUIRE IT.** B153 passed `wrap=True`; that keyword was added to `st.container`
+    AFTER the version `site/requirements.txt` pins, so on the deployed site the call raised
+    `TypeError` and this panel drew "Could not display this section" ON EVERY GAME PAGE for
+    about three weeks. **The wrap is the DEFAULT** — 1.61.1's own docstring says a horizontal
+    container's elements "will overflow to the next line if they don't fit within the
+    container's width" — so the keyword bought nothing and cost the panel.
+
+    ⚠️ **SO THE ASSERTION IS INVERTED RATHER THAN DELETED.** A test that merely stopped
+    requiring `wrap=True` would let the next author put it back; this one says it must not
+    come back, and why.
     """
     code = _code_of("_ats_so_far")
-    assert "horizontal=True" in code and "wrap=True" in code, (
-        "the pair is no longer a wrapping horizontal container, so it cannot stack")
+    assert "horizontal=True" in code, (
+        "the pair is no longer a horizontal container, so it cannot lay the two sides out "
+        "in a row at all")
+    assert "wrap=" not in code, (
+        "`wrap=` is back on this container. It does not exist in the streamlit "
+        "site/requirements.txt pins, so it raises TypeError at render time and the panel "
+        "draws a handled failure card on every game page (cfdb-wta-R-2970). The wrap is "
+        "already the default for a horizontal container; passing it buys nothing")
     assert "width=_ATS_PAIR" in code, (
         "the columns no longer carry a fixed width, so there is nothing for the wrap to "
         "measure against and the two tables will shrink instead of stacking")

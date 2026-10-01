@@ -1265,6 +1265,30 @@ def _excursions(row) -> None:
                unsafe_allow_html=bool(whose))
 
 
+# 🚨 THE MODEL LINE TILE NEEDS MORE ROOM THAN ITS NEIGHBOURS, AND IT IS THE ONLY ONE THAT
+# CARRIES TEXT (cfdb-wta-R-2972, from A275's cfdb-main-R-4566).
+#
+# 📊 MEASURED IN A REAL BROWSER AT THE PINNED STREAMLIT, 36px "Source Sans": the value sits
+# in a 150px tile and `MSST +4.3` is 152.53px natural — truncated to `MSST +…` on the one
+# game whose sign convention this panel was redesigned for. The neighbours are numbers:
+# `47.1` and `+1.7` are 62.66px, so they have ~87px of slack each and can afford to give.
+#
+# ⚠️ THE WORST CASE IS NOT THAT GAME. `TENN -33.9` is 165.92px and `MISS -28.9` is 154.61px,
+# so a fix sized to 153px would leave the same defect on other games (the prompt's own
+# warning). The site's longest abbreviation is `LIMESTONE` (9 chars) — it is non-FBS and has
+# never carried a prediction, and `LIMESTONE -47.9` would be 256px, which no reasonable tile
+# width reaches. The target is therefore the worst case that can actually be PUBLISHED: a
+# four-character abbreviation with a two-digit signed line, ~166px.
+#
+# ⚠️ WHY A COLUMN WEIGHT RATHER THAN A FONT SIZE: the 36px is Streamlit's own `stMetricValue`
+# and nothing in `site/lib/theme.py` styles it. Shrinking it means injecting CSS into
+# `theme.py`, which is session A's file (§3.2.2) — and it would shrink every metric on the
+# site to fix one tile on one panel. A weight costs only the slack the neighbours already
+# have.
+_MODEL_LINE_LABEL = "Model line"
+_MODEL_LINE_TILE_WEIGHT = 1.45
+
+
 def _model(row) -> None:
     # ⚠️ THE CAPITALS IN `M4D` ARE LOAD-BEARING (Marc, 2026-10-01). `fmt.title_case`
     # leaves an already mixed-case word alone and capitalises an all-lowercase one, so
@@ -1331,7 +1355,10 @@ def _model(row) -> None:
          "than the market does.", False),
     ]
     tiles = [tile for tile in tiles if not tile[3]]
-    cols = st.columns(len(tiles))
+    # ⚠️ KEYED ON THE LABEL, NOT ON INDEX 0. The tile list is filtered above, so a position
+    # is not stable; the label is what the weight is actually about.
+    cols = st.columns([_MODEL_LINE_TILE_WEIGHT if label == _MODEL_LINE_LABEL else 1.0
+                       for label, *_ in tiles])
     for column, (label, value, hint, _omit) in zip(cols, tiles):
         column.metric(label, value, help=hint)
 
@@ -6499,7 +6526,20 @@ def _ats_so_far(row) -> None:
         # nothing. **The container answers the question the layout is actually asking**, which
         # is A208's own reason for using container queries rather than `@media` for the
         # scroll note. 📊 The measured wrap point is in the round's report.
-        pair = st.container(horizontal=True, wrap=True, gap="medium")
+        #
+        # 🚨 **AND THE WRAP IS THE DEFAULT, WHICH IS WHY THERE IS NO `wrap=` HERE ANY MORE
+        # (cfdb-wta-R-2970).** B153 wrote `wrap=True`. That keyword was added to
+        # `st.container` AFTER the version `site/requirements.txt` pins, so on the deployed
+        # site this line raised `TypeError: LayoutsMixin.container() got an unexpected
+        # keyword argument 'wrap'`, `states.section` caught it, and THIS PANEL DREW A FAILURE
+        # CARD ON EVERY GAME PAGE FOR ABOUT THREE WEEKS.
+        #
+        # ✅ **NOTHING IS LOST BY DELETING IT.** The pinned version's own docstring says a
+        # horizontal container's elements "will overflow to the next line if they don't fit
+        # within the container's width", and in the newer versions `wrap` DEFAULTS to True.
+        # The keyword asked for the behaviour that was already the default — it bought
+        # nothing and cost the panel. Measured both ways in B159 at 1600 and 1024.
+        pair = st.container(horizontal=True, gap="medium")
         for team_id, name, where in sides:
             # ⚠️ **`with`, NOT `side.markdown(...)` — AND THE DIFFERENCE IS THE WHOLE PANEL.**
             # `states.empty` and `table.render` write to the ACTIVE container through the

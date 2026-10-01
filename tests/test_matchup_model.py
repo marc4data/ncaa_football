@@ -28,6 +28,7 @@ HAD: R-572 measured it null in all 111,049 rows of srv_game. One test below deli
 supplies a value anyway, so that this file keeps testing the metric rather than the outage.
 """
 import html
+import inspect
 import re
 import sys
 from pathlib import Path
@@ -374,6 +375,59 @@ def test_the_caption_does_not_LABEL_the_model_under_a_heading_that_already_did(p
     assert len(named) == 1, f"expected one caption naming the model, drew {captions}"
     assert named[0].startswith("Random Forest Score Model (Training Pack)"), (
         f"the caption still leads with a label before the model's name: {named[0]!r}")
+
+
+def test_the_model_line_tile_is_wide_enough_for_the_WORST_line_it_can_print(panel):
+    """cfdb-wta-R-2972, from A275's cfdb-main-R-4566: `MSST +4.3` painted as `MSST +…`.
+
+    🚨 THIS IS AN ARITHMETIC PIN OVER MEASURED INPUTS, NOT A LIVE MEASUREMENT, and the
+    distinction is worth stating: the suite has no browser, so it cannot re-measure text.
+    The three numbers below were measured in a real browser at the pinned Streamlit
+    (B159), in the tile's own computed font — 36px "Source Sans":
+
+        the three tiles sat at 150px each, so the row's column space is ~450px
+        `MSST +4.3`  152.53px   the game that exposed it
+        `TENN -33.9` 165.92px   the WORST line publishable today — 4-char abbreviation,
+                                two-digit signed number; `predicted_margin` runs -47.9..+29.5
+                                and every abbreviation on a predicted game is <= 4 characters
+
+    ⚠️ `scrollWidth > clientWidth` CANNOT SEE THIS and must not be used for it: the value has
+    `text-overflow: ellipsis`, so the content is CLIPPED rather than overflowing and both
+    numbers read 150. A275 had to clone the node off-screen (R-859).
+
+    ⚠️ WHAT THIS CANNOT CATCH, said rather than implied: a Streamlit upgrade that changes the
+    metric font, or a layout change that narrows the row below 450px. Both move the measured
+    inputs, and this test would keep passing on arithmetic that no longer describes the page.
+    A render check is the only thing that sees those, and B159's report carries one.
+    """
+    from views import matchup                                        # noqa: PLC0415
+
+    # The row's total column space, measured at weight 1.0 with three tiles.
+    MEASURED_ROW_PX = 450.0
+    # The widest string the tile can be asked to paint, measured in its own font.
+    WORST_LINE_PX = 165.92
+
+    weight = matchup._MODEL_LINE_TILE_WEIGHT
+    for tiles in (3, 4):
+        share = weight / (weight + (tiles - 1))
+        got = MEASURED_ROW_PX * share if tiles == 3 else None
+        if got is None:
+            continue
+        assert got >= WORST_LINE_PX, (
+            f"the Model line tile would be {got:.1f}px against a worst case of "
+            f"{WORST_LINE_PX}px, so a published model line will paint as `ABBR +…`. "
+            f"_MODEL_LINE_TILE_WEIGHT is {weight}; it needs to be at least "
+            f"{WORST_LINE_PX * (tiles - 1) / (MEASURED_ROW_PX - WORST_LINE_PX):.3f}")
+
+    # ⚠️ AND THE WEIGHT MUST ACTUALLY REACH `st.columns`. Without this the constant can keep
+    # its value while the call that uses it is deleted, and the arithmetic above would still
+    # pass — the shape R-843 is about.
+    source = inspect.getsource(matchup._model)
+    assert "_MODEL_LINE_TILE_WEIGHT" in source, (
+        "the Model line weight is no longer read by `_model`, so the tile is back to an "
+        "equal share however healthy the constant looks")
+    assert "st.columns([" in source, (
+        "`_model` no longer passes explicit column widths, so every tile is equal again")
 
 
 def test_the_out_of_sample_chip_appears_only_when_the_week_is_out_of_sample(panel):
