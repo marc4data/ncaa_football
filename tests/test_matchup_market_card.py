@@ -687,7 +687,7 @@ def test_a_ROW_SPECIFIC_caption_still_renders_and_was_not_tidied_away(card):
     """
     blocks = card(favorite_definitions_disagree=True, moneyline_favorite_side="home")
     text = _captions(blocks)
-    assert "cfdb records the disagreement rather than resolving it" in text, \
+    assert "M4D records the disagreement rather than resolving it" in text, \
         "B083's favorite-disagreement caption is gone"
     assert "overround" in text, "this row's overround is gone"
     assert "Furthest from the open" in text, "the excursion line is gone"

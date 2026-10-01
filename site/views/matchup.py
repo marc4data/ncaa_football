@@ -18,8 +18,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from lib import (attribution, chips, distribution, filters, fmt, glyphs, identity, params,
-                 shell, states, table, theme, winprob)
+from lib import (attribution, chips, distribution, filters, fmt, glyphs, identity, models,
+                 params, shell, states, table, theme, winprob)
 from lib.datasets import DATASETS
 from lib.query import query
 from lib.table import Col
@@ -781,7 +781,7 @@ def _win_probability_bar(row) -> None:
         f"<span>{home_label} {home_pct:.1f}%</span></div>"
         f"<div style='text-align:center;font-size:.72rem;opacity:.55;margin-top:.05rem'>"
         f"Market-implied win probability, de-vigged from the moneylines \u2014 the book's "
-        f"number, not cfdb's model</div></div>",
+        f"number, not M4D's model</div></div>",
         unsafe_allow_html=True)
 
 
@@ -900,7 +900,7 @@ _HELP = {
     "Spread": None,
     "Over/Under": "The total points the book expects both teams to score combined.",
     # R-605. The board's fourth column is DERIVED, and the hover is where that is said once.
-    "Implied points": "What the book's total and spread imply each team scores. cfdb derives "
+    "Implied points": "What the book's total and spread imply each team scores. M4D derives "
                       "this from the two of them — it is not a price any book quoted, and no "
                       "book took a bet on it.",
     # R-607: what a de-vig IS. What THIS game's overround WAS stays on the card beside it.
@@ -908,7 +908,7 @@ _HELP = {
                        "100% between them. De-vigging removes that margin proportionally to "
                        "recover what the price says about the game. The overround is how much "
                        "margin there was — 1.0000 would be a book taking none. These are the "
-                       "book's numbers, not cfdb's model.",
+                       "book's numbers, not M4D's model.",
 }
 
 
@@ -1155,7 +1155,7 @@ def _market_card(row) -> None:
             # market rather than a failure to fetch one.
             states.empty("The betting market would be here.",
                          "No sportsbook line has been recorded for this game. "
-                         "cfdb holds lines from 2013 onward, and only for games books priced.")
+                         "M4D holds lines from 2013 onward, and only for games books priced.")
             return
 
         rows = []
@@ -1211,7 +1211,7 @@ def _market_card(row) -> None:
             st.caption(
                 f"The spread makes {favorite or 'one side'} the favorite and the moneyline "
                 f"makes {html.escape(str(other_label)) if other_label else 'the other'} the "
-                f"favorite. cfdb records the disagreement rather than resolving it.")
+                f"favorite. M4D records the disagreement rather than resolving it.")
 
         # 🚨 R-607: `chips.spread_sign_note()` USED TO RENDER HERE AND ITS TEXT IS NOW IN THE
         # SPREAD `?`. It is true of every spread ever printed, which is the definition of
@@ -1346,7 +1346,7 @@ def _model(row) -> None:
          None, False),
         ("Home win probability",
          fmt.number(row.get("home_win_probability"), "home_win_probability"),
-         "cfdb's own model, not the market-implied bar above the header.",
+         "M4D's own model, not the market-implied bar above the header.",
          pd.isna(row.get("home_win_probability"))),
         ("Cover edge",
          fmt.signed(row.get("home_cover_edge"), "home_cover_edge"), None, False),
@@ -1359,8 +1359,20 @@ def _model(row) -> None:
     if row.get("is_out_of_sample_week"):
         st.markdown(chips.out_of_sample_chip_html(True), unsafe_allow_html=True)
 
+    # 🚨 THE DISPLAY NAME, NOT THE KEY (cfdb-main-R-4406). `model_name` is what every
+    # mart and serving view joins on, and it reads `cfdb_wtc_c1_own_features_tuned` —
+    # an internal session-and-config label plus the VS Code project's name — in front
+    # of a reader looking at Marc's own forecast. `lib/models.display_name` is the one
+    # map every surface reads (A269); a second copy here would be free to disagree.
+    #
+    # ⚠️ IT IS HANDED THE VALUE HERE, NOT THE ROW. `performance.py`'s `_model_label`
+    # takes a row because `Col.render` hands it one. Handing `display_name` a row
+    # returns it unchanged rather than raising, so the name would blank silently.
+    #
+    # ✅ THE VERSION STAYS RAW. `2b6f59115259` is a content hash, and it is honest.
     st.caption(
-        f"Model {row.get('model_name')} ({row.get('model_family')}), version "
+        f"Model {models.display_name(row.get('model_name'))} "
+        f"({row.get('model_family')}), version "
         f"{row.get('model_version_key')}. Predicted score "
         f"{fmt.number(row.get('predicted_away_points'), '', 1)} – "
         f"{fmt.number(row.get('predicted_home_points'), '', 1)} (away – home).")
@@ -1373,7 +1385,7 @@ def _model(row) -> None:
             f"Actual margin "
             f"{fmt.signed(actual, 'actual_margin_home_perspective')} from the home "
             f"perspective ({fmt.signed(row.get('actual_margin'), 'actual_margin')} as "
-            f"cfdb stores it, away minus home). Same result, read from the two ends.")
+            f"it is stored, away minus home). Same result, read from the two ends.")
     attribution.model_attribution(pd.DataFrame([row]))
 
 
@@ -3828,7 +3840,7 @@ def _yardage(row) -> None:
                 title="No data for this team",
                 missing_object="srv_team_week",
                 explanation=(
-                    f"cfdb holds no week-by-week record for {missing} this season, and "
+                    f"M4D holds no week-by-week record for {missing} this season, and "
                     f"both directions of this comparison need both sides — so showing the "
                     f"other team's own figures here would read as a matchup while "
                     f"describing one team."))
@@ -3846,13 +3858,13 @@ def _yardage(row) -> None:
             # zero at any later week means the box scores were never held.
             opening = str(row.get("season_type")) == "regular" and int(row["week"]) == 1
             why = ("Neither side has played a counted game yet, so there is no per-game "
-                   "figure to show — a zero here would be a measurement cfdb did not make."
+                   "figure to show — a zero here would be a measurement M4D did not make."
                    if opening else
-                   "cfdb holds no box scores for " + (
+                   "M4D holds no box scores for " + (
                        f"{row.get('home_team')} or {row.get('away_team')}" if not any(counted)
                        else f"{row.get('home_team') if not counted[0] else row.get('away_team')}")
                    + " in the weeks before this game, so there is no per-game figure to "
-                     "show — a zero here would be a measurement cfdb did not make.")
+                     "show — a zero here would be a measurement M4D did not make.")
             states.empty(
                 "Each side's yardage against the other's defense would be here.", why)
             return
@@ -3934,7 +3946,7 @@ def _yardage(row) -> None:
             f"{counted[0]} completed game{'' if counted[0] == 1 else 's'} for "
             f"{home.get('team_display')} and {counted[1]} for {away.get('team_display')}. "
             f"games_counted is not games played — it counts the completed games both "
-            f"sides of whose box score cfdb holds.")
+            f"sides of whose box score M4D holds.")
 
         if distribution:
             # 🚨 B119. THE DENOMINATOR IS TEAM-GAMES NOW, NOT TEAMS, AND THE SENTENCE HAD TO
@@ -5906,7 +5918,7 @@ def _post_game(game_id, season) -> None:
                     season,
                     not_yet="Box scores are collected after the game finishes, and this "
                             "game's has not arrived yet.",
-                    out_of_scope="cfdb holds box scores from 2024 onward, and this game's "
+                    out_of_scope="M4D holds box scores from 2024 onward, and this game's "
                                  "is not among them."))
             return
 
@@ -6086,7 +6098,7 @@ def _post_game(game_id, season) -> None:
 # count computed from it would be wrong and would look right. **The absence is named on the
 # page instead** (AC-G.11), and adding it is a dbt round of its own.
 _SEASON_TD_NOTE = (
-    "Touchdowns are not in this table because cfdb does not publish a per-game touchdown "
+    "Touchdowns are not in this table because M4D does not publish a per-game touchdown "
     "count. It is not derived from points here: points include field goals, safeties and "
     "two-point conversions, so a figure computed from them would be wrong and would look right."
 )
@@ -6223,7 +6235,7 @@ def _season_so_far(row) -> None:
         if df.empty:
             states.empty(
                 "Each team's season to date would be here.",
-                f"cfdb holds no game-by-game record for either side in "
+                f"M4D holds no game-by-game record for either side in "
                 f"{int(row['season'])}.")
             return
 
@@ -6292,9 +6304,9 @@ def _season_so_far(row) -> None:
                     (f"This is {fmt.text(name)}'s first game of the season, so there is "
                      f"nothing before it to show."
                      if mine.empty else
-                     f"cfdb holds no box score for any of {fmt.text(name)}'s {len(mine)} "
+                     f"M4D holds no box score for any of {fmt.text(name)}'s {len(mine)} "
                      f"earlier games this season, so there is no per-game figure to show "
-                     f"— a zero here would be a measurement cfdb did not make."))
+                     f"— a zero here would be a measurement M4D did not make."))
                 continue
             # ⚠️ **"BEFORE THIS ONE" IS NOT DECORATION — IT IS WHAT THE READER IS LOOKING
             # AT.** `_game_calendar` is bounded to games that kicked off BEFORE this matchup
@@ -6708,7 +6720,7 @@ def _travel(game_id) -> None:
         # no test could have.**
         absent = df["travel_miles"].isna().any() or df["elevation_change_ft"].isna().any()
         if absent:
-            st.caption("An em dash means cfdb publishes no coordinates for one of the two "
+            st.caption("An em dash means M4D publishes no coordinates for one of the two "
                        "venues. That is a different fact from “home venue”, which "
                        "is a team playing where it always plays — a measured zero.")
         table.as_of_caption(df)
@@ -7008,7 +7020,7 @@ _DRIVE_BAND_BORDER_WIDTH = 0.5
 _DRIVE_FG_RECORD_YARDS_TO_GOAL = 52
 
 _DRIVE_FG_NOTE = (
-    "cfdb publishes this drive's end as the ensuing kickoff spot rather than where the kick "
+    "M4D publishes this drive's end as the ensuing kickoff spot rather than where the kick "
     "was taken, so the bar and the result mark are not drawn. The Yrds column is the drive's "
     "own gain and is unaffected."
 )
@@ -9538,7 +9550,7 @@ def _drive_scoreboard(row, curve: str = "") -> str:
 # this caption does, and a test asserts it is present and scoped to itself rather than to the
 # panel (cfdb-main-R-1170).
 _DRIVE_IMPACT_NOTE = (
-    "In Impact, a blank cell means the drive scored nothing and an em dash means cfdb's "
+    "In Impact, a blank cell means the drive scored nothing and an em dash means M4D's "
     "published scores disagree with the drive's own result, so no figure can be trusted "
     "there. The score beside a swing is the scoreboard after that drive, read from the "
     "published columns rather than added up — and it is suppressed wherever it would have "
@@ -9744,7 +9756,8 @@ def _drives(game_id, season, row) -> None:
         if neutral:
             st.caption(
                 ", ".join(sorted(set(neutral))) + " publishes no color, so that side is "
-                "banded in a neutral cfdb tone. Every drive below is present.")
+                "banded in a neutral tone from this site's own palette. Every drive "
+                "below is present.")
 
         height = max(len(frame) * _DRIVE_ROW_HEIGHT, _DRIVE_ROW_HEIGHT * 4)
         away_name = _drive_band_name(frame, "away")
