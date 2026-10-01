@@ -166,6 +166,49 @@ def load_file(cursor, path: Path) -> int:
     return len(rows)
 
 
+def load_files(paths: List[Path]) -> Dict[str, int]:
+    """Load EXPLICITLY NAMED files, bypassing `EXPECTED_FILES` and `CANDIDATE_DIRS`.
+
+    🚨 A269 (cfdb-main-R-4350). THE PACK'S ALLOW-LIST IS NOT WIDENED, AND THAT IS THE POINT.
+    `EXPECTED_FILES` exists so a stray CSV in a scanned directory is never silently ingested
+    (its comment says exactly that). ⚠️ A second allow-list keyed by family would have to be
+    EDITED EVERY WEEK — the modeling session writes `..._2026_week05.csv`, `..._week06.csv`
+    and so on, so the list would always be one week behind the file somebody needs. **This
+    keeps the guarantee by a different route: nothing here is ever found, only named.** The
+    directory scan stays exactly as restrictive as it was.
+
+    ⚠️ AND THERE IS DELIBERATELY NO `--model-name` ARGUMENT. The 42-column contract already
+    carries `model_name`, and `stg_predictions.sql:45` reads it from the payload. A CLI
+    override would be a SECOND source for one fact, free to disagree with the column the
+    warehouse actually reads — which is §4.2.1's rule about a quantity with two possible
+    consumers, applied to an identifier.
+
+    🚨 `prediction_ts` IS THE FILE'S mtime (`load_file`), SO THIS DELIBERATELY DOES NOT COPY.
+    Pointing at the original is what makes a forecast's timestamp un-restampable: a copy made
+    without `cp -p` would silently re-date it to the moment of the copy, and a forecast dated
+    after kickoff is a different claim from one dated before it.
+    """
+    from .load_raw_to_postgres import get_conn
+
+    missing = [p for p in paths if not p.is_file()]
+    if missing:
+        for p in missing:
+            print(f"  {p}: NOT FOUND")
+        return {"files": 0, "rows": 0}
+
+    connection = get_conn()
+    total = 0
+    try:
+        with connection, connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA IF NOT EXISTS raw")
+            cursor.execute(DDL)
+            for path in paths:
+                total += load_file(cursor, path)
+    finally:
+        connection.close()
+    return {"files": len(paths), "rows": total}
+
+
 def load_directory(directory: Optional[Path] = None) -> Dict[str, int]:
     from .load_raw_to_postgres import get_conn
 
@@ -257,9 +300,19 @@ def main() -> int:
     # path and skip the candidate search entirely — which is exactly the bug that made this
     # report "0 files" while six exports sat in cfdb_model_pack/model_outputs.
     parser.add_argument("--dir", type=Path, default=None)
+    # A269. An explicitly named file, repeatable. Takes precedence over --dir, because
+    # naming a file and scanning a directory in one run is two intentions in one command.
+    parser.add_argument("--file", type=Path, action="append", dest="files", default=None,
+                        help="load this exact file, bypassing the expected-file list "
+                             "(repeatable); its mtime becomes prediction_ts")
     parser.add_argument("--databricks", action="store_true",
                         help="also mirror into Databricks")
     args = parser.parse_args()
+    if args.files:
+        summary = load_files(args.files)
+        print(f"Loaded {summary['rows']} row(s) from {summary['files']} named file(s) "
+              f"into Postgres")
+        return 0
     summary = load_directory(args.dir)
     print(f"Loaded {summary['rows']} row(s) from {summary['files']} file(s) into Postgres")
     if args.databricks:

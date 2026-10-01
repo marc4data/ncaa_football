@@ -418,3 +418,77 @@ def test_the_workbooks_sheet_sql_resolves_the_hole_by_mechanism():
     # And no sheet ships with the hole unresolved.
     for sheet in list(workbook.SHEETS) + list(workbook.PENDING_SHEETS):
         assert "{PUBLISHED_MODELS_ONLY}" not in sheet.sql, sheet.name
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A269 (cfdb-main-R-4352) — the site can name a model that is not the pack's
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+def test_the_own_features_model_is_published_and_not_withdrawn():
+    """It is clean for a different reason from `random_forest_score`: not a pack model at all.
+
+    ⚠️ `is_withdrawn` treats UNKNOWN names as not withdrawn, so this would render even without
+    being listed. Being in `PUBLISHED` is what puts it on Model Performance at all, because
+    `views/performance.py` builds its rows from `ALL_MODELS`.
+    """
+    assert "cfdb_wtc_c1_own_features_tuned" in models.PUBLISHED
+    assert "cfdb_wtc_c1_own_features_tuned" in models.ALL_MODELS
+    assert not models.is_withdrawn("cfdb_wtc_c1_own_features_tuned")
+
+
+def test_the_withdrawal_sql_does_not_name_the_own_features_model():
+    """The exclusion is keyed on WITHDRAWN, so a published model must not appear in it.
+
+    📊 A269 measured that `PUBLISHED_MODELS_ONLY` is an EXCLUSION of the six withdrawn names
+    rather than an inclusion of the published ones — so adding to `PUBLISHED` leaves the SQL
+    byte-identical. This pins that, because an exclusion that silently became an inclusion
+    would hide every model nobody had listed.
+    """
+    assert "cfdb_wtc_c1_own_features_tuned" not in models.PUBLISHED_MODELS_ONLY
+    for name in models.WITHDRAWN:
+        assert name in models.PUBLISHED_MODELS_ONLY
+
+
+def test_a_reader_is_never_shown_the_internal_model_key():
+    """`cfdb_wtc_c1` is a session-and-config label and `cfdb` is the project name, not the
+    brand. The join key does not change; what a reader sees is mapped."""
+    assert models.display_name("cfdb_wtc_c1_own_features_tuned") == "M4D Own-Features Model (v1)"
+    assert "wtc" not in models.display_name("cfdb_wtc_c1_own_features_tuned")
+    assert "cfdb" not in models.display_name("cfdb_wtc_c1_own_features_tuned").lower()
+    # an unmapped name falls back to itself, which is right for the pack's known names
+    assert models.display_name("random_forest_score") == "random_forest_score"
+    # and a null model is an empty label, not the string "None" (R-2255's family)
+    assert models.display_name(None) == ""
+    assert models.display_name("") == ""
+
+
+def test_a_not_loaded_card_states_that_models_own_reason():
+    """🚨 A269 FOUND THIS BY RENDERING, NOT BY READING. `views/performance.py` hardcoded ONE
+    filename and ONE sentence, correct while `fastai_home_win` was the only model that could
+    reach that branch — so the page told a reader that the own-features model's "export was
+    never written" and that it was "waiting on fastai_wp_predictions.csv". Two false
+    statements, one of them naming a different model's file.
+    """
+    fastai_object, fastai_why = models.not_loaded_reason("fastai_home_win")
+    own_object, own_why = models.not_loaded_reason("cfdb_wtc_c1_own_features_tuned")
+    assert fastai_object != own_object and fastai_why != own_why
+    # fastai's export genuinely was never written; the own-features exports exist
+    assert "never written" in fastai_why
+    assert "never written" not in own_why and "not been loaded" in own_why
+    # ⚠️ AND THE OBJECT IS DESCRIBED, NOT NAMED: the real files are `cfdb_wtc_c1_own_*.csv`,
+    # and printing those would put `cfdb` and `wtc_c1` in front of a reader.
+    assert "cfdb" not in own_object.lower() and "wtc" not in own_object.lower()
+    # an unknown model still gets a usable, non-committal pair rather than a KeyError
+    unknown_object, unknown_why = models.not_loaded_reason("something_nobody_listed")
+    assert unknown_object and unknown_why
+
+
+def test_the_performance_page_renders_the_label_not_the_key():
+    """`Col.render` is handed the ROW, not the value — passing `display_name` straight in
+    would hand it a Series and silently blank the Model column."""
+    import pandas as pd
+    from views import performance
+    row = pd.Series({"model_name": "cfdb_wtc_c1_own_features_tuned"})
+    assert performance._model_label(row) == "M4D Own-Features Model (v1)"
+    assert performance._model_label(pd.Series({"model_name": "random_forest_score"})) == \
+        "random_forest_score"

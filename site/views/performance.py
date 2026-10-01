@@ -69,6 +69,13 @@ def _ats(row) -> str:
                            f"breakeven at −110 is {BREAKEVEN}%")
 
 
+def _model_label(row) -> str:
+    """A269: the display name. ⚠️ `render` is handed the ROW, not the value —
+    `_winner` and `_ats` above take `row` too, and passing `display_name` directly
+    would hand it a Series and blank the column."""
+    return models.display_name(row.get("model_name"))
+
+
 def _winner(row) -> str:
     """Straight-up accuracy, with the denominator that produced it."""
     value = row.get("winner_accuracy_pct")
@@ -137,7 +144,9 @@ def body(page) -> None:
             return
 
         columns = [
-            Col("model_name", "Model"),
+            # A269: the KEY joins, the DISPLAY NAME reads. `cfdb_wtc_c1_...` is an
+            # internal label and `cfdb` is the project name, not the brand.
+            Col("model_name", "Model", render=_model_label),
             Col("split", "Split"),
             Col("season", "Season", "num", dp=0),
             Col("games", "n", "num", dp=0),
@@ -198,12 +207,22 @@ def _missing_models(df: pd.DataFrame) -> None:
     # ⚠️ THE COPY IS UNCHANGED, INCLUDING THE TITLE. `degraded()`'s default is "Not built yet",
     # which is false here — the model exists and its export was never written — so the title is
     # passed explicitly. That is the parameter A081 added for exactly this case (R-500).
+    # 🚨 A269 (cfdb-main-R-4352). THE FILENAME AND THE SENTENCE WERE CONSTANTS, AND BOTH WENT
+    # WRONG THE MOMENT A SECOND MODEL REACHED THIS BRANCH. `fastai_home_win` was the only one
+    # that could, so "its export was never written" and "fastai_wp_predictions.csv" were
+    # written inline — and A269's own render showed the page telling a reader that
+    # `cfdb_wtc_c1_own_features_tuned` was waiting on fastai's file. Both facts now travel
+    # with the model name, in `lib/models`, beside the rest of the per-model reasons.
+    #
+    # ⚠️ AND THE TITLE IS THE DISPLAY NAME, NOT THE KEY. `model_name` is a join key; a reader
+    # meeting `cfdb_wtc_c1_own_features_tuned` is reading an internal label, and `cfdb` is the
+    # project name rather than the brand.
     for name in missing:
+        missing_object, explanation = models.not_loaded_reason(name)
         states.degraded(
-            missing_object="fastai_wp_predictions.csv",
-            explanation="This model's export was never written, so it has no rows. It is "
-                        "listed rather than omitted: a shorter table would hide the absence.",
-            title=f"{name} — not loaded")
+            missing_object=missing_object,
+            explanation=explanation,
+            title=f"{models.display_name(name)} — not loaded")
 
 
 def _segment(model: str, segment_type: str) -> pd.DataFrame:
@@ -217,10 +236,12 @@ def _segment(model: str, segment_type: str) -> pd.DataFrame:
     """, {"segment_type": segment_type, "model": model})
 
 
-def _breakdowns(models: list) -> None:
+def _breakdowns(model_names: list) -> None:
     st.divider()
     st.subheader(fmt.title_case("Breakdowns"))
-    model = st.selectbox("Model", models,
+    # A269: `format_func` shows the display name while the VALUE stays the join key, so
+    # `_segment` still queries on `model_name` and nothing downstream has to translate back.
+    model = st.selectbox("Model", model_names, format_func=models.display_name,
                          help="Breakdowns are per model; averaging across models would "
                               "produce a figure no model achieved.")
     tabs = st.tabs(["By week", "By conference", "Calibration", "By confidence"])

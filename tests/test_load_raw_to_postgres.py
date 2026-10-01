@@ -3,6 +3,8 @@
 The database work needs Postgres, but row counting is what makes empty-response detection
 possible, so it is worth pinning down on its own.
 """
+from pathlib import Path
+
 from src.load_raw_to_postgres import payload_row_count
 
 
@@ -53,3 +55,30 @@ def test_the_schema_is_created_before_any_table_in_it():
     assert ensure_at < create_at, (
         "the raw schema must be created before the first table inside it, or a fresh "
         "warehouse cannot be loaded at all")
+
+
+def test_an_explicitly_named_file_does_not_widen_the_packs_allow_list():
+    """A269 (cfdb-main-R-4350). `--file` loads a named path; the directory scan stays as
+    restrictive as it was.
+
+    🚨 THE POINT OF `EXPECTED_FILES` IS THAT A STRAY CSV IS NEVER SILENTLY INGESTED. A second
+    allow-list keyed by family would need editing every week, because the modeling session
+    writes `..._week05.csv`, `..._week06.csv` and so on. Naming the file keeps the guarantee
+    without a list that is always one week stale.
+    """
+    from src import load_predictions as lp
+    assert hasattr(lp, "load_files")
+    # the pack's list is untouched, and neither modeling file is in it
+    assert len(lp.EXPECTED_FILES) == 7
+    for name in lp.EXPECTED_FILES:
+        assert "wtc" not in name
+    assert lp.CANDIDATE_DIRS == (Path("model_outputs"),
+                                 Path("cfdb_model_pack") / "model_outputs")
+
+
+def test_naming_a_missing_file_loads_nothing_and_says_so(capsys):
+    """A path that is not there must report that, not raise and not silently load zero."""
+    from src import load_predictions as lp
+    summary = lp.load_files([Path("/nonexistent/not_a_file.csv")])
+    assert summary == {"files": 0, "rows": 0}
+    assert "NOT FOUND" in capsys.readouterr().out
