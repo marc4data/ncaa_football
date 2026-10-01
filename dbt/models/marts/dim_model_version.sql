@@ -71,7 +71,7 @@ select
     case when model_name = 'cfdb_wtc_c1_own_features_tuned'
          then 'M4D original model — every feature computed in-house from '
               || 'CollegeFootballData.com data.'
-         else 'cfdb model, built on a licensed CFB Model Training Pack (2026 Edition). '
+         else 'M4D model, built on a licensed CFB Model Training Pack (2026 Edition). '
               || 'Not an official CollegeFootballData.com prediction.'
     end as attribution
 from versions
