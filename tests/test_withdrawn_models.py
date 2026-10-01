@@ -492,3 +492,59 @@ def test_the_performance_page_renders_the_label_not_the_key():
     assert performance._model_label(row) == "M4D Own-Features Model (v1)"
     assert performance._model_label(pd.Series({"model_name": "random_forest_score"})) == \
         "random_forest_score"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A270 (cfdb-main-R-4400) — the page must not call a pre-kickoff forecast a backtest
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+def test_the_banner_does_not_call_a_live_forecast_a_backtest():
+    """🚨 THE WARNING THAT EXISTS TO STOP ONE CONFLATION WAS ABOUT TO COMMIT IT.
+
+    It asserted "Every figure on this page is a 2025 held-out backtest" as a CONSTANT. The
+    M4D model's Week 5 rows are `split = 'live'` — a forecast published BEFORE kickoff — so
+    the constant would have labelled a forecast a backtest, which is precisely the
+    backtest-versus-realised confusion AC-13.5 is for.
+    """
+    import pandas as pd
+    from views import performance
+
+    live = pd.DataFrame({"split": ["live"], "model_name": ["cfdb_wtc_c1_own_features_tuned"]})
+    text = performance._backtest_warning(live)
+    # ⚠️ the closing sentence legitimately contains the word, so only the CLAIM is checked
+    claim = text.lower().split("a backtest number")[0]
+    assert "backtest" not in claim, (
+        f"a live-only page calls its figures a backtest: {text}")
+    assert "before kickoff" in text
+    assert "has been bet" in text, "AC-13.5's caution must survive"
+
+    # a backtest-only page still says so, in as many words
+    test_only = pd.DataFrame({"split": ["test"], "model_name": ["random_forest_score"]})
+    assert "held-out backtest" in performance._backtest_warning(test_only)
+
+    # and a mixed page names BOTH, because they are different claims
+    both = pd.DataFrame({"split": ["test", "live"],
+                         "model_name": ["random_forest_score",
+                                        "cfdb_wtc_c1_own_features_tuned"]})
+    mixed = performance._backtest_warning(both)
+    assert "held-out backtest" in mixed and "before kickoff" in mixed
+
+    # ⚠️ AC-G.11: a split nobody has written a sentence for is NAMED, never swallowed by
+    # whatever the recognised ones happened to say.
+    odd = pd.DataFrame({"split": ["validate"], "model_name": ["random_forest_score"]})
+    assert "validate" in performance._backtest_warning(odd)
+
+
+def test_the_banner_no_longer_hardcodes_the_packs_training_window():
+    """"trained on seasons up to 2023 and validated on 2024" is the PACK's split. The M4D
+    model is walk-forward 2018-2024 with 2025 scored once, so a page-level constant stating
+    one training window is false the moment two families are published."""
+    # ⚠️ COMMENTS ARE STRIPPED FIRST, and that is the point rather than a convenience: the
+    # comment explaining WHY these sentences went necessarily quotes them, and a check that
+    # cannot tell shipped prose from an explanation of shipped prose would forbid the
+    # documentation along with the defect.
+    page = (ROOT / "site" / "views" / "performance.py").read_text(encoding="utf-8")
+    code = "\n".join(line for line in page.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "Every figure on this page is a 2025 held-out backtest" not in code
+    assert "trained on seasons up to 2023 and validated on 2024" not in code

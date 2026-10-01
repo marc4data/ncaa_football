@@ -567,6 +567,18 @@ FALSE_TEXT = {"f", "false", "n", "no", "0", ""}
 TRUE_TEXT = {"t", "true", "y", "yes", "1"}
 
 
+def _model_display(value):
+    """A270 (cfdb-main-R-4402): what a reader is called, not what the warehouse joins on.
+
+    ⚠️ A `display` callable is handed the VALUE (unlike the page's `Col.render`, which gets
+    the ROW — A269 was bitten by assuming they matched). Nulls pass straight through so an
+    empty cell stays empty rather than becoming the string "None".
+    """
+    if value is None or (isinstance(value, float) and value != value):
+        return value
+    return models.display_name(str(value))
+
+
 def _yes_no(value):
     """R-218. A boolean as a word, because Marc asked and because a filter dropdown reading
     Yes / No beats one reading TRUE / FALSE.
@@ -1678,6 +1690,12 @@ _ALL_SHEETS = [
         has_predictions=True,          # it does carry predictions...
         derived={"status": _status},
         display={
+            # 🚨 A270 (cfdb-main-R-4402). THE KEY JOINS, THE DISPLAY NAME READS — and this
+            # sheet is the artifact that LEAVES THE BUILDING. Without this the first loaded
+            # row puts `cfdb_wtc_c1_own_features_tuned` into a file Marc sends people,
+            # carrying the scaffolding label `wtc_c1` and the string `cfdb`, which is the
+            # VS Code project name and reads as a claim about CollegeFootballData.com.
+            "model_name": _model_display,
             # R-218. Booleans as words. `Out-of-sample week` is deliberately NOT here:
             # Marc's CSV marks six fields t/f = Yes/No and leaves that one blank, and the
             # CSV is authoritative. Flagged in the report as the one boolean left raw.
@@ -1927,7 +1945,9 @@ _ALL_SHEETS = [
         # AC-15.4: the flag is per ROW, not a sheet-level footnote. A workbook gets
         # filtered and sorted, and a caption does not survive that.
         ("is_out_of_sample_week", "Out-of-sample week"),
-    ], has_predictions=True),
+    ], has_predictions=True,
+        # A270 (cfdb-main-R-4402): the display name, not the join key.
+        display={"model_name": _model_display}),
 
     Sheet("Standings", "srv_standings", """
         select conference, tiebreak_rank, school, wins, losses, ties,
@@ -2405,6 +2425,8 @@ _ALL_SHEETS = [
         ("brier_score", "Brier"), ("log_loss", "Log loss"),
         ("attribution", "Attribution"),
     ], has_predictions=True, scoped=False,
+        # A270 (cfdb-main-R-4402): the display name, not the join key.
+        display={"model_name": _model_display},
         note="Every segment: overall, by week, by conference, by confidence, and by "
              "predicted-probability decile. Filter on Segment. Conference rows count a "
              "game under both teams' conferences, so they exceed the overall row."),
@@ -3782,7 +3804,8 @@ def _write_index(book, season, week, season_type, conference, division, generate
                             where segment_type = 'overall'
                               and {PUBLISHED_MODELS_ONLY} limit 20""")
         model_version = ", ".join(
-            f"{r.model_name} {r.model_version}" for r in versions.itertuples()) or "none"
+            f"{_model_display(r.model_name)} {r.model_version}"
+            for r in versions.itertuples()) or "none"
     except Exception:                                              # noqa: BLE001
         model_version = "unavailable"
 

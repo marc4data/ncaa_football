@@ -69,6 +69,45 @@ def _ats(row) -> str:
                            f"breakeven at −110 is {BREAKEVEN}%")
 
 
+def _backtest_warning(df: pd.DataFrame) -> str:
+    """AC-13.5's standing caution, assembled from the splits this page is actually showing.
+
+    🚨 A270 (cfdb-main-R-4400). Each split is a DIFFERENT KIND OF CLAIM and they must not be
+    described by one sentence:
+
+      `test` — scored after the fact against seasons the model never trained on;
+      `live` — published BEFORE kickoff and not yet graded.
+
+    ⚠️ The old constant called every figure a backtest, which would have labelled the M4D
+    model's pre-kickoff Week 5 forecast a backtest — the exact conflation this warning exists
+    to prevent, committed by the warning itself.
+
+    ⚠️ AND AN UNRECOGNISED SPLIT IS NAMED RATHER THAN SWALLOWED. A new split with no sentence
+    here would otherwise be silently covered by whatever the others said (AC-G.11).
+    """
+    splits = set()
+    if "split" in df.columns:
+        splits = {str(s) for s in df["split"].dropna().unique()}
+
+    known = {
+        "test": "**held-out backtests** — scored after the fact against seasons the model "
+                "never trained on",
+        "live": "**forecasts published before kickoff** — not yet graded, and not bets",
+    }
+    described = [known[s] for s in ("test", "live") if s in splits]
+    unknown = sorted(splits - set(known))
+
+    if not described and not unknown:
+        head = "**Nothing on this page has been bet.**"
+    else:
+        clauses = described + [f"rows marked `{s}`" for s in unknown]
+        joined = clauses[0] if len(clauses) == 1 else (
+            ", ".join(clauses[:-1]) + " and " + clauses[-1])
+        head = f"**The figures on this page are {joined}. Nothing here has been bet.**"
+    return (f"{head} A backtest number, a forecast and a realised betting record are three "
+            f"different claims, and this page never renders them identically.")
+
+
 def _model_label(row) -> str:
     """A269: the display name. ⚠️ `render` is handed the ROW, not the value —
     `_winner` and `_ats` above take `row` too, and passing `display_name` directly
@@ -112,13 +151,25 @@ def body(page) -> None:
         table.as_of_caption(df)
 
         # AC-12.6 / AC-13.5: a persistent, visible statement — not a tooltip, not a
-        # footnote. Every figure here is a held-out backtest, and a backtest hit rate and a
-        # realised hit rate must never render in identical styling.
-        st.warning(
-            "**Every figure on this page is a 2025 held-out backtest, not live betting.** "
-            "The models were trained on seasons up to 2023 and validated on 2024; nothing "
-            "here has been bet. A backtest number and a realised number are different "
-            "claims.")
+        # footnote. A backtest hit rate and a realised hit rate must never render in
+        # identical styling.
+        #
+        # 🚨 A270 (cfdb-main-R-4400). THIS WAS A CONSTANT AND THE CONSTANT WENT FALSE THE
+        # MOMENT A SECOND MODEL FAMILY LANDED. It asserted "Every figure on this page is a
+        # 2025 held-out backtest" and "trained on seasons up to 2023 and validated on 2024" —
+        # both true of the pack's models and both FALSE of the M4D own-features model, whose
+        # Week 5 rows are `split = 'live'` (a forecast made before kickoff, never a backtest)
+        # and which was trained walk-forward 2018–2024 with 2025 held out and scored once.
+        #
+        # ✅ SO IT IS BUILT FROM THE SPLITS ACTUALLY ON THE PAGE rather than restated. A page
+        # showing only backtests still says so; a page showing a live forecast says that too;
+        # and a split nobody has thought of yet cannot make this sentence a lie, because the
+        # sentence is assembled from what is there.
+        #
+        # ⚠️ THE CAUTION IS THE SPINE AND IT STAYS. "Nothing here has been bet" is unchanged
+        # and unconditional — it is true of every row, and it is the whole reason AC-13.5
+        # exists.
+        st.warning(_backtest_warning(df))
 
         # A227 (cfdb-main-R-3102): THE WITHDRAWAL IS STATED IN THE PAGE'S OWN VOICE, beside
         # the backtest warning that is already here, because they are the same kind of fact
