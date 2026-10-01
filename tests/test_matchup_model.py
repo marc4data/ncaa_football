@@ -340,6 +340,42 @@ def test_the_model_and_its_version_are_named(panel):
     assert "98d34949266b" in caption, "the model version key is not on the page"
 
 
+def test_the_SECTION_HEADING_as_RENDERED_carries_the_brand(panel):
+    """Marc, 2026-10-01: *"can you change the header on Matchup page from 'Model' to
+    'M4D Model'?"* (cfdb-wta-R-2950).
+
+    🚨 THIS ASSERTS THE RENDERED HEADING, NOT THE LITERAL PASSED TO `fmt.title_case`, AND
+    THAT IS THE WHOLE POINT. `title_case` capitalises an all-lowercase word and leaves a
+    mixed-case one alone, so `"m4d model"` would ship as `M4d Model` while the source line
+    still read correct to anyone grepping for the string. Measured both ways when this was
+    written: `title_case("M4D Model") -> "M4D Model"`, `title_case("m4d model") -> "M4d
+    Model"`. A test on the constant cannot tell those apart; this one can.
+    """
+    headings = [_plain(body) for kind, body in panel(_row()) if kind == "subheader"]
+    assert headings, "the panel drew no section heading at all, so this would pass on nothing"
+    assert "M4D Model" in headings, (
+        f"the Model section no longer announces the brand; it drew {headings}")
+    assert "M4d Model" not in headings, (
+        "the brand was case-mangled on the way to the page — `title_case` lower-cased the D, "
+        "which means the literal reached it all-lowercase")
+
+
+def test_the_caption_does_not_LABEL_the_model_under_a_heading_that_already_did(panel):
+    """cfdb-main-R-3666. The caption used to open `Model <name>`, which under a section
+    headed "M4D Model" put the word three times in two lines.
+
+    ⚠️ THE LABEL WAS RIGHT WHEN THE VALUE WAS A RAW KEY and is wrong now that
+    `models.display_name` returns a name ending in "Model". The caption still NAMES the
+    model — `test_the_model_and_its_version_are_named` is the assertion for that, and it is
+    deliberately left alone — this one pins only that the redundant label is gone.
+    """
+    captions = _captions(panel(_row()))
+    named = [c for c in captions if "Random Forest Score Model (Training Pack)" in c]
+    assert len(named) == 1, f"expected one caption naming the model, drew {captions}"
+    assert named[0].startswith("Random Forest Score Model (Training Pack)"), (
+        f"the caption still leads with a label before the model's name: {named[0]!r}")
+
+
 def test_the_out_of_sample_chip_appears_only_when_the_week_is_out_of_sample(panel):
     """AC-12.5. The chip is a claim about the training cut, and a chip that always showed
     would be no claim at all."""
