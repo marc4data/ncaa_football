@@ -116,8 +116,24 @@ PUBLISHED = frozenset({"random_forest_score", "cfdb_wtc_c1_own_features_tuned"})
 # ⚠️ A name absent from this map falls back to its `model_name`, which is the right default:
 # the pack's models are already known to readers by those names and renaming them is not this
 # round's business.
+# 🚨 A274 (cfdb-main-R-4537): BOTH PUBLISHED MODELS OR NEITHER. With one name mapped and
+# one not, the Model column read a friendly `M4D Own-Features Model (v1)` beside a
+# truncated raw `random_forest…`, which reads as a rendering fault rather than as two
+# models. ⚠️ THE WORDING IS OFFERED FOR MARC'S REVIEW, NOT SETTLED — it is assembled
+# from the pack's OWN neutral facts (`model_family = random_forest`, the export's own
+# `score` token, `feature_set_version = CFB Model Training Pack 2026`) precisely so
+# that it claims nothing this file has not already established.
+#
+# ⚠️ AND IT DOES NOT SAY `M4D`, DELIBERATELY. The own-features model is Marc's from
+# feature to fit; this one is a pack model, and its `attribution` already says "M4D
+# model, built on a licensed CFB Model Training Pack". A display name that led with the
+# brand would blur the one distinction the provenance work exists to keep.
+#
+# ⚠️ ONLY PUBLISHED MODELS BELONG HERE (§3.2.3). A name for a withdrawn model would be
+# prose nothing renders — and would read as though the site still showed it.
 DISPLAY_NAMES = {
     "cfdb_wtc_c1_own_features_tuned": "M4D Own-Features Model (v1)",
+    "random_forest_score": "Random Forest Score Model (Training Pack)",
 }
 
 

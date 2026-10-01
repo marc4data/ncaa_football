@@ -361,7 +361,12 @@ def test_the_predicted_score_reads_away_then_home_and_says_which(panel):
 def test_the_model_and_its_version_are_named(panel):
     """A number from an unnamed version cannot be reproduced or retired."""
     caption = " ".join(_captions(panel(_row())))
-    assert "random_forest_score" in caption
+    # ⚠️ A274 (cfdb-main-R-4537) EDITED THIS LINE AND IT IS SESSION B's FILE (§3.2.2).
+    # A274 added the pack model to `lib/models.DISPLAY_NAMES`, which B157's own caption
+    # reads, so the key is no longer what the page prints. The MODEL IS STILL NAMED and
+    # the version key is still asserted below — the test's intent is unchanged, only
+    # the string it pins. Nothing else in this file was touched.
+    assert "Random Forest Score Model (Training Pack)" in caption
     assert "98d34949266b" in caption, "the model version key is not on the page"
 
 

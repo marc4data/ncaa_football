@@ -455,8 +455,15 @@ def test_a_reader_is_never_shown_the_internal_model_key():
     assert models.display_name("cfdb_wtc_c1_own_features_tuned") == "M4D Own-Features Model (v1)"
     assert "wtc" not in models.display_name("cfdb_wtc_c1_own_features_tuned")
     assert "cfdb" not in models.display_name("cfdb_wtc_c1_own_features_tuned").lower()
-    # an unmapped name falls back to itself, which is right for the pack's known names
-    assert models.display_name("random_forest_score") == "random_forest_score"
+    # 🚨 A274 (cfdb-main-R-4537): BOTH PUBLISHED MODELS, OR THE TABLE READS AS A FAULT.
+    # A269 mapped one of the two and left the other to fall back to its key, and the
+    # Model column then showed a friendly name beside a truncated `random_forest…`.
+    assert models.display_name("random_forest_score") == \
+        "Random Forest Score Model (Training Pack)"
+    # ⚠️ THE FALLBACK IS STILL PINNED, on a name that is genuinely unmapped — otherwise
+    # mapping every published model would quietly remove the coverage.
+    assert models.display_name("ridge_margin_expanded") == "ridge_margin_expanded"
+    assert models.display_name("something_nobody_listed") == "something_nobody_listed"
     # and a null model is an empty label, not the string "None" (R-2255's family)
     assert models.display_name(None) == ""
     assert models.display_name("") == ""
@@ -491,7 +498,7 @@ def test_the_performance_page_renders_the_label_not_the_key():
     row = pd.Series({"model_name": "cfdb_wtc_c1_own_features_tuned"})
     assert performance._model_label(row) == "M4D Own-Features Model (v1)"
     assert performance._model_label(pd.Series({"model_name": "random_forest_score"})) == \
-        "random_forest_score"
+        "Random Forest Score Model (Training Pack)"            # A274, R-4537
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════

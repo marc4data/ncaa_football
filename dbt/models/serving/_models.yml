@@ -31,7 +31,7 @@ models:
       drift — so the page can answer "is anything wrong" without knowing what any individual
       signal means. Airflow run history is deliberately excluded: task outcomes belong in
       Airflow's own UI, and this board is about data rather than the scheduler.
-      Postgres-only (tag `postgres_only`); it reads cfdb's own telemetry, which has no
+      Postgres-only (tag `postgres_only`); it reads M4D's own telemetry, which has no
       Databricks equivalent.
     columns:
       - name: system_health_sk
@@ -342,7 +342,7 @@ models:
   # ---------------------------------------------------------------------------------------
   - name: srv_model_performance
     description: >
-      Model Performance page. Accuracy and calibration for cfdb's own prediction model,
+      Model Performance page. Accuracy and calibration for M4D's own prediction model,
       pre-aggregated at five cuts and stacked long — `overall`, `week`, `conference`,
       `confidence` and `probability` — with `segment_type` naming the cut. Long rather than
       wide so a new chart needs a filter rather than an ALTER.
@@ -374,7 +374,7 @@ models:
       - name: is_out_of_sample_week
         description: >
           Whether the week fell outside the model's training window. The honest subset: a
-          reader comparing cfdb to the market should be reading rows where this is true.
+          reader comparing M4D to the market should be reading rows where this is true.
       - name: segment_type
         description: >
           Which cut the row belongs to — `overall`, `week`, `conference`, `confidence` or
@@ -444,7 +444,7 @@ models:
       - name: attribution
         description: >
           License-required attribution text, carried as data so no page can render these
-          numbers without it. States that this is cfdb's own model built on a licensed CFB
+          numbers without it. States that this is M4D's own model built on a licensed CFB
           Model Training Pack, and not an official CollegeFootballData.com prediction.
       - name: as_of_ts
         description: AC-G.35. Last load of the `prediction` domain, rendered instead of now().
@@ -684,7 +684,7 @@ models:
           that supply only a value.
       - name: rating_rank_computed
         description: >
-          Rank computed within (season, rating_system) by cfdb. Always populated, so it is
+          Rank computed within (season, rating_system) by M4D. Always populated, so it is
           the safe column to sort on; `rating_rank` is preferred for display where present
           because it is what the source itself claims.
       - name: rating_percentile
@@ -813,7 +813,7 @@ models:
           full-history version of this board does not silently read stale rows.
       - name: predicted_margin
         description: >
-          cfdb's predicted margin for the game. Model selection deliberately prefers a model
+          M4D's predicted margin for the game. Model selection deliberately prefers a model
           that populates this column over the merely most recent one — six of seven models
           are probability models with no margin at all, so ordering by recency alone rendered
           attribution for 1,701 rows and a margin for none.
@@ -1113,7 +1113,7 @@ models:
       - name: is_cover_edge_from_export
         description: >
           Whether the spread edge came from the pack's own export rather than being computed
-          by cfdb. Provenance, so a reader knows which numbers are the vendor's.
+          by M4D. Provenance, so a reader knows which numbers are the vendor's.
       - name: is_wp_edge_from_export
         description: The same provenance flag for the win-probability edge.
       - name: devig_method
@@ -1638,7 +1638,7 @@ models:
         description: >
           The player's jersey number, from dim_athlete. A146, for Marc's player cell -
           "[Jersey #, Name, Year (left aligned)], Position (right aligned)".
-          NULL where cfdb holds no athlete dimension row for that player-season, which is 8.61%
+          NULL where M4D holds no athlete dimension row for that player-season, which is 8.61%
           of 2024+ rows - an honest absence rather than a gap, and the page renders it as one.
       - name: position
         description: >
@@ -1708,7 +1708,7 @@ models:
       the API listed first. Fixed by fanning out per game: 375,925 rows over 1,884 games,
       with 2024 conference coverage now even (Big Ten 151, ACC 149, SEC 144, Big 12 127).
       The fan-out runs over completed FBS games, which is the project's scope, so absence
-      means "cfdb did not ask about that game", never "the player did nothing".
+      means "M4D did not ask about that game", never "the player did nothing".
       Published on the weekly cadence; see srv_player_stats.
     columns:
       - name: play_stat_sk
@@ -1915,7 +1915,7 @@ models:
   - name: srv_team_roster
     description: >
       Team page, Roster section. One row per player on a team's roster in a season — 68,357
-      rows across 2024-2026, which is every season cfdb holds a roster feed for. A 2019 team
+      rows across 2024-2026, which is every season M4D holds a roster feed for. A 2019 team
       page has no roster and says so, because /roster is `recent` scope and that is not a
       defect.
       Straight off dim_athlete with no aggregation: the dimension's grain is already
@@ -3036,7 +3036,7 @@ models:
           team scores. R-201 verified the identity on 1,930 games: the two rows of a game
           always sum to the total, and the larger of the pair is always
           `(total + abs(spread)) / 2`.
-          NOT "expected points". These come from the market, not from cfdb's model, and
+          NOT "expected points". These come from the market, not from M4D's model, and
           "expected" reads as a prediction — the one framing the training-pack license cares
           about (R-201 section 2.1). Called line-implied everywhere, Excel header included.
       - name: points_vs_line_implied_final
@@ -3127,7 +3127,7 @@ models:
           double every row of this view, and a scalar subquery raises instead.
       - name: attribution
         description: >
-          CFBD credit. NO cfdb model prediction travels on this view — box scores, advanced
+          CFBD credit. NO M4D model prediction travels on this view — box scores, advanced
           stats and arithmetic on published market numbers — so it deliberately does not
           borrow dim_model_version's disclaimer, which would imply predictions that are not
           here. AC-G.41 is satisfied by the column existing and being accurate, not by it
@@ -3591,7 +3591,7 @@ models:
       - name: spread_at_close_basis
         description: >
           PROVENANCE, and the reason this column exists. `observed_before_kickoff` means
-          cfdb sampled the line while the market was live. `as_recorded_by_cfbd` means our
+          M4D sampled the line while the market was live. `as_recorded_by_cfbd` means our
           snapshot history begins 2026-08-15, so for an older game the only line we hold is
           whatever CFBD returned when we fetched it — a real market number whose timestamp
           is our fetch time, not a pre-kickoff observation. Calling both "close" would
@@ -3836,7 +3836,7 @@ models:
           not a forecast we observed.
       - name: pregame_wp_basis
         description: >
-          PROVENANCE, and the reason the column exists. `observed_before_kickoff` means cfdb
+          PROVENANCE, and the reason the column exists. `observed_before_kickoff` means M4D
           sampled it while the game was still ahead; `as_recorded_by_cfbd` means the value
           is real but its timestamp is our fetch time. Measured: only 131 of 1,891 games
           have a genuine pre-kickoff observation, and all 131 are 2026 — snapshotting began
@@ -4005,9 +4005,9 @@ models:
         description: Which book that closing total came from.
       - name: total_at_close_basis
         description: >
-          How the closing total was obtained: `observed_before_kickoff` is a snapshot cfdb
+          How the closing total was obtained: `observed_before_kickoff` is a snapshot M4D
           took, `as_recorded_by_cfbd` is a number reported afterwards. Not the same claim —
-          cfdb began sampling on 15 August 2026, so earlier games carry the second.
+          M4D began sampling on 15 August 2026, so earlier games carry the second.
       - name: market_implied_home_points
         description: >
           `(total - spread) / 2` — what the market's own two numbers imply the home team
@@ -4266,7 +4266,7 @@ models:
         description: >
           Earliest season the warehouse holds drives for. Identical on every row by
           construction, so a page with no rows for its game can still read it with a
-          `limit 1` and say "cfdb holds drives from 2024" instead of rendering nothing.
+          `limit 1` and say "M4D holds drives from 2024" instead of rendering nothing.
         data_tests: [not_null]
       - name: drives_max_season
         description: Latest season the warehouse holds drives for. Same constant-column reasoning.
@@ -4332,7 +4332,7 @@ models:
       - name: offense_color_source
         description: >
           Which rung of the color ladder the rail color came from: primary or alternate are
-          the team's own, adjusted and fallback are cfdb's. Only the last two are debt worth
+          the team's own, adjusted and fallback are M4D's. Only the last two are debt worth
           flagging, and a page renders them as a Degraded state rather than a failure.
         data_tests: [not_null]
       - name: offense_logo_url
@@ -4888,7 +4888,7 @@ models:
         description: >
           The smallest games_counted behind any team in this row. WARNING, inherited from
           srv_team_week's own header: games_counted is NOT "games played" — it is the completed
-          games cfdb holds BOTH sides' box scores for. Carried so a reader can see the
+          games M4D holds BOTH sides' box scores for. Carried so a reader can see the
           denominator the week's figures rest on. Early in a season it is 1, and the spread is
           correspondingly wide: measured on 2026 week 2, stddev was 139.2 against 59.0 on 2025
           week 12.

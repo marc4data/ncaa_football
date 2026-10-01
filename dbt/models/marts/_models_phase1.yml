@@ -454,7 +454,7 @@ models:
         description: Wins divided by games played, 3dp.
       - name: tiebreak_rank
         description: >
-          cfdb's own ordering within (season, conference). CFBD has no standings endpoint, so
+          M4D's own ordering within (season, conference). CFBD has no standings endpoint, so
           this is our logic and the page must label it as such.
       - name: tiebreak_basis
         description: Names the rule applied, so the UI can attribute the ordering rather than implying an official standing.
@@ -513,7 +513,7 @@ models:
 
   - name: fct_api_usage
     description: >
-      Consumption against every metered external resource cfdb depends on, at one row per
+      Consumption against every metered external resource M4D depends on, at one row per
       (resource, observed_at). Two resources in one fact because the question asked of them
       is identical and asked at the same moment: are we about to lose a dependency? The
       failure modes are not symmetrical — CFBD publishes a limit and reports position
@@ -959,7 +959,7 @@ models:
       SEVERAL ROWS PER PLAY IS NORMAL: a completed pass produces a passer, a receiver and a
       reception, each its own row, and one athlete can record two different stats on one play.
       THIS FACT IS TRUNCATED UPSTREAM AND THAT IS THE MOST IMPORTANT THING ABOUT IT. CFBD's
-      spec states /plays/stats is "limited to 2,000 records" per request and cfdb fetches it
+      spec states /plays/stats is "limited to 2,000 records" per request and M4D fetches it
       per season-week, so every week returns exactly 2,000 rows and stops. It covers 375 of
       the 3,410 games that have box scores — about 11% — and the survivors skew heavily to
       one conference (118 of 177 covered 2024 games are SEC), which is the API's ordering
