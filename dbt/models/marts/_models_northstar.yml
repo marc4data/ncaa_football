@@ -5,7 +5,7 @@ models:
     description: >
       One row per poll CFBD publishes, derived from the data rather than hardcoded — the
       poll list is not stable across eras, and a fixed list would silently drop a poll the
-      API added. `division` and `is_committee` are cfdb's classification, not CFBD's: the
+      API added. `division` and `is_committee` are M4D's classification, not CFBD's: the
       API returns only a display name.
     columns:
       - name: poll_sk
@@ -142,7 +142,7 @@ models:
       Model Training Pack's 42-column export contract essentially verbatim — column names
       are NOT changed to house style, so that when a number here disagrees with the pack's
       own leaderboard the first question ("are these the same quantity?") is answerable.
-      model_version and prediction_ts are cfdb's addition to the pack's grain, and they are
+      model_version and prediction_ts are M4D's addition to the pack's grain, and they are
       what make in-season re-scoring append rather than overwrite.
       SIGN CONVENTION: margin = away_points - home_points, so a NEGATIVE margin means the
       HOME team won, and spread < 0 means the home team was favored. Preserved verbatim

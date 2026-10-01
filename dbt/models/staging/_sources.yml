@@ -336,7 +336,7 @@ sources:
         # it has no Databricks equivalent and the analytics build excludes it by tag.
         tags: ['postgres_only']
         description: >
-          cfdb's own telemetry, not a CFBD endpoint. Databricks Free Edition documents no
+          M4D's own telemetry, not a CFBD endpoint. Databricks Free Edition documents no
           account-level API, so warehouse consumption cannot be read back and is measured
           client-side by src/warehouse_usage.py instead.
         columns:
@@ -573,7 +573,7 @@ sources:
   # hours, because the alert could not leave the host.
   - name: ops
     description: >
-      cfdb's own pipeline telemetry, written directly to Postgres by src/*.py. Postgres-only:
+      M4D's own pipeline telemetry, written directly to Postgres by src/*.py. Postgres-only:
       there is no Databricks equivalent and the analytics build excludes what reads it.
     schema: ops
     tables:

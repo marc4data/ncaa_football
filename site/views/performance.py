@@ -199,7 +199,16 @@ def body(page) -> None:
             # internal label and `cfdb` is the project name, not the brand.
             Col("model_name", "Model", render=_model_label),
             Col("split", "Split"),
-            Col("season", "Season", "num", dp=0),
+            # 🚨 A274 (cfdb-main-R-4533). `kind="num"` PRINTED `2,025`. R-280 put the
+            # comma-free rule on `kind="plain"` and `lib/table.py` has carried its
+            # reason in a comment since — *"a season is 2025 and a game id is
+            # 401752817; a comma in either is a bug"* — while this call site, the only
+            # `season` column on the site, asked for a measure.
+            #
+            # ⚠️ `opens="desc"` IS NOT DECORATION: `plain` defaults to ascending and
+            # `num` to descending, so fixing the format alone would also have flipped
+            # the newest season off the top of the first click.
+            Col("season", "Season", "plain", opens="desc"),
             Col("games", "n", "num", dp=0),
             Col("mean_absolute_margin_error", "Margin MAE", "num", opens="asc"),
             Col("winner", "SU", render=_winner),

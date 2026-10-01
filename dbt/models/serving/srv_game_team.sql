@@ -683,7 +683,7 @@ select
     -- NO MODEL PREDICTION TRAVELS ON THIS VIEW, so this is CFBD credit and says so rather
     -- than borrowing dim_model_version's disclaimer, which would imply predictions that are
     -- not here. Box scores, advanced stats and arithmetic on published market numbers.
-    'Data from CollegeFootballData.com. Contains no cfdb model predictions.'
+    'Data from CollegeFootballData.com. Contains no M4D model predictions.'
                                           as attribution
 from {{ ref('fct_game_team') }} t
 join {{ ref('fct_game_team_advanced') }} a on a.game_team_sk = t.game_team_sk
