@@ -116,12 +116,15 @@ segmented as (
 )
 
 select
-    {{ surrogate_key(['model_name', 'model_version', 'split', 'season',
+    {{ surrogate_key(['segmented.model_name', 'segmented.model_version', 'split', 'season',
                       'is_out_of_sample_week', 'segment_type', 'segment_value']) }}
         as model_performance_sk,
-    model_name,
-    model_version,
-    model_family,
+    -- ⚠️ QUALIFIED: `dim_model_version` carries these three names too, so the join above
+    -- makes them ambiguous. The measures belong to `segmented`; only `attribution` is the
+    -- dimension's.
+    segmented.model_name,
+    segmented.model_version,
+    segmented.model_family,
     split,
     season,
     is_out_of_sample_week,
@@ -151,10 +154,29 @@ select
          then round(cast(actual_home_wins as numeric) / winner_scored, 4) end
         as actual_home_win_rate,
     -- Licence requirement, carried as data so a page cannot render the numbers without it.
-    'cfdb model, built on a licensed CFB Model Training Pack (2026 Edition). '
-        || 'Not an official CollegeFootballData.com prediction.' as attribution,
+    --
+    -- 🚨 A270 (cfdb-main-R-4405). THIS WAS A SECOND COPY OF THE STRING, AND THE TWO COPIES
+    -- DISAGREED THE DAY A NON-PACK MODEL LANDED. A269 keyed `dim_model_version.attribution`
+    -- by `model_name` so an own-features model would stop claiming the licensed pack — and
+    -- this constant went on asserting the pack over EVERY model, so the page published
+    -- "built on a licensed CFB Model Training Pack" over a model that uses no pack row and
+    -- no pack-derived column. A false provenance claim, rendered in good faith, because the
+    -- page reads this view and not the mart.
+    --
+    -- ⚠️ FOUND BY READING THE PUBLISHED VIEW, NOT THE MART. The mart was correct throughout;
+    -- `dim_model_version` and this view are the two places `claude_code/CLAUDE.md` names as
+    -- carrying the wording, and naming two places is how they come to disagree (R-574).
+    --
+    -- ✅ SO THERE IS ONE SOURCE NOW. The attribution is JOINED from the dimension on the
+    -- version that produced these rows, which makes a future divergence impossible rather
+    -- than merely unlikely — and leaves the licence requirement exactly as binding, since a
+    -- row without a matching version carries no attribution and the page says so (AC-G.41).
+    mv.attribution,
     ao_src.as_of_ts
 from segmented
+join {{ ref('dim_model_version') }} mv
+  on mv.model_name = segmented.model_name
+ and mv.model_version = segmented.model_version
 -- AC-G.35: the page's "as of" timestamp is a COLUMN, sourced from when this view's
 -- underlying data was last loaded, never from now() in the app. Per-domain rather than
 -- global: a betting line and a 1936 poll have very different notions of fresh.
