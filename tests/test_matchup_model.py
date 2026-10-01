@@ -149,7 +149,7 @@ def _captions(entries):
 
 _RECONCILIATION = re.compile(
     r"Actual margin (?P<home>[-+][\d.,]+) from the home perspective "
-    r"\((?P<stored>[-+][\d.,]+) as cfdb stores it, away minus home\)")
+    r"\((?P<stored>[-+][\d.,]+) as it is stored, away minus home\)")
 
 
 def _reconciliation(entries):
