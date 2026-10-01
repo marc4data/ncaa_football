@@ -128,6 +128,44 @@ def display_name(model_name) -> str:
     return DISPLAY_NAMES.get(model_name, model_name)
 
 
+# 🚨 WHY A KNOWN MODEL HAS NO ROWS — PER MODEL, BECAUSE THE REASONS DIFFER AND A READER IS
+# BEING TOLD A FACT (cfdb-main-R-4352).
+#
+# `views/performance.py` hardcoded ONE reason and ONE filename, which was correct for as long
+# as `fastai_home_win` was the only model that could reach that branch. A269 added a second,
+# and the page immediately told a reader that `cfdb_wtc_c1_own_features_tuned`'s "export was
+# never written" and that it was "waiting on fastai_wp_predictions.csv" — two false
+# statements, one of them naming a different model's file.
+#
+# ⚠️ BOTH ENTRIES ARE TRUE ONLY WHILE THE MODEL IS UNLOADED, which is self-limiting: the card
+# is drawn only for models absent from the table, so an entry stops being rendered the moment
+# its rows arrive.
+_NOT_LOADED_DEFAULT = (
+    "its export",
+    "This model has no rows yet. It is listed rather than omitted: a shorter table would "
+    "hide the absence.")
+
+NOT_LOADED = {
+    "fastai_home_win": (
+        "fastai_wp_predictions.csv",
+        "This model's export was never written, so it has no rows. It is listed rather "
+        "than omitted: a shorter table would hide the absence."),
+    # ⚠️ DESCRIBED, NOT NAMED, AND THAT IS DELIBERATE. The real filenames are
+    # `cfdb_wtc_c1_own_*.csv`, and putting them here would print `cfdb` and `wtc_c1` in front
+    # of a reader — the exact string this model is being renamed to avoid. `missing_object`
+    # is read by a person, so it says what the thing IS.
+    "cfdb_wtc_c1_own_features_tuned": (
+        "its 2026 Week 5 forecast and 2025 backtest exports",
+        "This model's exports are written and have not been loaded yet. It is listed "
+        "rather than omitted: a shorter table would hide the absence."),
+}
+
+
+def not_loaded_reason(model_name) -> tuple:
+    """`(missing_object, explanation)` for a known model with no rows."""
+    return NOT_LOADED.get(model_name, _NOT_LOADED_DEFAULT)
+
+
 # Every model the site knows about, withdrawn or not. `views/performance.py` renders a
 # visible row for each one it did not load (AC-13.4) and needs the full set to do it.
 ALL_MODELS = frozenset(WITHDRAWN) | PUBLISHED
