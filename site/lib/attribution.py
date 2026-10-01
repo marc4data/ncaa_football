@@ -12,13 +12,28 @@ import streamlit as st
 # Rendered as HTML, not markdown. The footer goes through st.markdown with
 # unsafe_allow_html, which does NOT also parse markdown link syntax — so the previous
 # `[text](url)` rendered as literal brackets and the attribution was not a link at all.
-# F2-09 replaces the SENTENCE ABOUT attribution, not the attribution. The link stays —
-# AC-G.43 requires it on every page — and the meta-commentary becomes a plug, which is
-# better copy anyway.
+# The link stays, because AC-G.43 requires it on every page.
+#
+# 🚨 A269 (cfdb-main-R-4351), MARC'S WORDING, AND THE SECOND SENTENCE IS THE POINT. This read
+# "Data sourced from the CollegeFootballData API. Really cool site, check it out!" — a credit
+# and a plug, saying nothing about WHOSE the predictions are.
+#
+# That was sufficient while every model on the site was a pack model carrying "Not an
+# official CollegeFootballData.com prediction" in its own `attribution` column. It stops
+# being sufficient the moment a model ships that does NOT carry that line — and
+# `cfdb_wtc_c1_own_features_tuned` must not, because that sentence is a CFB Model Training
+# Pack requirement and this model uses no pack row and no pack-derived column. The
+# non-affiliation statement therefore moves to where it is true of everything: the footer,
+# on every page.
+#
+# ⚠️ THE PLUG IS GONE, AND THAT IS A VISIBLE COPY CHANGE ON EVERY PAGE rather than a
+# technical one — it is Marc's wording, adopted verbatim, and it is flagged in A269's report
+# so he can put the plug back if he wants it.
 CFBD_CREDIT = (
-    'Data sourced from the '
+    'Data from '
     '<a href="https://collegefootballdata.com" target="_blank" rel="noopener">'
-    'CollegeFootballData API</a>. Really cool site, check it out!')
+    "CollegeFootballData.com</a>. Predictions are M4D's own and are not affiliated "
+    'with or endorsed by CollegeFootballData.com.')
 
 # THE TWO ICONS ARE INLINE SVG FOR THE SAME REASON THE DOME IS (R-141, R-175).
 #

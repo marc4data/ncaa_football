@@ -79,7 +79,54 @@ WITHDRAWN = {
 #   2. It is the only model this site still publishes, so the Model Performance page is now a
 #      one-row table rather than a leaderboard. That is stated on the page, not left to be
 #      noticed.
-PUBLISHED = frozenset({"random_forest_score"})
+#
+# ✅ `cfdb_wtc_c1_own_features_tuned` — ADDED A269 (cfdb-main-R-4352), AND CLEAN FOR A
+# DIFFERENT REASON FROM `random_forest_score`: it is not a pack model at all.
+#
+# No row of `cfdb_model_pack/training_data.csv` and no column derived from it enters it. Its
+# features are computed by `modeling/own_features.py` from CollegeFootballData.com API data
+# on disk — `stats/game/advanced`, `stats/game/havoc`, `drives`, `talent` — plus the
+# warehouse's `staging.stg_games`.
+#
+# ⚠️ THE SAME TWO HONEST QUALIFICATIONS THE ENTRY ABOVE MAKES, because "line-free" is the
+# claim this whole file exists to adjudicate:
+#   1. The market line IS present in its export, as `spread`. It is there FOR EVALUATION —
+#      grading against the closing number — and is never a model input. `modeling/leakage.
+#      assert_no_leakage` refuses `spread` outright, and refuses any column carrying the
+#      tokens margin, spread, cover, ats, win, winner, result or score; every column any
+#      model sees passes through it (`modeling/leakage.py:27,30`).
+#   2. Every feature for a game uses only games that kicked off before it.
+#
+# 📊 Its 2025 test, scored once after pre-registration: margin average miss 11.98 against the
+# market's 11.76 — a gap of +0.22 with a 95% range of −0.03 to +0.48, which is within noise.
+PUBLISHED = frozenset({"random_forest_score", "cfdb_wtc_c1_own_features_tuned"})
+
+# 🚨 WHAT A READER IS CALLED, WHICH IS NOT WHAT THE WAREHOUSE JOINS ON (cfdb-main-R-4352).
+#
+# `model_name` is the key: it comes from the export's own column, `stg_predictions.sql:45`
+# reads it from the payload, and every mart and serving view joins on it. It must not change.
+#
+# ⚠️ BUT IT IS ALSO RENDERED RAW TO READERS — `views/performance.py:140` and
+# `lib/workbook.py:1664` both do `("model_name", "Model")` — so without this map a reader
+# meets `cfdb_wtc_c1_own_features_tuned`. Two things are wrong with that string in front of a
+# person: `wtc_c1` is an internal session-and-config label, and `cfdb` is the VS CODE PROJECT
+# NAME, not the brand. The brand is Marc4Data / M4D, and `cfdb` reads as a reference to
+# CollegeFootballData.com — the last thing one of Marc's own models should appear to claim.
+#
+# ⚠️ A name absent from this map falls back to its `model_name`, which is the right default:
+# the pack's models are already known to readers by those names and renaming them is not this
+# round's business.
+DISPLAY_NAMES = {
+    "cfdb_wtc_c1_own_features_tuned": "M4D Own-Features Model (v1)",
+}
+
+
+def display_name(model_name) -> str:
+    """What to show a reader for `model_name`. The key itself when nothing is mapped."""
+    if not isinstance(model_name, str) or not model_name:
+        return ""
+    return DISPLAY_NAMES.get(model_name, model_name)
+
 
 # Every model the site knows about, withdrawn or not. `views/performance.py` renders a
 # visible row for each one it did not load (AC-13.4) and needs the full set to do it.

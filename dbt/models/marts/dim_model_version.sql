@@ -38,12 +38,40 @@ select
     split_count,
     first_season,
     last_season,
-    -- The pack's default split, recorded so a page can state it rather than assume it.
-    'train <= 2023, validate = 2024, test = 2025' as split_definition,
+    -- 🚨 A269 (cfdb-main-R-4351). THESE THREE WERE CONSTANTS AND TWO OF THEM ARE LICENCE AND
+    -- PROVENANCE STATEMENTS, so a constant made the page assert something untrue the moment a
+    -- model arrived that was not built from the pack.
+    --
+    -- `cfdb_wtc_c1_own_features_tuned` uses NO row of the pack's training data and NO column
+    -- derived from it: its features are computed by `modeling/own_features.py` from CFBD API
+    -- data on disk plus `staging.stg_games` (cfdb-wtc-R-2530's provenance section). So:
+    --
+    --  * it must NOT carry "built on a licensed CFB Model Training Pack" — that is false;
+    --  * it must NOT carry "Not an official CollegeFootballData.com prediction" — that
+    --    sentence is a PACK REQUIREMENT, and a model using no pack material sits under the
+    --    CFBD API terms instead, where this project's own boundary doc records attribution
+    --    as "Optional (do it anyway)". The footer carries the CFBD credit for every page.
+    --
+    -- ⚠️ THE PACK'S SIX MODELS KEEP EXACTLY THE TEXT THEY ALREADY HAD. Their branch below is
+    -- byte-for-byte what this file carried before, deliberately: one change per reason.
+    case when model_name = 'cfdb_wtc_c1_own_features_tuned'
+         then 'walk-forward 2018–2024; test = 2025, scored once'
+         else 'train <= 2023, validate = 2024, test = 2025'
+    end as split_definition,
     -- The pack version is the feature-set version: the 86 training columns are fixed by the
-    -- edition, so the edition identifies them.
-    'CFB Model Training Pack 2026' as feature_set_version,
-    -- Licence requirement, carried in the data so a page cannot render without it.
-    'cfdb model, built on a licensed CFB Model Training Pack (2026 Edition). '
-        || 'Not an official CollegeFootballData.com prediction.' as attribution
+    -- edition, so the edition identifies them. The own-features model names its own set.
+    case when model_name = 'cfdb_wtc_c1_own_features_tuned'
+         then 'M4D own features v1 (2026-09)'
+         else 'CFB Model Training Pack 2026'
+    end as feature_set_version,
+    -- Licence requirement for the pack's models, carried in the data so a page cannot render
+    -- without it. ⚠️ `M4D` is the BRAND; `cfdb` is only the VS Code project name and reads as
+    -- a reference to CollegeFootballData.com, which is the last thing an own-model should be
+    -- branded with (cfdb-main-R-3650).
+    case when model_name = 'cfdb_wtc_c1_own_features_tuned'
+         then 'M4D original model — every feature computed in-house from '
+              || 'CollegeFootballData.com data.'
+         else 'cfdb model, built on a licensed CFB Model Training Pack (2026 Edition). '
+              || 'Not an official CollegeFootballData.com prediction.'
+    end as attribution
 from versions

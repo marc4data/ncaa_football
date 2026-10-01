@@ -159,8 +159,18 @@ def test_the_page_does_not_contradict_the_live_withdrawal_note():
     """`lib/models.WITHDRAWAL_NOTE` is on the site today. Two descriptions of one decision are
     two things that can drift, so the page must agree with it on the facts that matter."""
     from lib import models
-    assert len(models.WITHDRAWN) == 6 and len(models.PUBLISHED) == 1, (
+    # 🚨 A269 (cfdb-main-R-4352). THIS USED TO ASSERT `len(PUBLISHED) == 1`, AND THAT WAS A
+    # PROXY THAT STOPPED MEANING WHAT IT SAID. The page's claim is about THE PACK — "of the
+    # seven models cfdb had trained, six were given the closing spread" — so what it must
+    # agree with is the WITHDRAWN count and the fate of the pack's seventh. `PUBLISHED`
+    # growing by a model from OUTSIDE the pack contradicts nothing on the page.
+    #
+    # ⚠️ Re-aimed rather than relaxed: the two things the page actually states are still
+    # pinned, and a seventh withdrawal or an un-withdrawn pack model still fails this.
+    assert len(models.WITHDRAWN) == 6, (
         "the withdrawal changed shape; the Methodology wording says six of seven")
+    assert "random_forest_score" in models.PUBLISHED, (
+        "the pack's seventh model is what the page's 'six of seven' leaves published")
     assert "six" in PAGE.lower()
     # both say the data still exists
     assert "deleted" in PAGE.lower() or "warehouse" in PAGE.lower()

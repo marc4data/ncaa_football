@@ -418,3 +418,45 @@ def test_the_workbooks_sheet_sql_resolves_the_hole_by_mechanism():
     # And no sheet ships with the hole unresolved.
     for sheet in list(workbook.SHEETS) + list(workbook.PENDING_SHEETS):
         assert "{PUBLISHED_MODELS_ONLY}" not in sheet.sql, sheet.name
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A269 (cfdb-main-R-4352) — the site can name a model that is not the pack's
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+def test_the_own_features_model_is_published_and_not_withdrawn():
+    """It is clean for a different reason from `random_forest_score`: not a pack model at all.
+
+    ⚠️ `is_withdrawn` treats UNKNOWN names as not withdrawn, so this would render even without
+    being listed. Being in `PUBLISHED` is what puts it on Model Performance at all, because
+    `views/performance.py` builds its rows from `ALL_MODELS`.
+    """
+    assert "cfdb_wtc_c1_own_features_tuned" in models.PUBLISHED
+    assert "cfdb_wtc_c1_own_features_tuned" in models.ALL_MODELS
+    assert not models.is_withdrawn("cfdb_wtc_c1_own_features_tuned")
+
+
+def test_the_withdrawal_sql_does_not_name_the_own_features_model():
+    """The exclusion is keyed on WITHDRAWN, so a published model must not appear in it.
+
+    📊 A269 measured that `PUBLISHED_MODELS_ONLY` is an EXCLUSION of the six withdrawn names
+    rather than an inclusion of the published ones — so adding to `PUBLISHED` leaves the SQL
+    byte-identical. This pins that, because an exclusion that silently became an inclusion
+    would hide every model nobody had listed.
+    """
+    assert "cfdb_wtc_c1_own_features_tuned" not in models.PUBLISHED_MODELS_ONLY
+    for name in models.WITHDRAWN:
+        assert name in models.PUBLISHED_MODELS_ONLY
+
+
+def test_a_reader_is_never_shown_the_internal_model_key():
+    """`cfdb_wtc_c1` is a session-and-config label and `cfdb` is the project name, not the
+    brand. The join key does not change; what a reader sees is mapped."""
+    assert models.display_name("cfdb_wtc_c1_own_features_tuned") == "M4D Own-Features Model (v1)"
+    assert "wtc" not in models.display_name("cfdb_wtc_c1_own_features_tuned")
+    assert "cfdb" not in models.display_name("cfdb_wtc_c1_own_features_tuned").lower()
+    # an unmapped name falls back to itself, which is right for the pack's known names
+    assert models.display_name("random_forest_score") == "random_forest_score"
+    # and a null model is an empty label, not the string "None" (R-2255's family)
+    assert models.display_name(None) == ""
+    assert models.display_name("") == ""
