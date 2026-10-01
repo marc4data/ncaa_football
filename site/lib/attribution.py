@@ -9,6 +9,8 @@ from typing import Optional
 import pandas as pd
 import streamlit as st
 
+from lib import models
+
 # Rendered as HTML, not markdown. The footer goes through st.markdown with
 # unsafe_allow_html, which does NOT also parse markdown link syntax — so the previous
 # `[text](url)` rendered as literal brackets and the attribution was not a link at all.
@@ -109,8 +111,29 @@ def model_attribution(df: Optional[pd.DataFrame]) -> None:
     if len(values) == 0:
         st.caption("⚠ Attribution is null on every row — see AC-G.44.")
         return
+
+    # 🚨 A270 (cfdb-main-R-4401). MEASURED BEFORE CHANGING ANYTHING, because the predicted
+    # failure was not the real one: this already loops over DISTINCT values, so two model
+    # families produce TWO captions — neither suppressed, neither duplicated.
+    #
+    # ⚠️ THE REAL DEFECT IS THAT NEITHER CAPTION SAYS WHICH MODEL IT DESCRIBES. Stacked
+    # unlabelled, a reader meets a CFB Model Training Pack licence statement directly above an
+    # "every feature computed in-house" one and cannot tell which covers which — which lets
+    # the pack's licence line read as though it covered a model built from no pack material.
+    # That is precisely what keying `dim_model_version` by `model_name` was for, undone at the
+    # last inch by the page.
+    #
+    # ✅ ONE PROVENANCE RENDERS EXACTLY AS BEFORE. Matchup passes a single row and Odds and
+    # Edge Finder pass single-model frames, so nothing but a genuinely mixed page changes.
+    if len(values) == 1 or "model_name" not in df.columns:
+        for value in values:
+            st.caption(str(value))
+        return
+
     for value in values:
-        st.caption(str(value))
+        covered = df.loc[df["attribution"] == value, "model_name"].dropna().unique()
+        names = sorted(models.display_name(n) for n in covered)
+        st.caption(f"**{', '.join(names)}** — {value}" if names else str(value))
 
 
 def footer() -> None:
