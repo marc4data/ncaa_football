@@ -1266,7 +1266,11 @@ def _excursions(row) -> None:
 
 
 def _model(row) -> None:
-    st.subheader(fmt.title_case("Model"))
+    # ⚠️ THE CAPITALS IN `M4D` ARE LOAD-BEARING (Marc, 2026-10-01). `fmt.title_case`
+    # leaves an already mixed-case word alone and capitalises an all-lowercase one, so
+    # `"M4D Model"` passes through intact while `"m4d model"` would ship as `M4d Model`.
+    # Measured both ways before this was written.
+    st.subheader(fmt.title_case("M4D Model"))
     floor = row.get("training_week_floor")
     week = row.get("week")
 
@@ -1345,8 +1349,13 @@ def _model(row) -> None:
     # returns it unchanged rather than raising, so the name would blank silently.
     #
     # ✅ THE VERSION STAYS RAW. `2b6f59115259` is a content hash, and it is honest.
+    #
+    # ⚠️ AND NO LEADING `Model ` LABEL (cfdb-main-R-3666). It was written when this
+    # value was a raw filename and needed one; `display_name` now returns a name that
+    # introduces itself, and under a section headed "M4D Model" the label put the word
+    # three times in two lines. The name carries it.
     st.caption(
-        f"Model {models.display_name(row.get('model_name'))} "
+        f"{models.display_name(row.get('model_name'))} "
         f"({row.get('model_family')}), version "
         f"{row.get('model_version_key')}. Predicted score "
         f"{fmt.number(row.get('predicted_away_points'), '', 1)} – "
