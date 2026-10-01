@@ -78,11 +78,11 @@ COLUMNS = """
     provider_key, line_snapshot_ts, market_implied_home_win_probability,
     market_implied_away_win_probability, overround, devig_method,
     market_implied_home_points, market_implied_away_points,
-    model_name, model_family, predicted_margin, predicted_margin_home_perspective,
+    model_name, model_family, predicted_margin,
     predicted_total_points, predicted_home_points, predicted_away_points,
     home_win_probability, confidence_bucket, home_cover_edge, home_win_probability_edge,
     is_out_of_sample_week, training_week_floor,
-    actual_margin, actual_margin_home_perspective,
+    actual_margin,
     series_games, series_home_team_wins, series_away_team_wins, series_ties,
     series_first_season, series_last_season,
     model_version_key, attribution, as_of_ts,
@@ -1158,44 +1158,10 @@ def _market_card(row) -> None:
                          "M4D holds lines from 2013 onward, and only for games books priced.")
             return
 
-        rows = []
-        side, favorite = _favorite(row)
-        if pd.notna(row.get("spread")):
-            if favorite:
-                # THE SPREAD IS SHOWN FROM THE FAVORITE'S SIDE, which is how Marc reads it and
-                # how a book prints it. The magnitude is the same number either way; only the
-                # name in front of it changes, and it comes from the column rather than from
-                # the sign.
-                line = f"{favorite} {fmt.number(-abs(float(row['spread'])), 'spread')}"
-            else:
-                # No favorite side recorded, so the number is stated as the column defines it
-                # — from the home perspective — and labelled that way rather than guessed.
-                home = row.get("home_abbreviation") or row.get("home_team") or "home"
-                line = f"{html.escape(str(home))} {fmt.signed(row.get('spread'), 'spread')}"
-            # 🚨 R-645: THE MOVE COMES FROM THE SAME ROW AS THE PRICE ABOVE IT.
-            #
-            # This chip used to read `line_spread_move_from_open` while the number beside it
-            # came from `spread` — two different books, in one row, and the row did not even
-            # add up: Marc's 401856679 showed Bovada's 5 next to DraftKings' 7.0, when
-            # 5 − (−1.5) is 6.5. Excel read the unprefixed column and showed 6.5, so the two
-            # surfaces disagreed about a fact on a betting page.
-            #
-            # ⚠️ AND THE CAPTION BELOW ALREADY STATED THE RULE THIS BROKE: "a move measured
-            # against a different book's price is not a move."
-            #
-            # Measured 2026-09-11: the two families disagree on 1,107 of the 1,332 games that
-            # carry both — 83% — and name a different book on 1,739 of 1,886 — 92%. The
-            # unprefixed family wins because it is what `spread` and `over_under` above
-            # already are, so the row reconciles; because the Excel export already reads it
-            # and already labels it `Book`; and because it covers 330 games the `line_`
-            # family does not, which would otherwise lose their chip entirely.
-            rows.append(("Spread", line,
-                         _move_chip(row.get("spread_move_from_open"),
-                                    "spread_move_from_open")))
-        if pd.notna(row.get("over_under")):
-            rows.append(("Over/Under", fmt.number(row.get("over_under"), "over_under"),
-                         _move_chip(row.get("total_move_from_open"),
-                                    "total_move_from_open")))
+        _side, favorite = _favorite(row)
+        # cfdb-wtc-R-2550: a `rows` list built here was never drawn — `_board` below renders the
+        # card, each team's own line in the market's sign — and it was the one place the app
+        # flipped a spread (the negated absolute spread, for the favourite's side). Removed, not rewired.
 
         st.markdown(_board(row), unsafe_allow_html=True)
 
@@ -1336,11 +1302,18 @@ def _model(row) -> None:
     # a model that scored this game and produced no cover edge is an absence worth showing.
     # A column that is null for every row ever published is not an absence, it is a promise
     # the page cannot keep.
+    # ONE CONVENTION FOR EVERY LINE ON THE PAGE — the market's (cfdb-wtc-R-2550, Marc's
+    # decision 2026-10-01). The header prints `HOME spread`; the model's line sits beside it
+    # as `HOME predicted_margin`. Both are STORED away − home, so a home favourite is negative
+    # in both and the two read side by side: "UGA −6.5" against "UGA −7.3". Read as stored —
+    # no flipped copy and no sign arithmetic here (G-3).
+    home_label = html.escape(str(row.get("home_abbreviation") or row.get("home_team") or "home"))
     tiles = [
-        ("Predicted margin (home)",
-         fmt.signed(row.get("predicted_margin_home_perspective"),
-                    "predicted_margin_home_perspective"),
-         "Positive means the model has the home team winning by that many.", False),
+        ("Model line",
+         (f"{home_label} {fmt.signed(row.get('predicted_margin'), 'spread')}"
+          if pd.notna(row.get("predicted_margin")) else fmt.EM_DASH),
+         "The model's line from the home team's side, read like the market's: negative means "
+         "the home team is favored by that many.", False),
         ("Predicted total",
          fmt.number(row.get("predicted_total_points"), "predicted_total_points"),
          None, False),
@@ -1349,7 +1322,9 @@ def _model(row) -> None:
          "M4D's own model, not the market-implied bar above the header.",
          pd.isna(row.get("home_win_probability"))),
         ("Cover edge",
-         fmt.signed(row.get("home_cover_edge"), "home_cover_edge"), None, False),
+         fmt.signed(row.get("home_cover_edge"), "home_cover_edge"),
+         "Market line minus model line. Positive means the model likes the home side more "
+         "than the market does.", False),
     ]
     tiles = [tile for tile in tiles if not tile[3]]
     cols = st.columns(len(tiles))
@@ -1377,15 +1352,12 @@ def _model(row) -> None:
         f"{fmt.number(row.get('predicted_away_points'), '', 1)} – "
         f"{fmt.number(row.get('predicted_home_points'), '', 1)} (away – home).")
 
-    actual = row.get("actual_margin_home_perspective")
-    if pd.notna(actual):
-        # Both readings come from the view. The app does not flip the sign: a sign
-        # convention is a definition, and definitions live in dbt (G-3).
+    # THE RESULT IS A SCORE, SAID ONCE (cfdb-wtc-R-2550). It used to print the margin two
+    # ways, home-positive and as stored; a result needs no sign convention at all.
+    if pd.notna(row.get("home_points")) and pd.notna(row.get("away_points")):
         st.caption(
-            f"Actual margin "
-            f"{fmt.signed(actual, 'actual_margin_home_perspective')} from the home "
-            f"perspective ({fmt.signed(row.get('actual_margin'), 'actual_margin')} as "
-            f"it is stored, away minus home). Same result, read from the two ends.")
+            f"Final score {int(row.get('away_points'))} – {int(row.get('home_points'))} "
+            f"(away – home).")
     attribution.model_attribution(pd.DataFrame([row]))
 
 

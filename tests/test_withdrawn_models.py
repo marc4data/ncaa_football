@@ -6,7 +6,7 @@ numbers describe a model that had already seen the answer.
 
 🚨 WHAT MAKES THIS A TEST FILE RATHER THAN A ONE-LINE FILTER: the same claim is published by
 FOUR different surfaces — the Model Performance page, the Edge Finder and its track record,
-the Odds Board's "Model margin" line, and the Excel workbook. A withdrawal that covers three
+the Odds Board's "Model line" caption, and the Excel workbook. A withdrawal that covers three
 of them is not a withdrawal, and the one it is most likely to miss is the workbook, because
 that is a file Marc sends to people and it outlives the page it disagrees with.
 
@@ -234,7 +234,7 @@ def test_suppression_reads_the_odds_boards_spelling_too():
         srv_game        model_name='random_forest_score'  model_version_key='98d34949266b'
         srv_odds_board  no model_name at all              model_version_key='random_forest_score'
 
-    Keying only on `model_name` leaves the Odds Board — which renders "Model margin … edge"
+    Keying only on `model_name` leaves the Odds Board — which renders "Model line … cover edge"
     — outside the withdrawal, silently, while looking wired up.
     """
     odds = pd.DataFrame({"model_version_key": ["ridge_margin_expanded"],

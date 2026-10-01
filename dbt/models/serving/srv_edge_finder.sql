@@ -62,6 +62,7 @@ select
     markets.spread,
     markets.predicted_margin,
     -- Derived, explicitly named, and the only place a home-perspective sign exists.
+    -- retiring — no site consumer since cfdb-wtc-R-2550; CONTRACT after deploy
     -1 * markets.predicted_margin as predicted_margin_home_perspective,
     -1 * markets.spread           as spread_home_perspective,
     markets.predicted_home_win_probability,

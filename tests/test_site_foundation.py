@@ -283,13 +283,15 @@ def test_edge_finder_empty_copy_is_empty_not_degraded():
 def test_matchup_does_not_flip_the_sign_convention_itself():
     """G-3: a sign convention is a definition, and definitions live in dbt.
 
-    The page reads actual_margin_home_perspective rather than negating actual_margin, so
-    there is exactly one place the convention is expressed.
+    cfdb-wtc-R-2550: the page now reads every line AS STORED — `spread` and `predicted_margin`,
+    both away − home, the market's sign — and prints the result as a score, so it needs no
+    home-perspective copy at all. The site-wide version of this guard, by AST rather than by
+    string, is `tests/test_one_line_convention.py`.
     """
     from pathlib import Path
     source = (Path(__file__).resolve().parents[1] / "site" / "views" / "matchup.py").read_text()
-    assert "actual_margin_home_perspective" in source
-    assert "-float(" not in source and "-1 *" not in source
+    assert "predicted_margin_home_perspective" not in source
+    assert "-float(" not in source and "-1 *" not in source and "-abs(" not in source
 
 
 def test_matchup_reads_series_ties_rather_than_deriving_them():

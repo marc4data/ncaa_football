@@ -606,7 +606,7 @@ def test_the_MARKET_is_drawn_before_the_MODEL(row_panel):
     passes the swap. Presence has now passed this class on the game header, the win-probability
     bar and the yardage columns; this reads the ORDER.
     """
-    entries = row_panel(predicted_margin=-7.4, predicted_margin_home_perspective=7.4,
+    entries = row_panel(predicted_margin=-7.4,
                         predicted_total_points=48.5, home_cover_edge=5.9,
                         home_win_probability=None, training_week_floor=5, week=12,
                         season=2026, attribution="cfdb model, licensed pack")

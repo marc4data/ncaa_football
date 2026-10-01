@@ -1921,7 +1921,7 @@ _ALL_SHEETS = [
     Sheet("Edges", "srv_edge_finder", """
         select week, away_team, home_team, market, edge_unit, edge_value, edge_magnitude,
                model_name, confidence_bucket,
-               spread_home_perspective, predicted_margin_home_perspective,
+               spread, predicted_margin,
                market_implied_home_win_probability, predicted_home_win_probability,
                actual_home_cover, cover_correct, home_win_correct, is_out_of_sample_week,
                count(*) over () as rows_in_scope
@@ -1936,8 +1936,9 @@ _ALL_SHEETS = [
         ("market", "Market"), ("edge_unit", "Unit"),
         ("edge_value", "Edge"), ("edge_magnitude", "Edge size"),
         ("model_name", "Model"), ("confidence_bucket", "Confidence"),
-        ("spread_home_perspective", "Market spread"),
-        ("predicted_margin_home_perspective", "Model margin"),
+        # The market's convention for both lines (cfdb-wtc-R-2550): negative = home favored.
+        ("spread", "Market line (home)"),
+        ("predicted_margin", "Model line (home)"),
         ("market_implied_home_win_probability", "Market win prob"),
         ("predicted_home_win_probability", "Model win prob"),
         ("actual_home_cover", "Home covered"), ("cover_correct", "Cover hit"),

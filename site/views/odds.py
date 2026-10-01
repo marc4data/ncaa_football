@@ -67,7 +67,7 @@ def body(page) -> None:
             limit 900
         """, {"season": season, "week": week})
         table.as_of_caption(df)
-        # A227 (cfdb-main-R-3101): this page renders "Model margin … edge …" from the
+        # A227 (cfdb-main-R-3101): this page renders "Model line … cover edge …" from the
         # prediction columns on the odds row, so a withdrawn model would keep publishing a
         # figure here after the Model Performance page had stopped. 📊 A no-op today —
         # srv_odds_board carries only `random_forest_score` — and the load path is what
@@ -145,8 +145,9 @@ def _board(df: pd.DataFrame) -> None:
         table.render(rows, columns, caption="srv_odds_board")
         if pd.notna(head.get("predicted_margin")):
             st.caption(
-                f"Model margin {fmt.signed(head['predicted_margin'], 'margin')} "
-                f"(away minus home), cover edge "
+                f"Model line {head['home_team_display']} "
+                f"{fmt.signed(head['predicted_margin'], 'spread')} "
+                f"(home team's line, read like the market's: negative = home favored), cover edge "
                 f"{fmt.signed(head.get('home_cover_edge'), 'edge')}. "
                 f"Implied probabilities de-vigged by {head.get('devig_method')}.")
         else:
