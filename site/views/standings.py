@@ -205,7 +205,7 @@ def _by_conference(df: pd.DataFrame, scope) -> None:
 
         basis = rows["tiebreak_basis"].dropna().unique()
         if len(basis):
-            st.caption(f"Tiebreak: {basis[0]}. cfdb's own ordering, not an official "
+            st.caption(f"Tiebreak: {basis[0]}. M4D's own ordering, not an official "
                        f"standing — real conference tiebreakers involve head-to-head.")
 
 

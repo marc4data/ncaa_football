@@ -4900,7 +4900,7 @@ def _kpi_row(scope, depth: int) -> None:
             # about our data. *No games yet* is a statement about the calendar.
             states.empty(
                 "The week in one row would be here.",
-                f"cfdb holds no week summary for {scope.describe()} yet.")
+                f"M4D holds no week summary for {scope.describe()} yet.")
             return
 
         row = summary.iloc[0]

@@ -321,7 +321,7 @@ def describe(row) -> str:
     described by the wrong one.
     """
     if row is None:
-        return "cfdb holds no distribution for this week yet"
+        return "M4D holds no distribution for this week yet"
     denominators = (("team_games_in_week", "team-games"),
                     ("teams_in_week", "teams"),
                     ("games_in_week", "games"))
@@ -417,7 +417,7 @@ def thumbnail(row, label: str = "", width: int = 120) -> str:
     height = THUMBNAIL_HEIGHT
     if row is None:
         body = (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
-                f"title='cfdb holds no distribution for this week yet'>"
+                f"title='M4D holds no distribution for this week yet'>"
                 f"<span class='cfdb-dist-label'>{label}</span>"
                 f"<span class='cfdb-dist-none'>–</span></span>")
         return body
@@ -1143,7 +1143,7 @@ def panel(row, label: str = "", width: int = 420, *,
     """
     if row is None:
         return ("<div class='cfdb-dist-panel cfdb-dist-empty'>"
-                "cfdb holds no distribution for this week yet.</div>")
+                "M4D holds no distribution for this week yet.</div>")
 
     counts = parse_bin_counts(row.get("bin_counts"))
     # 🚨 A243 (cfdb-main-R-3320). > **MARC, v20:** *"Remove the histograms. Increase the vertical
@@ -1543,7 +1543,7 @@ def box(row, value=None, width: int = 240, label: str = "",
     """
     if row is None:
         return (f"<span class='cfdb-dist cfdb-dist-empty' style='width:{width}px' "
-                f"title='cfdb holds no distribution for this week yet'>\u2013</span>")
+                f"title='M4D holds no distribution for this week yet'>\u2013</span>")
 
     def num(key):
         raw = row.get(key)

@@ -31,11 +31,18 @@ from lib import models
 # ⚠️ THE PLUG IS GONE, AND THAT IS A VISIBLE COPY CHANGE ON EVERY PAGE rather than a
 # technical one — it is Marc's wording, adopted verbatim, and it is flagged in A269's report
 # so he can put the plug back if he wants it.
+# 🚨 A272 (cfdb-main-R-4502), MARC'S CALL: THE PLUG COMES BACK, AFTER THE REQUIRED MEANING.
+# A269 replaced "Data sourced from the CollegeFootballData API. Really cool site, check it
+# out!" with the non-affiliation wording and dropped the plug; this round restores it as a
+# SEPARATE, FINAL sentence. ⚠️ THE ORDER IS THE POINT — the credit and the non-affiliation
+# statement are what the licence and the provenance need, so they lead; the plug is voice and
+# follows. A reader who stops after the first two sentences has still read everything that
+# matters.
 CFBD_CREDIT = (
     'Data from '
     '<a href="https://collegefootballdata.com" target="_blank" rel="noopener">'
     "CollegeFootballData.com</a>. Predictions are M4D's own and are not affiliated "
-    'with or endorsed by CollegeFootballData.com.')
+    'with or endorsed by CollegeFootballData.com. Really cool site, check it out!')
 
 # THE TWO ICONS ARE INLINE SVG FOR THE SAME REASON THE DOME IS (R-141, R-175).
 #

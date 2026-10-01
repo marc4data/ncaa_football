@@ -362,12 +362,17 @@ def test_THE_THUMBNAIL_HAS_NO_AXIS():
 
 def test_NO_SINGLE_WEEK_AND_NO_ROW_ARE_DIFFERENT_ABSENCES():
     """AC-G.11. A214's model publishes a row for every week that has fixtures, so *no row*
-    means cfdb holds nothing for that week — a statement about our data. *Every week is
-    selected* is a statement about the filter. They must not read the same."""
+    means M4D holds nothing for that week — a statement about our data. *Every week is
+    selected* is a statement about the filter. They must not read the same.
+
+    ⚠️ A272 (cfdb-main-R-4500): the pinned sentence moved from `cfdb` to `M4D` with the brand
+    sweep. The PIN IS THE POINT and is not loosened to a substring — it is the exact absence
+    wording a reader sees, and pinning it is what stops the two absences collapsing into one.
+    """
     src = ast.get_source_segment(SOURCE, _func("_kpi_row"))
     assert "This summary is per week" in src
-    assert "cfdb holds no week summary" in src
-    assert src.index("This summary is per week") < src.index("cfdb holds no week summary"), \
+    assert "M4D holds no week summary" in src
+    assert src.index("This summary is per week") < src.index("M4D holds no week summary"), \
         "the week=All branch must be checked before the empty-frame branch"
 
 

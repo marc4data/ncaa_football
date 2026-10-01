@@ -98,7 +98,7 @@ def week_floor_note(floor=None, season=None, clause: str = "") -> str:
 # it. Reader-facing copy is normalised; internal identifiers are a separate question.
 SPREAD_SIGN_NOTE = (
     "**A negative spread means the home team is favored** — and a negative predicted "
-    "margin means the model agrees. cfdb stores margin as away points minus home points, "
+    "margin means the model agrees. margin is stored as away points minus home points, "
     "so both numbers point the same way."
 )
 

@@ -88,7 +88,7 @@ def _slate_caption(scope, now=None) -> None:
     if not kicked.empty:
         st.caption(
             f"**{len(kicked)} game{'s' if len(kicked) != 1 else ''} in progress.** Results "
-            f"appear here as each one finals — cfdb records a score only once CFBD reports "
+            f"appear here as each one finals — M4D records a score only once CFBD reports "
             f"the game complete, so a game still being played is absent rather than shown "
             f"with a partial score.")
         return
