@@ -89,8 +89,16 @@ def body(page) -> None:
         model_options = ["All models"] + model_names
         chosen_model = params.get("model")
         with controls[1]:
+            # 🚨 A276 (cfdb-main-R-4590). `format_func` CHANGES WHAT IS SHOWN AND NOT WHAT IS
+            # RETURNED, which is the whole requirement: this control filters the query below
+            # on `model_name = :model`, so its VALUE must stay the warehouse key. It is the
+            # same call `performance._breakdowns` already makes — ⚠️ and `format_func` is
+            # handed the VALUE, unlike `Col.render` two screens down, which is handed the ROW.
+            #
+            # ⚠️ "All models" PASSES THROUGH UNCHANGED. `display_name` returns any unmapped
+            # string as itself, so the sentinel survives without a special case.
             model = st.selectbox(
-                "Model", model_options,
+                "Model", model_options, format_func=models.display_name,
                 index=model_options.index(chosen_model)
                 if chosen_model in model_options else 0)
         with controls[2]:
@@ -172,6 +180,22 @@ def _nothing_yet(season: int, floor: int, minimum: float, market_label: str) -> 
         "an opinion it does not have.")
 
 
+def _model_label(row) -> str:
+    """The display name, never the warehouse key (cfdb-main-R-4590).
+
+    🚨 A275 RENDERED THE DEPLOYED PAGE AND READ `cfdb_wtc_c1_own_features_tuned` IN THIS
+    COLUMN. `cfdb` is the VS Code project rather than the brand, and `wtc_c1` is a modeling
+    session's scaffolding name — neither belongs in front of a reader.
+
+    ⚠️ `render` IS HANDED THE ROW, NOT THE VALUE, and `display_name` returns anything it does
+    not recognise UNCHANGED rather than raising — so passing `models.display_name` straight in
+    would hand it a Series, get the Series back, and blank or garble the column SILENTLY.
+    `_bucket`, `_result` and the flag lambda below all take `row` too (A270's trap, which
+    `performance._model_label` carries the same note about).
+    """
+    return models.display_name(row.get("model_name"))
+
+
 def _bucket(row) -> str:
     """The pack writes an empty string where it has no bucket, and an empty cell reads as
     a value. Blank and absent are the same claim here, so both render as an em dash."""
@@ -200,7 +224,7 @@ def _edges(df: pd.DataFrame, market: str) -> None:
         Col("away_team", "Away"),
         Col("home_team", "Home"),
         Col("edge_value", "Edge", "signed"),
-        Col("model_name", "Model"),
+        Col("model_name", "Model", render=_model_label),
         Col("bucket", "Confidence", render=_bucket),
         Col("result", "Result", render=_result),
         Col("flag", "", render=lambda r: chips.out_of_sample_chip_html(
