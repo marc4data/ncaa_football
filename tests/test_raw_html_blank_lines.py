@@ -33,6 +33,7 @@ and 246 prose. Raw strings containing a blank line today: 0. Prose strings: 1** 
 `views/methodology.py:18`, whose paragraphs ARE blank lines, and which the guard cannot reach
 because it does not pass `unsafe_allow_html`.
 """
+import inspect
 import re
 import sys
 from pathlib import Path
@@ -222,3 +223,56 @@ def test_the_browser_instrument_looks_for_both_signatures():
         "break that calibrated it")
     assert "SKIP" in INSTRUMENT and "STYLE" in INSTRUMENT, (
         "the <style>/<script> exclusion is gone — 36 CSS comments would be reported as hits")
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A277 (cfdb-main-R-4622) — THE GUARD MUST NOT HIDE STREAMLIT FROM THE REST OF THE SUITE
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+
+def test_installing_the_guard_leaves_streamlits_signature_visible(guarded):
+    """🚨 B159 MEASURED THE COST OF THE OPPOSITE: 130 calls inspected alone, 75 in the suite.
+
+    A wrapper written as `(*args, **kwargs)` REPLACES the signature, so
+    `inspect.signature(st.markdown)` reported a bare `**kwargs` and
+    `test_streamlit_kwargs_exist` waved through every keyword on 55 of the site's calls —
+    including the one that does not exist in the pinned Streamlit, which is the exact defect
+    that guard exists to catch.
+
+    ✅ `functools.wraps` sets `__wrapped__` and `inspect.signature` follows it.
+    """
+    before = {fn: inspect.signature(getattr(st, fn)) for fn in rawhtml.GUARDED}
+    rawhtml.install()
+    for fn in rawhtml.GUARDED:
+        after = inspect.signature(getattr(st, fn))
+        assert after == before[fn], (
+            f"installing the guard changed the visible signature of st.{fn}:\n"
+            f"  before {before[fn]}\n  after  {after}")
+        assert not any(p.kind == p.VAR_KEYWORD for p in after.parameters.values()), (
+            f"st.{fn} now reports a bare **kwargs, so every keyword passes a signature check")
+
+
+def test_no_earlier_test_has_left_the_guard_installed():
+    """⚠️ THE OTHER HALF, AND IT IS A DIFFERENT DEFECT FROM THE ONE ABOVE.
+
+    `site/app.py:41` calls `install()`, so any test that executes or imports the app patches
+    Streamlit for the whole session. `tests/conftest.py` carries an AUTOUSE fixture that puts
+    the bindings back after every test; this asserts the result rather than the mechanism.
+
+    🚨 IT TAKES NO FIXTURE ON PURPOSE. Asking for `guarded` would restore the bindings around
+    this test and hide exactly what it is looking for.
+    """
+    leaked = [fn for fn in rawhtml.GUARDED
+              if getattr(getattr(st, fn), rawhtml._MARK, False)
+              or getattr(getattr(DeltaGenerator, fn), rawhtml._MARK, False)]
+    assert not leaked, (
+        f"an earlier test left the raw-HTML guard installed on {leaked}. Every test after it "
+        f"ran against a patched Streamlit — the cross-contamination cfdb-wta-R-2976 measured "
+        f"at 42% of one guard's subject.")
+
+
+def test_the_conftest_fallback_names_agree_with_the_module():
+    """R-574: one list. The autouse fixture carries a fallback tuple because it must not force
+    `site/` onto `sys.path` at collection time — so the fallback is PINNED here rather than
+    left free to disagree with `rawhtml.GUARDED`."""
+    import conftest                                                  # noqa: PLC0415
+    assert tuple(conftest._GUARDED_FALLBACK) == tuple(rawhtml.GUARDED)

@@ -53,13 +53,22 @@ def test_empty_and_degraded_produce_different_output():
     assert "<code>fct_poll_rank</code>" in captured[1]
 
 
-def test_error_state_never_leaks_internals():
-    """AC-G.9: no traceback, host, connection string or credential reaches the screen."""
+def test_error_state_never_leaks_internals(monkeypatch):
+    """AC-G.9: no traceback, host, connection string or credential reaches the screen.
+
+    🚨 A277 (cfdb-main-R-4622): `monkeypatch`, NOT BARE ASSIGNMENT. These two lines used to
+    write lambdas straight onto the live `streamlit` module and never put them back, so every
+    test that ran afterwards saw an `st.button` and an `st.markdown` that accept anything.
+    📊 Measured: at the end of a full-suite run `st.button` reported a bare `**kwargs`, which
+    is precisely what makes `test_streamlit_kwargs_exist` stop covering a call — the defect
+    cfdb-wta-R-2976 measured at 42% of that guard's subject. **`monkeypatch` restores on
+    teardown; an assignment does not.**
+    """
     from lib import states
     import streamlit as st
     captured = []
-    st.markdown = lambda body, **kw: captured.append(body)     # type: ignore
-    st.button = lambda *a, **kw: False                          # type: ignore
+    monkeypatch.setattr(st, "markdown", lambda body, **kw: captured.append(body))
+    monkeypatch.setattr(st, "button", lambda *a, **kw: False)
     states.error("srv_game")
     body = captured[0]
     for leak in ("Traceback", "psycopg2", "password", "5432", "143.110"):
