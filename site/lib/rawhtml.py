@@ -56,6 +56,7 @@ not assumed: zero `<pre>`, zero `<textarea>`, zero `white-space:pre` in any of t
 modules or in `theme.py`. In HTML a run of whitespace between tags is already collapsed by the
 renderer, so removing a blank line from raw markup cannot change what is drawn.
 """
+import functools
 import re
 
 import streamlit as st
@@ -85,6 +86,28 @@ def collapse(markup: str) -> str:
     return BLANK_LINE.sub("\n", markup)
 
 
+# 🚨 A277 (cfdb-main-R-4622). `functools.wraps` IS LOAD-BEARING HERE, NOT TIDINESS.
+#
+# 📊 B159 MEASURED THE COST: its signature guard inspected 130 `st.<name>(..., keyword=...)`
+# calls run alone and **75 run inside the full suite** — 42% of its subject silently waved
+# through. The cause is this file. A wrapper written as `(*args, **kwargs)` REPLACES the real
+# signature, so `inspect.signature(st.markdown)` reported a bare `**kwargs` and every keyword
+# became "valid" — including one that does not exist in the installed Streamlit, which is the
+# precise defect that guard exists to catch.
+#
+# ✅ `functools.wraps` SETS `__wrapped__`, AND `inspect.signature` FOLLOWS IT BY DEFAULT, so
+# introspection sees Streamlit's own parameters even while the guard is installed. ⚠️ THE
+# WRAPPER IS STILL MORE PERMISSIVE AT RUNTIME than the signature it now reports, which is the
+# normal and intended shape of a forwarding decorator.
+#
+# 🚨 AND THIS CLOSES ONE OF TWO DEFECTS, NOT BOTH. It makes the patch HONEST TO INTROSPECTION;
+# it does not stop the patch LEAKING between tests. That half is `tests/conftest.py`'s autouse
+# restore, and the two are separate because a fix for either one alone leaves the other.
+#
+# ⚠️ `setattr(..., _MARK, True)` COMES AFTER `wraps`, DELIBERATELY: `functools.wraps` copies
+# `real.__dict__` over the wrapper's, so marking first would have the mark overwritten.
+
+
 def _wrap_plain(real):
     """The same guard for a module-level function that is NOT a bound method.
 
@@ -92,6 +115,7 @@ def _wrap_plain(real):
     anything else — a stub, or a future Streamlit that exposes a plain function — and it exists
     so that case is GUARDED rather than silently skipped.
     """
+    @functools.wraps(real)
     def guarded(body="", unsafe_allow_html=False, *args, **kwargs):
         if unsafe_allow_html and isinstance(body, str):
             body = collapse(body)
@@ -101,6 +125,7 @@ def _wrap_plain(real):
 
 
 def _wrap(real):
+    @functools.wraps(real)
     def guarded(self, body="", unsafe_allow_html=False, *args, **kwargs):
         # ⚠️ ONLY WHEN THE CALLER ASKED FOR RAW HTML. Everything else is prose and is handed
         # through byte for byte — see the module docstring's measurement of methodology.py.
@@ -108,8 +133,6 @@ def _wrap(real):
             body = collapse(body)
         return real(self, body, unsafe_allow_html, *args, **kwargs)
     setattr(guarded, _MARK, True)
-    guarded.__name__ = getattr(real, "__name__", "guarded")
-    guarded.__doc__ = getattr(real, "__doc__", None)
     return guarded
 
 

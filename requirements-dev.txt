@@ -1,3 +1,32 @@
 -r requirements.txt
+
+# 🚨 A277 (cfdb-main-R-4621). THE SUITE RUNS THE STREAMLIT THE SITE RUNS.
+#
+# `site/requirements.txt` pins `streamlit==1.61.1` — that file is what the site image
+# installs, so it IS production. The root `requirements.txt` above says `streamlit>=1.40`,
+# and until this line CI resolved that to whatever was newest: measured on CI's own log for
+# `0d82c49`, it downloaded **streamlit-1.64.0**, three minor versions past production.
+#
+# 🚨 THAT GAP COST THREE WEEKS AND IT WAS NOT A KEYWORD. B153 wrote
+# `st.container(..., wrap=True)`, which is valid in 1.63/1.64 and does not exist in 1.61.1,
+# so *Against the Spread* drew a failure card on every Matchup game page from mid-September
+# until B159 fixed it. Nothing in the project compared the two versions — CI could not, and
+# session B's worktree could not, because each installed the range.
+#
+# ⚠️ WHY HERE AND NOT IN `requirements.txt`. The root list is installed by
+# `Dockerfile.airflow` (the droplet's pipeline image) and by CI's `publish-path` and
+# `spec-drift` jobs. None of them renders a page, and pinning there would change what the
+# pipeline image installs on its next rebuild — a production-image change inside a round
+# whose whole point is that nothing reaches a page. **This file is what the suite installs,
+# locally and in CI's `lint-and-test` job, and the suite is what the signature guard runs
+# inside.** 📋 Whether the root list should carry streamlit at all is a separate finding.
+#
+# ⚠️ AND IT IS A TRADE, STATED RATHER THAN HIDDEN. Before this line the suite tested the
+# NEWEST streamlit and told us nothing about production; now it tests production and tells us
+# nothing about the next release. The weekly CI cron's dependency canary is unaffected — it
+# still floats the root list — but an UPGRADE is now a deliberate act: bump this line and
+# `site/requirements.txt` together, in one commit, and let the signature guard check the new
+# version before the image ships it.
+streamlit==1.61.1
 pytest>=8.0
 flake8>=7.0
