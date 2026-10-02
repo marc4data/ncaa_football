@@ -195,137 +195,190 @@ SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # it — SELECT on all 35 tables in the schema, and INSERT/UPDATE/DELETE all false on
 # `srv_game_team`. So this is a credential line and a default, not a new privilege.
 
-# 🚨 THE OUTCOME QUERIES ALWAYS EMIT A LINE, EVEN AT ZERO — A185 (cfdb-main-R-1878).
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# 🚨 A280 (cfdb-main-R-4711) — "LATE" MEANS THE FETCH ALREADY RAN
+# ══════════════════════════════════════════════════════════════════════════════════════════
 #
-# They used to carry `having count(*) > 0`, so a clean site produced NO LINE AT ALL. ⚠️ That
-# made two very different states identical on the wire: *"I looked and everything is on the
-# site"* and *"this script is an older copy that does not run this check"*. A184 shipped the
-# player line and named the hole in its own report rather than leaving it to be discovered.
+# > **MARC, 2026-10-02:** *"the deadmans switch has been noisy for several weeks and our policy
+# > is drop everything if we have a site issue. It's a time suck and productivity killer."*
 #
-# ✅ Now every check says what it found — `unboxed|0|0|-` is an answer — and the watcher
-# REQUIRES a line from each registered check. **A missing line is BLIND, not quiet.** Silence
-# is not success, which is this project's oldest standing rule and the one that cost it four
-# days in August.
-"${SERVING_PSQL[@]}" -c "
-  select 'unboxed|' || count(*) || '|' ||
-         coalesce(max(floor(extract(epoch from (now() - (game_date + 1))))::bigint), 0) || '|' ||
-         coalesce(string_agg(distinct 'w' || week, ',' order by 'w' || week), '-')
-  from serving.srv_game_team
-  where is_fbs_game
-    and is_completed
-    and points_for is not null
-    and season = (select max(season) from serving.srv_game_team where is_completed)
-    and game_date < (now() at time zone 'America/Los_Angeles')::date
-    and (not has_box_score or not has_box_advanced)
-" || echo "unboxed|MONITOR.cannot_read_published_serving|0|-"
+# 📊 HE IS RIGHT AND THE CAUSE IS STRUCTURAL. All five checks below watch feeds in
+# `BUCKET_IMMUTABLE_WK`, which only `results_refresh()` requests (`src/weekly.py:264`) — Sunday
+# 12:00 UTC, with a midweek twin on Thursday. **Games finish continuously; the data arrives
+# weekly.** So every check went red the day after a game and stayed red until the next fetch,
+# with nothing wrong.
+#
+# 📊 MEASURED FOR 2026 BEFORE CHANGING ANYTHING: at least one check was non-zero for
+# **89.6 hours a week — 53% of the season's wall clock.**
+#
+# ✅ SO THE BOUND BELOW IS NOT `now()`. A game is LATE only if the fetch that would have
+# brought it HAS ALREADY RUN. A game that went final after that fetch is PENDING, and pending
+# is not a fault.
+#
+# ⚠️ THE CLOCK IS THE HEARTBEAT THE DAG ALREADY WRITES, and the reason is in the DAG's own
+# docstring: `dags/weekly_refresh_dag.py:127` leaves `trigger_rule` at `all_success` because
+# *"a heartbeat from a failed run is a lie"*. **So a `weekly_results` or `weekly_midweek` beat
+# IS a successful `results_refresh`** — already written on success, needing no new producer,
+# and in a table this forced command already reads for the cadence lines.
+#
+# ⚠️ BOTH NAMES, AND ONLY THOSE TWO. `cfbd_results_refresh` and `cfbd_midweek_results` run the
+# same callable and both fetch this bucket; `weekly_pregame` runs `pregame_refresh`, which does
+# not, so counting it would move the bound without moving the data.
+#
+# 🚨 AND IF THE CLOCK CANNOT BE READ, EVERY CHECK REPORTS BLIND RATHER THAN CLEAN. A bound on a
+# null timestamp excludes every game silently and forever — R-760's shape on a monitor, and the
+# one way this change could be worse than the noise it removes. `ci/check_heartbeats.py`
+# annotates a `MONITOR.` value as BLIND and exits 1 (A278, cfdb-main-R-4651).
+LAST_FETCH="$("${PSQL[@]}" -c "
+  select to_char(max(beat_at) at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+  from ops.pipeline_heartbeat
+  where heartbeat_name in ('weekly_results', 'weekly_midweek')
+" 2>/dev/null | tr -d '[:space:]')"
 
-# 🚨 THE PLAYER HALF, AND IT IS A SEPARATE LINE BECAUSE IT IS A SEPARATE FAILURE — A184
-# (cfdb-main-R-1906). The check above asks whether the TEAM box score is on the site. On
-# 2026-09-21 that was true of all 150 of week 3's team-games while THREE OF TODAY'S FOUR
-# LEADERBOARDS still read "Nothing to show", because the player tables publish weekly and the
-# team tables publish hot. **The alarm was quiet through the exact incident it exists to catch.**
-#
-# ⚠️ IT CANNOT BE A COLUMN ON THE QUERY ABOVE. Checked against information_schema rather than
-# the model file (§2.2.1c.2): `srv_game_team` publishes `has_box_score` and `has_box_advanced`
-# and NOTHING about player stats, so this has to ask `srv_player_game_log` directly.
-#
-# ⚠️ AND TWO LINES RATHER THAN ONE SUM, because "the team box is missing" and "the player box
-# is missing" have different causes and different fixes — folding them into one count would
-# have reported week 3 as healthy the moment the team half landed.
-"${SERVING_PSQL[@]}" -c "
-  select 'unplayered|' || count(*) || '|' ||
-         coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
-         coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
-  from (select distinct season, season_type, week, game_id, game_date
-        from serving.srv_game_team
-        where is_fbs_game
-          and is_completed
-          and points_for is not null
-          and season = (select max(season) from serving.srv_game_team where is_completed)
-          and game_date < (now() at time zone 'America/Los_Angeles')::date) g
-  where not exists (select 1 from serving.srv_player_game_log p
-                     where p.game_id = g.game_id)
-" || echo "unplayered|MONITOR.cannot_read_published_serving|0|-"
+if [ -z "$LAST_FETCH" ]; then
+  for CHECK in unboxed unplayered unadvanced undriven uncurved; do
+    echo "$CHECK|MONITOR.cannot_read_last_successful_fetch|0|-"
+  done
+else
 
-  # ── A249 (cfdb-main-R-3472): THE ADVANCED BOX SCORE, AND IT IS THE CONDITION OF A DECOUPLING
+  # 🚨 THE OUTCOME QUERIES ALWAYS EMIT A LINE, EVEN AT ZERO — A185 (cfdb-main-R-1878).
   #
-  # 🚨 `game/box/advanced` IS NOW THE ONE ENDPOINT WHOSE FAILURE DOES NOT FAIL THE WEEKLY RUN
-  # (`Endpoint.optional`). That trade is only honest with a watcher: without one it swaps a loud
-  # weekly failure for a silent data gap, which is what every check above was added after —
-  # "EVERY ONE OF THESE WAS ADDED AFTER THE SITE WAS WRONG AND NOTHING SAID SO."
+  # They used to carry `having count(*) > 0`, so a clean site produced NO LINE AT ALL. ⚠️ That
+  # made two very different states identical on the wire: *"I looked and everything is on the
+  # site"* and *"this script is an older copy that does not run this check"*. A184 shipped the
+  # player line and named the hole in its own report rather than leaving it to be discovered.
   #
-  # ⚠️ IT WATCHES `srv_game_team.has_box_advanced`, NOT `srv_game_team_leader_usage`, AND THE
-  # REASON IS THE PUBLISH DESIGN — B156's ninth class, which is exactly what `unplayered` got
-  # wrong. 📊 `srv_game_team_leader_usage` is in HEAVY_SERVING and reaches the site ONLY through
-  # `publish_all()`, which only the weekly DAG calls; a daily threshold against it would fire
-  # every week for a reason that is not a fault. **`srv_game_team` is HOT and publishes
-  # two-hourly, and it already carries the fact.** Checked against the published column list
-  # rather than the model file (§2.2.1c.2): `has_box_advanced` is there.
-  #
-  # ⚠️ TEAM-GAMES, NOT GAMES, because that is this relation's grain and because one side of a
-  # fixture can have its advanced box while the other does not.
+  # ✅ Now every check says what it found — `unboxed|0|0|-` is an answer — and the watcher
+  # REQUIRES a line from each registered check. **A missing line is BLIND, not quiet.** Silence
+  # is not success, which is this project's oldest standing rule and the one that cost it four
+  # days in August.
   "${SERVING_PSQL[@]}" -c "
-    select 'unadvanced|' || count(*) || '|' ||
+    select 'unboxed|' || count(*) || '|' ||
+           coalesce(max(floor(extract(epoch from (now() - (game_date + 1))))::bigint), 0) || '|' ||
+           coalesce(string_agg(distinct 'w' || week, ',' order by 'w' || week), '-')
+    from serving.srv_game_team
+    where is_fbs_game
+      and is_completed
+      and points_for is not null
+      and season = (select max(season) from serving.srv_game_team where is_completed)
+      and game_date < ('$LAST_FETCH'::timestamp at time zone 'UTC'
+                         at time zone 'America/Los_Angeles')::date
+      and (not has_box_score or not has_box_advanced)
+  " || echo "unboxed|MONITOR.cannot_read_published_serving|0|-"
+
+  # 🚨 THE PLAYER HALF, AND IT IS A SEPARATE LINE BECAUSE IT IS A SEPARATE FAILURE — A184
+  # (cfdb-main-R-1906). The check above asks whether the TEAM box score is on the site. On
+  # 2026-09-21 that was true of all 150 of week 3's team-games while THREE OF TODAY'S FOUR
+  # LEADERBOARDS still read "Nothing to show", because the player tables publish weekly and the
+  # team tables publish hot. **The alarm was quiet through the exact incident it exists to catch.**
+  #
+  # ⚠️ IT CANNOT BE A COLUMN ON THE QUERY ABOVE. Checked against information_schema rather than
+  # the model file (§2.2.1c.2): `srv_game_team` publishes `has_box_score` and `has_box_advanced`
+  # and NOTHING about player stats, so this has to ask `srv_player_game_log` directly.
+  #
+  # ⚠️ AND TWO LINES RATHER THAN ONE SUM, because "the team box is missing" and "the player box
+  # is missing" have different causes and different fixes — folding them into one count would
+  # have reported week 3 as healthy the moment the team half landed.
+  "${SERVING_PSQL[@]}" -c "
+    select 'unplayered|' || count(*) || '|' ||
            coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
            coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
-    from serving.srv_game_team g
-    where g.is_fbs_game
-      and g.is_completed
-      and g.points_for is not null
-      and not g.has_box_advanced
-      and g.season = (select max(season) from serving.srv_game_team where is_completed)
-      and g.game_date < (now() at time zone 'America/Los_Angeles')::date
-  " || echo "unadvanced|MONITOR.cannot_read_published_serving|0|-"
+    from (select distinct season, season_type, week, game_id, game_date
+          from serving.srv_game_team
+          where is_fbs_game
+            and is_completed
+            and points_for is not null
+            and season = (select max(season) from serving.srv_game_team where is_completed)
+            and game_date < ('$LAST_FETCH'::timestamp at time zone 'UTC'
+                         at time zone 'America/Los_Angeles')::date) g
+    where not exists (select 1 from serving.srv_player_game_log p
+                       where p.game_id = g.game_id)
+  " || echo "unplayered|MONITOR.cannot_read_published_serving|0|-"
 
-# 🚨 THE REST OF SATURDAY — DRIVES AND THE WIN-PROBABILITY CURVE. A185 (cfdb-main-R-1914).
-#
-# The two checks above ask whether the BOX SCORES are on the site. They were both quiet on
-# 2026-09-20 while the Matchup drive panel and the win-probability chart had nothing for
-# Saturday's games, because /drives and /metrics/wp were fetched only by the weekly Sunday run.
-#
-# ⚠️ BOTH LINES ARE BOUNDED TO SEVEN DAYS, AND THAT IS A DELIBERATE TRADE RATHER THAN A DETAIL.
-# 📊 Measured on live published serving before writing them — completed FBS games with each:
-#
-#     season   games   drives            curve
-#     2024       919   100.00%           99.24%
-#     2025       934   100.00%           85.97%      <- B139's figure, confirmed
-#     2026       260   100.00%           99.23%
-#
-# 🚨 DRIVES ARE 100% AND THE CURVE IS NOT, SO AN UNBOUNDED CURVE ALARM WOULD NEVER GO QUIET.
-# The two 2026 games with no curve are Eastern Illinois at Minnesota and UTEP at Oklahoma, both
-# week 1, and CFBD has simply never published one for them — **nothing we do can fix those, and
-# an alarm nobody can act on is one everybody learns to ignore.** The window lets a permanent
-# gap age out while a Saturday failure still fires for seven days, which is many cadences.
-#
-# ⚠️ WHAT THE WINDOW COSTS, SAID PLAINLY: a gap that survives eight days goes quiet. That is
-# the price of not having a light that is always on, and it is why the bound is SEVEN days
-# rather than one — long enough that every recovery path has had several attempts first.
-"${SERVING_PSQL[@]}" -c "
-  select 'undriven|' || count(*) || '|' ||
-         coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
-         coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
-  from (select distinct week, game_id, game_date
-        from serving.srv_game_team
-        where is_fbs_game and is_completed and points_for is not null
-          and season = (select max(season) from serving.srv_game_team where is_completed)
-          and game_date < (now() at time zone 'America/Los_Angeles')::date
-          and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
-  where not exists (select 1 from serving.srv_drive d where d.game_id = g.game_id)
-" || echo "undriven|MONITOR.cannot_read_published_serving|0|-"
+    # ── A249 (cfdb-main-R-3472): THE ADVANCED BOX SCORE, AND IT IS THE CONDITION OF A DECOUPLING
+    #
+    # 🚨 `game/box/advanced` IS NOW THE ONE ENDPOINT WHOSE FAILURE DOES NOT FAIL THE WEEKLY RUN
+    # (`Endpoint.optional`). That trade is only honest with a watcher: without one it swaps a loud
+    # weekly failure for a silent data gap, which is what every check above was added after —
+    # "EVERY ONE OF THESE WAS ADDED AFTER THE SITE WAS WRONG AND NOTHING SAID SO."
+    #
+    # ⚠️ IT WATCHES `srv_game_team.has_box_advanced`, NOT `srv_game_team_leader_usage`, AND THE
+    # REASON IS THE PUBLISH DESIGN — B156's ninth class, which is exactly what `unplayered` got
+    # wrong. 📊 `srv_game_team_leader_usage` is in HEAVY_SERVING and reaches the site ONLY through
+    # `publish_all()`, which only the weekly DAG calls; a daily threshold against it would fire
+    # every week for a reason that is not a fault. **`srv_game_team` is HOT and publishes
+    # two-hourly, and it already carries the fact.** Checked against the published column list
+    # rather than the model file (§2.2.1c.2): `has_box_advanced` is there.
+    #
+    # ⚠️ TEAM-GAMES, NOT GAMES, because that is this relation's grain and because one side of a
+    # fixture can have its advanced box while the other does not.
+    "${SERVING_PSQL[@]}" -c "
+      select 'unadvanced|' || count(*) || '|' ||
+             coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
+             coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
+      from serving.srv_game_team g
+      where g.is_fbs_game
+        and g.is_completed
+        and g.points_for is not null
+        and not g.has_box_advanced
+        and g.season = (select max(season) from serving.srv_game_team where is_completed)
+        and g.game_date < ('$LAST_FETCH'::timestamp at time zone 'UTC'
+                         at time zone 'America/Los_Angeles')::date
+    " || echo "unadvanced|MONITOR.cannot_read_published_serving|0|-"
 
-"${SERVING_PSQL[@]}" -c "
-  select 'uncurved|' || count(*) || '|' ||
-         coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
-         coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
-  from (select distinct week, game_id, game_date
-        from serving.srv_game_team
-        where is_fbs_game and is_completed and points_for is not null
-          and season = (select max(season) from serving.srv_game_team where is_completed)
-          and game_date < (now() at time zone 'America/Los_Angeles')::date
-          and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
-  where not exists (select 1 from serving.srv_game_win_probability_play w
-                     where w.game_id = g.game_id)
-" || echo "uncurved|MONITOR.cannot_read_published_serving|0|-"
+  # 🚨 THE REST OF SATURDAY — DRIVES AND THE WIN-PROBABILITY CURVE. A185 (cfdb-main-R-1914).
+  #
+  # The two checks above ask whether the BOX SCORES are on the site. They were both quiet on
+  # 2026-09-20 while the Matchup drive panel and the win-probability chart had nothing for
+  # Saturday's games, because /drives and /metrics/wp were fetched only by the weekly Sunday run.
+  #
+  # ⚠️ BOTH LINES ARE BOUNDED TO SEVEN DAYS, AND THAT IS A DELIBERATE TRADE RATHER THAN A DETAIL.
+  # 📊 Measured on live published serving before writing them — completed FBS games with each:
+  #
+  #     season   games   drives            curve
+  #     2024       919   100.00%           99.24%
+  #     2025       934   100.00%           85.97%      <- B139's figure, confirmed
+  #     2026       260   100.00%           99.23%
+  #
+  # 🚨 DRIVES ARE 100% AND THE CURVE IS NOT, SO AN UNBOUNDED CURVE ALARM WOULD NEVER GO QUIET.
+  # The two 2026 games with no curve are Eastern Illinois at Minnesota and UTEP at Oklahoma, both
+  # week 1, and CFBD has simply never published one for them — **nothing we do can fix those, and
+  # an alarm nobody can act on is one everybody learns to ignore.** The window lets a permanent
+  # gap age out while a Saturday failure still fires for seven days, which is many cadences.
+  #
+  # ⚠️ WHAT THE WINDOW COSTS, SAID PLAINLY: a gap that survives eight days goes quiet. That is
+  # the price of not having a light that is always on, and it is why the bound is SEVEN days
+  # rather than one — long enough that every recovery path has had several attempts first.
+  "${SERVING_PSQL[@]}" -c "
+    select 'undriven|' || count(*) || '|' ||
+           coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
+           coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
+    from (select distinct week, game_id, game_date
+          from serving.srv_game_team
+          where is_fbs_game and is_completed and points_for is not null
+            and season = (select max(season) from serving.srv_game_team where is_completed)
+            and game_date < ('$LAST_FETCH'::timestamp at time zone 'UTC'
+                         at time zone 'America/Los_Angeles')::date
+            and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
+    where not exists (select 1 from serving.srv_drive d where d.game_id = g.game_id)
+  " || echo "undriven|MONITOR.cannot_read_published_serving|0|-"
+
+  "${SERVING_PSQL[@]}" -c "
+    select 'uncurved|' || count(*) || '|' ||
+           coalesce(max(floor(extract(epoch from (now() - (g.game_date + 1))))::bigint), 0) || '|' ||
+           coalesce(string_agg(distinct 'w' || g.week, ',' order by 'w' || g.week), '-')
+    from (select distinct week, game_id, game_date
+          from serving.srv_game_team
+          where is_fbs_game and is_completed and points_for is not null
+            and season = (select max(season) from serving.srv_game_team where is_completed)
+            and game_date < ('$LAST_FETCH'::timestamp at time zone 'UTC'
+                         at time zone 'America/Los_Angeles')::date
+            and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
+    where not exists (select 1 from serving.srv_game_win_probability_play w
+                       where w.game_id = g.game_id)
+  " || echo "uncurved|MONITOR.cannot_read_published_serving|0|-"
+fi
+
 
 # One line per failing test: name, how many rows failed, how long ago. Not the log.
 # 6 hours matches the failure window above so the two signals describe the same period.

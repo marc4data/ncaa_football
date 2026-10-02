@@ -1041,3 +1041,76 @@ def test_the_unadvanced_line_stays_QUIET_when_there_is_no_gap(monkeypatch, capsy
                         lambda _h: (fresh, {}, {}, _all_clear()))
     assert chk.main(["host"]) == 0, "a week with no gap must not fail the check"
     assert "UNADVANCED" not in capsys.readouterr().out
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A280 (cfdb-main-R-4711) — "LATE" MEANS THE FETCH ALREADY RAN
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#
+# > **MARC, 2026-10-02:** *"the deadmans switch has been noisy for several weeks and our policy
+# > is drop everything if we have a site issue."*
+#
+# 📊 All five outcome checks watch feeds in `BUCKET_IMMUTABLE_WK`, which only `results_refresh()`
+# requests — weekly. Games finish continuously. Measured for 2026 before the change: at least one
+# check was non-zero **89.6 hours a week, 53% of the season's wall clock**, with nothing wrong.
+
+
+OUTCOME_CHECKS = ("unboxed", "unplayered", "unadvanced", "undriven", "uncurved")
+
+
+def test_every_outcome_check_is_bounded_on_the_last_fetch_not_on_now():
+    """🚨 THE DEFECT WAS THE WORD "YESTERDAY". A check bounded on `now()` counts a game the day
+    after it is played, whatever the pipeline was scheduled to do — so a Thursday-night game was
+    red for about 59 hours by design.
+    """
+    code = _code(FORCED_COMMAND)
+    assert code.count("$LAST_FETCH'::timestamp") == len(OUTCOME_CHECKS), (
+        "every outcome check must bound on the last successful fetch, not on now()")
+    # ⚠️ THE TWO SURVIVING `now()` USES ARE LOOKBACK FLOORS, NOT UPPER BOUNDS. They say how far
+    # back to look; moving them would change what the check covers rather than when it fires.
+    floors = [ln for ln in code.splitlines()
+              if "now() at time zone 'America/Los_Angeles'" in ln]
+    assert len(floors) == 2 and all("> (now()" in ln and "- 7) g" in ln for ln in floors), floors
+
+
+def test_the_clock_is_the_heartbeat_the_dag_writes_on_success_only():
+    """⚠️ `dags/weekly_refresh_dag.py` leaves the weekly heartbeat at `all_success` because
+    "a heartbeat from a failed run is a lie" — which is exactly what makes it usable as the
+    last-successful-fetch clock, with no new producer.
+
+    🚨 AND ONLY THE TWO DAGS THAT FETCH THIS BUCKET. `weekly_pregame` runs `pregame_refresh`,
+    which does not request `BUCKET_IMMUTABLE_WK`, so counting its beat would move the bound
+    without moving the data.
+    """
+    code = _code(FORCED_COMMAND)
+    assert "ops.pipeline_heartbeat" in code and "LAST_FETCH=" in code
+    clause = code.split("LAST_FETCH=", 1)[1].split("\n\n", 1)[0]
+    assert "'weekly_results'" in clause and "'weekly_midweek'" in clause
+    assert "weekly_pregame" not in clause, (
+        "pregame_refresh does not fetch BUCKET_IMMUTABLE_WK; its beat is not this clock")
+
+
+def test_an_unreadable_clock_reports_blind_rather_than_clean():
+    """🚨 THE ONE WAY THIS CHANGE COULD BE WORSE THAN THE NOISE IT REMOVES.
+
+    A bound on a null timestamp excludes every game silently and forever — R-760's shape on a
+    monitor. So a missing clock emits `MONITOR.` for every check, which `check_heartbeats`
+    annotates as BLIND and exits 1 on (A278, cfdb-main-R-4651).
+    """
+    code = _code(FORCED_COMMAND)
+    assert 'if [ -z "$LAST_FETCH" ]; then' in code
+    blind = code.split('if [ -z "$LAST_FETCH" ]; then', 1)[1].split("else", 1)[0]
+    for check in OUTCOME_CHECKS:
+        assert check in blind, f"{check} has no BLIND branch when the clock is unreadable"
+    assert "MONITOR.cannot_read_last_successful_fetch" in blind
+
+
+def test_the_watcher_calls_an_unreadable_clock_blind_and_fails(monkeypatch, capsys):
+    """END TO END: the line the forced command emits, through the watcher that reads it."""
+    outcomes = _all_clear(
+        unplayered=(-1, 0, "MONITOR.cannot_read_last_successful_fetch"))
+    ages = {name: 60 for name in chk.CADENCES}
+    monkeypatch.setattr(chk, "read_ages", lambda host: (ages, {}, {}, outcomes))
+    code = chk.main(["cfdb_monitor@example"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert any(ln.startswith("::error::") and "BLIND" in ln for ln in out.splitlines()), out
