@@ -270,6 +270,25 @@ def main(argv=None) -> int:
                    or any(h not in outcomes for h in OUTCOME_LINES))
     if stale or missing or failures or failed_tests or unboxed_now:
         print()
+        # 🚨 A278 (cfdb-main-R-4651). AN ALARM THAT NAMES NOTHING MAKES THE READER DO THE
+        # TRIAGE, WHICH IS THE OPPOSITE OF WHAT AN ALARM IS FOR.
+        #
+        # 📊 MEASURED FROM THE RUN MARC PASTED ON 2026-10-02: five cadences inside budget, no
+        # failed task, no failed assertion, one `UNPLAYERED 2` line — and the process exited 1
+        # with **not one `::error::` in the output**. GitHub's run summary was blank and the
+        # email named nothing, so the only way to learn what fired was to open the log and read
+        # it. ⚠️ That is cfdb-main-R-673's shape thirteen rounds on, and Marc's reply was
+        # "AGAIN!!!".
+        #
+        # ✅ THE CONTEXT LINE GOES FIRST, AND IT IS THE HALF THAT WAS ACTUALLY MISSING. When
+        # every cadence is beating, the distinction between "the pipeline stopped" and "the
+        # pipeline is fine and a feed is late" is the whole triage, and a reader should not
+        # have to reconstruct it. It is only printed when it is TRUE — a run with a stale beat
+        # says nothing of the kind.
+        if not (stale or missing or failures or failed_tests):
+            print(f"::error::the pipeline is BEATING — all {len(ok)} cadences inside budget, "
+                  f"no failed task and no failed assertion. This is a CONTENT gap: something "
+                  f"the site should be showing has not arrived yet. The lines below say what.")
         for line in stale + missing:
             print(f"::error::heartbeat absent — {line}")
         for task, age in sorted(failures.items()):
@@ -280,6 +299,31 @@ def main(argv=None) -> int:
             print(f"::error::dbt test failed — {name}, {count} row(s), {describe(age)} ago. "
                   f"This is the ASSERTION rather than the task: anything downstream of the "
                   f"test, including the publish, did not run.")
+        # 🚨 THE THREE SILENT EXITS. `unboxed_now` is true in three different ways and NONE of
+        # them annotated anything before this round:
+        #
+        #   1. a real non-zero count — the site is missing something a reader would notice;
+        #   2. `MONITOR.<why>` (`count == -1`) — the forced command could not read published
+        #      serving, so the check could not run at all;
+        #   3. a head absent from `outcomes` entirely — the deployed forced command is an older
+        #      copy that does not emit this line (A185, cfdb-main-R-1878).
+        #
+        # ⚠️ 2 AND 3 ARE BLINDNESS RATHER THAN A GAP, and they are annotated as such: "the check
+        # could not answer" and "the site is missing data" are different facts and collapsing
+        # them would make the louder one hide the quieter.
+        for head, (label, meaning) in OUTCOME_LINES.items():
+            value = outcomes.get(head)
+            if value is None:
+                print(f"::error::BLIND — the {head} check reported nothing. The forced command "
+                      f"on the droplet does not emit this line, so nothing can tell you "
+                      f"whether the site is current for it.")
+            elif value[0] == -1:
+                print(f"::error::BLIND — the {head} check could not read published serving "
+                      f"({value[2]}). It cannot tell you whether the site is current.")
+            elif value[0]:
+                count, age, weeks = value
+                print(f"::error::{label} — {count} {meaning}. Oldest {describe(age)}, "
+                      f"week(s) {weeks}.")
         if stale or missing:
             print("::error::the pipeline has stopped emitting on at least one cadence. "
                   "Silence is not success.")
