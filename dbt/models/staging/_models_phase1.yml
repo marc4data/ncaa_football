@@ -1133,11 +1133,16 @@ models:
   - name: stg_game_box_team
     description: >
       Advanced box score at team grain, one row per (game, team) — the widest model here.
-      EIGHT BLOCKS EACH KEYED BY TEAM NAME with no positional guarantee, so each is unnested
+      TEN BLOCKS EACH KEYED BY TEAM NAME with no positional guarantee, so each is unnested
       independently and joined on (game_id, team); a positional read would work on almost
       every game and silently swap two teams' numbers on the one where CFBD ordered a block
       differently. The spine is a UNION across blocks so a team missing from one block does
-      not lose its row.
+      not lose its row. A286 added `passing` and `rushingAdvanced`, the first two blocks that
+      nest offense and defense sub-objects rather than being flat, so the side is part of the
+      column name; `rushing_advanced_` is prefixed rather than bare because the older
+      `rushing` block already owns line_yards, stuff_rate and power_success on this model and
+      the names would otherwise collide. Fields containing Available or Eligible are COVERAGE
+      DENOMINATORS, not statistics, and averaging one is meaningless.
     columns:
       - name: game_id
         data_tests: [not_null]
@@ -1158,15 +1163,448 @@ models:
           this team's defense caused or havoc its offense suffered is not stated by the API
           and is not asserted here — it needs a reconciliation against stg_game_team_havoc
           before anything downstream relies on the direction.
+      - name: passing_offense_air_yards_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `airYardsAttemptsAvailable`. CFBD's
+          own definition: Number of attempts with non-null air yards, including zero-yard
+          values. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the
+          paired measure could be computed from, so averaging it or summing it across games
+          answers nothing about football; it tells you whether the measure beside it is
+          trustworthy for this row.
+      - name: passing_offense_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `attempts`.
+      - name: passing_offense_completions
+        description: >
+          CFBD advanced passing at team grain, raw field `completions`.
+      - name: passing_offense_incompletions
+        description: >
+          CFBD advanced passing at team grain, raw field `incompletions`.
+      - name: passing_offense_interceptions
+        description: >
+          CFBD advanced passing at team grain, raw field `interceptions`.
+      - name: passing_offense_location_available_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `locationAvailableAttempts`. CFBD's
+          own definition: Eligible attempts with both recognized source depth and direction.
+          A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: passing_offense_location_eligible_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `locationEligibleAttempts`. CFBD's
+          own definition: Attempts eligible for advanced metrics and location analysis.
+          Existing overall production includes ineligible attempts; location buckets do not.
+          A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: passing_offense_ppa_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `ppaAttemptsAvailable`. CFBD's own
+          definition: Eligible attempts with non-null PPA, including zero and negative
+          values. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the
+          paired measure could be computed from, so averaging it or summing it across games
+          answers nothing about football; it tells you whether the measure beside it is
+          trustworthy for this row.
+      - name: passing_offense_success_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `successAttemptsAvailable`. CFBD's
+          own definition: Eligible attempts with non-null success. Missing success remains
+          in the success-rate denominator but does not count as successful. A COVERAGE
+          DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired measure could
+          be computed from, so averaging it or summing it across games answers nothing about
+          football; it tells you whether the measure beside it is trustworthy for this row.
+      - name: passing_offense_successful_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `successfulAttempts`. CFBD's own
+          definition: Eligible attempts with stored success equal to true.
+      - name: passing_offense_successful_ppa_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `successfulPpaAttemptsAvailable`.
+          CFBD's own definition: Successful eligible attempts with non-null PPA;
+          explosiveness denominator. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how
+          many attempts the paired measure could be computed from, so averaging it or
+          summing it across games answers nothing about football; it tells you whether the
+          measure beside it is trustworthy for this row.
+      - name: passing_offense_total_air_yards
+        description: >
+          CFBD advanced passing at team grain, raw field `totalAirYards`.
+      - name: passing_offense_total_yards
+        description: >
+          CFBD advanced passing at team grain, raw field `totalYards`.
+      - name: passing_offense_total_yards_after_catch
+        description: >
+          CFBD advanced passing at team grain, raw field `totalYardsAfterCatch`.
+      - name: passing_offense_total_yards_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `totalYardsAttemptsAvailable`.
+          CFBD's own definition: Number of attempts with non-null total yards, including
+          zero-yard incompletions and interceptions. A COVERAGE DENOMINATOR, NOT A
+          STATISTIC: it counts how many attempts the paired measure could be computed from,
+          so averaging it or summing it across games answers nothing about football; it
+          tells you whether the measure beside it is trustworthy for this row.
+      - name: passing_offense_yards_after_catch_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `yardsAfterCatchAttemptsAvailable`.
+          CFBD's own definition: Number of completed attempts with valid total yards and air
+          yards to calculate yards after catch, including zero-yard values. A COVERAGE
+          DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired measure could
+          be computed from, so averaging it or summing it across games answers nothing about
+          football; it tells you whether the measure beside it is trustworthy for this row.
+      - name: passing_offense_average_depth_of_target
+        description: >
+          CFBD advanced passing at team grain, raw field `averageDepthOfTarget`.
+      - name: passing_offense_average_yards_after_catch
+        description: >
+          CFBD advanced passing at team grain, raw field `averageYardsAfterCatch`.
+      - name: passing_offense_completion_rate
+        description: >
+          CFBD advanced passing at team grain, raw field `completionRate`.
+      - name: passing_offense_explosiveness
+        description: >
+          CFBD advanced passing at team grain, raw field `explosiveness`. CFBD's own
+          definition: Average available PPA on successful eligible attempts; zero if
+          unavailable. NOTE THE ZERO: CFBD returns 0 rather than null when it is
+          unavailable, so an average over games silently averages in rows that hold no data;
+          use the paired attempts-available counter to exclude them.
+      - name: passing_offense_ppa
+        description: >
+          CFBD advanced passing at team grain, raw field `ppa`. CFBD's own definition:
+          Average available PPA on eligible attempts; zero if unavailable.
+      - name: passing_offense_success_rate
+        description: >
+          CFBD advanced passing at team grain, raw field `successRate`. CFBD's own
+          definition: Successful eligible attempts / all eligible attempts; zero if empty.
+      - name: passing_offense_total_ppa
+        description: >
+          CFBD advanced passing at team grain, raw field `totalPpa`. CFBD's own definition:
+          Sum of available PPA on eligible attempts; zero if unavailable.
+      - name: passing_defense_air_yards_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `airYardsAttemptsAvailable`. CFBD's
+          own definition: Number of attempts with non-null air yards, including zero-yard
+          values. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the
+          paired measure could be computed from, so averaging it or summing it across games
+          answers nothing about football; it tells you whether the measure beside it is
+          trustworthy for this row.
+      - name: passing_defense_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `attempts`.
+      - name: passing_defense_completions
+        description: >
+          CFBD advanced passing at team grain, raw field `completions`.
+      - name: passing_defense_incompletions
+        description: >
+          CFBD advanced passing at team grain, raw field `incompletions`.
+      - name: passing_defense_interceptions
+        description: >
+          CFBD advanced passing at team grain, raw field `interceptions`.
+      - name: passing_defense_location_available_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `locationAvailableAttempts`. CFBD's
+          own definition: Eligible attempts with both recognized source depth and direction.
+          A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: passing_defense_location_eligible_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `locationEligibleAttempts`. CFBD's
+          own definition: Attempts eligible for advanced metrics and location analysis.
+          Existing overall production includes ineligible attempts; location buckets do not.
+          A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: passing_defense_ppa_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `ppaAttemptsAvailable`. CFBD's own
+          definition: Eligible attempts with non-null PPA, including zero and negative
+          values. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the
+          paired measure could be computed from, so averaging it or summing it across games
+          answers nothing about football; it tells you whether the measure beside it is
+          trustworthy for this row.
+      - name: passing_defense_success_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `successAttemptsAvailable`. CFBD's
+          own definition: Eligible attempts with non-null success. Missing success remains
+          in the success-rate denominator but does not count as successful. A COVERAGE
+          DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired measure could
+          be computed from, so averaging it or summing it across games answers nothing about
+          football; it tells you whether the measure beside it is trustworthy for this row.
+      - name: passing_defense_successful_attempts
+        description: >
+          CFBD advanced passing at team grain, raw field `successfulAttempts`. CFBD's own
+          definition: Eligible attempts with stored success equal to true.
+      - name: passing_defense_successful_ppa_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `successfulPpaAttemptsAvailable`.
+          CFBD's own definition: Successful eligible attempts with non-null PPA;
+          explosiveness denominator. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how
+          many attempts the paired measure could be computed from, so averaging it or
+          summing it across games answers nothing about football; it tells you whether the
+          measure beside it is trustworthy for this row.
+      - name: passing_defense_total_air_yards
+        description: >
+          CFBD advanced passing at team grain, raw field `totalAirYards`.
+      - name: passing_defense_total_yards
+        description: >
+          CFBD advanced passing at team grain, raw field `totalYards`.
+      - name: passing_defense_total_yards_after_catch
+        description: >
+          CFBD advanced passing at team grain, raw field `totalYardsAfterCatch`.
+      - name: passing_defense_total_yards_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `totalYardsAttemptsAvailable`.
+          CFBD's own definition: Number of attempts with non-null total yards, including
+          zero-yard incompletions and interceptions. A COVERAGE DENOMINATOR, NOT A
+          STATISTIC: it counts how many attempts the paired measure could be computed from,
+          so averaging it or summing it across games answers nothing about football; it
+          tells you whether the measure beside it is trustworthy for this row.
+      - name: passing_defense_yards_after_catch_attempts_available
+        description: >
+          CFBD advanced passing at team grain, raw field `yardsAfterCatchAttemptsAvailable`.
+          CFBD's own definition: Number of completed attempts with valid total yards and air
+          yards to calculate yards after catch, including zero-yard values. A COVERAGE
+          DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired measure could
+          be computed from, so averaging it or summing it across games answers nothing about
+          football; it tells you whether the measure beside it is trustworthy for this row.
+      - name: passing_defense_average_depth_of_target
+        description: >
+          CFBD advanced passing at team grain, raw field `averageDepthOfTarget`.
+      - name: passing_defense_average_yards_after_catch
+        description: >
+          CFBD advanced passing at team grain, raw field `averageYardsAfterCatch`.
+      - name: passing_defense_completion_rate
+        description: >
+          CFBD advanced passing at team grain, raw field `completionRate`.
+      - name: passing_defense_explosiveness
+        description: >
+          CFBD advanced passing at team grain, raw field `explosiveness`. CFBD's own
+          definition: Average available PPA on successful eligible attempts; zero if
+          unavailable. NOTE THE ZERO: CFBD returns 0 rather than null when it is
+          unavailable, so an average over games silently averages in rows that hold no data;
+          use the paired attempts-available counter to exclude them.
+      - name: passing_defense_ppa
+        description: >
+          CFBD advanced passing at team grain, raw field `ppa`. CFBD's own definition:
+          Average available PPA on eligible attempts; zero if unavailable.
+      - name: passing_defense_success_rate
+        description: >
+          CFBD advanced passing at team grain, raw field `successRate`. CFBD's own
+          definition: Successful eligible attempts / all eligible attempts; zero if empty.
+      - name: passing_defense_total_ppa
+        description: >
+          CFBD advanced passing at team grain, raw field `totalPpa`. CFBD's own definition:
+          Sum of available PPA on eligible attempts; zero if unavailable.
+      - name: rushing_advanced_offense_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `attempts`.
+      - name: rushing_advanced_offense_direction_available_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `directionAvailableAttempts`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_advanced_offense_direction_eligible_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `directionEligibleAttempts`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_advanced_offense_individual_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `individualAttempts`.
+      - name: rushing_advanced_offense_kneels
+        description: >
+          CFBD advanced rushing at team grain, raw field `kneels`.
+      - name: rushing_advanced_offense_multi_carrier_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `multiCarrierAttempts`.
+      - name: rushing_advanced_offense_rushing_touchdowns
+        description: >
+          CFBD advanced rushing at team grain, raw field `rushingTouchdowns`.
+      - name: rushing_advanced_offense_rushing_yards_available
+        description: >
+          CFBD advanced rushing at team grain, raw field `rushingYardsAvailable`. A COVERAGE
+          DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired measure could
+          be computed from, so averaging it or summing it across games answers nothing about
+          football; it tells you whether the measure beside it is trustworthy for this row.
+      - name: rushing_advanced_offense_sacks
+        description: >
+          CFBD advanced rushing at team grain, raw field `sacks`.
+      - name: rushing_advanced_offense_team_rushes
+        description: >
+          CFBD advanced rushing at team grain, raw field `teamRushes`.
+      - name: rushing_advanced_offense_total_rushing_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `totalRushingYards`.
+      - name: rushing_advanced_offense_touchdown_status_available
+        description: >
+          CFBD advanced rushing at team grain, raw field `touchdownStatusAvailable`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_advanced_offense_unattributed_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `unattributedAttempts`.
+      - name: rushing_advanced_offense_explosiveness
+        description: >
+          CFBD advanced rushing at team grain, raw field `explosiveness`. NOTE THE ZERO:
+          CFBD returns 0 rather than null when it is unavailable, so an average over games
+          silently averages in rows that hold no data; use the paired attempts-available
+          counter to exclude them.
+      - name: rushing_advanced_offense_line_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `lineYards`.
+      - name: rushing_advanced_offense_line_yards_total
+        description: >
+          CFBD advanced rushing at team grain, raw field `lineYardsTotal`.
+      - name: rushing_advanced_offense_open_field_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `openFieldYards`.
+      - name: rushing_advanced_offense_open_field_yards_total
+        description: >
+          CFBD advanced rushing at team grain, raw field `openFieldYardsTotal`.
+      - name: rushing_advanced_offense_power_success
+        description: >
+          CFBD advanced rushing at team grain, raw field `powerSuccess`.
+      - name: rushing_advanced_offense_ppa
+        description: >
+          CFBD advanced rushing at team grain, raw field `ppa`.
+      - name: rushing_advanced_offense_second_level_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `secondLevelYards`.
+      - name: rushing_advanced_offense_second_level_yards_total
+        description: >
+          CFBD advanced rushing at team grain, raw field `secondLevelYardsTotal`.
+      - name: rushing_advanced_offense_stuff_rate
+        description: >
+          CFBD advanced rushing at team grain, raw field `stuffRate`.
+      - name: rushing_advanced_offense_success_rate
+        description: >
+          CFBD advanced rushing at team grain, raw field `successRate`.
+      - name: rushing_advanced_offense_total_ppa
+        description: >
+          CFBD advanced rushing at team grain, raw field `totalPpa`.
+      - name: rushing_advanced_offense_yards_per_carry
+        description: >
+          CFBD advanced rushing at team grain, raw field `yardsPerCarry`.
+      - name: rushing_advanced_defense_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `attempts`.
+      - name: rushing_advanced_defense_direction_available_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `directionAvailableAttempts`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_advanced_defense_direction_eligible_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `directionEligibleAttempts`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_advanced_defense_individual_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `individualAttempts`.
+      - name: rushing_advanced_defense_kneels
+        description: >
+          CFBD advanced rushing at team grain, raw field `kneels`.
+      - name: rushing_advanced_defense_multi_carrier_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `multiCarrierAttempts`.
+      - name: rushing_advanced_defense_rushing_touchdowns
+        description: >
+          CFBD advanced rushing at team grain, raw field `rushingTouchdowns`.
+      - name: rushing_advanced_defense_rushing_yards_available
+        description: >
+          CFBD advanced rushing at team grain, raw field `rushingYardsAvailable`. A COVERAGE
+          DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired measure could
+          be computed from, so averaging it or summing it across games answers nothing about
+          football; it tells you whether the measure beside it is trustworthy for this row.
+      - name: rushing_advanced_defense_sacks
+        description: >
+          CFBD advanced rushing at team grain, raw field `sacks`.
+      - name: rushing_advanced_defense_team_rushes
+        description: >
+          CFBD advanced rushing at team grain, raw field `teamRushes`.
+      - name: rushing_advanced_defense_total_rushing_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `totalRushingYards`.
+      - name: rushing_advanced_defense_touchdown_status_available
+        description: >
+          CFBD advanced rushing at team grain, raw field `touchdownStatusAvailable`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_advanced_defense_unattributed_attempts
+        description: >
+          CFBD advanced rushing at team grain, raw field `unattributedAttempts`.
+      - name: rushing_advanced_defense_explosiveness
+        description: >
+          CFBD advanced rushing at team grain, raw field `explosiveness`. NOTE THE ZERO:
+          CFBD returns 0 rather than null when it is unavailable, so an average over games
+          silently averages in rows that hold no data; use the paired attempts-available
+          counter to exclude them.
+      - name: rushing_advanced_defense_line_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `lineYards`.
+      - name: rushing_advanced_defense_line_yards_total
+        description: >
+          CFBD advanced rushing at team grain, raw field `lineYardsTotal`.
+      - name: rushing_advanced_defense_open_field_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `openFieldYards`.
+      - name: rushing_advanced_defense_open_field_yards_total
+        description: >
+          CFBD advanced rushing at team grain, raw field `openFieldYardsTotal`.
+      - name: rushing_advanced_defense_power_success
+        description: >
+          CFBD advanced rushing at team grain, raw field `powerSuccess`.
+      - name: rushing_advanced_defense_ppa
+        description: >
+          CFBD advanced rushing at team grain, raw field `ppa`.
+      - name: rushing_advanced_defense_second_level_yards
+        description: >
+          CFBD advanced rushing at team grain, raw field `secondLevelYards`.
+      - name: rushing_advanced_defense_second_level_yards_total
+        description: >
+          CFBD advanced rushing at team grain, raw field `secondLevelYardsTotal`.
+      - name: rushing_advanced_defense_stuff_rate
+        description: >
+          CFBD advanced rushing at team grain, raw field `stuffRate`.
+      - name: rushing_advanced_defense_success_rate
+        description: >
+          CFBD advanced rushing at team grain, raw field `successRate`.
+      - name: rushing_advanced_defense_total_ppa
+        description: >
+          CFBD advanced rushing at team grain, raw field `totalPpa`.
+      - name: rushing_advanced_defense_yards_per_carry
+        description: >
+          CFBD advanced rushing at team grain, raw field `yardsPerCarry`.
 
   - name: stg_game_box_player
     description: >
-      Advanced box score at player grain, one row per (game, team, player). Usage and PPA are
-      separate arrays joined on the player name. NO ATHLETE ID ON THIS PAYLOAD — the key is a
-      name within a game, so two same-named players in one game would collide and nothing in
-      the response could separate them. /games/players and /stats/player/season carry real
-      ids and are the better join for anything player-level; this model is for the advanced
-      metrics they lack.
+      Advanced box score at player grain, one row per (game, team, player). FOUR blocks —
+      usage, ppa and, since A286, advanced passing and rushing — are separate arrays joined on
+      the player name. THE GRAIN IS STILL THE NAME because usage and ppa carry no athlete id,
+      so two same-named players in one game would collide there; the two newer blocks DO carry
+      one and it is exposed as `player_id`, null wherever a player appears only in usage or
+      ppa. /games/players and /stats/player/season carry ids for everyone and remain the
+      better join when you need one unconditionally. 12 of the new fields are COVERAGE
+      DENOMINATORS rather than statistics — anything containing Available or Eligible counts
+      the attempts its paired measure could be computed from, and averaging one is
+      meaningless. `locations` and `directions` are deliberately absent: they are finer grains
+      (7 passing zones, 4 rushing directions) and belong in their own models.
     columns:
       - name: game_id
         data_tests: [not_null]
@@ -1176,6 +1614,219 @@ models:
         description: Share of the team's plays, 0-1. A SHARE, not a rate.
       - name: ppa_average_total
         description: Points per play. A RATE, not a share.
+      - name: player_id
+        description: >
+          CFBD's athlete id, surfaced by A286 from the new `players.passing` and
+          `players.rushing` blocks. NULL for a player who appears only in `usage` or `ppa`,
+          which carry no id at all, so this is an extra key for the rows that have one rather
+          than a replacement for the (game, team, player_name) grain.
+      - name: passing_air_yards_attempts_available
+        description: >
+          CFBD advanced passing at player grain, raw field `airYardsAttemptsAvailable`.
+          CFBD's own definition: Number of attempts with non-null air yards, including
+          zero-yard values. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many
+          attempts the paired measure could be computed from, so averaging it or summing it
+          across games answers nothing about football; it tells you whether the measure
+          beside it is trustworthy for this row.
+      - name: passing_attempts
+        description: >
+          CFBD advanced passing at player grain, raw field `attempts`.
+      - name: passing_completions
+        description: >
+          CFBD advanced passing at player grain, raw field `completions`.
+      - name: passing_incompletions
+        description: >
+          CFBD advanced passing at player grain, raw field `incompletions`.
+      - name: passing_interceptions
+        description: >
+          CFBD advanced passing at player grain, raw field `interceptions`.
+      - name: passing_location_available_attempts
+        description: >
+          CFBD advanced passing at player grain, raw field `locationAvailableAttempts`.
+          CFBD's own definition: Eligible attempts with both recognized source depth and
+          direction. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts
+          the paired measure could be computed from, so averaging it or summing it across
+          games answers nothing about football; it tells you whether the measure beside it
+          is trustworthy for this row.
+      - name: passing_location_eligible_attempts
+        description: >
+          CFBD advanced passing at player grain, raw field `locationEligibleAttempts`.
+          CFBD's own definition: Attempts eligible for advanced metrics and location
+          analysis. Existing overall production includes ineligible attempts; location
+          buckets do not. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many
+          attempts the paired measure could be computed from, so averaging it or summing it
+          across games answers nothing about football; it tells you whether the measure
+          beside it is trustworthy for this row.
+      - name: passing_ppa_attempts_available
+        description: >
+          CFBD advanced passing at player grain, raw field `ppaAttemptsAvailable`. CFBD's
+          own definition: Eligible attempts with non-null PPA, including zero and negative
+          values. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the
+          paired measure could be computed from, so averaging it or summing it across games
+          answers nothing about football; it tells you whether the measure beside it is
+          trustworthy for this row.
+      - name: passing_success_attempts_available
+        description: >
+          CFBD advanced passing at player grain, raw field `successAttemptsAvailable`.
+          CFBD's own definition: Eligible attempts with non-null success. Missing success
+          remains in the success-rate denominator but does not count as successful. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: passing_successful_attempts
+        description: >
+          CFBD advanced passing at player grain, raw field `successfulAttempts`. CFBD's own
+          definition: Eligible attempts with stored success equal to true.
+      - name: passing_successful_ppa_attempts_available
+        description: >
+          CFBD advanced passing at player grain, raw field `successfulPpaAttemptsAvailable`.
+          CFBD's own definition: Successful eligible attempts with non-null PPA;
+          explosiveness denominator. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how
+          many attempts the paired measure could be computed from, so averaging it or
+          summing it across games answers nothing about football; it tells you whether the
+          measure beside it is trustworthy for this row.
+      - name: passing_total_air_yards
+        description: >
+          CFBD advanced passing at player grain, raw field `totalAirYards`.
+      - name: passing_total_yards
+        description: >
+          CFBD advanced passing at player grain, raw field `totalYards`.
+      - name: passing_total_yards_after_catch
+        description: >
+          CFBD advanced passing at player grain, raw field `totalYardsAfterCatch`.
+      - name: passing_total_yards_attempts_available
+        description: >
+          CFBD advanced passing at player grain, raw field `totalYardsAttemptsAvailable`.
+          CFBD's own definition: Number of attempts with non-null total yards, including
+          zero-yard incompletions and interceptions. A COVERAGE DENOMINATOR, NOT A
+          STATISTIC: it counts how many attempts the paired measure could be computed from,
+          so averaging it or summing it across games answers nothing about football; it
+          tells you whether the measure beside it is trustworthy for this row.
+      - name: passing_yards_after_catch_attempts_available
+        description: >
+          CFBD advanced passing at player grain, raw field
+          `yardsAfterCatchAttemptsAvailable`. CFBD's own definition: Number of completed
+          attempts with valid total yards and air yards to calculate yards after catch,
+          including zero-yard values. A COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how
+          many attempts the paired measure could be computed from, so averaging it or
+          summing it across games answers nothing about football; it tells you whether the
+          measure beside it is trustworthy for this row.
+      - name: passing_average_depth_of_target
+        description: >
+          CFBD advanced passing at player grain, raw field `averageDepthOfTarget`.
+      - name: passing_average_yards_after_catch
+        description: >
+          CFBD advanced passing at player grain, raw field `averageYardsAfterCatch`.
+      - name: passing_completion_rate
+        description: >
+          CFBD advanced passing at player grain, raw field `completionRate`.
+      - name: passing_explosiveness
+        description: >
+          CFBD advanced passing at player grain, raw field `explosiveness`. CFBD's own
+          definition: Average available PPA on successful eligible attempts; zero if
+          unavailable. NOTE THE ZERO: CFBD returns 0 rather than null when it is
+          unavailable, so an average over games silently averages in rows that hold no data;
+          use the paired attempts-available counter to exclude them.
+      - name: passing_ppa
+        description: >
+          CFBD advanced passing at player grain, raw field `ppa`. CFBD's own definition:
+          Average available PPA on eligible attempts; zero if unavailable.
+      - name: passing_success_rate
+        description: >
+          CFBD advanced passing at player grain, raw field `successRate`. CFBD's own
+          definition: Successful eligible attempts / all eligible attempts; zero if empty.
+      - name: passing_total_ppa
+        description: >
+          CFBD advanced passing at player grain, raw field `totalPpa`. CFBD's own
+          definition: Sum of available PPA on eligible attempts; zero if unavailable.
+      - name: rushing_attempts
+        description: >
+          CFBD advanced rushing at player grain, raw field `attempts`.
+      - name: rushing_direction_available_attempts
+        description: >
+          CFBD advanced rushing at player grain, raw field `directionAvailableAttempts`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_direction_eligible_attempts
+        description: >
+          CFBD advanced rushing at player grain, raw field `directionEligibleAttempts`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_individual_attempts
+        description: >
+          CFBD advanced rushing at player grain, raw field `individualAttempts`.
+      - name: rushing_kneels
+        description: >
+          CFBD advanced rushing at player grain, raw field `kneels`.
+      - name: rushing_multi_carrier_attempts
+        description: >
+          CFBD advanced rushing at player grain, raw field `multiCarrierAttempts`.
+      - name: rushing_rushing_yards_available
+        description: >
+          CFBD advanced rushing at player grain, raw field `rushingYardsAvailable`. A
+          COVERAGE DENOMINATOR, NOT A STATISTIC: it counts how many attempts the paired
+          measure could be computed from, so averaging it or summing it across games answers
+          nothing about football; it tells you whether the measure beside it is trustworthy
+          for this row.
+      - name: rushing_sacks
+        description: >
+          CFBD advanced rushing at player grain, raw field `sacks`.
+      - name: rushing_team_rushes
+        description: >
+          CFBD advanced rushing at player grain, raw field `teamRushes`.
+      - name: rushing_total_rushing_yards
+        description: >
+          CFBD advanced rushing at player grain, raw field `totalRushingYards`.
+      - name: rushing_unattributed_attempts
+        description: >
+          CFBD advanced rushing at player grain, raw field `unattributedAttempts`.
+      - name: rushing_explosiveness
+        description: >
+          CFBD advanced rushing at player grain, raw field `explosiveness`. NOTE THE ZERO:
+          CFBD returns 0 rather than null when it is unavailable, so an average over games
+          silently averages in rows that hold no data; use the paired attempts-available
+          counter to exclude them.
+      - name: rushing_line_yards
+        description: >
+          CFBD advanced rushing at player grain, raw field `lineYards`.
+      - name: rushing_line_yards_total
+        description: >
+          CFBD advanced rushing at player grain, raw field `lineYardsTotal`.
+      - name: rushing_open_field_yards
+        description: >
+          CFBD advanced rushing at player grain, raw field `openFieldYards`.
+      - name: rushing_open_field_yards_total
+        description: >
+          CFBD advanced rushing at player grain, raw field `openFieldYardsTotal`.
+      - name: rushing_power_success
+        description: >
+          CFBD advanced rushing at player grain, raw field `powerSuccess`.
+      - name: rushing_ppa
+        description: >
+          CFBD advanced rushing at player grain, raw field `ppa`.
+      - name: rushing_second_level_yards
+        description: >
+          CFBD advanced rushing at player grain, raw field `secondLevelYards`.
+      - name: rushing_second_level_yards_total
+        description: >
+          CFBD advanced rushing at player grain, raw field `secondLevelYardsTotal`.
+      - name: rushing_stuff_rate
+        description: >
+          CFBD advanced rushing at player grain, raw field `stuffRate`.
+      - name: rushing_success_rate
+        description: >
+          CFBD advanced rushing at player grain, raw field `successRate`.
+      - name: rushing_total_ppa
+        description: >
+          CFBD advanced rushing at player grain, raw field `totalPpa`.
+      - name: rushing_yards_per_carry
+        description: >
+          CFBD advanced rushing at player grain, raw field `yardsPerCarry`.
 
   - name: stg_game_win_probability
     description: >
