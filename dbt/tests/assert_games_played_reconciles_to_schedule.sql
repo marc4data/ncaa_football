@@ -1,18 +1,19 @@
-{{ config(tags=['full_refresh_only']) }}
--- TAGGED `full_refresh_only`: excluded from cfbd_scores_refresh, which rebuilds one side of
--- this comparison and not the other. Full authority on the weekly +tag:production
--- build, which rebuilds both. See dags/scores_refresh_dag.py TEST_EXCLUDE.
--- Reconciliation (data quality rule #4): the mart's team-game count must reconcile to the
--- schedule it was built from, **per season**.
+{{ config(tags=['scores_refresh_only']) }}
+-- 🚨 A283 (cfdb-main-R-4804): `full_refresh_only` -> `scores_refresh_only`, named by
+-- `ci/check_test_refresh_scope.py` rather than chosen by me:
 --
--- Every completed game with scores contributes exactly two team-games (one per side), so
--- sum(games_played) must be exactly twice the number of such games in staging. Catches a
--- dropped season, a half-loaded backfill, or a join that fans out.
-
+--   "assert_games_played_reconciles_to_schedule straddles cfbd_lines_snapshot's refresh
+--    boundary: it reads [stg_games], which cfbd_lines_snapshot rebuilds, against
+--    [srv_standings], which it does not. Tag it `scores_refresh_only` — cfbd_scores_refresh
+--    rebuilds both sides and must keep running it"
+--
+-- While this read `mart_team_season_record` no gated DAG rebuilt both sides, so the blunt tag
+-- was right. Re-pointed at `srv_standings`, one of them does — and removing it from that DAG
+-- too would be coverage given away.
 with from_mart as (
 
     select season, sum(games_played) as team_games
-    from {{ ref('mart_team_season_record') }}
+    from {{ ref('srv_standings') }}
     group by season
 
 ),

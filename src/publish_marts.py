@@ -19,7 +19,7 @@ reads Databricks. Same contract, one flag.
 Usage:
   python -m src.publish_marts --dry-run
   python -m src.publish_marts
-  python -m src.publish_marts --marts mart_team_schedule
+  python -m src.publish_marts --marts mart_data_freshness
 """
 import argparse
 import contextlib
@@ -126,8 +126,13 @@ SERVING_SCHEMA = "serving"
 # The legacy contract. Still published so the running site keeps working until it is
 # repointed; dropped only after that, per the strangler pattern.
 DEFAULT_MARTS = [
-    "mart_team_schedule",
-    "mart_team_season_record",
+    # 🚨 A283 (cfdb-main-R-4802): `mart_team_schedule` and `mart_team_season_record` are GONE.
+    # The site was repointed off both on 2026-08-20 (`site/db.py:12`) and the strangler's last
+    # step never ran, so they went on being built and published for six weeks with no reader —
+    # and their parity gate stopped three of six scheduled weekly publishes.
+    #
+    # ⚠️ `mart_data_freshness` STAYS, AND THAT IS A MEASUREMENT RATHER THAN CAUTION:
+    # `dbt/models/serving/srv_system_health.sql:42` refs it, so it has a live consumer.
     "mart_data_freshness",
 ]
 
