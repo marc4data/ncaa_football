@@ -265,10 +265,47 @@ def main(argv=None) -> int:
         # that does not beat at all. Worth saying so it gets a budget.
         print(f"\n  note: beating but unmonitored — {', '.join(unknown)}")
 
-    # A check that did not answer is a failure, the same as one that answered badly.
-    unboxed_now = (any(v and v[0] for v in outcomes.values())
-                   or any(h not in outcomes for h in OUTCOME_LINES))
-    if stale or missing or failures or failed_tests or unboxed_now:
+    # ══════════════════════════════════════════════════════════════════════════════════════
+    # 🚨 A281 (cfdb-main-R-4740) — PAGE AND DIGEST, SPLIT INSIDE THE FUNCTION THAT ALREADY
+    # KNOWS THE DIFFERENCE
+    # ══════════════════════════════════════════════════════════════════════════════════════
+    #
+    # > **MARC, 2026-10-02:** *"I'm getting alarms and you are saying things look great… That's
+    # > misdirection and misinformation… It's a time suck and productivity killer."*
+    # > **2026-10-03:** *"Deadman's switch failure AGAIN."*
+    #
+    # 📊 `unboxed_now` was built from THREE different facts and all three returned 1:
+    #
+    #   a head ABSENT from `outcomes`  → the forced command is an older copy — the check
+    #                                    CANNOT RUN                              🚨 BLIND
+    #   `value[0] == -1`, `MONITOR.<why>` → it could not read published serving   🚨 BLIND
+    #   `value[0] > 0`                  → the site is missing content a reader
+    #                                     would notice                           📋 GAP
+    #
+    # ✅ BLIND STILL FAILS THE RUN. A monitor that cannot see is worse than no monitor, and it
+    # is a drop-everything event: it is indistinguishable from a clean site unless the watcher
+    # insists on hearing the answer (A185, cfdb-main-R-1878).
+    #
+    # ✅ A GAP NO LONGER FAILS THE RUN. 🚨 THE MECHANISM IS THE WHOLE POINT: GitHub emails on a
+    # FAILED run. A run that exits 0 sends nothing, and `::notice::` still puts the line in the
+    # run summary — so the SIGNAL IS KEPT AND THE INTERRUPT IS REMOVED. That is
+    # `cfdb_alerting_strategy.md` §4's PAGE/DIGEST split, with no second workflow, no settings
+    # change and no new credential.
+    #
+    # ⚠️ WHAT IT COSTS, STATED RATHER THAN DISCOVERED: a real content gap stops emailing too.
+    # That is deliberate — these checks were red ≈59 hours a week by construction, and an
+    # alarm that is red most of the week is not detection, it is wallpaper. A280 gives the
+    # signal a true threshold; this gives it a channel that does not interrupt.
+    blind = [head for head in OUTCOME_LINES
+             if head not in outcomes or (outcomes[head] and outcomes[head][0] == -1)]
+    gaps = [head for head in OUTCOME_LINES
+            if head in outcomes and outcomes[head] and outcomes[head][0] > 0]
+
+    # 🚨 THE PAGE SET IS THE EXIT CODE, AND NOTHING ELSE IS. Everything in it means the
+    # pipeline is down, stuck, or unwatchable.
+    page = bool(stale or missing or failures or failed_tests or blind)
+
+    if page or gaps:
         print()
         # 🚨 A278 (cfdb-main-R-4651). AN ALARM THAT NAMES NOTHING MAKES THE READER DO THE
         # TRIAGE, WHICH IS THE OPPOSITE OF WHAT AN ALARM IS FOR.
@@ -285,10 +322,14 @@ def main(argv=None) -> int:
         # pipeline is fine and a feed is late" is the whole triage, and a reader should not
         # have to reconstruct it. It is only printed when it is TRUE — a run with a stale beat
         # says nothing of the kind.
-        if not (stale or missing or failures or failed_tests):
-            print(f"::error::the pipeline is BEATING — all {len(ok)} cadences inside budget, "
-                  f"no failed task and no failed assertion. This is a CONTENT gap: something "
-                  f"the site should be showing has not arrived yet. The lines below say what.")
+        # ⚠️ THE CONTEXT LINE IS A NOTICE WHEN NOTHING FAILED, AND IT SAYS SO. It used to be
+        # printed as `::error::` even on a run where nothing was wrong — that is the line Marc
+        # quoted back twice.
+        if not page:
+            print(f"::notice::the pipeline is BEATING — all {len(ok)} cadences inside budget, "
+                  f"no failed task and no failed assertion. Something the site should be "
+                  f"showing is late; the line below says what. No action is needed unless it "
+                  f"is still here tomorrow.")
         for line in stale + missing:
             print(f"::error::heartbeat absent — {line}")
         for task, age in sorted(failures.items()):
@@ -311,6 +352,9 @@ def main(argv=None) -> int:
         # ⚠️ 2 AND 3 ARE BLINDNESS RATHER THAN A GAP, and they are annotated as such: "the check
         # could not answer" and "the site is missing data" are different facts and collapsing
         # them would make the louder one hide the quieter.
+        # 🚨 BLIND IS AN ERROR AND A GAP IS A NOTICE — the two are different facts and only one
+        # of them is an emergency. Collapsing them is what made every content gap read as an
+        # outage.
         for head, (label, meaning) in OUTCOME_LINES.items():
             value = outcomes.get(head)
             if value is None:
@@ -322,14 +366,20 @@ def main(argv=None) -> int:
                       f"({value[2]}). It cannot tell you whether the site is current.")
             elif value[0]:
                 count, age, weeks = value
-                print(f"::error::{label} — {count} {meaning}. Oldest {describe(age)}, "
+                print(f"::notice::{label} — {count} {meaning}. Oldest {describe(age)}, "
                       f"week(s) {weeks}.")
         if stale or missing:
             print("::error::the pipeline has stopped emitting on at least one cadence. "
                   "Silence is not success.")
-        return 1
+        if page:
+            return 1
 
-    print(f"\nAll {len(ok)} cadences beating within budget, no failed tasks or assertions in the window.")
+    if gaps:
+        print(f"\n{len(ok)} cadences beating within budget, no failed tasks or assertions in "
+              f"the window. {len(gaps)} content gap(s) noted above — reported, not paged.")
+    else:
+        print(f"\nAll {len(ok)} cadences beating within budget, no failed tasks or assertions "
+              f"in the window.")
     return 0
 
 

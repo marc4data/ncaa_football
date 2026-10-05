@@ -67,14 +67,21 @@ def test_a_healthy_pipeline_exits_zero_and_annotates_nothing(monkeypatch, capsys
 # ── the incident this round was written from ──────────────────────────────────────────────
 
 def test_the_unplayered_incident_names_itself(monkeypatch, capsys):
-    """🚨 THE EXACT SHAPE OF THE RUN MARC PASTED: healthy cadences, one outcome line."""
+    """🚨 THE EXACT SHAPE OF THE RUN MARC PASTED: healthy cadences, one outcome line.
+
+    ⚠️ A281 (cfdb-main-R-4741) MOVED THE CHANNEL, NOT THE SUBJECT. A278's point was that the
+    run named NOTHING; it still must name the gap, with the count, the age and the week — but
+    as a `::notice::` on a green run rather than an `::error::` on a failed one, because the
+    exit code is what sends Marc an email. **The assertion on the CONTENT is unchanged.**
+    """
     ages, failures, failed_tests, outcomes = _healthy()
     outcomes["unplayered"] = (2, 53940, "w5")
-    code, out, errors = run(monkeypatch, capsys, (ages, failures, failed_tests, outcomes))
+    code, out, _errors = run(monkeypatch, capsys, (ages, failures, failed_tests, outcomes))
+    annotations = [ln for ln in out.splitlines() if ln.startswith("::notice::")]
 
-    assert code == 1
-    assert errors, "the run Marc pasted exited 1 and annotated NOTHING — that is the defect"
-    joined = "\n".join(errors)
+    assert code == 0, "a content gap alone no longer pages (A281)"
+    assert annotations, "the run Marc pasted annotated NOTHING — that is A278's defect"
+    joined = "\n".join(annotations)
     assert "UNPLAYERED" in joined
     assert "2 FBS game(s)" in joined, "the count a reader needs is missing"
     assert "14h 59m" in joined, "the oldest age is missing"
@@ -83,11 +90,15 @@ def test_the_unplayered_incident_names_itself(monkeypatch, capsys):
 
 def test_a_content_gap_says_the_pipeline_is_beating(monkeypatch, capsys):
     """⚠️ THE HALF MARC ACTUALLY NEEDED. "The pipeline stopped" and "a feed is late" are
-    different emergencies, and the reader should not have to reconstruct which one this is."""
+    different emergencies, and the reader should not have to reconstruct which one this is.
+
+    ⚠️ A281: still printed, now as a notice — see the test above on why the channel moved.
+    """
     ages, failures, failed_tests, outcomes = _healthy()
     outcomes["unplayered"] = (2, 53940, "w5")
-    _code, _out, errors = run(monkeypatch, capsys, (ages, failures, failed_tests, outcomes))
-    assert any("BEATING" in e and "CONTENT gap" in e for e in errors), errors
+    _code, out, _errors = run(monkeypatch, capsys, (ages, failures, failed_tests, outcomes))
+    notices = [ln for ln in out.splitlines() if ln.startswith("::notice::")]
+    assert any("BEATING" in n for n in notices), notices
 
 
 def test_a_stale_beat_does_not_claim_the_pipeline_is_beating(monkeypatch, capsys):
@@ -175,3 +186,85 @@ def test_no_exit_1_is_ever_silent(monkeypatch, capsys):
                 f"{[n for n, _ in combination]}\n{out}")
     # R-760: every assertion above is satisfied by an empty walk.
     assert checked >= 90, f"only {checked} input shapes exercised"
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A281 (cfdb-main-R-4741) — PAGE AND DIGEST
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#
+# > **MARC, 2026-10-03:** *"Deadman's switch failure AGAIN."*
+#
+# 🚨 GitHub emails on a FAILED run. So the exit code IS the channel: exit 1 interrupts, exit 0
+# does not, and `::notice::` still shows the line in the run summary. A content gap is now a
+# notice on a green run; everything that means the pipeline is down, stuck or UNWATCHABLE
+# still fails.
+
+
+PAGE_SHAPES = {
+    "stale": lambda s: s[0].__setitem__("scores_refresh", 99 * 3600),
+    "never-beat": lambda s: s[0].pop("weekly_pregame", None),
+    "failed-task": lambda s: s[1].__setitem__("some.task", 3600),
+    "failed-test": lambda s: s[2].__setitem__("assert_y", (1, 3600)),
+    "blind-absent": lambda s: s[3].pop(next(iter(switch.OUTCOME_LINES)), None),
+    "blind-monitor": lambda s: s[3].__setitem__(next(iter(switch.OUTCOME_LINES)),
+                                                (-1, 0, "MONITOR.why")),
+}
+
+
+def test_a_content_gap_is_a_notice_on_a_green_run(monkeypatch, capsys):
+    ages, failures, failed_tests, outcomes = _healthy()
+    outcomes["unplayered"] = (2, 53940, "w5")
+    code, out, errors = run(monkeypatch, capsys, (ages, failures, failed_tests, outcomes))
+
+    assert code == 0, f"a content gap must not fail the run — it is what emails Marc\n{out}"
+    assert not errors, f"a green run must carry no ::error::\n{errors}"
+    notices = [ln for ln in out.splitlines() if ln.startswith("::notice::")]
+    assert any("UNPLAYERED" in n and "2 FBS game(s)" in n for n in notices), notices
+    assert any("BEATING" in n for n in notices), "the context line must survive, as a notice"
+    assert "reported, not paged" in out
+
+
+@pytest.mark.parametrize("shape", sorted(PAGE_SHAPES))
+def test_every_page_class_event_still_fails_the_run(monkeypatch, capsys, shape):
+    """⚠️ NOTHING ABOUT PAGE MOVES. Each shape alone must still exit 1 with an ::error::."""
+    state = _healthy()
+    PAGE_SHAPES[shape](state)
+    code, out, errors = run(monkeypatch, capsys, state)
+    assert code == 1, f"{shape} must still page\n{out}"
+    assert errors, f"{shape} exited 1 and annotated nothing"
+    if shape.startswith("blind"):
+        assert any("BLIND" in e for e in errors), errors
+
+
+def test_a_cadence_failure_and_a_gap_together_still_page(monkeypatch, capsys):
+    """The mixed case: the page wins, and the cadence annotation is present."""
+    state = _healthy()
+    state[0]["scores_refresh"] = 99 * 3600
+    state[3]["unplayered"] = (2, 53940, "w5")
+    code, out, errors = run(monkeypatch, capsys, state)
+    assert code == 1
+    assert any("heartbeat absent" in e for e in errors), errors
+    # ⚠️ AND THE CONTEXT LINE MUST NOT CLAIM THE PIPELINE IS BEATING WHEN IT IS NOT.
+    assert not any("BEATING" in ln for ln in out.splitlines()), out
+
+
+def test_no_exit_0_is_ever_a_page_class_event(monkeypatch, capsys):
+    """🚨 THE SIBLING OF A278's INVARIANT, AND THE DANGEROUS DIRECTION OF THIS CHANGE.
+
+    `test_no_exit_1_is_ever_silent` is kept rather than replaced — a guard deleted because a
+    round changed its subject is how the thing it caught comes back. This one walks the same
+    product of shapes and fails if any state containing a PAGE-class fact returns 0.
+    """
+    checked = 0
+    for size in (1, 2, 3):
+        for combination in itertools.combinations(sorted(PAGE_SHAPES), size):
+            state = _healthy()
+            for name in combination:
+                PAGE_SHAPES[name](state)
+            # a content gap alongside must never downgrade a page
+            state[3]["unplayered"] = (2, 53940, "w5")
+            code, out, _errors = run(monkeypatch, capsys, state)
+            checked += 1
+            assert code == 1, (
+                f"a PAGE-class event returned 0 — GitHub would send no email for "
+                f"{list(combination)}\n{out}")
+    assert checked >= 40, f"only {checked} page shapes exercised"
