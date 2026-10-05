@@ -19,7 +19,7 @@ never unnested, and never missed. Every DAG stayed green throughout.
 | no raw data | 22 | registered, never fetched |
 | unregistered | 0 | the API serves it; we have not decided about it |
 
-**Fields exposed: 986 of 1777 (55.5%).** That percentage is the product gap in one number.
+**Fields exposed: 1024 of 1777 (57.6%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -41,7 +41,7 @@ sweep can invent.
 | `draft/positions` | swept | 1 | `stg_draft_position` | 2/2 | complete |
 | `draft/teams` | swept | 1 | `stg_nfl_team` | 4/4 | complete |
 | `drives` | swept | 14 | `stg_drive` | 24/24 | complete |
-| `game/box/advanced` | CLI | 186 | `stg_game_box_info`, `stg_game_box_player`, `stg_game_box_team` | 36/84 | partial |
+| `game/box/advanced` | CLI | 186 | `stg_game_box_info`, `stg_game_box_player`, `stg_game_box_team` | 74/84 | partial |
 | `games` | swept | 345 | `stg_games` | 41/41 | complete |
 | `games/media` | swept | 8 | `stg_game_media` | 12/12 | complete |
 | `games/players` | swept | 44 | `stg_game_player_stat` | 7/7 | complete |
@@ -126,7 +126,7 @@ carried through.
 
 | Endpoint | Model | Dropped | Fields not exposed |
 |---|---|---:|---|
-| `game/box/advanced` | stg_game_box_info, stg_game_box_player, stg_game_box_team | 48 | `airYardsAttemptsAvailable`, `airYardsPerAttempt`, `attempts`, `averageDepthOfTarget`, `averageYardsAfterCatch`, `carries`, `completionRate`, `completions`, `conference`, `directionAvailableAttempts`, `directionEligibleAttempts`, `gameId`, … (+36) |
+| `game/box/advanced` | stg_game_box_info, stg_game_box_player, stg_game_box_team | 10 | `airYardsPerAttempt`, `carries`, `conference`, `gameId`, `opponent`, `season`, `seasonType`, `week`, `yards`, `yardsPerAttempt` |
 
 ## Partial on purpose
 

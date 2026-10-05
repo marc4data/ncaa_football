@@ -57,7 +57,7 @@ from memory:
 |---|---|
 | CFBD endpoints in the ingestion registry | **88**, of which **61** are fetched on a cadence |
 | dbt models | **173** — **81** staging, **56** dimensional, **36** serving |
-| dbt data tests | **637** — **496** schema tests and **141** hand-written assertions |
+| dbt data tests | **638** — **496** schema tests and **142** hand-written assertions |
 | Python tests | more than **2,250** |
 | Pages on this site | **18** |
 | Serving columns, every one with a written definition | **1,503** |
