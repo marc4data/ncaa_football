@@ -6,6 +6,7 @@ That is a real limitation and worth stating: these pin the SHAPE of the graph, a
 scheduler is what proves it parses. `scripts/deploy_main.sh` runs `dags list-import-errors`
 immediately after every deploy, which is where a broken graph actually surfaces.
 """
+import ast
 import re
 
 import pytest
@@ -906,3 +907,94 @@ def test_restoring_or_empty_brings_the_false_green_back():
             f"{path}: `or []` is back — a missing endpoint list would load nothing and report "
             f"success, which is the defect A180 found (cfdb-main-R-1865)")
         assert "if endpoints is None:" in source, f"{path}: the guard is gone"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# A285 (cfdb-main-R-4861) — ONE WAREHOUSE WRITER AT A TIME
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#
+# 📊 Every DAG carries `max_active_runs=1`, which serialises each DAG against ITSELF and nothing
+# against the others. Measured at `ad1af4d`: **320 overlapping warehouse-write task pairs in 30
+# days, 1,478 minutes of overlap** — and on 2026-10-04 that cost the Sunday publish seven failed
+# assertions which all passed on 10-05 when the same chain re-ran with the two-hourly DAG paused.
+#
+# 🚨 A TASK ASSIGNED TO A POOL THAT DOES NOT EXIST DOES NOT RUN, so this guard is also the thing
+# that stops a half-applied pool: either every warehouse writer is in it or the suite is red.
+
+#: Tasks that run dbt against the Postgres warehouse, or publish from it.
+WAREHOUSE_WRITERS = {
+    "lines_snapshot_dag.py": {"dbt_build_distributions", "dbt_test_distributions",
+                              "publish_distributions"},
+    "scores_refresh_dag.py": {"dbt_run", "dbt_test", "publish_to_serving"},
+    "weekly_refresh_dag.py": {"dbt_run", "dbt_catalogue", "dbt_test", "publish_to_serving"},
+}
+
+# ⚠️ TWO DELIBERATE EXCLUSIONS, WITH THEIR REASONS, BECAUSE AN UNEXPLAINED EXEMPTION IS A HOLE.
+#
+#   capture_test_results — `trigger_rule="all_done"`, and it inserts a handful of rows into
+#       `raw.raw_dbt_test_result`. It cannot move the data another DAG's test is reading, and
+#       putting the record of a FAILURE behind a slot another DAG may hold for 100 minutes is
+#       the one delay this project cannot afford (§2.3: silence is not success).
+#
+#   cfbd_databricks_sync — runs `dbt --target databricks` explicitly, and its own comment says
+#       "the profile's default target is Postgres, so this is explicit". It does not write this
+#       warehouse at all.
+POOL_EXEMPT = {"capture_test_results"}
+
+
+def _operator_calls(path):
+    """Every BashOperator/PythonOperator call in a DAG file, as (task_id, source, kwargs)."""
+    source = path.read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+        if fn not in ("BashOperator", "PythonOperator"):
+            continue
+        kwargs = {k.arg: k.value for k in node.keywords}
+        task_id = kwargs.get("task_id")
+        task_id = task_id.value if isinstance(task_id, ast.Constant) else None
+        yield task_id, (ast.get_source_segment(source, node) or ""), kwargs
+
+
+def test_every_warehouse_writing_task_is_in_the_pool():
+    """🚨 ONE SLOT, OR THE RACE COMES BACK. A writer outside the pool runs concurrently with one
+    inside it, which is the configuration that failed on 2026-10-04."""
+    missing = []
+    for name, writers in WAREHOUSE_WRITERS.items():
+        path = DAGS / name
+        found = set()
+        for task_id, _src, kwargs in _operator_calls(path):
+            if task_id not in writers:
+                continue
+            found.add(task_id)
+            if "pool" not in kwargs:
+                missing.append(f"{name}:{task_id}")
+        absent = writers - found
+        assert not absent, f"{name}: these warehouse writers were not found at all: {absent}"
+    assert not missing, (
+        "these tasks write the Postgres warehouse and are not in the pool, so they can run "
+        f"concurrently with one that is: {sorted(missing)}")
+
+
+def test_the_pool_name_has_one_home():
+    """R-574. A second copy of the string is how two DAGs come to disagree, which is what
+    `src/dbt_selectors.py` was written after."""
+    from src.dag_pools import WAREHOUSE_WRITE_POOL                    # noqa: PLC0415
+    for name in WAREHOUSE_WRITERS:
+        code = _code(name)
+        assert "WAREHOUSE_WRITE_POOL" in code, f"{name} does not import the shared constant"
+        assert f'"{WAREHOUSE_WRITE_POOL}"' not in code, (
+            f"{name} hard-codes the pool name instead of importing it")
+
+
+def test_the_guard_can_see_a_writer_that_slipped_out_of_the_pool():
+    """⚠️ R-760 — the assertion above passes on an empty walk, and an empty walk is what a
+    renamed operator or a changed task_id produces. This pins that the walk finds them."""
+    total = sum(len(w) for w in WAREHOUSE_WRITERS.values())
+    seen = 0
+    for name, writers in WAREHOUSE_WRITERS.items():
+        for task_id, _src, kwargs in _operator_calls(DAGS / name):
+            if task_id in writers and "pool" in kwargs:
+                seen += 1
+    assert seen == total == 10, f"walked {seen} pooled writers, expected {total} and 10"

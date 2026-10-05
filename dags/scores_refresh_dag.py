@@ -47,6 +47,7 @@ from airflow.providers.standard.operators.python import (
 from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
+from src.dag_pools import WAREHOUSE_WRITE_POOL, WAREHOUSE_WRITE_SLOTS
 from src.dbt_artifacts import load_run_results
 from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
 from src.lines_cadence import load_config
@@ -422,10 +423,12 @@ with DAG(
     boxes = PythonOperator(task_id="refresh_box_scores", python_callable=_refresh_boxes)
     dbt_run = BashOperator(
         task_id="dbt_run",
+        pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
         bash_command=f"dbt run --project-dir {DBT_PROJECT_DIR} {SCORES_SELECTOR}",
     )
     dbt_test = BashOperator(
         task_id="dbt_test",
+        pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
         bash_command=(f"dbt test --project-dir {DBT_PROJECT_DIR} "
                       f"{SCORES_SELECTOR} {PARTIAL_REBUILD_TEST_EXCLUDE}"),
     )
@@ -442,7 +445,10 @@ with DAG(
     # The split is honest as well as cheap: this DAG exists to move scores and lines quickly,
     # and player season totals, box scores and play attributions are none of those. They
     # publish on the weekly DAG, which is also when they change.
-    publish = PythonOperator(task_id="publish_to_serving", python_callable=_publish)
+    publish = PythonOperator(task_id="publish_to_serving",
+                             pool=WAREHOUSE_WRITE_POOL,
+                             pool_slots=WAREHOUSE_WRITE_SLOTS,
+                             python_callable=_publish)
 
     # The dead-man's switch. Downstream of publish and left at the default all_success
     # trigger rule, so it beats only when the whole chain reached the site.

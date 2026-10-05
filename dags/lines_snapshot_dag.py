@@ -42,6 +42,7 @@ from airflow.providers.standard.operators.python import (
 from airflow.utils.trigger_rule import TriggerRule
 
 from src.alerting import failure_callback
+from src.dag_pools import WAREHOUSE_WRITE_POOL, WAREHOUSE_WRITE_SLOTS
 from src.dbt_artifacts import load_run_results
 from src.dbt_selectors import LINES_SNAPSHOT_TEST_EXCLUDE
 from src.lines_cadence import load_config, should_snapshot
@@ -215,6 +216,7 @@ with DAG(
     # on_failure_callback.
     dbt_distribution = BashOperator(
         task_id="dbt_build_distributions",
+        pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
         bash_command=(f"dbt run --project-dir {DBT_PROJECT_DIR} "
                       f"{DISTRIBUTION_SELECTOR}"),
         # One retry. These models are append-only and skip a week already written, so a
@@ -234,6 +236,7 @@ with DAG(
     # rebuild the whole production set and so refresh both sides of every comparison.
     dbt_distribution_test = BashOperator(
         task_id="dbt_test_distributions",
+        pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
         bash_command=(f"dbt test --project-dir {DBT_PROJECT_DIR} "
                       f"{DISTRIBUTION_SELECTOR} {LINES_SNAPSHOT_TEST_EXCLUDE}"),
         retries=1,
@@ -252,6 +255,7 @@ with DAG(
     # a list a third the length.
     publish_distribution = PythonOperator(
         task_id="publish_distributions",
+        pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
         python_callable=lambda **_: publish_gated(DISTRIBUTION_HOT, "serving"),
         retries=1,
     )

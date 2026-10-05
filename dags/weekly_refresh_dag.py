@@ -36,6 +36,7 @@ from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator
 
 from src.alerting import failure_callback
+from src.dag_pools import WAREHOUSE_WRITE_POOL, WAREHOUSE_WRITE_SLOTS
 from src.dbt_artifacts import load_run_results
 from src.load_raw_to_postgres import load_endpoint
 from src.publish_marts import publish_all
@@ -178,6 +179,7 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
         # dbt, process reliability to Airflow.
         dbt_run = BashOperator(
             task_id="dbt_run",
+            pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
             bash_command=f"dbt run --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
         )
         # THE CATALOGUE MODELS NEED A SECOND PASS, AND dbt CANNOT KNOW THAT.
@@ -204,11 +206,13 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
         # the tests see the fresh catalogue rather than the stale one.
         dbt_catalogue = BashOperator(
             task_id="dbt_catalogue",
+            pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
             bash_command=(f"dbt run --project-dir {DBT_PROJECT_DIR} "
                           f"--select srv_data_dictionary srv_system_health"),
         )
         dbt_test = BashOperator(
             task_id="dbt_test",
+            pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
             bash_command=f"dbt test --project-dir {DBT_PROJECT_DIR} {PRODUCTION_SELECTOR}",
         )
 
@@ -229,6 +233,7 @@ def build_dag(dag_id: str, schedule: str, description: str, refresh_callable) ->
         # anyway would put data on the site that dbt has just said is wrong.
         publish = PythonOperator(
             task_id="publish_to_serving",
+            pool=WAREHOUSE_WRITE_POOL, pool_slots=WAREHOUSE_WRITE_SLOTS,
             python_callable=lambda **_: publish_all(),
         )
 
