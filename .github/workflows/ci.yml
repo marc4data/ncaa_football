@@ -344,9 +344,16 @@ jobs:
           PGPASSWORD: cfdb
         # A fixture that only covered the modern era would let the date-only regression
         # test pass without testing anything.
+        #
+        # 🚨 A283 (cfdb-main-R-4805): RE-POINTED FROM `marts.mart_team_schedule`, WHICH THAT
+        # COMMIT DELETES. ⚠️ AND IT IS THE ONE CONSUMER A283's OWN PART 1 SURVEY MISSED: that
+        # survey searched `site/ src/ dags/ ci/ notebooks/ tests/ dbt/` and reported ZERO
+        # runtime SELECTs — it never searched `.github/`, where this one lives. CI found it,
+        # which is what CI is for, but the count went into the report before the search was
+        # complete (R-859: name the question the command actually answered).
         run: |
           eras=$(psql -h localhost -U cfdb -d cfdb -tAc \
-            "select count(distinct kickoff_time_known) from marts.mart_team_schedule;")
+            "select count(distinct kickoff_time_known) from serving.srv_team_game_log;")
           if [ "$eras" -ne 2 ]; then
             echo "::error::fixture covers $eras date era(s); it must cover both"
             exit 1
