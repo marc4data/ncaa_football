@@ -671,7 +671,7 @@ def test_every_scheduled_dag_runs_more_often_than_the_alarm_forgets():
 
 # === A182: the OUTCOME line — are finished games on the site? (cfdb-main-R-1866) ============
 
-def test_the_watcher_parses_the_unboxed_line_and_fails_on_it(monkeypatch, capsys):
+def test_the_watcher_parses_the_unboxed_line_and_reports_it(monkeypatch, capsys):
     """🚨 A182. THE ONLY SIGNAL IN THIS SYSTEM THAT SPEAKS ABOUT THE SITE.
 
     > **MARC, 2026-09-20:** *"The data has to load and it has to be presented on the site. …
@@ -688,7 +688,8 @@ def test_the_watcher_parses_the_unboxed_line_and_fails_on_it(monkeypatch, capsys
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(chk, "read_ages",
                         lambda _h: (fresh, {}, {}, _all_clear(unboxed=(150, 100_800, "w3"))))
-    assert chk.main(["host"]) == 1, "finished games missing from the site must FAIL the check"
+    assert chk.main(["host"]) == 0, (                      # A281: reported, not paged
+        "finished games missing from the site must still be REPORTED")
     out = capsys.readouterr().out
     assert "UNBOXED 150" in out, out
     assert "week(s) w3" in out, "it must say WHICH weeks, not just how many (R-412)"
@@ -774,13 +775,20 @@ def test_a_monitor_that_cannot_read_serving_says_so_rather_than_passing(monkeypa
 
 # ── THE PLAYER HALF OF THE OUTCOME ALARM (A184, cfdb-main-R-1906) ───────────────────────────
 #
+# ⚠️ A281 (cfdb-main-R-4741): EVERY OUTCOME CHECK BELOW IS NOW REPORTED RATHER THAN PAGED.
+# The exit code IS the channel — GitHub emails on a failed run — and these checks were red
+# ~59 hours a week by construction, so the interrupt was wallpaper. **What each test asserts
+# about the CONTENT of the line is unchanged; only `== 1` became `== 0`, and the four names
+# that said `fails_on_it` now say `reports_it` (§3.2.3: a name is what the next round
+# trusts).** BLIND and every pipeline condition still page.
+#
 # 🚨 THE ALARM WAS QUIET THROUGH THE EXACT INCIDENT IT EXISTS TO CATCH. On 2026-09-21 all 150
 # of week 3's FBS team-games had a box score on the site — `unboxed` reported nothing — while
 # THREE OF TODAY'S FOUR LEADERBOARDS still read "Nothing to show", because the player tables
 # publish weekly and the team tables publish hot. A check that measures half the promise
 # reports success for a page that is half empty.
 
-def test_the_watcher_parses_the_unplayered_line_and_fails_on_it(monkeypatch, capsys):
+def test_the_watcher_parses_the_unplayered_line_and_reports_it(monkeypatch, capsys):
     """The player half must FAIL the run, exactly as the team half does.
 
     ⚠️ R-698 again: a payload nothing acts on is worse than no payload, because it looks like
@@ -789,8 +797,8 @@ def test_the_watcher_parses_the_unplayered_line_and_fails_on_it(monkeypatch, cap
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(chk, "read_ages",
                         lambda _h: (fresh, {}, {}, _all_clear(unplayered=(126, 100_800, "w3"))))
-    assert chk.main(["host"]) == 1, (
-        "finished games with no player box score on the site must FAIL the check")
+    assert chk.main(["host"]) == 0, (
+        "a content gap is reported, not paged (A281) — but it must still be reported")
     out = capsys.readouterr().out
     assert "UNPLAYERED 126" in out, out
     assert "week(s) w3" in out, "it must say WHICH weeks, not just how many (R-412)"
@@ -806,7 +814,7 @@ def test_the_team_half_passing_does_not_excuse_the_player_half(monkeypatch, caps
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(chk, "read_ages",
                         lambda _h: (fresh, {}, {}, _all_clear(unplayered=(126, 100_800, "w3"))))
-    assert chk.main(["host"]) == 1
+    assert chk.main(["host"]) == 0          # A281: reported, not paged
     out = capsys.readouterr().out
     assert "UNPLAYERED 126" in out, out
     assert "UNBOXED" not in out, "the team half is clean and must not be reported as a fault"
@@ -942,13 +950,13 @@ def _watcher_source() -> str:
     return (_Path(__file__).resolve().parents[1] / "ci" / "check_heartbeats.py").read_text()
 
 
-def test_the_drive_and_curve_lines_fail_the_run(monkeypatch, capsys):
+def test_the_drive_and_curve_lines_are_reported(monkeypatch, capsys):
     """Saturday's drives and win-probability chart are half the Matchup page."""
     fresh = {name: 60 for name in chk.CADENCES}
     for head, label in (("undriven", "UNDRIVEN"), ("uncurved", "UNCURVED")):
         outcomes = _all_clear(**{head: (12, 100_800, "w4")})
         monkeypatch.setattr(chk, "read_ages", lambda _h, o=outcomes: (fresh, {}, {}, o))
-        assert chk.main(["host"]) == 1, f"{head} must fail the check"
+        assert chk.main(["host"]) == 0, f"{head} must still be reported"   # A281
         out = capsys.readouterr().out
         assert f"{label} 12" in out, out
         assert "week(s) w4" in out
@@ -1008,7 +1016,7 @@ def test_one_missing_outcome_line_is_blind_and_fails(monkeypatch, capsys):
         assert "BLIND" in out and dropped in out, out
 
 
-def test_the_watcher_parses_the_unadvanced_line_and_fails_on_it(monkeypatch, capsys):
+def test_the_watcher_parses_the_unadvanced_line_and_reports_it(monkeypatch, capsys):
     """🚨 A249 (cfdb-main-R-3472). THE FIFTH DETECTOR, AND IT IS THE CONDITION OF A DECOUPLING.
 
     `game/box/advanced` is now the one endpoint whose failure does not fail the weekly run
@@ -1019,8 +1027,8 @@ def test_the_watcher_parses_the_unadvanced_line_and_fails_on_it(monkeypatch, cap
     fresh = {name: 60 for name in chk.CADENCES}
     monkeypatch.setattr(chk, "read_ages",
                         lambda _h: (fresh, {}, {}, _all_clear(unadvanced=(4, 100_800, "w4"))))
-    assert chk.main(["host"]) == 1, (
-        "finished team-games with no advanced box score on the site must FAIL the check")
+    assert chk.main(["host"]) == 0, (                      # A281: reported, not paged
+        "finished team-games with no advanced box score must still be REPORTED")
     out = capsys.readouterr().out
     assert "UNADVANCED 4" in out, out
 
