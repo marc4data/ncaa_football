@@ -2,7 +2,7 @@
 
 **Generated — do not edit by hand.** `python -m src.coverage_matrix`
 
-Spec v5.27.1 · 84 endpoints · generated 2026-09-21 · raw counts from `data/raw/` (response files on disk)
+Spec v5.32.1 · 88 endpoints · generated 2026-10-05 · raw counts from `data/raw/` (response files on disk)
 
 What the API serves, what we fetch, what has landed, and what is actually exposed as
 columns. The last of those is the one that was never measured: the pipeline was
@@ -13,13 +13,13 @@ never unnested, and never missed. Every DAG stayed green throughout.
 
 | Status | Endpoints | Meaning |
 |---|---:|---|
-| complete | 65 | every field the spec publishes is exposed as a column |
-| partial | 1 | a staging model exists but drops fields |
+| complete | 64 | every field the spec publishes is exposed as a column |
+| partial | 2 | a staging model exists but drops fields |
 | raw only | 0 | responses have landed; nothing reads them |
-| no raw data | 18 | registered, never fetched |
+| no raw data | 22 | registered, never fetched |
 | unregistered | 0 | the API serves it; we have not decided about it |
 
-**Fields exposed: 984 of 1408 (69.9%).** That percentage is the product gap in one number.
+**Fields exposed: 986 of 1777 (55.5%).** That percentage is the product gap in one number.
 
 ## By endpoint
 
@@ -29,7 +29,7 @@ sweep can invent.
 
 | Endpoint | Registered | Raw | Staging model | Fields | Status |
 |---|---|---:|---|---:|---|
-| `calendar` | swept | 26 | `stg_calendar` | 7/7 | complete |
+| `calendar` | swept | 29 | `stg_calendar` | 7/7 | complete |
 | `coaches` | swept | 141 | `stg_coach_season` | 19/19 | complete |
 | `coaches/profile` | CLI | — | — | 0/19 | no raw data |
 | `coaches/seasons` | swept | 3 | `stg_coach_season_detail` | 36/36 | complete |
@@ -41,12 +41,15 @@ sweep can invent.
 | `draft/positions` | swept | 1 | `stg_draft_position` | 2/2 | complete |
 | `draft/teams` | swept | 1 | `stg_nfl_team` | 4/4 | complete |
 | `drives` | swept | 14 | `stg_drive` | 24/24 | complete |
-| `game/box/advanced` | CLI | 186 | `stg_game_box_info`, `stg_game_box_player`, `stg_game_box_team` | 34/34 | complete |
+| `game/box/advanced` | CLI | 186 | `stg_game_box_info`, `stg_game_box_player`, `stg_game_box_team` | 36/84 | partial |
 | `games` | swept | 345 | `stg_games` | 41/41 | complete |
 | `games/media` | swept | 8 | `stg_game_media` | 12/12 | complete |
 | `games/players` | swept | 44 | `stg_game_player_stat` | 7/7 | complete |
+| `games/schedule` | CLI | — | — | 0/40 | no raw data |
 | `games/teams` | swept | 44 | `stg_game_team_stat` | 8/8 | complete |
 | `games/weather` | swept | 4 | `stg_game_weather` | 22/22 | complete |
+| `games/{gameId}/preview` | CLI | — | — | 0/137 | no raw data |
+| `games/{gameId}/preview/adjusted` | CLI | — | — | 0/51 | no raw data |
 | `info` | CLI | 13 | `stg_api_quota` | 13/13 | complete |
 | `info/usage` | CLI | 13 | `stg_api_recent_request`, `stg_api_usage_endpoint` | 10/10 | complete |
 | `lines` | swept | 62 | `stg_lines` | 23/23 | complete |
@@ -73,9 +76,9 @@ sweep can invent.
 | `plays/types` | swept | 1 | `stg_play_type` | 3/3 | complete |
 | `ppa/games` | swept | 13 | `stg_game_team_ppa` | 13/13 | complete |
 | `ppa/players/games` | swept | 43 | `stg_player_game_ppa` | 11/11 | complete |
-| `ppa/players/season` | swept | 25 | `stg_player_season_ppa` | 14/14 | complete |
+| `ppa/players/season` | swept | 26 | `stg_player_season_ppa` | 14/14 | complete |
 | `ppa/predicted` | CLI | — | — | 0/2 | no raw data |
-| `ppa/teams` | swept | 14 | `stg_team_rating`, `stg_team_season_ppa` | 10/10 | complete |
+| `ppa/teams` | swept | 15 | `stg_team_rating`, `stg_team_season_ppa` | 10/10 | complete |
 | `rankings` | swept | 194 | `stg_rankings` | 11/11 | complete |
 | `ratings/core` | swept | 14 | `stg_rating_core` | 11/11 | complete |
 | `ratings/elo` | swept | 14 | `stg_rating_elo`, `stg_team_rating` | 4/4 | complete |
@@ -102,17 +105,18 @@ sweep can invent.
 | `stats/player/success` | swept | 16 | `stg_player_season_success` | 9/9 | complete |
 | `stats/player/success/game` | swept | 43 | `stg_player_game_success` | 13/13 | complete |
 | `stats/season` | swept | 169 | `stg_team_season_stat` | 5/5 | complete |
-| `stats/season/advanced` | swept | 37 | `stg_team_season_advanced` | 25/25 | complete |
+| `stats/season/advanced` | swept | 38 | `stg_team_season_advanced` | 25/25 | complete |
 | `talent` | swept | 3 | `stg_team_talent` | 3/3 | complete |
 | `teams` | swept | 160 | `stg_teams` | 25/25 | complete |
 | `teams/ats` | swept | 14 | `stg_team_season_ats` | 9/9 | complete |
 | `teams/fbs` | swept | 3 | `stg_team_fbs` | 25/25 | complete |
 | `teams/matchup` | CLI | — | — | 0/18 | no raw data |
+| `teams/season/overview` | CLI | — | — | 0/91 | no raw data |
 | `venues` | swept | 1 | `stg_venues` | 14/14 | complete |
 | `wepa/players/kicking` | swept | 14 | `stg_player_season_wepa_kicking` | 7/7 | complete |
 | `wepa/players/passing` | swept | 14 | `stg_player_season_wepa_passing` | 8/8 | complete |
 | `wepa/players/rushing` | swept | 14 | `stg_player_season_wepa_rushing` | 8/8 | complete |
-| `wepa/team/season` | swept | 30 | `stg_team_season_wepa` | 15/15 | complete |
+| `wepa/team/season` | swept | 31 | `stg_team_season_wepa` | 15/15 | complete |
 
 ## What each gap costs
 
@@ -122,7 +126,7 @@ carried through.
 
 | Endpoint | Model | Dropped | Fields not exposed |
 |---|---|---:|---|
-| — | — | 0 | Nothing left in this category. |
+| `game/box/advanced` | stg_game_box_info, stg_game_box_player, stg_game_box_team | 48 | `airYardsAttemptsAvailable`, `airYardsPerAttempt`, `attempts`, `averageDepthOfTarget`, `averageYardsAfterCatch`, `carries`, `completionRate`, `completions`, `conference`, `directionAvailableAttempts`, `directionEligibleAttempts`, `gameId`, … (+36) |
 
 ## Partial on purpose
 

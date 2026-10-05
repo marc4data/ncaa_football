@@ -43,7 +43,7 @@ from lib import shell
 
 # 📊 THE DATE THESE COUNTS WERE TAKEN. Printed on the page, so a reader can see how old the
 # shape of the project is rather than having to trust that it is current.
-SCALE_AS_OF = "September 2026"
+SCALE_AS_OF = "October 2026"
 
 
 def body(page) -> None:
@@ -55,7 +55,7 @@ from memory:
 
 | | |
 |---|---|
-| CFBD endpoints in the ingestion registry | **84**, of which **61** are fetched on a cadence |
+| CFBD endpoints in the ingestion registry | **88**, of which **61** are fetched on a cadence |
 | dbt models | **173** — **81** staging, **56** dimensional, **36** serving |
 | dbt data tests | **637** — **496** schema tests and **141** hand-written assertions |
 | Python tests | more than **2,250** |

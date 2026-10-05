@@ -153,6 +153,44 @@ REGISTRY: List[Endpoint] = [
     Endpoint("games/weather", SEASON_TYPE, BUCKET_HISTORICAL, note="Tier 3 feature"),
     Endpoint("games/teams", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="team box scores"),
     Endpoint("games/players", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="player box scores"),
+
+    # ---- v5.28 - v5.32 arrivals (A284, cfdb-main-R-4830) ---------------------------
+    #
+    # 🚨 ALL FOUR NEW PATHS ARE REGISTERED AND NONE IS SWEPT, WHICH IS THE GOAL STATE THIS
+    # LIST'S OWN GUARD ASKS FOR. `tests/test_cfbd_spec.UNREGISTERED_ON_PURPOSE` says of
+    # itself: "EMPTY, AND THAT IS THE GOAL STATE… It is not a place to park work."
+    # Registering records that the endpoint exists; `include=False` means it costs zero
+    # requests until somebody asks for it.
+    #
+    # ⚠️ `games/schedule` DUPLICATES `games` AT A PRESENTATION GRAIN. Its 200 is
+    # `GameSchedule` — a `ScheduleWindow` plus `ScheduleGame[]` — and every fact in it already
+    # lands via `games`. The one thing it adds is CFBD's own "active or next" slate
+    # determination, which `site/lib/filters.py` and `views/today.py` already compute for
+    # themselves. So this is not a modelling gap: a second home for the current-week decision
+    # is how two surfaces come to disagree (R-574).
+    Endpoint("games/schedule", SEASON_WEEK, BUCKET_PREGAME, include=False,
+             note="duplicates `games` at a presentation grain; adds only CFBD's own "
+                  "current-slate window, which the site computes itself"),
+    # 🚨 MANUAL RATHER THAN PER_GAME, AND THE REASON IS MECHANICAL, NOT A COST JUDGEMENT:
+    # THE GAME ID IS A PATH PARAMETER. `src/ingest.py:75` builds `f"{BASE_URL}/{endpoint}"`,
+    # and nothing in `src/` substitutes a brace — measured, zero hits. Every other per-game
+    # endpoint here takes its id as a QUERY param (`game/box/advanced` uses `id_param: "id"`).
+    # So these two cannot be fetched by any code path that exists today, swept or manual;
+    # they are registered so the drift guard stops re-reporting them, and FETCHING them needs
+    # a loader change, which is its own round.
+    #
+    # ⚠️ AND `preview` IS PERISHABLE, WHICH NOTHING ELSE IN THIS REGISTRY IS. CFBD's own
+    # description: the analysis "remains available until the game is completed". It cannot be
+    # recovered after kickoff, so a backfill of it is not merely expensive, it returns nothing.
+    Endpoint("games/{gameId}/preview", MANUAL, BUCKET_PREGAME, include=False,
+             note="pregame comparisons and key players; id is a PATH param the fetcher "
+                  "cannot substitute; perishable - gone once the game completes"),
+    # Patreon Tier 1 per CFBD's description. ⚠️ WHETHER THIS KEY HAS IT IS UNPROBED — the
+    # passing set carries `min_season=2025` because a round probed it, and asserting an
+    # entitlement nobody measured is the same defect one field over (§2.4).
+    Endpoint("games/{gameId}/preview/adjusted", MANUAL, BUCKET_PREGAME, include=False,
+             note="adjusted pregame metrics; same path-param limit; Tier 1 entitlement "
+                  "UNPROBED"),
     Endpoint("drives", SEASON_TYPE, BUCKET_IMMUTABLE_WK),
     Endpoint("plays", SEASON_WEEK, BUCKET_IMMUTABLE_WK, note="highest volume: ~21k rows/week"),
     # NOT WEEK-SCOPED, BECAUSE A WEEK IS ALWAYS TRUNCATED.
@@ -189,6 +227,17 @@ REGISTRY: List[Endpoint] = [
 
     # ---- Team and player statistics (bucket C1) -----------------------------------
     Endpoint("records", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=1869),
+    # A284 (cfdb-main-R-4831). MANUAL for the same reason `coaches/tenures` is: the spec marks
+    # BOTH `year` and `team` REQUIRED, so a year-only call is rejected and this is a per-team
+    # fan-out no backfill can invent the argument for.
+    #
+    # ⚠️ AND ITS CONTENT OVERLAPS WHAT WE ALREADY PUBLISH. `TeamSeasonOverview` carries
+    # ratings, record and stat rankings, which `srv_standings` and `srv_team_game_log` already
+    # build from `records`, `ratings/*` and `games/teams`. What it ADDS is CFBD's own
+    # garbage-time and postseason splits. Modelling it would put a second home under numbers
+    # we already compute (R-574), so it needs a reader before it needs a model.
+    Endpoint("teams/season/overview", MANUAL, BUCKET_REVISIONIST, include=False,
+             note="requires year AND team - a per-team fan-out; overlaps srv_standings"),
     Endpoint("stats/season", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=1869),
     Endpoint("stats/season/advanced", SEASON, BUCKET_REVISIONIST, history=HISTORY_FULL, min_season=2001),
     Endpoint("stats/game/advanced", SEASON_TYPE, BUCKET_IMMUTABLE_WK),
