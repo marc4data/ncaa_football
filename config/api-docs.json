@@ -6,6 +6,94 @@
     "requestBodies": {},
     "responses": {},
     "schemas": {
+      "AdjustedGamePreview": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdjustedPreviewAnalysis"
+              }
+            ],
+            "nullable": true
+          },
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "availability": {
+            "enum": [
+              "pregame",
+              "metadata_only"
+            ],
+            "type": "string"
+          },
+          "game": {
+            "$ref": "#/components/schemas/GamePreviewMetadata"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/PreviewReason"
+          }
+        },
+        "required": [
+          "assembledAt",
+          "game",
+          "availability",
+          "reason",
+          "analysis"
+        ],
+        "type": "object"
+      },
+      "AdjustedPreviewAnalysis": {
+        "additionalProperties": false,
+        "properties": {
+          "away": {
+            "$ref": "#/components/schemas/AdjustedPreviewTeam"
+          },
+          "home": {
+            "$ref": "#/components/schemas/AdjustedPreviewTeam"
+          }
+        },
+        "required": [
+          "home",
+          "away"
+        ],
+        "type": "object"
+      },
+      "AdjustedPreviewTeam": {
+        "additionalProperties": false,
+        "properties": {
+          "kicking": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewKickerPaar-Array_"
+          },
+          "passing": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewPlayerWepa-Array_"
+          },
+          "rushing": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewPlayerWepa-Array_"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "teamId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "teamMetrics": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewAdjustedTeamMetrics_"
+          }
+        },
+        "required": [
+          "teamId",
+          "season",
+          "teamMetrics",
+          "passing",
+          "rushing",
+          "kicking"
+        ],
+        "type": "object"
+      },
       "AdjustedTeamMetrics": {
         "additionalProperties": false,
         "properties": {
@@ -239,9 +327,23 @@
           },
           "players": {
             "properties": {
+              "passing": {
+                "description": "Enriched passing by athlete ID, including location coverage.",
+                "items": {
+                  "$ref": "#/components/schemas/PlayerPassingGame"
+                },
+                "type": "array"
+              },
               "ppa": {
                 "items": {
                   "$ref": "#/components/schemas/PlayerPPA"
+                },
+                "type": "array"
+              },
+              "rushing": {
+                "description": "Enriched rushing by athlete ID, including direction coverage.",
+                "items": {
+                  "$ref": "#/components/schemas/PlayerRushingGame"
                 },
                 "type": "array"
               },
@@ -254,7 +356,9 @@
             },
             "required": [
               "ppa",
-              "usage"
+              "usage",
+              "rushing",
+              "passing"
             ],
             "type": "object"
           },
@@ -284,6 +388,13 @@
                 },
                 "type": "array"
               },
+              "passing": {
+                "description": "Enriched offense/defense passing; empty when no qualifying rows exist.",
+                "items": {
+                  "$ref": "#/components/schemas/TeamPassingGame"
+                },
+                "type": "array"
+              },
               "ppa": {
                 "items": {
                   "$ref": "#/components/schemas/TeamPPA"
@@ -293,6 +404,13 @@
               "rushing": {
                 "items": {
                   "$ref": "#/components/schemas/TeamRushingStats"
+                },
+                "type": "array"
+              },
+              "rushingAdvanced": {
+                "description": "Enriched rushing, separate from the legacy rushing section.",
+                "items": {
+                  "$ref": "#/components/schemas/TeamRushingGame"
                 },
                 "type": "array"
               },
@@ -310,6 +428,8 @@
               }
             },
             "required": [
+              "rushingAdvanced",
+              "passing",
               "fieldPosition",
               "scoringOpportunities",
               "havoc",
@@ -2590,6 +2710,16 @@
         ],
         "type": "object"
       },
+      "Division": {
+        "enum": [
+          "fbs",
+          "fcs",
+          "ii",
+          "ii/iii",
+          "iii"
+        ],
+        "type": "string"
+      },
       "DivisionClassification": {
         "enum": [
           "fbs",
@@ -2996,6 +3126,22 @@
         ],
         "type": "object"
       },
+      "FieldErrors": {
+        "additionalProperties": {
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "value": {}
+          },
+          "required": [
+            "message"
+          ],
+          "type": "object"
+        },
+        "properties": {},
+        "type": "object"
+      },
       "FieldGoalEP": {
         "additionalProperties": false,
         "properties": {
@@ -3016,6 +3162,72 @@
           "yardsToGoal",
           "distance",
           "expectedPoints"
+        ],
+        "type": "object"
+      },
+      "FreePreviewAnalysis": {
+        "additionalProperties": false,
+        "properties": {
+          "away": {
+            "$ref": "#/components/schemas/FreePreviewTeam"
+          },
+          "broadcasts": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewBroadcast-Array_"
+          },
+          "home": {
+            "$ref": "#/components/schemas/FreePreviewTeam"
+          },
+          "odds": {
+            "$ref": "#/components/schemas/PreviewSection_SelectedOdds_"
+          },
+          "series": {
+            "$ref": "#/components/schemas/PreviewSection_SeriesHistory_"
+          }
+        },
+        "required": [
+          "broadcasts",
+          "odds",
+          "home",
+          "away",
+          "series"
+        ],
+        "type": "object"
+      },
+      "FreePreviewTeam": {
+        "additionalProperties": false,
+        "properties": {
+          "keyPlayers": {
+            "$ref": "#/components/schemas/PreviewKeyPlayers"
+          },
+          "ratings": {
+            "$ref": "#/components/schemas/PreviewSection_TeamSeasonOverview-at-ratings_"
+          },
+          "recentResults": {
+            "$ref": "#/components/schemas/PreviewSection_RecentResult-Array_"
+          },
+          "record": {
+            "$ref": "#/components/schemas/PreviewSection_TeamSeasonOverview-at-record_"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "statistics": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewTeamStatistics_"
+          },
+          "teamId": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "teamId",
+          "season",
+          "record",
+          "ratings",
+          "statistics",
+          "keyPlayers",
+          "recentResults"
         ],
         "type": "object"
       },
@@ -3624,6 +3836,217 @@
           "homeSeed",
           "awaySeed",
           "bowlName"
+        ],
+        "type": "object"
+      },
+      "GamePreview": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FreePreviewAnalysis"
+              }
+            ],
+            "nullable": true
+          },
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "availability": {
+            "enum": [
+              "pregame",
+              "metadata_only"
+            ],
+            "type": "string"
+          },
+          "game": {
+            "$ref": "#/components/schemas/GamePreviewMetadata"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/PreviewReason"
+          }
+        },
+        "required": [
+          "assembledAt",
+          "game",
+          "availability",
+          "reason",
+          "analysis"
+        ],
+        "type": "object"
+      },
+      "GamePreviewError": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "GamePreviewMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "awayTeam": {
+            "$ref": "#/components/schemas/PreviewTeamIdentity"
+          },
+          "conferenceGame": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "homeTeam": {
+            "$ref": "#/components/schemas/PreviewTeamIdentity"
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "neutralSite": {
+            "type": "boolean"
+          },
+          "playoff": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GamePlayoff"
+              }
+            ],
+            "nullable": true
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seasonType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeasonType"
+              },
+              {
+                "enum": [
+                  "preseason"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "startDate": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "startTimeTBD": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameStatus"
+          },
+          "statusCheckedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "venue": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreviewVenue"
+              }
+            ],
+            "nullable": true
+          },
+          "week": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "season",
+          "week",
+          "seasonType",
+          "startDate",
+          "startTimeTBD",
+          "status",
+          "statusCheckedAt",
+          "neutralSite",
+          "conferenceGame",
+          "venue",
+          "homeTeam",
+          "awayTeam",
+          "playoff"
+        ],
+        "type": "object"
+      },
+      "GameSchedule": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "filters": {
+            "properties": {
+              "classification": {
+                "enum": [
+                  "fbs",
+                  "fcs"
+                ],
+                "type": "string"
+              },
+              "conference": {
+                "nullable": true,
+                "type": "string"
+              }
+            },
+            "required": [
+              "conference",
+              "classification"
+            ],
+            "type": "object"
+          },
+          "followingWindow": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleWindow"
+              }
+            ],
+            "nullable": true
+          },
+          "games": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleGame"
+            },
+            "type": "array"
+          },
+          "selection": {
+            "enum": [
+              "active",
+              "next",
+              "explicit",
+              "none"
+            ],
+            "type": "string"
+          },
+          "window": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleWindow"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "assembledAt",
+          "selection",
+          "filters",
+          "window",
+          "followingWindow",
+          "games"
         ],
         "type": "object"
       },
@@ -5002,6 +5425,78 @@
           "locationEligibleAttempts",
           "locationAvailableAttempts",
           "locations"
+        ],
+        "type": "object"
+      },
+      "Pick_KickerPAAR.Exclude_keyofKickerPAAR.attempts__": {
+        "description": "From T, pick a set of properties whose keys are in the union K",
+        "properties": {
+          "athleteId": {
+            "type": "string"
+          },
+          "athleteName": {
+            "type": "string"
+          },
+          "conference": {
+            "type": "string"
+          },
+          "paar": {
+            "format": "double",
+            "type": "number"
+          },
+          "team": {
+            "type": "string"
+          },
+          "year": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team",
+          "year",
+          "athleteId",
+          "athleteName",
+          "conference",
+          "paar"
+        ],
+        "type": "object"
+      },
+      "Pick_PlayerWeightedEPA.Exclude_keyofPlayerWeightedEPA.plays__": {
+        "description": "From T, pick a set of properties whose keys are in the union K",
+        "properties": {
+          "athleteId": {
+            "type": "string"
+          },
+          "athleteName": {
+            "type": "string"
+          },
+          "conference": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "wepa": {
+            "format": "double",
+            "type": "number"
+          },
+          "year": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team",
+          "year",
+          "athleteId",
+          "athleteName",
+          "position",
+          "conference",
+          "wepa"
         ],
         "type": "object"
       },
@@ -6844,6 +7339,45 @@
         ],
         "type": "object"
       },
+      "PlayerSourceAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt"
+        ],
+        "type": "object"
+      },
       "PlayerStat": {
         "additionalProperties": false,
         "properties": {
@@ -7670,11 +8204,1158 @@
         ],
         "type": "object"
       },
+      "PreviewAdjustedTeamMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "isPreviousSeason": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/AdjustedTeamMetrics"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "season",
+          "isPreviousSeason",
+          "metrics"
+        ],
+        "type": "object"
+      },
+      "PreviewBroadcast": {
+        "additionalProperties": false,
+        "properties": {
+          "mediaType": {
+            "$ref": "#/components/schemas/MediaType"
+          },
+          "outlet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mediaType",
+          "outlet"
+        ],
+        "type": "object"
+      },
+      "PreviewKeyPlayer": {
+        "additionalProperties": false,
+        "properties": {
+          "athleteId": {
+            "type": "string"
+          },
+          "averagePPA": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "nullable": true,
+            "type": "string"
+          },
+          "totalPPA": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "usage": {
+            "description": "Pass/rush involvement, not receiving target share.",
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "athleteId",
+          "name",
+          "position",
+          "usage",
+          "averagePPA",
+          "totalPPA"
+        ],
+        "type": "object"
+      },
+      "PreviewKeyPlayers": {
+        "additionalProperties": false,
+        "properties": {
+          "passing": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewKeyPlayer-Array_"
+          },
+          "ppa": {
+            "$ref": "#/components/schemas/PlayerSourceAvailability"
+          },
+          "receiving": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewKeyPlayer-Array_"
+          },
+          "rushing": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewKeyPlayer-Array_"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/PlayerSourceAvailability"
+          }
+        },
+        "required": [
+          "season",
+          "ppa",
+          "usage",
+          "passing",
+          "rushing",
+          "receiving"
+        ],
+        "type": "object"
+      },
+      "PreviewKickerPaar": {
+        "additionalProperties": false,
+        "properties": {
+          "athleteId": {
+            "type": "string"
+          },
+          "athleteName": {
+            "type": "string"
+          },
+          "attempts": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "conference": {
+            "type": "string"
+          },
+          "paar": {
+            "format": "double",
+            "type": "number"
+          },
+          "team": {
+            "type": "string"
+          },
+          "year": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team",
+          "year",
+          "athleteId",
+          "athleteName",
+          "conference",
+          "paar",
+          "attempts"
+        ],
+        "type": "object"
+      },
+      "PreviewPlayerWepa": {
+        "additionalProperties": false,
+        "properties": {
+          "athleteId": {
+            "type": "string"
+          },
+          "athleteName": {
+            "type": "string"
+          },
+          "conference": {
+            "type": "string"
+          },
+          "plays": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "position": {
+            "type": "string"
+          },
+          "team": {
+            "type": "string"
+          },
+          "wepa": {
+            "format": "double",
+            "type": "number"
+          },
+          "year": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team",
+          "year",
+          "athleteId",
+          "athleteName",
+          "position",
+          "conference",
+          "wepa",
+          "plays"
+        ],
+        "type": "object"
+      },
+      "PreviewReason": {
+        "enum": [
+          "game_started",
+          "game_completed",
+          "kickoff_reached",
+          "kickoff_unknown",
+          null
+        ],
+        "nullable": true,
+        "type": "string"
+      },
+      "PreviewSection_PreviewAdjustedTeamMetrics_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreviewAdjustedTeamMetrics"
+              }
+            ],
+            "nullable": true
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_PreviewBroadcast-Array_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewBroadcast"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_PreviewKeyPlayer-Array_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewKeyPlayer"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_PreviewKickerPaar-Array_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewKickerPaar"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_PreviewPlayerWepa-Array_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewPlayerWepa"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_PreviewTeamStatistics_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreviewTeamStatistics"
+              }
+            ],
+            "nullable": true
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_RecentResult-Array_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RecentResult"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_SelectedOdds_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SelectedOdds"
+              }
+            ],
+            "nullable": true
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_SeriesHistory_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SeriesHistory"
+              }
+            ],
+            "nullable": true
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_TeamSeasonOverview-at-ratings_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "nullable": true,
+            "properties": {
+              "core": {
+                "nullable": true,
+                "properties": {
+                  "defense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "offense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "overall": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                },
+                "required": [
+                  "defense",
+                  "offense",
+                  "overall"
+                ],
+                "type": "object"
+              },
+              "elo": {
+                "description": "Latest available postgame Elo from a completed game in this season.",
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "fpi": {
+                "description": "FPI efficiencies (higher is better for all four), not the FPI points rating.",
+                "nullable": true,
+                "properties": {
+                  "defense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "offense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "overall": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "specialTeams": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                },
+                "required": [
+                  "specialTeams",
+                  "defense",
+                  "offense",
+                  "overall"
+                ],
+                "type": "object"
+              },
+              "sp": {
+                "nullable": true,
+                "properties": {
+                  "defense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "offense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "overall": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "specialTeams": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                },
+                "required": [
+                  "specialTeams",
+                  "defense",
+                  "offense",
+                  "overall"
+                ],
+                "type": "object"
+              },
+              "srs": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                ],
+                "nullable": true
+              }
+            },
+            "required": [
+              "sp",
+              "srs",
+              "elo",
+              "core",
+              "fpi"
+            ],
+            "type": "object"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewSection_TeamSeasonOverview-at-record_": {
+        "additionalProperties": false,
+        "properties": {
+          "assembledAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {
+            "nullable": true,
+            "properties": {
+              "games": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "losses": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "ties": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "wins": {
+                "format": "int32",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ties",
+              "losses",
+              "wins",
+              "games"
+            ],
+            "type": "object"
+          },
+          "reason": {
+            "enum": [
+              "no_data",
+              "no_results_yet",
+              "source_error",
+              "invalid_data",
+              null
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "sourceUpdatedAt": {
+            "description": "Snapshot publication time, not a games-through cutoff.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "no_data",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "assembledAt",
+          "sourceUpdatedAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PreviewTeamIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DivisionClassification"
+              }
+            ],
+            "nullable": true
+          },
+          "conference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "conferenceAbbreviation": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "points": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "conference",
+          "conferenceAbbreviation",
+          "classification",
+          "points"
+        ],
+        "type": "object"
+      },
+      "PreviewTeamStatistics": {
+        "additionalProperties": false,
+        "properties": {
+          "advanced": {
+            "$ref": "#/components/schemas/TeamSeasonAdvancedStats"
+          },
+          "isPreviousSeason": {
+            "type": "boolean"
+          },
+          "passing": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TeamPassingSeason"
+              }
+            ],
+            "nullable": true
+          },
+          "rushing": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TeamRushingSeason"
+              }
+            ],
+            "nullable": true
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "statRankings": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TeamSeasonStatRankings"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "season",
+          "isPreviousSeason",
+          "advanced",
+          "passing",
+          "rushing"
+        ],
+        "type": "object"
+      },
+      "PreviewVenue": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "city",
+          "state"
+        ],
+        "type": "object"
+      },
       "RankingPoll": {
         "enum": [
           "cfp"
         ],
         "type": "string"
+      },
+      "RecentResult": {
+        "additionalProperties": false,
+        "properties": {
+          "gameId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "homeAway": {
+            "enum": [
+              "home",
+              "away"
+            ],
+            "type": "string"
+          },
+          "neutralSite": {
+            "type": "boolean"
+          },
+          "opponent": {
+            "properties": {
+              "id": {
+                "format": "double",
+                "type": "number"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "id"
+            ],
+            "type": "object"
+          },
+          "opponentPoints": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "result": {
+            "enum": [
+              "win",
+              "loss",
+              "tie",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "startDate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "teamPoints": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "venue": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreviewVenue"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "gameId",
+          "season",
+          "startDate",
+          "opponent",
+          "homeAway",
+          "neutralSite",
+          "venue",
+          "teamPoints",
+          "opponentPoints",
+          "result"
+        ],
+        "type": "object"
+      },
+      "Record_StatMetricKey.TeamStatRank-or-null_": {
+        "description": "Construct a type with a set of properties K of type T",
+        "properties": {
+          "explosiveness": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "fieldPosition.averagePredictedPoints": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "fieldPosition.averageStart": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "havoc.db": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "havoc.frontSeven": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "havoc.total": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "lineYards": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "openFieldYards": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "passingDowns.successRate": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "passingPlays.explosiveness": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "passingPlays.ppa": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "pointsPerOpportunity": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "powerSuccess": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "ppa": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "rushingPlays.explosiveness": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "rushingPlays.ppa": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "secondLevelYards": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "standardDowns.successRate": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "stuffRate": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          },
+          "successRate": {
+            "$ref": "#/components/schemas/TeamStatRank"
+          }
+        },
+        "required": [
+          "ppa",
+          "successRate",
+          "explosiveness",
+          "standardDowns.successRate",
+          "passingDowns.successRate",
+          "passingPlays.ppa",
+          "rushingPlays.ppa",
+          "passingPlays.explosiveness",
+          "rushingPlays.explosiveness",
+          "lineYards",
+          "secondLevelYards",
+          "openFieldYards",
+          "stuffRate",
+          "powerSuccess",
+          "havoc.total",
+          "havoc.frontSeven",
+          "havoc.db",
+          "pointsPerOpportunity",
+          "fieldPosition.averageStart",
+          "fieldPosition.averagePredictedPoints"
+        ],
+        "type": "object"
       },
       "Recruit": {
         "additionalProperties": false,
@@ -8271,6 +9952,151 @@
         ],
         "type": "object"
       },
+      "ScheduleGame": {
+        "additionalProperties": false,
+        "properties": {
+          "awayTeam": {
+            "$ref": "#/components/schemas/PreviewTeamIdentity"
+          },
+          "broadcasts": {
+            "$ref": "#/components/schemas/PreviewSection_PreviewBroadcast-Array_"
+          },
+          "conferenceGame": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "homeTeam": {
+            "$ref": "#/components/schemas/PreviewTeamIdentity"
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "neutralSite": {
+            "type": "boolean"
+          },
+          "odds": {
+            "$ref": "#/components/schemas/PreviewSection_SelectedOdds_"
+          },
+          "playoff": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GamePlayoff"
+              }
+            ],
+            "nullable": true
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seasonType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeasonType"
+              },
+              {
+                "enum": [
+                  "preseason"
+                ],
+                "type": "string"
+              }
+            ]
+          },
+          "startDate": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "startTimeTBD": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GameStatus"
+          },
+          "statusCheckedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "venue": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreviewVenue"
+              }
+            ],
+            "nullable": true
+          },
+          "watchabilityScore": {
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "nullable": true,
+            "type": "number"
+          },
+          "week": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "season",
+          "week",
+          "seasonType",
+          "startDate",
+          "startTimeTBD",
+          "status",
+          "statusCheckedAt",
+          "neutralSite",
+          "conferenceGame",
+          "venue",
+          "homeTeam",
+          "awayTeam",
+          "playoff",
+          "broadcasts",
+          "odds",
+          "watchabilityScore"
+        ],
+        "type": "object"
+      },
+      "ScheduleWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "endDate": {
+            "description": "Exclusive UTC bound.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "seasonType": {
+            "enum": [
+              "regular",
+              "postseason"
+            ],
+            "type": "string"
+          },
+          "startDate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "week": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "year": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year",
+          "seasonType",
+          "week",
+          "startDate",
+          "endDate"
+        ],
+        "type": "object"
+      },
       "ScoreboardGame": {
         "additionalProperties": false,
         "properties": {
@@ -8547,6 +10373,228 @@
           "spring_regular"
         ],
         "type": "string"
+      },
+      "SelectedOdds": {
+        "additionalProperties": false,
+        "properties": {
+          "awayMoneyline": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "homeMoneyline": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "overUnder": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "provider": {
+            "enum": [
+              "DraftKings",
+              "Bovada"
+            ],
+            "type": "string"
+          },
+          "providerId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "spread": {
+            "description": "Home-relative spread; negative favors home.",
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "providerId",
+          "provider",
+          "spread",
+          "overUnder",
+          "homeMoneyline",
+          "awayMoneyline"
+        ],
+        "type": "object"
+      },
+      "SeriesHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "awayTeamId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "awayWins": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "firstSeason": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "homeTeamId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "homeWins": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "knownResults": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "lastSeason": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "latestMeeting": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SeriesMeeting"
+              }
+            ],
+            "nullable": true
+          },
+          "meetings": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "recentMeetings": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesMeeting"
+            },
+            "type": "array"
+          },
+          "streak": {
+            "nullable": true,
+            "properties": {
+              "teamId": {
+                "format": "double",
+                "type": "number"
+              },
+              "wins": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "wins",
+              "teamId"
+            ],
+            "type": "object"
+          },
+          "ties": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "unknownResults": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "homeTeamId",
+          "awayTeamId",
+          "meetings",
+          "knownResults",
+          "unknownResults",
+          "homeWins",
+          "awayWins",
+          "ties",
+          "firstSeason",
+          "lastSeason",
+          "latestMeeting",
+          "streak",
+          "recentMeetings"
+        ],
+        "type": "object"
+      },
+      "SeriesMeeting": {
+        "additionalProperties": false,
+        "properties": {
+          "awayPoints": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "awayTeam": {
+            "type": "string"
+          },
+          "awayTeamId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "gameId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "homePoints": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "homeTeam": {
+            "type": "string"
+          },
+          "homeTeamId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "neutralSite": {
+            "type": "boolean"
+          },
+          "result": {
+            "enum": [
+              "win",
+              "tie",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "startDate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "venue": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PreviewVenue"
+              }
+            ],
+            "nullable": true
+          },
+          "winnerTeamId": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gameId",
+          "season",
+          "startDate",
+          "homeTeamId",
+          "homeTeam",
+          "awayTeamId",
+          "awayTeam",
+          "neutralSite",
+          "venue",
+          "homePoints",
+          "awayPoints",
+          "winnerTeamId",
+          "result"
+        ],
+        "type": "object"
       },
       "StatsByQuarter": {
         "additionalProperties": false,
@@ -10019,6 +12067,966 @@
         ],
         "type": "object"
       },
+      "TeamSeasonAdvancedStats": {
+        "additionalProperties": false,
+        "properties": {
+          "conference": {
+            "type": "string"
+          },
+          "defense": {
+            "properties": {
+              "drives": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "explosiveness": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "fieldPosition": {
+                "properties": {
+                  "averagePredictedPoints": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "averageStart": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "averagePredictedPoints",
+                  "averageStart"
+                ],
+                "type": "object"
+              },
+              "havoc": {
+                "properties": {
+                  "db": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "frontSeven": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "total": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "db",
+                  "frontSeven",
+                  "total"
+                ],
+                "type": "object"
+              },
+              "lineYards": {
+                "format": "double",
+                "type": "number"
+              },
+              "lineYardsTotal": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "openFieldYards": {
+                "format": "double",
+                "type": "number"
+              },
+              "openFieldYardsTotal": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "passingDowns": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "totalPPA": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "totalPPA",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "passingPlays": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "totalPPA": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "totalPPA",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "plays": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "pointsPerOpportunity": {
+                "format": "double",
+                "type": "number"
+              },
+              "powerRushAttempts": {
+                "format": "double",
+                "type": "number"
+              },
+              "powerSuccess": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "ppa": {
+                "format": "double",
+                "type": "number"
+              },
+              "rushingPlays": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "totalPPA": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "totalPPA",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "secondLevelYards": {
+                "format": "double",
+                "type": "number"
+              },
+              "secondLevelYardsTotal": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "standardDowns": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "stuffRate": {
+                "format": "double",
+                "type": "number"
+              },
+              "successRate": {
+                "format": "double",
+                "type": "number"
+              },
+              "totalOpportunies": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "totalPPA": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "passingPlays",
+              "rushingPlays",
+              "passingDowns",
+              "standardDowns",
+              "havoc",
+              "fieldPosition",
+              "pointsPerOpportunity",
+              "totalOpportunies",
+              "openFieldYardsTotal",
+              "openFieldYards",
+              "secondLevelYardsTotal",
+              "secondLevelYards",
+              "lineYardsTotal",
+              "lineYards",
+              "stuffRate",
+              "powerSuccess",
+              "explosiveness",
+              "successRate",
+              "totalPPA",
+              "ppa",
+              "drives",
+              "plays"
+            ],
+            "type": "object"
+          },
+          "offense": {
+            "properties": {
+              "drives": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "explosiveness": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "fieldPosition": {
+                "properties": {
+                  "averagePredictedPoints": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "averageStart": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "averagePredictedPoints",
+                  "averageStart"
+                ],
+                "type": "object"
+              },
+              "havoc": {
+                "properties": {
+                  "db": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "frontSeven": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "total": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "db",
+                  "frontSeven",
+                  "total"
+                ],
+                "type": "object"
+              },
+              "lineYards": {
+                "format": "double",
+                "type": "number"
+              },
+              "lineYardsTotal": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "openFieldYards": {
+                "format": "double",
+                "type": "number"
+              },
+              "openFieldYardsTotal": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "passingDowns": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "passingPlays": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "totalPPA": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "totalPPA",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "plays": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "pointsPerOpportunity": {
+                "format": "double",
+                "type": "number"
+              },
+              "powerRushAttempts": {
+                "format": "double",
+                "type": "number"
+              },
+              "powerSuccess": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "ppa": {
+                "format": "double",
+                "type": "number"
+              },
+              "rushingPlays": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "totalPPA": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "totalPPA",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "secondLevelYards": {
+                "format": "double",
+                "type": "number"
+              },
+              "secondLevelYardsTotal": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "standardDowns": {
+                "properties": {
+                  "explosiveness": {
+                    "format": "double",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  "ppa": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "rate": {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  "successRate": {
+                    "format": "double",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "explosiveness",
+                  "successRate",
+                  "ppa",
+                  "rate"
+                ],
+                "type": "object"
+              },
+              "stuffRate": {
+                "format": "double",
+                "type": "number"
+              },
+              "successRate": {
+                "format": "double",
+                "type": "number"
+              },
+              "totalOpportunies": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "totalPPA": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "passingPlays",
+              "rushingPlays",
+              "passingDowns",
+              "standardDowns",
+              "havoc",
+              "fieldPosition",
+              "pointsPerOpportunity",
+              "totalOpportunies",
+              "openFieldYardsTotal",
+              "openFieldYards",
+              "secondLevelYardsTotal",
+              "secondLevelYards",
+              "lineYardsTotal",
+              "lineYards",
+              "stuffRate",
+              "powerSuccess",
+              "explosiveness",
+              "successRate",
+              "totalPPA",
+              "ppa",
+              "drives",
+              "plays"
+            ],
+            "type": "object"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "team": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "season",
+          "team",
+          "conference",
+          "offense",
+          "defense"
+        ],
+        "type": "object"
+      },
+      "TeamSeasonOverview": {
+        "additionalProperties": false,
+        "properties": {
+          "advanced": {
+            "$ref": "#/components/schemas/TeamSeasonAdvancedStats"
+          },
+          "passing": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TeamPassingSeason"
+              }
+            ],
+            "nullable": true
+          },
+          "players": {
+            "properties": {
+              "ppa": {
+                "items": {
+                  "$ref": "#/components/schemas/TeamSeasonPlayerPpa"
+                },
+                "type": "array"
+              },
+              "usage": {
+                "items": {
+                  "$ref": "#/components/schemas/TeamSeasonPlayerUsage"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "usage",
+              "ppa"
+            ],
+            "type": "object"
+          },
+          "ratings": {
+            "description": "Current available ratings for the requested season; unavailable systems are null.",
+            "properties": {
+              "core": {
+                "nullable": true,
+                "properties": {
+                  "defense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "offense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "overall": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                },
+                "required": [
+                  "defense",
+                  "offense",
+                  "overall"
+                ],
+                "type": "object"
+              },
+              "elo": {
+                "description": "Latest available postgame Elo from a completed game in this season.",
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "fpi": {
+                "description": "FPI efficiencies (higher is better for all four), not the FPI points rating.",
+                "nullable": true,
+                "properties": {
+                  "defense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "offense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "overall": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "specialTeams": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                },
+                "required": [
+                  "specialTeams",
+                  "defense",
+                  "offense",
+                  "overall"
+                ],
+                "type": "object"
+              },
+              "sp": {
+                "nullable": true,
+                "properties": {
+                  "defense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "offense": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "overall": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  },
+                  "specialTeams": {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                },
+                "required": [
+                  "specialTeams",
+                  "defense",
+                  "offense",
+                  "overall"
+                ],
+                "type": "object"
+              },
+              "srs": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TeamSeasonRankedRating"
+                  }
+                ],
+                "nullable": true
+              }
+            },
+            "required": [
+              "sp",
+              "srs",
+              "elo",
+              "core",
+              "fpi"
+            ],
+            "type": "object"
+          },
+          "record": {
+            "description": "Completed games for the requested season, including postseason.",
+            "properties": {
+              "games": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "losses": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "ties": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "wins": {
+                "format": "int32",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ties",
+              "losses",
+              "wins",
+              "games"
+            ],
+            "type": "object"
+          },
+          "rushing": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TeamRushingSeason"
+              }
+            ],
+            "nullable": true
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "statRankings": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TeamSeasonStatRankings"
+              }
+            ],
+            "nullable": true
+          },
+          "team": {
+            "type": "string"
+          },
+          "teamId": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "advanced",
+          "players",
+          "passing",
+          "rushing",
+          "record",
+          "ratings",
+          "season",
+          "teamId",
+          "team"
+        ],
+        "type": "object"
+      },
+      "TeamSeasonOverviewError": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "TeamSeasonPlayerPpa": {
+        "additionalProperties": false,
+        "properties": {
+          "averagePPA": {
+            "$ref": "#/components/schemas/TeamSeasonPlayerPpaValues"
+          },
+          "conference": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "nullable": true,
+            "type": "string"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "team": {
+            "type": "string"
+          },
+          "totalPPA": {
+            "$ref": "#/components/schemas/TeamSeasonPlayerPpaValues"
+          }
+        },
+        "required": [
+          "season",
+          "id",
+          "name",
+          "position",
+          "team",
+          "conference",
+          "averagePPA",
+          "totalPPA"
+        ],
+        "type": "object"
+      },
+      "TeamSeasonPlayerPpaValues": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "firstDown": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "pass": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "passingDowns": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "rush": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "secondDown": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "standardDowns": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "thirdDown": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "all",
+          "pass",
+          "rush",
+          "firstDown",
+          "secondDown",
+          "thirdDown",
+          "standardDowns",
+          "passingDowns"
+        ],
+        "type": "object"
+      },
+      "TeamSeasonPlayerUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "conference": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "nullable": true,
+            "type": "string"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "team": {
+            "type": "string"
+          },
+          "usage": {
+            "properties": {
+              "firstDown": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "overall": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "pass": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "passingDowns": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "rush": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "secondDown": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "standardDowns": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              },
+              "thirdDown": {
+                "format": "double",
+                "nullable": true,
+                "type": "number"
+              }
+            },
+            "required": [
+              "passingDowns",
+              "standardDowns",
+              "thirdDown",
+              "secondDown",
+              "firstDown",
+              "rush",
+              "pass",
+              "overall"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "season",
+          "id",
+          "name",
+          "position",
+          "team",
+          "conference",
+          "usage"
+        ],
+        "type": "object"
+      },
       "TeamSeasonPredictedPointsAdded": {
         "additionalProperties": false,
         "properties": {
@@ -10162,6 +13170,75 @@
         ],
         "type": "object"
       },
+      "TeamSeasonRankedRating": {
+        "additionalProperties": false,
+        "properties": {
+          "rank": {
+            "description": "Competition rank within the requested season and division, using unrounded values.",
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "rating": {
+            "description": "Rating/efficiency rounded to two decimal places.",
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "rating",
+          "rank"
+        ],
+        "type": "object"
+      },
+      "TeamSeasonStatRankings": {
+        "additionalProperties": false,
+        "properties": {
+          "calculatedAt": {
+            "type": "string"
+          },
+          "defense": {
+            "$ref": "#/components/schemas/Record_StatMetricKey.TeamStatRank-or-null_"
+          },
+          "division": {
+            "$ref": "#/components/schemas/Division"
+          },
+          "divisionTeamCount": {
+            "format": "double",
+            "type": "number"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "offense": {
+            "$ref": "#/components/schemas/Record_StatMetricKey.TeamStatRank-or-null_"
+          },
+          "season": {
+            "format": "double",
+            "type": "number"
+          },
+          "sourceUpdatedAt": {
+            "type": "string"
+          },
+          "teamId": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "teamId",
+          "season",
+          "division",
+          "divisionTeamCount",
+          "calculatedAt",
+          "expiresAt",
+          "sourceUpdatedAt",
+          "offense",
+          "defense"
+        ],
+        "type": "object"
+      },
       "TeamStat": {
         "additionalProperties": false,
         "properties": {
@@ -10196,6 +13273,33 @@
           "conference",
           "statName",
           "statValue"
+        ],
+        "type": "object"
+      },
+      "TeamStatRank": {
+        "additionalProperties": false,
+        "properties": {
+          "percentile": {
+            "format": "double",
+            "type": "number"
+          },
+          "population": {
+            "format": "double",
+            "type": "number"
+          },
+          "rank": {
+            "format": "double",
+            "type": "number"
+          },
+          "tied": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rank",
+          "population",
+          "tied",
+          "percentile"
         ],
         "type": "object"
       },
@@ -10569,7 +13673,7 @@
       "name": "MIT"
     },
     "title": "College Football Data API",
-    "version": "5.27.1"
+    "version": "5.32.1"
   },
   "openapi": "3.0.0",
   "paths": {
@@ -10868,7 +13972,7 @@
     },
     "/coaches/tenures": {
       "get": {
-        "description": "Returns continuous head-coaching tenures and their attributed records.",
+        "description": "Returns continuous head-coaching tenures and their attributed records.\nRequires coachId or team; year and active only filter the results.",
         "operationId": "GetCoachTenures",
         "parameters": [
           {
@@ -10929,11 +14033,15 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "details": {
+                      "$ref": "#/components/schemas/FieldErrors"
+                    },
                     "message": {
                       "type": "string"
                     }
                   },
                   "required": [
+                    "details",
                     "message"
                   ],
                   "type": "object"
@@ -11417,7 +14525,7 @@
                 }
               }
             },
-            "description": "Ok"
+            "description": ""
           }
         },
         "security": [
@@ -11783,6 +14891,141 @@
         ]
       }
     },
+    "/games/schedule": {
+      "get": {
+        "description": "Returns the active or next calendar slate, including completed games.\nExplicit windows require year, seasonType, and week together.",
+        "operationId": "GetGameSchedule",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "seasonType",
+            "required": false,
+            "schema": {
+              "enum": [
+                "regular",
+                "postseason"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "week",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Division of either participant. Defaults to fbs.",
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "enum": [
+                "fbs",
+                "fcs"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Conference abbreviation of either participant.",
+            "in": "query",
+            "name": "conference",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "Example 1": {
+                    "value": {
+                      "assembledAt": "2026-09-25T12:00:00.000Z",
+                      "filters": {
+                        "classification": "fbs",
+                        "conference": null
+                      },
+                      "followingWindow": null,
+                      "games": [],
+                      "selection": "none",
+                      "window": null
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/GameSchedule"
+                }
+              }
+            },
+            "description": "Ok"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "games"
+        ]
+      }
+    },
     "/games/teams": {
       "get": {
         "description": "Returns team box score statistics by game.",
@@ -11965,6 +15208,240 @@
               }
             },
             "description": "Ok"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{gameId}/preview": {
+      "get": {
+        "description": "Returns pregame team comparisons and key players. Analysis remains available until the game is completed.\nTeam statistics may use the previous season; players and context stay in the game season.",
+        "operationId": "GetGamePreview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gameId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "Example 1": {
+                    "value": {
+                      "analysis": null,
+                      "assembledAt": "2026-09-25T12:00:00.000Z",
+                      "availability": "metadata_only",
+                      "game": {
+                        "awayTeam": {
+                          "classification": null,
+                          "conference": null,
+                          "conferenceAbbreviation": null,
+                          "id": 194,
+                          "name": "Ohio State",
+                          "points": null
+                        },
+                        "conferenceGame": null,
+                        "homeTeam": {
+                          "classification": null,
+                          "conference": null,
+                          "conferenceAbbreviation": null,
+                          "id": 130,
+                          "name": "Michigan",
+                          "points": 21
+                        },
+                        "id": 123,
+                        "neutralSite": false,
+                        "playoff": null,
+                        "season": 2026,
+                        "seasonType": "regular",
+                        "startDate": "2026-09-24T23:00:00.000Z",
+                        "startTimeTBD": false,
+                        "status": "completed",
+                        "statusCheckedAt": "2026-09-25T12:00:00.000Z",
+                        "venue": null,
+                        "week": 4
+                      },
+                      "reason": "game_completed"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreview"
+                }
+              }
+            },
+            "description": "Ok"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{gameId}/preview/adjusted": {
+      "get": {
+        "description": "Returns stored adjusted team and player metrics until game completion. Requires Patreon Tier 1.\nTeam metrics may use the previous season; players remain current-season.",
+        "operationId": "GetAdjustedGamePreview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gameId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "Example 1": {
+                    "value": {
+                      "analysis": null,
+                      "assembledAt": "2026-09-25T12:00:00.000Z",
+                      "availability": "metadata_only",
+                      "game": {
+                        "awayTeam": {
+                          "classification": null,
+                          "conference": null,
+                          "conferenceAbbreviation": null,
+                          "id": 194,
+                          "name": "Ohio State",
+                          "points": null
+                        },
+                        "conferenceGame": null,
+                        "homeTeam": {
+                          "classification": null,
+                          "conference": null,
+                          "conferenceAbbreviation": null,
+                          "id": 130,
+                          "name": "Michigan",
+                          "points": 21
+                        },
+                        "id": 123,
+                        "neutralSite": false,
+                        "playoff": null,
+                        "season": 2026,
+                        "seasonType": "regular",
+                        "startDate": "2026-09-24T23:00:00.000Z",
+                        "startTimeTBD": false,
+                        "status": "completed",
+                        "statusCheckedAt": "2026-09-25T12:00:00.000Z",
+                        "venue": null,
+                        "week": 4
+                      },
+                      "reason": "game_completed"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AdjustedGamePreview"
+                }
+              }
+            },
+            "description": "Ok"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GamePreviewError"
+                }
+              }
+            },
+            "description": ""
           }
         },
         "security": [
@@ -14309,6 +17786,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Return initial ratings from each team's opening regular-season\ngame. Missing opening ratings are omitted. Cannot be combined with week;\nseasonType must be regular or both when specified. Defaults to false.",
+            "in": "query",
+            "name": "preseason",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -16473,6 +19960,109 @@
               }
             },
             "description": "Ok"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "tags": [
+          "teams"
+        ]
+      }
+    },
+    "/teams/season/overview": {
+      "get": {
+        "description": "Returns a stored full-season team overview, including postseason and garbage time.",
+        "operationId": "GetTeamSeasonOverview",
+        "parameters": [
+          {
+            "description": "Season year.",
+            "in": "query",
+            "name": "year",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Team name.",
+            "in": "query",
+            "name": "team",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamSeasonOverview"
+                }
+              }
+            },
+            "description": "Ok"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Validation error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamSeasonOverviewError"
+                }
+              }
+            },
+            "description": ""
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamSeasonOverviewError"
+                }
+              }
+            },
+            "description": ""
           }
         },
         "security": [

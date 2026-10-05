@@ -63,7 +63,7 @@ def test_the_page_dates_its_counts():
 def test_the_endpoint_counts_are_the_registrys_own(manifest):
     """📊 TWO NUMBERS, BECAUSE THE REGISTRY HOLDS MORE THAN IT FETCHES. Printing only the
     larger one would overstate what the pipeline actually pulls — `include=False` is a real
-    flag with 23 endpoints behind it, and §2.5's own warning is that an endpoint nothing
+    flag with 27 endpoints behind it, and §2.5's own warning is that an endpoint nothing
     fetches produces models that are correct and empty."""
     from src.endpoints import REGISTRY
     total, fetched = _printed("ingestion registry")
