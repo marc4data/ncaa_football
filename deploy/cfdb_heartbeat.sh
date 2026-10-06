@@ -29,7 +29,15 @@ WAREHOUSE_HOST="${CFDB_WAREHOUSE_HOST:-172.19.0.2}"
 WAREHOUSE_PORT="${CFDB_WAREHOUSE_PORT:-5432}"
 
 export PGCONNECT_TIMEOUT=10
-PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
+# 🚨 A287 (cfdb-main-R-4923) — `-w` IS NOT OPTIONAL ON A MONITOR, AND IT WAS MISSING.
+# Measured on the droplet while diagnosing the 2026-10-05 blindness: with a deliberately wrong
+# database the script's own stderr read `psql: Password for user cfdb_read:` — **psql was
+# PROMPTING**. With no TTY it then failed, but it failed TWO DIFFERENT WAYS IN ONE RUN: the
+# first query reported `password authentication failed` and the next four
+# `fe_sendauth: no password supplied`. ⚠️ A classifier cannot be trusted on top of a
+# non-deterministic error, and a monitor that can block for input is a monitor that can hang.
+# `-w` makes psql refuse to prompt, so one cause always produces one sentence.
+PSQL=(psql -w -v ON_ERROR_STOP=1 -tA --no-psqlrc
       -h "$WAREHOUSE_HOST" -p "$WAREHOUSE_PORT"
       -U "${CFDB_PGUSER:-cfdb}" -d "${CFDB_PGDATABASE:-cfdb}")
 
@@ -178,7 +186,59 @@ PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # so rather than the check silently reporting nothing wrong.
 SERVING_HOST="${CFDB_SERVING_HOST:-127.0.0.1}"
 SERVING_PORT="${CFDB_SERVING_PORT:-5433}"
-SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# 🚨 A287 (cfdb-main-R-4921) — A GUARD THAT FIRES AND CANNOT SAY WHY COSTS A LIVE INCIDENT
+# ══════════════════════════════════════════════════════════════════════════════════════════
+#
+# Every serving query below ended `|| echo "<head>|MONITOR.cannot_read_published_serving|0|-"`,
+# so CONNECTION REFUSED, AUTHENTICATION FAILED, A MISSING RELATION, A MISSING COLUMN,
+# PERMISSION DENIED AND A SQL ERROR ALL COLLAPSED INTO ONE STRING — and psql's actual message
+# went to stderr, which the watcher does not capture. On 2026-10-05 the real fault was a
+# malformed timestamp literal and the monitor said "cannot read published serving" for four
+# hours while serving answered `select 1` fine. Five message round-trips with Marc, and an
+# incident round, to recover one line of stderr.
+#
+# ✅ SO THE REASON IS NOW CLASSIFIED FROM psql's OWN STDERR. The wire format is unchanged —
+# `<head>|MONITOR.<why>|0|-` — because `ci/check_heartbeats.py` matches on the `MONITOR.`
+# prefix and A278/A281 route any such value to BLIND. **This EXTENDS the vocabulary; it does
+# not alter the contract.** `cannot_read_published_serving` survives as the fallback, so an
+# error nobody has seen yet still reports as BLIND rather than vanishing.
+SERVING_ERR="$(mktemp)"
+trap 'rm -f "$SERVING_ERR"' EXIT
+
+serving_why() {
+  # ⚠️ ORDER MATTERS: the first pattern that matches wins, so the specific ones come before
+  # the generic ones. `invalid input syntax` would otherwise swallow the timestamp case.
+  local e
+  e="$(tr '\n' ' ' < "$SERVING_ERR" 2>/dev/null)"
+  case "$e" in
+    *"Connection refused"*)                 echo "serving_connection_refused" ;;
+    *"could not translate host name"*|*"Name or service not known"*) \
+                                            echo "serving_host_unresolvable" ;;
+    *"No route to host"*|*"Network is unreachable"*) echo "serving_host_unreachable" ;;
+    *"no password supplied"*)                echo "serving_no_password" ;;
+    *"password authentication failed"*)      echo "serving_auth_failed" ;;
+    *"role \""*"\" does not exist"*)          echo "serving_role_missing" ;;
+    *"database \""*"\" does not exist"*)      echo "serving_database_missing" ;;
+    *"relation \""*"\" does not exist"*)      echo "serving_relation_missing" ;;
+    *"column \""*"\" does not exist"*|*"column "*" does not exist"*) \
+                                            echo "serving_column_missing" ;;
+    *"permission denied"*)                   echo "serving_permission_denied" ;;
+    *"date/time field value out of range"*|*"invalid input syntax"*) \
+                                            echo "serving_bad_literal" ;;
+    *"syntax error"*)                        echo "serving_query_syntax_error" ;;
+    *"timeout expired"*|*"statement timeout"*) echo "serving_timeout" ;;
+    *"server closed the connection"*)        echo "serving_connection_dropped" ;;
+    "")                                      echo "cannot_read_published_serving" ;;
+    *)                                       echo "cannot_read_published_serving" ;;
+  esac
+  # ⚠️ The raw message still goes to stderr for whoever runs this by hand. The watcher
+  # discards stderr, so this costs the wire nothing and is the only copy a human gets.
+  [ -s "$SERVING_ERR" ] && sed 's/^/  psql: /' "$SERVING_ERR" >&2
+  : > "$SERVING_ERR"
+}
+
+SERVING_PSQL=(psql -w -v ON_ERROR_STOP=1 -tA --no-psqlrc
       -h "$SERVING_HOST" -p "$SERVING_PORT"
       -U "${CFDB_SERVING_USER:-cfdb_read}" -d "${CFDB_SERVING_DB:-cfdb}")
 
@@ -229,15 +289,39 @@ SERVING_PSQL=(psql -v ON_ERROR_STOP=1 -tA --no-psqlrc
 # null timestamp excludes every game silently and forever — R-760's shape on a monitor, and the
 # one way this change could be worse than the noise it removes. `ci/check_heartbeats.py`
 # annotates a `MONITOR.` value as BLIND and exits 1 (A278, cfdb-main-R-4651).
+# 🚨🚨 A287 (cfdb-main-R-4920) — THIS LINE ENDED `| tr -d '\''[:space:]'\''` AND IT TOOK THE
+# SITE'S MONITOR BLIND FOR FOUR HOURS. `tr -d` DELETES EVERY SPACE, INCLUDING THE ONE INSIDE
+# `'\''YYYY-MM-DD HH24:MI:SS'\''`. So `2026-10-05 03:50:29` reached the five serving queries as
+# `2026-10-0503:50:29`, every one of them died on
+# `ERROR: date/time field value out of range`, and the `|| echo` below reported
+# `cannot_read_published_serving` — a CONNECTION message for a value-formatting bug. Published
+# serving was readable the whole time: `select 1` as this very user returned 1.
+#
+# ⚠️ THE INTENT WAS RIGHT — psql'\''s `-tA` output still carries a trailing newline, so it needs
+# stripping. A TRIM is the operation; a DELETE was the bug. One character class, four hours.
 LAST_FETCH="$("${PSQL[@]}" -c "
   select to_char(max(beat_at) at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS')
   from ops.pipeline_heartbeat
   where heartbeat_name in ('weekly_results', 'weekly_midweek')
-" 2>/dev/null | tr -d '[:space:]')"
+" 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+# 🚨 AND THE EMPTY CHECK WAS NOT ENOUGH, WHICH IS THE REAL LESSON. A280 proved the
+# null-or-unreadable branch fires (its PART 3 required it) and that branch worked perfectly.
+# What nobody staged was a value that is NON-EMPTY AND INVALID — `[ -z ]` passes it straight
+# through to five SQL casts. So the shape is now asserted, and a malformed clock gets its OWN
+# reason instead of masquerading as a serving outage.
+LAST_FETCH_SHAPE='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$'
 
 if [ -z "$LAST_FETCH" ]; then
   for CHECK in unboxed unplayered unadvanced undriven uncurved; do
     echo "$CHECK|MONITOR.cannot_read_last_successful_fetch|0|-"
+  done
+elif ! printf '%s' "$LAST_FETCH" | grep -Eq "$LAST_FETCH_SHAPE"; then
+  # ⚠️ The VALUE is deliberately not echoed. It is not a secret, but a monitor line is parsed
+  # by a machine on a `|` delimiter and an arbitrary string is how a parser gets surprised.
+  echo "the last-fetch clock did not match YYYY-MM-DD HH:MM:SS" >&2
+  for CHECK in unboxed unplayered unadvanced undriven uncurved; do
+    echo "$CHECK|MONITOR.last_fetch_unparseable|0|-"
   done
 else
 
@@ -264,7 +348,7 @@ else
       and game_date < ('$LAST_FETCH'::timestamp at time zone 'UTC'
                          at time zone 'America/Los_Angeles')::date
       and (not has_box_score or not has_box_advanced)
-  " || echo "unboxed|MONITOR.cannot_read_published_serving|0|-"
+  " 2>"$SERVING_ERR" || echo "unboxed|MONITOR.$(serving_why)|0|-"
 
   # 🚨 THE PLAYER HALF, AND IT IS A SEPARATE LINE BECAUSE IT IS A SEPARATE FAILURE — A184
   # (cfdb-main-R-1906). The check above asks whether the TEAM box score is on the site. On
@@ -293,7 +377,7 @@ else
                          at time zone 'America/Los_Angeles')::date) g
     where not exists (select 1 from serving.srv_player_game_log p
                        where p.game_id = g.game_id)
-  " || echo "unplayered|MONITOR.cannot_read_published_serving|0|-"
+  " 2>"$SERVING_ERR" || echo "unplayered|MONITOR.$(serving_why)|0|-"
 
     # ── A249 (cfdb-main-R-3472): THE ADVANCED BOX SCORE, AND IT IS THE CONDITION OF A DECOUPLING
     #
@@ -324,7 +408,7 @@ else
         and g.season = (select max(season) from serving.srv_game_team where is_completed)
         and g.game_date < ('$LAST_FETCH'::timestamp at time zone 'UTC'
                          at time zone 'America/Los_Angeles')::date
-    " || echo "unadvanced|MONITOR.cannot_read_published_serving|0|-"
+    " 2>"$SERVING_ERR" || echo "unadvanced|MONITOR.$(serving_why)|0|-"
 
   # 🚨 THE REST OF SATURDAY — DRIVES AND THE WIN-PROBABILITY CURVE. A185 (cfdb-main-R-1914).
   #
@@ -361,7 +445,7 @@ else
                          at time zone 'America/Los_Angeles')::date
             and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
     where not exists (select 1 from serving.srv_drive d where d.game_id = g.game_id)
-  " || echo "undriven|MONITOR.cannot_read_published_serving|0|-"
+  " 2>"$SERVING_ERR" || echo "undriven|MONITOR.$(serving_why)|0|-"
 
   "${SERVING_PSQL[@]}" -c "
     select 'uncurved|' || count(*) || '|' ||
@@ -376,7 +460,7 @@ else
             and game_date > (now() at time zone 'America/Los_Angeles')::date - 7) g
     where not exists (select 1 from serving.srv_game_win_probability_play w
                        where w.game_id = g.game_id)
-  " || echo "uncurved|MONITOR.cannot_read_published_serving|0|-"
+  " 2>"$SERVING_ERR" || echo "uncurved|MONITOR.$(serving_why)|0|-"
 fi
 
 
