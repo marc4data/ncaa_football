@@ -1546,12 +1546,22 @@ def _pivot_player_stats(stat_types):
 
 _ALL_SHEETS = [
     # ======================================================================================
-    # THE SCHEDULE SHEET — FIFTY-SIX COLUMNS IN MARC'S ORDER (R-214, R-215).
+    # THE SCHEDULE SHEET — SIXTY COLUMNS: MARC'S ORDER PLUS FOUR RECORDED ADDITIONS.
     #
     # THE ORDER IS `claude_work/supporting_files/cfdb_schedule_column_order.csv`, TAKEN
-    # LITERALLY. It supersedes spec §3.2's block ordering. Reconciled before building: 67
-    # columns built, 11 removed, 56 remain, and his file has exactly 56 rows with no extras
-    # and nothing missing.
+    # LITERALLY WHERE IT SPEAKS. It supersedes spec §3.2's block ordering. Reconciled before
+    # building: 67 columns built, 11 removed, 56 remained, and his file had exactly 56 rows.
+    #
+    # 🚨 THE SHEET IS NO LONGER THE SAME LENGTH AS THE CSV, AND THE DIFFERENCE IS RECORDED IN
+    # ONE PLACE ONLY — `test_the_schedule_sheet_matches_marcs_order_plus_the_recorded_additions`
+    # subtracts the known additions and then demands exact equality. Read that test to see the
+    # current delta; do not infer it from this comment.
+    #
+    # ⚠️ A289 FOUND THIS COMMENT ALREADY STALE BY TWO (cfdb-main-R-4985). `Home pregame Elo`
+    # and `Away pregame Elo` landed in `ddc6c41` (R-290b) and the sheet has been 58 columns
+    # since, while this header said 56 and Marc's CSV still has neither. **Following that CSV
+    # literally would have DELETED two shipped columns**, which is why "where it speaks" is
+    # now in the sentence above.
     #
     # The shape is worth naming so nobody "improves" it later:
     #     scope → fixture → market → result → context → model → keys
@@ -1586,7 +1596,8 @@ _ALL_SHEETS = [
                away_conference, home_conference, away_classification, home_classification,
                is_conference_game, is_fbs_game,
                home_pregame_elo, away_pregame_elo,
-               predicted_margin, home_win_probability, confidence_bucket,
+               predicted_margin, predicted_total_points, home_cover_edge,
+               home_win_probability, confidence_bucket,
                model_name, model_version_key, is_out_of_sample_week,
                game_id, as_of_ts, attribution,
                home_team_slug, away_team_slug,
@@ -1670,7 +1681,26 @@ _ALL_SHEETS = [
         ("home_pregame_elo", "Home pregame Elo"),
         ("away_pregame_elo", "Away pregame Elo"),
         # --- the model --------------------------------------------------------------------
-        ("predicted_margin", "Pred margin"),
+        # 🚨 A289 (cfdb-main-R-4981). MARC: "The Schedule in the Excel Export needs to include
+        # model predictions for: Model Line, Predicted Total, and Cover Edge."
+        #
+        # `Pred margin` WAS RENAMED RATHER THAN DUPLICATED. This sheet was the only consumer
+        # calling this column anything else: `workbook.py`'s own Edge Finder sheet, the Edges
+        # page and the Odds Board prose all say "Model line (home)". A second column would
+        # have put one number on the sheet twice under two names.
+        #
+        # ⚠️ NOT `predicted_margin_home_perspective`, which srv_game marks "retiring — no site
+        # consumer since cfdb-wtc-R-2550; CONTRACT after deploy". A new consumer must not pick
+        # up a column on its way out.
+        #
+        # 📊 SIGN CONVENTION, MEASURED ON 740 LIVE ROWS RATHER THAN READ OFF THE MODEL'S
+        # COMMENT: `corr(spread_current, predicted_margin) = +0.96`, both correlate +0.63/+0.65
+        # with `away_points - home_points`, and a NEGATIVE value in either column means the
+        # home team is favoured — home won 74.5% of negative-spread games and 75.0% of
+        # negative-margin ones. So `Model line (home)` sits beside `Spread` in one frame.
+        ("predicted_margin", "Model line (home)"),
+        ("predicted_total_points", "Model total"),
+        ("home_cover_edge", "Cover edge (home)"),
         ("home_win_probability", "Home win prob"),
         ("confidence_bucket", "Confidence"),
         ("model_name", "Model"),
@@ -2675,7 +2705,14 @@ WIDTH_OVERRIDES = {
     "Final margin": 5.85,
     "Season": 5.6,
     "Wind mph": 5.5,
-    "Pred margin": 6.5,
+    # ⚠️ A289 FOLLOWED THE RENAME, AND MEASURED THAT THIS ENTRY IS INERT (cfdb-main-R-4982).
+    # `column_width` ends `max(base, floor)`, and `floor` is the LONGEST WORD of the label
+    # (headers wrap) plus WORD_PADDING. "margin" and "(home)" are both 6 characters, so the
+    # floor is 6.70 under either label and 6.5 never wins. 📊 The rendered width was 6.70
+    # before this round and is 6.70 after it. **Kept, renamed, because it is Marc's recorded
+    # measurement and the dict is keyed by label so it should follow the column — but he
+    # should know the number currently changes nothing if he wants a narrower column.**
+    "Model line (home)": 6.5,
     "Home win prob": 7.7,
 }
 
