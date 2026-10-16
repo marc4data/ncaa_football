@@ -296,8 +296,13 @@ def test_no_prediction_cell_is_populated_beside_a_blank_attribution(built):
     tab = book["Schedule"]
     header = workbook.header_row(0)
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
-    prediction_columns = ["Pred margin", "Home win prob", "Confidence", "Model",
-                          "Model version"]
+    # 🚨 A289 ADDED THE TWO NEW MODEL COLUMNS HERE, not just renamed the old one. This test is
+    # the R-221 obligation — no prediction cell may ship beside a blank attribution — and
+    # `Model total` and `Cover edge (home)` ARE prediction cells. Adding them STRENGTHENS the
+    # guard; leaving them out would have let two new columns escape the one check that exists
+    # to catch exactly that (cfdb-main-R-4983).
+    prediction_columns = ["Model line (home)", "Model total", "Cover edge (home)",
+                          "Home win prob", "Confidence", "Model", "Model version"]
     assert "Attribution" in labels and schedule.has_predictions
     for row in range(header + 1, tab.max_row + 1):
         attributed = tab.cell(row, labels["Attribution"]).value
@@ -576,10 +581,17 @@ def test_export_labels_agree_with_the_site(built):
         "the Scores page no longer takes its labels from the sheet — it is back to declaring "
         "them, and nothing here compares the two")
 
-    # And Schedule really is compared. SEVEN of its 56 columns share a field name with a page
+    # And Schedule really is compared. NINE of its 60 columns share a field name with a page
     # reading srv_game; it was thirteen until R-267, because the old Scores page also declared
     # srv_game columns and those counted toward the same pool. A floor rather than the exact
     # number, so a legitimate page change does not fail this — but a drop to nothing does.
+    #
+    # ⚠️ A289 RE-COUNTED RATHER THAN CARRYING THE NUMBER FORWARD (cfdb-main-R-4985): the prose
+    # said SEVEN of 56 and the measured answer is NINE of 60. Neither moved because of A289 —
+    # none of the three model columns it added is a `Col` on a page reading srv_game — so the
+    # 7 had already drifted. **The floor stays at 7 on purpose**: raising it to the measured
+    # value would make the next legitimate page change fail, which is the thing this comment
+    # says the floor exists to avoid.
     assert compared["Schedule"] >= 7, compared
 
 
@@ -1193,10 +1205,18 @@ def test_the_index_warns_that_access_will_ask_for_a_sign_in(built):
 
 # --- R-185, the Schedule sheet ------------------------------------------------------------
 
-def test_the_schedule_sheet_carries_marcs_fifty_six_columns_in_his_order():
+def test_the_schedule_sheet_matches_marcs_order_plus_the_recorded_additions():
     """R-214/R-215. The order is `claude_work/supporting_files/cfdb_schedule_column_order.csv`
-    and it is AUTHORITATIVE, so this reads the file rather than restating it. A test that
-    hardcoded the list would have to be edited alongside the CSV and could disagree with it.
+    and it is AUTHORITATIVE WHERE IT SPEAKS, so this reads the file rather than restating it. A
+    test that hardcoded the list would have to be edited alongside the CSV and could disagree
+    with it.
+
+    🚨 RENAMED BY A289, because the old name said `fifty_six_columns` and the sheet has not been
+    fifty-six since `ddc6c41` (cfdb-main-R-4985). The CSV is 58 rows, the sheet is 60, and the
+    difference is the `added` set below — which is the ONE place that delta is recorded. ⚠️ The
+    name mattered: A289's prompt listed the two tests it expected to break and this was not one
+    of them, yet THIS is the test Cowork's own CSV edit turned red, and a name claiming a stale
+    number is how the wrong test gets checked.
     """
     import csv as _csv
     source = (Path(__file__).resolve().parents[2] / "claude_work" / "supporting_files"
@@ -2035,7 +2055,7 @@ def test_the_hand_set_widths_are_exactly_what_marc_measured(built):
     labels = {tab.cell(header, i).value: i for i in range(1, tab.max_column + 1)}
     assert workbook.WIDTH_OVERRIDES == {
         "Kickoff": 11.5, "Winner covered": 8.0, "Final margin": 5.85, "Season": 5.6,
-        "Wind mph": 5.5, "Pred margin": 6.5, "Home win prob": 7.7}
+        "Wind mph": 5.5, "Model line (home)": 6.5, "Home win prob": 7.7}
     for label in workbook.WIDTH_OVERRIDES:
         letter = get_column_letter(labels[label])
         assert tab.column_dimensions[letter].width == workbook.effective_width(label), label
