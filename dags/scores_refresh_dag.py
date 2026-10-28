@@ -53,7 +53,8 @@ from src.dbt_selectors import PARTIAL_REBUILD_TEST_EXCLUDE
 from src.lines_cadence import load_config
 from src.load_raw_to_postgres import load_endpoint
 from src.publish_marts import SCORES_HOT, publish_gated
-from src.scores_cadence import schedule_state, should_refresh_scores
+from src.scores_cadence import (schedule_state, should_refresh_scores,
+                                unbuilt_prediction_weeks)
 from src.weekly import scores_refresh
 
 DBT_PROJECT_DIR = "/opt/airflow/project/dbt"
@@ -256,6 +257,10 @@ def cadence_gate(**context) -> bool:
         config=load_config(),
         hours_since_last_kickoff=state.hours_since_last_kickoff,
         unfinished_recent=state.unfinished_recent,
+        # 🚨 A290 (cfdb-main-R-5013). Read here and passed in, because the decision is a pure
+        # function by design and this module's docstring says so. Null means "could not tell"
+        # and falls through, exactly like the other two inputs.
+        unbuilt_predictions=unbuilt_prediction_weeks(),
     )
     print(f"scores cadence gate: {decision.branch.upper()} — "
           f"proceed={decision.proceed} | {decision.reason}")

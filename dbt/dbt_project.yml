@@ -121,6 +121,11 @@ models:
 #
 # Margins are in points, exclusive: a 7-point upset is level 1, an 8-point upset is level 2.
 vars:
+  # 🚨 A290 (cfdb-main-R-5012). How old a deploy-tree observation may be before
+  # `srv_system_health` stops treating its verdict as evidence and reports `unknown`.
+  # Generous on purpose: the deploy is a human act with no cadence advancing it, so a quiet
+  # fortnight is normal. Sixty-seven days of a green `ok` from one August observation is not.
+  deploy_status_stale_days: 14
   # ------------------------------------------------------------------------------------
   # THE BOOK LINE MOVEMENT IS MEASURED AGAINST (R-449). ONE PROVIDER, AND THAT IS THE POINT.
   #

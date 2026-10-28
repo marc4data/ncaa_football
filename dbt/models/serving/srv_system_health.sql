@@ -112,12 +112,36 @@ documentation as (
 -- while development had 56 — no error and no alert, because a pinned tree that requires a
 -- person to advance it is a tree that will be stale again. Latest observation only; the
 -- history is in the staging model.
+--
+-- 🚨🚨 A290 (cfdb-main-R-5012). THIS SIGNAL PUBLISHED A GREEN `ok` FOR SIXTY-SEVEN DAYS FROM
+-- A SINGLE AUGUST OBSERVATION, AND THAT IS R-843's EXACT SHAPE: a guard never seen red is a
+-- claim.
+--
+-- 📊 MEASURED 2026-10-28: `fct_deploy_status where recency_rank = 1` read
+-- `severity ok · "Deploy tree matches main at 9bb72cc" · observed_at 2026-08-22 07:36:26Z`,
+-- naming a commit 60+ commits behind `main`. **The model that exists to catch "production
+-- builds 39 models while development has 56" was itself reporting from August.**
+--
+-- 🚨 AND THE CAUSE WAS NOT A BROKEN WRITER — IT WAS THE ABSENCE OF ONE. `git log -S` across
+-- every ref finds no committed caller of `src/deploy_status.py`, ever. The module landed
+-- 2026-08-19, was revised 2026-09-06, and the lone observation between those dates was a
+-- hand run. **Nothing was ever wired to a cadence.**
+--
+-- ⚠️ SO THE FRESHNESS BOUND IS NOT BELT-AND-BRACES, IT IS THE ONLY THING STANDING BETWEEN A
+-- DEAD WRITER AND A GREEN BOARD. `unknown` is the word this model already uses for a fact it
+-- cannot currently establish (the absent quota threshold), so it is the honest word here too
+-- — and the detail says how old the answer is rather than hiding it.
+--
+-- ⚠️ THE BUDGET IS DELIBERATELY GENEROUS. The deploy is a HUMAN act (§2.2.1a) and there is no
+-- cadence that advances it, so a quiet fortnight is normal and must not cry wolf. What is not
+-- normal is two months. A severity that degrades rather than flips also keeps the real
+-- signal: an `error` observed yesterday still reads `error`.
 deployment as (
     select
         'deployment'                                       as signal_type,
         'airflow deploy tree'                              as subject,
-        severity,
-        detail,
+        {{ deploy_observation_severity('severity', 'observed_at') }} as severity,
+        {{ deploy_observation_detail('detail', 'observed_at') }}     as detail,
         observed_at
     from {{ ref('fct_deploy_status') }}
     where recency_rank = 1
