@@ -4217,13 +4217,35 @@ INSERT INTO raw.raw_games_media (filename, content, status_code, params, fetched
 INSERT INTO raw.raw_manifest (endpoint, filename, params, status_code, row_count, fetched_at, loaded_at) VALUES
 ('games_media', '2026-01-01T00-00-14-001Z.json', '{"year": "2024"}', 200, 3, '2026-01-01T00:00:26Z', now());
 
--- Deploy drift. A STALE row on purpose: the alarm exists because production silently ran
+-- Deploy drift. A STALE TREE on purpose: the alarm exists because production silently ran
 -- old code for a day, so the fixture exercises the escalating branch rather than the
 -- reassuring one.
+--
+-- 🚨 A290 (cfdb-main-R-5012). THE `observed_at` IS NOW RELATIVE, AND THE TWO KINDS OF STALE
+-- ARE WHY. This row carried a fixed '2026-01-01' timestamp, which was fine while the
+-- `deployment` signal published its severity verbatim — "stale" here meant the TREE was 7
+-- commits behind, not that the OBSERVATION was old.
+--
+-- A290 made `srv_system_health` degrade an observation older than `deploy_status_stale_days`
+-- to `unknown`, because production had been publishing a green `ok` from a single 2026-08-22
+-- observation for sixty-seven days. ⚠️ That immediately turned this fixture row into
+-- `unknown=1`, and `ci/check_health_signals.py` caught it in the same CI run:
+-- *"'deployment' never escalates in the fixture (only ['unknown'])"* — **the guard working,
+-- and a real loss of coverage rather than a nuisance.**
+--
+-- ✅ So the NEWEST observation is now fresh and still reports a 7-commits-behind `error`: the
+-- tree is stale, the observation is not, and the escalating branch is exercised again. The
+-- 2026-01-01 row is KEPT below it as history, which also exercises `recency_rank = 1`.
+--
+-- ⚠️ AND A FIXED TIMESTAMP COULD NOT WORK HERE AT ALL: the budget is measured against `now()`,
+-- so any literal date is eventually stale and this signal would silently stop escalating
+-- again. The heartbeat rows in this file are relative for the same reason.
 INSERT INTO raw.raw_deploy_status
   (observed_at, deploy_sha, main_sha, commits_behind, severity, detail) VALUES
-('2026-01-01T00:00:50Z', 'aaaa111', 'bbbb222', 7, 'error',
- 'Deploy tree is 7 commits behind main (aaaa111 vs bbbb222). Airflow is running old code');
+(now() - interval '1 hour', 'aaaa111', 'bbbb222', 7, 'error',
+ 'Deploy tree is 7 commits behind main (aaaa111 vs bbbb222). Airflow is running old code'),
+('2026-01-01T00:00:50Z', 'cccc333', 'dddd444', 2, 'warn',
+ 'Superseded observation, kept so recency_rank = 1 has something to rank past');
 
 -- The five rating systems (B1).
 --
