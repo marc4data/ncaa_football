@@ -83,6 +83,7 @@ def should_refresh_scores(now_utc: datetime,
                           config: CadenceConfig,
                           hours_since_last_kickoff: Optional[float] = None,
                           unfinished_recent: Optional[int] = None,
+                          unbuilt_predictions: Optional[int] = None,
                           settle_hours: int = SETTLE_HOURS) -> Decision:
     """Decide whether this run should fetch the game spine.
 
@@ -94,6 +95,31 @@ def should_refresh_scores(now_utc: datetime,
     games are holding the gate open. "1 game unfinished" and "14 games unfinished" are a
     lightning delay and a broken load respectively, and the log should be able to tell them
     apart without a second query.
+
+    🚨 `unbuilt_predictions` IS A290 (cfdb-main-R-5013), AND IT EXISTS BECAUSE THIS GATE
+    ANSWERED THE WRONG QUESTION FOR A WHOLE SEASON.
+    =========================================================================================
+    Every branch below asks *is there anything to FETCH*, and the answer short-circuits
+    `dbt_run`, `dbt_test` and `publish_to_serving` as well — which cost no CFBD quota and are
+    the only way anything reaches the site.
+
+    📊 MEASURED 2026-10-28: week 9's forecasts landed in `raw.raw_model_prediction` at
+    16:43:36Z. The daily unconditional run is 12:00 UTC (`SAFETY_NET_HOUR_UTC`) and had passed
+    4.7 hours earlier, so the 14:00, 16:00, 18:00, 20:00 and 22:00 runs all took
+    `nothing_settling` and skipped the build. **`fct_prediction` held 0 rows for week 9 while
+    weeks 5-8 were all present, and every heartbeat was green** — because `heartbeat` carries
+    `trigger_rule=NONE_FAILED` and beats on a deliberate skip (§2.3, A264's cfdb-main-R-4109).
+
+    ⚠️ THE FIX IS NOT "BUILD UNCONDITIONALLY". That would run a 39-model closure twelve times
+    a day year-round for nothing, and A285 bought the warehouse-write pool precisely because
+    concurrent builds were already costing Sunday's publish. **So this is a COUNT of work the
+    warehouse has but has not built**, passed in like the other two, and it opens the gate only
+    when there is something to open it for.
+
+    ⚠️ AND IT IS A COUNT RATHER THAN A BOOLEAN FOR THE SAME REASON `unfinished_recent` IS:
+    "1 week unbuilt" is this morning's load and "4 weeks unbuilt" is a pipeline that has been
+    skipping since the start of the month, and the log should separate them without a second
+    query.
     """
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=timezone.utc)
@@ -125,6 +151,20 @@ def should_refresh_scores(now_utc: datetime,
                     f"{UNFINISHED_HOURS}h and are still not final — delayed, suspended or "
                     f"simply not yet published, and none of those resolve by waiting for "
                     f"Sunday"),
+        )
+
+    # 🚨 A290. THERE IS BUILT WORK WAITING, SO THE BUILD HALF MUST RUN EVEN THOUGH THERE IS
+    # NOTHING TO FETCH. This sits BELOW the two fetch reasons on purpose: when a game is
+    # settling the gate is already open and `settling` is the more useful line in the log.
+    # It sits ABOVE the fail-open and the safety net because an unbuilt forecast is a KNOWN
+    # fact, not an unknown one, and it should not have to wait for 12:00 UTC to be noticed.
+    if in_season and unbuilt_predictions:
+        return ScoresDecision(
+            proceed=True,
+            branch="unbuilt_predictions",
+            reason=(f"{unbuilt_predictions} week(s) of forecasts are in raw and not yet in "
+                    f"fct_prediction — nothing to fetch, but the build half must run or the "
+                    f"site never sees them (cfdb-main-R-5013)"),
         )
 
     # FAIL OPEN, IN SEASON. If the schedule could not be read we cannot tell whether games
@@ -164,9 +204,10 @@ def should_refresh_scores(now_utc: datetime,
     return ScoresDecision(
         proceed=False,
         branch="nothing_settling",
-        reason=(f"in season, but {since} and no game unfinished inside "
-                f"{UNFINISHED_HOURS}h — outside the {settle_hours}h settle window and "
-                f"not the daily {SAFETY_NET_HOUR_UTC:02d}:00 run"),
+        reason=(f"in season, but {since}, no game unfinished inside "
+                f"{UNFINISHED_HOURS}h and no unbuilt forecasts — outside the "
+                f"{settle_hours}h settle window and not the daily "
+                f"{SAFETY_NET_HOUR_UTC:02d}:00 run"),
     )
 
 
@@ -183,6 +224,57 @@ class ScheduleState:
 
     hours_since_last_kickoff: Optional[float] = None
     unfinished_recent: Optional[int] = None
+
+
+def unbuilt_prediction_weeks() -> Optional[int]:
+    """How many (season, week) forecasts sit in `raw` that `fct_prediction` has not built.
+
+    🚨 A290 (cfdb-main-R-5013). THE GATE INPUT THAT WOULD HAVE SAVED WEEK 9.
+
+    ⚠️ IT COMPARES THE TWO ENDS OF THE CHAIN, NOT A FILE ON DISK. A detector keyed on "is
+    there a new CSV" could not see today's failure at all — the file had loaded fine, hours
+    earlier; what had not happened was the BUILD. So the question is asked of the warehouse
+    both times, and the gap between the two answers IS the fault.
+
+    ⚠️ RETURNS None ON ANY FAILURE, matching `schedule_state`'s contract exactly: the caller
+    treats null as "cannot tell", which falls through to the existing branches rather than
+    wedging the gate open or shut on a database blip. **A gate input that can hang the
+    pipeline when Postgres hiccups is worse than the gap it closes.**
+
+    ⚠️ AND IT IS DELIBERATELY NOT FILTERED TO THE CURRENT WEEK. A forecast for ANY week that
+    raw holds and the mart does not is unbuilt work, and bounding it to "this week" is how
+    week 6's silence would have survived the detector that was supposed to catch it.
+    """
+    try:
+        from src.load_raw_to_postgres import get_conn
+        connection = get_conn()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    with raw_weeks as (
+                        select distinct (payload->>'season')::int  as season,
+                                        (payload->>'week')::int    as week
+                        from raw.raw_model_prediction
+                        where payload->>'season' ~ '^[0-9]+$'
+                          and payload->>'week'   ~ '^[0-9]+$'
+                    ),
+                    built as (
+                        select distinct season, week from marts.fct_prediction
+                    )
+                    select count(*) from raw_weeks r
+                    where not exists (select 1 from built b
+                                      where b.season = r.season and b.week = r.week)
+                    """
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row and row[0] is not None else 0
+        finally:
+            connection.close()
+    except Exception as error:                                   # noqa: BLE001
+        print(f"unbuilt_prediction_weeks: could not read ({error}) — returning None so the "
+              f"gate falls through to its other branches")
+        return None
 
 
 def schedule_state(now_utc: Optional[datetime] = None,
