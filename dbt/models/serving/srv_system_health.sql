@@ -180,33 +180,68 @@ deployment as (
 -- THE GRAIN CHANGE BELONGS (ci/check_layering.py rule 3: serving reads marts, never sources).
 -- That model carries the note on why the budgets are restated from `ci/check_heartbeats.py`
 -- and which test holds the two in step.
+-- 🚨 A291 (cfdb-main-R-5043). EVERY RELATIVE FIGURE BELOW IS ANCHORED, BECAUSE THIS TABLE
+-- OUTLIVES THE CLOCK THAT COMPUTED IT. `srv_system_health` is rebuilt only by the weekly
+-- catalogue step, so a verdict about `scores_refresh`'s FIVE-HOUR budget can be three days
+-- old. "last completed 24 hours ago" read 28 hours after the build means 52, and nothing on
+-- the row used to say which clock the 24 was measured against. `health_verdict.sql` carries
+-- the full account and why this is NOT A290's build-time-branch shape.
 pipeline as (
     select
         'pipeline'                                         as signal_type,
         heartbeat_name                                     as subject,
-        case when extract(epoch from (now() - last_beat)) > budget_seconds then 'error'
-             when extract(epoch from (now() - last_beat)) > budget_seconds * 0.75 then 'warn'
-             else 'ok' end                                 as severity,
-        case when extract(epoch from (now() - last_beat)) > budget_seconds
-             then 'PUBLISH HAS STOPPED — last completed '
-                  || cast(round(extract(epoch from (now() - last_beat)) / 3600) as {{ dbt.type_string() }})
-                  || ' hours ago, past its '
-                  || cast(round(budget_seconds / 3600.0) as {{ dbt.type_string() }})
-                  || ' hour budget. The beat is downstream of publish_to_serving, so this '
-                  || 'cadence is not reaching serving.'
-             else 'published '
-                  || cast(round(extract(epoch from (now() - last_beat)) / 3600) as {{ dbt.type_string() }})
-                  || ' hours ago; budget '
-                  || cast(round(budget_seconds / 3600.0) as {{ dbt.type_string() }})
-                  || ' hours' end                          as detail,
+        severity,
+        {{ health_verdict_anchored('raw_detail', health_verdict_computed_at()) }}
+                                                           as detail,
         last_beat                                          as observed_at
     from (
-        select heartbeat_name, last_beat_at as last_beat, budget_seconds
-        from {{ ref('fct_pipeline_heartbeat') }}
-    ) beats
-    -- A cadence nobody has budgeted is not silently rated 'ok'; it is left out, and the
-    -- budget guard is what makes its absence a test failure rather than a quiet gap.
-    where budget_seconds is not null
+        select
+            heartbeat_name,
+            last_beat,
+            case when extract(epoch from (now() - last_beat)) > budget_seconds then 'error'
+                 when extract(epoch from (now() - last_beat)) > budget_seconds * 0.75 then 'warn'
+                 else 'ok' end                             as severity,
+            case when extract(epoch from (now() - last_beat)) > budget_seconds
+                 then 'PUBLISH HAS STOPPED — last completed '
+                      || cast(round(extract(epoch from (now() - last_beat)) / 3600) as {{ dbt.type_string() }})
+                      || ' hours ago, past its '
+                      || cast(round(budget_seconds / 3600.0) as {{ dbt.type_string() }})
+                      || ' hour budget. The beat is downstream of publish_to_serving, so this '
+                      || 'cadence is not reaching serving.'
+                 -- 🚨🚨 A291 (cfdb-main-R-5048). THIS BRANCH SAID 'published N hours ago'
+                 -- AND THE NUMBER IT MEASURED IS A BEAT, NOT A PUBLISH. Measured live
+                 -- 2026-11-02: this row read `scores_refresh · ok · published 2 hours ago`
+                 -- while `publish_to_serving` had not succeeded since 2026-10-31 13:04Z —
+                 -- FIFTY-FOUR HOURS against a five-hour budget.
+                 --
+                 -- ⚠️ IT IS NOT A WIRING BUG, IT IS §2.3's ASYMMETRY (cfdb-main-R-4109) AND
+                 -- THE IMPLICATION RUNS ONE WAY ONLY. `heartbeat` carries
+                 -- `trigger_rule=NONE_FAILED` deliberately, so it beats on a cadence SKIP as
+                 -- well as a success — "beats on a deliberate skip too, so the clock never
+                 -- stops". Therefore a STALE beat IS a stopped publish (the branch above is
+                 -- right to shout), but a FRESH beat is NOT a working publish.
+                 --
+                 -- ✅ SO ONLY THE WORD CHANGES, NOT THE THRESHOLD. Re-deciding whether a
+                 -- fresh beat should still rate `ok` is a design question about this signal's
+                 -- severity ladder and is cfdb-main-R-5049, not a wording fix. What is not
+                 -- defensible is a published sentence asserting a publish this model never
+                 -- observed (§3.2.3 — the sentence ships, and a reader believed this one).
+                 else 'last beat '
+                      || cast(round(extract(epoch from (now() - last_beat)) / 3600) as {{ dbt.type_string() }})
+                      || ' hours ago; budget '
+                      || cast(round(budget_seconds / 3600.0) as {{ dbt.type_string() }})
+                      || ' hours. A beat is not proof of a publish: the beat advances on a '
+                      || 'deliberate cadence skip too, so this says the DAG is alive, not '
+                      || 'that it reached serving. The failed-task line is what sees that.'
+                      end                                  as raw_detail
+        from (
+            select heartbeat_name, last_beat_at as last_beat, budget_seconds
+            from {{ ref('fct_pipeline_heartbeat') }}
+        ) beats
+        -- A cadence nobody has budgeted is not silently rated 'ok'; it is left out, and the
+        -- budget guard is what makes its absence a test failure rather than a quiet gap.
+        where budget_seconds is not null
+    ) rated
 ),
 
 orphan_market as (
@@ -232,6 +267,12 @@ orphan_market as (
 select
     {{ surrogate_key(['signal_type', 'subject']) }} as system_health_sk,
     signal_type, subject, severity, detail, observed_at,
+    -- 🚨 A291 (cfdb-main-R-5043). WHEN THIS VERDICT WAS COMPUTED, published so a reader can
+    -- tell a live reading from a snapshot. EVERY severity in this model is computed from
+    -- `now()` at build time, so the stamp is a property of the whole row set rather than of
+    -- any one signal — which is why it is assigned once, here, and not per CTE (R-574).
+    -- The page judges it against its own clock; this model only states it.
+    {{ health_verdict_computed_at() }}                      as verdict_computed_at,
     ao_src.as_of_ts
 from (
     select * from freshness
