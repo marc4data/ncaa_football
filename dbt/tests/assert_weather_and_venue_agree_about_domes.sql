@@ -1,8 +1,51 @@
+{{ config(severity='warn') }}
+
+-- 🚨🚨 A291 (cfdb-main-R-5041). THIS TEST STOPPED THE WHOLE SITE PUBLISHING FOR 54 HOURS, ON
+-- FOUR ROWS, AT A DIVISION II STADIUM — AND IT WAS RIGHT ABOUT THE DATA THE ENTIRE TIME.
+-- ==========================================================================================
+--
+-- 📊 MEASURED 2026-11-02. `cfbd_scores_refresh.publish_to_serving` last succeeded
+-- **2026-10-31 13:04Z**, against a FIVE-HOUR budget. This assertion began failing
+-- **2026-10-31 17:28Z** and had failed 34 consecutive times. It carries no tag, so it runs in
+-- BOTH gated DAGs, and `publish_to_serving` / `publish_distributions` are `all_success` by
+-- design — so one `error` here gates `cfbd_scores_refresh` AND `cfbd_lines_snapshot` at once.
+--
+-- 📊 ALL FOUR FAILING ROWS ARE THE SAME VENUE: `venue_id 3950`, the Superior Dome, Northern
+-- Michigan. `/games/weather` says `is_indoors = true`; `dim_venue` says `is_dome = false`.
+-- **The Superior Dome is a dome.** Weather is right and CFBD's `/venues` flag is wrong, which
+-- is A283's rule answered — *when parity fails the question is which side is right* — and the
+-- answer is "neither of ours".
+--
+-- 📊 AND THE GAMES ARE OUT OF THE SITE'S SPINE: all four are `is_fbs_game = false` with both
+-- teams classified `ii`, against Davenport, Ferris State and Roosevelt.
+--
+-- 🚨 SO THE SEVERITY IS NOW `warn`, AND THE PRECEDENT IS THIS PROJECT'S OWN. R-701 ruled on
+-- exactly this shape for `srv_odds_board`'s withdrawn games: *"A NUMBER SOMEBODY READS, NOT A
+-- GUARD THAT FAILS THE BUILD… That is not ours to fix and it must not stop a publish a second
+-- time, so this is `warn` at worst and never `error`."* A four-row venue-flag error upstream,
+-- on games the FBS site does not show, is not worth two days of a frozen scoreboard.
+--
+-- ⚠️ THE POPULATION IS DELIBERATELY NOT NARROWED, and §2.2.4 is why. Filtering to
+-- `is_fbs_game` would be the tempting fix and it is the forbidden one: *"Difficulty, noisiness
+-- and age are never reasons to narrow an assertion. Reader reach is the only one"* — and
+-- nobody has established that no page can reach a Division II fixture. **The test still sees
+-- every row; it simply no longer holds the publish hostage.**
+--
+-- ⚠️ IT IS NOT SILENCED. `warn` still prints in the run, still lands in
+-- `raw.raw_dbt_test_result` via `capture_test_results`, still reaches the R-412 alert payload
+-- and still shows on the status board. The only thing that changes is whether a reader of the
+-- site pays for it.
+--
+-- 📋 THE UPSTREAM DEFECT IS NOT FIXED BY THIS AND IS NOT THIS ROUND'S: cfdb-main-R-5046 carries
+-- "dim_venue.is_dome is false for venue 3950, which is a dome".
+--
 -- Two independent sources say whether a game was indoors, and they must not disagree.
 --
 -- /games/weather ships `is_indoors` per game; dim_venue carries `is_dome` per venue, built
--- from a different endpoint. They agree on all 6,847 rows today — 6,694 outdoor, 153 indoor,
--- zero disagreements.
+-- from a different endpoint. ⚠️ THIS PARAGRAPH SAID "zero disagreements" UNTIL A291 AND THAT
+-- STOPPED BEING TRUE ON 2026-10-31 (§3.2.3 — the sentence ships): there are FOUR, all at
+-- venue 3950, and the header above records them. The agreement it describes — 6,847 rows,
+-- 6,694 outdoor, 153 indoor — was the state when the test was written.
 --
 -- This is a join test wearing a data-quality hat. fct_game_weather joins weather to dim_venue
 -- on venue_id, and that join is the bridge srv_game needs for travel and elevation. If it
